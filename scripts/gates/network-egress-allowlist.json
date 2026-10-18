@@ -257,6 +257,120 @@
       "kind": "no-proxy",
       "reason": "loopback",
       "note": "Self-connectivity check against this host's own companion listener."
+    },
+    {
+      "file": "crates/cognia-cli/src/commands/acp.rs",
+      "kind": "tcp-connect",
+      "reason": "loopback",
+      "note": "Dials the local Cognia ACP endpoint. Non-loopback hosts are refused unless the user sets COGNIA_ACP_URL explicitly."
+    },
+    {
+      "file": "crates/cognia-codeserver/src/agent_channel.rs",
+      "kind": "tcp-connect",
+      "reason": "test",
+      "note": "Both hits are in the inline test module (test clients of the 127.0.0.1 agent channel); the module's cfg shape is not one blankRustTestModules recognises."
+    },
+    {
+      "file": "crates/cognia-connectors/src/lark_ws.rs",
+      "kind": "tcp-connect",
+      "reason": "transport-impl",
+      "note": "The direct leg of the Lark WebSocket transport: taken only when proxy_config routes the host Direct; the proxied leg goes through wsproxy::connect_via_proxy."
+    },
+    {
+      "file": "crates/cognia-connectors/src/ws_client.rs",
+      "kind": "tcp-connect",
+      "reason": "transport-impl",
+      "note": "The direct leg of the connector WebSocket client: taken only when proxy_config routes the host Direct; the proxied leg goes through wsproxy::connect_via_proxy."
+    },
+    {
+      "file": "crates/cognia-desktop-guest/src/probe.rs",
+      "kind": "tcp-connect",
+      "reason": "loopback",
+      "note": "In-guest qualification probe of the desktop helpers on 127.0.0.1:49983 and :8000 inside the sandbox."
+    },
+    {
+      "file": "crates/cognia-desktop-guest/src/qualify.rs",
+      "kind": "tcp-connect",
+      "reason": "loopback",
+      "note": "In-guest ingress check against 127.0.0.1:8000 inside the sandbox."
+    },
+    {
+      "file": "crates/cognia-exec-sandbox/src/net_bridge.rs",
+      "kind": "tcp-connect",
+      "reason": "loopback",
+      "note": "Readiness probe of the sandbox's own filtering proxy on 127.0.0.1."
+    },
+    {
+      "file": "crates/cognia-exec-sandbox/src/net_proxy.rs",
+      "kind": "tcp-connect",
+      "reason": "transport-impl",
+      "note": "The sandbox filtering proxy's direct route: proxy_config chose Direct for the vetted IP, which is dialed without re-resolving. The second hit is in an inline test."
+    },
+    {
+      "file": "crates/cognia-local-browser/src/dev_servers.rs",
+      "kind": "tcp-connect",
+      "reason": "loopback",
+      "note": "Probes this machine's own dev-server listeners to classify them."
+    },
+    {
+      "file": "crates/cognia-net/src/proxy_config/detect.rs",
+      "kind": "tcp-connect",
+      "reason": "loopback",
+      "note": "Proxy auto-detection: verifies a candidate local proxy (Clash, V2Ray, ...) on its loopback port by tunnelling to a loopback listener."
+    },
+    {
+      "file": "crates/cognia-net/src/proxy_config/wsproxy.rs",
+      "kind": "tcp-connect",
+      "reason": "transport-impl",
+      "note": "Opens the TCP connection to the configured proxy itself before the CONNECT / TLS tunnel; this is the proxied transport."
+    },
+    {
+      "file": "crates/cognia-remote-desktop/src/bridge.rs",
+      "kind": "tcp-connect",
+      "reason": "user-endpoint",
+      "note": "ADR-0234: the remote desktop bridge dials the pinned IP:port of a binding the user confirmed (LAN or plaintext internet). RFB is not HTTP, and the pin is the security boundary."
+    },
+    {
+      "file": "crates/cognia-remote-desktop/src/host.rs",
+      "kind": "tcp-connect",
+      "reason": "user-endpoint",
+      "note": "ADR-0234: the probe dials the pinned address only after the user confirmed the endpoint (draft confirm: true, or a saved binding whose name still resolves to its pin)."
+    },
+    {
+      "file": "crates/cognia-sandbox-pool/src/docker/services.rs",
+      "kind": "tcp-connect",
+      "reason": "loopback",
+      "note": "Relays a container service's published port on 127.0.0.1."
+    },
+    {
+      "file": "crates/cognia-sandbox-pool/src/git_proxy.rs",
+      "kind": "tcp-connect",
+      "reason": "test",
+      "note": "Inline test that the git proxy's 127.0.0.1 listener stops when dropped."
+    },
+    {
+      "file": "crates/cognia-sandboxd/src/egress.rs",
+      "kind": "tcp-connect",
+      "reason": "loopback",
+      "note": "In-sandbox probe of the supervisor's own egress listener on 127.0.0.1."
+    },
+    {
+      "file": "crates/cognia-sandboxd/src/serve.rs",
+      "kind": "tcp-connect",
+      "reason": "loopback",
+      "note": "Host-authorized direct exec path to a container-local port on 127.0.0.1."
+    },
+    {
+      "file": "crates/cognia-terminal/src/ssh.rs",
+      "kind": "tcp-connect",
+      "reason": "user-endpoint",
+      "note": "SSH port forwards dial the destination the user configured for the rule (-R local destination, -L/-D targets the remote asks for over the user's own session); the third hit relays to a 127.0.0.1 listener."
+    },
+    {
+      "file": "lib/remote-desktop/port-relay.ts",
+      "kind": "websocket",
+      "reason": "loopback",
+      "note": "ADR-0234: opens the Host's one-shot remote desktop bridge on ws://127.0.0.1:<port>/rd/<ticket> to relay bytes to a third-party viewer's MessagePort. A proxy must never carry the loopback ticket."
     }
   ]
 }

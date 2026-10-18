@@ -1043,4 +1043,11 @@ describe("host roles (ADR-0224 A4)", () => {
       find(buildDeviceRows(input({ local: { ...LOCAL, hostMode: true } })), "local").hostRole
     ).toBe("always-on")
   })
+
+  it("marks only the local row as a remote desktop host, and only on the desktop shell", () => {
+    expect(find(buildDeviceRows(input()), "local").remoteDesktopHost).toBeUndefined()
+    const rows = buildDeviceRows(input({ local: { ...LOCAL, remoteDesktopHost: true } }))
+    expect(find(rows, "local").remoteDesktopHost).toBe(true)
+    expect(rows.filter((row) => row.remoteDesktopHost)).toHaveLength(1)
+  })
 })

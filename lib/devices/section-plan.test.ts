@@ -101,8 +101,43 @@ describe("planDeviceSections", () => {
       "capabilities",
       "placement",
     ])
-    expect(plan.notApplicable.map((entry) => entry.id)).toEqual(["access", "dispatch"])
+    // The browser build brokers no remote desktops, and says so once.
+    expect(plan.notApplicable.map((entry) => entry.id)).toEqual([
+      "access",
+      "remote-desktop",
+      "dispatch",
+    ])
     expect(plan.notApplicable[0]?.reasonKey).toBe("access.notApplicable.local")
+    expect(plan.notApplicable[1]?.reasonKey).toBe("remoteDesktop.desktopOnly")
+  })
+
+  it("lists remote desktops after the sandbox on the desktop shell, and nowhere else", () => {
+    const runtime = {
+      sandbox: { support: "supported" as const, connections: [] },
+      shellTiers: [{ tier: "os" as const, available: true }],
+      workspaces: { support: "supported" as const },
+      isRoutingTarget: true,
+    }
+    const local = planDeviceSections(
+      row({ ref: "local", kind: "local", isSelf: true, remoteDesktopHost: true, runtime })
+    )
+    expect(ids(local.sections)).toEqual([
+      "routing",
+      "shell-tiers",
+      "workspaces",
+      "sandbox",
+      "remote-desktop",
+      "identity",
+      "presence",
+      "capabilities",
+      "placement",
+    ])
+    expect(local.sections.find((section) => section.id === "remote-desktop")?.wide).toBe(true)
+    expect(local.notApplicable.map((entry) => entry.id)).not.toContain("remote-desktop")
+    // A flag on any other row is ignored, and no other kind reports its absence.
+    const phone = planDeviceSections(row({ deviceId: "dev-1", remoteDesktopHost: true }))
+    expect(ids(phone.sections)).not.toContain("remote-desktop")
+    expect(phone.notApplicable.map((entry) => entry.id)).not.toContain("remote-desktop")
   })
 
   it("keeps an inactive remote host's workspace card, because it can be probed", () => {

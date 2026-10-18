@@ -83,6 +83,22 @@ test("finds unmanaged Rust clients and explicit opt-outs", () => {
   assert.deepEqual(hits.map((hit) => hit.kind).sort(), ["no-proxy", "reqwest-client-new"])
 })
 
+test("finds raw TCP sockets from std and tokio", () => {
+  const hits = findRustEgress(
+    [
+      "let a = tokio::net::TcpStream::connect(addr).await?;",
+      "let b = std::net::TcpStream::connect_timeout(&addr, t)?;",
+      "let c = TcpStream::connect ((host, port)).await?;",
+      "let d = MyTcpStream::connect(addr);",
+      "let e = UdpSocket::connect(addr);",
+    ].join("\n")
+  )
+  assert.deepEqual(
+    hits.map((hit) => hit.kind),
+    ["tcp-connect", "tcp-connect", "tcp-connect"]
+  )
+})
+
 test("blankNonCode hides strings and comments but preserves line numbers", () => {
   const source = [
     "// await fetch(a)",

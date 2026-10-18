@@ -1364,6 +1364,13 @@
         "screen_holds": {}
       }
     },
+    "remote_desktop": {
+      "children": {
+        "target": {},
+        "credential": {},
+        "session": {}
+      }
+    },
     "chat": {
       "children": {
         "copilot": {}

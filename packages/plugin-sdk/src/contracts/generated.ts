@@ -82,6 +82,7 @@ export const CANONICAL_PLUGIN_PERMISSION_IDS = [
   "secrets:write",
   "auth:provide",
   "auth:consume",
+  "remote-desktop:provide",
   "terminal:spawn",
   "terminal:write",
   "terminal:kill",
@@ -2060,6 +2061,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   },
   "ctx.recorder.undoLast": {
     kind: "none",
+  },
+  "ctx.remoteDesktop.registerProvider": {
+    kind: "returned-disposer",
   },
   "ctx.sandbox.activeRefForSession": {
     kind: "none",

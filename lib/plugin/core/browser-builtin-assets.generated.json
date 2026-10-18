@@ -12439,6 +12439,83 @@
         }
       }
     },
+    "cognia-remote-desktop-vnc": {
+      "manifest": {
+        "id": "cognia-remote-desktop-vnc",
+        "name": "VNC Remote Desktop",
+        "nameKey": "manifest.name",
+        "version": "0.1.0",
+        "description": "Opens VNC servers (TigerVNC, x11vnc, macOS Screen Sharing, RealVNC with VNC password) from the devices console. This desktop connects and authenticates; the viewer only ever sees an authenticated stream.",
+        "descriptionKey": "manifest.description",
+        "type": "frontend",
+        "capabilities": [],
+        "main": "dist/index.js",
+        "author": {
+          "name": "cognia-next"
+        },
+        "license": "MIT",
+        "minAppVersion": "0.1.0",
+        "engines": {
+          "cognia": ">=0.1.0"
+        },
+        "permissions": [
+          "remote-desktop:provide"
+        ],
+        "activationEvents": [
+          "startup"
+        ],
+        "runtimeCompatibility": {
+          "browser": {
+            "availability": "blocked",
+            "reason": "Remote desktops are brokered by the desktop app (ADR-0234 Phase 2)."
+          },
+          "tauri": {
+            "availability": "supported",
+            "entrypoint": "dist/index.js"
+          },
+          "mobile": {
+            "availability": "blocked",
+            "reason": "Phones reach remote desktops through a paired desktop in a later release (ADR-0234 Phase 3)."
+          }
+        },
+        "i18n": {
+          "locales": {
+            "en": {
+              "manifest.name": "VNC Remote Desktop",
+              "manifest.description": "Opens VNC servers (TigerVNC, x11vnc, macOS Screen Sharing, RealVNC with VNC password) from the devices console. This desktop connects and authenticates; the viewer only ever sees an authenticated stream.",
+              "provider.name": "VNC",
+              "provider.description": "VNC servers with no password or a VNC password.",
+              "viewer.label": "Remote screen",
+              "viewer.viewOnly": "View only: input is not sent"
+            },
+            "zh-CN": {
+              "manifest.name": "VNC 远程桌面",
+              "manifest.description": "从设备控制台打开 VNC 服务器（TigerVNC、x11vnc、macOS 屏幕共享、使用 VNC 密码的 RealVNC）。由本机连接并认证，查看器只接收已认证的数据流。",
+              "provider.name": "VNC",
+              "provider.description": "无密码或使用 VNC 密码的 VNC 服务器。",
+              "viewer.label": "远程屏幕",
+              "viewer.viewOnly": "只读：不发送输入"
+            }
+          }
+        }
+      },
+      "path": "builtin://cognia-remote-desktop-vnc",
+      "compatibilityDiagnostics": [],
+      "asset": {
+        "url": "/_cognia/builtin-plugins/cognia-remote-desktop-vnc/80d2d02328226e677e2f65f6415cd19c32d33a394a28cf84b21eb942f73cbc78.cjs",
+        "sha256": "80d2d02328226e677e2f65f6415cd19c32d33a394a28cf84b21eb942f73cbc78",
+        "sharedModules": [
+          "@cognia/plugin-sdk",
+          "@cognia/plugin-sdk/api/i18n",
+          "react",
+          "react/jsx-runtime"
+        ],
+        "resourcesUrl": "/_cognia/builtin-plugins/cognia-remote-desktop-vnc/resources/",
+        "entryHashes": {
+          "dist/index.js": "80d2d02328226e677e2f65f6415cd19c32d33a394a28cf84b21eb942f73cbc78"
+        }
+      }
+    },
     "ripgrep-tools": {
       "manifest": {
         "id": "ripgrep-tools",

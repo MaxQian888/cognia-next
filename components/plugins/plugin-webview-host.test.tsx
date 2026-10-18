@@ -95,6 +95,31 @@ describe("PluginWebviewHost", () => {
     )
   })
 
+  it("hands a per-frame poster that can transfer a MessagePort into the frame", () => {
+    let post: ((data: unknown, transfer?: Transferable[]) => boolean) | undefined
+    const { container } = render(
+      <PluginWebviewHost fullId="p:dash" srcDoc="x" onFrameReady={(poster) => (post = poster)} />
+    )
+    const iframe = container.querySelector("iframe") as HTMLIFrameElement
+    const postSpy = jest
+      .spyOn(iframe.contentWindow as Window, "postMessage")
+      .mockImplementation(() => undefined)
+    const channel = new MessageChannel()
+    expect(post?.({ type: "cognia.remote-desktop.port" }, [channel.port2])).toBe(true)
+    expect(postSpy).toHaveBeenLastCalledWith(
+      { __cogniaWebview: "host", data: { type: "cognia.remote-desktop.port" } },
+      "*",
+      [channel.port2]
+    )
+    expect(post?.({ plain: true })).toBe(true)
+    expect(postSpy).toHaveBeenLastCalledWith(
+      { __cogniaWebview: "host", data: { plain: true } },
+      "*",
+      []
+    )
+    channel.port1.close()
+  })
+
   it("does not post a restore when no state was ever saved", () => {
     const { container } = render(<PluginWebviewHost fullId="p:dash" srcDoc="x" />)
     const iframe = container.querySelector("iframe") as HTMLIFrameElement

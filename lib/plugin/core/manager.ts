@@ -159,6 +159,7 @@ import {
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
 import { loadPluginStyles, removePluginStyles } from "@/lib/plugin/styles/plugin-stylesheet"
 import { unregisterUriHandlersByPlugin } from "@/lib/plugin/uri/uri-handler-registry"
+import { unregisterRemoteDesktopProvidersOf } from "@/lib/remote-desktop/provider-registry"
 import {
   evaluatePluginCompatibility,
   type CompatibilityDiagnostic,
@@ -6491,6 +6492,9 @@ export class PluginManager {
     contextPanelRegistry.unregisterPlugin(pluginId)
     // Drop the plugin's imperatively-registered deep-link handler (C2).
     unregisterUriHandlersByPlugin(pluginId)
+    // Drop its remote desktop providers (ADR-0234); open sessions keep the
+    // Host bridge, but no new one can pick a provider that is gone.
+    unregisterRemoteDesktopProvidersOf(pluginId)
     // Async module-bridge capabilities — drop every contribution. Includes
     // message renderers, which the standalone `purgeMessagePartRenderersForPlugin`
     // call previously handled (the bridge unregister calls the same

@@ -44,6 +44,7 @@ export type DeviceSectionId =
   | "capabilities"
   | "dispatch"
   | "placement"
+  | "remote-desktop"
 
 export interface DevicePlannedSection {
   id: DeviceSectionId
@@ -53,7 +54,14 @@ export interface DevicePlannedSection {
 
 /** What a card would have said had it rendered, as one row of a shared record. */
 export type DeviceNotApplicableId =
-  "capabilities" | "access" | "sandbox" | "workspaces" | "runtime" | "dispatch" | "placement"
+  | "capabilities"
+  | "access"
+  | "sandbox"
+  | "workspaces"
+  | "runtime"
+  | "remote-desktop"
+  | "dispatch"
+  | "placement"
 
 export interface DeviceNotApplicable {
   id: DeviceNotApplicableId
@@ -97,6 +105,7 @@ const WIDE: Record<DeviceSectionId, boolean> = {
   capabilities: true,
   dispatch: true,
   placement: false,
+  "remote-desktop": true,
 }
 
 /**
@@ -104,8 +113,8 @@ const WIDE: Record<DeviceSectionId, boolean> = {
  * {@link isApplicable} says it has something to show.
  *
  *  * `local` What this window runs on: where calls land, which shells and
- *    machines it has, which worktrees. Its identity is the least interesting
- *    thing about it.
+ *    machines it has, which worktrees, which other screens it reaches. Its
+ *    identity is the least interesting thing about it.
  *  * `paired-device` What the phone may do here, then whether it can be
  *    reached at all, then who it is.
  *  * `remote-host` The always-on work it runs for this device, then its
@@ -120,6 +129,7 @@ const ORDER: Record<DeviceKind, readonly DeviceSectionId[]> = {
     "shell-tiers",
     "workspaces",
     "sandbox",
+    "remote-desktop",
     "identity",
     "presence",
     "event-plane",
@@ -223,6 +233,10 @@ function isApplicable(row: DeviceRow, id: DeviceSectionId): boolean {
       return Boolean(dispatchTargetRef(row))
     case "placement":
       return row.kind !== "ssh-host"
+    case "remote-desktop":
+      // Targets, their credentials and the viewer bridge belong to the
+      // desktop that confirmed each endpoint (ADR-0234 Phase 2).
+      return row.kind === "local" && row.remoteDesktopHost === true
   }
 }
 
@@ -271,6 +285,15 @@ function notApplicableFor(row: DeviceRow): DeviceNotApplicable[] {
         reasonKey: `runtime.reason.${row.runtime.workspaces.reasonKey ?? "workspaceNotHosted"}`,
       })
     }
+  }
+  // Only the local row is asked: other machines' screens are reached from
+  // here, never brokered by them (Phase 3 adds paired clients).
+  if (row.kind === "local" && !isApplicable(row, "remote-desktop")) {
+    entries.push({
+      id: "remote-desktop",
+      labelKey: "remoteDesktop.title",
+      reasonKey: "remoteDesktop.desktopOnly",
+    })
   }
   if (!isApplicable(row, "dispatch")) {
     entries.push({

@@ -5,18 +5,34 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Provider-neutral remote desktop control leases and Host audit."
+description = "Host-brokered remote desktop: control leases, audit, target store, VNC bridge and sessions (ADR-0234)."
+
+[features]
+# ADR-0196: the `#[tauri::command]` shells. Off by default so the crate builds
+# and tests Tauri-free; only `src-tauri` enables it.
+tauri-host = ["dep:tauri"]
 
 [dependencies]
+tauri = { workspace = true, optional = true }
+cognia-net = { path = "../cognia-net" }
+cognia-problem = { path = "../cognia-problem" }
+cognia-secrets = { path = "../cognia-secrets" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 parking_lot.workspace = true
 log.workspace = true
-tokio = { workspace = true, features = ["rt", "macros"] }
+tokio = { workspace = true, features = ["rt", "macros", "net", "io-util", "time", "sync"] }
+tempfile.workspace = true
+hex.workspace = true
+# VncAuth is single DES over the server challenge (RFC 6143 §7.2.2).
+des = "0.9"
+futures-util = { workspace = true, features = ["sink", "std"] }
+tokio-tungstenite = { workspace = true, features = ["handshake"] }
 
 [dev-dependencies]
-tempfile.workspace = true
+tokio-tungstenite = { workspace = true, features = ["handshake", "connect"] }
+tokio = { workspace = true, features = ["rt", "macros", "net", "io-util", "time", "sync", "test-util"] }
 
 [lints]
 workspace = true

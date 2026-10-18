@@ -77,7 +77,15 @@ fn entry(
             | "remote_desktop.input"
             | "remote_desktop.input.quarantined"
             | "remote_desktop.agent.preempted"
-    ) || !matches!(target_kind, "sandbox" | "managed-desktop")
+            | "remote_desktop.target.save"
+            | "remote_desktop.target.delete"
+            | "remote_desktop.credential.set"
+            | "remote_desktop.credential.clear"
+            | "remote_desktop.endpoint.confirm"
+            | "remote_desktop.session.open"
+            | "remote_desktop.session.close"
+            | "remote_desktop.session.failed"
+    ) || !matches!(target_kind, "sandbox" | "managed-desktop" | "external")
     {
         return None;
     }
@@ -98,6 +106,44 @@ fn entry(
     }
     if let Some(expires_at) = fields.get("expires_at").and_then(Value::as_i64) {
         value["expires_at"] = json!(expires_at);
+    }
+    // External targets: ids and closed vocabularies only. Hosts, ports and
+    // credentials are never logged.
+    if let Some(binding) = fields.get("binding_id").and_then(Value::as_str) {
+        if crate::target::valid_id(binding) {
+            value["binding_id"] = json!(binding);
+        }
+    }
+    for (field, allowed) in [
+        ("mode", &["view", "control"][..]),
+        ("credential", &["control", "view"][..]),
+        ("class", &["private", "public"][..]),
+        (
+            "reason",
+            &[
+                "closed",
+                "expired",
+                "preempted",
+                "viewer_closed",
+                "failed",
+                "binding_changed",
+                "target_deleted",
+            ][..],
+        ),
+    ] {
+        if let Some(text) = fields.get(field).and_then(Value::as_str) {
+            if allowed.contains(&text) {
+                value[field] = json!(text);
+            }
+        }
+    }
+    if let Some(code) = fields.get("code").and_then(Value::as_str) {
+        if code.len() <= 64
+            && code.starts_with("remote_desktop_")
+            && code.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+        {
+            value["code"] = json!(code);
+        }
     }
     Some(value)
 }
@@ -224,6 +270,56 @@ mod tests {
         assert!(record.get("action_kind").is_none());
         assert!(record.get("count").is_none());
         assert!(entry("secret", "sandbox", "id", "p", "deny", 0, json!({})).is_none());
+        assert!(entry("remote_desktop.input", "elsewhere", "id", "p", "deny", 0, json!({})).is_none());
+    }
+
+    #[test]
+    fn external_fields_are_closed_vocabularies_and_never_endpoints() {
+        let record = entry(
+            "remote_desktop.session.failed",
+            "external",
+            "target-1",
+            "local-owner",
+            "deny",
+            0,
+            json!({"binding_id":"b_1", "mode":"control", "reason":"failed",
+                "code":"remote_desktop_auth_failed", "class":"private", "credential":"view",
+                "host":"192.168.1.5", "port":5900, "password":"hunter2"}),
+        )
+        .unwrap();
+        assert_eq!(record["binding_id"], "b_1");
+        assert_eq!(record["mode"], "control");
+        assert_eq!(record["reason"], "failed");
+        assert_eq!(record["code"], "remote_desktop_auth_failed");
+        assert_eq!(record["class"], "private");
+        assert_eq!(record["credential"], "view");
+        let text = record.to_string();
+        assert!(!text.contains("192.168") && !text.contains("5900") && !text.contains("hunter2"));
+        let record = entry(
+            "remote_desktop.session.close",
+            "external",
+            "target-1",
+            "local-owner",
+            "allow",
+            0,
+            json!({"binding_id":"../x", "mode":"admin", "reason":"because",
+                "code":"Remote Desktop: 192.168.1.5", "class":"lan"}),
+        )
+        .unwrap();
+        for field in ["binding_id", "mode", "reason", "code", "class"] {
+            assert!(record.get(field).is_none(), "{field} must be dropped");
+        }
+    }
+
+    /// Other tests in this binary record through the same global sink while
+    /// it is installed, so this one only reads its own rows.
+    fn own_rows(path: &Path, target_id: &str) -> Vec<Value> {
+        std::fs::read_to_string(path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|row| row["target_id"] == target_id)
+            .collect()
     }
 
     #[tokio::test]
@@ -234,17 +330,17 @@ mod tests {
         record_async(
             "remote_desktop.lease.acquire",
             "managed-desktop",
-            "id",
+            "audit-sink-test",
             "p",
             "allow",
             1,
             json!({"expires_at":123}),
         )
         .await;
-        let value: Value =
-            serde_json::from_str(std::fs::read_to_string(&path).unwrap().trim()).unwrap();
-        assert_eq!(value["expires_at"], 123);
-        assert!(value["ts_ms"].is_number());
+        let rows = own_rows(&path, "audit-sink-test");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["expires_at"], 123);
+        assert!(rows[0]["ts_ms"].is_number());
         let rotated = path.with_extension("jsonl.1");
         std::fs::write(&rotated, "old generation").unwrap();
         let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
@@ -252,27 +348,29 @@ mod tests {
         record_async(
             "remote_desktop.lease.release",
             "sandbox",
-            "id",
+            "audit-sink-test",
             "p",
             "allow",
             2,
             json!({}),
         )
         .await;
-        assert_eq!(std::fs::metadata(&rotated).unwrap().len(), MAX_LOG_BYTES);
-        assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 1);
+        // A concurrent append may land between `set_len` and the rotation.
+        assert!(std::fs::metadata(&rotated).unwrap().len() >= MAX_LOG_BYTES);
+        let rows = own_rows(&path, "audit-sink-test");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["kind"], "remote_desktop.lease.release");
         *AUDIT.lock() = None;
-        std::fs::remove_file(&path).unwrap();
         record_async(
             "remote_desktop.input",
             "sandbox",
-            "id",
+            "audit-sink-uninstalled",
             "p",
             "allow",
             2,
             json!({}),
         )
         .await;
-        assert!(!path.exists());
+        assert!(own_rows(&path, "audit-sink-uninstalled").is_empty());
     }
 }

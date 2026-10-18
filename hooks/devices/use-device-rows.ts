@@ -420,6 +420,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
         containerAvailable: runtimeAvailability.container.available,
         osSandboxAvailable: runtimeAvailability.os.available,
         hostMode,
+        remoteDesktopHost: isTauri(),
       },
       pairedDevices: pairedDevices ?? [],
       hostDevices: hostDevices ?? undefined,

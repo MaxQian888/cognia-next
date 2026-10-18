@@ -547,6 +547,7 @@ function buildLocalRow(input: BuildDeviceRowsInput): DeviceRow {
       platform: input.local.platform,
     }),
     appVersion: input.local.appVersion,
+    ...(input.local.remoteDesktopHost ? { remoteDesktopHost: true } : {}),
     adminState: "active",
     reachability: "online",
     liveness,

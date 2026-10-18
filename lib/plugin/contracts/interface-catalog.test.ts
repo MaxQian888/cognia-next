@@ -14,7 +14,7 @@ describe("plugin interface catalog", () => {
   it("indexes the canonical ctx method surface", () => {
     // A canary, not a fact worth memorising: any catalog edit lands here so
     // the method surface cannot grow or shrink without someone noticing.
-    expect(listPluginApiMethodContracts()).toHaveLength(890)
+    expect(listPluginApiMethodContracts()).toHaveLength(895)
     for (const method of [
       "listKnowledgeDocuments",
       "readKnowledgeOutline",

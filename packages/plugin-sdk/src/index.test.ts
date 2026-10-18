@@ -56,6 +56,7 @@ describe("plugin-sdk root barrel", () => {
       "defineWebview",
       "defineAuthProvider",
       "defineUriHandler",
+      "defineRemoteDesktopProvider",
       "defineTheme",
       "defineThemePack",
       "defineFontContribution",

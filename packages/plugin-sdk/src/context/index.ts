@@ -146,6 +146,10 @@ export type {
   PluginAuthProvider,
 } from "@/lib/plugin/api/auth-api"
 export type { PluginUriAPI, PluginUriHandlerDef } from "@/lib/plugin/api/uri-api"
+export type {
+  PluginRemoteDesktopAPI,
+  RemoteDesktopProviderDefinition,
+} from "@/lib/plugin/api/remote-desktop-api"
 export type { PluginChatAPI } from "@/lib/plugin/api/chat-api"
 export type { PluginCapabilitiesAPI } from "@/lib/plugin/api/capabilities-api"
 export type {

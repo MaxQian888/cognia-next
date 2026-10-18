@@ -17,7 +17,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 const LOCAL_PRINCIPAL: &str = "local-owner";
@@ -778,6 +778,7 @@ pub(crate) fn button_name(button: MouseButton) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     #[tokio::test]
     async fn upload_admission_must_revalidate_a_lease_that_expires_before_dispatch() {
         let mut desktop = RemoteDesktop::default();

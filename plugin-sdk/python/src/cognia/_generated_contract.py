@@ -93,6 +93,7 @@ VALID_PERMISSIONS = (
     "secrets:write",
     "auth:provide",
     "auth:consume",
+    "remote-desktop:provide",
     "terminal:spawn",
     "terminal:write",
     "terminal:kill",
@@ -3694,6 +3695,14 @@ PLUGIN_POINT_CONTRACTS = [
         "stability": "stable",
         "status": "implemented",
         "introducedIn": "0.5.0",
+    },
+    {
+        "id": "provider.remote-desktop",
+        "kind": "runtime",
+        "stability": "stable",
+        "status": "implemented",
+        "introducedIn": "0.5.0",
+        "permission": "remote-desktop:provide",
     },
     {
         "id": "startup",
@@ -14057,6 +14066,44 @@ API_NAMESPACE_CONTRACTS = [
                 "cancellable": False,
                 "resourceEffect": {
                     "kind": "none",
+                },
+            },
+        ],
+    },
+    {
+        "id": "remoteDesktop",
+        "authorPath": "ctx.remoteDesktop",
+        "type": "PluginRemoteDesktopAPI",
+        "stability": "stable",
+        "introducedIn": "0.5.0",
+        "runtimes": [
+            "frontend",
+            "hybrid",
+        ],
+        "platforms": [
+            "desktop",
+        ],
+        "transport": "direct",
+        "factory": "context.remoteDesktop",
+        "enforcement": "shadow",
+        "dataClassification": "internal",
+        "timeoutMs": None,
+        "retry": "never",
+        "errorPolicy": "preserve",
+        "lifecycle": "plugin",
+        "methods": [
+            {
+                "id": "remoteDesktop.registerProvider",
+                "name": "registerProvider",
+                "requiredPermissions": [
+                    "remote-desktop:provide",
+                ],
+                "consentTier": "confirm",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
                 },
             },
         ],

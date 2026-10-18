@@ -161,6 +161,7 @@ import { createModalAPI } from "../api/modal-api"
 import { createWebviewAPI } from "../api/webview-api"
 import { createAuthAPI } from "../api/auth-api"
 import { createUriAPI } from "../api/uri-api"
+import { createRemoteDesktopAPI } from "../api/remote-desktop-api"
 import { createChatAPI } from "../api/chat-api"
 import { createCapabilitiesAPI } from "../api/capabilities-api"
 import { createGitAPI } from "../api/git-api"
@@ -466,6 +467,10 @@ export function createFullPluginContext(
       hasPermission: (p) => (plugin.manifest.permissions ?? []).includes(p as never),
     }),
     uri: createUriAPI(pluginId),
+    remoteDesktop: createRemoteDesktopAPI(pluginId, {
+      hasPermission: (p) => (plugin.manifest.permissions ?? []).includes(p as never),
+      firstParty: plugin.source === "builtin",
+    }),
     chat: createChatAPI(pluginId, (permission) =>
       permissionsAPI.hasPermission(permission as never)
     ),

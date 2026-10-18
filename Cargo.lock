@@ -3179,12 +3179,20 @@ dependencies = [
 name = "cognia-remote-desktop"
 version = "0.1.0"
 dependencies = [
+ "cognia-net",
+ "cognia-problem",
+ "cognia-secrets",
+ "des",
+ "futures-util",
+ "hex",
  "log",
  "parking_lot",
  "serde",
  "serde_json",
+ "tauri",
  "tempfile",
  "tokio",
+ "tokio-tungstenite 0.30.0",
  "uuid",
 ]
 

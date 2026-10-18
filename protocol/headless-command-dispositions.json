@@ -12,6 +12,20 @@
     },
     {
       "disposition": "local-only",
+      "reason": "ADR-0234 Phase 2: external remote desktop targets, their Host-held credentials and the loopback viewer bridge belong to the desktop that confirmed each endpoint. Phase 3 adds remote-capable variants with their own Companion transports; until then these commands must not be exposed to remote callers.",
+      "commands": [
+        "remote_desktop_credential_set",
+        "remote_desktop_session_close",
+        "remote_desktop_session_open",
+        "remote_desktop_session_renew",
+        "remote_desktop_target_delete",
+        "remote_desktop_target_list",
+        "remote_desktop_target_probe",
+        "remote_desktop_target_save"
+      ]
+    },
+    {
+      "disposition": "local-only",
       "reason": "Sandbox desktop observation and human input belong to the client-local virtual computer. Controller leases arbitrate the local renderer and agent; these commands must not be exposed to remote agents or follow the selected remote Host.",
       "commands": [
         "cua_sandbox_desktop_acquire_control",

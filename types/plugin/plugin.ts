@@ -2617,6 +2617,9 @@ export interface PluginBaseContext {
   /** URI / deep-link handler registration (C2). */
   uri?: import("@/lib/plugin/api/uri-api").PluginUriAPI
 
+  /** Remote desktop provider registration (ADR-0234, `remote-desktop:provide`). */
+  remoteDesktop?: import("@/lib/plugin/api/remote-desktop-api").PluginRemoteDesktopAPI
+
   /** Chat-middleware registration (ADR-0026 §4 §A). */
   chat?: import("@/lib/plugin/api/chat-api").PluginChatAPI
 
@@ -2696,6 +2699,7 @@ export interface PluginHostContextAPI {
   webview: import("@/lib/plugin/api/webview-api").PluginWebviewAPI
   auth: import("@/lib/plugin/api/auth-api").PluginAuthAPI
   uri: import("@/lib/plugin/api/uri-api").PluginUriAPI
+  remoteDesktop: import("@/lib/plugin/api/remote-desktop-api").PluginRemoteDesktopAPI
   chat: import("@/lib/plugin/api/chat-api").PluginChatAPI
   capabilities: import("@/lib/plugin/api/capabilities-api").PluginCapabilitiesAPI
   git: import("@/lib/plugin/api/git-api").PluginGitAPI

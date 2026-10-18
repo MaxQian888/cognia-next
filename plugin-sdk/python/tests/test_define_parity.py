@@ -39,6 +39,7 @@ JS_RUNTIME_ONLY: dict[str, str] = {
     "importer": "carries an import() transform function",
     "chat-importer": "carries detect() and async parse() functions for the host chat-import pipeline",
     "uri-handler": "carries a handle() deep-link function",
+    "remote-desktop-provider": "carries a React component or webview viewer for ctx.remoteDesktop (desktop only)",
     "tray-item": "carries an onClick() function (PluginTrayItemInput)",
     "balance-adapter": "runtime adapter object with fetch methods",
     "limits-source": "runtime adapter object with fetch methods",

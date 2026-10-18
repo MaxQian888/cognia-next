@@ -96,7 +96,7 @@ cognia-companion-bus = { path = "../crates/cognia-companion-bus", features = ["t
 # grants, rate limits and audit trail; `companion_api` re-exports each module at
 # its old path.
 cognia-companion-security = { path = "../crates/cognia-companion-security" }
-cognia-remote-desktop = { path = "../crates/cognia-remote-desktop" }
+cognia-remote-desktop = { path = "../crates/cognia-remote-desktop", features = ["tauri-host"] }
 # The companion core; `companion_api` re-exports it and keeps the RPC dispatch
 # table, the Tauri command shells and its `CompanionRuntime` (ADR-0196 P7).
 cognia-companion = { path = "../crates/cognia-companion", features = ["tauri-host"] }

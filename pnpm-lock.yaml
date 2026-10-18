@@ -50,6 +50,7 @@ patchedDependencies:
   '@capacitor/browser@8.0.4': 2118f366da52a2ea51b214aef8812f86d13917eecc9b6f094cbc61eae2d3c6e7
   '@capacitor/push-notifications@8.1.2': 00d217d65aac2798c675558ccb7e6ecfe1c85053928891323572af9395c7a70c
   '@capgo/capacitor-native-biometric@8.7.0': 8aed032e94ffe6e4edf67ccaf6954431b9e53afa3a5bd309f3146a26948e9e5a
+  '@novnc/novnc@1.6.0': 8015cc468f52553b07ef37b37403f0101707caec8a5103526815662a905391c7
   '@sinonjs/fake-timers@15.4.0': 989a2bbf216c35c0a239565777e46732670f0ee40c085e03622285b8f541e78e
   capacitor-secure-storage-plugin@0.13.0: 107761618a151e09b442053f6e7c72f39a0abfc7b9e23f5d4ccdd9cc2893e196
   capacitor-zeroconf@4.0.0: dbd964283925c2c43e48d6cfcd77864f990874b602d48c25b88d1b154d1c3fc0
@@ -205,6 +206,9 @@ importers:
       '@noble/hashes':
         specifier: 2.4.0
         version: 2.4.0
+      '@novnc/novnc':
+        specifier: 1.6.0
+        version: 1.6.0(patch_hash=8015cc468f52553b07ef37b37403f0101707caec8a5103526815662a905391c7)
       '@octokit/auth-app':
         specifier: ^8.3.1
         version: 8.3.1
@@ -4307,6 +4311,9 @@ packages:
   '@nolyfill/is-core-module@1.0.39':
     resolution: {integrity: sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA==}
     engines: {node: '>=12.4.0'}
+
+  '@novnc/novnc@1.6.0':
+    resolution: {integrity: sha512-CJrmdSe9Yt2ZbLsJpVFoVkEu0KICEvnr3njW25Nz0jodaiFJtg8AYLGZogRYy0/N5HUWkGUsCmegKXYBSqwygw==}
 
   '@octokit/auth-app@8.3.1':
     resolution: {integrity: sha512-XHWxZsF4mvGTQCv7AOxgby9t9OjVO19FBuKq+QmyBxFrf+B2hR/P5j/MTF8g95bITf8cRtR17KIXThpFNqiKbg==}
@@ -18502,6 +18509,8 @@ snapshots:
       fastq: 1.20.3
 
   '@nolyfill/is-core-module@1.0.39': {}
+
+  '@novnc/novnc@1.6.0(patch_hash=8015cc468f52553b07ef37b37403f0101707caec8a5103526815662a905391c7)': {}
 
   '@octokit/auth-app@8.3.1':
     dependencies:

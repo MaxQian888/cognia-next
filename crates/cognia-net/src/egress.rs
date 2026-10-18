@@ -127,6 +127,65 @@ pub fn is_forbidden_dest_ip(ip: &IpAddr) -> bool {
     }
 }
 
+/// How a user-configured destination may be reached (ADR-0234 §4). The
+/// remote-desktop bridge dials exactly what the user confirmed, so it needs a
+/// three-way answer rather than [`is_forbidden_dest_ip`]'s yes/no.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DestClass {
+    /// Public unicast. Reachable after the user confirms a plaintext route.
+    Public,
+    /// RFC 1918, CGNAT or ULA: the user's own network, after confirmation.
+    Private,
+    /// Never dialed: loopback, unspecified, link-local, multicast, broadcast,
+    /// documentation and every cloud metadata endpoint.
+    Forbidden,
+}
+
+/// Classify one resolved address. Metadata endpoints are Forbidden even where
+/// they sit inside a range that would otherwise be Private (Alibaba and
+/// Volcengine inside CGNAT, AWS inside ULA). IPv4-mapped IPv6 addresses are
+/// judged by their embedded IPv4 address.
+pub fn classify_dest(ip: &IpAddr) -> DestClass {
+    if is_metadata_ip(ip) {
+        return DestClass::Forbidden;
+    }
+    match ip {
+        IpAddr::V4(v4) => classify_v4(v4),
+        IpAddr::V6(v6) => {
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return classify_dest(&IpAddr::V4(mapped));
+            }
+            if v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || is_link_local_v6(v6)
+            {
+                DestClass::Forbidden
+            } else if is_ula_v6(v6) {
+                DestClass::Private
+            } else {
+                DestClass::Public
+            }
+        }
+    }
+}
+
+fn classify_v4(v4: &Ipv4Addr) -> DestClass {
+    if v4.is_loopback()
+        || v4.is_link_local()
+        || v4.is_unspecified()
+        || v4.is_broadcast()
+        || v4.is_multicast()
+        || v4.is_documentation()
+    {
+        DestClass::Forbidden
+    } else if v4.is_private() || is_cgnat_v4(v4) {
+        DestClass::Private
+    } else {
+        DestClass::Public
+    }
+}
+
 /// Parse a CONNECT request line — `CONNECT host:port HTTP/1.1` — into
 /// `(host, port)`. Returns `None` for any other method or a malformed
 /// authority.
@@ -320,6 +379,39 @@ pub fn is_metadata_ip(ip: &IpAddr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classify_dest_separates_lan_public_and_never_dialed() {
+        let class = |s: &str| classify_dest(&s.parse::<IpAddr>().unwrap());
+        for private in ["10.0.0.5", "172.16.3.4", "192.168.1.20", "100.64.0.9", "fd12::1"] {
+            assert_eq!(class(private), DestClass::Private, "{private}");
+        }
+        for public in ["8.8.8.8", "1.1.1.1", "2606:4700::1111"] {
+            assert_eq!(class(public), DestClass::Public, "{public}");
+        }
+        for forbidden in [
+            "127.0.0.1",
+            "0.0.0.0",
+            "169.254.169.254",
+            "169.254.1.1",
+            "255.255.255.255",
+            "224.0.0.1",
+            "192.0.2.1",
+            "::1",
+            "::",
+            "fe80::1",
+            "ff02::1",
+            "100.100.100.200",
+            "100.96.0.96",
+            "fd00:ec2::254",
+            "::ffff:127.0.0.1",
+            "::ffff:169.254.169.254",
+        ] {
+            assert_eq!(class(forbidden), DestClass::Forbidden, "{forbidden}");
+        }
+        assert_eq!(class("::ffff:192.168.1.2"), DestClass::Private);
+        assert_eq!(class("::ffff:8.8.8.8"), DestClass::Public);
+    }
 
     #[test]
     fn exact_pattern_matches_only_itself() {

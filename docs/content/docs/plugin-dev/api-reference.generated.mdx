@@ -66,6 +66,7 @@ Contract `1.3.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.quickActions` | 2 | None | frontend, hybrid | internal |
 | `ctx.resources` | 7 | `database:read` | frontend, hybrid | sensitive |
 | `ctx.recorder` | 19 | `media:image:write`, `native:input`, `native:screen`, `media:image:read` | frontend, hybrid | sensitive |
+| `ctx.remoteDesktop` | 1 | `remote-desktop:provide` | frontend, hybrid | internal |
 | `ctx.sandbox` | 6 | `session:read`, `native:filesystem`, `native:process`, `native:input` | frontend, hybrid | sensitive |
 | `ctx.scheduler` | 20 | None | frontend, hybrid | internal |
 | `ctx.secrets` | 6 | `secrets:write`, `secrets:read` | frontend, hybrid, python | secret |
@@ -1017,6 +1018,12 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `recorder.stop` | `native:input`, `media:image:write` | high | No | frontend, hybrid |
 | `recorder.subscribeAvailability` | None | low | No | frontend, hybrid |
 | `recorder.undoLast` | `native:input`, `media:image:write` | high | No | frontend, hybrid |
+
+## `ctx.remoteDesktop`
+
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `remoteDesktop.registerProvider` | `remote-desktop:provide` | high | No | frontend, hybrid |
 
 ## `ctx.sandbox`
 

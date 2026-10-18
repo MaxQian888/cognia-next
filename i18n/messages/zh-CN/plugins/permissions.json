@@ -19,6 +19,7 @@
     "artifact:read": "读取产物元数据",
     "artifact:write": "创建和修改产物",
     "auth:consume": "使用已注册认证提供方的登录会话",
+    "remote-desktop:provide": "注册用于显示其他机器屏幕的远程桌面查看器。密码和连接由本机保管。",
     "auth:provide": "注册可供其他插件使用的原生认证 / OAuth 提供方",
     "automation:click": "在你的桌面上点击和按下鼠标按键",
     "automation:pointer": "在你的桌面上移动、拖拽和滚动鼠标",

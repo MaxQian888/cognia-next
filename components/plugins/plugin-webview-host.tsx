@@ -30,8 +30,15 @@ interface Props {
    * sheet can both be mounted); per-instance state like panel visibility must
    * not leak to the sibling frame, so it goes through this channel instead.
    */
-  onFrameReady?: (post: (data: unknown) => boolean) => void
+  onFrameReady?: (post: WebviewFramePoster) => void
 }
+
+/**
+ * Posts into this one frame. `transfer` moves objects such as a `MessagePort`
+ * into the frame (ADR-0234: a remote desktop viewer's byte channel), which the
+ * page reads from the message event's `ports`.
+ */
+export type WebviewFramePoster = (data: unknown, transfer?: Transferable[]) => boolean
 
 export function PluginWebviewHost({ fullId, srcDoc, title, onFrameReady }: Props) {
   const ref = useRef<HTMLIFrameElement | null>(null)
@@ -40,10 +47,10 @@ export function PluginWebviewHost({ fullId, srcDoc, title, onFrameReady }: Props
     const iframe = ref.current
     if (!iframe) return
 
-    const postToFrame = (data: unknown) => {
+    const postToFrame: WebviewFramePoster = (data, transfer) => {
       const win = iframe.contentWindow
       if (!win) return false
-      win.postMessage({ __cogniaWebview: "host", data }, "*")
+      win.postMessage({ __cogniaWebview: "host", data }, "*", transfer ?? [])
       return true
     }
 

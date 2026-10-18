@@ -105,6 +105,7 @@ describe("lib/plugin/api barrel", () => {
       "PluginAuthProvider",
       "PluginUriAPI",
       "PluginUriHandlerDef",
+      "PluginRemoteDesktopAPI",
       "PluginChatAPI",
       "PluginCapabilitiesAPI",
       "PluginDexieAPI",

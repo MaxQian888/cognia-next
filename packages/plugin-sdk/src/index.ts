@@ -310,6 +310,15 @@ export { defineTreeDataProvider, defineView } from "./define/define-view"
 export { defineWebview } from "./define/define-webview"
 export { defineAuthProvider } from "./define/define-auth-provider"
 export { defineUriHandler } from "./define/define-uri-handler"
+export { defineRemoteDesktopProvider } from "./define/define-remote-desktop-provider"
+export type {
+  RemoteDesktopIntegrationMode,
+  RemoteDesktopProviderCapabilities,
+  RemoteDesktopProviderDefinition,
+  RemoteDesktopViewer,
+  RemoteDesktopViewerProps,
+  RemoteDesktopViewerStatus,
+} from "@/lib/remote-desktop/provider-registry"
 export { defineTheme } from "./define/define-theme"
 export { defineThemePack } from "./define/define-theme-pack"
 export { defineFontContribution } from "./define/define-font-contribution"

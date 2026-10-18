@@ -789,5 +789,9 @@
     "lastError": "The last check failed: {error}",
     "installRequested": "The host will update as soon as it can.",
     "actionFailed": "The host did not take that: {error}"
+  },
+  "remoteDesktop": {
+    "title": "Remote desktops",
+    "desktopOnly": "Remote desktops open from the desktop app. The browser and phone builds reach them through a paired desktop in a later release."
   }
 }

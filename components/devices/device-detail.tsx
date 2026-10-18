@@ -57,6 +57,7 @@ import { HostSecretsSection } from "./host-secrets/host-secrets-section"
 import { HostRuntimesSection } from "./host-runtimes/host-runtimes-section"
 import { HostUpdatesSection } from "./host-updates/host-updates-section"
 import { HostSystemSection } from "./host-system/host-system-section"
+import { RemoteDesktopSection } from "./remote-desktop/remote-desktop-section"
 import { DeviceHero, DeviceStatSummary } from "./device-hero"
 import { DeviceSection } from "./device-section"
 import { DeviceSectionNav, type DeviceSectionNavItem } from "./device-section-nav"
@@ -104,6 +105,7 @@ const SECTION_LABEL_KEY: Record<DeviceSectionId, string> = {
   capabilities: "capabilities.title",
   dispatch: "activity.dispatch",
   placement: "activity.placement",
+  "remote-desktop": "remoteDesktop.title",
 }
 
 export interface DeviceDetailProps {
@@ -180,6 +182,8 @@ function PlannedSection({
       return <DispatchSection row={row} />
     case "placement":
       return <PlacementSection row={row} />
+    case "remote-desktop":
+      return <RemoteDesktopSection />
   }
 }
 

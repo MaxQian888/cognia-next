@@ -789,5 +789,9 @@
     "lastError": "上次检查失败：{error}",
     "installRequested": "主机会尽快完成更新。",
     "actionFailed": "主机未接受该操作：{error}"
+  },
+  "remoteDesktop": {
+    "title": "远程桌面",
+    "desktopOnly": "远程桌面需要在桌面应用中打开。浏览器和手机版本将在后续版本中通过已配对的桌面访问。"
   }
 }

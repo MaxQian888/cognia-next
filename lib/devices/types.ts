@@ -292,6 +292,11 @@ export interface DeviceRow {
   /** Host rows only: what kind of host this is. See {@link HostRole}. */
   hostRole?: HostRole
   /**
+   * Local row only: this machine brokers external remote desktops (ADR-0234).
+   * Targets are `client`-target commands, so no other row ever has them.
+   */
+  remoteDesktopHost?: boolean
+  /**
    * Remote-host rows only: the operation-level contract the Host last
    * reported. A section that needs one of its features asks this, since a
    * `/pair` Host has no remote-host store entry to read it from.
@@ -475,6 +480,11 @@ export interface LocalDeviceInput {
   osSandboxAvailable: boolean
   /** This desktop is in always-on host mode (ADR-0224 A3). */
   hostMode?: boolean
+  /**
+   * This process is the desktop shell, which brokers external remote desktops
+   * (ADR-0234 Phase 2). The browser and phone builds reach them in Phase 3.
+   */
+  remoteDesktopHost?: boolean
 }
 
 export interface BuildDeviceRowsInput {

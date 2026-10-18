@@ -31,6 +31,8 @@
  * Rust:
  *   - `reqwest::Client::new()` — no policy can be applied to it
  *   - `.no_proxy()` — an explicit opt-out of the policy
+ *   - `TcpStream::connect` / `connect_timeout` — a raw socket the proxy
+ *     policy never sees (ADR-0234: remote desktop bridges dial LAN devices)
  *
  * ## The approved paths
  *
@@ -88,6 +90,10 @@ export const REASONS = new Set([
   // The managed transport's own implementation — the one place a bare call
   // is the point.
   "transport-impl",
+  // Raw TCP to an endpoint the user named and confirmed (an SSH forward's
+  // destination, a remote desktop server pinned to one address). The protocol
+  // is not HTTP, and re-routing would defeat the confirmation.
+  "user-endpoint",
 ])
 
 // ---------------------------------------------------------------------------
@@ -338,6 +344,7 @@ export function findRustEgress(code) {
   for (const [kind, pattern] of [
     ["reqwest-client-new", /reqwest::Client::new\s*\(\s*\)/g],
     ["no-proxy", /\.no_proxy\s*\(\s*\)/g],
+    ["tcp-connect", /\bTcpStream::connect(?:_timeout)?\s*\(/g],
   ]) {
     let match
     while ((match = pattern.exec(code)) !== null) {

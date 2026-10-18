@@ -268,6 +268,8 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "events:subscribe": "Listen for events other plugins emit",
   "auth:provide": "Register a native auth/OAuth provider other plugins can use",
   "auth:consume": "Consume sessions from a registered auth provider",
+  "remote-desktop:provide":
+    "Register a remote desktop viewer that renders other machines' screens (the Host keeps passwords and connections)",
   "integrations:read": "Read Integration definitions, accounts, subscriptions, and job status",
   "integrations:events": "Publish normalized Integration events to workflows and Inbox",
   "integrations:execute": "Run Integration actions and authenticated platform requests",
@@ -317,6 +319,9 @@ export function expandLegacyPermissions(
 }
 
 export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
+  // A remote desktop viewer renders another machine's screen and forwards
+  // the user's input to it (ADR-0234), even though it never holds a password.
+  "remote-desktop:provide",
   // Desktop selections can contain passwords, private messages, or document
   // fragments. A plugin must receive per-call consent before reading them.
   "selection:read",

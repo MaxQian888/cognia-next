@@ -1,0 +1,21 @@
+diff --git a/lib/util/browser.js b/lib/util/browser.js
+index 8121bc15babc99bb9483bba18e84f674e34f82d0..3fdf390b02c6ed495cf3eb88ebe3587cb1f8cd07 100644
+--- a/lib/util/browser.js
++++ b/lib/util/browser.js
+@@ -176,7 +176,15 @@ function _checkWebCodecsH264DecodeSupport2() {
+   }));
+   return _checkWebCodecsH264DecodeSupport2.apply(this, arguments);
+ }
+-exports.supportsWebCodecsH264Decode = supportsWebCodecsH264Decode = await _checkWebCodecsH264DecodeSupport();
++// PATCHED (cognia): upstream awaits this probe at module top level, which a
++// CommonJS bundle cannot express (esbuild refuses top-level await with
++// format "cjs"; plugins are bundled that way). Start false, as declared
++// above, and publish the probe's answer when it settles. rfb.js reads
++// `_browser.supportsWebCodecsH264Decode` live when it sends its encodings at
++// connect time, so H.264 is advertised once the probe has finished.
++_checkWebCodecsH264DecodeSupport().then(function (supported) {
++  exports.supportsWebCodecsH264Decode = supportsWebCodecsH264Decode = supported;
++}, function () {});
+ 
+ /*
+  * The functions for detection of platforms and browsers below are exported

@@ -148,6 +148,17 @@ describe("useDeviceRows", () => {
     expect(result.current.rows[0]).toMatchObject({ ref: "local", hostRole: "always-on" })
   })
 
+  it("brokers remote desktops only from the desktop shell (ADR-0234)", async () => {
+    const { result, rerender } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.rows[0]?.remoteDesktopHost).toBe(true)
+    tauri = false
+    rerender()
+    const browser = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(browser.result.current.loading).toBe(false))
+    expect(browser.result.current.rows[0]?.remoteDesktopHost).toBeUndefined()
+  })
+
   it("names this device by the hardware model once the native shell reports it", async () => {
     // A phone read "Linux browser": the label came from the user agent alone.
     consoleLabelMock.mockResolvedValueOnce("HUAWEI PLR-AL00")

@@ -80,8 +80,18 @@ test("leaves unrelated workers and nested scopes alone", async () => {
   }
 })
 
+test("reloads a controlled window after another window removed the registration", async () => {
+  const result = await run({ present: false })
+  expect(result.unregister).not.toHaveBeenCalled()
+  expect(result.reload).toHaveBeenCalledTimes(1)
+})
+
 test("does not reload a clean page or create a loop when unregistering fails", async () => {
-  for (const options of [{ present: false }, { controlled: false }, { removed: false }]) {
+  for (const options of [
+    { present: false, controlled: false },
+    { controlled: false },
+    { removed: false },
+  ]) {
     expect((await run(options)).reload).not.toHaveBeenCalled()
   }
 })

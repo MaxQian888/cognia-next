@@ -1438,6 +1438,7 @@ export const CANONICAL_RUNTIME_POINTS = [
   "tray.item",
   "glance.module",
   "uri.handler",
+  "provider.remote-desktop",
 ] as const
 
 export type CanonicalRuntimePoint = (typeof CANONICAL_RUNTIME_POINTS)[number]
@@ -1528,13 +1529,18 @@ export const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
   // host from `lib/glance/plugin-registry.ts`.
   "glance.module": "lib/plugin/api/glance-api.ts:createGlanceAPI",
   "uri.handler": "lib/plugin/uri/uri-handler-registry.ts:registerUriHandler",
+  // ADR-0234: providers name a binding's viewer and server features; the
+  // Host keeps the handshake, credentials and network path.
+  "provider.remote-desktop":
+    "lib/remote-desktop/provider-registry.ts:registerRemoteDesktopProvider",
 }
 
 /**
  * Permission a plugin must hold to register at the given runtime point.
- * Reused permission keys per locked decision #3 of ADR-0026 — no new
- * permission strings introduced. The `permission` field on each contract
- * below is sourced from this map.
+ * Reused permission keys per locked decision #3 of ADR-0026, with one
+ * deliberate exception: `remote-desktop:provide` (ADR-0234), because a viewer
+ * renders another machine's screen and no existing permission says that.
+ * The `permission` field on each contract below is sourced from this map.
  */
 const RUNTIME_POINT_PERMISSIONS: Partial<Record<CanonicalRuntimePoint, string>> = {
   "workflow.node": "extension:workflow",
@@ -1585,6 +1591,7 @@ const RUNTIME_POINT_PERMISSIONS: Partial<Record<CanonicalRuntimePoint, string>> 
   // manifest path and the runtime path answer to the same name instead of
   // the canonical point being the one contribution nothing gated.
   "command.slash": "commands:write",
+  "provider.remote-desktop": "remote-desktop:provide",
 }
 
 // Runtime points that are NOT yet stable (everything else defaults to

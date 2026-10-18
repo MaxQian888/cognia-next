@@ -32,6 +32,7 @@ patchedDependencies:
   "@capgo/capacitor-native-biometric@8.7.0": patches/@capgo__capacitor-native-biometric@8.7.0.patch
   "@sinonjs/fake-timers@15.4.0": patches/@sinonjs__fake-timers@15.4.0.patch
   "@capacitor/browser@8.0.4": patches/@capacitor__browser@8.0.4.patch
+  "@novnc/novnc@1.6.0": patches/@novnc__novnc@1.6.0.patch
 
 # Security floors for transitive dependencies whose direct parents currently
 # declare broader ranges or have not yet published a compatible patch release.

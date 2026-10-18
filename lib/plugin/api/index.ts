@@ -63,6 +63,7 @@ export {
 export { createWebviewAPI } from "./webview-api"
 export { createAuthAPI } from "./auth-api"
 export { createUriAPI } from "./uri-api"
+export { createRemoteDesktopAPI, REMOTE_DESKTOP_PROVIDE_PERMISSION } from "./remote-desktop-api"
 export { createChatAPI, clearChatMiddlewaresForPluginContext } from "./chat-api"
 export { createCapabilitiesAPI } from "./capabilities-api"
 export { createDexieAPI } from "./dexie-api"
@@ -148,6 +149,11 @@ export type { PluginViewContainerAPI, ViewContainerOpenErrorCode } from "./view-
 export type { CreateWebviewInput, PluginWebviewAPI } from "./webview-api"
 export type { CreateAuthAPIOptions, PluginAuthAPI, PluginAuthProvider } from "./auth-api"
 export type { PluginUriAPI, PluginUriHandlerDef } from "./uri-api"
+export type {
+  CreateRemoteDesktopAPIOptions,
+  PluginRemoteDesktopAPI,
+  RemoteDesktopProviderDefinition,
+} from "./remote-desktop-api"
 export type { PluginChatAPI } from "./chat-api"
 export type { PluginCapabilitiesAPI } from "./capabilities-api"
 export type { PluginDexieAPI } from "./dexie-api"
