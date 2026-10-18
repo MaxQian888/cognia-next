@@ -61,7 +61,8 @@
     "cline": "Cline",
     "qoder": "Qoder",
     "minimaxCode": "MiniMax Code",
-    "kimi": "Kimi Code"
+    "kimi": "Kimi Code",
+    "grok": "Grok Build"
   },
   "runtimeStatus": {
     "disconnected": "{runtime} 已配置但未连接。请到「设置 → 外部 Agent」连接。",

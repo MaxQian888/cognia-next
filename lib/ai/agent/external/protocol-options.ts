@@ -29,6 +29,7 @@ import { listPluginProtocolAdapters } from "./protocol-adapter"
 const PROTOCOL_LABELS: Record<BuiltinExecutableExternalAgentProtocol | "opencode", string> = {
   acp: "ACP (Agent Client Protocol)",
   "codex-app-server": "Codex app-server (JSON-RPC)",
+  "codex-siwc-app-server": "Codex app-server (Sign in with ChatGPT)",
   "dsh-sdk": "DeepSeek Harness SDK",
   "pi-rpc": "Pi native RPC",
   "aider-cli": "Aider CLI",
@@ -48,6 +49,13 @@ export interface ExternalProtocolOption {
    * `externalAgent.manager`, not a sentence.
    */
   reasonKey?: "legacyProtocolUnavailable" | "pluginProtocolContributed"
+}
+
+export const SIWC_APP_SERVER_PROTOCOL = "codex-siwc-app-server" as const
+
+/** Shared wire/lifecycle family; credential ownership remains protocol-specific. */
+export function isCodexAppServerProtocol(protocol: string | undefined): boolean {
+  return protocol === "codex-app-server" || protocol === SIWC_APP_SERVER_PROTOCOL
 }
 
 /**

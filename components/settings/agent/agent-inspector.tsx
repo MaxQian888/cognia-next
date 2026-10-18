@@ -1,5 +1,7 @@
 "use client"
 
+import { isCodexAppServerProtocol } from "@/lib/ai/agent/external/protocol-options"
+
 /**
  * AgentInspector — the detail pane for one selected external agent.
  *
@@ -58,6 +60,7 @@ import { lifecycleErrorMessage } from "@/lib/ai/agent/external/lifecycle/error-m
 import { getExternalAgentLifecycleService } from "@/lib/ai/agent/external/lifecycle/service"
 import { getExternalAgentEcosystemReadiness } from "@/lib/ai/agent/external/config/config-normalizer"
 import { isFromPreset } from "@/lib/ai/agent/external/config/presets"
+import { findRuntimeForConfig } from "@/lib/ai/agent/external/config/install-catalog"
 import {
   adaptPermissionMode,
   supportedPermissionModes,
@@ -382,7 +385,11 @@ export function AgentInspector({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1 basis-64 space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <BrandIcon id={presetId ?? agent.name} label={agent.name} size={20} />
+            <BrandIcon
+              id={presetId ?? findRuntimeForConfig(agent)?.runtimeId ?? agent.name}
+              label={agent.name}
+              size={20}
+            />
             {renaming ? (
               <span className="flex min-w-0 flex-1 basis-48 items-center gap-1">
                 <Label htmlFor={`${ids}-name`} className="sr-only">
@@ -741,7 +748,7 @@ export function AgentInspector({
             </dl>
 
             {/* Native Codex app-server status (MCP servers + skills) */}
-            {agent.protocol === "codex-app-server" && (
+            {isCodexAppServerProtocol(agent.protocol) && (
               <CodexAppServerStatusCard agentId={agent.id} connected={isConnected} />
             )}
 

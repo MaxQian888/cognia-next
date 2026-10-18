@@ -91,6 +91,7 @@ import { isolatedAcpExtension } from "@cognia/agent-acp/isolated-adapter"
 import { createAcpAdapterFactory, isolateNativeAcp } from "./integrations/acp"
 import { createAiderCliAdapterFactory } from "./integrations/aider"
 import { createCodexAppServerAdapterFactory } from "./integrations/codex"
+import { createSiwcAppServerAdapterFactory, isCodexAppServerProtocol } from "./integrations/siwc"
 import {
   canProjectOpenCodeV2McpOnThisHost,
   createOpenCodeV2AdapterFactory,
@@ -381,6 +382,7 @@ export interface ExternalAgentLifecycleEvent {
 export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistry): void {
   registry.register("acp", createAcpAdapterFactory())
   registry.register("codex-app-server", createCodexAppServerAdapterFactory())
+  registry.register("codex-siwc-app-server", createSiwcAppServerAdapterFactory())
   registry.register("opencode-v2", createOpenCodeV2AdapterFactory())
   registry.register("a2a", createA2aAdapterFactory())
   // Managed install/facts are local-host commands; the integration wiring
@@ -2844,7 +2846,7 @@ export class ExternalAgentManager {
     if (adapter) {
       this.intentionalProcessStops.add(agentId)
       try {
-        if (this.instances.get(agentId)?.config.protocol === "codex-app-server") {
+        if (isCodexAppServerProtocol(this.instances.get(agentId)?.config.protocol)) {
           await this.disconnect(agentId)
         } else {
           await adapter.disconnect()
@@ -2995,7 +2997,7 @@ export class ExternalAgentManager {
     // Provider credentials are task-scoped. Settings/preflight may register this
     // agent, but only execution can mint a lease and launch its isolated child.
     if (this.instances.get(agentId)?.config.cogniaModel) return
-    if (this.instances.get(agentId)?.config.protocol !== "codex-app-server") {
+    if (!isCodexAppServerProtocol(this.instances.get(agentId)?.config.protocol)) {
       return this.connectAdapter(agentId)
     }
     // A reconnect must finish teardown first, and simultaneous callers must
@@ -3079,26 +3081,25 @@ export class ExternalAgentManager {
         // do less than the project asked for, so the connect stops here
         // rather than starting an unsandboxed agent.
         await assertRunEnvironmentPlaced(agentId)
-        const scopedConfig =
-          instance.config.protocol === "codex-app-server"
-            ? {
-                ...instance.config,
-                defaultPermissionMode:
-                  this.codexWritableScopes.get(agentId)?.permissionMode ??
-                  instance.config.defaultPermissionMode,
-                metadata: {
-                  ...instance.config.metadata,
-                  cogniaCodexWritableCeiling: this.codexWritableScopes.get(agentId)?.ceiling,
-                },
-                codexOptions: {
-                  ...instance.config.codexOptions,
-                  writableRoots: this.codexWritableScopes.get(agentId)?.roots ?? [],
-                },
-              }
-            : instance.config
+        const scopedConfig = isCodexAppServerProtocol(instance.config.protocol)
+          ? {
+              ...instance.config,
+              defaultPermissionMode:
+                this.codexWritableScopes.get(agentId)?.permissionMode ??
+                instance.config.defaultPermissionMode,
+              metadata: {
+                ...instance.config.metadata,
+                cogniaCodexWritableCeiling: this.codexWritableScopes.get(agentId)?.ceiling,
+              },
+              codexOptions: {
+                ...instance.config.codexOptions,
+                writableRoots: this.codexWritableScopes.get(agentId)?.roots ?? [],
+              },
+            }
+          : instance.config
         const launchConfig = await prepareDshManagedLaunch(scopedConfig, dshManagedLaunchHost)
         const connectTimeout = this.resolveExecutionTimeoutMs(instance)
-        if (instance.config.protocol === "codex-app-server") {
+        if (isCodexAppServerProtocol(instance.config.protocol)) {
           // Native connect times out its handshake and tears down the child
           // before rejecting. Racing an outer timeout would abandon that
           // owner and start a retry while its process was still initializing.
@@ -3233,7 +3234,7 @@ export class ExternalAgentManager {
     for (const task of [...this.gatewayTasks.values()]) {
       if (task.parentId === agentId) await task.release()
     }
-    if (this.instances.get(agentId)?.config.protocol !== "codex-app-server") {
+    if (!isCodexAppServerProtocol(this.instances.get(agentId)?.config.protocol)) {
       return this.disconnectAdapter(agentId)
     }
     const existing = this.codexDisconnections.get(agentId)
@@ -3335,13 +3336,12 @@ export class ExternalAgentManager {
       instructionEnvelope: options?.instructionEnvelope,
       // Per-agent Codex defaults (sandbox mode / reasoning effort / summary)
       // ride to the adapter through metadata — same channel as selectedModel.
-      codexOptions:
-        instance.config.protocol === "codex-app-server"
-          ? {
-              ...instance.config.codexOptions,
-              writableRoots: this.codexWritableScopes.get(instance.config.id)?.roots ?? [],
-            }
-          : instance.config.codexOptions,
+      codexOptions: isCodexAppServerProtocol(instance.config.protocol)
+        ? {
+            ...instance.config.codexOptions,
+            writableRoots: this.codexWritableScopes.get(instance.config.id)?.roots ?? [],
+          }
+        : instance.config.codexOptions,
       // Per-execution thinking level. Rides the same metadata channel as
       // `selectedModel`, and because the Codex client only applies
       // `codexOptions.defaultReasoningEffort` when this is undefined, setting it
@@ -3352,7 +3352,12 @@ export class ExternalAgentManager {
       // writes, which is the only one adapters read (e.g. the Codex app-server
       // client lifts it into `thread/start` params.model). Callers used to pass
       // a `model` that nothing consumed.
-      selectedModel: options?.model,
+      selectedModel:
+        options?.model ??
+        (instance.config.protocol === "codex-siwc-app-server" &&
+        typeof instance.config.metadata?.selectedModel === "string"
+          ? instance.config.metadata.selectedModel
+          : undefined),
     } as Record<string, unknown>
     const metadata =
       Object.entries(metadataPayload).filter(([, value]) => value !== undefined).length > 0
@@ -3399,7 +3404,7 @@ export class ExternalAgentManager {
   }> {
     const instance = this.instances.get(agentId)
     const adapter = this.adapters.get(agentId)
-    if (!instance || !adapter || instance.config.protocol !== "codex-app-server") {
+    if (!instance || !adapter || !isCodexAppServerProtocol(instance.config.protocol)) {
       return { options, release: () => {} }
     }
     options = enforceExternalPermissionCeiling(
@@ -4685,8 +4690,9 @@ export class ExternalAgentManager {
     // Codex owns response retries inside its native turn. A timeout or failed
     // response does not prove the turn was rejected or that its tools never
     // ran, so replaying execute() could duplicate accepted work and requests.
-    const maxExecutionRetries =
-      instance.config.protocol === "codex-app-server" ? 0 : retryConfig.maxRetries
+    const maxExecutionRetries = isCodexAppServerProtocol(instance.config.protocol)
+      ? 0
+      : retryConfig.maxRetries
     const hookCtx: AgentHookContext = {
       agentId,
       agentKind: "external",

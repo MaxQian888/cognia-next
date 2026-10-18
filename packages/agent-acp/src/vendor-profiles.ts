@@ -6,6 +6,7 @@
 import type { AcpVendorProfile } from "./vendor-profile"
 import { clineAcpProfile } from "./vendors/cline"
 import { devinAcpProfile } from "./vendors/devin"
+import { grokAcpProfile } from "./vendors/grok"
 import { gooseAcpProfile } from "./vendors/goose"
 import { minimaxAcpProfile } from "./vendors/minimax"
 import { kimiAcpProfile } from "./vendors/kimi"
@@ -17,6 +18,7 @@ export {
   clineAcpProfile,
   devinAcpProfile,
   gooseAcpProfile,
+  grokAcpProfile,
   kimiAcpProfile,
   openCodeAcpProfile,
   qoderAcpProfile,
@@ -28,6 +30,7 @@ export const ACP_VENDOR_PROFILES: readonly AcpVendorProfile[] = Object.freeze([
   clineAcpProfile,
   qoderAcpProfile,
   gooseAcpProfile,
+  grokAcpProfile,
   devinAcpProfile,
   openCodeAcpProfile,
 ])

@@ -191,14 +191,37 @@ pub(crate) fn push_baseline_secret_read_denies(out: &mut String) {
 /// also matches the real `Cognia` dir, so paths are canonicalized before the
 /// nesting test. The store root itself and its other children —
 /// `secret-store.enc`, the vault, the vector store — stay denied.
+/// Include protected Cognia stores beneath declared host roots too: a managed
+/// child can rebase HOME before the helper computes the ambient app-data path.
 ///
 /// Emit AFTER [`push_baseline_secret_read_denies`]: SBPL is last-match-wins,
 /// so these rules must follow the deny they carve out of.
 pub(crate) fn push_app_store_carveouts(out: &mut String, declared: &[impl AsRef<Path>]) {
-    let Some(store) = app_store_root() else {
-        return;
-    };
-    push_store_carveouts_at(out, &store, declared);
+    let mut stores: Vec<PathBuf> = app_store_root().into_iter().collect();
+    for root in declared {
+        for (store, _, secret) in protected_entries_under(root.as_ref()) {
+            // Managed children can have an isolated HOME. Match the Cognia
+            // stores the declared host roots actually denied, while leaving
+            // every other protected credential store sealed.
+            if secret
+                && matches!(
+                    store.file_name().and_then(|name| name.to_str()),
+                    Some("cognia" | ".cognia")
+                )
+                && !stores.contains(&store)
+            {
+                stores.push(store);
+            }
+        }
+    }
+    let mut carved = Vec::new();
+    for store in stores {
+        carved.extend(push_store_carveouts_at(out, &store, declared));
+    }
+    // A broad workspace allow must not re-open its own credentials. Apply
+    // these floors after every carveout, including nested declared roots.
+    // Applying them to the host home would seal the app store again.
+    push_protected_denies(out, &carved);
 }
 
 /// Canonicalize as much of `p` as exists, keeping the caller's spelling for
@@ -254,7 +277,11 @@ fn nests_under(path: &Path, root: &Path) -> bool {
 
 /// The emit core, split from [`push_app_store_carveouts`] so tests can point
 /// the store at a tempdir instead of the host's real app-data directory.
-fn push_store_carveouts_at(out: &mut String, store: &Path, declared: &[impl AsRef<Path>]) {
+fn push_store_carveouts_at(
+    out: &mut String,
+    store: &Path,
+    declared: &[impl AsRef<Path>],
+) -> Vec<PathBuf> {
     let store = canon_or_nearest(store);
     let mut emitted: Vec<PathBuf> = Vec::new();
     for declared in declared {
@@ -292,6 +319,7 @@ fn push_store_carveouts_at(out: &mut String, store: &Path, declared: &[impl AsRe
         ));
         emitted.push(canon);
     }
+    emitted
 }
 
 /// The shared rule permitting exactly one loopback proxy port. Both the one-shot
@@ -447,7 +475,7 @@ mod tests {
 
         let mut out = String::new();
         push_read_deny(&mut out, &escape(&store.to_string_lossy()));
-        push_store_carveouts_at(&mut out, &store, std::slice::from_ref(&ws));
+        let _ = push_store_carveouts_at(&mut out, &store, std::slice::from_ref(&ws));
 
         let deny = out.find("file-read* (subpath").unwrap();
         let lit = |p: &Path| format!("(allow file-read-metadata (literal \"{}\"))", p.display());
@@ -490,8 +518,78 @@ mod tests {
         std::fs::create_dir_all(&outside).expect("mkdir");
 
         let mut out = String::new();
-        push_store_carveouts_at(&mut out, &store, &[store.clone(), outside]);
+        let _ = push_store_carveouts_at(&mut out, &store, &[store.clone(), outside]);
         assert_eq!(out, "", "{out}");
+    }
+
+    #[test]
+    fn carveouts_follow_declared_host_store_when_process_home_is_elsewhere() {
+        // A managed child has its own HOME. The host-home readable grant still
+        // emits protected store denies, independently of that ambient HOME.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let host_home = std::fs::canonicalize(tmp.path()).unwrap();
+        let store = host_home.join("Library/Application Support/cognia");
+        let workspace = store.join("task-workspaces/executions/own");
+        let ssh = host_home.join(".ssh/private");
+        let nested_ssh = workspace.join(".ssh/private");
+        let nested_store = workspace.join(".cognia/private");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&ssh).unwrap();
+        std::fs::create_dir_all(&nested_ssh).unwrap();
+        std::fs::create_dir_all(&nested_store).unwrap();
+        let declared = [
+            host_home.clone(),
+            workspace.clone(),
+            ssh.clone(),
+            nested_ssh,
+            nested_store,
+        ];
+        let mut out = String::new();
+        push_secret_read_denies(&mut out, std::slice::from_ref(&host_home));
+        push_baseline_secret_read_denies(&mut out);
+        push_app_store_carveouts(&mut out, &declared);
+
+        let sub = |path: &Path| {
+            format!(
+                "(allow file-read* (subpath \"{}\"))",
+                escape(&path.to_string_lossy())
+            )
+        };
+        let denied = format!(
+            "(deny file-read* (subpath \"{}\"))",
+            escape(&store.to_string_lossy())
+        );
+        assert!(
+            out.find(&sub(&workspace)).expect("workspace carveout")
+                > out.find(&denied).expect("host store deny"),
+            "{out}"
+        );
+        for hidden in [
+            store.clone(),
+            store.join("task-workspaces"),
+            store.join("task-workspaces/executions/sibling"),
+            store.join("vault"),
+            store.join("secret-store.enc"),
+            ssh,
+        ] {
+            assert!(
+                !out.contains(&sub(&hidden)),
+                "reopened {}",
+                hidden.display()
+            );
+        }
+        let last_allow = out.rfind("(allow file-read*").unwrap();
+        for relative in [".ssh", ".aws", ".cognia"] {
+            let protected = workspace.join(relative);
+            let deny = format!(
+                "(deny file-read* (subpath \"{}\"))",
+                escape(&protected.to_string_lossy())
+            );
+            assert!(
+                out.rfind(&deny).is_some_and(|at| at > last_allow),
+                "workspace carveout reopened {relative}"
+            );
+        }
     }
 
     #[test]
@@ -506,7 +604,7 @@ mod tests {
         let store = std::fs::canonicalize(&store).unwrap_or(store);
         let child = std::fs::canonicalize(&child).unwrap_or(child);
         let parent = std::fs::canonicalize(&parent).unwrap_or(parent);
-        push_store_carveouts_at(&mut out, &store, &[parent.clone(), child.clone()]);
+        let _ = push_store_carveouts_at(&mut out, &store, &[parent.clone(), child.clone()]);
         assert_eq!(
             out.matches("(allow file-read* (subpath").count(),
             1,
@@ -537,7 +635,7 @@ mod tests {
             .join("pending");
 
         let mut out = String::new();
-        push_store_carveouts_at(&mut out, &store, std::slice::from_ref(&pending));
+        let _ = push_store_carveouts_at(&mut out, &store, std::slice::from_ref(&pending));
         // Either spelling nests under the deny — case-insensitive FS resolves
         // `cognia` to `Cognia`, and on a case-sensitive FS the lowercase
         // spelling is the one the deny itself matched.

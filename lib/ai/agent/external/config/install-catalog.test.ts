@@ -575,3 +575,24 @@ it("discovers system MiniMax without offering an unpinned managed install", () =
     findRuntimeForConfig({ protocol: "acp", process: { command: "/opt/bin/mcode", args: ["acp"] } })
   ).toBe(runtime)
 })
+
+it("requires executable consent for the system-owned Grok Build runtime", () => {
+  const runtime = findRuntimeByPresetId("grok")!
+  expect(runtime).toMatchObject({
+    runtimeId: "grok",
+    ownership: "system",
+    protocol: "acp",
+    systemCommand: "grok",
+    launchArgs: ["agent", "--no-leader", "stdio"],
+    supportedRange: ">=1.0.62 <1.1.0",
+    versionProbe: { args: ["--version"], parser: "semver-anywhere" },
+    distributions: [],
+    sandbox: { required: true, windowsExceptionEligible: false },
+  })
+  expect(runtime.certifiedVersions).toBeUndefined()
+  expect(runtimeSupportsPlatform(runtime, "win32")).toBe(false)
+  expect(deriveRuntimeBinding({ protocol: "acp", process: { command: "grok" } })).toEqual({
+    runtimeId: "grok",
+    ownership: "system",
+  })
+})

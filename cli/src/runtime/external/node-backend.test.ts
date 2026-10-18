@@ -1162,3 +1162,48 @@ it("passes reviewed MiniMax directory aliases and BYOK without opening arbitrary
   expect(env.MCODE_PROVIDER_API_KEY).toBe("synthetic")
   expect(env.MCODE_BIN_PATH).toBeUndefined()
 })
+
+it("preserves exact reviewed Grok controls without allowing arbitrary Grok or xAI env", () => {
+  const reviewed = {
+    XAI_API_KEY: "synthetic-key",
+    GROK_HOME: "/owned/grok",
+    GROK_DISABLE_AUTOUPDATER: "1",
+    GROK_CHANGELOG_OFFLINE: "1",
+    GROK_TELEMETRY_ENABLED: "0",
+    GROK_TELEMETRY_TRACE_UPLOAD: "0",
+    GROK_FEEDBACK_ENABLED: "0",
+  }
+  expect(
+    buildExternalAgentChildEnv(
+      { NODE_ENV: "test" },
+      {
+        ...reviewed,
+        GROK_UNREVIEWED: "blocked",
+        XAI_UNREVIEWED: "blocked",
+      }
+    )
+  ).toEqual({ NODE_ENV: "test", ...reviewed })
+})
+
+it.each([undefined, "explicit-fixture", ""])(
+  "isolates Grok host credentials while preserving explicit value %s",
+  (explicit) => {
+    const overrides: Record<string, string> =
+      explicit === undefined ? {} : { XAI_API_KEY: explicit }
+    const isolated = buildExternalAgentChildEnv(
+      { NODE_ENV: "test", XAI_API_KEY: "ambient-fixture" },
+      overrides,
+      false,
+      false,
+      false,
+      false,
+      true
+    )
+    expect(isolated.XAI_API_KEY).toBe(explicit)
+    const shared = buildExternalAgentChildEnv(
+      { NODE_ENV: "test", XAI_API_KEY: "ambient-fixture" },
+      overrides
+    )
+    expect(shared.XAI_API_KEY).toBe(explicit ?? "ambient-fixture")
+  }
+)

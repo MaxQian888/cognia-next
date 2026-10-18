@@ -1086,3 +1086,69 @@ it("refuses MiniMax Bot state escape before creating a directory", async () => {
   ).rejects.toThrow("inside the Bot")
   expect(ensureDir).not.toHaveBeenCalled()
 })
+
+it.each([
+  [{ GROK_HOME: "/owned/grok" }, "/owned/grok"],
+  [{ GROK_HOME: "state/../grok" }, "/work/grok"],
+])("scopes Grok state and temporary paths and disables hosted updates", async (env, root) => {
+  const ensureDir = jest.fn()
+  const launch = await resolveSandboxedExternalAgentLaunch(
+    {
+      id: "grok",
+      command: "grok",
+      args: ["agent", "--no-leader", "stdio"],
+      cwd: "/work",
+      env: { ...env, GROK_DISABLE_AUTOUPDATER: "0", GROK_CHANGELOG_OFFLINE: "0" },
+    },
+    {
+      platform: "darwin",
+      homedir: "/home/user",
+      candidates: ["/launcher"],
+      isExecutable: () => true,
+      ensureDir,
+    }
+  )
+  const writable = launch.args.filter((_, index) => launch.args[index - 1] === "--writable")
+  expect(writable).toContain(root)
+  expect(writable).not.toContain("/home/user/.grok")
+  expect(writable).not.toContain("/tmp/sessions")
+  expect(launch.env).toMatchObject({
+    GROK_HOME: root,
+    GROK_DISABLE_AUTOUPDATER: "1",
+    GROK_CHANGELOG_OFFLINE: "1",
+    TMPDIR: `${root}/tmp`,
+    TMP: `${root}/tmp`,
+    TEMP: `${root}/tmp`,
+  })
+  expect(ensureDir).toHaveBeenCalledWith(`${root}/tmp`)
+})
+
+it.each(["", "   ", "/work/state/../escape", "/home/user/.grok"])(
+  "rejects an invalid Grok Bot home before provisioning: %s",
+  async (selected) => {
+    const ensureDir = jest.fn()
+    await expect(
+      resolveSandboxedExternalAgentLaunch(
+        {
+          id: "grok",
+          command: "grok",
+          cwd: "/work",
+          env: {
+            COGNIA_BOT_ISOLATION: "1",
+            COGNIA_BOT_STATE_DIR: "/work/state",
+            GROK_HOME: selected,
+          },
+        },
+        {
+          platform: "darwin",
+          homedir: "/home/user",
+          candidates: ["/launcher"],
+          isExecutable: () => true,
+          supportsBotIsolation: () => true,
+          ensureDir,
+        }
+      )
+    ).rejects.toThrow(/Grok/)
+    expect(ensureDir).not.toHaveBeenCalled()
+  }
+)

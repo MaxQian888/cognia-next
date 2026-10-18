@@ -16,6 +16,7 @@ import type { ExternalAgentEcosystemSupportTier } from "@/types/agent/external-a
 type Translate = (key: string) => string
 
 const SETUP_HINT_KEYS: Readonly<Record<string, string>> = {
+  grok: "grokSetupHint",
   "minimax-code": "minimaxCodeSetupHint",
   devin: "devinSetupHint",
   aider: "aiderSetupHint",
@@ -26,6 +27,7 @@ const SETUP_HINT_KEYS: Readonly<Record<string, string>> = {
 }
 
 const ENV_VAR_HINT_KEYS: Readonly<Record<string, string>> = {
+  grok: "grokEnvVarHint",
   "minimax-code": "minimaxCodeEnvVarHint",
   aider: "aiderEnvVarHint",
   qoder: "qoderEnvVarHint",
@@ -35,6 +37,7 @@ const ENV_VAR_HINT_KEYS: Readonly<Record<string, string>> = {
 }
 
 const DESCRIPTION_KEYS: Readonly<Record<string, string>> = {
+  grok: "grokPresetDescription",
   "minimax-code": "minimaxCodePresetDescription",
   "opencode-v2-service": "opencodeV2PresetDescription",
   devin: "devinPresetDescription",
@@ -46,6 +49,7 @@ const DESCRIPTION_KEYS: Readonly<Record<string, string>> = {
 }
 
 const NAME_KEYS: Readonly<Record<string, string>> = {
+  grok: "grokPresetName",
   "opencode-v2-service": "opencodeV2PresetName",
 }
 

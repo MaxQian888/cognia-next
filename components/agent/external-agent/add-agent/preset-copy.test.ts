@@ -30,6 +30,7 @@ function preset(overrides: Partial<ExternalAgentPresetConfig> = {}): ExternalAge
 
 describe("presetSetupHint", () => {
   it.each([
+    ["grok", "grokSetupHint"],
     ["minimax-code", "minimaxCodeSetupHint"],
     ["devin", "devinSetupHint"],
     ["aider", "aiderSetupHint"],
@@ -64,6 +65,7 @@ describe("presetSetupHint", () => {
 
 describe("presetEnvVarHint", () => {
   it.each([
+    ["grok", "grokEnvVarHint"],
     ["minimax-code", "minimaxCodeEnvVarHint"],
     ["aider", "aiderEnvVarHint"],
     ["qoder", "qoderEnvVarHint"],
@@ -108,6 +110,7 @@ describe("presetEnvironmentLabel", () => {
 
 describe("presetDescription", () => {
   it.each([
+    ["grok", "grokPresetDescription"],
     ["opencode-v2-service", "opencodeV2PresetDescription"],
     ["minimax-code", "minimaxCodePresetDescription"],
     ["devin", "devinPresetDescription"],
@@ -126,6 +129,10 @@ describe("presetDescription", () => {
 })
 
 describe("presetName", () => {
+  it("uses the catalogue key for Grok Build", () => {
+    expect(presetName(t, "grok", preset())).toBe("t:grokPresetName")
+  })
+
   it("uses the catalogue key for opencode-v2-service", () => {
     expect(presetName(t, "opencode-v2-service", preset())).toBe("t:opencodeV2PresetName")
   })
@@ -145,6 +152,7 @@ describe("catalogue keys exist", () => {
   const zh = zhMessages as unknown as Bundle
 
   const ids = [
+    "grok",
     "minimax-code",
     "devin",
     "aider",

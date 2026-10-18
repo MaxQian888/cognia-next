@@ -66,7 +66,11 @@ import {
   type ExternalAgentProcessSandboxPolicy,
 } from "@cognia/agent-contracts/external-agent"
 import { piPackagesHref } from "@/lib/pi-packages/deep-link"
-import { externalProtocolOptions } from "@/lib/ai/agent/external/protocol-options"
+import {
+  externalProtocolOptions,
+  isCodexAppServerProtocol,
+  SIWC_APP_SERVER_PROTOCOL,
+} from "@/lib/ai/agent/external/protocol-options"
 import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
 import { uniqueDuplicateName } from "@/lib/ai/agent/external/config/duplicate-config"
 import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
@@ -361,7 +365,10 @@ const CODEX_EFFORT_CHOICES = ["minimal", "low", "medium", "high", "xhigh"] as co
 
 /** Does this configuration run the Codex runtime (and so sign in with a Codex account)? */
 function isCodexFamily(presetId: string, protocol: ExternalAgentProtocol): boolean {
-  return CODEX_PRESET_FAMILY.includes(presetId) || protocol === "codex-app-server"
+  return (
+    protocol !== SIWC_APP_SERVER_PROTOCOL &&
+    (CODEX_PRESET_FAMILY.includes(presetId) || protocol === "codex-app-server")
+  )
 }
 
 function errorText(error: unknown): string {
@@ -588,6 +595,7 @@ export function AgentEditorDialog({
   const tManage = useTranslations("externalAgentManage.editor")
   const tCommon = useTranslations("common")
   const tGateway = useTranslations("externalAgent.cogniaModel")
+  const tSiwc = useTranslations("siwc")
   const { getAgent, getAllAgents } = useExternalAgentStore()
   const [customName, setCustomName] = useState(false)
   const uniquePresetName = useCallback(
@@ -728,6 +736,7 @@ export function AgentEditorDialog({
     : undefined
   const environmentLabel = presetEnvironmentLabel(t, selectedPreset, formData.protocol)
   const codexFamily = isCodexFamily(selectedPreset, formData.protocol)
+  const siwcMode = formData.protocol === SIWC_APP_SERVER_PROTOCOL
 
   const handleOpenChange = useCallback(
     (next: boolean) => {
@@ -750,7 +759,11 @@ export function AgentEditorDialog({
       toast.error(tManage("sandboxAllowedHostsInvalid"))
       return
     }
-    const processArgs = managedDsh ? [] : tokenizeShellCommand(formData.processArgs)
+    const processArgs = siwcMode
+      ? ["app-server"]
+      : managedDsh
+        ? []
+        : tokenizeShellCommand(formData.processArgs)
     if (usesProcess && processArgs === null) {
       toast.error(t("argumentsInvalid"))
       return
@@ -798,7 +811,7 @@ export function AgentEditorDialog({
 
     const input: AgentEditorSaveInput = {
       name: formData.name.trim(),
-      cogniaModel: formData.cogniaModel ?? null,
+      cogniaModel: siwcMode ? null : (formData.cogniaModel ?? null),
       protocol: formData.protocol,
       transport: formData.transport,
       description: formData.description.trim(),
@@ -903,7 +916,7 @@ export function AgentEditorDialog({
         return
       }
       input.process = {
-        command: managedDsh ? "" : formData.processCommand.trim(),
+        command: siwcMode ? "codex" : managedDsh ? "" : formData.processCommand.trim(),
         args: processArgs ?? [],
         cwd: formData.processCwd || undefined,
         env: {
@@ -924,7 +937,7 @@ export function AgentEditorDialog({
       }
     }
 
-    if (formData.protocol === "codex-app-server") {
+    if (isCodexAppServerProtocol(formData.protocol)) {
       input.codexOptions = {
         sandboxMode: formData.codexSandboxMode,
         networkAccess: formData.codexNetworkAccess,
@@ -963,6 +976,10 @@ export function AgentEditorDialog({
         ecosystemDocsUrl: selectedPresetConfig.docsUrl,
         ...selectedPresetConfig.metadata,
       }
+    }
+    if (siwcMode) {
+      input.metadata = { ...editingAgent?.metadata }
+      input.subscriptionAccountId = null
     }
 
     if (formData.protocol === "opencode") {
@@ -1078,6 +1095,7 @@ export function AgentEditorDialog({
     launchesProcess,
     effectiveStateIsolation,
     codexFamily,
+    siwcMode,
     editingAgent,
     editingAgentId,
     onSave,
@@ -1273,12 +1291,11 @@ export function AgentEditorDialog({
                   protocol,
                   // The Codex app-server is a locally spawned JSON-RPC process;
                   // it has no network transport to fall back on.
-                  transport:
-                    protocol === "codex-app-server"
-                      ? "stdio"
-                      : protocol === "opencode" || protocol === "opencode-v2"
-                        ? "sse"
-                        : formData.transport,
+                  transport: isCodexAppServerProtocol(protocol)
+                    ? "stdio"
+                    : protocol === "opencode" || protocol === "opencode-v2"
+                      ? "sse"
+                      : formData.transport,
                 })
               }}
             >
@@ -1287,7 +1304,14 @@ export function AgentEditorDialog({
               </SelectTrigger>
               <SelectContent>
                 {externalProtocolOptions(formData.protocol).map((option) => (
-                  <SelectItem key={option.value} value={option.value} disabled={!option.selectable}>
+                  <SelectItem
+                    key={option.value}
+                    value={option.value}
+                    disabled={
+                      !option.selectable ||
+                      (option.value === SIWC_APP_SERVER_PROTOCOL && !editingAgent?.metadata?.siwc)
+                    }
+                  >
                     {option.value === "opencode-v2" ? t("opencodeV2Protocol") : option.label}
                     {option.reasonKey ? ` — ${tManager(option.reasonKey)}` : ""}
                   </SelectItem>
@@ -1304,7 +1328,7 @@ export function AgentEditorDialog({
                 onValueChange={(v) =>
                   setFormData({ ...formData, transport: v as AgentFormData["transport"] })
                 }
-                disabled={managedDsh || formData.protocol === "codex-app-server"}
+                disabled={managedDsh || isCodexAppServerProtocol(formData.protocol)}
               >
                 <SelectTrigger id={fid("transport")} data-testid="transport-select">
                   <SelectValue />
@@ -1595,7 +1619,7 @@ export function AgentEditorDialog({
                   <Label htmlFor={fid("command")}>{t("command")}</Label>
                   <Input
                     id={fid("command")}
-                    disabled={managedDsh}
+                    disabled={managedDsh || siwcMode}
                     value={formData.processCommand}
                     onChange={(e) => setFormData({ ...formData, processCommand: e.target.value })}
                     // i18n-exempt: example CLI command, not UI prose
@@ -1606,7 +1630,7 @@ export function AgentEditorDialog({
                   <Label htmlFor={fid("args")}>{t("arguments")}</Label>
                   <Input
                     id={fid("args")}
-                    disabled={managedDsh}
+                    disabled={managedDsh || siwcMode}
                     value={formData.processArgs}
                     onChange={(e) => setFormData({ ...formData, processArgs: e.target.value })}
                     // i18n-exempt: example CLI arguments, not UI prose
@@ -1714,14 +1738,21 @@ export function AgentEditorDialog({
             field disables "own state" with the reason for a runtime that has
             no home variable, and says there is nothing to isolate for an agent
             that runs elsewhere. */}
-        <StateIsolationField
-          value={effectiveStateIsolation}
-          onChange={(stateIsolation) => setFormData((current) => ({ ...current, stateIsolation }))}
-          command={isolationCommand}
-          args={isolationArgs}
-          disabled={submitting}
-          showSignInWarning={movingToOwnState}
-        />
+        {!siwcMode && (
+          <StateIsolationField
+            value={effectiveStateIsolation}
+            onChange={(stateIsolation) =>
+              setFormData((current) => ({ ...current, stateIsolation }))
+            }
+            command={isolationCommand}
+            args={isolationArgs}
+            disabled={submitting}
+            showSignInWarning={movingToOwnState}
+          />
+        )}
+        {siwcMode && (
+          <p className="text-xs text-muted-foreground">{tSiwc("editorConnectionHint")}</p>
+        )}
 
         {codexFamily && (
           <SubscriptionAccountField
@@ -1733,31 +1764,33 @@ export function AgentEditorDialog({
           />
         )}
 
-        <CogniaModelPicker
-          config={{
-            protocol: formData.protocol,
-            transport: formData.transport,
-            process: {
-              command: formData.processCommand || (formData.opencodeAutoSpawn ? "opencode" : ""),
-              args: tokenizeShellCommand(formData.processArgs) ?? [],
-            },
-            network:
-              formData.transport !== "stdio" && !formData.opencodeAutoSpawn
-                ? { endpoint: formData.networkEndpoint }
-                : undefined,
-            metadata: {
-              ...(selectedPreset
-                ? getPresetConfig(selectedPreset)?.metadata
-                : editingAgent
-                  ? editingAgent.metadata
-                  : {}),
-              preset: selectedPreset || undefined,
-              autoSpawnServer: formData.opencodeAutoSpawn,
-            },
-          }}
-          value={formData.cogniaModel}
-          onChange={(cogniaModel) => setFormData((current) => ({ ...current, cogniaModel }))}
-        />
+        {!siwcMode && (
+          <CogniaModelPicker
+            config={{
+              protocol: formData.protocol,
+              transport: formData.transport,
+              process: {
+                command: formData.processCommand || (formData.opencodeAutoSpawn ? "opencode" : ""),
+                args: tokenizeShellCommand(formData.processArgs) ?? [],
+              },
+              network:
+                formData.transport !== "stdio" && !formData.opencodeAutoSpawn
+                  ? { endpoint: formData.networkEndpoint }
+                  : undefined,
+              metadata: {
+                ...(selectedPreset
+                  ? getPresetConfig(selectedPreset)?.metadata
+                  : editingAgent
+                    ? editingAgent.metadata
+                    : {}),
+                preset: selectedPreset || undefined,
+                autoSpawnServer: formData.opencodeAutoSpawn,
+              },
+            }}
+            value={formData.cogniaModel}
+            onChange={(cogniaModel) => setFormData((current) => ({ ...current, cogniaModel }))}
+          />
+        )}
 
         {/* Permission Mode — narrowed to the modes the chosen backend can
             enforce, and clamped for display so switching protocol never shows
@@ -1876,7 +1909,7 @@ export function AgentEditorDialog({
         {/* Codex app-server options — sandbox + reasoning defaults applied at
             thread/start (sandbox) and turn/start (sandboxPolicy/effort/summary).
             Session-level overrides remain available via config options. */}
-        {formData.protocol === "codex-app-server" && (
+        {isCodexAppServerProtocol(formData.protocol) && (
           <FormSection
             title={t("sectionCodexOptions")}
             defaultOpen

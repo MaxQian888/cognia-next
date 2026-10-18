@@ -12,6 +12,32 @@
   },
   "runtimes": [
     {
+      "runtimeId": "grok",
+      "presetIds": ["grok"],
+      "displayName": "Grok Build",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "grok",
+      "launchArgs": ["agent", "--no-leader", "stdio"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
+      "supportedRange": ">=1.0.62 <1.1.0",
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://github.com/xai-org/grok-build",
+      "notes": {
+        "certification": "CLI 1.0.62 passed isolated ACP compatibility checks on 2026-10-18; authenticated xAI acceptance is pending. Require identity-bound uncertified-runtime consent."
+      }
+    },
+    {
       "runtimeId": "minimax-code",
       "presetIds": ["minimax-code"],
       "displayName": "MiniMax Code",
@@ -55,7 +81,7 @@
       },
       "docsUrl": "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started",
       "notes": {
-        "certification": "Node CLI 2.1.1 researched; identity-bound uncertified-runtime consent is required. No certification claimed."
+        "certification": "Node CLI 2.2.0 passed isolated macOS ACP lifecycle and authenticated execution smoke on 2026-10-18; identity-bound uncertified-runtime consent is required. No certification claimed."
       },
       "supportedRange": ">=2.1.1 <3.0.0"
     },

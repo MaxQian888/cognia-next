@@ -49,6 +49,37 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
   string,
   ExternalAgentEcosystemAdapterDefinition
 > = {
+  grok: {
+    id: "grok",
+    name: "Grok Build",
+    description: "xAI Grok Build over its native ACP server",
+    docsUrl: "https://github.com/xai-org/grok-build",
+    tags: ["coding", "xai", "grok", "acp"],
+    surfaces: [
+      {
+        id: "acp-stdio",
+        presetId: "grok",
+        name: "Grok Build",
+        description:
+          "Native Grok Build with streamed replies, tool approvals, user questions, MCP and persisted sessions.",
+        protocol: "acp",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "xai", "grok", "acp"],
+        docsUrl: "https://github.com/xai-org/grok-build",
+        setupHint:
+          "Install @xai-official/grok@1.0.62 and authenticate with Grok Build, or supply XAI_API_KEY locally. Cognia launches grok agent --no-leader stdio with automatic updates disabled. Update outside hosted sessions. Removing a configuration preserves the system installation and shared Grok data.",
+        envVarHint:
+          "Use the existing Grok Build login or XAI_API_KEY. Optional GROK_HOME selects state (default ~/.grok); isolated configurations use their own login and settings.",
+        limitationNote:
+          "Grok Build 1.0.62 passed isolated ACP compatibility checks; authenticated xAI acceptance is pending. Session fork, image input and audio input are unavailable in this release.",
+        process: { command: "grok", args: ["agent", "--no-leader", "stdio"] },
+        icon: "xai",
+      },
+    ],
+  },
   "minimax-code": {
     id: "minimax-code",
     name: "MiniMax Code",
@@ -99,7 +130,7 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         tags: ["coding", "kimi", "acp"],
         docsUrl: "https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-command.html",
         setupHint:
-          "Install npm install -g @moonshot-ai/kimi-code@2.1.1 with Node.js 22.19 or newer, then run kimi login for your Kimi Code subscription. Cognia launches kimi acp using the existing login. KIMI_CODE_HOME selects separate state; update outside hosted sessions with kimi upgrade. Removing this configuration preserves the system installation and Kimi data. The archived Python kimi-cli is not this runtime.",
+          "Install npm install -g @moonshot-ai/kimi-code@2.2.0 with Node.js 22.19 or newer, then run kimi login for your Kimi Code subscription. Cognia launches kimi acp using the existing login. KIMI_CODE_HOME selects separate state; update outside hosted sessions with kimi upgrade. Removing this configuration preserves the system installation and Kimi data. The archived Python kimi-cli is not this runtime.",
         envVarHint:
           "Subscription login needs no API key. Optional KIMI_CODE_HOME selects state (default ~/.kimi-code). For a custom provider use KIMI_MODEL_NAME, KIMI_MODEL_PROVIDER_TYPE, KIMI_MODEL_BASE_URL and KIMI_MODEL_API_KEY; these replace subscription model selection.",
         process: { command: "kimi", args: ["acp"] },

@@ -75,6 +75,16 @@ beforeEach(() => {
 })
 
 describe("AgentInstanceSection", () => {
+  it("shows the Codex icon for a sibling without preset metadata", () => {
+    const a = codex("a", { metadata: undefined })
+    const b = codex("b", { name: "Codex (app-server)", metadata: undefined })
+    renderSection(a, [a, b])
+    expect(screen.getByTestId("instance-sibling-b").querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/codex-color.svg"
+    )
+  })
+
   it("shows an isolated configuration's own folder, its size, and reveals it", async () => {
     mockStateRootInfo.mockResolvedValue({
       path: "/data/cognia/external-agents/work",

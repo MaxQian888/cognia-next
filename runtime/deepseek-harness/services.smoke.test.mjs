@@ -142,6 +142,7 @@ for (const channel of ["sdk", "sdk-workspace", "acp"]) {
             sessionId: "cognia-services",
             contentBlocks: [{ type: "text", text: "Use the Cognia tool for both paths." }],
           })
+          await request(3, "session/wait", { sessionId: "cognia-services" })
           await until(
             () =>
               frames.some(
@@ -149,7 +150,7 @@ for (const channel of ["sdk", "sdk-workspace", "acp"]) {
               ),
             "idle"
           )
-          await request(3, "shutdown", {})
+          await request(4, "shutdown", {})
         } else {
           await request(1, "initialize", {
             protocolVersion: 1,

@@ -79,6 +79,25 @@ const defaultFixture = () => ({
   ]),
 })
 
+test.each(["Codex (app-server)", "Work assistant"])(
+  "shows the Codex icon for %s without preset metadata",
+  (name) => {
+    renderRail(
+      { kind: "overview" },
+      {
+        agents: [
+          { ...agent("codex", name, "codex", ["app-server"]), protocol: "codex-app-server" },
+        ],
+        readinessById: new Map([["codex", off]]),
+      }
+    )
+    expect(screen.getByTestId("agent-row-codex").querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/codex-color.svg"
+    )
+  }
+)
+
 function renderRail(
   view: AgentSettingsView = { kind: "overview" },
   fixture: {

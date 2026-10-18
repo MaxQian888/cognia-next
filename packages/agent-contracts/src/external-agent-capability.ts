@@ -32,10 +32,26 @@ import { AGENT_CAPABILITY_IDS } from "./capability-ids"
  * answer the handshake.
  */
 export type BuiltinExecutableExternalAgentProtocol =
-  "acp" | "codex-app-server" | "dsh-sdk" | "pi-rpc" | "aider-cli" | "opencode-v2" | "a2a"
+  | "acp"
+  | "codex-app-server"
+  | "codex-siwc-app-server"
+  | "dsh-sdk"
+  | "pi-rpc"
+  | "aider-cli"
+  | "opencode-v2"
+  | "a2a"
 
 export const BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS: readonly BuiltinExecutableExternalAgentProtocol[] =
-  ["acp", "codex-app-server", "dsh-sdk", "pi-rpc", "aider-cli", "opencode-v2", "a2a"]
+  [
+    "acp",
+    "codex-app-server",
+    "codex-siwc-app-server",
+    "dsh-sdk",
+    "pi-rpc",
+    "aider-cli",
+    "opencode-v2",
+    "a2a",
+  ]
 
 /**
  * Protocols that exist in stored configs but have no adapter.

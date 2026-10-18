@@ -64,6 +64,7 @@ import type {
 export type ExternalAgentProtocol =
   | "acp" // Agent Client Protocol (Claude Code, etc.)
   | "codex-app-server" // OpenAI Codex native app-server JSON-RPC (thread/turn/item)
+  | "codex-siwc-app-server" // Native SIWC reference; independent from legacy Codex authorization
   | "dsh-sdk" // DeepSeek Harness stdio JSON-RPC SDK runtime (observation-rich, no mid-turn approval)
   | "pi-rpc" // Pi native `pi --mode rpc` JSONL command/event protocol (NOT JSON-RPC, NOT ACP)
   | "aider-cli" // Official one-shot CLI; Cognia-owned history, no per-tool approval wire
@@ -1394,6 +1395,8 @@ export interface AcpElicitationRequest {
   requestId?: number | string
   toolCallId?: string | null
   requestedSchema?: AcpElicitationSchema
+  /** Presentation order, followed by schema properties not listed here. */
+  propertyOrder?: string[]
   elicitationId?: string
   url?: string
   origin?: string
@@ -1401,6 +1404,38 @@ export interface AcpElicitationRequest {
   _meta?: Record<string, unknown> | null
   /** Opaque original payload for storage/proxying; never interpreted as known behavior. */
   raw: Record<string, unknown>
+}
+
+/** Shared safety boundary for ordinary MCP/runtime forms; credentials use URL mode. */
+export function elicitationFormSchemaSafetyError(schema: unknown): string | null {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema))
+    return "MCP elicitation form requires an object schema"
+  const value = schema as Record<string, unknown>
+  if (
+    value.type !== "object" ||
+    !value.properties ||
+    typeof value.properties !== "object" ||
+    Array.isArray(value.properties)
+  )
+    return "MCP elicitation form requires an object schema"
+  if (
+    value.required !== undefined &&
+    (!Array.isArray(value.required) || value.required.some((key) => typeof key !== "string"))
+  )
+    return "MCP elicitation form requires string required fields"
+  const sensitive =
+    /(?:password|passcode|secret|api[\s_-]*key|access[\s_-]*token|refresh[\s_-]*token|payment|card[\s_-]*(?:number|code)|cvv|cvc|pin)/i
+  for (const [name, raw] of Object.entries(value.properties)) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+      return "MCP elicitation form requires property schemas"
+    const property = raw as Record<string, unknown>
+    const signals = [name, property.title, property.description, property.format]
+      .filter((item): item is string => typeof item === "string")
+      .join(" ")
+    if (sensitive.test(signals))
+      return `MCP elicitation form cannot request sensitive field: ${name}`
+  }
+  return null
 }
 
 export interface AcpElicitationResponse {

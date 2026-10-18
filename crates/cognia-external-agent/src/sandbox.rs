@@ -51,6 +51,7 @@ pub enum SandboxError {
     InvalidPolicy(String),
     InvalidClineConfigDir,
     InvalidKimiConfigDir,
+    InvalidGrokConfigDir,
     InvalidMiniMaxConfigDir,
     /// The configuration asked for a private state root
     /// ([`crate::state_isolation`]) and it could not be provided. Refusing is
@@ -92,6 +93,7 @@ impl std::fmt::Display for SandboxError {
             Self::InvalidPolicy(reason) => write!(f, "Invalid external-agent sandbox policy: {reason}"),
             Self::InvalidClineConfigDir => write!(f, "Cline ACP requires a nonempty --config or CLINE_DIR inside the Bot state directory when isolated; --data-dir is unsupported in ACP."),
             Self::InvalidMiniMaxConfigDir => write!(f, "MiniMax state directory must stay inside the Bot state directory when isolated."),
+            Self::InvalidGrokConfigDir => write!(f, "Grok state directory must be nonempty and stay inside the Bot state directory when isolated."),
             Self::InvalidKimiConfigDir => write!(f, "Kimi state directory must be nonempty and stay inside the Bot state directory when isolated."),
             Self::InvalidQoderConfigDir => write!(f, "Qoder config directory must be nonempty and stay inside the Bot state directory when isolated."),
             Self::MissingHome => write!(
@@ -182,6 +184,9 @@ pub fn agent_state_writable_roots(command: &str, args: &[String], home: &Path) -
     }
     if base == "mcode" {
         roots.push(home.join(".minimax"));
+    }
+    if base == "grok" {
+        roots.push(home.join(".grok"));
     }
     if base == "kimi" {
         roots.push(home.join(".kimi-code"));
@@ -938,6 +943,28 @@ fn cline_config_root(
     Ok(Some(normalized))
 }
 
+fn grok_config_root(
+    config: &ExternalAgentSpawnConfig,
+    home: &Path,
+) -> Result<Option<PathBuf>, SandboxError> {
+    if base_command(&config.command) != "grok" {
+        return Ok(None);
+    }
+    let selected = config.env.get("GROK_HOME").cloned().or_else(|| {
+        // A gateway task already owns its home; never inherit the host login.
+        (!config.env.contains_key(crate::gateway_task::PAYLOAD_ENV))
+            .then(|| std::env::var("GROK_HOME").ok())
+            .flatten()
+    });
+    native_state_root(
+        config,
+        home,
+        selected,
+        ".grok",
+        SandboxError::InvalidGrokConfigDir,
+    )
+}
+
 fn kimi_config_root(
     config: &ExternalAgentSpawnConfig,
     home: &Path,
@@ -1091,6 +1118,41 @@ pub fn desktop_fallback_confinement() -> crate::sandbox_routing_backend::Fallbac
     })
 }
 
+/// The command allowlist has already admitted these managed launcher paths.
+/// Grant runtime code only for reading, and only the two owned state trees for writing.
+fn managed_dsh_sandbox_roots(
+    config: &ExternalAgentSpawnConfig,
+) -> Result<Option<(PathBuf, [PathBuf; 2])>, SandboxError> {
+    let Some(raw_root) = config.env.get("COGNIA_DSH_RUNTIME_HOME") else {
+        return Ok(None);
+    };
+    let invalid = || SandboxError::InvalidPolicy("Invalid managed DeepSeek Harness state paths".into());
+    let root = Path::new(raw_root).canonicalize().map_err(|_| invalid())?;
+    if Path::new(&config.command).file_name().and_then(|s| s.to_str()) != Some("node")
+        || config.args.len() != 2
+        || Path::new(&config.args[0]).canonicalize().map_err(|_| invalid())? != root.join("launcher.mjs")
+        || !["host.sdk-readonly.yml", "host.sdk-workspace.yml", "host.acp.yml"]
+            .iter().any(|name| Path::new(&config.args[1]).canonicalize().ok() == Some(root.join(name)))
+    {
+        return Err(invalid());
+    }
+    let state = [root.join("dsh-home"), root.join("sessions")];
+    for (key, expected) in ["DSH_HOME", "COGNIA_DSH_SESSION_ROOT"].into_iter().zip(&state) {
+        let name = expected.file_name().ok_or_else(invalid)?;
+        let requested = config.env.get(key).ok_or_else(invalid)?;
+        // Check before creation, then reject a symlink escape after resolution.
+        if Path::new(requested) != expected.as_path() && Path::new(requested) != Path::new(raw_root).join(name) {
+            return Err(invalid());
+        }
+        std::fs::create_dir_all(expected).map_err(|_| invalid())?;
+        let canonical = expected.canonicalize().map_err(|_| invalid())?;
+        if canonical != *expected {
+            return Err(invalid());
+        }
+    }
+    Ok(Some((root, state)))
+}
+
 /// Rewrite a validated spawn config so the agent runs under the launcher.
 ///
 /// Call this **after** the command allowlist has run: the allowlist requires a
@@ -1125,6 +1187,7 @@ pub fn wrap_with_sandbox(
 
     let mut config = config;
     config.sandbox_policy.validate().map_err(SandboxError::InvalidPolicy)?;
+    crate::process::scope_grok_credentials(&mut config);
     let isolation = crate::state_isolation::apply_state_isolation(
         &mut config,
         host.agent_state_data_dir().as_deref(),
@@ -1134,6 +1197,7 @@ pub fn wrap_with_sandbox(
 
     let minimax_root = minimax_config_root(&config, &home)?;
     let kimi_root = kimi_config_root(&config, &home)?;
+    let grok_root = grok_config_root(&config, &home)?;
     let cline_root = cline_config_root(&config, &home)?;
     let qoder_root = qoder_config_root(&config, &home)?;
     let tool_host_dir = tool_host_runtime_dir(&host.temp_dir(), host.uid());
@@ -1141,6 +1205,7 @@ pub fn wrap_with_sandbox(
         .clone()
         .or_else(|| qoder_root.clone())
         .or_else(|| kimi_root.clone())
+        .or_else(|| grok_root.clone())
         .or_else(|| minimax_root.clone())
         .map(|root| vec![root])
         .unwrap_or_else(|| agent_state_writable_roots(&config.command, &config.args, &home))
@@ -1261,6 +1326,7 @@ pub fn wrap_with_sandbox(
             // Kimi Code (and its archived Python CLI), Copilot CLI, Goose and
             // Aider keep logins and provider settings here; a task uses its own.
             ".kimi-code",
+            ".grok",
             ".minimax",
             ".kimi",
             ".copilot",
@@ -1337,6 +1403,13 @@ pub fn wrap_with_sandbox(
         );
     }
 
+    if let Some((runtime, state_roots)) = managed_dsh_sandbox_roots(&config)? {
+        args.splice(0..0, ["--readable".into(), runtime.to_string_lossy().into_owned()]);
+        for root in state_roots {
+            args.splice(0..0, ["--writable".into(), root.to_string_lossy().into_owned()]);
+        }
+    }
+
     let mut env = config.env.clone();
     env.remove(CODEX_WRITABLE_ROOTS_ENV);
     env.remove(CODEX_WRITABLE_CEILING_ENV);
@@ -1373,6 +1446,26 @@ pub fn wrap_with_sandbox(
         for key in ["MINIMAX_DATA_DIR", "MAVIS_DATA_DIR"] {
             env.insert(key.into(), root.to_string_lossy().into_owned());
         }
+        for key in ["TMPDIR", "TMP", "TEMP"] {
+            env.insert(key.into(), temp.to_string_lossy().into_owned());
+        }
+    }
+    if let Some(root) = grok_root {
+        drop_writable(&mut args, &home.join(".grok"));
+        host.ensure_dir(&root);
+        if !bot_isolation {
+            args.splice(
+                0..0,
+                ["--writable".into(), root.to_string_lossy().into_owned()],
+            );
+        }
+        env.insert("GROK_HOME".into(), root.to_string_lossy().into_owned());
+        env.insert("GROK_DISABLE_AUTOUPDATER".into(), "1".into());
+        env.insert("GROK_CHANGELOG_OFFLINE".into(), "1".into());
+        // Keep sessions and file-lock fallbacks within the selected state root.
+        // Do not grant shared /tmp/sessions or /tmp/grok-file-lock-* paths.
+        let temp = root.join("tmp");
+        host.ensure_dir(&temp);
         for key in ["TMPDIR", "TMP", "TEMP"] {
             env.insert(key.into(), temp.to_string_lossy().into_owned());
         }
@@ -1495,6 +1588,58 @@ pub fn wrap_with_sandbox(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_dsh_grants_only_its_state_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("deepseek-harness");
+        std::fs::create_dir_all(&root).unwrap();
+        for name in ["launcher.mjs", "host.sdk-readonly.yml"] {
+            std::fs::write(root.join(name), "fixture").unwrap();
+        }
+        let launcher = root.join("launcher.mjs");
+        let composition = root.join("host.sdk-readonly.yml");
+        let mut request = config("node", &[launcher.to_str().unwrap(), composition.to_str().unwrap()], Some("/work"));
+        for (key, path) in [
+            ("COGNIA_DSH_RUNTIME_HOME", root.clone()),
+            ("DSH_HOME", root.join("dsh-home")),
+            ("COGNIA_DSH_SESSION_ROOT", root.join("sessions")),
+        ] {
+            request.env.insert(key.into(), path.to_string_lossy().into_owned());
+        }
+        let wrapped = wrap_with_sandbox(request.clone(), &FakeHost::new("macos")).unwrap();
+        for name in ["dsh-home", "sessions"] {
+            assert!(wrapped.args.windows(2).any(|p| p[0] == "--writable" && Path::new(&p[1]) == root.join(name).canonicalize().unwrap()));
+        }
+        assert!(!wrapped.args.windows(2).any(|p| p[0] == "--writable" && Path::new(&p[1]) == root.canonicalize().unwrap()));
+        request.env.insert("DSH_HOME".into(), temp.path().to_string_lossy().into_owned());
+        assert!(wrap_with_sandbox(request, &FakeHost::new("macos")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn managed_dsh_rejects_state_symlink_escape() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("deepseek-harness");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        for name in ["launcher.mjs", "host.sdk-readonly.yml"] {
+            std::fs::write(root.join(name), "fixture").unwrap();
+        }
+        std::os::unix::fs::symlink(&outside, root.join("dsh-home")).unwrap();
+        let launcher = root.join("launcher.mjs");
+        let composition = root.join("host.sdk-readonly.yml");
+        let mut request = config("node", &[launcher.to_str().unwrap(), composition.to_str().unwrap()], Some("/work"));
+        for (key, path) in [
+            ("COGNIA_DSH_RUNTIME_HOME", root.clone()),
+            ("DSH_HOME", root.join("dsh-home")),
+            ("COGNIA_DSH_SESSION_ROOT", root.join("sessions")),
+        ] {
+            request.env.insert(key.into(), path.to_string_lossy().into_owned());
+        }
+        assert!(wrap_with_sandbox(request, &FakeHost::new("macos")).is_err());
+    }
 
     /// The desktop wrapper and a container never both apply, and a placement
     /// nothing will route is wrapped because it falls back to this host.
@@ -1814,6 +1959,71 @@ mod tests {
             launcher_file_name("macos"),
             "cognia-external-agent-launcher"
         );
+    }
+
+    #[test]
+    fn grok_rebases_state_and_temp_and_disables_hosted_updates() {
+        let host = FakeHost::new("macos");
+        let mut input = config("grok", &["agent", "--no-leader", "stdio"], Some("/work"));
+        input.env.extend([
+            ("GROK_HOME".into(), "state/../grok".into()),
+            ("GROK_DISABLE_AUTOUPDATER".into(), "0".into()),
+            ("GROK_CHANGELOG_OFFLINE".into(), "0".into()),
+        ]);
+        let wrapped = wrap_with_sandbox(input, &host).unwrap();
+        assert_eq!(wrapped.env["GROK_HOME"], "/work/grok");
+        assert_eq!(wrapped.env["GROK_DISABLE_AUTOUPDATER"], "1");
+        assert_eq!(wrapped.env["GROK_CHANGELOG_OFFLINE"], "1");
+        for key in ["TMPDIR", "TMP", "TEMP"] {
+            assert_eq!(wrapped.env[key], "/work/grok/tmp");
+        }
+        assert!(pairs(&wrapped.args, "--writable").contains(&"/work/grok"));
+        assert!(!pairs(&wrapped.args, "--writable").contains(&"/home/dev/.grok"));
+        assert!(!pairs(&wrapped.args, "--writable").contains(&"/tmp/sessions"));
+        assert_eq!(
+            agent_state_writable_roots("grok", &[], Path::new("/home/dev")),
+            [PathBuf::from("/home/dev/.grok")]
+        );
+        assert!(agent_state_writable_roots("not-grok", &[], Path::new("/home/dev")).is_empty());
+    }
+
+    #[test]
+    fn grok_isolated_wrapper_preserves_the_credential_opt_out_after_consuming_state_key() {
+        let data = tempfile::tempdir().unwrap();
+        let host = isolated_host(data.path());
+        for explicit in [None, Some("explicit-fixture"), Some("")] {
+            let mut original = config("grok", &["agent", "--no-leader", "stdio"], Some("/work"));
+            original.env.insert(
+                crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+                "grok-env".into(),
+            );
+            if let Some(value) = explicit {
+                original.env.insert("XAI_API_KEY".into(), value.into());
+            }
+            let wrapped = wrap_with_sandbox(original, &host).unwrap();
+            assert!(!wrapped
+                .env
+                .contains_key(crate::state_isolation::AGENT_STATE_KEY_ENV));
+            assert_eq!(wrapped.env["XAI_API_KEY"], explicit.unwrap_or(""));
+        }
+    }
+
+    #[test]
+    fn grok_bot_rejects_empty_and_escaping_state_before_provisioning() {
+        for selected in ["", "   ", "/work/state/../escape", "/home/dev/.grok"] {
+            let host = FakeHost::new("macos");
+            let mut input = config("grok", &["agent", "--no-leader", "stdio"], Some("/work"));
+            input.env.extend([
+                ("COGNIA_BOT_ISOLATION".into(), "1".into()),
+                ("COGNIA_BOT_STATE_DIR".into(), "/work/state".into()),
+                ("GROK_HOME".into(), selected.into()),
+            ]);
+            assert!(matches!(
+                wrap_with_sandbox(input, &host),
+                Err(SandboxError::InvalidGrokConfigDir)
+            ));
+            assert!(host.dirs.borrow().is_empty());
+        }
     }
 
     #[test]
@@ -2862,6 +3072,7 @@ mod tests {
         let host = isolated_host(data.path());
         for (command, env_key, shared, sub) in [
             ("kimi", "KIMI_CODE_HOME", "/home/dev/.kimi-code", "kimi"),
+            ("grok", "GROK_HOME", "/home/dev/.grok", "grok"),
             ("cline", "CLINE_DIR", "/home/dev/.cline", "cline"),
             ("qoder", "QODER_CONFIG_DIR", "/home/dev/.qoder", "qoder"),
         ] {

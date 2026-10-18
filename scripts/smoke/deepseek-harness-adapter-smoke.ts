@@ -33,6 +33,8 @@ async function main() {
   const pi = process.argv.includes("--pi")
   const sandbox = pi && process.argv.includes("--sandbox")
   const opencode = process.argv.includes("--opencode")
+  const cogniaGateway = process.argv.includes("--cognia-gateway")
+  assert.ok(!cogniaGateway || (!pi && !opencode), "Gateway regression selects the DSH adapter")
   const installed = path.resolve(process.argv[2] ?? "")
   if (!pi && !opencode)
     assert.ok(
@@ -67,16 +69,20 @@ async function main() {
     ] as const
   const backend = await createMockDeepSeek({
     reply: (body: {
+      model?: string
       messages?: Array<{ role: string; content?: unknown }>
-      tools?: Array<{ function: { name: string } }>
+      tools?: Array<{ name?: string; function?: { name: string } }>
     }) => {
+      if (cogniaGateway)
+        assert.equal(body.model, "smoke", "The task-selected model must reach the gateway")
+      const toolNames = new Set(body.tools?.map((tool) => tool.function?.name ?? tool.name))
       const lastUser = body.messages?.findLastIndex((message) => message.role === "user") ?? -1
       const lastText = JSON.stringify(body.messages?.[lastUser]?.content)
       if (pi && lastText?.includes("PI_TRIGGER_TOOL")) {
         if (body.messages?.slice(lastUser + 1).some((message) => message.role === "tool"))
           return { content: "Triggered Cognia tool completed." }
         const name = "mcp__cognia-tools__read"
-        assert.ok(body.tools?.some((tool) => tool.function.name === name))
+        assert.ok(toolNames.has(name))
         return {
           tool_calls: [
             {
@@ -96,10 +102,7 @@ async function main() {
           return { content: "Cognia smoke completed. Unicode: \u2028 / \u2029 / 中文" }
         if (lastText.includes("PI_NATIVE_PLAN")) {
           for (const name of ["bash", "write", "edit", "codemode"])
-            assert.ok(
-              !body.tools?.some((tool) => tool.function.name === name),
-              `${name} escaped plan floor`
-            )
+            assert.ok(!toolNames.has(name), `${name} escaped plan floor`)
           return { content: "Cognia smoke completed." }
         }
         const cancel = lastText.includes("PI_NATIVE_CANCEL")
@@ -147,10 +150,7 @@ async function main() {
         if (body.messages?.slice(refreshIndex + 1).some((message) => message.role === "tool"))
           return { content: "Cognia smoke completed." }
         const name = "mcp__cognia-tools__read"
-        assert.ok(
-          body.tools?.some((tool) => tool.function.name === name),
-          "Fresh renderer MCP catalog was lost"
-        )
+        assert.ok(toolNames.has(name), "Fresh renderer MCP catalog was lost")
         return {
           tool_calls: [
             {
@@ -167,7 +167,16 @@ async function main() {
       }
       if (!JSON.stringify(body.messages).includes("COGNIA_TOOL_PARITY"))
         return { content: "Cognia smoke completed." }
-      const step = body.messages?.filter((message) => message.role === "tool").length ?? 0
+      const step =
+        body.messages?.reduce((count, message) => {
+          if (message.role === "tool") return count + 1
+          if (!Array.isArray(message.content)) return count
+          return (
+            count +
+            message.content.filter((block: { type?: string }) => block.type === "tool_result")
+              .length
+          )
+        }, 0) ?? 0
       const expected = toolSteps()[step]
       const request =
         expected &&
@@ -176,10 +185,7 @@ async function main() {
           expected[1],
         ] as const)
       if (!request) return { content: "Cognia smoke completed." }
-      assert.ok(
-        body.tools?.some((tool) => tool.function.name === request[0]),
-        `Missing Cognia tool: ${request[0]}`
-      )
+      assert.ok(toolNames.has(request[0]), `Missing Cognia tool: ${request[0]}`)
       return {
         tool_calls: [
           {
@@ -244,7 +250,7 @@ async function main() {
     transport: "stdio",
     enabled: true,
     defaultPermissionMode: "plan",
-    metadata: { dshProfileId: "cognia-sdk-readonly" },
+    metadata: { preset: "deepseek-harness-readonly", dshProfileId: "cognia-sdk-readonly" },
     process: {
       ...launch,
       cwd: workspace,
@@ -343,17 +349,23 @@ export default function (pi) {
         },
       }
     : config
-  if (opencode) {
+  if (opencode || cogniaGateway) {
+    // The gateway builder accepts saved customization, before host inheritance.
+    // PATH belongs to the process host, not a saved provider customization.
+    const { PATH: inheritedPath, ...savedEnvironment } = config.process.env
+    void inheritedPath
     agentConfig = buildGatewayTaskConfig({
-      config: {
-        ...config,
-        protocol: "opencode-v2",
-        transport: "sse",
-        process: { command: "opencode", cwd: workspace },
-        metadata: { preset: "opencode-v2-service" },
-      },
+      config: opencode
+        ? {
+            ...config,
+            protocol: "opencode-v2",
+            transport: "sse",
+            process: { command: "opencode", cwd: workspace },
+            metadata: { preset: "opencode-v2-service" },
+          }
+        : { ...config, process: { ...config.process, env: savedEnvironment } },
       binding: { providerId: "fixture", modelId: "smoke" },
-      taskId: "opencode-smoke",
+      taskId: opencode ? "opencode-smoke" : "dsh-gateway-smoke",
       endpoint: backend.baseURL,
       secret: "local-fixture",
       model: "smoke",
@@ -366,6 +378,10 @@ export default function (pi) {
         supportsTools: true,
       },
     }).config
+    if (cogniaGateway) {
+      assert.equal(agentConfig.process?.env?.DEEPSEEK_API_KEY, undefined)
+      assert.equal(agentConfig.process?.env?.COGNIA_DSH_PROVIDER, "cognia")
+    }
   }
   const makeAdapter = () =>
     opencode
@@ -417,7 +433,16 @@ export default function (pi) {
                 resolveDshLaunchFromConfig,
                 createProcessPlaneHost(
                   {
-                    invoke: (name, args) => host.invoke(name, args),
+                    invoke: (name, args) => {
+                      if (cogniaGateway && name === "spawn_external_agent") {
+                        const prepared = prepareGatewayTask(
+                          args.config as Parameters<typeof prepareGatewayTask>[0],
+                          dataRoot
+                        )
+                        return host.invoke(name, { ...args, config: prepared.config })
+                      }
+                      return host.invoke(name, args)
+                    },
                     listen: async (name, callback) => host.listen(name, callback),
                   },
                   () => true
@@ -440,8 +465,21 @@ export default function (pi) {
   })
   try {
     await adapter.connect(agentConfig)
-    const first = await adapter.createSession({ cwd: workspace, permissionMode: "plan" })
-    const second = await adapter.createSession({ cwd: workspace, permissionMode: "plan" })
+    const first = await adapter.createSession({
+      cwd: workspace,
+      permissionMode: "plan",
+      // Chat's global thinking preference must not add unsupported options
+      // to a frozen gateway model that advertises no reasoning efforts.
+      ...(cogniaGateway ? { metadata: { reasoningEffort: "medium" } } : {}),
+    })
+    if (cogniaGateway)
+      await assert.rejects(
+        adapter.createSession({ cwd: workspace, permissionMode: "plan" }),
+        /one.*session|session.*active/i
+      )
+    const second = cogniaGateway
+      ? undefined
+      : await adapter.createSession({ cwd: workspace, permissionMode: "plan" })
     async function prompt(sessionId: string, text: string) {
       const events: ExternalAgentEvent[] = []
       for await (const event of adapter.prompt(
@@ -473,11 +511,17 @@ export default function (pi) {
       )
       return events.length
     }
-    const counts = await Promise.all([
-      prompt(first.id, "First session"),
-      prompt(second.id, "Second session"),
-    ])
+    const counts = second
+      ? await Promise.all([prompt(first.id, "First session"), prompt(second.id, "Second session")])
+      : [await prompt(first.id, "First session")]
     counts.push(await prompt(first.id, "Followup message"))
+    if (cogniaGateway) {
+      await adapter.closeSession(first.id)
+      const replacement = await adapter.createSession({ cwd: workspace, permissionMode: "plan" })
+      counts.push(await prompt(replacement.id, "Replacement session"))
+      await adapter.closeSession(replacement.id)
+      compatibility.push("one active session per gateway task; replacement after close")
+    }
     assert.ok(opencode ? backend.requests.length >= 3 : backend.requests.length === 3)
     await adapter.disconnect()
     assert.equal(adapter.isConnected(), false)
@@ -809,6 +853,7 @@ export default function (pi) {
       token: broker.token,
       packaged: false,
     })
+    if (cogniaGateway) await adapter.closeSession(reconnected.id)
     const toolsSession = await adapter.createSession({
       cwd: workspace,
       permissionMode: "plan",
@@ -938,6 +983,7 @@ export default function (pi) {
     }
     const rendererLease = await rendererHost.start(rendererStart)
     fs.unlinkSync(path.join(workspace, "SMOKE.txt"))
+    if (cogniaGateway) await adapter.closeSession(toolsSession.id)
     const rendererSession = await adapter.createSession({
       cwd: workspace,
       mcpServers: rendererLease.mcpServers,
@@ -1063,7 +1109,7 @@ export default function (pi) {
     await rendererHost.pause()
     await adapter.disconnect()
     process.stdout.write(
-      `${JSON.stringify({ result: "PASS", source: `real ${pi ? "Pi + bundled extension" : opencode ? "OpenCode V2" : "DSH"} + Cognia Node host + protocol adapter + CLI broker + renderer helper + sidecar; local mock provider`, piVersion, sandbox, compatibility, sessions: pi ? 9 : 5, prompts: pi ? 21 : 7, reconnect: true, toolResults, approvals, rendererApprovals, rendererTools, rendererHookEvents, additionalRoot: true, deniedWrite: true, eventCounts: counts })}\n`
+      `${JSON.stringify({ result: "PASS", source: `real ${pi ? "Pi + bundled extension" : opencode ? "OpenCode V2" : "DSH"} + Cognia Node host + protocol adapter + CLI broker + renderer helper + sidecar; local mock provider`, piVersion, sandbox, cogniaGateway, compatibility, sessions: pi ? 9 : 5, prompts: pi ? 21 : 7, reconnect: true, toolResults, approvals, rendererApprovals, rendererTools, rendererHookEvents, additionalRoot: true, deniedWrite: true, eventCounts: counts })}\n`
     )
   } finally {
     await adapter.disconnect()

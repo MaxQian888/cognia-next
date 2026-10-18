@@ -146,6 +146,32 @@ function renderInspector(over: Partial<Parameters<typeof AgentInspector>[0]> = {
 }
 
 describe("AgentInspector", () => {
+  it("mounts read-only Codex diagnostics for the independently bound SIWC protocol", async () => {
+    renderInspector({
+      agent: {
+        ...agent,
+        protocol: "codex-siwc-app-server",
+        process: { command: "codex", args: ["app-server"] },
+        metadata: { siwc: { localAccountId: "local-a", connectionId: "registration-a" } },
+      },
+    })
+    expect(screen.getByTestId("codex-status-card")).toBeInTheDocument()
+  })
+  it("shows the Codex icon for a configuration without preset metadata", () => {
+    renderInspector({
+      agent: {
+        ...agent,
+        name: "Codex (app-server)",
+        protocol: "codex-app-server",
+        process: { command: "codex", args: ["app-server"] },
+      },
+    })
+    expect(screen.getByTestId("agent-detail-a1").querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/codex-color.svg"
+    )
+  })
+
   beforeEach(() => {
     updateConfigMock.mockReset()
     updateConfigMock.mockImplementation(async () => {})

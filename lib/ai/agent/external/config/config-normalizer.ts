@@ -38,6 +38,7 @@ import { normalizeCogniaModelBinding } from "./gateway-task"
 export const SUPPORTED_EXTERNAL_AGENT_PROTOCOLS = [
   "acp",
   "codex-app-server",
+  "codex-siwc-app-server",
   "dsh-sdk",
   "pi-rpc",
   "aider-cli",

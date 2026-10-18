@@ -63,6 +63,7 @@ describe("protocol vocabulary", () => {
       "acp",
       "aider-cli",
       "codex-app-server",
+      "codex-siwc-app-server",
       "dsh-sdk",
       "opencode-v2",
       "pi-rpc",

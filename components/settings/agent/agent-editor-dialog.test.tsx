@@ -133,6 +133,47 @@ async function withAgent(patch: Record<string, unknown>, body: () => Promise<voi
 }
 
 describe("AgentEditorDialog", () => {
+  it("edits SIWC Codex options while keeping native command and independent account binding", async () => {
+    const metadata = {
+      preset: "codex",
+      siwc: { localAccountId: "local-a", connectionId: "registration-a" },
+      selectedModel: "model-a",
+    }
+    await withAgent(
+      {
+        protocol: "codex-siwc-app-server",
+        process: { command: "codex", args: ["app-server"] },
+        metadata,
+        codexOptions: { sandboxMode: "readOnly" },
+      },
+      async () => {
+        const onSave = jest.fn().mockResolvedValue(true)
+        render(
+          <AgentEditorDialog
+            open
+            editingAgentId="agent-1"
+            onOpenChange={jest.fn()}
+            onSave={onSave}
+          />
+        )
+        expect(screen.getByRole("textbox", { name: /^command$/i })).toBeDisabled()
+        expect(screen.getByRole("textbox", { name: /^arguments$/i })).toBeDisabled()
+        expect(screen.queryByTestId("subscription-account-field")).not.toBeInTheDocument()
+        expect(screen.queryByTestId("cognia-model-picker")).not.toBeInTheDocument()
+        expect(screen.getByRole("switch", { name: "Network access" })).toBeInTheDocument()
+        await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
+        expect(onSave).toHaveBeenCalledWith(
+          expect.objectContaining({
+            protocol: "codex-siwc-app-server",
+            process: expect.objectContaining({ command: "codex", args: ["app-server"] }),
+            cogniaModel: null,
+            subscriptionAccountId: null,
+            metadata,
+          })
+        )
+      }
+    )
+  })
   it("loads, edits and saves the external process sandbox policy", async () => {
     await withAgent(
       {

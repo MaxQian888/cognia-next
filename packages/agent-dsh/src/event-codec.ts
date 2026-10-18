@@ -3,7 +3,7 @@ import type {
   ExternalAgentTokenUsage,
 } from "@cognia/agent-contracts/external-agent"
 
-/** Current @deepseek-ai/dsh-session 0.2.0-rc.2 vocabulary (session format 4).
+/** Current @deepseek-ai/dsh-session 0.2.1-rc.2 vocabulary (session format 4).
  * The SDK publishes durable settlements, not the removed assistant/chunk wire.
  * Plugin records without a canonical presentation remain observable as progress.
  */
@@ -30,6 +30,8 @@ const KNOWN_EVENT_TYPES = new Set([
   "hook/invoked",
   "hook/result",
   "image/offload",
+  "job/registered",
+  "job/settled",
   "llm/retry",
   "llm/retry-started",
   "model/selection",
@@ -66,6 +68,7 @@ const KNOWN_EVENT_TYPES = new Set([
   "turn/start",
   "user/message",
   "web/deepseek-search-llm-request",
+  "working-directory/change",
   "workspace/changes",
 ])
 
@@ -316,34 +319,32 @@ export function translateDshNotification(notification: unknown): DshCodecResult 
     case "tool/result": {
       const message = record(data.message) ? data.message : undefined
       const source = record(message?.source) ? message.source : undefined
-      const block =
-        Array.isArray(message?.content) && record(message.content[0])
-          ? message.content[0]
-          : undefined
       const toolUseId = string(source?.callId)
       if (
+        !message ||
+        message.role !== "tool" ||
+        source?.kind !== "tool" ||
         !toolUseId ||
-        block?.type !== "tool-result" ||
-        block.toolCallId !== toolUseId ||
-        !Array.isArray(block.content)
+        message.toolCallId !== toolUseId ||
+        !Array.isArray(message.content)
       )
         throw new TypeError(
           "DeepSeek Harness tool/result requires matching tool call identity and content"
         )
-      const textOnly = block.content.every(
+      const textOnly = message.content.every(
         (part: unknown) => record(part) && part.type === "text" && typeof part.text === "string"
       )
       const result = textOnly
-        ? block.content.map((part: { text: string }) => part.text).join("")
-        : { content: block.content }
+        ? message.content.map((part: { text: string }) => part.text).join("")
+        : { content: message.content }
       events.push({
         type: "tool_result",
         ...base,
         toolUseId,
         result,
-        isError: block.isError === true,
+        isError: message.isError === true,
         rawOutput: {
-          content: block.content,
+          content: message.content,
           ...(data.meta === undefined ? {} : { meta: data.meta }),
           ...(data.error === undefined ? {} : { error: data.error }),
         },

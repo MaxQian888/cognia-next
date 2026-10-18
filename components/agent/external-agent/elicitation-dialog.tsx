@@ -95,7 +95,7 @@ function ExternalAgentElicitationForm({
     }
   }
 
-  const complete = isElicitationComplete(properties, required, values)
+  const complete = isElicitationComplete(properties, required, values, request)
   const title = request.requestedSchema?.title || t("title")
 
   return (

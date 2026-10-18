@@ -2,14 +2,27 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { AlertTriangle, CheckCircle2, Download, RefreshCw, Trash2, XCircle } from "lucide-react"
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  Download,
+  RefreshCw,
+  Trash2,
+  XCircle,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { useDshRuntime } from "@/hooks/agent/use-dsh-runtime"
 import type { DshDoctorFinding } from "@cognia/agent-dsh/install"
 import {
   dshCapabilitiesForTransport,
+  dshNativeCapabilitiesForProfile,
+  dshPluginsForProfile,
+  DSH_PROFILE_IDS,
   profileTransport,
   type DshProfileId,
 } from "@cognia/agent-dsh/channel"
@@ -40,16 +53,38 @@ const FINDING_KEYS: Record<DshDoctorFinding["code"], string> = {
   "native-toolchain-missing": "nativeToolchainMissing",
 }
 
-export function DeepSeekHarnessCard({
-  profile,
-  profileId = profile ?? "cognia-sdk-readonly",
-}: DeepSeekHarnessCardProps) {
+export function DeepSeekHarnessCard({ profile, profileId }: DeepSeekHarnessCardProps) {
   const t = useTranslations("externalAgent.settings.deepseekHarness")
+  const [selectedProfile, setSelectedProfile] = useState<DshProfileId>("cognia-sdk-readonly")
+  const activeProfile = profileId ?? profile ?? selectedProfile
   const { supported, report, busy, error, installed, refresh, install, remove } =
-    useDshRuntime(profileId)
+    useDshRuntime(activeProfile)
   const [confirmingRemove, setConfirmingRemove] = useState(false)
 
-  const capabilities = dshCapabilitiesForTransport(profileTransport(profileId))
+  const capabilities = dshCapabilitiesForTransport(profileTransport(activeProfile))
+  const nativeCapabilities = dshNativeCapabilitiesForProfile(activeProfile)
+  const plugins = dshPluginsForProfile(activeProfile)
+  const profileLabels = {
+    "cognia-sdk-readonly": "profileReadonly",
+    "cognia-sdk-workspace": "profileWorkspace",
+    "cognia-acp": "profileAcp",
+  } as const
+  const profileDescriptions = {
+    "cognia-sdk-readonly": "profileReadonlyDesc",
+    "cognia-sdk-workspace": "profileWorkspaceDesc",
+    "cognia-acp": "profileAcpDesc",
+  } as const
+  const nativeRows = [
+    ["nativeFileRead", nativeCapabilities.fileRead],
+    ["nativeFileWrite", nativeCapabilities.fileWrite],
+    ["nativeShell", nativeCapabilities.persistentShell],
+    ["nativeJobsBackend", nativeCapabilities.jobsBackend],
+    ["nativeJobsManagement", nativeCapabilities.jobsManagement],
+    ["nativeSubagents", nativeCapabilities.subagents],
+    ["nativeSkills", nativeCapabilities.skills],
+    ["nativeCompaction", nativeCapabilities.autoCompaction],
+    ["nativeSessionResume", nativeCapabilities.sessionResume],
+  ] as const
   const capabilityRows = [
     ["capabilityStreaming", capabilities.streamingDeltas],
     ["capabilityToolEvents", capabilities.toolEvents],
@@ -95,6 +130,34 @@ export function DeepSeekHarnessCard({
         {t("experimentalNotice")}
       </p>
 
+      <div className="space-y-1.5">
+        {profileId || profile ? (
+          <p className="text-xs font-medium">
+            {t("profile")}: {t(profileLabels[activeProfile])}
+          </p>
+        ) : (
+          <label className="flex flex-wrap items-center gap-2 text-xs font-medium">
+            {t("profile")}
+            <NativeSelect
+              aria-label={t("profile")}
+              value={activeProfile}
+              size="sm"
+              onChange={(event) => {
+                setSelectedProfile(event.target.value as DshProfileId)
+                setConfirmingRemove(false)
+              }}
+            >
+              {DSH_PROFILE_IDS.map((id) => (
+                <NativeSelectOption key={id} value={id}>
+                  {t(profileLabels[id])}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </label>
+        )}
+        <p className="text-xs text-muted-foreground">{t(profileDescriptions[activeProfile])}</p>
+      </div>
+
       {report || !error ? (
         <div className="flex items-center gap-2 text-xs" role="status" data-testid="dsh-status">
           {!report ? (
@@ -133,6 +196,21 @@ export function DeepSeekHarnessCard({
         </ul>
       ) : null}
 
+      <div className="space-y-1">
+        <p className="text-xs font-medium">{t("nativeCapabilities")}</p>
+        <p className="text-xs text-muted-foreground">{t("nativeCapabilitiesNotice")}</p>
+        <dl className="space-y-1">
+          {nativeRows.map(([key, enabled]) => (
+            <div key={key} className="flex items-start justify-between gap-4 text-xs">
+              <dt className="text-muted-foreground">{t(key)}</dt>
+              <dd className="shrink-0">
+                {enabled ? t("capabilitySupported") : t("capabilityUnsupported")}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+
       <div className="space-y-1" data-testid="dsh-capabilities">
         <p className="text-xs font-medium">{t("capabilities")}</p>
         {capabilityRows.map(([key, enabled]) => (
@@ -142,6 +220,41 @@ export function DeepSeekHarnessCard({
           </div>
         ))}
       </div>
+
+      <Collapsible className="rounded-md border p-2">
+        <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 text-left text-xs font-medium">
+          {t("plugins")}
+          <ChevronDown
+            className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-180"
+            aria-hidden
+          />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-2 pt-2">
+          <p className="text-xs text-muted-foreground">{t("pluginsNotice")}</p>
+          <ul className="max-h-96 space-y-2 overflow-y-auto">
+            {plugins.map((plugin) => (
+              <li
+                key={plugin.id}
+                className="space-y-0.5 text-xs"
+                data-testid={`dsh-plugin-${plugin.id}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <code className="min-w-0 break-all">{plugin.packageName}</code>
+                  <Badge variant="outline" className="shrink-0">
+                    {t(`pluginStatus.${plugin.status}`)}
+                  </Badge>
+                </div>
+                <p className="break-all text-muted-foreground">{plugin.id}</p>
+                {plugin.condition && (
+                  <p className="text-muted-foreground">
+                    {t(`pluginCondition.${plugin.condition}`)}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </CollapsibleContent>
+      </Collapsible>
 
       <p className="text-xs text-muted-foreground">{t("committedEventsNotice")}</p>
 

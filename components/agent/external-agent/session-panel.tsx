@@ -252,6 +252,7 @@ function LocalExternalAgentSessionPanel({
     isExecuting,
     activeSession,
     activeAgentId,
+    activeAgentValidity,
     cloneSession,
     executeSessionCommand,
     executeSessionShell,
@@ -292,7 +293,10 @@ function LocalExternalAgentSessionPanel({
   const hasCommands = availableCommands.length > 0
   const hasPlan = planEntries.length > 0 || Boolean(planDocument)
   const hasConfigOptions = configOptions.length > 0
-  const canFork = Boolean(activeSession)
+  const sessionCapabilities =
+    activeAgentValidity?.negotiation?.agentCapabilities?.sessionCapabilities
+  const canFork =
+    Boolean(activeSession) && (!sessionCapabilities || Boolean(sessionCapabilities.fork))
   const sessionBusy = isExecuting || isCompacting || isProviderUndoing
   const supportsProviderUndo = providerUndoCapability?.status === "supported"
 

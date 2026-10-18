@@ -28,6 +28,22 @@ const INSTALLED = {
   },
 }
 
+const COGNIA_GATEWAY_ENV = {
+  COGNIA_DSH_PROVIDER: "cognia",
+  COGNIA_DSH_MODEL: "configured-model",
+  COGNIA_DSH_GATEWAY_TOKEN: "task-route-fixture",
+  COGNIA_DSH_GATEWAY_CONFIG: JSON.stringify({
+    providers: {
+      cognia: {
+        api: "openai-completions",
+        baseURL: "http://127.0.0.1:4123/v1",
+        apiKeyEnv: "COGNIA_DSH_GATEWAY_TOKEN",
+        models: [{ id: "configured-model" }],
+      },
+    },
+  }),
+}
+
 describe("resolveDshLaunchFromConfig", () => {
   it("forwards process-wide reasoning and output limits", () => {
     expect(
@@ -64,6 +80,38 @@ describe("resolveDshLaunchFromConfig", () => {
       config({ ...INSTALLED, env: { ...INSTALLED.env, COGNIA_DSH_MODEL: "deepseek-v4-pro" } })
     )
     expect(launch.model).toBe("deepseek-v4-pro")
+  })
+
+  it("resolves a Cognia gateway route without a DeepSeek credential", () => {
+    const launch = resolveDshLaunchFromConfig(config({ ...INSTALLED, env: COGNIA_GATEWAY_ENV }))
+    expect(launch).toMatchObject({ provider: "cognia", model: "configured-model" })
+    expect(launch.env.DEEPSEEK_API_KEY).toBeUndefined()
+  })
+
+  it.each(["COGNIA_DSH_GATEWAY_CONFIG", "COGNIA_DSH_GATEWAY_TOKEN", "COGNIA_DSH_MODEL"])(
+    "rejects a Cognia route missing %s even when a DeepSeek key is available",
+    (missing) => {
+      const env: Record<string, string> = { ...INSTALLED.env, ...COGNIA_GATEWAY_ENV }
+      delete env[missing]
+      expect(() => resolveDshLaunchFromConfig(config({ ...INSTALLED, env }))).toThrow(
+        /Cognia model route/
+      )
+    }
+  )
+
+  it("rejects unsupported providers rather than falling back to DeepSeek", () => {
+    expect(() =>
+      resolveDshLaunchFromConfig(
+        config({ ...INSTALLED, env: { ...INSTALLED.env, COGNIA_DSH_PROVIDER: "other" } })
+      )
+    ).toThrow(/Unsupported managed model provider/)
+  })
+
+  it("rejects a gateway lease without the Cognia provider", () => {
+    const { COGNIA_DSH_PROVIDER: _, ...env } = COGNIA_GATEWAY_ENV
+    expect(() =>
+      resolveDshLaunchFromConfig(config({ ...INSTALLED, env: { ...INSTALLED.env, ...env } }))
+    ).toThrow(/gateway lease requires the Cognia provider/)
   })
 
   it("falls back to the process cwd when no workspace variable is set", () => {
@@ -186,6 +234,28 @@ function fixture(envOverrides: Record<string, string> = {}, agentId = "agent-1")
 }
 
 describe("DSH host process transport", () => {
+  it("preserves a redacted spawn rejection without killing an unregistered process", async () => {
+    const f = fixture()
+    f.host.spawn = jest.fn().mockRejectedValue(new Error("task locked sk-test-1234567890"))
+    f.host.kill = jest.fn().mockRejectedValue(new Error("no registered process"))
+    await expect(f.transport.start(f.handlers)).rejects.toThrow("task locked [redacted]")
+    expect(f.host.kill).not.toHaveBeenCalled()
+    expect(f.listeners.size).toBe(0)
+    expect(f.transport.isRunning()).toBe(false)
+    await f.transport.close()
+    expect(f.host.kill).not.toHaveBeenCalled()
+  })
+
+  it("initializes the selected Cognia model through its gateway route", async () => {
+    const f = fixture({ ...COGNIA_GATEWAY_ENV, DEEPSEEK_API_KEY: "" })
+    await f.transport.start(f.handlers)
+    expect(f.frames[0]).toMatchObject({
+      method: "initialize",
+      params: { provider: "cognia", model: "configured-model" },
+    })
+    await f.transport.close()
+  })
+
   it("sends supported initialization tuning and ignores unrelated host exits", async () => {
     const f = fixture({ COGNIA_DSH_MAX_TOKENS: "4096", COGNIA_DSH_REASONING_EFFORT: "high" })
     await f.transport.start(f.handlers)
@@ -283,7 +353,7 @@ describe("DSH host process transport", () => {
     expect(f.transport.isRunning()).toBe(false)
     expect(f.listeners.size).toBe(0)
   })
-  it("registers listeners before spawning and uses the host bridge for all three SDK methods", async () => {
+  it("registers listeners before spawning and uses the host bridge for admission and settlement", async () => {
     const f = fixture()
     await f.transport.start(f.handlers)
     expect(f.listen).toHaveBeenCalledTimes(3)
@@ -307,12 +377,48 @@ describe("DSH host process transport", () => {
       method: "session/prompt",
       params: { sessionId: "s1", contentBlocks: [{ type: "text", text: "hello" }] },
     })
+    await f.transport.wait("s1")
+    expect(f.frames[2]).toMatchObject({ method: "session/wait", params: { sessionId: "s1" } })
     await f.transport.close()
-    expect(f.frames[2].method).toBe("shutdown")
+    expect(f.frames[3].method).toBe("shutdown")
     expect(f.invoke).toHaveBeenCalledWith("kill_external_agent", { agentId: expect.any(String) })
     expect(f.listeners.size).toBe(0)
     expect(f.transport.isRunning()).toBe(false)
     expect(f.handlers.onClosed).not.toHaveBeenCalled()
+  })
+
+  it("lets the adapter own the execution deadline while waiting for descendants", async () => {
+    const f = fixture()
+    await expect(f.transport.wait("s1")).rejects.toThrow("not running")
+    await f.transport.start(f.handlers)
+    jest.useFakeTimers()
+    try {
+      f.setRespond(false)
+      let settled = false
+      const waiting = f.transport.wait("s1").then(() => {
+        settled = true
+      })
+      await jest.advanceTimersByTimeAsync(60000)
+      expect(settled).toBe(false)
+      expect(f.frames.map((frame) => frame.method)).toEqual(["initialize", "session/wait"])
+      f.wire({ id: f.frames[1].id, result: {} })
+      await waiting
+      f.setRespond(true)
+      await f.transport.close()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("rejects pending settlement on process loss and redacts provider secrets", async () => {
+    const f = fixture()
+    await f.transport.start(f.handlers)
+    f.setRespond(false)
+    const waiting = expect(f.transport.wait("s1")).rejects.toThrow("[redacted]")
+    f.emit("stderr", { data: "failed sk-test-1234567890" })
+    f.emit("exit", { code: 1 })
+    await waiting
+    expect(f.transport.isRunning()).toBe(false)
   })
 
   it("preserves split UTF-8 frames and filters another process's notifications", async () => {

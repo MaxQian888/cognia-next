@@ -8,6 +8,7 @@ const resolve = (config: Parameters<typeof resolveAcpVendorProfile>[0]) =>
 describe("resolveAcpVendorProfile", () => {
   it("selects a profile by preset id", () => {
     expect(resolve({ metadata: { preset: "kimi" } })).toBe("kimi")
+    expect(resolve({ metadata: { preset: "grok" } })).toBe("grok")
     expect(resolve({ metadata: { preset: "opencode-acp" } })).toBe("opencode-acp")
   })
 
@@ -15,6 +16,8 @@ describe("resolveAcpVendorProfile", () => {
     expect(resolve({ process: { command: "/usr/local/bin/goose" } })).toBe("goose")
     expect(resolve({ process: { command: "C:\\Tools\\Devin.EXE" } })).toBe("devin")
     expect(resolve({ process: { command: "cline" } })).toBe("cline")
+    expect(resolve({ process: { command: "/opt/bin/grok" } })).toBe("grok")
+    expect(resolve({ process: { command: "C:\\Tools\\Grok.EXE" } })).toBe("grok")
     expect(resolve({ process: { command: "/opt/opencode" } })).toBe("opencode-acp")
   })
 
@@ -31,6 +34,7 @@ describe("resolveAcpVendorProfile", () => {
     )
     expect(resolve({ process: { command: "/bin/kimi-helper" } })).toBeUndefined()
     expect(resolve({ process: { command: "/bin/notgoose" } })).toBeUndefined()
+    expect(resolve({ process: { command: "/bin/grok-cli" } })).toBeUndefined()
   })
 
   it("resolves against the profiles it is given", () => {

@@ -43,7 +43,7 @@ describe("the registered protocol set", () => {
     expect(orphans).toEqual([])
   })
 
-  it("covers the seven protocols this repository ships", () => {
+  it("covers the protocols this repository ships, including independent SIWC", () => {
     // A literal list as well, so DELETING a protocol from both sides at once
     // still has to be a deliberate edit to this file.
     expect([...SUPPORTED_EXTERNAL_AGENT_PROTOCOLS].sort()).toEqual([
@@ -51,6 +51,7 @@ describe("the registered protocol set", () => {
       "acp",
       "aider-cli",
       "codex-app-server",
+      "codex-siwc-app-server",
       "dsh-sdk",
       "opencode-v2",
       "pi-rpc",

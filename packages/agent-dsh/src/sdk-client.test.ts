@@ -17,6 +17,8 @@ class FakeTransport implements DshRuntimeTransport {
   closed = 0
   prompts: Array<{ sessionId: string; contentBlocks: DshPromptContentBlock[] }> = []
   receipt: Promise<string> = Promise.resolve("msg-1")
+  completion: Promise<void> = Promise.resolve()
+  waits: string[] = []
   async start(handlers: DshRuntimeTransportHandlers) {
     this.handlers = handlers
     this.running = true
@@ -24,6 +26,10 @@ class FakeTransport implements DshRuntimeTransport {
   async prompt(sessionId: string, contentBlocks: DshPromptContentBlock[]) {
     this.prompts.push({ sessionId, contentBlocks })
     return this.receipt
+  }
+  async wait(sessionId: string) {
+    this.waits.push(sessionId)
+    return this.completion
   }
   async close() {
     this.closed++
@@ -71,6 +77,24 @@ const CONFIG: ExternalAgentConfig = {
   transport: "stdio",
   enabled: true,
   process: { command: "node", cwd: "/workspace", env: { COGNIA_DSH_MODEL: "deepseek-flash" } },
+}
+const GATEWAY_CONFIG: ExternalAgentConfig = {
+  ...CONFIG,
+  id: "gateway-task-fixture",
+  metadata: { cogniaGatewayTask: "fixture" },
+  process: {
+    ...CONFIG.process!,
+    env: {
+      ...CONFIG.process?.env,
+      COGNIA_DSH_PROVIDER: "cognia",
+      COGNIA_DSH_GATEWAY_CONFIG: JSON.stringify({
+        providers: { cognia: { models: [{ id: "deepseek-flash" }] } },
+      }),
+      COGNIA_GATEWAY_TASK_CONFIG: JSON.stringify({ taskId: "fixture", runtime: "dsh" }),
+      COGNIA_GATEWAY_TOKEN: "task-lease-fixture",
+      COGNIA_DSH_GATEWAY_TOKEN: "route-lease-fixture",
+    },
+  },
 }
 const MESSAGE = { role: "user", content: [{ type: "text", text: "hello" }] } as ExternalAgentMessage
 
@@ -138,6 +162,146 @@ function hosted(customize?: (transport: FakeTransport, index: number) => void) {
 }
 
 describe("DSH hosted conversation lifecycle", () => {
+  it.each([
+    { efforts: undefined, inherited: undefined, requested: "medium", expected: undefined },
+    { efforts: false, inherited: "medium", requested: "medium", expected: undefined },
+    { efforts: undefined, inherited: "medium", requested: undefined, expected: undefined },
+    { efforts: { high: "high" }, inherited: "medium", requested: "low", expected: undefined },
+    {
+      efforts: { medium: "medium" },
+      inherited: undefined,
+      requested: "medium",
+      expected: "medium",
+    },
+    {
+      efforts: { off: null, medium: "medium" },
+      inherited: undefined,
+      requested: "off",
+      expected: "off",
+    },
+  ])(
+    "bounds gateway session and prompt reasoning to frozen model support: %j",
+    async ({ efforts, inherited, requested, expected }) => {
+      const { adapter, configs, transports } = hosted()
+      await adapter.connect({
+        ...GATEWAY_CONFIG,
+        process: {
+          ...GATEWAY_CONFIG.process!,
+          env: {
+            ...GATEWAY_CONFIG.process?.env,
+            ...(inherited ? { COGNIA_DSH_REASONING_EFFORT: inherited } : {}),
+            COGNIA_DSH_GATEWAY_CONFIG: JSON.stringify({
+              providers: {
+                cognia: { models: [{ id: "deepseek-flash", reasoningEfforts: efforts }] },
+              },
+            }),
+          },
+        },
+      })
+      const session = await adapter.createSession({ metadata: { reasoningEffort: requested } })
+      expect(configs[1].process?.env?.COGNIA_DSH_REASONING_EFFORT).toBe(expected)
+      const running = adapter.execute(session.id, MESSAGE, { reasoningEffort: requested })
+      await tick()
+      transports[1].turn(session.id)
+      await expect(running).resolves.toMatchObject({ success: true })
+      await adapter.disconnect()
+    }
+  )
+
+  it.each(["not-json", "null", JSON.stringify({ providers: { cognia: { models: [] } } })])(
+    "rejects an unreadable frozen gateway model before starting a session: %s",
+    async (route) => {
+      const { adapter, configs } = hosted()
+      await adapter.connect({
+        ...GATEWAY_CONFIG,
+        process: {
+          ...GATEWAY_CONFIG.process!,
+          env: { ...GATEWAY_CONFIG.process?.env, COGNIA_DSH_GATEWAY_CONFIG: route },
+        },
+      })
+      await expect(adapter.createSession()).rejects.toThrow(/Cognia model route/)
+      expect(configs).toHaveLength(1)
+      await adapter.disconnect()
+    }
+  )
+
+  it("gives gateway discovery an owned child identity without dropping native task authority", async () => {
+    const { adapter, configs } = hosted()
+    await adapter.connect(GATEWAY_CONFIG)
+    expect(configs[0].id).toMatch(/^gateway-task-fixture:dsh:discovery-/)
+    expect(configs[0].id).not.toBe(GATEWAY_CONFIG.id)
+    expect(configs[0].metadata).toEqual(GATEWAY_CONFIG.metadata)
+    expect(configs[0].process?.env).toMatchObject(GATEWAY_CONFIG.process!.env!)
+    const session = await adapter.createSession()
+    expect(session.agentId).toBe(GATEWAY_CONFIG.id)
+    expect(configs[1].id).toMatch(/^gateway-task-fixture:dsh:/)
+    expect(configs[1].id).not.toBe(configs[0].id)
+    await adapter.disconnect()
+  })
+
+  it("releases gateway discovery before acquiring the task lock for its session", async () => {
+    let active = 0
+    const { adapter, transports, configs } = hosted((transport) => {
+      transport.start = async (handlers) => {
+        if (active) throw new Error("Stop the gateway task before changing its state")
+        active++
+        transport.handlers = handlers
+        transport.running = true
+      }
+      transport.close = async () => {
+        if (transport.running) active--
+        transport.running = false
+        transport.closed++
+      }
+    })
+    await adapter.connect(GATEWAY_CONFIG)
+    expect(transports[0].closed).toBe(1)
+    expect(adapter.isConnected()).toBe(true)
+    expect(await adapter.healthCheck()).toBe(true)
+    const session = await adapter.createSession()
+    expect(configs[1].metadata?.cogniaGatewayTask).toBe("fixture")
+    expect(adapter.getSession(session.id)).toBeDefined()
+    await adapter.disconnect()
+    expect(active).toBe(0)
+  })
+
+  it("allows only one active or starting session per gateway task and releases capacity after close", async () => {
+    const starting = deferred<void>()
+    const { adapter, transports } = hosted((transport, index) => {
+      if (index === 1) {
+        transport.start = async (handlers) => {
+          transport.handlers = handlers
+          transport.running = true
+          await starting.promise
+        }
+      }
+    })
+    await adapter.connect(GATEWAY_CONFIG)
+    const creating = adapter.createSession()
+    await expect(adapter.createSession()).rejects.toThrow(/one session/)
+    expect(transports).toHaveLength(2)
+    starting.resolve()
+    const session = await creating
+    await expect(adapter.createSession()).rejects.toThrow(/one session/)
+    await adapter.closeSession(session.id)
+    const replacement = await adapter.createSession()
+    expect(replacement.id).not.toBe(session.id)
+    await adapter.disconnect()
+  })
+
+  it("retains a gateway discovery cleanup failure and retries it before reconnecting", async () => {
+    const { adapter, transports } = hosted((transport, index) => {
+      if (index === 0)
+        jest.spyOn(transport, "close").mockRejectedValueOnce(new Error("probe reap failed"))
+    })
+    await expect(adapter.connect(GATEWAY_CONFIG)).rejects.toThrow("probe reap failed")
+    expect(adapter.connectionStatus).toBe("error")
+    await adapter.connect(GATEWAY_CONFIG)
+    expect(transports[0].closed).toBe(1)
+    expect(adapter.isConnected()).toBe(true)
+    await adapter.disconnect()
+  })
+
   it("requires connection, exposes MCP capability and refuses unknown session operations", async () => {
     const { adapter } = hosted()
     expect(adapter.protocol).toBe("dsh-sdk")
@@ -165,6 +329,7 @@ describe("DSH hosted conversation lifecycle", () => {
     })
     await adapter.connect(CONFIG)
     expect(configs).toHaveLength(1)
+    expect(configs[0].id).toBe(CONFIG.id)
     expect(configs[0].process!.env!.COGNIA_DSH_MCP_SERVERS).toBeUndefined()
     expect(configs[0].process!.env!.COGNIA_DSH_MCP_CONFIGS).toBeUndefined()
     transports[0].running = false
@@ -630,6 +795,66 @@ describe("DeepSeek Harness current protocol adapter", () => {
     admit("msg-1")
     expect((await stream).filter((event) => event.type === "done")).toHaveLength(1)
   })
+  it("keeps the prompt open across root idle until descendant work and its root continuation finish", async () => {
+    const { adapter, transport, session } = await connected()
+    const completion = deferred<void>()
+    transport.completion = completion.promise
+    const stream = collect(adapter.prompt(session.id, MESSAGE))
+    let ended = false
+    void stream.then(() => {
+      ended = true
+    })
+    transport.raw({
+      method: "subagent.started",
+      params: { parentSessionId: session.id, childSessionId: "child" },
+    })
+    transport.turn(session.id, "delegated")
+    await tick()
+    expect(ended).toBe(false)
+    expect(transport.waits).toEqual([session.id])
+    expect(session.status).toBe("executing")
+    transport.turn("child", "child-only answer")
+    transport.turn(session.id, "final parent answer")
+    completion.resolve()
+    const events = await stream
+    expect(events.filter((event) => event.type === "done")).toHaveLength(1)
+    expect(events.filter((event) => event.type === "message_delta")).toMatchObject([
+      { delta: { text: "delegated" } },
+      { delta: { text: "final parent answer" } },
+    ])
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      success: true,
+      tokenUsage: { promptTokens: 6, completionTokens: 4, totalTokens: 10 },
+    })
+  })
+  it("rejects and closes when descendant settlement fails after a successful root turn", async () => {
+    const { adapter, transport, session } = await connected()
+    const completion = deferred<void>()
+    transport.completion = completion.promise
+    const stream = collect(adapter.prompt(session.id, MESSAGE))
+    const rejected = expect(stream).rejects.toThrow("child runtime failed")
+    transport.turn(session.id)
+    await tick()
+    completion.reject(new Error("child runtime failed"))
+    await rejected
+    expect(transport.closed).toBe(1)
+  })
+  it("ignores a late wait response after cancellation instead of reporting success", async () => {
+    const { adapter, transport, session } = await connected()
+    const completion = deferred<void>()
+    transport.completion = completion.promise
+    const stream = collect(adapter.prompt(session.id, MESSAGE))
+    transport.turn(session.id)
+    await tick()
+    await adapter.cancel(session.id)
+    completion.resolve()
+    const events = await stream
+    expect(events.filter((event) => event.type === "done")).toMatchObject([
+      { success: false, stopReason: "cancelled" },
+    ])
+    expect(adapter.getSession(session.id)).toBeUndefined()
+  })
   it("does not let initial idle or unrelated session traffic finish the prompt", async () => {
     const { adapter, transport, session } = await connected()
     const stream = collect(adapter.prompt(session.id, MESSAGE))
@@ -972,6 +1197,24 @@ describe("DeepSeek Harness current protocol adapter", () => {
 })
 
 describe("DSH autonomous session events", () => {
+  it("waits for autonomous descendants and reports settlement failure without a successful done", async () => {
+    const { adapter, transport, session } = await connected()
+    const events: ExternalAgentEvent[] = []
+    adapter.subscribeSessionEvents(session.id, (event) => events.push(event))
+    const completion = deferred<void>()
+    transport.completion = completion.promise
+    transport.turn(session.id)
+    await tick()
+    expect(events.some((event) => event.type === "done")).toBe(false)
+    expect(session.status).toBe("executing")
+    completion.reject(new Error("autonomous child failed"))
+    await tick()
+    await tick()
+    expect(events.at(-1)).toMatchObject({ type: "error", error: "autonomous child failed" })
+    expect(session.status).toBe("error")
+    expect(transport.closed).toBe(1)
+    await adapter.disconnect()
+  })
   it("routes background turns after foreground completion without duplicating owned events", async () => {
     const transport = new FakeTransport()
     const adapter = new DshSdkClientAdapter({ createTransport: () => transport })
@@ -997,6 +1240,7 @@ describe("DSH autonomous session events", () => {
     })
     transport.event(session.id, "turn/end", { reason: { kind: "completed" } })
     transport.status(session.id, "idle")
+    await tick()
     expect(events.map((event) => event.type)).toEqual([
       "session_start",
       "message_start",
@@ -1034,6 +1278,7 @@ describe("DSH autonomous session events", () => {
       backgroundTurns: "supported",
     })
     transports[1].turn(first.id)
+    await tick()
     expect(firstEvents.at(-1)).toMatchObject({ type: "done", success: true })
     expect(secondEvents).toEqual([])
     await adapter.closeSession(first.id)
@@ -1041,6 +1286,7 @@ describe("DSH autonomous session events", () => {
     transports[1].turn(first.id)
     expect(firstEvents).toHaveLength(count)
     transports[2].turn(second.id)
+    await tick()
     expect(secondEvents.at(-1)).toMatchObject({ type: "done", success: true })
     await adapter.disconnect()
   })

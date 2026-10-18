@@ -112,6 +112,8 @@ test("rejects stale installed runtime packages before evaluating upstream code",
   const pkg = join(f.root, "package.json")
   writeFileSync(pkg, JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.1.0-rc.6" }))
   assert.throws(() => resolveProductLauncher({ resolve: () => pkg }), /Unsupported/)
+  writeFileSync(pkg, JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.2.0-rc.2" }))
+  assert.throws(() => resolveProductLauncher({ resolve: () => pkg }), /reinstall.*0.2.1-rc.2/)
   writeFileSync(pkg, JSON.stringify({ name: "@deepseek-ai/dsh", version: DSH_VERSION }))
   assert.equal(resolveProductLauncher({ resolve: () => pkg }), join(f.root, "lib", "bin.js"))
 })
@@ -275,5 +277,12 @@ test("pins one complete DSH release without overriding unrelated infrastructure 
     assert.match(name, /^@deepseek-ai\/dsh(?:-|$)/)
     assert.equal(version, manifest.dependencies[name] ? `$${name}` : DSH_VERSION)
   }
+  for (const name of [
+    "dsh-working-directory",
+    "dsh-tool-working-directory",
+    "dsh-web-deepseek-api",
+  ])
+    assert.equal(manifest.overrides[`@deepseek-ai/${name}`], DSH_VERSION)
   assert.equal(manifest.overrides["@deepseek-ai/dsh-settings-file"], undefined)
+  assert.equal(manifest.overrides["@deepseek-ai/dsh-subagent-in-process-driver"], undefined)
 })

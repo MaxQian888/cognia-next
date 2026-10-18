@@ -140,3 +140,17 @@ it("labels MiniMax in every teammate runtime picker", () => {
   expect(RUNTIME_OPTIONS).toContain("minimax-code")
   expect(runtimeLabelKey("minimax-code")).toBe("minimaxCode")
 })
+
+it("offers Grok Build with a translated teammate runtime label in both locales", () => {
+  expect(RUNTIME_OPTIONS).toContain("grok")
+  expect(runtimeLabelKey("grok")).toBe("grok")
+  for (const locale of ["en", "zh-CN"]) {
+    const messages = JSON.parse(
+      readFileSync(
+        join(process.cwd(), `i18n/messages/${locale}/agentTeamsWorkspace/chat.json`),
+        "utf8"
+      )
+    )
+    expect(messages.runtime.grok).toBe("Grok Build")
+  }
+})

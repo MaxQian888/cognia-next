@@ -57,6 +57,8 @@ export interface DshRuntimeTransport {
   start(handlers: DshRuntimeTransportHandlers): Promise<void>
   /** Enqueue a prompt. Resolves with the inbox-admission message id. */
   prompt(sessionId: string, contentBlocks: DshPromptContentBlock[]): Promise<string>
+  /** Wait for stable root idle and progressing managed descendant work. */
+  wait(sessionId: string): Promise<void>
   close(): Promise<void>
   isRunning(): boolean
 }
@@ -143,6 +145,8 @@ interface DshSessionState {
   admitted?: boolean
   started?: boolean
   idle?: boolean
+  waitSettled?: boolean
+  waiting?: object
   terminal?: Extract<ExternalAgentEvent, { type: "done" }>
   usage?: ExternalAgentTokenUsage
   cleanup?: () => void
@@ -371,6 +375,7 @@ export class DshSdkRuntimeAdapter extends BaseProtocolAdapter {
     state.admitted = false
     state.started = false
     state.idle = false
+    state.waitSettled = false
     state.terminal = undefined
     state.usage = undefined
     state.messageId = undefined
@@ -406,13 +411,13 @@ export class DshSdkRuntimeAdapter extends BaseProtocolAdapter {
         }, timeout)
       void transport
         .prompt(sessionId, contentBlocks)
-        .then((messageId) => {
+        .then(async (messageId) => {
           if (state.queue !== queue) return
           if (!messageId) throw new Error("DeepSeek Harness prompt receipt is missing messageId")
           state.sentPreamble = preamble
           state.messageId = messageId
           state.admitted = true
-          this.finishIfIdle(state)
+          await this.waitForCompletion(state, transport)
         })
         .catch((error: unknown) => {
           if (state.queue !== queue) return
@@ -533,10 +538,17 @@ export class DshSdkRuntimeAdapter extends BaseProtocolAdapter {
         state.background = true
         state.started = false
         state.idle = false
+        state.waitSettled = false
         state.terminal = undefined
         state.usage = undefined
         state.session.status = "executing"
         state.session.error = undefined
+        const transport = this.transport!
+        void this.waitForCompletion(state, transport).catch((error: unknown) => {
+          if (this.transport !== transport) return
+          this.failAllSessions(asError(error))
+          void transport.close().catch(() => undefined)
+        })
       }
       // Descendant boundaries and answers must never complete or contaminate
       // the parent answer. Lineage is still projected as progress.
@@ -587,10 +599,21 @@ export class DshSdkRuntimeAdapter extends BaseProtocolAdapter {
     }
   }
 
+  private async waitForCompletion(state: DshSessionState, transport: DshRuntimeTransport) {
+    const waiting = {}
+    state.waiting = waiting
+    await transport.wait(state.session.id)
+    // Cancellation, reconnection or a later lifecycle must not inherit an old wait.
+    if (this.transport !== transport || state.waiting !== waiting) return
+    state.waitSettled = true
+    this.finishIfIdle(state)
+  }
+
   private finishIfIdle(state: DshSessionState): void {
     if (
       (!state.queue && !state.background) ||
       (state.queue && !state.admitted) ||
+      !state.waitSettled ||
       !state.started ||
       !state.idle
     )
@@ -692,9 +715,13 @@ export class DshSdkClientAdapter extends BaseProtocolAdapter {
   }
 
   override get connectionStatus() {
-    return this._connectionStatus === "connected"
+    return this._connectionStatus === "connected" && !this.isGatewayTask
       ? this.discovery.connectionStatus
       : this._connectionStatus
+  }
+
+  private get isGatewayTask() {
+    return this._config?.process?.env?.COGNIA_DSH_PROVIDER === "cognia"
   }
 
   override isConnected() {
@@ -712,7 +739,18 @@ export class DshSdkClientAdapter extends BaseProtocolAdapter {
     const env = { ...config.process?.env }
     delete env.COGNIA_DSH_MCP_SERVERS
     delete env.COGNIA_DSH_MCP_CONFIGS
-    const connecting = this.discovery.connect({ ...config, process: { ...config.process!, env } })
+    const connecting = (async () => {
+      await this.discovery.connect({
+        ...config,
+        // A probe is an owned process, not the logical task: retiring it must
+        // not trigger the manager's task-exit route revocation.
+        id: this.isGatewayTask ? `${config.id}:dsh:discovery-${crypto.randomUUID()}` : config.id,
+        process: { ...config.process!, env },
+      })
+      // A gateway lease has one native task-state lock. Discovery only probes
+      // initialization; release its process before the conversation acquires it.
+      if (this.isGatewayTask) await this.discovery.disconnect()
+    })()
     this.pending.add(connecting)
     try {
       await connecting
@@ -773,12 +811,40 @@ export class DshSdkClientAdapter extends BaseProtocolAdapter {
 
   createSession(options: SessionCreateOptions = {}): Promise<ExternalAgentSession> {
     if (!this.isConnected()) return Promise.reject(new Error("DeepSeek Harness is not connected"))
+    // The manager gives each gateway task its own adapter. Reserve before the
+    // first await, including failed cleanup, so two children cannot own its lock.
+    if (this.isGatewayTask && this.children.size > 0)
+      return Promise.reject(
+        new Error("Only one session may be active for this Cognia gateway task")
+      )
     const config = this._config!
     const custom = options.context?.custom as Record<string, unknown> | undefined
     const mcpServers = options.mcpServers ?? custom?.mcpServers ?? []
     const additionalDirectories =
       options.additionalDirectories ?? custom?.additionalDirectories ?? []
     const cwd = options.cwd ?? config.process?.env?.COGNIA_DSH_WORKSPACE ?? config.process?.cwd
+    const launchEnv = {
+      ...config.process?.env,
+      ...(typeof options.metadata?.reasoningEffort === "string"
+        ? { COGNIA_DSH_REASONING_EFFORT: options.metadata.reasoningEffort }
+        : {}),
+    }
+    let sessionOptions = options
+    if (this.isGatewayTask) {
+      let effort: string | undefined
+      try {
+        effort = gatewayReasoningEffort(
+          config,
+          options.metadata?.selectedModel,
+          launchEnv.COGNIA_DSH_REASONING_EFFORT
+        )
+      } catch (error) {
+        return Promise.reject(error)
+      }
+      delete launchEnv.COGNIA_DSH_REASONING_EFFORT
+      if (effort !== undefined) launchEnv.COGNIA_DSH_REASONING_EFFORT = effort
+      sessionOptions = { ...options, metadata: { ...options.metadata, reasoningEffort: effort } }
+    }
     const childConfig: ExternalAgentConfig = {
       ...config,
       id: `${config.id}:dsh:${crypto.randomUUID()}`,
@@ -788,16 +854,13 @@ export class DshSdkClientAdapter extends BaseProtocolAdapter {
         restartOnCrash: false,
         keepAlive: false,
         env: {
-          ...config.process?.env,
+          ...launchEnv,
           ...(cwd ? { COGNIA_DSH_WORKSPACE: cwd } : {}),
           COGNIA_DSH_MCP_SERVERS: JSON.stringify(mcpServers),
           COGNIA_DSH_ADDITIONAL_DIRECTORIES: JSON.stringify(additionalDirectories),
           COGNIA_DSH_ALLOWED_TOOLS: JSON.stringify(options.allowedTools ?? []),
           ...(typeof options.metadata?.selectedModel === "string"
             ? { COGNIA_DSH_MODEL: options.metadata.selectedModel }
-            : {}),
-          ...(typeof options.metadata?.reasoningEffort === "string"
-            ? { COGNIA_DSH_REASONING_EFFORT: options.metadata.reasoningEffort }
             : {}),
         },
       },
@@ -809,7 +872,7 @@ export class DshSdkClientAdapter extends BaseProtocolAdapter {
       try {
         await child.connect(childConfig)
         if (generation !== this.generation) throw new Error("DeepSeek Harness session cancelled")
-        const session = await child.createSession(options)
+        const session = await child.createSession(sessionOptions)
         if (generation !== this.generation) throw new Error("DeepSeek Harness session cancelled")
         session.agentId = config.id
         session.metadata = {
@@ -865,7 +928,20 @@ export class DshSdkClientAdapter extends BaseProtocolAdapter {
     message: ExternalAgentMessage,
     options?: ExternalAgentExecutionOptions
   ) {
-    return this.owner(sessionId).prompt(sessionId, message, options)
+    return this.owner(sessionId).prompt(
+      sessionId,
+      message,
+      this.isGatewayTask && options
+        ? {
+            ...options,
+            reasoningEffort: gatewayReasoningEffort(
+              this._config!,
+              options.model,
+              options.reasoningEffort
+            ),
+          }
+        : options
+    )
   }
   respondToPermission(sessionId: string, response: AcpPermissionResponse) {
     return this.owner(sessionId).respondToPermission(sessionId, response)
@@ -887,6 +963,30 @@ export class DshSdkClientAdapter extends BaseProtocolAdapter {
       if (!child.isConnected()) await this.dispose(child)
     }
     return this.isConnected()
+  }
+}
+
+/** Session defaults cannot add reasoning support to a frozen Cognia model lease. */
+function gatewayReasoningEffort(
+  config: ExternalAgentConfig,
+  selectedModel: unknown,
+  effort: string | undefined
+): string | undefined {
+  const env = config.process?.env
+  try {
+    // The launcher validates the complete route. Read only the selected model's
+    // advertised effort names here, and never infer support from UI defaults.
+    const route = JSON.parse(env?.COGNIA_DSH_GATEWAY_CONFIG ?? "null")
+    const models: unknown = route?.providers?.cognia?.models
+    if (!Array.isArray(models)) throw new Error()
+    const model = models.find((entry) => entry?.id === (selectedModel ?? env?.COGNIA_DSH_MODEL))
+    if (!model) throw new Error()
+    const efforts: unknown = model.reasoningEfforts
+    if (efforts === undefined || efforts === false) return undefined
+    if (!efforts || typeof efforts !== "object" || Array.isArray(efforts)) throw new Error()
+    return effort !== undefined && Object.hasOwn(efforts, effort) ? effort : undefined
+  } catch {
+    throw new Error("DeepSeek Harness Cognia model route has invalid reasoning capabilities")
   }
 }
 

@@ -69,6 +69,13 @@ pub struct AgentStateIsolationRule {
 /// isolated and its isolated launch is refused.
 pub const AGENT_STATE_ISOLATION_RULES: &[AgentStateIsolationRule] = &[
     AgentStateIsolationRule {
+        match_kind: IsolationMatch::Base,
+        values: &["grok"],
+        env: &[("GROK_HOME", "grok")],
+        shared_roots: &[".grok"],
+        deny_readable: &[".grok"],
+    },
+    AgentStateIsolationRule {
         match_kind: IsolationMatch::Contains,
         values: &["codex"],
         env: &[("CODEX_HOME", "codex")],
@@ -737,6 +744,28 @@ mod tests {
             actual.sort();
             assert_eq!(actual, expected);
         }
+    }
+
+    #[test]
+    fn grok_isolation_overrides_shared_state_and_denies_the_shared_login() {
+        let data = tempfile::tempdir().unwrap();
+        let mut input = config("grok", &[], &[]);
+        input
+            .env
+            .insert(AGENT_STATE_KEY_ENV.into(), "grok-cfg".into());
+        input.env.insert("GROK_HOME".into(), "/shared/grok".into());
+        let plan = apply_state_isolation(&mut input, Some(data.path()), Path::new("/home/dev"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            input.env["GROK_HOME"],
+            plan.root.join("grok").to_string_lossy()
+        );
+        assert!(plan.root.join("grok").is_dir());
+        assert_eq!(plan.shared_roots, [PathBuf::from("/home/dev/.grok")]);
+        assert_eq!(plan.deny_readable, plan.shared_roots);
+        assert!(!input.env.contains_key(AGENT_STATE_KEY_ENV));
+        assert!(isolation_rule_for("not-grok", &[]).is_none());
     }
 
     #[test]

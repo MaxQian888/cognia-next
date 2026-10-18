@@ -5,8 +5,10 @@ import {
   copyFileSync,
   existsSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -18,6 +20,7 @@ import { createInterface } from "node:readline"
 import { test } from "node:test"
 import { fileURLToPath } from "node:url"
 import { createMockDeepSeek } from "./mock-deepseek.mjs"
+import { DSH_VERSION, resolveProductLauncher } from "./launcher.mjs"
 
 const source = dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
@@ -25,6 +28,22 @@ const require = createRequire(import.meta.url)
 const modules =
   process.env.COGNIA_DSH_TEST_MODULES ??
   join(dirname(dirname(dirname(require.resolve("@deepseek-ai/dsh/package.json")))))
+
+test("installed dependency closure contains only the managed DSH release", () => {
+  const installedRequire = createRequire(join(modules, "..", "package.json"))
+  assert.ok(resolveProductLauncher(installedRequire).endsWith("/lib/bin.js"))
+  const manifest = JSON.parse(readFileSync(join(source, "package.json"), "utf8"))
+  const lock = JSON.parse(readFileSync(join(modules, "..", "package-lock.json"), "utf8"))
+  const installed = new Set()
+  for (const [path, pkg] of Object.entries(lock.packages)) {
+    const name = path.match(/(?:^|\/)node_modules\/(@deepseek-ai\/dsh(?:-[^/]+)?)$/)?.[1]
+    if (!name) continue
+    assert.equal(pkg.version, DSH_VERSION, path)
+    assert.ok(manifest.overrides[name], name + " must be covered by release overrides")
+    installed.add(name)
+  }
+  assert.deepEqual([...installed].sort(), Object.keys(manifest.overrides).sort())
+})
 
 for (const profile of ["sdk-readonly", "sdk-workspace", "acp"]) {
   test(
@@ -174,13 +193,29 @@ for (const profile of ["sdk-readonly", "sdk-workspace", "acp"]) {
             prompt: [{ type: "text", text: "Perform the smoke test." }],
           })
           assert.equal(prompt.error, undefined, JSON.stringify(prompt))
-          assert.ok(frames.some((frame) => frame.method === "session/request_permission"))
+          assert.ok(
+            frames.some((frame) => frame.method === "session/request_permission"),
+            JSON.stringify(frames)
+          )
           assert.equal(existsSync(join(root, "must-not-exist.txt")), false)
           assert.ok(JSON.stringify(frames).includes("Cognia smoke completed."))
         } else {
           assert.equal(initialized.result.serverInfo.name, "deepseek-harness-sdk-runtime")
           const stale = await request(2, "session.prompt", {})
           assert.ok(stale.error, "legacy dotted method must not be accepted")
+          const changedDirectory = join(root, "working-directory")
+          mkdirSync(changedDirectory)
+          const changed = await request(7, "session/working-directory/set", {
+            sessionId: "cognia-smoke",
+            path: changedDirectory,
+          })
+          assert.equal(changed.error, undefined, JSON.stringify(changed))
+          assert.equal(changed.result.cwd, realpathSync(changedDirectory))
+          const invalidDirectory = await request(8, "session/working-directory/set", {
+            sessionId: "cognia-smoke",
+            path: join(root, "missing-directory"),
+          })
+          assert.ok(invalidDirectory.error, "a missing working directory must be rejected")
           const receipt = await request(3, "session/prompt", {
             sessionId: "cognia-smoke",
             contentBlocks: [
@@ -198,6 +233,18 @@ for (const profile of ["sdk-readonly", "sdk-workspace", "acp"]) {
           })
           assert.equal(receipt.error, undefined, JSON.stringify(receipt))
           assert.equal(typeof receipt.result.messageId, "string")
+          const waited = await request(4, "session/wait", { sessionId: "cognia-smoke" })
+          assert.deepEqual(waited.result, {})
+          assert.equal(waited.error, undefined, JSON.stringify(waited))
+          const directory = await request(5, "session/working-directory/get", {
+            sessionId: "cognia-smoke",
+          })
+          assert.equal(directory.result.cwd, changed.result.cwd)
+          assert.ok(
+            frames.some((frame) => frame.params?.event?.type === "working-directory/change"),
+            "directory changes must be durable SDK events"
+          )
+          assert.ok(JSON.stringify(requests[0].messages).includes(changed.result.cwd))
           const deadline = Date.now() + 15000
           while (
             !frames.some(
@@ -212,8 +259,14 @@ for (const profile of ["sdk-readonly", "sdk-workspace", "acp"]) {
           assert.ok(JSON.stringify(frames).includes("Cognia smoke completed."))
           if (profile === "sdk-readonly") {
             assert.equal(requests.length, 3)
-            assert.ok(JSON.stringify(requests[1].messages).includes("read-only"))
-            assert.ok(JSON.stringify(requests[2].messages).includes("approval"))
+            assert.ok(
+              JSON.stringify(requests[1].messages).includes("read-only"),
+              JSON.stringify(requests[1].messages)
+            )
+            assert.ok(
+              JSON.stringify(requests[2].messages).includes("approval"),
+              JSON.stringify(requests[2].messages)
+            )
             assert.equal(existsSync(join(root, "must-not-exist.txt")), false)
           }
           if (profile === "sdk-workspace") {
@@ -223,8 +276,89 @@ for (const profile of ["sdk-readonly", "sdk-workspace", "acp"]) {
               JSON.stringify(requests[0].messages)
             )
           }
-          const shutdown = await request(4, "shutdown", {})
+          const shutdown = await request(6, "shutdown", {})
           assert.equal(shutdown.error, undefined)
+        }
+        const activePackages = new Set(
+          requests[0].dsh_plugin_packages.packages.map((pkg) => pkg.name)
+        )
+        // Independently inspect real Loader composition rather than package.json:
+        // installed dependencies alone cannot establish that a plugin is active.
+        for (const name of [
+          "dsh-fs-sandbox",
+          "dsh-attachment-local",
+          "dsh-tool-fs",
+          "dsh-working-directory",
+          "dsh-tool-working-directory",
+          "dsh-session-projection",
+          "dsh-token-meter",
+          "dsh-compaction-basic",
+          "dsh-compaction-image-offload",
+          "dsh-sandbox-policy",
+          "dsh-session-persistence-jsonl",
+          "dsh-llm-deepseek-api-key",
+        ]) {
+          assert.ok(activePackages.has(`@deepseek-ai/${name}`), `${profile}: missing ${name}`)
+        }
+        for (const name of [
+          "dsh-subprocess-local",
+          "dsh-terminal",
+          // The disabled PowerShell row shares this package with active Bash.
+          "dsh-terminal-bash",
+          "dsh-tool-bash-persistent",
+          "dsh-jobs-local",
+        ]) {
+          assert.equal(
+            activePackages.has(`@deepseek-ai/${name}`),
+            profile === "sdk-workspace",
+            `${profile}: unexpected shell/job activation ${name}`
+          )
+        }
+        for (const name of ["dsh-sdk-app", "dsh-sdk-jsonrpc-server"]) {
+          assert.equal(
+            activePackages.has(`@deepseek-ai/${name}`),
+            profile !== "acp",
+            `${profile}: ${name}`
+          )
+        }
+        for (const name of ["dsh-acp-app", "dsh-acp", "dsh-user-approval"]) {
+          assert.equal(
+            activePackages.has(`@deepseek-ai/${name}`),
+            profile === "acp",
+            `${profile}: ${name}`
+          )
+        }
+        for (const name of [
+          "dsh-fs-local",
+          "dsh-tool-pwsh-persistent",
+          "dsh-llm-pi-ai",
+          "dsh-mcp-client",
+          "dsh-subagent",
+          "dsh-subagent-fork-in-process",
+          "dsh-subagent-spawn-in-process",
+          "dsh-tool-subagent",
+          "dsh-tool-subagent-control",
+          "dsh-skill",
+          "dsh-skill-filesystem",
+          "dsh-tool-skill",
+          "dsh-tool-fs-search",
+          "dsh-web-search-deepseek",
+          "dsh-tool-todo",
+          "dsh-goal",
+          "dsh-goal-round-driver",
+          "dsh-tool-goal",
+          "dsh-ptc-runtime",
+          "dsh-ptc-runtime-node",
+          "dsh-workflow-ptc",
+          "dsh-agent-instructions",
+          "dsh-plugin-manager",
+          "dsh-client-ui-plugin-manager",
+        ]) {
+          assert.equal(
+            activePackages.has(`@deepseek-ai/${name}`),
+            false,
+            `${profile}: unexpectedly active ${name}`
+          )
         }
         child.stdin.end()
         const status = await exited

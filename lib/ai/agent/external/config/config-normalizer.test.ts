@@ -45,10 +45,11 @@ function baseConfig(overrides: Partial<ExternalAgentConfig> = {}): ExternalAgent
 }
 
 describe("SUPPORTED_EXTERNAL_AGENT_PROTOCOLS", () => {
-  it("contains the seven registered built-in adapters", () => {
+  it("contains the registered built-in adapters, including isolated SIWC", () => {
     expect(SUPPORTED_EXTERNAL_AGENT_PROTOCOLS).toEqual([
       "acp",
       "codex-app-server",
+      "codex-siwc-app-server",
       "dsh-sdk",
       "pi-rpc",
       "aider-cli",
@@ -64,6 +65,7 @@ describe("isSupportedExternalAgentProtocol", () => {
     expect(isSupportedExternalAgentProtocol("opencode")).toBe(false)
     expect(isSupportedExternalAgentProtocol("opencode-v2")).toBe(true)
     expect(isSupportedExternalAgentProtocol("codex-app-server")).toBe(true)
+    expect(isSupportedExternalAgentProtocol("codex-siwc-app-server")).toBe(true)
     expect(isSupportedExternalAgentProtocol("a2a")).toBe(true)
     expect(isSupportedExternalAgentProtocol("dsh-sdk")).toBe(true)
     expect(isSupportedExternalAgentProtocol("pi-rpc")).toBe(true)

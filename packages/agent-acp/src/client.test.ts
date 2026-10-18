@@ -2629,6 +2629,208 @@ describe("AcpClientAdapter — ACP v1 stable elicitation", () => {
     }
   }
 
+  function grokQuestionHarness() {
+    mockIsTauri.mockReturnValue(true)
+    const adapter = new AcpClientAdapter(acpDeps())
+    seedSession(adapter, "s1", "default")
+    const internal = adapter as unknown as {
+      _config: ExternalAgentConfig
+      dispatchAgentRequest: (
+        method: string,
+        params: Record<string, unknown>,
+        id: number,
+        signal: AbortSignal
+      ) => Promise<unknown>
+      addEventListener: (id: string, listener: (event: ExternalAgentEvent) => void) => void
+    }
+    internal._config = {
+      ...stdioConfig(),
+      metadata: { preset: "grok", acpElicitationEnabled: true },
+    }
+    const events: ExternalAgentEvent[] = []
+    internal.addEventListener("s1", (event) => events.push(event))
+    const params = {
+      sessionId: "s1",
+      toolCallId: "tc-1",
+      mode: "default",
+      questions: [
+        {
+          question: "Which database?",
+          options: [
+            { label: "Postgres", description: "Relational" },
+            { label: "Redis", description: "In-memory" },
+          ],
+          multiSelect: null,
+        },
+        {
+          question: "Which tools?",
+          options: [
+            { label: "A", description: "First" },
+            { label: "B", description: "Second" },
+          ],
+          multiSelect: true,
+        },
+      ],
+    }
+    const request = (signal = new AbortController().signal) =>
+      internal.dispatchAgentRequest("_x.ai/ask_user_question", params, 81, signal)
+    return { adapter, internal, events, params, request }
+  }
+
+  it("bridges Grok questions through existing elicitation and returns native answers", async () => {
+    const { adapter, events, request } = grokQuestionHarness()
+    const pending = request()
+    expect(events.at(-1)).toMatchObject({
+      type: "elicitation_request",
+      request: {
+        id: "81",
+        sessionId: "s1",
+        toolCallId: "tc-1",
+        mode: "form",
+        requestedSchema: {
+          properties: {
+            q0: { title: "Which database?", type: "string" },
+            q1: { title: "Which tools?", type: "array" },
+          },
+        },
+      },
+    })
+    await adapter.respondToElicitation({
+      requestId: "81",
+      action: "accept",
+      content: { q0: "Postgres", q1: ["A", "B"] },
+    })
+    await expect(pending).resolves.toEqual({
+      outcome: "accepted",
+      answers: {
+        "Which database?": ["Postgres"],
+        "Which tools?": ["A", "B"],
+      },
+    })
+  })
+
+  it("accepts actual UI defaults with freeform-only Grok answers", async () => {
+    const { adapter, request } = grokQuestionHarness()
+    const pending = request()
+    await adapter.respondToElicitation({
+      requestId: "81",
+      action: "accept",
+      content: {
+        q0: "",
+        q0_notes: "SQLite",
+        q1: [],
+        q1_notes: "Neither",
+      },
+    })
+    await expect(pending).resolves.toEqual({
+      outcome: "accepted",
+      answers: {
+        "Which database?": ["Other"],
+        "Which tools?": ["Other"],
+      },
+      annotations: { "Which database?": { notes: "SQLite" }, "Which tools?": { notes: "Neither" } },
+    })
+  })
+
+  it("cancels Grok questions on decline, invalid answers, closed sessions and abort", async () => {
+    const { adapter, params, request } = grokQuestionHarness()
+    for (const response of [
+      { action: "decline" as const },
+      { action: "accept" as const, content: { q0: "unknown", q0_notes: "custom", q1: ["A"] } },
+    ]) {
+      const pending = request()
+      await adapter.respondToElicitation({ requestId: "81", ...response })
+      await expect(pending).resolves.toEqual({ outcome: "cancelled" })
+    }
+    const abort = new AbortController()
+    const pending = request(abort.signal)
+    const rejected = expect(pending).rejects.toMatchObject({ code: -32800 })
+    abort.abort()
+    await rejected
+    params.sessionId = "closed"
+    await expect(request()).resolves.toEqual({ outcome: "cancelled" })
+  })
+
+  it.each(["cancel", "close"] as const)(
+    "settles a pending Grok question on session %s",
+    async (operation) => {
+      const { adapter, request } = grokQuestionHarness()
+      const session = adapter.getSession("s1")!
+      session.status = "executing"
+      const notification = jest.fn()
+      ;(adapter as unknown as { sendNotification: jest.Mock }).sendNotification = notification
+      const pending = request()
+      if (operation === "cancel") await adapter.cancel("s1")
+      else await adapter.closeSession("s1")
+      await expect(pending).resolves.toEqual({ outcome: "cancelled" })
+      await expect(
+        adapter.respondToElicitation({
+          requestId: "81",
+          action: "accept",
+          content: { q0: "Postgres", q1: ["A"] },
+        })
+      ).resolves.toBeUndefined()
+      if (operation === "cancel")
+        expect(notification).toHaveBeenCalledWith("session/cancel", { sessionId: "s1" })
+      else expect(adapter.getSession("s1")).toBeUndefined()
+    }
+  )
+
+  it("times out a Grok questionnaire and ignores later answers", async () => {
+    jest.useFakeTimers()
+    try {
+      const { adapter, request } = grokQuestionHarness()
+      const pending = request()
+      await jest.advanceTimersByTimeAsync(30 * 60 * 1000)
+      await expect(pending).resolves.toEqual({ outcome: "cancelled" })
+      await expect(
+        adapter.respondToElicitation({
+          requestId: "81",
+          action: "accept",
+          content: { q0: "Postgres", q1: ["A"] },
+        })
+      ).resolves.toBeUndefined()
+      expect(jest.getTimerCount()).toBe(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("does not open a Grok question already cancelled by the peer", async () => {
+    const { request, events } = grokQuestionHarness()
+    const abort = new AbortController()
+    abort.abort()
+    await expect(request(abort.signal)).rejects.toMatchObject({ code: -32800 })
+    expect(events).toEqual([])
+  })
+
+  it("settles pending Grok questions on disconnect and leaves no late answer target", async () => {
+    const { adapter, request } = grokQuestionHarness()
+    const pending = request()
+    await adapter.disconnect()
+    await expect(pending).resolves.toEqual({ outcome: "cancelled" })
+    await expect(
+      adapter.respondToElicitation({
+        requestId: "81",
+        action: "accept",
+        content: { q0: "Postgres", q1: ["A"] },
+      })
+    ).resolves.toBeUndefined()
+  })
+
+  it("rejects malformed and unsupported-host Grok questions without opening a form", async () => {
+    const { internal, events, params, request } = grokQuestionHarness()
+    params.questions[0].multiSelect = "yes" as unknown as null
+    await expect(request()).rejects.toMatchObject({ code: -32602 })
+    expect(events).toEqual([])
+    params.questions[0].multiSelect = null
+    mockIsTauri.mockReturnValue(false)
+    await expect(request()).rejects.toMatchObject({ code: -32601 })
+    expect(events).toEqual([])
+    internal._config.metadata = { acpElicitationEnabled: true }
+    await expect(request()).rejects.toMatchObject({ code: -32601 })
+  })
+
   it("emits a form request and resolves it through respondToElicitation", async () => {
     mockIsTauri.mockReturnValue(true)
     const a = new AcpClientAdapter(acpDeps())
@@ -2702,6 +2904,39 @@ describe("AcpClientAdapter — ACP v1 stable elicitation", () => {
       content: { enabled: "yes" },
     })
     await expect(response).resolves.toEqual({ action: "cancel" })
+  })
+
+  it("keeps standard enum validation strict outside the Grok question extension", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const adapter = new AcpClientAdapter(acpDeps())
+    seedSession(adapter, "s1", "default")
+    const internal = elicitationInternals(adapter)
+    internal._config = {
+      ...stdioConfig(),
+      metadata: { preset: "grok", acpElicitationEnabled: true },
+    }
+    const pending = internal.handleElicitationRequest(
+      91,
+      {
+        mode: "form",
+        sessionId: "s1",
+        message: "Choose",
+        requestedSchema: {
+          type: "object",
+          properties: {
+            q0: { type: "string", oneOf: [{ const: "A", title: "A" }] },
+            q0_notes: { type: "string" },
+          },
+        },
+      },
+      new AbortController().signal
+    )
+    await adapter.respondToElicitation({
+      requestId: "91",
+      action: "accept",
+      content: { q0: "", q0_notes: "custom" },
+    })
+    await expect(pending).resolves.toEqual({ action: "cancel" })
   })
 
   it("rejects elicitation when the current host cannot back it", async () => {
@@ -2985,6 +3220,137 @@ describe("AcpClientAdapter — session-confined file requests", () => {
 })
 
 describe("AcpClientAdapter — outbound PII gate", () => {
+  const credential = {
+    agentId: "stdio-agent",
+    server: { type: "http", name: "cognia-tools", url: "http://127.0.0.1:49123/mcp" },
+    header: { name: "Authorization", value: "Bearer sk-1234567890abcdefghijklmnopqrstuv" },
+  }
+  const sessionFrame = (method = "session/new") => ({
+    jsonrpc: "2.0",
+    id: 1,
+    method,
+    params: {
+      cwd: "/work",
+      mcpServers: [{ ...credential.server, headers: [{ ...credential.header }] }],
+    },
+  })
+  function gatedSender(
+    trust?: AcpClientDeps["isTrustedLocalMcpCredential"],
+    config: Partial<ExternalAgentConfig> = {}
+  ) {
+    mockIsTauri.mockReturnValue(true)
+    const gate = jest.fn(hasNoLeakingPiiDeep)
+    const adapter = new AcpClientAdapter({
+      ...acpDeps(),
+      outboundGate: gate,
+      isTrustedLocalMcpCredential: trust,
+    })
+    ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
+      ...stdioConfig(),
+      id: credential.agentId,
+      ...config,
+    }
+    ;(adapter as unknown as { processId: string }).processId = "proc-1"
+    return {
+      gate,
+      send: (frame: unknown) =>
+        (adapter as unknown as { sendMessage(message: string): Promise<void> }).sendMessage(
+          JSON.stringify(frame)
+        ),
+    }
+  }
+  const trustsExactCredential = (candidate: unknown) =>
+    JSON.stringify(candidate) === JSON.stringify(credential)
+
+  it.each(["session/new", "session/load", "session/resume", "session/fork"])(
+    "exempts only a host-verified credential in %s while preserving the original wire",
+    async (method) => {
+      const trust = jest.fn(trustsExactCredential)
+      const { send, gate } = gatedSender(trust)
+      const frame = sessionFrame(method)
+      expect(hasNoLeakingPiiDeep(frame)).toBe(false)
+      await send(frame)
+      expect(trust).toHaveBeenCalledWith(credential)
+      expect(hasNoLeakingPiiDeep(gate.mock.calls[0][0])).toBe(true)
+      expect(mockInvoke).toHaveBeenCalledWith("send_to_external_agent", {
+        agentId: "proc-1",
+        message: JSON.stringify(frame),
+      })
+      expect(frame.params.mcpServers[0].headers[0]).toEqual(credential.header)
+    }
+  )
+
+  it.each(["http", "websocket", "sse"] as const)(
+    "does not exempt credentials for a %s agent destination",
+    async (transport) => {
+      const trust = jest.fn(() => true)
+      await expect(gatedSender(trust, { transport }).send(sessionFrame())).rejects.toThrow(
+        /PII gate/i
+      )
+      expect(trust).not.toHaveBeenCalled()
+    }
+  )
+
+  it("does not reuse another agent's active credential", async () => {
+    await expect(
+      gatedSender(trustsExactCredential, { id: "other-agent" }).send(sessionFrame())
+    ).rejects.toThrow(/PII gate/i)
+  })
+
+  it("fails closed without a verifier or after the host revokes a lease", async () => {
+    await expect(gatedSender().send(sessionFrame())).rejects.toThrow(/PII gate/i)
+    const trust = jest.fn(trustsExactCredential)
+    const { send } = gatedSender(trust)
+    await send(sessionFrame())
+    trust.mockReturnValue(false)
+    await expect(send(sessionFrame())).rejects.toThrow(/PII gate/i)
+  })
+
+  it.each(["type", "name", "url", "header name", "header value"])(
+    "does not trust a changed %s",
+    async (field) => {
+      const frame = sessionFrame()
+      const server = frame.params.mcpServers[0]
+      if (field === "type") server.type = "sse"
+      if (field === "name") server.name = "other-tools"
+      if (field === "url") server.url = "http://127.0.0.1:49124/mcp"
+      if (field === "header name") server.headers[0].name = "X-Authorization"
+      if (field === "header value") server.headers[0].value += "changed"
+      await expect(gatedSender(trustsExactCredential).send(frame)).rejects.toThrow(/PII gate/i)
+    }
+  )
+
+  it.each([
+    ["prompt", { method: "session/prompt", params: { prompt: credential.header.value } }],
+    ["tool result", { id: 1, result: { content: credential.header.value } }],
+    ["resource", { method: "session/new", params: { resource: credential.header.value } }],
+    ["nested servers", { method: "session/new", params: { nested: sessionFrame().params } }],
+    ["wrong method", { method: "custom/new", params: sessionFrame().params }],
+  ])("still blocks the same credential in %s", async (_name, payload) => {
+    await expect(
+      gatedSender(trustsExactCredential).send({ jsonrpc: "2.0", ...payload })
+    ).rejects.toThrow(/PII gate/i)
+  })
+
+  it("keeps every other MCP field and duplicate token subject to the gate", async () => {
+    const { send } = gatedSender(trustsExactCredential)
+    const frame = sessionFrame()
+    await expect(
+      send({ ...frame, params: { ...frame.params, note: credential.header.value } })
+    ).rejects.toThrow(/PII gate/i)
+    await expect(
+      send({
+        ...frame,
+        params: {
+          ...frame.params,
+          mcpServers: [{ ...frame.params.mcpServers[0], note: "alice@example.com" }],
+        },
+      })
+    ).rejects.toThrow(/PII gate/i)
+    frame.params.mcpServers[0].headers.push({ name: "X-Note", value: credential.header.value })
+    await expect(send(frame)).rejects.toThrow(/PII gate/i)
+  })
+
   it("blocks a PII-bearing JSON-RPC payload before it reaches the agent transport", async () => {
     mockIsTauri.mockReturnValue(true)
     const a = new AcpClientAdapter(acpDeps())
@@ -5246,6 +5612,92 @@ describe("AcpClientAdapter — per-turn token usage accounting", () => {
     await consume
     return events
   }
+
+  it("uses Grok prompt aggregates unchanged across turns and ignores stale last-call counters", async () => {
+    const { adapter, internal } = usageHarness()
+    internal._config = { ...stdioConfig(), metadata: { preset: "grok" } }
+    const aggregate = {
+      inputTokens: 207,
+      outputTokens: 14,
+      totalTokens: 221,
+      cachedReadTokens: 50,
+      cacheCreationTokens: 0,
+      reasoningTokens: 4,
+    }
+    internal.sendRequest.mockResolvedValue({
+      stopReason: "end_turn",
+      _meta: {
+        inputTokens: 104,
+        outputTokens: 7,
+        usage: aggregate,
+      },
+    })
+    const first = (await runTurn(adapter)).find((event) => event.type === "done")
+    const second = (await runTurn(adapter)).find((event) => event.type === "done")
+    for (const event of [first, second]) {
+      expect(event).toMatchObject({
+        tokenUsage: {
+          promptTokens: 207,
+          completionTokens: 14,
+          totalTokens: 221,
+          cacheReadTokens: 50,
+          cacheWriteTokens: 0,
+          reasoningTokens: 4,
+        },
+      })
+      expect(event?.tokenUsage).not.toHaveProperty("providerCost")
+    }
+    internal.sendRequest.mockResolvedValue({
+      stopReason: "cancelled",
+      _meta: {
+        inputTokens: 104,
+        outputTokens: 7,
+      },
+    })
+    expect((await runTurn(adapter)).find((event) => event.type === "done")).not.toHaveProperty(
+      "tokenUsage"
+    )
+  })
+
+  it("does not attach a session cost snapshot to Grok's prompt usage", async () => {
+    const { adapter, internal } = usageHarness()
+    internal._config = { ...stdioConfig(), metadata: { preset: "grok" } }
+    internal.sendRequest.mockResolvedValue({
+      stopReason: "end_turn",
+      _meta: {
+        usage: {
+          inputTokens: 100,
+          outputTokens: 10,
+          totalTokens: 110,
+        },
+      },
+    })
+    const events = await runTurn(adapter, () =>
+      internal.handleNotification({
+        method: "session/update",
+        params: {
+          sessionId: "s",
+          update: {
+            sessionUpdate: "usage_update",
+            used: 1000,
+            size: 200000,
+            cost: { amount: 99, currency: "USD" },
+          },
+        },
+      })
+    )
+    const done = events.find((event) => event.type === "done")
+    expect(done).toMatchObject({
+      tokenUsage: {
+        promptTokens: 100,
+        completionTokens: 10,
+        totalTokens: 110,
+        contextTokens: 1000,
+        modelContextWindow: 200000,
+      },
+    })
+    expect(done?.tokenUsage).not.toHaveProperty("providerCost")
+  })
 
   it("reports the turn's delta from streamed cognition.ai counters", async () => {
     const { adapter, internal } = usageHarness()

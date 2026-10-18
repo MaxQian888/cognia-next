@@ -37,6 +37,7 @@ export type ExternalAgentPresetId =
   | "droid"
   | "devin"
   | "minimax-code"
+  | "grok"
   | "kimi"
   | "cline"
   | "qoder"
@@ -299,6 +300,7 @@ export const EXTERNAL_AGENT_PRESETS: Record<
     ...buildPresetConfig("kimi"),
     metadata: { acpPreviewFeatures: { sessionFork: true } },
   },
+  grok: buildPresetConfig("grok"),
   cline: buildPresetConfig("cline"),
   qoder: buildPresetConfig("qoder"),
   goose: buildPresetConfig("goose"),

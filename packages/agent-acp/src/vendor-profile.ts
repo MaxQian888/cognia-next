@@ -13,7 +13,12 @@
  * approval policy and permission broker still decide every tool call.
  */
 
-import type { AcpPermissionMode, ExternalAgentConfig } from "@cognia/agent-contracts/external-agent"
+import type {
+  AcpElicitationResponse,
+  AcpPermissionMode,
+  ExternalAgentConfig,
+  ExternalAgentTokenUsage,
+} from "@cognia/agent-contracts/external-agent"
 
 /** How a vendor names permission modes on the wire. */
 export interface AcpVendorPermissionModes {
@@ -69,6 +74,28 @@ export interface AcpVendorProfile {
   }>
   /** Tool identity recovered from vendor metadata, for the host's permission callback. */
   toolIdentity?(meta: Record<string, unknown> | undefined): AcpVendorToolIdentity | undefined
+  /** Prompt-local telemetry; when supplied, cumulative usage fallback is disabled. */
+  promptUsage?(result: {
+    _meta?: Record<string, unknown> | null
+  }): ExternalAgentTokenUsage | undefined
+  /** Vendor reverse requests projected through the host's existing elicitation lifecycle. */
+  elicitationExtensions?: Readonly<
+    Record<
+      string,
+      {
+        request(params: Record<string, unknown> | undefined): Record<string, unknown>
+        /** Normalize vendor form defaults before the shared schema validator. */
+        prepareResponse?(
+          response: AcpElicitationResponse,
+          params: Record<string, unknown> | undefined
+        ): AcpElicitationResponse
+        response(
+          response: Omit<AcpElicitationResponse, "requestId">,
+          params: Record<string, unknown> | undefined
+        ): unknown
+      }
+    >
+  >
   /** Match `dontAsk` allow-lists against the tool name instead of the generated title. */
   preApprovalMatchesToolName?: boolean
 }

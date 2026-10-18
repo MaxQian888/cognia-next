@@ -181,6 +181,7 @@ struct RuntimeStatus {
 /// Information about a running external agent process
 #[derive(Debug)]
 pub struct ExternalAgentProcess {
+    protected_siwc: bool,
     /// Process ID
     pub pid: Option<u32>,
     /// Configuration used to spawn
@@ -341,6 +342,13 @@ impl Default for ExternalAgentProcessManager {
     }
 }
 
+fn configure_siwc_environment(cmd: &mut Command) {
+    // Reuse the native runtime allowlist. Inherited OPENAI/CODEX credentials,
+    // shell startup hooks and proxy destinations cannot compete with SIWC.
+    cmd.env_clear()
+        .envs(crate::gateway_task::runtime_environment());
+}
+
 impl ExternalAgentProcessManager {
     /// Create a new process manager
     pub fn new() -> Self {
@@ -366,6 +374,8 @@ impl ExternalAgentProcessManager {
                 return Err(format!("Agent {} is already running", id));
             }
         }
+
+        scope_grok_credentials(&mut config);
 
         // A private state root (ADR-0216) is honoured by every route that
         // reaches this process table. The desktop sandbox wrapper normally
@@ -455,6 +465,10 @@ impl ExternalAgentProcessManager {
             None
         };
         let mut cmd = Command::new(&program);
+        let protected_siwc = config.env.contains_key("COGNIA_AGENT_SIWC_CAPABILITY");
+        if protected_siwc {
+            configure_siwc_environment(&mut cmd);
+        }
         if crate::sandbox::is_aider_invocation(&config.command, &config.args) {
             for (key, _) in std::env::vars_os() {
                 if key.to_string_lossy().starts_with("AIDER_") {
@@ -550,6 +564,7 @@ impl ExternalAgentProcessManager {
         }
 
         // Set working directory
+        config.env.remove("COGNIA_AGENT_SIWC_CAPABILITY");
         if let Some(cwd) = &config.cwd {
             cmd.current_dir(cwd);
         }
@@ -643,6 +658,7 @@ impl ExternalAgentProcessManager {
         // exits immediately is then still removed through the same supervised
         // lifecycle as a long-running child.
         let process = Arc::new(Mutex::new(ExternalAgentProcess {
+            protected_siwc,
             remote_origin: crate::spawn_authority::current_origin(),
             pid,
             config,
@@ -670,7 +686,6 @@ impl ExternalAgentProcessManager {
         let supervisor_process = Arc::downgrade(&process);
         let supervisor_processes = Arc::downgrade(&self.processes);
         tokio::spawn(async move {
-            let _task_files = task_files;
             let (code, signal) = tokio::select! {
                 status = child.wait() => match status {
                     Ok(status) => exit_info_from_status(status),
@@ -715,6 +730,9 @@ impl ExternalAgentProcessManager {
                 super::proc_group::kill_process_group(supervisor_pid);
             }
             drop(devin_config);
+            // Exit observers may immediately restart this task. Release its
+            // private files and lock before publishing that lifecycle barrier.
+            drop(task_files);
             supervisor_sink.exited(&supervisor_id, code, signal);
             let _ = exit_tx.send(true);
         });
@@ -735,6 +753,20 @@ impl ExternalAgentProcessManager {
             .await
             .ok_or(format!("Agent {} not found", id))?;
         let mut process = process.lock().await;
+        if process.protected_siwc {
+            return Err("SIWC processes require the account-bound SIWC command".into());
+        }
+        process.send(message).await
+    }
+
+    /// Native SIWC boundary has already checked owner and immutable routing.
+    /// The generic process plane cannot invoke this credential-bearing child.
+    pub async fn send_siwc(&self, id: &str, message: &str) -> Result<(), String> {
+        let process = self.get(id).await.ok_or("siwc_process_missing")?;
+        let mut process = process.lock().await;
+        if !process.protected_siwc {
+            return Err("siwc_process_mismatch".into());
+        }
         process.send(message).await
     }
 
@@ -831,6 +863,23 @@ impl ExternalAgentProcessManager {
     }
 }
 
+/// Private Grok state starts signed out unless this configuration supplies a key.
+/// Called before the sandbox/state-root wrappers consume the isolation request.
+/// An explicit empty value also opts out of the host credential.
+pub(crate) fn scope_grok_credentials(config: &mut ExternalAgentSpawnConfig) {
+    let grok = std::path::Path::new(&config.command)
+        .file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|name| name.eq_ignore_ascii_case("grok"));
+    let private = config
+        .env
+        .contains_key(crate::state_isolation::AGENT_STATE_KEY_ENV)
+        || config.env.get("COGNIA_BOT_ISOLATION").map(String::as_str) == Some("1");
+    if grok && private {
+        config.env.entry("XAI_API_KEY".into()).or_default();
+    }
+}
+
 /// Native Kimi accepts environment hooks for OAuth, identity and executable paths.
 /// Preserve only its reviewed model/runtime contract; Bot credentials are explicit.
 fn configure_kimi_environment(
@@ -852,6 +901,74 @@ fn configure_kimi_environment(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn siwc_child_has_no_generic_send_or_retained_capability() {
+        let cwd = crate::workspace_env_fixture("none");
+        let manager = ExternalAgentProcessManager::new();
+        let sink = Arc::new(CollectorSink::default());
+        let mut config = echo_config("siwc-owned-fixture");
+        config.cwd = Some(cwd.path().to_string_lossy().into_owned());
+        config.env.insert(
+            "COGNIA_AGENT_SIWC_CAPABILITY".into(),
+            "synthetic-local-capability".into(),
+        );
+        manager.spawn(config, sink.clone()).await.unwrap();
+        assert!(manager
+            .send("siwc-owned-fixture", "forbidden")
+            .await
+            .unwrap_err()
+            .contains("account-bound"));
+        let info = manager.get_info("siwc-owned-fixture").await.unwrap();
+        assert!(!info.to_string().contains("synthetic-local-capability"));
+        manager
+            .send_siwc("siwc-owned-fixture", "native-owner")
+            .await
+            .unwrap();
+        for _ in 0..100 {
+            if sink
+                .stdout
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|line| line == "native-owner")
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let observed = sink
+            .stdout
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|line| line == "native-owner");
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            manager.kill("siwc-owned-fixture"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(observed);
+    }
+    #[test]
+    fn siwc_environment_clears_inherited_credentials_and_keeps_runtime_only() {
+        let mut command = tokio::process::Command::new("codex");
+        command
+            .env("OPENAI_API_KEY", "synthetic")
+            .env("CODEX_AUTH_TOKEN", "synthetic")
+            .env("NODE_OPTIONS", "synthetic");
+        super::configure_siwc_environment(&mut command);
+        let env: std::collections::HashMap<_, _> = command
+            .as_std()
+            .get_envs()
+            .filter_map(|(k, v)| v.map(|v| (k.to_owned(), v.to_owned())))
+            .collect();
+        for key in ["OPENAI_API_KEY", "CODEX_AUTH_TOKEN", "NODE_OPTIONS"] {
+            assert!(!env.contains_key(std::ffi::OsStr::new(key)));
+        }
+    }
     #[cfg(unix)]
     #[tokio::test]
     async fn workspace_env_is_last_in_inherited_and_dsh_processes() {
@@ -933,6 +1050,40 @@ mod tests {
             Some(std::ffi::OsStr::new("41000"))
         );
         assert_eq!(env.len(), 3);
+    }
+
+    #[test]
+    fn grok_private_credentials_mask_ambient_keys_but_preserve_explicit_values() {
+        for isolation in [
+            None,
+            Some(crate::state_isolation::AGENT_STATE_KEY_ENV),
+            Some("COGNIA_BOT_ISOLATION"),
+        ] {
+            for explicit in [None, Some("explicit-fixture"), Some("")] {
+                let mut config = echo_config("grok-env");
+                config.command = "grok".into();
+                if let Some(key) = isolation {
+                    config.env.insert(key.into(), "1".into());
+                }
+                if let Some(value) = explicit {
+                    config.env.insert("XAI_API_KEY".into(), value.into());
+                }
+                scope_grok_credentials(&mut config);
+                let mut command = Command::new("fixture");
+                command.env("XAI_API_KEY", "ambient-fixture");
+                command.envs(&config.env);
+                let env: std::collections::BTreeMap<_, _> = command.as_std().get_envs().collect();
+                let expected = explicit.unwrap_or(if isolation.is_some() {
+                    ""
+                } else {
+                    "ambient-fixture"
+                });
+                assert_eq!(
+                    env[std::ffi::OsStr::new("XAI_API_KEY")],
+                    Some(std::ffi::OsStr::new(expected))
+                );
+            }
+        }
     }
 
     #[test]
@@ -1525,6 +1676,104 @@ mod tests {
         );
         let exit = sink.exited.lock().unwrap().clone().unwrap();
         assert_eq!(exit.1.as_deref(), Some("killed"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn gateway_task_cleanup_precedes_exit_notification() {
+        struct GatewayExitSink {
+            home: std::path::PathBuf,
+            root: std::path::PathBuf,
+            environment: HashMap<String, String>,
+            observation: StdMutex<Option<(bool, bool, Result<(), String>)>>,
+        }
+        impl ExternalAgentEventSink for GatewayExitSink {
+            fn stdout_line(&self, _: &str, _: &str) {}
+            fn stderr_line(&self, _: &str, _: &str) {}
+            fn exited(&self, _: &str, _: Option<i32>, _: Option<String>) {
+                let config_removed = !self.root.join("pi/models.json").exists();
+                let history_retained = self.root.join("pi/session.jsonl").exists();
+                let mut environment = self.environment.clone();
+                let reprepare =
+                    crate::gateway_task::prepare(&mut environment, &self.home).map(drop);
+                *self.observation.lock().unwrap() =
+                    Some((config_removed, history_retained, reprepare));
+            }
+        }
+
+        let home = std::path::PathBuf::from(
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .unwrap(),
+        );
+        for kill in [false, true] {
+            let task = format!(
+                "process-cleanup-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            );
+            let environment = HashMap::from([(
+                crate::gateway_task::PAYLOAD_ENV.into(),
+                serde_json::json!({
+                    "taskId": task,
+                    "binding": {"providerId": "gateway", "modelId": "fixture"},
+                    "runtime": "pi",
+                    "files": {"pi/models.json": "{}"}
+                })
+                .to_string(),
+            )]);
+            let root = crate::gateway_task::task_home(&environment, &home)
+                .unwrap()
+                .unwrap();
+            let sink = Arc::new(GatewayExitSink {
+                home: home.clone(),
+                root: root.clone(),
+                environment: environment.clone(),
+                observation: StdMutex::new(None),
+            });
+            let manager = ExternalAgentProcessManager::new();
+            let mut config = echo_config(&task);
+            config.command = if kill { "/bin/cat" } else { "/bin/sh" }.into();
+            if !kill {
+                config.args = vec!["-c".into(), "read line".into()];
+            }
+            config.env = environment.clone();
+            manager.spawn(config, sink.clone()).await.unwrap();
+            assert!(root.join("pi/models.json").exists());
+            std::fs::write(root.join("pi/session.jsonl"), "retained conversation").unwrap();
+            assert!(crate::gateway_task::prepare(&mut environment.clone(), &home).is_err());
+            if kill {
+                manager.kill(&task).await.unwrap();
+            } else {
+                manager.send(&task, "finish").await.unwrap();
+                tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                    while sink.observation.lock().unwrap().is_none() {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .unwrap();
+            }
+            let (config_removed, history_retained, reprepare) =
+                sink.observation.lock().unwrap().take().unwrap();
+            crate::gateway_task::delete_task(&task, &home).unwrap();
+            std::fs::remove_file(root.parent().unwrap().join(".locks").join(&task)).unwrap();
+            assert!(
+                config_removed,
+                "exit event preceded transient configuration cleanup"
+            );
+            assert!(
+                history_retained,
+                "exit cleanup removed retained task history"
+            );
+            assert!(
+                reprepare.is_ok(),
+                "exit event preceded task lock release: {reprepare:?}"
+            );
+        }
     }
 
     #[cfg(unix)]

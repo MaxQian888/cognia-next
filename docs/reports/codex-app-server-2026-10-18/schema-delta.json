@@ -1,0 +1,131 @@
+{
+  "date": "2026-10-18",
+  "platform": "darwin-arm64",
+  "baseline": "0.159.2",
+  "candidate": "0.163.0",
+  "artifact": {
+    "version": "0.163.0",
+    "integrity": "sha512-i7Dzk2a5aGmuGM9aNZgaUVTojZ/4bc5lRfosz++Y7X2BGhDkz+cySgbD+NYS1pOxfm0VEbLi9PZ3pAulI4kchw==",
+    "sha256": "1193ff4ce72387a5d6c34820b54a9dc57d007c67a958e8acb4715924facd3c31",
+    "tarball": "https://registry.npmjs.org/@openai/codex/-/codex-0.163.0-darwin-arm64.tgz",
+    "binarySha256": "8813367285524ac798dd96d1b071aea30d58708c7226fd236cd275cf1cfdee31"
+  },
+  "schemaBundleSha256": {
+    "0.159.2-stable": "8683f6fd9fbb994fa2bfb704ab5b02c9890238fa507a4c0ff33ff45884cd0a2e",
+    "0.159.2-experimental": "7243ba241962af92ca60581f1a81808ebda4212a800f8b205f54703bcfd508c5",
+    "0.163.0-stable": "408e09849d5d4931992a4227a7f3eb80b15d24901f84aca0562e816634651a82",
+    "0.163.0-experimental": "43e8c1495557ca91e33a63bbfae36c311c206253afae2974c979dbdf5d940c71"
+  },
+  "surfaces": {
+    "ClientRequest": {
+      "beforeMethods": 167,
+      "afterMethods": 172,
+      "addedMethods": [
+        "thread/prediction/request",
+        "thread/attachmentOwner/list",
+        "thread/readState/update",
+        "thread/items/read",
+        "account/bedrock/checkGovCloudRequirements"
+      ],
+      "removedMethods": [],
+      "changedProperties": {
+        "EnvironmentAddParams": {
+          "added": ["skills", "websocketRequestId"],
+          "removed": []
+        },
+        "ThreadForkParams": {
+          "added": ["experimentalPredictionMode"],
+          "removed": []
+        },
+        "ThreadGoalClearParams": {
+          "added": ["origin"],
+          "removed": []
+        },
+        "ThreadGoalSetParams": {
+          "added": ["origin"],
+          "removed": []
+        },
+        "ThreadListParams": {
+          "added": ["excludedThreadIds"],
+          "removed": []
+        },
+        "TurnStartParams": {
+          "added": ["parentTurnId", "rootTurnId"],
+          "removed": []
+        },
+        "TurnToolOutput": {
+          "added": ["retain"],
+          "removed": []
+        }
+      },
+      "changedRequired": {}
+    },
+    "ServerRequest": {
+      "beforeMethods": 11,
+      "afterMethods": 11,
+      "addedMethods": [],
+      "removedMethods": [],
+      "changedProperties": {},
+      "changedRequired": {}
+    },
+    "ServerNotification": {
+      "beforeMethods": 83,
+      "afterMethods": 85,
+      "addedMethods": ["thread/readState/changed", "thread/prediction/updated"],
+      "removedMethods": [],
+      "changedProperties": {
+        "McpServerOauthLoginCompletedNotification": {
+          "added": ["loginId"],
+          "removed": []
+        },
+        "MisalignmentErrorDetails": {
+          "added": ["reviewTarget"],
+          "removed": []
+        },
+        "Turn": {
+          "added": ["rootTurnId"],
+          "removed": []
+        }
+      },
+      "changedRequired": {}
+    }
+  },
+  "messagePhase": {
+    "before": {
+      "description": "Classifies an assistant message as interim commentary or final answer text.\n\nProviders do not emit this consistently, so callers must treat `None` as \"phase unknown\" and keep compatibility behavior for legacy models.",
+      "oneOf": [
+        {
+          "description": "Mid-turn assistant text (for example preamble/progress narration).\n\nAdditional tool calls or assistant output may follow before turn completion.",
+          "enum": ["commentary"],
+          "type": "string"
+        },
+        {
+          "description": "The assistant's terminal answer text for the current turn.",
+          "enum": ["final_answer"],
+          "type": "string"
+        }
+      ]
+    },
+    "after": {
+      "description": "Classifies assistant text as commentary, a partial answer, or a terminal answer.\n\nProviders do not emit this consistently, so callers must treat `None` as \"phase unknown\" and keep compatibility behavior for legacy models.",
+      "oneOf": [
+        {
+          "description": "Mid-turn assistant text (for example preamble/progress narration).\n\nAdditional tool calls or assistant output may follow before turn completion.",
+          "enum": ["commentary"],
+          "type": "string"
+        },
+        {
+          "description": "Stable answer text that may be followed by more assistant output or tools.",
+          "enum": ["partial_answer"],
+          "type": "string"
+        },
+        {
+          "description": "The assistant's declared terminal answer text for the current turn.",
+          "enum": ["final_answer"],
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "scope": "Structural comparison only: method names, definition property names and required lists. Native tests validate emitted ClientRequest against the generated experimental schema. This does not prove every response, enum, runtime behavior, auth path or platform is compatible."
+}

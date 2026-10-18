@@ -130,6 +130,13 @@ const CHANNEL = {
 const BINARY_ALLOWLIST: ReadonlySet<string> = new Set(EXTERNAL_AGENT_BINARY_ALLOWLIST)
 const NPX_ALLOWLIST: ReadonlySet<string> = new Set(EXTERNAL_AGENT_NPX_ALLOWLIST)
 const CONFIG_ENV_KEYS = new Set([
+  "XAI_API_KEY",
+  "GROK_HOME",
+  "GROK_DISABLE_AUTOUPDATER",
+  "GROK_CHANGELOG_OFFLINE",
+  "GROK_TELEMETRY_ENABLED",
+  "GROK_TELEMETRY_TRACE_UPLOAD",
+  "GROK_FEEDBACK_ENABLED",
   "MINIMAX_DATA_DIR",
   "MAVIS_DATA_DIR",
   "MCODE_PROVIDER_API_KEY",
@@ -415,7 +422,8 @@ export function buildExternalAgentChildEnv(
   managedDsh = false,
   aider = false,
   kimi = false,
-  pi = false
+  pi = false,
+  isolateGrokCredentials = false
 ): NodeJS.ProcessEnv {
   if (managedDsh) {
     const inherited = new Set([
@@ -460,6 +468,7 @@ export function buildExternalAgentChildEnv(
       key === "COGNIA_AGENT_CODEX_WRITABLE_CEILING"
     )
       continue
+    if (isolateGrokCredentials && key === "XAI_API_KEY") continue
     if (!pi && isPiPackageOnlyKey(key)) continue
     if (aider && key.startsWith("AIDER_")) continue
     if (kimi && overrides?.COGNIA_BOT_ISOLATION === "1" && key.startsWith("KIMI_")) continue
@@ -683,7 +692,9 @@ export class NodeExternalAgentBackend {
       isDshLauncherInvocation(config.args ?? [], this.workspacesRoot),
       config.command === "aider",
       config.command === "kimi",
-      baseCommand(config.command) === "pi"
+      baseCommand(config.command) === "pi",
+      baseCommand(config.command) === "grok" &&
+        (stateIsolation !== null || config.env?.COGNIA_BOT_ISOLATION === "1")
     )
     // The isolated homes are host-resolved, so they are applied after the
     // user-input filter (which drops e.g. XDG_DATA_HOME from the request).

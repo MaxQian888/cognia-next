@@ -366,6 +366,12 @@ export interface AcpClientDeps {
   toolPreApproval: AgentToolPreApproval
   /** Every prompt, injected context and outbound frame passes it. */
   outboundGate: AgentOutboundGate
+  /** Host verifies an active, agent-owned local MCP transport credential. */
+  isTrustedLocalMcpCredential?: (candidate: {
+    agentId: string
+    server: { type: string; name: string; url: string }
+    header: { name: string; value: string }
+  }) => boolean
   /**
    * The host-owned MCP gateway for preview ACP-channel MCP servers, read live.
    * `undefined` disables the feature immediately: the client neither
@@ -749,6 +755,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private readonly approvalPolicy: AgentApprovalPolicy
   private readonly toolPreApproval: AgentToolPreApproval
   private readonly outboundGate: AgentOutboundGate
+  private readonly isTrustedLocalMcpCredential: AcpClientDeps["isTrustedLocalMcpCredential"]
   private readonly dynamicMcpHost: () => AcpDynamicMcpHostController | undefined
   private readonly log: AgentLogger
   private readonly vendorProfiles: readonly AcpVendorProfile[]
@@ -766,6 +773,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this.approvalPolicy = deps.approvalPolicy
     this.toolPreApproval = deps.toolPreApproval
     this.outboundGate = deps.outboundGate
+    this.isTrustedLocalMcpCredential = deps.isTrustedLocalMcpCredential
     this.dynamicMcpHost = deps.dynamicMcpHost
     this.log = deps.logger
     this.vendorProfiles = deps.vendorProfiles ?? ACP_VENDOR_PROFILES
@@ -861,6 +869,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     string,
     {
       request: AcpElicitationRequest
+      prepareResponse?: (response: AcpElicitationResponse) => AcpElicitationResponse
       resolve: (response: Omit<AcpElicitationResponse, "requestId">) => void
       reject: (error: Error) => void
       timeout: ReturnType<typeof setTimeout>
@@ -2431,7 +2440,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     if (!pending) return
     let validated: Omit<AcpElicitationResponse, "requestId">
     try {
-      validated = validateAcpElicitationResponse(pending.request, response)
+      validated = validateAcpElicitationResponse(
+        pending.request,
+        pending.prepareResponse ? pending.prepareResponse(response) : response
+      )
     } catch (error) {
       // A response that fails schema validation must still SETTLE the wire
       // request — rethrowing leaves it pending until the 5-minute timeout,
@@ -2534,7 +2546,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         // turn total; Devin's `cognition.ai/*` usage meta streamed during the
         // turn is the fallback. Agents reporting neither keep the honest
         // "unknown" — no fabricated token total.
-        const tokenUsage = this.resolveTurnTokenUsage(sessionId, result.usage)
+        const promptUsage = this.vendor?.promptUsage
+        const tokenUsage = promptUsage
+          ? promptUsage(result)
+          : this.resolveTurnTokenUsage(sessionId, result.usage)
         // The usage figure replaces the UI's usage entry wholesale, so the
         // occupancy snapshot the turn's usage_updates recorded rides along —
         // otherwise the context gauge would blank between turns.
@@ -2549,7 +2564,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
                 // cost delta the usage meta produced wins over it.
                 ...(tokenUsage.providerCost
                   ? { providerCost: tokenUsage.providerCost }
-                  : occupancy.cost
+                  : !promptUsage && occupancy.cost
                     ? {
                         providerCost: {
                           amount: occupancy.cost.amount,
@@ -3552,6 +3567,55 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this.peer?.sendNotification(method, params)
   }
 
+  /** Credentials stay on the wire; only verified transport values leave the gate's view. */
+  private outboundGatePayload(payload: unknown): unknown {
+    const verify = this.isTrustedLocalMcpCredential
+    const agentId = this._config?.id
+    if (!verify || !agentId || this._config?.transport !== "stdio") return payload
+    const frame = payload as Record<string, unknown>
+    if (
+      !["session/new", "session/load", "session/resume", "session/fork"].includes(
+        frame.method as string
+      ) ||
+      !frame.params ||
+      typeof frame.params !== "object" ||
+      Array.isArray(frame.params)
+    )
+      return payload
+    const params = frame.params as Record<string, unknown>
+    if (!Array.isArray(params.mcpServers)) return payload
+    const mcpServers = params.mcpServers.map((value: unknown) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return value
+      const server = value as Record<string, unknown>
+      if (
+        server.type !== "http" ||
+        typeof server.name !== "string" ||
+        typeof server.url !== "string" ||
+        !Array.isArray(server.headers)
+      )
+        return value
+      const descriptor = { type: server.type, name: server.name, url: server.url }
+      const headers = server.headers.map((value: unknown) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return value
+        const header = value as Record<string, unknown>
+        if (
+          typeof header.name !== "string" ||
+          header.name.toLowerCase() !== "authorization" ||
+          typeof header.value !== "string" ||
+          !verify({
+            agentId,
+            server: descriptor,
+            header: { name: header.name, value: header.value },
+          })
+        )
+          return value
+        return { ...header, value: "[trusted local MCP credential]" }
+      })
+      return { ...server, headers }
+    })
+    return { ...frame, params: { ...params, mcpServers } }
+  }
+
   /**
    * Send a message to the agent
    */
@@ -3563,7 +3627,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     } catch {
       throw new Error("ACP outbound payload is not valid JSON")
     }
-    if (!this.outboundGate(outboundPayload)) {
+    if (!this.outboundGate(this.outboundGatePayload(outboundPayload))) {
       throw new Error("ACP outbound payload blocked by the PII gate")
     }
     if (this._config?.transport === "stdio" && this.processId && this.processHost.available) {
@@ -3708,10 +3772,20 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       default:
         if (method.startsWith("_")) {
           const extensionHandler = this.extensionHandlers.get(method)
-          if (!extensionHandler) {
-            throw new JsonRpcMethodError(-32601, `Method not found: ${method}`)
+          if (extensionHandler) return extensionHandler(params)
+          const elicitation = this.vendor?.elicitationExtensions?.[method]
+          if (elicitation) {
+            const response = await this.handleElicitationRequest(
+              requestId,
+              elicitation.request(params),
+              signal,
+              elicitation.prepareResponse
+                ? (response) => elicitation.prepareResponse!(response, params)
+                : undefined
+            )
+            return elicitation.response(response, params)
           }
-          return extensionHandler(params)
+          throw new JsonRpcMethodError(-32601, `Method not found: ${method}`)
         }
         throw new JsonRpcMethodError(-32601, `Method not found: ${method}`)
     }
@@ -3800,8 +3874,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private async handleElicitationRequest(
     requestId: number | string,
     params: Record<string, unknown> | undefined,
-    signal: AbortSignal
+    signal: AbortSignal,
+    prepareResponse?: (response: AcpElicitationResponse) => AcpElicitationResponse
   ): Promise<Omit<AcpElicitationResponse, "requestId">> {
+    if (signal.aborted) throw new JsonRpcMethodError(-32800, "Request cancelled")
     const normalized = normalizeAcpElicitationRequest(requestId, params)
     if (!normalized.ok) {
       throw new JsonRpcMethodError(-32602, `Invalid elicitation request: ${normalized.reason}`)
@@ -3817,24 +3893,34 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     return new Promise((resolve, reject) => {
       const id = normalized.request.id
+      const onAbort = () => {
+        cleanup()
+        reject(new JsonRpcMethodError(-32800, "Request cancelled"))
+      }
       const cleanup = () => {
         const pending = this.pendingElicitations.get(id)
         if (pending) clearTimeout(pending.timeout)
         this.pendingElicitations.delete(id)
+        signal.removeEventListener("abort", onAbort)
       }
       const timeout = setTimeout(() => {
         cleanup()
         resolve({ action: "cancel" })
       }, USER_DECISION_TIMEOUT_MS)
-      this.pendingElicitations.set(id, { request: normalized.request, resolve, reject, timeout })
-      signal.addEventListener(
-        "abort",
-        () => {
+      this.pendingElicitations.set(id, {
+        request: normalized.request,
+        prepareResponse,
+        resolve: (response) => {
           cleanup()
-          reject(new JsonRpcMethodError(-32800, "Request cancelled"))
+          resolve(response)
         },
-        { once: true }
-      )
+        reject: (error) => {
+          cleanup()
+          reject(error)
+        },
+        timeout,
+      })
+      signal.addEventListener("abort", onAbort, { once: true })
       this.emitEvent({
         type: "elicitation_request",
         sessionId: normalized.request.sessionId,

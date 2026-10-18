@@ -18,6 +18,20 @@ const base: CapabilityManifestFile = {
 }
 
 describe("mergeIntegrationCapabilityRows", () => {
+  it("records new portable capabilities as unknown until an integration supplies evidence", () => {
+    const merged = mergeIntegrationCapabilityRows(base, [])
+    for (const id of [
+      "extensions.dynamic",
+      "tools.permission-policy",
+      "subagents.context-fork",
+      "subagents.auto-compaction",
+    ]) {
+      expect(merged.capabilityIds).toContain(id)
+      expect(merged.protocols.a.capabilities[id]).toEqual({ level: "unknown", evidence: "none" })
+    }
+    expect(merged.protocols.a.capabilities.streaming).toEqual(cell)
+    expect(base.protocols.a.capabilities).toEqual({ streaming: cell })
+  })
   it("leaves the committed manifest unchanged: every package row matches its manifest", () => {
     expect(mergeIntegrationCapabilityRows(manifest, INTEGRATION_CAPABILITIES)).toEqual(manifest)
   })

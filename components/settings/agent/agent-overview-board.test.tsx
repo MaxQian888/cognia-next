@@ -88,6 +88,28 @@ function renderBoard(over: Partial<Parameters<typeof AgentOverviewBoard>[0]> = {
 }
 
 describe("AgentOverviewBoard", () => {
+  it.each(["Codex (app-server)", "Work assistant"])(
+    "shows the Codex icon for %s without preset metadata",
+    (name) => {
+      renderBoard({
+        entries: [
+          {
+            agent: {
+              ...agent("codex", name),
+              protocol: "codex-app-server",
+              process: { command: "codex", args: ["app-server"] },
+            },
+            readiness: readiness({ state: "off", nextAction: "connect" }),
+          },
+        ],
+      })
+      expect(screen.getByTestId("overview-open-codex").querySelector("img")).toHaveAttribute(
+        "src",
+        "/icons/lobe/codex-color.svg"
+      )
+    }
+  )
+
   it("counts status groups without rendering a progress bar or the whole fleet", () => {
     renderBoard()
     expect(screen.getByTestId("overview-filter-connected")).toHaveTextContent("1")

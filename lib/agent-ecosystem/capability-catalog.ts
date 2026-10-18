@@ -21,6 +21,7 @@ import type {
 import { DSH_CAPABILITIES } from "@cognia/agent-dsh/manifest"
 import { OPENCODE_CAPABILITIES } from "@cognia/agent-opencode/manifest"
 import { PI_CAPABILITIES } from "@cognia/agent-pi/manifest"
+import { AGENT_CAPABILITY_IDS } from "@cognia/agent-contracts/capability-ids"
 
 /** Every package's capability contribution. */
 export const INTEGRATION_CAPABILITIES: readonly AgentCapabilityContribution[] = [
@@ -81,6 +82,20 @@ export function mergeIntegrationCapabilityRows(
     ...manifest,
     protocols: mergeSection(manifest.protocols, protocols),
     presetRefinements: mergeSection(manifest.presetRefinements, refinements),
+  }
+  // New portable capabilities carry no evidence for an integration until its
+  // adapter declares support. Complete rows must survive vocabulary growth.
+  const capabilityIds = [
+    ...new Set([
+      ...(Array.isArray(manifest.capabilityIds) ? (manifest.capabilityIds as string[]) : []),
+      ...AGENT_CAPABILITY_IDS,
+    ]),
+  ]
+  merged.capabilityIds = capabilityIds
+  for (const row of Object.values(merged.protocols)) {
+    for (const id of capabilityIds) {
+      row.capabilities[id] ??= { level: "unknown", evidence: "none" }
+    }
   }
   for (const [preset, refinement] of refinements) {
     if (!(refinement.protocol in merged.protocols)) {

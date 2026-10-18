@@ -2137,6 +2137,26 @@ describe("Session extensions: list/fork/resume", () => {
 })
 
 describe("execute — model selection", () => {
+  it.each([undefined, "explicit-model"])(
+    "uses the SIWC configuration model unless execution explicitly selects %p",
+    async (requested) => {
+      const m = freshManager()
+      protocolAdapterRegistry.register("codex-siwc-app-server", () => currentMock as never)
+      await m.addAgent(
+        buildBaseConfig({
+          protocol: "codex-siwc-app-server",
+          metadata: {
+            siwc: { localAccountId: "local-a", connectionId: "registration-a" },
+            selectedModel: "configured-model",
+          },
+        })
+      )
+      const createSession = jest.spyOn(currentMock, "createSession")
+      await m.execute("agent-1", "hi", { ...(requested ? { model: requested } : {}) })
+      const opts = createSession.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> }
+      expect(opts.metadata?.selectedModel).toBe(requested ?? "configured-model")
+    }
+  )
   // Regression: `ExternalAgentExecutionOptions` had no `model`, so callers that
   // passed one (the plugin subagent dispatcher did) were silently dropped —
   // spread properties bypass TypeScript's excess-property check, so it type-

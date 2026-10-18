@@ -2,6 +2,7 @@ import type { AcpConfigOption, AcpSessionModelState } from "@/types/agent/extern
 import { gatewaySessionId } from "@/lib/ai/agent/external/config/gateway-task"
 
 import {
+  assertExternalRuntimeFeatureSupport,
   externalAgentIdFromProviderId,
   externalAgentProviderId,
   findModelConfigOption,
@@ -22,6 +23,50 @@ import {
   findThinkingConfigOption,
   resolveExternalAgentThinking,
 } from "./session-models"
+
+describe("external runtime feature boundary", () => {
+  it.each([
+    [{ runtimeExtensions: [{ kind: "directory", path: "/trusted/plugin" }] }, "extensions.dynamic"],
+    [
+      { toolPermissionRules: [{ tool: "mcp__test__read", decision: "ask" }] },
+      "tools.permission-policy",
+    ],
+    [{ subagentRuntime: { contextMode: "fork" } }, "subagents.context-fork"],
+    [
+      { agents: { child: { contextPolicy: { compactAtTokens: 1000 } } } },
+      "subagents.auto-compaction",
+    ],
+  ])(
+    "rejects unimplemented feature %j even when a manifest claims support",
+    async (request, capability) => {
+      await expect(assertExternalRuntimeFeatureSupport(request as never)).rejects.toMatchObject({
+        name: "AgentCapabilityError",
+        capability,
+      })
+    }
+  )
+
+  it.each([
+    { runtimeExtensions: null },
+    { toolPermissionRules: [{ tool: "read", decision: "allow" }] },
+    { subagentRuntime: { contextMode: "inherit" } },
+    { agents: { child: null } },
+  ])("rejects malformed options %j", async (request) => {
+    await expect(assertExternalRuntimeFeatureSupport(request as never)).rejects.toThrow("invalid_")
+  })
+
+  it("retains the empty and isolated legacy behavior", async () => {
+    await expect(assertExternalRuntimeFeatureSupport({})).resolves.toBeUndefined()
+    await expect(
+      assertExternalRuntimeFeatureSupport({
+        runtimeExtensions: [],
+        toolPermissionRules: [],
+        subagentRuntime: { contextMode: "isolated" },
+        agents: { child: { contextPolicy: {} } },
+      })
+    ).resolves.toBeUndefined()
+  })
+})
 
 it("binds a persisted agent-model marker to one agent", () => {
   const marker = externalAgentProviderId("pi/one")

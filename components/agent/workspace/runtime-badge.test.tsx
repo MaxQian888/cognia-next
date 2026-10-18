@@ -190,3 +190,10 @@ it("renders MiniMax's localized runtime identity and brand asset", () => {
   expect(badge).toHaveAttribute("title", "MiniMax Code")
   expect(badge.querySelector("img")).toHaveAttribute("src", "/icons/lobe/minimax-color.svg")
 })
+
+it("renders Grok Build's localized teammate label and existing xAI icon", () => {
+  renderBadge("grok")
+  const badge = screen.getByTestId("runtime-badge-grok")
+  expect(badge).toHaveAttribute("title", "Grok Build")
+  expect(badge.querySelector("img")).toHaveAttribute("src", "/icons/lobe/xai.svg")
+})

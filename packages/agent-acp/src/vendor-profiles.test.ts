@@ -9,6 +9,7 @@ describe("ACP_VENDOR_PROFILES", () => {
       "cline",
       "qoder",
       "goose",
+      "grok",
       "devin",
       "opencode-acp",
     ])

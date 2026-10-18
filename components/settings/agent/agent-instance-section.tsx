@@ -36,6 +36,7 @@ import {
   sharedStateSiblings,
 } from "@/lib/ai/agent/external/config/instance-family"
 import { isFromPreset } from "@/lib/ai/agent/external/config/presets"
+import { findRuntimeForConfig } from "@/lib/ai/agent/external/config/install-catalog"
 import {
   getExternalAgentStateRootInfo,
   type ExternalAgentStateRootInfo,
@@ -233,7 +234,11 @@ export function AgentInstanceSection({
                     data-testid={`instance-sibling-${sibling.id}`}
                   >
                     <BrandIcon
-                      id={isFromPreset(sibling) ?? sibling.name}
+                      id={
+                        isFromPreset(sibling) ??
+                        findRuntimeForConfig(sibling)?.runtimeId ??
+                        sibling.name
+                      }
                       label={sibling.name}
                       size={18}
                     />

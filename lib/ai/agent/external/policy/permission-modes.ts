@@ -71,6 +71,7 @@ export const PROTOCOL_PERMISSION_MODE_SUPPORT: Record<
   // clamp to plan, never to automatic confirmations.
   "aider-cli": ["bypassPermissions", "plan"],
   "codex-app-server": ["default", "acceptEdits", "bypassPermissions", "plan"],
+  "codex-siwc-app-server": ["default", "acceptEdits", "bypassPermissions", "plan"],
   opencode: ["default", "acceptEdits", "bypassPermissions", "plan"],
   "opencode-v2": ["default", "acceptEdits", "bypassPermissions", "plan"],
   a2a: ["default"],

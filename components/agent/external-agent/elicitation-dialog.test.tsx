@@ -39,6 +39,44 @@ function piRequest(
 }
 
 describe("ExternalAgentElicitationDialog", () => {
+  it("requires a choice or notes for a runtime question and submits a freeform answer", () => {
+    const onRespond = jest.fn()
+    const request: AcpElicitationRequest = {
+      id: "grok-question",
+      mode: "form",
+      message: "Which environment?",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          q0: { type: "string", title: "Environment", enum: ["Local", "Cloud"] },
+          q0_notes: { type: "string", format: "multiline" },
+        },
+      },
+      _meta: {
+        userInput: {
+          questions: [{ id: "q0", notesField: "q0_notes", question: "Environment", options: [] }],
+        },
+      },
+      raw: {},
+    }
+    render(wrap(<ExternalAgentElicitationDialog request={request} onRespond={onRespond} />))
+    const submit = screen.getByRole("button", { name: en.externalAgent.elicitation.submit })
+    expect(submit).toBeDisabled()
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Other response or notes: Environment" }),
+      {
+        target: { value: "My own environment" },
+      }
+    )
+    expect(submit).toBeEnabled()
+    fireEvent.click(submit)
+    expect(onRespond).toHaveBeenCalledWith({
+      requestId: request.id,
+      action: "accept",
+      content: { q0: "", q0_notes: "My own environment" },
+    })
+  })
+
   it("renders nothing when no question is pending", () => {
     const { container } = render(
       wrap(<ExternalAgentElicitationDialog request={null} onRespond={jest.fn()} />)

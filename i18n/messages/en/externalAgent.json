@@ -66,7 +66,8 @@
       "userDeclared": "you declared this for this agent",
       "cogniaExtensionBridge": "provided by the bundled Cognia extension",
       "isolatedLocalService": "provided by a private local service for this conversation",
-      "aiderCliBridge": "provided by Cognia’s official Aider CLI adapter and per-session history"
+      "aiderCliBridge": "provided by Cognia’s official Aider CLI adapter and per-session history",
+      "profilePluginNotComposed": "the certified profile does not compose this native plugin"
     },
     "adapterMethod": {
       "steerTurn": "Cognia's adapter implements steerTurn",
@@ -103,7 +104,8 @@
     "punycodeWarning": "This address uses characters that can imitate another domain. Check it before continuing.",
     "submit": "Submit",
     "title": "The agent needs an answer",
-    "responseFailed": "Your answer could not be delivered. It has been kept here; try again."
+    "responseFailed": "Your answer could not be delivered. It has been kept here; try again.",
+    "otherResponse": "Other response or notes: {question}"
   },
   "enableInSettings": "Enable external agents in settings",
   "errors": {
@@ -339,7 +341,7 @@
     "aiderEnvVarHint": "DeepSeek example: args --model deepseek/deepseek-flash and environment variable DEEPSEEK_API_KEY. Use your provider’s Aider model ID and key for other services.",
     "qoderSetupHint": "Install with curl -fsSL https://qoder.com/install | bash, then run qoder login or supply QODER_PERSONAL_ACCESS_TOKEN here. Cognia launches native ACP with explicit default permissions and per-session MCP. Background auto-update is disabled for this process; update separately with qoder update. Removing an agent keeps your system installation and Qoder data. Cognia supports local Qoder hosting on macOS and Linux.",
     "qoderEnvVarHint": "Use an existing Qoder CLI login or QODER_PERSONAL_ACCESS_TOKEN. QODER_CONFIG_DIR selects a separate configuration directory. A provider API key alone does not replace Qoder authentication; BYOK models depend on your account.",
-    "kimiSetupHint": "Install npm install -g @moonshot-ai/kimi-code@2.1.1 with Node.js 22.19 or newer, then run kimi login for your Kimi Code subscription. Cognia launches kimi acp and reuses the CLI login. KIMI_CODE_HOME selects separate state (default ~/.kimi-code). Update separately with kimi upgrade. Removing this configuration preserves the system installation and Kimi data. Use the current Node CLI, not the archived Python kimi-cli.",
+    "kimiSetupHint": "Install npm install -g @moonshot-ai/kimi-code@2.2.0 with Node.js 22.19 or newer, then run kimi login for your Kimi Code subscription. Cognia launches kimi acp and reuses the CLI login. KIMI_CODE_HOME selects separate state (default ~/.kimi-code). Update separately with kimi upgrade. Removing this configuration preserves the system installation and Kimi data. Use the current Node CLI, not the archived Python kimi-cli.",
     "kimiEnvVarHint": "Subscription login needs no API key. Optional KIMI_CODE_HOME selects state. For a custom provider use KIMI_MODEL_NAME, KIMI_MODEL_PROVIDER_TYPE, KIMI_MODEL_BASE_URL and KIMI_MODEL_API_KEY; these replace subscription model selection.",
     "deleteNativeSession": "Delete native history",
     "deleteNativeSessionConfirm": "Permanently delete this session from the agent’s stored history? This cannot be undone. Project files are kept.",
@@ -356,7 +358,9 @@
     "untitledSession": "Untitled session",
     "archivedSession": "Archived",
     "updatedAt": "Updated {time}",
-    "currentSession": "Current session"
+    "currentSession": "Current session",
+    "grokSetupHint": "Install @xai-official/grok@1.0.62 and authenticate with Grok Build, or provide XAI_API_KEY. Cognia starts a separate Grok process with automatic updates disabled. An isolated configuration has its own login and settings. Update the CLI outside Cognia sessions; removing this configuration preserves the system installation. This release does not support session forks, image input or audio input.",
+    "grokEnvVarHint": "Use your Grok Build login or XAI_API_KEY. Optional GROK_HOME selects the shared state directory (default ~/.grok). Isolated configurations use a separate state directory."
   },
   "placement": {
     "fallback": "Not sandboxed",
@@ -526,12 +530,12 @@
     "deepseekHarness": {
       "approvalNotice": "Native SDK tools cannot request approval during a turn, so their authority is fixed at startup. Cognia tools follow the host permission policy.",
       "cancelNotice": "Cancelling a turn closes the runtime: this transport has no mid-turn cancel.",
-      "capabilities": "Capabilities",
+      "capabilities": "Transport observations and controls",
       "capabilityApproval": "Mid-turn approval",
       "capabilityCancel": "Cancel a single turn",
       "capabilityReasoning": "Reasoning",
       "capabilityStreaming": "Live streaming",
-      "capabilitySubagents": "Subagent lineage",
+      "capabilitySubagents": "Subagent event observation",
       "capabilitySupported": "Supported",
       "capabilityToolEvents": "Tool activity",
       "capabilityUnsupported": "Not supported",
@@ -560,7 +564,7 @@
       "notInstalled": "Not installed",
       "profile": "Profile",
       "profileReadonly": "Read-only",
-      "profileReadonlyDesc": "Reads and searches files. Cannot write or run commands, and cannot ask you for approval mid-turn.",
+      "profileReadonlyDesc": "Reads files and images. Cannot write or run commands, and cannot ask you for approval mid-turn.",
       "profileWorkspace": "Workspace write",
       "profileWorkspaceDesc": "Can write inside the workspace and run commands. Everything it may do is granted at launch and cannot be revoked mid-turn.",
       "reinstall": "Reinstall",
@@ -572,9 +576,36 @@
       "upstreamVersion": "Upstream version",
       "managedLaunchNotice": "Install the managed runtime, then save this profile. Cognia resolves its executable and composition at launch.",
       "credentialNotice": "The API key is stored in the local keyring. Leave this field blank when editing to keep the existing key.",
-      "committedEventsNotice": "Both transports provide committed text, reasoning and tool events, and can use Cognia tools through MCP. Live token deltas are unavailable; SDK also reports usage and subagent lineage, while ACP supports per-tool approval and session resume.",
+      "committedEventsNotice": "Both transports report committed text, reasoning and tool events rather than live token deltas. SDK can observe usage and subagent events, but these profiles compose no native subagent producer. ACP supports per-tool approval and persisted session resume.",
       "capabilityMcp": "Cognia and MCP tools",
-      "retry": "Retry"
+      "retry": "Retry",
+      "profileAcp": "ACP with approval",
+      "profileAcpDesc": "Can write inside the workspace and ask for approval for broader file operations. Shell and background jobs are disabled.",
+      "nativeCapabilities": "Native profile capabilities",
+      "nativeCapabilitiesNotice": "These capabilities describe the certified composition. Cognia and MCP tools follow their own host permission policy.",
+      "nativeFileRead": "Native file reads and images",
+      "nativeFileWrite": "Native workspace file writes",
+      "nativeShell": "Native persistent shell",
+      "nativeJobsBackend": "Background job service",
+      "nativeJobsManagement": "Background job management tools",
+      "nativeSubagents": "Native subagents",
+      "nativeSkills": "Native Skills",
+      "nativeCompaction": "Automatic context compaction",
+      "nativeSessionResume": "Native session resume",
+      "plugins": "Certified plugin composition",
+      "pluginsNotice": "This is the certified profile composition, not a live plugin or installation report. A package may be installed without being composed. Conditional plugins activate only when the model route or MCP configuration selects them.",
+      "pluginStatus": {
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "conditional": "Conditional",
+        "not-composed": "Not composed"
+      },
+      "pluginCondition": {
+        "direct-provider": "Active only for direct DeepSeek credentials; disabled for Cognia models.",
+        "cognia-gateway": "Active only with a Cognia model gateway lease at startup.",
+        "mcp-servers": "Active when servers are configured: at startup for SDK, per session for ACP.",
+        "windows-only": "Windows only; disabled on the certified macOS and Linux profiles."
+      }
     },
     "defaultPermissionMode": "Default Permission Mode",
     "defaultPermissionModeDesc": "Default permission mode for new agent sessions",
@@ -848,7 +879,9 @@
     "mobileDetailNotSet": "Not set",
     "mobileDetailSaved": "Saved",
     "mobileDetailNonNegativeIntegerInvalid": "Enter a whole number of zero or greater.",
-    "sectionDefaults": "Defaults"
+    "sectionDefaults": "Defaults",
+    "grokPresetName": "Grok Build",
+    "grokPresetDescription": "Run xAI Grok Build over native ACP with streamed replies, tool approvals, user questions, MCP and persisted sessions."
   },
   "statusConnected": "Connected",
   "statusConnecting": "Connecting",

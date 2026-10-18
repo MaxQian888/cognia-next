@@ -633,6 +633,48 @@ describe("CodexAppServerAdapter", () => {
       expect(starts).toEqual(["f1"])
     })
 
+    it.each([true, false])(
+      "keeps 0.163 partial answers on the text track until turn completion (streamed: %s)",
+      async (streamed) => {
+        const adapter = await connectedAdapter()
+        const session = await adapter.createSession()
+        const events: import("@cognia/agent-contracts/external-agent").ExternalAgentEvent[] = []
+        const pending = adapter.execute(session.id, userMessage("hi"), {
+          onEvent: (event) => events.push(event),
+        })
+        await new Promise<void>((resolve) => queueMicrotask(resolve))
+        for (const [id, phase, text] of [
+          ["partial", "partial_answer", "First answer. "],
+          ["final", "final_answer", "Final answer."],
+        ]) {
+          feed("item/started", { threadId: session.id, item: { id, type: "agentMessage", phase } })
+          if (streamed)
+            feed("item/agentMessage/delta", { threadId: session.id, itemId: id, delta: text })
+          feed("item/completed", {
+            threadId: session.id,
+            item: { id, type: "agentMessage", phase, text },
+          })
+        }
+        // New notifications unrelated to the running turn must not complete it.
+        feed("thread/readState/changed", { threadId: session.id })
+        feed("thread/prediction/updated", { threadId: session.id })
+        expect(events.some((event) => event.type === "done")).toBe(false)
+        feed("turn/completed", {
+          threadId: session.id,
+          turn: { id: "turn_1", status: "completed" },
+        })
+        const result = await pending
+        expect(result.success).toBe(true)
+        expect(result.finalResponse).toBe("First answer. Final answer.")
+        expect(events.filter((event) => event.type === "message_delta")).toHaveLength(2)
+        expect(events.filter((event) => event.type === "done")).toHaveLength(1)
+        expect(
+          events.some((event) => event.type === "thinking" || event.type === "commentary_delta")
+        ).toBe(false)
+        await adapter.disconnect()
+      }
+    )
+
     it("buffers async-question deltas and emits them on async_questions at item/completed", async () => {
       const adapter = await connectedAdapter()
       const session = await adapter.createSession()
@@ -4660,20 +4702,154 @@ describe("native 0.154.0 request regressions", () => {
 })
 
 // Opt in with COGNIA_CODEX_LIVE=1. This uses a real local Codex binary with an
-// isolated home and one fixture MCP server; it makes no model inference calls.
+// isolated home, a fixture MCP server and a loopback Responses fixture. No
+// credentials or external inference service are used. COGNIA_CODEX_BINARY can
+// select an isolated release without replacing the installed CLI.
 ;(process.env.COGNIA_CODEX_LIVE === "1" ? it : it.skip)(
-  "does not amplify real MCP startup and coalesces explicit discovery reads",
+  "validates native schemas, MCP discovery and thread/turn lifecycle against loopback fixtures",
   async () => {
     const fs = await import("node:fs")
     const os = await import("node:os")
     const path = await import("node:path")
-    const { spawn } = await import("node:child_process")
+    const { spawn, execFileSync } = await import("node:child_process")
+    const { createServer } = await import("node:http")
+    const { createInterface } = await import("node:readline")
+    const { default: Ajv } = await import("ajv")
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-native-mcp-audit-"))
-    const marker = path.join(dir, "starts")
-    const fixture = path.join(dir, "fixture.cjs")
-    fs.writeFileSync(
-      fixture,
-      `
+    const binary = process.env.COGNIA_CODEX_BINARY || "codex"
+    // Do not inherit API keys, subscription tokens, proxy settings or the
+    // user's CODEX_HOME into this acceptance fixture.
+    const env: NodeJS.ProcessEnv = {
+      NODE_ENV: "test",
+      PATH: process.env.PATH,
+      TMPDIR: process.env.TMPDIR,
+      CODEX_HOME: dir,
+    }
+    const adapter = new CodexAppServerAdapter(adapterOptions())
+    let server: ReturnType<typeof createServer> | undefined
+    let child: ReturnType<typeof spawn> | undefined
+    let exited: Promise<void> | undefined
+    let deadline: ReturnType<typeof setTimeout> | undefined
+    let requestDeadline: ReturnType<typeof setTimeout> | undefined
+    const stopChild = async () => {
+      child?.kill()
+      const forceKill = setTimeout(() => child?.kill("SIGKILL"), 1000)
+      try {
+        await exited
+      } finally {
+        clearTimeout(forceKill)
+      }
+    }
+    try {
+      // Reject inside this async body so cleanup still runs when an upstream
+      // regression prevents admission, streaming or a terminal notification.
+      await Promise.race([
+        new Promise<never>((_, reject) => {
+          deadline = setTimeout(() => reject(new Error("Native Codex acceptance timed out")), 20000)
+        }),
+        (async () => {
+          const schemaDir = path.join(dir, "schema")
+          execFileSync(
+            binary,
+            ["app-server", "generate-json-schema", "--experimental", "--out", schemaDir],
+            { env, timeout: 15000 }
+          )
+          const schema = JSON.parse(
+            fs.readFileSync(path.join(schemaDir, "ClientRequest.json"), "utf8")
+          )
+          const validateRequest = new Ajv({ strict: false, validateFormats: false }).compile(schema)
+          const partialAnswers = JSON.stringify(schema.definitions.MessagePhase).includes(
+            "partial_answer"
+          )
+          let requestCount = 0
+          let credentialHeaderSeen = false
+          let holdNextResponse = false
+          let responseStarted: (() => void) | undefined
+          const fixtureServer = createServer(async (request, response) => {
+            credentialHeaderSeen ||= Boolean(
+              request.headers.authorization ||
+              request.headers["api-key"] ||
+              request.headers["x-api-key"]
+            )
+            if (request.url !== "/v1/responses" || request.method !== "POST") {
+              response.writeHead(404).end()
+              return
+            }
+            for await (const _chunk of request) {
+              /* Drain the fixture request. */
+            }
+            requestCount += 1
+            response.writeHead(200, { "Content-Type": "text/event-stream" })
+            const id = `response_${requestCount}`
+            const event = (type: string, payload: Record<string, unknown>) =>
+              response.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...payload })}\n\n`)
+            event("response.created", { response: { id, status: "in_progress", output: [] } })
+            responseStarted?.()
+            if (holdNextResponse) {
+              holdNextResponse = false
+              return
+            }
+            const output = [
+              ...(partialAnswers
+                ? [
+                    {
+                      id: `${id}_partial`,
+                      type: "message",
+                      role: "assistant",
+                      phase: "partial_answer",
+                      content: [{ type: "output_text", text: "Partial. " }],
+                    },
+                  ]
+                : []),
+              {
+                id: `${id}_final`,
+                type: "message",
+                role: "assistant",
+                phase: "final_answer",
+                content: [{ type: "output_text", text: "Fixture answer." }],
+              },
+            ]
+            for (const [outputIndex, item] of output.entries()) {
+              event("response.output_item.added", {
+                output_index: outputIndex,
+                item: { ...item, content: [] },
+              })
+              event("response.output_text.delta", {
+                item_id: item.id,
+                output_index: outputIndex,
+                content_index: 0,
+                delta: item.content[0].text,
+              })
+              event("response.output_item.done", { output_index: outputIndex, item })
+            }
+            event("response.completed", {
+              response: {
+                id,
+                status: "completed",
+                output,
+                usage: {
+                  input_tokens: 30,
+                  output_tokens: 8,
+                  total_tokens: 38,
+                  input_tokens_details: { cached_tokens: 10 },
+                  output_tokens_details: { reasoning_tokens: 0 },
+                },
+              },
+            })
+            response.end()
+          })
+          server = fixtureServer
+          await new Promise<void>((resolve, reject) => {
+            fixtureServer.once("error", reject)
+            fixtureServer.listen(0, "127.0.0.1", resolve)
+          })
+          const address = fixtureServer.address()
+          if (!address || typeof address === "string") throw new Error("Fixture did not bind TCP")
+          const marker = path.join(dir, "starts")
+          const fixture = path.join(dir, "fixture.cjs")
+          fs.writeFileSync(
+            fixture,
+            `
       const fs = require('node:fs');
       fs.appendFileSync(${JSON.stringify(marker)}, 'start\\n');
       require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
@@ -4685,114 +4861,235 @@ describe("native 0.154.0 request regressions", () => {
         process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }) + '\\n');
       });
     `
-    )
-    fs.writeFileSync(
-      path.join(dir, "config.toml"),
-      `[mcp_servers.audit_fixture]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(fixture)}]\n`
-    )
-    const skillDir = path.join(dir, ".agents/skills/audit")
-    fs.mkdirSync(skillDir, { recursive: true })
-    fs.writeFileSync(
-      path.join(skillDir, "SKILL.md"),
-      "---\nname: audit\ndescription: local fixture\n---\nAudit only.\n"
-    )
-    const envBuilder = { buildAgentEnv }
-    let child: ReturnType<typeof spawn> | undefined
-    let exited: Promise<void> | undefined
-    native.spawnExternalAgent.mockImplementation(async () => {
-      child = spawn("codex", ["app-server"], {
-        cwd: dir,
-        env: { ...process.env, CODEX_HOME: dir },
-        stdio: ["pipe", "pipe", "pipe"],
-      })
-      exited = new Promise<void>((resolve) => child!.once("exit", () => resolve()))
-      let buffer = ""
-      child.stdout!.on("data", (chunk: Buffer) => {
-        buffer += chunk.toString()
-        let newline: number
-        while ((newline = buffer.indexOf("\n")) >= 0) {
-          const data = buffer.slice(0, newline)
-          buffer = buffer.slice(newline + 1)
-          stdoutCb?.({ agentId: "proc-1", data })
-        }
-      })
-      child.stderr!.resume()
-      return "proc-1"
-    })
-    native.sendToExternalAgent.mockImplementation(async (_id: string, message: string) => {
-      writes.push(message)
-      child!.stdin!.write(message.endsWith("\n") ? message : `${message}\n`)
-    })
-    native.killExternalAgent.mockImplementation(async () => {
-      child?.kill()
-      await exited
-    })
-    envBuilder.buildAgentEnv.mockResolvedValueOnce({ CODEX_HOME: dir })
-    const adapter = new CodexAppServerAdapter(adapterOptions())
-    try {
-      await adapter.connect({
-        ...config,
-        process: { command: "codex", args: ["app-server"], cwd: dir },
-      })
-      expect(await adapter.refreshSkills([dir])).toEqual(
-        expect.arrayContaining([expect.objectContaining({ name: "audit" })])
-      )
-      const session = await adapter.createSession({ cwd: dir })
-      await new Promise<void>((resolve, reject) => {
-        const ready = () =>
-          adapter
-            .getStatus()
-            .mcpServers.some(
-              (server) => server.name === "audit_fixture" && server.runtimeStatus === "connected"
+          )
+          fs.writeFileSync(
+            path.join(dir, "config.toml"),
+            [
+              'model_provider = "fixture"',
+              'model = "gpt-6.1-sol"',
+              'web_search = "disabled"',
+              'cli_auth_credentials_store = "file"',
+              "[analytics]",
+              "enabled = false",
+              "[model_providers.fixture]",
+              'name = "Loopback fixture"',
+              `base_url = "http://127.0.0.1:${address.port}/v1"`,
+              'wire_api = "responses"',
+              "requires_openai_auth = false",
+              "supports_websockets = false",
+              "request_max_retries = 0",
+              "stream_max_retries = 0",
+              "[mcp_servers.audit_fixture]",
+              `command = ${JSON.stringify(process.execPath)}`,
+              `args = [${JSON.stringify(fixture)}]`,
+              "",
+            ].join("\n")
+          )
+          const skillDir = path.join(dir, ".agents/skills/audit")
+          fs.mkdirSync(skillDir, { recursive: true })
+          fs.writeFileSync(
+            path.join(skillDir, "SKILL.md"),
+            "---\nname: audit\ndescription: local fixture\n---\nAudit only.\n"
+          )
+          const envBuilder = { buildAgentEnv }
+          native.spawnExternalAgent.mockImplementation(async () => {
+            const spawnedChild = spawn(binary, ["app-server"], {
+              cwd: dir,
+              env,
+              stdio: ["pipe", "pipe", "pipe"],
+            })
+            child = spawnedChild
+            exited = new Promise<void>((resolve) => {
+              spawnedChild.once("exit", () => resolve())
+              spawnedChild.once("error", () => resolve())
+            })
+            createInterface({ input: spawnedChild.stdout }).on("line", (data) =>
+              stdoutCb?.({ agentId: "proc-1", data })
             )
-        if (ready()) {
-          resolve()
-          return
-        }
-        const timer = setTimeout(() => {
-          off()
-          reject(new Error("fixture MCP startup did not complete"))
-        }, 5000)
-        const off = adapter.onStatusUpdate(() => {
-          if (ready()) {
-            clearTimeout(timer)
-            off()
-            resolve()
-          }
-        })
-      })
-      expect(fs.readFileSync(marker, "utf8").trim().split("\n")).toHaveLength(1)
-      expect(
-        writes.map((line) => JSON.parse(line)).filter((m) => m.method === "mcpServerStatus/list")
-      ).toHaveLength(0)
-      const results = await Promise.all([
-        adapter.refreshMcpServers(true),
-        adapter.refreshMcpServers(true),
-        adapter.refreshMcpServers(true),
+            spawnedChild.stderr.resume()
+            await new Promise<void>((resolve, reject) => {
+              spawnedChild.once("spawn", resolve)
+              spawnedChild.once("error", reject)
+            })
+            return "proc-1"
+          })
+          native.sendToExternalAgent.mockImplementation(async (_id: string, message: string) => {
+            const parsed = JSON.parse(message)
+            if (parsed.method && parsed.id !== undefined && !validateRequest(parsed)) {
+              throw new Error(
+                `Native ${parsed.method} schema mismatch: ${JSON.stringify(validateRequest.errors)}`
+              )
+            }
+            writes.push(message)
+            child!.stdin!.write(message.endsWith("\n") ? message : `${message}\n`)
+          })
+          native.killExternalAgent.mockImplementation(stopChild)
+          envBuilder.buildAgentEnv.mockResolvedValueOnce({ CODEX_HOME: dir })
+          await adapter.connect({
+            ...config,
+            process: { command: "codex", args: ["app-server"], cwd: dir },
+          })
+          expect(await adapter.refreshSkills([dir])).toEqual(
+            expect.arrayContaining([expect.objectContaining({ name: "audit" })])
+          )
+          expect((await adapter.listModels()).length).toBeGreaterThan(0)
+          const session = await adapter.createSession({ cwd: dir, permissionMode: "plan" })
+          await new Promise<void>((resolve, reject) => {
+            const ready = () =>
+              adapter
+                .getStatus()
+                .mcpServers.some(
+                  (server) =>
+                    server.name === "audit_fixture" && server.runtimeStatus === "connected"
+                )
+            if (ready()) {
+              resolve()
+              return
+            }
+            const timer = setTimeout(() => {
+              off()
+              reject(new Error("fixture MCP startup did not complete"))
+            }, 5000)
+            const off = adapter.onStatusUpdate(() => {
+              if (ready()) {
+                clearTimeout(timer)
+                off()
+                resolve()
+              }
+            })
+          })
+          expect(fs.readFileSync(marker, "utf8").trim().split("\n")).toHaveLength(1)
+          expect(
+            writes
+              .map((line) => JSON.parse(line))
+              .filter((m) => m.method === "mcpServerStatus/list")
+          ).toHaveLength(0)
+          const results = await Promise.all([
+            adapter.refreshMcpServers(true),
+            adapter.refreshMcpServers(true),
+            adapter.refreshMcpServers(true),
+          ])
+          expect(results[0]).toEqual(
+            expect.arrayContaining([expect.objectContaining({ name: "audit_fixture" })])
+          )
+          const calls = writes
+            .map((line) => JSON.parse(line))
+            .filter((m) => m.method === "mcpServerStatus/list")
+          expect(calls).toHaveLength(1)
+          expect(calls[0].params).toEqual({ threadId: session.id })
+          const startedAfterInitialRead = fs.readFileSync(marker, "utf8").trim().split("\n").length
+          await adapter.refreshMcpServers(true)
+          expect({
+            startedAfterInitialRead,
+            afterRepeatedRead: fs.readFileSync(marker, "utf8").trim().split("\n").length,
+          }).toEqual({ startedAfterInitialRead: 2, afterRepeatedRead: 3 })
+
+          const events: import("@cognia/agent-contracts/external-agent").ExternalAgentEvent[] = []
+          const result = await adapter.execute(
+            session.id,
+            userMessage("Reply using the fixture."),
+            {
+              onEvent: (event) => events.push(event),
+            }
+          )
+          expect(result.success).toBe(true)
+          expect(result.finalResponse).toBe(`${partialAnswers ? "Partial. " : ""}Fixture answer.`)
+          expect(result.tokenUsage).toMatchObject({
+            promptTokens: 30,
+            completionTokens: 8,
+            cacheReadTokens: 10,
+          })
+          expect(events.filter((event) => event.type === "done")).toHaveLength(1)
+          expect(events.some((event) => event.type === "commentary_delta")).toBe(false)
+          const entries = await adapter.getSessionEntries(session.id)
+          expect(entries.length).toBeGreaterThan(0)
+          const forked = await adapter.forkSession(session.id, {
+            cwd: dir,
+            permissionMode: "plan",
+            forkAt: { kind: "turn", id: entries[entries.length - 1].id, boundary: "through" },
+          })
+          expect(forked.id).not.toBe(session.id)
+          const forkTurn = await adapter.execute(forked.id, userMessage("Reply in the fork."))
+          expect(forkTurn.success).toBe(true)
+          await adapter.archiveSession(forked.id)
+          expect(await adapter.listSessions()).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ sessionId: forked.id, archived: true }),
+            ])
+          )
+          await adapter.unarchiveSession(forked.id)
+          const restoredRows = await adapter.listSessions()
+          const restored = restoredRows.find((row) => row.sessionId === forked.id)
+          expect(restoredRows).toEqual(
+            expect.arrayContaining([expect.objectContaining({ sessionId: forked.id })])
+          )
+          expect(restored?.archived).not.toBe(true)
+
+          holdNextResponse = true
+          let rejectStarted: (error: unknown) => void = () => {}
+          const started = new Promise<void>((resolve, reject) => {
+            responseStarted = resolve
+            rejectStarted = reject
+            requestDeadline = setTimeout(
+              () => reject(new Error("Fixture response did not start")),
+              5000
+            )
+          })
+          const running = adapter.execute(session.id, userMessage("Wait for cancellation."))
+          void running.then(
+            () => rejectStarted(new Error("Turn ended before the fixture response started")),
+            rejectStarted
+          )
+          await started
+          clearTimeout(requestDeadline)
+          responseStarted = undefined
+          await adapter.steerTurn(session.id, "Additional fixture input.")
+          await adapter.cancel(session.id)
+          expect((await running).success).toBe(false)
+
+          await adapter.disconnect()
+          await adapter.connect({
+            ...config,
+            process: { command: binary, args: ["app-server"], cwd: dir },
+          })
+          const resumed = await adapter.resumeSession(session.id, {
+            cwd: dir,
+            permissionMode: "plan",
+          })
+          expect(resumed.messages?.some((message) => message.role === "assistant")).toBe(true)
+          const recovered = await adapter.execute(resumed.id, userMessage("Reply after reconnect."))
+          expect(recovered.success).toBe(true)
+          expect(recovered.finalResponse).toContain("Fixture answer.")
+          expect(requestCount).toBeGreaterThanOrEqual(3)
+          expect(credentialHeaderSeen).toBe(false)
+          expect(
+            writes.some((line) =>
+              /^account\/(?:login|logout)(?:\/|$)/.test(JSON.parse(line).method ?? "")
+            )
+          ).toBe(false)
+          expect(fs.existsSync(path.join(dir, "auth.json"))).toBe(false)
+        })(),
       ])
-      expect(results[0]).toEqual(
-        expect.arrayContaining([expect.objectContaining({ name: "audit_fixture" })])
-      )
-      const calls = writes
-        .map((line) => JSON.parse(line))
-        .filter((m) => m.method === "mcpServerStatus/list")
-      expect(calls).toHaveLength(1)
-      expect(calls[0].params).toEqual({ threadId: session.id })
-      const startedAfterInitialRead = fs.readFileSync(marker, "utf8").trim().split("\n").length
-      await adapter.refreshMcpServers(true)
-      expect({
-        startedAfterInitialRead,
-        afterRepeatedRead: fs.readFileSync(marker, "utf8").trim().split("\n").length,
-      }).toEqual({ startedAfterInitialRead: 2, afterRepeatedRead: 3 })
     } finally {
-      await adapter.disconnect()
-      child?.kill()
-      await exited
-      native.sendToExternalAgent.mockImplementation(async (agentId: string, message: string) => {
-        writes.push(message)
-        autoRespond(agentId, message)
-      })
-      fs.rmSync(dir, { recursive: true, force: true })
+      clearTimeout(deadline)
+      clearTimeout(requestDeadline)
+      try {
+        await adapter.disconnect()
+      } finally {
+        await stopChild()
+        server?.closeAllConnections()
+        const fixtureServer = server
+        if (fixtureServer?.listening) {
+          await new Promise<void>((resolve, reject) =>
+            fixtureServer.close((error) => (error ? reject(error) : resolve()))
+          )
+        }
+        native.sendToExternalAgent.mockImplementation(async (agentId: string, message: string) => {
+          writes.push(message)
+          autoRespond(agentId, message)
+        })
+        fs.rmSync(dir, { recursive: true, force: true })
+      }
     }
   },
   30000

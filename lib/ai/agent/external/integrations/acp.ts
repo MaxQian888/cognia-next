@@ -32,6 +32,7 @@ import { createAgentTransportFileHost } from "../host/file-host"
 import { createAgentTransportProcessHost } from "../host/process-host"
 import { createNativeTerminalHost } from "../host/terminal-host"
 import { configuredApprovalPolicy, isToolPreApproved } from "../policy/tool-preapproval"
+import { isTrustedLocalMcpCredential } from "../session/renderer-tool-host"
 
 let dynamicMcpHostController: AcpDynamicMcpHostController | undefined
 
@@ -60,6 +61,7 @@ export function createAcpClientDeps(): AcpClientDeps {
     approvalPolicy: configuredApprovalPolicy,
     toolPreApproval: isToolPreApproved,
     outboundGate: hasNoLeakingPiiDeep,
+    isTrustedLocalMcpCredential,
     dynamicMcpHost: () => dynamicMcpHostController,
     logger: createAgentLogger(loggers.agent),
   }

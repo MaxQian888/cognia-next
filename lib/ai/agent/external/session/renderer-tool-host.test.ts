@@ -18,7 +18,11 @@ jest.mock("@/lib/claude/adapter-hooks", () => ({
 }))
 
 import type { ToolHostEvent, SendOptions } from "@cognia/agent-config-types"
-import { createRendererToolHost, RENDERER_TOOL_HOST_APPROVAL_PREFIX } from "./renderer-tool-host"
+import {
+  createRendererToolHost,
+  isTrustedLocalMcpCredential,
+  RENDERER_TOOL_HOST_APPROVAL_PREFIX,
+} from "./renderer-tool-host"
 import { callSidecarToolHost } from "@/lib/claude/feature-call"
 import { handlePluginToolExec } from "@/lib/claude/plugin-tool-ipc"
 import { transport } from "@/lib/tauri"
@@ -612,5 +616,207 @@ describe("remote renderer tool-host transport", () => {
     await expect(host.pause()).rejects.toThrow("Host")
     await host.close().catch(() => undefined)
     expect(other.call).not.toHaveBeenCalled()
+  })
+})
+
+describe("live local MCP credential provenance", () => {
+  const candidate = {
+    agentId: "agent-local",
+    server: { type: "http", name: "cognia-tools", url: descriptor.mcpServers[0].url },
+    header: { name: "Authorization", value: "Bearer fixture" },
+  }
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => {
+    __resetRoutingForTests()
+    __resetSpawnPlacementsForTests()
+    jest.useRealTimers()
+  })
+
+  it("accepts only the exact active agent/server/Authorization tuple and revokes synchronously", async () => {
+    const { host, call } = setup()
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    await host.start({ agentId: candidate.agentId, deferSandbox: true, sendOptions })
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(true)
+    for (const changed of [
+      { ...candidate, agentId: "another-agent" },
+      { ...candidate, server: { ...candidate.server, type: "sse" } },
+      { ...candidate, server: { ...candidate.server, name: "forged-tools" } },
+      { ...candidate, server: { ...candidate.server, url: `${candidate.server.url}/forged` } },
+      { ...candidate, header: { ...candidate.header, name: "authorization" } },
+      { ...candidate, header: { ...candidate.header, value: "Bearer forged" } },
+    ])
+      expect(isTrustedLocalMcpCredential(changed)).toBe(false)
+    const paused = host.pause()
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    await paused
+    const replacement = {
+      ...candidate,
+      header: { ...candidate.header, value: "Bearer replacement" },
+    }
+    call.mockResolvedValueOnce({
+      ...descriptor,
+      generation: 2,
+      mcpServers: [
+        {
+          ...descriptor.mcpServers[0],
+          headers: { Authorization: replacement.header.value },
+        },
+      ],
+    })
+    await host.start({ agentId: candidate.agentId, sendOptions })
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    expect(isTrustedLocalMcpCredential(replacement)).toBe(true)
+    const closed = host.close()
+    expect(isTrustedLocalMcpCredential(replacement)).toBe(false)
+    await closed
+  })
+
+  it("does not trust endpoints without an agent binding or non-Authorization headers", async () => {
+    const { host, call } = setup()
+    await host.start({ sendOptions })
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    await host.pause()
+    call.mockResolvedValueOnce({
+      ...descriptor,
+      mcpServers: [
+        {
+          ...descriptor.mcpServers[0],
+          headers: { "X-Api-Key": candidate.header.value },
+        },
+      ],
+    })
+    await host.start({ agentId: candidate.agentId, sendOptions })
+    expect(
+      isTrustedLocalMcpCredential({
+        ...candidate,
+        header: { ...candidate.header, name: "X-Api-Key" },
+      })
+    ).toBe(false)
+    await host.close()
+  })
+
+  it("never registers sandbox or deferred sandbox endpoints", async () => {
+    registerSpawnPlacement(candidate.agentId, {
+      kind: "container",
+      isolationMandatory: true,
+      spec: { specDigest: "fixture" },
+    } as never)
+    const { host, call } = setup()
+    await host.start({ agentId: candidate.agentId, sendOptions })
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    await host.pause()
+    call.mockResolvedValueOnce({
+      ...descriptor,
+      sandboxToolHostLeaseId: "f268714a-4659-4b2e-b35a-c749c54e852e",
+    })
+    await host.start({ agentId: candidate.agentId, deferSandbox: true, sendOptions })
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    await host.close()
+  })
+
+  it("never registers endpoints belonging to a remote Host", async () => {
+    const remote = { call: jest.fn(), subscribe: jest.fn() }
+    setActiveRemoteEndpoint({ deviceId: "device-remote" } as never)
+    setActiveRemoteTransport(remote as Transport)
+    const { host, call } = setup()
+    call.mockImplementation(async (operation, input) =>
+      operation === "tool-host-start"
+        ? { ...descriptor, leaseId: (input as { leaseId: string }).leaseId }
+        : {}
+    )
+    await host.start({ agentId: candidate.agentId, sendOptions })
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    await host.close()
+  })
+
+  it("revokes a local credential immediately when switching to a remote Host", async () => {
+    const { host, call } = setup()
+    await host.start({ agentId: candidate.agentId, sendOptions })
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(true)
+    const remote = { call: jest.fn(), subscribe: jest.fn() }
+    setActiveRemoteTransport(remote as Transport)
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    const stops = call.mock.calls.filter(([operation]) => operation === "tool-host-stop").length
+    await host.close()
+    expect(call.mock.calls.filter(([operation]) => operation === "tool-host-stop")).toHaveLength(
+      stops
+    )
+    expect(remote.call).not.toHaveBeenCalled()
+    setActiveRemoteTransport(null)
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+  })
+
+  it("revokes on a tool-host cancellation event", async () => {
+    const { host, emit } = setup()
+    await host.start({ agentId: candidate.agentId, sendOptions })
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(true)
+    emit({ type: "tool_host_cancel", sessionId: "chat-1" })
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    await host.close()
+  })
+
+  it("does not register a start result arriving after the local Host changes", async () => {
+    const { host, call } = setup()
+    let finish!: (value: unknown) => void
+    call.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const started = host.start({ agentId: candidate.agentId, sendOptions })
+    await flush()
+    const remote = { call: jest.fn(), subscribe: jest.fn() }
+    setActiveRemoteTransport(remote as Transport)
+    finish(descriptor)
+    await expect(started).rejects.toMatchObject({ name: "AbortError" })
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    expect(call.mock.calls.filter(([operation]) => operation === "tool-host-stop")).toHaveLength(0)
+    expect(remote.call).not.toHaveBeenCalled()
+    await host.close()
+  })
+
+  it("does not trust a sandbox lease descriptor even without a placement hint", async () => {
+    const { host, call } = setup()
+    call.mockResolvedValueOnce({
+      ...descriptor,
+      sandboxToolHostLeaseId: "f268714a-4659-4b2e-b35a-c749c54e852e",
+    })
+    await host.start({ agentId: candidate.agentId, deferSandbox: true, sendOptions })
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    await host.close()
+  })
+
+  it("does not register cancelled or invalid startup results and revokes on heartbeat failure", async () => {
+    const { host, call } = setup()
+    let finish!: (value: unknown) => void
+    call.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const controller = new AbortController()
+    const pending = host.start({
+      agentId: candidate.agentId,
+      sendOptions,
+      signal: controller.signal,
+    })
+    await flush()
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    controller.abort()
+    finish(descriptor)
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    call.mockResolvedValueOnce({ ...descriptor, generation: 0 })
+    await expect(host.start({ agentId: candidate.agentId, sendOptions })).rejects.toThrow("invalid")
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    await host.start({ agentId: candidate.agentId, sendOptions })
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(true)
+    call.mockRejectedValueOnce(new Error("lease expired"))
+    jest.advanceTimersByTime(60_000)
+    await flush()
+    expect(isTrustedLocalMcpCredential(candidate)).toBe(false)
+    await host.close()
   })
 })

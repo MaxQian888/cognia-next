@@ -2,7 +2,33 @@ import {
   catalogModelCapabilities,
   isValidExternalAgentSandboxHost,
   validateExternalAgentSandboxPolicy,
+  elicitationFormSchemaSafetyError,
 } from "./external-agent"
+
+describe("shared elicitation form safety", () => {
+  it("rejects sensitive fields and malformed required lists before rendering or prompting", () => {
+    expect(
+      elicitationFormSchemaSafetyError({
+        type: "object",
+        properties: { password: { type: "string" } },
+      })
+    ).toMatch(/sensitive field/)
+    expect(
+      elicitationFormSchemaSafetyError({
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: "name",
+      })
+    ).toMatch(/required/)
+    expect(
+      elicitationFormSchemaSafetyError({
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name"],
+      })
+    ).toBeNull()
+  })
+})
 
 describe("catalogModelCapabilities", () => {
   it("projects a Pi/OMP model record", () => {

@@ -14,6 +14,32 @@ import { activeHostFeatureManifest } from "@/stores/remote-host/remote-host-stor
 import { supportsHostFeatureOperation } from "@/lib/platform/host-feature-manifest"
 import type { AcpMcpServerConfig, ExternalAgentEvent } from "@/types/agent/external-agent"
 
+interface LocalMcpCredential {
+  agentId: string
+  server: { type: string; name: string; url: string }
+  header: { name: string; value: string }
+}
+
+// Only validated, live local tool-host starts can populate this registry.
+// The ACP gate receives a verifier, never a registration port.
+const localMcpCredentials = new Set<LocalMcpCredential>()
+
+export function isTrustedLocalMcpCredential(candidate: LocalMcpCredential): boolean {
+  if (candidate.header.name !== "Authorization" || getActiveRemoteTransport()) return false
+  for (const credential of localMcpCredentials) {
+    if (
+      credential.agentId === candidate.agentId &&
+      credential.server.type === candidate.server.type &&
+      credential.server.name === candidate.server.name &&
+      credential.server.url === candidate.server.url &&
+      credential.header.name === candidate.header.name &&
+      credential.header.value === candidate.header.value
+    )
+      return true
+  }
+  return false
+}
+
 export const RENDERER_TOOL_HOST_APPROVAL_PREFIX = "external-tool-host:"
 
 export interface RendererToolHostStartOptions {
@@ -179,17 +205,15 @@ export function createRendererToolHost(
         randomUUID: () => crypto.randomUUID(),
       })
     : undefined
-  const stopWatching = remote
-    ? subscribeActiveRemoteTransport((next) => {
-        if (next !== remote) {
-          deactivate()
-          if (heartbeat) clearInterval(heartbeat)
-          remoteClient?.dispose(new Error("Cognia tool host Host changed"))
-          for (const off of remoteSubscriptions) off()
-          remoteSubscriptions.clear()
-        }
-      })
-    : undefined
+  const stopWatching = subscribeActiveRemoteTransport((next) => {
+    if (next !== remote) {
+      deactivate()
+      if (heartbeat) clearInterval(heartbeat)
+      remoteClient?.dispose(new Error("Cognia tool host Host changed"))
+      for (const off of remoteSubscriptions) off()
+      remoteSubscriptions.clear()
+    }
+  })
   const deps: Dependencies = {
     call: remoteClient
       ? (operation, control) => callSidecarToolHost(operation, control, remoteClient.requestResult)
@@ -216,6 +240,7 @@ export function createRendererToolHost(
         pending: Map<string, AbortController>
         detach: () => void
         generation: number
+        credentials: Set<LocalMcpCredential>
       }
     | undefined
   let closed = false
@@ -234,6 +259,8 @@ export function createRendererToolHost(
   function deactivate() {
     const prior = active
     active = undefined
+    for (const credential of prior?.credentials ?? []) localMcpCredentials.delete(credential)
+    prior?.credentials.clear()
     prior?.detach()
     prior?.controller.abort()
   }
@@ -417,6 +444,7 @@ export function createRendererToolHost(
           seen: new Set(),
           pending: new Map(),
           generation: 0,
+          credentials: new Set<LocalMcpCredential>(),
           detach: () => options.signal?.removeEventListener("abort", abort),
         })
         options.signal?.addEventListener("abort", abort, { once: true })
@@ -447,10 +475,27 @@ export function createRendererToolHost(
           turn.generation = generation
           if (closed || options.signal?.aborted || controller.signal.aborted)
             throw new DOMException("Cognia tool host start aborted", "AbortError")
+          assertTarget()
+          if (!remote && !sandbox && !sandboxToolHostLeaseId && options.agentId) {
+            for (const server of mcpServers) {
+              if (server.type !== "http") continue
+              for (const header of server.headers) {
+                if (header.name !== "Authorization") continue
+                const credential: LocalMcpCredential = {
+                  agentId: options.agentId,
+                  server: { type: server.type, name: server.name, url: server.url },
+                  header: { name: header.name, value: header.value },
+                }
+                turn.credentials.add(credential)
+                localMcpCredentials.add(credential)
+              }
+            }
+          }
           heartbeat ??= setInterval(() => {
             void enqueue(async () => {
               if (!opened || closed) return
               try {
+                assertTarget()
                 await deps.call("tool-host-start", { ...identity, renew: true })
               } catch {
                 deactivate()
@@ -464,7 +509,8 @@ export function createRendererToolHost(
           }
         } catch (error) {
           deactivate()
-          await deps.call("tool-host-stop", identity).catch(() => undefined)
+          if (getActiveRemoteTransport() === remote)
+            await deps.call("tool-host-stop", identity).catch(() => undefined)
           opened = false
           throw error
         }
@@ -473,7 +519,10 @@ export function createRendererToolHost(
     pause() {
       deactivate()
       return enqueue(async () => {
-        if (opened) await deps.call("tool-host-stop", { ...identity, pause: true })
+        if (opened) {
+          assertTarget()
+          await deps.call("tool-host-stop", { ...identity, pause: true })
+        }
       })
     },
     close() {
@@ -482,7 +531,7 @@ export function createRendererToolHost(
       if (heartbeat) clearInterval(heartbeat)
       return enqueue(async () => {
         try {
-          if (opened && (!remote || getActiveRemoteTransport() === remote))
+          if (opened && getActiveRemoteTransport() === remote)
             await deps.call("tool-host-stop", identity)
           opened = false
         } finally {

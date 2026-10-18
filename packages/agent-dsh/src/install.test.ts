@@ -96,6 +96,8 @@ describe("doctorDshRuntime", () => {
   it("requires reinstalling old or uncertified protocol channels", () => {
     for (const overrides of [
       { upstreamVersion: "0.1.0-rc.6" },
+      { upstreamVersion: "0.2.0-rc.2" },
+      { conformanceSuiteVersion: "3" },
       { conformanceSuiteVersion: "legacy" },
     ]) {
       const report = doctorDshRuntime(channel(overrides), facts(), "cognia-sdk-readonly")

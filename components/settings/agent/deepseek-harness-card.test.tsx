@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
 import externalAgent from "@/i18n/messages/en/externalAgent.json"
@@ -61,6 +61,42 @@ beforeEach(() => {
 })
 
 describe("DeepSeekHarnessCard", () => {
+  it("switches the certified profile and displays its native authority", () => {
+    renderCard()
+    const dsh = messages.externalAgent.settings.deepseekHarness
+    const selector = screen.getByRole("combobox", { name: dsh.profile })
+    const row = (name: string) => screen.getByText(name).closest("div")!
+    expect(row(dsh.nativeFileWrite)).toHaveTextContent(dsh.capabilityUnsupported)
+    fireEvent.change(selector, { target: { value: "cognia-sdk-workspace" } })
+    expect(useDshRuntime).toHaveBeenLastCalledWith("cognia-sdk-workspace")
+    expect(row(dsh.nativeFileWrite)).toHaveTextContent(dsh.capabilitySupported)
+    expect(row(dsh.nativeShell)).toHaveTextContent(dsh.capabilitySupported)
+    expect(row(dsh.nativeJobsBackend)).toHaveTextContent(dsh.capabilitySupported)
+    expect(row(dsh.nativeJobsManagement)).toHaveTextContent(dsh.capabilityUnsupported)
+    expect(row(dsh.nativeSubagents)).toHaveTextContent(dsh.capabilityUnsupported)
+    expect(row(dsh.nativeSkills)).toHaveTextContent(dsh.capabilityUnsupported)
+    fireEvent.change(selector, { target: { value: "cognia-acp" } })
+    expect(row(dsh.nativeShell)).toHaveTextContent(dsh.capabilityUnsupported)
+    expect(row(dsh.nativeSessionResume)).toHaveTextContent(dsh.capabilitySupported)
+    expect(screen.queryByText(dsh.approvalNotice)).not.toBeInTheDocument()
+  })
+
+  it("keeps a requested profile fixed and distinguishes composition from installation", () => {
+    renderCard({ profileId: "cognia-sdk-readonly" })
+    const dsh = messages.externalAgent.settings.deepseekHarness
+    expect(screen.queryByRole("combobox", { name: dsh.profile })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: dsh.plugins }))
+    const plugin = (id: string) => screen.getByTestId(`dsh-plugin-${id}`)
+    expect(plugin("filesystem")).toHaveTextContent(dsh.pluginStatus.disabled)
+    expect(plugin("fs-sandboxed")).toHaveTextContent(dsh.pluginStatus.enabled)
+    expect(plugin("subagent")).toHaveTextContent(dsh.pluginStatus["not-composed"])
+    expect(plugin("llm-deepseek")).toHaveTextContent(dsh.pluginCondition["direct-provider"])
+    expect(plugin("llm-pi-ai")).toHaveTextContent(dsh.pluginCondition["cognia-gateway"])
+    expect(plugin("mcp-client")).toHaveTextContent(dsh.pluginCondition["mcp-servers"])
+    expect(within(plugin("jobs")).getByText(dsh.pluginStatus.disabled)).toBeInTheDocument()
+    expect(screen.getByText(dsh.pluginsNotice)).toBeVisible()
+  })
+
   it("shows ACP tools without SDK-only approval and cancellation notices", () => {
     renderCard({ profileId: "cognia-acp" })
     const dsh = messages.externalAgent.settings.deepseekHarness

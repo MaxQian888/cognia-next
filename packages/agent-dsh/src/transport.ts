@@ -30,10 +30,9 @@ const DEFAULT_MODEL = "deepseek-flash"
  * Derive the launch spec from a stored agent config.
  *
  * Managed launch preparation puts resolved paths into a transient `process`
- * block immediately before connect. The API key
- * is NOT stored there — it is injected into `process.env` by the execution host
- * immediately before connect, from a `CredentialReference`, and this function
- * only forwards what it is handed.
+ * block immediately before connect. Credentials are injected into `process.env`
+ * by the execution host immediately before connect: either a resolved DeepSeek
+ * key or a task-scoped Cognia gateway lease. They are never persisted there.
  *
  * @throws {DshRuntimeUnavailableError} when the agent has not been installed.
  */
@@ -46,7 +45,25 @@ export function resolveDshLaunchFromConfig(config: ExternalAgentConfig): DshTran
     )
   }
   const env = process_.env ?? {}
-  if (!env.DEEPSEEK_API_KEY) {
+  const provider = env.COGNIA_DSH_PROVIDER ?? DEFAULT_PROVIDER
+  if (provider !== DEFAULT_PROVIDER && provider !== "cognia") {
+    throw new DshRuntimeUnavailableError("Unsupported managed model provider")
+  }
+  if (provider === "cognia") {
+    if (
+      !env.COGNIA_DSH_GATEWAY_CONFIG?.trim() ||
+      !env.COGNIA_DSH_GATEWAY_TOKEN?.trim() ||
+      !env.COGNIA_DSH_MODEL?.trim()
+    ) {
+      throw new DshRuntimeUnavailableError(
+        "DeepSeek Harness Cognia model route requires a managed gateway lease and selected model."
+      )
+    }
+    // The managed launcher validates the route's JSON, endpoint and model
+    // membership before loading provider plugins; keep that schema authoritative.
+  } else if (env.COGNIA_DSH_GATEWAY_CONFIG || env.COGNIA_DSH_GATEWAY_TOKEN) {
+    throw new DshRuntimeUnavailableError("Cognia gateway lease requires the Cognia provider")
+  } else if (!env.DEEPSEEK_API_KEY) {
     // Failing here keeps the cause attributable: without it the model route
     // fails deep inside the runtime with an opaque provider error.
     throw new DshRuntimeUnavailableError(
@@ -58,7 +75,7 @@ export function resolveDshLaunchFromConfig(config: ExternalAgentConfig): DshTran
     args: process_.args,
     env,
     workspace: env.COGNIA_DSH_WORKSPACE ?? process_.cwd ?? "",
-    provider: DEFAULT_PROVIDER,
+    provider,
     model: env.COGNIA_DSH_MODEL ?? DEFAULT_MODEL,
     ...(env.COGNIA_DSH_REASONING_EFFORT
       ? { reasoningEffort: env.COGNIA_DSH_REASONING_EFFORT }
@@ -162,6 +179,7 @@ class HarnessSubprocessTransport implements DshRuntimeTransport {
       onNotification: (method, params) => this.handlers?.onNotification({ method, params }),
     })
     this.peer = peer
+    let spawned = false
     try {
       this.unlisten.push(
         await this.host.onStdoutRaw((payload) => {
@@ -198,6 +216,7 @@ class HarnessSubprocessTransport implements DshRuntimeTransport {
         env: launch.env,
         framing: "raw",
       })
+      spawned = true
       const result = await peer.sendRequest<{ serverInfo?: { name?: string; version?: string } }>(
         "initialize",
         {
@@ -225,13 +244,16 @@ class HarnessSubprocessTransport implements DshRuntimeTransport {
         error instanceof Error ? error.message : String(error),
         this.secrets
       )
-      // A failed handshake cannot safely accept shutdown; reap through the host.
-      try {
-        await this.host.kill(processId)
-      } catch (cleanupError) {
-        throw new DshRuntimeUnavailableError(
-          `${message} Cleanup failed: ${redactDshOutput(String(cleanupError), this.secrets)}`
-        )
+      // Rejected spawn never registered a child. A failed handshake does own
+      // one and cannot safely accept shutdown, so reap it through the host.
+      if (spawned && this.processId === processId) {
+        try {
+          await this.host.kill(processId)
+        } catch (cleanupError) {
+          throw new DshRuntimeUnavailableError(
+            `${message} Cleanup failed: ${redactDshOutput(String(cleanupError), this.secrets)}`
+          )
+        }
       }
       this.processId = undefined
       this.cleanup()
@@ -249,6 +271,22 @@ class HarnessSubprocessTransport implements DshRuntimeTransport {
       if (typeof result?.messageId !== "string" || !result.messageId)
         throw new Error("DeepSeek Harness returned an invalid prompt admission receipt.")
       return result.messageId
+    } catch (error) {
+      throw new Error(
+        redactDshOutput(error instanceof Error ? error.message : String(error), this.secrets)
+      )
+    }
+  }
+
+  async wait(sessionId: string): Promise<void> {
+    if (!this.peer || !this.running)
+      throw new DshRuntimeUnavailableError("The DeepSeek Harness runtime is not running.")
+    // The adapter owns execution timeout/cancellation. A descendant wait can
+    // legitimately outlive the short handshake/admission request deadline.
+    const request = this.peer.sendTrackedRequest("session/wait", { sessionId })
+    request.deadline.pause()
+    try {
+      await request.promise
     } catch (error) {
       throw new Error(
         redactDshOutput(error instanceof Error ? error.message : String(error), this.secrets)

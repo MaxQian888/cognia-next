@@ -132,7 +132,7 @@ export type DshRuntimeChannel = z.infer<typeof dshRuntimeChannelSchema>
 /**
  * Capability facts for the SDK transport.
  *
- * Confirmed against published 0.2.0-rc.2 SDK protocol/server and session format
+ * Confirmed against published 0.2.1-rc.2 SDK protocol/server and session format
  * 4 declarations. Only durable message settlements cross the current SDK wire.
  */
 export const DSH_SDK_CAPABILITIES: DshCapabilitySnapshot = {
@@ -149,6 +149,7 @@ export const DSH_SDK_CAPABILITIES: DshCapabilitySnapshot = {
   // turn means closing the runtime." (dsh-sdk-client)
   turnCancellation: false,
   mcpPassthrough: true,
+  // Upstream now supports session/resume; Cognia's SDK adapter does not yet expose it.
   sessionResume: false,
 }
 
@@ -187,4 +188,155 @@ export function isReadOnlyProfile(profileId: DshProfileId): boolean {
 
 export function profileTransport(profileId: DshProfileId): DshTransport {
   return profileId === "cognia-acp" ? "acp" : "dsh-sdk"
+}
+
+export type DshPluginStatus = "enabled" | "disabled" | "conditional" | "not-composed"
+export type DshPluginCondition =
+  "direct-provider" | "cognia-gateway" | "mcp-servers" | "windows-only"
+
+/** Certified composition, not a report of installed packages or a live session. */
+export interface DshProfilePlugin {
+  id: string
+  packageName: string
+  status: DshPluginStatus
+  condition?: DshPluginCondition
+}
+
+// Exact rows from the pinned sdk-minimal bundle and Cognia overlays. Keeping IDs
+// preserves two differently configured instances of the same upstream package.
+const COMMON_PROFILE_PLUGINS = {
+  "deepseek-llm-api-extensions": "dsh-deepseek-llm-api-extensions",
+  "session-log-deepseek": "dsh-session-log-deepseek",
+  "plugin-package-inventory-deepseek": "dsh-plugin-package-inventory-deepseek",
+  sandbox: "dsh-sandbox-local",
+  "attachment-local": "dsh-attachment-local",
+  "tool-fs": "dsh-tool-fs",
+  "working-directory": "dsh-working-directory",
+  "tool-working-directory": "dsh-tool-working-directory",
+  "session-projection": "dsh-session-projection",
+  "token-meter": "dsh-token-meter",
+  "compaction-basic": "dsh-compaction-basic",
+  "image-offload": "dsh-compaction-image-offload",
+  "sandbox-policy": "dsh-sandbox-policy",
+  timer: "cordis-plugin-timer",
+  llm: "dsh-llm",
+  session: "dsh-session",
+  "session-title": "dsh-session-title",
+  "system-prompt": "dsh-system-prompt",
+  tools: "dsh-tools",
+  "mcp-resources": "dsh-mcp-resources",
+  agent: "dsh-agent",
+  "llm-retry": "dsh-llm-retry",
+  "agent-loop": "dsh-agent-loop",
+  sessions: "dsh-session-persistence-jsonl",
+  "fs-sandboxed": "dsh-fs-sandbox",
+} as const
+
+const SHELL_PROFILE_PLUGINS = {
+  subprocess: "dsh-subprocess-local",
+  pty: "dsh-terminal",
+  "terminal-bash": "dsh-terminal-bash",
+  "persistent-bash": "dsh-tool-bash-persistent",
+  jobs: "dsh-jobs-local",
+} as const
+
+const OPTIONAL_PROFILE_PLUGINS = {
+  "agent-instructions": "dsh-agent-instructions",
+  "plugin-manager": "dsh-plugin-manager",
+  "tool-plugin-manager": "dsh-plugin-manager/tools",
+  "client-ui-plugin-manager": "dsh-client-ui-plugin-manager",
+  subagent: "dsh-subagent",
+  "subagent-fork": "dsh-subagent-fork-in-process",
+  "subagent-spawn": "dsh-subagent-spawn-in-process",
+  "tool-subagent": "dsh-tool-subagent",
+  "tool-subagent-control": "dsh-tool-subagent-control",
+  skill: "dsh-skill",
+  "skill-filesystem": "dsh-skill-filesystem",
+  "tool-skill": "dsh-tool-skill",
+  "tool-fs-search": "dsh-tool-fs-search",
+  "web-search": "dsh-web-search-deepseek",
+  "tool-todo": "dsh-tool-todo",
+  goal: "dsh-goal",
+  "goal-round-driver": "dsh-goal-round-driver",
+  "tool-goal": "dsh-tool-goal",
+  "ptc-runtime": "dsh-ptc-runtime",
+  "ptc-runtime-node": "dsh-ptc-runtime-node",
+  "workflow-ptc": "dsh-workflow-ptc",
+} as const
+
+/** All three profiles are certified only on macOS/Linux; PowerShell stays disabled. */
+export function dshPluginsForProfile(profileId: DshProfileId): readonly DshProfilePlugin[] {
+  const acp = profileId === "cognia-acp"
+  const workspace = profileId === "cognia-sdk-workspace"
+  const rows = (
+    plugins: Readonly<Record<string, string>>,
+    status: DshPluginStatus
+  ): DshProfilePlugin[] =>
+    Object.entries(plugins).map(([id, name]) => ({
+      id,
+      packageName: `@deepseek-ai/${name}`,
+      status,
+    }))
+  return [
+    ...rows(COMMON_PROFILE_PLUGINS, "enabled"),
+    ...rows(SHELL_PROFILE_PLUGINS, workspace ? "enabled" : "disabled"),
+    ...rows(OPTIONAL_PROFILE_PLUGINS, "not-composed"),
+    ...rows(
+      { "sdk-app-startup": "dsh-sdk-app", "sdk-jsonrpc-server": "dsh-sdk-jsonrpc-server" },
+      acp ? "disabled" : "enabled"
+    ),
+    ...rows(
+      { "acp-app-startup": "dsh-acp-app", acp: "dsh-acp", "user-approval": "dsh-user-approval" },
+      acp ? "enabled" : "not-composed"
+    ),
+    { id: "cognia-services", packageName: "./launcher.mjs", status: "enabled" },
+    { id: "filesystem", packageName: "@deepseek-ai/dsh-fs-local", status: "disabled" },
+    {
+      id: "terminal-pwsh",
+      packageName: "@deepseek-ai/dsh-terminal-bash",
+      status: "disabled",
+      condition: "windows-only",
+    },
+    {
+      id: "persistent-pwsh",
+      packageName: "@deepseek-ai/dsh-tool-pwsh-persistent",
+      status: "disabled",
+      condition: "windows-only",
+    },
+    {
+      id: "llm-deepseek",
+      packageName: "@deepseek-ai/dsh-llm-deepseek-api-key",
+      status: "conditional",
+      condition: "direct-provider",
+    },
+    {
+      id: "llm-pi-ai",
+      packageName: "@deepseek-ai/dsh-llm-pi-ai",
+      status: "conditional",
+      condition: "cognia-gateway",
+    },
+    {
+      id: "mcp-client",
+      packageName: "@deepseek-ai/dsh-mcp-client",
+      status: "conditional",
+      condition: "mcp-servers",
+    },
+  ]
+}
+
+/** Native composition capabilities; governed Cognia/MCP tools have their own policy. */
+export function dshNativeCapabilitiesForProfile(profileId: DshProfileId) {
+  const workspace = profileId === "cognia-sdk-workspace"
+  return {
+    fileRead: true,
+    fileWrite: !isReadOnlyProfile(profileId),
+    persistentShell: workspace,
+    jobsBackend: workspace,
+    // A jobs service does not compose native background-task management tools.
+    jobsManagement: false,
+    subagents: false,
+    skills: false,
+    autoCompaction: true,
+    sessionResume: dshCapabilitiesForTransport(profileTransport(profileId)).sessionResume,
+  }
 }

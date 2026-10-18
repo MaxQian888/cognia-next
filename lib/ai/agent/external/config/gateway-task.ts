@@ -38,7 +38,7 @@ export type CogniaGatewayUnsupportedReason =
  * `transcript` starts a fresh native turn and replays Cognia's conversation
  * transcript instead. Keys are the runtime names {@link cogniaGatewaySupport}
  * reports; DeepSeek Harness's SDK profile is distinguished as `dsh-sdk`
- * because, unlike its ACP profile, it has no resumable native session.
+ * because Cognia does not yet expose its SDK native resume, unlike ACP.
  */
 export const GATEWAY_RUNTIME_TRAITS: Record<
   string,

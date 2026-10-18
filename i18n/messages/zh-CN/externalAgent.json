@@ -66,7 +66,8 @@
       "userDeclared": "这是你为该 agent 声明的",
       "cogniaExtensionBridge": "由随附的 Cognia 扩展提供",
       "isolatedLocalService": "由此对话专用的本地服务提供",
-      "aiderCliBridge": "由 Cognia 的官方 Aider CLI 适配器和独立会话历史提供"
+      "aiderCliBridge": "由 Cognia 的官方 Aider CLI 适配器和独立会话历史提供",
+      "profilePluginNotComposed": "已认证配置未挂载此原生插件"
     },
     "adapterMethod": {
       "steerTurn": "Cognia 适配器已实现 steerTurn",
@@ -103,7 +104,8 @@
     "punycodeWarning": "该网址包含可能伪装成其他域名的字符，请确认后再继续。",
     "submit": "提交",
     "title": "代理需要你的回答",
-    "responseFailed": "回答发送失败，已保留填写的内容，请重试。"
+    "responseFailed": "回答发送失败，已保留填写的内容，请重试。",
+    "otherResponse": "{question}：其他回答或补充说明"
   },
   "enableInSettings": "请在设置中启用外部代理",
   "errors": {
@@ -339,7 +341,7 @@
     "aiderEnvVarHint": "DeepSeek 示例：参数 --model deepseek/deepseek-flash，环境变量 DEEPSEEK_API_KEY。其他服务请使用对应的 Aider model ID 和 key。",
     "qoderSetupHint": "使用 curl -fsSL https://qoder.com/install | bash 安装，再运行 qoder login，或在此配置 QODER_PERSONAL_ACCESS_TOKEN。Cognia 通过原生 ACP 调用，显式启用默认权限，并为每个会话配置 MCP。此进程禁用后台自动更新；请单独使用 qoder update 更新。删除 Agent 会保留系统安装及 Qoder 数据。Cognia 支持在 macOS 和 Linux 上本地运行 Qoder。",
     "qoderEnvVarHint": "可复用已有 Qoder CLI 登录，或配置 QODER_PERSONAL_ACCESS_TOKEN。QODER_CONFIG_DIR 可指定独立配置目录。模型服务的 API key 不能替代 Qoder 认证；BYOK 模型是否可用取决于你的账号。",
-    "kimiSetupHint": "使用 Node.js 22.19 或更高版本执行 npm install -g @moonshot-ai/kimi-code@2.1.1，再执行 kimi login 登录 Kimi Code 订阅。Cognia 启动 kimi acp 并复用 CLI 登录。KIMI_CODE_HOME 可选择独立状态目录（默认 ~/.kimi-code）。请在托管会话之外执行 kimi upgrade 更新。删除此配置会保留系统安装和 Kimi 数据。请使用当前 Node CLI，不要使用已归档的 Python kimi-cli。",
+    "kimiSetupHint": "使用 Node.js 22.19 或更高版本执行 npm install -g @moonshot-ai/kimi-code@2.2.0，再执行 kimi login 登录 Kimi Code 订阅。Cognia 启动 kimi acp 并复用 CLI 登录。KIMI_CODE_HOME 可选择独立状态目录（默认 ~/.kimi-code）。请在托管会话之外执行 kimi upgrade 更新。删除此配置会保留系统安装和 Kimi 数据。请使用当前 Node CLI，不要使用已归档的 Python kimi-cli。",
     "kimiEnvVarHint": "订阅登录不需要 API key。可选 KIMI_CODE_HOME 指定状态目录。自定义服务可设置 KIMI_MODEL_NAME、KIMI_MODEL_PROVIDER_TYPE、KIMI_MODEL_BASE_URL 和 KIMI_MODEL_API_KEY；这些设置会替代订阅模型选择。",
     "deleteNativeSession": "删除原生记录",
     "deleteNativeSessionConfirm": "永久删除 Agent 保存的此会话记录？此操作无法撤销，项目文件会保留。",
@@ -356,7 +358,9 @@
     "untitledSession": "未命名会话",
     "archivedSession": "已归档",
     "updatedAt": "更新于 {time}",
-    "currentSession": "当前会话"
+    "currentSession": "当前会话",
+    "grokSetupHint": "安装 @xai-official/grok@1.0.62 后在 Grok Build 中登录，或提供 XAI_API_KEY。Cognia 会启动独立 Grok 进程并禁用自动更新。隔离配置使用各自的登录和设置。请在 Cognia 会话之外更新 CLI；删除此配置会保留系统安装。此版本不支持会话分叉、图片输入和音频输入。",
+    "grokEnvVarHint": "使用 Grok Build 登录或 XAI_API_KEY。可选 GROK_HOME 指定共享状态目录（默认 ~/.grok）；隔离配置使用单独的状态目录。"
   },
   "placement": {
     "fallback": "未使用沙箱",
@@ -526,12 +530,12 @@
     "deepseekHarness": {
       "approvalNotice": "SDK 原生工具无法在执行中请求审批，其权限在启动时确定。Cognia 工具遵循宿主权限策略。",
       "cancelNotice": "取消对话会关闭整个运行时：该传输层没有单次对话取消能力。",
-      "capabilities": "能力",
+      "capabilities": "传输事件观测和控制",
       "capabilityApproval": "对话中授权",
       "capabilityCancel": "取消单次对话",
       "capabilityReasoning": "推理过程",
       "capabilityStreaming": "实时流式输出",
-      "capabilitySubagents": "子 Agent 谱系",
+      "capabilitySubagents": "子代理事件观测",
       "capabilitySupported": "支持",
       "capabilityToolEvents": "工具活动",
       "capabilityUnsupported": "不支持",
@@ -560,7 +564,7 @@
       "notInstalled": "未安装",
       "profile": "配置档案",
       "profileReadonly": "只读",
-      "profileReadonlyDesc": "可以读取和搜索文件，不能写入或执行命令，也无法在对话过程中向你申请授权。",
+      "profileReadonlyDesc": "可以读取文件和图片。无法写入或执行命令，也无法在执行过程中请求审批。",
       "profileWorkspace": "工作区写入",
       "profileWorkspaceDesc": "可在工作区内写入并执行命令。其全部权限在启动时授予，且无法在对话过程中收回。",
       "reinstall": "重新安装",
@@ -572,9 +576,36 @@
       "upstreamVersion": "上游版本",
       "managedLaunchNotice": "先安装托管运行时，再保存此配置。Cognia 会在启动时解析可执行文件和运行配置。",
       "credentialNotice": "API Key 将保存到本地密钥库。编辑时留空可保留已有密钥。",
-      "committedEventsNotice": "两种传输均提供已提交的文本、推理和工具事件，并可通过 MCP 使用 Cognia 工具。不支持实时 token 增量；SDK 额外提供用量和子代理关系，ACP 支持逐工具审批和会话恢复。",
+      "committedEventsNotice": "两种传输均报告已提交的文本、推理和工具事件，不提供实时 token 增量。SDK 可观测用量和子代理事件，但这些配置均未挂载原生子代理插件。ACP 支持逐工具审批和持久化会话恢复。",
       "capabilityMcp": "Cognia 与 MCP 工具",
-      "retry": "重试"
+      "retry": "重试",
+      "profileAcp": "ACP 审批",
+      "profileAcpDesc": "可在工作区内写入文件，更大范围的文件操作需要审批。Shell 和后台任务已禁用。",
+      "nativeCapabilities": "原生配置能力",
+      "nativeCapabilitiesNotice": "此处展示已认证插件组合的能力。Cognia 和 MCP 工具分别遵循宿主的权限策略。",
+      "nativeFileRead": "原生文件读取和图片",
+      "nativeFileWrite": "原生工作区文件写入",
+      "nativeShell": "原生持久 Shell",
+      "nativeJobsBackend": "后台任务服务",
+      "nativeJobsManagement": "后台任务管理工具",
+      "nativeSubagents": "原生子代理",
+      "nativeSkills": "原生 Skills",
+      "nativeCompaction": "自动上下文压缩",
+      "nativeSessionResume": "原生会话恢复",
+      "plugins": "已认证插件组合",
+      "pluginsNotice": "此处展示已认证配置中的插件组合，并非实时插件或安装报告。包已安装不代表已挂载。条件插件仅在模型路由或 MCP 配置选择它们时启用。",
+      "pluginStatus": {
+        "enabled": "已启用",
+        "disabled": "已禁用",
+        "conditional": "按条件启用",
+        "not-composed": "未挂载"
+      },
+      "pluginCondition": {
+        "direct-provider": "仅在使用 DeepSeek 凭据直连时启用；使用 Cognia 模型时禁用。",
+        "cognia-gateway": "仅在启动时获得 Cognia 模型网关租约后启用。",
+        "mcp-servers": "配置了服务器时启用：SDK 在启动时挂载，ACP 按会话挂载。",
+        "windows-only": "仅适用于 Windows；在已认证的 macOS 和 Linux 配置中禁用。"
+      }
     },
     "defaultPermissionMode": "默认权限模式",
     "defaultPermissionModeDesc": "新代理会话使用的默认权限模式",
@@ -848,7 +879,9 @@
     "mobileDetailNotSet": "未设置",
     "mobileDetailSaved": "已保存",
     "mobileDetailNonNegativeIntegerInvalid": "请输入大于或等于零的整数。",
-    "sectionDefaults": "默认设置"
+    "sectionDefaults": "默认设置",
+    "grokPresetName": "Grok Build",
+    "grokPresetDescription": "通过原生 ACP 运行 xAI Grok Build，支持流式回复、工具审批、用户提问、MCP 和持久化会话。"
   },
   "statusConnected": "已连接",
   "statusConnecting": "连接中",

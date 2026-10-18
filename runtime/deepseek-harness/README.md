@@ -7,15 +7,18 @@ It uses the official `@deepseek-ai/dsh` product launcher and the shipped
 
 ## Supported release and protocol
 
-The managed release is **0.2.0-rc.2**, verified against the published package
-sources on 2026-10-05. The runtime pins the product, transport packages, and
+The managed release is **0.2.1-rc.2**, verified against the published package
+sources on 2026-10-18. The runtime pins the product, transport packages, and
 DSH dependency namespace together so caret dependencies cannot mix releases.
-The explicit overrides come from the installed product's dependency closure and
-must be refreshed together on the next supported release upgrade. The installer
+The explicit overrides cover all **295 DSH packages** in the exact published
+product/runtime dependency closure, including optional and peer dependencies,
+and must be refreshed together on the next supported release upgrade. The installer
 retains a lockfile and validates its digest.
 
-The SDK requests are `initialize`, `session/prompt`, and `shutdown`; notifications
-remain `session.event`, `session.status`, `subagent.started`, and `subagent.finished`.
+The Cognia SDK adapter uses `initialize`, `session/prompt`, `session/wait`, and
+`shutdown`. Upstream also supports working-directory get/set and native
+`session/resume`; native SDK resume remains excluded from this integration upgrade.
+Notifications remain `session.event`, `session.status`, `subagent.started`, and `subagent.finished`.
 Durable sessions use format **4**. The transport's `serverInfo.version` is still
 `0.0.1`, so it cannot establish package compatibility. The launcher checks installed
 package versions before loading upstream code and rejects older releases.
@@ -25,8 +28,16 @@ package versions before loading upstream code and rejects older releases.
 The existing `host.*.yml` artifact names now contain **patch overlays**, applied
 last through the official `dsh --profile <name> --patch <absolute-overlay>` grammar.
 All profiles inherit the maintained minimal agent kernel, projection registry,
-LLM service, and session persistence, then add sandboxed filesystem tools and a
-local image attachment store.
+LLM service, session persistence, working-directory service/tools, and automatic
+compaction/image offload. The new minimal bundle already owns filesystem tools
+and the attachment store. Cognia configures those inherited rows rather than
+inserting duplicate IDs.
+
+Cordis patch rows cannot replace a plugin by changing its `name`. Each overlay
+explicitly disables the inherited `filesystem` (`dsh-fs-local`) row and inserts
+`fs-sandboxed` (`dsh-fs-sandbox`). The smoke test verifies the active package
+inventory contains only the sandboxed provider. Working-directory changes keep
+the original session workspace as the sandbox policy root.
 
 | Artifact                 | Managed profile        | Authority                                                                               |
 | ------------------------ | ---------------------- | --------------------------------------------------------------------------------------- |
@@ -96,9 +107,9 @@ Cognia preflight failures go to stderr.
 ## Verification
 
 ```sh
-node --test launcher.test.mjs
-npm install --ignore-scripts --no-audit --no-fund
-node --test launcher.smoke.test.mjs services.smoke.test.mjs
+rtk node --test launcher.test.mjs
+rtk npm install --ignore-scripts --no-audit --no-fund
+rtk node --test launcher.smoke.test.mjs services.smoke.test.mjs
 ```
 
 Install this package into an isolated directory, never into Cognia's application
@@ -106,13 +117,39 @@ workspace. `launcher.test.mjs` checks argument validation, path containment, hid
 patches, manifest injection, and stale release refusal. `launcher.smoke.test.mjs`
 launches actual product subprocesses using `mock-deepseek.mjs`, a loopback SSE
 provider with a dummy credential. It exercises SDK initialize, prompt receipts,
-tool execution/denial, final output, idle, shutdown, image input, persisted v3
-headers, and ACP initialize/new/prompt/permission rejection/disconnect. It rejects
+tool execution/denial, `session/wait`, final output, idle, shutdown, image input,
+working-directory get/set and missing-directory rejection, durable directory
+change events, persisted v4 headers, and ACP initialize/new/prompt/permission rejection/disconnect. It rejects
 the obsolete dotted `session.prompt` request. `services.smoke.test.mjs` also drives SDK startup MCP, ACP session MCP, the generic Cognia model route, and denied-tool-result propagation without duplicate approvals. These tests spend no model credits.
+
+On 2026-10-18, an isolated npm installation on macOS arm64 with Node 26.5.0
+installed 613 packages, and all **17 tests passed** (10 launcher unit checks plus
+7 actual-runtime/closure checks). The closure check verifies every DSH entry in
+the installed lockfile is exactly `0.2.1-rc.2` and covered by the managed override
+list. No user-managed runtime, credentials, or persistent sessions were migrated
+or activated during this validation.
+
+The production-adapter smoke also passed **5 sessions and 7 prompts** through
+the actual DSH subprocess, Cognia Node host, CLI tool broker, renderer helper,
+and sidecar, with event counts `[7, 7, 6, 7, 42, 42, 6]`. It covered concurrent
+sessions, follow-ups, reconnects, tool reads/writes, `ask_user`, additional roots,
+denied writes, and renderer approval hooks. The provider was a local Messages API
+fixture, not an authenticated public model call. Native DSH sandbox policies were
+active; this adapter smoke did not exercise a packaged Tauri or host OS sandbox.
+The real run also corrected Cognia's old nested tool-result assumption: published
+DSH tool messages carry `toolCallId`, `content`, and `isError` on the message itself.
+The codec checks the tool role and source call identity before forwarding results.
+
+Run the production-adapter regression from the Cognia repository root after
+installing this runtime into an isolated directory:
+
+```sh
+rtk node scripts/smoke/build-and-run-smoke.mjs --deepseek-harness /path/to/installed/runtime
+```
 
 The package carries the full official launcher closure, including optional native
 providers. The smoke results establish the local macOS installation; other platforms
 still need their own native-binding and sandbox checks before claiming device support.
 
-Upstream: [product launcher](https://www.npmjs.com/package/@deepseek-ai/dsh/v/0.2.0-rc.2),
-[SDK minimal bundle](https://www.npmjs.com/package/@deepseek-ai/dsh-sdk-minimal/v/0.2.0-rc.2).
+Upstream: [product launcher](https://www.npmjs.com/package/@deepseek-ai/dsh/v/0.2.1-rc.2),
+[SDK minimal bundle](https://www.npmjs.com/package/@deepseek-ai/dsh-sdk-minimal/v/0.2.1-rc.2).

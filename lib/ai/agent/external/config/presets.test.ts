@@ -573,3 +573,16 @@ it("offers MiniMax's native ACP process with persisted-session negotiation", () 
   })
   expect(getRunnablePresets()).toContain("minimax-code")
 })
+
+it("materializes Grok Build through native ACP without a shared leader or automatic approval", () => {
+  expect(createAgentFromPreset("grok")).toMatchObject({
+    name: "Grok Build",
+    protocol: "acp",
+    transport: "stdio",
+    defaultPermissionMode: "default",
+    process: { command: "grok", args: ["agent", "--no-leader", "stdio"] },
+    metadata: { preset: "grok", ecosystemAdapterId: "grok", ecosystemSurfaceId: "acp-stdio" },
+  })
+  expect(BUILTIN_EXECUTABLE_PRESET_IDS).toContain("grok")
+  expect(getRunnablePresets()).toContain("grok")
+})

@@ -34,6 +34,7 @@ const RUNTIME_CLASSES: Record<TeammateRuntime, string> = {
   "gemini-cli": "bg-violet-500/15 text-violet-700 dark:text-violet-300 ring-violet-500/30",
   "minimax-code": "bg-rose-500/15 text-rose-700 dark:text-rose-300 ring-rose-500/30",
   kimi: "bg-blue-500/15 text-blue-700 dark:text-blue-300 ring-blue-500/30",
+  grok: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-200 ring-zinc-500/30",
   cline: "bg-orange-500/15 text-orange-700 dark:text-orange-300 ring-orange-500/30",
   qoder: "bg-purple-500/15 text-purple-700 dark:text-purple-300 ring-purple-500/30",
   goose: "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30",
@@ -73,7 +74,7 @@ export function RuntimeBadge({ runtime, iconOnly = false, className }: RuntimeBa
       )}
       title={label}
     >
-      <BrandIcon id={runtime} label={label} size={12} />
+      <BrandIcon id={runtime === "grok" ? "xai" : runtime} label={label} size={12} />
       {!iconOnly && <span className="leading-none">{label}</span>}
     </span>
   )

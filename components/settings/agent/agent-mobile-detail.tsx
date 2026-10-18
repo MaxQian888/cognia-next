@@ -1,5 +1,7 @@
 "use client"
 
+import { isCodexAppServerProtocol } from "@/lib/ai/agent/external/protocol-options"
+
 import { useState, type ComponentProps, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { MoreHorizontal } from "lucide-react"
@@ -364,7 +366,7 @@ function MobileDetail({
     status.action = connectAction(readiness.state === "error")
 
   const diagnostics: Diagnostic[] = []
-  if (agent.protocol === "codex-app-server") diagnostics.push("codex")
+  if (isCodexAppServerProtocol(agent.protocol)) diagnostics.push("codex")
   if (agent.protocol === "opencode" || agent.protocol === "opencode-v2")
     diagnostics.push("opencode")
   if (agent.protocol === "pi-rpc") diagnostics.push("pi")

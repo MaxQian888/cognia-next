@@ -96,6 +96,32 @@ const baseAgentState = {
 }
 
 describe("ExternalAgentSessionPanel", () => {
+  it.each([false, true])("honors negotiated ACP fork support (%s)", (supported) => {
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
+    useExternalAgentMock.mockReturnValue({
+      ...baseAgentState,
+      activeSession: { id: "grok-session" },
+      activeAgentValidity: {
+        negotiation: {
+          protocol: "acp",
+          agentCapabilities: {
+            sessionCapabilities: {
+              list: {},
+              resume: {},
+              close: {},
+              ...(supported ? { fork: {} } : {}),
+            },
+          },
+        },
+      },
+      forkSession: jest.fn(),
+    })
+    render(wrap(<ExternalAgentSessionPanel />))
+    const fork = screen.queryByRole("button", { name: en.chat.header.forkAria })
+    if (supported) expect(fork).toBeInTheDocument()
+    else expect(fork).not.toBeInTheDocument()
+  })
+
   it("mounts shared session controls for the active native session", () => {
     mockAgentRuntime.mockReturnValue({ runtime: "external" })
     useExternalAgentMock.mockReturnValue({

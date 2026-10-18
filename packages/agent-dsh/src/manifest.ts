@@ -16,7 +16,8 @@ import type { AgentExecutionSemantics } from "@cognia/agent-contracts/semantics"
  * The SDK runtime has no prompt-cancel method on the wire, so cancelling a
  * turn retires that session's runtime process. Each session owns its process
  * (SDK MCP configuration is fixed at startup), so other sessions are
- * untouched, but the cancelled session cannot continue and cannot be resumed.
+ * untouched. Cognia does not yet expose the upstream session/resume method,
+ * so the cancelled session cannot currently continue through this adapter.
  * Authority is fixed by the composition at launch: per-call approval answers
  * are refused.
  */
@@ -97,8 +98,8 @@ export const DSH_CAPABILITIES: AgentCapabilityContribution = {
         },
         "session.resume": {
           level: "unsupported",
-          evidence: "protocol-spec",
-          reasonKey: "noProtocolSlot",
+          evidence: "adapter-code",
+          reasonKey: "adapterMethodMissing",
         },
         "tools.ordinary": {
           level: "native",
@@ -301,10 +302,37 @@ export const DSH_CAPABILITIES: AgentCapabilityContribution = {
     },
   },
   presetRefinements: {
+    "deepseek-harness-readonly": {
+      protocol: "dsh-sdk",
+      note: "The certified minimal composition does not mount native subagent producers.",
+      capabilities: {
+        "subagents.native": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "profilePluginNotComposed",
+        },
+      },
+    },
+    "deepseek-harness-workspace": {
+      protocol: "dsh-sdk",
+      note: "The certified minimal composition mounts shell and job services, but no native subagent producers.",
+      capabilities: {
+        "subagents.native": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "profilePluginNotComposed",
+        },
+      },
+    },
     "deepseek-harness-acp": {
       protocol: "acp",
       note: "Current ACP publishes committed text, reasoning and tool updates, supports per-session MCP and persisted session list/resume/close.",
       capabilities: {
+        "subagents.native": {
+          level: "unsupported",
+          evidence: "adapter-code",
+          reasonKey: "profilePluginNotComposed",
+        },
         streaming: {
           level: "unsupported",
           evidence: "protocol-spec",

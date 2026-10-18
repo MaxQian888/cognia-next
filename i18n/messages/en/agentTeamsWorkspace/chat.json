@@ -61,7 +61,8 @@
     "cline": "Cline",
     "qoder": "Qoder",
     "minimaxCode": "MiniMax Code",
-    "kimi": "Kimi Code"
+    "kimi": "Kimi Code",
+    "grok": "Grok Build"
   },
   "runtimeStatus": {
     "disconnected": "{runtime} is configured but not connected. Open Settings → External Agents to connect.",

@@ -13,6 +13,16 @@ const assistant = (content: unknown[], usage?: unknown) =>
   frame("assistant/message", { message: { id: "a", content }, usage, stream: [] })
 
 describe("current DeepSeek Harness session format 4", () => {
+  it.each([
+    ["job/registered", { jobId: "job-1" }],
+    ["job/settled", { jobId: "job-1" }],
+    ["working-directory/change", { cwd: "/workspace/subdirectory" }],
+  ])("observes 0.2.1 event %s without ending the turn", (type, data) => {
+    const result = translateDshNotification(frame(type as string, data))
+    expect(result.warnings).toEqual([])
+    expect(result.events).toMatchObject([{ type: "progress" }])
+    expect(result.events.some((event) => event.type === "done")).toBe(false)
+  })
   it("emits committed text and governed reasoning exactly once without replaying the embedded stream", () => {
     const result = translateDshNotification(
       frame("assistant/message", {
@@ -123,8 +133,11 @@ describe("current DeepSeek Harness session format 4", () => {
     const result = translateDshNotification(
       frame("tool/result", {
         message: {
-          source: { callId: "c" },
-          content: [{ type: "tool-result", toolCallId: "c", content, isError: true }],
+          role: "tool",
+          source: { kind: "tool", callId: "c" },
+          toolCallId: "c",
+          content,
+          isError: true,
         },
         meta: { diff: "x" },
         error: { code: "X" },
@@ -143,21 +156,25 @@ describe("current DeepSeek Harness session format 4", () => {
       translateDshNotification(
         frame("tool/result", {
           message: {
-            source: { callId: "c" },
+            role: "tool",
+            source: { kind: "tool", callId: "c" },
+            toolCallId: "c",
             content: [
-              {
-                type: "tool-result",
-                toolCallId: "c",
-                content: [
-                  { type: "text", text: "a" },
-                  { type: "text", text: "b" },
-                ],
-              },
+              { type: "text", text: "a" },
+              { type: "text", text: "b" },
             ],
           },
         })
       ).events[0]
     ).toMatchObject({ result: "ab" })
+  })
+  it.each([
+    { role: "tool", source: { kind: "tool", callId: "c" }, toolCallId: "other", content: [] },
+    { role: "user", source: { kind: "tool", callId: "c" }, toolCallId: "c", content: [] },
+    { role: "tool", source: { kind: "user", callId: "c" }, toolCallId: "c", content: [] },
+    { role: "tool", source: { kind: "tool", callId: "c" }, toolCallId: "c", content: "invalid" },
+  ])("refuses a tool result with mismatched authority, call identity or content", (message) => {
+    expect(() => translateDshNotification(frame("tool/result", { message }))).toThrow()
   })
   it("uses parentSessionId for subagent lineage without exposing child reasoning as progress", () => {
     const result = translateDshNotification({

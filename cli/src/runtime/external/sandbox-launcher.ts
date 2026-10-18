@@ -240,6 +240,7 @@ export function buildSandboxLauncherArgs(
   qoderConfigRoot(config, homedir)
   clineConfigRoot(config, homedir)
   kimiConfigRoot(config, homedir)
+  grokConfigRoot(config, homedir)
   minimaxConfigRoot(config, homedir)
   const taskHome = config.env?.COGNIA_GATEWAY_TASK_HOME
   const botIsolation = config.env?.COGNIA_BOT_ISOLATION === "1"
@@ -317,6 +318,7 @@ export function buildSandboxLauncherArgs(
             // Kimi Code (and its archived Python CLI), Copilot CLI, Goose and
             // Aider keep logins and provider settings here; a task uses its own.
             ".kimi-code",
+            ".grok",
             ".minimax",
             ".kimi",
             ".copilot",
@@ -477,6 +479,18 @@ export function clineConfigRoot(
   return root
 }
 
+/** Grok Build uses its native home; gateway tasks never inherit the host login. */
+export function grokConfigRoot(
+  config: NodeExternalAgentSpawnConfig,
+  homedir: string
+): string | undefined {
+  if (config.command !== "grok") return undefined
+  const selected =
+    config.env?.GROK_HOME ??
+    (config.env?.COGNIA_GATEWAY_TASK_HOME ? undefined : process.env.GROK_HOME)
+  return nativeStateRoot(config, homedir, selected, ".grok", "Grok")
+}
+
 /** Kimi Code resolves its native state home from the environment, relative to cwd. */
 export function kimiConfigRoot(
   config: NodeExternalAgentSpawnConfig,
@@ -564,6 +578,8 @@ function agentStateWritableRoots(
   homedir: string,
   isolation: StateIsolationPlan | null = null
 ): string[] {
+  const grokRoot = grokConfigRoot(config, homedir)
+  if (grokRoot) return [grokRoot]
   const minimaxRoot = minimaxConfigRoot(config, homedir)
   if (minimaxRoot) return [minimaxRoot]
   const kimiRoot = kimiConfigRoot(config, homedir)
@@ -653,6 +669,19 @@ export async function resolveSandboxedExternalAgentLaunch(
   // Goose's platform extensions create temporary files during session/new.
   // macOS's ambient /var/folders temp root is outside the sandbox write scope.
   let env: Record<string, string> | undefined
+  const grokRoot = grokConfigRoot(config, runtime.homedir)
+  if (grokRoot) {
+    const temp = path.join(grokRoot, "tmp")
+    runtime.ensureDir?.(temp)
+    env = {
+      GROK_HOME: grokRoot,
+      GROK_DISABLE_AUTOUPDATER: "1",
+      GROK_CHANGELOG_OFFLINE: "1",
+      TMPDIR: temp,
+      TMP: temp,
+      TEMP: temp,
+    }
+  }
   const minimaxRoot = minimaxConfigRoot(config, runtime.homedir)
   if (minimaxRoot) {
     const temp = path.join(minimaxRoot, "tmp")

@@ -7,6 +7,8 @@ import {
   dshCapabilitiesForTransport,
   dshCapabilitySnapshotSchema,
   dshRuntimeChannelSchema,
+  dshPluginsForProfile,
+  dshNativeCapabilitiesForProfile,
   isReadOnlyProfile,
   profileTransport,
   type DshRuntimeChannel,
@@ -118,6 +120,78 @@ describe("DSH capability facts", () => {
 })
 
 describe("profile classification", () => {
+  it("distinguishes workspace execution services from task management", () => {
+    expect(dshNativeCapabilitiesForProfile("cognia-sdk-workspace")).toMatchObject({
+      fileRead: true,
+      fileWrite: true,
+      persistentShell: true,
+      jobsBackend: true,
+      jobsManagement: false,
+      subagents: false,
+      skills: false,
+      autoCompaction: true,
+      sessionResume: false,
+    })
+    expect(dshNativeCapabilitiesForProfile("cognia-sdk-readonly")).toMatchObject({
+      fileWrite: false,
+      persistentShell: false,
+      jobsBackend: false,
+      sessionResume: false,
+    })
+    expect(dshNativeCapabilitiesForProfile("cognia-acp")).toMatchObject({
+      fileWrite: true,
+      persistentShell: false,
+      jobsBackend: false,
+      sessionResume: true,
+    })
+  })
+
+  it("lists enabled, disabled, conditional and absent plugins for every certified profile", () => {
+    for (const profileId of DSH_PROFILE_IDS) {
+      const plugins = dshPluginsForProfile(profileId)
+      expect(new Set(plugins.map((plugin) => plugin.id)).size).toBe(plugins.length)
+      const byId = Object.fromEntries(plugins.map((plugin) => [plugin.id, plugin]))
+      expect(byId.filesystem.status).toBe("disabled")
+      expect(byId["fs-sandboxed"].status).toBe("enabled")
+      expect(byId["llm-deepseek"]).toMatchObject({
+        status: "conditional",
+        condition: "direct-provider",
+      })
+      expect(byId["llm-pi-ai"]).toMatchObject({
+        status: "conditional",
+        condition: "cognia-gateway",
+      })
+      expect(byId["mcp-client"]).toMatchObject({ status: "conditional", condition: "mcp-servers" })
+      expect(byId["persistent-pwsh"]).toMatchObject({
+        status: "disabled",
+        condition: "windows-only",
+      })
+      expect(byId.subagent.status).toBe("not-composed")
+      expect(byId.skill.status).toBe("not-composed")
+      expect(byId["agent-instructions"]).toMatchObject({
+        packageName: "@deepseek-ai/dsh-agent-instructions",
+        status: "not-composed",
+      })
+      expect(byId["plugin-manager"]).toMatchObject({
+        packageName: "@deepseek-ai/dsh-plugin-manager",
+        status: "not-composed",
+      })
+      expect(byId["tool-plugin-manager"]).toMatchObject({
+        packageName: "@deepseek-ai/dsh-plugin-manager/tools",
+        status: "not-composed",
+      })
+      expect(byId["client-ui-plugin-manager"]).toMatchObject({
+        packageName: "@deepseek-ai/dsh-client-ui-plugin-manager",
+        status: "not-composed",
+      })
+      expect(byId.jobs.status).toBe(profileId === "cognia-sdk-workspace" ? "enabled" : "disabled")
+      expect(byId["sdk-jsonrpc-server"].status).toBe(
+        profileId === "cognia-acp" ? "disabled" : "enabled"
+      )
+      expect(byId.acp.status).toBe(profileId === "cognia-acp" ? "enabled" : "not-composed")
+    }
+  })
+
   it("treats only the read-only SDK profile as read-only", () => {
     // Not derivable from sandbox mode: cognia-sdk-workspace also has a sandbox,
     // and the read-only guarantee rests on no approval provider being composed.

@@ -10,6 +10,7 @@ import { PresetPickerList } from "@/components/agent/external-agent/add-agent/pr
 import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
 import { cn } from "@/lib/utils"
 import { isFromPreset } from "@/lib/ai/agent/external/config/presets"
+import { findRuntimeForConfig } from "@/lib/ai/agent/external/config/install-catalog"
 import type { AgentReadiness, AgentReadinessAction } from "@/lib/ai/agent/external/agent-readiness"
 import type { LifecycleExternalAgentConfig } from "@/stores/agent/external-agent-store"
 import type { InstanceTrait } from "@/components/agent/external-agent/instance-traits"
@@ -124,7 +125,11 @@ export function AgentOverviewBoard({
                           data-testid={`overview-open-${agent.id}`}
                         >
                           <BrandIcon
-                            id={isFromPreset(agent) ?? agent.name}
+                            id={
+                              isFromPreset(agent) ??
+                              findRuntimeForConfig(agent)?.runtimeId ??
+                              agent.name
+                            }
                             label={agent.name}
                             size={20}
                           />

@@ -11,6 +11,7 @@ import { createPlatformWebSocket } from "@/lib/network/platform-websocket"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { getAcpHostCapabilities } from "../agent-transport"
 import { buildAgentEnv } from "../config/env-builder"
+import { isTrustedLocalMcpCredential } from "../session/renderer-tool-host"
 import { configuredApprovalPolicy, isToolPreApproved } from "../policy/tool-preapproval"
 import {
   createAcpAdapterFactory,
@@ -34,6 +35,7 @@ describe("ACP host wiring", () => {
     expect(deps.approvalPolicy).toBe(configuredApprovalPolicy)
     expect(deps.toolPreApproval).toBe(isToolPreApproved)
     expect(deps.outboundGate).toBe(hasNoLeakingPiiDeep)
+    expect(deps.isTrustedLocalMcpCredential).toBe(isTrustedLocalMcpCredential)
   })
 
   it("reads the dynamic-MCP controller live", () => {

@@ -23,6 +23,7 @@
       "droid",
       "gemini",
       "goose",
+      "grok",
       "kiro-cli",
       "opencode",
       "pi",
@@ -52,6 +53,7 @@
   "agentStateWritableRoots": {
     "note": "Home-relative paths each agent family must be able to write inside the sandbox. Matching runs against the RESOLVED target: for `npx <package>` that is the package, otherwise the base command with any Windows executable suffix stripped. `match` is either \"contains\" (substring of the target), \"target\" (target equals one of `values`) or \"base\" (the base command equals one of `values`) -- Pi needs `base` rather than \"contains\" because \"copilot\" contains \"pi\". No rule uses \"target\" today: its only user was the `pi-acp` npx bridge, removed with that runtime. The mode is kept because it is the only correct match for an npx package name, which the next bridge will need. A missing root does not fail the launch; it silently breaks whatever the agent stores there, which is how OpenCode's absence went unnoticed while its session resume started over every time.",
     "rules": [
+      { "match": "base", "values": ["grok"], "roots": [".grok"] },
       {
         "match": "base",
         "values": ["cline"],
@@ -143,6 +145,13 @@
   "agentStateIsolation": {
     "note": "Per-configuration state roots (ADR-0216). When a configuration is `isolated`, the TS launch path sets COGNIA_AGENT_STATE_KEY=<configId> and each spawn backend resolves <data_dir>/cognia/external-agents/<key>, creates it, maps every `env` key to `<root>/<relative>`, and under the sandbox replaces the rule's `sharedRoots` writable grants with the root and adds `denyReadable` (home-relative) so the CLI cannot fall back to the user's own login. `match`/`values` resolve exactly like agentStateWritableRoots. A runtime with no rule here cannot be isolated and the launch is refused with `state_isolation_unsupported`. Only documented home variables are listed: Gemini, Goose, Devin, Kiro, Droid, Cursor, Aider and DeepSeek Harness have none Cognia can rely on. Qoder keeps its login root readable because its own binary is installed under it.",
     "rules": [
+      {
+        "match": "base",
+        "values": ["grok"],
+        "env": { "GROK_HOME": "grok" },
+        "sharedRoots": [".grok"],
+        "denyReadable": [".grok"]
+      },
       {
         "match": "contains",
         "values": ["codex"],

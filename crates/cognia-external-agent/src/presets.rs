@@ -81,6 +81,7 @@ const BINARY_ALLOWLIST: &[&str] = &[
     "kimi",
     "mcode",
     "goose",
+    "grok",
     "aider",
     // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119).
     "pi",
@@ -103,6 +104,13 @@ const NPX_PACKAGE_ALLOWLIST: &[&str] = &[
 
 /// Exact env keys always allowed through.
 const ENV_KEY_ALLOWLIST: &[&str] = &[
+    "XAI_API_KEY",
+    "GROK_HOME",
+    "GROK_DISABLE_AUTOUPDATER",
+    "GROK_CHANGELOG_OFFLINE",
+    "GROK_TELEMETRY_ENABLED",
+    "GROK_TELEMETRY_TRACE_UPLOAD",
+    "GROK_FEEDBACK_ENABLED",
     "MINIMAX_DATA_DIR",
     "MAVIS_DATA_DIR",
     "MCODE_PROVIDER_API_KEY",
@@ -975,6 +983,41 @@ mod tests {
             tmp,
             policy.with_operator_allowlists(Ok(commands.into()), Ok(keys.into())),
         )
+    }
+
+    #[test]
+    fn grok_admits_only_reviewed_provider_and_state_controls() {
+        let (_tmp, policy) = policy(false);
+        let reviewed = HashMap::from([
+            ("XAI_API_KEY".into(), "synthetic-key".into()),
+            ("GROK_HOME".into(), "/owned/grok".into()),
+            ("GROK_DISABLE_AUTOUPDATER".into(), "1".into()),
+            ("GROK_CHANGELOG_OFFLINE".into(), "1".into()),
+            ("GROK_TELEMETRY_ENABLED".into(), "0".into()),
+            ("GROK_TELEMETRY_TRACE_UPLOAD".into(), "0".into()),
+            ("GROK_FEEDBACK_ENABLED".into(), "0".into()),
+        ]);
+        let mut request = config("grok", &["agent", "--no-leader", "stdio"]);
+        request.env = reviewed.clone();
+        request
+            .env
+            .insert("GROK_UNREVIEWED".into(), "blocked".into());
+        request
+            .env
+            .insert("XAI_UNREVIEWED".into(), "blocked".into());
+        for result in [
+            policy.validate(request.clone()),
+            policy.validate_desktop(request),
+        ] {
+            let validated = result.unwrap();
+            assert_eq!(validated.config.env, reviewed);
+            assert_eq!(
+                validated.dropped_env_keys,
+                ["GROK_UNREVIEWED", "XAI_UNREVIEWED"]
+            );
+            let mut env = validated.config.env.into_iter().collect();
+            assert!(cognia_exec_sandbox::env::filter_env(&mut env).is_empty());
+        }
     }
 
     #[test]

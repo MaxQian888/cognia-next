@@ -55,6 +55,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { BrandIcon } from "@/components/icons/brand-icon"
 import { cn } from "@/lib/utils"
 import { getPresetDisplayInfo, isFromPreset } from "@/lib/ai/agent/external/config/presets"
+import { findRuntimeForConfig } from "@/lib/ai/agent/external/config/install-catalog"
 import { runtimeFamilyKey } from "@/lib/ai/agent/external/config/instance-family"
 import type { AgentReadiness, AgentReadinessState } from "@/lib/ai/agent/external/agent-readiness"
 import type { LifecycleExternalAgentConfig } from "@/stores/agent/external-agent-store"
@@ -228,7 +229,11 @@ function AgentRow({
             active && "font-medium text-accent-foreground"
           )}
         >
-          <BrandIcon id={presetId ?? agent.name} label={agent.name} size={20} />
+          <BrandIcon
+            id={presetId ?? findRuntimeForConfig(agent)?.runtimeId ?? agent.name}
+            label={agent.name}
+            size={20}
+          />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5 overflow-hidden">
               <span className="min-w-0 max-w-full shrink-0 basis-auto truncate">{agent.name}</span>

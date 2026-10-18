@@ -422,6 +422,7 @@ it("renders consent in place of other remedies", () => {
 
 it.each([
   ["codex-app-server", "Codex app-server", "codex"],
+  ["codex-siwc-app-server", "Codex app-server", "codex"],
   ["opencode", "OpenCode", "opencode"],
   ["opencode-v2", "OpenCode", "opencode"],
   ["pi-rpc", "Pi sign-in", "pi"],

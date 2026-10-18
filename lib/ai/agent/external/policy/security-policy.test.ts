@@ -3,6 +3,7 @@ import {
   EXTERNAL_AGENT_BINARY_ALLOWLIST,
   EXTERNAL_AGENT_NPX_ALLOWLIST,
   agentStateWritableRoots,
+  agentStateIsolationFor,
   baseCommandName,
   externalAgentSandboxSupportsPlatform,
   isAgentStateFileRoot,
@@ -133,4 +134,26 @@ it("allows the installed ACP binaries and retains their writable state roots", (
     expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain(command)
     expect(agentStateWritableRoots(command)).not.toEqual([])
   }
+})
+
+it("confines MiniMax state to its documented root and isolates both directory aliases", () => {
+  expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain("mcode")
+  expect(agentStateWritableRoots("mcode", ["acp"])).toEqual([".minimax"])
+  expect(agentStateWritableRoots("not-mcode")).toEqual([])
+  expect(agentStateIsolationFor("mcode", ["acp"])).toMatchObject({
+    env: { MINIMAX_DATA_DIR: "minimax", MAVIS_DATA_DIR: "minimax" },
+    sharedRoots: [".minimax"],
+    denyReadable: [".minimax"],
+  })
+})
+
+it("scopes Grok state by its exact executable and documented home", () => {
+  expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain("grok")
+  expect(agentStateWritableRoots("grok")).toEqual([".grok"])
+  expect(agentStateWritableRoots("not-grok")).toEqual([])
+  expect(agentStateIsolationFor("grok")).toEqual({
+    env: { GROK_HOME: "grok" },
+    sharedRoots: [".grok"],
+    denyReadable: [".grok"],
+  })
 })

@@ -1,3 +1,7 @@
+import en from "@/i18n/messages/en/externalAgent.json"
+import zhCN from "@/i18n/messages/zh-CN/externalAgent.json"
+import { KIMI_REVIEWED_VERSION } from "@/lib/agent-ecosystem/kimi-management"
+
 import {
   EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS,
   getExternalAgentEcosystemAdapter,
@@ -22,6 +26,7 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
       "droid",
       "gemini-cli",
       "goose",
+      "grok",
       "kimi",
       "kiro",
       "minimax-code",
@@ -59,6 +64,14 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
     expect(copilot.envVarHint).toContain("fine-grained PAT")
   })
 
+  it("keeps Kimi installation guidance aligned with the reviewed version", () => {
+    const kimi = findExternalAgentSurfaceByPresetId("kimi")!.surface
+    const packageVersion = `@moonshot-ai/kimi-code@${KIMI_REVIEWED_VERSION}`
+    for (const hint of [kimi.setupHint, en.manager.kimiSetupHint, zhCN.manager.kimiSetupHint]) {
+      expect(hint).toContain(packageVersion)
+    }
+  })
+
   it("gives every surface a stable shape", () => {
     for (const adapter of Object.values(EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS)) {
       expect(adapter.id).toBeTruthy()
@@ -88,6 +101,7 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
 describe("new ACP agent surfaces", () => {
   const cases: Array<{ presetId: string; command: string; args: string[] }> = [
     { presetId: "kimi", command: "kimi", args: ["acp"] },
+    { presetId: "grok", command: "grok", args: ["agent", "--no-leader", "stdio"] },
     { presetId: "devin", command: "devin", args: ["acp"] },
     { presetId: "goose", command: "goose", args: ["acp", "--with-builtin", "developer"] },
     // The Claude Code / Gemini / Cursor ACP entrypoints are easy to get wrong
@@ -162,6 +176,7 @@ describe("listExternalAgentEcosystemAdapters", () => {
       "droid",
       "gemini-cli",
       "goose",
+      "grok",
       "kimi",
       "kiro",
       "minimax-code",

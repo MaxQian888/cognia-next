@@ -47,7 +47,7 @@ describe("BrandIcon", () => {
     )
   })
 
-  it.each(["codex", "codex-acp", "codex-app-server"])(
+  it.each(["codex", "codex-acp", "codex-app-server", "codex-siwc-app-server"])(
     "renders the Codex asset for %s",
     (runtime) => {
       render(<BrandIcon id={runtime} label="Codex" decorative={false} />)
@@ -258,5 +258,14 @@ it("resolves the MiniMax Code runtime alias to the MiniMax brand", () => {
   expect(screen.getByRole("img", { name: "MiniMax Code" })).toHaveAttribute(
     "src",
     "/icons/lobe/minimax-color.svg"
+  )
+})
+
+it("uses the existing xAI asset for the Grok Build preset alias", () => {
+  expect(brandIconAsset("grok")).toEqual(brandIconAsset("xai"))
+  render(<BrandIcon id="grok" label="Grok Build" decorative={false} />)
+  expect(screen.getByRole("img", { name: "Grok Build" })).toHaveAttribute(
+    "src",
+    "/icons/lobe/xai.svg"
   )
 })

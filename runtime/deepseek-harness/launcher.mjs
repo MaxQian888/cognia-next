@@ -13,7 +13,7 @@ import { createRequire } from "node:module"
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
-export const DSH_VERSION = "0.2.0-rc.2"
+export const DSH_VERSION = "0.2.1-rc.2"
 export const PROFILE_BY_COMPOSITION = Object.freeze({
   "host.sdk-readonly.yml": "cognia-sdk-readonly",
   "host.sdk-workspace.yml": "cognia-sdk-workspace",
@@ -131,6 +131,10 @@ export function resolveProductLauncher(require = createRequire(import.meta.url))
     "dsh-mcp-client",
     "dsh-llm-pi-ai",
     "dsh-llm-deepseek-api-key",
+    "dsh-working-directory",
+    "dsh-tool-working-directory",
+    "dsh-compaction-basic",
+    "dsh-compaction-image-offload",
   ]) {
     const pkg = JSON.parse(
       readFileSync(require.resolve(`@deepseek-ai/${name}/package.json`), "utf8")

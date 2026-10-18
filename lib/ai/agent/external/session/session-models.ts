@@ -18,7 +18,7 @@
  * reusable, so a picker and a session bootstrap cannot disagree about which
  * write reaches the agent.
  *
- * Everything here is pure. Nothing spawns, nothing awaits, and no verdict is
+ * Model projections are pure and do not spawn agents. No verdict is
  * rendered about whether a model is any good: the caller decides what to do
  * with a list that comes back empty, which is a real answer meaning "this
  * agent does not offer a choice" rather than a failure.
@@ -37,6 +37,11 @@ import type {
 } from "@/types/agent/external-agent"
 import { parseGatewaySessionId } from "@/lib/ai/agent/external/config/gateway-task"
 import { findModelConfigOption, flattenValues } from "@cognia/agent-runtime-kit/config-options"
+import {
+  requestedRuntimeCapabilities,
+  runtimeFeatureValidationError,
+  type AgentRuntimeFeatureRequest,
+} from "@cognia/agent-contracts/session-operations"
 
 // The config-option lookup lives in the runtime kit (ADR-0217) so the ACP
 // integration reads models the same way; re-exported for app importers.
@@ -89,6 +94,22 @@ export function isExternalAgentProviderId(providerId: string | undefined): boole
     providerId === EXTERNAL_AGENT_PROVIDER_ID ||
     providerId?.startsWith(`${EXTERNAL_AGENT_PROVIDER_ID}:`) === true
   )
+}
+
+/**
+ * External turn payloads do not yet forward these portable feature requests.
+ * A manifest cannot make a missing transport implementation safe to ignore.
+ * Keep this at raw send boundaries as well as the options builder.
+ */
+export async function assertExternalRuntimeFeatureSupport(
+  request: AgentRuntimeFeatureRequest
+): Promise<void> {
+  const validationError = runtimeFeatureValidationError(request)
+  if (validationError) throw new Error(validationError)
+  const [capability] = requestedRuntimeCapabilities(request)
+  if (!capability) return
+  const { AgentCapabilityError } = await import("@/lib/ai/agent/execution/agent-execution-handle")
+  throw new AgentCapabilityError(capability, "external send")
 }
 
 /** `null` also covers the legacy unscoped marker, which is unsafe to replay. */
