@@ -8,6 +8,11 @@
 ARG BASE_IMAGE=cognia-cua-desktop:0.3.46-2
 FROM ${BASE_IMAGE}
 
+# uv installs the Selkies environment. Pinned by index digest, like the base.
+COPY --from=ghcr.io/astral-sh/uv:0.11.33@sha256:77280f2f771df71f90786c314fe1bbc1e023feac652969bbf139c280babf2eb7 /uv /usr/local/bin/uv
+# Optional package index (a PyPI mirror). Unset unless passed as a build arg.
+ARG UV_DEFAULT_INDEX
+
 # Runtime libraries the upstream Selkies package declares (infra/packaging/deb.sh).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -15,12 +20,16 @@ RUN apt-get update \
       libdrm2 libgbm1 libegl1 libwayland-server0 libglib2.0-0 libpixman-1-0 \
       libxcb-render0 libxcb-shm0 libxcb-dri3-0 libxfixes3 libxext6 libice6 libsm6 \
     && rm -rf /var/lib/apt/lists/* \
-    && python3 -m venv /opt/selkies \
-    && /opt/selkies/bin/pip install --no-cache-dir --only-binary=pixelflux,pcmflux \
+    && uv venv --no-python-downloads --python /usr/local/bin/python3 /opt/selkies \
+    && uv pip install --no-cache --python /opt/selkies/bin/python \
+      --only-binary pixelflux --only-binary pcmflux \
       'selkies==2.0.0' 'pixelflux==2.1.0' 'pcmflux==2.1.0' \
     && /opt/selkies/bin/python -c "import importlib.metadata as m; assert m.version('selkies') == '2.0.0' and m.version('pixelflux') == '2.1.0'" \
     && test -x /opt/selkies/bin/selkies
 
+# Drops Selkies' per-frame warning for viewer acks (see sitecustomize.py).
+COPY sitecustomize.py /opt/selkies/lib/python3.12/site-packages/sitecustomize.py
+RUN /opt/selkies/bin/python -c "import logging, sitecustomize; assert logging.getLogger('ws').filters"
 COPY selkies-startup.py /opt/cognia-desktop/selkies-startup.py
 COPY selkies-entrypoint.sh /usr/local/bin/cognia-desktop-selkies
 RUN chmod 0755 /usr/local/bin/cognia-desktop-selkies

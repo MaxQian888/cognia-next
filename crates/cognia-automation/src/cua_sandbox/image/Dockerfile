@@ -10,6 +10,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CUA_TELEMETRY=0 \
     DO_NOT_TRACK=1
 
+# Optional package index (a PyPI mirror). Unset unless passed as a build arg,
+# so the published managed image is built exactly as before.
+ARG PIP_INDEX_URL
+
 # Debian's Chromium and X11 desktop packages support both arm64 and amd64.
 # The pinned legacy computer-server speaks the protocol Cognia implements;
 # Driver/spacesd is deliberately not substituted for that API.

@@ -48,6 +48,9 @@ export function useSandboxDesktopStream(
   const current = useRef<SandboxStreamGrant | null>(null)
   const generation = useRef(0)
   const live = useRef(false)
+  // Whether a stream is (being) shown. Without one the viewer polls
+  // screenshots, and the control lease is carried by those.
+  const streamShown = useRef(false)
 
   const drop = useCallback(() => {
     const previous = current.current
@@ -60,6 +63,7 @@ export function useSandboxDesktopStream(
     drop()
     setGrant(null)
     setStatus("opening")
+    streamShown.current = true
     try {
       const next = await io.current.open(connectionId)
       if (attempt !== generation.current || !live.current) {
@@ -71,6 +75,7 @@ export function useSandboxDesktopStream(
       setStatus("open")
     } catch (error) {
       if (attempt !== generation.current) return
+      streamShown.current = false
       setStatus(isSandboxStreamUnavailable(error) ? "unavailable" : "error")
     }
   }, [connectionId, drop])
@@ -92,11 +97,16 @@ export function useSandboxDesktopStream(
     }
   }, [drop, enabled, open])
 
-  /** Upgrade this viewer to controller; `false` when it could not. */
+  /**
+   * Upgrade this viewer to controller. `true` also when there is no stream
+   * (no Selkies, or it failed): the polling viewer carries the lease then.
+   * `false` when a stream is shown or opening and cannot take control.
+   */
   const claim = useCallback(
     async (lease: SandboxControlLease): Promise<boolean> => {
+      if (!live.current) return false
       const viewer = current.current
-      if (!viewer || !live.current) return false
+      if (!viewer) return !streamShown.current
       const attempt = generation.current
       try {
         const next = await io.current.claim(connectionId, viewer.viewerId, lease.token, lease.fence)

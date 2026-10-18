@@ -122,6 +122,40 @@ test("while streaming it polls slowly, reports the lease, and keeps control when
   frameElement.remove()
 })
 
+test("on the desktop, focus in the stream keeps control even though WebKit reports no focus", async () => {
+  const frameElement = document.createElement("iframe")
+  frameElement.dataset.sandboxStream = "c1"
+  document.body.appendChild(frameElement)
+  document.documentElement.dataset.windowFocused = "true"
+  // WKWebView: the parent document has no focus while its cross-origin child does.
+  const hasFocus = jest.spyOn(document, "hasFocus").mockReturnValue(false)
+  const { result } = renderHook(() =>
+    useSandboxDesktop("c1", true, undefined, true, { streaming: true })
+  )
+  await tick()
+  await act(async () => {
+    await result.current.acquire()
+  })
+  frameElement.focus()
+  await act(async () => {
+    window.dispatchEvent(new Event("blur"))
+  })
+  await tick()
+  expect(result.current.controlling).toBe(true)
+  expect(client.releaseControl).not.toHaveBeenCalled()
+  // The app going to the background fires no blur here; the native window does.
+  await act(async () => {
+    document.documentElement.dataset.windowFocused = "false"
+    await Promise.resolve()
+  })
+  await tick()
+  expect(result.current.controlling).toBe(false)
+  expect(client.releaseControl).toHaveBeenCalledTimes(1)
+  hasFocus.mockRestore()
+  frameElement.remove()
+  delete document.documentElement.dataset.windowFocused
+})
+
 test("releases a late lease after unmount instead of retaining invisible control", async () => {
   let resolve!: (lease: { token: string; fence: number; expiresAt: number }) => void
   client.acquireControl.mockImplementationOnce(

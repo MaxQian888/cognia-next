@@ -206,9 +206,10 @@ pub const MAX_STREAM_BYTES: usize = 1024 * 1024;
 
 /// The `docker inspect --format` template. One line, `|`-separated, so a single
 /// round-trip answers both "what state is it in" and "what policy did it get".
-/// The label lookup is wrapped in `with` because `.Config.Labels` is nil on
-/// unlabeled containers and `index` on a nil map still answers an empty string.
-const INSPECT_FORMAT: &str = "{{.Id}}|{{.State.Status}}|{{.State.Running}}|{{.State.Paused}}|{{.HostConfig.NetworkMode}}|{{.HostConfig.NanoCpus}}|{{.HostConfig.Memory}}|{{.HostConfig.PidsLimit}}|{{.HostConfig.ReadonlyRootfs}}|{{join .HostConfig.CapDrop \",\"}}|{{join .HostConfig.SecurityOpt \",\"}}|{{with .Config.Labels}}{{index . \"cognia.cua.exec-user\"}}{{end}}";
+/// Each label lookup is wrapped in two `with`s: `.Config.Labels` is nil on
+/// unlabeled objects, and a missing key prints `<no value>` (image inspect
+/// does, on the containerd image store) instead of an empty string.
+const INSPECT_FORMAT: &str = "{{.Id}}|{{.State.Status}}|{{.State.Running}}|{{.State.Paused}}|{{.HostConfig.NetworkMode}}|{{.HostConfig.NanoCpus}}|{{.HostConfig.Memory}}|{{.HostConfig.PidsLimit}}|{{.HostConfig.ReadonlyRootfs}}|{{join .HostConfig.CapDrop \",\"}}|{{join .HostConfig.SecurityOpt \",\"}}|{{with .Config.Labels}}{{with index . \"cognia.cua.exec-user\"}}{{.}}{{end}}{{end}}";
 
 fn backend_err(msg: impl Into<String>) -> AutomationError {
     AutomationError::BackendError {
@@ -361,6 +362,7 @@ fn selkies_image_context() -> Result<tempfile::TempDir> {
         ("Dockerfile", include_str!("image/selkies/Dockerfile")),
         ("selkies-startup.py", include_str!("image/selkies/selkies-startup.py")),
         ("selkies-entrypoint.sh", include_str!("image/selkies/selkies-entrypoint.sh")),
+        ("sitecustomize.py", include_str!("image/selkies/sitecustomize.py")),
     ] {
         std::fs::write(context.path().join(name), content).map_err(|e| {
             backend_err(format!(
@@ -369,6 +371,26 @@ fn selkies_image_context() -> Result<tempfile::TempDir> {
         })?;
     }
     Ok(context)
+}
+
+/// The Host's own `PIP_INDEX_URL` (a PyPI mirror), handed to the image
+/// builds as a build argument. Only an http(s) URL without user info is
+/// used: the value is recorded in the image history.
+fn package_index(raw: Option<&str>) -> Option<String> {
+    let raw = raw?.trim();
+    let url = url::Url::parse(raw).ok()?;
+    let usable = matches!(url.scheme(), "https" | "http")
+        && url.has_host()
+        && url.username().is_empty()
+        && url.password().is_none();
+    usable.then(|| raw.to_string())
+}
+
+/// `--build-arg <name>=<index>` when the Host has a package index.
+fn package_index_args(name: &str) -> Vec<String> {
+    package_index(std::env::var("PIP_INDEX_URL").ok().as_deref())
+        .map(|index| vec!["--build-arg".to_string(), format!("{name}={index}")])
+        .unwrap_or_default()
 }
 
 /// Build the Selkies variant on top of the built-in image, building that
@@ -400,6 +422,7 @@ async fn build_selkies_image(executable: &std::ffi::OsStr) -> Result<()> {
                 "--tag",
                 SELKIES_DESKTOP_IMAGE,
             ])
+            .args(package_index_args("UV_DEFAULT_INDEX"))
             .arg(context.path()),
         "build Selkies Linux desktop image",
         Duration::from_secs(1200),
@@ -427,6 +450,7 @@ async fn build_builtin_image(executable: &std::ffi::OsStr) -> Result<()> {
                 "--tag",
                 BUILTIN_DESKTOP_IMAGE,
             ])
+            .args(package_index_args("PIP_INDEX_URL"))
             .arg(context.path()),
         "build built-in Linux desktop image",
         Duration::from_secs(900),
@@ -450,7 +474,7 @@ struct PinnedImage {
 }
 
 const IMAGE_INSPECT_FORMAT: &str =
-    "{{.Id}}|{{with .Config.Labels}}{{index . \"cognia.cua.selkies\"}}{{end}}";
+    "{{.Id}}|{{with .Config.Labels}}{{with index . \"cognia.cua.selkies\"}}{{.}}{{end}}{{end}}";
 
 async fn pinned_spec(spec: &SpawnSpec) -> Result<PinnedImage> {
     pinned_spec_with(spec, std::ffi::OsStr::new("docker")).await
@@ -719,7 +743,7 @@ pub async fn docker_stream_endpoint(container: &str) -> Result<Option<StreamEndp
         Command::new("docker").args([
             "inspect",
             "--format",
-            "{{with .Config.Labels}}{{index . \"cognia.cua.selkies\"}}{{end}}\n{{json .Config.Env}}",
+            "{{with .Config.Labels}}{{with index . \"cognia.cua.selkies\"}}{{.}}{{end}}{{end}}\n{{json .Config.Env}}",
             container,
         ]),
         "read private stream credential",
@@ -1197,6 +1221,37 @@ fn validate_file_read(
 mod tests {
     use super::*;
 
+    #[test]
+    fn label_lookups_answer_empty_for_a_missing_label() {
+        // A bare `index` prints `<no value>` for a missing image label, which
+        // once made every labelled image look like a Selkies image.
+        let source = include_str!("lifecycle.rs");
+        let bare = ["{{index . ", "\\\"cognia.cua."].concat();
+        assert!(!source.contains(&bare), "a label lookup is not wrapped in `with index`");
+        for format in [INSPECT_FORMAT, IMAGE_INSPECT_FORMAT] {
+            assert!(format.contains("{{with .Config.Labels}}{{with index . "), "{format}");
+        }
+    }
+
+    #[test]
+    fn a_package_index_is_used_only_as_a_plain_web_url() {
+        assert_eq!(
+            package_index(Some(" https://pypi.tuna.tsinghua.edu.cn/simple ")).as_deref(),
+            Some("https://pypi.tuna.tsinghua.edu.cn/simple")
+        );
+        assert_eq!(
+            package_index(Some("http://mirror.lan:3141/root/pypi/+simple/")).as_deref(),
+            Some("http://mirror.lan:3141/root/pypi/+simple/")
+        );
+        // A credential would be written into the image history.
+        assert_eq!(package_index(Some("https://user:secret@mirror.example/simple")), None);
+        assert_eq!(package_index(Some("https://token@mirror.example/simple")), None);
+        assert_eq!(package_index(Some("file:///srv/wheels")), None);
+        assert_eq!(package_index(Some("not a url")), None);
+        assert_eq!(package_index(Some("")), None);
+        assert_eq!(package_index(None), None);
+    }
+
     #[tokio::test]
     #[ignore = "requires Docker and the built-in native desktop image; operates only a new isolated container"]
     async fn live_builtin_desktop_authenticated_lifecycle_and_real_input() {
@@ -1546,7 +1601,7 @@ if sys.argv[1] == 'build':
  tag = sys.argv[sys.argv.index('--tag')+1]
  files = set(os.listdir(sys.argv[-1]))
  if 'selkies' in tag:
-  assert files == {{'Dockerfile','selkies-startup.py','selkies-entrypoint.sh'}}, files
+  assert files == {{'Dockerfile','selkies-startup.py','selkies-entrypoint.sh','sitecustomize.py'}}, files
   assert os.path.exists(os.path.join(built, 'base')), 'base must be built first'
   dockerfile = open(os.path.join(sys.argv[-1],'Dockerfile')).read()
   assert "'selkies==2.0.0'" in dockerfile and 'cognia.cua.selkies="2.0.0"' in dockerfile

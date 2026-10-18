@@ -192,3 +192,30 @@ inspect` format: `{{.Id}}|<cognia.cua.selkies label>`. Only a labelled image
     `?token=` alone. Whether WKWebView loads the frame at all is unverified.
     If it does not, the frame stays blank, and the sandbox must be recreated
     on the default image to get polling back. Both are part of the smoke.
+
+## Smoke (2026-10-18)
+
+Built locally on arm64 (colima) with the classic builder, Debian through a
+local mirror proxy and PyPI through `PIP_INDEX_URL` / `UV_DEFAULT_INDEX`;
+viewed in the macOS desktop app.
+
+- WKWebView loads the `127.0.0.1` iframe from `?token=` alone. Idle view-only:
+  about 18 fps at 1280×800, the container at about 24% of one core and 409 MiB.
+- Controller claim, input through the stream (the X pointer follows the mouse),
+  and release in the order revoke → confirm → release, then a fresh viewer.
+- Found and fixed:
+  - Image labels were read with a bare `index`, which prints `<no value>` for a
+    missing image label, so every labelled image (the default one too) was
+    treated as Selkies: port 8080 published and a master token injected. The
+    lookups are now `with index`.
+  - WebKit reports `document.hasFocus()` false while the cross-origin stream
+    frame has focus, so clicking into the stream gave control back. The hook
+    now asks the native window focus (`data-window-focused`) and releases when
+    the window itself loses focus.
+  - Selkies logs a warning for every viewer frame ack (about 20 lines a second
+    into an uncapped Docker log). The venv's `sitecustomize.py` drops exactly
+    that warning.
+  - The variant installs with uv, and both images take an optional package
+    index build argument that the Host fills from its own `PIP_INDEX_URL`.
+- Upstream, harmless: `Cannot start backpressure task: display 'primary' not
+found` once per capture start with only viewers connected.

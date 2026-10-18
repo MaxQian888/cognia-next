@@ -70,3 +70,22 @@ In `desktop_session.rs` / `registry.rs`:
 ## Out of scope for Phase 1
 
 Companion transports and reading the audit from clients (Phase 3), streaming (Phase 4), external targets (Phase 2).
+
+## Smoke (2026-10-18)
+
+Real local Docker desktop (`cognia-cua-desktop:0.3.46-2`, colima, arm64) in the
+macOS desktop app, keys and buttons read from X on `:99` inside the container:
+
+- An agent `hold_key` of Ctrl+Shift, then "Take control": both keys released,
+  the agent call ends with `PREEMPTED_BEFORE_SEND`, audit rows
+  `agent.preempted`, `lease.takeover`, `lease.acquire`, renews every 5 s.
+- An agent left-button down, then takeover: the button is released.
+- Agent actions while a human holds control are refused (`under human control`).
+- A human drag is delivered and audited (`action_kind: drag`); a release fired
+  right behind a drag leaves no button down. After release the agent acts again.
+- Found and fixed: with the Phase 4 viewer, every takeover of a sandbox without
+  Selkies was released at once (the stream hook refused to "claim" a stream
+  that did not exist). Polling now carries the lease when there is no stream.
+- Seen once, not reproduced: an agent call failed with `cua client channel
+closed`; the sandbox then refused control until it was stopped and started,
+  as designed for an unconfirmed input.

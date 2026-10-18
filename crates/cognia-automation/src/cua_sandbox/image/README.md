@@ -86,6 +86,11 @@ Selkies once `:99` answers:
 - **Network.** It listens on container port 8080. Lifecycle publishes that port
   on host loopback only, and passes the master token as
   `COGNIA_SELKIES_MASTER_TOKEN` by name, the same way as the auth token.
+- **Install.** uv (pinned by digest, copied from `ghcr.io/astral-sh/uv`) creates
+  the `/opt/selkies` venv from the base image's Python and installs the wheels.
+- **Log noise.** Selkies 2.0.0 drops every viewer's `CLIENT_FRAME_ACK`, rightly,
+  but logs a warning for each (about 20 a second per viewer). The venv's
+  `sitecustomize.py` filters exactly that warning; other refusals still log.
 - **Fixed flags.** WebSocket mode, H.264 software encoding with JPEG fallback, no
   resize, and `enable_collab=false`. Audio, microphone, webcam, gamepads,
   clipboard, file transfer, printing, command messages, sharing links and the
@@ -101,6 +106,13 @@ against code running as `cua`: that code can already reach the X display. It
 keeps other processes on the host from using the published port.
 
 Build by hand: `docker build --build-arg BASE_IMAGE=cognia-cua-desktop:0.3.46-2 -t cognia-cua-desktop:0.3.46-2-selkies-2.0.0 selkies`
+
+**Package mirror.** Both Dockerfiles take an optional build argument for a PyPI
+mirror: `PIP_INDEX_URL` for the base, `UV_DEFAULT_INDEX` for the variant. Unset,
+they install from PyPI exactly as before. When the Host itself has
+`PIP_INDEX_URL` set to an http(s) URL without credentials (the value is kept in
+the image history), its builds pass it on as both. For example
+`--build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`.
 
 Sources verified 2026-10-18: https://pypi.org/project/selkies/2.0.0/ ,
 https://docs.selkies.io/latest/secure-mode ,

@@ -41,18 +41,45 @@ describe("useSandboxDesktopStream", () => {
     expect(close).toHaveBeenCalledWith("c1", "v1")
   })
 
-  it("reports a sandbox without Selkies as unavailable and grants nothing", async () => {
+  it("reports a sandbox without Selkies as unavailable and lets polling keep control", async () => {
     const open = jest
       .fn()
       .mockRejectedValue(new Error(`Backend error: ${SANDBOX_STREAM_UNAVAILABLE}`))
+    const claim = jest.fn()
     const { result } = renderHook(() =>
-      useSandboxDesktopStream("c1", true, { open, claim: jest.fn(), close: jest.fn() })
+      useSandboxDesktopStream("c1", true, { open, claim, close: jest.fn() })
     )
     await waitFor(() => expect(result.current.status).toBe("unavailable"))
     expect(result.current.grant).toBeNull()
+    // No stream to upgrade: the screenshot viewer carries the lease.
+    await act(async () => {
+      expect(await result.current.claim(lease)).toBe(true)
+    })
+    expect(claim).not.toHaveBeenCalled()
+  })
+
+  it("lets polling keep control when the stream failed to open", async () => {
+    const open = jest.fn().mockRejectedValue(new Error("selkies crashed"))
+    const { result } = renderHook(() =>
+      useSandboxDesktopStream("c1", true, { open, claim: jest.fn(), close: jest.fn() })
+    )
+    await waitFor(() => expect(result.current.status).toBe("error"))
+    await act(async () => {
+      expect(await result.current.claim(lease)).toBe(true)
+    })
+  })
+
+  it("does not let control through while the stream is still opening", async () => {
+    const open = jest.fn(() => new Promise<never>(() => undefined))
+    const claim = jest.fn()
+    const { result } = renderHook(() =>
+      useSandboxDesktopStream("c1", true, { open, claim, close: jest.fn() })
+    )
+    await waitFor(() => expect(result.current.status).toBe("opening"))
     await act(async () => {
       expect(await result.current.claim(lease)).toBe(false)
     })
+    expect(claim).not.toHaveBeenCalled()
   })
 
   it("reopens a fresh viewer after control ends and keeps the viewer when a claim fails", async () => {

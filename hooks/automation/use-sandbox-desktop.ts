@@ -29,13 +29,23 @@ export interface SandboxDesktopOptions {
 }
 
 /** The stream frame of this connection holds focus inside this window. */
+/**
+ * The native window's focus as `WindowFocusTracker` mirrors it onto
+ * `<html data-window-focused>`, or null where nothing mirrors it.
+ */
+function windowFocused(): boolean | null {
+  const value = document.documentElement.dataset.windowFocused
+  return value === undefined ? null : value === "true"
+}
+
 function focusInStream(connectionId: string): boolean {
   const active = document.activeElement
-  return (
-    document.hasFocus() &&
-    active instanceof HTMLIFrameElement &&
-    active.dataset.sandboxStream === connectionId
-  )
+  if (!(active instanceof HTMLIFrameElement) || active.dataset.sandboxStream !== connectionId)
+    return false
+  // WebKit reports `document.hasFocus()` false while a cross-origin child
+  // frame has focus, so on the desktop the native window focus tells working
+  // in the stream apart from leaving the app.
+  return windowFocused() ?? document.hasFocus()
 }
 
 /** The session closure owns all timers and leases, including late async completions. */
@@ -413,6 +423,18 @@ export function useSandboxDesktop(
           })
       } else void refresh()
     }, 0)
+    // With focus inside the stream frame, leaving the app fires no `blur`
+    // here; the native window losing focus gives control back instead.
+    const windowFocus =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(() => {
+            if (windowFocused() === false) void release()
+          })
+    windowFocus?.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-window-focused"],
+    })
     document.addEventListener("visibilitychange", visibilityChanged)
     window.addEventListener("blur", blur)
     window.addEventListener("offline", networkChanged)
@@ -424,6 +446,7 @@ export function useSandboxDesktop(
       clearTimeout(poll)
       void release().finally(() => desktop?.close())
       detachInvalidated?.()
+      windowFocus?.disconnect()
       document.removeEventListener("visibilitychange", visibilityChanged)
       window.removeEventListener("blur", blur)
       window.removeEventListener("offline", networkChanged)
