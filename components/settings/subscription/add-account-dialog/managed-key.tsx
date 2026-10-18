@@ -65,6 +65,7 @@ export function ManagedKeyAccountDialog({
   )
   const [plan, setPlan] = useState(existingAccount?.plan ?? definition?.plans?.[0]?.id ?? "")
   const provider = definition ?? createdDefinition
+  const isSubscriptionPlan = provider?.billingMode === "subscription"
   const selectedPlan = definition?.plans?.find((entry) => entry.id === plan)
   const tAccountList = useTranslations("subscription.common.accountList")
   const [presetId, setPresetId] = useState<string | null>(null)
@@ -123,7 +124,11 @@ export function ManagedKeyAccountDialog({
     const input = {
       definition: provider,
       providerAccountId: existingAccount?.id,
-      preview: { apiKey: accessToken, baseUrl: baseUrl.trim() || selectedPlan?.baseUrl, presetId },
+      preview: {
+        apiKey: accessToken,
+        baseUrl: isSubscriptionPlan ? provider.baseUrl : baseUrl.trim() || selectedPlan?.baseUrl,
+        presetId: isSubscriptionPlan ? null : presetId,
+      },
       signal: controller.signal,
     }
     try {
@@ -209,7 +214,7 @@ export function ManagedKeyAccountDialog({
       setError(t("invalidKey"))
       return
     }
-    if (baseUrl.trim()) {
+    if (!isSubscriptionPlan && baseUrl.trim()) {
       try {
         const url = new URL(baseUrl.trim())
         if (
@@ -248,7 +253,8 @@ export function ManagedKeyAccountDialog({
       const now = Date.now()
       const fields = {
         accessToken: accessToken.trim(),
-        baseUrl: baseUrl.trim() || undefined,
+        baseUrl:
+          target.billingMode === "subscription" ? target.baseUrl : baseUrl.trim() || undefined,
         storedAtMs: now,
       }
       const credential =
@@ -281,7 +287,7 @@ export function ManagedKeyAccountDialog({
               }
         const account = await persistProviderAccount(target.id, {
           ...draft,
-          ...(presetId ? { presetId } : {}),
+          ...(!isSubscriptionPlan && presetId ? { presetId } : {}),
         })
         onAdded?.(account)
       }
@@ -311,7 +317,11 @@ export function ManagedKeyAccountDialog({
               provider: provider?.name ?? t("customTitle"),
             })}
           </DialogTitle>
-          <DialogDescription>{provider?.description ?? t("description")}</DialogDescription>
+          <DialogDescription>
+            {isSubscriptionPlan
+              ? t("subscriptionDescription")
+              : (provider?.description ?? t("description"))}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
@@ -364,7 +374,7 @@ export function ManagedKeyAccountDialog({
               </div>
             </>
           )}
-          {!!definition?.plans?.length && (
+          {!!definition?.plans?.length && !isSubscriptionPlan && (
             <div className="space-y-1">
               <Label>{t("plan")}</Label>
               <RadioGroup value={plan} onValueChange={setPlan} disabled={busy}>
@@ -377,7 +387,7 @@ export function ManagedKeyAccountDialog({
               </RadioGroup>
             </div>
           )}
-          {!existingAccount && provider && (
+          {!existingAccount && provider && !isSubscriptionPlan && (
             <NewAccountPresetSelector
               provider={provider.id}
               value={presetId}
@@ -386,7 +396,9 @@ export function ManagedKeyAccountDialog({
             />
           )}
           <div className="space-y-1">
-            <Label htmlFor={`${formId}-token`}>{t("accessTokenField")}</Label>
+            <Label htmlFor={`${formId}-token`}>
+              {t(isSubscriptionPlan ? "subscriptionKeyField" : "accessTokenField")}
+            </Label>
             <Input
               id={`${formId}-token`}
               type="password"
@@ -398,26 +410,50 @@ export function ManagedKeyAccountDialog({
               spellCheck={false}
             />
           </div>
-          <div className="space-y-1">
-            <Label htmlFor={`${formId}-base-url`}>
-              {t(provider ? "baseUrlField" : "customBaseUrlField")}
-            </Label>
-            <Input
-              id={`${formId}-base-url`}
-              type="url"
-              disabled={busy}
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder={selectedPlan?.baseUrl ?? provider?.baseUrl}
-              spellCheck={false}
-            />
-            {/* An `AccountSummary` carries no credential, so the stored URL
+          {isSubscriptionPlan && provider ? (
+            <div className="space-y-2 rounded-md border p-3 text-xs">
+              <p className="text-muted-foreground">{t("subscriptionKeyHint")}</p>
+              <dl className="space-y-2">
+                <div>
+                  <dt className="text-muted-foreground">{t("inferenceDestination")}</dt>
+                  <dd className="break-all font-mono">{provider.baseUrl}</dd>
+                </div>
+                {provider.usage && (
+                  <div>
+                    <dt className="text-muted-foreground">{t("usageDestination")}</dt>
+                    <dd className="break-all font-mono">
+                      {`${
+                        provider.usage.request.useBaseUrlOrigin
+                          ? new URL(provider.usage.baseUrl ?? provider.baseUrl!).origin
+                          : (provider.usage.baseUrl ?? provider.baseUrl)?.replace(/\/$/, "")
+                      }${provider.usage.request.path}`}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <Label htmlFor={`${formId}-base-url`}>
+                {t(provider ? "baseUrlField" : "customBaseUrlField")}
+              </Label>
+              <Input
+                id={`${formId}-base-url`}
+                type="url"
+                disabled={busy}
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder={selectedPlan?.baseUrl ?? provider?.baseUrl}
+                spellCheck={false}
+              />
+              {/* An `AccountSummary` carries no credential, so the stored URL
                 cannot be prefilled here. Say that the save overwrites it rather
                 than letting a blank field quietly clear a custom endpoint. */}
-            {existingAccount && (
-              <p className="text-xs text-muted-foreground">{t("baseUrlReplaceHint")}</p>
-            )}
-          </div>
+              {existingAccount && (
+                <p className="text-xs text-muted-foreground">{t("baseUrlReplaceHint")}</p>
+              )}
+            </div>
+          )}
           {provider && modelOptions.length > 0 && (
             <div className="space-y-2 rounded-md border p-3">
               <Label htmlFor={`${formId}-model-info`}>{t("availableModels")}</Label>

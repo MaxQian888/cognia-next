@@ -798,6 +798,177 @@ it("discovers plugin providers dynamically and tests their declared protocol", a
   )
 })
 
+describe("subscription-only provider credential isolation", () => {
+  const pluginId = "settings-subscription-only"
+  const id = `${pluginId}:coding`
+
+  async function register(subscriptionOnly = true) {
+    const registry = await import("@/lib/subscription/core/provider-registry")
+    registry.registerPluginSubscriptionProvider(
+      {
+        id: "coding",
+        name: "Coding subscription",
+        baseUrl: "https://subscription.example/coding/v1",
+        protocol: "anthropic",
+        models: ["coding-model"],
+        billingMode: subscriptionOnly ? "subscription" : undefined,
+      },
+      pluginId
+    )
+    settingsState.settings!.providerSettings[id] = {
+      enabled: true,
+      defaultModel: "coding-model",
+      apiKey: "stale-metered-key",
+      apiKeys: ["stale-pooled-key"],
+      apiKeyRotationEnabled: true,
+      currentKeyIndex: 1,
+      baseURL: "https://metered.example/v1",
+      apiProtocol: "openai",
+      apiFlavor: "responses",
+      customHeaders: { Authorization: "Bearer stale-auth-header" },
+    }
+    return registry
+  }
+
+  it("retains manual credential precedence for legacy subscription definitions", async () => {
+    const registry = await register(false)
+    subscriptionCredential.mockResolvedValue({
+      apiKey: "legacy-vault-secret",
+      baseURL: "https://subscription.example/coding/v1",
+    })
+    testCustomProviderConnectionByProtocol.mockResolvedValue({
+      success: true,
+      message: "Connected",
+    })
+    try {
+      const { result } = renderHook(() => useProviderSettings())
+      await act(async () => {
+        await result.current.testProvider(id)
+      })
+      expect(testCustomProviderConnectionByProtocol).toHaveBeenCalledWith(
+        "https://metered.example/v1",
+        "stale-metered-key",
+        "anthropic",
+        "coding-model",
+        { Authorization: "Bearer stale-auth-header" }
+      )
+      expect(result.current.readinessProviderSettings?.[id].apiKey).toBe("stale-metered-key")
+      expect(subscriptionCredential).not.toHaveBeenCalledWith(id, expect.anything())
+    } finally {
+      await act(async () => {
+        registry.unregisterSubscriptionProvidersByPlugin(pluginId)
+      })
+    }
+  })
+
+  it("uses vault credentials despite stale manual keys, protocol, endpoint, and headers", async () => {
+    const registry = await register()
+    subscriptionCredential.mockImplementation(async (providerId: string) =>
+      providerId === id
+        ? {
+            apiKey: "selected-account-secret",
+            baseURL: "https://subscription.example/coding/v1",
+            headers: { Authorization: "Bearer selected-account-secret" },
+          }
+        : null
+    )
+    testCustomProviderConnectionByProtocol.mockResolvedValue({
+      success: true,
+      message: "Connected",
+    })
+    try {
+      const { result } = renderHook(() => useProviderSettings())
+      expect(result.current.readinessProviderSettings?.[id].apiKey).toBe("")
+      await waitFor(() =>
+        expect(result.current.readinessProviderSettings?.[id].apiKey).toMatch(/^subscription:/)
+      )
+      expect(result.current.readinessProviderSettings?.[id]).toMatchObject({
+        apiKeys: [],
+        apiKeyRotationEnabled: false,
+        currentKeyIndex: 0,
+        baseURL: "https://subscription.example/coding/v1",
+        apiProtocol: "anthropic",
+      })
+      expect(result.current.readinessProviderSettings?.[id].customHeaders).toBeUndefined()
+      expect(JSON.stringify(result.current.readinessProviderSettings)).not.toContain(
+        "selected-account-secret"
+      )
+      await act(async () => {
+        await result.current.testProvider(id)
+      })
+      expect(testCustomProviderConnectionByProtocol).toHaveBeenCalledWith(
+        "https://subscription.example/coding/v1",
+        "selected-account-secret",
+        "anthropic",
+        "coding-model",
+        { Authorization: "Bearer selected-account-secret" }
+      )
+      expect(JSON.stringify(settingsState.setProviderConfig.mock.calls)).not.toContain(
+        "selected-account-secret"
+      )
+      expect(result.current.providerSettings[id].apiKey).toBe("stale-metered-key")
+    } finally {
+      await act(async () => {
+        registry.unregisterSubscriptionProvidersByPlugin(pluginId)
+      })
+    }
+  })
+
+  it.each(["missing", "locked"])(
+    "does not use manual credentials when the vault is %s",
+    async (state) => {
+      const registry = await register()
+      if (state === "locked") subscriptionCredential.mockRejectedValue(new Error("Vault locked"))
+      else subscriptionCredential.mockResolvedValue(null)
+      try {
+        const { result } = renderHook(() => useProviderSettings())
+        await act(async () => {
+          await result.current.testProvider(id)
+        })
+        expect(result.current.readinessProviderSettings?.[id].apiKey).toBe("")
+        expect(result.current.readinessProviderSettings?.[id].apiKeys).toEqual([])
+        expect(
+          getBuiltInProviderReadiness(id, result.current.readinessProviderSettings?.[id])
+            .eligibility.enable.allowed
+        ).toBe(false)
+        expect(testCustomProviderConnectionByProtocol).not.toHaveBeenCalled()
+        expect(testProviderConnection).not.toHaveBeenCalled()
+      } finally {
+        await act(async () => {
+          registry.unregisterSubscriptionProvidersByPlugin(pluginId)
+        })
+      }
+    }
+  )
+
+  it("revokes readiness and connection tests after unloading the plugin", async () => {
+    const registry = await register()
+    subscriptionCredential.mockResolvedValue({
+      apiKey: "vault-secret",
+      baseURL: "https://subscription.example/coding/v1",
+    })
+    const { result } = renderHook(() => useProviderSettings())
+    try {
+      await waitFor(() =>
+        expect(result.current.readinessProviderSettings?.[id].apiKey).toMatch(/^subscription:/)
+      )
+      act(() => {
+        registry.unregisterSubscriptionProvidersByPlugin(pluginId)
+      })
+      expect(result.current.readinessProviderSettings?.[id].apiKey).toBe("")
+      await act(async () => {
+        await result.current.testProvider(id)
+      })
+      expect(testCustomProviderConnectionByProtocol).not.toHaveBeenCalled()
+      expect(testProviderConnection).not.toHaveBeenCalled()
+    } finally {
+      await act(async () => {
+        registry.unregisterSubscriptionProvidersByPlugin(pluginId)
+      })
+    }
+  })
+})
+
 it("keeps a successful result when persisting verification refreshes the store", async () => {
   testProviderConnection.mockResolvedValue({ success: true, message: "Connected" })
   const { result, rerender } = renderHook(() => useProviderSettings())

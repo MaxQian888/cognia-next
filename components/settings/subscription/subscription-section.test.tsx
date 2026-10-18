@@ -9,6 +9,7 @@ jest.mock("next-intl", () => ({
 
 const useRouterMock = jest.fn()
 const useSearchParamsMock = jest.fn()
+const extraProviders = jest.fn(() => [] as Array<Record<string, unknown>>)
 jest.mock("next/navigation", () => ({
   useRouter: () => useRouterMock(),
   useSearchParams: () => useSearchParamsMock(),
@@ -50,12 +51,21 @@ jest.mock("./import-export-buttons", () => ({
 jest.mock("./cloud-sync-card", () => ({
   CloudSyncCard: () => <div data-testid="sync-panel">sync</div>,
 }))
+jest.mock("./panels/managed-provider-panel", () => ({
+  ManagedProviderPanel: ({
+    provider,
+    onManageAccounts,
+  }: {
+    provider: { name: string }
+    onManageAccounts: () => void
+  }) => <button onClick={onManageAccounts}>{provider.name}</button>,
+}))
 jest.mock("@/components/settings/common/related-sections-strip", () => ({
   CLAUDE_CODE_RELATED: [],
   RelatedSectionsStrip: () => <div data-testid="related-strip" />,
 }))
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 
 import { SubscriptionSection } from "./subscription-section"
 
@@ -65,6 +75,7 @@ beforeEach(() => {
   jest.resetAllMocks()
   useRouterMock.mockReturnValue({ replace })
   useSearchParamsMock.mockReturnValue(new URLSearchParams())
+  extraProviders.mockReturnValue([])
 })
 
 function renderWith(query = "") {
@@ -73,6 +84,24 @@ function renderWith(query = "") {
 }
 
 describe("SubscriptionSection", () => {
+  it("mounts the full registered provider panel and its Account Center action", () => {
+    extraProviders.mockReturnValue([
+      {
+        id: "plugin:kimi",
+        name: "Kimi Code",
+        source: "plugin",
+        authMode: "api-key",
+        billingMode: "subscription",
+      },
+    ])
+    renderWith("subTab=plugin%3Akimi")
+    fireEvent.click(
+      within(screen.getByTestId("subscription-panel-body")).getByRole("button", {
+        name: "Kimi Code",
+      })
+    )
+    expect(replace).toHaveBeenCalledWith("?subTab=accounts", { scroll: false })
+  })
   it("renders the overview panel by default", () => {
     renderWith()
     expect(screen.getByTestId("overview-panel")).toBeInTheDocument()
@@ -183,6 +212,8 @@ it("routes the CommandCode settings deep link to its provider panel", () => {
 })
 
 jest.mock("@/lib/subscription/core/hooks", () => ({
-  useSubscriptionProviders: () =>
-    jest.requireActual("@/lib/subscription/core/provider-registry").listSubscriptionProviders(),
+  useSubscriptionProviders: () => [
+    ...jest.requireActual("@/lib/subscription/core/provider-registry").listSubscriptionProviders(),
+    ...extraProviders(),
+  ],
 }))

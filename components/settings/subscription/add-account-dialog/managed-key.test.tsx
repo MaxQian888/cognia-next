@@ -27,7 +27,11 @@ jest.mock("@/lib/subscription/core/account-lifecycle", () => ({
 jest.mock("@/lib/subscription/core/provider-registry", () => ({
   saveCustomSubscriptionProvider: (...args: unknown[]) => saveDefinition(...args),
 }))
-jest.mock("@/lib/subscription/core/transport", () => ({ listPresets: jest.fn(async () => []) }))
+jest.mock("@/lib/subscription/core/transport", () => ({
+  listPresets: jest.fn(async () => []),
+  replaceAccountCredential: jest.fn(),
+}))
+import { listPresets, replaceAccountCredential } from "@/lib/subscription/core/transport"
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 import { ManagedKeyAccountDialog } from "./managed-key"
 
@@ -35,6 +39,77 @@ beforeEach(() => {
   jest.clearAllMocks()
   persist.mockImplementation(async (_provider, account) => account)
   saveDefinition.mockResolvedValue(definition)
+})
+
+const subscriptionDefinition: SubscriptionProviderDefinition = {
+  ...definition,
+  id: "plugin:subscription",
+  source: "plugin",
+  billingMode: "subscription",
+  usage: {
+    baseUrl: "https://quota.vendor.example/v2",
+    request: { path: "/quota", useBaseUrlOrigin: true },
+    extract: {
+      kind: "window",
+      windows: [{ id: "plan", labelKey: "subscription.limits.meter.plan", usedPctPath: "percent" }],
+    },
+  },
+}
+
+it("keeps subscription key destinations fixed and omits presets when creating an account", async () => {
+  render(
+    <ManagedKeyAccountDialog definition={subscriptionDefinition} open onOpenChange={jest.fn()} />
+  )
+  expect(screen.queryByLabelText("Base URL (optional)")).not.toBeInTheDocument()
+  expect(screen.queryByText("Endpoint preset")).not.toBeInTheDocument()
+  expect(listPresets).not.toHaveBeenCalled()
+  expect(screen.getByText("https://custom.example/v1")).toBeInTheDocument()
+  expect(screen.getByText("https://quota.vendor.example/quota")).toBeInTheDocument()
+  expect(screen.getByText(/cannot determine a key’s billing type/)).toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText("Subscription key"), {
+    target: { value: "subscription-key" },
+  })
+  await userEvent.click(screen.getByRole("button", { name: "Save" }))
+  expect(persist).toHaveBeenCalledWith(
+    "plugin:subscription",
+    expect.objectContaining({
+      credential: expect.objectContaining({
+        baseUrl: definition.baseUrl,
+        accessToken: "subscription-key",
+      }),
+    })
+  )
+  expect(persist.mock.calls[0][1]).not.toHaveProperty("presetId")
+})
+
+it("replaces a subscription key using the declared endpoint without exposing URL overrides", async () => {
+  jest
+    .mocked(replaceAccountCredential)
+    .mockResolvedValue({ id: "existing", provider: "plugin:subscription" } as Awaited<
+      ReturnType<typeof replaceAccountCredential>
+    >)
+  render(
+    <ManagedKeyAccountDialog
+      definition={subscriptionDefinition}
+      existingAccount={
+        { id: "existing", provider: "plugin:subscription", label: "Work" } as NonNullable<
+          Parameters<typeof ManagedKeyAccountDialog>[0]["existingAccount"]
+        >
+      }
+      open
+      onOpenChange={jest.fn()}
+    />
+  )
+  fireEvent.change(screen.getByLabelText("Subscription key"), {
+    target: { value: "replacement-key" },
+  })
+  await userEvent.click(screen.getByRole("button", { name: "Save" }))
+  expect(replaceAccountCredential).toHaveBeenCalledWith(
+    "plugin:subscription",
+    "existing",
+    expect.objectContaining({ baseUrl: definition.baseUrl, accessToken: "replacement-key" })
+  )
+  expect(screen.queryByLabelText("Base URL (optional)")).not.toBeInTheDocument()
 })
 
 it("creates custom service metadata separately from the vault secret", async () => {

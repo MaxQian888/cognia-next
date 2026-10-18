@@ -70,6 +70,39 @@ it("uses saved vault credentials and returns metadata without storing credential
   expect(await input.persistence.readInventory("anything")).toBeUndefined()
 })
 
+it("subscription model preview uses the declared endpoint without reading legacy relay bindings", async () => {
+  const subscription: SubscriptionProviderDefinition = {
+    ...definition,
+    billingMode: "subscription",
+  }
+  registered = subscription
+  await discoverSubscriptionModels({
+    definition: subscription,
+    preview: { apiKey: "subscription-key", presetId: "bound" },
+  })
+  expect(list.mock.calls[0][0].provider).toMatchObject({
+    apiKey: "subscription-key",
+    baseURL: "https://api.example/coding/v1",
+  })
+  expect(presets).not.toHaveBeenCalled()
+  expect(defaultPreset).not.toHaveBeenCalled()
+})
+
+it("subscription model preview rejects an explicit pay-as-you-go endpoint", async () => {
+  const subscription: SubscriptionProviderDefinition = {
+    ...definition,
+    billingMode: "subscription",
+  }
+  registered = subscription
+  await expect(
+    discoverSubscriptionModels({
+      definition: subscription,
+      preview: { apiKey: "subscription-key", baseUrl: "https://payg.example/v1" },
+    })
+  ).rejects.toMatchObject({ code: "invalidBaseUrl" })
+  expect(list).not.toHaveBeenCalled()
+})
+
 it("honors creation and existing-account preset bindings ahead of preview overrides", async () => {
   await discoverSubscriptionModels({
     definition,

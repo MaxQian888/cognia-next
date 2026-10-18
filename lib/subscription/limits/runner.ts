@@ -28,6 +28,9 @@ import {
 } from "@/lib/subscription/core/transport"
 
 import { resolveLimitsSources } from "./registry"
+import { getSubscriptionProvider } from "../core/provider-registry"
+import { resolveSubscriptionEndpoint, subscriptionRequestHeaders } from "../core/provider-policy"
+import { descriptorToSource } from "./descriptor/engine"
 
 import type {
   Account,
@@ -128,16 +131,23 @@ export async function queryAccountLimits(
   }
 
   const localAccountId = getLocalAccountId()
+  const definition = getSubscriptionProvider(provider)
+  if (!definition && provider.includes(":")) return null
   let lifecycleError: Error | null = null
   const assertScope = () => {
     if (getLocalAccountId() !== localAccountId) {
       lifecycleError = new Error("Subscription local account changed during limits query")
+    }
+    if (definition?.source === "plugin" && getSubscriptionProvider(provider) !== definition) {
+      lifecycleError = new Error("Subscription plugin changed during limits query")
     }
     if (lifecycleError) throw lifecycleError
   }
   const account = await getAccount(provider, providerAccountId)
   assertScope()
   if (!account) return null
+  if (account.credential.provider === "api-key" && account.credential.providerId !== provider)
+    return null
   if (account.credential.provider === "codex") assertCodexAccountLifecycleReady(account)
 
   let token = accessTokenOf(account.credential)
@@ -205,10 +215,26 @@ export async function queryAccountLimits(
   }
 
   assertScope()
-  const presets = await listPresets(provider)
+  const subscriptionOnly = definition?.billingMode === "subscription"
+  const presets = subscriptionOnly ? [] : await listPresets(provider)
   assertScope()
-  const preset = await resolvePresetForAccount(account, presets, () => getProviderPreset(provider))
+  const preset = subscriptionOnly
+    ? null
+    : await resolvePresetForAccount(account, presets, () => getProviderPreset(provider))
   assertScope()
+  const accountBaseUrl =
+    account.credential.provider === "api-key" ? account.credential.baseUrl : undefined
+  let baseUrl = subscriptionOnly
+    ? definition.baseUrl
+    : preset?.baseUrl || accountBaseUrl || definition?.baseUrl
+  if (definition?.billingMode === "subscription") {
+    try {
+      baseUrl = resolveSubscriptionEndpoint(definition, baseUrl)
+      subscriptionRequestHeaders(definition, preset?.extraHeaders)
+    } catch {
+      return null
+    }
+  }
 
   const ctx: LimitsSourceContext = {
     provider,
@@ -216,7 +242,7 @@ export async function queryAccountLimits(
     accountLabel: account.label,
     token,
     credential: account.credential,
-    baseUrl: preset?.baseUrl,
+    baseUrl: definition?.usage?.baseUrl ?? baseUrl,
     providerKey: preset?.templateId,
     presetHeaders: preset?.extraHeaders,
     // Sources can catch refresh errors themselves. Once identity validation
@@ -242,11 +268,22 @@ export async function queryAccountLimits(
     now: now(),
   }
 
-  const sources = resolveLimitsSources({
-    provider,
-    providerKey: ctx.providerKey,
-    baseUrl: ctx.baseUrl,
-  })
+  const sources = definition?.usage
+    ? [
+        descriptorToSource({
+          id: provider,
+          match: { providerKey: provider },
+          request: definition.usage.request,
+          extract: definition.usage.extract,
+        }),
+      ]
+    : definition?.billingMode === "subscription"
+      ? []
+      : resolveLimitsSources({
+          provider,
+          providerKey: ctx.providerKey,
+          baseUrl: ctx.baseUrl,
+        })
   if (sources.length === 0) return null
 
   for (const source of sources) {

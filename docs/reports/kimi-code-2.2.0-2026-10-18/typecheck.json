@@ -1,0 +1,155 @@
+{
+  "command": "rtk proxy pnpm typecheck",
+  "exitCode": 2,
+  "errorCount": 21,
+  "taskOwnedErrorCount": 0,
+  "errors": [
+    {
+      "file": "components/pet/pet-overlay-view.test.tsx",
+      "line": 538,
+      "column": 37,
+      "code": "TS2769",
+      "message": "No overload matches this call."
+    },
+    {
+      "file": "components/pet/pet-overlay-view.test.tsx",
+      "line": 550,
+      "column": 18,
+      "code": "TS2339",
+      "message": "Property 'mockRestore' does not exist on type 'never'."
+    },
+    {
+      "file": "components/settings/provider/subscription-provider-links.test.tsx",
+      "line": 93,
+      "column": 44,
+      "code": "TS2352",
+      "message": "Conversion of type '{ loading: boolean; accounts: never[]; activeAccountId: null; error: null; } | { error: string; accounts: never[]; activeAccountId: null; loading: false; } | { activeAccountId: null; accounts: never[]; loading: false; error: null; }' to type 'UseAccountsResult' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first."
+    },
+    {
+      "file": "hooks/chat/use-claude-chat-controller.ts",
+      "line": 6557,
+      "column": 11,
+      "code": "TS2345",
+      "message": "Argument of type 'string | Record<string, unknown> | undefined' is not assignable to parameter of type 'string | undefined'."
+    },
+    {
+      "file": "hooks/data/use-remote-session-stream.ts",
+      "line": 580,
+      "column": 11,
+      "code": "TS2345",
+      "message": "Argument of type 'string | Record<string, unknown> | undefined' is not assignable to parameter of type 'string | undefined'."
+    },
+    {
+      "file": "lib/account-sync/data/tables.ts",
+      "line": 176,
+      "column": 12,
+      "code": "TS1360",
+      "message": "Type '{ readonly id: \"key\"; readonly title: \"sync\"; readonly titleAuto: \"sync\"; readonly kind: \"sync\"; readonly visibility: \"sync\"; readonly origin: \"sync\"; readonly characterId: \"sync\"; readonly disabledSkillIds: \"sync\"; ... 95 more ...; readonly importDivergedAt: \"local\"; }' does not satisfy the expected type 'Record<keyof ChatSession, FieldPolicy>'."
+    },
+    {
+      "file": "lib/agent-ecosystem/capability-catalog.test.ts",
+      "line": 30,
+      "column": 14,
+      "code": "TS7053",
+      "message": "Element implicitly has an 'any' type because expression of type 'string' can't be used to index type 'Partial<Record<ExternalAgentCapabilityId, ExternalAgentCapabilityCell>>'."
+    },
+    {
+      "file": "lib/agent-ecosystem/capability-catalog.ts",
+      "line": 97,
+      "column": 7,
+      "code": "TS7053",
+      "message": "Element implicitly has an 'any' type because expression of type 'string' can't be used to index type 'Partial<Record<ExternalAgentCapabilityId, ExternalAgentCapabilityCell>>'."
+    },
+    {
+      "file": "lib/claude/build-options.test.ts",
+      "line": 8009,
+      "column": 7,
+      "code": "TS2739",
+      "message": "Type '{ id: \"singleton\"; subagentRuntime: { contextMode: \"fork\"; }; }' is missing the following properties from type 'AppSettings': alwaysAllowTools, builtinTools"
+    },
+    {
+      "file": "lib/claude/build-options.test.ts",
+      "line": 8024,
+      "column": 9,
+      "code": "TS2739",
+      "message": "Type '{ id: \"singleton\"; subagentRuntime: { contextMode: \"fork\"; }; }' is missing the following properties from type 'AppSettings': alwaysAllowTools, builtinTools"
+    },
+    {
+      "file": "lib/claude/sdk-subagent-bridge.test.ts",
+      "line": 45,
+      "column": 9,
+      "code": "TS2698",
+      "message": "Spread types may only be created from object types."
+    },
+    {
+      "file": "lib/claude/sdk-subagent-bridge.test.ts",
+      "line": 56,
+      "column": 9,
+      "code": "TS2698",
+      "message": "Spread types may only be created from object types."
+    },
+    {
+      "file": "lib/claude/sdk-subagent-bridge.test.ts",
+      "line": 66,
+      "column": 9,
+      "code": "TS2698",
+      "message": "Spread types may only be created from object types."
+    },
+    {
+      "file": "lib/claude/sdk-subagent-bridge.test.ts",
+      "line": 75,
+      "column": 9,
+      "code": "TS2698",
+      "message": "Spread types may only be created from object types."
+    },
+    {
+      "file": "lib/usage/run-estimate/progress.test.ts",
+      "line": 25,
+      "column": 5,
+      "code": "TS2322",
+      "message": "Type '\"priced\"' is not assignable to type 'UsageCostSource | undefined'."
+    },
+    {
+      "file": "packages/agent-config-types/src/settings-sync.ts",
+      "line": 469,
+      "column": 12,
+      "code": "TS1360",
+      "message": "Type '{ readonly id: { readonly category: \"desktop-only\"; }; readonly browserCookieImportEnabled: { readonly category: \"desktop-only\"; }; readonly remoteBrowserEnabled: { readonly category: \"server-authoritative\"; readonly rationale: \"The desktop owns the remote-browser gate (profiles + granted domains live there). The ph...' does not satisfy the expected type 'Record<keyof AppSettings, SettingsSyncEntry>'."
+    },
+    {
+      "file": "packages/agent-config-types/src/settings-sync.ts",
+      "line": 474,
+      "column": 33,
+      "code": "TS7053",
+      "message": "Element implicitly has an 'any' type because expression of type 'keyof AppSettings' can't be used to index type '{ readonly id: { readonly category: \"desktop-only\"; }; readonly browserCookieImportEnabled: { readonly category: \"desktop-only\"; }; readonly remoteBrowserEnabled: { readonly category: \"server-authoritative\"; readonly rationale: \"The desktop owns the remote-browser gate (profiles + granted domains live there). The ph...'."
+    },
+    {
+      "file": "packages/agent-config-types/src/settings-sync.ts",
+      "line": 500,
+      "column": 27,
+      "code": "TS7053",
+      "message": "Element implicitly has an 'any' type because expression of type 'keyof AppSettings' can't be used to index type '{ readonly id: { readonly category: \"desktop-only\"; }; readonly browserCookieImportEnabled: { readonly category: \"desktop-only\"; }; readonly remoteBrowserEnabled: { readonly category: \"server-authoritative\"; readonly rationale: \"The desktop owns the remote-browser gate (profiles + granted domains live there). The ph...'."
+    },
+    {
+      "file": "packages/agent-dsh/src/manifest.test.ts",
+      "line": 24,
+      "column": 12,
+      "code": "TS2532",
+      "message": "Object is possibly 'undefined'."
+    },
+    {
+      "file": "scripts/smoke/deepseek-harness-adapter-smoke.ts",
+      "line": 355,
+      "column": 13,
+      "code": "TS2339",
+      "message": "Property 'PATH' does not exist on type '{ DEEPSEEK_BASE_URL: any; }'."
+    },
+    {
+      "file": "types/subscription/provider-definition.test.ts",
+      "line": 150,
+      "column": 29,
+      "code": "TS2352",
+      "message": "Conversion of type '{ Host: string; Cookie?: undefined; \"X-Cognia-Host-Token\"?: undefined; \"Proxy-Authorization\"?: undefined; Authorization?: undefined; \"Invalid:header\"?: undefined; authorization?: undefined; Accept?: undefined; } | ... 6 more ... | { ...; }' to type 'Record<string, string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first."
+    }
+  ]
+}

@@ -20,6 +20,36 @@ const definition = {
   protocol: "anthropic" as const,
   models: ["test-model"],
 }
+test("registration owns a copy of billing, brand and usage metadata", () => {
+  const input = {
+    ...definition,
+    billingMode: "subscription" as const,
+    brandId: "kimi",
+    relatedProviderIds: ["moonshot"],
+    usage: {
+      request: { path: "/quota" },
+      extract: {
+        kind: "window" as const,
+        windows: [{ id: "plan", labelKey: "subscription.limits.meter.plan", usedPctPath: "used" }],
+      },
+    },
+  }
+  const id = registerPluginSubscriptionProvider(input, "example")
+  input.usage.request.path = "/changed"
+  input.relatedProviderIds.push("unrelated")
+  expect(getSubscriptionProvider(id)).toMatchObject({
+    billingMode: "subscription",
+    brandId: "kimi",
+    relatedProviderIds: ["moonshot"],
+    usage: { request: { path: "/quota" } },
+  })
+})
+test("custom account setup rejects plugin-only metadata rather than dropping billing protection", async () => {
+  await expect(
+    saveCustomSubscriptionProvider({ ...definition, billingMode: "subscription" })
+  ).rejects.toThrow()
+  expect(upsert).not.toHaveBeenCalled()
+})
 afterEach(() => {
   unregisterSubscriptionProvidersByPlugin("example")
   jest.clearAllMocks()

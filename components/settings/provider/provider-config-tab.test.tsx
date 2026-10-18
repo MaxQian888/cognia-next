@@ -7,6 +7,14 @@ import { getAllProviders } from "@cognia/provider-types/provider"
 import { ProviderConfigTab } from "./provider-config-tab"
 import { useLiveQuery } from "dexie-react-hooks"
 import type { UserProviderSettings } from "@cognia/provider-types"
+import { useSubscriptionProviders } from "@/lib/subscription/core/hooks"
+
+jest.mock("@/lib/subscription/core/hooks", () => ({
+  useSubscriptionProviders: jest.fn(() => []),
+}))
+jest.mock("./subscription-provider-links", () => ({
+  SubscriptionProviderLinks: () => null,
+}))
 
 // ── i18n mock ────────────────────────────────────────────────────────────────
 
@@ -203,6 +211,56 @@ const defaultProps = {
 describe("ProviderConfigTab", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    jest.mocked(useSubscriptionProviders).mockReturnValue([])
+  })
+
+  it("keeps subscription keys and transport in account management while retaining models and verification", () => {
+    const providerId = "cognia-kimi-subscription:kimi-code"
+    jest.mocked(useSubscriptionProviders).mockReturnValue([
+      {
+        id: providerId,
+        name: "Kimi Code",
+        authMode: "api-key",
+        source: "plugin",
+        billingMode: "subscription",
+        baseUrl: "https://api.kimi.com/coding/v1",
+      },
+    ])
+    const { rerender } = render(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId={providerId}
+        settings={{ ...mockSettings, providerId, baseURL: undefined }}
+        hasSubscriptionCredential
+        onApiProtocolChange={jest.fn()}
+        onApiFlavorChange={jest.fn()}
+        onCustomHeadersChange={jest.fn()}
+        onAddApiKey={jest.fn()}
+        onToggleRotation={jest.fn()}
+        authSlot={<button>manual credential login</button>}
+      />
+    )
+    expect(screen.queryByRole("button", { name: "Show key" })).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText("Enter your API key")).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue("https://api.kimi.com/coding/v1")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("provider-transport")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("provider-key-rotation")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "manual credential login" })
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("provider-default-model")).toBeInTheDocument()
+    expect(screen.getByTestId("config-test-connection")).toBeEnabled()
+    expect(defaultProps.onBaseURLChange).not.toHaveBeenCalled()
+    rerender(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId={providerId}
+        settings={{ ...mockSettings, providerId }}
+        canTestConnection
+        hasSubscriptionCredential={false}
+      />
+    )
+    expect(screen.getByTestId("config-test-connection")).toBeDisabled()
   })
 
   it("tests a subscription account without filling or persisting its secret or default endpoint", () => {

@@ -62,7 +62,7 @@ test("enable and disable use the host bridge and update account setup and model 
     supportsReasoning: true,
   })
   expect(getAllProviders()[`${pluginId}:kimi-code-anthropic`].protocol).toBe("anthropic")
-  expect(bridge.unregisterAllByPlugin(pluginId)).toBe(2)
+  expect(bridge.unregisterAllByPlugin(pluginId)).toBe(4)
   expect(getSubscriptionProvider(providerId)).toBeUndefined()
   expect(getAllProviders()[providerId]).toBeUndefined()
   expect(collectModelOptions(settings, []).some((option) => option.providerId === providerId)).toBe(

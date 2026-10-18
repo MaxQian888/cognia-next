@@ -1,0 +1,365 @@
+{
+  "id": "cognia-zhipu-subscription",
+  "name": "Zhipu / Z.ai Coding Plan",
+  "nameKey": "manifest.name",
+  "version": "0.1.0",
+  "icon": "assets/icon.png",
+  "description": "GLM Coding Plan subscription accounts for BigModel and Z.ai, separate from standard pay-as-you-go API.",
+  "descriptionKey": "manifest.description",
+  "type": "frontend",
+  "capabilities": ["subscription-provider"],
+  "permissions": [],
+  "main": "dist/index.js",
+  "author": {
+    "name": "cognia-next"
+  },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["startup"],
+  "bundle_include": ["README.md", "README.zh-CN.md", "assets/icon.png"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "blocked",
+      "reason": "Subscription accounts require Cognia's desktop credential vault."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "dist/index.js"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Subscription accounts require Cognia's desktop credential vault."
+    }
+  },
+  "subscriptionProviders": [
+    {
+      "id": "glm-coding",
+      "name": "Zhipu GLM Coding Plan",
+      "description": "Subscription Coding Plan endpoint; standard API billing is configured separately.",
+      "billingMode": "subscription",
+      "brandId": "zhipu",
+      "relatedProviderIds": ["zhipu", "glm4"],
+      "protocol": "openai",
+      "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "models": [
+        {
+          "id": "glm-5.3",
+          "name": "GLM-5.3",
+          "contextLength": 1000000,
+          "maxOutputTokens": 131072,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "glm-5.3-flash",
+          "name": "GLM-5.3-Flash",
+          "contextLength": 1000000,
+          "maxOutputTokens": 131072,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        }
+      ],
+      "apiKeyUrl": "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",
+      "usageUrl": "https://bigmodel.cn/usercenter/usage-query",
+      "docsUrl": "https://docs.bigmodel.cn/cn/coding-plan/overview",
+      "apiFlavor": "chat",
+      "usage": {
+        "request": {
+          "useBaseUrlOrigin": true,
+          "path": "/api/monitor/usage/quota/limit",
+          "method": "GET",
+          "headers": {
+            "Authorization": "{{token}}"
+          }
+        },
+        "extract": {
+          "kind": "window",
+          "windows": [
+            {
+              "id": "session",
+              "labelKey": "subscription.limits.meter.session",
+              "usedPctPath": "percentage",
+              "resetAtPath": "nextResetTime",
+              "resetUnit": "unix",
+              "select": {
+                "arrayPath": "data.limits",
+                "by": "unit",
+                "equals": 3
+              }
+            },
+            {
+              "id": "weekly",
+              "labelKey": "subscription.limits.meter.weekly",
+              "usedPctPath": "percentage",
+              "resetAtPath": "nextResetTime",
+              "resetUnit": "unix",
+              "select": {
+                "arrayPath": "data.limits",
+                "by": "unit",
+                "equals": 6
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "glm-coding-anthropic",
+      "name": "Zhipu GLM Coding Plan (Anthropic)",
+      "description": "Subscription Coding Plan endpoint; standard API billing is configured separately.",
+      "billingMode": "subscription",
+      "brandId": "zhipu",
+      "relatedProviderIds": ["zhipu", "glm4"],
+      "protocol": "anthropic",
+      "baseUrl": "https://open.bigmodel.cn/api/anthropic",
+      "models": [
+        {
+          "id": "glm-5.3",
+          "name": "GLM-5.3",
+          "contextLength": 1000000,
+          "maxOutputTokens": 131072,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "glm-5.3-flash",
+          "name": "GLM-5.3-Flash",
+          "contextLength": 1000000,
+          "maxOutputTokens": 131072,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        }
+      ],
+      "apiKeyUrl": "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",
+      "usageUrl": "https://bigmodel.cn/usercenter/usage-query",
+      "docsUrl": "https://docs.bigmodel.cn/cn/coding-plan/overview",
+      "usage": {
+        "request": {
+          "useBaseUrlOrigin": true,
+          "path": "/api/monitor/usage/quota/limit",
+          "method": "GET",
+          "headers": {
+            "Authorization": "{{token}}"
+          }
+        },
+        "extract": {
+          "kind": "window",
+          "windows": [
+            {
+              "id": "session",
+              "labelKey": "subscription.limits.meter.session",
+              "usedPctPath": "percentage",
+              "resetAtPath": "nextResetTime",
+              "resetUnit": "unix",
+              "select": {
+                "arrayPath": "data.limits",
+                "by": "unit",
+                "equals": 3
+              }
+            },
+            {
+              "id": "weekly",
+              "labelKey": "subscription.limits.meter.weekly",
+              "usedPctPath": "percentage",
+              "resetAtPath": "nextResetTime",
+              "resetUnit": "unix",
+              "select": {
+                "arrayPath": "data.limits",
+                "by": "unit",
+                "equals": 6
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "glm-coding-intl",
+      "name": "Z.ai GLM Coding Plan",
+      "description": "Subscription Coding Plan endpoint; standard API billing is configured separately.",
+      "billingMode": "subscription",
+      "brandId": "zhipu",
+      "relatedProviderIds": ["zhipu", "glm4"],
+      "protocol": "openai",
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "models": [
+        {
+          "id": "glm-5.3",
+          "name": "GLM-5.3",
+          "contextLength": 1000000,
+          "maxOutputTokens": 131072,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "glm-5.3-flash",
+          "name": "GLM-5.3-Flash",
+          "contextLength": 1000000,
+          "maxOutputTokens": 131072,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        }
+      ],
+      "apiKeyUrl": "https://z.ai/manage-apikey/apikey-list",
+      "usageUrl": "https://z.ai/manage-apikey/subscription",
+      "docsUrl": "https://docs.z.ai/devpack/overview",
+      "apiFlavor": "chat",
+      "usage": {
+        "request": {
+          "useBaseUrlOrigin": true,
+          "path": "/api/monitor/usage/quota/limit",
+          "method": "GET",
+          "headers": {
+            "Authorization": "{{token}}"
+          }
+        },
+        "extract": {
+          "kind": "window",
+          "windows": [
+            {
+              "id": "session",
+              "labelKey": "subscription.limits.meter.session",
+              "usedPctPath": "percentage",
+              "resetAtPath": "nextResetTime",
+              "resetUnit": "unix",
+              "select": {
+                "arrayPath": "data.limits",
+                "by": "unit",
+                "equals": 3
+              }
+            },
+            {
+              "id": "weekly",
+              "labelKey": "subscription.limits.meter.weekly",
+              "usedPctPath": "percentage",
+              "resetAtPath": "nextResetTime",
+              "resetUnit": "unix",
+              "select": {
+                "arrayPath": "data.limits",
+                "by": "unit",
+                "equals": 6
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "glm-coding-anthropic-intl",
+      "name": "Z.ai GLM Coding Plan (Anthropic)",
+      "description": "Subscription Coding Plan endpoint; standard API billing is configured separately.",
+      "billingMode": "subscription",
+      "brandId": "zhipu",
+      "relatedProviderIds": ["zhipu", "glm4"],
+      "protocol": "anthropic",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "models": [
+        {
+          "id": "glm-5.3",
+          "name": "GLM-5.3",
+          "contextLength": 1000000,
+          "maxOutputTokens": 131072,
+          "supportsTools": true,
+          "supportsVision": false,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "glm-5.3-flash",
+          "name": "GLM-5.3-Flash",
+          "contextLength": 1000000,
+          "maxOutputTokens": 131072,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        }
+      ],
+      "apiKeyUrl": "https://z.ai/manage-apikey/apikey-list",
+      "usageUrl": "https://z.ai/manage-apikey/subscription",
+      "docsUrl": "https://docs.z.ai/devpack/overview",
+      "usage": {
+        "request": {
+          "useBaseUrlOrigin": true,
+          "path": "/api/monitor/usage/quota/limit",
+          "method": "GET",
+          "headers": {
+            "Authorization": "{{token}}"
+          }
+        },
+        "extract": {
+          "kind": "window",
+          "windows": [
+            {
+              "id": "session",
+              "labelKey": "subscription.limits.meter.session",
+              "usedPctPath": "percentage",
+              "resetAtPath": "nextResetTime",
+              "resetUnit": "unix",
+              "select": {
+                "arrayPath": "data.limits",
+                "by": "unit",
+                "equals": 3
+              }
+            },
+            {
+              "id": "weekly",
+              "labelKey": "subscription.limits.meter.weekly",
+              "usedPctPath": "percentage",
+              "resetAtPath": "nextResetTime",
+              "resetUnit": "unix",
+              "select": {
+                "arrayPath": "data.limits",
+                "by": "unit",
+                "equals": 6
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Zhipu / Z.ai Coding Plan",
+        "manifest.description": "GLM Coding Plan subscription accounts for BigModel and Z.ai, separate from standard pay-as-you-go API."
+      },
+      "zh-CN": {
+        "manifest.name": "智谱 / Z.ai Coding Plan",
+        "manifest.description": "管理智谱与 Z.ai 的 GLM Coding Plan 订阅账户，与标准按量 API 独立。"
+      }
+    }
+  }
+}

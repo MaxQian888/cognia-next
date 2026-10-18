@@ -87,6 +87,8 @@ import { ProtocolSelectContent } from "./protocol-select-content"
 import { AnthropicSubscriptionReuseCard } from "./anthropic-subscription-reuse-card"
 import { getActiveCredential } from "@cognia/provider-core/providers/completeness"
 import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
+import { useSubscriptionProviders } from "@/lib/subscription/core/hooks"
+import { SubscriptionProviderLinks } from "./subscription-provider-links"
 import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
@@ -463,7 +465,11 @@ export function ProviderConfigTab({
   // Catalog-default base URL for this provider (empty for OpenAI/Anthropic/…
   // whose SDKs hard-code the endpoint). Drives both the pre-filled field value
   // and the persist-on-configure effect below.
-  const subscriptionDefinition = getSubscriptionProvider(providerId)
+  const subscriptionProviders = useSubscriptionProviders()
+  const subscriptionDefinition =
+    subscriptionProviders.find((provider) => provider.id === providerId) ??
+    getSubscriptionProvider(providerId)
+  const isSubscriptionPlan = subscriptionDefinition?.billingMode === "subscription"
   const defaultBaseURL =
     getBuiltInProviderSettingsBaseURL(providerId) ?? subscriptionDefinition?.baseUrl
   const isConfiguringProvider = !!settings.enabled || !!settings.apiKey
@@ -479,13 +485,17 @@ export function ProviderConfigTab({
   // CommandCode's protocol is selected per model and exposes no Responses API.
   const modelSelectsProtocol = providerId === "commandcode"
   const showProtocolSelector =
-    providerId !== "anthropic" && !modelSelectsProtocol && !!onApiProtocolChange
+    !isSubscriptionPlan &&
+    providerId !== "anthropic" &&
+    !modelSelectsProtocol &&
+    !!onApiProtocolChange
   const catalogProtocol = getBuiltInProviderProtocol(providerId)
   const effectiveProtocol = settings.apiProtocol ?? catalogProtocol ?? "openai"
   // The Responses/Chat override only means something on the OpenAI wire
   // protocol (Azure OpenAI, gateways, custom URLs); `anthropic` always
   // dispatches through the native SDK.
   const showFlavorSelector =
+    !isSubscriptionPlan &&
     providerId !== "anthropic" &&
     !modelSelectsProtocol &&
     effectiveProtocol === "openai" &&
@@ -505,6 +515,7 @@ export function ProviderConfigTab({
       defaultBaseURL &&
       baseURLNeverStored &&
       isConfiguringProvider &&
+      !isSubscriptionPlan &&
       !mayUseSubscriptionCredential
     ) {
       onBaseURLChange(defaultBaseURL)
@@ -515,6 +526,7 @@ export function ProviderConfigTab({
     isConfiguringProvider,
     onBaseURLChange,
     mayUseSubscriptionCredential,
+    isSubscriptionPlan,
   ])
 
   // Draft-buffered credential inputs: keystrokes stay local and commit on the
@@ -535,17 +547,20 @@ export function ProviderConfigTab({
   // user has to hunt for behind a closed disclosure is how endpoints silently
   // drift from what the settings pane appears to say.
   const showTransportBlock =
-    !isBedrock && (showProtocolSelector || showFlavorSelector || !!onCustomHeadersChange)
+    !isBedrock &&
+    !isSubscriptionPlan &&
+    (showProtocolSelector || showFlavorSelector || !!onCustomHeadersChange)
   const transportOverrideCount =
     (settings.apiProtocol ? 1 : 0) +
     (settings.apiFlavor && settings.apiFlavor !== "auto" ? 1 : 0) +
     Object.keys(settings.customHeaders ?? {}).length
 
-  const canTest =
-    canTestConnection ??
-    (isBedrock
-      ? !!settings.bedrock && validateBedrockConnectionSettings(settings.bedrock).valid
-      : !!settings.apiKey)
+  const canTest = isSubscriptionPlan
+    ? hasSubscriptionCredential && (canTestConnection ?? true)
+    : (canTestConnection ??
+      (isBedrock
+        ? !!settings.bedrock && validateBedrockConnectionSettings(settings.bedrock).valid
+        : !!settings.apiKey))
 
   // One verification affordance, always in the same place (the credentials
   // block header) whether or not a result exists — it used to sit bottom-right
@@ -571,6 +586,7 @@ export function ProviderConfigTab({
 
   return (
     <SettingsStack>
+      <SubscriptionProviderLinks providerId={providerId} providers={subscriptionProviders} />
       {/* ── 0. Anthropic auth extras (subscription reuse, privacy, ccswitch) ── */}
       {providerId === "anthropic" && (
         <div className="min-w-0">
@@ -581,7 +597,7 @@ export function ProviderConfigTab({
       {/* ── 0.5 Ways in that are not "type a key here" ────────────────────
           OAuth, guided key login and subscription reuse belong above the field
           they replace, not below it. */}
-      {authSlot ? (
+      {authSlot && !isSubscriptionPlan ? (
         <div className="min-w-0 space-y-4" data-testid="provider-auth-slot">
           {authSlot}
         </div>
@@ -597,12 +613,24 @@ export function ProviderConfigTab({
       <SettingsBlock
         icon={<Key />}
         title={t("configTab.credentialsTitle")}
-        description={t("configTab.credentialsDescription")}
+        description={t(
+          isSubscriptionPlan
+            ? "subscriptionLinks.subscriptionCredentials"
+            : "configTab.credentialsDescription"
+        )}
         action={testAction}
         testid="provider-credentials"
         settingId={`provider-${providerId}-credentials`}
       >
-        {isBedrock ? (
+        {isSubscriptionPlan ? (
+          <p className="text-sm text-muted-foreground">
+            {t(
+              hasSubscriptionCredential
+                ? "subscriptionLinks.credentialReady"
+                : "subscriptionLinks.credentialMissing"
+            )}
+          </p>
+        ) : isBedrock ? (
           onBedrockSettingsChange ? (
             <BedrockSettingsFields
               value={settings.bedrock ?? { authMode: "default-chain", region: "us-east-1" }}
@@ -862,7 +890,7 @@ export function ProviderConfigTab({
       )}
 
       {/* ── 4. Key rotation ────────────────────────────────────────────── */}
-      {!isBedrock && hasRotationSupport && (
+      {!isBedrock && !isSubscriptionPlan && hasRotationSupport && (
         <KeyRotationSection
           key={`rotation-${providerId}`}
           settings={settings}

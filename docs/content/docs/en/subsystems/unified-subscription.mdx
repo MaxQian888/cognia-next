@@ -99,8 +99,43 @@ for inspection/removal. Encrypted backups include custom service definitions, bu
 See the [manifest reference](../../plugin-dev/manifest) for a declaration example.
 
 The declaration supports API-key authentication with the two standard protocols. OAuth, token refresh,
-CLI discovery, a vendor-specific wire protocol, and live quota queries still require their existing
-host adapters or separate quota extensions. No login flow or quota endpoint is inferred from a name.
+CLI discovery, and vendor-specific wire protocols still require host adapters. No login flow or quota
+endpoint is inferred from a name.
+
+### Subscription plugins and separate billing sources
+
+The independently installable `kimi-subscription`, `zhipu-subscription`, and `minimax-subscription`
+plugins contribute domestic/international OpenAI Chat and Anthropic Messages entries. Build each
+plugin's ZIP with `pnpm exec node plugins/<directory>/build.mjs`, then install and enable it from the
+desktop Plugins settings. The plugins are intentionally not enabled by default. Kimi preserves the
+existing `cognia-kimi-subscription:kimi-code` and `:kimi-code-anthropic` account identities.
+
+`defineSubscriptionProvider` accepts these optional, JSON-only fields:
+
+| Field | Host behavior |
+| --- | --- |
+| `billingMode` | `subscription` pins requests to a vault account and the declared HTTPS endpoint; `pay-as-you-go` identifies an API billing entry. Omitting it preserves legacy behavior. |
+| `brandId` | Reuses the corresponding provider logo in navigation and AI Connections. |
+| `relatedProviderIds` | Links to separate pay-as-you-go providers without copying credentials, active accounts, or enable state. |
+| `usage` | Declares a host-executed GET request and safe JSON field extraction for quota meters. Optional `baseUrl` identifies a separate vendor usage destination; `request` and `extract` use the exported descriptor types. |
+
+Usage declarations cannot execute callbacks. Request paths cannot carry credentials, and token
+substitution is permitted only in headers. The host validates the declaration at installation and
+registration, sends the selected account's credential itself, and discards results after account
+scope or plugin registration changes. Missing quota fields remain unavailable rather than becoming
+an API credit balance. The settings form shows the inference and usage destinations.
+
+For `billingMode: "subscription"`, manual provider keys, key rotation, protocol overrides, and old
+relay presets do not change the billing source. Chat, compaction, connection verification and quota
+queries use the subscription account. Automatic retries cannot switch to a pay-as-you-go provider;
+an unavailable account requires user action. MiniMax requires its Subscription Key even when the
+inference URL is also used by standard API keys. Cognia cannot determine a key's vendor entitlement
+from its format; it never substitutes another billing key when authentication or quota checks fail.
+
+The SDK exports `SubscriptionBillingMode`, `SubscriptionUsageDefinition`, and the descriptor types.
+Custom-service forms retain their legacy configuration; the plugin-only billing/usage metadata must
+be installed as a plugin so it cannot be silently lost from custom settings. See each plugin's
+README for current vendor documentation, region endpoints, models, and quota response fixtures.
 
 ## CommandCode API subscriptions
 

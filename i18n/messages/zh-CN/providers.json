@@ -1554,5 +1554,24 @@
     "waitingForTest": "等待运行连接测试..."
   },
   "xai": "xAI (Grok)",
-  "xaiDescription": "Grok 3、Grok 3 Mini"
+  "xaiDescription": "Grok 3、Grok 3 Mini",
+  "subscriptionLinks": {
+    "title": "计费来源",
+    "subscriptionBadge": "订阅套餐",
+    "paygBadge": "按量 API",
+    "subscriptionDescription": "此连接仅使用当前订阅账户及其套餐端点。按量 API 凭据独立保存，Cognia 不会自动复制密钥或切换计费来源。",
+    "paygDescription": "此连接使用按量 API 计费。下方订阅套餐是独立连接，拥有各自的账户和端点。请明确选择使用的连接，Cognia 不会自动复制密钥或切换计费来源。",
+    "loadingAccounts": "正在加载订阅账户…",
+    "accountsUnavailable": "订阅账户暂不可用，请前往账户管理重试。",
+    "activeAccount": "当前账户：{account}",
+    "unnamedAccount": "订阅账户",
+    "noActiveAccount": "尚未选择订阅账户，请前往账户管理选择。",
+    "openProvider": "打开 AI 连接",
+    "openSubscription": "打开订阅",
+    "manageAccounts": "管理账户",
+    "openPaygProvider": "打开 {name} 按量 API",
+    "subscriptionCredentials": "订阅凭据和套餐端点统一在订阅页面管理。可在此配置模型并测试所选账户。",
+    "credentialReady": "此连接使用当前订阅账户提供的凭据。",
+    "credentialMissing": "请先选择订阅账户，再测试此连接。"
+  }
 }

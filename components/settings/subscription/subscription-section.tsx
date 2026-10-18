@@ -41,7 +41,7 @@ import { ImportExportButtons } from "./import-export-buttons"
 import { ProviderTabCodex } from "./provider-tab-codex"
 import { ProviderTabCommandcode } from "./provider-tab-commandcode"
 import { useSubscriptionProviders } from "@/lib/subscription/core/hooks"
-import { PresetPicker } from "./preset-picker"
+import { ManagedProviderPanel } from "./panels/managed-provider-panel"
 import type { SubscriptionProviderDefinition } from "@/lib/subscription/core/provider-registry"
 import { ProviderTabOpencode } from "./provider-tab-opencode"
 import { ClaudeAccountPanel } from "./panels/claude-account-panel"
@@ -88,13 +88,11 @@ function renderPanel(
     default: {
       const provider = providers.find((entry) => entry.id === panel)
       return provider ? (
-        <div className="space-y-4">
-          <Label>{provider.name}</Label>
-          {provider.description && (
-            <p className="text-xs text-muted-foreground">{provider.description}</p>
-          )}
-          <PresetPicker provider={provider.id} />
-        </div>
+        <ManagedProviderPanel
+          key={provider.id}
+          provider={provider}
+          onManageAccounts={onRequestAddAccount}
+        />
       ) : null
     }
   }

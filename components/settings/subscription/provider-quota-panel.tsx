@@ -17,7 +17,7 @@ import { LimitsMetersCard } from "@/components/settings/subscription/limits-mete
 import { SettingsAlert } from "@/components/settings/common/settings-section"
 import { Button } from "@/components/ui/button"
 
-import { useAccounts } from "@/lib/subscription/core/hooks"
+import { useAccounts, useSubscriptionProviders } from "@/lib/subscription/core/hooks"
 import { useProviderLimits } from "@/lib/subscription/limits/hooks"
 import { usageWindowsStale } from "@/lib/subscription/anthropic/overview-windows"
 import { isTauri } from "@/lib/tauri"
@@ -46,6 +46,9 @@ export function ProviderQuotaPanel({ provider, now: nowProp }: ProviderQuotaPane
   const now = nowProp ?? tickedNow
 
   const { accounts, activeAccountId } = useAccounts(provider)
+  const definitions = useSubscriptionProviders()
+  const subscription =
+    definitions.find((definition) => definition.id === provider)?.billingMode === "subscription"
   const { snapshot, queryEnabled, setQueryEnabled, refresh } = useProviderLimits(
     provider,
     activeAccountId ?? ""
@@ -86,14 +89,16 @@ export function ProviderQuotaPanel({ provider, now: nowProp }: ProviderQuotaPane
         accountId={activeAccountId}
         label={label}
         now={now}
-        windowsOnly
+        windowsOnly={!subscription}
       />
-      <BalanceCard
-        provider={provider}
-        accountId={activeAccountId}
-        queryEnabled={queryEnabled}
-        label={label}
-      />
+      {!subscription && (
+        <BalanceCard
+          provider={provider}
+          accountId={activeAccountId}
+          queryEnabled={queryEnabled}
+          label={label}
+        />
+      )}
     </>
   )
 }

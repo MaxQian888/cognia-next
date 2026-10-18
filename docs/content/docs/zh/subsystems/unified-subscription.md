@@ -41,7 +41,26 @@ description: Anthropic、Codex、OpenCode 与 CommandCode 共用的账号模型�
 
 插件可声明 `subscription-provider` capability 和 `subscriptionProviders[]`，TypeScript SDK 提供 `defineSubscriptionProvider`。宿主自动生成 `pluginId:providerId` 标识，注册模型目录，并复用添加账号、端点预设、默认账号、凭据解析和加密备份流程。停用插件会移除其配置入口和模型注册，已保存账号仍可查看和删除。加密备份同时保存面板创建的服务定义，不会自动启用插件。
 
-声明式接入支持 API Key 以及上述两种标准协议。OAuth、自动刷新、CLI 凭据发现、厂商特殊协议和实时额度查询仍需专门的宿主适配器或独立额度扩展，不会根据服务名称猜测认证流程或额度 API。
+声明式接入支持 API Key 以及上述两种标准协议。OAuth、自动刷新、CLI 凭据发现和厂商特殊协议仍需宿主适配器，不会根据服务名称猜测认证流程或额度 API。
+
+### 订阅插件与独立计费来源
+
+`kimi-subscription`、`zhipu-subscription` 和 `minimax-subscription` 是三个可独立安装、升级和停用的桌面插件，分别提供国内/国际及 OpenAI Chat/Anthropic Messages 接入。运行 `pnpm exec node plugins/<directory>/build.mjs` 构建 ZIP，在桌面版插件设置中安装并启用；它们不会默认启用。Kimi 保留原有 `cognia-kimi-subscription:kimi-code` 和 `:kimi-code-anthropic` 账号身份。
+
+`defineSubscriptionProvider` 新增以下可选纯 JSON 字段，旧插件仍兼容：
+
+| 字段 | 宿主行为 |
+| --- | --- |
+| `billingMode` | `subscription` 固定使用 vault 账号和声明的 HTTPS 端点；`pay-as-you-go` 表示按量 API。省略时保持旧行为。 |
+| `brandId` | 在订阅导航和 AI 提供商页面复用品牌图标。 |
+| `relatedProviderIds` | 链接到独立按量 API 提供商，不复制密钥、激活账号或启用状态。 |
+| `usage` | 声明宿主执行的 GET 请求及安全 JSON 字段提取。可选 `baseUrl` 指定独立用量地址，`request` 和 `extract` 复用 SDK 导出的描述符类型。 |
+
+额度声明不能执行回调；请求路径不能携带凭据，Token 占位符仅允许用于 Header。宿主在安装和注册时校验声明，自行注入所选账号凭据，并在本地账号范围或插件注册发生变化后丢弃结果。缺少额度字段时保持不可用，不回退成 API 余额。账号表单展示推理和用量请求目的地址。
+
+显式订阅模式下，提供商页手填密钥、密钥轮换、协议覆盖和旧中转预设都不会改变计费来源。聊天、上下文压缩、连接测试及额度查询使用订阅账号；自动重试不能切换到按量 API，账号不可用时需要用户处理。MiniMax 即使复用标准 API 的推理 URL，也必须填写 Subscription Key。Cognia 无法根据密钥格式确认厂商套餐权限，认证失败或额度耗尽时不会替换成另一个计费密钥。
+
+SDK 同时导出 `SubscriptionBillingMode`、`SubscriptionUsageDefinition` 和额度描述符类型。自定义服务表单保持旧配置方式；新增的插件专用计费/额度元数据必须通过插件安装，防止写入自定义配置时被静默丢失。各插件 README 记录官方文档、区域端点、模型及额度响应验证样例。
 
 ## CommandCode API 订阅
 

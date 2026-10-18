@@ -37,9 +37,41 @@ import { sha256Hex } from "@/lib/share/hash"
 import type { AppSettings } from "@cognia/agent-config-types"
 
 import {
+  getSubscriptionProvider,
   listSubscriptionProviders,
   subscribeSubscriptionProviders,
 } from "@/lib/subscription/core/provider-registry"
+import type { SubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
+
+function subscriptionOnlyConfig<T extends UserProviderSettings>(
+  cfg: T,
+  definition?: SubscriptionProviderDefinition
+): T {
+  return {
+    ...cfg,
+    apiKey: "",
+    apiKeys: [],
+    apiKeyRotationEnabled: false,
+    apiKeyRotationStrategy: undefined,
+    apiKeyUsageStats: undefined,
+    currentKeyIndex: 0,
+    customHeaders: undefined,
+    baseURL: definition?.baseUrl,
+    apiProtocol: definition?.protocol,
+    apiFlavor: definition?.apiFlavor,
+  }
+}
+
+function isUnavailablePluginProvider(
+  id: string,
+  settings: AppSettings | null | undefined
+): boolean {
+  return (
+    id.includes(":") &&
+    !getAllProviders()[id] &&
+    !settings?.customProviders?.some((provider) => provider.id === id)
+  )
+}
 
 // Readiness needs credential identity, never the vault secret. Hash the complete
 // transport so account rotation and relay/header changes invalidate verification.
@@ -60,11 +92,18 @@ async function prepareConnectionConfigs<T extends UserProviderSettings>(
   cfg: T,
   settings: AppSettings | null | undefined,
   allowSubscription: boolean
-): Promise<{ effectiveCfg: T; verificationCfg: T }> {
-  if (!settings || !allowSubscription || getActiveCredential(cfg))
+): Promise<{ effectiveCfg: T; verificationCfg: T } | null> {
+  if (isUnavailablePluginProvider(id, settings)) return null
+  const definition = getSubscriptionProvider(id, settings?.customProviders)
+  const subscriptionOnly = definition?.billingMode === "subscription"
+  if (subscriptionOnly) cfg = subscriptionOnlyConfig(cfg, definition)
+  if (!settings) return subscriptionOnly ? null : { effectiveCfg: cfg, verificationCfg: cfg }
+  if ((!allowSubscription && !subscriptionOnly) || (!subscriptionOnly && getActiveCredential(cfg)))
     return { effectiveCfg: cfg, verificationCfg: cfg }
   const credential = await resolveSubscriptionProviderCredential(id, settings)
-  if (!credential) return { effectiveCfg: cfg, verificationCfg: cfg }
+  if (!credential) return subscriptionOnly ? null : { effectiveCfg: cfg, verificationCfg: cfg }
+  if (subscriptionOnly && getSubscriptionProvider(id, settings.customProviders) !== definition)
+    return null
   return {
     effectiveCfg: {
       ...cfg,
@@ -207,6 +246,7 @@ export function useProviderSettings(): UseProviderSettingsResult {
   )
   const [subscriptionReadiness, setSubscriptionReadiness] = useState<{
     settings: typeof readinessSettings
+    definitions: typeof subscriptionDefinitions
     configs: Record<string, UserProviderSettings>
   } | null>(null)
   useEffect(() => {
@@ -225,14 +265,21 @@ export function useProviderSettings(): UseProviderSettingsResult {
               enabled: false,
               defaultModel: catalog[id]?.defaultModel,
             }
-          if (getActiveCredential(cfg)) return null
+          const definition = subscriptionDefinitions.find(
+            (entry) => entry.id === id || entry.plans?.some((plan) => plan.chatProviderId === id)
+          )
+          const effectiveCfg =
+            definition?.billingMode === "subscription"
+              ? subscriptionOnlyConfig(cfg, definition)
+              : cfg
+          if (getActiveCredential(effectiveCfg)) return null
           try {
             const credential = await resolveSubscriptionProviderCredential(
               id,
               readinessSettings as AppSettings
             )
             return credential
-              ? ([id, await subscriptionReadinessConfig(cfg, credential)] as const)
+              ? ([id, await subscriptionReadinessConfig(effectiveCfg, credential)] as const)
               : null
           } catch {
             return null
@@ -242,6 +289,7 @@ export function useProviderSettings(): UseProviderSettingsResult {
       if (!disposed && generation === current) {
         setSubscriptionReadiness({
           settings: readinessSettings,
+          definitions: subscriptionDefinitions,
           configs: Object.fromEntries(entries.filter((entry) => entry !== null)),
         })
       }
@@ -258,15 +306,26 @@ export function useProviderSettings(): UseProviderSettingsResult {
       disposed = true
       unsubscribe()
     }
-  }, [readinessSettings, providerSettings, subscriptionApiIds, catalog])
+  }, [readinessSettings, providerSettings, subscriptionApiIds, subscriptionDefinitions, catalog])
   const readinessProviderSettings = useMemo(
     () => ({
-      ...providerSettings,
-      ...(subscriptionReadiness?.settings === readinessSettings
+      ...Object.fromEntries(
+        Object.entries(providerSettings).map(([id, cfg]) => {
+          const definition = subscriptionDefinitions.find((entry) => entry.id === id)
+          return [
+            id,
+            definition?.billingMode === "subscription" || isUnavailablePluginProvider(id, settings)
+              ? subscriptionOnlyConfig(cfg, definition)
+              : cfg,
+          ]
+        })
+      ),
+      ...(subscriptionReadiness?.settings === readinessSettings &&
+      subscriptionReadiness?.definitions === subscriptionDefinitions
         ? subscriptionReadiness?.configs
         : {}),
     }),
-    [providerSettings, readinessSettings, subscriptionReadiness]
+    [providerSettings, readinessSettings, subscriptionReadiness, subscriptionDefinitions, settings]
   )
   const customProvidersList = useMemo(
     () => settings?.customProviders ?? [],
@@ -286,17 +345,23 @@ export function useProviderSettings(): UseProviderSettingsResult {
   const readinessCustomProviders = useMemo(
     () =>
       Object.fromEntries(
-        Object.entries(customProviders).map(([id, custom]) => [
-          id,
-          {
-            ...custom,
-            ...(subscriptionReadiness?.settings === readinessSettings
-              ? subscriptionReadiness.configs[id]
-              : {}),
-          },
-        ])
+        Object.entries(customProviders).map(([id, custom]) => {
+          const definition = subscriptionDefinitions.find((entry) => entry.id === id)
+          return [
+            id,
+            {
+              ...(definition?.billingMode === "subscription"
+                ? subscriptionOnlyConfig(custom, definition)
+                : custom),
+              ...(subscriptionReadiness?.settings === readinessSettings &&
+              subscriptionReadiness?.definitions === subscriptionDefinitions
+                ? subscriptionReadiness.configs[id]
+                : {}),
+            },
+          ]
+        })
       ),
-    [customProviders, subscriptionReadiness, readinessSettings]
+    [customProviders, subscriptionReadiness, readinessSettings, subscriptionDefinitions]
   )
 
   const selectedProviderId = uiPreferences.selectedProviderId ?? null
@@ -379,12 +444,14 @@ export function useProviderSettings(): UseProviderSettingsResult {
         ) === testedConfig
       setTestingProviders((s) => ({ ...s, [id]: true }))
       try {
-        const { effectiveCfg, verificationCfg } = await prepareConnectionConfigs(
+        const connectionConfigs = await prepareConnectionConfigs(
           id,
           cfg,
           settings,
           subscriptionApiIds.includes(id)
         )
+        if (!connectionConfigs) return null
+        const { effectiveCfg, verificationCfg } = connectionConfigs
         let result: ApiTestResult
         if (id === "bedrock") {
           const bedrockResult = await testAndDiscoverBedrock(cfg)
@@ -491,12 +558,14 @@ export function useProviderSettings(): UseProviderSettingsResult {
         ) === testedConfig
       setTestingCustomProviders((s) => ({ ...s, [id]: true }))
       try {
-        const { effectiveCfg, verificationCfg } = await prepareConnectionConfigs(
+        const connectionConfigs = await prepareConnectionConfigs(
           id,
           cp,
           settings,
           Boolean(cp.subscription)
         )
+        if (!connectionConfigs) return null
+        const { effectiveCfg, verificationCfg } = connectionConfigs
         const result = await testCustomProviderConnectionByProtocol(
           effectiveCfg.baseURL,
           getActiveCredential(effectiveCfg),

@@ -454,7 +454,8 @@
       "topUp": "自动充值",
       "weekly": "本周（所有模型）",
       "weekly_opus": "本周（仅 Opus）",
-      "weekly_sonnet": "本周（仅 Sonnet）"
+      "weekly_sonnet": "本周（仅 Sonnet）",
+      "plan": "套餐用量"
     },
     "noMeters": "该账号未上报任何限额窗口。",
     "noValue": "—",
@@ -966,6 +967,35 @@
     "modelNotFound": "服务未返回该模型的信息。",
     "modelInputPrice": "输入 / 百万 Token（{currency}）",
     "modelOutputPrice": "输出 / 百万 Token（{currency}）",
-    "modelInput": "最大输入 Token 数"
+    "modelInput": "最大输入 Token 数",
+    "subscriptionDescription": "请添加此订阅套餐签发的密钥。按量 API 密钥应配置在独立的 AI 连接中。",
+    "subscriptionKeyField": "订阅密钥",
+    "subscriptionKeyHint": "请使用 Coding Plan 控制台中的密钥。Cognia 无法通过密钥格式判断其计费类型。推理请求和可选的额度查询仅向下方展示的目标地址发送此密钥。",
+    "inferenceDestination": "推理端点",
+    "usageDestination": "用量查询目标地址"
+  },
+  "managedProvider": {
+    "subscriptionBadge": "订阅套餐",
+    "paygBadge": "按量 API",
+    "subscriptionDescription": "此连接仅使用对应订阅账户及声明的套餐端点。按量 API 账户独立管理，Cognia 不会自动复制密钥或切换计费来源。",
+    "paygDescription": "此服务使用按量 API 计费。订阅套餐使用独立账户和连接。",
+    "accountsTitle": "账户",
+    "loadingAccounts": "正在加载账户…",
+    "accountsUnavailable": "账户暂不可用，请前往账户管理重试。",
+    "activeAccount": "当前账户：{account}",
+    "unnamedAccount": "订阅账户",
+    "noActiveAccount": "尚未选择账户，请添加账户或前往账户管理选择。",
+    "accountCount": "已保存 {count} 个账户",
+    "manageAccounts": "管理账户",
+    "addAccount": "添加账户",
+    "desktopRequired": "账户管理需要桌面应用。",
+    "inferenceDestination": "推理端点",
+    "usageDestination": "用量查询目标地址",
+    "openProvider": "打开 AI 连接",
+    "openPaygProvider": "打开 {name} 按量 API",
+    "getKey": "获取密钥",
+    "usageConsole": "用量控制台",
+    "docs": "文档",
+    "quotaUnavailable": "此提供商尚未声明自动额度查询，请前往用量控制台查看套餐用量。"
   }
 }

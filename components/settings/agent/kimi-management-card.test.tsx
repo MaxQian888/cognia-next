@@ -87,7 +87,7 @@ describe("KimiManagementCard", () => {
     expect(screen.getByText(en.quota)).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Copy Install reviewed version command" }))
     await waitFor(() =>
-      expect(clipboard).toHaveBeenCalledWith("npm install --global @moonshot-ai/kimi-code@2.1.1")
+      expect(clipboard).toHaveBeenCalledWith("npm install --global @moonshot-ai/kimi-code@2.2.0")
     )
     expect(launch).not.toHaveBeenCalled()
     expect(screen.queryByText(/secret-key/)).not.toBeInTheDocument()
@@ -153,7 +153,7 @@ describe("KimiManagementCard", () => {
       screen.getByRole("button", { name: "Open terminal for Install reviewed version" })
     )
     expect(screen.getByRole("alertdialog")).toHaveTextContent(
-      "npm install --global @moonshot-ai/kimi-code@2.1.1"
+      "npm install --global @moonshot-ai/kimi-code@2.2.0"
     )
     expect(launch).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
@@ -169,7 +169,7 @@ describe("KimiManagementCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run reviewed command" }))
     await waitFor(() =>
       expect(launch).toHaveBeenCalledWith(
-        "/bin/sh -c 'npm install --global @moonshot-ai/kimi-code@2.1.1'",
+        "/bin/sh -c 'npm install --global @moonshot-ai/kimi-code@2.2.0'",
         "/workspace",
         "",
         {}
@@ -228,7 +228,7 @@ describe("KimiManagementCard", () => {
   })
 
   it.each([
-    ["Restore reviewed version", "/bin/sh -c 'npm install --global @moonshot-ai/kimi-code@2.1.1'"],
+    ["Restore reviewed version", "/bin/sh -c 'npm install --global @moonshot-ai/kimi-code@2.2.0'"],
     [
       "Check native upgrade",
       "/bin/sh -c 'cd -- /workspace && env KIMI_CODE_HOME=/owned/state kimi upgrade'",

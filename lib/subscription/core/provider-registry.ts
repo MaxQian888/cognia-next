@@ -187,7 +187,7 @@ export function registerPluginSubscriptionProvider(
   if (!isValidSubscriptionProviderId(id))
     throw new Error("Invalid namespaced subscription provider id")
   const registered: SubscriptionProviderDefinition = {
-    ...definition,
+    ...structuredClone(definition),
     models: definition.models.map((model) => (typeof model === "string" ? model : model.id)),
     modelMetadata: subscriptionModelMetadata(definition),
     ...(definition.protocol === "openai" ? { apiFlavor: definition.apiFlavor ?? "chat" } : {}),
@@ -242,6 +242,11 @@ export function unregisterSubscriptionProvidersByPlugin(pluginId: string): numbe
 export async function saveCustomSubscriptionProvider(
   input: Omit<PluginSubscriptionProviderDefinition, "id">
 ): Promise<SubscriptionProviderDefinition> {
+  if (input.billingMode || input.brandId || input.relatedProviderIds || input.usage) {
+    throw new Error(
+      "Billing, brand and usage declarations must be installed through a provider plugin"
+    )
+  }
   const { uuidv7 } = await import("./uuidv7")
   const definition = { ...input, id: `custom-${uuidv7()}` }
   validateSubscriptionProvider(definition)

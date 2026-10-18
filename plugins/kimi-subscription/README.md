@@ -2,9 +2,9 @@
 
 [中文说明](./README.zh-CN.md)
 
-A complete, explicitly installable example of Cognia's `subscription-provider` capability.
+An explicitly installable plugin using Cognia's `subscription-provider` capability.
 It contributes Kimi Code to the existing subscription account forms and model selectors. There is
-no provider-specific panel, credential reader, or network client in this plugin. It declares both
+no provider-specific panel, credential reader, or network client in this plugin. It declares China and international
 OpenAI Chat Completions and Anthropic Messages entries, rich fallback metadata, and live model listing.
 
 ## Requirements
@@ -28,8 +28,8 @@ From the repository root:
 pnpm exec node plugins/kimi-subscription/build.mjs
 ```
 
-Output: `plugins/kimi-subscription/dist/cognia-kimi-subscription-0.2.0.zip`.
-The ZIP contains `plugin.json`, the compiled `dist/index.js`, and both READMEs. It has no runtime
+Output: `plugins/kimi-subscription/dist/cognia-kimi-subscription-0.3.0.zip`.
+The ZIP contains `plugin.json`, the compiled `dist/index.js`, the plugin icon, and both READMEs. It has no runtime
 dependency on the repository, SDK package, or Node.js. The build uses the repository's esbuild and
 JSZip dependencies; do not install a second copy inside this directory.
 
@@ -52,14 +52,14 @@ updated ZIP over the same plugin ID to retain existing accounts.
 ## Models and membership
 
 Verified against the [official model documentation](https://www.kimi.com/code/docs/en/kimi-code/models.html)
-on **2026-09-11**:
+on **2026-10-18**:
 
-| Model ID                    | Membership requirement | Selection guidance                                        |
-| --------------------------- | ---------------------- | --------------------------------------------------------- |
-| `kimi-for-coding`           | All Kimi Code members  | Default; the service manages the model behind this alias. |
-| `k3-256k`                   | Moderato or higher     | K3 with a fixed 256K context.                             |
-| `k3`                        | Moderato or higher     | Context limit depends on membership.                      |
-| `kimi-for-coding-highspeed` | Allegretto or higher   | Higher-speed model with greater quota consumption.        |
+| Model ID                    | Membership requirement   | Selection guidance                                        |
+| --------------------------- | ------------------------ | --------------------------------------------------------- |
+| `kimi-for-coding`           | Plus / legacy Andante+   | Default; the service manages the model behind this alias. |
+| `k3-256k`                   | Plus / legacy Moderato+  | K3 with a fixed 256K context.                             |
+| `k3`                        | Moderato or higher       | Context limit depends on membership.                      |
+| `kimi-for-coding-highspeed` | Pro / legacy Allegretto+ | Higher-speed model with greater quota consumption.        |
 
 The catalogue lists documented models, not your account's entitlements. Start with `kimi-for-coding`.
 The alias behind `kimi-for-coding` can change without a client update. The current docs describe
@@ -165,7 +165,7 @@ does not request agent dispatch permission or automatically start agents.
   settings, source files, or the ZIP; no secret-read permission is requested.
 - Disabling or uninstalling the plugin removes its available provider and models. Saved accounts
   remain in the host vault for explicit removal or reuse after reinstalling the same plugin ID.
-- Usage opens the official console. This example declares no automatic balance/quota endpoint.
+- Usage is requested by the host from `/coding/v1/usages`; the plugin never receives the key. The aggregate is labeled Plan usage because its period depends on the membership. Both consumed and remaining count variants are supported; reset timestamps are ISO 8601. The official console remains available for verification.
 - A `401` can mean an ineligible model tier as well as an invalid key. Try `kimi-for-coding`, check
   your membership and key in the console, and ensure this is a Kimi Code key, not a Moonshot key.
 - For quota or rate-limit errors, check the console and the
@@ -184,17 +184,29 @@ Update the READMEs and test expectations, then rebuild. Changing an existing plu
 creates a different account namespace; preserve IDs when updating an installed provider.
 
 Use this approach for standard OpenAI Chat Completions or Anthropic Messages services with API keys.
-OAuth, custom signatures, and automatic usage adapters require additional host capabilities.
+OAuth and custom signatures require additional host capabilities. Standard GET usage endpoints can be declared using `usage.request` and `usage.extract`; the host supplies credentials.
 
 ## Verification
 
 From the repository root, without coverage collection:
 
 ```sh
-pnpm exec node --test plugins/kimi-subscription/build.test.mjs
+pnpm exec jest --runInBand --coverage=false --runTestsByPath plugins/kimi-subscription/build.test.mjs
 pnpm exec jest --runInBand --coverage=false --roots plugins/kimi-subscription --runTestsByPath plugins/kimi-subscription/src/index.test.ts
 ```
 
 The tests validate the real installer schema, host bridge registration/removal, model selection,
 manifest parity, archive contents, and execution of the compiled entry. They do not make authenticated
 Kimi requests or establish whether your membership permits a particular model.
+
+## Subscription and AI provider linkage (0.3.0)
+
+All four entries declare `billingMode: "subscription"` and the Kimi brand. The original `kimi-code` and `kimi-code-anthropic` IDs stay unchanged; `kimi-code-intl` and `kimi-code-anthropic-intl` add the documented `api.kimi.ai` endpoints. Protocol and region entries have independent account selections. Updating the same plugin preserves old account namespaces; no account is copied or merged into Moonshot.
+
+Related-provider IDs connect the subscription and AI provider management pages without sharing credentials. Select an account explicitly in Subscriptions, then manage models and connection tests in AI Providers. A missing or exhausted subscription account must not automatically fall back to a pay-as-you-go key. Moonshot API keys belong in the separate Moonshot API provider.
+
+The bundled models remain fallback metadata, not proof of entitlement. Current Plus / legacy Moderato unlock K3 and 256K; Pro / legacy Allegretto unlock K3 1M and HighSpeed. Use live model discovery for account-specific limits. Kimi Code keys are issued from the Kimi Code console. Follow the vendor's supported-use terms; the plugin does not spoof official clients.
+
+Sources rechecked 2026-10-18: [official model and regional endpoint reference](https://www.kimi.com/code/docs/en/kimi-code/models.html), [membership guide](https://www.kimi.com/en/help/kimi-code/membership-guide), [official CLI usage implementation](https://github.com/MoonshotAI/kimi-code/blob/main/packages/oauth/src/managed-usage.ts), [official-repository quota inconsistency report](https://github.com/MoonshotAI/kimi-code/issues/3951). The aggregate counter is preferred over the reported zero-valued ratio windows in that report. No authenticated live quota or inference request was made during this update.
+
+Subscription plugin inference and quota requests always use the declared endpoints; relay presets and URL overrides saved on older accounts are ignored without modifying the stored accounts.

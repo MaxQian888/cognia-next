@@ -1,7 +1,7 @@
 import { shellQuote } from "@/lib/mcp/config-transfer"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 
-export const KIMI_REVIEWED_VERSION = "2.1.1"
+export const KIMI_REVIEWED_VERSION = "2.2.0"
 
 export type KimiManagementAction =
   | "install"

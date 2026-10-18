@@ -4,7 +4,7 @@ describe("kimiManagementCommand", () => {
   it("pins installation and restore without exposing runtime secrets", () => {
     const agent = { process: { command: "kimi", env: { KIMI_MODEL_API_KEY: "private" } } }
     expect(kimiManagementCommand(agent, "install")).toBe(
-      "npm install --global @moonshot-ai/kimi-code@2.1.1"
+      "npm install --global @moonshot-ai/kimi-code@2.2.0"
     )
     expect(kimiManagementCommand(agent, "restore")).toBe(kimiManagementCommand(agent, "install"))
     expect(kimiManagementCommand(agent, "uninstall")).toBe(

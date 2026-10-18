@@ -20,7 +20,7 @@ test("the example uses the subscription endpoint, stable default, and no secret 
   const manifest = readManifest()
   expect(manifest.capabilities).toEqual(["subscription-provider"])
   expect(manifest.permissions).toEqual([])
-  expect(manifest.subscriptionProviders).toHaveLength(2)
+  expect(manifest.subscriptionProviders).toHaveLength(4)
   expect(manifest.subscriptionProviders?.[0]).toMatchObject({
     id: "kimi-code",
     protocol: "openai",
@@ -51,4 +51,14 @@ test("the module and installed JSON have identical contributions", async () => {
   expect(pluginModule.manifest).toEqual(readManifest())
   expect(pluginModule.default.manifest).toEqual(readManifest())
   await expect(Promise.resolve(pluginModule.default.activate({} as never))).resolves.toBeUndefined()
+})
+
+test("Kimi entries identify subscription billing and keep region-specific usage hosts", () => {
+  for (const provider of readManifest().subscriptionProviders ?? []) {
+    expect(provider.billingMode).toBe("subscription")
+    expect(provider.brandId).toBe("kimi")
+    expect(provider.relatedProviderIds).toEqual(["moonshot"])
+    expect(provider.usage?.request.path).toBe("/coding/v1/usages")
+    expect(provider.usage?.request.useBaseUrlOrigin).toBe(true)
+  }
 })

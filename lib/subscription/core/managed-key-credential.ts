@@ -1,7 +1,7 @@
 import { useAccountStore } from "@/stores/account/account-store"
 import { getSubscriptionProvider } from "./provider-registry"
 import { isTauri } from "@/lib/tauri"
-import { restBaseOf } from "@/lib/ai/operations/handlers/http"
+import { resolveSubscriptionEndpoint, subscriptionRequestHeaders } from "./provider-policy"
 import type { SubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
 import { getAccount, getActiveAccount, getProviderPreset, listPresets } from "./transport"
 
@@ -16,6 +16,9 @@ export async function resolveManagedSubscriptionCredential(
   apiFlavor?: "chat" | "responses"
 } | null> {
   if (!isTauri() || definition.available === false || definition.authMode !== "api-key") return null
+  const registration =
+    definition.source === "plugin" ? getSubscriptionProvider(definition.id) : undefined
+  if (definition.source === "plugin" && !registration) return null
   const localAccountId = useAccountStore.getState().unlockedAccountId
   if (!localAccountId) return null
   try {
@@ -27,26 +30,23 @@ export async function resolveManagedSubscriptionCredential(
       return null
     const apiKey = credential.accessToken.trim()
     if (!apiKey) return null
-    const bound = account.presetId
-      ? (await listPresets(definition.id)).find((preset) => preset.id === account.presetId)
-      : null
-    const preset = bound ?? (await getProviderPreset(definition.id))
-    const configuredBaseURL =
-      preset?.baseUrl?.trim() || credential.baseUrl?.trim() || definition.baseUrl
+    const subscriptionOnly = definition.billingMode === "subscription"
+    const bound =
+      !subscriptionOnly && account.presetId
+        ? (await listPresets(definition.id)).find((preset) => preset.id === account.presetId)
+        : null
+    const preset = subscriptionOnly ? null : (bound ?? (await getProviderPreset(definition.id)))
+    const configuredBaseURL = subscriptionOnly
+      ? definition.baseUrl
+      : preset?.baseUrl?.trim() || credential.baseUrl?.trim() || definition.baseUrl
     if (!configuredBaseURL) return null
     // The Anthropic AI SDK appends `/messages` to third-party bases verbatim.
     // Resolve the same versioned base used by model-list and other REST calls.
-    const baseURL = restBaseOf({
-      protocol: definition.protocol ?? "openai",
-      baseURL: configuredBaseURL.replace(/\/+$/, ""),
-    })!
-    const headers = Object.fromEntries(
-      Object.entries(preset?.extraHeaders ?? {}).filter(
-        ([name]) => !name.toLowerCase().startsWith("x-cognia-")
-      )
-    )
+    const baseURL = resolveSubscriptionEndpoint(definition, configuredBaseURL)
+    const headers = subscriptionRequestHeaders(definition, preset?.extraHeaders)
     if (useAccountStore.getState().unlockedAccountId !== localAccountId) return null
-    if (definition.source === "plugin" && !getSubscriptionProvider(definition.id)) return null
+    if (definition.source === "plugin" && getSubscriptionProvider(definition.id) !== registration)
+      return null
     return {
       apiKey,
       baseURL,

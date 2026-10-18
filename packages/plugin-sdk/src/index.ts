@@ -343,7 +343,17 @@ export type {
   PluginSubscriptionProviderDefinition,
   SubscriptionModelDefinition,
   SubscriptionModelApi,
+  SubscriptionBillingMode,
+  SubscriptionUsageDefinition,
 } from "@/types/subscription/provider-definition"
+export type {
+  DescriptorExtract,
+  BalanceExtract,
+  WindowExtract,
+  WindowSpec,
+  WindowSelect,
+  ResetUnit,
+} from "@/types/subscription/descriptor"
 export { defineBalanceAdapter } from "./define/define-balance-adapter"
 export { defineLimitsSource } from "./define/define-limits-source"
 export { defineProviderOperationAdapter } from "./define/define-provider-operation-adapter"

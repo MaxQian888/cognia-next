@@ -1554,5 +1554,24 @@
     "waitingForTest": "Waiting to run connection test..."
   },
   "xai": "xAI (Grok)",
-  "xaiDescription": "Grok 3, Grok 3 Mini"
+  "xaiDescription": "Grok 3, Grok 3 Mini",
+  "subscriptionLinks": {
+    "title": "Billing source",
+    "subscriptionBadge": "Subscription plan",
+    "paygBadge": "Pay-as-you-go API",
+    "subscriptionDescription": "This connection uses only the active subscription account and its plan endpoint. Pay-as-you-go API credentials are separate; Cognia does not copy keys or switch billing sources automatically.",
+    "paygDescription": "This connection uses pay-as-you-go API billing. Subscription plans below are separate connections with their own accounts and endpoints. Choose the connection explicitly; Cognia does not copy keys or switch billing sources automatically.",
+    "loadingAccounts": "Loading subscription accounts…",
+    "accountsUnavailable": "Subscription accounts are unavailable. Open account management to retry.",
+    "activeAccount": "Active account: {account}",
+    "unnamedAccount": "Subscription account",
+    "noActiveAccount": "No active subscription account. Select one in account management.",
+    "openProvider": "Open AI connection",
+    "openSubscription": "Open subscription",
+    "manageAccounts": "Manage accounts",
+    "openPaygProvider": "Open {name} pay-as-you-go API",
+    "subscriptionCredentials": "Subscription credentials and the plan endpoint are managed in Subscription. Configure models here and verify the selected account.",
+    "credentialReady": "The active subscription account supplies the credential for this connection.",
+    "credentialMissing": "Select an active subscription account before testing this connection."
+  }
 }

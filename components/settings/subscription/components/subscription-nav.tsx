@@ -8,6 +8,7 @@
 
 import type { ComponentType } from "react"
 import { useTranslations } from "next-intl"
+import { ProviderIcon } from "@/components/providers/ai/provider-icon"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { SubscriptionNavGroup, SubscriptionPanelId } from "../nav-config"
@@ -69,7 +70,7 @@ function SubscriptionNavItem({
   onSelect,
 }: {
   id: SubscriptionPanelId
-  icon: ComponentType<{ className?: string }>
+  icon: ComponentType<{ className?: string }> | string
   label: string
   description: string
   isSelected: boolean
@@ -91,7 +92,13 @@ function SubscriptionNavItem({
           "data-[active=true]:bg-accent data-[active=true]:text-accent-foreground"
         )}
       >
-        <Icon className="mt-0.5 size-4 shrink-0" />
+        <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">
+          {typeof Icon === "string" ? (
+            <ProviderIcon providerId={Icon} label={label} size={20} className="text-xs" />
+          ) : (
+            <Icon className="size-4" />
+          )}
+        </span>
         <span className="min-w-0 flex-1" data-nav-text>
           <span className="block truncate text-sm font-medium" data-nav-label>
             {label}

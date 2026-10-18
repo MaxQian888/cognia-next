@@ -6,6 +6,18 @@ import {
 } from "./nav-config"
 
 describe("SUBSCRIPTION_NAV_GROUPS", () => {
+  it("uses vendor brand identities for provider navigation", () => {
+    const providers = SUBSCRIPTION_NAV_GROUPS.find((group) => group.id === "providersGroup")!
+    expect(
+      providers.items.filter((item) => item.id !== "accounts").map(({ id, icon }) => [id, icon])
+    ).toEqual([
+      ["claude", "claude"],
+      ["codex", "codex"],
+      ["opencode", "opencode"],
+      ["commandcode", "commandcode"],
+    ])
+  })
+
   it("has no duplicate panel ids across groups", () => {
     const ids = SUBSCRIPTION_NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id))
     expect(new Set(ids).size).toBe(ids.length)
@@ -88,5 +100,21 @@ it("builds dynamic provider navigation and excludes unavailable plugin definitio
   expect(items.some((item) => item.id === "removed-provider")).toBe(false)
   expect(resolveSubscriptionPanel("my-provider", null, new Set(items.map((item) => item.id)))).toBe(
     "my-provider"
+  )
+})
+
+it("uses the declared brand for namespaced subscription plugins", () => {
+  const groups = buildSubscriptionNavGroups([
+    {
+      id: "cognia-kimi-subscription:kimi-code",
+      name: "Kimi Code",
+      brandId: "kimi",
+      authMode: "api-key",
+      source: "plugin",
+      billingMode: "subscription",
+    },
+  ])
+  expect(groups.find((group) => group.id === "providersGroup")?.items).toContainEqual(
+    expect.objectContaining({ id: "cognia-kimi-subscription:kimi-code", icon: "kimi" })
   )
 })

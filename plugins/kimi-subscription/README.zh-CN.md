@@ -25,7 +25,7 @@
 pnpm exec node plugins/kimi-subscription/build.mjs
 ```
 
-产物为 `plugins/kimi-subscription/dist/cognia-kimi-subscription-0.2.0.zip`。
+产物为 `plugins/kimi-subscription/dist/cognia-kimi-subscription-0.3.0.zip`。
 压缩包只包含 `plugin.json`、编译后的 `dist/index.js` 和中英文说明。
 安装后不依赖源码仓库、SDK 包或 Node.js。构建复用仓库已有的 esbuild 和 JSZip。
 
@@ -44,14 +44,14 @@ pnpm exec node plugins/kimi-subscription/build.mjs
 
 ## 模型与套餐
 
-以下内容于 **2026-09-11** 按[官方模型文档](https://www.kimi.com/code/docs/en/kimi-code/models.html)核对：
+以下内容于 **2026-10-18** 按[官方模型文档](https://www.kimi.com/code/docs/en/kimi-code/models.html)核对：
 
-| 模型 ID                     | 套餐要求            | 选择建议                         |
-| --------------------------- | ------------------- | -------------------------------- |
-| `kimi-for-coding`           | 所有 Kimi Code 会员 | 默认选项；底层模型由服务端维护。 |
-| `k3-256k`                   | Moderato 及以上     | 固定 256K 上下文的 K3。          |
-| `k3`                        | Moderato 及以上     | 上下文上限取决于套餐。           |
-| `kimi-for-coding-highspeed` | Allegretto 及以上   | 更高速度，消耗更多额度。         |
+| 模型 ID                     | 套餐要求                   | 选择建议                         |
+| --------------------------- | -------------------------- | -------------------------------- |
+| `kimi-for-coding`           | Plus / 旧 Andante 及以上   | 默认选项；底层模型由服务端维护。 |
+| `k3-256k`                   | Plus / 旧 Moderato 及以上  | 固定 256K 上下文的 K3。          |
+| `k3`                        | Plus / 旧 Moderato 及以上  | 上下文上限取决于套餐。           |
+| `kimi-for-coding-highspeed` | Pro / 旧 Allegretto 及以上 | 更高速度，消耗更多额度。         |
 
 模型列表表示官方可选项，不代表当前账号已获得所有模型权限。建议先使用 `kimi-for-coding`。
 `kimi-for-coding` 对应的底层模型可能自动升级；当前官方文档描述为 K2.8 Preview。
@@ -141,7 +141,7 @@ export async function reviewWithKimi(ctx: PluginContext, prompt: string, account
 - 密钥由 Cognia 已有凭据库管理，不应写入清单、插件配置、源码或 ZIP。插件不申请读取密钥权限。
 - 停用或卸载插件会移除服务和模型注册；已保存账号保留在宿主凭据库，供用户明确删除，或在重新
   安装相同插件 ID 后复用。
-- 用量入口打开官方控制台。本示例没有虚构自动余额或额度接口。
+- 用量由宿主请求官方接口；也可打开官方控制台核对。
 - `401` 可能是模型套餐权限不足，也可能是密钥无效。先尝试 `kimi-for-coding`，检查控制台中的
   会员资格与密钥，并确认使用的是 Kimi Code 密钥，而非 Moonshot 平台密钥。
 - 遇到额度耗尽或限流，查看控制台和[官方错误说明](https://www.kimi.com/code/docs/en/kimi-code/error-reference.html)。
@@ -157,16 +157,30 @@ OpenAI Responses 服务使用 `apiFlavor: "responses"`。第一个模型是默�
 同步更新说明和测试期望，然后重新构建。升级已有插件时应保留插件和服务 ID，否则会产生不同的账号命名空间。
 
 此方式适用于标准 OpenAI Chat Completions 或 Anthropic Messages API Key 服务。
-OAuth、自定义签名和自动用量适配需要额外的宿主能力。
+OAuth、自定义签名需要额外的宿主能力。标准 GET 用量接口可以通过声明式 usage.request 与 usage.extract 配置。
 
 ## 验证
 
 在仓库根目录执行，不收集覆盖率：
 
 ```sh
-pnpm exec node --test plugins/kimi-subscription/build.test.mjs
+pnpm exec jest --runInBand --coverage=false --runTestsByPath plugins/kimi-subscription/build.test.mjs
 pnpm exec jest --runInBand --coverage=false --roots plugins/kimi-subscription --runTestsByPath plugins/kimi-subscription/src/index.test.ts
 ```
 
 测试检查真实安装清单校验、宿主注册与移除、模型选择、清单一致性、ZIP 内容和编译后入口执行。
 测试不会使用真实密钥调用 Kimi，也不能证明某个账号拥有指定模型的使用权限。
+
+## 订阅与 AI 提供商联动（0.3.0）
+
+四个入口均声明 `billingMode: "subscription"` 和 Kimi 品牌。原有 `kimi-code`、`kimi-code-anthropic` ID 保持不变；新增 `kimi-code-intl`、`kimi-code-anthropic-intl` 使用官方 `api.kimi.ai` 国际端点。不同协议与区域独立选择账户；更新同 ID 插件保留原账户，不将账户复制或合并到 Moonshot。
+
+关联提供商 ID 连接订阅页与 AI 提供商管理页，但不共享凭据。先在订阅页明确选择账户，再到 AI 提供商页管理模型、测试连接。订阅账户缺失或额度耗尽时，不应自动回退到按量 Key。Moonshot 开放平台按量 Key 应配置到独立的 Moonshot API 提供商。
+
+套餐额度由宿主使用账户凭据请求 `/coding/v1/usages`，插件不接触 Key。聚合计数命名为“套餐用量”，因为对应周期取决于套餐；兼容已用/剩余计数字段，重置时间按 ISO 8601 解析。官方控制台仍可用于核对。
+
+静态模型是回退元数据，不代表账户权益。当前 Plus / 旧 Moderato 支持 K3 256K，Pro / 旧 Allegretto 支持 K3 1M 及 HighSpeed；账户实际限制请刷新模型确认。Key 从 Kimi Code 控制台获取。遵守厂商支持范围，插件不伪装官方客户端。
+
+资料核对日期：2026-10-18。[官方模型与区域端点](https://www.kimi.com/code/docs/en/kimi-code/models.html)、[会员说明](https://www.kimi.com/en/help/kimi-code/membership-guide)、[官方 CLI 用量实现](https://github.com/MoonshotAI/kimi-code/blob/main/packages/oauth/src/managed-usage.ts)、[官方仓库额度不一致报告](https://github.com/MoonshotAI/kimi-code/issues/3951)。本插件优先使用聚合计数，避免报告中的比例窗口错误归零问题。本次未进行真实账户推理或额度查询。
+
+订阅插件的推理和额度请求始终使用清单声明的地址；旧账户中保存的转发预设和自定义地址会被忽略，账户记录本身不会被修改。

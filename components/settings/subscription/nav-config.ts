@@ -21,10 +21,7 @@ import {
   CloudIcon,
   DatabaseBackupIcon,
   GaugeIcon,
-  KeyRoundIcon,
   RadioIcon,
-  SparklesIcon,
-  TerminalIcon,
   ChartColumnIcon,
   UsersIcon,
 } from "lucide-react"
@@ -40,7 +37,8 @@ export type SubscriptionNavGroupId = "usageGroup" | "providersGroup" | "vaultGro
 
 export interface SubscriptionNavItem {
   id: SubscriptionPanelId
-  icon: ComponentType<{ className?: string }>
+  /** Brand id for providers; a Lucide component for functional entries. */
+  icon: ComponentType<{ className?: string }> | string
   label?: string
   description?: string
   localize?: boolean
@@ -74,11 +72,8 @@ export function buildSubscriptionNavGroups(
           .map((provider) => ({
             id: provider.authMode === "anthropic-oauth" ? "claude" : provider.id,
             icon:
-              provider.authMode === "anthropic-oauth"
-                ? SparklesIcon
-                : provider.authMode === "codex-oauth"
-                  ? TerminalIcon
-                  : KeyRoundIcon,
+              provider.brandId ??
+              (provider.authMode === "anthropic-oauth" ? "claude" : provider.id),
             label: provider.name,
             description: provider.description ?? provider.baseUrl ?? "",
             localize: provider.source === "builtin",

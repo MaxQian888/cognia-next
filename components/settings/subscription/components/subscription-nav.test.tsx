@@ -3,7 +3,7 @@
  */
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string) => (key === "items.commandcode.label" ? "CommandCode" : key),
 }))
 
 import { fireEvent, render, screen } from "@testing-library/react"
@@ -12,6 +12,30 @@ import { SubscriptionNav } from "./subscription-nav"
 import { buildSubscriptionNavGroups, SUBSCRIPTION_NAV_GROUPS } from "../nav-config"
 
 describe("SubscriptionNav", () => {
+  it.each([
+    ["claude", "/icons/lobe/claude-color.svg"],
+    ["codex", "/icons/lobe/codex-color.svg"],
+    ["opencode", "/icons/lobe/opencode.svg"],
+  ])("renders the decorative vendor logo for %s", (id, src) => {
+    render(
+      <SubscriptionNav groups={SUBSCRIPTION_NAV_GROUPS} activeId="accounts" onSelect={jest.fn()} />
+    )
+    const image = screen.getByTestId(`subscription-nav-item-${id}`).querySelector("img")
+    expect(image).toHaveAttribute("src", src)
+    expect(image).toHaveAttribute("alt", "")
+    expect(image).toHaveAttribute("aria-hidden", "true")
+  })
+
+  it("uses a monogram for a vendor without a brand asset and keeps functional icons", () => {
+    render(
+      <SubscriptionNav groups={SUBSCRIPTION_NAV_GROUPS} activeId="accounts" onSelect={jest.fn()} />
+    )
+    const commandcode = screen.getByTestId("subscription-nav-item-commandcode")
+    expect(commandcode.querySelector("span[aria-hidden=true]")).toHaveTextContent(/^C$/)
+    expect(commandcode.querySelector("svg")).toBeNull()
+    expect(screen.getByTestId("subscription-nav-item-accounts").querySelector("svg")).not.toBeNull()
+  })
+
   it("renders a listitem per entry under its group header", () => {
     render(
       <SubscriptionNav groups={SUBSCRIPTION_NAV_GROUPS} activeId="overview" onSelect={jest.fn()} />

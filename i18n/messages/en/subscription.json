@@ -454,7 +454,8 @@
       "topUp": "Auto top-up",
       "weekly": "Current week (all models)",
       "weekly_opus": "Current week (Opus only)",
-      "weekly_sonnet": "Current week (Sonnet only)"
+      "weekly_sonnet": "Current week (Sonnet only)",
+      "plan": "Plan usage"
     },
     "noMeters": "No limit windows reported for this account.",
     "noValue": "—",
@@ -966,6 +967,35 @@
     "modelNotFound": "The service did not return information for this model.",
     "modelInputPrice": "Input / 1M tokens ({currency})",
     "modelOutputPrice": "Output / 1M tokens ({currency})",
-    "modelInput": "Maximum input tokens"
+    "modelInput": "Maximum input tokens",
+    "subscriptionDescription": "Add a key issued for this subscription plan. Pay-as-you-go API keys belong to a separate AI connection.",
+    "subscriptionKeyField": "Subscription key",
+    "subscriptionKeyHint": "Use the key from your Coding Plan console. Cognia cannot determine a key’s billing type from its format. Inference and optional quota queries send this key only to the destinations shown below.",
+    "inferenceDestination": "Inference endpoint",
+    "usageDestination": "Usage query destination"
+  },
+  "managedProvider": {
+    "subscriptionBadge": "Subscription plan",
+    "paygBadge": "Pay-as-you-go API",
+    "subscriptionDescription": "This connection uses only its subscription account and the declared plan endpoint. Pay-as-you-go API accounts are separate. Cognia does not copy keys or switch billing sources automatically.",
+    "paygDescription": "This service uses pay-as-you-go API billing. Subscription plans use separate accounts and connections.",
+    "accountsTitle": "Accounts",
+    "loadingAccounts": "Loading accounts…",
+    "accountsUnavailable": "Accounts are unavailable. Open account management to retry.",
+    "activeAccount": "Active account: {account}",
+    "unnamedAccount": "Subscription account",
+    "noActiveAccount": "No active account. Add an account or select one in account management.",
+    "accountCount": "{count, plural, one {# saved account} other {# saved accounts}}",
+    "manageAccounts": "Manage accounts",
+    "addAccount": "Add account",
+    "desktopRequired": "Account management requires the desktop app.",
+    "inferenceDestination": "Inference endpoint",
+    "usageDestination": "Usage query destination",
+    "openProvider": "Open AI connection",
+    "openPaygProvider": "Open {name} pay-as-you-go API",
+    "getKey": "Get key",
+    "usageConsole": "Usage console",
+    "docs": "Documentation",
+    "quotaUnavailable": "This provider does not declare automatic quota queries. Check its usage console for plan usage."
   }
 }

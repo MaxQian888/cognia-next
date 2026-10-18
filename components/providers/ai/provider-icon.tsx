@@ -2,6 +2,7 @@
 
 /** Shared AI-provider brand icon with a deterministic monogram fallback. */
 import { BrandIcon } from "@/components/icons/brand-icon"
+import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
 
 interface ProviderIconProps {
   providerId: string
@@ -21,7 +22,7 @@ export function ProviderIcon({
 }: ProviderIconProps) {
   return (
     <BrandIcon
-      id={providerId}
+      id={getSubscriptionProvider(providerId)?.brandId ?? providerId}
       className={className}
       decorative={decorative}
       label={label}

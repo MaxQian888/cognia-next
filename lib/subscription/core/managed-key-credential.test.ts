@@ -1,10 +1,11 @@
 const mockLocalAccount = { unlockedAccountId: "local-a" as string | null }
-const mockPluginAvailable = { value: true }
+const mockPluginAvailable = { value: true, registration: {} }
 jest.mock("@/stores/account/account-store", () => ({
   useAccountStore: { getState: () => mockLocalAccount },
 }))
 jest.mock("./provider-registry", () => ({
-  getSubscriptionProvider: () => (mockPluginAvailable.value ? {} : undefined),
+  getSubscriptionProvider: () =>
+    mockPluginAvailable.value ? mockPluginAvailable.registration : undefined,
 }))
 import { resolveManagedSubscriptionCredential } from "./managed-key-credential"
 import * as transport from "./transport"
@@ -28,6 +29,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockLocalAccount.unlockedAccountId = "local-a"
   mockPluginAvailable.value = true
+  mockPluginAvailable.registration = {}
   jest.mocked(isTauri).mockReturnValue(true)
   jest.mocked(transport.getActiveAccount).mockResolvedValue({ activeAccountId: "active", env: [] })
   jest.mocked(transport.getAccount).mockResolvedValue({
@@ -64,6 +66,30 @@ test("presets override the provider endpoint and filter internal headers", async
     baseURL: "https://relay.example/v1",
     headers: { "X-Tenant": "team" },
   })
+})
+test("a subscription account ignores old pay-as-you-go preset and credential overrides", async () => {
+  jest.mocked(transport.getProviderPreset).mockResolvedValue({
+    id: "payg",
+    label: "Pay as you go",
+    baseUrl: "https://payg.example/v1",
+  })
+  const account = await transport.getAccount(definition.id, "active")
+  jest.mocked(transport.getAccount).mockResolvedValue({
+    ...account!,
+    presetId: "payg",
+    credential: {
+      provider: "api-key",
+      providerId: definition.id,
+      accessToken: "secret",
+      storedAtMs: 0,
+      baseUrl: "https://payg.example/v1",
+    },
+  })
+  expect(
+    await resolveManagedSubscriptionCredential({ ...definition, billingMode: "subscription" })
+  ).toMatchObject({ apiKey: "secret", baseURL: definition.baseUrl })
+  expect(transport.getProviderPreset).not.toHaveBeenCalled()
+  expect(transport.listPresets).not.toHaveBeenCalled()
 })
 test.each([
   "https://api.kimi.com/coding/",
@@ -116,12 +142,13 @@ test("web and locked/missing credentials remain unavailable", async () => {
   expect(await resolveManagedSubscriptionCredential(definition)).toBeNull()
 })
 
-test.each(["lock", "unload"])(
+test.each(["lock", "unload", "reload"])(
   "discards a resolved key when %s occurs during vault reads",
   async (action) => {
     jest.mocked(transport.getProviderPreset).mockImplementation(async () => {
       if (action === "lock") mockLocalAccount.unlockedAccountId = null
-      else mockPluginAvailable.value = false
+      else if (action === "unload") mockPluginAvailable.value = false
+      else mockPluginAvailable.registration = {}
       return null
     })
     expect(await resolveManagedSubscriptionCredential(definition)).toBeNull()

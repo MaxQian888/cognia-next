@@ -1,6 +1,6 @@
 import type { ResolvedProvider, ProviderSettingsSnapshot } from "@/lib/ai/provider-consumption"
 import { listProviderModels, getProviderModel } from "@/lib/ai/operations/handlers/discovery"
-import { restBaseOf } from "@/lib/ai/operations/handlers/http"
+import { resolveSubscriptionEndpoint, subscriptionRequestHeaders } from "./provider-policy"
 import type { ProviderOperationPersistence } from "@/lib/ai/operations/persistence"
 import type { SubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
 import { getSubscriptionProvider } from "./provider-registry"
@@ -56,14 +56,19 @@ async function resolve(input: SubscriptionModelDiscoveryInput): Promise<Resolved
     const apiKey = preview.apiKey.trim()
     if (!apiKey || /\s/.test(apiKey))
       throw new SubscriptionModelDiscoveryError("credentialsRequired")
-    const boundId = input.providerAccountId
-      ? (await getAccount(definition.id, input.providerAccountId))?.presetId
-      : preview.presetId
+    const subscriptionOnly = definition.billingMode === "subscription"
+    const boundId = subscriptionOnly
+      ? null
+      : input.providerAccountId
+        ? (await getAccount(definition.id, input.providerAccountId))?.presetId
+        : preview.presetId
     const bound = boundId
       ? (await listPresets(definition.id)).find((entry) => entry.id === boundId)
       : null
-    const preset = bound ?? (await getProviderPreset(definition.id))
+    const preset = subscriptionOnly ? null : (bound ?? (await getProviderPreset(definition.id)))
     const baseURL = preset?.baseUrl?.trim() || preview.baseUrl?.trim() || definition.baseUrl
+    let resolvedBaseURL: string
+    let headers: Record<string, string>
     try {
       const url = new URL(baseURL ?? "")
       if (
@@ -74,17 +79,15 @@ async function resolve(input: SubscriptionModelDiscoveryInput): Promise<Resolved
         url.hash
       )
         throw new Error()
+      resolvedBaseURL = resolveSubscriptionEndpoint(definition, baseURL)
+      headers = subscriptionRequestHeaders(definition, preset?.extraHeaders)
     } catch {
       throw new SubscriptionModelDiscoveryError("invalidBaseUrl")
     }
     credentials = {
       apiKey,
-      baseURL: restBaseOf({ protocol: definition.protocol ?? "openai", baseURL }),
-      headers: Object.fromEntries(
-        Object.entries(preset?.extraHeaders ?? {}).filter(
-          ([name]) => !name.toLowerCase().startsWith("x-cognia-")
-        )
-      ),
+      baseURL: resolvedBaseURL,
+      headers,
       apiFlavor: definition.apiFlavor,
     }
   } else {

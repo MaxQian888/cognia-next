@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process"
 import path from "node:path"
 import fs from "node:fs"
 import { fileURLToPath } from "node:url"
+import { createBundleAgentProtocolDependenciesPlugin } from "../build/esbuild-shared.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const kimiAcp = process.argv.includes("--kimi-acp")
@@ -115,7 +116,11 @@ await esbuild.build({
     ".woff": "empty",
     ".woff2": "empty",
   },
-  plugins: [stubNextPlugin, jsonDefaultOnlyPlugin],
+  plugins: [
+    createBundleAgentProtocolDependenciesPlugin(root),
+    stubNextPlugin,
+    jsonDefaultOnlyPlugin,
+  ],
   logLevel: "warning",
 })
 

@@ -1,4 +1,8 @@
 import { queryAccountLimits } from "./runner"
+import {
+  registerPluginSubscriptionProvider,
+  unregisterSubscriptionProvidersByPlugin,
+} from "../core/provider-registry"
 
 import {
   __resetLimitsSourcesForTesting,
@@ -37,6 +41,140 @@ jest.mock("@/lib/subscription/core/transport", () => ({
 }))
 
 afterEach(() => __resetLimitsSourcesForTesting())
+
+describe("declarative plugin subscription usage", () => {
+  const makeProvider = () =>
+    registerPluginSubscriptionProvider(
+      {
+        id: "plan",
+        name: "Plan",
+        billingMode: "subscription",
+        protocol: "openai",
+        baseUrl: "https://api.vendor.example/v1",
+        models: ["model"],
+        usage: {
+          baseUrl: "https://usage.vendor.example",
+          request: { path: "/quota", headers: { Authorization: "{{token}}" } },
+          extract: {
+            kind: "window",
+            windows: [
+              {
+                id: "session",
+                labelKey: "subscription.limits.meter.session",
+                usedPctPath: "used",
+              },
+            ],
+          },
+        },
+      },
+      "usage-test"
+    )
+  const accountFor = (providerId: string): Account => ({
+    id: "plan-account",
+    label: "Work",
+    createdAtMs: 0,
+    lastUsedAtMs: 0,
+    credential: { provider: "api-key", providerId, accessToken: "subscription-key", storedAtMs: 0 },
+  })
+  afterEach(() => unregisterSubscriptionProvidersByPlugin("usage-test"))
+
+  it("queries the declared usage destination without any relay preset", async () => {
+    const provider = makeProvider()
+    const authedGet = jest.fn(async () => JSON.stringify({ used: 25 }))
+    const result = await queryAccountLimits(provider, "plan-account", {
+      getAccount: async () => accountFor(provider),
+      listPresets: async () => [],
+      authedGet,
+    })
+    expect(authedGet).toHaveBeenCalledWith("https://usage.vendor.example/quota", {
+      Accept: "application/json",
+      Authorization: "subscription-key",
+    })
+    expect(result).toMatchObject({
+      provider,
+      accountId: "plan-account",
+      accountLabel: "Work",
+      meters: [{ id: "session", usedPct: 25 }],
+    })
+  })
+
+  it("never accepts another provider's account", async () => {
+    const provider = makeProvider()
+    const authedGet = jest.fn(async () => "{}")
+    {
+      const account = accountFor("other:plan")
+      await expect(
+        queryAccountLimits(provider, account.id, {
+          getAccount: async () => account,
+          listPresets: async () => [],
+          authedGet,
+          getProviderPreset: async () => ({
+            id: "p",
+            label: "PAYG",
+            baseUrl: "https://payg.example/v1",
+          }),
+        })
+      ).resolves.toBeNull()
+    }
+    expect(authedGet).not.toHaveBeenCalled()
+  })
+
+  it("ignores legacy relay bindings when querying a subscription", async () => {
+    const provider = makeProvider()
+    const getProviderPreset = jest.fn(async () => ({
+      id: "p",
+      label: "PAYG",
+      baseUrl: "https://payg.example/v1",
+    }))
+    const authedGet = jest.fn(async () => JSON.stringify({ used: 10 }))
+    const account = { ...accountFor(provider), presetId: "p" }
+    await queryAccountLimits(provider, account.id, {
+      getAccount: async () => account,
+      getProviderPreset,
+      listPresets: async () => [],
+      authedGet,
+    })
+    expect(getProviderPreset).not.toHaveBeenCalled()
+    expect(authedGet).toHaveBeenCalledWith("https://usage.vendor.example/quota", expect.any(Object))
+  })
+
+  it("does not fall through to balance adapters when the subscription reply has no usable meters", async () => {
+    const provider = makeProvider()
+    const authedGet = jest.fn(async () => "{}")
+    await expect(
+      queryAccountLimits(provider, "plan-account", {
+        getAccount: async () => accountFor(provider),
+        listPresets: async () => [],
+        authedGet,
+      })
+    ).resolves.toBeNull()
+    expect(authedGet).toHaveBeenCalledTimes(1)
+  })
+
+  it("stops requests and discards results when its plugin is disabled", async () => {
+    const provider = makeProvider()
+    const authedGet = jest.fn(async () => {
+      unregisterSubscriptionProvidersByPlugin("usage-test")
+      return JSON.stringify({ used: 25 })
+    })
+    await expect(
+      queryAccountLimits(provider, "plan-account", {
+        getAccount: async () => accountFor(provider),
+        listPresets: async () => [],
+        authedGet,
+      })
+    ).rejects.toThrow()
+    authedGet.mockClear()
+    await expect(
+      queryAccountLimits(provider, "plan-account", {
+        getAccount: async () => accountFor(provider),
+        listPresets: async () => [],
+        authedGet,
+      })
+    ).resolves.toBeNull()
+    expect(authedGet).not.toHaveBeenCalled()
+  })
+})
 
 function anthropicAccount(over: Partial<Account> = {}): Account {
   return {

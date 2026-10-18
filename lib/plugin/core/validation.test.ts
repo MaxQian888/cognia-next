@@ -4560,6 +4560,29 @@ describe("declarative subscriptionProviders validation", () => {
   it("accepts host-owned setup metadata without secret permissions", () => {
     expect(validatePluginManifest(manifest([definition])).valid).toBe(true)
   })
+  it("validates host-owned billing and quota declarations before activation", () => {
+    const provider = {
+      ...definition,
+      billingMode: "subscription",
+      brandId: "example",
+      relatedProviderIds: ["example-api"],
+      usage: {
+        request: { path: "/usage", headers: { Authorization: "Bearer {{token}}" } },
+        extract: { kind: "balance", remainingPath: "data.remaining", unit: "requests" },
+      },
+    }
+    expect(validatePluginManifest(manifest([provider])).valid).toBe(true)
+    expect(
+      validatePluginManifest(
+        manifest([
+          {
+            ...provider,
+            usage: { ...provider.usage, request: { path: "https://evil.example/{{token}}" } },
+          },
+        ])
+      ).valid
+    ).toBe(false)
+  })
   it.each([
     null,
     "bad",

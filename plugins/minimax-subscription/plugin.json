@@ -1,0 +1,317 @@
+{
+  "id": "cognia-minimax-subscription",
+  "name": "MiniMax M Plan Subscription",
+  "nameKey": "manifest.name",
+  "version": "0.1.0",
+  "icon": "assets/icon.png",
+  "description": "MiniMax M Plan subscription accounts (including legacy Token Plan), using Subscription Keys rather than pay-as-you-go API Keys.",
+  "descriptionKey": "manifest.description",
+  "type": "frontend",
+  "capabilities": ["subscription-provider"],
+  "permissions": [],
+  "main": "dist/index.js",
+  "author": {
+    "name": "cognia-next"
+  },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["startup"],
+  "bundle_include": ["README.md", "README.zh-CN.md", "assets/icon.png"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "blocked",
+      "reason": "Subscription accounts require Cognia's desktop credential vault."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "dist/index.js"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Subscription accounts require Cognia's desktop credential vault."
+    }
+  },
+  "subscriptionProviders": [
+    {
+      "id": "minimax-m-plan",
+      "name": "MiniMax M Plan (China)",
+      "description": "Use a Subscription Key for M Plan or legacy Token Plan. A standard API Key charges pay-as-you-go balance.",
+      "billingMode": "subscription",
+      "brandId": "minimax",
+      "relatedProviderIds": ["minimax"],
+      "protocol": "openai",
+      "baseUrl": "https://api.minimax.cn/v1",
+      "models": [
+        {
+          "id": "MiniMax-M3.1-Flash-Preview",
+          "name": "MiniMax M3.1 Flash Preview",
+          "contextLength": 524288,
+          "maxOutputTokens": 128000,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        }
+      ],
+      "apiKeyUrl": "https://platform.minimax.cn/console/plan",
+      "usageUrl": "https://platform.minimax.cn/console/usage",
+      "docsUrl": "https://platform.minimax.cn/docs/m-plan/other-tools",
+      "apiFlavor": "chat",
+      "usage": {
+        "request": {
+          "useBaseUrlOrigin": true,
+          "path": "/v1/token_plan/remains",
+          "method": "GET"
+        },
+        "extract": {
+          "kind": "window",
+          "windows": [
+            {
+              "id": "session",
+              "labelKey": "subscription.limits.meter.session",
+              "usedPctPath": "current_interval_remaining_percent",
+              "invert": true,
+              "resetAtPath": "end_time",
+              "resetUnit": "ms",
+              "select": {
+                "arrayPath": "model_remains",
+                "by": "model_name",
+                "equals": "general"
+              }
+            },
+            {
+              "id": "weekly",
+              "labelKey": "subscription.limits.meter.weekly",
+              "usedPctPath": "current_weekly_remaining_percent",
+              "invert": true,
+              "resetAtPath": "weekly_end_time",
+              "resetUnit": "ms",
+              "select": {
+                "arrayPath": "model_remains",
+                "by": "model_name",
+                "equals": "general"
+              }
+            }
+          ]
+        },
+        "baseUrl": "https://www.minimax.cn"
+      }
+    },
+    {
+      "id": "minimax-m-plan-anthropic",
+      "name": "MiniMax M Plan (China, Anthropic)",
+      "description": "Use a Subscription Key for M Plan or legacy Token Plan. A standard API Key charges pay-as-you-go balance.",
+      "billingMode": "subscription",
+      "brandId": "minimax",
+      "relatedProviderIds": ["minimax"],
+      "protocol": "anthropic",
+      "baseUrl": "https://api.minimax.cn/anthropic",
+      "models": [
+        {
+          "id": "MiniMax-M3.1-Flash-Preview",
+          "name": "MiniMax M3.1 Flash Preview",
+          "contextLength": 524288,
+          "maxOutputTokens": 128000,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        }
+      ],
+      "apiKeyUrl": "https://platform.minimax.cn/console/plan",
+      "usageUrl": "https://platform.minimax.cn/console/usage",
+      "docsUrl": "https://platform.minimax.cn/docs/m-plan/other-tools",
+      "usage": {
+        "request": {
+          "useBaseUrlOrigin": true,
+          "path": "/v1/token_plan/remains",
+          "method": "GET"
+        },
+        "extract": {
+          "kind": "window",
+          "windows": [
+            {
+              "id": "session",
+              "labelKey": "subscription.limits.meter.session",
+              "usedPctPath": "current_interval_remaining_percent",
+              "invert": true,
+              "resetAtPath": "end_time",
+              "resetUnit": "ms",
+              "select": {
+                "arrayPath": "model_remains",
+                "by": "model_name",
+                "equals": "general"
+              }
+            },
+            {
+              "id": "weekly",
+              "labelKey": "subscription.limits.meter.weekly",
+              "usedPctPath": "current_weekly_remaining_percent",
+              "invert": true,
+              "resetAtPath": "weekly_end_time",
+              "resetUnit": "ms",
+              "select": {
+                "arrayPath": "model_remains",
+                "by": "model_name",
+                "equals": "general"
+              }
+            }
+          ]
+        },
+        "baseUrl": "https://www.minimax.cn"
+      }
+    },
+    {
+      "id": "minimax-m-plan-intl",
+      "name": "MiniMax M Plan (International)",
+      "description": "Use a Subscription Key for M Plan or legacy Token Plan. A standard API Key charges pay-as-you-go balance.",
+      "billingMode": "subscription",
+      "brandId": "minimax",
+      "relatedProviderIds": ["minimax"],
+      "protocol": "openai",
+      "baseUrl": "https://api.minimax.io/v1",
+      "models": [
+        {
+          "id": "MiniMax-M3.1-Flash-Preview",
+          "name": "MiniMax M3.1 Flash Preview",
+          "contextLength": 524288,
+          "maxOutputTokens": 128000,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        }
+      ],
+      "apiKeyUrl": "https://platform.minimax.io/console/plan",
+      "usageUrl": "https://platform.minimax.io/console/usage",
+      "docsUrl": "https://platform.minimax.io/docs/m-plan/other-tools",
+      "apiFlavor": "chat",
+      "usage": {
+        "request": {
+          "useBaseUrlOrigin": true,
+          "path": "/v1/token_plan/remains",
+          "method": "GET"
+        },
+        "extract": {
+          "kind": "window",
+          "windows": [
+            {
+              "id": "session",
+              "labelKey": "subscription.limits.meter.session",
+              "usedPctPath": "current_interval_remaining_percent",
+              "invert": true,
+              "resetAtPath": "end_time",
+              "resetUnit": "ms",
+              "select": {
+                "arrayPath": "model_remains",
+                "by": "model_name",
+                "equals": "general"
+              }
+            },
+            {
+              "id": "weekly",
+              "labelKey": "subscription.limits.meter.weekly",
+              "usedPctPath": "current_weekly_remaining_percent",
+              "invert": true,
+              "resetAtPath": "weekly_end_time",
+              "resetUnit": "ms",
+              "select": {
+                "arrayPath": "model_remains",
+                "by": "model_name",
+                "equals": "general"
+              }
+            }
+          ]
+        },
+        "baseUrl": "https://www.minimax.io"
+      }
+    },
+    {
+      "id": "minimax-m-plan-anthropic-intl",
+      "name": "MiniMax M Plan (International, Anthropic)",
+      "description": "Use a Subscription Key for M Plan or legacy Token Plan. A standard API Key charges pay-as-you-go balance.",
+      "billingMode": "subscription",
+      "brandId": "minimax",
+      "relatedProviderIds": ["minimax"],
+      "protocol": "anthropic",
+      "baseUrl": "https://api.minimax.io/anthropic",
+      "models": [
+        {
+          "id": "MiniMax-M3.1-Flash-Preview",
+          "name": "MiniMax M3.1 Flash Preview",
+          "contextLength": 524288,
+          "maxOutputTokens": 128000,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        }
+      ],
+      "apiKeyUrl": "https://platform.minimax.io/console/plan",
+      "usageUrl": "https://platform.minimax.io/console/usage",
+      "docsUrl": "https://platform.minimax.io/docs/m-plan/other-tools",
+      "usage": {
+        "request": {
+          "useBaseUrlOrigin": true,
+          "path": "/v1/token_plan/remains",
+          "method": "GET"
+        },
+        "extract": {
+          "kind": "window",
+          "windows": [
+            {
+              "id": "session",
+              "labelKey": "subscription.limits.meter.session",
+              "usedPctPath": "current_interval_remaining_percent",
+              "invert": true,
+              "resetAtPath": "end_time",
+              "resetUnit": "ms",
+              "select": {
+                "arrayPath": "model_remains",
+                "by": "model_name",
+                "equals": "general"
+              }
+            },
+            {
+              "id": "weekly",
+              "labelKey": "subscription.limits.meter.weekly",
+              "usedPctPath": "current_weekly_remaining_percent",
+              "invert": true,
+              "resetAtPath": "weekly_end_time",
+              "resetUnit": "ms",
+              "select": {
+                "arrayPath": "model_remains",
+                "by": "model_name",
+                "equals": "general"
+              }
+            }
+          ]
+        },
+        "baseUrl": "https://www.minimax.io"
+      }
+    }
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "MiniMax M Plan Subscription",
+        "manifest.description": "MiniMax M Plan subscription accounts (including legacy Token Plan), using Subscription Keys rather than pay-as-you-go API Keys."
+      },
+      "zh-CN": {
+        "manifest.name": "MiniMax M Plan 订阅",
+        "manifest.description": "管理 MiniMax M Plan 订阅账户（含旧版 Token Plan），使用订阅 Key，与按量 API Key 独立。"
+      }
+    }
+  }
+}

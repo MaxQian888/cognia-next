@@ -1,10 +1,10 @@
 {
   "id": "cognia-kimi-subscription",
-  "name": "Kimi Code Subscription Example",
+  "name": "Kimi Code Subscription",
   "nameKey": "manifest.name",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "icon": "assets/icon.png",
-  "description": "Installable subscription provider example for Kimi Code memberships, using Cognia's shared account panel.",
+  "description": "Kimi Code membership accounts, models, and plan usage. Separate from Moonshot pay-as-you-go API.",
   "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["subscription-provider"],
@@ -94,6 +94,30 @@
       "modelApi": {
         "list": true,
         "retrieve": false
+      },
+      "billingMode": "subscription",
+      "brandId": "kimi",
+      "relatedProviderIds": ["moonshot"],
+      "usage": {
+        "request": {
+          "useBaseUrlOrigin": true,
+          "path": "/coding/v1/usages",
+          "method": "GET"
+        },
+        "extract": {
+          "kind": "window",
+          "windows": [
+            {
+              "id": "plan",
+              "labelKey": "subscription.limits.meter.plan",
+              "usedPath": "usage.used",
+              "remainingPath": "usage.remaining",
+              "totalPath": "usage.limit",
+              "resetAtPath": "usage.resetTime",
+              "resetUnit": "iso"
+            }
+          ]
+        }
       }
     },
     {
@@ -154,18 +178,211 @@
       "modelApi": {
         "list": true,
         "retrieve": false
+      },
+      "billingMode": "subscription",
+      "brandId": "kimi",
+      "relatedProviderIds": ["moonshot"],
+      "usage": {
+        "request": {
+          "useBaseUrlOrigin": true,
+          "path": "/coding/v1/usages",
+          "method": "GET"
+        },
+        "extract": {
+          "kind": "window",
+          "windows": [
+            {
+              "id": "plan",
+              "labelKey": "subscription.limits.meter.plan",
+              "usedPath": "usage.used",
+              "remainingPath": "usage.remaining",
+              "totalPath": "usage.limit",
+              "resetAtPath": "usage.resetTime",
+              "resetUnit": "iso"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "kimi-code-intl",
+      "name": "Kimi Code (International)",
+      "description": "Kimi Code membership API. Additional models require eligible membership tiers.",
+      "protocol": "openai",
+      "baseUrl": "https://api.kimi.ai/coding/v1",
+      "models": [
+        {
+          "id": "kimi-for-coding",
+          "name": "Kimi for Coding",
+          "contextLength": 1048576,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "k3-256k",
+          "name": "K3 256K",
+          "contextLength": 262144,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "k3",
+          "name": "K3",
+          "contextLength": 262144,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "kimi-for-coding-highspeed",
+          "name": "Kimi for Coding HighSpeed",
+          "contextLength": 262144,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        }
+      ],
+      "apiKeyUrl": "https://www.kimi.com/code/console",
+      "usageUrl": "https://www.kimi.com/code/console",
+      "docsUrl": "https://www.kimi.com/code/docs/en/kimi-code/models.html",
+      "apiFlavor": "chat",
+      "modelApi": {
+        "list": true,
+        "retrieve": false
+      },
+      "billingMode": "subscription",
+      "brandId": "kimi",
+      "relatedProviderIds": ["moonshot"],
+      "usage": {
+        "request": {
+          "useBaseUrlOrigin": true,
+          "path": "/coding/v1/usages",
+          "method": "GET"
+        },
+        "extract": {
+          "kind": "window",
+          "windows": [
+            {
+              "id": "plan",
+              "labelKey": "subscription.limits.meter.plan",
+              "usedPath": "usage.used",
+              "remainingPath": "usage.remaining",
+              "totalPath": "usage.limit",
+              "resetAtPath": "usage.resetTime",
+              "resetUnit": "iso"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "kimi-code-anthropic-intl",
+      "name": "Kimi Code (Anthropic) (International)",
+      "description": "Kimi Code membership API. Additional models require eligible membership tiers.",
+      "protocol": "anthropic",
+      "baseUrl": "https://api.kimi.ai/coding/",
+      "models": [
+        {
+          "id": "kimi-for-coding",
+          "name": "Kimi for Coding",
+          "contextLength": 1048576,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "k3-256k",
+          "name": "K3 256K",
+          "contextLength": 262144,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "k3",
+          "name": "K3",
+          "contextLength": 262144,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "kimi-for-coding-highspeed",
+          "name": "Kimi for Coding HighSpeed",
+          "contextLength": 262144,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        }
+      ],
+      "apiKeyUrl": "https://www.kimi.com/code/console",
+      "usageUrl": "https://www.kimi.com/code/console",
+      "docsUrl": "https://www.kimi.com/code/docs/en/kimi-code/models.html",
+      "modelApi": {
+        "list": true,
+        "retrieve": false
+      },
+      "billingMode": "subscription",
+      "brandId": "kimi",
+      "relatedProviderIds": ["moonshot"],
+      "usage": {
+        "request": {
+          "useBaseUrlOrigin": true,
+          "path": "/coding/v1/usages",
+          "method": "GET"
+        },
+        "extract": {
+          "kind": "window",
+          "windows": [
+            {
+              "id": "plan",
+              "labelKey": "subscription.limits.meter.plan",
+              "usedPath": "usage.used",
+              "remainingPath": "usage.remaining",
+              "totalPath": "usage.limit",
+              "resetAtPath": "usage.resetTime",
+              "resetUnit": "iso"
+            }
+          ]
+        }
       }
     }
   ],
   "i18n": {
     "locales": {
       "en": {
-        "manifest.name": "Kimi Code Subscription Example",
-        "manifest.description": "Installable subscription provider example for Kimi Code memberships, using Cognia's shared account panel."
+        "manifest.name": "Kimi Code Subscription",
+        "manifest.description": "Kimi Code membership accounts, models, and plan usage. Separate from Moonshot pay-as-you-go API."
       },
       "zh-CN": {
-        "manifest.name": "Kimi Code 订阅示例",
-        "manifest.description": "可安装的 Kimi Code 会员订阅提供方示例，使用 Cognia 共享的账户面板。"
+        "manifest.name": "Kimi Code 订阅",
+        "manifest.description": "管理 Kimi Code 会员账户、模型与套餐用量，与 Moonshot 按量 API 独立。"
       }
     }
   }

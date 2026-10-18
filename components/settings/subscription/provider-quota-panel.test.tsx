@@ -8,8 +8,10 @@ const isTauriMock = jest.fn(() => true)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 
 const useAccountsMock = jest.fn()
+const useProvidersMock = jest.fn()
 jest.mock("@/lib/subscription/core/hooks", () => ({
   useAccounts: (provider: string) => useAccountsMock(provider),
+  useSubscriptionProviders: () => useProvidersMock(),
 }))
 
 const refreshMock = jest.fn()
@@ -37,8 +39,10 @@ jest.mock("@/components/settings/subscription/balance-card", () => ({
 }))
 
 jest.mock("@/components/settings/subscription/limits-meters-card", () => ({
-  LimitsMetersCard: ({ provider, accountId, label }: Record<string, string>) => (
-    <div data-testid={`limits-${provider}-${accountId}`}>{label}</div>
+  LimitsMetersCard: ({ provider, accountId, label, windowsOnly }: Record<string, unknown>) => (
+    <div data-testid={`limits-${provider}-${accountId}`} data-windows-only={String(windowsOnly)}>
+      {String(label)}
+    </div>
   ),
 }))
 
@@ -49,6 +53,7 @@ const NOW = Date.now()
 beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
+  useProvidersMock.mockReturnValue([])
   limitsResult = { snapshot: null, refreshing: false }
   useAccountsMock.mockReturnValue({
     accounts: [{ id: "acc-1", label: "Work", provider: "codex" }],
@@ -57,6 +62,15 @@ beforeEach(() => {
 })
 
 describe("ProviderQuotaPanel", () => {
+  it("shows plan meters without mixing in a credit balance for explicit subscriptions", () => {
+    useProvidersMock.mockReturnValue([{ id: "plugin:kimi", billingMode: "subscription" }])
+    render(<ProviderQuotaPanel provider="plugin:kimi" now={NOW} />)
+    expect(screen.getByTestId("limits-plugin:kimi-acc-1")).toHaveAttribute(
+      "data-windows-only",
+      "false"
+    )
+    expect(screen.queryByTestId("balance-plugin:kimi-acc-1")).not.toBeInTheDocument()
+  })
   it("renders the windows + balance cards for the active account", () => {
     render(<ProviderQuotaPanel provider="codex" now={NOW} />)
     expect(screen.getByTestId("limits-codex-acc-1")).toHaveTextContent("Work")
