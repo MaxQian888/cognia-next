@@ -378,6 +378,43 @@ describe("RemoteDesktopTargetDialog", () => {
     expect(input.view).toBeUndefined()
   })
 
+  it("clears a console save refusal once the link is edited", async () => {
+    const probe = jest
+      .fn()
+      .mockResolvedValue({ pinnedIp: "192.168.1.4", class: "private", connected: false })
+    const onSave = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("remote_desktop_console_url_has_credentials"))
+    render(
+      <RemoteDesktopTargetDialog
+        host={LOCAL_REMOTE_DESKTOP_HOST}
+        state={{ kind: "add" }}
+        providers={[guacamole]}
+        onClose={jest.fn()}
+        onSave={onSave}
+        probe={probe}
+      />
+    )
+    expect(screen.getByText(/opens it in the provider's own page or app/)).toBeInTheDocument()
+    expect(screen.queryByText(/already-authenticated stream/)).not.toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText("Name"), "Office")
+    const link = screen.getByLabelText("Console link")
+    // The client already flags a link with a token; the Host's refusal is mocked here.
+    await userEvent.type(link, "http://192.168.1.4:8080/guacamole/?token=x#/client/abc")
+    expect(
+      screen.getByText(/Remove the sign-in token or password from the link/)
+    ).toBeInTheDocument()
+    await userEvent.clear(link)
+    await userEvent.type(link, "http://192.168.1.4:8080/guacamole/#/client/abc")
+    await userEvent.click(screen.getByRole("button", { name: "Check address" }))
+    await userEvent.click(await screen.findByRole("checkbox"))
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    const refusal = /Remove the sign-in token or password from the link/
+    expect(await screen.findByText(refusal)).toBeInTheDocument()
+    await userEvent.type(link, "d")
+    expect(screen.queryByText(refusal)).not.toBeInTheDocument()
+  })
+
   it("saves a RustDesk ID with its server and key and nothing to check", async () => {
     const probe = jest.fn()
     const onSave = jest.fn().mockResolvedValue({ target: saved })

@@ -48,6 +48,31 @@ fn custom_store_available(os_version: &str) -> bool {
         .is_some_and(|major| major >= 14)
 }
 
+/// Whether a page load in `label` takes the console with it. The console
+/// belongs to the viewer page in the main webview; once that webview starts
+/// loading a new document (reload, hard navigation, renderer restart), React
+/// never unmounts the viewer, so the shell has to close the console itself.
+fn closes_for_page_load(label: &str, started: bool) -> bool {
+    started && label == "main"
+}
+
+/// Close the console when the main webview starts loading a new document.
+/// Called from the app's `on_page_load` hook.
+pub fn close_on_owner_reload<R: tauri::Runtime>(webview: &tauri::Webview<R>, started: bool) {
+    if !closes_for_page_load(webview.label(), started) {
+        return;
+    }
+    #[cfg(desktop)]
+    {
+        use tauri::Manager;
+        if let Some(console) = webview.app_handle().get_webview(REMOTE_CONSOLE_LABEL) {
+            if let Err(error) = console.close() {
+                log::warn!("remote console could not close after its page reloaded: {error}");
+            }
+        }
+    }
+}
+
 fn checked(url: &str) -> Result<url::Url, String> {
     check_open_url(url).map_err(|error| error.code.to_string())
 }
@@ -248,6 +273,16 @@ mod tests {
             "remote_desktop_console_url_has_credentials"
         );
         assert_eq!(checked("file:///etc/passwd").unwrap_err(), "remote_desktop_console_url_invalid");
+    }
+
+    #[test]
+    fn a_new_main_document_closes_the_console() {
+        assert!(closes_for_page_load("main", true));
+        assert!(!closes_for_page_load("main", false));
+        // The console's own loads and other windows leave it open.
+        assert!(!closes_for_page_load(REMOTE_CONSOLE_LABEL, true));
+        assert!(!closes_for_page_load("pet", true));
+        assert!(!closes_for_page_load("browser-embed", true));
     }
 
     #[test]

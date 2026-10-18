@@ -526,6 +526,10 @@ pub fn run() {
                     .state::<webview_watchdog::RendererLifecycle>()
                     .record_page_load(webview.label());
             }
+            browser::remote_console::close_on_owner_reload(
+                webview,
+                payload.event() == tauri::webview::PageLoadEvent::Started,
+            );
 
             #[cfg(all(feature = "agent-debug", desktop))]
             if matches!(

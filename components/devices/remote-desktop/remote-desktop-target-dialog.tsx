@@ -193,6 +193,8 @@ export function RemoteDesktopTargetDialog({
   }
 
   const update = (patch: Partial<RemoteDesktopForm>) => {
+    // An edit answers the last refusal; a new save reports its own.
+    setSaveError(null)
     setForm((current) => {
       const next = { ...current, ...patch }
       // A new address invalidates the check and its confirmation.
@@ -302,9 +304,13 @@ export function RemoteDesktopTargetDialog({
             {existing ? t("dialog.titleEdit", { name: existing.name }) : t("dialog.titleAdd")}
           </DialogTitle>
           <DialogDescription>
-            {host.kind === "remote"
-              ? t("dialog.descriptionRemote", { host: hostLabel ?? "" })
-              : t("dialog.description")}
+            {bridged
+              ? host.kind === "remote"
+                ? t("dialog.descriptionRemote", { host: hostLabel ?? "" })
+                : t("dialog.description")
+              : host.kind === "remote"
+                ? t("dialog.descriptionLaunchRemote", { host: hostLabel ?? "" })
+                : t("dialog.descriptionLaunch")}
           </DialogDescription>
         </DialogHeader>
 

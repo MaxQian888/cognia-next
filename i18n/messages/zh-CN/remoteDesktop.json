@@ -89,6 +89,8 @@
     "addressChanged": "地址已更改，保存前请重新检查。",
     "required": "请填写名称、主机和端口，并检查地址。",
     "descriptionRemote": "Cognia 从 {host} 连接服务器，并把已认证的数据流交给此查看器。密码只会发送给 {host} 一次，之后不再显示。",
+    "descriptionLaunch": "Cognia 只保存这台机器的位置，并在服务方自己的页面或应用里打开它。登录由服务方负责。",
+    "descriptionLaunchRemote": "{host} 只保存这台机器的位置，本设备在服务方自己的页面或应用里打开它。登录由服务方负责。",
     "confirmPrivateRemote": "这是 {host} 所在局域网中的设备（{ip}）。{host} 只会连接这个地址；如果名称之后指向别处，会再次询问你。"
   },
   "viewer": {

@@ -25,6 +25,7 @@ import { isMobile } from "@/lib/capacitor/_shared"
 import { isTauri } from "@/lib/tauri"
 import { localTransport } from "@/lib/tauri/transport-instance"
 
+import { consoleLinkCarriesCredentials } from "./drafts"
 import { RemoteDesktopError } from "./host-client"
 import type { RemoteDesktopLaunched } from "./types"
 
@@ -32,30 +33,8 @@ import type { RemoteDesktopLaunched } from "./types"
 const RUSTDESK_URI =
   /^rustdesk:\/\/connection\/new\/[A-Za-z0-9][A-Za-z0-9_-]{5,31}(?:@(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(?::\d{1,5})?)?(?:\?key=(?:%[0-9A-F]{2}|[A-Za-z0-9])+)?$/
 
-/** Query keys that carry a login (`console::CREDENTIAL_KEYS`). */
-const CREDENTIAL_KEYS = new Set([
-  "token",
-  "access_token",
-  "id_token",
-  "auth",
-  "authtoken",
-  "login",
-  "logintoken",
-  "password",
-  "passwd",
-  "pwd",
-  "secret",
-])
-
 export function isRustdeskLaunchUri(uri: string): boolean {
   return uri.length <= 512 && RUSTDESK_URI.test(uri)
-}
-
-function hasCredential(query: string): boolean {
-  for (const key of new URLSearchParams(query).keys()) {
-    if (CREDENTIAL_KEYS.has(key.toLowerCase())) return true
-  }
-  return false
 }
 
 /** http(s), a host, no user info, no login in the query or fragment query. */
@@ -68,9 +47,7 @@ export function isOpenableConsoleUrl(raw: string): boolean {
     return false
   }
   if ((url.protocol !== "https:" && url.protocol !== "http:") || !url.hostname) return false
-  if (url.username || url.password) return false
-  const fragmentQuery = url.hash.includes("?") ? url.hash.slice(url.hash.indexOf("?") + 1) : ""
-  return !hasCredential(url.search) && !hasCredential(fragmentQuery)
+  return !consoleLinkCarriesCredentials(url)
 }
 
 export type RemoteDesktopClientKind = "desktop" | "phone" | "web"

@@ -38457,6 +38457,8 @@
       "controlPassword": "密码",
       "controlPasswordOptional": "密码（可选）",
       "description": "Cognia 从本机连接服务器，并把已完成认证的数据流交给查看器。",
+      "descriptionLaunch": "Cognia 只保存这台机器的位置，并在服务方自己的页面或应用里打开它。登录由服务方负责。",
+      "descriptionLaunchRemote": "{host} 只保存这台机器的位置，本设备在服务方自己的页面或应用里打开它。登录由服务方负责。",
       "descriptionRemote": "Cognia 从 {host} 连接服务器，并把已认证的数据流交给此查看器。密码只会发送给 {host} 一次，之后不再显示。",
       "enabled": "启用",
       "host": "主机名或 IP 地址",

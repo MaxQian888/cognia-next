@@ -89,6 +89,8 @@
     "addressChanged": "The address changed. Check it again before saving.",
     "required": "Fill in a name, host and port, and check the address.",
     "descriptionRemote": "Cognia connects to the server from {host} and passes an already-authenticated stream to this viewer. The password is sent to {host} once and never shown again.",
+    "descriptionLaunch": "Cognia saves where to find this machine and opens it in the provider's own page or app. The provider signs you in.",
+    "descriptionLaunchRemote": "{host} saves where to find this machine; this device opens it in the provider's own page or app. The provider signs you in.",
     "confirmPrivateRemote": "This is a device on {host}'s local network ({ip}). {host} will only ever connect to this address; if the name later points elsewhere you will be asked again."
   },
   "viewer": {

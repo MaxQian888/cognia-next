@@ -38457,6 +38457,8 @@
       "controlPassword": "Password",
       "controlPasswordOptional": "Password (optional)",
       "description": "Cognia connects to the server from this desktop and passes an already-authenticated stream to the viewer.",
+      "descriptionLaunch": "Cognia saves where to find this machine and opens it in the provider's own page or app. The provider signs you in.",
+      "descriptionLaunchRemote": "{host} saves where to find this machine; this device opens it in the provider's own page or app. The provider signs you in.",
       "descriptionRemote": "Cognia connects to the server from {host} and passes an already-authenticated stream to this viewer. The password is sent to {host} once and never shown again.",
       "enabled": "Enabled",
       "host": "Host or IP address",

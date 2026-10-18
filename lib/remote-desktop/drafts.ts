@@ -130,6 +130,35 @@ export function endpointOf(
   return { host: form.host.trim(), port: form.port }
 }
 
+/** Query keys that carry a login (`console::CREDENTIAL_KEYS`). */
+const CREDENTIAL_KEYS = new Set([
+  "token",
+  "access_token",
+  "id_token",
+  "auth",
+  "authtoken",
+  "login",
+  "logintoken",
+  "password",
+  "passwd",
+  "pwd",
+  "secret",
+])
+
+function hasCredential(query: string): boolean {
+  for (const key of new URLSearchParams(query).keys()) {
+    if (CREDENTIAL_KEYS.has(key.toLowerCase())) return true
+  }
+  return false
+}
+
+/** Whether a console link signs in by itself: user info, or a login in the query or fragment query. */
+export function consoleLinkCarriesCredentials(url: URL): boolean {
+  if (url.username || url.password) return true
+  const fragmentQuery = url.hash.includes("?") ? url.hash.slice(url.hash.indexOf("?") + 1) : ""
+  return hasCredential(url.search) || hasCredential(fragmentQuery)
+}
+
 /**
  * Why a console link cannot be saved, as the Host's refusal code, or null.
  * The Host checks again (`console::parse`); this only spares a round trip.
@@ -140,7 +169,7 @@ export function consoleLinkProblem(
 ): string | null {
   if (!consoleEndpointOf(url)) return "remote_desktop_console_url_invalid"
   const parsed = new URL(url.trim())
-  if (parsed.username || parsed.password) return "remote_desktop_console_url_has_credentials"
+  if (consoleLinkCarriesCredentials(parsed)) return "remote_desktop_console_url_has_credentials"
   if (profile === "guacamole") {
     const route = parsed.hash.replace(/^#/, "")
     if (!/^\/client\/[^?]+/.test(route)) return "remote_desktop_console_url_invalid"

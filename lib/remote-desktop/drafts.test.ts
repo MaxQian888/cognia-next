@@ -210,6 +210,12 @@ describe("remote desktop drafts", () => {
     expect(consoleLinkProblem("https://mesh.lan/", "meshcentral")).toBe(
       "remote_desktop_console_url_invalid"
     )
+    expect(consoleLinkProblem("https://gw.lan/?token=x#/client/abc", "guacamole")).toBe(
+      "remote_desktop_console_url_has_credentials"
+    )
+    expect(consoleLinkProblem("https://mesh.lan/#/?LoginToken=x&gotonode=n", "generic")).toBe(
+      "remote_desktop_console_url_has_credentials"
+    )
     expect(consoleLinkProblem("https://u:p@gw.lan/", "generic")).toBe(
       "remote_desktop_console_url_has_credentials"
     )
