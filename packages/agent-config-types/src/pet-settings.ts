@@ -56,7 +56,7 @@ export interface PetDesktopOverlaySettings {
    * overlay has no controller of its own and needs the main window's.
    */
   enabled: boolean
-  /** Whether the overlay ignores cursor events (click-through). */
+  /** Whether the overlay ignores cursor events (click-through). Defaults to true. */
   clickThrough: boolean
   /** Render box size in px for the overlay pet. */
   size: number
@@ -199,7 +199,7 @@ export const DEFAULT_PET_WANDER: PetWanderSettings = {
 
 export const DEFAULT_PET_DESKTOP_OVERLAY: PetDesktopOverlaySettings = {
   enabled: true,
-  clickThrough: false,
+  clickThrough: true,
   size: 128,
   position: null,
   wander: DEFAULT_PET_WANDER,

@@ -1,6 +1,17 @@
 jest.mock("@/components/providers/full-messages-gate", () => ({
   LocaleReadyContext: jest.requireActual("react").createContext(true),
-  FullMessagesGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  FullMessagesGate: ({
+    children,
+    fallback,
+  }: {
+    children: React.ReactNode
+    fallback?: React.ReactNode
+  }) =>
+    mockMessagesPending ? (
+      <>{fallback === undefined ? "workspace startup animation" : fallback}</>
+    ) : (
+      <>{children}</>
+    ),
 }))
 jest.mock("@/components/desktop/desktop-app-shell", () => ({
   DesktopAppShell: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -14,6 +25,7 @@ jest.mock("@/components/providers/onboarding-gate", () => ({
 let mockPathname = "/"
 let mockAccount = "open"
 let mockRecovery = false
+let mockMessagesPending = false
 jest.mock("next/navigation", () => ({
   usePathname: () => mockPathname,
   useRouter: () => ({ push: jest.fn(), replace: jest.fn(), prefetch: jest.fn() }),
@@ -105,6 +117,7 @@ describe("AppRuntime boot boundaries", () => {
     mockPathname = "/"
     mockAccount = "open"
     mockRecovery = false
+    mockMessagesPending = false
   })
 
   it("keeps liveness, native splash handoff and database errors visible before unlock", () => {
@@ -139,6 +152,23 @@ describe("AppRuntime boot boundaries", () => {
     expect(markup).not.toContain('data-testid="account-locked"')
     expect(markup).not.toContain('data-testid="plugin-runtime"')
     expectNoPluginHosts(markup)
+  })
+
+  it.each(["/pet-overlay", "/pet-popup", "/pet-overlay.html", "/pet-popup/"])(
+    "does not paint the workspace startup animation while %s loads its messages",
+    (pathname) => {
+      mockPathname = pathname
+      mockMessagesPending = true
+      const markup = renderRuntime()
+      expect(markup).not.toContain("workspace startup animation")
+      expect(markup).not.toContain("page content")
+      expect(markup).not.toContain('data-testid="mobile-splash-overlay"')
+    }
+  )
+
+  it("keeps the workspace startup animation in the main window", () => {
+    mockMessagesPending = true
+    expect(renderRuntime()).toContain("workspace startup animation")
   })
 
   it.each(["open", "locked"])(

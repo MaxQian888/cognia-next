@@ -61,7 +61,7 @@ describe("lib/tauri/pet-window — happy path command mapping", () => {
     mockInvoke.mockResolvedValue(undefined)
     const opts = { width: 128, height: 160, x: 10, y: 20, clickThrough: false }
     await expect(openPetWindow(opts)).resolves.toBe(true)
-    expect(mockInvoke).toHaveBeenCalledWith("open_pet_window", { opts })
+    expect(mockInvoke).toHaveBeenCalledWith("open_pet_window", { opts: { ...opts, topInset: 160 } })
   })
 
   it("closePetWindow invokes close_pet_window", async () => {
@@ -104,7 +104,7 @@ describe("lib/tauri/pet-window — happy path command mapping", () => {
     const area = { x: 0, y: 0, width: 2560, height: 1400, scaleFactor: 1.25 }
     mockInvoke.mockResolvedValue(area)
     await expect(getPetWorkArea()).resolves.toEqual(area)
-    expect(mockInvoke).toHaveBeenCalledWith("pet_window_get_work_area")
+    expect(mockInvoke).toHaveBeenCalledWith("pet_window_get_work_area", { topInset: 160 })
   })
 
   it("getPetSurfaces unwraps the surfaces array", async () => {
@@ -150,7 +150,11 @@ describe("lib/tauri/pet-window — happy path command mapping", () => {
   it("setPetWindowSize passes the logical width/height", async () => {
     mockInvoke.mockResolvedValue(undefined)
     await expect(setPetWindowSize(224, 288)).resolves.toBe(true)
-    expect(mockInvoke).toHaveBeenCalledWith("pet_window_set_size", { width: 224, height: 288 })
+    expect(mockInvoke).toHaveBeenCalledWith("pet_window_set_size", {
+      width: 224,
+      height: 288,
+      topInset: 160,
+    })
   })
 
   it("closePetPopup invokes close_pet_popup", async () => {

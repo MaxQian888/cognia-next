@@ -1,12 +1,15 @@
-import { renderHook } from "@testing-library/react"
+import { act, renderHook } from "@testing-library/react"
 
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 jest.mock("@/lib/pet/events/pet-event-bus", () => ({ emitPetEvent: jest.fn() }))
 jest.mock("@/lib/pet/remote/mirror", () => ({ isPetMirrorShell: jest.fn(() => false) }))
+jest.mock("@/lib/pet/window-role", () => ({ getPetWindowRole: jest.fn(() => "main") }))
 jest.mock("@/lib/db/schema", () => {
   const put = jest.fn(async () => undefined)
   const get = jest.fn()
-  return { getDb: () => ({ petCharacterBindings: { get, put }, petProfile: { get: jest.fn() } }) }
+  return {
+    getDb: jest.fn(() => ({ petCharacterBindings: { get, put }, petProfile: { get: jest.fn() } })),
+  }
 })
 
 import { useLiveQuery } from "dexie-react-hooks"
@@ -15,6 +18,9 @@ import { usePet } from "./use-pet"
 import { createDefaultProfile } from "@/lib/pet/defaults"
 import { isPetMirrorShell } from "@/lib/pet/remote/mirror"
 import { getDb } from "@/lib/db/schema"
+import { getPetWindowRole } from "@/lib/pet/window-role"
+import { usePetStore } from "@/stores/pet/pet-store"
+import { projectPetProfileForSync } from "@/lib/sync/handlers/pet"
 
 const liveQuery = useLiveQuery as jest.Mock
 const emit = emitPetEvent as jest.Mock
@@ -22,9 +28,35 @@ const emit = emitPetEvent as jest.Mock
 beforeEach(() => {
   liveQuery.mockReset()
   emit.mockReset()
+  ;(getPetWindowRole as jest.Mock).mockReturnValue("main")
+  usePetStore.setState({ profileSnapshot: null })
 })
 
 describe("usePet", () => {
+  it.each(["overlay", "popup"])(
+    "renders the main window profile in %s without reading an unopened account database",
+    async (role) => {
+      ;(getPetWindowRole as jest.Mock).mockReturnValue(role)
+      liveQuery.mockReturnValue(undefined)
+      const profile = projectPetProfileForSync(createDefaultProfile("private-account", 0))
+      const binding = { characterId: "active", species: "cat" as const, updatedAt: "" }
+      const { result } = renderHook(() => usePet("active"))
+      // Both queries must stay inert in a secondary window, even when React
+      // runs the queriers before the bridge's first snapshot arrives.
+      ;(getDb as jest.Mock).mockClear()
+      expect(await liveQuery.mock.calls[0][0]()).toBeUndefined()
+      expect(await liveQuery.mock.calls[1][0]()).toBeUndefined()
+      expect(getDb).not.toHaveBeenCalled()
+      act(() => usePetStore.getState().setProfileSnapshot({ profile, binding }))
+      expect(result.current.profile).toEqual(profile)
+      expect(result.current.view?.effectiveBones.species).toBe("cat")
+      expect(result.current.loading).toBe(false)
+      act(() => usePetStore.getState().setProfileSnapshot(null))
+      expect(result.current.profile).toBeUndefined()
+      expect(result.current.view).toBeUndefined()
+    }
+  )
+
   it("reports loading while the profile is undefined", () => {
     liveQuery.mockReturnValueOnce(undefined).mockReturnValueOnce(undefined)
     const { result } = renderHook(() => usePet())

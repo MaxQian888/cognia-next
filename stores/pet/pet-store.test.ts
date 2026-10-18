@@ -1,4 +1,6 @@
 import { usePetStore } from "./pet-store"
+import { createDefaultProfile } from "@/lib/pet/defaults"
+import { generateBones } from "@/lib/pet/bones/generate"
 
 function reset() {
   usePetStore.setState({
@@ -10,12 +12,30 @@ function reset() {
     lastGrewStats: [],
     careAlert: null,
     interactionRefusal: null,
+    profileSnapshot: null,
   })
 }
 
 beforeEach(reset)
 
 describe("usePetStore", () => {
+  it("keeps the main-window profile transient and can clear it on lock", () => {
+    const snapshot = {
+      profile: {
+        ...createDefaultProfile("companion-mirror", 0),
+        mirroredBones: generateBones("account"),
+      },
+      binding: null,
+    }
+    usePetStore.getState().setProfileSnapshot(snapshot)
+    expect(usePetStore.getState().profileSnapshot).toEqual(snapshot)
+    expect(usePetStore.persist.getOptions().partialize?.(usePetStore.getState())).toEqual({
+      minimized: false,
+      position: null,
+    })
+    usePetStore.getState().setProfileSnapshot(null)
+    expect(usePetStore.getState().profileSnapshot).toBeNull()
+  })
   it("sets the visual state", () => {
     usePetStore.getState().setVisualState("thinking")
     expect(usePetStore.getState().visualState).toBe("thinking")

@@ -3,7 +3,9 @@ import {
   startOverlayPetBridge,
   type BroadcastChannelLike,
 } from "./cross-window-bridge"
-import type { PetBridgeMessage } from "./cross-window-protocol"
+import type { PetBridgeMessage, PetBridgeProfileSnapshot } from "./cross-window-protocol"
+import { createDefaultProfile } from "@/lib/pet/defaults"
+import { generateBones } from "@/lib/pet/bones/generate"
 import type { PetBubble } from "@/stores/pet/pet-store"
 import type { PetLookTarget, PetOneShot, PetSkinSelection, PetVisualState } from "@/types/pet"
 
@@ -33,11 +35,13 @@ interface FakeState {
   bubble: PetBubble | null
   appearanceSelection: PetSkinSelection | null
   lookTarget: PetLookTarget | null
+  profileSnapshot: PetBridgeProfileSnapshot | null
   setVisualState: (s: PetVisualState) => void
   enqueueOneShot: (s: PetOneShot) => void
   setBubble: (b: PetBubble | null) => void
   setAppearanceSelection: (selection: PetSkinSelection | null) => void
   setLookTarget: (target: PetLookTarget | null) => void
+  setProfileSnapshot: (snapshot: PetBridgeProfileSnapshot | null) => void
 }
 
 function makeStore() {
@@ -47,6 +51,7 @@ function makeStore() {
     bubble: null,
     appearanceSelection: null,
     lookTarget: null,
+    profileSnapshot: null,
     setVisualState: jest.fn((s: PetVisualState) => {
       state.visualState = s
     }),
@@ -61,6 +66,9 @@ function makeStore() {
     }),
     setLookTarget: jest.fn((target: PetLookTarget | null) => {
       state.lookTarget = target
+    }),
+    setProfileSnapshot: jest.fn((snapshot: PetBridgeProfileSnapshot | null) => {
+      state.profileSnapshot = snapshot
     }),
   }
   let listener: ((s: FakeState, p: FakeState) => void) | null = null
@@ -85,6 +93,56 @@ function makeStore() {
 }
 
 describe("startMainPetBridge", () => {
+  it("catches up an overlay that requested its profile before main started", () => {
+    const mainChannel = new FakeChannel()
+    const overlayChannel = new FakeChannel()
+    const mainStore = makeStore()
+    const overlayStore = makeStore()
+    mainChannel.postMessage = (message) => overlayChannel.deliver(message)
+    overlayChannel.postMessage = (message) => mainChannel.deliver(message)
+    const overlay = startOverlayPetBridge({ channel: overlayChannel, store: overlayStore as never })
+    mainStore.__state.profileSnapshot = {
+      profile: {
+        ...createDefaultProfile("companion-mirror", 0),
+        mirroredBones: generateBones("account"),
+      },
+      binding: null,
+    }
+    const stop = startMainPetBridge({ channel: mainChannel, store: mainStore as never })
+    expect(overlayStore.__state.profileSnapshot).toEqual(mainStore.__state.profileSnapshot)
+    stop()
+    overlay.dispose()
+  })
+
+  it("publishes the account pet for a late-opening overlay and clears it when main stops", () => {
+    const mainChannel = new FakeChannel()
+    const overlayChannel = new FakeChannel()
+    const mainStore = makeStore()
+    const overlayStore = makeStore()
+    const snapshot: PetBridgeProfileSnapshot = {
+      profile: {
+        ...createDefaultProfile("companion-mirror", 0),
+        mirroredBones: generateBones("account"),
+      },
+      binding: { characterId: "active", species: "cat", updatedAt: "" },
+    }
+    mainStore.__state.profileSnapshot = snapshot
+    mainChannel.postMessage = (message) => overlayChannel.deliver(message)
+    overlayChannel.postMessage = (message) => mainChannel.deliver(message)
+    const stopMain = startMainPetBridge({ channel: mainChannel, store: mainStore as never })
+    const overlay = startOverlayPetBridge({ channel: overlayChannel, store: overlayStore as never })
+    expect(overlayStore.__state.profileSnapshot).toEqual(snapshot)
+    const next = { ...snapshot, profile: { ...snapshot.profile, xp: 42 } }
+    mainStore.emit({ profileSnapshot: next })
+    expect(overlayStore.__state.profileSnapshot?.profile.xp).toBe(42)
+    mainStore.emit({ bubble: { text: "current account", origin: "llm" } })
+    expect(overlayStore.__state.bubble?.text).toBe("current account")
+    stopMain()
+    expect(overlayStore.__state.profileSnapshot).toBeNull()
+    expect(overlayStore.__state.bubble).toBeNull()
+    overlay.dispose()
+  })
+
   it("broadcasts visual-state changes", () => {
     const channel = new FakeChannel()
     const store = makeStore()
@@ -352,6 +410,29 @@ describe("open-console routing", () => {
 })
 
 describe("startOverlayPetBridge", () => {
+  it("clears stale display data on connect and clears received data on its own teardown", () => {
+    const channel = new FakeChannel()
+    const store = makeStore()
+    const snapshot: PetBridgeProfileSnapshot = {
+      profile: {
+        ...createDefaultProfile("companion-mirror", 0),
+        mirroredBones: generateBones("account"),
+      },
+      binding: null,
+    }
+    store.__state.profileSnapshot = snapshot
+    store.__state.bubble = { text: "previous account", origin: "llm" }
+    const overlay = startOverlayPetBridge({ channel, store: store as never })
+    expect(store.__state.profileSnapshot).toBeNull()
+    expect(store.__state.bubble).toBeNull()
+    channel.deliver({ v: 1, t: "profile", snapshot })
+    channel.deliver({ v: 1, t: "bubble", bubble: { text: "current pet", origin: "llm" } })
+    expect(store.__state.profileSnapshot).toEqual(snapshot)
+    overlay.dispose()
+    expect(store.__state.profileSnapshot).toBeNull()
+    expect(store.__state.bubble).toBeNull()
+  })
+
   it("posts request-state on start", () => {
     const channel = new FakeChannel()
     const store = makeStore()

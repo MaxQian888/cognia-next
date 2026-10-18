@@ -1,7 +1,8 @@
 // Thin transient store for the pet's runtime UI state. The canonical record
 // (profile / needs / bindings / achievements) lives in Dexie and is read
-// reactively via `useLiveQuery`; this store only holds ephemeral things the
-// renderer needs frame-to-frame plus the persisted widget placement.
+// reactively via `useLiveQuery` in main; this store holds ephemeral things the
+// renderer needs frame-to-frame, a read-only profile projection for secondary
+// windows, and the persisted widget placement.
 //
 // Modeled on the persist+partialize pattern in
 // `stores/agent/agent-team-store/store.ts`.
@@ -10,6 +11,7 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
 import type { PetBubbleAction } from "@/lib/pet/bubbles/action"
+import type { PetBridgeProfileSnapshot } from "@/lib/pet/events/cross-window-protocol"
 import type {
   PetLookTarget,
   PetOneShot,
@@ -85,6 +87,8 @@ interface PetStoreState {
   appearanceSelection: PetSkinSelection | null
   /** Transient local-only gaze sample for cross-window presentation parity. */
   lookTarget: PetLookTarget | null
+  /** Main-window display projection for pet webviews without account access. */
+  profileSnapshot: PetBridgeProfileSnapshot | null
 
   setVisualState: (state: PetVisualState) => void
   enqueueOneShot: (shot: PetOneShot) => void
@@ -98,6 +102,7 @@ interface PetStoreState {
   setInteractionRefusal: (refusal: PetInteractionRefusalSignal | null) => void
   setAppearanceSelection: (selection: PetSkinSelection | null) => void
   setLookTarget: (target: PetLookTarget | null) => void
+  setProfileSnapshot: (snapshot: PetBridgeProfileSnapshot | null) => void
 }
 
 export const usePetStore = create<PetStoreState>()(
@@ -113,6 +118,7 @@ export const usePetStore = create<PetStoreState>()(
       interactionRefusal: null,
       appearanceSelection: null,
       lookTarget: null,
+      profileSnapshot: null,
 
       setVisualState: (visualState) => set({ visualState }),
       enqueueOneShot: (shot) => set((s) => ({ oneShotQueue: [...s.oneShotQueue, shot] })),
@@ -131,6 +137,7 @@ export const usePetStore = create<PetStoreState>()(
       setInteractionRefusal: (interactionRefusal) => set({ interactionRefusal }),
       setAppearanceSelection: (appearanceSelection) => set({ appearanceSelection }),
       setLookTarget: (lookTarget) => set({ lookTarget }),
+      setProfileSnapshot: (profileSnapshot) => set({ profileSnapshot }),
     }),
     {
       name: "cognia-pet-ui",

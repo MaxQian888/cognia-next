@@ -27,7 +27,11 @@ const rendererProps = jest.fn()
 jest.mock("./pet-renderer", () => ({
   PetRenderer: (props: unknown) => {
     rendererProps(props)
-    return <div data-testid="pet-renderer" />
+    return (
+      <div data-testid="pet-renderer">
+        <span data-pet-part={(props as { stage: string }).stage === "egg" ? "egg" : "body"} />
+      </div>
+    )
   },
 }))
 jest.mock("./pet-bubble", () => ({
@@ -453,6 +457,52 @@ describe("PetOverlayView", () => {
     expect(screen.getByTestId("pet-bubble")).toHaveTextContent("hello")
   })
 
+  it.each(["egg", "baby"])(
+    "anchors speech above the visible %s instead of the empty render box",
+    (stage) => {
+      mockUsePet.mockReturnValue({ profile: { stage }, view: VIEW, loading: false })
+      bubbleValue = { text: "Reminder! Your scheduled task is due.", origin: "system" }
+      const bounds = jest
+        .spyOn(Element.prototype, "getBoundingClientRect")
+        .mockImplementation(function (this: Element) {
+          if (this.matches("[data-pet-overlay-root]")) return new DOMRect(0, 0, 256, 320)
+          if (this.matches("[data-pet-part]")) return new DOMRect(100, 228, 56, 68)
+          return new DOMRect(48, 160, 160, 160)
+        })
+      try {
+        render(<PetOverlayView />)
+        const anchor = screen.getByTestId("pet-bubble").parentElement
+        expect(anchor).toHaveStyle({ bottom: "100px" })
+        expect(screen.getByTestId("pet-overlay-pet")).toHaveStyle({
+          width: "160px",
+          height: "160px",
+        })
+      } finally {
+        bounds.mockRestore()
+      }
+    }
+  )
+
+  it("positions an existing bubble when the profile arrives after the window mounts", () => {
+    mockUsePet.mockReturnValue({ profile: undefined, view: undefined, loading: true })
+    bubbleValue = { text: "hello", origin: "system" }
+    const bounds = jest
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: Element) {
+        if (this.matches("[data-pet-overlay-root]")) return new DOMRect(0, 0, 256, 320)
+        if (this.matches("[data-pet-part]")) return new DOMRect(100, 228, 56, 68)
+        return new DOMRect(48, 160, 160, 160)
+      })
+    try {
+      const { rerender } = render(<PetOverlayView />)
+      withPet()
+      rerender(<PetOverlayView />)
+      expect(screen.getByTestId("pet-bubble").parentElement).toHaveStyle({ bottom: "100px" })
+    } finally {
+      bounds.mockRestore()
+    }
+  })
+
   it("routes a bubble action to the main window, which owns the router", () => {
     withPet()
     bubbleValue = {
@@ -468,11 +518,60 @@ describe("PetOverlayView", () => {
     expect(mockSetBubble).toHaveBeenCalledWith(null)
   })
 
+  it("repositions for an async canvas skin and releases its layout observers on unmount", async () => {
+    withPet()
+    bubbleValue = { text: "hello", origin: "system" }
+    const observe = jest.spyOn(MutationObserver.prototype, "observe")
+    const bounds = jest
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: Element) {
+        if (this.matches("[data-pet-overlay-root]")) return new DOMRect(0, 0, 256, 320)
+        if (this.matches("[data-pet-part]")) return new DOMRect(100, 228, 56, 68)
+        return new DOMRect(48, 160, 160, 160)
+      })
+    try {
+      const { unmount } = render(<PetOverlayView />)
+      const box = screen.getByTestId("pet-overlay-pet")
+      const index = observe.mock.calls.findIndex(([target]) => target === box)
+      expect(index).toBeGreaterThanOrEqual(0)
+      const observer = observe.mock.instances[index]
+      const disconnect = jest.spyOn(observer, "disconnect")
+      const anchor = screen.getByTestId("pet-bubble").parentElement
+      expect(anchor).toHaveStyle({ bottom: "100px" })
+      await act(async () => {
+        screen.getByTestId("pet-renderer").replaceChildren(document.createElement("canvas"))
+        await Promise.resolve()
+      })
+      act(() => flushRaf())
+      expect(anchor).toHaveStyle({ bottom: "168px" })
+      unmount()
+      expect(disconnect).toHaveBeenCalledTimes(1)
+      expect(cancelRafSpy).toHaveBeenCalled()
+      disconnect.mockRestore()
+    } finally {
+      observe.mockRestore()
+      bounds.mockRestore()
+    }
+  })
+
   it("renders nothing for the pet until the profile loads (still transparent)", () => {
     mockUsePet.mockReturnValue({ profile: undefined, view: undefined, loading: true })
     render(<PetOverlayView />)
     expect(screen.queryByTestId("pet-renderer")).toBeNull()
     expect(screen.getByTestId("pet-overlay-root")).toBeInTheDocument()
+  })
+
+  it("shows an arriving profile and removes it when the controller clears the snapshot", () => {
+    mockUsePet.mockReturnValue({ profile: undefined, view: undefined, loading: true })
+    const { rerender } = render(<PetOverlayView />)
+    expect(screen.queryByTestId("pet-renderer")).toBeNull()
+    withPet()
+    rerender(<PetOverlayView />)
+    expect(screen.getByTestId("pet-renderer")).toBeInTheDocument()
+    mockUsePet.mockReturnValue({ profile: undefined, view: undefined, loading: true })
+    rerender(<PetOverlayView />)
+    expect(screen.queryByTestId("pet-renderer")).toBeNull()
+    expect(document.documentElement.dataset.petOverlay).toBe("1")
   })
 
   it("falls back to default overlay size when desktopPet is absent", () => {

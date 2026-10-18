@@ -34,7 +34,7 @@ export const BOOT_MIRROR_STORAGE_KEY = "cognia.appearance.mirror"
  * signalled its first frame, and the views set the same attribute only from
  * an effect, after hydration — without this that reveal showed an opaque box.
  */
-export const PET_OVERLAY_ROUTE_PATTERN = /^\/pet-(?:overlay|popup)(?:\/|$)/
+export const PET_OVERLAY_ROUTE_PATTERN = /^\/pet-(?:overlay|popup)(?:\.html)?(?:\/|$)/
 
 /**
  * Mirror payload. The four flat color keys are the original FOUC-critical

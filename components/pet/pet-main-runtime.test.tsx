@@ -76,6 +76,19 @@ function renderRuntime(settings: Partial<PetSettings> = {}, activeCharacterId?: 
 }
 
 describe("PetMainRuntime", () => {
+  it("publishes a read-only profile for secondary windows and clears it on unmount", () => {
+    const { unmount } = renderRuntime()
+    const snapshot = usePetStore.getState().profileSnapshot
+    expect(snapshot?.profile.accountFingerprint).toBe("companion-mirror")
+    expect(snapshot?.profile.mirroredBones).toEqual(view.bones)
+    expect(snapshot?.profile.soul?.name).toBe("Boba")
+    expect(snapshot?.binding).toBeNull()
+    usePetStore.getState().setBubble({ text: "current account", origin: "llm" })
+    unmount()
+    expect(usePetStore.getState().profileSnapshot).toBeNull()
+    expect(usePetStore.getState().bubble).toBeNull()
+  })
+
   it("renders nothing", () => {
     const { container } = renderRuntime()
     expect(container).toBeEmptyDOMElement()

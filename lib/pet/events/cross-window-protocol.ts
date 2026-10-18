@@ -5,11 +5,20 @@
 // `cross-window-bridge.ts`), which is cross-context within the same origin —
 // the same mechanism the scheduler uses (`lib/scheduler/task-scheduler.ts`).
 //
-// Keep this module pure and dependency-free so both windows agree on the shape
-// and it is trivially testable. The profile/needs flow via Dexie liveQuery, not
-// this channel, so there is intentionally no profile-snapshot message.
+// Keep this module pure and free of database initialization so both windows agree on the shape
+// and it is trivially testable. Secondary windows have no unlocked account
+// database, so their profile is a read-only projection from the main window.
 
-import type { PetLookTarget, PetOneShot, PetSkinSelection, PetVisualState } from "@/types/pet"
+import { z } from "zod"
+import type {
+  PetCharacterBinding,
+  PetLookTarget,
+  PetOneShot,
+  PetSkinSelection,
+  PetVisualState,
+} from "@/types/pet"
+import type { PetProfileSyncRow } from "@/lib/sync/handlers/pet"
+import { ALL_PET_SPECIES } from "@/lib/pet/skins/species-traits"
 import { isPetConsoleTab, type PetConsoleTab } from "@/lib/pet/console-tabs"
 import { decodePetBubbleAction, type PetBubbleAction } from "@/lib/pet/bubbles/action"
 
@@ -30,6 +39,102 @@ export interface PetBridgeBubble {
 export type PetBridgeInteractionKind =
   "fed" | "played" | "petted" | "talked" | "slept" | "cleaned" | "treated"
 
+/** Display data only; never an account key or a writable database handle. */
+export interface PetBridgeProfileSnapshot {
+  profile: PetProfileSyncRow
+  binding: PetCharacterBinding | null
+}
+
+const paletteSchema = z.object({ primary: z.string(), secondary: z.string(), accent: z.string() })
+const eyesSchema = z.enum(["dot", "sleepy", "wide", "wink", "star", "spiral"])
+const hatSchema = z.enum([
+  "none",
+  "crown",
+  "tophat",
+  "propeller",
+  "halo",
+  "wizard",
+  "beanie",
+  "tinyduck",
+])
+const bodySchema = z.enum(["round", "tall", "wide"])
+const statsSchema = z.object({
+  debugging: z.number().nonnegative(),
+  patience: z.number().nonnegative(),
+  chaos: z.number().nonnegative(),
+  wisdom: z.number().nonnegative(),
+  snark: z.number().nonnegative(),
+})
+const cosmeticSchema = z.object({
+  eyes: eyesSchema.optional(),
+  hat: hatSchema.optional(),
+  bodyType: bodySchema.optional(),
+  palette: paletteSchema.optional(),
+})
+const profileSnapshotSchema: z.ZodType<PetBridgeProfileSnapshot> = z.object({
+  profile: z.object({
+    id: z.literal("global"),
+    soul: z.object({ name: z.string(), personality: z.string(), hatchDate: z.string() }).nullable(),
+    xp: z.number().nonnegative(),
+    level: z.number().int().nonnegative(),
+    stage: z.enum(["egg", "baby", "juvenile", "adult", "elder"]),
+    needs: z.object({
+      energy: z.number().min(0).max(100),
+      mood: z.number().min(0).max(100),
+      bond: z.number().min(0).max(100),
+      lastTickAt: z.string(),
+    }),
+    // Matches projectPetProfileForSync: provider identity never crosses this wire.
+    accountFingerprint: z.literal("companion-mirror"),
+    mirroredBones: z.object({
+      species: z.enum(ALL_PET_SPECIES),
+      rarity: z.enum(["common", "uncommon", "rare", "epic", "legendary"]),
+      stars: z.number().int().min(1).max(5),
+      eyes: eyesSchema,
+      hat: hatSchema,
+      shiny: z.boolean(),
+      bodyType: bodySchema,
+      palette: paletteSchema,
+      stats: statsSchema,
+    }),
+    statProgress: statsSchema.optional(),
+    care: z
+      .object({
+        lowSince: z.number().nullable(),
+        condition: z.enum(["well", "unwell"]),
+        notifiedAt: z.number().nullable(),
+        everUnwell: z.boolean(),
+        careQuality: z.number().min(0).max(100),
+      })
+      .optional(),
+    cosmetic: cosmeticSchema.optional(),
+    coins: z.number().nonnegative().optional(),
+    streak: z
+      .object({ days: z.number().int().nonnegative(), lastDay: z.string().nullable() })
+      .optional(),
+    evolutionFlavor: z.enum(["plain", "normal", "radiant"]).optional(),
+    interactionGate: z.object({ lastAtByKind: z.record(z.string(), z.number()) }).optional(),
+    lastBirthdayAwardDay: z.string().optional(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  }),
+  binding: cosmeticSchema
+    .extend({
+      characterId: z.string(),
+      updatedAt: z.string(),
+      species: z.enum(ALL_PET_SPECIES).optional(),
+      live2dModelId: z.string().optional(),
+      skin: z
+        .discriminatedUnion("skinId", [
+          z.object({ skinId: z.literal("svg") }),
+          z.object({ skinId: z.literal("live2d"), modelId: z.string().max(200) }),
+          z.object({ skinId: z.literal("sprite-v2"), packId: z.string().max(200) }),
+        ])
+        .optional(),
+    })
+    .nullable(),
+})
+
 /** Discriminated union of every message that can cross the bridge. */
 export type PetBridgeMessage =
   | { v: 1; t: "visual-state"; state: PetVisualState }
@@ -46,6 +151,7 @@ export type PetBridgeMessage =
   | { v: 1; t: "activity"; at: number }
   | { v: 1; t: "appearance"; selection: PetSkinSelection }
   | { v: 1; t: "look-target"; target: PetLookTarget | null }
+  | { v: 1; t: "profile"; snapshot: PetBridgeProfileSnapshot | null }
 
 /** The `BroadcastChannel` name shared by both window sides. */
 export const PET_BRIDGE_CHANNEL = "cognia-pet-bridge"
@@ -136,6 +242,11 @@ export function decodePetBridgeMessage(raw: unknown): PetBridgeMessage | null {
   if (raw.v !== 1) return null
   const t = raw.t
   switch (t) {
+    case "profile": {
+      if (raw.snapshot === null) return { v: 1, t: "profile", snapshot: null }
+      const parsed = profileSnapshotSchema.safeParse(raw.snapshot)
+      return parsed.success ? { v: 1, t: "profile", snapshot: parsed.data } : null
+    }
     case "visual-state":
       return typeof raw.state === "string" && VISUAL_STATES.has(raw.state)
         ? { v: 1, t: "visual-state", state: raw.state as PetVisualState }

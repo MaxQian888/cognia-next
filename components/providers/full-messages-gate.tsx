@@ -27,10 +27,13 @@ export function FullMessagesGate({
   children,
   additionalMessages,
   ready = true,
+  fallback = <PageLoading variant="workspace" milestone="interface" allowReload />,
 }: {
   children: React.ReactNode
   additionalMessages?: Partial<Record<Locale, AbstractIntlMessages>>
   ready?: boolean
+  /** Transparent secondary windows stay empty until their catalog is ready. */
+  fallback?: React.ReactNode
 }) {
   const localeReady = useContext(LocaleReadyContext)
   const locale = useLocale() as Locale
@@ -96,7 +99,7 @@ export function FullMessagesGate({
           {children}
         </NextIntlClientProvider>
       ) : failure === locale ? null : (
-        <PageLoading variant="workspace" milestone="interface" allowReload />
+        fallback
       )}
     </>
   )

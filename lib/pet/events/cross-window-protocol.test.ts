@@ -4,9 +4,21 @@ import {
   PET_BRIDGE_CHANNEL,
   type PetBridgeMessage,
 } from "./cross-window-protocol"
+import { createDefaultProfile } from "@/lib/pet/defaults"
+import { generateBones } from "@/lib/pet/bones/generate"
+
+const profileSnapshot = {
+  profile: {
+    ...createDefaultProfile("companion-mirror", 0),
+    mirroredBones: generateBones("private-account"),
+  },
+  binding: null,
+}
 
 describe("cross-window-protocol", () => {
   const valid: PetBridgeMessage[] = [
+    { v: 1, t: "profile", snapshot: profileSnapshot },
+    { v: 1, t: "profile", snapshot: null },
     { v: 1, t: "visual-state", state: "thinking" },
     { v: 1, t: "visual-state", state: "unwell" },
     { v: 1, t: "one-shot", shot: "levelUp" },
@@ -42,6 +54,44 @@ describe("cross-window-protocol", () => {
 
   it("exposes the shared channel name", () => {
     expect(PET_BRIDGE_CHANNEL).toBe("cognia-pet-bridge")
+  })
+
+  it("rejects malformed profiles and account fingerprints at the presentation boundary", () => {
+    for (const profile of [
+      {},
+      { ...profileSnapshot.profile, accountFingerprint: "private-account" },
+      { ...profileSnapshot.profile, mirroredBones: undefined },
+      { ...profileSnapshot.profile, needs: { energy: 100 } },
+      { ...profileSnapshot.profile, stage: "unknown" },
+      { ...profileSnapshot.profile, xp: NaN },
+      {
+        ...profileSnapshot.profile,
+        mirroredBones: { ...profileSnapshot.profile.mirroredBones, species: "unknown" },
+      },
+    ]) {
+      expect(
+        decodePetBridgeMessage({ v: 1, t: "profile", snapshot: { profile, binding: null } })
+      ).toBeNull()
+    }
+    expect(
+      decodePetBridgeMessage({
+        v: 1,
+        t: "profile",
+        snapshot: { ...profileSnapshot, binding: { skin: { skinId: "unknown" } } },
+      })
+    ).toBeNull()
+  })
+
+  it("strips controller-only bookkeeping from a mirrored profile", () => {
+    const message = decodePetBridgeMessage({
+      v: 1,
+      t: "profile",
+      snapshot: {
+        ...profileSnapshot,
+        profile: { ...profileSnapshot.profile, proactiveState: { spoken: 1 }, extra: "private" },
+      },
+    })
+    expect(message).toEqual({ v: 1, t: "profile", snapshot: profileSnapshot })
   })
 
   it("round-trips every valid message (encode → decode)", () => {

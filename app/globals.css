@@ -687,6 +687,12 @@ html[data-pro-ide-active] [data-slot="resizable-handle"] {
     color-scheme: normal !important;
   }
 
+  /* The development compile badge is app chrome too. Its portal otherwise
+     covers the sprite and quick menu in the small transparent pet windows. */
+  html[data-pet-overlay] nextjs-portal {
+    display: none !important;
+  }
+
   /* The island window hugs its measured content (`island_resize`), but the
      resize round-trips through Rust — for a frame or two the content can be
      taller/wider than the window, and any overflow paints a scrollbar inside

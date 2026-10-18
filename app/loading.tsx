@@ -15,16 +15,21 @@
 import { getTranslations } from "next-intl/server"
 
 import { PageLoading } from "@/components/ui/loading-states"
+import { LightweightRouteShell } from "@/components/runtime/lightweight-route-shell"
 
 export default async function GlobalLoading() {
   const t = await getTranslations("loading.page")
   return (
-    <PageLoading
-      variant="workspace"
-      milestone="workspace"
-      allowReload
-      title={t("title")}
-      description={t("description")}
-    />
+    // Overlay windows own their first-paint reveal and must never display the
+    // main workspace startup screen while a route chunk is still loading.
+    <LightweightRouteShell lightweightShell={null}>
+      <PageLoading
+        variant="workspace"
+        milestone="workspace"
+        allowReload
+        title={t("title")}
+        description={t("description")}
+      />
+    </LightweightRouteShell>
   )
 }

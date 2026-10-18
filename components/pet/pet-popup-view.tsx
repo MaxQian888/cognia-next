@@ -4,8 +4,8 @@
 //
 // This is a thin shell over the existing `PetInteractionPanel` (the same panel
 // the in-app widget shows when expanded) plus a small row of overlay-only window
-// actions. It owns no pet controller: profile/view flow in via Dexie
-// `useLiveQuery` (cross-window reactive), and interactions are posted back to the
+// actions. It owns no pet controller: usePet reads the main window's profile
+// projection over the bridge, and interactions are posted back to the
 // main window over the cross-window bridge, which awards XP exactly once.
 //
 // Why its own window: the sprite window no longer grows/shifts to make room for

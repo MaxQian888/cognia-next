@@ -1,5 +1,6 @@
-// Reactive read model for the pet. Subscribes to the Dexie profile + the active
-// character's binding via `useLiveQuery`, then derives the view (bones, decayed
+// Reactive read model for the pet. Main reads its Dexie profile and active
+// character binding; secondary pet windows read the controller's projection
+// over the bridge. Derives the view (bones, decayed
 // needs, mood) with the pure `computePetView`. Also exposes the direct-interaction
 // actions, which simply emit user events onto the bus (the controller persists).
 
@@ -13,6 +14,8 @@ import { emitPetEvent } from "@/lib/pet/events/pet-event-bus"
 import type { PetCharacterBinding, PetProfile } from "@/types/pet"
 import { migrateLegacyPetBinding } from "@/lib/pet/binding/resolve-skin"
 import { isPetMirrorShell } from "@/lib/pet/remote/mirror"
+import { getPetWindowRole } from "@/lib/pet/window-role"
+import { usePetStore } from "@/stores/pet/pet-store"
 
 export interface UsePetResult {
   profile: PetProfile | undefined
@@ -30,9 +33,15 @@ export interface UsePetResult {
 }
 
 export function usePet(activeCharacterId?: string | null): UsePetResult {
-  const profile = useLiveQuery(() => getDb().petProfile.get("global"), [])
-  const binding = useLiveQuery(async () => {
-    if (!activeCharacterId) return undefined
+  const role = getPetWindowRole()
+  const secondary = role === "overlay" || role === "popup"
+  const snapshot = usePetStore((s) => s.profileSnapshot)
+  const storedProfile = useLiveQuery(
+    () => (secondary ? undefined : getDb().petProfile.get("global")),
+    [secondary]
+  )
+  const storedBinding = useLiveQuery(async () => {
+    if (secondary || !activeCharacterId) return undefined
     const stored = await getDb().petCharacterBindings.get(activeCharacterId)
     if (!stored) return undefined
     const migrated = migrateLegacyPetBinding(stored)
@@ -43,7 +52,11 @@ export function usePet(activeCharacterId?: string | null): UsePetResult {
       await getDb().petCharacterBindings.put(migrated)
     }
     return migrated
-  }, [activeCharacterId])
+  }, [activeCharacterId, secondary])
+  // Only main can open the encrypted account. Never fall back to a different
+  // local database when the controller has not published its pet yet.
+  const profile = secondary ? snapshot?.profile : storedProfile
+  const binding = secondary ? snapshot?.binding : storedBinding
 
   const view = useMemo(
     // eslint-disable-next-line react-hooks/purity -- need-decay is computed against the wall clock captured when profile/binding change; an effect-based clock would add a render and shift timing.

@@ -71,7 +71,22 @@ pub const HEARTBEAT_RECOVERY_ENV: &str = "COGNIA_WEBVIEW_WATCHDOG";
 /// Remove an old browser PWA worker from the native asset origin before it
 /// can strand the desktop on offline.html. Native evaluation is required:
 /// that fallback page contains neither React nor the normal boot initializers.
-pub const NATIVE_SERVICE_WORKER_RECOVERY: &str = include_str!("native-service-worker-recovery.js");
+const NATIVE_SERVICE_WORKER_RECOVERY: &str = include_str!("native-service-worker-recovery.js");
+
+/// The native hook also runs when a cached foreign document prevented React
+/// from mounting. Include the exact configured dev origin, never all localhost
+/// services, and keep embedded browser webviews out of the recovery path.
+pub fn should_recover_native_service_worker(webview_label: &str, load_finished: bool) -> bool {
+    load_finished && matches!(webview_label, "main" | "pet" | "pet-popup")
+}
+
+pub fn native_service_worker_recovery_script(dev_url: Option<&tauri::Url>) -> String {
+    let origin = dev_url.map(|url| url.origin().ascii_serialization());
+    NATIVE_SERVICE_WORKER_RECOVERY.replace(
+        "__COGNIA_DEV_ORIGIN__",
+        &serde_json::json!(origin).to_string(),
+    )
+}
 
 /// Pure decision: should the heartbeat-timeout reload loop run at all?
 ///
@@ -641,6 +656,24 @@ mod tests {
         assert!(should_arm_boot_reveal("main", true));
         assert!(!should_arm_boot_reveal("main", false));
         assert!(!should_arm_boot_reveal("pet", true));
+    }
+
+    #[test]
+    fn native_worker_recovery_includes_pet_windows_without_arming_the_main_reveal() {
+        for label in ["main", "pet", "pet-popup"] {
+            assert!(should_recover_native_service_worker(label, true));
+            assert!(!should_recover_native_service_worker(label, false));
+        }
+        assert!(!should_recover_native_service_worker("browser-embed", true));
+    }
+
+    #[test]
+    fn native_worker_recovery_uses_the_configured_dev_origin() {
+        let dev_url: tauri::Url = "http://127.0.0.1:4300/app/".parse().unwrap();
+        let script = native_service_worker_recovery_script(Some(&dev_url));
+        assert!(script.contains("\"http://127.0.0.1:4300\""));
+        assert!(!script.contains("__COGNIA_DEV_ORIGIN__"));
+        assert!(native_service_worker_recovery_script(None).contains("})(null)"));
     }
 
     #[test]

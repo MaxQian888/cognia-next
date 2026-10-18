@@ -251,6 +251,10 @@ pub enum PetPositionSpace {
 pub struct PetWindowOpts {
     pub width: f64,
     pub height: f64,
+    /// Transparent headroom above the bottom-anchored pet, in logical px.
+    /// Older callers omit it and retain whole-window bounds.
+    #[serde(default)]
+    pub top_inset: f64,
     /// Saved top-left X, if the user has dragged before.
     #[serde(default)]
     pub x: Option<f64>,
@@ -261,8 +265,12 @@ pub struct PetWindowOpts {
     #[serde(default)]
     pub position_space: PetPositionSpace,
     /// When true the window ignores cursor events (click-through mode).
-    #[serde(default)]
+    #[serde(default = "default_click_through")]
     pub click_through: bool,
+}
+
+fn default_click_through() -> bool {
+    true
 }
 
 /// Resolve the initial top-left position of the overlay.
@@ -322,19 +330,76 @@ fn resolve_sprite_position(
     saved: Option<(f64, f64)>,
     logical: (f64, f64),
     monitors: &[DesktopMonitor],
+    top_inset: f64,
 ) -> (i32, i32) {
-    let probe = saved.map(|(x, y)| DesktopRect {
-        x: x.round() as i32,
-        y: y.round() as i32,
-        width: logical.0.round() as i32,
-        height: logical.1.round() as i32,
+    let inset = content_top_inset(top_inset, logical.1);
+    // Saved coordinates are desktop units; the content size/inset are logical.
+    // Test each display using its own scale before choosing the content's host.
+    let probe = |scale: f64| {
+        saved.map(|(x, y)| {
+            content_frame(
+                DesktopRect {
+                    x: x.round() as i32,
+                    y: y.round() as i32,
+                    width: (logical.0 * scale).round() as i32,
+                    height: (logical.1 * scale).round() as i32,
+                },
+                inset * scale,
+            )
+        })
+    };
+    let monitor = saved.and_then(|_| {
+        monitors.iter().find(|monitor| {
+            desktop_space::plausible_anchor(
+                probe(monitor.content_scale).unwrap(),
+                std::slice::from_ref(*monitor),
+            )
+        })
     });
-    let (area, scale) = work_area_for(probe, monitors);
-    rounded(resolve_initial_position(
+    let fallback_scale = monitors.first().map_or(1.0, |m| m.content_scale);
+    let (area, scale) = match monitor {
+        Some(monitor) => work_area_for(None, std::slice::from_ref(monitor)),
+        None => work_area_for(probe(fallback_scale), monitors),
+    };
+    rounded(resolve_content_position(
         saved,
         area,
         desktop_overlay_size(logical, scale),
+        inset * scale,
     ))
+}
+
+fn content_top_inset(inset: f64, height: f64) -> f64 {
+    if inset.is_finite() && inset >= 0.0 && inset < height {
+        inset
+    } else {
+        0.0
+    }
+}
+
+fn content_frame(frame: DesktopRect, top_inset: f64) -> DesktopRect {
+    let inset = content_top_inset(top_inset, f64::from(frame.height)).round() as i32;
+    DesktopRect {
+        y: frame.y.saturating_add(inset),
+        height: frame.height - inset,
+        ..frame
+    }
+}
+
+/// Constrain the pet's content, allowing its transparent headroom off-screen.
+fn resolve_content_position(
+    saved: Option<(f64, f64)>,
+    area: (f64, f64, f64, f64),
+    size: (f64, f64),
+    top_inset: f64,
+) -> (f64, f64) {
+    let inset = content_top_inset(top_inset, size.1);
+    let (x, y) = resolve_initial_position(
+        saved.map(|(x, y)| (x, y + inset)),
+        area,
+        (size.0, size.1 - inset),
+    );
+    (x, y - inset)
 }
 
 /// Payload of the `pet://state-changed` event — lets the renderer's settings
@@ -401,6 +466,7 @@ fn open_pet_window_claimed<R: Runtime>(
                 Some(saved),
                 (opts.width, opts.height),
                 &desktop_monitors(app),
+                opts.top_inset,
             );
             if (x, y) != (frame.x, frame.y) {
                 let _ = place_window(&window, x, y);
@@ -447,7 +513,12 @@ fn open_pet_window_claimed<R: Runtime>(
         PetPositionSpace::Desktop => saved,
         PetPositionSpace::Legacy => legacy_position(app, saved, (opts.width, opts.height)),
     });
-    let (x, y) = resolve_sprite_position(saved, (opts.width, opts.height), &desktop_monitors(app));
+    let (x, y) = resolve_sprite_position(
+        saved,
+        (opts.width, opts.height),
+        &desktop_monitors(app),
+        opts.top_inset,
+    );
 
     let window =
         tauri::WebviewWindowBuilder::new(app, "pet", tauri::WebviewUrl::App("pet-overlay".into()))
@@ -491,8 +562,6 @@ fn open_pet_window_claimed<R: Runtime>(
         // reveal. No-op on macOS (the menu there is app-global, never per-window).
         let _ = window.remove_menu();
 
-        place_window(&window, x, y)?;
-
         // Apply click-through before the first paint (Linux-tolerant).
         apply_click_through(&window, opts.click_through)?;
 
@@ -511,6 +580,9 @@ fn open_pet_window_claimed<R: Runtime>(
         // The helper waits for that AppKit task, so this open cannot report
         // success while the hidden window is still an ordinary NSWindow.
         macos_panel::configure_pet_panel(&window, macos_panel::PetPanelRole::Sprite)?;
+        // AppKit's original NSWindow would clamp a negative top before the
+        // sprite's transparent-headroom override is installed.
+        place_window(&window, x, y)?;
         Ok(())
     };
     if let Err(e) = configure() {
@@ -863,15 +935,20 @@ pub async fn pet_window_set_position(app: AppHandle, x: f64, y: f64) -> Result<(
 }
 
 /// Resize the pet window to a new logical size, keeping its bottom-center
-/// where it stood (the pet's feet stay put) and the whole window inside the
-/// work area of the monitor it is on.
+/// where it stood (the pet's feet stay put) and its content inside the work
+/// area of the monitor it is on. Transparent headroom may extend above it.
 ///
 /// This is how a size change reaches an open overlay. The only other resize
 /// path is the re-show branch of `open_pet_window`, which also reveals the
 /// window and restarts its animation loops, so the Settings size slider used
 /// to do nothing until the pet was hidden and shown again. Never reveals.
 #[tauri::command]
-pub async fn pet_window_set_size(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+pub async fn pet_window_set_size(
+    app: AppHandle,
+    width: f64,
+    height: f64,
+    top_inset: Option<f64>,
+) -> Result<(), String> {
     if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {
         return Err(format!("pet: invalid window size {width}x{height}"));
     }
@@ -879,10 +956,31 @@ pub async fn pet_window_set_size(app: AppHandle, width: f64, height: f64) -> Res
         return Ok(());
     };
     let frame = window_frame(&window)?;
-    let (area, scale) = work_area_for(Some(frame), &desktop_monitors(&app));
-    let (x, y) = resize_position(frame, (width, height), area, scale);
+    let content_scale = desktop_space::window_content_scale(
+        window.scale_factor().map_err(|e| e.to_string())?,
+        desktop_space::DESKTOP_UNITS_ARE_POINTS,
+    );
+    let (x, y) = resolve_resize_position(
+        frame,
+        (width, height),
+        top_inset.unwrap_or(0.0),
+        content_scale,
+        &desktop_monitors(&app),
+    );
     set_fixed_logical_size(&window, width, height)?;
     place_window(&window, x, y)
+}
+
+fn resolve_resize_position(
+    frame: DesktopRect,
+    logical: (f64, f64),
+    top_inset: f64,
+    old_content_scale: f64,
+    monitors: &[DesktopMonitor],
+) -> (i32, i32) {
+    let content = content_frame(frame, top_inset * old_content_scale);
+    let (area, scale) = work_area_for(Some(content), monitors);
+    resize_position(frame, logical, area, scale, top_inset)
 }
 
 /// The top-left (desktop units) after resizing the window in `frame` (desktop
@@ -892,6 +990,7 @@ fn resize_position(
     logical: (f64, f64),
     area: (f64, f64, f64, f64),
     content_scale: f64,
+    top_inset: f64,
 ) -> (i32, i32) {
     let new_size = desktop_overlay_size(logical, content_scale);
     let anchored = resize_anchored_bottom_center(
@@ -899,7 +998,12 @@ fn resize_position(
         (f64::from(frame.width), f64::from(frame.height)),
         new_size,
     );
-    rounded(resolve_initial_position(Some(anchored), area, new_size))
+    rounded(resolve_content_position(
+        Some(anchored),
+        area,
+        new_size,
+        top_inset * content_scale,
+    ))
 }
 
 /// A legacy saved position (see `legacy_position_to_desktop`) in desktop units.
@@ -1036,10 +1140,18 @@ fn work_area_dto(frame: Option<DesktopRect>, monitors: &[DesktopMonitor]) -> Opt
 /// the primary monitor, then `None` when neither resolves — headless). The
 /// wander loop keeps the pet inside this rectangle.
 #[tauri::command]
-pub async fn pet_window_get_work_area(app: AppHandle) -> Result<Option<PetWorkArea>, String> {
-    let frame = app
-        .get_webview_window("pet")
-        .and_then(|window| window_frame(&window).ok());
+pub async fn pet_window_get_work_area(
+    app: AppHandle,
+    top_inset: Option<f64>,
+) -> Result<Option<PetWorkArea>, String> {
+    let frame = app.get_webview_window("pet").and_then(|window| {
+        let frame = window_frame(&window).ok()?;
+        let scale = desktop_space::window_content_scale(
+            window.scale_factor().ok()?,
+            desktop_space::DESKTOP_UNITS_ARE_POINTS,
+        );
+        Some(content_frame(frame, top_inset.unwrap_or(0.0) * scale))
+    });
     Ok(work_area_dto(frame, &desktop_monitors(&app)))
 }
 
@@ -1114,11 +1226,143 @@ mod tests {
     }
 
     #[test]
+    fn a_top_edge_pet_reopens_without_clamping_its_transparent_headroom() {
+        assert_eq!(
+            resolve_sprite_position(Some((500.0, -80.0)), (224.0, 288.0), &mac_pair(), 160.0),
+            (500, -80)
+        );
+        assert_eq!(
+            resolve_sprite_position(Some((500.0, -300.0)), (224.0, 288.0), &mac_pair(), 160.0),
+            (500, 25 - 160)
+        );
+        assert_eq!(
+            resolve_sprite_position(Some((500.0, 900.0)), (224.0, 288.0), &mac_pair(), 160.0),
+            (500, 25 + 957 - 288)
+        );
+    }
+
+    #[test]
+    fn content_bounds_scale_headroom_on_pixel_displays() {
+        assert_eq!(
+            resolve_sprite_position(
+                Some((500.0, -200.0)),
+                (224.0, 288.0),
+                &windows_pair(),
+                160.0
+            ),
+            (500, -200)
+        );
+        assert_eq!(
+            resolve_sprite_position(
+                Some((500.0, -400.0)),
+                (224.0, 288.0),
+                &windows_pair(),
+                160.0
+            ),
+            (500, -240)
+        );
+    }
+
+    #[test]
+    fn content_bounds_preserve_corner_fallback_and_reject_invalid_insets() {
+        assert_eq!(
+            resolve_sprite_position(None, WIN, &mac_pair(), 160.0),
+            resolve_sprite_position(None, WIN, &mac_pair(), 0.0)
+        );
+        for inset in [-1.0, f64::NAN, f64::INFINITY, 288.0, 999.0] {
+            assert_eq!(
+                resolve_content_position(
+                    Some((500.0, -80.0)),
+                    (0.0, 25.0, 1512.0, 957.0),
+                    (224.0, 288.0),
+                    inset
+                ),
+                (500.0, 25.0)
+            );
+        }
+    }
+
+    #[test]
+    fn resize_preserves_a_pet_parked_near_the_screen_top() {
+        assert_eq!(
+            resize_position(
+                drect(500, -80, 224, 288),
+                (192.0, 256.0),
+                (0.0, 25.0, 1512.0, 957.0),
+                1.0,
+                160.0
+            ),
+            (516, -48)
+        );
+    }
+
+    #[test]
+    fn stacked_displays_follow_the_content_on_resize_and_work_area_reads() {
+        let monitors = vec![
+            DesktopMonitor::from_tao(drect(0, 0, 1512, 982), drect(0, 25, 1512, 957), 1.0, true),
+            DesktopMonitor::from_tao(
+                drect(0, 982, 1512, 982),
+                drect(0, 982, 1512, 982),
+                1.0,
+                true,
+            ),
+        ];
+        let frame = drect(500, 830, 224, 288);
+        assert_eq!(
+            resolve_resize_position(frame, (192.0, 256.0), 160.0, 1.0, &monitors),
+            (516, 862)
+        );
+        let area = work_area_dto(Some(content_frame(frame, 160.0)), &monitors).unwrap();
+        assert_eq!(area.y, 982.0);
+        assert_eq!(area.height, 982.0);
+    }
+
+    #[test]
+    fn stacked_pixel_displays_scale_content_before_selecting_the_monitor() {
+        let monitors = vec![
+            DesktopMonitor::from_tao(drect(0, 0, 2880, 1800), drect(0, 0, 2880, 1800), 1.5, false),
+            DesktopMonitor::from_tao(
+                drect(0, 1800, 2880, 1800),
+                drect(0, 1800, 2880, 1800),
+                1.5,
+                false,
+            ),
+        ];
+        assert_eq!(
+            resolve_sprite_position(Some((500.0, 1560.0)), (224.0, 288.0), &monitors, 160.0),
+            (500, 1560)
+        );
+        assert_eq!(
+            resolve_resize_position(
+                drect(500, 1560, 336, 432),
+                (192.0, 256.0),
+                160.0,
+                1.5,
+                &monitors
+            ),
+            (524, 1608)
+        );
+    }
+
+    #[test]
+    fn cold_open_converts_the_panel_before_placing_it() {
+        let source = include_str!("mod.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap();
+        let configure = source.split("let configure = ||").nth(1).unwrap();
+        assert!(
+            configure.find("macos_panel::configure_pet_panel(").unwrap()
+                < configure.find("place_window(&window, x, y)").unwrap()
+        );
+    }
+
+    #[test]
     fn retina_unsaved_fallback_stays_on_screen() {
         // Regression: a 280x320 overlay with nothing saved lands fully on the
         // primary Retina display's bottom-right corner, in points — not at
         // twice the spot (off-screen), and above the dock's work-area edge.
-        let (x, y) = resolve_sprite_position(None, WIN, &mac_pair());
+        let (x, y) = resolve_sprite_position(None, WIN, &mac_pair(), 0.0);
         assert_eq!(x, 1512 - 280 - EDGE_MARGIN as i32);
         assert_eq!(y, 25 + 957 - 320 - EDGE_MARGIN as i32);
     }
@@ -1128,12 +1372,12 @@ mod tests {
         // In tao's numbers this spot is also inside the Retina laptop's
         // (0, 0, 3024, 1964) rect, which is where the old lookup clamped it.
         assert_eq!(
-            resolve_sprite_position(Some((2400.0, 700.0)), (224.0, 288.0), &mac_pair()),
+            resolve_sprite_position(Some((2400.0, 700.0)), (224.0, 288.0), &mac_pair(), 0.0),
             (2400, 700)
         );
         // Past the external display's bottom edge: clamped into ITS work area.
         assert_eq!(
-            resolve_sprite_position(Some((2400.0, 1400.0)), (224.0, 288.0), &mac_pair()),
+            resolve_sprite_position(Some((2400.0, 1400.0)), (224.0, 288.0), &mac_pair(), 0.0),
             (2400, 25 + 1415 - 288)
         );
     }
@@ -1141,13 +1385,13 @@ mod tests {
     #[test]
     fn a_pet_saved_on_the_retina_laptop_reopens_at_its_points() {
         assert_eq!(
-            resolve_sprite_position(Some((600.0, 500.0)), (224.0, 288.0), &mac_pair()),
+            resolve_sprite_position(Some((600.0, 500.0)), (224.0, 288.0), &mac_pair(), 0.0),
             (600, 500)
         );
         // Low on the laptop: clamped to the work area above the dock, in
         // points (the work area ends at 982pt, not tao's 1964).
         assert_eq!(
-            resolve_sprite_position(Some((600.0, 900.0)), (224.0, 288.0), &mac_pair()),
+            resolve_sprite_position(Some((600.0, 900.0)), (224.0, 288.0), &mac_pair(), 0.0),
             (600, 25 + 957 - 288)
         );
     }
@@ -1157,7 +1401,7 @@ mod tests {
         // Nothing saved: the 150% primary's corner, the window 1.5x its
         // logical size.
         assert_eq!(
-            resolve_sprite_position(None, WIN, &windows_pair()),
+            resolve_sprite_position(None, WIN, &windows_pair(), 0.0),
             (
                 2880 - 420 - EDGE_MARGIN as i32,
                 1728 - 480 - EDGE_MARGIN as i32
@@ -1165,7 +1409,7 @@ mod tests {
         );
         // Saved on the 1x display: unscaled there.
         assert_eq!(
-            resolve_sprite_position(Some((4700.0, 900.0)), WIN, &windows_pair()),
+            resolve_sprite_position(Some((4700.0, 900.0)), WIN, &windows_pair(), 0.0),
             (4800 - 280, 1040 - 320)
         );
     }
@@ -1173,7 +1417,7 @@ mod tests {
     #[test]
     fn no_reported_display_falls_back_to_a_plain_1080p_area() {
         assert_eq!(
-            resolve_sprite_position(None, WIN, &[]),
+            resolve_sprite_position(None, WIN, &[], 0.0),
             (
                 1920 - 280 - EDGE_MARGIN as i32,
                 1080 - 320 - EDGE_MARGIN as i32
@@ -1338,7 +1582,7 @@ mod tests {
         let (area, scale) = work_area_for(Some(frame), &mac_pair());
         assert_eq!(scale, 1.0);
         assert_eq!(
-            resize_position(frame, (288.0, 352.0), area, scale),
+            resize_position(frame, (288.0, 352.0), area, scale, 0.0),
             (2368, 636)
         );
     }
@@ -1351,7 +1595,7 @@ mod tests {
         let (area, scale) = work_area_for(Some(frame), &windows_pair());
         assert_eq!(scale, 1.5);
         assert_eq!(
-            resize_position(frame, (288.0, 352.0), area, scale),
+            resize_position(frame, (288.0, 352.0), area, scale, 0.0),
             (952, 604)
         );
     }
@@ -1461,6 +1705,13 @@ mod tests {
         let opts: PetWindowOpts = serde_json::from_str(r#"{"width":280,"height":320}"#).unwrap();
         assert_eq!(opts.x, None);
         assert_eq!(opts.y, None);
+        assert!(opts.click_through);
+    }
+
+    #[test]
+    fn opts_preserves_an_explicit_click_through_opt_out() {
+        let opts: PetWindowOpts =
+            serde_json::from_str(r#"{"width":280,"height":320,"clickThrough":false}"#).unwrap();
         assert!(!opts.click_through);
     }
 

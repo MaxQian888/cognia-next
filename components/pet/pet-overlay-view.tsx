@@ -1,8 +1,8 @@
 // The transparent desktop-pet overlay window's root view. Rendered by
 // `app/pet-overlay/page.tsx` inside the frameless always-on-top "pet" Tauri
-// window (window role "overlay"). It owns NO controller: the pet profile flows
-// in via Dexie `useLiveQuery` (cross-window reactive), and the ephemeral visual
-// state / one-shots / bubble arrive over the cross-window bridge. User
+// window (window role "overlay"). It owns NO controller: a read-only pet
+// profile projection and the ephemeral visual state / one-shots / bubble
+// arrive over the cross-window bridge. User
 // interactions are posted back to the main window, which awards XP exactly once.
 //
 // Responsibilities:
@@ -22,7 +22,7 @@
 
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useReducedMotion } from "motion/react"
 import { useTranslations } from "next-intl"
 import { useSettingsStore } from "@/stores/settings"
@@ -105,6 +105,35 @@ export function PetOverlayView() {
     skinId === "live2d" ? { holdFloorMs: LIVE2D_ONE_SHOT_HOLD_MS } : {}
   )
   const bubble = usePetStore((s) => s.bubble)
+  const petBoxRef = useRef<HTMLDivElement>(null)
+  const bubbleAnchorRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const box = petBoxRef.current
+    const anchor = bubbleAnchorRef.current
+    const root = box?.parentElement
+    if (!bubble || !box || !anchor || !root) return
+
+    // The SVG's stage scaling leaves transparent space above the egg/body.
+    // Anchor to its visible silhouette, keeping the render/drag box in place.
+    const positionBubble = () => {
+      const art = box.querySelector('[data-pet-part="egg"], [data-pet-part="body"]') ?? box
+      const top = art.getBoundingClientRect().top
+      anchor.style.bottom = `${Math.round(root.getBoundingClientRect().bottom - top + 8)}px`
+    }
+    positionBubble()
+    // Motion applies its initial transforms on the next frame. Async skin
+    // loads can replace the fallback SVG later; neither needs a polling loop.
+    let frame = requestAnimationFrame(positionBubble)
+    const observer = new MutationObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(positionBubble)
+    })
+    observer.observe(box, { childList: true, subtree: true })
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [bubble, size, skinId, profile?.stage, view?.effectiveBones])
   const hidden = useDocumentHidden()
   const [dragging, setDragging] = useState(false)
   // Native hide/show signal from Rust (`pet://suspend` / `pet://resume`): a
@@ -386,28 +415,35 @@ export function PetOverlayView() {
       onContextMenu={handleContextMenu}
       // Bottom-anchored so the pet's feet sit on the window bottom — the
       // wander ground math rests the window bottom on the work-area bottom.
-      className="flex h-screen w-screen select-none flex-col items-center justify-end overflow-hidden bg-transparent"
+      className="relative flex h-screen w-screen select-none flex-col items-center justify-end overflow-hidden bg-transparent"
     >
       {bubble && (
-        <PetBubbleView
-          bubble={bubble}
-          className="mb-2"
-          // Clickable only while the overlay takes the pointer: with
-          // click-through on, the whole window ignores the cursor, and the
-          // widget or the pet console remain the way in.
-          onAction={(action) => {
-            void showMainWindow()
-            sendOpenConsoleRef.current(action.tab)
-            usePetStore.getState().setBubble(null)
-          }}
-        />
+        <div
+          ref={bubbleAnchorRef}
+          className="pointer-events-none absolute inset-x-2 z-10 flex justify-center"
+          style={{ bottom: size + 8 }}
+        >
+          <PetBubbleView
+            bubble={bubble}
+            className="after:left-1/2 after:-translate-x-1/2"
+            // Clickable only while the overlay takes the pointer: with
+            // click-through on, the whole window ignores the cursor, and the
+            // widget or the pet console remain the way in.
+            onAction={(action) => {
+              void showMainWindow()
+              sendOpenConsoleRef.current(action.tab)
+              usePetStore.getState().setBubble(null)
+            }}
+          />
+        </div>
       )}
       {profile && view ? (
         <div
+          ref={petBoxRef}
           data-testid="pet-overlay-pet"
           role="img"
           aria-label={t("petLabel")}
-          className="cursor-grab touch-none active:cursor-grabbing"
+          className="shrink-0 cursor-grab touch-none active:cursor-grabbing"
           style={containerStyle}
           onPointerDown={handlePointerDown}
           onPointerMove={dragGesture.onPointerMove}

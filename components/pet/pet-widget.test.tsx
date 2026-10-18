@@ -318,7 +318,7 @@ describe("PetWidget", () => {
     })
     await user.click(screen.getByText("Show desktop pet"))
     expect(openPetWindow).toHaveBeenCalledWith(
-      expect.objectContaining({ width: 128 + 96, height: 128 + 160, clickThrough: false })
+      expect.objectContaining({ width: 128 + 96, height: 128 + 160, clickThrough: true })
     )
     expect(saveMock).toHaveBeenCalledWith(
       expect.objectContaining({

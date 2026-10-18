@@ -46,7 +46,7 @@ subsystems (chat/agent-team/goal/scheduler/connector/terminal/workflow/twin/rada
     → components/pet/pet-renderer.tsx → skins/{svg-skin.tsx | live2d-skin.tsx | sprite-v2-skin.tsx}
 ```
 
-**Dexie与Zustand的分离**是有意为之：持久记录（档案、需求、XP/level/stage业绩、绑定）仅存于Dexie中，并被反应式读取;`usePetStore`（Zustand）仅保留帧到帧的短暂状态，通过`partialize`持续存在`{ minimized, position }`到`localStorage`（键`cognia-pet-ui`）。这正是跨窗口同步能够依靠自身交叉表反应Dexie而非定制同步协议的原因。
+**Dexie 与 Zustand 的分离**是有意为之：持久记录（档案、需求、XP/level/stage、成就、绑定）仅存于 Dexie，由已解锁的主窗口响应式读取。`usePetStore`（Zustand）还保存供悬浮窗和弹出窗口使用的临时只读档案投影；这两个窗口不解锁账号数据库。`PetMainRuntime` 通过既有宠物桥接发布投影和当前角色绑定，辅助窗口中的 `usePet` 从桥接读取。投影复用 `projectPetProfileForSync`，用镜像占位值替换 provider fingerprint，并携带生成的外观。桥接启动时主动发布快照，避免辅助窗口早于主窗口挂载时丢失首次请求；主运行时卸载时清空投影。只有 `{ minimized, position }` 持久化到 `localStorage`（键 `cognia-pet-ui`）。辅助路由的页面加载和语言包加载均使用空 fallback，主界面的启动动画不会出现在宠物窗口中（2026-10-18）。
 
 ### 事件总线
 
@@ -144,15 +144,19 @@ Live2D 导入现在校验完整引用图，并在非索引模型元数据中持�
 
 **显示器查找。** `monitor_from_point` 在不同平台使用不同的坐标空间，在 macOS 多显示器上会选错显示器。`work_area_for` 现在从换算为桌面单位的显示器中，选出包含窗口中心点（或离它最近）的那一个。`ScaleFactorChanged` 以及跨显示器的 `Moved` 事件都会发出 `pet://work-area-changed`，且每当漫游恢复时运动模块都会重新读取工作区，宠物不会在过期的矩形里行走。
 
+**移动边界（2026-10-18）。** 宠物窗口包含气泡所需的透明上方留白。此前 AppKit 将整个窗口框限制在菜单栏以下，导致可见宠物无法到达屏幕上部。现在只有宠物面板覆盖 `constrainFrameRect:toScreen:`；弹出面板和 Capacity Dock 保持原生约束。前端在打开、调整尺寸和读取工作区域时传入共享的逻辑 `topInset`，原生层先换算为桌面单位，再按内容区域选择显示器并约束位置，也覆盖纵向排列的多显示器。因此重新打开和调整尺寸会保留顶部附近的位置，同时继续恢复不可达的内容区域。首次定位发生在面板转换之后，冷启动使用相同策略。
+
 **尺寸。** 尺寸滑块过去要到下次打开才生效。`pet_window_set_size` 现在以底部中心为锚点调整正在显示的悬浮窗，宠物仍站在原处，并限制在工作区内。该命令从不显示隐藏的窗口。滑块在松手时提交，而不是每次拖动都提交。
 
 **弹出窗口定位。** 弹出窗口在 Rust 中定位（`resolve_popup_placement`），依据宠物在其所在显示器上以桌面单位表示的矩形。下方、上方与侧方的回退位置都限制在工作区内。随内容变化的尺寸调整会针对保存的锚点重新定位，弹出窗口变大时不再偏离宠物。再次显示时发出 `pet-popup://shown`，丢弃缓存尺寸并重新适配。它不显示插件插槽（D13），并把窗口操作（点击穿透、设置、主窗口、隐藏）归入一个带标签的 2×2 分组。
 
 **焦点。** 两个窗口都以 `.focused(false)` 创建。Windows 上悬浮窗带 `WS_EX_NOACTIVATE`、弹出窗口带 `WS_EX_TOOLWINDOW`，两者都不会抢走正在使用的应用的焦点，也不会出现在 Alt-Tab 中。macOS 保留不激活的 NSPanel。
 
+**原生缓存恢复（2026-10-18）。** 即使已经禁止原生窗口新注册 PWA worker，历史浏览器 worker 仍可能控制桌面开发源；开发服务不可达时，其 network-first 缓存会回放包括 Logto HTML 在内的错误文档。原生 finished-load 回调现在对 `main`、`pet`、`pet-popup` 清理打包资源源或精确配置的开发源上的根 `/sw.js` 注册。每个仍受控制的窗口都会在清理后重新加载，包括其他窗口抢先注销的情况；恢复不依赖 React 挂载。其他 localhost 服务、内嵌浏览器窗口及无关 worker 脚本和 scope 均不受影响。
+
 **生命周期。** 系统关闭（Alt+F4、⌘W）过去会绕过 store 直接销毁窗口。`CloseRequested` 现在走与 UI 相同的关闭路径。`open_pet_window` 会等待生命周期队列，超时即失败，而不是为一次从未发生的打开报告成功。`is_pet_window_open` 报告的是打开意图，而不只是窗口对象存在，这消除了启动时的重复打开（旧的 `PetWindowInitializer` 与 `PetMount` 的对齐逻辑都会打开；该 initializer 已移除）。已有窗口在首帧绘制前不会被显示；显示现在在所有平台上先经由 Rust，再做 1px 重合成微调，这修复了 macOS 以外平台上的显示竞态。悬浮窗与弹出窗口路由在启动脚本中设置 `data-pet-overlay`，因此在 hydrate 前就是透明的。主窗口「退出」关闭行为会退出应用，而不是留下孤立的宠物窗口。
 
-**销毁跟随设置。** 关闭 `PetSettings.enabled` 会销毁悬浮窗，关闭 `desktopPet.enabled` 会关闭它，无论哪个窗口写入了更改（只在状态转换时触发，冷启动不会误销毁）。隐藏悬浮窗会保留点击穿透偏好。
+**销毁跟随设置。** 关闭 `PetSettings.enabled` 会销毁悬浮窗，关闭 `desktopPet.enabled` 会关闭它，无论哪个窗口写入了更改（只在状态转换时触发，冷启动不会误销毁）。隐藏悬浮窗会保留点击穿透偏好。共享设置和省略原生打开选项时均默认开启点击穿透；已明确保存为关闭的偏好仍保持关闭。
 
 **跨窗口的设置写入。** 每个 WebView 有自己的设置 store，而 `saveSettings` 会整体替换 `petSettings`。因此悬浮窗保存位置时，可能抹掉主窗口刚做的更改。现在所有宠物写入方都经过 `lib/pet/settings-sync.ts:updatePetSettings`。它用 Web Lock 串行化写入，在锁内重新读取最新设置，保存后在 `cognia-pet-settings` 上广播。每个宠物窗口都运行一个跟随者，只重新读取 `petSettings` 切片。
 

@@ -78,6 +78,7 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
   // Broadcast the current snapshot so a late-opening overlay catches up.
   const broadcastSnapshot = () => {
     const s = store.getState()
+    post(channel, { v: 1, t: "profile", snapshot: s.profileSnapshot })
     post(channel, { v: 1, t: "visual-state", state: s.visualState })
     post(channel, { v: 1, t: "bubble", bubble: toBridgeBubble(s.bubble) })
     if (s.appearanceSelection) {
@@ -87,6 +88,9 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
   }
 
   const unsub = store.subscribe((state, prev) => {
+    if (state.profileSnapshot !== prev.profileSnapshot) {
+      post(channel, { v: 1, t: "profile", snapshot: state.profileSnapshot })
+    }
     if (state.visualState !== prev.visualState) {
       post(channel, { v: 1, t: "visual-state", state: state.visualState })
     }
@@ -125,7 +129,12 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
     }
   }
 
+  // An overlay can request state before account unlock mounts this listener.
+  // Publish on connect too, so that first request cannot be lost forever.
+  broadcastSnapshot()
+
   return () => {
+    post(channel, { v: 1, t: "profile", snapshot: null })
     unsub()
     channel.onmessage = null
     channel.close()
@@ -163,11 +172,17 @@ export function startOverlayPetBridge(deps: OverlayPetBridgeDeps = {}): OverlayP
   }
   const store = deps.store ?? usePetStore
 
+  store.getState().setProfileSnapshot(null)
+  store.getState().setBubble(null)
   channel.onmessage = (event) => {
     const msg = decodePetBridgeMessage(event.data)
     if (!msg) return
     const api = store.getState()
     switch (msg.t) {
+      case "profile":
+        api.setProfileSnapshot(msg.snapshot)
+        if (!msg.snapshot) api.setBubble(null)
+        break
       case "visual-state":
         api.setVisualState(msg.state)
         break
@@ -203,6 +218,8 @@ export function startOverlayPetBridge(deps: OverlayPetBridgeDeps = {}): OverlayP
 
   return {
     dispose: () => {
+      store.getState().setProfileSnapshot(null)
+      store.getState().setBubble(null)
       channel.onmessage = null
       channel.close()
     },

@@ -154,7 +154,7 @@ export function AppRuntime({ children }: { children: React.ReactNode }) {
           <LightweightLocaleGate>
             <SettingsHydrator />
             <SettingsSyncProvider>
-              <FullMessagesGate>
+              <FullMessagesGate fallback={null}>
                 <TooltipProvider>{children}</TooltipProvider>
               </FullMessagesGate>
             </SettingsSyncProvider>

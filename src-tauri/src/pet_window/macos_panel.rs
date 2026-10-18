@@ -385,6 +385,16 @@ tauri_panel! {
             works_when_modal: true
         }
     })
+    // Keep the gauge rail's native screen constraints independent of the pet.
+    panel!(PetReadOnlyPanel {
+        config: {
+            can_become_key_window: false,
+            can_become_main_window: false,
+            is_floating_panel: true,
+            hides_on_deactivate: false,
+            works_when_modal: true
+        }
+    })
     // Popup: may become key so the talk composer accepts typing, but the
     // non-activating style mask keeps it from activating the app.
     panel!(PetPopupPanel {
@@ -396,6 +406,54 @@ tauri_panel! {
             works_when_modal: true
         }
     })
+}
+
+/// AppKit must not constrain the sprite's transparent headroom to the screen.
+/// Install the override on our sprite class only; popup/rail classes keep the
+/// standard NSPanel behavior. Use the inherited method's ABI encoding.
+#[cfg(target_os = "macos")]
+fn install_sprite_frame_constraint() -> Result<(), String> {
+    use objc2::runtime::Imp;
+    use std::sync::OnceLock;
+
+    static INSTALLED: OnceLock<bool> = OnceLock::new();
+    let installed = *INSTALLED.get_or_init(|| {
+        let selector = objc2::sel!(constrainFrameRect:toScreen:);
+        let class = RawPetSpritePanel::class();
+        let Some(method) = class.instance_method(selector) else {
+            return false;
+        };
+        // SAFETY: the callback has NSWindow's (id, SEL, NSRect, NSScreen*) ->
+        // NSRect signature. The runtime copies the inherited type encoding,
+        // and the implementation lives for the process lifetime.
+        unsafe {
+            let implementation: Imp = std::mem::transmute(
+                unconstrained_sprite_frame as unsafe extern "C-unwind" fn(_, _, _, _) -> _,
+            );
+            objc2::ffi::class_addMethod(
+                class as *const _ as *mut _,
+                selector,
+                implementation,
+                objc2::ffi::method_getTypeEncoding(method),
+            )
+            .as_bool()
+        }
+    });
+    if installed {
+        Ok(())
+    } else {
+        Err("pet: could not install sprite frame constraint override".into())
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C-unwind" fn unconstrained_sprite_frame(
+    _window: *mut objc2::runtime::AnyObject,
+    _selector: objc2::runtime::Sel,
+    frame: objc2_foundation::NSRect,
+    _screen: *mut objc2_app_kit::NSScreen,
+) -> objc2_foundation::NSRect {
+    frame
 }
 
 /// Run an AppKit operation synchronously. Tauri's `run_on_main_thread` only
@@ -466,15 +524,17 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
     let style = StyleMask::empty().nonactivating_panel();
 
     let panel = match role {
-        // Both roles that never take key share the sprite's panel class. The
-        // Capacity Dock is a read-only gauge rail, so taking the keyboard from
-        // whatever the user is actually typing in would be a bug.
-        PetPanelRole::Sprite | PetPanelRole::UsageDock => {
+        // The sprite alone can move its transparent headroom above the screen.
+        PetPanelRole::Sprite => {
             debug_assert!(!role.can_become_key());
+            install_sprite_frame_constraint()?;
             window
                 .to_panel::<PetSpritePanel<R>>()
                 .map_err(|e| format!("non-key overlay to_panel failed: {e:?}"))?
         }
+        PetPanelRole::UsageDock => window
+            .to_panel::<PetReadOnlyPanel<R>>()
+            .map_err(|e| format!("read-only overlay to_panel failed: {e:?}"))?,
         // The island and the selection toolbar share the popup's panel class
         // (key-capable, non-activating); only their window level differs.
         PetPanelRole::Popup
@@ -667,6 +727,29 @@ pub(crate) fn detach_pet_panel<R: Runtime>(_window: &WebviewWindow<R>) -> Result
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn only_the_sprite_class_overrides_native_frame_constraints() {
+        use objc2::ClassType;
+        use objc2_app_kit::NSPanel;
+        super::install_sprite_frame_constraint().unwrap();
+        super::install_sprite_frame_constraint().unwrap();
+        let selector = objc2::sel!(constrainFrameRect:toScreen:);
+        let native = NSPanel::class().instance_method(selector).unwrap();
+        let sprite = super::RawPetSpritePanel::class()
+            .instance_method(selector)
+            .unwrap();
+        let rail = super::RawPetReadOnlyPanel::class()
+            .instance_method(selector)
+            .unwrap();
+        let popup = super::RawPetPopupPanel::class()
+            .instance_method(selector)
+            .unwrap();
+        assert!(!std::ptr::eq(sprite, native));
+        assert!(std::ptr::eq(rail, native));
+        assert!(std::ptr::eq(popup, native));
+    }
+
     use super::*;
 
     #[test]

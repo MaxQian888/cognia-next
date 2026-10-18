@@ -24,6 +24,7 @@ import { useActiveLive2dModel } from "@/hooks/pet/use-active-live2d-model"
 import { useActiveSpritePack } from "@/hooks/pet/use-active-sprite-pack"
 import { usePetStore } from "@/stores/pet/pet-store"
 import { resolveCharacterSkinSelection } from "@/lib/pet/binding/resolve-skin"
+import { projectPetProfileForSync } from "@/lib/sync/handlers/pet"
 import { resolveEffectiveSkin, selectionFromEffectiveSkin } from "./skins/resolve-effective-skin"
 
 export interface PetMainRuntimeProps {
@@ -33,6 +34,22 @@ export interface PetMainRuntimeProps {
 
 export function PetMainRuntime({ settings, activeCharacterId }: PetMainRuntimeProps) {
   const { profile, view, binding } = usePet(activeCharacterId)
+  useEffect(() => {
+    usePetStore
+      .getState()
+      .setProfileSnapshot(
+        profile ? { profile: projectPetProfileForSync(profile), binding: binding ?? null } : null
+      )
+  }, [profile, binding])
+  // Lock, account switch and disabling the runtime must remove the old pet
+  // from secondary windows as well as from this window.
+  useEffect(
+    () => () => {
+      usePetStore.getState().setProfileSnapshot(null)
+      usePetStore.getState().setBubble(null)
+    },
+    []
+  )
   const speaking = settings.enabled && !settings.mutedBubbles
 
   usePetBubbles(speaking, view?.effectiveStats.snark ?? 0)

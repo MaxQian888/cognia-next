@@ -17,6 +17,8 @@ async function run(
     present?: boolean
     failure?: boolean
     removed?: boolean
+    removedElsewhere?: boolean
+    devOrigin?: string
   } = {}
 ) {
   const url = new URL(options.url ?? "http://tauri.localhost/settings")
@@ -35,17 +37,23 @@ async function run(
   const getRegistration = options.failure
     ? jest.fn().mockRejectedValue(new Error("storage unavailable"))
     : jest.fn().mockResolvedValue(registration)
-  await vm.runInNewContext(source, {
-    URL,
-    location: { href: url.href, hostname: url.hostname, protocol: url.protocol, reload },
-    navigator: {
-      serviceWorker: {
-        getRegistration,
-        controller: options.controlled === false ? null : { scriptURL },
+  if (options.removedElsewhere) {
+    getRegistration.mockResolvedValueOnce(registration).mockResolvedValue(undefined)
+  }
+  await vm.runInNewContext(
+    source.replace("__COGNIA_DEV_ORIGIN__", JSON.stringify(options.devOrigin ?? null)),
+    {
+      URL,
+      location: { href: url.href, hostname: url.hostname, protocol: url.protocol, reload },
+      navigator: {
+        serviceWorker: {
+          getRegistration,
+          controller: options.controlled === false ? null : { scriptURL },
+        },
       },
-    },
-    console: { warn },
-  })
+      console: { warn },
+    }
+  )
   return { unregister, reload, warn, getRegistration }
 }
 
@@ -53,6 +61,23 @@ test("recovers a desktop page already controlled by the stale PWA worker", async
   const result = await run()
   expect(result.unregister).toHaveBeenCalledTimes(1)
   expect(result.reload).toHaveBeenCalledTimes(1)
+})
+
+test.each(["/pet-overlay", "/pet-popup"])(
+  "recovers a cached foreign document on the configured development origin %s",
+  async (route) => {
+    const result = await run({
+      url: `http://localhost:3000${route}`,
+      devOrigin: "http://localhost:3000",
+    })
+    expect(result.unregister).toHaveBeenCalledTimes(1)
+    expect(result.reload).toHaveBeenCalledTimes(1)
+  }
+)
+
+test("does not recover another service merely because it shares the dev hostname", async () => {
+  const result = await run({ url: "http://localhost:3301/", devOrigin: "http://localhost:3000" })
+  expect(result.getRegistration).not.toHaveBeenCalled()
 })
 
 test.each(["https://tauri.localhost/", "http://tauri.localhost/"])(
@@ -83,6 +108,13 @@ test("leaves unrelated workers and nested scopes alone", async () => {
 test("reloads a controlled window after another window removed the registration", async () => {
   const result = await run({ present: false })
   expect(result.unregister).not.toHaveBeenCalled()
+  expect(result.reload).toHaveBeenCalledTimes(1)
+})
+
+test("reloads when a concurrent unregister finishes between lookup and removal", async () => {
+  const result = await run({ removed: false, removedElsewhere: true })
+  expect(result.unregister).toHaveBeenCalledTimes(1)
+  expect(result.getRegistration).toHaveBeenCalledTimes(2)
   expect(result.reload).toHaveBeenCalledTimes(1)
 })
 

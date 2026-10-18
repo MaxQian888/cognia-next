@@ -60,6 +60,33 @@ it("waits for the complete selected catalog before mounting translated children"
   expect(screen.getByText("workspace")).toBeInTheDocument()
 })
 
+it("keeps a transparent overlay empty while its catalog loads, then mounts it", async () => {
+  let resolve!: (value: unknown) => void
+  load.mockImplementation(
+    () =>
+      new Promise((r) => {
+        resolve = r
+      })
+  )
+  const { container } = render(<FullMessagesGate fallback={null}>overlay</FullMessagesGate>)
+  expect(container).toBeEmptyDOMElement()
+  expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  await act(async () => {
+    resolve({ pet: { title: "Pet" } })
+  })
+  expect(screen.getByText("overlay")).toBeInTheDocument()
+})
+
+it("retains language-load recovery when the loading fallback is empty", async () => {
+  load.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({ pet: {} })
+  render(<FullMessagesGate fallback={null}>overlay</FullMessagesGate>)
+  await screen.findByRole("alert")
+  expect(screen.queryByText("overlay")).not.toBeInTheDocument()
+  expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "retryLanguage" }))
+  await screen.findByText("overlay")
+})
+
 it("loads only Chinese for a Chinese user and includes plugin messages", async () => {
   mockLocale = "zh-CN"
   load.mockResolvedValue({ chat: { title: "聊天" } })

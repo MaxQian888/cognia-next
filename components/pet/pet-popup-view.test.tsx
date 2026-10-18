@@ -292,6 +292,19 @@ describe("PetPopupView", () => {
     expect(screen.getByText("hideDesktopPet")).toBeInTheDocument()
   })
 
+  it("shows an arriving profile and clears care UI when the controller clears the snapshot", () => {
+    mockUsePet.mockReturnValue({ profile: undefined, view: undefined, loading: true })
+    const { rerender } = render(<PetPopupView />)
+    expect(screen.queryByTestId("pet-interaction-panel")).not.toBeInTheDocument()
+    mockUsePet.mockReturnValue({ profile: PROFILE, view: VIEW, loading: false })
+    rerender(<PetPopupView />)
+    expect(screen.getByTestId("pet-interaction-panel")).toBeInTheDocument()
+    mockUsePet.mockReturnValue({ profile: undefined, view: undefined, loading: true })
+    rerender(<PetPopupView />)
+    expect(screen.queryByTestId("pet-interaction-panel")).not.toBeInTheDocument()
+    expect(screen.getByText("hideDesktopPet")).toBeInTheDocument()
+  })
+
   it("routes panel actions to the bridge (talk carries text)", () => {
     render(<PetPopupView />)
     fireEvent.click(screen.getByText("feed"))

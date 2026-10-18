@@ -14,6 +14,19 @@ describe("PetBubbleView", () => {
     expect(el).toHaveAttribute("data-bubble-origin", "llm")
   })
 
+  it("allows the overlay to center the tail while retaining the bubble content", () => {
+    render(
+      <PetBubbleView
+        bubble={{ text: "Reminder! Your scheduled task is due.", origin: "system" }}
+        className="after:left-1/2 after:-translate-x-1/2"
+      />
+    )
+    const bubble = screen.getByRole("status")
+    expect(bubble).toHaveTextContent("Reminder! Your scheduled task is due.")
+    expect(bubble).toHaveClass("after:left-1/2", "after:-translate-x-1/2", "after:border-inherit")
+    expect(bubble).not.toHaveClass("after:left-6")
+  })
+
   const withAction = {
     text: "A new radar report is in.",
     origin: "system" as const,

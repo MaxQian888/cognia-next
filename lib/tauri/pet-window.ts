@@ -11,6 +11,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
+import { OVERLAY_CHROME_H } from "@/lib/pet/overlay-geometry"
 import type { PetPositionSpace } from "@/types/pet"
 import { safeUnlisten } from "./safe-unlisten"
 
@@ -38,7 +39,7 @@ export interface PetWindowOpts {
 export async function openPetWindow(opts: PetWindowOpts): Promise<boolean> {
   if (!isTauri()) return false
   try {
-    await invoke("open_pet_window", { opts })
+    await invoke("open_pet_window", { opts: { ...opts, topInset: OVERLAY_CHROME_H } })
     return true
   } catch (err) {
     console.warn("openPetWindow failed", err)
@@ -103,7 +104,7 @@ export async function setPetWindowPosition(x: number, y: number): Promise<boolea
 export async function setPetWindowSize(width: number, height: number): Promise<boolean> {
   if (!isTauri()) return false
   try {
-    await invoke("pet_window_set_size", { width, height })
+    await invoke("pet_window_set_size", { width, height, topInset: OVERLAY_CHROME_H })
     return true
   } catch (err) {
     console.warn("setPetWindowSize failed", err)
@@ -153,7 +154,9 @@ export interface PetWorkArea {
 export async function getPetWorkArea(): Promise<PetWorkArea | null> {
   if (!isTauri()) return null
   try {
-    return await invoke<PetWorkArea | null>("pet_window_get_work_area")
+    return await invoke<PetWorkArea | null>("pet_window_get_work_area", {
+      topInset: OVERLAY_CHROME_H,
+    })
   } catch (err) {
     console.warn("getPetWorkArea failed", err)
     return null

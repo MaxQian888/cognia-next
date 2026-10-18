@@ -267,7 +267,14 @@ describe("pet overlay routes", () => {
   it.each([runBootScript, () => eval(BOOT_SCRIPT)])(
     "marks the sprite and popup routes transparent before any React runs, with no mirror (%#)",
     (run) => {
-      for (const path of ["/pet-overlay", "/pet-overlay/", "/pet-popup", "/pet-popup/index.html"]) {
+      for (const path of [
+        "/pet-overlay",
+        "/pet-overlay/",
+        "/pet-overlay.html",
+        "/pet-popup",
+        "/pet-popup.html",
+        "/pet-popup/index.html",
+      ]) {
         document.documentElement.removeAttribute("data-pet-overlay")
         navigate(path)
         run()

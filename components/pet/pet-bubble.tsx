@@ -33,8 +33,8 @@ export function PetBubbleView({
       data-pet-bubble
       data-bubble-origin={bubble.origin}
       className={cn(
-        "pointer-events-none max-w-[12rem] rounded-2xl border bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-md",
-        "after:absolute after:-bottom-1 after:left-6 after:size-2 after:rotate-45 after:border-b after:border-r after:bg-popover",
+        "pointer-events-none min-w-0 max-w-[12rem] rounded-2xl border bg-popover px-3 py-1.5 text-xs break-words text-popover-foreground shadow-md",
+        "after:absolute after:-bottom-1 after:left-6 after:size-2 after:rotate-45 after:border-r after:border-b after:border-inherit after:bg-popover",
         "relative",
         className
       )}

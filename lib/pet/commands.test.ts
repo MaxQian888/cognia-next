@@ -126,7 +126,19 @@ describe("toggleDesktopPetWindow", () => {
     settingsValue = {}
     isPetWindowOpen.mockResolvedValue(false)
     await toggleDesktopPetWindow()
-    expect(openPetWindow).toHaveBeenCalled()
+    expect(openPetWindow).toHaveBeenCalledWith(expect.objectContaining({ clickThrough: true }))
+  })
+
+  it("keeps an explicitly saved click-through opt-out when opening", async () => {
+    settingsValue = {
+      petSettings: {
+        enabled: true,
+        desktopPet: { enabled: false, clickThrough: false, size: 128, position: null },
+      },
+    }
+    isPetWindowOpen.mockResolvedValue(false)
+    await toggleDesktopPetWindow()
+    expect(openPetWindow).toHaveBeenCalledWith(expect.objectContaining({ clickThrough: false }))
   })
 
   it("closing hides the window but never switches the pet off", async () => {

@@ -10,6 +10,9 @@ import {
 } from "@/lib/boot/boot-progress"
 
 const mockNetwork = { connected: true, connectionType: "wifi" as const }
+let mockPathname = "/"
+
+jest.mock("next/navigation", () => ({ usePathname: () => mockPathname }))
 
 jest.mock("@/hooks/use-network-status", () => ({
   useNetworkStatus: () => ({ loading: false, status: mockNetwork }),
@@ -66,6 +69,7 @@ describe("GlobalLoading", () => {
   beforeEach(() => {
     jest.useFakeTimers()
     mockNetwork.connected = true
+    mockPathname = "/"
     __resetBootProgressForTesting()
   })
 
@@ -91,6 +95,16 @@ describe("GlobalLoading", () => {
     expect(screen.getByText("Step 1 of 1")).toBeInTheDocument()
     expect(screen.queryByText("Unlocking your account")).not.toBeInTheDocument()
   })
+
+  it.each(["/pet-overlay", "/pet-popup", "/pet-overlay.html", "/pet-popup/"])(
+    "keeps the route fallback empty in %s",
+    async (pathname) => {
+      mockPathname = pathname
+      const { container } = render(await GlobalLoading())
+      expect(container).toBeEmptyDOMElement()
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
+    }
+  )
 
   it("continues the cold-boot timeline when it is the last step of a boot", async () => {
     const now = Date.now()
