@@ -252,3 +252,11 @@ describe("BrandIcon", () => {
     })
   })
 })
+
+it("resolves the MiniMax Code runtime alias to the MiniMax brand", () => {
+  render(<BrandIcon id="minimax-code" label="MiniMax Code" decorative={false} />)
+  expect(screen.getByRole("img", { name: "MiniMax Code" })).toHaveAttribute(
+    "src",
+    "/icons/lobe/minimax-color.svg"
+  )
+})

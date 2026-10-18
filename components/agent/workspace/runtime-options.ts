@@ -26,6 +26,7 @@ export const RUNTIME_LABEL_KEYS: Record<TeammateRuntime, string> = {
   "claude-code": "claudeCode",
   "gemini-cli": "geminiCli",
   kimi: "kimi",
+  "minimax-code": "minimaxCode",
   cline: "cline",
   qoder: "qoder",
   goose: "goose",

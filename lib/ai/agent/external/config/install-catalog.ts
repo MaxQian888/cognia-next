@@ -85,7 +85,7 @@ export function findRuntimeForConfig(
   const command = config.process?.command
   if (!command) return undefined
 
-  const base = baseCommandName(command)
+  const base = baseCommandName(command.split(/[\\/]/).at(-1) ?? command)
   const legacy = EXTERNAL_AGENT_RUNTIMES.filter(
     (entry) =>
       entry.protocol === config.protocol &&

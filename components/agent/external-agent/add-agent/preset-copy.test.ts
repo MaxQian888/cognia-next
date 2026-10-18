@@ -30,6 +30,7 @@ function preset(overrides: Partial<ExternalAgentPresetConfig> = {}): ExternalAge
 
 describe("presetSetupHint", () => {
   it.each([
+    ["minimax-code", "minimaxCodeSetupHint"],
     ["devin", "devinSetupHint"],
     ["aider", "aiderSetupHint"],
     ["qoder", "qoderSetupHint"],
@@ -63,6 +64,7 @@ describe("presetSetupHint", () => {
 
 describe("presetEnvVarHint", () => {
   it.each([
+    ["minimax-code", "minimaxCodeEnvVarHint"],
     ["aider", "aiderEnvVarHint"],
     ["qoder", "qoderEnvVarHint"],
     ["kimi", "kimiEnvVarHint"],
@@ -107,6 +109,7 @@ describe("presetEnvironmentLabel", () => {
 describe("presetDescription", () => {
   it.each([
     ["opencode-v2-service", "opencodeV2PresetDescription"],
+    ["minimax-code", "minimaxCodePresetDescription"],
     ["devin", "devinPresetDescription"],
     ["aider", "aiderPresetDescription"],
     ["qoder", "qoderPresetDescription"],
@@ -141,7 +144,16 @@ describe("catalogue keys exist", () => {
   const en = enMessages as unknown as Bundle
   const zh = zhMessages as unknown as Bundle
 
-  const ids = ["devin", "aider", "qoder", "kimi", "cline", "goose", "opencode-v2-service"]
+  const ids = [
+    "minimax-code",
+    "devin",
+    "aider",
+    "qoder",
+    "kimi",
+    "cline",
+    "goose",
+    "opencode-v2-service",
+  ]
 
   it.each([
     ["en", en],

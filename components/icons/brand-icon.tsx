@@ -163,6 +163,7 @@ const BRAND_ALIASES: Record<string, BrandAsset> = {
   lmstudio: assets.lmStudio,
   "lm-studio": assets.lmStudio,
   minimax: assets.minimax,
+  "minimax-code": assets.minimax,
   manus: assets.manus,
   microsoft: assets.microsoft,
   "mistral-ocr": assets.mistral,

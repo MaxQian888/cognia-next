@@ -87,8 +87,8 @@ import {
   type SessionListOptions,
 } from "./protocol-adapter"
 import { acpClientExtension } from "@cognia/agent-acp/client"
-import { devinAcpExtension } from "@cognia/agent-acp/devin-adapter"
-import { createAcpAdapterFactory, isolateNativeDevin } from "./integrations/acp"
+import { isolatedAcpExtension } from "@cognia/agent-acp/isolated-adapter"
+import { createAcpAdapterFactory, isolateNativeAcp } from "./integrations/acp"
 import { createAiderCliAdapterFactory } from "./integrations/aider"
 import { createCodexAppServerAdapterFactory } from "./integrations/codex"
 import {
@@ -396,7 +396,7 @@ export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistr
 export function createConfiguredProtocolAdapter(
   config: ExternalAgentConfig
 ): ProtocolAdapter | undefined {
-  return isolateNativeDevin(config, protocolAdapterRegistry.create(config.protocol))
+  return isolateNativeAcp(config, protocolAdapterRegistry.create(config.protocol))
 }
 
 function placementWithToolHostLeases(
@@ -953,7 +953,7 @@ export class ExternalAgentManager {
     const adapter = this.adapters.get(agentId)
     if (!instance || !adapter) {
       for (const [parentId, candidate] of this.adapters) {
-        const devin = devinAcpExtension.resolve(candidate)
+        const devin = isolatedAcpExtension.resolve(candidate)
         if (!devin) continue
         const retired = await devin.handleProcessExit(agentId)
         if (!retired) continue
@@ -3544,7 +3544,7 @@ export class ExternalAgentManager {
         : undefined
     const sessionOptions = this.buildSessionOptions(instance, options)
 
-    const devin = devinAcpExtension.resolve(adapter)
+    const devin = isolatedAcpExtension.resolve(adapter)
     let session = preferredSessionId
       ? devin
         ? devin.getSession(preferredSessionId)
@@ -5628,7 +5628,7 @@ export class ExternalAgentManager {
       let attemptedReconnect = false
       try {
         const healthy = await adapter.healthCheck()
-        const devin = devinAcpExtension.resolve(adapter)
+        const devin = isolatedAcpExtension.resolve(adapter)
         if (devin) {
           for (const sessionId of instance.sessions.keys()) {
             if (!devin.getSession(sessionId)) instance.sessions.delete(sessionId)

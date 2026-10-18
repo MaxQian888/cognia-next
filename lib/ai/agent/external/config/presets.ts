@@ -36,6 +36,7 @@ export type ExternalAgentPresetId =
   | "pi-rpc"
   | "droid"
   | "devin"
+  | "minimax-code"
   | "kimi"
   | "cline"
   | "qoder"
@@ -293,6 +294,7 @@ export const EXTERNAL_AGENT_PRESETS: Record<
   "pi-rpc": buildPresetConfig("pi-rpc"),
   droid: buildPresetConfig("droid"),
   devin: buildPresetConfig("devin"),
+  "minimax-code": buildPresetConfig("minimax-code"),
   kimi: {
     ...buildPresetConfig("kimi"),
     metadata: { acpPreviewFeatures: { sessionFork: true } },

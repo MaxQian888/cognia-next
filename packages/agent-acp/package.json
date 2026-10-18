@@ -2,7 +2,7 @@
   "name": "@cognia/agent-acp",
   "version": "0.0.0",
   "private": true,
-  "description": "ACP integration for Cognia agents (ADR-0217): the Agent Client Protocol client over host-provided process, file, terminal, fetch and WebSocket ports, its wire codec, feature profile, permission-input derivation, ACP Registry v1 client, the per-conversation Devin adapter, manifest and execution semantics.",
+  "description": "ACP integration for Cognia agents (ADR-0217): the Agent Client Protocol client over host-provided process, file, terminal, fetch and WebSocket ports, its wire codec, feature profile, permission-input derivation, ACP Registry v1 client, per-conversation Devin and MiniMax adapters, manifest and execution semantics.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "main": "./dist/index.cjs",

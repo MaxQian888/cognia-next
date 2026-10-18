@@ -136,3 +136,11 @@ it("keeps every row's arrays free of duplicates", () => {
     expect(new Set(entry.vendorRootKeys).size).toBe(entry.vendorRootKeys.length)
   }
 })
+
+it("links MiniMax ACP without claiming its extensions or a portable history importer", () => {
+  expect(findEcosystemByRuntimeId("minimax-code")).toMatchObject({
+    id: "minimax-code",
+    sessionSourceIds: [],
+    pluginEcosystem: null,
+  })
+})

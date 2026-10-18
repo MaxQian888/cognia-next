@@ -10,6 +10,8 @@
  */
 export * from "./client"
 export * from "./devin-adapter"
+export * from "./isolated-adapter"
+export * from "./minimax-adapter"
 export * from "./devin-model-axis"
 export * from "./feature-profile"
 export * from "./manifest"

@@ -38,13 +38,16 @@ export const ACP_REMOTE_EXECUTION_SEMANTICS: AgentExecutionSemantics = Object.fr
 }) as AgentExecutionSemantics
 
 /**
- * Devin over stdio: native MCP configuration is read once per process, so each
- * conversation owns its own ACP process (`DevinAcpAdapter`).
+ * Process-scoped ACP state requires one process per conversation: Devin reads
+ * MCP configuration once at launch; MiniMax shares native permissions.
  */
-export const DEVIN_ACP_EXECUTION_SEMANTICS: AgentExecutionSemantics = Object.freeze({
+export const ISOLATED_ACP_EXECUTION_SEMANTICS: AgentExecutionSemantics = Object.freeze({
   ...ACP_EXECUTION_SEMANTICS,
   processModel: "per-session",
 }) as AgentExecutionSemantics
+
+export const DEVIN_ACP_EXECUTION_SEMANTICS = ISOLATED_ACP_EXECUTION_SEMANTICS
+export const MINIMAX_ACP_EXECUTION_SEMANTICS = ISOLATED_ACP_EXECUTION_SEMANTICS
 
 /** The Devin preset id; a hand-pointed `devin` binary runs the same adapter. */
 export const DEVIN_PRESET_ID = "devin"
@@ -52,7 +55,10 @@ export const DEVIN_PRESET_ID = "devin"
 export const acpProtocolIntegration: AgentProtocolIntegration = Object.freeze({
   protocol: ACP_PROTOCOL,
   semantics: ACP_EXECUTION_SEMANTICS,
-  presetSemantics: Object.freeze({ [DEVIN_PRESET_ID]: DEVIN_ACP_EXECUTION_SEMANTICS }),
+  presetSemantics: Object.freeze({
+    [DEVIN_PRESET_ID]: DEVIN_ACP_EXECUTION_SEMANTICS,
+    "minimax-code": MINIMAX_ACP_EXECUTION_SEMANTICS,
+  }),
 }) as AgentProtocolIntegration
 
 /**

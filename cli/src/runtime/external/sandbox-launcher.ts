@@ -240,6 +240,7 @@ export function buildSandboxLauncherArgs(
   qoderConfigRoot(config, homedir)
   clineConfigRoot(config, homedir)
   kimiConfigRoot(config, homedir)
+  minimaxConfigRoot(config, homedir)
   const taskHome = config.env?.COGNIA_GATEWAY_TASK_HOME
   const botIsolation = config.env?.COGNIA_BOT_ISOLATION === "1"
   const botState = config.env?.COGNIA_BOT_STATE_DIR
@@ -316,6 +317,7 @@ export function buildSandboxLauncherArgs(
             // Kimi Code (and its archived Python CLI), Copilot CLI, Goose and
             // Aider keep logins and provider settings here; a task uses its own.
             ".kimi-code",
+            ".minimax",
             ".kimi",
             ".copilot",
             ".config/goose",
@@ -482,24 +484,47 @@ export function kimiConfigRoot(
 ): string | undefined {
   if (config.command !== "kimi") return undefined
   const selected = config.env?.KIMI_CODE_HOME ?? process.env.KIMI_CODE_HOME
+  return nativeStateRoot(config, homedir, selected, ".kimi-code", "Kimi")
+}
+
+/** MiniMax resolves its first nonempty directory alias before ~/.minimax. */
+export function minimaxConfigRoot(
+  config: NodeExternalAgentSpawnConfig,
+  homedir: string
+): string | undefined {
+  if (config.command !== "mcode") return undefined
+  const selected = ["MINIMAX_DATA_DIR", "MAVIS_DATA_DIR"]
+    .map((key) => config.env?.[key] ?? process.env[key])
+    .find((value) => value !== undefined && value.trim().length > 0)
+  return nativeStateRoot(config, homedir, selected, ".minimax", "MiniMax")
+}
+
+function nativeStateRoot(
+  config: NodeExternalAgentSpawnConfig,
+  homedir: string,
+  selected: string | undefined,
+  defaultDirectory: string,
+  label: string
+): string {
   if (selected !== undefined && !selected.trim())
-    throw new Error("Kimi state directory must not be empty")
+    throw new Error(`${label} state directory must not be empty`)
   const bot = config.env?.COGNIA_BOT_ISOLATION === "1"
   const home = bot
     ? config.env?.COGNIA_BOT_STATE_DIR
     : (config.env?.COGNIA_GATEWAY_TASK_HOME ?? homedir)
-  if (!home || !path.isAbsolute(home)) throw new Error("Kimi requires an absolute state directory")
+  if (!home || !path.isAbsolute(home))
+    throw new Error(`${label} requires an absolute state directory`)
   // Preserve whitespace in nonempty native paths; upstream does not trim these.
   const root =
     selected !== undefined
       ? path.resolve(config.cwd ?? homedir, selected)
-      : path.join(home, ".kimi-code")
+      : path.join(home, defaultDirectory)
   const relative = path.relative(home, root)
   if (
     bot &&
     (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
   )
-    throw new Error("Kimi state directory must stay inside the Bot state directory")
+    throw new Error(`${label} state directory must stay inside the Bot state directory`)
   if (bot) {
     const existingPath = (candidate: string): string => {
       const missing: string[] = []
@@ -519,7 +544,7 @@ export function kimiConfigRoot(
       physicalRelative.startsWith(`..${path.sep}`) ||
       path.isAbsolute(physicalRelative)
     )
-      throw new Error("Kimi state directory must stay inside the Bot state directory")
+      throw new Error(`${label} state directory must stay inside the Bot state directory`)
   }
   return root
 }
@@ -539,6 +564,8 @@ function agentStateWritableRoots(
   homedir: string,
   isolation: StateIsolationPlan | null = null
 ): string[] {
+  const minimaxRoot = minimaxConfigRoot(config, homedir)
+  if (minimaxRoot) return [minimaxRoot]
   const kimiRoot = kimiConfigRoot(config, homedir)
   if (kimiRoot) return [kimiRoot]
   const clineRoot = clineConfigRoot(config, homedir)
@@ -626,6 +653,18 @@ export async function resolveSandboxedExternalAgentLaunch(
   // Goose's platform extensions create temporary files during session/new.
   // macOS's ambient /var/folders temp root is outside the sandbox write scope.
   let env: Record<string, string> | undefined
+  const minimaxRoot = minimaxConfigRoot(config, runtime.homedir)
+  if (minimaxRoot) {
+    const temp = path.join(minimaxRoot, "tmp")
+    runtime.ensureDir?.(temp)
+    env = {
+      MINIMAX_DATA_DIR: minimaxRoot,
+      MAVIS_DATA_DIR: minimaxRoot,
+      TMPDIR: temp,
+      TMP: temp,
+      TEMP: temp,
+    }
+  }
   const kimiRoot = kimiConfigRoot(config, runtime.homedir)
   if (kimiRoot) {
     env = {

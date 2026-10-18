@@ -51,6 +51,7 @@ pub enum SandboxError {
     InvalidPolicy(String),
     InvalidClineConfigDir,
     InvalidKimiConfigDir,
+    InvalidMiniMaxConfigDir,
     /// The configuration asked for a private state root
     /// ([`crate::state_isolation`]) and it could not be provided. Refusing is
     /// the only safe answer: launching anyway would hand the agent the user's
@@ -90,6 +91,7 @@ impl std::fmt::Display for SandboxError {
             ),
             Self::InvalidPolicy(reason) => write!(f, "Invalid external-agent sandbox policy: {reason}"),
             Self::InvalidClineConfigDir => write!(f, "Cline ACP requires a nonempty --config or CLINE_DIR inside the Bot state directory when isolated; --data-dir is unsupported in ACP."),
+            Self::InvalidMiniMaxConfigDir => write!(f, "MiniMax state directory must stay inside the Bot state directory when isolated."),
             Self::InvalidKimiConfigDir => write!(f, "Kimi state directory must be nonempty and stay inside the Bot state directory when isolated."),
             Self::InvalidQoderConfigDir => write!(f, "Qoder config directory must be nonempty and stay inside the Bot state directory when isolated."),
             Self::MissingHome => write!(
@@ -177,6 +179,9 @@ pub fn agent_state_writable_roots(command: &str, args: &[String], home: &Path) -
     // `--session-id` resume silently starts fresh.
     if base == "pi" {
         roots.push(home.join(".pi"));
+    }
+    if base == "mcode" {
+        roots.push(home.join(".minimax"));
     }
     if base == "kimi" {
         roots.push(home.join(".kimi-code"));
@@ -945,21 +950,63 @@ fn kimi_config_root(
         .get("KIMI_CODE_HOME")
         .cloned()
         .or_else(|| std::env::var("KIMI_CODE_HOME").ok());
+    native_state_root(
+        config,
+        home,
+        selected,
+        ".kimi-code",
+        SandboxError::InvalidKimiConfigDir,
+    )
+}
+
+fn minimax_config_root(
+    config: &ExternalAgentSpawnConfig,
+    home: &Path,
+) -> Result<Option<PathBuf>, SandboxError> {
+    if base_command(&config.command) != "mcode" {
+        return Ok(None);
+    }
+    let selected = ["MINIMAX_DATA_DIR", "MAVIS_DATA_DIR"]
+        .iter()
+        .filter_map(|key| {
+            config
+                .env
+                .get(*key)
+                .cloned()
+                .or_else(|| std::env::var(key).ok())
+        })
+        .find(|value| !value.trim().is_empty());
+    native_state_root(
+        config,
+        home,
+        selected,
+        ".minimax",
+        SandboxError::InvalidMiniMaxConfigDir,
+    )
+}
+
+fn native_state_root(
+    config: &ExternalAgentSpawnConfig,
+    home: &Path,
+    selected: Option<String>,
+    default_directory: &str,
+    invalid: SandboxError,
+) -> Result<Option<PathBuf>, SandboxError> {
     let bot = config.env.get("COGNIA_BOT_ISOLATION").map(String::as_str) == Some("1");
     let base = if bot {
         config
             .env
             .get("COGNIA_BOT_STATE_DIR")
             .map(PathBuf::from)
-            .ok_or(SandboxError::InvalidKimiConfigDir)?
+            .ok_or(invalid.clone())?
     } else {
         home.to_path_buf()
     };
     if !base.is_absolute() {
-        return Err(SandboxError::InvalidKimiConfigDir);
+        return Err(invalid.clone());
     }
     let root = match selected {
-        Some(value) if value.trim().is_empty() => return Err(SandboxError::InvalidKimiConfigDir),
+        Some(value) if value.trim().is_empty() => return Err(invalid.clone()),
         Some(value) => {
             let path = PathBuf::from(value);
             if path.is_absolute() {
@@ -968,7 +1015,7 @@ fn kimi_config_root(
                 Path::new(config.cwd.as_deref().ok_or(SandboxError::MissingCwd)?).join(path)
             }
         }
-        None => base.join(".kimi-code"),
+        None => base.join(default_directory),
     };
     let mut normalized = PathBuf::new();
     for component in root.components() {
@@ -983,15 +1030,15 @@ fn kimi_config_root(
         }
     }
     if bot && !normalized.starts_with(&base) {
-        return Err(SandboxError::InvalidKimiConfigDir);
+        return Err(invalid.clone());
     }
     if bot {
         let physical_base = cognia_exec_sandbox::paths::safe_canonicalize(&base)
-            .map_err(|_| SandboxError::InvalidKimiConfigDir)?;
+            .map_err(|_| invalid.clone())?;
         let physical_root = cognia_exec_sandbox::paths::safe_canonicalize(&normalized)
-            .map_err(|_| SandboxError::InvalidKimiConfigDir)?;
+            .map_err(|_| invalid.clone())?;
         if !physical_root.starts_with(&physical_base) {
-            return Err(SandboxError::InvalidKimiConfigDir);
+            return Err(invalid.clone());
         }
     }
     Ok(Some(normalized))
@@ -1085,6 +1132,7 @@ pub fn wrap_with_sandbox(
     )
     .map_err(SandboxError::StateIsolation)?;
 
+    let minimax_root = minimax_config_root(&config, &home)?;
     let kimi_root = kimi_config_root(&config, &home)?;
     let cline_root = cline_config_root(&config, &home)?;
     let qoder_root = qoder_config_root(&config, &home)?;
@@ -1093,6 +1141,7 @@ pub fn wrap_with_sandbox(
         .clone()
         .or_else(|| qoder_root.clone())
         .or_else(|| kimi_root.clone())
+        .or_else(|| minimax_root.clone())
         .map(|root| vec![root])
         .unwrap_or_else(|| agent_state_writable_roots(&config.command, &config.args, &home))
     {
@@ -1212,6 +1261,7 @@ pub fn wrap_with_sandbox(
             // Kimi Code (and its archived Python CLI), Copilot CLI, Goose and
             // Aider keep logins and provider settings here; a task uses its own.
             ".kimi-code",
+            ".minimax",
             ".kimi",
             ".copilot",
             ".config/goose",
@@ -1307,6 +1357,24 @@ pub fn wrap_with_sandbox(
                 cognia_exec_sandbox::net_proxy::UPSTREAM_POLICY_ENV.into(),
                 path.to_string_lossy().into_owned(),
             );
+        }
+    }
+    if let Some(root) = minimax_root {
+        drop_writable(&mut args, &home.join(".minimax"));
+        host.ensure_dir(&root);
+        if !bot_isolation {
+            args.splice(
+                0..0,
+                ["--writable".into(), root.to_string_lossy().into_owned()],
+            );
+        }
+        let temp = root.join("tmp");
+        host.ensure_dir(&temp);
+        for key in ["MINIMAX_DATA_DIR", "MAVIS_DATA_DIR"] {
+            env.insert(key.into(), root.to_string_lossy().into_owned());
+        }
+        for key in ["TMPDIR", "TMP", "TEMP"] {
+            env.insert(key.into(), temp.to_string_lossy().into_owned());
         }
     }
     if let Some(root) = &kimi_root {
@@ -1785,6 +1853,41 @@ mod tests {
     }
 
     #[test]
+    fn minimax_scopes_directory_aliases_and_image_temp() {
+        let host = FakeHost::new("macos");
+        for (selected, fallback, expected) in [
+            ("", "", "/home/dev/.minimax"),
+            ("/owned/minimax", "/ignored", "/owned/minimax"),
+            ("", "state/../minimax", "/work/minimax"),
+        ] {
+            let mut input = config("mcode", &["acp"], Some("/work"));
+            input.env.insert("MINIMAX_DATA_DIR".into(), selected.into());
+            input.env.insert("MAVIS_DATA_DIR".into(), fallback.into());
+            let wrapped = wrap_with_sandbox(input, &host).unwrap();
+            assert_eq!(wrapped.env["MINIMAX_DATA_DIR"], expected);
+            assert_eq!(wrapped.env["MAVIS_DATA_DIR"], expected);
+            assert_eq!(wrapped.env["TMPDIR"], format!("{expected}/tmp"));
+            assert!(wrapped
+                .args
+                .windows(2)
+                .any(|pair| pair == ["--writable", expected]));
+            if expected != "/home/dev/.minimax" {
+                assert!(!wrapped.args.iter().any(|arg| arg == "/home/dev/.minimax"));
+            }
+        }
+        let mut input = config("mcode", &["acp"], Some("/work"));
+        input.env = HashMap::from([
+            ("COGNIA_BOT_ISOLATION".into(), "1".into()),
+            ("COGNIA_BOT_STATE_DIR".into(), "/owned".into()),
+            ("MINIMAX_DATA_DIR".into(), "/outside".into()),
+        ]);
+        assert!(matches!(
+            wrap_with_sandbox(input, &host),
+            Err(SandboxError::InvalidMiniMaxConfigDir)
+        ));
+    }
+
+    #[test]
     fn kimi_scopes_native_state_temp_and_update_lifecycle() {
         let host = FakeHost::new("macos");
         for (selected, expected) in [
@@ -1978,6 +2081,11 @@ mod tests {
 
     #[test]
     fn devin_gets_its_config_sessions_and_cache_without_matching_other_commands() {
+        assert_eq!(
+            agent_state_writable_roots("mcode", &["acp".into()], Path::new("/home/dev")),
+            vec![PathBuf::from("/home/dev/.minimax")]
+        );
+        assert!(agent_state_writable_roots("not-mcode", &[], Path::new("/home/dev")).is_empty());
         assert_eq!(
             agent_state_writable_roots("devin", &["acp".into()], Path::new("/home/dev")),
             vec![

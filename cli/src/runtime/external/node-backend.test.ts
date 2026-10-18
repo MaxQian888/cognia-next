@@ -1146,3 +1146,19 @@ describe("sandbox policy host ceiling", () => {
     )
   })
 })
+
+it("passes reviewed MiniMax directory aliases and BYOK without opening arbitrary MCODE env", () => {
+  const env = buildExternalAgentChildEnv(
+    { NODE_ENV: "test" },
+    {
+      MINIMAX_DATA_DIR: "/owned/minimax",
+      MAVIS_DATA_DIR: "/owned/fallback",
+      MCODE_PROVIDER_API_KEY: "synthetic",
+      MCODE_BIN_PATH: "/untrusted",
+    }
+  )
+  expect(env.MINIMAX_DATA_DIR).toBe("/owned/minimax")
+  expect(env.MAVIS_DATA_DIR).toBe("/owned/fallback")
+  expect(env.MCODE_PROVIDER_API_KEY).toBe("synthetic")
+  expect(env.MCODE_BIN_PATH).toBeUndefined()
+})

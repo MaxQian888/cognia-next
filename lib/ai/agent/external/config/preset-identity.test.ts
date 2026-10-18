@@ -37,3 +37,12 @@ describe("isDevinAgentConfig", () => {
     expect(isDevinAgentConfig(undefined)).toBe(false)
   })
 })
+
+import { isMiniMaxAgentConfig } from "./preset-identity"
+it("recognises MiniMax by preset or exact executable without matching suffixes", () => {
+  for (const command of ["mcode", "/opt/bin/mcode", "C:\\tools\\mcode.exe"])
+    expect(isMiniMaxAgentConfig({ process: { command } })).toBe(true)
+  expect(isMiniMaxAgentConfig({ metadata: { preset: "minimax-code" } })).toBe(true)
+  expect(isMiniMaxAgentConfig({ process: { command: "not-mcode" } })).toBe(false)
+  expect(isMiniMaxAgentConfig(undefined)).toBe(false)
+})

@@ -17,6 +17,7 @@ import type {
   ExternalAgentConfig,
 } from "@cognia/agent-contracts/external-agent"
 import { AcpClientAdapter, acpClientExtension, type AcpClientDeps } from "@cognia/agent-acp/client"
+import { MiniMaxAcpAdapter } from "@cognia/agent-acp/minimax-adapter"
 import { DevinAcpAdapter } from "@cognia/agent-acp/devin-adapter"
 import { loggers } from "@cognia/logging"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
@@ -25,7 +26,7 @@ import { createPlatformWebSocket } from "@/lib/network/platform-websocket"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { getAcpHostCapabilities } from "../agent-transport"
 import { buildAgentEnv } from "../config/env-builder"
-import { isDevinAgentConfig } from "../config/preset-identity"
+import { isDevinAgentConfig, isMiniMaxAgentConfig } from "../config/preset-identity"
 import { createAgentLogger } from "../host/agent-logger"
 import { createAgentTransportFileHost } from "../host/file-host"
 import { createAgentTransportProcessHost } from "../host/process-host"
@@ -103,4 +104,23 @@ export function isolateNativeDevin(
     acp?.constructor === AcpClientAdapter
     ? createDevinAcpAdapter(acp)
     : adapter
+}
+
+/** Isolate process-wide ACP authority without replacing plugin-owned factories. */
+export function isolateNativeAcp(
+  config: ExternalAgentConfig,
+  adapter: ProtocolAdapter | undefined
+): ProtocolAdapter | undefined {
+  const acp = adapter ? acpClientExtension.resolve(adapter) : undefined
+  if (
+    config.transport === "stdio" &&
+    isMiniMaxAgentConfig(config) &&
+    acp?.constructor === AcpClientAdapter
+  )
+    return new MiniMaxAcpAdapter(
+      acp,
+      () => createAcpClientAdapter(),
+      createAgentLogger(loggers.agent)
+    )
+  return isolateNativeDevin(config, adapter)
 }

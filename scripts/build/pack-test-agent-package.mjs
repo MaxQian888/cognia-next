@@ -276,6 +276,8 @@ const SPECS = {
       "./manifest",
       "./client",
       "./devin-adapter",
+      "./isolated-adapter",
+      "./minimax-adapter",
       "./devin-model-axis",
       "./registry",
       "./wire-codec",
@@ -284,8 +286,9 @@ const SPECS = {
       "./vendor-profile",
       "./vendor-profiles",
       "./vendors/kimi",
+      "./vendors/minimax",
     ],
-    dataOnly: ["./manifest", "./vendor-profile", "./vendor-profiles", "./vendors/kimi"],
+    dataOnly: ["./manifest", "./vendor-profile", "./vendor-profiles", "./vendors/kimi", "./vendors/minimax"],
     runtimeModules: ["client", "base-adapter", "json-rpc-peer", "prompt-gate", "sse"],
     smoke: `
       import { ACP_EXECUTION_SEMANTICS, DEVIN_ACP_EXECUTION_SEMANTICS } from "@cognia/agent-acp/manifest"
@@ -314,6 +317,10 @@ const SPECS = {
       if (!refused) throw new Error("connect must refuse without a process host")
       const devin = new DevinAcpAdapter(adapter, () => new AcpClientAdapter(deps))
       if (devin.semantics !== DEVIN_ACP_EXECUTION_SEMANTICS) throw new Error("devin semantics")
+      const { MiniMaxAcpAdapter } = await import("@cognia/agent-acp/minimax-adapter")
+      const minimax = new MiniMaxAcpAdapter(adapter, () => new AcpClientAdapter(deps))
+      if (minimax.semantics.processModel !== "per-session") throw new Error("minimax semantics")
+      if (minimax.capabilities.permissionModes.includes("dontAsk")) throw new Error("unsupported permission")
       const catalog = { version: "1.0.0", agents: [] }
       const fetched = await fetchAcpRegistry({ fetcher: async () => new Response(JSON.stringify(catalog), { status: 200 }) })
       if (fetched.version !== "1.0.0") throw new Error("registry")

@@ -79,6 +79,7 @@ const BINARY_ALLOWLIST: &[&str] = &[
     "cline",
     "qoder",
     "kimi",
+    "mcode",
     "goose",
     "aider",
     // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119).
@@ -102,6 +103,11 @@ const NPX_PACKAGE_ALLOWLIST: &[&str] = &[
 
 /// Exact env keys always allowed through.
 const ENV_KEY_ALLOWLIST: &[&str] = &[
+    "MINIMAX_DATA_DIR",
+    "MAVIS_DATA_DIR",
+    "MCODE_PROVIDER_API_KEY",
+    "MCODE_LLM_FIRST_EVENT_TIMEOUT_MS",
+    "MCODE_LLM_STREAM_IDLE_TIMEOUT_MS",
     "COGNIA_PORT",
     "COGNIA_PORT_COUNT",
     "PORT",
@@ -1441,6 +1447,7 @@ mod tests {
 
     #[test]
     fn installed_acp_defaults_are_allowlisted() {
+        assert!(BINARY_ALLOWLIST.contains(&"mcode"));
         let (_tmp, p) = policy(false);
         for command in ["codex-acp", "gemini", "qwen"] {
             assert!(p.validate(config(command, &["--acp"])).is_ok());
@@ -1680,6 +1687,14 @@ mod tests {
 
     #[test]
     fn env_is_default_deny_with_provider_allowlist() {
+        let (minimax, dropped) = filter_env(HashMap::from([
+            ("MINIMAX_DATA_DIR".into(), "/owned/minimax".into()),
+            ("MAVIS_DATA_DIR".into(), "/owned/fallback".into()),
+            ("MCODE_PROVIDER_API_KEY".into(), "synthetic".into()),
+            ("MCODE_BIN_PATH".into(), "/untrusted".into()),
+        ]));
+        assert_eq!(minimax.len(), 3);
+        assert!(dropped.contains(&"MCODE_BIN_PATH".into()));
         let (_tmp, p) = policy(false);
         let mut cfg = config("claude", &[]);
         cfg.env = HashMap::from([

@@ -561,3 +561,17 @@ it.each([
     })
   ).toBeUndefined()
 })
+
+it("discovers system MiniMax without offering an unpinned managed install", () => {
+  const runtime = findRuntimeById("minimax-code")
+  expect(runtime).toMatchObject({
+    ownership: "system",
+    systemCommand: "mcode",
+    launchArgs: ["acp"],
+    distributions: [],
+    platforms: ["darwin", "linux"],
+  })
+  expect(
+    findRuntimeForConfig({ protocol: "acp", process: { command: "/opt/bin/mcode", args: ["acp"] } })
+  ).toBe(runtime)
+})

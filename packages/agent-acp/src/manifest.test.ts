@@ -38,3 +38,9 @@ describe("ACP manifest", () => {
     expect(Object.isFrozen(acpProtocolIntegration)).toBe(true)
   })
 })
+
+it("declares MiniMax's conversation-owned process model", () => {
+  expect(semanticsForPreset(acpProtocolIntegration, "minimax-code").processModel).toBe(
+    "per-session"
+  )
+})

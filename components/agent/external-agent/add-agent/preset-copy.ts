@@ -16,6 +16,7 @@ import type { ExternalAgentEcosystemSupportTier } from "@/types/agent/external-a
 type Translate = (key: string) => string
 
 const SETUP_HINT_KEYS: Readonly<Record<string, string>> = {
+  "minimax-code": "minimaxCodeSetupHint",
   devin: "devinSetupHint",
   aider: "aiderSetupHint",
   qoder: "qoderSetupHint",
@@ -25,6 +26,7 @@ const SETUP_HINT_KEYS: Readonly<Record<string, string>> = {
 }
 
 const ENV_VAR_HINT_KEYS: Readonly<Record<string, string>> = {
+  "minimax-code": "minimaxCodeEnvVarHint",
   aider: "aiderEnvVarHint",
   qoder: "qoderEnvVarHint",
   kimi: "kimiEnvVarHint",
@@ -33,6 +35,7 @@ const ENV_VAR_HINT_KEYS: Readonly<Record<string, string>> = {
 }
 
 const DESCRIPTION_KEYS: Readonly<Record<string, string>> = {
+  "minimax-code": "minimaxCodePresetDescription",
   "opencode-v2-service": "opencodeV2PresetDescription",
   devin: "devinPresetDescription",
   aider: "aiderPresetDescription",

@@ -114,3 +114,25 @@ describe("ACP host wiring", () => {
     expect(isolateNativeDevin(devinConfig, undefined)).toBeUndefined()
   })
 })
+
+import { MiniMaxAcpAdapter } from "@cognia/agent-acp/minimax-adapter"
+import { isolatedAcpExtension } from "@cognia/agent-acp/isolated-adapter"
+import { isolateNativeAcp } from "./acp"
+it("isolates native MiniMax for both preset and manual configuration, preserving plugin adapters", () => {
+  const config = {
+    id: "mm",
+    protocol: "acp",
+    transport: "stdio",
+    process: { command: "/opt/bin/mcode", args: ["acp"] },
+  } as never
+  const client = createAcpClientAdapter()
+  const isolated = isolateNativeAcp(config, client)
+  expect(isolated).toBeInstanceOf(MiniMaxAcpAdapter)
+  expect(isolatedAcpExtension.resolve(isolated!)).toBe(isolated)
+  expect(isolated?.semantics?.processModel).toBe("per-session")
+  expect(isolateNativeAcp({ ...(config as object), transport: "http" } as never, client)).toBe(
+    client
+  )
+  const custom = { protocol: "acp" } as never
+  expect(isolateNativeAcp(config, custom)).toBe(custom)
+})

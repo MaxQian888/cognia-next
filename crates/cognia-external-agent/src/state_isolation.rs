@@ -98,6 +98,16 @@ pub const AGENT_STATE_ISOLATION_RULES: &[AgentStateIsolationRule] = &[
     },
     AgentStateIsolationRule {
         match_kind: IsolationMatch::Base,
+        values: &["mcode"],
+        env: &[
+            ("MINIMAX_DATA_DIR", "minimax"),
+            ("MAVIS_DATA_DIR", "minimax"),
+        ],
+        shared_roots: &[".minimax"],
+        deny_readable: &[".minimax"],
+    },
+    AgentStateIsolationRule {
+        match_kind: IsolationMatch::Base,
         values: &["kimi"],
         env: &[("KIMI_CODE_HOME", "kimi")],
         shared_roots: &[".kimi-code"],
@@ -612,6 +622,15 @@ mod tests {
 
     #[test]
     fn rules_resolve_like_the_typescript_accessor() {
+        let minimax = isolation_rule_for("mcode", &[]).unwrap();
+        assert_eq!(
+            minimax.env,
+            vec![
+                ("MINIMAX_DATA_DIR".into(), "minimax".into()),
+                ("MAVIS_DATA_DIR".into(), "minimax".into())
+            ]
+        );
+        assert_eq!(minimax.deny_readable, vec![".minimax".to_string()]);
         assert_eq!(
             env_keys("npx", &["-y", "@zed-industries/codex-acp"]),
             Some(vec!["CODEX_HOME".into()])

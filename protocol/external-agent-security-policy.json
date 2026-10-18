@@ -28,6 +28,7 @@
       "pi",
       "qoder",
       "kimi",
+      "mcode",
       "qwen"
     ],
     "manualOnly": {
@@ -56,6 +57,7 @@
         "values": ["cline"],
         "roots": [".cline"]
       },
+      { "match": "base", "values": ["mcode"], "roots": [".minimax"] },
       {
         "match": "base",
         "values": ["kimi"],
@@ -177,6 +179,13 @@
         },
         "sharedRoots": [".pi"],
         "denyReadable": [".pi"]
+      },
+      {
+        "match": "base",
+        "values": ["mcode"],
+        "env": { "MINIMAX_DATA_DIR": "minimax", "MAVIS_DATA_DIR": "minimax" },
+        "sharedRoots": [".minimax"],
+        "denyReadable": [".minimax"]
       },
       {
         "match": "base",

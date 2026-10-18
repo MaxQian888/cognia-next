@@ -49,6 +49,35 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
   string,
   ExternalAgentEcosystemAdapterDefinition
 > = {
+  "minimax-code": {
+    id: "minimax-code",
+    name: "MiniMax Code",
+    description: "MiniMax Code's native ACP agent with per-conversation process isolation",
+    docsUrl: "https://github.com/MiniMax-AI/minimax-code",
+    tags: ["coding", "minimax", "acp"],
+    surfaces: [
+      {
+        id: "acp-stdio",
+        presetId: "minimax-code",
+        name: "MiniMax Code",
+        description:
+          "Native MiniMax Code with streamed replies, images, tool approvals, MCP and persisted sessions. Each conversation owns a process.",
+        protocol: "acp",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "minimax", "acp"],
+        docsUrl: "https://github.com/MiniMax-AI/minimax-code",
+        setupHint:
+          "Install @minimax-ai/code@0.6.12 with Node.js 22.19+ (22.x), 24.2+ (24.x), 25 or 26, including optional dependencies and the MiniMax/SQLite install scripts. Run mcode login in the configuration's state directory. Cognia launches mcode acp and preserves the system installation and login when removing a configuration.",
+        envVarHint:
+          "MINIMAX_DATA_DIR selects state; MAVIS_DATA_DIR is its fallback. Default state is ~/.minimax. Native Default may preapprove edits and classified shell operations. Accept Edits, Don't ask and mandatory host approval rules are unavailable; native Auto is hidden.",
+        process: { command: "mcode", args: ["acp"] },
+        icon: "minimax",
+      },
+    ],
+  },
   kimi: {
     id: "kimi",
     name: "Kimi Code",

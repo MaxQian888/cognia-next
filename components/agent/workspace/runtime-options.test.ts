@@ -135,3 +135,8 @@ describe("withTeammateRuntime / withTeammateConfigPin", () => {
     expect(cleared).not.toHaveProperty("externalAgentConfigId")
   })
 })
+
+it("labels MiniMax in every teammate runtime picker", () => {
+  expect(RUNTIME_OPTIONS).toContain("minimax-code")
+  expect(runtimeLabelKey("minimax-code")).toBe("minimaxCode")
+})

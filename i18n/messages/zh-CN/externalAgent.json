@@ -176,7 +176,9 @@
   "manager": {
     "clineSetupHint": "安装 npm install -g cline@3.0.67，运行 cline auth 登录 Cline/ClinePass/ChatGPT，或在本地设置 CLINE_PROVIDER、CLINE_MODEL 和 CLINE_API_KEY。独立 ACP 状态请用 --config 或 CLINE_DIR；ACP 不支持 --data-dir。托管运行关闭自动更新。删除配置会保留系统安装与 Cline 数据。Cline 3.0.67 ACP 未转发图片和会话 MCP；原生 MCP 使用 cline mcp 配置。",
     "clineEnvVarHint": "使用已有 OAuth 登录，或配合 CLINE_PROVIDER、CLINE_MODEL 设置 CLINE_API_KEY。CLINE_DIR 可指定状态目录。固定 CLINE_PROVIDER 后不能在会话中切换服务商。",
+    "minimaxCodeSetupHint": "安装 @minimax-ai/code@0.6.12，使用受支持的 Node.js，并启用可选的 SQLite 依赖。在此配置所选的状态目录中执行 mcode login。Cognia 为每个会话单独启动 mcode acp 进程。支持默认、计划和完全访问模式。默认模式下 MiniMax 可能自动批准操作；不支持仅接受编辑、不询问及强制主机审批规则。移除配置会保留系统安装和登录信息。",
     "gooseSetupHint": "macOS 使用 `brew install block-goose-cli`，Linux 使用官方 CLI 安装脚本。运行 `goose configure` 选择 provider 和 model，或在 Agent 环境变量中设置 GOOSE_PROVIDER、GOOSE_MODEL 和 provider API key。Cognia 调用 `goose acp --with-builtin developer`，工具审批由 Cognia 处理。Homebrew 安装通过 `brew upgrade block-goose-cli` 更新，脚本安装通过 `goose update` 更新。删除 Agent 配置会保留系统安装及 Goose 会话。",
+    "minimaxCodeEnvVarHint": "MINIMAX_DATA_DIR 指定状态目录（默认 ~/.minimax），MAVIS_DATA_DIR 为备用变量。原生默认模式可能自动批准编辑和已分类的 Shell 操作；Cognia 处理 MiniMax 发出的审批请求。原生 Auto 不可选。",
     "gooseEnvVarHint": "可以使用已有 Goose 配置，或设置 GOOSE_PROVIDER、GOOSE_MODEL 和 provider API key。DeepSeek 使用 OpenAI 兼容 provider：GOOSE_PROVIDER=openai、OPENAI_BASE_URL=https://api.deepseek.com/v1，并将 DeepSeek key 设置为 OPENAI_API_KEY。",
     "a2aProtocol": "A2A",
     "addAgentFailed": "添加外部代理失败。",
@@ -444,6 +446,7 @@
     "clinePresetDescription": "官方 Cline CLI，支持流式回复、Plan/Act、工具审批和会话恢复。",
     "clineSetupHint": "安装 npm install -g cline@3.0.67，运行 cline auth 登录 Cline/ClinePass/ChatGPT，或在本地设置 CLINE_PROVIDER、CLINE_MODEL 和 CLINE_API_KEY。独立 ACP 状态请用 --config 或 CLINE_DIR；ACP 不支持 --data-dir。托管运行关闭自动更新。删除配置会保留系统安装与 Cline 数据。Cline 3.0.67 ACP 未转发图片和会话 MCP；原生 MCP 使用 cline mcp 配置。",
     "clineEnvironment": "Cline 认证与配置",
+    "minimaxCodePresetDescription": "通过原生 ACP 运行 MiniMax Code，支持图片、MCP、工具审批和会话恢复。每个会话独立运行进程并使用独立权限策略。",
     "goosePresetDescription": "通过原生 ACP 调用 Goose，使用其 developer 扩展及 Cognia 工具，支持流式回复和 Cognia 工具审批。运行 `goose configure` 配置所需 provider 和 model。",
     "addAgent": "添加代理",
     "addAgentToStart": "添加一个代理以开始使用",

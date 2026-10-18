@@ -112,6 +112,7 @@ import {
 import { AiderCliClientAdapter } from "@cognia/agent-aider/cli-client"
 import { PiRpcClientAdapter } from "@cognia/agent-pi/rpc-client"
 import { AcpClientAdapter } from "@cognia/agent-acp/client"
+import { MiniMaxAcpAdapter } from "@cognia/agent-acp/minimax-adapter"
 import { DevinAcpAdapter } from "@cognia/agent-acp/devin-adapter"
 import {
   __setModelSurfaceDepsForTests,
@@ -5300,4 +5301,13 @@ it("gates out-of-band permission requests before publishing or auto-approving th
   } finally {
     gate.mockImplementation(jest.requireActual("./agent-hooks").gateExternalAgentPermission)
   }
+})
+
+it("routes MiniMax through the conversation-isolated adapter in the real manager factory", () => {
+  protocolAdapterRegistry.register("acp", () => newMockedAcpClient())
+  expect(
+    createConfiguredProtocolAdapter(
+      buildBaseConfig({ transport: "stdio", process: { command: "mcode", args: ["acp"] } })
+    )
+  ).toBeInstanceOf(MiniMaxAcpAdapter)
 })

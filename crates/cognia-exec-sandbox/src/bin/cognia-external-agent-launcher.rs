@@ -614,6 +614,9 @@ fn bot_environment(
                     | "http_proxy"
                     | "https_proxy"
                     | "no_proxy"
+                    | "MINIMAX_DATA_DIR"
+                    | "MAVIS_DATA_DIR"
+                    | "MCODE_PROVIDER_API_KEY"
                     | "DEVIN_API_KEY"
                     | "DEVIN_TOKEN"
                     | "DEVIN_BASE_URL"
@@ -966,6 +969,9 @@ mod tests {
                 ("SSH_AUTH_SOCK", "/socket"),
                 ("NODE_OPTIONS", "--require bad"),
                 ("DEVIN_API_KEY", "model-only"),
+                ("MINIMAX_DATA_DIR", "/owned/minimax"),
+                ("MAVIS_DATA_DIR", "/owned/minimax"),
+                ("MCODE_PROVIDER_API_KEY", "synthetic"),
                 ("PATH", "/bin"),
                 ("XDG_CONFIG_HOME", "/isolated/config"),
             ]
@@ -975,6 +981,9 @@ mod tests {
             assert!(!env.contains_key(key));
         }
         assert_eq!(env["DEVIN_API_KEY"], "model-only");
+        assert_eq!(env["MINIMAX_DATA_DIR"], "/owned/minimax");
+        assert_eq!(env["MAVIS_DATA_DIR"], "/owned/minimax");
+        assert_eq!(env["MCODE_PROVIDER_API_KEY"], "synthetic");
         assert_eq!(env["GIT_CONFIG_GLOBAL"], "/dev/null");
         assert_eq!(env["GIT_TERMINAL_PROMPT"], "0");
         let args = parse_args(

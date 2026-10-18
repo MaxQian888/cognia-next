@@ -24,6 +24,7 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
       "goose",
       "kimi",
       "kiro",
+      "minimax-code",
       "pi",
       "qoder",
       "qwen-code",
@@ -163,6 +164,7 @@ describe("listExternalAgentEcosystemAdapters", () => {
       "goose",
       "kimi",
       "kiro",
+      "minimax-code",
       "pi",
       "qoder",
       "qwen-code",
@@ -326,4 +328,15 @@ it("resolves explicit Codex ACP to the canonical surface without duplicating eco
   expect(checkSurfaceExecutability("codex", "acp-stdio")).toEqual({ executable: true })
   expect(checkSurfaceExecutability("codex", "official-cli").executable).toBe(false)
   expect(findExternalAgentSurfaceByPresetId("official-cli")).toBeNull()
+})
+
+it("offers only the MiniMax stdio ACP surface", () => {
+  expect(EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS["minimax-code"].surfaces).toEqual([
+    expect.objectContaining({
+      presetId: "minimax-code",
+      protocol: "acp",
+      transport: "stdio",
+      process: { command: "mcode", args: ["acp"] },
+    }),
+  ])
 })

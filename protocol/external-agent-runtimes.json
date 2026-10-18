@@ -12,6 +12,28 @@
   },
   "runtimes": [
     {
+      "runtimeId": "minimax-code",
+      "presetIds": ["minimax-code"],
+      "displayName": "MiniMax Code",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "mcode",
+      "launchArgs": ["acp"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://github.com/MiniMax-AI/minimax-code"
+    },
+    {
       "runtimeId": "kimi",
       "presetIds": ["kimi"],
       "displayName": "Kimi Code",

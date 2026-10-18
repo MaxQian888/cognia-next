@@ -176,7 +176,9 @@
   "manager": {
     "clineSetupHint": "Install npm install -g cline@3.0.67, then run cline auth for Cline/ClinePass/ChatGPT login, or supply CLINE_PROVIDER, CLINE_MODEL and CLINE_API_KEY locally. Use --config or CLINE_DIR for separate ACP state; --data-dir is unsupported in ACP. Hosted auto-update is disabled. Removing this configuration preserves your system installation and Cline data. Cline 3.0.67 ACP does not forward images or session MCP servers; native MCP uses cline mcp.",
     "clineEnvVarHint": "Saved OAuth login, or CLINE_API_KEY with CLINE_PROVIDER and CLINE_MODEL. Optional CLINE_DIR selects state. Pinning CLINE_PROVIDER disables provider switching.",
+    "minimaxCodeSetupHint": "Install @minimax-ai/code@0.6.12 with supported Node.js and optional SQLite dependencies enabled. Run mcode login using the state directory selected for this configuration. Cognia launches mcode acp in a separate process for each conversation. Supported modes: Default, Plan and Full access. MiniMax may preapprove operations in Default. Accept Edits, Don’t ask and mandatory host approval rules are unavailable. Removing a configuration preserves the system installation and login.",
     "gooseSetupHint": "Install Goose with `brew install block-goose-cli` on macOS, or the official CLI installer on Linux. Run `goose configure` to choose a provider and model, or set GOOSE_PROVIDER, GOOSE_MODEL, and the provider API key in the agent environment. Cognia launches `goose acp --with-builtin developer`; approval stays in Cognia. Update with `brew upgrade block-goose-cli` for Homebrew installs, or `goose update` for script installs. Removing a saved agent keeps your system installation and Goose sessions.",
+    "minimaxCodeEnvVarHint": "MINIMAX_DATA_DIR selects state (default ~/.minimax); MAVIS_DATA_DIR is its fallback. Native Default can preapprove edits and classified shell operations. Cognia handles the approval requests MiniMax sends. Native Auto is unavailable.",
     "gooseEnvVarHint": "Use your existing Goose configuration, or GOOSE_PROVIDER, GOOSE_MODEL, and your provider API key. For DeepSeek use the OpenAI-compatible provider: GOOSE_PROVIDER=openai, OPENAI_BASE_URL=https://api.deepseek.com/v1, and your DeepSeek key as OPENAI_API_KEY.",
     "a2aProtocol": "A2A",
     "addAgentFailed": "Failed to add external agent.",
@@ -444,6 +446,7 @@
     "clinePresetDescription": "Official Cline CLI with streaming, Plan/Act, tool approvals and session resume.",
     "clineSetupHint": "Install npm install -g cline@3.0.67, then run cline auth for Cline/ClinePass/ChatGPT login, or supply CLINE_PROVIDER, CLINE_MODEL and CLINE_API_KEY locally. Use --config or CLINE_DIR for separate ACP state; --data-dir is unsupported in ACP. Hosted auto-update is disabled. Removing this configuration preserves your system installation and Cline data. Cline 3.0.67 ACP does not forward images or session MCP servers; native MCP uses cline mcp.",
     "clineEnvironment": "Cline authentication and configuration",
+    "minimaxCodePresetDescription": "Run MiniMax Code over native ACP with images, MCP, tool approvals and persisted sessions. Each conversation has its own process and permission policy.",
     "goosePresetDescription": "Run Goose over native ACP with its developer extension, Cognia tools, streamed replies, and tool approval in Cognia. Configure your preferred provider and model with `goose configure`.",
     "addAgent": "Add Agent",
     "addAgentToStart": "Add an agent to get started",

@@ -35,6 +35,18 @@ export const INTEGRATION_MANIFESTS: readonly AgentIntegrationManifest[] = [
 
 export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
   {
+    id: "minimax-code",
+    runtimeIds: ["minimax-code"],
+    sessionSourceIds: [],
+    migrationVendor: null,
+    vendorRootKeys: [],
+    configRootKey: null,
+    probeRootKeys: [],
+    pluginEcosystem: null,
+    subagentSourceId: null,
+    memoryAgentId: null,
+  },
+  {
     // Native session management is negotiated over ACP; no portable importer is claimed.
     id: "kimi",
     runtimeIds: ["kimi"],

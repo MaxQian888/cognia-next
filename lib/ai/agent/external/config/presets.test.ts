@@ -562,3 +562,14 @@ describe("explicit Codex ACP and native options", () => {
     expect(check).not.toHaveBeenCalled()
   })
 })
+
+it("offers MiniMax's native ACP process with persisted-session negotiation", () => {
+  expect(createAgentFromPreset("minimax-code")).toMatchObject({
+    protocol: "acp",
+    transport: "stdio",
+    defaultPermissionMode: "default",
+    process: { command: "mcode", args: ["acp"] },
+    metadata: { preset: "minimax-code", ecosystemAdapterId: "minimax-code" },
+  })
+  expect(getRunnablePresets()).toContain("minimax-code")
+})

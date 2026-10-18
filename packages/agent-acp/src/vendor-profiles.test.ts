@@ -3,7 +3,15 @@ import { ACP_VENDOR_PROFILES } from "./vendor-profiles"
 describe("ACP_VENDOR_PROFILES", () => {
   it("ships one frozen profile per vendor with unique ids and executables", () => {
     const ids = ACP_VENDOR_PROFILES.map((profile) => profile.id)
-    expect(ids).toEqual(["kimi", "cline", "qoder", "goose", "devin", "opencode-acp"])
+    expect(ids).toEqual([
+      "minimax-code",
+      "kimi",
+      "cline",
+      "qoder",
+      "goose",
+      "devin",
+      "opencode-acp",
+    ])
     expect(Object.isFrozen(ACP_VENDOR_PROFILES)).toBe(true)
     for (const profile of ACP_VENDOR_PROFILES) expect(Object.isFrozen(profile)).toBe(true)
     const commands = ACP_VENDOR_PROFILES.flatMap((profile) => profile.commandNames)
@@ -16,6 +24,10 @@ describe("ACP_VENDOR_PROFILES", () => {
       const permissionModes = profile.permissionModes
       if (!permissionModes) continue
       for (const mode of modes) {
+        if (profile.id === "minimax-code" && (mode === "acceptEdits" || mode === "dontAsk")) {
+          expect(() => permissionModes.toNative(mode)).toThrow("cannot enforce")
+          continue
+        }
         const native = permissionModes.toNative(mode)
         expect(permissionModes.toNative(permissionModes.toCanonical(native, mode))).toBe(native)
       }

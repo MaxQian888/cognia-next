@@ -183,3 +183,10 @@ describe("safeRuntimeLabel", () => {
     ).toBe("qwen-code")
   })
 })
+
+it("renders MiniMax's localized runtime identity and brand asset", () => {
+  renderBadge("minimax-code")
+  const badge = screen.getByTestId("runtime-badge-minimax-code")
+  expect(badge).toHaveAttribute("title", "MiniMax Code")
+  expect(badge.querySelector("img")).toHaveAttribute("src", "/icons/lobe/minimax-color.svg")
+})

@@ -33,3 +33,15 @@ export function isDevinAgentConfig(
     externalAgentPresetIdOf(config) === "devin" || command === "devin" || command === "devin.exe"
   )
 }
+
+/** MiniMax's permission policy is process-wide even for hand-configured ACP. */
+export function isMiniMaxAgentConfig(
+  config: Pick<ExternalAgentConfig, "metadata" | "process"> | undefined
+): boolean {
+  const command = config?.process?.command.split(/[\\/]/).at(-1)?.toLowerCase()
+  return (
+    externalAgentPresetIdOf(config) === "minimax-code" ||
+    command === "mcode" ||
+    command === "mcode.exe"
+  )
+}

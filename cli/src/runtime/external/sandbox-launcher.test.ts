@@ -707,6 +707,7 @@ describe("external-agent sandbox launcher", () => {
     )
     for (const relative of [
       ".kimi-code",
+      ".minimax",
       ".kimi",
       ".copilot",
       ".config/goose",
@@ -1027,4 +1028,61 @@ describe("sandbox readiness reporting", () => {
       )
     ).rejects.toThrow(/Can't launch "codex"/)
   })
+})
+
+it.each([
+  [{ MINIMAX_DATA_DIR: "", MAVIS_DATA_DIR: "" }, "/home/user/.minimax"],
+  [{ MINIMAX_DATA_DIR: "/owned/minimax", MAVIS_DATA_DIR: "/ignored" }, "/owned/minimax"],
+  [{ MINIMAX_DATA_DIR: "", MAVIS_DATA_DIR: "state/../minimax" }, "/work/minimax"],
+])(
+  "scopes MiniMax aliases and image scratch to the selected state directory",
+  async (env, root) => {
+    const ensureDir = jest.fn()
+    const launch = await resolveSandboxedExternalAgentLaunch(
+      { id: "mm", command: "mcode", args: ["acp"], cwd: "/work", env },
+      {
+        platform: "darwin",
+        homedir: "/home/user",
+        candidates: ["/launcher"],
+        isExecutable: () => true,
+        ensureDir,
+      }
+    )
+    expect(launch.env).toMatchObject({
+      MINIMAX_DATA_DIR: root,
+      MAVIS_DATA_DIR: root,
+      TMPDIR: `${root}/tmp`,
+    })
+    expect(launch.args).toContain(root)
+    expect(ensureDir).toHaveBeenCalledWith(`${root}/tmp`)
+    if (root !== "/home/user/.minimax") expect(launch.args).not.toContain("/home/user/.minimax")
+  }
+)
+
+it("refuses MiniMax Bot state escape before creating a directory", async () => {
+  const ensureDir = jest.fn()
+  await expect(
+    resolveSandboxedExternalAgentLaunch(
+      {
+        id: "mm",
+        command: "mcode",
+        args: ["acp"],
+        cwd: "/work",
+        env: {
+          COGNIA_BOT_ISOLATION: "1",
+          COGNIA_BOT_STATE_DIR: "/owned",
+          MINIMAX_DATA_DIR: "/outside",
+        },
+      },
+      {
+        platform: "darwin",
+        homedir: "/home/user",
+        candidates: ["/launcher"],
+        isExecutable: () => true,
+        ensureDir,
+        supportsBotIsolation: () => true,
+      }
+    )
+  ).rejects.toThrow("inside the Bot")
+  expect(ensureDir).not.toHaveBeenCalled()
 })
