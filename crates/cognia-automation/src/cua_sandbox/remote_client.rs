@@ -26,12 +26,12 @@ type Job = (
     WsRequest,
     oneshot::Sender<Result<Value>>,
     tokio::time::Instant,
-    Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
 );
 
 pub struct CuaRemoteClient {
     tx: mpsc::Sender<Job>,
-    admission: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    admission: Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
 }
 
 fn backend_err(msg: impl Into<String>) -> AutomationError {
@@ -156,9 +156,11 @@ impl CuaRemoteClient {
                 if reply.is_closed() || tokio::time::Instant::now() >= deadline {
                     continue;
                 }
-                if admission.as_ref().is_some_and(|check| !check()) {
-                    let _ = reply.send(Err(auth_denied("sandbox input fence expired")));
-                    continue;
+                if let Some(check) = admission {
+                    if let Err(error) = check() {
+                        let _ = reply.send(Err(error));
+                        continue;
+                    }
                 }
                 let payload = match serde_json::to_string(&req) {
                     Ok(p) => p,
@@ -223,7 +225,39 @@ impl CuaRemoteClient {
     pub(crate) fn fenced(&self, admission: Arc<dyn Fn() -> bool + Send + Sync>) -> Arc<Self> {
         Arc::new(Self {
             tx: self.tx.clone(),
-            admission: Some(admission),
+            admission: Some(Arc::new(move || {
+                if admission() {
+                    Ok(())
+                } else {
+                    Err(auth_denied("sandbox input fence expired"))
+                }
+            })),
+        })
+    }
+
+    /// Agent fencing distinguishes an unsent command from uncertain transport
+    /// failure, allowing acknowledged earlier commands to remain confirmed.
+    pub(crate) fn fenced_preemptible(
+        &self,
+        admission: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            tx: self.tx.clone(),
+            admission: Some(Arc::new(move || {
+                if admission() {
+                    Ok(())
+                } else {
+                    Err(AutomationError::PreemptedBeforeSend)
+                }
+            })),
+        })
+    }
+
+    /// Cleanup must still release acknowledged held input after agent revocation.
+    pub(crate) fn unfenced(&self) -> Arc<Self> {
+        Arc::new(Self {
+            tx: self.tx.clone(),
+            admission: None,
         })
     }
 
@@ -409,6 +443,31 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("fence expired"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn agent_fence_refuses_unsent_command_with_typed_preemption() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let mut stream = accept_test_client(&listener).await;
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), stream.next())
+                    .await
+                    .is_err()
+            );
+        });
+        let client = CuaRemoteClient::connect("127.0.0.1", port, TEST_AUTH_TOKEN)
+            .await
+            .unwrap();
+        let guarded = client.fenced_preemptible(Arc::new(|| false));
+        let error = guarded
+            .call_simple("key_down", serde_json::json!({"key":"secret-key"}))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, AutomationError::PreemptedBeforeSend));
+        assert_eq!(error.to_string(), "human took over the sandbox desktop");
         server.await.unwrap();
     }
 

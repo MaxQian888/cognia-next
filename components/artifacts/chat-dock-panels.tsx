@@ -24,6 +24,8 @@
  * for the loop this used to be.
  */
 
+import { SandboxDesktopViewer } from "@/components/settings/automation/sandbox-desktop-viewer"
+import { useSessionSandboxDesktop } from "@/hooks/automation/use-session-sandbox-desktop"
 import { BestOfNComparisonPanel } from "@/components/best-of-n/best-of-n-comparison"
 import { AgentTeamIcon } from "@/components/mobile/mobile-spot-icon"
 import {
@@ -36,6 +38,7 @@ import {
   LibraryIcon,
   MessageSquareIcon,
   MessagesSquareIcon,
+  MonitorPlayIcon,
   PanelsTopLeftIcon,
   SearchCodeIcon,
   FileSearchIcon,
@@ -92,7 +95,11 @@ import {
 } from "@/stores/artifact/dock-tabs-store"
 import { DOCK_BROWSER_PANEL_ID, openDockPage, setDockPageEngine } from "@/lib/artifacts/dock-pages"
 import { chatPageOwner } from "@/lib/browser/shared-local-browser"
-import { DOCK_SESSION_PANEL_META, NEW_TAB_PANEL_ID } from "./dock-panel-meta"
+import {
+  DOCK_SESSION_PANEL_META,
+  NEW_TAB_PANEL_ID,
+  SANDBOX_DESKTOP_PANEL_ID,
+} from "./dock-panel-meta"
 import { DockWorkspace } from "./workspace-mode/dock-workspace"
 import { ProjectOverviewPanel } from "./workspace-mode/project-overview-panel"
 import { MemoryWorkbenchPanel } from "@/components/context-workbench/panels/memory-workbench-panel"
@@ -793,6 +800,16 @@ function SessionSquadRenderer({ inputs }: Inputs<SessionPanelInputs>) {
   return <SquadContextPanel sessionId={activeSessionId} />
 }
 
+function SessionSandboxDesktopRenderer({ inputs }: Inputs<SessionPanelInputs>) {
+  const sessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  const desktop = useSessionSandboxDesktop(sessionId)
+  return desktop ? (
+    <div className="overflow-y-auto p-3">
+      <SandboxDesktopViewer key={desktop.connectionId} {...desktop} />
+    </div>
+  ) : null
+}
+
 function SessionFilesRenderer({ inputs }: Inputs<SessionPanelInputs>) {
   const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
   return <ConversationFilesPanel sessionId={activeSessionId} />
@@ -820,6 +837,8 @@ export function useSessionSurfacePanels({
   newTab = false,
 }: SessionSurfacePanelsInput): ContextPanelDefinition[] {
   const { requestedUrl, requestId, revealBrowserPanel } = useSideBrowserRequest(scopeKey)
+  const sandboxDesktop = useSessionSandboxDesktop(activeSessionId)
+  const hasSandboxDesktop = Boolean(sandboxDesktop)
   // The plan panel claims its rail slot only when the session actually has a
   // plan — the badge counts plans awaiting a decision.
   const sessionPlans = useLiveQuery(
@@ -855,6 +874,7 @@ export function useSessionSurfacePanels({
       projectOverview: () => <DockProjectOverviewPanel key={key} inputs={inputs} />,
       workspace: () => <DockWorkspacePanel key={key} inputs={inputs} />,
       files: () => <SessionFilesRenderer key={key} inputs={inputs} />,
+      sandboxDesktop: () => <SessionSandboxDesktopRenderer key={key} inputs={inputs} />,
       sourceControl: () => <SessionSourceControlRenderer key={key} inputs={inputs} />,
       bestOfN: () => <DockBestOfNPanel key={key} inputs={inputs} />,
       comments: () => <SessionCommentsRenderer key={key} inputs={inputs} />,
@@ -947,6 +967,25 @@ export function useSessionSurfacePanels({
         exclusiveSurface: true,
         preferredMode: "wide",
         renderer: renderers.browser,
+      },
+      {
+        id: SANDBOX_DESKTOP_PANEL_ID,
+        activity: "preview-run",
+        labelKey: "automation.sandboxConnections.desktopViewer.dockTitle",
+        icon: MonitorPlayIcon,
+        order: 22,
+        appliesTo: (resource) =>
+          resource.kind === "session" &&
+          resource.sessionId === activeSessionId &&
+          hasSandboxDesktop,
+        retention: "ephemeral",
+        scope: "session",
+        preferredMode: "wide",
+        // Parked while the workbench is concealed, so the viewer unmounts:
+        // polling stops and a held control lease is released, not kept
+        // by an invisible pane.
+        exclusiveSurface: true,
+        renderer: renderers.sandboxDesktop,
       },
       {
         id: PROJECT_OVERVIEW_PANEL_ID,
@@ -1133,6 +1172,8 @@ export function useSessionSurfacePanels({
     ],
     [
       hasActiveSession,
+      activeSessionId,
+      hasSandboxDesktop,
       hasProjectRoots,
       isTeamSession,
       newTab,

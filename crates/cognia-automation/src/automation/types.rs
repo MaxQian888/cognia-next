@@ -367,6 +367,9 @@ pub enum AutomationError {
     /// The element ref was valid but the target window has since closed.
     #[error("stale element reference")]
     StaleElement,
+    /// A human takeover fenced this agent command before it reached the guest.
+    #[error("human took over the sandbox desktop")]
+    PreemptedBeforeSend,
     /// The back-end raised an OS-level error (UIA HRESULT, AXAPI error, …).
     #[error("backend error: {message}")]
     BackendError { message: String },
@@ -805,6 +808,7 @@ mod tests {
             AutomationError::WhitelistMiss,
             AutomationError::ElementNotFound,
             AutomationError::StaleElement,
+            AutomationError::PreemptedBeforeSend,
             AutomationError::BackendError {
                 message: "HRESULT".into(),
             },

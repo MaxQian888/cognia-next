@@ -47,7 +47,11 @@ function picked(chunks: Uint8Array[], closed = jest.fn()) {
 beforeEach(() => {
   jest.resetAllMocks()
   release.mockResolvedValue(undefined)
-  client.acquireControl.mockResolvedValue({ token: "fresh", expiresAt: Date.now() + 15000 })
+  client.acquireControl.mockResolvedValue({
+    token: "fresh",
+    fence: 3,
+    expiresAt: Date.now() + 15000,
+  })
   client.releaseControl.mockResolvedValue(undefined)
   client.uploadFile.mockResolvedValue({ path: "/home/cua/binary.dat", size: 3, sha256: "unused" })
   saver.mockResolvedValue({
@@ -76,7 +80,7 @@ test("uploads binary bytes to the original container with a fresh post-picker le
   expect(release.mock.invocationCallOrder[0]).toBeLessThan(
     client.acquireControl.mock.invocationCallOrder[0]
   )
-  await waitFor(() => expect(client.releaseControl).toHaveBeenCalledWith("a", "fresh"))
+  await waitFor(() => expect(client.releaseControl).toHaveBeenCalledWith("a", "fresh", 3))
 })
 
 test("closes an over-limit stream before control acquisition or upload", async () => {
@@ -160,7 +164,7 @@ test("stop and restart clears a cancelled generation's busy state", async () => 
 })
 
 test("an acquisition that resolves after unmount is released without uploading", async () => {
-  let grant!: (lease: { token: string; expiresAt: number }) => void
+  let grant!: (lease: { token: string; fence: number; expiresAt: number }) => void
   picker.mockResolvedValue([picked([])])
   client.acquireControl.mockReturnValueOnce(
     new Promise((resolve) => {
@@ -172,10 +176,10 @@ test("an acquisition that resolves after unmount is released without uploading",
   await waitFor(() => expect(client.acquireControl).toHaveBeenCalled())
   unmount()
   await act(async () => {
-    grant({ token: "late", expiresAt: Date.now() + 15000 })
+    grant({ token: "late", fence: 3, expiresAt: Date.now() + 15000 })
   })
   expect(client.uploadFile).not.toHaveBeenCalled()
-  expect(client.releaseControl).toHaveBeenCalledWith("a", "late")
+  expect(client.releaseControl).toHaveBeenCalledWith("a", "late", 3)
 })
 
 test("a rejected upload releases its lease and allows retry", async () => {
@@ -187,7 +191,7 @@ test("a rejected upload releases its lease and allows retry", async () => {
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "Choose file and upload" })).toBeEnabled()
   )
-  expect(client.releaseControl).toHaveBeenCalledWith("a", "fresh")
+  expect(client.releaseControl).toHaveBeenCalledWith("a", "fresh", 3)
 })
 
 test("validates binary download size and hash before saving, and distinguishes save cancellation", async () => {

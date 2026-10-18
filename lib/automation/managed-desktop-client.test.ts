@@ -30,6 +30,7 @@ jest.mock("@/lib/tauri/admin-lease", () => ({
 }))
 import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
 import { localTransport } from "@/lib/tauri/transport-instance"
+import type { SandboxDesktopFrame } from "@/lib/automation/sandbox-client"
 import {
   acquireManagementChannel,
   withManagementChannel,
@@ -323,6 +324,7 @@ test("viewer pins the selected Host, generation, fenced frame and short lease", 
       screenshot: { bytes: "aA==", width: 1, height: 1, capturedAt: 1, format: "png" },
       frameId: "opaque-frame",
       fence: 4,
+      expiresAt: Date.now() + 5_000,
     },
     { x: 0, y: 0 },
     { kind: "click" }
@@ -382,7 +384,11 @@ test("viewer refuses absent frame proof and late acquire after account change", 
   await expect(
     session.input(
       { token: "token", fence: 1, expiresAt: 1 },
-      { screenshot: { bytes: "aA==", width: 1, height: 1, capturedAt: 1, format: "png" } },
+      // Deliberately malformed: the runtime guard must refuse a frame the
+      // type system would not let a Host return.
+      {
+        screenshot: { bytes: "aA==", width: 1, height: 1, capturedAt: 1, format: "png" },
+      } as unknown as SandboxDesktopFrame,
       null,
       { kind: "pressKey", chord: "Enter" }
     )

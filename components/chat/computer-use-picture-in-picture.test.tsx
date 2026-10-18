@@ -4,6 +4,16 @@ import { StrictMode } from "react"
 const settingsGet = jest.fn()
 let mockReducedMotion = false
 
+// The session's bound sandbox desktop, if any (ADR-0234 Phase 1).
+let mockSandboxDesktop: { connectionId: string; enabled: boolean } | null = null
+const revealSessionPanel = jest.fn()
+jest.mock("@/hooks/automation/use-session-sandbox-desktop", () => ({
+  useSessionSandboxDesktop: () => mockSandboxDesktop,
+}))
+jest.mock("@/lib/artifacts/reveal", () => ({
+  revealSessionPanel: (...args: unknown[]) => revealSessionPanel(...args),
+}))
+
 jest.mock("@/lib/automation/client", () => ({
   desktop: {
     settingsGet: (...args: unknown[]) => settingsGet(...args),
@@ -86,6 +96,8 @@ function seedStatus(
 }
 
 beforeEach(() => {
+  mockSandboxDesktop = null
+  revealSessionPanel.mockReset()
   window.localStorage.removeItem(COMPUTER_USE_PIP_LAYOUT_STORAGE_KEY)
   mockReducedMotion = false
   settingsGet.mockReset().mockResolvedValue({ alwaysHidePictureInPicture: false })
@@ -143,6 +155,31 @@ describe("ComputerUsePictureInPicture", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /show picture in picture/i }))
     expect(screen.getByRole("img", { name: /computer use screen/i })).toBeInTheDocument()
+  })
+
+  it("opens the bound sandbox desktop in the chat dock only when the session has one", async () => {
+    publishComputerUseActivity(SID, "screenshot", {
+      ok: true,
+      output: "FRAME",
+      display_width_px: 1280,
+      display_height_px: 800,
+    })
+    const { rerender } = render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    await screen.findByRole("img", { name: /computer use screen/i })
+    expect(screen.queryByRole("button", { name: /open sandbox desktop/i })).toBeNull()
+
+    mockSandboxDesktop = { connectionId: "c1", enabled: true }
+    rerender(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    fireEvent.click(screen.getByRole("button", { name: /open sandbox desktop/i }))
+    expect(revealSessionPanel).toHaveBeenCalledWith(SID, "sandbox-desktop")
   })
 
   it("stays absent until a session has Computer Use activity", () => {

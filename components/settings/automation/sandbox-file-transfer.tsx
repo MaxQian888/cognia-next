@@ -82,6 +82,7 @@ function SandboxFileTransferSession({
     setNotice(null)
     onBusyChange(true)
     let token: string | undefined
+    let fence = 0
     let failure: Notice = kind === "upload" ? "readFailed" : "downloadFailed"
     try {
       if (kind === "upload") {
@@ -126,8 +127,9 @@ function SandboxFileTransferSession({
         failure = "uploadFailed"
         await releaseControl()
         if (!generation.current) return
-        const lease = await sandboxClient.acquireControl(connectionId)
+        const lease = await sandboxClient.acquireControl(connectionId, true)
         token = lease.token
+        fence = lease.fence
         if (!generation.current) return
         await sandboxClient.uploadFile(
           connectionId,
@@ -186,7 +188,8 @@ function SandboxFileTransferSession({
     } finally {
       // A dispatched upload may finish after unmount. Release its exact lease,
       // even though no UI is left to receive the result. Expiry is already safe.
-      if (token) await sandboxClient.releaseControl(connectionId, token).catch(() => undefined)
+      if (token)
+        await sandboxClient.releaseControl(connectionId, token, fence).catch(() => undefined)
       generation.busy = false
       if (generation.current) {
         setBusy(null)

@@ -35,6 +35,7 @@ import {
   ListTodoIcon,
   MessageSquareIcon,
   MessagesSquareIcon,
+  MonitorPlayIcon,
   PlusIcon,
   SearchCodeIcon,
   UsersIcon,
@@ -53,6 +54,9 @@ import type { ContextPanelMode } from "@/types/context-workbench"
  */
 export { NEW_TAB_PANEL_ID }
 
+/** A session's bound sandbox desktop (ADR-0234 Phase 1). */
+export const SANDBOX_DESKTOP_PANEL_ID = "sandbox-desktop"
+
 export interface DockPanelMeta {
   labelKey: string
   icon: LucideIcon
@@ -68,6 +72,11 @@ export const DOCK_SESSION_PANEL_META: Readonly<Record<string, DockPanelMeta>> = 
   "squad-context": { labelKey: "contextWorkbench.squadPanel.title", icon: AgentTeamIcon },
   "team-members": { labelKey: "contextWorkbench.teamMembersPanel.title", icon: UsersIcon },
   browser: { labelKey: "browser.title", icon: GlobeIcon, preferredMode: "wide" },
+  [SANDBOX_DESKTOP_PANEL_ID]: {
+    labelKey: "automation.sandboxConnections.desktopViewer.dockTitle",
+    icon: MonitorPlayIcon,
+    preferredMode: "wide",
+  },
   "project-overview": {
     labelKey: "projectOverview.panelTitle",
     icon: FolderKanbanIcon,

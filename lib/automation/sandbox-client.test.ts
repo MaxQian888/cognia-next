@@ -65,18 +65,25 @@ test("health invokes cua_sandbox_health", async () => {
 
 test("desktop observation and control stay scoped to the same connection and lease", async () => {
   await sandboxClient.desktopFrame("c1")
-  await sandboxClient.acquireControl("c1")
-  await sandboxClient.renewControl("c1", "lease")
-  await sandboxClient.controlInput("c1", "lease", { x: 12, y: 30 }, { kind: "click" })
-  await sandboxClient.releaseControl("c1", "lease")
+  await sandboxClient.acquireControl("c1", true)
+  await sandboxClient.renewControl("c1", "lease", 7)
+  await sandboxClient.controlInput("c1", "lease", 7, "frame-1", { x: 12, y: 30 }, { kind: "click" })
+  await sandboxClient.releaseControl("c1", "lease", 7)
   expect(call.mock.calls).toEqual([
     ["cua_sandbox_desktop_capture", { connectionId: "c1" }],
-    ["cua_sandbox_desktop_acquire_control", { connectionId: "c1" }],
-    ["cua_sandbox_desktop_renew_control", { connectionId: "c1", token: "lease" }],
+    ["cua_sandbox_desktop_acquire_control", { connectionId: "c1", takeover: true }],
+    ["cua_sandbox_desktop_renew_control", { connectionId: "c1", token: "lease", fence: 7 }],
     [
       "cua_sandbox_desktop_input",
-      { connectionId: "c1", token: "lease", point: { x: 12, y: 30 }, action: { kind: "click" } },
+      {
+        connectionId: "c1",
+        token: "lease",
+        fence: 7,
+        frameId: "frame-1",
+        point: { x: 12, y: 30 },
+        action: { kind: "click" },
+      },
     ],
-    ["cua_sandbox_desktop_release_control", { connectionId: "c1", token: "lease" }],
+    ["cua_sandbox_desktop_release_control", { connectionId: "c1", token: "lease", fence: 7 }],
   ])
 })

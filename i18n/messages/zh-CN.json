@@ -5530,6 +5530,7 @@
       "hide": "隐藏画中画",
       "justNow": "刚刚",
       "move": "移动画中画",
+      "openSandboxDesktop": "打开沙箱桌面",
       "resize": "调整画中画大小",
       "screenAlt": "桌面自动化画面",
       "secondsAgo": "{seconds} 秒前",
@@ -5560,6 +5561,7 @@
         "controlHelp": "点击画面后可使用键盘，也可拖拽和滚动。Escape 释放控制权；此窗口失去焦点时也会释放。接管期间智能体输入会暂停。",
         "controlling": "正在由你控制",
         "disconnected": "桌面已断开，正在自动重试…",
+        "dockTitle": "沙箱桌面",
         "doubleClick": "双击模式",
         "error": {
           "capture": "无法获取桌面画面，控制权已释放。",

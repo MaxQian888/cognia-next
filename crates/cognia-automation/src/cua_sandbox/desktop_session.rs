@@ -8,27 +8,69 @@ use crate::automation::{
     platform::shared::screenshot::downscale_encoded, session::*, types::*,
 };
 use base64::Engine as _;
+pub use cognia_remote_desktop::control::ControlLease;
+use cognia_remote_desktop::{audit, control::ControlLeaseCore};
 use serde::Serialize;
 use serde_json::json;
-use std::time::{Duration, Instant};
+use std::{
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
 
-const CONTROL_TTL: Duration = Duration::from_secs(15);
+const LOCAL_PRINCIPAL: &str = "local-owner";
+/// Every client-local viewer (Settings, the chat dock, a second window) is the
+/// same principal, so the cap covers three concurrent 1 Hz viewers.
+const LOCAL_FRAMES_PER_PRINCIPAL: usize = 16;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ControlLease {
-    pub token: String,
+pub struct ControlFrame {
+    pub frame_id: String,
+    pub fence: u64,
     pub expires_at: i64,
+    pub screenshot: Screenshot,
+}
+
+#[derive(Default)]
+pub(crate) struct DesktopPreemption {
+    pub epoch: AtomicU64,
+    pub pending: AtomicBool,
+    pub notify: tokio::sync::Notify,
+}
+
+/// Cancellation must clear pending admission even while waiting for the mutex.
+pub(crate) struct PendingTakeover(Arc<DesktopPreemption>);
+impl PendingTakeover {
+    pub(crate) fn begin(preempt: Arc<DesktopPreemption>) -> Result<Self> {
+        preempt
+            .pending
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map_err(|_| denied("sandbox desktop takeover is already pending"))?;
+        preempt.epoch.fetch_add(1, Ordering::SeqCst);
+        preempt.notify.notify_waiters();
+        Ok(Self(preempt))
+    }
+}
+impl Drop for PendingTakeover {
+    fn drop(&mut self) {
+        self.0.pending.store(false, Ordering::SeqCst);
+    }
 }
 
 #[derive(Default)]
 pub(crate) struct RemoteDesktop {
     pub sessions: UiSessionManager,
-    control: Option<(ControlLease, Instant)>,
-    // Set before a remote mutation can start. Cancellation drops the mutex
-    // guard but leaves this state resident until completion is confirmed.
+    control: ControlLeaseCore,
+    // Cancellation leaves quarantine resident until cleanup is confirmed.
     cleanup_unconfirmed: bool,
     pub(crate) held_mouse_buttons: Vec<MouseButton>,
+    pub(crate) held_keys: Vec<String>,
+    pub(crate) preempt: Arc<DesktopPreemption>,
+    pub(crate) agent_epoch: u64,
+    pub(crate) target_id: String,
 }
 
 fn denied(reason: impl Into<String>) -> AutomationError {
@@ -52,17 +94,44 @@ fn session_error(error: SessionError) -> AutomationError {
 }
 
 impl RemoteDesktop {
+    pub(crate) fn for_target(target_id: String, preempt: Arc<DesktopPreemption>) -> Self {
+        Self {
+            target_id,
+            preempt,
+            control: ControlLeaseCore::with_frame_limit(LOCAL_FRAMES_PER_PRINCIPAL),
+            ..Self::default()
+        }
+    }
+    pub(crate) fn current_fence(&self) -> u64 {
+        self.control.fence
+    }
     pub(crate) fn invalidate(&mut self) {
         self.sessions = UiSessionManager::default();
-        self.control = None;
+        self.control.invalidate();
+    }
+    fn audit(&self, kind: &str, decision: &str, fields: serde_json::Value) {
+        audit::record_background(
+            kind,
+            "sandbox",
+            &self.target_id,
+            LOCAL_PRINCIPAL,
+            decision,
+            self.control.fence,
+            fields,
+        );
     }
     fn expire(&mut self) {
-        if self
-            .control
-            .as_ref()
-            .is_some_and(|(_, deadline)| Instant::now() >= *deadline)
-        {
-            self.invalidate();
+        if let Some(lease) = self.control.expire() {
+            self.sessions = UiSessionManager::default();
+            audit::record_background(
+                "remote_desktop.lease.expire",
+                "sandbox",
+                &self.target_id,
+                LOCAL_PRINCIPAL,
+                "expired",
+                lease.dto.fence,
+                json!({}),
+            );
         }
     }
     pub(crate) fn require_quiescent(&self) -> Result<()> {
@@ -74,45 +143,67 @@ impl RemoteDesktop {
     pub(crate) fn confirm_quiescence(&mut self) {
         self.cleanup_unconfirmed = false;
         self.held_mouse_buttons.clear();
+        self.held_keys.clear();
+    }
+    pub(crate) fn begin_mutation(&mut self) {
+        self.cleanup_unconfirmed = true;
+    }
+    pub(crate) fn finish_mutation<T>(&mut self, result: &Result<T>) {
+        if result.is_ok() || matches!(result, Err(AutomationError::PreemptedBeforeSend)) {
+            self.cleanup_unconfirmed = false;
+        }
     }
     pub(crate) async fn run_mutation<T>(
         &mut self,
         operation: impl std::future::Future<Output = Result<T>>,
     ) -> Result<T> {
-        self.cleanup_unconfirmed = true;
+        self.begin_mutation();
         let result = operation.await;
-        if result.is_ok() {
-            self.cleanup_unconfirmed = false;
+        self.finish_mutation(&result);
+        if matches!(&result, Err(AutomationError::PreemptedBeforeSend)) {
+            self.audit("remote_desktop.agent.preempted", "preempted", json!({}));
         }
         result
+    }
+    pub(crate) fn agent_client(&self, client: &CuaRemoteClient) -> Arc<CuaRemoteClient> {
+        let preempt = self.preempt.clone();
+        let epoch = self.agent_epoch;
+        client.fenced_preemptible(Arc::new(move || {
+            preempt.epoch.load(Ordering::SeqCst) == epoch
+        }))
     }
     pub(crate) fn require_agent(&mut self) -> Result<()> {
         self.require_quiescent()?;
         self.expire();
-        if self.control.is_some() {
-            return Err(denied("sandbox desktop is under human control"));
+        if self.control.lease.is_some() || self.preempt.pending.load(Ordering::SeqCst) {
+            return Err(denied(
+                "sandbox desktop is under human control or takeover is pending",
+            ));
         }
         Ok(())
     }
+    // File transfer's existing token-only API remains compatible: the token is
+    // still bound to this target and the current core fence and principal.
     pub(crate) fn require_controller(&mut self, token: &str) -> Result<()> {
+        self.require_control_lease(token, self.control.fence)
+    }
+    fn require_control_lease(&mut self, token: &str, fence: u64) -> Result<()> {
         self.require_quiescent()?;
         self.expire();
-        match &self.control {
-            Some((lease, _)) if lease.token == token => Ok(()),
-            _ => Err(denied(
-                "sandbox control lease is absent, expired, or belongs to another controller",
-            )),
-        }
+        self.control
+            .require_lease(LOCAL_PRINCIPAL, token, fence)
+            .map_err(|_| {
+                denied("sandbox control lease is absent, expired, or belongs to another controller")
+            })
     }
     fn acquire(&mut self) -> Result<ControlLease> {
-        self.require_agent()?;
+        self.require_quiescent()?;
+        self.expire();
+        if self.control.lease.is_some() {
+            return Err(denied("sandbox desktop is already under human control"));
+        }
         self.sessions = UiSessionManager::default();
-        let lease = ControlLease {
-            token: uuid::Uuid::now_v7().to_string(),
-            expires_at: now_ms() + CONTROL_TTL.as_millis() as i64,
-        };
-        self.control = Some((lease.clone(), Instant::now() + CONTROL_TTL));
-        Ok(lease)
+        Ok(self.control.issue(LOCAL_PRINCIPAL, now_ms(), i64::MAX))
     }
 }
 
@@ -199,71 +290,189 @@ pub(crate) async fn capture(client: &CuaRemoteClient) -> Result<Screenshot> {
 }
 
 impl CuaSandboxRegistry {
-    pub async fn acquire_control(&self, id: &str) -> Result<ControlLease> {
-        let mut desktop = self.desktop_guard(id).await;
-        desktop.require_agent()?;
-        let client = self.client(id).await?;
-        // A legacy mouse-down may intentionally span multiple agent calls.
-        // Human takeover must not inherit that held button.
-        let held = desktop.held_mouse_buttons.clone();
-        if !held.is_empty() {
-            desktop
-                .run_mutation(async {
-                    for button in held {
-                        client
-                            .call_simple("mouse_up", json!({"button": button_name(button)}))
-                            .await?;
-                    }
-                    Ok(())
-                })
-                .await?;
-            desktop.held_mouse_buttons.clear();
+    pub async fn acquire_control(&self, id: &str, takeover: bool) -> Result<ControlLease> {
+        let (slot, preempt) = self.desktop_slot(id).await;
+        if !takeover {
+            audit::record_background(
+                "remote_desktop.lease.refused",
+                "sandbox",
+                id,
+                LOCAL_PRINCIPAL,
+                "takeover_required",
+                0,
+                json!({}),
+            );
+            return Err(denied(
+                "sandbox desktop takeover must be explicitly requested",
+            ));
         }
-        // Prove GUI availability before handing the viewer an input lease.
-        capture(&client).await?;
-        desktop.acquire()
+        let pending = PendingTakeover::begin(preempt)?;
+        let mut desktop = slot.lock_owned().await;
+        let result = async {
+            desktop.require_quiescent()?;
+            desktop.expire();
+            if desktop.control.lease.is_some() {
+                return Err(denied("sandbox desktop is already under human control"));
+            }
+            let client = self.client(id).await?;
+            // Cleanup uses the unfenced client: takeover has revoked agent sends.
+            let buttons = desktop.held_mouse_buttons.clone();
+            let keys = desktop.held_keys.clone();
+            if !buttons.is_empty() || !keys.is_empty() {
+                desktop
+                    .run_mutation(async {
+                        for key in keys.iter().rev() {
+                            client.call_simple("key_up", json!({"key": key})).await?;
+                        }
+                        for button in buttons.iter().rev() {
+                            client
+                                .call_simple("mouse_up", json!({"button": button_name(*button)}))
+                                .await?;
+                        }
+                        Ok(())
+                    })
+                    .await?;
+                desktop.held_keys.clear();
+                desktop.held_mouse_buttons.clear();
+            }
+            capture(&client).await?;
+            desktop.acquire()
+        }
+        .await;
+        drop(pending);
+        match &result {
+            Ok(lease) => {
+                desktop.audit("remote_desktop.lease.takeover", "allowed", json!({}));
+                desktop.audit(
+                    "remote_desktop.lease.acquire",
+                    "allowed",
+                    json!({"expires_at":lease.expires_at}),
+                );
+            }
+            Err(_) => {
+                desktop.audit("remote_desktop.lease.refused", "refused", json!({}));
+                if desktop.cleanup_unconfirmed {
+                    desktop.audit("remote_desktop.input.quarantined", "quarantined", json!({}));
+                }
+            }
+        }
+        result
     }
-    pub async fn renew_control(&self, id: &str, token: &str) -> Result<ControlLease> {
+    pub async fn renew_control(&self, id: &str, token: &str, fence: u64) -> Result<ControlLease> {
         let mut desktop = self.desktop_guard(id).await;
-        desktop.require_controller(token)?;
-        let lease = ControlLease {
-            token: token.into(),
-            expires_at: now_ms() + CONTROL_TTL.as_millis() as i64,
-        };
-        desktop.control = Some((lease.clone(), Instant::now() + CONTROL_TTL));
+        if let Err(error) = desktop.require_control_lease(token, fence) {
+            desktop.audit("remote_desktop.lease.refused", "refused", json!({}));
+            return Err(error);
+        }
+        let lease = desktop
+            .control
+            .renew(LOCAL_PRINCIPAL, token, fence, now_ms(), i64::MAX)
+            .map_err(|_| denied("sandbox control lease expired"))?;
+        desktop.audit(
+            "remote_desktop.lease.renew",
+            "allowed",
+            json!({"expires_at":lease.expires_at}),
+        );
         Ok(lease)
     }
-    pub async fn release_control(&self, id: &str, token: &str) -> Result<()> {
+    pub async fn release_control(&self, id: &str, token: &str, fence: u64) -> Result<()> {
         let mut desktop = self.desktop_guard(id).await;
-        desktop.require_controller(token)?;
+        if let Err(error) = desktop.require_control_lease(token, fence) {
+            desktop.audit("remote_desktop.lease.refused", "refused", json!({}));
+            return Err(error);
+        }
+        desktop.audit("remote_desktop.lease.release", "allowed", json!({}));
         desktop.invalidate();
         Ok(())
     }
-    pub async fn desktop_frame(&self, id: &str) -> Result<Screenshot> {
-        let _desktop = self.desktop_guard(id).await;
-        capture(self.client(id).await?.as_ref()).await
+    pub async fn desktop_frame(&self, id: &str) -> Result<ControlFrame> {
+        let mut desktop = self.desktop_guard(id).await;
+        desktop.expire();
+        let screenshot = capture(self.client(id).await?.as_ref()).await?;
+        desktop.expire();
+        let proof = desktop
+            .control
+            .register_frame(
+                LOCAL_PRINCIPAL,
+                now_ms(),
+                i64::MAX,
+                screenshot.width,
+                screenshot.height,
+            )
+            .map_err(|_| denied("sandbox desktop frame limit reached"))?;
+        Ok(ControlFrame {
+            frame_id: proof.frame_id,
+            fence: proof.fence,
+            expires_at: proof.expires_at,
+            screenshot,
+        })
     }
     pub async fn control_input(
         &self,
         id: &str,
         token: &str,
+        fence: u64,
+        frame_id: &str,
         point: Option<Point>,
         action: UiAction,
     ) -> Result<()> {
         let mut desktop = self.desktop_guard(id).await;
-        desktop.require_controller(token)?;
-        let client = self.client(id).await?;
-        // Revalidate the surface on every manual action, including a drag end.
-        let frame = capture(&client).await?;
-        desktop.require_controller(token)?;
-        if let Some(point) = point {
-            validate_point(point, frame.width, frame.height)?;
+        let result = async {
+            desktop.require_control_lease(token, fence)?;
+            let frame = desktop
+                .control
+                .frame(LOCAL_PRINCIPAL, frame_id, fence)
+                .map_err(|_| denied("sandbox desktop frame is stale or consumed"))?
+                .clone();
+            if let Some(point) = point {
+                validate_point(point, frame.width, frame.height)?;
+            }
+            if let UiAction::Drag { to, .. } = &action {
+                validate_point(*to, frame.width, frame.height)?;
+            }
+            validate_control_action(point, &action)?;
+            let lease = desktop.control.lease.as_ref().expect("validated lease");
+            let deadline = lease.deadline.min(frame.deadline);
+            let epoch = lease.epoch;
+            let revoked = desktop.control.revoked.clone();
+            let client = self.client(id).await?;
+            let current = capture(&client).await?;
+            desktop.require_control_lease(token, fence)?;
+            if (current.width, current.height) != (frame.width, frame.height)
+                || Instant::now() >= deadline
+            {
+                desktop.control.frames.clear();
+                return Err(denied("sandbox desktop frame is stale or surface changed"));
+            }
+            desktop
+                .control
+                .take_frame(LOCAL_PRINCIPAL, frame_id, fence)
+                .map_err(|_| denied("sandbox desktop frame is stale or consumed"))?;
+            let client = client.fenced(Arc::new(move || {
+                Instant::now() < deadline && revoked.load(Ordering::SeqCst) == epoch
+            }));
+            desktop
+                .run_mutation(async {
+                    tokio::time::timeout_at(
+                        tokio::time::Instant::from_std(deadline),
+                        deliver(&client, point, &action),
+                    )
+                    .await
+                    .map_err(|_| backend("sandbox input deadline elapsed"))?
+                })
+                .await
         }
-        if let UiAction::Drag { to, .. } = &action {
-            validate_point(*to, frame.width, frame.height)?;
+        .await;
+        let (action_kind, count) = input_audit_fields(&action);
+        desktop.audit(
+            "remote_desktop.input",
+            if result.is_ok() { "allowed" } else { "refused" },
+            json!({"action_kind":action_kind,"count":count}),
+        );
+        if desktop.cleanup_unconfirmed {
+            desktop.audit("remote_desktop.input.quarantined", "quarantined", json!({}));
         }
-        validate_action(point, &action)?;
-        desktop.run_mutation(deliver(&client, point, &action)).await
+        result
     }
     pub async fn remote_list_apps(&self, id: &str) -> Result<Vec<ResolvedApplication>> {
         let _desktop = self.agent_guard(id).await?;
@@ -414,6 +623,7 @@ impl CuaSandboxRegistry {
             return Err(AutomationError::StaleElement);
         }
         validate_action(prepared.point, &action)?;
+        let client = desktop.agent_client(&client);
         desktop
             .run_mutation(deliver(&client, prepared.point, &action))
             .await?;
@@ -468,6 +678,29 @@ pub(crate) fn validate_action(point: Option<Point>, action: &UiAction) -> Result
     Ok(())
 }
 
+pub(crate) fn input_audit_fields(action: &UiAction) -> (&'static str, usize) {
+    match action {
+        UiAction::Click { count, .. } => ("click", count.unwrap_or(1) as usize),
+        UiAction::Drag { .. } => ("drag", 1),
+        UiAction::Scroll { .. } => ("scroll", 1),
+        UiAction::PressKey { chord } => (
+            "key",
+            chord.0.split('+').filter(|k| !k.trim().is_empty()).count(),
+        ),
+        UiAction::TypeText { text } => ("text", text.chars().count()),
+        _ => ("key", 0),
+    }
+}
+fn validate_control_action(point: Option<Point>, action: &UiAction) -> Result<()> {
+    if matches!(action, UiAction::Drag { opts, .. } if opts.duration_ms.unwrap_or(150) > 2_000 || opts.steps.unwrap_or(12) > 60)
+        || matches!(action, UiAction::PressKey { chord } if chord.0.len() > 256)
+        || matches!(action, UiAction::TypeText { text } if text.len() > 4096)
+    {
+        return Err(denied("sandbox desktop input limit exceeded"));
+    }
+    validate_action(point, action)
+}
+
 pub(crate) async fn deliver(
     client: &CuaRemoteClient,
     point: Option<Point>,
@@ -495,9 +728,16 @@ pub(crate) async fn deliver(
                     client
                         .call_simple("mouse_down", json!({"button": button_name(button)}))
                         .await?;
-                    client
+                    let released = client
                         .call_simple("mouse_up", json!({"button": button_name(button)}))
-                        .await?;
+                        .await;
+                    if matches!(&released, Err(AutomationError::PreemptedBeforeSend)) {
+                        client
+                            .unfenced()
+                            .call_simple("mouse_up", json!({"button": button_name(button)}))
+                            .await?;
+                    }
+                    released?;
                 }
             }
         }
@@ -544,7 +784,8 @@ mod tests {
         let lease = desktop.acquire().unwrap();
         desktop.require_controller(&lease.token).unwrap();
         // Model a Docker admission await taking longer than the remaining lease.
-        desktop.control.as_mut().unwrap().1 = Instant::now() - Duration::from_millis(1);
+        desktop.control.lease.as_mut().unwrap().deadline =
+            Instant::now() - Duration::from_millis(1);
         tokio::task::yield_now().await;
         let mut dispatched = false;
         let result: Result<()> = async {
@@ -590,6 +831,20 @@ mod tests {
     }
 
     #[test]
+    fn two_local_viewers_polling_at_one_hertz_stay_under_the_frame_cap() {
+        let mut desktop = RemoteDesktop::for_target("c1".into(), Default::default());
+        // Five live proofs per viewer in the five-second window, two viewers.
+        for _ in 0..10 {
+            desktop
+                .control
+                .register_frame(LOCAL_PRINCIPAL, 1000, i64::MAX, 1, 1)
+                .unwrap();
+        }
+        let lease = desktop.acquire().unwrap();
+        assert!(desktop.require_controller(&lease.token).is_ok());
+    }
+
+    #[test]
     fn desktop_identity_is_bound_to_connection_and_never_resolves_local_apps() {
         let locator = AppLocator::BundleId {
             bundle_id: desktop_application("a").bundle_id.unwrap(),
@@ -612,7 +867,8 @@ mod tests {
         assert!(desktop.acquire().is_err());
         assert!(desktop.require_controller("wrong").is_err());
         assert!(desktop.require_controller(&lease.token).is_ok());
-        desktop.control.as_mut().unwrap().1 = Instant::now() - Duration::from_millis(1);
+        desktop.control.lease.as_mut().unwrap().deadline =
+            Instant::now() - Duration::from_millis(1);
         assert!(desktop.require_controller(&lease.token).is_err());
         assert!(desktop.require_agent().is_ok());
         assert_ne!(desktop.acquire().unwrap().token, lease.token);
@@ -863,7 +1119,7 @@ mod tests {
             .await
             .is_err());
         let revision = observe(&registry).await;
-        let lease = registry.acquire_control("a").await.unwrap();
+        let lease = registry.acquire_control("a", true).await.unwrap();
         assert!(registry
             .remote_perform_action("a", pixel_action(&revision), "turn")
             .await
@@ -873,6 +1129,8 @@ mod tests {
             .control_input(
                 "a",
                 &lease.token,
+                lease.fence,
+                &registry.desktop_frame("a").await.unwrap().frame_id,
                 Some(Point { x: 10, y: 10 }),
                 UiAction::Click {
                     button: None,
@@ -881,7 +1139,10 @@ mod tests {
             )
             .await
             .is_err());
-        assert!(registry.renew_control("a", &lease.token).await.is_ok());
+        assert!(registry
+            .renew_control("a", &lease.token, lease.fence)
+            .await
+            .is_ok());
 
         let blocked_exec = registry
             .exec(
@@ -903,6 +1164,8 @@ mod tests {
             .control_input(
                 "a",
                 "wrong",
+                lease.fence,
+                "wrong-frame",
                 None,
                 UiAction::TypeText {
                     text: "blocked".into()
@@ -914,6 +1177,8 @@ mod tests {
             .control_input(
                 "a",
                 &lease.token,
+                lease.fence,
+                &registry.desktop_frame("a").await.unwrap().frame_id,
                 None,
                 UiAction::TypeText {
                     text: "hello".into(),
@@ -921,7 +1186,10 @@ mod tests {
             )
             .await
             .unwrap();
-        registry.release_control("a", &lease.token).await.unwrap();
+        registry
+            .release_control("a", &lease.token, lease.fence)
+            .await
+            .unwrap();
         assert!(registry
             .remote_perform_action("a", pixel_action(&revision), "turn")
             .await
@@ -1014,7 +1282,7 @@ mod tests {
         let _ = task.await;
         // These must refuse before trying to locate Docker or a desktop server.
         assert!(matches!(
-            registry.acquire_control("cancelled").await,
+            registry.acquire_control("cancelled", true).await,
             Err(AutomationError::PermissionDenied { .. })
         ));
         assert!(registry.agent_guard("cancelled").await.is_err());
@@ -1085,7 +1353,7 @@ mod tests {
         let _ = task.await;
         gate.notify_one();
         assert!(matches!(
-            registry.acquire_control("a").await,
+            registry.acquire_control("a", true).await,
             Err(AutomationError::PermissionDenied { .. })
         ));
         // Even after cleanup is independently confirmed, the observation
@@ -1114,7 +1382,7 @@ mod tests {
         let (registry, server, calls) = fixture().await;
         registry.desktop_guard("a").await.held_mouse_buttons =
             vec![MouseButton::Left, MouseButton::Middle];
-        let lease = registry.acquire_control("a").await.unwrap();
+        let lease = registry.acquire_control("a", true).await.unwrap();
         assert_eq!(
             calls
                 .lock()
@@ -1129,7 +1397,10 @@ mod tests {
             .await
             .held_mouse_buttons
             .is_empty());
-        registry.release_control("a", &lease.token).await.unwrap();
+        registry
+            .release_control("a", &lease.token, lease.fence)
+            .await
+            .unwrap();
         registry.disconnect_all().await;
         server.abort();
     }

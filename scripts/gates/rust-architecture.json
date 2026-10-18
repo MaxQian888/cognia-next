@@ -18,6 +18,7 @@
     "cognia-update-catalog": "foundation",
 
     "cognia-e2b": "platform",
+    "cognia-remote-desktop": "platform",
     "cognia-desktop-guest": "platform",
     "cognia-jobs": "platform",
     "cognia-sidecar": "platform",

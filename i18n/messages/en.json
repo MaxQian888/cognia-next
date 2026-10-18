@@ -5530,6 +5530,7 @@
       "hide": "Hide picture in picture",
       "justNow": "Just now",
       "move": "Move picture in picture",
+      "openSandboxDesktop": "Open sandbox desktop",
       "resize": "Resize picture in picture",
       "screenAlt": "Computer Use screen",
       "secondsAgo": "{seconds}s ago",
@@ -5560,6 +5561,7 @@
         "controlHelp": "Click the screen to use the keyboard. Drag or scroll to interact. Escape releases control. Control also ends when this window loses focus. Agent input is paused while you have control.",
         "controlling": "You have control",
         "disconnected": "Desktop disconnected. Retrying automatically…",
+        "dockTitle": "Sandbox desktop",
         "doubleClick": "Double-click mode",
         "error": {
           "capture": "Unable to capture the desktop. Control has been released.",

@@ -41,7 +41,7 @@ export function useSandboxDesktop(
     let generation = 0
     let capturing = false
     let captureEpoch = 0
-    let managedMutation = false
+    let mutationPending = false
     let refreshPending = false
     let consumedFrameId: string | undefined
     let currentFrame: Screenshot | null = null
@@ -53,12 +53,21 @@ export function useSandboxDesktop(
       ? null
       : {
           managed: false,
-          frame: async () => ({ screenshot: await sandboxClient.desktopFrame(connectionId) }),
-          acquire: () => sandboxClient.acquireControl(connectionId),
-          renew: (current) => sandboxClient.renewControl(connectionId, current.token),
-          release: (current) => sandboxClient.releaseControl(connectionId, current.token),
-          input: (current, _frame, point, action) =>
-            sandboxClient.controlInput(connectionId, current.token, point, action),
+          frame: () => sandboxClient.desktopFrame(connectionId),
+          acquire: () => sandboxClient.acquireControl(connectionId, true),
+          renew: (current) =>
+            sandboxClient.renewControl(connectionId, current.token, current.fence),
+          release: (current) =>
+            sandboxClient.releaseControl(connectionId, current.token, current.fence),
+          input: (current, proof, point, action) =>
+            sandboxClient.controlInput(
+              connectionId,
+              current.token,
+              current.fence,
+              proof.frameId,
+              point,
+              action
+            ),
           close: () => undefined,
         }
     let receivedAt = 0
@@ -113,7 +122,7 @@ export function useSandboxDesktop(
 
     const refresh = async () => {
       if (!alive || !visible() || !desktop) return
-      if (capturing || managedMutation) {
+      if (capturing || mutationPending) {
         refreshPending = true
         return
       }
@@ -158,11 +167,10 @@ export function useSandboxDesktop(
         )
           return
         if (
-          desktop.managed &&
-          (!proof.frameId ||
-            !Number.isFinite(proof.expiresAt) ||
-            proof.expiresAt! <= Date.now() ||
-            (lease && proof.fence !== lease.fence))
+          !proof.frameId ||
+          !Number.isFinite(proof.expiresAt) ||
+          proof.expiresAt <= Date.now() ||
+          (lease && proof.fence !== lease.fence)
         )
           throw new Error("Invalid frame proof")
         currentProof = proof
@@ -208,37 +216,35 @@ export function useSandboxDesktop(
         }
         lease = next
         scheduleRenewal()
-        if (desktop.managed) {
-          // Fence invalidates every observer frame. A capture begun before
-          // acquisition must never overwrite the fresh controller frame.
-          generation += 1
-          currentFrame = null
-          currentProof = null
-          setFrame(null)
-          const acquiredGeneration = generation
-          const proof = await desktop.frame()
-          if (
-            !alive ||
-            !visible() ||
-            generation !== acquiredGeneration ||
-            lease?.token !== next.token
-          )
-            return
-          if (
-            !proof.frameId ||
-            !Number.isFinite(proof.expiresAt) ||
-            proof.fence !== next.fence ||
-            proof.expiresAt! <= Date.now() ||
-            !proof.screenshot.bytes ||
-            proof.screenshot.width <= 0 ||
-            proof.screenshot.height <= 0
-          )
-            throw new Error("Invalid controller frame")
-          currentProof = proof
-          currentFrame = proof.screenshot
-          receivedAt = Date.now()
-          setFrame(proof.screenshot)
-        }
+        // Fence invalidates every observer frame. A capture begun before
+        // acquisition must never overwrite the fresh controller frame.
+        generation += 1
+        currentFrame = null
+        currentProof = null
+        setFrame(null)
+        const acquiredGeneration = generation
+        const proof = await desktop.frame()
+        if (
+          !alive ||
+          !visible() ||
+          generation !== acquiredGeneration ||
+          lease?.token !== next.token
+        )
+          return
+        if (
+          !proof.frameId ||
+          !Number.isFinite(proof.expiresAt) ||
+          proof.fence !== next.fence ||
+          proof.expiresAt! <= Date.now() ||
+          !proof.screenshot.bytes ||
+          proof.screenshot.width <= 0 ||
+          proof.screenshot.height <= 0
+        )
+          throw new Error("Invalid controller frame")
+        currentProof = proof
+        currentFrame = proof.screenshot
+        receivedAt = Date.now()
+        setFrame(proof.screenshot)
         setControlling(true)
       } catch {
         await release()
@@ -287,26 +293,24 @@ export function useSandboxDesktop(
             !inputLease ||
             !observedProof ||
             !desktop ||
-            (desktop.managed &&
-              (observedProof.expiresAt! <= Date.now() || observedProof.fence !== inputLease.fence))
+            observedProof.expiresAt <= Date.now() ||
+            observedProof.fence !== inputLease.fence
           )
             return false
-          if (desktop.managed) {
-            // The Host consumes every frame proof after one mutation. A queued
-            // event must not reuse that proof or adopt newer coordinates.
-            if (currentProof !== observedProof || observedProof.frameId === consumedFrameId)
-              return false
-            consumedFrameId = observedProof.frameId
-            currentProof = null
-            captureEpoch += 1
-            managedMutation = true
-          }
+          // The Host consumes every frame proof after one mutation. A queued
+          // event must not reuse that proof or adopt newer coordinates.
+          if (currentProof !== observedProof || observedProof.frameId === consumedFrameId)
+            return false
+          consumedFrameId = observedProof.frameId
+          currentProof = null
+          captureEpoch += 1
+          mutationPending = true
           try {
             await desktop.input(inputLease, observedProof, point, action)
           } finally {
-            managedMutation = false
+            mutationPending = false
           }
-          if (desktop.managed) await refresh()
+          await refresh()
           return true
         } catch {
           await release()

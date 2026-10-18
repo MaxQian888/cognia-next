@@ -30,6 +30,7 @@ tauri-host = ["dep:tauri", "dep:tauri-plugin-clipboard-manager"]
 cc = "1"
 
 [dependencies]
+cognia-remote-desktop = { path = "../cognia-remote-desktop" }
 cognia-instrument = { path = "../cognia-instrument" }
 cognia-core = { path = "../cognia-core", features = ["workspace-env-async"] }
 cognia-secrets = { path = "../cognia-secrets" }

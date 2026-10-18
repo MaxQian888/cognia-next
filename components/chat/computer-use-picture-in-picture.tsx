@@ -14,6 +14,9 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useTranslations } from "next-intl"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 
+import { SANDBOX_DESKTOP_PANEL_ID } from "@/components/artifacts/dock-panel-meta"
+import { useSessionSandboxDesktop } from "@/hooks/automation/use-session-sandbox-desktop"
+import { revealSessionPanel } from "@/lib/artifacts/reveal"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -128,6 +131,7 @@ export function resizeGrowth(alignment: PictureInPictureAlignment, dx: number, d
 
 export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }) {
   const t = useTranslations("automation.pictureInPicture")
+  const sandboxDesktop = useSessionSandboxDesktop(sessionId)
   const snapshot = useComputerUsePip(sessionId)
   const hasActivity = snapshot.action != null
   const frameWidth = snapshot.frame?.width
@@ -510,6 +514,22 @@ export function ComputerUsePictureInPicture({ sessionId }: { sessionId: string }
               {snapshot.phase === "running" && !snapshot.ended && (
                 <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" aria-hidden />
               )}
+              {sandboxDesktop ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={t("openSandboxDesktop")}
+                      onClick={() => revealSessionPanel(sessionId, SANDBOX_DESKTOP_PANEL_ID)}
+                    >
+                      <MonitorPlay className="size-3.5" aria-hidden />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("openSandboxDesktop")}</TooltipContent>
+                </Tooltip>
+              ) : null}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button

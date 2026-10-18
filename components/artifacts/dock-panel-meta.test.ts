@@ -31,6 +31,12 @@ describe("DOCK_SESSION_PANEL_META", () => {
       .filter(([, meta]) => meta.preferredMode === "wide")
       .map(([id]) => id)
       .sort()
-    expect(wide).toEqual(["best-of-n", "browser", "project-overview", "workspace"])
+    expect(wide).toEqual([
+      "best-of-n",
+      "browser",
+      "project-overview",
+      "sandbox-desktop",
+      "workspace",
+    ])
   })
 })

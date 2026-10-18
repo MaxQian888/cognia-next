@@ -36,6 +36,14 @@ fn cognia_data_dir(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("cognia")
 }
 
+/// Install before desktop services can accept control or agent input.
+pub(crate) fn remote_desktop_audit(app: &App) {
+    match app.path().app_data_dir() {
+        Ok(dir) => cognia_remote_desktop::audit::install(&cognia_data_dir(&dir)),
+        Err(error) => log::warn!("remote desktop audit: no app data dir: {error}"),
+    }
+}
+
 fn agent_session_db(app_data_dir: &Path) -> PathBuf {
     cognia_data_dir(app_data_dir).join("agent-sessions.sqlite")
 }
@@ -304,6 +312,13 @@ pub(crate) fn cli_bridge(app: &App) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn remote_desktop_audit_installs_before_automation_and_managed_desktops() {
+        let audit = crate::startup::step_position("remote_desktop_audit");
+        assert!(audit < crate::startup::step_position("automation_state"));
+        assert!(audit < crate::startup::step_position("managed_desktops"));
+    }
+
     use super::*;
 
     #[test]

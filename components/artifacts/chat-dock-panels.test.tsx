@@ -41,6 +41,22 @@ let sessionPlans: Array<{ id: string; status: string }> = []
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => sessionPlans,
 }))
+// The sandbox desktop panel follows the session's resolved GUI binding.
+let mockSessionSandboxDesktop: {
+  connectionId: string
+  containerId?: string
+  enabled: boolean
+} | null = null
+jest.mock("@/hooks/automation/use-session-sandbox-desktop", () => ({
+  useSessionSandboxDesktop: () => mockSessionSandboxDesktop,
+}))
+jest.mock("@/components/settings/automation/sandbox-desktop-viewer", () => ({
+  SandboxDesktopViewer: (props: { connectionId: string; enabled: boolean }) => (
+    <div data-testid="sandbox-desktop-viewer" data-enabled={String(props.enabled)}>
+      {props.connectionId}
+    </div>
+  ),
+}))
 jest.mock("@/lib/db/plans", () => ({
   listPlansBySession: jest.fn(async () => sessionPlans),
   listPlanEvents: jest.fn(async () => []),
@@ -718,7 +734,7 @@ describe("the selection composer inside the resource chat", () => {
 })
 
 describe("useSessionSurfacePanels", () => {
-  it("offers exactly the nineteen session-surface panels, in a stable order", () => {
+  it("offers exactly the twenty session-surface panels, in a stable order", () => {
     const panels = collect(useSessionSurfacePanels, sessionInput())
     expect(panels.find((panel) => panel.id === "squad-context")?.icon).toBe(AgentTeamIcon)
     expect(panels.map((p) => [p.id, p.activity, p.order])).toEqual([
@@ -727,6 +743,7 @@ describe("useSessionSurfacePanels", () => {
       ["plan", "review", 12],
       ["session-sidechat", "ai", 15],
       ["browser", "preview-run", 20],
+      ["sandbox-desktop", "preview-run", 22],
       [PROJECT_OVERVIEW_PANEL_ID, "workspace", 25],
       ["conversation-files", "workspace", 28],
       [WORKSPACE_PANEL_ID, "workspace", 30],
@@ -748,12 +765,52 @@ describe("useSessionSurfacePanels", () => {
     // Team members and plan are the conditional entries — see the tests below.
     // Give the plan query a record so the panel claims its slot.
     sessionPlans = [{ id: "p1", status: "completed" }]
+    mockSessionSandboxDesktop = { connectionId: "c1", containerId: "k1", enabled: true }
     const panels = collect(
       useSessionSurfacePanels,
       sessionInput({ session: teamSession, newTab: true })
     ).filter((p) => p.id !== "team-members")
+    mockSessionSandboxDesktop = null
     expect(panels.every((p) => p.appliesTo(SESSION_RESOURCE))).toBe(true)
     expect(panels.some((p) => p.appliesTo(ARTIFACT_RESOURCE))).toBe(false)
+  })
+
+  describe("sandbox desktop", () => {
+    afterEach(() => {
+      mockSessionSandboxDesktop = null
+    })
+
+    it("claims a slot only when the session routes GUI work to a sandbox connection", () => {
+      mockSessionSandboxDesktop = null
+      const without = panelById(collect(useSessionSurfacePanels, sessionInput()), "sandbox-desktop")
+      expect(without.appliesTo(SESSION_RESOURCE)).toBe(false)
+
+      mockSessionSandboxDesktop = { connectionId: "c1", containerId: "k1", enabled: true }
+      const panel = panelById(collect(useSessionSurfacePanels, sessionInput()), "sandbox-desktop")
+      expect(panel.appliesTo(SESSION_RESOURCE)).toBe(true)
+      expect(panel.appliesTo({ ...SESSION_RESOURCE, sessionId: "other" })).toBe(false)
+      expect(panel.appliesTo(ARTIFACT_RESOURCE)).toBe(false)
+      expect(panel).toMatchObject({
+        labelKey: "automation.sandboxConnections.desktopViewer.dockTitle",
+        retention: "ephemeral",
+        preferredMode: "wide",
+        exclusiveSurface: true,
+      })
+    })
+
+    it("renders the bound connection's viewer and nothing when the binding is gone", () => {
+      mockSessionSandboxDesktop = { connectionId: "c1", containerId: "k1", enabled: false }
+      const panel = panelById(collect(useSessionSurfacePanels, sessionInput()), "sandbox-desktop")
+      const { unmount } = renderPanel(panel, SESSION_RESOURCE)
+      const viewer = screen.getByTestId("sandbox-desktop-viewer")
+      expect(viewer).toHaveTextContent("c1")
+      expect(viewer).toHaveAttribute("data-enabled", "false")
+      unmount()
+
+      mockSessionSandboxDesktop = null
+      renderPanel(panel, SESSION_RESOURCE)
+      expect(screen.queryByTestId("sandbox-desktop-viewer")).toBeNull()
+    })
   })
 
   it("offers the New Tab page to the desktop dock only, as its landing panel", () => {

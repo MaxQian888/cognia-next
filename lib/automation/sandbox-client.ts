@@ -4,15 +4,15 @@ import type { Point, Screenshot, UiAction } from "@/lib/automation/types"
 export interface SandboxControlLease {
   token: string
   expiresAt: number
-  fence?: number
+  fence: number
 }
 
-/** Bound viewer transport. Managed frames carry Host-issued proofs; local Docker does not. */
+/** Bound viewer transport. Every frame carries a Host-issued, single-use proof. */
 export interface SandboxDesktopFrame {
   screenshot: Screenshot
-  frameId?: string
-  fence?: number
-  expiresAt?: number
+  frameId: string
+  fence: number
+  expiresAt: number
 }
 export interface SandboxDesktopStatus {
   qualified: boolean
@@ -154,30 +154,45 @@ export const sandboxClient = {
       path,
     })
   },
-  desktopFrame(connectionId: string): Promise<Screenshot> {
-    return transport.call<Screenshot>("cua_sandbox_desktop_capture", { connectionId })
+  desktopFrame(connectionId: string): Promise<SandboxDesktopFrame> {
+    return transport.call<SandboxDesktopFrame>("cua_sandbox_desktop_capture", { connectionId })
   },
-  acquireControl(connectionId: string): Promise<SandboxControlLease> {
+  acquireControl(connectionId: string, takeover: boolean): Promise<SandboxControlLease> {
     return transport.call<SandboxControlLease>("cua_sandbox_desktop_acquire_control", {
       connectionId,
+      takeover,
     })
   },
-  renewControl(connectionId: string, token: string): Promise<SandboxControlLease> {
+  renewControl(connectionId: string, token: string, fence: number): Promise<SandboxControlLease> {
     return transport.call<SandboxControlLease>("cua_sandbox_desktop_renew_control", {
       connectionId,
       token,
+      fence,
     })
   },
-  releaseControl(connectionId: string, token: string): Promise<void> {
-    return transport.call<void>("cua_sandbox_desktop_release_control", { connectionId, token })
+  releaseControl(connectionId: string, token: string, fence: number): Promise<void> {
+    return transport.call<void>("cua_sandbox_desktop_release_control", {
+      connectionId,
+      token,
+      fence,
+    })
   },
   controlInput(
     connectionId: string,
     token: string,
+    fence: number,
+    frameId: string,
     point: Point | null,
     action: UiAction
   ): Promise<void> {
-    return transport.call<void>("cua_sandbox_desktop_input", { connectionId, token, point, action })
+    return transport.call<void>("cua_sandbox_desktop_input", {
+      connectionId,
+      token,
+      fence,
+      frameId,
+      point,
+      action,
+    })
   },
   /** Provision the container without starting it. */
   create(

@@ -1057,7 +1057,7 @@ mod tests {
             println!("native desktop started: {} port {}", placement.container_id, placement.port);
             // connect() itself verifies that an unauthenticated WebSocket is
             // rejected before establishing the private authenticated channel.
-            let frame = registry.desktop_frame(&id).await?;
+            let frame = registry.desktop_frame(&id).await?.screenshot;
             if (frame.width, frame.height) != (1280, 800) { return Err(backend_err("unexpected native frame dimensions")); }
             std::fs::write("/tmp/cognia-cua-desktop-native.png", base64::engine::general_purpose::STANDARD.decode(&frame.bytes).map_err(|e| backend_err(e.to_string()))?).map_err(|e| backend_err(e.to_string()))?;
             let credentials = registry.exec(&id,
@@ -1080,7 +1080,7 @@ mod tests {
             registry.remote_query_elements(&id, &revision.session_id, &revision.lineage_id, revision.revision, &Locator::default(), 10).await?;
             registry.remote_perform_action(&id, action(&revision), "live-turn").await?;
             let revision = registry.remote_get_app_state(&id, "live-session".into(), "live-turn".into(), locator, GetAppStateOptions::default(), ScreenshotScalingSettings { enabled: false, ..Default::default() }).await?;
-            let lease = registry.acquire_control(&id).await?;
+            let lease = registry.acquire_control(&id, true).await?;
             if registry.remote_perform_action(&id, action(&revision), "live-turn").await.is_ok() {
                 return Err(backend_err("agent desktop action was not blocked during human control"));
             }
@@ -1094,24 +1094,24 @@ mod tests {
             let binary_hash = super::super::file_transfer::sha256(&binary);
             let uploaded = registry.upload_file(&id, &placement.container_id, &lease.token, "/home/cua/binary-proof.bin", &binary_base64).await?;
             if uploaded.size != binary.len() as u64 || uploaded.sha256 != binary_hash { return Err(backend_err("binary upload mismatch")); }
-            registry.renew_control(&id, &lease.token).await?;
+            registry.renew_control(&id, &lease.token, lease.fence).await?;
             if registry.upload_file(&id, &placement.container_id, &lease.token, "/home/cua/binary-proof.bin", "").await.is_ok() { return Err(backend_err("binary upload silently replaced an existing file")); }
             // Acknowledged EEXIST must not quarantine or discard human control.
-            registry.renew_control(&id, &lease.token).await?;
+            registry.renew_control(&id, &lease.token, lease.fence).await?;
             let downloaded = registry.download_file(&id, &placement.container_id, "/home/cua/binary-proof.bin").await?;
             if downloaded.data_base64 != binary_base64 || downloaded.sha256 != binary_hash { return Err(backend_err("binary download mismatch")); }
             if registry.download_file(&id, &"0".repeat(64), "/home/cua/binary-proof.bin").await.is_ok() { return Err(backend_err("transfer accepted a replaced container identity")); }
-            registry.renew_control(&id, &lease.token).await?;
+            registry.renew_control(&id, &lease.token, lease.fence).await?;
             registry.upload_file(&id, &placement.container_id, &lease.token, "/home/cua/empty-proof.bin", "").await?;
             if registry.download_file(&id, &placement.container_id, "/home/cua/empty-proof.bin").await?.size != 0 { return Err(backend_err("empty binary transfer mismatch")); }
-            registry.control_input(&id, &lease.token, Some(Point { x: 100, y: 650 }), UiAction::Click { button: None, count: Some(1) }).await?;
-            registry.control_input(&id, &lease.token, None, UiAction::TypeText {
+            registry.control_input(&id, &lease.token, lease.fence, &registry.desktop_frame(&id).await?.frame_id, Some(Point { x: 100, y: 650 }), UiAction::Click { button: None, count: Some(1) }).await?;
+            registry.control_input(&id, &lease.token, lease.fence, &registry.desktop_frame(&id).await?.frame_id, None, UiAction::TypeText {
                 text: "printf 'native-ui-proof' > /home/cua/ui-proof.txt".into(),
             }).await?;
-            registry.control_input(&id, &lease.token, None, UiAction::PressKey { chord: KeyChord("Enter".into()) }).await?;
-            registry.release_control(&id, &lease.token).await?;
+            registry.control_input(&id, &lease.token, lease.fence, &registry.desktop_frame(&id).await?.frame_id, None, UiAction::PressKey { chord: KeyChord("Enter".into()) }).await?;
+            registry.release_control(&id, &lease.token, lease.fence).await?;
             tokio::time::sleep(Duration::from_millis(300)).await;
-            let frame = registry.desktop_frame(&id).await?;
+            let frame = registry.desktop_frame(&id).await?.screenshot;
             std::fs::write("/tmp/cognia-cua-desktop-native-input.png", base64::engine::general_purpose::STANDARD.decode(&frame.bytes).map_err(|e| backend_err(e.to_string()))?).map_err(|e| backend_err(e.to_string()))?;
             if registry.read_file(&id, "/home/cua/ui-proof.txt", 1024).await? != "native-ui-proof" {
                 return Err(backend_err("real desktop keyboard input did not create the expected file"));
@@ -1151,7 +1151,7 @@ print('anonymous-upload-clean')
             registry.suspend(&id).await?;
             if !docker_inspect(&name).await?.is_some_and(|state| state.paused) { return Err(backend_err("desktop did not pause")); }
             registry.resume(&id).await?;
-            registry.desktop_frame(&id).await?;
+            registry.desktop_frame(&id).await?.screenshot;
             registry.disconnect_all().await;
             let restarted_host = CuaSandboxRegistry::default();
             restarted_host.desktop_frame(&id).await?;

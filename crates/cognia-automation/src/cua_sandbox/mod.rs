@@ -15,10 +15,10 @@ use std::time::Duration;
 #[cfg(feature = "tauri-host")]
 use crate::automation::{
     session::UiAction,
-    types::{Point, Screenshot},
+    types::Point,
 };
 #[cfg(feature = "tauri-host")]
-use desktop_session::ControlLease;
+use desktop_session::{ControlFrame, ControlLease};
 use serde::{Deserialize, Serialize};
 
 pub mod desktop_session;
@@ -417,7 +417,7 @@ pub async fn cua_sandbox_download_file(
 pub async fn cua_sandbox_desktop_capture(
     reg: tauri::State<'_, CuaSandboxRegistry>,
     connection_id: String,
-) -> Result<Screenshot, String> {
+) -> Result<ControlFrame, String> {
     reg.desktop_frame(&connection_id)
         .await
         .map_err(|e| e.to_string())
@@ -427,8 +427,9 @@ pub async fn cua_sandbox_desktop_capture(
 pub async fn cua_sandbox_desktop_acquire_control(
     reg: tauri::State<'_, CuaSandboxRegistry>,
     connection_id: String,
+    takeover: bool,
 ) -> Result<ControlLease, String> {
-    reg.acquire_control(&connection_id)
+    reg.acquire_control(&connection_id, takeover)
         .await
         .map_err(|e| e.to_string())
 }
@@ -438,8 +439,9 @@ pub async fn cua_sandbox_desktop_renew_control(
     reg: tauri::State<'_, CuaSandboxRegistry>,
     connection_id: String,
     token: String,
+    fence: u64,
 ) -> Result<ControlLease, String> {
-    reg.renew_control(&connection_id, &token)
+    reg.renew_control(&connection_id, &token, fence)
         .await
         .map_err(|e| e.to_string())
 }
@@ -449,8 +451,9 @@ pub async fn cua_sandbox_desktop_release_control(
     reg: tauri::State<'_, CuaSandboxRegistry>,
     connection_id: String,
     token: String,
+    fence: u64,
 ) -> Result<(), String> {
-    reg.release_control(&connection_id, &token)
+    reg.release_control(&connection_id, &token, fence)
         .await
         .map_err(|e| e.to_string())
 }
@@ -460,10 +463,12 @@ pub async fn cua_sandbox_desktop_input(
     reg: tauri::State<'_, CuaSandboxRegistry>,
     connection_id: String,
     token: String,
+    fence: u64,
+    frame_id: String,
     point: Option<Point>,
     action: UiAction,
 ) -> Result<(), String> {
-    reg.control_input(&connection_id, &token, point, action)
+    reg.control_input(&connection_id, &token, fence, &frame_id, point, action)
         .await
         .map_err(|e| e.to_string())
 }

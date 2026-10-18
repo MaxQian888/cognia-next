@@ -13,6 +13,14 @@ jest.mock("@/lib/automation/sandbox-client", () => ({
 }))
 const client = jest.mocked(sandboxClient)
 const frame = { bytes: "aA==", width: 800, height: 600, capturedAt: 42, format: "png" as const }
+// The local Host issues a single-use proof with every capture, and acquiring
+// control advances the fence, exactly like the managed Host.
+let fence = 1
+let frameSeq = 0
+function proofFor(screenshot: typeof frame = frame) {
+  frameSeq += 1
+  return { screenshot, frameId: `f${frameSeq}`, fence, expiresAt: Date.now() + 5000 }
+}
 async function tick(ms = 0) {
   await act(async () => {
     jest.advanceTimersByTime(ms)
@@ -21,13 +29,16 @@ async function tick(ms = 0) {
 beforeEach(() => {
   jest.useFakeTimers()
   jest.resetAllMocks()
-  client.desktopFrame.mockResolvedValue(frame)
-  client.acquireControl.mockImplementation(async () => ({
-    token: "lease",
-    expiresAt: Date.now() + 15000,
-  }))
+  fence = 1
+  frameSeq = 0
+  client.desktopFrame.mockImplementation(async () => proofFor())
+  client.acquireControl.mockImplementation(async () => {
+    fence += 1
+    return { token: "lease", fence, expiresAt: Date.now() + 15000 }
+  })
   client.renewControl.mockImplementation(async () => ({
     token: "lease",
+    fence,
     expiresAt: Date.now() + 15000,
   }))
   client.releaseControl.mockResolvedValue(undefined)
@@ -60,16 +71,21 @@ test("renews human control and releases on blur", async () => {
     expect(await result.current.input({ kind: "typeText", text: "中文" }, null, 42)).toBe(true)
   })
   await tick(5000)
-  expect(client.renewControl).toHaveBeenCalledWith("c1", "lease")
+  expect(client.acquireControl).toHaveBeenCalledWith("c1", true)
+  expect(client.controlInput).toHaveBeenCalledWith("c1", "lease", 2, "f2", null, {
+    kind: "typeText",
+    text: "中文",
+  })
+  expect(client.renewControl).toHaveBeenCalledWith("c1", "lease", 2)
   await act(async () => {
     window.dispatchEvent(new Event("blur"))
   })
   expect(result.current.controlling).toBe(false)
-  expect(client.releaseControl).toHaveBeenCalledWith("c1", "lease")
+  expect(client.releaseControl).toHaveBeenCalledWith("c1", "lease", 2)
 })
 
 test("releases a late lease after unmount instead of retaining invisible control", async () => {
-  let resolve!: (lease: { token: string; expiresAt: number }) => void
+  let resolve!: (lease: { token: string; fence: number; expiresAt: number }) => void
   client.acquireControl.mockImplementationOnce(
     () =>
       new Promise((r) => {
@@ -83,9 +99,9 @@ test("releases a late lease after unmount instead of retaining invisible control
   })
   unmount()
   await act(async () => {
-    resolve({ token: "late", expiresAt: Date.now() + 15000 })
+    resolve({ token: "late", fence: 9, expiresAt: Date.now() + 15000 })
   })
-  expect(client.releaseControl).toHaveBeenCalledWith("c1", "late")
+  expect(client.releaseControl).toHaveBeenCalledWith("c1", "late", 9)
 })
 
 test("capture failures clear stale pixels, release control, and recover automatically", async () => {
@@ -134,7 +150,7 @@ test("rejects stale frame inputs and releases control after renewal failure", as
   expect(client.controlInput).not.toHaveBeenCalled()
 })
 
-test("accepted keyboard input survives a capture refresh while queued", async () => {
+test("a queued keystroke cannot reuse a consumed proof; the next frame enables it", async () => {
   let completeFirst!: () => void
   client.controlInput.mockImplementationOnce(
     () =>
@@ -149,15 +165,20 @@ test("accepted keyboard input survives a capture refresh while queued", async ()
   })
   const first = result.current.input({ kind: "typeText", text: "a" }, null, 42)
   const second = result.current.input({ kind: "typeText", text: "b" }, null, 42)
-  client.desktopFrame.mockResolvedValue({ ...frame, capturedAt: 43 })
-  await tick(1000)
-  expect(result.current.frame?.capturedAt).toBe(43)
+  client.desktopFrame.mockImplementation(async () => proofFor({ ...frame, capturedAt: 43 }))
+  await tick()
   await act(async () => {
     completeFirst()
     expect(await first).toBe(true)
-    expect(await second).toBe(true)
+    expect(await second).toBe(false)
   })
-  expect(client.controlInput).toHaveBeenNthCalledWith(2, "c1", "lease", null, {
+  expect(client.controlInput).toHaveBeenCalledTimes(1)
+  expect(result.current.frame?.capturedAt).toBe(43)
+  expect(result.current.controlling).toBe(true)
+  await act(async () => {
+    expect(await result.current.input({ kind: "typeText", text: "b" }, null, 43)).toBe(true)
+  })
+  expect(client.controlInput).toHaveBeenLastCalledWith("c1", "lease", 2, "f3", null, {
     kind: "typeText",
     text: "b",
   })
@@ -178,7 +199,9 @@ test("queued pointer input is rejected if a capture changes desktop dimensions",
   })
   const first = result.current.input({ kind: "typeText", text: "a" }, null, 42)
   const second = result.current.input({ kind: "click" }, { x: 10, y: 10 }, 42)
-  client.desktopFrame.mockResolvedValue({ ...frame, width: 400, capturedAt: 43 })
+  client.desktopFrame.mockImplementation(async () =>
+    proofFor({ ...frame, width: 400, capturedAt: 43 })
+  )
   await tick(1000)
   await act(async () => {
     completeFirst()
@@ -200,7 +223,8 @@ test("client-local capture and control continue without an external network", as
     window.dispatchEvent(new Event("offline"))
     await tick(1000)
     expect(result.current.controlling).toBe(true)
-    expect(client.desktopFrame).toHaveBeenCalledTimes(2)
+    // Initial observation, the fresh controller frame at acquisition, one poll.
+    expect(client.desktopFrame).toHaveBeenCalledTimes(3)
     expect(client.releaseControl).not.toHaveBeenCalled()
   } finally {
     online.mockRestore()

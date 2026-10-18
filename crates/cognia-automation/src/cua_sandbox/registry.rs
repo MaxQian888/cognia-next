@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::desktop_session::RemoteDesktop;
+use super::desktop_session::{DesktopPreemption, RemoteDesktop};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use super::lifecycle::{
@@ -44,7 +44,7 @@ pub struct SandboxPlacement {
 pub struct CuaSandboxRegistry {
     /// Live driver connections only. Rebuildable at any time from Docker.
     clients: Arc<Mutex<HashMap<String, Arc<CuaRemoteClient>>>>,
-    desktops: Arc<Mutex<HashMap<String, Arc<Mutex<RemoteDesktop>>>>>,
+    desktops: Arc<Mutex<HashMap<String, (Arc<Mutex<RemoteDesktop>>, Arc<DesktopPreemption>)>>>,
 }
 
 fn backend_err(msg: impl Into<String>) -> AutomationError {
@@ -86,18 +86,26 @@ impl CuaSandboxRegistry {
         self.clients.lock().await.insert(id.into(), client);
     }
 
+    pub(crate) async fn desktop_slot(
+        &self,
+        connection_id: &str,
+    ) -> (Arc<Mutex<RemoteDesktop>>, Arc<DesktopPreemption>) {
+        self.desktops
+            .lock()
+            .await
+            .entry(connection_id.to_owned())
+            .or_insert_with(|| {
+                let preempt = Arc::new(DesktopPreemption::default());
+                let desktop = RemoteDesktop::for_target(connection_id.to_owned(), preempt.clone());
+                (Arc::new(Mutex::new(desktop)), preempt)
+            })
+            .clone()
+    }
     pub(crate) async fn desktop_guard(
         &self,
         connection_id: &str,
     ) -> OwnedMutexGuard<RemoteDesktop> {
-        let desktop = self
-            .desktops
-            .lock()
-            .await
-            .entry(connection_id.to_owned())
-            .or_insert_with(|| Arc::new(Mutex::new(RemoteDesktop::default())))
-            .clone();
-        desktop.lock_owned().await
+        self.desktop_slot(connection_id).await.0.lock_owned().await
     }
 
     pub(crate) async fn agent_guard(
@@ -105,6 +113,10 @@ impl CuaSandboxRegistry {
         connection_id: &str,
     ) -> Result<OwnedMutexGuard<RemoteDesktop>> {
         let mut guard = self.desktop_guard(connection_id).await;
+        guard.agent_epoch = guard
+            .preempt
+            .epoch
+            .load(std::sync::atomic::Ordering::SeqCst);
         guard.require_agent()?;
         Ok(guard)
     }
@@ -463,7 +475,7 @@ impl CuaSandboxRegistry {
     pub async fn disconnect_all(&self) {
         self.clients.lock().await.clear();
         let desktops: Vec<_> = self.desktops.lock().await.values().cloned().collect();
-        for desktop in desktops {
+        for (desktop, _) in desktops {
             desktop.lock().await.invalidate();
         }
     }

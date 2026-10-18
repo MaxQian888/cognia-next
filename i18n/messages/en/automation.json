@@ -386,6 +386,7 @@
     "hide": "Hide picture in picture",
     "justNow": "Just now",
     "move": "Move picture in picture",
+    "openSandboxDesktop": "Open sandbox desktop",
     "resize": "Resize picture in picture",
     "screenAlt": "Computer Use screen",
     "secondsAgo": "{seconds}s ago",
@@ -489,7 +490,8 @@
       "otherController": "Another user has control",
       "agentDormant": "Task and agent control remain dormant until delivery handoff is implemented.",
       "mobileObservation": "Mobile supports observation only. Desktop input is disabled.",
-      "qualificationRequired": "Cloud desktop viewing and control require a separately authorized GUI smoke test."
+      "qualificationRequired": "Cloud desktop viewing and control require a separately authorized GUI smoke test.",
+      "dockTitle": "Sandbox desktop"
     },
     "deleteConfirmTitle": "Delete {name}?",
     "deleteConfirmDescription": "This permanently deletes the container and all files stored inside it. Files in mounted host folders remain. Export any files you need before deleting.",

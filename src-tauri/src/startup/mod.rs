@@ -40,6 +40,10 @@ pub(crate) const STEPS: &[Step] = &[
         run: services::node_runtime,
     },
     Step {
+        name: "remote_desktop_audit",
+        run: services::remote_desktop_audit,
+    },
+    Step {
         name: "automation_state",
         run: automation::automation_state,
     },
@@ -237,6 +241,7 @@ mod tests {
                 "gateway_session",
                 "companion_reachability",
                 "node_runtime",
+                "remote_desktop_audit",
                 "automation_state",
                 "native_logging",
                 "host_services",

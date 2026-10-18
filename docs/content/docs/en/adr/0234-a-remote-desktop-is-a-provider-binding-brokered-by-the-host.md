@@ -43,7 +43,7 @@ Targets, bindings and credentials live on the Host that reaches them, in a versi
 `managed/control.rs`'s fenced lease becomes the only control model. Local Docker CUA moves onto it from `desktop_session.rs`. The lease is 15 seconds, renewed every 5 seconds, and bound to principal, target, binding and generation. The fence advances on every invalidation.
 
 - Many viewers, one controller among Cognia-brokered sessions. Takeover is an explicit request; a second human cannot take control silently.
-- The Host tracks held keys and held mouse buttons per controller. It releases them on release, expiry, disconnect, revocation and takeover. Today buttons are released only at the next acquire and keys are not tracked; that is a defect this ADR requires fixed. Uncertain cleanup quarantines the target, as in 0233.
+- Human input is an atomic action, so held keys and mouse buttons originate only from agent transitions. The Host tracks that agent-held state and releases it at takeover, preemption and stop; expiry of a human lease cannot leave input held. Uncertain cleanup quarantines the target, as in 0233.
 - Takeover fences new agent operations and cancels or waits out the in-flight one under a deadline. It does not simply queue behind it.
 - Connections that bypass Cognia (another VNC client, a Guacamole tab) cannot be governed. A binding without server-side control revocation is labelled **provider-managed** in the UI and never presented as lease-protected.
 

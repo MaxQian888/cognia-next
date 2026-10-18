@@ -2605,6 +2605,7 @@ async fn run_serve(
     // Audit trail for the RCE-grade external-agent arms (ADR-0059 R11) —
     // append-only JSONL beside the SQLite store.
     app_lib::companion_api::audit::install(&data_dir);
+    cognia_remote_desktop::audit::install(&data_dir);
 
     // ADR-0090 Phase 2 — headless LLM Gateway. The SAME crate/state the
     // desktop manages; snapshots are the Provider Profile Store projection
@@ -2913,6 +2914,16 @@ async fn run_serve(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn remote_desktop_audit_is_installed_beside_companion_audit() {
+        let source = include_str!("cognia-server.rs");
+        let installation = [
+            "app_lib::companion_api::audit::install(&data_dir);",
+            "    cognia_remote_desktop::audit::install(&data_dir);",
+        ].join("\n");
+        assert!(source.contains(&installation));
+    }
+
     #[test]
     fn mdns_is_advertised_only_for_a_reachable_listener_that_did_not_opt_out() {
         assert!(super::should_advertise_mdns(true, false));

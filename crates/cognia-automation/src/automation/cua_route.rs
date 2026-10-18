@@ -79,7 +79,7 @@ pub async fn click(
                 count: Some(count),
             };
             crate::cua_sandbox::desktop_session::validate_action(Some(point), &action)?;
-            let c = client(cua, id).await?;
+            let c = desktop.agent_client(client(cua, id).await?.as_ref());
             desktop
                 .run_mutation(crate::cua_sandbox::desktop_session::deliver(
                     &c,
@@ -106,7 +106,7 @@ pub async fn type_text(
             }
             let mut desktop = cua.agent_guard(id).await?;
             desktop.sessions = super::session::UiSessionManager::default();
-            let c = client(cua, id).await?;
+            let c = desktop.agent_client(client(cua, id).await?.as_ref());
             desktop
                 .run_mutation(c.call(protocol::type_text_request(&text)))
                 .await
@@ -132,7 +132,7 @@ pub async fn send_keys(
                     chord: chord.clone(),
                 },
             )?;
-            let c = client(cua, id).await?;
+            let c = desktop.agent_client(client(cua, id).await?.as_ref());
             desktop
                 .run_mutation(c.call(protocol::keys_request(&chord)))
                 .await
@@ -152,7 +152,7 @@ pub async fn mouse_move(
         Some(id) => {
             let mut desktop = cua.agent_guard(id).await?;
             desktop.sessions = super::session::UiSessionManager::default();
-            let c = client(cua, id).await?;
+            let c = desktop.agent_client(client(cua, id).await?.as_ref());
             desktop
                 .run_mutation(c.call(protocol::move_request(point)))
                 .await
@@ -176,7 +176,7 @@ pub async fn drag(
             desktop.sessions = super::session::UiSessionManager::default();
             let button = opts.button.unwrap_or(MouseButton::Left);
             let duration_secs = opts.duration_ms.unwrap_or(150) as f64 / 1000.0;
-            let c = client(cua, id).await?;
+            let c = desktop.agent_client(client(cua, id).await?.as_ref());
             desktop
                 .run_mutation(c.call(protocol::drag_request(from, to, button, duration_secs)))
                 .await
@@ -197,7 +197,7 @@ pub async fn scroll(
         Some(id) => {
             let mut desktop = cua.agent_guard(id).await?;
             desktop.sessions = super::session::UiSessionManager::default();
-            let c = client(cua, id).await?;
+            let c = desktop.agent_client(client(cua, id).await?.as_ref());
             let point = match target {
                 ScrollTarget::Point { x, y } => Point { x, y },
                 ScrollTarget::Element { .. } => return Err(AutomationError::UnsupportedPlatform),
@@ -225,31 +225,87 @@ pub async fn hold_key(
             let mut desktop = cua.agent_guard(id).await?;
             desktop.sessions = super::session::UiSessionManager::default();
             let c = client(cua, id).await?;
-            let keys: Vec<String> = chord
-                .0
-                .split('+')
-                .map(|t| t.trim().to_string())
-                .filter(|t| !t.is_empty())
-                .collect();
-            if keys.is_empty() {
-                return Err(AutomationError::BackendError {
-                    message: "key chord is empty".into(),
-                });
-            }
-            desktop
-                .run_mutation(async {
-                    for k in &keys {
-                        c.call(protocol::key_transition_request(k, true)).await?;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(duration_ms as u64)).await;
-                    for k in keys.iter().rev() {
-                        c.call(protocol::key_transition_request(k, false)).await?;
-                    }
-                    Ok(())
-                })
-                .await
+            hold_remote_keys(&mut desktop, &c, chord, duration_ms).await
         }
     }
+}
+
+/// Keep held state resident in the desktop before each send, so cancellation
+/// cannot lose the cleanup obligation. Cleanup deliberately bypasses fencing.
+async fn hold_remote_keys(
+    desktop: &mut crate::cua_sandbox::desktop_session::RemoteDesktop,
+    client: &CuaRemoteClient,
+    chord: KeyChord,
+    duration_ms: u32,
+) -> Result<()> {
+    use std::sync::atomic::Ordering;
+
+    let keys: Vec<String> = chord
+        .0
+        .split('+')
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(str::to_owned)
+        .collect();
+    if keys.is_empty() {
+        return Err(AutomationError::BackendError {
+            message: "key chord is empty".into(),
+        });
+    }
+    let fenced = desktop.agent_client(client);
+    let preempt = desktop.preempt.clone();
+    let epoch = desktop.agent_epoch;
+    desktop.begin_mutation();
+    let mut result = async {
+        for key in &keys {
+            desktop.held_keys.push(key.clone());
+            if let Err(error) = fenced.call(protocol::key_transition_request(key, true)).await {
+                if matches!(error, AutomationError::PreemptedBeforeSend) {
+                    desktop.held_keys.pop();
+                }
+                return Err(error);
+            }
+        }
+        let notified = preempt.notify.notified();
+        tokio::pin!(notified);
+        // Enable before inspecting the epoch: notify_waiters does not retain a
+        // permit for a waiter that has not registered yet.
+        notified.as_mut().enable();
+        if preempt.epoch.load(Ordering::SeqCst) != epoch {
+            return Err(AutomationError::PreemptedBeforeSend);
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_millis(u64::from(duration_ms))) => Ok(()),
+            _ = notified => Err(AutomationError::PreemptedBeforeSend),
+        }
+    }.await;
+    while let Some(key) = desktop.held_keys.last().cloned() {
+        if let Err(error) = client
+            .call(protocol::key_transition_request(&key, false))
+            .await
+        {
+            result = Err(error);
+            break;
+        }
+        desktop.held_keys.pop();
+    }
+    // A takeover can also arrive during the final acknowledged release.
+    if result.is_ok() && preempt.epoch.load(Ordering::SeqCst) != epoch {
+        result = Err(AutomationError::PreemptedBeforeSend);
+    }
+    desktop.finish_mutation(&result);
+    if matches!(&result, Err(AutomationError::PreemptedBeforeSend)) {
+        cognia_remote_desktop::audit::record_background(
+            "remote_desktop.agent.preempted",
+            "sandbox",
+            &desktop.target_id,
+            "local-owner",
+            "preempted",
+            desktop.current_fence(),
+            json!({}),
+        );
+    }
+    result
 }
 
 pub async fn mouse_button(
@@ -269,7 +325,7 @@ pub async fn mouse_button(
                 ButtonTransition::Down => "mouse_down",
                 ButtonTransition::Up => "mouse_up",
             };
-            let c = client(cua, id).await?;
+            let c = desktop.agent_client(client(cua, id).await?.as_ref());
             desktop
                 .run_mutation(c.call_simple(command, json!({ "button": button_name(button) })))
                 .await?;
@@ -468,6 +524,103 @@ pub(crate) fn flatten_a11y(node: &Value, depth: usize) -> Vec<ElementInfo> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    async fn held_key_fixture(
+        fail_release: bool,
+    ) -> (
+        Arc<CuaRemoteClient>,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::task::JoinHandle<Vec<Value>>,
+    ) {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (pressed, ready) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let mut stream = crate::cua_sandbox::remote_client::accept_test_client(&listener).await;
+            let mut requests = Vec::new();
+            let mut pressed = Some(pressed);
+            for index in 0..4 {
+                let message = stream.next().await.unwrap().unwrap();
+                requests.push(serde_json::from_str(message.to_text().unwrap()).unwrap());
+                if fail_release && index == 2 {
+                    stream.close(None).await.unwrap();
+                    break;
+                }
+                stream
+                    .send(Message::Text(r#"{"status":"success"}"#.into()))
+                    .await
+                    .unwrap();
+                if index == 1 {
+                    pressed.take().unwrap().send(()).unwrap();
+                }
+            }
+            requests
+        });
+        let client = CuaRemoteClient::connect(
+            "127.0.0.1",
+            port,
+            crate::cua_sandbox::remote_client::TEST_AUTH_TOKEN,
+        )
+        .await
+        .unwrap();
+        (client, ready, server)
+    }
+
+    #[tokio::test]
+    async fn cua_hold_key_preemption_releases_reverse_order_without_quarantine() {
+        use std::sync::atomic::Ordering;
+        let (client, ready, server) = held_key_fixture(false).await;
+        let mut desktop = crate::cua_sandbox::desktop_session::RemoteDesktop::default();
+        let preempt = desktop.preempt.clone();
+        let task = tokio::spawn(async move {
+            let result =
+                hold_remote_keys(&mut desktop, &client, KeyChord("CTRL+A".into()), 60_000).await;
+            (desktop, result)
+        });
+        ready.await.unwrap();
+        preempt.epoch.fetch_add(1, Ordering::SeqCst);
+        preempt.notify.notify_waiters();
+        let (desktop, result) = tokio::time::timeout(std::time::Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(result, Err(AutomationError::PreemptedBeforeSend)));
+        assert!(desktop.held_keys.is_empty());
+        assert!(desktop.require_quiescent().is_ok());
+        let requests = server.await.unwrap();
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request["command"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["key_down", "key_down", "key_up", "key_up"]
+        );
+        assert_eq!(requests[2]["params"]["key"], "A");
+        assert_eq!(requests[3]["params"]["key"], "ctrl");
+    }
+
+    #[tokio::test]
+    async fn cua_hold_key_failed_preemption_cleanup_retains_keys_and_quarantine() {
+        use std::sync::atomic::Ordering;
+        let (client, ready, server) = held_key_fixture(true).await;
+        let mut desktop = crate::cua_sandbox::desktop_session::RemoteDesktop::default();
+        let preempt = desktop.preempt.clone();
+        let task = tokio::spawn(async move {
+            let result =
+                hold_remote_keys(&mut desktop, &client, KeyChord("CTRL+A".into()), 60_000).await;
+            (desktop, result)
+        });
+        ready.await.unwrap();
+        preempt.epoch.fetch_add(1, Ordering::SeqCst);
+        preempt.notify.notify_waiters();
+        let (desktop, result) = task.await.unwrap();
+        assert!(matches!(result, Err(AutomationError::BackendError { .. })));
+        assert_eq!(desktop.held_keys, ["CTRL", "A"]);
+        assert!(desktop.require_quiescent().is_err());
+        server.await.unwrap();
+    }
 
     #[test]
     fn flatten_a11y_assigns_distinct_refs_across_sibling_subtrees() {

@@ -11,15 +11,18 @@ use crate::cua_sandbox::{
     remote_client::CuaRemoteClient,
 };
 use async_trait::async_trait;
+use cognia_remote_desktop::{
+    audit,
+    control::{ControlError, ControlLeaseCore},
+};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
-const LEASE_MS: i64 = 15_000;
-const FRAME_MS: i64 = 5_000;
+const LEASE_MS: i64 = cognia_remote_desktop::control::LEASE_MS;
+const FRAME_MS: i64 = cognia_remote_desktop::control::FRAME_MS;
 
 /// Implemented by the authenticated Host, checking its live device/owner
 /// authority store. A captured request context alone is not a revocation check.
@@ -121,51 +124,65 @@ impl ControlQualificationReceipt {
             && a.agent_delegation_refused
     }
 }
-struct Lease {
-    dto: ManagedControlLease,
-    principal: String,
-    deadline: Instant,
-    epoch: u64,
-}
-struct Frame {
-    id: String,
-    fence: u64,
-    deadline: Instant,
-    width: u32,
-    height: u32,
-}
+/// The lease, fence, revocation epoch and frame proofs are the shared
+/// ADR-0234 core; this wrapper adds the computer-server desktop and client.
+/// Field access (`lease`, `frames`, `fence`, `revoked`) derefs to the core,
+/// while the inherent methods below keep the managed refusal codes.
 pub(super) struct ManagedControl {
     desktop: RemoteDesktop,
     client: Option<Arc<CuaRemoteClient>>,
-    lease: Option<Lease>,
-    frames: BTreeMap<String, Vec<Frame>>,
-    fence: u64,
+    core: ControlLeaseCore,
     generation: u64,
-    revoked: Arc<AtomicU64>,
+    target_id: String,
+}
+impl std::ops::Deref for ManagedControl {
+    type Target = ControlLeaseCore;
+    fn deref(&self) -> &ControlLeaseCore {
+        &self.core
+    }
+}
+impl std::ops::DerefMut for ManagedControl {
+    fn deref_mut(&mut self) -> &mut ControlLeaseCore {
+        &mut self.core
+    }
 }
 impl ManagedControl {
-    fn new(generation: u64) -> Self {
+    fn new(target_id: &str, generation: u64) -> Self {
         Self {
             desktop: Default::default(),
             client: None,
-            lease: None,
-            frames: Default::default(),
-            fence: 0,
+            core: ControlLeaseCore::default(),
             generation,
-            revoked: Arc::new(AtomicU64::new(0)),
+            target_id: target_id.into(),
         }
     }
+    fn audit(&self, kind: &str, principal: &str, decision: &str, fields: serde_json::Value) {
+        audit::record_background(
+            kind,
+            "managed-desktop",
+            &self.target_id,
+            principal,
+            decision,
+            self.core.fence,
+            fields,
+        );
+    }
     fn invalidate(&mut self) {
-        self.fence = self.fence.saturating_add(1);
-        self.lease = None;
-        self.frames.clear();
+        self.core.invalidate();
         self.desktop.invalidate();
     }
     fn expire(&mut self) {
-        if self.lease.as_ref().is_some_and(|l| {
-            Instant::now() >= l.deadline || self.revoked.load(Ordering::SeqCst) != l.epoch
-        }) {
-            self.invalidate();
+        if let Some(lease) = self.core.expire() {
+            self.desktop.invalidate();
+            audit::record_background(
+                "remote_desktop.lease.expire",
+                "managed-desktop",
+                &self.target_id,
+                &lease.principal,
+                "expired",
+                lease.dto.fence,
+                serde_json::json!({}),
+            );
         }
     }
     fn require_lease(
@@ -177,15 +194,9 @@ impl ManagedControl {
         p.require_human()?;
         self.expire();
         self.desktop.require_quiescent().map_err(control_error)?;
-        if !self.lease.as_ref().is_some_and(|l| {
-            l.principal == p.principal_id
-                && l.dto.token == token
-                && l.dto.fence == fence
-                && self.fence == fence
-        }) {
-            return Err(refused("managed_desktop_control_lease_expired"));
-        }
-        Ok(())
+        self.core
+            .require_lease(&p.principal_id, token, fence)
+            .map_err(|_| refused("managed_desktop_control_lease_expired"))
     }
     fn issue(
         &mut self,
@@ -193,20 +204,23 @@ impl ManagedControl {
         now: i64,
         desktop_deadline: i64,
     ) -> ManagedControlLease {
-        self.invalidate();
-        let ttl = LEASE_MS.min(desktop_deadline.saturating_sub(now)).max(0);
-        let dto = ManagedControlLease {
-            token: Uuid::new_v4().to_string(),
-            fence: self.fence,
-            expires_at: now + ttl,
-        };
-        self.lease = Some(Lease {
-            dto: dto.clone(),
-            principal: p.principal_id.clone(),
-            epoch: self.revoked.load(Ordering::SeqCst),
-            deadline: Instant::now() + Duration::from_millis(ttl as u64),
-        });
-        dto
+        // `ControlLeaseCore::issue` bumps the fence once; only the desktop
+        // half of `invalidate` is needed here.
+        self.desktop.invalidate();
+        let lease = self.core.issue(&p.principal_id, now, desktop_deadline);
+        ManagedControlLease {
+            token: lease.token,
+            fence: lease.fence,
+            expires_at: lease.expires_at,
+        }
+    }
+}
+fn core_frame_error(error: ControlError) -> ManagedDesktopError {
+    match error {
+        ControlError::ObserverLimit => refused("managed_desktop_control_observer_limit"),
+        ControlError::FrameLimit => refused("managed_desktop_control_frame_limit"),
+        ControlError::StaleFrame => refused("managed_desktop_control_stale_frame"),
+        ControlError::LeaseExpired => refused("managed_desktop_control_lease_expired"),
     }
 }
 fn control_error(_: crate::automation::types::AutomationError) -> ManagedDesktopError {
@@ -904,7 +918,7 @@ impl ManagedDesktopService {
             .lock()
             .await
             .entry(id.into())
-            .or_insert_with(|| Arc::new(Mutex::new(ManagedControl::new(generation))))
+            .or_insert_with(|| Arc::new(Mutex::new(ManagedControl::new(id, generation))))
             .clone()
     }
     pub(super) async fn control_qualified(&self, row: &DesktopRecord) -> bool {
@@ -1192,38 +1206,24 @@ impl ManagedDesktopService {
         }
         c.expire();
         let now = self.now().await;
-        let ttl = FRAME_MS
-            .min(row.desktop.deadline_at.saturating_sub(now))
-            .max(0);
-        let frame_id = Uuid::new_v4().to_string();
         // A newer poll may arrive at the Host before its pixels reach the
-        // viewer. Retain prior unexpired proofs so the visible frame remains
-        // usable throughout its five-second validity window.
-        c.frames.retain(|_, frames| {
-            frames.retain(|f| Instant::now() < f.deadline);
-            !frames.is_empty()
-        });
-        if c.frames.len() >= 32 && !c.frames.contains_key(&p.principal_id) {
-            return Err(refused("managed_desktop_control_observer_limit"));
-        }
-        let fence = c.fence;
-        let frames = c.frames.entry(p.principal_id.clone()).or_default();
-        // At 1 Hz polling a five-second window needs at most six proofs.
-        // Refuse excess polling instead of evicting a still-visible proof.
-        if frames.len() >= 8 {
-            return Err(refused("managed_desktop_control_frame_limit"));
-        }
-        frames.push(Frame {
-            id: frame_id.clone(),
-            fence,
-            deadline: Instant::now() + Duration::from_millis(ttl as u64),
-            width: screenshot.width,
-            height: screenshot.height,
-        });
+        // viewer. The core retains prior unexpired proofs so the visible frame
+        // remains usable throughout its five-second validity window, and
+        // refuses excess polling instead of evicting a still-visible proof.
+        let proof = c
+            .core
+            .register_frame(
+                &p.principal_id,
+                now,
+                row.desktop.deadline_at,
+                screenshot.width,
+                screenshot.height,
+            )
+            .map_err(core_frame_error)?;
         Ok(ManagedControlFrame {
-            frame_id,
-            fence,
-            expires_at: now + ttl,
+            frame_id: proof.frame_id,
+            fence: proof.fence,
+            expires_at: proof.expires_at,
             screenshot,
         })
     }
@@ -1308,7 +1308,14 @@ impl ManagedDesktopService {
             .entry(p.principal_id.clone())
             .or_insert_with(|| Arc::new(AtomicU64::new(0)))
             .clone();
-        Ok(c.issue(p, self.now().await, row.desktop.deadline_at))
+        let lease = c.issue(p, self.now().await, row.desktop.deadline_at);
+        c.audit(
+            "remote_desktop.lease.acquire",
+            &p.principal_id,
+            "allowed",
+            serde_json::json!({ "expires_at": lease.expires_at }),
+        );
+        Ok(lease)
     }
     pub async fn control_renew(
         &self,
@@ -1345,13 +1352,21 @@ impl ManagedDesktopService {
         c.require_lease(p, token, fence)?;
         let row = self.scoped(p, id, generation).await?;
         let now = self.now().await;
-        let ttl = LEASE_MS
-            .min(row.desktop.deadline_at.saturating_sub(now))
-            .max(0);
-        let lease = c.lease.as_mut().expect("validated lease");
-        lease.deadline = Instant::now() + Duration::from_millis(ttl as u64);
-        lease.dto.expires_at = now + ttl;
-        Ok(lease.dto.clone())
+        let lease = c
+            .core
+            .renew(&p.principal_id, token, fence, now, row.desktop.deadline_at)
+            .map_err(|_| refused("managed_desktop_control_lease_expired"))?;
+        c.audit(
+            "remote_desktop.lease.renew",
+            &p.principal_id,
+            "allowed",
+            serde_json::json!({ "expires_at": lease.expires_at }),
+        );
+        Ok(ManagedControlLease {
+            token: lease.token,
+            fence: lease.fence,
+            expires_at: lease.expires_at,
+        })
     }
     pub async fn control_release(
         &self,
@@ -1369,6 +1384,12 @@ impl ManagedDesktopService {
         let slot = self.control_slot(id, generation).await;
         let mut c = slot.lock().await;
         c.require_lease(p, token, fence)?;
+        c.audit(
+            "remote_desktop.lease.release",
+            &p.principal_id,
+            "allowed",
+            serde_json::json!({}),
+        );
         c.invalidate();
         Ok(())
     }
@@ -1537,6 +1558,13 @@ impl ManagedDesktopService {
                     input_started.elapsed().as_millis(), send_started.elapsed().as_millis(),
                     counts.0.load(Ordering::SeqCst), counts.1.load(Ordering::SeqCst));
             }
+            let (action_kind, count) = desktop_session::input_audit_fields(&action);
+            c.audit(
+                "remote_desktop.input.quarantined",
+                &p.principal_id,
+                "quarantined",
+                serde_json::json!({ "action_kind": action_kind, "count": count }),
+            );
             c.invalidate();
             return Err(refused("managed_desktop_control_quarantined"));
         }
@@ -1552,6 +1580,13 @@ impl ManagedDesktopService {
             Ok(())
         })
         .await?;
+        let (action_kind, count) = desktop_session::input_audit_fields(&action);
+        c.audit(
+            "remote_desktop.input",
+            &p.principal_id,
+            "allowed",
+            serde_json::json!({ "action_kind": action_kind, "count": count }),
+        );
         if let Err(e) = self
             .control_check(p, id, generation, authority, smoke)
             .await
@@ -2687,7 +2722,7 @@ mod tests {
     }
     #[test]
     fn lease_is_principal_and_fence_bound_and_expiry_never_resumes_agent() {
-        let mut c = ManagedControl::new(1);
+        let mut c = ManagedControl::new("desktop", 1);
         let p = principal("first");
         let first = c.issue(&p, 1_000, 60_000);
         assert_eq!(first.expires_at, 16_000);
@@ -2706,13 +2741,13 @@ mod tests {
     }
     #[test]
     fn lease_is_capped_at_resource_deadline_and_invalidation_drops_frames() {
-        let mut c = ManagedControl::new(1);
+        let mut c = ManagedControl::new("desktop", 1);
         let p = principal("human");
         let lease = c.issue(&p, 1_000, 2_000);
         assert_eq!(lease.expires_at, 2_000);
         c.frames.insert(
             p.principal_id.clone(),
-            vec![Frame {
+            vec![cognia_remote_desktop::control::Frame {
                 id: "frame".into(),
                 fence: lease.fence,
                 deadline: Instant::now() + Duration::from_secs(5),

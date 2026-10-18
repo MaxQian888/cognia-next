@@ -386,6 +386,7 @@
     "hide": "隐藏画中画",
     "justNow": "刚刚",
     "move": "移动画中画",
+    "openSandboxDesktop": "打开沙箱桌面",
     "resize": "调整画中画大小",
     "screenAlt": "桌面自动化画面",
     "secondsAgo": "{seconds} 秒前",
@@ -489,7 +490,8 @@
       "otherController": "其他用户正在控制",
       "agentDormant": "任务与 agent 控制保持 dormant，直到交接功能完成。",
       "mobileObservation": "移动端仅支持查看，桌面输入已禁用。",
-      "qualificationRequired": "云桌面查看与控制需要另行授权并通过 GUI smoke 验证。"
+      "qualificationRequired": "云桌面查看与控制需要另行授权并通过 GUI smoke 验证。",
+      "dockTitle": "沙箱桌面"
     },
     "deleteConfirmTitle": "删除 {name}？",
     "deleteConfirmDescription": "此操作将永久删除容器及其内部存储的所有文件，挂载的主机目录中的文件会保留。请先导出需要保留的文件。",

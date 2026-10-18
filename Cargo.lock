@@ -1772,6 +1772,7 @@ dependencies = [
  "cognia-exec-sandbox",
  "cognia-instrument",
  "cognia-net",
+ "cognia-remote-desktop",
  "cognia-secrets",
  "core-foundation 0.10.1",
  "core-graphics",
@@ -2876,6 +2877,7 @@ dependencies = [
  "cognia-power",
  "cognia-problem",
  "cognia-provider-diagnostics",
+ "cognia-remote-desktop",
  "cognia-sandbox-pool",
  "cognia-scheduling",
  "cognia-secrets",
@@ -3171,6 +3173,19 @@ dependencies = [
  "serde_json",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "cognia-remote-desktop"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
