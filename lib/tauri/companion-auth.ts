@@ -167,7 +167,10 @@ interface TokenState {
 
 export type AuthFetcher = (url: string, init: PinnedFetchInit) => Promise<Response>
 export type SocketTicketRequest =
-  { channel: "events" | "terminal" | "acp" | "worker" } | { channel: "browser"; sessionId: string }
+  | { channel: "events" | "terminal" | "acp" | "worker" }
+  | { channel: "browser"; sessionId: string }
+  /** One remote desktop viewer stream (ADR-0234 Phase 3). */
+  | { channel: "remote-desktop"; sessionId: string }
 const tokens = new Map<string, TokenState>()
 
 export async function generateDeviceIdentity(): Promise<DeviceIdentity> {
@@ -515,6 +518,9 @@ export async function issueSocketTicket(
   const payload: SocketTicketRequest = typeof request === "string" ? { channel: request } : request
   if (payload.channel === "browser" && payload.sessionId.trim() === "") {
     throw new Error("browser socket tickets require a sessionId")
+  }
+  if (payload.channel === "remote-desktop" && payload.sessionId.trim() === "") {
+    throw new Error("remote desktop socket tickets require a sessionId")
   }
   const path = "/api/auth/socket-ticket"
   const headers = await companionAuthorizationHeaders(config, "POST", path, fetcher)

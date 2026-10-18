@@ -1,10 +1,14 @@
 "use client"
 
 /**
- * The remote desktop viewer (ADR-0234 Phase 2): one binding, one Host session.
+ * The remote desktop viewer (ADR-0234 Phases 2 and 3): one binding, one Host
+ * session.
  *
- * The page asks the Host for a session (view, or control with the lease),
- * hands the bridge URL to the provider's viewer, and keeps the session alive.
+ * The page asks the Host that owns the target (this desktop's own, or a paired
+ * Host named by `?host=`) for a session (view, or control with the lease),
+ * hands the stream to the provider's viewer (the loopback URL, a ticketed
+ * Companion socket, or an attached `cognia.rfb` channel), and keeps the
+ * session alive.
  * Taking control from someone else is an explicit choice; losing it, the
  * server closing, or the network dropping all end the session with a stated
  * reason. The note at the bottom says what the Host cannot govern.
@@ -42,6 +46,7 @@ import type { RemoteDesktopViewerStatus } from "@/lib/remote-desktop/provider-re
 import type { RemoteDesktopSessionMode } from "@/lib/remote-desktop/types"
 import { parseRemoteDesktopViewerParams } from "@/lib/remote-desktop/viewer-href"
 import { isTauri } from "@/lib/tauri"
+import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 
 import { RemoteDesktopWebviewViewer } from "./remote-desktop-webview-viewer"
 
@@ -72,13 +77,24 @@ export function RemoteDesktopViewerPage({
   const t = useTranslations("remoteDesktop")
   const search = useSearchParams()
   const params = useMemo(() => parseRemoteDesktopViewerParams(search), [search])
-  const desktop = isTauri()
+  // Only a desktop has a Host of its own; anywhere else a link must name one.
+  const reachable = params !== null && (params.host.kind === "remote" || isTauri())
+  const host = reachable ? params.host : null
+  const remoteHostRef = host?.kind === "remote" ? host.hostRef : null
+  const hostLabel = useRemoteHostStore((store) =>
+    remoteHostRef
+      ? store.hosts.find(
+          (entry) => entry.id === remoteHostRef || `companion:${entry.id}` === remoteHostRef
+        )?.label
+      : undefined
+  )
   const providers = useRemoteDesktopProviders()
   const {
+    host: listedOn,
     targets,
     loading,
     error: loadError,
-  } = useRemoteDesktopTargets(desktop && params !== null, targetsDeps)
+  } = useRemoteDesktopTargets(host, targetsDeps)
   const target = params ? targets.find((entry) => entry.id === params.targetId) : undefined
   const binding = target?.bindings.find((entry) => entry.id === params?.bindingId)
   const provider = binding
@@ -89,6 +105,7 @@ export function RemoteDesktopViewerPage({
     [target, binding]
   )
   const { state, connect, disconnect, markEnded } = useRemoteDesktopSession(
+    listedOn,
     sessionTarget,
     sessionDeps
   )
@@ -138,14 +155,15 @@ export function RemoteDesktopViewerPage({
     return t(`errors.${message.key}`, message.values)
   }
 
-  if (!desktop) return <Notice message={t("viewer.desktopOnly")} />
   if (!params) return <Notice message={t("viewer.missingParams")} />
+  if (!reachable) return <Notice message={t("viewer.needsHost")} />
   if (loadError) return <Notice message={errorText(loadError)} />
   if (loading && !target) return <Notice message={t("viewer.opening")} />
   if (!target || !binding) return <Notice message={t("viewer.notFound")} />
   if (!provider) return <Notice message={t("viewer.providerMissing")} />
 
   const session = state.status === "open" ? state.session : null
+  const connection = state.status === "open" ? state.connection : null
   const toggleFullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen()
     else void stage.current?.requestFullscreen()
@@ -161,6 +179,11 @@ export function RemoteDesktopViewerPage({
           </Link>
         </Button>
         <h1 className="truncate text-sm font-medium">{target.name}</h1>
+        {remoteHostRef ? (
+          <span className="text-muted-foreground truncate text-xs">
+            {hostLabel ? t("viewer.hostLabel", { host: hostLabel }) : t("viewer.remoteHost")}
+          </span>
+        ) : null}
         {session ? (
           <Badge variant={session.mode === "control" ? "default" : "secondary"}>
             {session.mode === "control" ? t("viewer.modeControl") : t("viewer.modeView")}
@@ -246,11 +269,11 @@ export function RemoteDesktopViewerPage({
       ) : null}
 
       <div ref={stage} className="relative min-h-0 flex-1 bg-black">
-        {session ? (
+        {session && connection ? (
           Viewer.kind === "react" ? (
             <Viewer.component
               key={session.sessionId}
-              url={session.url}
+              connection={connection}
               mode={session.mode}
               scaleToFit={scaleToFit}
               onStatus={onStatus}
@@ -263,7 +286,7 @@ export function RemoteDesktopViewerPage({
               pluginId={provider.pluginId}
               viewId={Viewer.viewId}
               title={provider.definition.name}
-              url={session.url}
+              connection={connection}
               mode={session.mode}
               scaleToFit={scaleToFit}
               onStatus={onStatus}

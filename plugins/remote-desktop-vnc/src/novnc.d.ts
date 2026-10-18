@@ -6,8 +6,25 @@ declare module "@novnc/novnc/lib/rfb" {
     wsProtocols?: string[]
   }
 
+  /** What `Websock.attach` accepts: a WebSocket or an `RTCDataChannel`-like channel. */
+  export interface NoVncRawChannel {
+    binaryType: string
+    readonly protocol: string
+    readonly readyState: string | number
+    onopen: ((event: Event) => void) | null
+    onmessage: ((event: MessageEvent) => void) | null
+    onclose: ((event: Event) => void) | null
+    onerror: ((event: Event) => void) | null
+    send(data: ArrayBuffer | ArrayBufferView): void
+    close(): void
+  }
+
   export default class RFB extends EventTarget {
-    constructor(target: HTMLElement, urlOrChannel: string | WebSocket, options?: NoVncRfbOptions)
+    constructor(
+      target: HTMLElement,
+      urlOrChannel: string | NoVncRawChannel,
+      options?: NoVncRfbOptions
+    )
     viewOnly: boolean
     scaleViewport: boolean
     clipViewport: boolean
@@ -16,5 +33,8 @@ declare module "@novnc/novnc/lib/rfb" {
     background: string
     disconnect(): void
     focus(): void
+    /** `down` undefined presses and releases; `code` may be null. */
+    sendKey(keysym: number, code: string | null, down?: boolean): void
+    sendCtrlAltDel(): void
   }
 }

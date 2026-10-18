@@ -2606,6 +2606,11 @@ async fn run_serve(
     // append-only JSONL beside the SQLite store.
     app_lib::companion_api::audit::install(&data_dir);
     cognia_remote_desktop::audit::install(&data_dir);
+    // The external-target Host (ADR-0234 Phase 3): a headless Host bridges
+    // its own LAN to its paired devices, with credentials in its secrets.
+    cognia_remote_desktop::commands::install(
+        cognia_remote_desktop::commands::RemoteDesktopState::open(&data_dir),
+    );
 
     // ADR-0090 Phase 2 — headless LLM Gateway. The SAME crate/state the
     // desktop manages; snapshots are the Provider Profile Store projection
@@ -2922,6 +2927,9 @@ mod tests {
             "    cognia_remote_desktop::audit::install(&data_dir);",
         ].join("\n");
         assert!(source.contains(&installation));
+        assert!(source.contains(
+            "cognia_remote_desktop::commands::install(\n        cognia_remote_desktop::commands::RemoteDesktopState::open(&data_dir),"
+        ));
     }
 
     #[test]

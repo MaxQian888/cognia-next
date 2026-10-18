@@ -1,10 +1,13 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 
-jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
+jest.mock("@/lib/tauri/transport-instance", () => ({ localTransport: { call: jest.fn() } }))
+jest.mock("@/lib/remote-host/management-channel", () => ({ withManagementChannel: jest.fn() }))
 
-import type { RemoteDesktopTarget } from "@/lib/remote-desktop/types"
+import type { RemoteDesktopHostRef, RemoteDesktopTarget } from "@/lib/remote-desktop/types"
 
-import { useRemoteDesktopTargets } from "./use-remote-desktop-targets"
+import { remoteDesktopHostKey, useRemoteDesktopTargets } from "./use-remote-desktop-targets"
+
+const local: RemoteDesktopHostRef = { kind: "local" }
 
 const target = (id: string): RemoteDesktopTarget => ({
   id,
@@ -34,11 +37,33 @@ const target = (id: string): RemoteDesktopTarget => ({
 })
 
 describe("useRemoteDesktopTargets", () => {
-  it("does nothing off the desktop shell", () => {
+  it("does nothing without a Host to ask", () => {
     const list = jest.fn()
-    const { result } = renderHook(() => useRemoteDesktopTargets(false, { list }))
+    const { result } = renderHook(() => useRemoteDesktopTargets(null, { list }))
     expect(result.current.loading).toBe(false)
+    expect(result.current.host).toBeNull()
     expect(list).not.toHaveBeenCalled()
+  })
+
+  it("keys a Host by its ref, not the object it arrives in", async () => {
+    expect(remoteDesktopHostKey(null)).toBeNull()
+    expect(remoteDesktopHostKey(local)).toBe("local")
+    expect(remoteDesktopHostKey({ kind: "remote", hostRef: "companion:h" })).toBe(
+      "remote:companion:h"
+    )
+    const list = jest.fn().mockResolvedValue([])
+    const { result, rerender } = renderHook(
+      ({ hostRef }: { hostRef: string }) =>
+        useRemoteDesktopTargets({ kind: "remote", hostRef }, { list }),
+      { initialProps: { hostRef: "companion:h" } }
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    rerender({ hostRef: "companion:h" })
+    expect(list).toHaveBeenCalledTimes(1)
+    expect(list).toHaveBeenCalledWith({ kind: "remote", hostRef: "companion:h" })
+    rerender({ hostRef: "companion:other" })
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2))
+    expect(list).toHaveBeenLastCalledWith({ kind: "remote", hostRef: "companion:other" })
   })
 
   it("loads targets and surfaces a Host refusal", async () => {
@@ -46,7 +71,7 @@ describe("useRemoteDesktopTargets", () => {
       .fn()
       .mockRejectedValueOnce(new Error("remote_desktop_storage_corrupt"))
       .mockResolvedValueOnce([target("a")])
-    const { result } = renderHook(() => useRemoteDesktopTargets(true, { list }))
+    const { result } = renderHook(() => useRemoteDesktopTargets(local, { list }))
     await waitFor(() => expect(result.current.error?.code).toBe("remote_desktop_storage_corrupt"))
     await act(() => result.current.reload())
     expect(result.current.error).toBeNull()
@@ -62,7 +87,7 @@ describe("useRemoteDesktopTargets", () => {
       .mockRejectedValueOnce(new Error("remote_desktop_credential_unavailable"))
     const list = jest.fn().mockResolvedValue([saved])
     const { result } = renderHook(() =>
-      useRemoteDesktopTargets(true, { list, save, setCredential })
+      useRemoteDesktopTargets(local, { list, save, setCredential })
     )
     await waitFor(() => expect(result.current.loading).toBe(false))
     let outcome: Awaited<ReturnType<typeof result.current.saveTarget>> | undefined
@@ -74,9 +99,10 @@ describe("useRemoteDesktopTargets", () => {
         view: null,
       })
     })
+    expect(save).toHaveBeenCalledWith(local, { name: "a", bindings: [] })
     expect(setCredential.mock.calls).toEqual([
-      ["a", "a-b", "control", "secret"],
-      ["a", "a-b", "view", null],
+      [local, "a", "a-b", "control", "secret"],
+      [local, "a", "a-b", "view", null],
     ])
     expect(outcome?.target.name).toBe("after control")
     expect(outcome?.credentialError?.code).toBe("remote_desktop_credential_unavailable")
@@ -88,7 +114,7 @@ describe("useRemoteDesktopTargets", () => {
     const remove = jest.fn().mockResolvedValue(undefined)
     const list = jest.fn().mockResolvedValue([])
     const { result } = renderHook(() =>
-      useRemoteDesktopTargets(true, { list, save, setCredential, remove })
+      useRemoteDesktopTargets(local, { list, save, setCredential, remove })
     )
     await waitFor(() => expect(result.current.loading).toBe(false))
     await act(async () => {
@@ -99,6 +125,6 @@ describe("useRemoteDesktopTargets", () => {
       await result.current.deleteTarget("a")
     })
     expect(setCredential).not.toHaveBeenCalled()
-    expect(remove).toHaveBeenCalledWith("a")
+    expect(remove).toHaveBeenCalledWith(local, "a")
   })
 })

@@ -312,9 +312,11 @@ export { defineAuthProvider } from "./define/define-auth-provider"
 export { defineUriHandler } from "./define/define-uri-handler"
 export { defineRemoteDesktopProvider } from "./define/define-remote-desktop-provider"
 export type {
+  RemoteDesktopConnection,
   RemoteDesktopIntegrationMode,
   RemoteDesktopProviderCapabilities,
   RemoteDesktopProviderDefinition,
+  RemoteDesktopRawChannel,
   RemoteDesktopViewer,
   RemoteDesktopViewerProps,
   RemoteDesktopViewerStatus,

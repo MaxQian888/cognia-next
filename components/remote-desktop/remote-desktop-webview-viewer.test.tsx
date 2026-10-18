@@ -23,7 +23,7 @@ describe("RemoteDesktopWebviewViewer", () => {
         pluginId="acme"
         viewId="viewer"
         title="Acme viewer"
-        url="ws://127.0.0.1:4100/rd/ticket"
+        connection="ws://127.0.0.1:4100/rd/ticket"
         mode="control"
         scaleToFit
         onStatus={onStatus}
@@ -36,7 +36,7 @@ describe("RemoteDesktopWebviewViewer", () => {
     expect(iframe.getAttribute("srcdoc")).not.toContain("ticket")
     await waitFor(() => expect(startRelay).toHaveBeenCalledTimes(1))
     expect(startRelay.mock.calls[0]![0]).toMatchObject({
-      url: "ws://127.0.0.1:4100/rd/ticket",
+      connection: "ws://127.0.0.1:4100/rd/ticket",
       mode: "control",
     })
     const relay = startRelay.mock.calls[0]![0]
@@ -54,7 +54,7 @@ describe("RemoteDesktopWebviewViewer", () => {
         pluginId="acme"
         viewId="missing"
         title="x"
-        url="ws://x"
+        connection="ws://x"
         mode="view"
         scaleToFit
         onStatus={jest.fn()}

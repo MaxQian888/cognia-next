@@ -1,8 +1,18 @@
 /**
- * Wire types for the Host's remote desktop commands (ADR-0234 Phase 2),
- * mirroring `crates/cognia-remote-desktop`. Credentials are write-only: no
+ * Wire types for the Host's remote desktop commands (ADR-0234 Phases 2 and
+ * 3), mirroring `crates/cognia-remote-desktop`. Credentials are write-only: no
  * type here ever carries one back.
  */
+
+/**
+ * Which Host a call goes to: this desktop's own (the local owner), or a Host
+ * this client manages or is paired to, by the ref
+ * `lib/remote-host/management-channel.ts` accepts (a store Host id or
+ * `companion:<hostId>`).
+ */
+export type RemoteDesktopHostRef = { kind: "local" } | { kind: "remote"; hostRef: string }
+
+export const LOCAL_REMOTE_DESKTOP_HOST: RemoteDesktopHostRef = { kind: "local" }
 
 /** The Host handshake adapter a binding uses. Closed list (ADR-0234 §4). */
 export type RemoteDesktopAdapter = "vnc" | "none"
@@ -104,10 +114,17 @@ export interface RemoteDesktopControlLease {
   expiresAt: number
 }
 
+/**
+ * How the viewer reaches the bridge: the desktop renderer's loopback
+ * WebSocket, or the Companion transport a paired device called over.
+ */
+export type RemoteDesktopSessionTransport = "loopback" | "companion"
+
 export interface RemoteDesktopSessionOpened {
   sessionId: string
-  /** Loopback WebSocket URL carrying a one-shot ticket. Never persist it. */
-  url: string
+  transport: RemoteDesktopSessionTransport
+  /** Loopback only: the WebSocket URL carrying a one-shot ticket. Never persist it. */
+  url?: string
   mode: RemoteDesktopSessionMode
   expiresAt: number
   lease?: RemoteDesktopControlLease

@@ -128,6 +128,12 @@ describe("needsFullViewport", () => {
     expect(needsFullViewport("/pet-popup")).toBe(false)
   })
 
+  it("gives the remote desktop viewer a definite height without catching the console", () => {
+    expect(needsFullViewport("/devices/remote-desktop")).toBe(true)
+    expect(needsFullViewport("/devices")).toBe(true)
+    expect(needsFullViewport("/devices/other")).toBe(false)
+  })
+
   it("leaves an ordinary scrolling route alone", () => {
     expect(needsFullViewport("/settings")).toBe(false)
   })

@@ -274,8 +274,14 @@ test("selectArmFiles adds the delegated sources and drops test modules", () => {
   assert.deepEqual(selected, [
     "src-tauri/src/companion_api/rpc/chat.rs",
     "crates/cognia-terminal/src/sftp_service.rs",
+    "crates/cognia-file-share/src/rpc.rs",
+    "crates/cognia-remote-desktop/src/commands.rs",
   ])
-  assert.deepEqual(DELEGATED_ARM_FILES, ["crates/cognia-terminal/src/sftp_service.rs"])
+  assert.deepEqual(DELEGATED_ARM_FILES, [
+    "crates/cognia-terminal/src/sftp_service.rs",
+    "crates/cognia-file-share/src/rpc.rs",
+    "crates/cognia-remote-desktop/src/commands.rs",
+  ])
 })
 
 test("selectArmFiles skips a tracked file that is no longer on disk", () => {
@@ -293,7 +299,7 @@ test("selectArmFiles scans a delegated file once even if git already listed it",
   const selected = selectArmFiles(["crates/cognia-terminal/src/sftp_service.rs"], {
     exists: () => true,
   })
-  assert.deepEqual(selected, ["crates/cognia-terminal/src/sftp_service.rs"])
+  assert.deepEqual(selected, DELEGATED_ARM_FILES)
 })
 
 test("armReadFields covers every field-reader spelling, aliases included", () => {

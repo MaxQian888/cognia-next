@@ -46,7 +46,7 @@
     {
       "id": "development",
       "title": "Development tools",
-      "description": "Git, files, terminals, browsers, media processing, code-server, language servers, and the container image a project runs in.",
+      "description": "Git, files, terminals, browsers, remote desktops, media processing, code-server, language servers, and the container image a project runs in.",
       "skill": "cognia-host-development"
     },
     {
@@ -366,6 +366,11 @@
       "id": "provider-profiles",
       "title": "Provider Profiles",
       "category": "extensions"
+    },
+    {
+      "id": "remote",
+      "title": "Remote",
+      "category": "development"
     },
     {
       "id": "resolve",
@@ -61087,6 +61092,1007 @@
       "outputTyped": true
     },
     {
+      "name": "remote_desktop_credential_set",
+      "category": "development",
+      "resource": "remote",
+      "target": "execution",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "remote_desktop_credential_set (host.admin)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bindingId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "control",
+              "view"
+            ]
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "admin_lease": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "targetId",
+          "bindingId",
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bindings": {
+            "type": "array",
+            "items": {
+              "description": "ADR-0234: a provider binding the Host reaches. Credentials are write-only; only whether one is stored is reported.",
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "providerId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "adapter": {
+                  "type": "string",
+                  "enum": [
+                    "vnc",
+                    "none"
+                  ]
+                },
+                "priority": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "endpoint": {
+                  "type": "object",
+                  "properties": {
+                    "host": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    },
+                    "pinnedIp": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "class": {
+                      "type": "string",
+                      "enum": [
+                        "private",
+                        "public"
+                      ]
+                    },
+                    "confirmedAt": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "host",
+                    "port",
+                    "pinnedIp",
+                    "class",
+                    "confirmedAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "viewOnly": {
+                  "type": "boolean"
+                },
+                "config": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "hasControlCredential": {
+                  "type": "boolean"
+                },
+                "hasViewCredential": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "providerId",
+                "adapter",
+                "priority",
+                "enabled",
+                "endpoint",
+                "viewOnly",
+                "config",
+                "hasControlCredential",
+                "hasViewCredential"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "bindings",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "remote_desktop_session_close",
+      "category": "development",
+      "resource": "remote",
+      "target": "execution",
+      "operation": "write",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "remote_desktop_session_close (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "remote_desktop_session_open",
+      "category": "development",
+      "resource": "remote",
+      "target": "execution",
+      "operation": "write",
+      "capability": "host.observe",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "remote_desktop_session_open (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bindingId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "view",
+              "control"
+            ]
+          },
+          "takeover": {
+            "type": "boolean"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "admin_lease": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "targetId",
+          "bindingId",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "description": "A paired device always gets transport companion and no url: it attaches over /ws/remote-desktop/{sessionId} or a cognia.rfb channel.",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "loopback",
+              "companion"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "view",
+              "control"
+            ]
+          },
+          "expiresAt": {
+            "type": "integer"
+          },
+          "lease": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "minLength": 1
+              },
+              "fence": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "expiresAt": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "token",
+              "fence",
+              "expiresAt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "sessionId",
+          "transport",
+          "mode",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "remote_desktop_session_renew",
+      "category": "development",
+      "resource": "remote",
+      "target": "execution",
+      "operation": "write",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "remote_desktop_session_renew (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "expiresAt": {
+            "type": "integer"
+          },
+          "lease": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "minLength": 1
+              },
+              "fence": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "expiresAt": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "token",
+              "fence",
+              "expiresAt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "remote_desktop_target_delete",
+      "category": "development",
+      "resource": "remote",
+      "target": "execution",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "remote_desktop_target_delete (host.admin)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "admin_lease": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "targetId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "remote_desktop_target_list",
+      "category": "development",
+      "resource": "remote",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "remote_desktop_target_list (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pageSize": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "pageToken": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "bindings": {
+                  "type": "array",
+                  "items": {
+                    "description": "ADR-0234: a provider binding the Host reaches. Credentials are write-only; only whether one is stored is reported.",
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "providerId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "adapter": {
+                        "type": "string",
+                        "enum": [
+                          "vnc",
+                          "none"
+                        ]
+                      },
+                      "priority": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endpoint": {
+                        "type": "object",
+                        "properties": {
+                          "host": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "port": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 65535
+                          },
+                          "pinnedIp": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "class": {
+                            "type": "string",
+                            "enum": [
+                              "private",
+                              "public"
+                            ]
+                          },
+                          "confirmedAt": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "host",
+                          "port",
+                          "pinnedIp",
+                          "class",
+                          "confirmedAt"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "viewOnly": {
+                        "type": "boolean"
+                      },
+                      "config": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "hasControlCredential": {
+                        "type": "boolean"
+                      },
+                      "hasViewCredential": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "providerId",
+                      "adapter",
+                      "priority",
+                      "enabled",
+                      "endpoint",
+                      "viewOnly",
+                      "config",
+                      "hasControlCredential",
+                      "hasViewCredential"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "createdAt": {
+                  "type": "integer"
+                },
+                "updatedAt": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "bindings",
+                "createdAt",
+                "updatedAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "nextPageToken": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "remote_desktop_target_probe",
+      "category": "development",
+      "resource": "remote",
+      "target": "execution",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "remote_desktop_target_probe (host.admin)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "draft"
+                  },
+                  "host": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "port": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65535
+                  },
+                  "adapter": {
+                    "type": "string",
+                    "enum": [
+                      "vnc",
+                      "none"
+                    ]
+                  },
+                  "confirm": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "host",
+                  "port",
+                  "adapter"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "saved"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "bindingId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "targetId",
+                  "bindingId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "admin_lease": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "request"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "pinnedIp": {
+            "type": "string",
+            "minLength": 1
+          },
+          "class": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public"
+            ]
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "rfb": {
+            "type": "object",
+            "properties": {
+              "protocolVersion": {
+                "type": "string"
+              },
+              "securityTypes": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                }
+              },
+              "supported": {
+                "type": "boolean"
+              },
+              "requiresPassword": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "protocolVersion",
+              "securityTypes",
+              "supported",
+              "requiresPassword"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "pinnedIp",
+          "class",
+          "connected"
+        ],
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "remote_desktop_target_save",
+      "category": "development",
+      "resource": "remote",
+      "target": "execution",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "remote_desktop_target_save (host.admin)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "draft": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "bindings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "providerId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "adapter": {
+                      "type": "string",
+                      "enum": [
+                        "vnc",
+                        "none"
+                      ]
+                    },
+                    "priority": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "host": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    },
+                    "viewOnly": {
+                      "type": "boolean"
+                    },
+                    "config": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {},
+                          "example": {}
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "confirm": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "providerId",
+                    "adapter",
+                    "host",
+                    "port"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "name",
+              "bindings"
+            ],
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "admin_lease": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "draft"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bindings": {
+            "type": "array",
+            "items": {
+              "description": "ADR-0234: a provider binding the Host reaches. Credentials are write-only; only whether one is stored is reported.",
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "providerId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "adapter": {
+                  "type": "string",
+                  "enum": [
+                    "vnc",
+                    "none"
+                  ]
+                },
+                "priority": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "endpoint": {
+                  "type": "object",
+                  "properties": {
+                    "host": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    },
+                    "pinnedIp": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "class": {
+                      "type": "string",
+                      "enum": [
+                        "private",
+                        "public"
+                      ]
+                    },
+                    "confirmedAt": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "host",
+                    "port",
+                    "pinnedIp",
+                    "class",
+                    "confirmedAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "viewOnly": {
+                  "type": "boolean"
+                },
+                "config": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "hasControlCredential": {
+                  "type": "boolean"
+                },
+                "hasViewCredential": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "providerId",
+                "adapter",
+                "priority",
+                "enabled",
+                "endpoint",
+                "viewOnly",
+                "config",
+                "hasControlCredential",
+                "hasViewCredential"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "bindings",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "remote_notification_publish",
       "category": "connectors",
       "resource": "notifications",
@@ -99550,5 +100556,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "d668efb8190cb448fc634fee855213e493a61dc333332cf4468c41ab57be32f8"
+  "catalogHash": "3db9d82ba02c350ba05564e500403b88abe223897caf1ddedb8a475bb3e3bb7f"
 }

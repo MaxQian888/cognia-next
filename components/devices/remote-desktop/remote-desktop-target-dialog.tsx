@@ -48,13 +48,20 @@ import {
 import { remoteDesktopErrorMessage } from "@/lib/remote-desktop/error-messages"
 import { probeRemoteDesktop, toRemoteDesktopError } from "@/lib/remote-desktop/host-client"
 import type { RemoteDesktopProviderRegistration } from "@/lib/remote-desktop/provider-registry"
-import type { RemoteDesktopProbeOutcome, RemoteDesktopTarget } from "@/lib/remote-desktop/types"
+import type {
+  RemoteDesktopHostRef,
+  RemoteDesktopProbeOutcome,
+  RemoteDesktopTarget,
+} from "@/lib/remote-desktop/types"
 
 export type DialogState =
   { kind: "add" } | { kind: "edit"; target: RemoteDesktopTarget; bindingId?: string }
 
 export interface RemoteDesktopTargetDialogProps {
   state: DialogState
+  /** The Host that saves the target and reaches its address. */
+  host: RemoteDesktopHostRef
+  hostLabel?: string
   providers: readonly RemoteDesktopProviderRegistration[]
   onClose: () => void
   onSave: (input: SaveTargetInput) => Promise<SaveTargetResult>
@@ -82,6 +89,8 @@ function changeOf(field: PasswordField): CredentialChange {
 
 export function RemoteDesktopTargetDialog({
   state,
+  host,
+  hostLabel,
   providers,
   onClose,
   onSave,
@@ -158,7 +167,7 @@ export function RemoteDesktopTargetDialog({
   const resolve = async () => {
     setCheck({ status: "busy" })
     try {
-      const resolved = await probe({
+      const resolved = await probe(host, {
         kind: "draft",
         host: form.host.trim(),
         port: form.port,
@@ -175,8 +184,8 @@ export function RemoteDesktopTargetDialog({
     try {
       const tested =
         !changed && existing && binding
-          ? await probe({ kind: "saved", targetId: existing.id, bindingId: binding.id })
-          : await probe({
+          ? await probe(host, { kind: "saved", targetId: existing.id, bindingId: binding.id })
+          : await probe(host, {
               kind: "draft",
               host: form.host.trim(),
               port: form.port,
@@ -232,7 +241,11 @@ export function RemoteDesktopTargetDialog({
           <DialogTitle>
             {existing ? t("dialog.titleEdit", { name: existing.name }) : t("dialog.titleAdd")}
           </DialogTitle>
-          <DialogDescription>{t("dialog.description")}</DialogDescription>
+          <DialogDescription>
+            {host.kind === "remote"
+              ? t("dialog.descriptionRemote", { host: hostLabel ?? "" })
+              : t("dialog.description")}
+          </DialogDescription>
         </DialogHeader>
 
         {providers.length === 0 ? (
@@ -333,7 +346,12 @@ export function RemoteDesktopTargetDialog({
               <p>
                 {outcome.class === "public"
                   ? t("dialog.confirmPublic", { ip: outcome.pinnedIp })
-                  : t("dialog.confirmPrivate", { ip: outcome.pinnedIp })}
+                  : host.kind === "remote"
+                    ? t("dialog.confirmPrivateRemote", {
+                        ip: outcome.pinnedIp,
+                        host: hostLabel ?? "",
+                      })
+                    : t("dialog.confirmPrivate", { ip: outcome.pinnedIp })}
               </p>
               <label className="flex items-center gap-2">
                 <Checkbox

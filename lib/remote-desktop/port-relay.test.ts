@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import {
+  CHANNEL_CHUNK_BYTES,
   MAX_RELAY_FRAME_BYTES,
   REMOTE_DESKTOP_PORT_MESSAGE,
   startRemoteDesktopRelay,
@@ -54,7 +55,7 @@ function setup(post = jest.fn(() => true)) {
   const onStatus = jest.fn()
   const onError = jest.fn()
   const stop = startRemoteDesktopRelay({
-    url: "ws://127.0.0.1:4100/rd/ticket",
+    connection: "ws://127.0.0.1:4100/rd/ticket",
     mode: "view",
     post,
     onStatus,
@@ -126,5 +127,57 @@ describe("remote desktop port relay", () => {
     socket.open()
     expect(onError).toHaveBeenCalledWith("remote_desktop_viewer_failed")
     expect(socket.close).toHaveBeenCalled()
+  })
+
+  it("relays an attached channel without opening a socket", () => {
+    const sent: unknown[] = []
+    const raw = {
+      binaryType: "blob",
+      protocol: "",
+      readyState: "open",
+      onopen: null,
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onclose: null as (() => void) | null,
+      onerror: null,
+      send: (data: unknown) => sent.push(data),
+      close: jest.fn(),
+    }
+    const channel = fakeChannel()
+    const post = jest.fn(() => true)
+    const onStatus = jest.fn()
+    const createSocket = jest.fn()
+    const stop = startRemoteDesktopRelay({
+      connection: raw as never,
+      mode: "control",
+      post,
+      onStatus,
+      onError: jest.fn(),
+      createSocket: createSocket as never,
+      createChannel: () => channel,
+    })
+    expect(createSocket).not.toHaveBeenCalled()
+    expect(raw.binaryType).toBe("arraybuffer")
+    expect(post).toHaveBeenCalledWith({ type: REMOTE_DESKTOP_PORT_MESSAGE, mode: "control" }, [
+      channel.port2,
+    ])
+    expect(onStatus).toHaveBeenLastCalledWith("connected")
+    const down = new Uint8Array([4]).buffer
+    raw.onmessage?.({ data: down } as MessageEvent)
+    expect((channel as unknown as ReturnType<typeof fakeChannel>).port1.sent).toEqual([down])
+    ;(channel as unknown as ReturnType<typeof fakeChannel>).port1.onmessage?.({
+      data: new Uint8Array([5]),
+    } as MessageEvent)
+    expect(sent).toHaveLength(1)
+    // A large page frame reaches the channel in 16 KiB pieces.
+    ;(channel as unknown as ReturnType<typeof fakeChannel>).port1.onmessage?.({
+      data: new ArrayBuffer(CHANNEL_CHUNK_BYTES * 2 + 1),
+    } as MessageEvent)
+    expect(sent.slice(1).map((piece) => (piece as ArrayBuffer).byteLength)).toEqual([
+      CHANNEL_CHUNK_BYTES,
+      CHANNEL_CHUNK_BYTES,
+      1,
+    ])
+    stop()
+    expect(raw.close).toHaveBeenCalledTimes(1)
   })
 })

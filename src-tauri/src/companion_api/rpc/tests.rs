@@ -1565,6 +1565,36 @@ fn managed_desktop_mutations_require_admin_leases_but_observation_does_not() {
     }
 }
 
+/// ADR-0234 Phase 3: changing what the Host reaches is admin with an
+/// interactive lease; viewing and keeping one's own session alive is the
+/// observe baseline, and a control open escalates by payload.
+#[test]
+fn remote_desktop_commands_split_observe_from_admin() {
+    use crate::companion_api::command_manifest::{descriptor, CommandApproval, CommandTarget};
+    for name in cognia_companion_rpc::remote_desktops::COMMANDS {
+        let admin = matches!(*name,
+            "remote_desktop_target_save" | "remote_desktop_target_delete" |
+            "remote_desktop_credential_set" | "remote_desktop_target_probe");
+        let descriptor = descriptor(name).expect("registered");
+        assert_eq!(descriptor.target, CommandTarget::Execution, "{name}");
+        assert_eq!(descriptor.capability, if admin { "host.admin" } else { "host.observe" }, "{name}");
+        assert_eq!(
+            descriptor.approval == CommandApproval::Interactive,
+            admin,
+            "{name}"
+        );
+        assert!(KNOWN_COMMANDS.contains(name), "{name} must be allowlisted");
+        assert!(!is_service_only_command(name), "{name}");
+    }
+    assert_eq!(
+        crate::companion_api::payload_capability::payload_required_capability(
+            "remote_desktop_session_open",
+            &serde_json::json!({"mode": "control"})
+        ),
+        Some("host.admin")
+    );
+}
+
 #[tokio::test]
 async fn managed_desktop_dispatch_refuses_missing_invalid_and_revoked_leases() {
     let state = test_state();

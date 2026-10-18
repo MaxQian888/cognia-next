@@ -2,9 +2,10 @@
 
 /**
  * A third-party provider's viewer (ADR-0234 §3): the plugin's own sandboxed
- * webview, fed over a transferred `MessagePort`. This document opens the
- * loopback bridge and relays bytes, so the opaque-origin page never sees the
- * bridge URL or its ticket (`lib/remote-desktop/port-relay.ts`).
+ * webview, fed over a transferred `MessagePort`. This document holds the
+ * connection (a ticketed WebSocket or an attached `cognia.rfb` channel) and
+ * relays bytes, so the opaque-origin page never sees a URL, a ticket or the
+ * transport (`lib/remote-desktop/port-relay.ts`).
  */
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
@@ -29,7 +30,7 @@ export function RemoteDesktopWebviewViewer({
   pluginId,
   viewId,
   title,
-  url,
+  connection,
   mode,
   onStatus,
   onError,
@@ -50,7 +51,7 @@ export function RemoteDesktopWebviewViewer({
     // Reports after teardown belong to a session the page already left.
     let active = true
     const stop = startRelay({
-      url,
+      connection,
       mode,
       post: (data, transfer) => poster(data, transfer),
       onStatus: (status) => active && onStatus(status),
@@ -60,7 +61,7 @@ export function RemoteDesktopWebviewViewer({
       active = false
       stop()
     }
-  }, [poster, url, mode, onStatus, onError, startRelay])
+  }, [poster, connection, mode, onStatus, onError, startRelay])
 
   if (!webview) return null
   return (

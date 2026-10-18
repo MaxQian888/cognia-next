@@ -47,6 +47,7 @@ import { useScrollSpy } from "@/hooks/ui/use-scroll-spy"
 import {
   NOT_APPLICABLE_SECTION_ID,
   planDeviceSections,
+  remoteDesktopHostOf,
   type DeviceSectionId,
 } from "@/lib/devices/section-plan"
 import type { DeviceRow } from "@/lib/devices/types"
@@ -182,8 +183,16 @@ function PlannedSection({
       return <DispatchSection row={row} />
     case "placement":
       return <PlacementSection row={row} />
-    case "remote-desktop":
-      return <RemoteDesktopSection />
+    case "remote-desktop": {
+      // The plan renders this only when the row has a Host to ask.
+      const host = remoteDesktopHostOf(row)
+      return host ? (
+        <RemoteDesktopSection
+          host={host}
+          hostLabel={host.kind === "remote" ? row.label : undefined}
+        />
+      ) : null
+    }
   }
 }
 

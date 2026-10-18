@@ -21,6 +21,8 @@
  * are the same value: a nav entry can never point at a card that did not render.
  */
 
+import type { RemoteDesktopHostRef } from "@/lib/remote-desktop/types"
+
 import { dispatchTargetRef } from "./build-device-rows"
 import type { DeviceKind, DeviceRow } from "./types"
 
@@ -154,6 +156,7 @@ const ORDER: Record<DeviceKind, readonly DeviceSectionId[]> = {
     "host-runtimes",
     "sandbox",
     "workspaces",
+    "remote-desktop",
     "routing",
     "shell-tiers",
     "identity",
@@ -234,10 +237,20 @@ function isApplicable(row: DeviceRow, id: DeviceSectionId): boolean {
     case "placement":
       return row.kind !== "ssh-host"
     case "remote-desktop":
-      // Targets, their credentials and the viewer bridge belong to the
-      // desktop that confirmed each endpoint (ADR-0234 Phase 2).
-      return row.kind === "local" && row.remoteDesktopHost === true
+      return remoteDesktopHostOf(row) !== null
   }
+}
+
+/**
+ * The Host whose remote desktops a row lists (ADR-0234 Phase 3): the
+ * desktop's own, or a Host reached over its management channel. Targets,
+ * their credentials and the bridge live on that Host; a phone or a browser
+ * has none of its own.
+ */
+export function remoteDesktopHostOf(row: DeviceRow): RemoteDesktopHostRef | null {
+  if (row.kind === "local") return row.remoteDesktopHost === true ? { kind: "local" } : null
+  const hostRef = managementRefOf(row)
+  return hostRef ? { kind: "remote", hostRef } : null
 }
 
 /**
@@ -286,13 +299,13 @@ function notApplicableFor(row: DeviceRow): DeviceNotApplicable[] {
       })
     }
   }
-  // Only the local row is asked: other machines' screens are reached from
-  // here, never brokered by them (Phase 3 adds paired clients).
+  // Only the local row is asked: a phone or a browser opens remote desktops
+  // through the Host it is paired to, on that Host's own page.
   if (row.kind === "local" && !isApplicable(row, "remote-desktop")) {
     entries.push({
       id: "remote-desktop",
       labelKey: "remoteDesktop.title",
-      reasonKey: "remoteDesktop.desktopOnly",
+      reasonKey: "remoteDesktop.viaHost",
     })
   }
   if (!isApplicable(row, "dispatch")) {

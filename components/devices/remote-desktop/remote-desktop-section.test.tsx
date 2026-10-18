@@ -18,7 +18,11 @@ import {
   __resetRemoteDesktopProvidersForTests,
   registerRemoteDesktopProvider,
 } from "@/lib/remote-desktop/provider-registry"
-import type { RemoteDesktopBinding, RemoteDesktopTarget } from "@/lib/remote-desktop/types"
+import {
+  LOCAL_REMOTE_DESKTOP_HOST,
+  type RemoteDesktopBinding,
+  type RemoteDesktopTarget,
+} from "@/lib/remote-desktop/types"
 
 import { RemoteDesktopSection } from "./remote-desktop-section"
 
@@ -72,6 +76,8 @@ function registerVnc() {
   })
 }
 
+const LOCAL = LOCAL_REMOTE_DESKTOP_HOST
+
 beforeEach(() => {
   push.mockReset()
   toastSuccess.mockReset()
@@ -82,7 +88,7 @@ afterEach(() => __resetRemoteDesktopProvidersForTests())
 describe("RemoteDesktopSection", () => {
   it("explains an empty list and offers to add one", async () => {
     registerVnc()
-    render(<RemoteDesktopSection deps={{ list: async () => [] }} />)
+    render(<RemoteDesktopSection host={LOCAL} deps={{ list: async () => [] }} />)
     expect(await screen.findByText("No remote desktops yet")).toBeInTheDocument()
     expect(screen.getByText(/bypasses Cognia/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: /Add remote desktop/ }))
@@ -91,7 +97,7 @@ describe("RemoteDesktopSection", () => {
 
   it("lists a target's facts and opens it in either mode", async () => {
     registerVnc()
-    render(<RemoteDesktopSection deps={{ list: async () => [target()] }} />)
+    render(<RemoteDesktopSection host={LOCAL} deps={{ list: async () => [target()] }} />)
     expect(await screen.findByText("Studio")).toBeInTheDocument()
     expect(screen.getByText("nas.local:5900")).toHaveAttribute("title", "Pinned to 192.168.1.20")
     expect(screen.getByText("LAN")).toBeInTheDocument()
@@ -109,6 +115,7 @@ describe("RemoteDesktopSection", () => {
     registerVnc()
     render(
       <RemoteDesktopSection
+        host={LOCAL}
         deps={{
           list: async () => [
             target({
@@ -138,7 +145,7 @@ describe("RemoteDesktopSection", () => {
   })
 
   it("disables opening when the provider is not installed", async () => {
-    render(<RemoteDesktopSection deps={{ list: async () => [target()] }} />)
+    render(<RemoteDesktopSection host={LOCAL} deps={{ list: async () => [target()] }} />)
     expect(await screen.findByText("Provider not installed")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /^Open$/ })).toBeDisabled()
   })
@@ -147,11 +154,11 @@ describe("RemoteDesktopSection", () => {
     registerVnc()
     const remove = jest.fn().mockResolvedValue(undefined)
     const list = jest.fn().mockResolvedValueOnce([target()]).mockResolvedValue([])
-    render(<RemoteDesktopSection deps={{ list, remove }} />)
+    render(<RemoteDesktopSection host={LOCAL} deps={{ list, remove }} />)
     await userEvent.click(await screen.findByRole("button", { name: /Delete/ }))
     expect(await screen.findByText("Delete Studio?")).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "Delete" }))
-    await waitFor(() => expect(remove).toHaveBeenCalledWith("t1"))
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(LOCAL, "t1"))
     expect(toastSuccess).toHaveBeenCalledWith("Remote desktop deleted")
   })
 
@@ -160,11 +167,51 @@ describe("RemoteDesktopSection", () => {
       .fn()
       .mockRejectedValueOnce(new Error("remote_desktop_storage_version"))
       .mockResolvedValue([])
-    render(<RemoteDesktopSection deps={{ list }} />)
+    render(<RemoteDesktopSection host={LOCAL} deps={{ list }} />)
     expect(
       await screen.findByText("The remote desktop list was written by a newer version of Cognia.")
     ).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(await screen.findByText("No remote desktops yet")).toBeInTheDocument()
+  })
+  it("lists a paired Host's targets with its name and opens them through that Host", async () => {
+    registerVnc()
+    const list = jest.fn().mockResolvedValue([])
+    const host = { kind: "remote" as const, hostRef: "h1" }
+    const { unmount } = render(
+      <RemoteDesktopSection host={host} hostLabel="Studio Mac" deps={{ list }} />
+    )
+    expect(
+      await screen.findByText(/Add a VNC server that Studio Mac can reach/)
+    ).toBeInTheDocument()
+    expect(list).toHaveBeenCalledWith(host)
+    unmount()
+    render(
+      <RemoteDesktopSection
+        host={host}
+        hostLabel="Studio Mac"
+        deps={{ list: async () => [target()] }}
+      />
+    )
+    await userEvent.click(await screen.findByRole("button", { name: /^Open$/ }))
+    expect(push).toHaveBeenLastCalledWith(
+      "/devices/remote-desktop?target=t1&binding=b1&mode=control&host=h1"
+    )
+  })
+
+  it("says the Host must be updated when it does not know the commands", async () => {
+    registerVnc()
+    render(
+      <RemoteDesktopSection
+        host={{ kind: "remote", hostRef: "h1" }}
+        hostLabel="Studio Mac"
+        deps={{ list: jest.fn().mockRejectedValue(new Error("remote_desktop_host_outdated")) }}
+      />
+    )
+    expect(
+      await screen.findByText(
+        "Studio Mac cannot broker remote desktops yet. Update it to open them from here."
+      )
+    ).toBeInTheDocument()
   })
 })

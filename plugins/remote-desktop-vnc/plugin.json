@@ -3,7 +3,7 @@
   "name": "VNC Remote Desktop",
   "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "Opens VNC servers (TigerVNC, x11vnc, macOS Screen Sharing, RealVNC with VNC password) from the devices console. This desktop connects and authenticates; the viewer only ever sees an authenticated stream.",
+  "description": "Opens VNC servers (TigerVNC, x11vnc, macOS Screen Sharing, RealVNC with VNC password) from the devices console on desktop, Web and phone. The Host connects and authenticates; the viewer only ever sees an authenticated stream.",
   "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": [],
@@ -20,35 +20,75 @@
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
-      "availability": "blocked",
-      "reason": "Remote desktops are brokered by the desktop app (ADR-0234 Phase 2)."
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
     },
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
     },
     "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "headless": {
       "availability": "blocked",
-      "reason": "Phones reach remote desktops through a paired desktop in a later release (ADR-0234 Phase 3)."
+      "reason": "A viewer needs an interactive screen; a headless Host only bridges sessions for its paired devices (ADR-0234)."
     }
   },
   "i18n": {
     "locales": {
       "en": {
         "manifest.name": "VNC Remote Desktop",
-        "manifest.description": "Opens VNC servers (TigerVNC, x11vnc, macOS Screen Sharing, RealVNC with VNC password) from the devices console. This desktop connects and authenticates; the viewer only ever sees an authenticated stream.",
+        "manifest.description": "Opens VNC servers (TigerVNC, x11vnc, macOS Screen Sharing, RealVNC with VNC password) from the devices console on desktop, Web and phone. The Host connects and authenticates; the viewer only ever sees an authenticated stream.",
         "provider.name": "VNC",
         "provider.description": "VNC servers with no password or a VNC password.",
         "viewer.label": "Remote screen",
-        "viewer.viewOnly": "View only: input is not sent"
+        "viewer.viewOnly": "View only: input is not sent",
+        "touch.surfaceLabel": "Trackpad: drag to move the pointer, tap to click, tap with two fingers to right-click, drag with two fingers to scroll, press and hold to drag",
+        "touch.trackpad": "Trackpad",
+        "touch.direct": "Touch",
+        "touch.switchToDirect": "Trackpad mode. Switch to direct touch",
+        "touch.switchToTrackpad": "Direct touch mode. Switch to trackpad",
+        "keys.barLabel": "Special keys",
+        "keys.ctrl": "Ctrl",
+        "keys.alt": "Alt",
+        "keys.meta": "Super",
+        "keys.esc": "Esc",
+        "keys.tab": "Tab",
+        "keys.left": "Left arrow",
+        "keys.up": "Up arrow",
+        "keys.down": "Down arrow",
+        "keys.right": "Right arrow",
+        "keys.ctrlAltDel": "Ctrl+Alt+Del",
+        "keys.keyboard": "Keyboard",
+        "keys.keyboardInput": "Type to send keys to the remote screen"
       },
       "zh-CN": {
         "manifest.name": "VNC 远程桌面",
-        "manifest.description": "从设备控制台打开 VNC 服务器（TigerVNC、x11vnc、macOS 屏幕共享、使用 VNC 密码的 RealVNC）。由本机连接并认证，查看器只接收已认证的数据流。",
+        "manifest.description": "在桌面、网页和手机的设备控制台中打开 VNC 服务器（TigerVNC、x11vnc、macOS 屏幕共享、使用 VNC 密码的 RealVNC）。由主机连接并认证，查看器只接收已认证的数据流。",
         "provider.name": "VNC",
         "provider.description": "无密码或使用 VNC 密码的 VNC 服务器。",
         "viewer.label": "远程屏幕",
-        "viewer.viewOnly": "只读：不发送输入"
+        "viewer.viewOnly": "只读：不发送输入",
+        "touch.surfaceLabel": "触控板：拖动移动指针，轻点单击，双指轻点右键，双指拖动滚动，长按后拖动",
+        "touch.trackpad": "触控板",
+        "touch.direct": "触摸",
+        "touch.switchToDirect": "当前为触控板模式，切换为直接触摸",
+        "touch.switchToTrackpad": "当前为直接触摸模式，切换为触控板",
+        "keys.barLabel": "特殊按键",
+        "keys.ctrl": "Ctrl",
+        "keys.alt": "Alt",
+        "keys.meta": "Super",
+        "keys.esc": "Esc",
+        "keys.tab": "Tab",
+        "keys.left": "左方向键",
+        "keys.up": "上方向键",
+        "keys.down": "下方向键",
+        "keys.right": "右方向键",
+        "keys.ctrlAltDel": "Ctrl+Alt+Del",
+        "keys.keyboard": "键盘",
+        "keys.keyboardInput": "输入以向远程屏幕发送按键"
       }
     }
   }

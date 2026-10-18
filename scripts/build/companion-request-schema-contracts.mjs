@@ -360,6 +360,29 @@ const bestOfNMutation = z.object({
   leaseDurationMs: z.number().int().positive().max(300_000),
 })
 
+// ADR-0234 Phase 3: the Host's remote desktop commands. The Rust DTOs
+// (`crates/cognia-remote-desktop/src/commands.rs` and `target.rs`) all
+// `deny_unknown_fields`; `adminLease` is read and removed by the Companion
+// router (`crates/cognia-companion-rpc/src/remote_desktops.rs`) first.
+const remoteDesktopAdminLease = {
+  adminLease: z.string().min(1).max(512).optional(),
+  admin_lease: z.string().min(1).max(512).optional(),
+}
+const remoteDesktopAdapter = z.enum(["vnc", "none"])
+const remoteDesktopPort = z.number().int().min(1).max(65535)
+const remoteDesktopBindingDraft = z.object({
+  id: z.string().min(1).optional(),
+  providerId: z.string().min(1),
+  adapter: remoteDesktopAdapter,
+  priority: z.number().int().nonnegative().optional(),
+  enabled: z.boolean().optional(),
+  host: z.string().min(1),
+  port: remoteDesktopPort,
+  viewOnly: z.boolean().optional(),
+  config: z.record(z.string(), z.unknown()).nullable().optional(),
+  confirm: z.boolean().optional(),
+})
+
 const schemas = {
   fs_read_workspace_file_versioned: z.object({
     root: z.string(),
@@ -926,6 +949,57 @@ const schemas = {
       .optional(),
   }),
   scheduled_task_cleanup: z.object({ maxAgeDays: z.number().int().positive().optional() }),
+  remote_desktop_target_list: z.object({
+    pageSize: z.number().int().nonnegative().optional(),
+    pageToken: z.string().min(1).optional(),
+  }),
+  remote_desktop_target_save: z.object({
+    draft: z.object({
+      id: z.string().min(1).optional(),
+      name: z.string().min(1),
+      bindings: remoteDesktopBindingDraft.array(),
+    }),
+    ...remoteDesktopAdminLease,
+  }),
+  remote_desktop_target_delete: z.object({
+    targetId: z.string().min(1),
+    ...remoteDesktopAdminLease,
+  }),
+  // `value: null` clears; the value is never readable again.
+  remote_desktop_credential_set: z.object({
+    targetId: z.string().min(1),
+    bindingId: z.string().min(1),
+    kind: z.enum(["control", "view"]),
+    value: z.string().min(1).max(256).nullable().optional(),
+    ...remoteDesktopAdminLease,
+  }),
+  remote_desktop_target_probe: z.object({
+    request: z.union([
+      z.object({
+        kind: z.literal("draft"),
+        host: z.string().min(1),
+        port: remoteDesktopPort,
+        adapter: remoteDesktopAdapter,
+        confirm: z.boolean().optional(),
+      }),
+      z.object({
+        kind: z.literal("saved"),
+        targetId: z.string().min(1),
+        bindingId: z.string().min(1),
+      }),
+    ]),
+    ...remoteDesktopAdminLease,
+  }),
+  // A control open needs `host.admin` and an admin lease; a view open neither.
+  remote_desktop_session_open: z.object({
+    targetId: z.string().min(1),
+    bindingId: z.string().min(1),
+    mode: z.enum(["view", "control"]),
+    takeover: z.boolean().optional(),
+    ...remoteDesktopAdminLease,
+  }),
+  remote_desktop_session_renew: z.object({ sessionId: z.string().min(1) }),
+  remote_desktop_session_close: z.object({ sessionId: z.string().min(1) }),
   scheduled_task_emit_event: z.object({
     eventType: z.string().min(1),
     eventSource: z.string().optional(),

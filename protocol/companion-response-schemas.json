@@ -14331,9 +14331,136 @@
       },
       "required": ["diagnostics", "leases"],
       "type": "object"
+    },
+    "RemoteDesktopEndpoint": {
+      "type": "object",
+      "properties": {
+        "host": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "pinnedIp": { "type": "string", "minLength": 1 },
+        "class": { "type": "string", "enum": ["private", "public"] },
+        "confirmedAt": { "type": "integer" }
+      },
+      "required": ["host", "port", "pinnedIp", "class", "confirmedAt"],
+      "additionalProperties": false
+    },
+    "RemoteDesktopBinding": {
+      "description": "ADR-0234: a provider binding the Host reaches. Credentials are write-only; only whether one is stored is reported.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "providerId": { "type": "string", "minLength": 1 },
+        "adapter": { "type": "string", "enum": ["vnc", "none"] },
+        "priority": { "type": "integer", "minimum": 0 },
+        "enabled": { "type": "boolean" },
+        "endpoint": { "$ref": "#/$defs/RemoteDesktopEndpoint" },
+        "viewOnly": { "type": "boolean" },
+        "config": { "type": ["object", "null"] },
+        "hasControlCredential": { "type": "boolean" },
+        "hasViewCredential": { "type": "boolean" }
+      },
+      "required": [
+        "id",
+        "providerId",
+        "adapter",
+        "priority",
+        "enabled",
+        "endpoint",
+        "viewOnly",
+        "config",
+        "hasControlCredential",
+        "hasViewCredential"
+      ],
+      "additionalProperties": false
+    },
+    "RemoteDesktopTarget": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "bindings": { "type": "array", "items": { "$ref": "#/$defs/RemoteDesktopBinding" } },
+        "createdAt": { "type": "integer" },
+        "updatedAt": { "type": "integer" }
+      },
+      "required": ["id", "name", "bindings", "createdAt", "updatedAt"],
+      "additionalProperties": false
+    },
+    "RemoteDesktopTargetPage": {
+      "type": "object",
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/RemoteDesktopTarget" } },
+        "nextPageToken": { "type": "string", "minLength": 1 }
+      },
+      "required": ["items"],
+      "additionalProperties": false
+    },
+    "RemoteDesktopProbeOutcome": {
+      "type": "object",
+      "properties": {
+        "pinnedIp": { "type": "string", "minLength": 1 },
+        "class": { "type": "string", "enum": ["private", "public"] },
+        "connected": { "type": "boolean" },
+        "rfb": {
+          "type": "object",
+          "properties": {
+            "protocolVersion": { "type": "string" },
+            "securityTypes": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+            },
+            "supported": { "type": "boolean" },
+            "requiresPassword": { "type": "boolean" }
+          },
+          "required": ["protocolVersion", "securityTypes", "supported", "requiresPassword"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["pinnedIp", "class", "connected"],
+      "additionalProperties": false
+    },
+    "RemoteDesktopControlLease": {
+      "type": "object",
+      "properties": {
+        "token": { "type": "string", "minLength": 1 },
+        "fence": { "type": "integer", "minimum": 1 },
+        "expiresAt": { "type": "integer" }
+      },
+      "required": ["token", "fence", "expiresAt"],
+      "additionalProperties": false
+    },
+    "RemoteDesktopSessionOpened": {
+      "description": "A paired device always gets transport companion and no url: it attaches over /ws/remote-desktop/{sessionId} or a cognia.rfb channel.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "transport": { "type": "string", "enum": ["loopback", "companion"] },
+        "url": { "type": "string", "minLength": 1 },
+        "mode": { "type": "string", "enum": ["view", "control"] },
+        "expiresAt": { "type": "integer" },
+        "lease": { "$ref": "#/$defs/RemoteDesktopControlLease" }
+      },
+      "required": ["sessionId", "transport", "mode", "expiresAt"],
+      "additionalProperties": false
+    },
+    "RemoteDesktopSessionRenewed": {
+      "type": "object",
+      "properties": {
+        "expiresAt": { "type": "integer" },
+        "lease": { "$ref": "#/$defs/RemoteDesktopControlLease" }
+      },
+      "required": ["expiresAt"],
+      "additionalProperties": false
     }
   },
   "commands": {
+    "remote_desktop_target_list": { "$ref": "#/$defs/RemoteDesktopTargetPage" },
+    "remote_desktop_target_save": { "$ref": "#/$defs/RemoteDesktopTarget" },
+    "remote_desktop_target_delete": { "type": "null" },
+    "remote_desktop_credential_set": { "$ref": "#/$defs/RemoteDesktopTarget" },
+    "remote_desktop_target_probe": { "$ref": "#/$defs/RemoteDesktopProbeOutcome" },
+    "remote_desktop_session_open": { "$ref": "#/$defs/RemoteDesktopSessionOpened" },
+    "remote_desktop_session_renew": { "$ref": "#/$defs/RemoteDesktopSessionRenewed" },
+    "remote_desktop_session_close": { "type": "null" },
     "sandbox_preview_context": { "$ref": "#/$defs/SandboxPreviewContext" },
     "sandbox_preview_create": { "$ref": "#/$defs/CreatedSandboxPreview" },
     "sandbox_preview_open": { "$ref": "#/$defs/CreatedSandboxPreview" },

@@ -12,20 +12,6 @@
     },
     {
       "disposition": "local-only",
-      "reason": "ADR-0234 Phase 2: external remote desktop targets, their Host-held credentials and the loopback viewer bridge belong to the desktop that confirmed each endpoint. Phase 3 adds remote-capable variants with their own Companion transports; until then these commands must not be exposed to remote callers.",
-      "commands": [
-        "remote_desktop_credential_set",
-        "remote_desktop_session_close",
-        "remote_desktop_session_open",
-        "remote_desktop_session_renew",
-        "remote_desktop_target_delete",
-        "remote_desktop_target_list",
-        "remote_desktop_target_probe",
-        "remote_desktop_target_save"
-      ]
-    },
-    {
-      "disposition": "local-only",
       "reason": "Sandbox desktop observation and human input belong to the client-local virtual computer. Controller leases arbitrate the local renderer and agent; these commands must not be exposed to remote agents or follow the selected remote Host.",
       "commands": [
         "cua_sandbox_desktop_acquire_control",
@@ -98,7 +84,8 @@
         "vector_cloud_scroll",
         "vector_cloud_truncate",
         "vector_cloud_upsert",
-        "managed_desktop_local_call"
+        "managed_desktop_local_call",
+        "remote_desktop_local_call"
       ],
       "commandReasons": {
         "vector_cloud_count": "Proxies HTTP calls to the operator's own cloud vector database. A Headless install configures that database directly and reaches it with its own credentials; the desktop command adds no capability the operator lacks.",
@@ -146,7 +133,8 @@
         "environment_local_call": "The desktop's own entry to its environment plane (ADR-0221): it dispatches to the same arms a paired client reaches through the companion `environment_*` commands, which are the Headless surface. A Headless host serves those commands directly.",
         "remote_sandboxes_get": "Reads the desktop's remote sandbox settings (ADR-0221). A Headless install configures its providers in the operator's own file named by COGNIA_SANDBOX_PROVIDERS_FILE and reads their live state through environment_driver_status.",
         "remote_sandboxes_set": "Writes the desktop's remote sandbox settings and credentials (ADR-0221). A Headless install configures its providers in the operator's own file named by COGNIA_SANDBOX_PROVIDERS_FILE, with credentials from its environment or files; no client edits a server's providers.",
-        "managed_desktop_local_call": "Local IPC wrapper over the same authenticated managed_desktop_* Host commands; headless uses those commands and managed-desktops.json."
+        "managed_desktop_local_call": "Local IPC wrapper over the same authenticated managed_desktop_* Host commands; headless uses those commands and managed-desktops.json.",
+        "remote_desktop_local_call": "Local IPC wrapper over the same remote_desktop_* Host commands for the desktop's own user (ADR-0234). cognia-server installs the same Host, so a headless Host serves those commands, the /ws/remote-desktop socket and cognia.rfb channels to its paired devices directly."
       }
     },
     {

@@ -88,6 +88,9 @@ export const DISPATCH_SOURCES = [
   COMPANION_SOURCES.browserGateway,
   COMPANION_SOURCES.sftpService,
   COMPANION_SOURCES.fileShareRpc,
+  // Remote desktops (ADR-0234) are routed by `cognia-companion-rpc` into
+  // the Host crate's own typed dispatcher, which keys its arms on the names.
+  "crates/cognia-remote-desktop/src/commands.rs",
 ]
 
 /** Directories scanned for surviving old-name literals (R7). */

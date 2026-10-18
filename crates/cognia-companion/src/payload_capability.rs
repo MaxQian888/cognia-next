@@ -65,7 +65,18 @@ pub fn payload_required_capability(name: &str, args: &Value) -> Option<&'static 
     if attach_requests_control(name, args) {
         return Some("workspace.write");
     }
+    if remote_desktop_open_requests_control(name, args) {
+        return Some("host.admin");
+    }
     None
+}
+
+/// True when `remote_desktop_session_open` asks for control (ADR-0234 Phase
+/// 3). Viewing a target is the `host.observe` baseline; controlling it takes
+/// its lease, which is `host.admin`. Anything that is not literally `"view"`
+/// is a control request, the way the Host reads it.
+fn remote_desktop_open_requests_control(name: &str, args: &Value) -> bool {
+    name == "remote_desktop_session_open" && args.get("mode").and_then(Value::as_str) != Some("view")
 }
 
 /// True when `session_attach` is asking for a *control* attachment.
@@ -165,6 +176,25 @@ mod tests {
         // holding it, so it stays at the baseline whatever the payload says.
         assert_eq!(
             payload_required_capability("session_detach", &json!({ "mode": "control" })),
+            None
+        );
+    }
+
+    #[test]
+    fn a_remote_desktop_open_escalates_to_admin_unless_it_asks_to_view() {
+        for args in [json!({ "mode": "control" }), json!({}), json!({ "mode": "VIEW" })] {
+            assert_eq!(
+                payload_required_capability("remote_desktop_session_open", &args),
+                Some("host.admin"),
+                "{args}"
+            );
+        }
+        assert_eq!(
+            payload_required_capability("remote_desktop_session_open", &json!({ "mode": "view" })),
+            None
+        );
+        assert_eq!(
+            payload_required_capability("remote_desktop_session_renew", &json!({ "mode": "control" })),
             None
         );
     }

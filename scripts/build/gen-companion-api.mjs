@@ -650,10 +650,13 @@ const HOST_CATEGORIES = [
     id: "development",
     title: "Development tools",
     description:
-      "Git, files, terminals, browsers, media processing, code-server, language servers, and the container image a project runs in.",
+      "Git, files, terminals, browsers, remote desktops, media processing, code-server, language servers, and the container image a project runs in.",
     skill: "cognia-host-development",
+    // `remote_desktop_` is here beside `terminal_`: both reach a screen or a
+    // shell through the Host for a human at the device (ADR-0234), and
+    // neither is a workflow.
     pattern:
-      /^(browser_|codeserver_|environment_|sandbox_snapshot_|sandbox_preview_|file_|fs_|git_|github_workspace_|plugin_media_|video_|project_environment_|project_mutate$|code_snapshot_|code_checkout_|code_result_|sftp_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|read_project_mcp_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
+      /^(browser_|codeserver_|remote_desktop_|environment_|sandbox_snapshot_|sandbox_preview_|file_|fs_|git_|github_workspace_|plugin_media_|video_|project_environment_|project_mutate$|code_snapshot_|code_checkout_|code_result_|sftp_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|read_project_mcp_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
   },
   {
     id: "system",
@@ -1700,7 +1703,8 @@ function authForPath(path) {
     path === "/ws/events" ||
     path === "/ws/acp" ||
     path.startsWith("/ws/terminal") ||
-    path.startsWith("/ws/browser")
+    path.startsWith("/ws/browser") ||
+    path.startsWith("/ws/remote-desktop/")
   ) {
     return []
   }
@@ -1985,6 +1989,41 @@ function normalizePublicPaths(paths, contract) {
     ].join(" ")
     terminal.responses[403] = publicApiError
     terminal.responses[503] = publicApiError
+  }
+  const remoteDesktop = next["/ws/remote-desktop/{session_id}"]?.get
+  if (remoteDesktop) {
+    remoteDesktop.summary = "Attach a remote desktop viewer with a one-time ticket."
+    remoteDesktop.description = [
+      "Open the viewer stream of a remote desktop session this device opened with",
+      "`remote_desktop_session_open` (ADR-0234). Obtain a 60-second, path-bound, single-use ticket",
+      "from `POST /api/auth/socket-ticket` with channel `remote-desktop` and the session id.",
+      "The Host refuses another device's session, a second attach and an ended session before the",
+      "upgrade. Frames are binary RFB bytes after authentication (security type None); offer the",
+      "`binary` subprotocol. Bearer tokens are never accepted in the WebSocket URL.",
+    ].join(" ")
+    remoteDesktop.parameters ??= []
+    if (
+      !remoteDesktop.parameters.some(
+        (parameter) => parameter?.in === "query" && parameter.name === "ticket"
+      )
+    ) {
+      remoteDesktop.parameters.push({
+        in: "query",
+        name: "ticket",
+        required: true,
+        schema: { type: "string" },
+        description: "Single-use ticket bound to this session's socket path and the device.",
+      })
+    }
+    remoteDesktop.responses = {
+      101: { description: "WebSocket upgrade accepted; binary RFB frames follow." },
+      401: { $ref: "#/components/responses/AuthenticationRejected" },
+      403: publicApiError,
+      404: publicApiError,
+      409: publicApiError,
+      426: { description: "A WebSocket upgrade is required." },
+      503: publicApiError,
+    }
   }
   const browser = next["/ws/browser/{session_id}"]?.get
   if (browser) {
@@ -2705,6 +2744,20 @@ function ensurePublicComponents(components, publicNames) {
               type: "string",
               minLength: 1,
               description: "Binds the ticket to one active browser session owned by the device.",
+            },
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["channel", "sessionId"],
+          properties: {
+            channel: { type: "string", const: "remote-desktop" },
+            sessionId: {
+              type: "string",
+              pattern: "^[0-9a-f]{1,64}$",
+              description:
+                "Binds the ticket to one remote desktop session the device opened (ADR-0234).",
             },
           },
         },

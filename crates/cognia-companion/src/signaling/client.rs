@@ -1439,6 +1439,18 @@ async fn handle_relay(
                             });
                         }
                     }),
+                    rfb_channel: Arc::new({
+                        let device_id = config.device_id.clone();
+                        move |channel, tag| {
+                            let device_id = device_id.clone();
+                            tokio::spawn(async move {
+                                crate::ws_remote_desktop::proxy_rfb_datachannel(
+                                    channel, tag, device_id,
+                                )
+                                .await;
+                            });
+                        }
+                    }),
                     state_change: state_tx,
                 };
                 let new_peer = PeerSession::new(config.ice_servers.clone(), callbacks)

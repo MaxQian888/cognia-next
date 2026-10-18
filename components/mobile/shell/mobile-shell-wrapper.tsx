@@ -121,6 +121,9 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     // "Add to Host" action; a tab bar under it would sit on that button and
     // offer five ways out of a half-filled form.
     if (pathname.startsWith("/me/external-agents/new")) return false
+    // The remote desktop viewer has its own key bar at the bottom; the tab bar
+    // would sit on it and shrink a screen that needs every pixel.
+    if (pathname === "/devices/remote-desktop") return false
     return !TAB_BAR_HIDDEN_PREFIXES.some(
       (prefix) => pathname === prefix || pathname.startsWith(prefix + "/")
     )

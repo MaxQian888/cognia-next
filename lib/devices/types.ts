@@ -292,8 +292,9 @@ export interface DeviceRow {
   /** Host rows only: what kind of host this is. See {@link HostRole}. */
   hostRole?: HostRole
   /**
-   * Local row only: this machine brokers external remote desktops (ADR-0234).
-   * Targets are `client`-target commands, so no other row ever has them.
+   * Local row only: this machine is a Host that brokers external remote
+   * desktops (ADR-0234), the desktop shell. A Host row reached over its
+   * management channel lists its own (`remoteDesktopHostOf`).
    */
   remoteDesktopHost?: boolean
   /**
@@ -482,7 +483,7 @@ export interface LocalDeviceInput {
   hostMode?: boolean
   /**
    * This process is the desktop shell, which brokers external remote desktops
-   * (ADR-0234 Phase 2). The browser and phone builds reach them in Phase 3.
+   * (ADR-0234). The browser and phone builds reach them through their Host.
    */
   remoteDesktopHost?: boolean
 }

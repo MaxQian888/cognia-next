@@ -1302,7 +1302,11 @@ const readJson = (p) => JSON.parse(read(p))
  * rather than for the RPC table it happens to serve.
  * `gen-companion-api.mjs:RPC_DISPATCH_SOURCE_PATHS` lists the same file.
  */
-export const DELEGATED_ARM_FILES = [COMPANION_SOURCES.sftpService, COMPANION_SOURCES.fileShareRpc]
+export const DELEGATED_ARM_FILES = [
+  COMPANION_SOURCES.sftpService,
+  COMPANION_SOURCES.fileShareRpc,
+  COMPANION_SOURCES.remoteDesktopCommands,
+]
 
 /**
  * The files to scan for dispatch arms: every tracked `companion_api/rpc/*.rs`

@@ -1575,6 +1575,32 @@ export class CompanionTransport implements Transport {
     )
   }
 
+  /**
+   * A fresh `cognia.rfb` channel on the live WebRTC tier for one remote
+   * desktop session (ADR-0234 Phase 3), or null without one.
+   */
+  public openRfbDataChannel(): RTCDataChannel | null {
+    return this.rtc?.openRfbDataChannel() ?? null
+  }
+
+  /**
+   * The ticketed WebSocket URL for one remote desktop session this device
+   * opened (ADR-0234 Phase 3). Only meaningful while the HTTPS+WS tier is
+   * connected (`ws-lan` / `ws-tunnel`): that is when a browser `WebSocket`
+   * can reach the Host at all.
+   */
+  public async remoteDesktopSocketUrl(sessionId: string): Promise<string> {
+    const config = this.config()
+    if (!config) throw new Error("companion is not paired")
+    const { ticket } = await issueSocketTicket(config, { channel: "remote-desktop", sessionId })
+    const url = new URL(
+      `/ws/remote-desktop/${encodeURIComponent(sessionId)}`,
+      toWebSocketBase(config.baseUrl)
+    )
+    url.searchParams.set("ticket", ticket)
+    return url.toString()
+  }
+
   public getTerminalClientId(): string | null {
     const deviceId = this.config()?.deviceId
     return deviceId ? `companion:${deviceId}` : null

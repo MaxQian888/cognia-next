@@ -2173,6 +2173,9 @@ enum SocketChannel {
     /// The Browser Companion's device socket (ADR-0228 §5).
     #[serde(rename = "browser-companion")]
     BrowserCompanion,
+    /// One remote desktop viewer stream (ADR-0234 Phase 3).
+    #[serde(rename = "remote-desktop")]
+    RemoteDesktop,
 }
 
 impl SocketChannel {
@@ -2185,6 +2188,9 @@ impl SocketChannel {
             // Status hints for the browser's own submissions. Operations on
             // the same socket are gated per frame on `browser.drive`.
             Self::BrowserCompanion => "browser.read-own",
+            // Viewing is the baseline; the session itself was opened with
+            // the capability its mode needs and re-checks it while live.
+            Self::RemoteDesktop => "host.observe",
         }
     }
 
@@ -2206,10 +2212,23 @@ impl SocketChannel {
                 "browser_session_required",
                 "browser socket tickets require a sessionId",
             )),
+            (Self::RemoteDesktop, Some(session_id))
+                if crate::ws_remote_desktop::valid_session_id(session_id) =>
+            {
+                Ok((
+                    crate::ws_remote_desktop::socket_path(session_id),
+                    crate::ws_remote_desktop::SOCKET_AUDIENCE,
+                ))
+            }
+            (Self::RemoteDesktop, _) => Err(api_error(
+                StatusCode::BAD_REQUEST,
+                "remote_desktop_session_required",
+                "remote desktop socket tickets require a sessionId",
+            )),
             (_, Some(_)) => Err(api_error(
                 StatusCode::BAD_REQUEST,
                 "socket_ticket_resource_forbidden",
-                "sessionId is only valid for browser socket tickets",
+                "sessionId is only valid for browser and remote desktop socket tickets",
             )),
         }
     }
@@ -2983,6 +3002,23 @@ mod tests {
         );
         let parsed: SocketChannel = serde_json::from_str("\"browser-companion\"").unwrap();
         assert!(matches!(parsed, SocketChannel::BrowserCompanion));
+        let session = "0123456789abcdef0123456789abcdef";
+        assert_eq!(
+            SocketChannel::RemoteDesktop.binding(Some(session)).unwrap(),
+            (format!("/ws/remote-desktop/{session}"), "remote-desktop")
+        );
+        assert_eq!(SocketChannel::RemoteDesktop.capability(), "host.observe");
+        for bad in [None, Some(""), Some("../terminal"), Some("ABC")] {
+            assert_eq!(
+                SocketChannel::RemoteDesktop.binding(bad).unwrap_err().code,
+                "remote_desktop_session_required",
+                "{bad:?}"
+            );
+        }
+        let parsed: SocketChannel = serde_json::from_str("\"remote-desktop\"").unwrap();
+        assert!(matches!(parsed, SocketChannel::RemoteDesktop));
+        socket_channel_host_gate(SocketChannel::RemoteDesktop, false, false)
+            .expect("no host switch gates a viewer socket; the session does");
     }
 
     /// A browser gets an untyped `error` event off a rejected WebSocket

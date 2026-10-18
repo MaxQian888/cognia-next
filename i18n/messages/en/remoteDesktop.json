@@ -27,7 +27,11 @@
     "deleted": "Remote desktop deleted",
     "actionsLabel": "Actions for {name}",
     "endpoint": "{host}:{port}",
-    "pinned": "Pinned to {ip}"
+    "pinned": "Pinned to {ip}",
+    "descriptionRemote": "Other machines' screens {host} opens through its bridge. Passwords stay on {host}.",
+    "emptyBodyRemote": "Add a VNC server that {host} can reach. {host} resolves its address once, pins it, and asks you to confirm before connecting.",
+    "deleteBodyRemote": "Its stored passwords are removed from {host} and any open session to it ends.",
+    "hostOutdated": "{host} cannot broker remote desktops yet. Update it to open them from here."
   },
   "dialog": {
     "titleAdd": "Add remote desktop",
@@ -71,7 +75,9 @@
     "saved": "Remote desktop saved",
     "savedWithoutPassword": "Saved, but the password could not be stored: {message}",
     "addressChanged": "The address changed. Check it again before saving.",
-    "required": "Fill in a name, host and port, and check the address."
+    "required": "Fill in a name, host and port, and check the address.",
+    "descriptionRemote": "Cognia connects to the server from {host} and passes an already-authenticated stream to this viewer. The password is sent to {host} once and never shown again.",
+    "confirmPrivateRemote": "This is a device on {host}'s local network ({ip}). {host} will only ever connect to this address; if the name later points elsewhere you will be asked again."
   },
   "viewer": {
     "title": "Remote desktop",
@@ -79,7 +85,6 @@
     "missingParams": "This link does not name a remote desktop.",
     "notFound": "This remote desktop no longer exists.",
     "providerMissing": "The provider for this remote desktop is not installed or enabled.",
-    "desktopOnly": "Remote desktops open from the desktop app.",
     "opening": "Opening session…",
     "connecting": "Connecting…",
     "connected": "Connected",
@@ -100,7 +105,10 @@
     "lostControl": "Control was taken by another session.",
     "ended": "The session ended.",
     "viewOnlyHint": "The server enforces view-only: input is ignored.",
-    "unmanagedNote": "Clients that connect to this server directly are not governed by Cognia."
+    "unmanagedNote": "Clients that connect to this server directly are not governed by Cognia.",
+    "hostLabel": "Through {host}",
+    "needsHost": "This link names a remote desktop on a desktop's own Host. Open it from that Host in Devices.",
+    "remoteHost": "On a paired Host"
   },
   "errors": {
     "adapterUnknown": "This provider asks for a protocol Cognia does not support.",
@@ -155,6 +163,15 @@
     "viewerFailed": "The viewer stopped unexpectedly.",
     "viewerInvalid": "The provider's viewer is not valid.",
     "viewerRequiresWebview": "Only built-in providers may render their viewer in the app; this one must use a sandboxed view.",
-    "unknown": "The remote desktop refused with {code}."
+    "unknown": "The remote desktop refused with {code}.",
+    "adminLeaseRequired": "Approve this change on the Host first: it needs a fresh admin approval.",
+    "forbidden": "This device is not allowed to do that on the Host. An owner can grant it in Devices.",
+    "hostConsentRequired": "The Host is waiting for approval. Approve code {detail} on the Host, then try again.",
+    "hostOutdated": "This Host's version cannot broker remote desktops. Update the Host.",
+    "hostUnavailable": "The Host's remote desktop service is not running.",
+    "invalidRequest": "The Host refused a malformed request. {detail}",
+    "sessionAttached": "This session already has a viewer.",
+    "transportUnavailable": "The current connection to the Host cannot carry a remote desktop. Connect on the same network or enable the direct (WebRTC) connection.",
+    "unknownCommand": "The Host does not know this remote desktop command."
   }
 }

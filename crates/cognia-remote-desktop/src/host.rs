@@ -4,14 +4,14 @@
 
 use crate::{
     audit,
-    bridge::{Bridge, BridgeTarget, CONNECT_TIMEOUT, HANDSHAKE_TIMEOUT, TICKET_TTL},
+    bridge::{Attachment, Bridge, BridgeTarget, ViewerStream, CONNECT_TIMEOUT, HANDSHAKE_TIMEOUT, TICKET_TTL},
     credentials::{self, CredentialKind, CredentialStore, KeyringCredentials, MAX_CREDENTIAL_BYTES},
     endpoint::{self, Pinned},
     error::{RemoteDesktopError, Result},
     rfb::{self, ProbeResult},
     session::{
-        now_ms, Admission, Broker, EndReason, SessionMode, SessionOpened, SessionRenewed,
-        LOCAL_PRINCIPAL, TARGET_KIND,
+        now_ms, Admission, Broker, EndReason, Principal, SessionMode, SessionOpened, SessionRenewed,
+        TARGET_KIND,
     },
     target::{validate_draft, Adapter, Binding, Endpoint, EndpointClass, RemoteTarget, TargetDraft, TargetStore},
 };
@@ -166,7 +166,7 @@ impl RemoteDesktopHost {
 
     /// Create or replace a target. Every endpoint is resolved and pinned
     /// first; a binding whose pinned address is new needs `confirm`.
-    pub async fn save_target(&self, draft: TargetDraft) -> Result<RemoteTarget> {
+    pub async fn save_target(&self, actor: &Principal, draft: TargetDraft) -> Result<RemoteTarget> {
         validate_draft(&draft)?;
         let mut pins = Vec::with_capacity(draft.bindings.len());
         for binding in &draft.bindings {
@@ -185,7 +185,7 @@ impl RemoteDesktopHost {
             "remote_desktop.target.save",
             TARGET_KIND,
             &target_id,
-            LOCAL_PRINCIPAL,
+            actor.id(),
             "allow",
             0,
             json!({"count": saved.target.bindings.len()}),
@@ -196,7 +196,7 @@ impl RemoteDesktopHost {
                 "remote_desktop.endpoint.confirm",
                 TARGET_KIND,
                 &target_id,
-                LOCAL_PRINCIPAL,
+                actor.id(),
                 "allow",
                 0,
                 json!({"binding_id": binding_id, "class": class_str(*class)}),
@@ -208,7 +208,7 @@ impl RemoteDesktopHost {
                 "remote_desktop.credential.clear",
                 TARGET_KIND,
                 &target_id,
-                LOCAL_PRINCIPAL,
+                actor.id(),
                 "allow",
                 0,
                 json!({"binding_id": binding_id, "credential": kind.as_str()}),
@@ -219,7 +219,7 @@ impl RemoteDesktopHost {
     }
 
     /// Repeating a delete is a no-op (ADR-0175 `delete`).
-    pub async fn delete_target(&self, target_id: &str) -> Result<()> {
+    pub async fn delete_target(&self, actor: &Principal, target_id: &str) -> Result<()> {
         let id = target_id.to_owned();
         let removed = self
             .blocking(move |store, credentials| {
@@ -249,7 +249,7 @@ impl RemoteDesktopHost {
             "remote_desktop.target.delete",
             TARGET_KIND,
             target_id,
-            LOCAL_PRINCIPAL,
+            actor.id(),
             "allow",
             0,
             json!({"count": target.bindings.len()}),
@@ -262,6 +262,7 @@ impl RemoteDesktopHost {
     /// write-only: no command ever returns it.
     pub async fn set_credential(
         &self,
+        actor: &Principal,
         target_id: &str,
         binding_id: &str,
         kind: CredentialKind,
@@ -303,7 +304,7 @@ impl RemoteDesktopHost {
             },
             TARGET_KIND,
             target_id,
-            LOCAL_PRINCIPAL,
+            actor.id(),
             "allow",
             0,
             json!({"binding_id": binding_id, "credential": kind.as_str()}),
@@ -388,20 +389,24 @@ impl RemoteDesktopHost {
     /// Open a viewer session. `view` needs a server-enforced view password;
     /// `control` takes the target's lease, preempting the current controller
     /// only when `takeover` is set.
+    ///
+    /// The desktop's own user gets a loopback bridge; a paired device gets a
+    /// bridge it attaches to through its Companion transport.
     pub async fn open_session(
         &self,
+        principal: &Principal,
         target_id: &str,
         binding_id: &str,
         mode: SessionMode,
         takeover: bool,
     ) -> Result<SessionOpened> {
-        let result = self.open_inner(target_id, binding_id, mode, takeover).await;
+        let result = self.open_inner(principal, target_id, binding_id, mode, takeover).await;
         if let Err(error) = &result {
             audit::record_async(
                 "remote_desktop.session.failed",
                 TARGET_KIND,
                 target_id,
-                LOCAL_PRINCIPAL,
+                principal.id(),
                 "deny",
                 0,
                 json!({"binding_id": binding_id, "mode": mode.as_str(), "reason": "failed",
@@ -414,11 +419,15 @@ impl RemoteDesktopHost {
 
     async fn open_inner(
         &self,
+        principal: &Principal,
         target_id: &str,
         binding_id: &str,
         mode: SessionMode,
         takeover: bool,
     ) -> Result<SessionOpened> {
+        if !principal.admitted(mode) {
+            return Err(RemoteDesktopError::new("remote_desktop_forbidden"));
+        }
         let revision = self.broker.revision();
         let binding = self.binding(target_id, binding_id).await?;
         if !binding.enabled {
@@ -455,11 +464,17 @@ impl RemoteDesktopHost {
                 adapter: binding.adapter,
                 password,
             },
+            if principal.is_local() {
+                Attachment::Loopback
+            } else {
+                Attachment::Remote
+            },
             TICKET_TTL,
         )
         .await?;
         self.broker.commit(
             Admission {
+                principal: principal.clone(),
                 target_id: target_id.to_owned(),
                 binding_id: binding_id.to_owned(),
                 mode,
@@ -470,12 +485,18 @@ impl RemoteDesktopHost {
         )
     }
 
-    pub fn renew_session(&self, session_id: &str) -> Result<SessionRenewed> {
-        self.broker.renew(session_id)
+    pub fn renew_session(&self, principal: &Principal, session_id: &str) -> Result<SessionRenewed> {
+        self.broker.renew(principal.id(), session_id)
     }
 
-    pub fn close_session(&self, session_id: &str) {
-        self.broker.close(session_id);
+    pub fn close_session(&self, principal: &Principal, session_id: &str) {
+        self.broker.close(principal.id(), session_id);
+    }
+
+    /// A paired device's transport delivers the viewer stream for the
+    /// session it opened. Refused for anyone else and after the ticket TTL.
+    pub fn attach_viewer(&self, principal: &Principal, session_id: &str, stream: ViewerStream) -> Result<()> {
+        self.broker.attach(principal, session_id, stream)
     }
 }
 
@@ -606,6 +627,10 @@ mod tests {
         net::TcpListener,
     };
 
+    fn me() -> Principal {
+        Principal::local()
+    }
+
     /// Maps every name to a fixed answer; `moved` swaps it.
     struct FixedResolver(Mutex<Vec<IpAddr>>);
 
@@ -725,12 +750,12 @@ mod tests {
         let fixture = fixture();
         let mut unconfirmed = binding_draft("nas.local", 5900, Adapter::Vnc, false);
         unconfirmed.confirm = false;
-        let error = fixture.host.save_target(draft(vec![unconfirmed])).await.unwrap_err();
+        let error = fixture.host.save_target(&me(), draft(vec![unconfirmed])).await.unwrap_err();
         assert_eq!(error.code, "remote_desktop_endpoint_unconfirmed");
         assert_eq!(error.detail.as_deref(), Some("private"));
         let target = fixture
             .host
-            .save_target(draft(vec![binding_draft("nas.local", 5900, Adapter::Vnc, false)]))
+            .save_target(&me(), draft(vec![binding_draft("nas.local", 5900, Adapter::Vnc, false)]))
             .await
             .unwrap();
         assert_eq!(target.name, "Studio NAS");
@@ -740,28 +765,28 @@ mod tests {
         assert!(binding.endpoint.confirmed_at > 0);
         assert_eq!(binding.id.len(), 32);
         // An unchanged endpoint keeps its confirmation without re-confirming.
-        let again = fixture.host.save_target(edit(&target)).await.unwrap();
+        let again = fixture.host.save_target(&me(), edit(&target)).await.unwrap();
         assert_eq!(again.bindings[0].endpoint.confirmed_at, binding.endpoint.confirmed_at);
         assert_eq!(again.created_at, target.created_at);
         // The name moving to a new address needs a fresh confirmation.
         *fixture.resolver.0.lock() = vec!["203.0.113.50".parse().unwrap(), "8.8.8.8".parse().unwrap()];
-        let error = fixture.host.save_target(edit(&target)).await.unwrap_err();
+        let error = fixture.host.save_target(&me(), edit(&target)).await.unwrap_err();
         assert_eq!(error.code, "remote_desktop_endpoint_forbidden");
         *fixture.resolver.0.lock() = vec!["8.8.8.8".parse().unwrap()];
-        let error = fixture.host.save_target(edit(&target)).await.unwrap_err();
+        let error = fixture.host.save_target(&me(), edit(&target)).await.unwrap_err();
         assert_eq!(error.detail.as_deref(), Some("public"));
         // Ids the Host did not mint are refused.
         let mut forged = edit(&target);
         forged.bindings[0].id = Some("someone-elses".into());
         forged.bindings[0].confirm = true;
         assert_eq!(
-            fixture.host.save_target(forged).await.unwrap_err().code,
+            fixture.host.save_target(&me(), forged).await.unwrap_err().code,
             "remote_desktop_binding_not_found"
         );
         let mut unknown = edit(&target);
         unknown.id = Some("nope".into());
         assert_eq!(
-            fixture.host.save_target(unknown).await.unwrap_err().code,
+            fixture.host.save_target(&me(), unknown).await.unwrap_err().code,
             "remote_desktop_target_not_found"
         );
         let page = fixture.host.list_targets(None, None).await.unwrap();
@@ -778,7 +803,7 @@ mod tests {
         let fixture = fixture();
         let target = fixture
             .host
-            .save_target(draft(vec![
+            .save_target(&me(), draft(vec![
                 binding_draft("192.168.1.20", 5900, Adapter::Vnc, true),
                 binding_draft("192.168.1.21", 5901, Adapter::None, false),
             ]))
@@ -787,20 +812,20 @@ mod tests {
         let (vnc, raw) = (&target.bindings[0], &target.bindings[1]);
         let updated = fixture
             .host
-            .set_credential(&target.id, &vnc.id, CredentialKind::Control, Some("secret".into()))
+            .set_credential(&me(), &target.id, &vnc.id, CredentialKind::Control, Some("secret".into()))
             .await
             .unwrap();
         assert!(updated.bindings[0].has_control_credential);
         assert!(!serde_json::to_string(&updated).unwrap().contains("secret"));
         fixture
             .host
-            .set_credential(&target.id, &vnc.id, CredentialKind::View, Some("look".into()))
+            .set_credential(&me(), &target.id, &vnc.id, CredentialKind::View, Some("look".into()))
             .await
             .unwrap();
         assert_eq!(
             fixture
                 .host
-                .set_credential(&target.id, &raw.id, CredentialKind::Control, Some("x".into()))
+                .set_credential(&me(), &target.id, &raw.id, CredentialKind::Control, Some("x".into()))
                 .await
                 .unwrap_err()
                 .code,
@@ -810,7 +835,7 @@ mod tests {
             assert_eq!(
                 fixture
                     .host
-                    .set_credential(&target.id, &vnc.id, CredentialKind::Control, Some(bad.into()))
+                    .set_credential(&me(), &target.id, &vnc.id, CredentialKind::Control, Some(bad.into()))
                     .await
                     .unwrap_err()
                     .code,
@@ -822,7 +847,7 @@ mod tests {
         let mut next = edit(&fixture.host.list_targets(None, None).await.unwrap().items[0]);
         next.bindings[0].view_only = false;
         next.bindings.pop();
-        let saved = fixture.host.save_target(next).await.unwrap();
+        let saved = fixture.host.save_target(&me(), next).await.unwrap();
         assert!(!saved.bindings[0].has_view_credential);
         assert!(saved.bindings[0].has_control_credential);
         {
@@ -833,13 +858,13 @@ mod tests {
         // A failing secret store aborts the delete and keeps the target.
         fixture.credentials.fail.store(true, Ordering::SeqCst);
         assert_eq!(
-            fixture.host.delete_target(&target.id).await.unwrap_err().code,
+            fixture.host.delete_target(&me(), &target.id).await.unwrap_err().code,
             "remote_desktop_credential_unavailable"
         );
         fixture.credentials.fail.store(false, Ordering::SeqCst);
-        fixture.host.delete_target(&target.id).await.unwrap();
+        fixture.host.delete_target(&me(), &target.id).await.unwrap();
         assert!(fixture.credentials.entries.lock().is_empty());
-        fixture.host.delete_target(&target.id).await.unwrap();
+        fixture.host.delete_target(&me(), &target.id).await.unwrap();
         assert!(fixture.host.list_targets(None, None).await.unwrap().items.is_empty());
     }
 
@@ -849,14 +874,14 @@ mod tests {
         let (port, server) = vnc_server().await;
         let target = fixture
             .host
-            .save_target(draft(vec![binding_draft("192.168.1.20", port, Adapter::Vnc, false)]))
+            .save_target(&me(), draft(vec![binding_draft("192.168.1.20", port, Adapter::Vnc, false)]))
             .await
             .unwrap();
         let binding_id = target.bindings[0].id.clone();
         assert_eq!(
             fixture
                 .host
-                .open_session(&target.id, &binding_id, SessionMode::View, false)
+                .open_session(&me(), &target.id, &binding_id, SessionMode::View, false)
                 .await
                 .unwrap_err()
                 .code,
@@ -864,19 +889,19 @@ mod tests {
         );
         fixture
             .host
-            .set_credential(&target.id, &binding_id, CredentialKind::Control, Some("password".into()))
+            .set_credential(&me(), &target.id, &binding_id, CredentialKind::Control, Some("password".into()))
             .await
             .unwrap();
         point_at_loopback(&fixture, &target.id);
         let opened = fixture
             .host
-            .open_session(&target.id, &binding_id, SessionMode::Control, false)
+            .open_session(&me(), &target.id, &binding_id, SessionMode::Control, false)
             .await
             .unwrap();
         assert!(opened.lease.is_some());
         let json = serde_json::to_string(&opened).unwrap();
         assert!(!json.contains("password"));
-        let (mut viewer, _) = tokio_tungstenite::connect_async(opened.url.as_str()).await.unwrap();
+        let (mut viewer, _) = tokio_tungstenite::connect_async(opened.url.as_deref().unwrap()).await.unwrap();
         use futures_util::StreamExt;
         let mut received = Vec::new();
         while received.len() < 12 {
@@ -885,8 +910,8 @@ mod tests {
             }
         }
         assert_eq!(&received[..12], b"RFB 003.008\n");
-        fixture.host.renew_session(&opened.session_id).unwrap();
-        fixture.host.close_session(&opened.session_id);
+        fixture.host.renew_session(&me(), &opened.session_id).unwrap();
+        fixture.host.close_session(&me(), &opened.session_id);
         let _ = viewer.close(None).await;
         assert_eq!(server.await.unwrap(), rfb::vnc_auth_response("password", &[7; 16]));
     }
@@ -896,21 +921,21 @@ mod tests {
         let fixture = fixture();
         let target = fixture
             .host
-            .save_target(draft(vec![binding_draft("192.168.1.20", 5900, Adapter::Vnc, true)]))
+            .save_target(&me(), draft(vec![binding_draft("192.168.1.20", 5900, Adapter::Vnc, true)]))
             .await
             .unwrap();
         let binding_id = target.bindings[0].id.clone();
         // The flag says present but the secret store lost it.
         fixture
             .host
-            .set_credential(&target.id, &binding_id, CredentialKind::View, Some("look".into()))
+            .set_credential(&me(), &target.id, &binding_id, CredentialKind::View, Some("look".into()))
             .await
             .unwrap();
         fixture.credentials.entries.lock().clear();
         assert_eq!(
             fixture
                 .host
-                .open_session(&target.id, &binding_id, SessionMode::View, false)
+                .open_session(&me(), &target.id, &binding_id, SessionMode::View, false)
                 .await
                 .unwrap_err()
                 .code,
@@ -918,11 +943,11 @@ mod tests {
         );
         let mut disabled = edit(&target);
         disabled.bindings[0].enabled = false;
-        fixture.host.save_target(disabled).await.unwrap();
+        fixture.host.save_target(&me(), disabled).await.unwrap();
         assert_eq!(
             fixture
                 .host
-                .open_session(&target.id, &binding_id, SessionMode::Control, true)
+                .open_session(&me(), &target.id, &binding_id, SessionMode::Control, true)
                 .await
                 .unwrap_err()
                 .code,
@@ -931,7 +956,7 @@ mod tests {
         assert_eq!(
             fixture
                 .host
-                .open_session(&target.id, "missing", SessionMode::Control, true)
+                .open_session(&me(), &target.id, "missing", SessionMode::Control, true)
                 .await
                 .unwrap_err()
                 .code,
@@ -939,7 +964,7 @@ mod tests {
         );
         let named = fixture
             .host
-            .save_target(draft(vec![binding_draft("nas.local", 5900, Adapter::Vnc, false)]))
+            .save_target(&me(), draft(vec![binding_draft("nas.local", 5900, Adapter::Vnc, false)]))
             .await
             .unwrap();
         *fixture.resolver.0.lock() = vec!["192.168.1.7".parse().unwrap()];
@@ -1002,27 +1027,81 @@ mod tests {
         let fixture = fixture();
         let target = fixture
             .host
-            .save_target(draft(vec![binding_draft("192.168.1.20", 5900, Adapter::None, false)]))
+            .save_target(&me(), draft(vec![binding_draft("192.168.1.20", 5900, Adapter::None, false)]))
             .await
             .unwrap();
         let binding_id = target.bindings[0].id.clone();
         let opened = fixture
             .host
-            .open_session(&target.id, &binding_id, SessionMode::Control, false)
+            .open_session(&me(), &target.id, &binding_id, SessionMode::Control, false)
             .await
             .unwrap();
         // Renaming keeps the session.
         let mut renamed = edit(&target);
         renamed.name = "Renamed".into();
-        let renamed = fixture.host.save_target(renamed).await.unwrap();
-        fixture.host.renew_session(&opened.session_id).unwrap();
+        let renamed = fixture.host.save_target(&me(), renamed).await.unwrap();
+        fixture.host.renew_session(&me(), &opened.session_id).unwrap();
         let mut moved = edit(&renamed);
         moved.bindings[0].port = 5901;
         moved.bindings[0].confirm = true;
-        fixture.host.save_target(moved).await.unwrap();
+        fixture.host.save_target(&me(), moved).await.unwrap();
         assert_eq!(
-            fixture.host.renew_session(&opened.session_id).unwrap_err().code,
+            fixture.host.renew_session(&me(), &opened.session_id).unwrap_err().code,
             "remote_desktop_session_not_found"
         );
+    }
+
+    #[tokio::test]
+    async fn a_paired_device_attaches_its_own_stream_and_never_gets_a_loopback_url() {
+        let fixture = fixture();
+        let (port, server) = vnc_server().await;
+        let target = fixture
+            .host
+            .save_target(&me(), draft(vec![binding_draft("192.168.1.20", port, Adapter::Vnc, false)]))
+            .await
+            .unwrap();
+        let binding_id = target.bindings[0].id.clone();
+        fixture
+            .host
+            .set_credential(&me(), &target.id, &binding_id, CredentialKind::Control, Some("password".into()))
+            .await
+            .unwrap();
+        point_at_loopback(&fixture, &target.id);
+        let view_only = Principal::device("phone", Arc::new(|mode| mode == SessionMode::View));
+        assert_eq!(
+            fixture
+                .host
+                .open_session(&view_only, &target.id, &binding_id, SessionMode::Control, false)
+                .await
+                .unwrap_err()
+                .code,
+            "remote_desktop_forbidden"
+        );
+        let phone = Principal::device("phone", Arc::new(|_| true));
+        let opened = fixture
+            .host
+            .open_session(&phone, &target.id, &binding_id, SessionMode::Control, false)
+            .await
+            .unwrap();
+        assert!(opened.url.is_none());
+        assert_eq!(serde_json::to_value(&opened).unwrap()["transport"], "companion");
+        let (mut viewer, host_end) = tokio::io::duplex(64 * 1024);
+        assert_eq!(
+            fixture
+                .host
+                .attach_viewer(&me(), &opened.session_id, Box::new(tokio::io::duplex(8).1))
+                .unwrap_err()
+                .code,
+            "remote_desktop_session_not_found"
+        );
+        fixture.host.attach_viewer(&phone, &opened.session_id, Box::new(host_end)).unwrap();
+        let mut banner = [0; 12];
+        viewer.read_exact(&mut banner).await.unwrap();
+        assert_eq!(&banner, b"RFB 003.008\n");
+        fixture.host.renew_session(&phone, &opened.session_id).unwrap();
+        assert!(fixture.host.renew_session(&me(), &opened.session_id).is_err());
+        fixture.host.close_session(&phone, &opened.session_id);
+        drop(viewer);
+        assert_eq!(server.await.unwrap(), rfb::vnc_auth_response("password", &[7; 16]));
     }
 }

@@ -5,6 +5,7 @@ import {
   planDeviceSections,
   type DevicePlannedSection,
   managementRefOf,
+  remoteDesktopHostOf,
 } from "./section-plan"
 
 const CELL: DeviceCapabilityCell = {
@@ -101,17 +102,17 @@ describe("planDeviceSections", () => {
       "capabilities",
       "placement",
     ])
-    // The browser build brokers no remote desktops, and says so once.
+    // The browser build brokers no remote desktops of its own: its Host does.
     expect(plan.notApplicable.map((entry) => entry.id)).toEqual([
       "access",
       "remote-desktop",
       "dispatch",
     ])
     expect(plan.notApplicable[0]?.reasonKey).toBe("access.notApplicable.local")
-    expect(plan.notApplicable[1]?.reasonKey).toBe("remoteDesktop.desktopOnly")
+    expect(plan.notApplicable[1]?.reasonKey).toBe("remoteDesktop.viaHost")
   })
 
-  it("lists remote desktops after the sandbox on the desktop shell, and nowhere else", () => {
+  it("lists remote desktops after the sandbox on the desktop shell, and on reachable Hosts", () => {
     const runtime = {
       sandbox: { support: "supported" as const, connections: [] },
       shellTiers: [{ tier: "os" as const, available: true }],
@@ -134,10 +135,29 @@ describe("planDeviceSections", () => {
     ])
     expect(local.sections.find((section) => section.id === "remote-desktop")?.wide).toBe(true)
     expect(local.notApplicable.map((entry) => entry.id)).not.toContain("remote-desktop")
+    expect(
+      remoteDesktopHostOf(row({ ref: "local", kind: "local", remoteDesktopHost: true }))
+    ).toEqual({ kind: "local" })
     // A flag on any other row is ignored, and no other kind reports its absence.
     const phone = planDeviceSections(row({ deviceId: "dev-1", remoteDesktopHost: true }))
     expect(ids(phone.sections)).not.toContain("remote-desktop")
     expect(phone.notApplicable.map((entry) => entry.id)).not.toContain("remote-desktop")
+    expect(remoteDesktopHostOf(row({ deviceId: "dev-1", remoteDesktopHost: true }))).toBeNull()
+    // A Host reached over its management channel lists its own targets.
+    const pairHost = row({
+      ref: "companion:x",
+      kind: "remote-host",
+      hostId: undefined,
+      runtime: { ...runtime, isRoutingTarget: true },
+    })
+    expect(remoteDesktopHostOf(pairHost)).toEqual({ kind: "remote", hostRef: "companion:x" })
+    expect(ids(planDeviceSections(pairHost).sections)).toContain("remote-desktop")
+    const unreachable = row({ ref: "companion:y", kind: "remote-host", hostId: undefined })
+    expect(remoteDesktopHostOf(unreachable)).toBeNull()
+    expect(ids(planDeviceSections(unreachable).sections)).not.toContain("remote-desktop")
+    expect(planDeviceSections(unreachable).notApplicable.map((entry) => entry.id)).not.toContain(
+      "remote-desktop"
+    )
   })
 
   it("keeps an inactive remote host's workspace card, because it can be probed", () => {
@@ -163,6 +183,7 @@ describe("planDeviceSections", () => {
       "host-runtimes",
       "sandbox",
       "workspaces",
+      "remote-desktop",
       "routing",
       "identity",
       "host-system",

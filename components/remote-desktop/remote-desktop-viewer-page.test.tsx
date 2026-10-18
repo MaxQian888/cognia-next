@@ -12,13 +12,18 @@ import {
   type RemoteDesktopViewerProps,
 } from "@/lib/remote-desktop/provider-registry"
 import type { RemoteDesktopTarget } from "@/lib/remote-desktop/types"
+import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 
 import { RemoteDesktopViewerPage } from "./remote-desktop-viewer-page"
 
 const viewerSpy = jest.fn<void, [RemoteDesktopViewerProps]>()
 function FakeViewer(props: RemoteDesktopViewerProps) {
   viewerSpy(props)
-  return <div data-testid="fake-viewer">{props.url}</div>
+  return (
+    <div data-testid="fake-viewer">
+      {typeof props.connection === "string" ? props.connection : "channel"}
+    </div>
+  )
 }
 const viewerProps = () => viewerSpy.mock.calls.at(-1)?.[0]
 
@@ -50,7 +55,13 @@ const target: RemoteDesktopTarget = {
 }
 
 function session(sessionId: string, mode: "view" | "control") {
-  return { sessionId, url: `ws://127.0.0.1:1/rd/${sessionId}`, mode, expiresAt: 1 }
+  return {
+    sessionId,
+    transport: "loopback" as const,
+    url: `ws://127.0.0.1:1/rd/${sessionId}`,
+    mode,
+    expiresAt: 1,
+  }
 }
 
 beforeEach(() => {
@@ -86,12 +97,10 @@ describe("RemoteDesktopViewerPage", () => {
       />
     )
     expect(await screen.findByTestId("fake-viewer")).toHaveTextContent("ws://127.0.0.1:1/rd/s1")
-    expect(open).toHaveBeenCalledWith({
-      targetId: "t1",
-      bindingId: "b1",
-      mode: "control",
-      takeover: false,
-    })
+    expect(open).toHaveBeenCalledWith(
+      { kind: "local" },
+      { targetId: "t1", bindingId: "b1", mode: "control", takeover: false }
+    )
     expect(screen.getByText("In control")).toBeInTheDocument()
     act(() => viewerProps()?.onStatus("connected"))
     expect(screen.getByRole("status")).toHaveTextContent("Connected")
@@ -116,9 +125,12 @@ describe("RemoteDesktopViewerPage", () => {
     expect(screen.getByText(/The server enforces view-only/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "Take control" }))
     await waitFor(() =>
-      expect(open).toHaveBeenLastCalledWith(expect.objectContaining({ mode: "control" }))
+      expect(open).toHaveBeenLastCalledWith(
+        { kind: "local" },
+        expect.objectContaining({ mode: "control" })
+      )
     )
-    expect(close).toHaveBeenCalledWith("s2")
+    expect(close).toHaveBeenCalledWith({ kind: "local" }, "s2")
   })
 
   it("states why a session ended and reconnects", async () => {
@@ -139,10 +151,51 @@ describe("RemoteDesktopViewerPage", () => {
     expect(await screen.findByTestId("fake-viewer")).toHaveTextContent("s4")
   })
 
+  it("opens a paired Host's target off the desktop and hands the viewer its channel", async () => {
+    tauri = false
+    search = new URLSearchParams("target=t1&binding=b1&mode=control&host=h1")
+    useRemoteHostStore.setState({
+      hosts: [{ id: "h1", label: "Studio Mac" } as never],
+    })
+    const listOn = jest.fn().mockResolvedValue([target])
+    const channel = { readyState: "open" } as never
+    const openStream = jest.fn().mockResolvedValue({ connection: channel, close: jest.fn() })
+    const open = jest.fn().mockResolvedValue({
+      sessionId: "s9",
+      transport: "companion",
+      mode: "control",
+      expiresAt: 1,
+    })
+    render(
+      <RemoteDesktopViewerPage
+        targetsDeps={{ list: listOn }}
+        sessionDeps={{
+          open,
+          openStream,
+          renew: jest.fn(),
+          close: jest.fn().mockResolvedValue(undefined),
+        }}
+      />
+    )
+    expect(await screen.findByTestId("fake-viewer")).toHaveTextContent("channel")
+    expect(listOn).toHaveBeenCalledWith({ kind: "remote", hostRef: "h1" })
+    expect(open).toHaveBeenCalledWith(
+      { kind: "remote", hostRef: "h1" },
+      expect.objectContaining({ targetId: "t1", bindingId: "b1" })
+    )
+    expect(viewerProps()?.connection).toBe(channel)
+    expect(screen.getByText("Through Studio Mac")).toBeInTheDocument()
+    useRemoteHostStore.setState({ hosts: [] })
+  })
+
   it("explains each reason it cannot open", async () => {
     tauri = false
     const { unmount } = render(<RemoteDesktopViewerPage targetsDeps={{ list }} />)
-    expect(screen.getByText("Remote desktops open from the desktop app.")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "This link names a remote desktop on a desktop's own Host. Open it from that Host in Devices."
+      )
+    ).toBeInTheDocument()
     unmount()
     tauri = true
     search = new URLSearchParams("")

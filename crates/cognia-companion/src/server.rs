@@ -856,6 +856,12 @@ fn build_router_for_mode(
         // Terminal upgrades use the same single-use-ticket pattern as the
         // browser stream, so a bearer access token never enters the URL.
         .route("/ws/terminal", any(ws_terminal::ws_terminal_handler))
+        // Remote desktop viewers (ADR-0234 Phase 3): a ticket bound to one
+        // session's path, redeemed once, then the session's own owner check.
+        .route(
+            "/ws/remote-desktop/{session_id}",
+            any(super::ws_remote_desktop::ws_remote_desktop_handler),
+        )
         .route("/ws/worker", any(ws_worker::ws_worker_handler))
         // The Browser Companion's device socket (ADR-0228 §5): single-use
         // ticket, bound to the extension origin like every browser request.

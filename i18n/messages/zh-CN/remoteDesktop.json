@@ -27,7 +27,11 @@
     "deleted": "已删除远程桌面",
     "actionsLabel": "{name} 的操作",
     "endpoint": "{host}:{port}",
-    "pinned": "已固定为 {ip}"
+    "pinned": "已固定为 {ip}",
+    "descriptionRemote": "{host} 通过自己的中转打开的其他机器的屏幕。密码保存在 {host} 上。",
+    "emptyBodyRemote": "添加 {host} 能访问到的 VNC 服务器。{host} 会解析一次地址并固定下来，连接前会请你确认。",
+    "deleteBodyRemote": "已保存的密码会从 {host} 删除，与它的所有会话都会结束。",
+    "hostOutdated": "{host} 暂不支持远程桌面中转。更新后即可从这里打开。"
   },
   "dialog": {
     "titleAdd": "添加远程桌面",
@@ -71,7 +75,9 @@
     "saved": "已保存远程桌面",
     "savedWithoutPassword": "已保存，但密码未能存储：{message}",
     "addressChanged": "地址已更改，保存前请重新检查。",
-    "required": "请填写名称、主机和端口，并检查地址。"
+    "required": "请填写名称、主机和端口，并检查地址。",
+    "descriptionRemote": "Cognia 从 {host} 连接服务器，并把已认证的数据流交给此查看器。密码只会发送给 {host} 一次，之后不再显示。",
+    "confirmPrivateRemote": "这是 {host} 所在局域网中的设备（{ip}）。{host} 只会连接这个地址；如果名称之后指向别处，会再次询问你。"
   },
   "viewer": {
     "title": "远程桌面",
@@ -79,7 +85,6 @@
     "missingParams": "该链接没有指定远程桌面。",
     "notFound": "该远程桌面已不存在。",
     "providerMissing": "该远程桌面的提供方未安装或未启用。",
-    "desktopOnly": "远程桌面需要在桌面应用中打开。",
     "opening": "正在打开会话…",
     "connecting": "连接中…",
     "connected": "已连接",
@@ -100,7 +105,10 @@
     "lostControl": "控制权已被其他会话取得。",
     "ended": "会话已结束。",
     "viewOnlyHint": "服务器强制只读：输入会被忽略。",
-    "unmanagedNote": "直接连接该服务器的客户端不受 Cognia 管理。"
+    "unmanagedNote": "直接连接该服务器的客户端不受 Cognia 管理。",
+    "hostLabel": "经由 {host}",
+    "needsHost": "此链接指向某台桌面端自身 Host 上的远程桌面，请在“设备”中从该 Host 打开。",
+    "remoteHost": "位于已配对的 Host"
   },
   "errors": {
     "adapterUnknown": "该提供方要求的协议 Cognia 不支持。",
@@ -155,6 +163,15 @@
     "viewerFailed": "查看器意外停止。",
     "viewerInvalid": "提供方的查看器无效。",
     "viewerRequiresWebview": "只有内置提供方可以在应用内渲染查看器；该提供方必须使用沙箱视图。",
-    "unknown": "远程桌面拒绝了请求：{code}。"
+    "unknown": "远程桌面拒绝了请求：{code}。",
+    "adminLeaseRequired": "请先在主机上批准此更改：需要一次新的管理员批准。",
+    "forbidden": "此设备无权在主机上执行该操作。所有者可在“设备”中授予权限。",
+    "hostConsentRequired": "主机正在等待批准。请在主机上批准代码 {detail}，然后重试。",
+    "hostOutdated": "此主机的版本不支持远程桌面中转，请更新主机。",
+    "hostUnavailable": "主机的远程桌面服务未运行。",
+    "invalidRequest": "主机拒绝了格式错误的请求。{detail}",
+    "sessionAttached": "此会话已有查看器。",
+    "transportUnavailable": "当前与主机的连接无法承载远程桌面。请连接到同一网络，或启用直连（WebRTC）连接。",
+    "unknownCommand": "主机不识别此远程桌面命令。"
   }
 }

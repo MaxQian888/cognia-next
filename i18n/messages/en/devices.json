@@ -792,6 +792,6 @@
   },
   "remoteDesktop": {
     "title": "Remote desktops",
-    "desktopOnly": "Remote desktops open from the desktop app. The browser and phone builds reach them through a paired desktop in a later release."
+    "viaHost": "This device has no remote desktops of its own. Open them on the page of the Host it is paired to, which reaches them on its network."
   }
 }

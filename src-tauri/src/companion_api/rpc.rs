@@ -219,6 +219,16 @@ const KNOWN_COMMANDS: &[&str] = &[
     "managed_desktop_control_release",
     "managed_desktop_control_input",
 
+    // External remote desktop targets and sessions (ADR-0234 Phase 3).
+    "remote_desktop_target_list",
+    "remote_desktop_target_save",
+    "remote_desktop_target_delete",
+    "remote_desktop_credential_set",
+    "remote_desktop_target_probe",
+    "remote_desktop_session_open",
+    "remote_desktop_session_renew",
+    "remote_desktop_session_close",
+
     // Shared media engine, with caller-owned binary transfers.
     "video_get_info",
     "plugin_media_get_video_frame",
@@ -3917,6 +3927,24 @@ pub(super) async fn dispatch(
             StatusCode::BAD_REQUEST,
             Json(RpcError::new(error.code.clone(), error.to_string())),
         ));
+    }
+
+    if cognia_companion_rpc::remote_desktops::COMMANDS.contains(&name) {
+        // ADR-0234 Phase 3: the router re-checks pairing, refuses agents and
+        // requires the admin lease for a control open; identity comes only
+        // from the authenticated envelope.
+        return cognia_companion_rpc::remote_desktops::dispatch(
+            name,
+            args,
+            cognia_companion_rpc::remote_desktops::Caller { device_id, tenant_id, scope },
+        )
+        .await
+        .map_err(|error| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(RpcError::new(error.code, error.to_string())),
+            )
+        });
     }
 
     if environment::COMMANDS.contains(&name) {

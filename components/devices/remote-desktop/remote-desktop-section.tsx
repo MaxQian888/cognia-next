@@ -1,11 +1,15 @@
 "use client"
 
 /**
- * Remote desktops (ADR-0234 Phase 2): the local desktop's chapter listing
- * other machines' screens it opens through its own bridge.
+ * Remote desktops (ADR-0234 Phases 2 and 3): a Host's chapter listing other
+ * machines' screens it opens through its own bridge. On the local desktop
+ * that Host is this machine; on a Host row (a store Host, or the `/pair` Host
+ * a phone or browser is connected to) it is that Host, over its management
+ * channel.
  *
- *  * **Host-owned.** Targets, pinned endpoints and passwords live on this
- *    desktop. A password is entered here and never shown again.
+ *  * **Host-owned.** Targets, pinned endpoints and passwords live on the
+ *    Host. A password is entered here, sent to the Host once and never shown
+ *    again.
  *  * **Confirmed endpoints.** Each address is resolved once, pinned, and
  *    confirmed as LAN or plaintext internet before anything connects to it.
  *  * **Honest about read-only.** View-only is offered only where the server
@@ -45,6 +49,7 @@ import { toRemoteDesktopError } from "@/lib/remote-desktop/host-client"
 import { remoteDesktopViewerHref } from "@/lib/remote-desktop/viewer-href"
 import type {
   RemoteDesktopBinding,
+  RemoteDesktopHostRef,
   RemoteDesktopSessionMode,
   RemoteDesktopTarget,
 } from "@/lib/remote-desktop/types"
@@ -53,18 +58,25 @@ import { DeviceSection } from "../device-section"
 import { RemoteDesktopTargetDialog, type DialogState } from "./remote-desktop-target-dialog"
 
 export interface RemoteDesktopSectionProps {
+  /** The Host whose targets these are. */
+  host: RemoteDesktopHostRef
+  /** A remote Host's name, for the copy that says where things live. */
+  hostLabel?: string
   deps?: RemoteDesktopTargetsDeps
 }
 
-export function RemoteDesktopSection({ deps }: RemoteDesktopSectionProps = {}) {
+export function RemoteDesktopSection({ host, hostLabel, deps }: RemoteDesktopSectionProps) {
   const t = useTranslations("remoteDesktop")
   const tDevices = useTranslations("devices")
   const router = useRouter()
   const providers = useRemoteDesktopProviders()
   const { targets, loading, error, reload, saveTarget, deleteTarget } = useRemoteDesktopTargets(
-    true,
+    host,
     deps
   )
+  const remote = host.kind === "remote"
+  const hostName = hostLabel ?? ""
+  const outdated = error?.code === "remote_desktop_host_outdated"
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [deleting, setDeleting] = useState<RemoteDesktopTarget | null>(null)
 
@@ -78,7 +90,8 @@ export function RemoteDesktopSection({ deps }: RemoteDesktopSectionProps = {}) {
     target: RemoteDesktopTarget,
     binding: RemoteDesktopBinding,
     mode: RemoteDesktopSessionMode
-  ) => router.push(remoteDesktopViewerHref({ targetId: target.id, bindingId: binding.id, mode }))
+  ) =>
+    router.push(remoteDesktopViewerHref({ host, targetId: target.id, bindingId: binding.id, mode }))
 
   const confirmDelete = async () => {
     const target = deleting
@@ -97,12 +110,18 @@ export function RemoteDesktopSection({ deps }: RemoteDesktopSectionProps = {}) {
       id="remote-desktop"
       title={tDevices("remoteDesktop.title")}
       icon={MonitorIcon}
-      description={t("section.description")}
+      description={
+        remote ? t("section.descriptionRemote", { host: hostName }) : t("section.description")
+      }
       meta={targets.length > 0 ? String(targets.length) : undefined}
       wide
     >
       <div className="flex flex-col gap-3">
-        {error ? (
+        {outdated ? (
+          <Alert>
+            <AlertDescription>{t("section.hostOutdated", { host: hostName })}</AlertDescription>
+          </Alert>
+        ) : error ? (
           <Alert variant="destructive">
             <AlertTitle>{t("section.loadFailed")}</AlertTitle>
             <AlertDescription className="flex items-center justify-between gap-2">
@@ -118,7 +137,9 @@ export function RemoteDesktopSection({ deps }: RemoteDesktopSectionProps = {}) {
           <Empty className="border border-dashed py-6">
             <EmptyHeader>
               <EmptyTitle>{t("section.emptyTitle")}</EmptyTitle>
-              <EmptyDescription>{t("section.emptyBody")}</EmptyDescription>
+              <EmptyDescription>
+                {remote ? t("section.emptyBodyRemote", { host: hostName }) : t("section.emptyBody")}
+              </EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : null}
@@ -219,7 +240,12 @@ export function RemoteDesktopSection({ deps }: RemoteDesktopSectionProps = {}) {
 
         <div className="flex items-center justify-between gap-2">
           <p className="text-muted-foreground text-xs">{t("section.unmanagedNote")}</p>
-          <Button size="sm" variant="outline" onClick={() => setDialog({ kind: "add" })}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={outdated}
+            onClick={() => setDialog({ kind: "add" })}
+          >
             <PlusIcon className="size-3.5" />
             {t("section.add")}
           </Button>
@@ -229,6 +255,8 @@ export function RemoteDesktopSection({ deps }: RemoteDesktopSectionProps = {}) {
       {dialog ? (
         <RemoteDesktopTargetDialog
           state={dialog}
+          host={host}
+          hostLabel={hostLabel}
           providers={providers}
           onClose={() => setDialog(null)}
           onSave={saveTarget}
@@ -241,7 +269,9 @@ export function RemoteDesktopSection({ deps }: RemoteDesktopSectionProps = {}) {
             <AlertDialogTitle>
               {t("section.deleteTitle", { name: deleting?.name ?? "" })}
             </AlertDialogTitle>
-            <AlertDialogDescription>{t("section.deleteBody")}</AlertDialogDescription>
+            <AlertDialogDescription>
+              {remote ? t("section.deleteBodyRemote", { host: hostName }) : t("section.deleteBody")}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("section.cancel")}</AlertDialogCancel>

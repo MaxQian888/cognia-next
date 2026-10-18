@@ -37,19 +37,20 @@ fn cognia_data_dir(app_data_dir: &Path) -> PathBuf {
 }
 
 /// Install before desktop services can accept control or agent input. The
-/// external-target Host (ADR-0234 Phase 2) is managed here too: always, so its
-/// commands refuse with a code instead of missing their state.
+/// external-target Host (ADR-0234) is installed here too: always, so its
+/// commands, the Companion viewer socket and `cognia.rfb` channels refuse
+/// with a code instead of missing their state.
 pub(crate) fn remote_desktop_audit(app: &App) {
-    use cognia_remote_desktop::commands::RemoteDesktopState;
+    use cognia_remote_desktop::commands::{install, RemoteDesktopState};
     match app.path().app_data_dir() {
         Ok(dir) => {
             let root = cognia_data_dir(&dir);
             cognia_remote_desktop::audit::install(&root);
-            app.manage(RemoteDesktopState::open(&root));
+            install(RemoteDesktopState::open(&root));
         }
         Err(error) => {
             log::warn!("remote desktop audit: no app data dir: {error}");
-            app.manage(RemoteDesktopState::unavailable());
+            install(RemoteDesktopState::unavailable());
         }
     }
 }

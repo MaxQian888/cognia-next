@@ -68,6 +68,12 @@ export const COMPANION_SOURCES = Object.freeze({
    * `#[tauri::command]` shells share (ADR-0222).
    */
   fileShareRpc: "crates/cognia-file-share/src/rpc.rs",
+  /**
+   * Not under `companion_api` either: `cognia-companion-rpc` admits the
+   * caller, then the remote desktop crate's one typed dispatcher runs the
+   * command, the same one `remote_desktop_local_call` reaches (ADR-0234).
+   */
+  remoteDesktopCommands: "crates/cognia-remote-desktop/src/commands.rs",
 })
 
 /** The dispatch file of one RPC family, e.g. `rpcFamilyFile("chat")`. */

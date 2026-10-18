@@ -2,8 +2,10 @@
  * The byte relay for third-party remote desktop viewers (ADR-0234 §3).
  *
  * A third-party viewer is a sandboxed, opaque-origin webview page. It never
- * learns the bridge URL or its one-shot ticket: the app's own document opens
- * the loopback WebSocket and hands the page one end of a `MessageChannel`.
+ * learns the bridge URL, its one-shot ticket or the transport: the app's own
+ * document opens the WebSocket (loopback, or the Host's ticketed viewer
+ * socket) or holds the attached `cognia.rfb` channel, and hands the page one
+ * end of a `MessageChannel`.
  *
  * Protocol on the page's port:
  *  * The page receives a host message `{ type: "cognia.remote-desktop.port",
@@ -17,15 +19,19 @@
  * cannot make the app buffer more than the Host would accept.
  */
 
+import type { RemoteDesktopConnection, RemoteDesktopRawChannel } from "./stream"
 import type { RemoteDesktopSessionMode } from "./types"
 
 export const REMOTE_DESKTOP_PORT_MESSAGE = "cognia.remote-desktop.port"
 export const MAX_RELAY_FRAME_BYTES = 1024 * 1024
+/** Largest message sent on a datachannel; browsers interoperate on 16 KiB. */
+export const CHANNEL_CHUNK_BYTES = 16 * 1024
 
 export type RelayStatus = "connecting" | "connected" | "disconnected"
 
 export interface RemoteDesktopRelayOptions {
-  url: string
+  /** A WebSocket URL to open, or an attached channel that is already open. */
+  connection: RemoteDesktopConnection
   mode: RemoteDesktopSessionMode
   /** Posts into the viewer's frame, transferring the port. */
   post: (data: unknown, transfer: Transferable[]) => boolean
@@ -45,6 +51,21 @@ function asBinary(data: unknown): ArrayBuffer | null {
   return null
 }
 
+/** A WebSocket or a raw channel: both carry binary frames, with different readyStates. */
+type Carrier = WebSocket | RemoteDesktopRawChannel
+
+function isOpen(carrier: Carrier): boolean {
+  return carrier.readyState === "open" || carrier.readyState === WebSocket.OPEN
+}
+
+function isLive(carrier: Carrier): boolean {
+  return (
+    isOpen(carrier) ||
+    carrier.readyState === "connecting" ||
+    carrier.readyState === WebSocket.CONNECTING
+  )
+}
+
 /** Start relaying; returns a stop function that closes both ends. */
 export function startRemoteDesktopRelay(options: RemoteDesktopRelayOptions): () => void {
   // The loopback bridge never goes through a proxy (network-egress allowlist).
@@ -54,7 +75,10 @@ export function startRemoteDesktopRelay(options: RemoteDesktopRelayOptions): () 
   const local = channel.port1
   let stopped = false
   let delivered = false
-  const socket = createSocket(options.url, ["binary"])
+  const socket: Carrier =
+    typeof options.connection === "string"
+      ? createSocket(options.connection, ["binary"])
+      : options.connection
   socket.binaryType = "arraybuffer"
   options.onStatus("connecting")
 
@@ -67,13 +91,11 @@ export function startRemoteDesktopRelay(options: RemoteDesktopRelayOptions): () 
       // The page may already be gone.
     }
     local.close()
-    if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) {
-      socket.close()
-    }
+    if (isLive(socket)) socket.close()
     options.onStatus("disconnected")
   }
 
-  socket.onopen = () => {
+  const onOpen = () => {
     if (stopped) return
     delivered = options.post({ type: REMOTE_DESKTOP_PORT_MESSAGE, mode: options.mode }, [
       channel.port2,
@@ -85,6 +107,7 @@ export function startRemoteDesktopRelay(options: RemoteDesktopRelayOptions): () 
     }
     options.onStatus("connected")
   }
+  socket.onopen = onOpen
   socket.onmessage = (event: MessageEvent) => {
     const bytes = asBinary(event.data)
     if (!bytes || stopped) return
@@ -104,12 +127,22 @@ export function startRemoteDesktopRelay(options: RemoteDesktopRelayOptions): () 
         stop()
         return
       }
-      if (socket.readyState === WebSocket.OPEN) socket.send(bytes)
+      if (!isOpen(socket)) return
+      if (typeof options.connection === "string") {
+        socket.send(bytes)
+        return
+      }
+      // RFB is a byte stream, so a channel takes it in interoperable pieces.
+      for (let offset = 0; offset < bytes.byteLength; offset += CHANNEL_CHUNK_BYTES) {
+        socket.send(bytes.slice(offset, offset + CHANNEL_CHUNK_BYTES))
+      }
       return
     }
     if ((event.data as { type?: unknown } | null)?.type === "close") stop()
   }
   local.start()
+  // An attached channel is open already; it will not fire `open` again.
+  if (typeof options.connection !== "string" && isOpen(socket)) onOpen()
 
   return stop
 }

@@ -24,6 +24,7 @@ cognia-plugin-runtime = { path = "../cognia-plugin-runtime" }
 cognia-external-agent = { path = "../cognia-external-agent" }
 cognia-gateway = { path = "../cognia-gateway" }
 cognia-terminal = { path = "../cognia-terminal" }
+cognia-remote-desktop = { path = "../cognia-remote-desktop" }
 cognia-hooks = { path = "../cognia-hooks" }
 chrono.workspace = true
 cognia-core = { path = "../cognia-core", features = ["workspace-env-async"] }

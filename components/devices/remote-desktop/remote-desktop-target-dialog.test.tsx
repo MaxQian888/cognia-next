@@ -14,7 +14,7 @@ jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
 
 import { RemoteDesktopError } from "@/lib/remote-desktop/host-client"
 import type { RemoteDesktopProviderRegistration } from "@/lib/remote-desktop/provider-registry"
-import type { RemoteDesktopTarget } from "@/lib/remote-desktop/types"
+import { LOCAL_REMOTE_DESKTOP_HOST, type RemoteDesktopTarget } from "@/lib/remote-desktop/types"
 
 import { RemoteDesktopTargetDialog } from "./remote-desktop-target-dialog"
 
@@ -85,6 +85,7 @@ describe("RemoteDesktopTargetDialog", () => {
     const onClose = jest.fn()
     render(
       <RemoteDesktopTargetDialog
+        host={LOCAL_REMOTE_DESKTOP_HOST}
         state={{ kind: "add" }}
         providers={[vnc]}
         onClose={onClose}
@@ -97,7 +98,7 @@ describe("RemoteDesktopTargetDialog", () => {
     await userEvent.type(screen.getByLabelText("Host or IP address"), "nas.local")
     expect(save).toBeDisabled()
     await userEvent.click(screen.getByRole("button", { name: "Check address" }))
-    expect(probe).toHaveBeenNthCalledWith(1, {
+    expect(probe).toHaveBeenNthCalledWith(1, LOCAL_REMOTE_DESKTOP_HOST, {
       kind: "draft",
       host: "nas.local",
       port: 5900,
@@ -110,7 +111,7 @@ describe("RemoteDesktopTargetDialog", () => {
     expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled()
     await userEvent.click(screen.getByRole("checkbox"))
     await userEvent.click(screen.getByRole("button", { name: "Test connection" }))
-    expect(probe).toHaveBeenNthCalledWith(2, {
+    expect(probe).toHaveBeenNthCalledWith(2, LOCAL_REMOTE_DESKTOP_HOST, {
       kind: "draft",
       host: "nas.local",
       port: 5900,
@@ -163,6 +164,7 @@ describe("RemoteDesktopTargetDialog", () => {
       })
     render(
       <RemoteDesktopTargetDialog
+        host={LOCAL_REMOTE_DESKTOP_HOST}
         state={{ kind: "add" }}
         providers={[vnc]}
         onClose={jest.fn()}
@@ -189,6 +191,7 @@ describe("RemoteDesktopTargetDialog", () => {
       .mockResolvedValue({ pinnedIp: "192.168.1.20", class: "private", connected: true })
     render(
       <RemoteDesktopTargetDialog
+        host={LOCAL_REMOTE_DESKTOP_HOST}
         state={{ kind: "edit", target: saved, bindingId: "b1" }}
         providers={[vnc]}
         onClose={jest.fn()}
@@ -202,7 +205,11 @@ describe("RemoteDesktopTargetDialog", () => {
       "Leave blank to keep the stored password"
     )
     await userEvent.click(screen.getByRole("button", { name: "Test connection" }))
-    expect(probe).toHaveBeenCalledWith({ kind: "saved", targetId: "t1", bindingId: "b1" })
+    expect(probe).toHaveBeenCalledWith(LOCAL_REMOTE_DESKTOP_HOST, {
+      kind: "saved",
+      targetId: "t1",
+      bindingId: "b1",
+    })
     await userEvent.click(screen.getByRole("button", { name: "Remove stored password" }))
     expect(screen.getByText("Will be removed on save")).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "Save" }))
@@ -220,6 +227,7 @@ describe("RemoteDesktopTargetDialog", () => {
       .mockRejectedValue(new Error("remote_desktop_endpoint_unconfirmed: private"))
     render(
       <RemoteDesktopTargetDialog
+        host={LOCAL_REMOTE_DESKTOP_HOST}
         state={{ kind: "edit", target: saved, bindingId: "b1" }}
         providers={[vnc]}
         onClose={jest.fn()}
@@ -239,6 +247,7 @@ describe("RemoteDesktopTargetDialog", () => {
     })
     render(
       <RemoteDesktopTargetDialog
+        host={LOCAL_REMOTE_DESKTOP_HOST}
         state={{ kind: "edit", target: saved, bindingId: "b1" }}
         providers={[vnc]}
         onClose={jest.fn()}
@@ -256,6 +265,7 @@ describe("RemoteDesktopTargetDialog", () => {
   it("says how to get a provider when none is enabled", () => {
     render(
       <RemoteDesktopTargetDialog
+        host={LOCAL_REMOTE_DESKTOP_HOST}
         state={{ kind: "add" }}
         providers={[]}
         onClose={jest.fn()}
@@ -263,5 +273,28 @@ describe("RemoteDesktopTargetDialog", () => {
       />
     )
     expect(screen.getByText(/Enable the VNC provider plugin/)).toBeInTheDocument()
+  })
+  it("says a paired Host resolves and reaches the address", async () => {
+    const host = { kind: "remote" as const, hostRef: "h1" }
+    const probe = jest
+      .fn()
+      .mockResolvedValue({ pinnedIp: "192.168.1.20", class: "private", connected: false })
+    render(
+      <RemoteDesktopTargetDialog
+        host={host}
+        hostLabel="Studio Mac"
+        state={{ kind: "add" }}
+        providers={[vnc]}
+        onClose={jest.fn()}
+        onSave={jest.fn()}
+        probe={probe}
+      />
+    )
+    await userEvent.type(screen.getByLabelText("Host or IP address"), "nas.local")
+    await userEvent.click(screen.getByRole("button", { name: "Check address" }))
+    expect(probe).toHaveBeenCalledWith(host, expect.objectContaining({ host: "nas.local" }))
+    expect(
+      await screen.findByText(/device on Studio Mac's local network \(192\.168\.1\.20\)/)
+    ).toBeInTheDocument()
   })
 })

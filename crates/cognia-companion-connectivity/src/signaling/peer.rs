@@ -37,6 +37,10 @@ pub const DATACHANNEL_LABEL: &str = "cognia.signaling";
 /// — otherwise upgrading the desktop alone silently breaks every WAN session.
 pub const LEGACY_DATACHANNEL_LABEL: &str = "cognia.v2";
 pub const TERMINAL_DATACHANNEL_LABEL: &str = "cognia.terminal";
+/// One remote desktop viewer stream per channel (ADR-0234 Phase 3). The phone
+/// opens it on demand on the live peer; the first message attaches it to a
+/// session. Mirrored in `lib/tauri/transport-rtc.ts`.
+pub const RFB_DATACHANNEL_LABEL: &str = "cognia.rfb";
 
 /// True for the current label and the pre-rename one.
 pub fn is_agent_datachannel_label(label: &str) -> bool {
@@ -164,6 +168,8 @@ pub struct PeerCallbacks {
     /// Handler for the isolated canonical binary terminal channel. The tag
     /// names the channel in logs (label, SCTP stream id, handle).
     pub terminal_channel: Arc<dyn Fn(Arc<dyn DataChannel>, DataChannelTag) + Send + Sync>,
+    /// Handler for each reliable, ordered `cognia.rfb` remote desktop channel.
+    pub rfb_channel: Arc<dyn Fn(Arc<dyn DataChannel>, DataChannelTag) + Send + Sync>,
     /// `RTCPeerConnectionState` transitions for failure detection.
     pub state_change: mpsc::Sender<RTCPeerConnectionState>,
 }
@@ -244,14 +250,22 @@ async fn handle_inbound_channel(
         handle,
     };
 
-    if label == TERMINAL_DATACHANNEL_LABEL {
+    // Byte-stream channels: handed to their owner whole, never stored in the
+    // main slot. Each must be reliable and ordered, because both carry a
+    // stream protocol that cannot survive a lost or reordered message.
+    let stream_owner = match label.as_str() {
+        TERMINAL_DATACHANNEL_LABEL => Some(("terminal", &callbacks.terminal_channel)),
+        RFB_DATACHANNEL_LABEL => Some(("remote desktop", &callbacks.rfb_channel)),
+        _ => None,
+    };
+    if let Some((name, owner)) = stream_owner {
         if !is_reliable_ordered_channel(ordered, max_packet_lifetime, max_retransmits) {
-            log::warn!("signaling::peer: rejecting unreliable terminal data channel ({tag})");
+            log::warn!("signaling::peer: rejecting unreliable {name} data channel ({tag})");
             close_inbound_channel(channel, &tag).await;
             return;
         }
-        log::info!("signaling::peer: terminal data channel accepted ({tag})");
-        (callbacks.terminal_channel)(channel, tag);
+        log::info!("signaling::peer: {name} data channel accepted ({tag})");
+        owner(channel, tag);
         return;
     }
     if !is_agent_datachannel_label(&label) {
@@ -791,6 +805,7 @@ mod tests {
                 outbound_ice: ice_tx,
                 inbound_data: data_tx,
                 terminal_channel: Arc::new(|_, _| {}),
+                rfb_channel: Arc::new(|_, _| {}),
                 state_change: state_tx,
             },
             ice_rx,
@@ -812,6 +827,8 @@ mod tests {
     #[test]
     fn terminal_channel_contract_is_unversioned_reliable_and_ordered() {
         assert_eq!(TERMINAL_DATACHANNEL_LABEL, "cognia.terminal");
+        assert_eq!(RFB_DATACHANNEL_LABEL, "cognia.rfb");
+        assert!(!is_agent_datachannel_label(RFB_DATACHANNEL_LABEL));
         assert!(is_reliable_ordered_channel(true, None, None));
         assert!(!is_reliable_ordered_channel(false, None, None));
         assert!(!is_reliable_ordered_channel(true, Some(1000), None));
@@ -1123,6 +1140,7 @@ mod tests {
         desktop: PeerSession,
         desktop_data: mpsc::Receiver<Vec<u8>>,
         desktop_terminal: mpsc::Receiver<(Arc<dyn DataChannel>, DataChannelTag)>,
+        desktop_rfb: mpsc::Receiver<(Arc<dyn DataChannel>, DataChannelTag)>,
         mobile: Arc<dyn PeerConnection>,
         main: MobileChannel,
         terminal: MobileChannel,
@@ -1147,11 +1165,15 @@ mod tests {
         let (state_tx, _state_rx) = mpsc::channel(STATE_QUEUE_CAPACITY);
         let (terminal_tx, desktop_terminal) =
             mpsc::channel::<(Arc<dyn DataChannel>, DataChannelTag)>(4);
+        let (rfb_tx, desktop_rfb) = mpsc::channel::<(Arc<dyn DataChannel>, DataChannelTag)>(4);
         let callbacks = PeerCallbacks {
             outbound_ice: ice_tx,
             inbound_data: data_tx,
             terminal_channel: Arc::new(move |channel, tag| {
                 let _ = terminal_tx.try_send((channel, tag));
+            }),
+            rfb_channel: Arc::new(move |channel, tag| {
+                let _ = rfb_tx.try_send((channel, tag));
             }),
             state_change: state_tx,
         };
@@ -1200,6 +1222,7 @@ mod tests {
             desktop,
             desktop_data,
             desktop_terminal,
+            desktop_rfb,
             mobile,
             main,
             terminal,
@@ -1397,6 +1420,78 @@ mod tests {
         .await;
         assert_eq!(tag.stream_id, mobile_stream_id);
         drop(terminal);
+        pair.teardown().await;
+    }
+
+    /// The phone opens a viewer channel per remote desktop session long after
+    /// the offer. The SCTP association already exists, so the channel opens
+    /// in band (DCEP) without renegotiation and reaches its own owner, not the
+    /// main slot or the terminal.
+    #[tokio::test]
+    async fn a_remote_desktop_channel_opened_mid_session_reaches_its_owner() {
+        let mut pair = connect_two_channel_pair().await;
+        let _ = tokio::time::timeout(PAIR_TIMEOUT, pair.desktop_terminal.recv()).await;
+        let reliable = webrtc::data_channel::RTCDataChannelInit {
+            ordered: true,
+            ..Default::default()
+        };
+        let mut viewer = pump_mobile_channel(
+            pair.mobile
+                .create_data_channel(RFB_DATACHANNEL_LABEL, Some(reliable))
+                .await
+                .expect("mobile rfb dc"),
+        );
+        let (rfb, tag) = tokio::time::timeout(PAIR_TIMEOUT, pair.desktop_rfb.recv())
+            .await
+            .expect("Host never saw the remote desktop channel")
+            .expect("rfb queue closed");
+        assert_eq!(tag.label, RFB_DATACHANNEL_LABEL);
+        tokio::time::timeout(PAIR_TIMEOUT, viewer.opened.recv())
+            .await
+            .expect("viewer channel never opened");
+        rfb.send(bytes::BytesMut::from(&b"RFB 003.008\n"[..]))
+            .await
+            .expect("host send");
+        let received = tokio::time::timeout(PAIR_TIMEOUT, viewer.messages.recv())
+            .await
+            .expect("no bytes on the viewer channel")
+            .expect("viewer queue closed");
+        assert_eq!(received, b"RFB 003.008\n");
+        // The main channel keeps delivering beside it.
+        assert_main_channel_delivers(&mut pair, "beside-rfb", 1).await;
+        drop(rfb);
+        viewer.pump.abort();
+        pair.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn an_unreliable_remote_desktop_channel_is_refused() {
+        let mut pair = connect_two_channel_pair().await;
+        // Unordered, not partially reliable: webrtc-rs 0.21 drops the DCEP
+        // reliability type of a channel the peer opened (rtc
+        // `data_channel/internal.rs` hard-codes `max_retransmits: None`), so
+        // the Host can only see the ordering half of the contract.
+        let lossy = webrtc::data_channel::RTCDataChannelInit {
+            ordered: false,
+            ..Default::default()
+        };
+        let viewer = pump_mobile_channel(
+            pair.mobile
+                .create_data_channel(RFB_DATACHANNEL_LABEL, Some(lossy))
+                .await
+                .expect("mobile rfb dc"),
+        );
+        // The Host closes it on its side; whether the stack reports that
+        // close to the offerer is up to the stack, so the assertion is on the
+        // Host: the channel never reaches the remote desktop owner.
+        assert!(
+            tokio::time::timeout(Duration::from_secs(3), pair.desktop_rfb.recv())
+                .await
+                .is_err(),
+            "an unreliable viewer channel reached its owner"
+        );
+        assert_main_channel_delivers(&mut pair, "after-lossy-rfb", 1).await;
+        viewer.pump.abort();
         pair.teardown().await;
     }
 }

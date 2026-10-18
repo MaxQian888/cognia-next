@@ -76,6 +76,7 @@ cognia-sidecar = { path = "../cognia-sidecar" }
 cognia-signaling-core = { path = "../../services/signaling-server/core" }
 cognia-tenant-auth = { path = "../cognia-tenant-auth" }
 cognia-task-workspace = { path = "../cognia-task-workspace" }
+cognia-remote-desktop = { path = "../cognia-remote-desktop" }
 cognia-terminal = { path = "../cognia-terminal" }
 cognia-update-catalog = { path = "../cognia-update-catalog", features = ["client"] }
 tauri = { workspace = true, optional = true }

@@ -1,9 +1,14 @@
-import type { RemoteDesktopSessionMode } from "./types"
+import type { RemoteDesktopHostRef, RemoteDesktopSessionMode } from "./types"
 
-/** The viewer route for one binding. Ids only: never a URL, host or ticket. */
+/**
+ * The viewer route for one binding. Ids only: never a URL, address or
+ * ticket. `host` names the Host that owns the target when it is not this
+ * desktop's own (a store Host id or `companion:<hostId>`).
+ */
 export const REMOTE_DESKTOP_VIEWER_PATH = "/devices/remote-desktop"
 
 export function remoteDesktopViewerHref(input: {
+  host: RemoteDesktopHostRef
   targetId: string
   bindingId: string
   mode: RemoteDesktopSessionMode
@@ -13,10 +18,12 @@ export function remoteDesktopViewerHref(input: {
     binding: input.bindingId,
     mode: input.mode,
   })
+  if (input.host.kind === "remote") params.set("host", input.host.hostRef)
   return `${REMOTE_DESKTOP_VIEWER_PATH}?${params.toString()}`
 }
 
 export interface RemoteDesktopViewerParams {
+  host: RemoteDesktopHostRef
   targetId: string
   bindingId: string
   mode: RemoteDesktopSessionMode
@@ -29,5 +36,11 @@ export function parseRemoteDesktopViewerParams(
   const targetId = search.get("target")
   const bindingId = search.get("binding")
   if (!targetId || !bindingId) return null
-  return { targetId, bindingId, mode: search.get("mode") === "view" ? "view" : "control" }
+  const hostRef = search.get("host")
+  return {
+    host: hostRef ? { kind: "remote", hostRef } : { kind: "local" },
+    targetId,
+    bindingId,
+    mode: search.get("mode") === "view" ? "view" : "control",
+  }
 }

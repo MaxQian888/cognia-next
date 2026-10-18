@@ -18,12 +18,15 @@
  * Viewers. A React component runs in the app's own document, so only an
  * in-tree first-party plugin may supply one. Every other plugin supplies a
  * sandboxed webview page that receives the session's bytes over a
- * `MessagePort` and never the bridge URL or its ticket.
+ * `MessagePort` and never the bridge URL, its ticket or the transport.
  */
 
 import type { ComponentType } from "react"
 
+import type { RemoteDesktopConnection } from "./stream"
 import type { RemoteDesktopAdapter, RemoteDesktopSessionMode } from "./types"
+
+export type { RemoteDesktopConnection, RemoteDesktopRawChannel } from "./stream"
 
 export type RemoteDesktopIntegrationMode = "embedded" | "native" | "web-console" | "external-app"
 
@@ -34,8 +37,13 @@ export type RemoteDesktopViewerStatus = "connecting" | "connected" | "disconnect
 
 /** What a React viewer is handed for one open session. */
 export interface RemoteDesktopViewerProps {
-  /** Loopback WebSocket carrying the one-shot ticket. Never persist or log it. */
-  url: string
+  /**
+   * What to connect to: a WebSocket URL carrying a one-shot ticket (open it
+   * with the `binary` subprotocol), or an attached channel that is already
+   * open. Either carries RFB bytes past authentication. Never persist or log
+   * a URL.
+   */
+  connection: RemoteDesktopConnection
   mode: RemoteDesktopSessionMode
   /** Scale the remote screen to the viewer's box. */
   scaleToFit: boolean

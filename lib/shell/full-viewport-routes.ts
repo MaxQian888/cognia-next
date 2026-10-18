@@ -108,6 +108,11 @@ export const FULL_VIEWPORT_ROUTE_PATTERNS: readonly string[] = [
   // `PairShell` is a `h-[100dvh] overflow-hidden` two-pane window.
   "/pair",
   "/pair/",
+  // The remote desktop viewer (ADR-0234 Phase 3) is a `flex h-full` column
+  // whose canvas fills what is left above its key bar. Sized to the visible
+  // viewport, so the soft keyboard pushes the key bar up instead of covering
+  // it.
+  "/devices/remote-desktop",
 ]
 
 /** Whether the compact shell must give this route a definite viewport height. */

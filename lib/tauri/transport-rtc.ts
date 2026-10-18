@@ -341,6 +341,12 @@ const BUFFERED_AMOUNT_LOW_WATER = 256 * 1024
 const MAX_PENDING_REMOTE_ICE = 256
 const PENDING_REMOTE_ICE_TTL_MS = 30_000
 export const TERMINAL_DATACHANNEL_LABEL = "cognia.terminal"
+/**
+ * One remote desktop viewer stream per channel (ADR-0234 Phase 3), opened on
+ * demand on the live peer. Mirrored in `crates/cognia-companion-connectivity`
+ * (`RFB_DATACHANNEL_LABEL`).
+ */
+export const RFB_DATACHANNEL_LABEL = "cognia.rfb"
 
 /**
  * Transport liveness probe on the main data channel. Mirrored in
@@ -622,6 +628,17 @@ export class TransportRtc {
    */
   getTerminalDataChannel(): RTCDataChannel | null {
     return this.terminalDc
+  }
+
+  /**
+   * Open a fresh reliable, ordered `cognia.rfb` channel for one remote
+   * desktop session, or null when no peer is open. The SCTP association
+   * already exists, so the channel opens in band without renegotiation. The
+   * caller owns it: it attaches it to a session and closes it.
+   */
+  openRfbDataChannel(): RTCDataChannel | null {
+    if (this.state !== "open" || !this.pc) return null
+    return this.pc.createDataChannel(RFB_DATACHANNEL_LABEL, { ordered: true })
   }
 
   onStateChange(handler: (state: RtcState) => void): () => void {

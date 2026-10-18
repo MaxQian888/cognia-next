@@ -452,6 +452,18 @@ describe("<MobileShellWrapper />", () => {
     expect(screen.queryByTestId("mobile-tab-bar")).not.toBeInTheDocument()
   })
 
+  it("reserves the full viewport for the remote desktop viewer and hides the tab bar", () => {
+    pathnameMock.mockReturnValue("/devices/remote-desktop")
+    render(
+      <MobileShellWrapper>
+        <div>viewer</div>
+      </MobileShellWrapper>
+    )
+    const wrapper = screen.getByTestId("mobile-shell-wrapper")
+    expect(wrapper).toHaveAttribute("data-full-viewport", "true")
+    expect(wrapper).toHaveAttribute("data-tab-bar-visible", "false")
+  })
+
   it.each([
     ["/me/external-agents/new", "false"],
     ["/me/external-agents/new/configure", "false"],

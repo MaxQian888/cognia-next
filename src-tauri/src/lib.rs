@@ -833,15 +833,10 @@ pub fn run() {
             // Per-conversation "keep the screen on while this runs" holds
             // (`lib/power/screen-wake-lock.ts`).
             power_assertion::power_screen_holds_set,
-            // External remote desktop targets and sessions (ADR-0234).
-            cognia_remote_desktop::commands::remote_desktop_target_list,
-            cognia_remote_desktop::commands::remote_desktop_target_save,
-            cognia_remote_desktop::commands::remote_desktop_target_delete,
-            cognia_remote_desktop::commands::remote_desktop_credential_set,
-            cognia_remote_desktop::commands::remote_desktop_target_probe,
-            cognia_remote_desktop::commands::remote_desktop_session_open,
-            cognia_remote_desktop::commands::remote_desktop_session_renew,
-            cognia_remote_desktop::commands::remote_desktop_session_close,
+            // External remote desktop targets and sessions (ADR-0234): the
+            // local owner's door to the same `remote_desktop_*` Host commands
+            // paired devices reach over Companion.
+            cognia_remote_desktop::commands::remote_desktop_local_call,
             capture::get_foreground_app,
             media::commands::video_get_info,
             media::commands::plugin_media_get_video_frame,
