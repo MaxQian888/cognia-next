@@ -19,6 +19,9 @@
         "cua_sandbox_desktop_release_control",
         "cua_sandbox_desktop_input",
         "cua_sandbox_desktop_capture",
+        "cua_sandbox_desktop_stream_open",
+        "cua_sandbox_desktop_stream_claim",
+        "cua_sandbox_desktop_stream_close",
         "cua_sandbox_upload_file",
         "cua_sandbox_download_file"
       ]

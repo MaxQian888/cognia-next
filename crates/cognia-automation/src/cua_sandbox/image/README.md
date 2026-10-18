@@ -65,3 +65,43 @@ privileged descriptors and drops setup privileges before running the validated
 npm script. Cancellation or uncertain launch terminates the entire desktop
 generation; project descendants cannot survive by creating another session.
 These implementation paths remain dormant until exact-image qualification.
+
+## Selkies variant (ADR-0234 Phase 4)
+
+`selkies/` builds `cognia-cua-desktop:0.3.46-2-selkies-2.0.0` on top of the
+built-in image. A sandbox only gets it when the user turns on its Selkies switch
+after the licence notice. It is built on first start from the public `selkies==2.0.0`,
+`pixelflux==2.1.0` and `pcmflux==2.1.0` wheels. The `pixelflux` wheel bundles GPL
+x264, x265 and FFmpeg, so Cognia never publishes this image. The base image, its
+recipe 7 and the managed image are unchanged; the variant refuses `--managed`.
+
+`selkies-startup.py` runs the unchanged `startup.main()` in-process and starts
+Selkies once `:99` answers:
+
+- **Environment.** Selkies runs with an explicit environment holding only the
+  display variables and `SELKIES_MASTER_TOKEN`. The computer-server credential
+  never reaches it.
+- **Restarts.** The startup restarts Selkies with backoff, at most five times,
+  and keeps the desktop running if Selkies gives up.
+- **Network.** It listens on container port 8080. Lifecycle publishes that port
+  on host loopback only, and passes the master token as
+  `COGNIA_SELKIES_MASTER_TOKEN` by name, the same way as the auth token.
+- **Fixed flags.** WebSocket mode, H.264 software encoding with JPEG fallback, no
+  resize, and `enable_collab=false`. Audio, microphone, webcam, gamepads,
+  clipboard, file transfer, printing, command messages, sharing links and the
+  second screen are off, and locked where Selkies allows it.
+
+**Access.** The Host is the only writer of the Secure Mode session table. Each
+viewer gets a fresh view-only token. A controller token (`mk_control`) goes only
+to the viewer holding the control lease, and it is revoked and confirmed gone
+before the lease is released or the agent acts.
+
+**Trust boundary.** Inside the container the master token is not a boundary
+against code running as `cua`: that code can already reach the X display. It
+keeps other processes on the host from using the published port.
+
+Build by hand: `docker build --build-arg BASE_IMAGE=cognia-cua-desktop:0.3.46-2 -t cognia-cua-desktop:0.3.46-2-selkies-2.0.0 selkies`
+
+Sources verified 2026-10-18: https://pypi.org/project/selkies/2.0.0/ ,
+https://docs.selkies.io/latest/secure-mode ,
+https://github.com/selkies-project/pixelflux/blob/1ebcb0a10a96caeba20e1ad09be47cc018a55238/LICENSES.md

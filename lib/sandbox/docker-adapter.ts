@@ -38,6 +38,14 @@ import {
 /** Built from the desktop recipe embedded in the native lifecycle module. */
 export const DEFAULT_DOCKER_SANDBOX_IMAGE = "cognia-cua-desktop:0.3.46-2"
 
+/**
+ * The opt-in Selkies variant (ADR-0234 Phase 4), layered on the built-in image
+ * and built locally on first start: its encoder wheel bundles GPL x264, x265
+ * and FFmpeg, so Cognia never publishes it. Mirrors
+ * `cua_sandbox::lifecycle::SELKIES_DESKTOP_IMAGE`.
+ */
+export const SELKIES_DOCKER_SANDBOX_IMAGE = "cognia-cua-desktop:0.3.46-2-selkies-2.0.0"
+
 /** Side channel for values a lifecycle call discovers, e.g. the mapped port. */
 export type DockerAdapterOutcome = import("./lifecycle-contract").SandboxAdapterOutcome
 

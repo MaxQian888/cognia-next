@@ -187,7 +187,7 @@ impl RemoteDesktop {
     pub(crate) fn require_controller(&mut self, token: &str) -> Result<()> {
         self.require_control_lease(token, self.control.fence)
     }
-    fn require_control_lease(&mut self, token: &str, fence: u64) -> Result<()> {
+    pub(crate) fn require_control_lease(&mut self, token: &str, fence: u64) -> Result<()> {
         self.require_quiescent()?;
         self.expire();
         self.control
@@ -381,6 +381,9 @@ impl CuaSandboxRegistry {
             desktop.audit("remote_desktop.lease.refused", "refused", json!({}));
             return Err(error);
         }
+        // The stream controller goes first and must be confirmed gone; until
+        // then the lease stays, so the agent cannot act beside a live human.
+        self.stream_settle(id, fence).await?;
         desktop.audit("remote_desktop.lease.release", "allowed", json!({}));
         desktop.invalidate();
         Ok(())
@@ -1402,6 +1405,113 @@ mod tests {
             .release_control("a", &lease.token, lease.fence)
             .await
             .unwrap();
+        registry.disconnect_all().await;
+        server.abort();
+    }
+
+    fn controller_session(api: &crate::cua_sandbox::stream::testing::FakeSelkies) {
+        api.sessions
+            .lock()
+            .unwrap()
+            .push(crate::cua_sandbox::stream::SelkiesSession {
+                id: "s1".into(),
+                role: "controller".into(),
+            });
+    }
+
+    #[tokio::test]
+    async fn releasing_control_revokes_the_stream_controller_first() {
+        use crate::cua_sandbox::stream::{testing::FakeSelkies, StreamRole};
+        let api = std::sync::Arc::new(FakeSelkies::default());
+        let (registry, server, _) = fixture().await;
+        let registry = registry.with_fake_stream("a", api.clone()).await;
+        let viewer = registry.stream_open("a").await.unwrap();
+        // Control of the stream needs the lease.
+        assert!(registry
+            .stream_claim("a", &viewer.viewer_id, "wrong", 0)
+            .await
+            .is_err());
+        let lease = registry.acquire_control("a", true).await.unwrap();
+        let grant = registry
+            .stream_claim("a", &viewer.viewer_id, &lease.token, lease.fence)
+            .await
+            .unwrap();
+        assert_eq!(grant.role, StreamRole::Controller);
+        controller_session(&api);
+        registry
+            .release_control("a", &lease.token, lease.fence)
+            .await
+            .unwrap();
+        let tables = api.tables.lock().unwrap().clone();
+        assert!(tables
+            .last()
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|grant| grant["role"] != "controller"));
+        assert!(api.sessions.lock().unwrap().is_empty());
+        // The lease is gone only after the revoke: the agent may act again.
+        assert!(registry.agent_guard("a").await.is_ok());
+        registry.disconnect_all().await;
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn an_unconfirmed_revoke_keeps_the_lease_and_the_agent_out() {
+        use crate::cua_sandbox::stream::testing::FakeSelkies;
+        let api = std::sync::Arc::new(FakeSelkies {
+            refuse_disconnect_effect: true,
+            ..FakeSelkies::default()
+        });
+        let (registry, server, _) = fixture().await;
+        let registry = registry.with_fake_stream("a", api.clone()).await;
+        let viewer = registry.stream_open("a").await.unwrap();
+        let lease = registry.acquire_control("a", true).await.unwrap();
+        registry
+            .stream_claim("a", &viewer.viewer_id, &lease.token, lease.fence)
+            .await
+            .unwrap();
+        controller_session(&api);
+        *api.lingering.lock().unwrap() = usize::MAX;
+        assert!(registry
+            .release_control("a", &lease.token, lease.fence)
+            .await
+            .is_err());
+        // Still the human's: renewing works and the agent is refused.
+        registry
+            .renew_control("a", &lease.token, lease.fence)
+            .await
+            .unwrap();
+        assert!(registry.agent_guard("a").await.is_err());
+        // Even with the lease gone (expired), the agent waits for the revoke.
+        registry.desktop_guard("a").await.invalidate();
+        assert!(registry.agent_guard("a").await.is_err());
+        api.sessions.lock().unwrap().clear();
+        *api.lingering.lock().unwrap() = 0;
+        assert!(registry.agent_guard("a").await.is_ok());
+        registry.disconnect_all().await;
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_controller_left_by_an_expired_lease_is_revoked_before_the_agent_runs() {
+        use crate::cua_sandbox::stream::testing::FakeSelkies;
+        let api = std::sync::Arc::new(FakeSelkies::default());
+        let (registry, server, _) = fixture().await;
+        let registry = registry.with_fake_stream("a", api.clone()).await;
+        let viewer = registry.stream_open("a").await.unwrap();
+        let lease = registry.acquire_control("a", true).await.unwrap();
+        registry
+            .stream_claim("a", &viewer.viewer_id, &lease.token, lease.fence)
+            .await
+            .unwrap();
+        registry.desktop_guard("a").await.invalidate();
+        let before = api.tables.lock().unwrap().len();
+        assert!(registry.agent_guard("a").await.is_ok());
+        let tables = api.tables.lock().unwrap().clone();
+        assert_eq!(tables.len(), before + 1);
+        assert!(tables.last().unwrap().as_object().unwrap().is_empty());
         registry.disconnect_all().await;
         server.abort();
     }

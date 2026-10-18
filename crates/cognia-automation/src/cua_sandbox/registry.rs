@@ -45,6 +45,9 @@ pub struct CuaSandboxRegistry {
     /// Live driver connections only. Rebuildable at any time from Docker.
     clients: Arc<Mutex<HashMap<String, Arc<CuaRemoteClient>>>>,
     desktops: Arc<Mutex<HashMap<String, (Arc<Mutex<RemoteDesktop>>, Arc<DesktopPreemption>)>>>,
+    /// Selkies session tables (ADR-0234 Phase 4), one writer per connection.
+    pub(crate) streams: super::stream::StreamSlots,
+    pub(crate) stream_backend: super::stream::StreamBackendHandle,
 }
 
 fn backend_err(msg: impl Into<String>) -> AutomationError {
@@ -118,6 +121,10 @@ impl CuaSandboxRegistry {
             .epoch
             .load(std::sync::atomic::Ordering::SeqCst);
         guard.require_agent()?;
+        // A controller grant left behind by an expired lease is revoked and
+        // confirmed before the agent may touch the desktop.
+        self.stream_settle(connection_id, guard.current_fence())
+            .await?;
         Ok(guard)
     }
 
@@ -132,6 +139,7 @@ impl CuaSandboxRegistry {
         let mut desktop = self.desktop_guard(connection_id).await;
         desktop.invalidate();
         self.clients.lock().await.remove(connection_id);
+        self.stream_forget(connection_id).await;
         let name = container_name_for_connection(connection_id);
         if let Some(state) = docker_inspect(&name).await? {
             if state.running {
@@ -180,6 +188,7 @@ impl CuaSandboxRegistry {
         let mut desktop = self.desktop_guard(connection_id).await;
         desktop.invalidate();
         self.clients.lock().await.remove(connection_id);
+        self.stream_forget(connection_id).await;
         let name = container_name_for_connection(connection_id);
         let container_id = match docker_inspect(&name).await? {
             Some(state) => {
@@ -219,6 +228,7 @@ impl CuaSandboxRegistry {
             .lock()
             .await
             .insert(connection_id.to_string(), client);
+        self.stream_reset_on_connect(connection_id, &name).await;
         Ok(SandboxPlacement { container_id, port })
     }
 
@@ -229,6 +239,7 @@ impl CuaSandboxRegistry {
         let mut desktop = self.desktop_guard(connection_id).await;
         desktop.invalidate();
         self.clients.lock().await.remove(connection_id);
+        self.stream_forget(connection_id).await;
         let name = self.require_container(connection_id).await?;
         docker_pause(&name).await
     }
@@ -237,6 +248,7 @@ impl CuaSandboxRegistry {
         let mut desktop = self.desktop_guard(connection_id).await;
         desktop.invalidate();
         self.clients.lock().await.remove(connection_id);
+        self.stream_forget(connection_id).await;
         let name = self.require_container(connection_id).await?;
         let state = docker_inspect(&name)
             .await?
@@ -264,6 +276,7 @@ impl CuaSandboxRegistry {
             .lock()
             .await
             .insert(connection_id.to_string(), client);
+        self.stream_reset_on_connect(connection_id, &name).await;
         Ok(SandboxPlacement {
             container_id: state.id,
             port,
@@ -276,6 +289,7 @@ impl CuaSandboxRegistry {
         let mut desktop = self.desktop_guard(connection_id).await;
         desktop.invalidate();
         self.clients.lock().await.remove(connection_id);
+        self.stream_forget(connection_id).await;
         let name = container_name_for_connection(connection_id);
         // A container that is already gone is already stopped. Reporting that
         // as a failure would leave the user unable to settle the row.
@@ -301,6 +315,7 @@ impl CuaSandboxRegistry {
         let mut desktop = self.desktop_guard(connection_id).await;
         desktop.invalidate();
         self.clients.lock().await.remove(connection_id);
+        self.stream_forget(connection_id).await;
         let name = container_name_for_connection(connection_id);
         if docker_inspect(&name).await?.is_none() {
             desktop.confirm_quiescence();
@@ -464,6 +479,7 @@ impl CuaSandboxRegistry {
             .lock()
             .await
             .insert(connection_id.to_string(), client.clone());
+        self.stream_reset_on_connect(connection_id, &name).await;
         Ok(client)
     }
 
@@ -474,6 +490,7 @@ impl CuaSandboxRegistry {
     /// it rather than creating a second one.
     pub async fn disconnect_all(&self) {
         self.clients.lock().await.clear();
+        self.streams.lock().await.clear();
         let desktops: Vec<_> = self.desktops.lock().await.values().cloned().collect();
         for (desktop, _) in desktops {
             desktop.lock().await.invalidate();
@@ -494,7 +511,10 @@ impl CuaSandboxRegistry {
     /// The container name and its inspected state for a connection that must
     /// be running right now. Callers need the state as well as the name: the
     /// exec-user bound is recorded on the container, not in this process.
-    async fn require_running(&self, connection_id: &str) -> Result<(String, ContainerState)> {
+    pub(crate) async fn require_running(
+        &self,
+        connection_id: &str,
+    ) -> Result<(String, ContainerState)> {
         let name = container_name_for_connection(connection_id);
         match docker_inspect(&name).await? {
             Some(state) if state.paused => Err(backend_err(format!(

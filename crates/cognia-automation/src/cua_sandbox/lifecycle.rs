@@ -36,6 +36,13 @@ pub const DEFAULT_EXEC_USER: &str = "cua";
 /// created with, and attestation can compare it against what was asked.
 pub const EXEC_USER_LABEL: &str = "cognia.cua.exec-user";
 pub const AUTH_TOKEN_ENV: &str = "COGNIA_CUA_AUTH_TOKEN";
+/// The Selkies master token (ADR-0234 Phase 4), passed like the auth token: by
+/// name on argv, value only in the `docker` child's environment.
+pub const STREAM_TOKEN_ENV: &str = "COGNIA_SELKIES_MASTER_TOKEN";
+/// The container port the Selkies variant serves its page, API and stream on.
+pub const STREAM_PORT: u16 = 8080;
+/// Present, with the Selkies version, only on the locally built variant.
+pub const STREAM_IMAGE_LABEL: &str = "cognia.cua.selkies";
 
 /// Container-level isolation settings. Docker fixes all of these at create
 /// time: `docker exec` cannot change the network mode or the cpu/memory
@@ -320,6 +327,9 @@ async fn docker(args: &[&str], what: &str) -> Result<String> {
 const IMAGE_ID_LABEL: &str = "cognia.cua.image-id";
 const IMAGE_REFERENCE_LABEL: &str = "cognia.cua.image-reference";
 pub const BUILTIN_DESKTOP_IMAGE: &str = "cognia-cua-desktop:0.3.46-2";
+/// The opt-in Selkies variant, layered on the built-in image and only ever
+/// built locally: its encoder wheel bundles GPL x264, x265 and FFmpeg.
+pub const SELKIES_DESKTOP_IMAGE: &str = "cognia-cua-desktop:0.3.46-2-selkies-2.0.0";
 
 fn builtin_image_context() -> Result<tempfile::TempDir> {
     let context = tempfile::Builder::new()
@@ -340,6 +350,68 @@ fn builtin_image_context() -> Result<tempfile::TempDir> {
         })?;
     }
     Ok(context)
+}
+
+fn selkies_image_context() -> Result<tempfile::TempDir> {
+    let context = tempfile::Builder::new()
+        .prefix("cognia-cua-desktop-selkies-")
+        .tempdir()
+        .map_err(|e| backend_err(format!("could not prepare desktop build context: {e}")))?;
+    for (name, content) in [
+        ("Dockerfile", include_str!("image/selkies/Dockerfile")),
+        ("selkies-startup.py", include_str!("image/selkies/selkies-startup.py")),
+        ("selkies-entrypoint.sh", include_str!("image/selkies/selkies-entrypoint.sh")),
+    ] {
+        std::fs::write(context.path().join(name), content).map_err(|e| {
+            backend_err(format!(
+                "could not write desktop build resource {name}: {e}"
+            ))
+        })?;
+    }
+    Ok(context)
+}
+
+/// Build the Selkies variant on top of the built-in image, building that
+/// first when it is missing. Like the base, the context is embedded.
+async fn build_selkies_image(executable: &std::ffi::OsStr) -> Result<()> {
+    let (status, _, stderr) = execution::control(
+        Command::new(executable).args(["image", "inspect", "--format", "{{.Id}}", BUILTIN_DESKTOP_IMAGE]),
+        "resolve built-in desktop image",
+    )
+    .await?;
+    if !status.success() {
+        if !is_no_such_image(&stderr.text()) {
+            return Err(backend_err(format!(
+                "could not resolve the built-in desktop image: {}",
+                stderr.text().trim()
+            )));
+        }
+        build_builtin_image(executable).await?;
+    }
+    let context = selkies_image_context()?;
+    let (status, stdout, stderr) = execution::control_with_timeout(
+        Command::new(executable)
+            .args([
+                "build",
+                "--progress",
+                "plain",
+                "--build-arg",
+                &format!("BASE_IMAGE={BUILTIN_DESKTOP_IMAGE}"),
+                "--tag",
+                SELKIES_DESKTOP_IMAGE,
+            ])
+            .arg(context.path()),
+        "build Selkies Linux desktop image",
+        Duration::from_secs(1200),
+    )
+    .await?;
+    if !status.success() {
+        return Err(backend_err(format!(
+            "Could not build the Selkies Linux desktop image. Check Docker disk space and access to Debian and PyPI. {} {}",
+            stderr.text().trim(), stdout.text().trim()
+        )));
+    }
+    Ok(())
 }
 
 async fn build_builtin_image(executable: &std::ffi::OsStr) -> Result<()> {
@@ -369,12 +441,23 @@ async fn build_builtin_image(executable: &std::ffi::OsStr) -> Result<()> {
     Ok(())
 }
 
-async fn pinned_spec(spec: &SpawnSpec) -> Result<SpawnSpec> {
+/// The image identity a container is created from, and whether that image
+/// carries a Selkies stream to publish.
+#[derive(Debug)]
+struct PinnedImage {
+    spec: SpawnSpec,
+    stream: bool,
+}
+
+const IMAGE_INSPECT_FORMAT: &str =
+    "{{.Id}}|{{with .Config.Labels}}{{index . \"cognia.cua.selkies\"}}{{end}}";
+
+async fn pinned_spec(spec: &SpawnSpec) -> Result<PinnedImage> {
     pinned_spec_with(spec, std::ffi::OsStr::new("docker")).await
 }
 
-async fn pinned_spec_with(spec: &SpawnSpec, executable: &std::ffi::OsStr) -> Result<SpawnSpec> {
-    let inspect_args = ["image", "inspect", "--format", "{{.Id}}", &spec.image];
+async fn pinned_spec_with(spec: &SpawnSpec, executable: &std::ffi::OsStr) -> Result<PinnedImage> {
+    let inspect_args = ["image", "inspect", "--format", IMAGE_INSPECT_FORMAT, &spec.image];
     let (mut status, mut stdout, mut stderr) = execution::control(
         Command::new(executable).args(inspect_args),
         "resolve desktop image",
@@ -386,6 +469,8 @@ async fn pinned_spec_with(spec: &SpawnSpec, executable: &std::ffi::OsStr) -> Res
         // permissions and malformed-reference errors must retain their cause.
         if spec.image == BUILTIN_DESKTOP_IMAGE {
             build_builtin_image(executable).await?;
+        } else if spec.image == SELKIES_DESKTOP_IMAGE {
+            build_selkies_image(executable).await?;
         } else {
             let (pull_status, _, pull_stderr) = execution::control_with_timeout(
                 Command::new(executable).args(["pull", &spec.image]),
@@ -415,16 +500,35 @@ async fn pinned_spec_with(spec: &SpawnSpec, executable: &std::ffi::OsStr) -> Res
     if stdout.truncated {
         return Err(backend_err("Docker image identity response exceeds limit"));
     }
-    let image = stdout.text().trim().to_owned();
-    if !valid_image_id(&image) {
+    let text = stdout.text();
+    let (image, label) = text.trim().split_once('|').unwrap_or((text.trim(), ""));
+    if !valid_image_id(image) {
         return Err(backend_err(
             "Docker did not return an immutable sha256 image identity",
         ));
     }
-    Ok(SpawnSpec {
-        image,
-        ..spec.clone()
+    Ok(PinnedImage {
+        spec: SpawnSpec {
+            image: image.to_owned(),
+            ..spec.clone()
+        },
+        stream: !label.is_empty(),
     })
+}
+
+/// Publish the Selkies port on the same loopback address as computer-server,
+/// and name the master token's variable so its value never reaches argv.
+fn add_stream_args(args: &mut Vec<String>, publish_addr: &str) {
+    let at = args.len() - 1;
+    args.splice(
+        at..at,
+        [
+            "-p".into(),
+            format!("{publish_addr}:0:{STREAM_PORT}"),
+            "--env".into(),
+            STREAM_TOKEN_ENV.into(),
+        ],
+    );
 }
 
 fn is_no_such_image(stderr: &str) -> bool {
@@ -512,28 +616,35 @@ fn attest_image_response(text: &str, configured_image: &str) -> Result<()> {
 /// Create and start the container. Returns its container id.
 pub async fn docker_run(spec: &SpawnSpec) -> Result<String> {
     let pinned = pinned_spec(spec).await?;
-    let mut args = run_args(&pinned);
-    add_image_labels(&mut args, &pinned.image, &spec.image);
+    let mut args = run_args(&pinned.spec);
+    if pinned.stream {
+        add_stream_args(&mut args, &pinned.spec.policy.publish_addr);
+    }
+    add_image_labels(&mut args, &pinned.spec.image, &spec.image);
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    create_with_private_token(&borrowed, "docker run").await
+    create_with_private_token(&borrowed, "docker run", pinned.stream).await
 }
 
 /// Create the container without starting it. Returns its container id.
 pub async fn docker_create(spec: &SpawnSpec) -> Result<String> {
     let pinned = pinned_spec(spec).await?;
-    let mut args = create_args(&pinned);
-    add_image_labels(&mut args, &pinned.image, &spec.image);
+    let mut args = create_args(&pinned.spec);
+    if pinned.stream {
+        add_stream_args(&mut args, &pinned.spec.policy.publish_addr);
+    }
+    add_image_labels(&mut args, &pinned.spec.image, &spec.image);
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    create_with_private_token(&borrowed, "docker create").await
+    create_with_private_token(&borrowed, "docker create", pinned.stream).await
 }
 
-async fn create_with_private_token(args: &[&str], what: &str) -> Result<String> {
+async fn create_with_private_token(args: &[&str], what: &str, stream: bool) -> Result<String> {
     let token = hex::encode(rand::random::<[u8; 32]>());
-    let (status, stdout, stderr) = execution::control(
-        Command::new("docker").args(args).env(AUTH_TOKEN_ENV, token),
-        what,
-    )
-    .await?;
+    let mut command = Command::new("docker");
+    command.args(args).env(AUTH_TOKEN_ENV, token);
+    if stream {
+        command.env(STREAM_TOKEN_ENV, hex::encode(rand::random::<[u8; 32]>()));
+    }
+    let (status, stdout, stderr) = execution::control(&mut command, what).await?;
     if !status.success() {
         return Err(backend_err(format!(
             "{what} failed: {}",
@@ -563,10 +674,14 @@ pub async fn docker_auth_token(container: &str) -> Result<String> {
 }
 
 fn parse_auth_token(bytes: &[u8]) -> Result<String> {
+    parse_env_token(bytes, AUTH_TOKEN_ENV)
+}
+
+fn parse_env_token(bytes: &[u8], name: &str) -> Result<String> {
     let env: Vec<String> = serde_json::from_slice(bytes).map_err(|_| {
         backend_err("Invalid private desktop credential metadata; recreate this sandbox")
     })?;
-    let prefix = format!("{AUTH_TOKEN_ENV}=");
+    let prefix = format!("{name}=");
     let tokens: Vec<_> = env
         .iter()
         .filter_map(|entry| entry.strip_prefix(&prefix))
@@ -580,6 +695,66 @@ fn parse_auth_token(bytes: &[u8]) -> Result<String> {
         ));
     }
     Ok(tokens[0].to_owned())
+}
+
+/// Where a running Selkies variant serves its stream, and the master token that
+/// manages its session table. Never serialized to the renderer.
+#[derive(Clone, PartialEq, Eq)]
+pub struct StreamEndpoint {
+    pub port: u16,
+    pub master_token: String,
+}
+
+impl std::fmt::Debug for StreamEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamEndpoint")
+            .field("port", &self.port)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The stream of a running container, or `None` when its image has no Selkies.
+pub async fn docker_stream_endpoint(container: &str) -> Result<Option<StreamEndpoint>> {
+    let (status, stdout, _) = execution::control(
+        Command::new("docker").args([
+            "inspect",
+            "--format",
+            "{{with .Config.Labels}}{{index . \"cognia.cua.selkies\"}}{{end}}\n{{json .Config.Env}}",
+            container,
+        ]),
+        "read private stream credential",
+    )
+    .await?;
+    if !status.success() || stdout.truncated {
+        return Err(backend_err(
+            "Could not recover private stream credential; inspect the sandbox state",
+        ));
+    }
+    let Some(master_token) = parse_stream_metadata(&stdout.bytes)? else {
+        return Ok(None);
+    };
+    let text = docker(
+        &["port", container, &format!("{STREAM_PORT}/tcp")],
+        "docker port",
+    )
+    .await?;
+    let port = parse_port(&text)
+        .ok_or_else(|| backend_err("the desktop stream port is not published"))?;
+    Ok(Some(StreamEndpoint { port, master_token }))
+}
+
+/// `<label>\n<env json>`: no label means no stream; a label without exactly
+/// one well-formed master token is a broken container, not a missing stream.
+fn parse_stream_metadata(bytes: &[u8]) -> Result<Option<String>> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| backend_err("Invalid private stream credential metadata"))?;
+    let (label, env) = text
+        .split_once('\n')
+        .ok_or_else(|| backend_err("Invalid private stream credential metadata"))?;
+    if label.trim().is_empty() {
+        return Ok(None);
+    }
+    parse_env_token(env.trim().as_bytes(), STREAM_TOKEN_ENV).map(Some)
 }
 
 /// `docker start <id>` on a container that already exists but is stopped.
@@ -1312,10 +1487,12 @@ sys.exit(1)
                 .collect();
             assert_eq!(
                 calls[0],
-                ["image", "inspect", "--format", "{{.Id}}", requested_image]
+                ["image", "inspect", "--format", IMAGE_INSPECT_FORMAT, requested_image]
             );
             if missing {
-                assert_eq!(result.unwrap().image, format!("sha256:{}", "a".repeat(64)));
+                let pinned = result.unwrap();
+                assert_eq!(pinned.spec.image, format!("sha256:{}", "a".repeat(64)));
+                assert!(!pinned.stream, "an image without the label publishes no stream");
                 assert_eq!(calls.len(), 3);
                 if requested_image == BUILTIN_DESKTOP_IMAGE {
                     assert_eq!(
@@ -1349,6 +1526,115 @@ sys.exit(1)
             name: "cua-c1".into(),
             policy,
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_selkies_variant_builds_its_base_first_and_publishes_a_stream() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("fake-docker");
+        let log = directory.path().join("calls.jsonl");
+        let built = directory.path().join("built");
+        let script = format!(
+            r#"#!/usr/bin/env python3
+import sys,json,os
+with open({log:?},'a') as log: log.write(json.dumps(sys.argv[1:])+'\n')
+built = {built:?}
+os.makedirs(built, exist_ok=True)
+if sys.argv[1] == 'build':
+ tag = sys.argv[sys.argv.index('--tag')+1]
+ files = set(os.listdir(sys.argv[-1]))
+ if 'selkies' in tag:
+  assert files == {{'Dockerfile','selkies-startup.py','selkies-entrypoint.sh'}}, files
+  assert os.path.exists(os.path.join(built, 'base')), 'base must be built first'
+  dockerfile = open(os.path.join(sys.argv[-1],'Dockerfile')).read()
+  assert "'selkies==2.0.0'" in dockerfile and 'cognia.cua.selkies="2.0.0"' in dockerfile
+  open(os.path.join(built, 'variant'),'w').close()
+ else:
+  open(os.path.join(built, 'base'),'w').close()
+ sys.exit(0)
+image = sys.argv[-1]
+name = 'variant' if 'selkies' in image else 'base'
+if os.path.exists(os.path.join(built, name)):
+ print('sha256:'+('b' if name == 'variant' else 'a')*64+('|2.0.0' if name == 'variant' else '|'))
+ sys.exit(0)
+print('Error response from daemon: No such image: '+image, file=sys.stderr)
+sys.exit(1)
+"#,
+            log = log.to_str().unwrap(),
+            built = built.to_str().unwrap(),
+        );
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut requested = spec(ContainerPolicy::default());
+        requested.image = SELKIES_DESKTOP_IMAGE.into();
+        let pinned = pinned_spec_with(&requested, executable.as_os_str())
+            .await
+            .unwrap();
+        assert_eq!(pinned.spec.image, format!("sha256:{}", "b".repeat(64)));
+        assert!(pinned.stream);
+        let calls: Vec<Vec<String>> = std::fs::read_to_string(&log)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let builds: Vec<&Vec<String>> = calls.iter().filter(|c| c[0] == "build").collect();
+        assert_eq!(builds.len(), 2);
+        assert!(builds[0].contains(&BUILTIN_DESKTOP_IMAGE.to_string()));
+        assert_eq!(
+            &builds[1][..7],
+            [
+                "build",
+                "--progress",
+                "plain",
+                "--build-arg",
+                &format!("BASE_IMAGE={BUILTIN_DESKTOP_IMAGE}"),
+                "--tag",
+                SELKIES_DESKTOP_IMAGE
+            ]
+        );
+    }
+
+    #[test]
+    fn a_stream_image_publishes_its_port_on_loopback_and_names_its_token() {
+        for mut args in [
+            run_args(&spec(ContainerPolicy::default())),
+            create_args(&spec(ContainerPolicy::default())),
+        ] {
+            add_stream_args(&mut args, "127.0.0.1");
+            let joined = args.join(" ");
+            assert!(joined.contains("-p 127.0.0.1:0:8080 --env COGNIA_SELKIES_MASTER_TOKEN"));
+            assert_eq!(args.last().unwrap(), "img", "the image stays last");
+            assert!(
+                !joined.contains("COGNIA_SELKIES_MASTER_TOKEN="),
+                "the value never reaches argv"
+            );
+        }
+    }
+
+    #[test]
+    fn stream_metadata_needs_the_label_and_exactly_one_master_token() {
+        let token = "c".repeat(64);
+        let env = serde_json::to_string(&vec![
+            format!("{AUTH_TOKEN_ENV}={}", "a".repeat(64)),
+            format!("{STREAM_TOKEN_ENV}={token}"),
+        ])
+        .unwrap();
+        assert_eq!(
+            parse_stream_metadata(format!("2.0.0\n{env}").as_bytes()).unwrap(),
+            Some(token)
+        );
+        assert_eq!(parse_stream_metadata(format!("\n{env}").as_bytes()).unwrap(), None);
+        let missing = serde_json::to_string(&vec![format!("{AUTH_TOKEN_ENV}={}", "a".repeat(64))])
+            .unwrap();
+        assert!(parse_stream_metadata(format!("2.0.0\n{missing}").as_bytes()).is_err());
+        assert!(parse_stream_metadata(b"2.0.0").is_err());
+        let endpoint = StreamEndpoint {
+            port: 1,
+            master_token: "c".repeat(64),
+        };
+        assert!(!format!("{endpoint:?}").contains("ccc"), "Debug never prints the token");
     }
 
     #[test]

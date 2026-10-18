@@ -29,10 +29,24 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { isTauri } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
 import { useSandboxConnections } from "@/hooks/automation/use-sandbox-connections"
-import { DEFAULT_DOCKER_SANDBOX_IMAGE } from "@/lib/sandbox/docker-adapter"
+import {
+  DEFAULT_DOCKER_SANDBOX_IMAGE,
+  SELKIES_DOCKER_SANDBOX_IMAGE,
+} from "@/lib/sandbox/docker-adapter"
 import { hasSandboxAdapter } from "@/lib/sandbox/adapter-registry"
 import type { SandboxHealthStatus } from "@/lib/db/sandbox-connections"
 import type { SandboxConnectionRow, SandboxLifecycleState } from "@/types/sandbox"
@@ -109,7 +123,9 @@ function LocalSandboxConnectionsTab({
   const [workspaceHostPath, setWorkspaceHostPath] = useState("")
   const [workspaceContainerPath, setWorkspaceContainerPath] = useState("/workspace")
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [confirmingSelkies, setConfirmingSelkies] = useState(false)
   const desktop = isTauri()
+  const selkies = image === SELKIES_DOCKER_SANDBOX_IMAGE
 
   const statusLabel: Record<SandboxHealthStatus, string> = {
     unknown: t("statusUnknown"),
@@ -242,6 +258,35 @@ function LocalSandboxConnectionsTab({
             <Input id="cua-image" value={image} onChange={(e) => setImage(e.target.value)} />
             <p className="text-xs text-muted-foreground">{t("imageHelp")}</p>
           </div>
+          {/* Opt-in only, with the licence stated first (ADR-0234 Phase 4):
+              the Selkies variant bundles GPL encoders and is built here. */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="cua-selkies"
+                checked={selkies}
+                onCheckedChange={(checked) =>
+                  checked ? setConfirmingSelkies(true) : setImage(DEFAULT_DOCKER_SANDBOX_IMAGE)
+                }
+              />
+              <Label htmlFor="cua-selkies">{t("selkies")}</Label>
+            </div>
+            <p className="text-xs text-muted-foreground">{t("selkiesHelp")}</p>
+          </div>
+          <AlertDialog open={confirmingSelkies} onOpenChange={setConfirmingSelkies}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t("selkiesLicenseTitle")}</AlertDialogTitle>
+                <AlertDialogDescription>{t("selkiesLicenseBody")}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t("selkiesCancel")}</AlertDialogCancel>
+                <AlertDialogAction onClick={() => setImage(SELKIES_DOCKER_SANDBOX_IMAGE)}>
+                  {t("selkiesConfirm")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <div className="space-y-1">
             <Label htmlFor="cua-host">{t("host")}</Label>
             <Input id="cua-host" value={host} onChange={(e) => setHost(e.target.value)} />

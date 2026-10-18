@@ -80,8 +80,46 @@ test("renews human control and releases on blur", async () => {
   await act(async () => {
     window.dispatchEvent(new Event("blur"))
   })
+  await tick()
   expect(result.current.controlling).toBe(false)
   expect(client.releaseControl).toHaveBeenCalledWith("c1", "lease", 2)
+})
+
+test("while streaming it polls slowly, reports the lease, and keeps control when focus enters the stream", async () => {
+  const onLeaseChange = jest.fn()
+  const frameElement = document.createElement("iframe")
+  frameElement.dataset.sandboxStream = "c1"
+  document.body.appendChild(frameElement)
+  const { result } = renderHook(() =>
+    useSandboxDesktop("c1", true, undefined, true, { streaming: true, onLeaseChange })
+  )
+  await tick()
+  await tick(1000)
+  expect(client.desktopFrame).toHaveBeenCalledTimes(1)
+  await tick(4000)
+  expect(client.desktopFrame).toHaveBeenCalledTimes(2)
+  await act(async () => {
+    await result.current.acquire()
+  })
+  expect(onLeaseChange).toHaveBeenLastCalledWith(expect.objectContaining({ token: "lease" }))
+  const hasFocus = jest.spyOn(document, "hasFocus").mockReturnValue(true)
+  frameElement.focus()
+  await act(async () => {
+    window.dispatchEvent(new Event("blur"))
+  })
+  await tick()
+  expect(result.current.controlling).toBe(true)
+  expect(client.releaseControl).not.toHaveBeenCalled()
+  // Leaving the app entirely still gives control back.
+  hasFocus.mockReturnValue(false)
+  await act(async () => {
+    window.dispatchEvent(new Event("blur"))
+  })
+  await tick()
+  expect(result.current.controlling).toBe(false)
+  expect(onLeaseChange).toHaveBeenLastCalledWith(null)
+  hasFocus.mockRestore()
+  frameElement.remove()
 })
 
 test("releases a late lease after unmount instead of retaining invisible control", async () => {

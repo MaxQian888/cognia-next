@@ -1,4 +1,8 @@
-import { sandboxClient } from "@/lib/automation/sandbox-client"
+import {
+  isSandboxStreamUnavailable,
+  sandboxClient,
+  SANDBOX_STREAM_UNAVAILABLE,
+} from "@/lib/automation/sandbox-client"
 import { transport } from "@/lib/tauri"
 
 jest.mock("@/lib/tauri", () => ({
@@ -86,4 +90,31 @@ test("desktop observation and control stay scoped to the same connection and lea
     ],
     ["cua_sandbox_desktop_release_control", { connectionId: "c1", token: "lease", fence: 7 }],
   ])
+})
+
+test("stream grants open, claim with the lease, and close by viewer id", async () => {
+  const grant = { viewerId: "v1", url: "http://127.0.0.1:49000/?token=t", role: "viewer" }
+  call.mockResolvedValue(grant)
+  await expect(sandboxClient.streamOpen("c1")).resolves.toEqual(grant)
+  expect(call).toHaveBeenLastCalledWith("cua_sandbox_desktop_stream_open", { connectionId: "c1" })
+  await sandboxClient.streamClaim("c1", "v1", "lease", 7)
+  expect(call).toHaveBeenLastCalledWith("cua_sandbox_desktop_stream_claim", {
+    connectionId: "c1",
+    viewerId: "v1",
+    token: "lease",
+    fence: 7,
+  })
+  await sandboxClient.streamClose("c1", "v1")
+  expect(call).toHaveBeenLastCalledWith("cua_sandbox_desktop_stream_close", {
+    connectionId: "c1",
+    viewerId: "v1",
+  })
+})
+
+test("a sandbox without Selkies is recognised by its refusal code", () => {
+  expect(
+    isSandboxStreamUnavailable(new Error(`Backend error: ${SANDBOX_STREAM_UNAVAILABLE}`))
+  ).toBe(true)
+  expect(isSandboxStreamUnavailable(SANDBOX_STREAM_UNAVAILABLE)).toBe(true)
+  expect(isSandboxStreamUnavailable(new Error("docker port failed"))).toBe(false)
 })

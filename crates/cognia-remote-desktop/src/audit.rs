@@ -85,6 +85,10 @@ fn entry(
             | "remote_desktop.session.open"
             | "remote_desktop.session.close"
             | "remote_desktop.session.failed"
+            | "remote_desktop.stream.open"
+            | "remote_desktop.stream.claim"
+            | "remote_desktop.stream.revoke"
+            | "remote_desktop.stream.revoke_unconfirmed"
     ) || !matches!(target_kind, "sandbox" | "managed-desktop" | "external")
     {
         return None;
@@ -118,6 +122,8 @@ fn entry(
         ("mode", &["view", "control"][..]),
         ("credential", &["control", "view"][..]),
         ("class", &["private", "public"][..]),
+        // Stream grants (ADR-0234 Phase 4): the role only, never a token or URL.
+        ("role", &["viewer", "controller"][..]),
         (
             "reason",
             &[
@@ -271,6 +277,36 @@ mod tests {
         assert!(record.get("count").is_none());
         assert!(entry("secret", "sandbox", "id", "p", "deny", 0, json!({})).is_none());
         assert!(entry("remote_desktop.input", "elsewhere", "id", "p", "deny", 0, json!({})).is_none());
+    }
+
+    #[test]
+    fn stream_grants_record_the_role_and_never_the_token() {
+        let record = entry(
+            "remote_desktop.stream.claim",
+            "sandbox",
+            "desktop",
+            "local-owner",
+            "allowed",
+            3,
+            json!({"role":"controller", "url":"http://127.0.0.1:1/?token=secret", "token":"secret"}),
+        )
+        .unwrap();
+        assert_eq!(record["role"], "controller");
+        assert!(!record.to_string().contains("secret"));
+        let record = entry(
+            "remote_desktop.stream.open",
+            "sandbox",
+            "desktop",
+            "local-owner",
+            "allowed",
+            0,
+            json!({"role":"admin"}),
+        )
+        .unwrap();
+        assert!(record.get("role").is_none());
+        for kind in ["remote_desktop.stream.revoke", "remote_desktop.stream.revoke_unconfirmed"] {
+            assert!(entry(kind, "sandbox", "d", "p", "refused", 0, json!({})).is_some());
+        }
     }
 
     #[test]

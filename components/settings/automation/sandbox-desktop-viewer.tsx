@@ -1,13 +1,25 @@
 "use client"
 
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+} from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useSandboxDesktop } from "@/hooks/automation/use-sandbox-desktop"
+import {
+  useSandboxDesktopStream,
+  type SandboxDesktopStreamDeps,
+} from "@/hooks/automation/use-sandbox-desktop-stream"
 import { screenshotMimeType } from "@/lib/automation/model-frame"
 import type { Point, Screenshot } from "@/lib/automation/types"
-import type { OpenSandboxDesktop } from "@/lib/automation/sandbox-client"
+import type { OpenSandboxDesktop, SandboxControlLease } from "@/lib/automation/sandbox-client"
 import { isCapacitor } from "@/lib/platform/detect"
 import { SandboxFileTransfer } from "./sandbox-file-transfer"
 
@@ -35,19 +47,27 @@ function framePoint(
   }
 }
 
-/** Screenshots stay inside the authenticated command transport; no raw desktop endpoint is exposed. */
+/**
+ * Screenshots stay inside the authenticated command transport; no raw desktop
+ * endpoint is exposed. A local sandbox built with Selkies (ADR-0234 Phase 4)
+ * is shown as its live stream instead: a loopback page with a Host-issued
+ * session token that can only watch until this viewer holds the control lease.
+ */
 export function SandboxDesktopViewer({
   connectionId,
   enabled,
   containerId,
   openDesktop,
   observeOnly = false,
+  streamDeps,
 }: {
   connectionId: string
   enabled: boolean
   containerId?: string
   openDesktop?: OpenSandboxDesktop
   observeOnly?: boolean
+  /** Test seam for the stream grant calls. */
+  streamDeps?: SandboxDesktopStreamDeps
 }) {
   const t = useTranslations("automation.sandboxConnections.desktopViewer")
   const mobileObservation =
@@ -55,8 +75,32 @@ export function SandboxDesktopViewer({
     (observeOnly ||
       isCapacitor() ||
       (typeof navigator !== "undefined" && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)))
+  // Only the client-local Docker desktop has a Selkies variant.
+  const stream = useSandboxDesktopStream(connectionId, enabled && !openDesktop, streamDeps)
+  const streaming = stream.grant !== null
+  const releaseRef = useRef<(() => Promise<void> | undefined) | null>(null)
+  const { claim: claimStream, reopen: reopenStream } = stream
+  const onLeaseChange = useCallback(
+    (lease: SandboxControlLease | null) => {
+      if (!lease) {
+        void reopenStream()
+        return
+      }
+      // Control the stream cannot carry is control the user cannot use.
+      void claimStream(lease).then((claimed) => {
+        if (!claimed) void releaseRef.current?.()
+      })
+    },
+    [claimStream, reopenStream]
+  )
   const { frame, controlling, acquiring, error, acquire, release, refresh, input, status } =
-    useSandboxDesktop(connectionId, enabled, openDesktop, !mobileObservation)
+    useSandboxDesktop(connectionId, enabled, openDesktop, !mobileObservation, {
+      streaming,
+      onLeaseChange: openDesktop ? undefined : onLeaseChange,
+    })
+  useLayoutEffect(() => {
+    releaseRef.current = release
+  })
   const [text, setText] = useState("")
   const [sending, setSending] = useState(false)
   const [doubleClick, setDoubleClick] = useState(false)
@@ -201,7 +245,9 @@ export function SandboxDesktopViewer({
                 : t("readOnly")}
         </span>
       </div>
-      <p className="text-xs text-muted-foreground">{t("cadence")}</p>
+      <p className="text-xs text-muted-foreground">
+        {streaming ? t("streamCadence") : t("cadence")}
+      </p>
       {openDesktop ? (
         <p className="text-xs text-muted-foreground" data-dormant="managed-desktop-agent-control">
           {t("agentDormant")}
@@ -220,7 +266,20 @@ export function SandboxDesktopViewer({
           {t(`error.${error}`)}
         </p>
       ) : null}
-      {frame ? (
+      {stream.grant ? (
+        // Remounted per grant: a role change closes Selkies' socket anyway.
+        <iframe
+          key={stream.grant.url}
+          src={stream.grant.url}
+          title={t("streamTitle")}
+          data-sandbox-stream={connectionId}
+          data-stream-role={stream.grant.role}
+          sandbox="allow-scripts allow-same-origin allow-pointer-lock"
+          allow="fullscreen"
+          referrerPolicy="no-referrer"
+          className="block aspect-[16/10] w-full rounded border bg-black"
+        />
+      ) : frame ? (
         // Native img preserves the screenshot pixel aspect ratio for pointer mapping.
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -271,7 +330,10 @@ export function SandboxDesktopViewer({
           {acquiring ? t("acquiring") : controlling ? t("release") : t("takeControl")}
         </Button>
       </div>
-      {controlling ? (
+      {controlling && streaming ? (
+        <p className="text-xs text-muted-foreground">{t("streamControlHelp")}</p>
+      ) : null}
+      {controlling && !streaming ? (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">{t("controlHelp")}</p>
           <Textarea

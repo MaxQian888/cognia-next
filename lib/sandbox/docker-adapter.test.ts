@@ -4,6 +4,7 @@ import { defaultSandboxCapabilities } from "./connection-capabilities"
 import {
   buildDockerSandboxAdapter,
   DEFAULT_DOCKER_SANDBOX_IMAGE,
+  SELKIES_DOCKER_SANDBOX_IMAGE,
   lifecycleStateFromDocker,
   policyInputFromConfig,
   requireDockerConfig,
@@ -138,4 +139,8 @@ test("a running container does not imply a usable desktop or execution channel",
 
 it("pins the authenticated computer-server recipe revision", () => {
   expect(DEFAULT_DOCKER_SANDBOX_IMAGE).toBe("cognia-cua-desktop:0.3.46-2")
+})
+
+it("names the Selkies variant after the base image it is layered on", () => {
+  expect(SELKIES_DOCKER_SANDBOX_IMAGE).toBe(`${DEFAULT_DOCKER_SANDBOX_IMAGE}-selkies-2.0.0`)
 })

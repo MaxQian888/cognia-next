@@ -28,6 +28,7 @@ pub mod managed;
 pub mod protocol;
 pub mod registry;
 pub mod remote_client;
+pub mod stream;
 
 pub use registry::CuaSandboxRegistry;
 
@@ -469,6 +470,43 @@ pub async fn cua_sandbox_desktop_input(
     action: UiAction,
 ) -> Result<(), String> {
     reg.control_input(&connection_id, &token, fence, &frame_id, point, action)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// Selkies stream grants (ADR-0234 Phase 4). The URL carries a session token
+// for the container's loopback-published stream; control needs the lease.
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn cua_sandbox_desktop_stream_open(
+    reg: tauri::State<'_, CuaSandboxRegistry>,
+    connection_id: String,
+) -> Result<stream::StreamGrant, String> {
+    reg.stream_open(&connection_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn cua_sandbox_desktop_stream_claim(
+    reg: tauri::State<'_, CuaSandboxRegistry>,
+    connection_id: String,
+    viewer_id: String,
+    token: String,
+    fence: u64,
+) -> Result<stream::StreamGrant, String> {
+    reg.stream_claim(&connection_id, &viewer_id, &token, fence)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn cua_sandbox_desktop_stream_close(
+    reg: tauri::State<'_, CuaSandboxRegistry>,
+    connection_id: String,
+    viewer_id: String,
+) -> Result<(), String> {
+    reg.stream_close(&connection_id, &viewer_id)
         .await
         .map_err(|e| e.to_string())
 }

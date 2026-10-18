@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import {
   sandboxClient,
   type SandboxControlLease,
@@ -13,20 +13,52 @@ import type { Point, Screenshot, UiAction } from "@/lib/automation/types"
 
 export type SandboxDesktopError = "capture" | "control" | "input" | "release" | "session" | null
 const POLL_MS = 1_000
+/** While a Selkies stream shows the desktop, snapshots only gate control. */
+export const STREAM_POLL_MS = 5_000
 const MAX_FRAME_AGE_MS = 5_000
+
+export interface SandboxDesktopOptions {
+  /** A Selkies stream is on screen (ADR-0234 Phase 4); poll snapshots slowly. */
+  streaming?: boolean
+  /**
+   * The lease after acquisition, and `null` once it is released or lost. The
+   * `null` comes after the Host answered the release, which revokes any stream
+   * controller first.
+   */
+  onLeaseChange?: (lease: SandboxControlLease | null) => void
+}
+
+/** The stream frame of this connection holds focus inside this window. */
+function focusInStream(connectionId: string): boolean {
+  const active = document.activeElement
+  return (
+    document.hasFocus() &&
+    active instanceof HTMLIFrameElement &&
+    active.dataset.sandboxStream === connectionId
+  )
+}
 
 /** The session closure owns all timers and leases, including late async completions. */
 export function useSandboxDesktop(
   connectionId: string,
   enabled: boolean,
   openDesktop?: OpenSandboxDesktop,
-  inputAllowed = true
+  inputAllowed = true,
+  options: SandboxDesktopOptions = {}
 ) {
   const [status, setStatus] = useState<SandboxDesktopStatus | null>(null)
   const [frame, setFrame] = useState<Screenshot | null>(null)
   const [controlling, setControlling] = useState(false)
   const [acquiring, setAcquiring] = useState(false)
   const [error, setError] = useState<SandboxDesktopError>(null)
+  // Read through refs: toggling the stream must not restart the session and
+  // drop the lease.
+  const streaming = useRef(Boolean(options.streaming))
+  const leaseChange = useRef(options.onLeaseChange)
+  useLayoutEffect(() => {
+    streaming.current = Boolean(options.streaming)
+    leaseChange.current = options.onLeaseChange
+  })
   const session = useRef<{
     acquire: (takeover?: boolean) => Promise<void>
     release: () => Promise<void>
@@ -98,6 +130,7 @@ export function useSandboxDesktop(
           // retain control indefinitely. Never reuse a locally released token.
           if (alive) setError("release")
         }
+        leaseChange.current?.(null)
       }
     }
 
@@ -188,7 +221,10 @@ export function useSandboxDesktop(
       } finally {
         capturing = false
         if (alive && visible())
-          poll = setTimeout(() => void refresh(), refreshPending ? 0 : POLL_MS)
+          poll = setTimeout(
+            () => void refresh(),
+            refreshPending ? 0 : streaming.current ? STREAM_POLL_MS : POLL_MS
+          )
       }
     }
 
@@ -246,6 +282,7 @@ export function useSandboxDesktop(
         receivedAt = Date.now()
         setFrame(proof.screenshot)
         setControlling(true)
+        leaseChange.current?.(next)
       } catch {
         await release()
         if (alive) setError("control")
@@ -330,7 +367,12 @@ export function useSandboxDesktop(
         void release()
       } else void refresh()
     }
-    const blur = () => void release()
+    // Focus moving into this desktop's stream frame blurs the window too; that
+    // is the user starting to work, not leaving.
+    const blur = () =>
+      setTimeout(() => {
+        if (!focusInStream(connectionId)) void release()
+      }, 0)
     const invalidate = () => {
       invalidated = true
       clearTimeout(poll)

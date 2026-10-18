@@ -43,6 +43,26 @@ export interface SandboxDesktopSession {
 }
 export type OpenSandboxDesktop = () => Promise<SandboxDesktopSession>
 
+/**
+ * A Selkies stream grant (ADR-0234 Phase 4): the loopback page of the
+ * desktop's stream with a session token. `viewer` grants can only watch; the
+ * Host hands out `controller` only to the viewer holding the control lease.
+ */
+export type SandboxStreamRole = "viewer" | "controller"
+export interface SandboxStreamGrant {
+  viewerId: string
+  url: string
+  role: SandboxStreamRole
+}
+
+/** The Host's refusal when the sandbox image has no Selkies stream. */
+export const SANDBOX_STREAM_UNAVAILABLE = "sandbox_stream_unavailable"
+
+export function isSandboxStreamUnavailable(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes(SANDBOX_STREAM_UNAVAILABLE)
+}
+
 /** Dedicated binary transfer budget; ordinary command output keeps its own limit. */
 export const MAX_SANDBOX_TRANSFER_BYTES = 8 * 1024 * 1024
 
@@ -176,6 +196,25 @@ export const sandboxClient = {
       token,
       fence,
     })
+  },
+  streamOpen(connectionId: string): Promise<SandboxStreamGrant> {
+    return transport.call<SandboxStreamGrant>("cua_sandbox_desktop_stream_open", { connectionId })
+  },
+  streamClaim(
+    connectionId: string,
+    viewerId: string,
+    token: string,
+    fence: number
+  ): Promise<SandboxStreamGrant> {
+    return transport.call<SandboxStreamGrant>("cua_sandbox_desktop_stream_claim", {
+      connectionId,
+      viewerId,
+      token,
+      fence,
+    })
+  },
+  streamClose(connectionId: string, viewerId: string): Promise<void> {
+    return transport.call<void>("cua_sandbox_desktop_stream_close", { connectionId, viewerId })
   },
   controlInput(
     connectionId: string,

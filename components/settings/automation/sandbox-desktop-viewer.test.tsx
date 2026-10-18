@@ -1,14 +1,27 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import messages from "@/i18n/messages/en/automation.json"
+import { act } from "react"
 import { useSandboxDesktop } from "@/hooks/automation/use-sandbox-desktop"
+import { useSandboxDesktopStream } from "@/hooks/automation/use-sandbox-desktop-stream"
 import { SandboxDesktopViewer } from "./sandbox-desktop-viewer"
 
 jest.mock("@/hooks/automation/use-sandbox-desktop")
+jest.mock("@/hooks/automation/use-sandbox-desktop-stream")
 jest.mock("./sandbox-file-transfer", () => ({
   SandboxFileTransfer: () => <div role="region" aria-label="File transfer" />,
 }))
 const useDesktop = jest.mocked(useSandboxDesktop)
+const useStream = jest.mocked(useSandboxDesktopStream)
+function streamState(overrides = {}) {
+  return {
+    status: "unavailable" as const,
+    grant: null,
+    claim: jest.fn().mockResolvedValue(true),
+    reopen: jest.fn().mockResolvedValue(undefined),
+    ...overrides,
+  }
+}
 const frame = { bytes: "aA==", width: 800, height: 600, capturedAt: 42, format: "png" as const }
 function state(overrides = {}) {
   return {
@@ -34,7 +47,10 @@ function viewer() {
 function mount() {
   return render(viewer())
 }
-beforeEach(() => jest.resetAllMocks())
+beforeEach(() => {
+  jest.resetAllMocks()
+  useStream.mockReturnValue(streamState())
+})
 
 beforeAll(() => {
   window.PointerEvent = MouseEvent as typeof PointerEvent
@@ -245,7 +261,13 @@ test("managed mobile observation explicitly disables control", () => {
     screen.getByText(messages.sandboxConnections.desktopViewer.mobileObservation)
   ).toBeInTheDocument()
   expect(screen.getByRole("button", { name: "Take control" })).toBeDisabled()
-  expect(useDesktop).toHaveBeenLastCalledWith("managed", true, expect.any(Function), false)
+  expect(useDesktop).toHaveBeenLastCalledWith(
+    "managed",
+    true,
+    expect.any(Function),
+    false,
+    expect.objectContaining({ streaming: false })
+  )
 })
 
 test("managed take-control gesture requests explicit native takeover from observer mode", () => {
@@ -258,4 +280,57 @@ test("managed take-control gesture requests explicit native takeover from observ
   )
   fireEvent.click(screen.getByRole("button", { name: "Take control" }))
   expect(model.acquire).toHaveBeenCalledWith(true)
+})
+
+test("a Selkies sandbox shows its live stream and leaves input to the stream frame", () => {
+  const grant = {
+    viewerId: "v1",
+    url: "http://127.0.0.1:49000/?token=view",
+    role: "viewer" as const,
+  }
+  useStream.mockReturnValue(streamState({ status: "open", grant }))
+  useDesktop.mockReturnValue(state({ controlling: true }))
+  mount()
+  const stream = screen.getByTitle("Live sandbox desktop stream")
+  expect(stream.tagName).toBe("IFRAME")
+  expect(stream).toHaveAttribute("src", grant.url)
+  expect(stream).toHaveAttribute("data-sandbox-stream", "c1")
+  expect(stream).toHaveAttribute("sandbox", "allow-scripts allow-same-origin allow-pointer-lock")
+  expect(stream).toHaveAttribute("referrerpolicy", "no-referrer")
+  expect(screen.queryByRole("img")).not.toBeInTheDocument()
+  // The polled-input tools would send through the snapshot path; the stream replaces them.
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+  expect(screen.getByText(/Click into the stream/)).toBeInTheDocument()
+  expect(screen.getByText(/Live stream through Selkies/)).toBeInTheDocument()
+  expect(useDesktop.mock.calls.at(-1)?.[4]).toMatchObject({ streaming: true })
+})
+
+test("control of the lease is carried into the stream, and given up when the stream cannot carry it", async () => {
+  const stream = streamState({ claim: jest.fn().mockResolvedValue(false) })
+  useStream.mockReturnValue(stream)
+  const model = state()
+  useDesktop.mockReturnValue(model)
+  mount()
+  const options = useDesktop.mock.calls.at(-1)?.[4]
+  const lease = { token: "lease", fence: 2, expiresAt: Date.now() + 15_000 }
+  await act(async () => {
+    options?.onLeaseChange?.(lease)
+  })
+  expect(stream.claim).toHaveBeenCalledWith(lease)
+  expect(model.release).toHaveBeenCalled()
+  await act(async () => {
+    options?.onLeaseChange?.(null)
+  })
+  expect(stream.reopen).toHaveBeenCalled()
+})
+
+test("a managed desktop never asks for a stream", () => {
+  useDesktop.mockReturnValue(state())
+  render(
+    <NextIntlClientProvider locale="en" messages={{ automation: messages }}>
+      <SandboxDesktopViewer connectionId="c1" enabled openDesktop={jest.fn()} />
+    </NextIntlClientProvider>
+  )
+  expect(useStream).toHaveBeenCalledWith("c1", false, undefined)
+  expect(useDesktop.mock.calls.at(-1)?.[4]).toMatchObject({ onLeaseChange: undefined })
 })

@@ -103,6 +103,47 @@ test("add flow creates a connection with the typed name", async () => {
   )
 })
 
+test("Selkies streaming is opt-in behind the licence notice and switches the image", async () => {
+  renderTab()
+  fireEvent.click(screen.getByText("Add connection"))
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "lab" } })
+  const toggle = screen.getByRole("switch", { name: "Stream with Selkies" })
+  fireEvent.click(toggle)
+  expect(await screen.findByText("Build a desktop that includes GPL encoders?")).toBeInTheDocument()
+  // Declining keeps the built-in image.
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+  await waitFor(() =>
+    expect(screen.getByLabelText("Docker image")).toHaveValue("cognia-cua-desktop:0.3.46-2")
+  )
+  fireEvent.click(toggle)
+  fireEvent.click(await screen.findByRole("button", { name: "Build with Selkies" }))
+  await waitFor(() =>
+    expect(screen.getByLabelText("Docker image")).toHaveValue(
+      "cognia-cua-desktop:0.3.46-2-selkies-2.0.0"
+    )
+  )
+  expect(toggle).toBeChecked()
+  fireEvent.click(screen.getByText("Save"))
+  await waitFor(() =>
+    expect(actions.create).toHaveBeenCalledWith(
+      expect.objectContaining({ image: "cognia-cua-desktop:0.3.46-2-selkies-2.0.0" })
+    )
+  )
+})
+
+test("turning Selkies off goes straight back to the built-in image", async () => {
+  renderTab()
+  fireEvent.click(screen.getByText("Add connection"))
+  fireEvent.change(screen.getByLabelText("Docker image"), {
+    target: { value: "cognia-cua-desktop:0.3.46-2-selkies-2.0.0" },
+  })
+  const toggle = screen.getByRole("switch", { name: "Stream with Selkies" })
+  expect(toggle).toBeChecked()
+  fireEvent.click(toggle)
+  expect(screen.getByLabelText("Docker image")).toHaveValue("cognia-cua-desktop:0.3.46-2")
+  expect(screen.queryByText("Build a desktop that includes GPL encoders?")).not.toBeInTheDocument()
+})
+
 test("add flow freezes the container policy onto the new machine", async () => {
   renderTab()
   fireEvent.click(screen.getByText("Add connection"))
