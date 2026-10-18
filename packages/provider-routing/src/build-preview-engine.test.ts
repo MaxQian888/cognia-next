@@ -694,3 +694,29 @@ describe("applyCircuitBreakerSettings", () => {
     expect(providerConfigs.openai).toEqual({ failureThreshold: 1 })
   })
 })
+
+it("keeps SIWC outside implicit candidates and mapping availability while allowing an explicit primary", () => {
+  const settings = {
+    customProviders: [
+      {
+        id: "siwc",
+        name: "ChatGPT",
+        apiProtocol: "chatgpt-siwc",
+        enabled: true,
+        defaultModel: "m",
+        customModels: ["m"],
+      },
+    ],
+    providerSettings: {},
+  }
+  const implicit = buildRoutingEngineDeps(settings)
+  expect(implicit.isProviderAvailable("siwc")).toBe(false)
+  expect(implicit.listCandidates?.().some((candidate) => candidate.providerId === "siwc")).toBe(
+    false
+  )
+  const explicit = buildRoutingEngineDeps(settings, { explicitProviderId: "siwc" })
+  expect(explicit.isProviderAvailable("siwc")).toBe(true)
+  expect(explicit.listCandidates?.().some((candidate) => candidate.providerId === "siwc")).toBe(
+    false
+  )
+})

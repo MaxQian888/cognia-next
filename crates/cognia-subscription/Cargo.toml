@@ -42,9 +42,14 @@ dirs.workspace = true
 keyring = { version = "4", default-features = false }
 # Live re-discovery of upstream CLI credential files.
 notify.workspace = true
+# Independent SIWC envelope ownership and OIDC verification.
+fs2 = "0.4"
+sha2.workspace = true
+jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
+tempfile.workspace = true
 # Codex device-auth flow.
 reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart", "form"] }
-tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }
+tokio = { workspace = true, features = ["sync", "time", "rt", "macros", "net", "io-util"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "4", features = ["windows-native-keyring-store"] }

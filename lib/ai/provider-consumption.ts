@@ -56,6 +56,14 @@ import type {
 import { validateBedrockConnectionSettings } from "@cognia/provider-types"
 import { createBedrockSidecarLanguageModel } from "@/lib/claude/feature-call"
 import { protectRawAnalysis } from "@/lib/ai/raw-analysis"
+import { createNativeSiwcFetch } from "@/lib/subscription/siwc/native-fetch"
+import { withSiwcStreamingGeneration } from "../../sidecar/src/providers/siwc-language-model"
+import {
+  decodeSiwcReference,
+  SIWC_PROTOCOL,
+  SIWC_RESPONSES_BASE_URL,
+  SIWC_SDK_PLACEHOLDER,
+} from "../../sidecar/src/providers/siwc-fetch"
 // Single source of truth for provider→protocol (shared with the sidecar; the
 // sidecar can't import `lib/`, so the file lives under `sidecar/` and TS imports
 // it — see sidecar/src/providers/provider-protocol.ts).
@@ -414,6 +422,22 @@ function resolveOne(
   const headers =
     headersSource && Object.keys(headersSource).length > 0 ? { ...headersSource } : undefined
 
+  if (protocol === SIWC_PROTOCOL) {
+    try {
+      decodeSiwcReference(baseURL)
+      if (apiKey || headers || apiFlavor === "chat" || !model) throw new Error()
+    } catch {
+      return {
+        kind: "blocked",
+        reason:
+          "SIWC requires an explicit native connection and model without API keys or relay headers.",
+        nextAction: "open_provider_settings",
+        attemptedProviderIds: [providerId],
+        code: "policy_blocked",
+      }
+    }
+  }
+
   // Local inference engines (Ollama, LM Studio, llama.cpp, vLLM, …) listen on
   // a well-known localhost port and need no API key. When the user enabled a
   // built-in local provider without typing a base URL, fall back to the
@@ -477,6 +501,21 @@ export function resolveFeatureProvider(
       candidates.push(...(args.supportedProviders ?? []))
       break
     case "any":
+      if (
+        snapshot.defaultProvider &&
+        (snapshot.customProviders.find((provider) => provider.id === snapshot.defaultProvider)
+          ?.protocol ?? snapshot.providers[snapshot.defaultProvider]?.apiProtocol) === SIWC_PROTOCOL
+      ) {
+        return {
+          kind: "blocked",
+          code: "policy_blocked",
+          reason:
+            "SIWC requires explicit provider selection; automatic requests cannot switch to another provider.",
+          nextAction: "open_provider_settings",
+          attemptedProviderIds: [snapshot.defaultProvider],
+          fallbackProviderIds: [],
+        }
+      }
       if (snapshot.defaultProvider) candidates.push(snapshot.defaultProvider)
       candidates.push(...Object.keys(snapshot.providers))
       // Custom providers are configured exclusively in `customProviders` —
@@ -497,6 +536,14 @@ export function resolveFeatureProvider(
   const seen = new Set<string>()
   const ordered: string[] = []
   for (const id of candidates) {
+    const protocol =
+      snapshot.customProviders.find((provider) => provider.id === id)?.protocol ??
+      snapshot.providers[id]?.apiProtocol
+    if (
+      protocol === SIWC_PROTOCOL &&
+      !(args.selectionMode === "explicit-provider" && args.providerId === id)
+    )
+      continue
     if (seen.has(id)) continue
     seen.add(id)
     ordered.push(id)
@@ -516,6 +563,19 @@ export function resolveFeatureProvider(
       continue
     }
     const resolution = resolveOne(providerId, snapshot)
+    const selectedProtocol =
+      snapshot.customProviders.find((provider) => provider.id === providerId)?.protocol ??
+      snapshot.providers[providerId]?.apiProtocol
+    if (selectedProtocol === SIWC_PROTOCOL && resolution.kind !== "resolved") {
+      return {
+        ...resolution,
+        kind: "blocked",
+        attemptedProviderIds: [...attempted],
+        fallbackProviderIds: [],
+      }
+    }
+    if (resolution.kind === "blocked")
+      return { ...resolution, attemptedProviderIds: [...attempted] }
     if (resolution.kind === "resolved") {
       // The ledger fields. Declared on the type since the resolver was
       // written and never assigned (a three-axis dormancy: typed, read by
@@ -527,7 +587,8 @@ export function resolveFeatureProvider(
         routeProfile: args.routeProfile,
         ...(args.executionMode ? { executionMode: args.executionMode } : {}),
         attemptedProviderIds: [...attempted],
-        fallbackProviderIds: ordered.filter((id) => id !== providerId),
+        fallbackProviderIds:
+          resolution.protocol === SIWC_PROTOCOL ? [] : ordered.filter((id) => id !== providerId),
       }
     }
     lastReason = resolution.reason
@@ -562,6 +623,29 @@ export function createFeatureProviderClient(config: FeatureClientConfig) {
     fetch: fetchImpl,
     headers,
   } = config
+  if (protocol === SIWC_PROTOCOL) {
+    if (apiKey || (headers && Object.keys(headers).length)) {
+      throw new Error("SIWC cannot use API keys or custom authorization headers")
+    }
+    const client = createOpenAI({
+      apiKey: SIWC_SDK_PLACEHOLDER,
+      baseURL: SIWC_RESPONSES_BASE_URL,
+      fetch: withProviderTimeouts(createNativeSiwcFetch(baseURL)),
+    })
+    const responses = (modelId: string) => withSiwcStreamingGeneration(client.responses(modelId))
+    return new Proxy(client, {
+      apply: (_target, _thisArg, args: [string]) => responses(args[0]),
+      get(target, property, receiver) {
+        if (property === "responses" || property === "languageModel") return responses
+        if (property === "chat" || property === "completion") {
+          return () => {
+            throw new Error("SIWC supports only the Responses API")
+          }
+        }
+        return Reflect.get(target, property, receiver)
+      },
+    })
+  }
   const settings: {
     apiKey?: string
     baseURL?: string
@@ -701,6 +785,9 @@ export function createFeatureProviderModel(
   // without TS narrowing the union to `never` after the first branch.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handle = client as any
+  if (resolved.protocol === SIWC_PROTOCOL) {
+    return protectRawAnalysis(handle.responses(modelId) as LanguageModelV4, modelId)
+  }
   if (resolved.protocol === "openai" || resolved.protocol === "azure") {
     const flavor = decideOpenAiEndpointFlavor({
       apiFlavor: resolved.apiFlavor,

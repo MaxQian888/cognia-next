@@ -10,6 +10,7 @@ import type { CodeAdapterBridge } from "./code-adapter.ts"
 import { makeOpenAiCompatVariantAdapter } from "./openai-compatible-variant-adapter.ts"
 import { BUILTIN_PROTOCOL_NAMES } from "../provider-protocol.ts"
 import type { CodeAdapterSpec, OpenAiCompatibleVariantSpec, ProtocolAdapter } from "./types.ts"
+import type { SiwcNativeCall } from "../siwc-fetch.ts"
 
 /**
  * Protocols the built-in `@ai-sdk/*` adapter handles, derived from the single
@@ -34,9 +35,9 @@ export function isBuiltinProtocol(protocol: unknown): protocol is string {
 export function resolveAdapter(
   protocol: unknown,
   spec?: unknown,
-  codeBridge?: CodeAdapterBridge
+  codeBridge?: CodeAdapterBridge & { nativeCall?: SiwcNativeCall }
 ): ProtocolAdapter | null {
-  if (isBuiltinProtocol(protocol)) return makeAiSdkAdapter(protocol)
+  if (isBuiltinProtocol(protocol)) return makeAiSdkAdapter(protocol, codeBridge?.nativeCall)
   const kind = (spec as { kind?: unknown } | null | undefined)?.kind
   if (spec && kind === "openai-compatible-variant") {
     // Validated when the adapter starts.

@@ -134,6 +134,159 @@ afterEach(() => {
   jest.restoreAllMocks()
 })
 
+describe("account-scoped custom provider configuration", () => {
+  const provider = {
+    id: "custom-siwc-test",
+    customName: "ChatGPT",
+    baseURL: "siwc://local-a/registration-a",
+    apiKey: "",
+    apiProtocol: "chatgpt-siwc" as const,
+    apiFlavor: "responses" as const,
+    customModels: ["model-a"],
+  }
+
+  it("forwards captured database ownership through the existing provider queue without mirroring", async () => {
+    const original = baseSettings({ customProviders: [], defaultProvider: "openai" })
+    useSettingsStore.setState({ settings: original })
+    dbSettings.saveSettings.mockImplementationOnce(async (patch) =>
+      baseSettings({ ...original, ...patch })
+    )
+    const scope = { db: {} as never, assertActive: jest.fn() }
+    await useSettingsStore.getState().addCustomProvider(provider, scope)
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customProviders: [
+          expect.objectContaining({
+            id: "custom-siwc-test",
+            apiKey: "",
+            apiProtocol: "chatgpt-siwc",
+          }),
+        ],
+      }),
+      { scope, mirrorToHost: false }
+    )
+    expect(useSettingsStore.getState().settings?.defaultProvider).toBe("openai")
+    expect(scope.assertActive).toHaveBeenCalled()
+  })
+
+  it("converges overlapping scoped additions with the same ID without changing defaults", async () => {
+    const original = baseSettings({
+      customProviders: [],
+      defaultProvider: "openai",
+      defaultAccountId: "legacy-account",
+    })
+    useSettingsStore.setState({ settings: original })
+    let release!: () => void
+    dbSettings.saveSettings.mockImplementationOnce(
+      (patch) =>
+        new Promise((resolve) => {
+          release = () => resolve(baseSettings({ ...original, ...patch }))
+        })
+    )
+    dbSettings.saveSettings.mockImplementationOnce(async (patch) =>
+      baseSettings({ ...original, ...patch })
+    )
+    const scope = { db: {} as never, assertActive: jest.fn() }
+    const first = useSettingsStore.getState().addCustomProvider(provider, scope)
+    const second = useSettingsStore.getState().addCustomProvider(provider, scope)
+    await waitForSaveStart()
+    expect(dbSettings.saveSettings).toHaveBeenCalledTimes(1)
+    release()
+    await Promise.all([first, second])
+    expect(useSettingsStore.getState().settings).toMatchObject({
+      defaultProvider: "openai",
+      defaultAccountId: "legacy-account",
+      customProviders: [expect.objectContaining({ id: provider.id })],
+    })
+    expect(useSettingsStore.getState().settings?.customProviders).toHaveLength(1)
+    expect(
+      dbSettings.saveSettings.mock.calls.every(
+        ([, options]) => options.scope === scope && options.mirrorToHost === false
+      )
+    ).toBe(true)
+  })
+
+  it("rejects a queued scoped addition after switching accounts before the write begins", async () => {
+    useSettingsStore.setState({ settings: baseSettings({ customProviders: [] }) })
+    let release!: (value: AppSettings) => void
+    dbSettings.saveSettings.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    const first = useSettingsStore.getState().setProviderConfig("openai", { enabled: true })
+    let active = true
+    const scope = {
+      db: {} as never,
+      assertActive: () => {
+        if (!active) throw new Error("scope changed")
+      },
+    }
+    const second = useSettingsStore.getState().addCustomProvider(provider, scope)
+    const rejection = expect(second).rejects.toThrow("scope changed")
+    await waitForSaveStart()
+    active = false
+    release(
+      baseSettings({
+        providerSettings: {
+          openai: { providerId: "openai", defaultModel: "model-a", enabled: true },
+        },
+      })
+    )
+    await first
+    await rejection
+    expect(dbSettings.saveSettings).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not publish an old database completion into the next account's settings", async () => {
+    useSettingsStore.setState({ settings: baseSettings({ customProviders: [] }) })
+    let release!: (value: AppSettings) => void
+    dbSettings.saveSettings.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    let active = true
+    const scope = {
+      db: {} as never,
+      assertActive: () => {
+        if (!active) throw new Error("scope changed")
+      },
+    }
+    const pending = useSettingsStore.getState().addCustomProvider(provider, scope)
+    const rejection = expect(pending).rejects.toThrow("scope changed")
+    await waitForSaveStart()
+    active = false
+    const nextAccount = baseSettings({ customProviders: [], defaultProvider: "anthropic" })
+    useSettingsStore.setState({ settings: nextAccount })
+    release(
+      baseSettings({
+        customProviders: [
+          {
+            ...provider,
+            providerId: provider.id,
+            defaultModel: "model-a",
+            enabled: true,
+            isCustom: true,
+            name: "ChatGPT",
+            models: ["model-a"],
+          },
+        ],
+      })
+    )
+    await rejection
+    expect(useSettingsStore.getState().settings).toBe(nextAccount)
+  })
+})
+
+async function waitForSaveStart() {
+  for (let index = 0; index < 10 && dbSettings.saveSettings.mock.calls.length === 0; index++)
+    await Promise.resolve()
+  expect(dbSettings.saveSettings).toHaveBeenCalledTimes(1)
+}
+
 // ---- load ----
 
 describe("load", () => {

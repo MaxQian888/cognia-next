@@ -1131,6 +1131,53 @@ pub fn generate_master_key() -> [u8; 32] {
     random_key()
 }
 
+/// Seal an independent native envelope with the unlocked store's key, without
+/// reading or mutating its cached secret map. The namespace authenticates the
+/// owning profile and subsystem, preventing ciphertext substitution.
+pub fn seal_namespace(namespace: &str, plaintext: &[u8]) -> Result<Vec<u8>, String> {
+    use aes_gcm::aead::Payload;
+    if namespace.is_empty() || namespace.len() > 1024 {
+        return Err("secret-store invalid envelope namespace".into());
+    }
+    let store = global()?.read();
+    let cipher = Aes256Gcm::new(&Key::<Aes256Gcm>::from(store.key));
+    let mut nonce_bytes = [0u8; 12];
+    rand::fill(&mut nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(
+            &Nonce::from(nonce_bytes),
+            Payload {
+                msg: plaintext,
+                aad: namespace.as_bytes(),
+            },
+        )
+        .map_err(|_| "secret-store envelope seal failed".to_string())?;
+    let mut blob = nonce_bytes.to_vec();
+    blob.extend_from_slice(&ciphertext);
+    Ok(blob)
+}
+
+/// Open a native envelope. No global secret-map cache is consulted or updated.
+pub fn open_namespace(namespace: &str, blob: &[u8]) -> Result<Vec<u8>, String> {
+    use aes_gcm::aead::Payload;
+    if namespace.is_empty() || namespace.len() > 1024 || blob.len() < 28 {
+        return Err("secret-store invalid envelope".into());
+    }
+    let store = global()?.read();
+    let cipher = Aes256Gcm::new(&Key::<Aes256Gcm>::from(store.key));
+    let nonce = Nonce::try_from(&blob[..12])
+        .map_err(|_| "secret-store invalid envelope nonce".to_string())?;
+    cipher
+        .decrypt(
+            &nonce,
+            Payload {
+                msg: &blob[12..],
+                aad: namespace.as_bytes(),
+            },
+        )
+        .map_err(|_| "secret-store envelope authentication failed".into())
+}
+
 // ---------------------------------------------------------------------------
 // Legacy per-subsystem keyring fallback (production) / stub (tests)
 // ---------------------------------------------------------------------------
@@ -1240,6 +1287,23 @@ pub fn delete(service: &str, account: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scoped_envelopes_authenticate_namespace_without_mutating_secret_map() {
+        let namespace = "test-siwc/profile-a";
+        let before = list_accounts("test-siwc").unwrap();
+        let sealed = seal_namespace(namespace, b"synthetic-token").unwrap();
+        assert_eq!(
+            open_namespace(namespace, &sealed).unwrap(),
+            b"synthetic-token"
+        );
+        assert!(open_namespace("test-siwc/profile-b", &sealed).is_err());
+        let mut damaged = sealed;
+        damaged[15] ^= 1;
+        assert!(open_namespace(namespace, &damaged).is_err());
+        assert_eq!(list_accounts("test-siwc").unwrap(), before);
+        assert!(seal_namespace("", b"value").is_err());
+    }
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 

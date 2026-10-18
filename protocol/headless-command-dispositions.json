@@ -3,6 +3,26 @@
   "groups": [
     {
       "disposition": "local-only",
+      "reason": "Sign in with ChatGPT registrations, OAuth callbacks, native token storage, Responses streams and scoped app-server processes belong only to the unlocked local desktop profile. Remote and headless clients cannot use or modify this desktop authorization namespace.",
+      "commands": [
+        "siwc_begin_login",
+        "siwc_cancel_login",
+        "siwc_delete_connection",
+        "siwc_list_connections",
+        "siwc_list_models",
+        "siwc_poll_login",
+        "siwc_refresh_connection",
+        "siwc_responses_cancel",
+        "siwc_responses_open",
+        "siwc_responses_read",
+        "siwc_send_app_server",
+        "siwc_sign_out",
+        "siwc_spawn_app_server",
+        "siwc_stop_app_server"
+      ]
+    },
+    {
+      "disposition": "local-only",
       "reason": "Standalone frontend bundle and directory installation is coordinated by the interactive client's trust prompts and staged activation transaction. File/directory sources name client-local filesystem paths; the URL variant participates in the same client-owned activation flow.",
       "commands": [
         "plugin_bundle_install_from_file",

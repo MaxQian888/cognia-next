@@ -28,6 +28,7 @@ const MAX_BACKOFF_SECS: i64 = 15 * 60;
 struct ActiveAccountSecuritySession {
     local_account_id: String,
     verifier_digest: String,
+    generation: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -49,6 +50,7 @@ pub struct AccountSecuritySession {
     /// from the renderer.
     file_share: parking_lot::Mutex<Option<std::sync::Arc<cognia_file_share::FileShareService>>>,
     active: parking_lot::RwLock<Option<ActiveAccountSecuritySession>>,
+    siwc: parking_lot::Mutex<Option<crate::siwc::SiwcState>>,
     throttle: parking_lot::Mutex<HashMap<String, PasswordThrottleRecord>>,
     throttle_path: Option<PathBuf>,
     /// Where the cloud deployment record lives (`cloud_deployment`).
@@ -69,6 +71,7 @@ impl AccountSecuritySession {
             gateway: parking_lot::Mutex::new(None),
             file_share: parking_lot::Mutex::new(None),
             active: parking_lot::RwLock::new(None),
+            siwc: parking_lot::Mutex::new(None),
             throttle: parking_lot::Mutex::new(throttle),
             throttle_path,
             data_dir,
@@ -106,6 +109,9 @@ impl AccountSecuritySession {
 
     fn activate(&self, local_account_id: &str, verifier_digest: String) {
         let mut active = self.active.write();
+        if let Some(siwc) = self.siwc.lock().as_ref() {
+            siwc.invalidate();
+        }
         if let Some((gateway, app)) = self.gateway.lock().as_ref() {
             gateway.activate_account(local_account_id);
             if let Some(app) = app {
@@ -115,12 +121,16 @@ impl AccountSecuritySession {
         *active = Some(ActiveAccountSecuritySession {
             local_account_id: local_account_id.to_owned(),
             verifier_digest,
+            generation: uuid::Uuid::new_v4().to_string(),
         });
         self.bind_file_share(Some(local_account_id.to_owned()));
     }
 
     fn clear(&self) {
         let mut active = self.active.write();
+        if let Some(siwc) = self.siwc.lock().as_ref() {
+            siwc.invalidate();
+        }
         if let Some((gateway, app)) = self.gateway.lock().as_ref() {
             gateway.lock_account();
             if let Some(app) = app {
@@ -215,6 +225,43 @@ impl AccountSecuritySession {
     /// merely that no other one is.
     pub fn assert_unlocked_account(&self, local_account_id: &str) -> Result<(), String> {
         self.require_account(local_account_id).map(|_| ())
+    }
+
+    /// Native-only generation fences an async operation across lock/unlock ABA.
+    pub fn unlock_generation(&self, local_account_id: &str) -> Result<String, String> {
+        Ok(self.require_account(local_account_id)?.generation)
+    }
+
+    pub fn assert_unlock_generation(
+        &self,
+        local_account_id: &str,
+        generation: &str,
+    ) -> Result<(), String> {
+        if self.require_account(local_account_id)?.generation != generation {
+            return Err("siwc_account_changed".into());
+        }
+        Ok(())
+    }
+
+    /// Publish an SIWC child atomically with respect to account locking.
+    pub(crate) fn with_unlock_generation<T>(
+        &self,
+        local_account_id: &str,
+        generation: &str,
+        operation: impl FnOnce() -> T,
+    ) -> Result<T, String> {
+        let active = self.active.read();
+        if !active
+            .as_ref()
+            .is_some_and(|a| a.local_account_id == local_account_id && a.generation == generation)
+        {
+            return Err("siwc_account_changed".into());
+        }
+        Ok(operation())
+    }
+
+    pub fn attach_siwc(&self, state: crate::siwc::SiwcState) {
+        *self.siwc.lock() = Some(state);
     }
 
     /// Throttle gate for a quick-unlock attempt.
@@ -858,6 +905,33 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn siwc_unlock_generation_rejects_lock_and_same_account_reunlock() {
+        let session = super::AccountSecuritySession::new(None);
+        session.activate("fixture-profile", "fixture-verifier".into());
+        let generation = session.unlock_generation("fixture-profile").unwrap();
+        assert!(session
+            .assert_unlock_generation("fixture-profile", &generation)
+            .is_ok());
+        assert!(session
+            .with_unlock_generation("fixture-profile", &generation, || 42)
+            .is_ok());
+        session.clear();
+        assert!(session
+            .assert_unlock_generation("fixture-profile", &generation)
+            .is_err());
+        session.activate("fixture-profile", "fixture-verifier".into());
+        assert!(session
+            .assert_unlock_generation("fixture-profile", &generation)
+            .is_err());
+        assert!(session
+            .with_unlock_generation("fixture-profile", &generation, || 42)
+            .is_err());
+        assert_ne!(
+            session.unlock_generation("fixture-profile").unwrap(),
+            generation
+        );
+    }
     use super::*;
 
     fn account_password_verify(

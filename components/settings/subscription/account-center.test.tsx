@@ -103,6 +103,9 @@ jest.mock("./account-preset-selector", () => ({
 }))
 jest.mock("./add-account-dialog/anthropic", () => ({ AnthropicAddAccountDialog: () => null }))
 jest.mock("./add-account-dialog/codex", () => ({ CodexAddAccountDialog: () => null }))
+jest.mock("./siwc-connections", () => ({
+  SiwcConnections: () => <section aria-label="Separate ChatGPT connections" />,
+}))
 
 jest.mock("./add-account-dialog/subscription", () => ({
   SubscriptionAccountDialog: ({ providerId }: { providerId?: string }) => (
@@ -136,6 +139,18 @@ beforeEach(() => {
 })
 
 describe("AccountCenter", () => {
+  it("mounts independent SIWC management only for all accounts or Codex without altering legacy selection", async () => {
+    render(<AccountCenter />)
+    expect(screen.getByRole("region", { name: "Separate ChatGPT connections" })).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("account-filter-anthropic"))
+    expect(
+      screen.queryByRole("region", { name: "Separate ChatGPT connections" })
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("account-filter-codex"))
+    expect(screen.getByRole("region", { name: "Separate ChatGPT connections" })).toBeInTheDocument()
+    expect(stateByProvider.codex.setActive).not.toHaveBeenCalled()
+    await waitFor(() => expect(getAccountDetail).toHaveBeenCalled())
+  })
   it("renders all providers and explains active versus default", async () => {
     render(<AccountCenter />)
     expect(screen.getAllByText("Claude Pro").length).toBeGreaterThan(0)

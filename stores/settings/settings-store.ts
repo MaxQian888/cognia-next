@@ -366,7 +366,10 @@ interface SettingsState {
     providerId: string,
     patch: Partial<UserProviderSettings>
   ) => Promise<void>
-  upsertCustomProvider: (provider: CustomProviderSettings) => Promise<void>
+  upsertCustomProvider: (
+    provider: CustomProviderSettings,
+    scope?: CustomProviderMutationScope
+  ) => Promise<void>
   /**
    * Add a new custom provider (returns its id).
    *
@@ -375,23 +378,26 @@ interface SettingsState {
    * fields default to safe values. This matches Cognia's component
    * call sites which pass only the user-entered fields.
    */
-  addCustomProvider: (provider: {
-    customName: string
-    baseURL: string
-    apiKey: string
-    apiProtocol: import("@cognia/provider-types/provider").ApiProtocol
-    apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
-    customModels: string[]
-    defaultModel?: string
-    enabled?: boolean
-    customModelMetadata?: Record<
-      string,
-      import("@cognia/provider-types/provider").CustomModelMetadata
-    >
-    discoveredModels?: import("@cognia/provider-types/provider").ProviderModelDiscoveryEntry[]
-    discoveredModelsLastFetched?: number
-    id?: string
-  }) => Promise<string>
+  addCustomProvider: (
+    provider: {
+      customName: string
+      baseURL: string
+      apiKey: string
+      apiProtocol: import("@cognia/provider-types/provider").ApiProtocol
+      apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
+      customModels: string[]
+      defaultModel?: string
+      enabled?: boolean
+      customModelMetadata?: Record<
+        string,
+        import("@cognia/provider-types/provider").CustomModelMetadata
+      >
+      discoveredModels?: import("@cognia/provider-types/provider").ProviderModelDiscoveryEntry[]
+      discoveredModelsLastFetched?: number
+      id?: string
+    },
+    scope?: CustomProviderMutationScope
+  ) => Promise<string>
   /** Patch an existing custom provider by id. */
   updateCustomProvider: (
     providerId: string,
@@ -771,6 +777,11 @@ export function resolveSkillBundleMirrors(settings: AppSettings | null | undefin
 
 let updateSettingsSaveQueue: Promise<void> = Promise.resolve()
 let providerMutationQueue: Promise<unknown> = Promise.resolve()
+
+/** Optional account-bound persistence for native-only connection references. */
+type CustomProviderMutationScope = NonNullable<
+  NonNullable<Parameters<typeof saveSettings>[1]>["scope"]
+>
 
 function enqueueProviderMutation<T>(task: () => Promise<T>): Promise<T> {
   const next = providerMutationQueue.catch(() => undefined).then(task)
@@ -1700,18 +1711,23 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       await get().setProviderConfig(providerId, patch)
     },
 
-    upsertCustomProvider: (provider) =>
+    upsertCustomProvider: (provider, scope) =>
       enqueueProviderMutation(async () => {
+        scope?.assertActive()
         const cur = get().settings
         const list = cur?.customProviders ?? []
         const idx = list.findIndex((p) => p.id === provider.id)
         const updated =
           idx >= 0 ? list.map((p) => (p.id === provider.id ? provider : p)) : [...list, provider]
-        const next = await saveSettings({ customProviders: updated })
+        const next = scope
+          ? await saveSettings({ customProviders: updated }, { scope, mirrorToHost: false })
+          : await saveSettings({ customProviders: updated })
+        scope?.assertActive()
         set({ settings: next })
       }),
 
-    addCustomProvider: async (provider) => {
+    addCustomProvider: async (provider, scope) => {
+      scope?.assertActive()
       const id = provider.id || `custom-${Date.now().toString(36)}`
       const full: CustomProviderSettings = {
         // UserProviderSettings base
@@ -1733,7 +1749,8 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         discoveredModels: provider.discoveredModels,
         discoveredModelsLastFetched: provider.discoveredModelsLastFetched,
       }
-      await get().upsertCustomProvider(full)
+      await get().upsertCustomProvider(full, scope)
+      scope?.assertActive()
       return id
     },
 

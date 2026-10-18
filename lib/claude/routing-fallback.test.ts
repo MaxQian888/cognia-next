@@ -808,3 +808,223 @@ it("retains a custom subscription pin only within the same registered provider",
     null
   )
 })
+
+describe("SIWC routing boundary", () => {
+  beforeEach(() => {
+    sendPromptMock.mockReset()
+    useChatStore.getState().clear()
+    useSettingsStore.setState({
+      settings: {
+        routingFallbackEnabled: true,
+        customProviders: [
+          {
+            id: "siwc",
+            apiProtocol: "chatgpt-siwc",
+            enabled: true,
+            baseURL: "siwc://a/c",
+            defaultModel: "m",
+          },
+        ],
+      } as never,
+    })
+  })
+  it("does not activate SIWC from a saved legacy fallback chain", async () => {
+    seedCache("s", [
+      { providerId: "openai", modelId: "m" },
+      { providerId: "siwc", modelId: "m" },
+    ])
+    expect(await attemptRoutingFallback("s", "rate limit exceeded")).toBe(false)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+  it("does not move a selected SIWC turn onto a paid legacy provider", async () => {
+    seedCache("s", [
+      { providerId: "siwc", modelId: "m" },
+      { providerId: "openai", modelId: "m" },
+    ])
+    expect(await attemptRoutingFallback("s", "rate limit exceeded")).toBe(false)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("subscription billing boundary on automatic routing retry", () => {
+  const pluginId = "billing-fallback"
+  const currentId = `${pluginId}:source`
+  const subscriptionId = `${pluginId}:target`
+  let registry: typeof import("@/lib/subscription/core/provider-registry")
+
+  beforeEach(async () => {
+    registry = await import("@/lib/subscription/core/provider-registry")
+    for (const id of ["source", "target"]) {
+      registry.registerPluginSubscriptionProvider(
+        {
+          id,
+          name: id,
+          billingMode: "subscription",
+          baseUrl: `https://${id}.subscription.example/v1`,
+          protocol: "openai",
+          models: ["model-a", "model-b"],
+        },
+        pluginId
+      )
+    }
+    sendPromptMock.mockReset().mockResolvedValue(undefined)
+    managedCredentialMock.mockReset().mockImplementation(async (definition: { id: string }) => ({
+      apiKey: `vault-${definition.id}`,
+      baseURL: "https://target.subscription.example/v1",
+    }))
+    getSessionMock.mockReset().mockResolvedValue({ id: "s1" })
+    getCharacterMock.mockReset()
+    rerouteRouterFusionSendMock.mockReset()
+    abortRouterFusionSendMock.mockClear()
+    useChatStore.getState().clear()
+    useSettingsStore.setState({
+      settings: {
+        routingFallbackEnabled: true,
+        defaultProvider: currentId,
+        defaultAccountIds: { [currentId]: "source-account", [subscriptionId]: "target-account" },
+        providerSettings: {
+          [currentId]: { enabled: true, apiKey: "stale-metered-key" },
+          [subscriptionId]: { enabled: true, apiKey: "stale-metered-target-key" },
+          openai: { enabled: true, apiKey: "metered-openai-key" },
+        },
+      } as never,
+    })
+  })
+
+  afterEach(() => {
+    registry.unregisterSubscriptionProvidersByPlugin(pluginId)
+  })
+
+  it.each(["openai", "unloaded:unknown"])(
+    "does not retry a rate-limited subscription against %s or mutate the cached turn",
+    async (targetId) => {
+      seedCache("s1", [
+        { providerId: currentId, modelId: "model-a" },
+        { providerId: targetId, modelId: "model-b" },
+      ])
+      const cached = useChatStore.getState().lastSendBySession.s1
+      expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(false)
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      expect(managedCredentialMock).not.toHaveBeenCalled()
+      expect(useChatStore.getState().lastSendBySession.s1).toBe(cached)
+    }
+  )
+
+  it("also rejects an explicitly pay-as-you-go plugin declaration", async () => {
+    const targetId = registry.registerPluginSubscriptionProvider(
+      {
+        id: "metered",
+        name: "Metered API",
+        billingMode: "pay-as-you-go",
+        baseUrl: "https://api.metered.example/v1",
+        protocol: "openai",
+        models: ["model-b"],
+      },
+      pluginId
+    )
+    seedCache("s1", [
+      { providerId: currentId, modelId: "model-a" },
+      { providerId: targetId, modelId: "model-b" },
+    ])
+    expect(await attemptRoutingFallback("s1", "HTTP 429")).toBe(false)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(useChatStore.getState().lastSendBySession.s1?.attemptIndex).toBe(0)
+  })
+
+  it("retries a connected subscription using the target provider's selected default account", async () => {
+    seedCache("s1", [
+      { providerId: currentId, modelId: "model-a" },
+      { providerId: subscriptionId, modelId: "model-b" },
+    ])
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(true)
+    expect(managedCredentialMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: subscriptionId, billingMode: "subscription" }),
+      "target-account"
+    )
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "s1",
+      "hello",
+      expect.objectContaining({
+        provider: subscriptionId,
+        model: "model-b",
+        providerCredentials: expect.objectContaining({ apiKey: `vault-${subscriptionId}` }),
+      })
+    )
+    expect(useChatStore.getState().lastSendBySession.s1?.attemptIndex).toBe(1)
+  })
+
+  it("allows a different model in the same subscription using its current vault account", async () => {
+    seedCache("s1", [
+      { providerId: currentId, modelId: "model-a" },
+      { providerId: currentId, modelId: "model-b" },
+    ])
+    expect(await attemptRoutingFallback("s1", "HTTP 429")).toBe(true)
+    expect(managedCredentialMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: currentId }),
+      "source-account"
+    )
+  })
+
+  it.each(["default", "explicit"])(
+    "does not retry when the target %s vault account is missing",
+    async (selection) => {
+      managedCredentialMock.mockResolvedValue(null)
+      if (selection === "explicit")
+        getSessionMock.mockResolvedValue({
+          id: "s1",
+          providerOverride: currentId,
+          accountId: "removed",
+        })
+      seedCache("s1", [
+        { providerId: currentId, modelId: "model-a" },
+        { providerId: selection === "explicit" ? currentId : subscriptionId, modelId: "model-b" },
+      ])
+      const cached = useChatStore.getState().lastSendBySession.s1
+      expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(false)
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      expect(useChatStore.getState().lastSendBySession.s1).toBe(cached)
+    }
+  )
+
+  it("does not replay a cached turn after its subscription plugin is unloaded", async () => {
+    seedCache("s1", [
+      { providerId: currentId, modelId: "model-a" },
+      { providerId: "openai", modelId: "model-b" },
+    ])
+    const cached = useChatStore.getState().lastSendBySession.s1
+    registry.unregisterSubscriptionProvidersByPlugin(pluginId)
+    expect(await attemptRoutingFallback("s1", "HTTP 429")).toBe(false)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(useChatStore.getState().lastSendBySession.s1).toBe(cached)
+  })
+
+  it("rechecks the billing boundary if Router + Fusion substitutes a metered target", async () => {
+    const entries = [
+      { providerId: currentId, modelId: "model-a" },
+      { providerId: subscriptionId, modelId: "model-b" },
+    ]
+    useChatStore.getState().setLastSend("s1", {
+      content: "hello",
+      attemptIndex: 0,
+      options: {
+        ...baseOptions(entries),
+        routerFusion: { runId: "original-run", providerId: currentId, modelId: "model-a" },
+      } as SendOptions,
+    })
+    rerouteRouterFusionSendMock.mockImplementationOnce(
+      async ({ options }: { options: SendOptions }) => ({
+        kind: "send",
+        options: { ...options, provider: "openai", routerFusion: { runId: "metered-run" } },
+      })
+    )
+    const cached = useChatStore.getState().lastSendBySession.s1
+    expect(await attemptRoutingFallback("s1", "HTTP 429")).toBe(false)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(useChatStore.getState().lastSendBySession.s1).toBe(cached)
+    expect(abortRouterFusionSendMock).toHaveBeenCalledWith(
+      "s1",
+      expect.objectContaining({ provider: "openai" }),
+      expect.any(String)
+    )
+  })
+})

@@ -17,8 +17,11 @@ import { useChatStore, type LastSendCacheEntry } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { SendOptions } from "@cognia/agent-config-types"
 import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
+import { getAllProviders } from "@cognia/provider-types/provider"
+import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
 import { recordEvent } from "@cognia/agent-trace/emitter"
 import { RoutingAttemptController } from "@cognia/provider-routing/routing-attempt-controller"
+import { isSiwcRoutingProvider } from "@cognia/provider-routing/build-preview-engine"
 import {
   applyProviderAttemptLimits,
   resolveProviderAttemptOptions,
@@ -85,6 +88,23 @@ async function issueRetry(
   cacheUpdate: Pick<LastSendCacheEntry, "attemptIndex" | "specialAttempts">
 ): Promise<boolean> {
   const settings = useSettingsStore.getState().settings
+  const currentDefinition = getSubscriptionProvider(
+    cached.options.provider ?? "",
+    settings?.customProviders
+  )
+  const nextDefinition = getSubscriptionProvider(nextEntry.providerId, settings?.customProviders)
+  // A subscription failure cannot implicitly opt the user into metered billing.
+  if (
+    currentDefinition?.billingMode === "subscription" &&
+    nextDefinition?.billingMode !== "subscription"
+  )
+    return false
+  if (
+    settings &&
+    (isSiwcRoutingProvider(settings, nextEntry.providerId) ||
+      isSiwcRoutingProvider(settings, cached.options.provider ?? ""))
+  )
+    return false
   let attemptOptions: Awaited<ReturnType<typeof resolveProviderAttemptOptions>> = {}
   try {
     if (settings) {
@@ -144,6 +164,8 @@ async function issueRetry(
     console.warn("routing-fallback credential resolution failed", error)
     return false
   }
+  if (nextDefinition?.billingMode === "subscription" && !attemptOptions.providerCredentials?.apiKey)
+    return false
   const retryOptions: SendOptions = {
     ...cached.options,
     provider: nextEntry.providerId,
@@ -197,6 +219,27 @@ async function issueRetry(
       console.warn("routing-fallback reroute failed", error)
       return false
     }
+  }
+
+  // Recheck after asynchronous vault and routing work: plugin unload or a
+  // Router + Fusion substitution must not bypass the billing boundary.
+  if (
+    (currentDefinition?.billingMode === "subscription" &&
+      getSubscriptionProvider(cached.options.provider ?? "", settings?.customProviders) !==
+        currentDefinition) ||
+    ((currentDefinition?.billingMode === "subscription" ||
+      nextDefinition?.billingMode === "subscription") &&
+      (getSubscriptionProvider(dispatchOptions.provider ?? "", settings?.customProviders)
+        ?.billingMode !== "subscription" ||
+        !dispatchOptions.providerCredentials?.apiKey))
+  ) {
+    if (routerFusionRunStarted)
+      await abortRouterFusionSend(
+        sessionId,
+        dispatchOptions,
+        "Subscription billing boundary changed"
+      )
+    return false
   }
 
   // Bump the cache *before* the IPC so a second consecutive failure
@@ -293,6 +336,18 @@ export async function attemptRoutingFallback(
 
   const cached = useChatStore.getState().lastSendBySession[sessionId]
   if (!cached) return false
+  const currentProviderId = cached.options.provider ?? ""
+  if (
+    currentProviderId.includes(":") &&
+    !getAllProviders()[currentProviderId] &&
+    !settings?.customProviders?.some((provider) => provider.id === currentProviderId)
+  )
+    return false
+  if (
+    cached.options.providerCredentials?.protocol === "chatgpt-siwc" ||
+    (settings && isSiwcRoutingProvider(settings, cached.options.provider ?? ""))
+  )
+    return false
   // Never replay after the first visible assistant frame or tool dispatch.
   if (cached.routingCommitted) return false
   // A ledgered turn reroutes at most MAX_LEDGERED_REROUTES times (ADR-0188 D5).

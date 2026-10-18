@@ -657,6 +657,11 @@ const fn subsystem_index(subsystem: ManagedSubsystem) -> usize {
 async fn teardown_subsystem(app: &AppHandle, subsystem: ManagedSubsystem) {
     match subsystem {
         ManagedSubsystem::ExternalAgent => {
+            // Revoke SIWC listeners/callbacks before reaping their children;
+            // the managed AppHandle can outlive Tauri's event-loop shutdown.
+            if let Some(siwc) = app.try_state::<crate::siwc::SiwcState>() {
+                siwc.invalidate();
+            }
             if let Some(st) = app.try_state::<ExternalAgentState>() {
                 // Through the router when one is installed, so agents in
                 // remote sandboxes stop too (ADR-0221).

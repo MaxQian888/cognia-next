@@ -1,4 +1,4 @@
-import { listSubscriptionProviders } from "./provider-registry"
+import { getSubscriptionProvider, listSubscriptionProviders } from "./provider-registry"
 import type { AccountSummary, ProviderId } from "@/types/subscription"
 
 export interface AccountCapabilities {
@@ -44,6 +44,7 @@ export function accountCapabilities(account: AccountSummary): AccountCapabilitie
 
   return {
     ...BASE,
+    bindPreset: getSubscriptionProvider(account.provider)?.billingMode !== "subscription",
     reauthenticate: account.authMode === "chatgpt" && !account.isExternal,
   }
 }

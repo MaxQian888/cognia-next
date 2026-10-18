@@ -47,7 +47,16 @@ test("normalizeProtocol folds the gemini alias to google, passes everything else
 })
 
 test("isBuiltInProtocol recognizes the first-party families incl. the gemini alias", () => {
-  for (const p of ["openai", "anthropic", "google", "mistral", "cohere", "azure", "bedrock"]) {
+  for (const p of [
+    "openai",
+    "anthropic",
+    "google",
+    "mistral",
+    "cohere",
+    "azure",
+    "bedrock",
+    "chatgpt-siwc",
+  ]) {
     assert.equal(isBuiltInProtocol(p), true, p)
   }
   assert.equal(isBuiltInProtocol("gemini"), true, "gemini normalizes to google")

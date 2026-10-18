@@ -9,6 +9,10 @@ import { createTogetherAI } from "@ai-sdk/togetherai"
 import { createFireworks } from "@ai-sdk/fireworks"
 import { createDeepInfra } from "@ai-sdk/deepinfra"
 import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
+import { createNativeSiwcFetch } from "@/lib/subscription/siwc/native-fetch"
+jest.mock("@/lib/subscription/siwc/native-fetch", () => ({
+  createNativeSiwcFetch: jest.fn(() => jest.fn()),
+}))
 
 import {
   createProviderSettingsSnapshot,
@@ -1176,3 +1180,137 @@ it.each([
   } as ResolvedProvider)
   expect(result).toMatchObject({ __provider: expected, id: model })
 })
+
+describe("independent SIWC feature transport", () => {
+  const custom = {
+    id: "siwc-choice",
+    name: "ChatGPT connection",
+    protocol: "chatgpt-siwc",
+    baseURL: "siwc://account/connection",
+    defaultModel: "m",
+  }
+  it("does not silently replace an SIWC default with a legacy provider", () => {
+    const result = resolveFeatureProvider(
+      {
+        featureId: "chat",
+        routeProfile: "general-text",
+        selectionMode: "any",
+        fallbackMode: "first-eligible",
+      },
+      {
+        defaultProvider: custom.id,
+        providers: { openai: { apiKey: "legacy" } },
+        customProviders: [custom],
+      }
+    )
+    expect(result).toMatchObject({
+      kind: "blocked",
+      code: "policy_blocked",
+      attemptedProviderIds: [custom.id],
+      fallbackProviderIds: [],
+    })
+  })
+  it("resolves opaque references without API keys and excludes paid fallbacks", () => {
+    const result = resolveFeatureProvider(
+      {
+        featureId: "chat",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: custom.id,
+        fallbackMode: "ordered",
+        fallbackProviderOrder: ["openai"],
+      },
+      {
+        defaultProvider: "openai",
+        providers: { openai: { apiKey: "legacy" } },
+        customProviders: [custom],
+      }
+    )
+    expect(result.kind).toBe("resolved")
+    expect(result).toMatchObject({
+      protocol: "chatgpt-siwc",
+      apiKey: undefined,
+      baseURL: custom.baseURL,
+      fallbackProviderIds: [],
+    })
+  })
+  it.each([
+    { ...custom, enabled: false },
+    { ...custom, baseURL: "https://relay.invalid" },
+    { ...custom, apiKey: "legacy" },
+  ])("blocks an unavailable or unsafe SIWC choice without resolving another provider", (row) => {
+    const result = resolveFeatureProvider(
+      {
+        featureId: "chat",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: custom.id,
+        fallbackMode: "ordered",
+        fallbackProviderOrder: ["openai"],
+      },
+      {
+        defaultProvider: "openai",
+        providers: { openai: { apiKey: "legacy" } },
+        customProviders: [row],
+      }
+    )
+    expect(result.kind).toBe("blocked")
+    expect(result.attemptedProviderIds).toEqual([custom.id])
+  })
+  it("always constructs Responses with native fetch rather than caller global fetch", () => {
+    const directFetch = jest.fn()
+    createFeatureProviderModel(
+      {
+        kind: "resolved",
+        providerId: custom.id,
+        protocol: "chatgpt-siwc",
+        apiKey: undefined,
+        baseURL: custom.baseURL,
+        model: "m",
+        isCustomProvider: true,
+        useProxy: false,
+      },
+      { fetch: directFetch }
+    )
+    expect(createNativeSiwcFetch).toHaveBeenCalledWith(custom.baseURL)
+    expect(createOpenAI).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        apiKey: "cognia-native-siwc",
+        baseURL: "https://siwc.cognia.invalid/v1",
+        fetch: expect.any(Function),
+      })
+    )
+    expect(directFetch).not.toHaveBeenCalled()
+  })
+})
+
+it.each(["first-eligible", "ordered"] as const)(
+  "never implicitly falls back to an SIWC connection (%s)",
+  (fallbackMode) => {
+    const result = resolveFeatureProvider(
+      {
+        featureId: "chat",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "missing-legacy",
+        fallbackMode,
+        fallbackProviderOrder: ["siwc-choice"],
+      },
+      {
+        defaultProvider: "missing-legacy",
+        providers: {},
+        customProviders: [
+          {
+            id: "siwc-choice",
+            name: "ChatGPT",
+            protocol: "chatgpt-siwc",
+            baseURL: "siwc://a/c",
+            defaultModel: "m",
+          },
+        ],
+      }
+    )
+    expect(result.kind).toBe("unresolved")
+    expect(result.attemptedProviderIds).toEqual(["missing-legacy"])
+  }
+)

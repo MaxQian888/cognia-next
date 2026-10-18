@@ -18,6 +18,15 @@ import {
   resolveProviderProtocol,
 } from "../provider-protocol.ts"
 import { buildBedrockProviderOptions } from "../bedrock.ts"
+import { withSiwcStreamingGeneration } from "../siwc-language-model.ts"
+import {
+  createSiwcFetch,
+  decodeSiwcReference,
+  SIWC_PROTOCOL,
+  SIWC_RESPONSES_BASE_URL,
+  SIWC_SDK_PLACEHOLDER,
+  type SiwcNativeCall,
+} from "../siwc-fetch.ts"
 import { partitionPrompt } from "../prompt-partition.ts"
 import { aiSdkTelemetry, withTraceparent } from "../../platform/telemetry/index.ts"
 import { EFFORT_TO_BUDGET, OPENAI_EFFORT_VALUES } from "../reasoning-effort-tables.ts"
@@ -52,6 +61,8 @@ export interface ModelSettings {
   profile?: string | undefined
   roleArn?: string | undefined
   roleSessionName?: string | undefined
+  /** Native-only SIWC transport. Never falls back to global fetch. */
+  nativeFetch?: typeof globalThis.fetch | undefined
 }
 
 export { isGenuineOpenAiEndpoint, isResponsesOnlyEndpoint }
@@ -284,6 +295,7 @@ export async function buildModel({
   profile,
   roleArn,
   roleSessionName,
+  nativeFetch,
 }: ModelSettings): Promise<ProviderModel> {
   const base = await buildRawModel({
     protocol: providerId === "commandcode" ? resolveProviderProtocol(providerId, model) : protocol,
@@ -301,6 +313,7 @@ export async function buildModel({
     profile,
     roleArn,
     roleSessionName,
+    nativeFetch,
   })
   return withReasoningExtraction(base, model)
 }
@@ -322,8 +335,24 @@ async function buildRawModel({
   profile,
   roleArn,
   roleSessionName,
+  nativeFetch,
 }: ModelSettings): Promise<ProviderModel> {
   switch (protocol) {
+    case SIWC_PROTOCOL: {
+      decodeSiwcReference(baseURL)
+      if (!nativeFetch) throw new Error("SIWC requires a native Host transport")
+      if (apiKey || (headers && Object.keys(headers).length)) {
+        throw new Error("SIWC cannot use API keys or custom authorization headers")
+      }
+      const { createOpenAI } = await import("@ai-sdk/openai")
+      return withSiwcStreamingGeneration(
+        createOpenAI({
+          apiKey: SIWC_SDK_PLACEHOLDER,
+          baseURL: SIWC_RESPONSES_BASE_URL,
+          fetch: nativeFetch,
+        }).responses(model)
+      )
+    }
     case "openai": {
       // The resolver intentionally keeps DeepSeek in the openai wire-protocol
       // family, but the official adapter understands DeepSeek's native
@@ -428,7 +457,7 @@ interface StreamTextResultLike {
 }
 
 /** The adapter for one of the built-in AI SDK protocols. */
-export function makeAiSdkAdapter(protocol: string): ProtocolAdapter {
+export function makeAiSdkAdapter(protocol: string, nativeCall?: SiwcNativeCall): ProtocolAdapter {
   return {
     id: `ai-sdk:${protocol}`,
     async start(req: NormalizedRequest): Promise<AdapterResult> {
@@ -436,6 +465,9 @@ export function makeAiSdkAdapter(protocol: string): ProtocolAdapter {
       const providerId = req.providerId
       const modelProtocol =
         providerId === "commandcode" ? resolveProviderProtocol(providerId, req.model) : protocol
+      if (protocol === SIWC_PROTOCOL && !nativeCall) {
+        throw new Error("SIWC requires a native Host transport")
+      }
       const modelInstance = await buildModel({
         protocol: modelProtocol,
         model: req.model,
@@ -452,6 +484,9 @@ export function makeAiSdkAdapter(protocol: string): ProtocolAdapter {
         profile: creds.profile,
         roleArn: creds.roleArn,
         roleSessionName: creds.roleSessionName,
+        ...(protocol === SIWC_PROTOCOL
+          ? { nativeFetch: createSiwcFetch(decodeSiwcReference(creds.baseURL), nativeCall!) }
+          : {}),
       })
       // `streamArgs` is assembled from renderer-provided `modelParams`, so it is
       // a plain record here and the SDK validates it.
@@ -467,6 +502,9 @@ export function makeAiSdkAdapter(protocol: string): ProtocolAdapter {
         model: modelInstance,
         ...partitionPrompt(req.messages),
         ...(req.modelParams ?? {}),
+      }
+      if (protocol === SIWC_PROTOCOL) {
+        streamArgs.providerOptions = { openai: { store: false } }
       }
       // OpenCode Go requires an honest client identity and stable per-conversation
       // session header, including auxiliary requests (docs checked 2026-09-11).
@@ -508,10 +546,10 @@ export function makeAiSdkAdapter(protocol: string): ProtocolAdapter {
       // (e.g. the anthropic cacheControl breakpoint) so neither clobbers the
       // other.
       const reasoningOptions = buildReasoningProviderOptions(
-        modelProtocol,
-        creds.baseURL,
+        modelProtocol === SIWC_PROTOCOL ? "openai" : modelProtocol,
+        modelProtocol === SIWC_PROTOCOL ? undefined : creds.baseURL,
         req.reasoning,
-        { providerId }
+        { providerId: modelProtocol === SIWC_PROTOCOL ? "openai" : providerId }
       )
       // Codex's own Responses-API fields (store:false + encrypted reasoning).
       // Merged after the reasoning block so both land under the `openai` key.
@@ -545,7 +583,32 @@ export function makeAiSdkAdapter(protocol: string): ProtocolAdapter {
       // provider-configured `modelParams.maxRetries` exactly then and never else.
       if (typeof req.maxRetries === "number") streamArgs.maxRetries = req.maxRetries
       if (req.tools && Object.keys(req.tools).length > 0) {
-        streamArgs.tools = req.tools
+        streamArgs.tools =
+          protocol === SIWC_PROTOCOL
+            ? Object.fromEntries(
+                Object.entries(req.tools).map(([name, value]) => {
+                  const tool = value as Record<string, unknown>
+                  const options = tool.providerOptions as Record<string, unknown> | undefined
+                  const openai = options?.openai as Record<string, unknown> | undefined
+                  return [
+                    name,
+                    {
+                      ...tool,
+                      providerOptions: {
+                        ...options,
+                        openai: {
+                          ...openai,
+                          namespace: openai?.namespace ?? {
+                            name: "functions",
+                            description: "Cognia tools",
+                          },
+                        },
+                      },
+                    },
+                  ]
+                })
+              )
+            : req.tools
         if (req.repairToolCall) streamArgs.repairToolCall = req.repairToolCall
         // Multi-step agentic loop: AI SDK runs each tool's `execute` and feeds
         // the result back to the model until it stops or we hit the step cap.

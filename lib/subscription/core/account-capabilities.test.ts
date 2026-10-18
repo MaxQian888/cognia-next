@@ -1,4 +1,8 @@
 import { accountCapabilities, providerDisplayOrder } from "./account-capabilities"
+import {
+  registerPluginSubscriptionProvider,
+  unregisterSubscriptionProvidersByPlugin,
+} from "./provider-registry"
 
 import type { AccountSummary } from "@/types/subscription"
 
@@ -19,6 +23,26 @@ function summary(overrides: Partial<AccountSummary> = {}): AccountSummary {
 }
 
 describe("accountCapabilities", () => {
+  it("keeps a subscription plugin account on its declared billing endpoint", () => {
+    const provider = registerPluginSubscriptionProvider(
+      {
+        id: "plan",
+        name: "Plan",
+        protocol: "openai",
+        models: ["model"],
+        baseUrl: "https://plan.example/v1",
+        billingMode: "subscription",
+      },
+      "capability-test"
+    )
+    try {
+      expect(
+        accountCapabilities(summary({ provider, variant: "api-key", authMode: "api_key" }))
+      ).toMatchObject({ bindPreset: false, activate: true, updateCredential: true })
+    } finally {
+      unregisterSubscriptionProvidersByPlugin("capability-test")
+    }
+  })
   it("allows targeted reauthentication only for Cognia-managed Codex OAuth", () => {
     expect(accountCapabilities(summary()).reauthenticate).toBe(true)
     expect(accountCapabilities(summary({ authMode: "api_key" })).reauthenticate).toBe(false)

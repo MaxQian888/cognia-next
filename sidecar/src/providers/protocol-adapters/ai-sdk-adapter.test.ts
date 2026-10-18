@@ -769,3 +769,98 @@ test("start preserves SDK prototype getters without eagerly reading rejecting pr
   assert.deepEqual(await result.usage, { inputTokens: 12 })
   assert.equal(((await result.steps) as unknown[]).length, 1)
 })
+
+test("SIWC refuses absent native transport and foreign credentials", async () => {
+  await assert.rejects(
+    buildModel({ protocol: "chatgpt-siwc", model: "m", baseURL: "siwc://a/c" }),
+    /native Host/
+  )
+  await assert.rejects(
+    buildModel({
+      protocol: "chatgpt-siwc",
+      model: "m",
+      baseURL: "siwc://a/c",
+      apiKey: "legacy",
+      nativeFetch: async () => new Response(),
+    }),
+    /API keys/
+  )
+  await assert.rejects(
+    makeAiSdkAdapter("chatgpt-siwc").start({
+      model: "m",
+      messages: [],
+      credentials: { baseURL: "siwc://a/c" },
+    }),
+    /native Host/
+  )
+})
+
+test("SIWC uses Responses, private storage and namespaced tool definitions", async () => {
+  let captured: Record<string, unknown> | undefined
+  const originalTools = {
+    lookup: { description: "Look up a fact", inputSchema: { type: "object" } },
+  }
+  await makeAiSdkAdapter("chatgpt-siwc", async () => {
+    throw new Error("fake stream must not call native")
+  }).start({
+    model: "m",
+    messages: [],
+    credentials: { baseURL: "siwc://a/c" },
+    tools: originalTools,
+    reasoning: { effort: "high" },
+    streamTextFn(args) {
+      captured = args
+      return { stream: (async function* () {})() }
+    },
+  })
+  assert.equal((captured!.model as { provider: string }).provider, "openai.responses")
+  assert.equal(getPath(captured, "providerOptions.openai.store"), false)
+  assert.equal(getPath(captured, "providerOptions.openai.reasoningEffort"), "high")
+  assert.deepEqual(getPath(captured, "tools.lookup.providerOptions.openai.namespace"), {
+    name: "functions",
+    description: "Cognia tools",
+  })
+  assert.equal(getPath(originalTools, "lookup.providerOptions"), undefined)
+})
+
+test("SIWC actual SDK request uses native stream RPC and preserves function names in namespaces", async () => {
+  const { createSiwcFetch } = await import("../siwc-fetch.ts")
+  let body: Record<string, unknown> | undefined
+  const model = await buildModel({
+    protocol: "chatgpt-siwc",
+    model: "m",
+    baseURL: "siwc://a/c",
+    nativeFetch: createSiwcFetch(
+      { localAccountId: "a", connectionId: "c" },
+      async (method, params) => {
+        if (method.endsWith("open")) {
+          body = JSON.parse(String(params.body))
+          return { streamId: "s", status: 200, headers: { "content-type": "text/event-stream" } }
+        }
+        return { done: true }
+      }
+    ),
+  })
+  const response = await model.doStream({
+    prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+    tools: [
+      {
+        type: "function",
+        name: "lookup",
+        inputSchema: { type: "object", properties: {} },
+        providerOptions: {
+          openai: { namespace: { name: "functions", description: "Cognia tools" } },
+        },
+      },
+    ],
+    providerOptions: { openai: { store: false } },
+  })
+  const reader = response.stream.getReader()
+  while (!(await reader.read()).done) {
+    /* drain the fake native stream */
+  }
+  assert.equal(body!.stream, true)
+  assert.equal(body!.store, false)
+  assert.equal(getPath(body, "tools.0.type"), "namespace")
+  assert.equal(getPath(body, "tools.0.tools.0.name"), "lookup")
+})

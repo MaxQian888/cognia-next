@@ -81,6 +81,11 @@
  *
  * ## Deliberately NOT registered (lifecycle owned elsewhere or UI-only)
  *
+ * - `chatgpt-siwc` — desktop-only, on-demand native OAuth callbacks,
+ *   Responses idle sweepers and app-server loopback listeners. Native SIWC
+ *   commands own their deadlines and cancellation; account locking revokes
+ *   the generation, and sign-out/process exit stops owned execution. The
+ *   headless command dispositions refuse these local-only commands.
  * - `renderer-diagnostics` — opt-in Resource/Event/Navigation Timing and frame
  *   measurements owned by the renderer's live/capture/HUD sampling demand.
  *   Headless hosts have no document; their metrics use `performance-runtime`.

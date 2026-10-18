@@ -1,5 +1,6 @@
 mod a2ui_bridge;
 mod account_auth;
+mod siwc;
 #[cfg(all(feature = "agent-debug", desktop))]
 mod agent_debug;
 // ADR-0067 Tier C — extracted to `crates/cognia-agent-state` (zero `crate::`
@@ -498,6 +499,7 @@ pub fn run() {
         // env-builder) consume it via `subscription_get_active`.
         .manage(subscription::ActiveAccountState::new())
         .manage(subscription::codex::lifecycle::CodexLifecycleManager::new())
+        .manage(siwc::SiwcState::default())
         .manage(account_auth::AccountSecuritySession::new(dirs::data_dir()))
         .manage(WindowBehavior::new())
         .manage(selection_toolbar::SelectionToolbarState::default())
@@ -539,15 +541,23 @@ pub fn run() {
                 agent_debug::install(webview);
             }
 
+            if webview_watchdog::should_recover_native_service_worker(
+                webview.label(),
+                payload.event() == tauri::webview::PageLoadEvent::Finished,
+            ) {
+                let script = webview_watchdog::native_service_worker_recovery_script(
+                    webview.app_handle().config().build.dev_url.as_ref(),
+                );
+                if let Err(error) = webview.eval(script) {
+                    log::warn!("native asset service-worker recovery could not run: {error}");
+                }
+            }
+
             if !webview_watchdog::should_arm_boot_reveal(
                 webview.label(),
                 payload.event() == tauri::webview::PageLoadEvent::Finished,
             ) {
                 return;
-            }
-
-            if let Err(error) = webview.eval(webview_watchdog::NATIVE_SERVICE_WORKER_RECOVERY) {
-                log::warn!("native asset service-worker recovery could not run: {error}");
             }
 
             let watchdog = webview.state::<webview_watchdog::WebviewWatchdog>();
@@ -763,6 +773,20 @@ pub fn run() {
             // ADR-0025 — unified subscription module. Provider-agnostic CRUD,
             // active-pointer management, and provider preset persistence.
             subscription::commands::subscription_init,
+            siwc::siwc_list_connections,
+            siwc::siwc_begin_login,
+            siwc::siwc_poll_login,
+            siwc::siwc_cancel_login,
+            siwc::siwc_refresh_connection,
+            siwc::siwc_sign_out,
+            siwc::siwc_delete_connection,
+            siwc::siwc_list_models,
+            siwc::siwc_responses_open,
+            siwc::siwc_responses_read,
+            siwc::siwc_responses_cancel,
+            siwc::siwc_spawn_app_server,
+            siwc::siwc_send_app_server,
+            siwc::siwc_stop_app_server,
             subscription::commands::subscription_list_provider_ids,
             subscription::commands::subscription_clear_runtime,
             subscription::commands::subscription_list_accounts,
@@ -2039,6 +2063,19 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_worker_recovery_precedes_the_main_only_boot_guard() {
+        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let recovery = source
+            .find("webview_watchdog::should_recover_native_service_worker(")
+            .expect("finished pet documents must run native worker recovery");
+        let main_guard = source
+            .find("webview_watchdog::should_arm_boot_reveal(")
+            .expect("main-only reveal guard remains separate");
+        assert!(recovery < main_guard);
+        assert!(source[recovery..main_guard].contains("webview.eval(script)"));
+    }
+
     #[test]
     fn build_time_context_preserves_the_window_icon() {
         let context = super::application_context();

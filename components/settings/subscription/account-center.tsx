@@ -41,6 +41,7 @@ import { AccountUsageChips, useAccountUsageIndex, type AccountUsage } from "./ac
 import { RemoveDialog, RenameDialog } from "./account-dialogs"
 import { SubscriptionAccountDialog } from "./add-account-dialog/subscription"
 import type { CodexLoginMode } from "./add-account-dialog/codex"
+import { SiwcConnections } from "./siwc-connections"
 
 type ProviderFilter = "all" | ProviderId
 
@@ -275,6 +276,8 @@ export function AccountCenter() {
           )}
         </div>
       </div>
+
+      {(filter === "all" || filter === "codex") && <SiwcConnections />}
 
       <Sheet open={mobileDetailOpen} onOpenChange={setMobileDetailOpen}>
         <SheetContent side="right" className="w-[min(92vw,440px)] overflow-y-auto p-4">

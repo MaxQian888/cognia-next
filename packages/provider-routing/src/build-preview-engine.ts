@@ -49,16 +49,32 @@ export interface RoutingEngineSettings extends PriceLookupSettings {
   providerSettings?: PriceLookupSettings["providerSettings"] &
     Record<
       string,
-      { enabled?: boolean; discoveredModels?: ProviderModelDiscoveryEntry[] } | undefined
+      | {
+          enabled?: boolean
+          apiProtocol?: string
+          discoveredModels?: ProviderModelDiscoveryEntry[]
+        }
+      | undefined
     >
   customProviders?: Array<{
     id: string
     providerId?: string
     enabled?: boolean
+    protocol?: string
+    apiProtocol?: string
     defaultModel?: string
     customModelMetadata?: Record<string, RoutingModelMetadata | undefined>
     subscription?: CustomProviderSettings["subscription"]
   }>
+}
+
+/** A ChatGPT-plan connection is usable only after an explicit provider selection. */
+export function isSiwcRoutingProvider(appSettings: RoutingEngineSettings, id: string): boolean {
+  const custom = appSettings.customProviders?.find((provider) => provider.id === id)
+  return (
+    (custom?.protocol ?? custom?.apiProtocol ?? appSettings.providerSettings?.[id]?.apiProtocol) ===
+    "chatgpt-siwc"
+  )
 }
 
 export interface RoutingCatalogSnapshot {
@@ -202,6 +218,7 @@ export function getRoutingCatalogSnapshot(
   )
     .map(({ providerId, modelId }) => ({ providerId, modelId }))
     .filter(({ providerId, modelId }) => {
+      if (isSiwcRoutingProvider(appSettings, providerId)) return false
       const key = catalogKey(providerId, modelId)
       if (seen.has(key)) return false
       seen.add(key)
@@ -226,7 +243,10 @@ export function getRoutingCatalogSnapshot(
 }
 
 /** Build the live-store-backed deps `resolveSendOptions` wires into the engine. */
-export function buildRoutingEngineDeps(appSettings: RoutingEngineSettings): RoutingEngineDeps {
+export function buildRoutingEngineDeps(
+  appSettings: RoutingEngineSettings,
+  options?: { explicitProviderId?: string }
+): RoutingEngineDeps {
   const runtime = getProviderRoutingRuntimeAdapters()
   const catalogSnapshot = getRoutingCatalogSnapshot(appSettings)
   return {
@@ -237,6 +257,7 @@ export function buildRoutingEngineDeps(appSettings: RoutingEngineSettings): Rout
     getHealthMetrics: (id) => runtime.getHealthMetrics(id),
     getCircuitBreakerState: (id) => runtime.getCircuitBreakerState(id),
     isProviderAvailable: (id) => {
+      if (isSiwcRoutingProvider(appSettings, id) && options?.explicitProviderId !== id) return false
       // An OPEN circuit breaker takes a provider out of rotation; otherwise
       // fall back to the provider's enabled flag.
       if (!runtime.isCircuitBreakerAvailable(id)) return false

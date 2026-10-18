@@ -29,6 +29,7 @@ pub mod migration;
 pub mod opencode;
 pub mod preset;
 pub mod provider;
+pub mod siwc;
 pub mod vault;
 
 // ADR-0067 Tier B: extracted from app_lib's `subscription/` module; the

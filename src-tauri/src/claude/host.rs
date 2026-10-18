@@ -100,6 +100,9 @@ impl SidecarHost for TauriSidecarHost {
     }
 
     async fn dispatch_host_rpc(&self, method: &str, params: &Value) -> Result<Value, String> {
+        if method.starts_with("siwc.") {
+            return crate::siwc::dispatch(&self.0, method, params).await;
+        }
         dispatch_runtime_rpc(method, params).await
     }
 

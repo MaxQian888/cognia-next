@@ -20,7 +20,7 @@
 // tsconfig's ES2018 target.
 
 /**
- * The AI SDK families with a first-party `@ai-sdk/*` package. A protocol id NOT
+ * Built-in AI SDK families and the native-only SIWC Responses transport. An id NOT
  * in this set is either an alias (`gemini` → `google`, normalize first) or a
  * plugin-contributed adapter id resolved through the protocol-adapter registry.
  */
@@ -32,11 +32,12 @@ export const BUILTIN_PROTOCOL_NAMES: readonly string[] = Object.freeze([
   "cohere",
   "azure",
   "bedrock",
+  "chatgpt-siwc",
 ])
 
 const BUILTIN_PROTOCOL_SET: ReadonlySet<string> = new Set(BUILTIN_PROTOCOL_NAMES)
 
-/** Is `protocol` one of the first-party AI SDK families (vs a plugin adapter)? */
+/** Is `protocol` a built-in model transport (vs a plugin adapter)? */
 export function isBuiltInProtocol(protocol: unknown): boolean {
   return typeof protocol === "string" && BUILTIN_PROTOCOL_SET.has(normalizeProtocol(protocol))
 }
