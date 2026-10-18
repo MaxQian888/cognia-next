@@ -33,6 +33,31 @@ const vnc: RemoteDesktopProviderRegistration = {
   },
 }
 
+const guacamole: RemoteDesktopProviderRegistration = {
+  providerId: "cognia-remote-desktop-web-console.guacamole",
+  pluginId: "cognia-remote-desktop-web-console",
+  firstParty: true,
+  definition: {
+    id: "guacamole",
+    name: "Guacamole",
+    integrationMode: "web-console",
+    consoleProfile: "guacamole",
+    linkExample: "https://gateway.example.com/guacamole/#/client/…",
+  },
+}
+
+const rustdesk: RemoteDesktopProviderRegistration = {
+  providerId: "cognia-remote-desktop-rustdesk.rustdesk",
+  pluginId: "cognia-remote-desktop-rustdesk",
+  firstParty: true,
+  definition: {
+    id: "rustdesk",
+    name: "RustDesk",
+    integrationMode: "external-app",
+    launcher: "rustdesk",
+  },
+}
+
 const saved: RemoteDesktopTarget = {
   id: "t1",
   name: "Studio",
@@ -131,6 +156,7 @@ describe("RemoteDesktopTargetDialog", () => {
       bindings: [
         {
           providerId: vnc.providerId,
+          access: "bridge",
           adapter: "vnc",
           enabled: true,
           host: "nas.local",
@@ -272,7 +298,9 @@ describe("RemoteDesktopTargetDialog", () => {
         onSave={jest.fn()}
       />
     )
-    expect(screen.getByText(/Enable the VNC provider plugin/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Enable the VNC, web console or RustDesk provider plugin/)
+    ).toBeInTheDocument()
   })
   it("says a paired Host resolves and reaches the address", async () => {
     const host = { kind: "remote" as const, hostRef: "h1" }
@@ -296,5 +324,97 @@ describe("RemoteDesktopTargetDialog", () => {
     expect(
       await screen.findByText(/device on Studio Mac's local network \(192\.168\.1\.20\)/)
     ).toBeInTheDocument()
+  })
+
+  it("checks a web console's link, confirms its host and saves no password", async () => {
+    const probe = jest
+      .fn()
+      .mockResolvedValueOnce({ pinnedIp: "203.0.113.4", class: "public", connected: false })
+    const onSave = jest.fn().mockResolvedValue({ target: saved })
+    render(
+      <RemoteDesktopTargetDialog
+        host={LOCAL_REMOTE_DESKTOP_HOST}
+        state={{ kind: "add" }}
+        providers={[guacamole, vnc]}
+        onClose={jest.fn()}
+        onSave={onSave}
+        probe={probe}
+      />
+    )
+    expect(screen.queryByLabelText("Host or IP address")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Password/)).not.toBeInTheDocument()
+    expect(screen.getByText(/signs you in and decides what you may do/)).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText("Name"), "Office")
+    const link = screen.getByLabelText("Console link")
+    await userEvent.type(link, "https://gw.example.com/guacamole/")
+    expect(screen.getByText(/isn't a link this console opens a machine with/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Check address" })).toBeDisabled()
+    await userEvent.clear(link)
+    await userEvent.type(link, "https://gw.example.com:8443/guacamole/#/client/abc")
+    await userEvent.click(screen.getByRole("button", { name: "Check address" }))
+    expect(probe).toHaveBeenCalledWith(LOCAL_REMOTE_DESKTOP_HOST, {
+      kind: "draft",
+      host: "gw.example.com",
+      port: 8443,
+      adapter: "none",
+    })
+    expect(
+      await screen.findByText(/console is on the internet \(203\.0\.113\.4\)/)
+    ).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("checkbox"))
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const input = onSave.mock.calls[0][0]
+    expect(input.draft.bindings[0]).toEqual({
+      providerId: guacamole.providerId,
+      access: "web-console",
+      adapter: "none",
+      enabled: true,
+      viewOnly: false,
+      confirm: true,
+      console: { url: "https://gw.example.com:8443/guacamole/#/client/abc", profile: "guacamole" },
+    })
+    expect(input.control).toBeUndefined()
+    expect(input.view).toBeUndefined()
+  })
+
+  it("saves a RustDesk ID with its server and key and nothing to check", async () => {
+    const probe = jest.fn()
+    const onSave = jest.fn().mockResolvedValue({ target: saved })
+    render(
+      <RemoteDesktopTargetDialog
+        host={LOCAL_REMOTE_DESKTOP_HOST}
+        state={{ kind: "add" }}
+        providers={[rustdesk]}
+        onClose={jest.fn()}
+        onSave={onSave}
+        probe={probe}
+      />
+    )
+    expect(screen.queryByRole("button", { name: "Check address" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Test connection" })).not.toBeInTheDocument()
+    const save = screen.getByRole("button", { name: "Save" })
+    await userEvent.type(screen.getByLabelText("Name"), "Mum's PC")
+    expect(save).toBeDisabled()
+    await userEvent.type(screen.getByLabelText("RustDesk ID"), "123 456 789")
+    await userEvent.type(screen.getByLabelText("ID server (optional)"), "rd.example.com:21116")
+    await userEvent.type(screen.getByLabelText("Server key (optional)"), "Ab+/=")
+    await userEvent.click(save)
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0].draft.bindings[0]).toEqual({
+      providerId: rustdesk.providerId,
+      access: "external-app",
+      adapter: "none",
+      enabled: true,
+      viewOnly: false,
+      confirm: false,
+      launch: {
+        launcher: "rustdesk",
+        peerId: "123456789",
+        server: "rd.example.com:21116",
+        key: "Ab+/=",
+      },
+    })
+    expect(probe).not.toHaveBeenCalled()
   })
 })

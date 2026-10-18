@@ -12,6 +12,10 @@
  * Taking control from someone else is an explicit choice; losing it, the
  * server closing, or the network dropping all end the session with a stated
  * reason. The note at the bottom says what the Host cannot govern.
+ *
+ * A web console binding (Phase 5) opens in the desktop app's console webview
+ * instead (`RemoteConsoleView`), and elsewhere, like an external app, from a
+ * button that asks the Host where to go: neither has a session.
  */
 
 import {
@@ -31,6 +35,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { canLaunch, useRemoteDesktopLaunch } from "@/hooks/remote-desktop/use-remote-desktop-launch"
 import { useRemoteDesktopProviders } from "@/hooks/remote-desktop/use-remote-desktop-providers"
 import {
   useRemoteDesktopSession,
@@ -41,13 +46,19 @@ import {
   type RemoteDesktopTargetsDeps,
 } from "@/hooks/remote-desktop/use-remote-desktop-targets"
 import { remoteDesktopErrorMessage } from "@/lib/remote-desktop/error-messages"
-import { RemoteDesktopError } from "@/lib/remote-desktop/host-client"
+import { RemoteDesktopError, toRemoteDesktopError } from "@/lib/remote-desktop/host-client"
 import type { RemoteDesktopViewerStatus } from "@/lib/remote-desktop/provider-registry"
-import type { RemoteDesktopSessionMode } from "@/lib/remote-desktop/types"
+import type {
+  RemoteDesktopBinding,
+  RemoteDesktopHostRef,
+  RemoteDesktopSessionMode,
+  RemoteDesktopTarget,
+} from "@/lib/remote-desktop/types"
 import { parseRemoteDesktopViewerParams } from "@/lib/remote-desktop/viewer-href"
 import { isTauri } from "@/lib/tauri"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 
+import { RemoteConsoleView } from "./remote-console-view"
 import { RemoteDesktopWebviewViewer } from "./remote-desktop-webview-viewer"
 
 export interface RemoteDesktopViewerPageProps {
@@ -61,6 +72,63 @@ function Notice({ message }: { message: string }) {
     <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
       <p className="text-muted-foreground text-sm">{message}</p>
       <Button asChild variant="outline" size="sm">
+        <Link href="/devices">
+          <ArrowLeftIcon className="size-3.5" />
+          {t("viewer.back")}
+        </Link>
+      </Button>
+    </div>
+  )
+}
+
+/** A binding this client opens outside Cognia: the console in a browser, or the app. */
+function LaunchNotice({
+  host,
+  target,
+  binding,
+}: {
+  host: RemoteDesktopHostRef
+  target: RemoteDesktopTarget
+  binding: RemoteDesktopBinding
+}) {
+  const t = useTranslations("remoteDesktop")
+  const { open, pending } = useRemoteDesktopLaunch(host)
+  const [message, setMessage] = useState<string | null>(null)
+  const app = binding.access === "external-app"
+  const launch = async () => {
+    setMessage(null)
+    try {
+      const outcome = await open(target, binding)
+      if (outcome === "app") setMessage(t("console.appAsked"))
+    } catch (caught) {
+      const refusal = toRemoteDesktopError(caught)
+      const text = remoteDesktopErrorMessage(refusal.code, refusal.detail)
+      setMessage(t(`errors.${text.key}`, text.values))
+    }
+  }
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+      <p className="font-medium">{target.name}</p>
+      <Badge variant="outline">{t("console.providerManaged")}</Badge>
+      <p className="text-muted-foreground max-w-md text-sm">
+        {app ? t("console.appBody") : t("console.outsideBody")}
+      </p>
+      <Button
+        size="sm"
+        disabled={!canLaunch(binding) || !binding.enabled || pending !== null}
+        onClick={() => void launch()}
+      >
+        {app ? t("console.openApp") : t("console.openConsole")}
+      </Button>
+      {!canLaunch(binding) ? (
+        <p className="text-muted-foreground text-xs">{t("console.needsControl")}</p>
+      ) : null}
+      {message ? (
+        <p className="text-muted-foreground text-xs" role="status">
+          {message}
+        </p>
+      ) : null}
+      <Button asChild variant="ghost" size="sm">
         <Link href="/devices">
           <ArrowLeftIcon className="size-3.5" />
           {t("viewer.back")}
@@ -100,9 +168,14 @@ export function RemoteDesktopViewerPage({
   const provider = binding
     ? providers.find((entry) => entry.providerId === binding.providerId)
     : undefined
+  const access = binding?.access ?? "bridge"
+  // Only a bridged binding has a session; the others open from here.
   const sessionTarget = useMemo(
-    () => (target && binding ? { targetId: target.id, bindingId: binding.id } : null),
-    [target, binding]
+    () =>
+      target && binding && access === "bridge"
+        ? { targetId: target.id, bindingId: binding.id }
+        : null,
+    [access, target, binding]
   )
   const { state, connect, disconnect, markEnded } = useRemoteDesktopSession(
     listedOn,
@@ -161,6 +234,16 @@ export function RemoteDesktopViewerPage({
   if (loading && !target) return <Notice message={t("viewer.opening")} />
   if (!target || !binding) return <Notice message={t("viewer.notFound")} />
   if (!provider) return <Notice message={t("viewer.providerMissing")} />
+  const owner = listedOn ?? params.host
+  if (access === "web-console" && isTauri()) {
+    return (
+      <RemoteConsoleView host={owner} target={target} binding={binding} hostLabel={hostLabel} />
+    )
+  }
+  if (access !== "bridge") return <LaunchNotice host={owner} target={target} binding={binding} />
+  if (provider.definition.integrationMode !== "embedded") {
+    return <Notice message={t("viewer.providerMissing")} />
+  }
 
   const session = state.status === "open" ? state.session : null
   const connection = state.status === "open" ? state.connection : null

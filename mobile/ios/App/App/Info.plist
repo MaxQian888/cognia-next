@@ -85,10 +85,11 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<!-- canOpenURL probe for CogniaAppHandoff: a Feishu sign-in runs in the Feishu app when installed. -->
+	<!-- canOpenURL probes for CogniaAppHandoff: a Feishu sign-in runs in the Feishu app when installed, and a remote desktop opens its ID in RustDesk (ADR-0234). -->
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>lark</string>
+		<string>rustdesk</string>
 	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>

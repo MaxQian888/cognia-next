@@ -17,9 +17,18 @@
  *    opened with full control.
  *  * **Honest about governance.** Only sessions opened here share one
  *    controller and are audited; the note says a direct VNC client bypasses it.
+ *    Web consoles and RustDesk (Phase 5) are labelled as managed by their
+ *    provider: Cognia opens them and audits the open, nothing more.
  */
 
-import { MonitorIcon, MonitorPlayIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import {
+  ExternalLinkIcon,
+  MonitorIcon,
+  MonitorPlayIcon,
+  PencilIcon,
+  PlusIcon,
+  Trash2Icon,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
@@ -39,6 +48,12 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import {
+  canLaunch,
+  isLaunchable,
+  useRemoteDesktopLaunch,
+  type RemoteDesktopLaunchDeps,
+} from "@/hooks/remote-desktop/use-remote-desktop-launch"
 import { useRemoteDesktopProviders } from "@/hooks/remote-desktop/use-remote-desktop-providers"
 import {
   useRemoteDesktopTargets,
@@ -63,9 +78,15 @@ export interface RemoteDesktopSectionProps {
   /** A remote Host's name, for the copy that says where things live. */
   hostLabel?: string
   deps?: RemoteDesktopTargetsDeps
+  launchDeps?: RemoteDesktopLaunchDeps
 }
 
-export function RemoteDesktopSection({ host, hostLabel, deps }: RemoteDesktopSectionProps) {
+export function RemoteDesktopSection({
+  host,
+  hostLabel,
+  deps,
+  launchDeps,
+}: RemoteDesktopSectionProps) {
   const t = useTranslations("remoteDesktop")
   const tDevices = useTranslations("devices")
   const router = useRouter()
@@ -79,6 +100,7 @@ export function RemoteDesktopSection({ host, hostLabel, deps }: RemoteDesktopSec
   const outdated = error?.code === "remote_desktop_host_outdated"
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [deleting, setDeleting] = useState<RemoteDesktopTarget | null>(null)
+  const launcher = useRemoteDesktopLaunch(host, launchDeps)
 
   const errorText = (caught: unknown) => {
     const refusal = toRemoteDesktopError(caught)
@@ -92,6 +114,16 @@ export function RemoteDesktopSection({ host, hostLabel, deps }: RemoteDesktopSec
     mode: RemoteDesktopSessionMode
   ) =>
     router.push(remoteDesktopViewerHref({ host, targetId: target.id, bindingId: binding.id, mode }))
+
+  const launch = async (target: RemoteDesktopTarget, binding: RemoteDesktopBinding) => {
+    try {
+      const outcome = await launcher.open(target, binding)
+      // Cognia never learns whether RustDesk connected.
+      if (outcome === "app") toast.success(t("console.appAsked"))
+    } catch (caught) {
+      toast.error(errorText(caught))
+    }
+  }
 
   const confirmDelete = async () => {
     const target = deleting
@@ -176,28 +208,81 @@ export function RemoteDesktopSection({ host, hostLabel, deps }: RemoteDesktopSec
               </div>
               {target.bindings.map((binding) => {
                 const provider = providers.find((entry) => entry.providerId === binding.providerId)
+                const providerName = provider
+                  ? provider.definition.name
+                  : t("section.providerMissing")
+                if (isLaunchable(binding)) {
+                  const app = binding.access === "external-app"
+                  const allowed = canLaunch(binding)
+                  return (
+                    <div key={binding.id} className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="text-muted-foreground">{providerName}</span>
+                      {app ? (
+                        binding.launch?.peerId ? (
+                          <span className="font-mono text-xs">
+                            {binding.launch.server
+                              ? t("section.peerOnServer", {
+                                  peer: binding.launch.peerId,
+                                  server: binding.launch.server,
+                                })
+                              : binding.launch.peerId}
+                          </span>
+                        ) : null
+                      ) : binding.endpoint ? (
+                        <>
+                          <span className="font-mono text-xs">{binding.endpoint.host}</span>
+                          <Badge
+                            variant={binding.endpoint.class === "public" ? "outline" : "secondary"}
+                          >
+                            {binding.endpoint.class === "public"
+                              ? t("section.classInternet")
+                              : t("section.classPrivate")}
+                          </Badge>
+                        </>
+                      ) : null}
+                      <Badge variant="outline">{t("console.providerManaged")}</Badge>
+                      {!binding.enabled ? (
+                        <Badge variant="outline">{t("section.disabled")}</Badge>
+                      ) : null}
+                      <div className="ml-auto flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          disabled={
+                            !provider ||
+                            !binding.enabled ||
+                            !allowed ||
+                            launcher.pending === binding.id
+                          }
+                          title={allowed ? undefined : t("console.needsControl")}
+                          onClick={() => void launch(target, binding)}
+                        >
+                          <ExternalLinkIcon className="size-3.5" />
+                          {app ? t("console.openApp") : t("console.openConsole")}
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                }
                 const canView = binding.viewOnly && binding.hasViewCredential
+                const endpoint = binding.endpoint
                 return (
                   <div key={binding.id} className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="text-muted-foreground">
-                      {provider ? provider.definition.name : t("section.providerMissing")}
-                    </span>
-                    <span
-                      className="font-mono text-xs"
-                      title={t("section.pinned", { ip: binding.endpoint.pinnedIp })}
-                    >
-                      {t("section.endpoint", {
-                        host: binding.endpoint.host,
-                        port: binding.endpoint.port,
-                      })}
-                    </span>
-                    <Badge
-                      variant={binding.endpoint.class === "public" ? "destructive" : "secondary"}
-                    >
-                      {binding.endpoint.class === "public"
-                        ? t("section.classPublic")
-                        : t("section.classPrivate")}
-                    </Badge>
+                    <span className="text-muted-foreground">{providerName}</span>
+                    {endpoint ? (
+                      <>
+                        <span
+                          className="font-mono text-xs"
+                          title={t("section.pinned", { ip: endpoint.pinnedIp })}
+                        >
+                          {t("section.endpoint", { host: endpoint.host, port: endpoint.port })}
+                        </span>
+                        <Badge variant={endpoint.class === "public" ? "destructive" : "secondary"}>
+                          {endpoint.class === "public"
+                            ? t("section.classPublic")
+                            : t("section.classPrivate")}
+                        </Badge>
+                      </>
+                    ) : null}
                     <Badge variant="outline">
                       {binding.viewOnly ? t("section.viewOnly") : t("section.noViewOnly")}
                     </Badge>

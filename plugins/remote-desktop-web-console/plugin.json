@@ -1,0 +1,63 @@
+{
+  "id": "cognia-remote-desktop-web-console",
+  "name": "Remote Desktop Web Consoles",
+  "nameKey": "manifest.name",
+  "version": "0.1.0",
+  "description": "Opens machines through your own Apache Guacamole or MeshCentral server from the devices console. You paste the console's page for a machine; the desktop app shows it in a separate browser view, and phones and the Web open it in a browser. Cognia stores no console password: the console signs you in and decides what you may do.",
+  "descriptionKey": "manifest.description",
+  "type": "frontend",
+  "capabilities": [],
+  "main": "src/index.ts",
+  "author": {
+    "name": "cognia-next"
+  },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["remote-desktop:provide"],
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "headless": {
+      "availability": "blocked",
+      "reason": "A console is a page someone looks at; a headless Host only keeps the binding for its paired devices (ADR-0234)."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Remote Desktop Web Consoles",
+        "manifest.description": "Opens machines through your own Apache Guacamole or MeshCentral server from the devices console. You paste the console's page for a machine; the desktop app shows it in a separate browser view, and phones and the Web open it in a browser. Cognia stores no console password: the console signs you in and decides what you may do.",
+        "guacamole.name": "Apache Guacamole",
+        "guacamole.description": "A connection page of your Guacamole server (…/#/client/…). Reaches RDP, VNC and SSH machines behind it.",
+        "guacamole.example": "https://gateway.example.com/guacamole/#/client/…",
+        "meshcentral.name": "MeshCentral",
+        "meshcentral.description": "A device page of your MeshCentral server (…?gotonode=…). Opens that device's desktop.",
+        "meshcentral.example": "https://mesh.example.com/?gotonode=…"
+      },
+      "zh-CN": {
+        "manifest.name": "远程桌面 Web 控制台",
+        "manifest.description": "在设备控制台中通过你自己的 Apache Guacamole 或 MeshCentral 服务器打开机器。粘贴控制台中某台机器的页面链接；桌面应用会在独立的浏览视图中显示，手机和网页则在浏览器中打开。Cognia 不保存控制台密码：由控制台负责登录和权限。",
+        "guacamole.name": "Apache Guacamole",
+        "guacamole.description": "你的 Guacamole 服务器中的连接页面（…/#/client/…）。可访问其后的 RDP、VNC 和 SSH 机器。",
+        "guacamole.example": "https://gateway.example.com/guacamole/#/client/…",
+        "meshcentral.name": "MeshCentral",
+        "meshcentral.description": "你的 MeshCentral 服务器中的设备页面（…?gotonode=…）。打开该设备的桌面。",
+        "meshcentral.example": "https://mesh.example.com/?gotonode=…"
+      }
+    }
+  }
+}

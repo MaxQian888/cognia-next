@@ -14,6 +14,9 @@
 //! password vault and autofill, `downloads.rs` the shared Downloads directory
 //! and the embedded webview's download handler, and `local_content.rs` local
 //! files and dev-server discovery.
+//!
+//! `remote_console.rs` is the remote desktop web console webview and the
+//! RustDesk launcher (ADR-0234 Phase 5).
 
 pub mod cdp;
 pub mod commands;
@@ -25,6 +28,7 @@ pub mod local;
 pub mod local_content;
 pub mod overlay;
 pub mod passwords;
+pub mod remote_console;
 
 /// Every browser command is invoked from the main window, which hosts the
 /// embedded preview as a child webview. Tauri only resolves a command's

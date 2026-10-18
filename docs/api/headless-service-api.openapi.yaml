@@ -142967,6 +142967,222 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/remote_desktop_binding_launch:
+    post:
+      operationId: internalRpcRemoteDesktopBindingLaunch
+      tags:
+        - headless-rpc
+      summary: remote_desktop_binding_launch (host.admin)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                targetId:
+                  type: string
+                  minLength: 1
+                bindingId:
+                  type: string
+                  minLength: 1
+                adminLease:
+                  type: string
+                  minLength: 1
+                  maxLength: 512
+                admin_lease:
+                  type: string
+                  minLength: 1
+                  maxLength: 512
+              required:
+                - targetId
+                - bindingId
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                description: "ADR-0234 Phase 5: where a client goes for a binding the Host does not bridge. Never a credential."
+                oneOf:
+                  - type: object
+                    properties:
+                      kind:
+                        const: web-console
+                      url:
+                        type: string
+                        minLength: 1
+                      profile:
+                        type: string
+                        enum:
+                          - guacamole
+                          - meshcentral
+                          - generic
+                    required:
+                      - kind
+                      - url
+                      - profile
+                    additionalProperties: false
+                  - type: object
+                    properties:
+                      kind:
+                        const: external-app
+                      launcher:
+                        type: string
+                        enum:
+                          - rustdesk
+                      uri:
+                        type: string
+                        minLength: 1
+                    required:
+                      - kind
+                      - launcher
+                      - uri
+                    additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/remote_desktop_credential_set:
     post:
       operationId: internalRpcRemoteDesktopCredentialSet
@@ -143031,8 +143247,9 @@ paths:
                   bindings:
                     type: array
                     items:
-                      description: "ADR-0234: a provider binding the Host reaches. Credentials are write-only; only whether one is stored is
-                        reported."
+                      description: "ADR-0234: a provider binding the Host reaches, a web console or an external app. Credentials are
+                        write-only; only whether one is stored is reported. A caller that may only view gets console and
+                        launch without the link or peer."
                       type: object
                       properties:
                         id:
@@ -143041,6 +143258,12 @@ paths:
                         providerId:
                           type: string
                           minLength: 1
+                        access:
+                          type: string
+                          enum:
+                            - bridge
+                            - web-console
+                            - external-app
                         adapter:
                           type: string
                           enum:
@@ -143052,31 +143275,67 @@ paths:
                         enabled:
                           type: boolean
                         endpoint:
+                          anyOf:
+                            - type: object
+                              properties:
+                                host:
+                                  type: string
+                                  minLength: 1
+                                port:
+                                  type: integer
+                                  minimum: 1
+                                  maximum: 65535
+                                pinnedIp:
+                                  type: string
+                                  minLength: 1
+                                class:
+                                  type: string
+                                  enum:
+                                    - private
+                                    - public
+                                confirmedAt:
+                                  type: integer
+                              required:
+                                - host
+                                - port
+                                - pinnedIp
+                                - class
+                                - confirmedAt
+                              additionalProperties: false
+                            - type: "null"
+                        console:
                           type: object
                           properties:
-                            host:
+                            url:
                               type: string
                               minLength: 1
-                            port:
-                              type: integer
-                              minimum: 1
-                              maximum: 65535
-                            pinnedIp:
-                              type: string
-                              minLength: 1
-                            class:
+                            profile:
                               type: string
                               enum:
-                                - private
-                                - public
-                            confirmedAt:
-                              type: integer
+                                - guacamole
+                                - meshcentral
+                                - generic
                           required:
-                            - host
-                            - port
-                            - pinnedIp
-                            - class
-                            - confirmedAt
+                            - profile
+                          additionalProperties: false
+                        launch:
+                          type: object
+                          properties:
+                            launcher:
+                              type: string
+                              enum:
+                                - rustdesk
+                            peerId:
+                              type: string
+                              minLength: 1
+                            server:
+                              type: string
+                              minLength: 1
+                            key:
+                              type: string
+                              minLength: 1
+                          required:
+                            - launcher
                           additionalProperties: false
                         viewOnly:
                           type: boolean
@@ -143091,6 +143350,7 @@ paths:
                       required:
                         - id
                         - providerId
+                        - access
                         - adapter
                         - priority
                         - enabled
@@ -144064,8 +144324,9 @@ paths:
                         bindings:
                           type: array
                           items:
-                            description: "ADR-0234: a provider binding the Host reaches. Credentials are write-only; only whether one is stored is
-                              reported."
+                            description: "ADR-0234: a provider binding the Host reaches, a web console or an external app. Credentials are
+                              write-only; only whether one is stored is reported. A caller that may only view gets
+                              console and launch without the link or peer."
                             type: object
                             properties:
                               id:
@@ -144074,6 +144335,12 @@ paths:
                               providerId:
                                 type: string
                                 minLength: 1
+                              access:
+                                type: string
+                                enum:
+                                  - bridge
+                                  - web-console
+                                  - external-app
                               adapter:
                                 type: string
                                 enum:
@@ -144085,31 +144352,67 @@ paths:
                               enabled:
                                 type: boolean
                               endpoint:
+                                anyOf:
+                                  - type: object
+                                    properties:
+                                      host:
+                                        type: string
+                                        minLength: 1
+                                      port:
+                                        type: integer
+                                        minimum: 1
+                                        maximum: 65535
+                                      pinnedIp:
+                                        type: string
+                                        minLength: 1
+                                      class:
+                                        type: string
+                                        enum:
+                                          - private
+                                          - public
+                                      confirmedAt:
+                                        type: integer
+                                    required:
+                                      - host
+                                      - port
+                                      - pinnedIp
+                                      - class
+                                      - confirmedAt
+                                    additionalProperties: false
+                                  - type: "null"
+                              console:
                                 type: object
                                 properties:
-                                  host:
+                                  url:
                                     type: string
                                     minLength: 1
-                                  port:
-                                    type: integer
-                                    minimum: 1
-                                    maximum: 65535
-                                  pinnedIp:
-                                    type: string
-                                    minLength: 1
-                                  class:
+                                  profile:
                                     type: string
                                     enum:
-                                      - private
-                                      - public
-                                  confirmedAt:
-                                    type: integer
+                                      - guacamole
+                                      - meshcentral
+                                      - generic
                                 required:
-                                  - host
-                                  - port
-                                  - pinnedIp
-                                  - class
-                                  - confirmedAt
+                                  - profile
+                                additionalProperties: false
+                              launch:
+                                type: object
+                                properties:
+                                  launcher:
+                                    type: string
+                                    enum:
+                                      - rustdesk
+                                  peerId:
+                                    type: string
+                                    minLength: 1
+                                  server:
+                                    type: string
+                                    minLength: 1
+                                  key:
+                                    type: string
+                                    minLength: 1
+                                required:
+                                  - launcher
                                 additionalProperties: false
                               viewOnly:
                                 type: boolean
@@ -144124,6 +144427,7 @@ paths:
                             required:
                               - id
                               - providerId
+                              - access
                               - adapter
                               - priority
                               - enabled
@@ -144580,6 +144884,12 @@ paths:
                           providerId:
                             type: string
                             minLength: 1
+                          access:
+                            type: string
+                            enum:
+                              - bridge
+                              - web-console
+                              - external-app
                           adapter:
                             type: string
                             enum:
@@ -144598,6 +144908,43 @@ paths:
                             type: integer
                             minimum: 1
                             maximum: 65535
+                          console:
+                            type: object
+                            properties:
+                              url:
+                                type: string
+                                minLength: 1
+                                maxLength: 2048
+                              profile:
+                                type: string
+                                enum:
+                                  - guacamole
+                                  - meshcentral
+                                  - generic
+                            required:
+                              - url
+                              - profile
+                            additionalProperties: false
+                          launch:
+                            type: object
+                            properties:
+                              launcher:
+                                type: string
+                                const: rustdesk
+                              peerId:
+                                type: string
+                                minLength: 1
+                                maxLength: 64
+                              server:
+                                type: string
+                                maxLength: 300
+                              key:
+                                type: string
+                                maxLength: 128
+                            required:
+                              - launcher
+                              - peerId
+                            additionalProperties: false
                           viewOnly:
                             type: boolean
                           config:
@@ -144613,8 +144960,6 @@ paths:
                         required:
                           - providerId
                           - adapter
-                          - host
-                          - port
                         additionalProperties: false
                   required:
                     - name
@@ -144648,8 +144993,9 @@ paths:
                   bindings:
                     type: array
                     items:
-                      description: "ADR-0234: a provider binding the Host reaches. Credentials are write-only; only whether one is stored is
-                        reported."
+                      description: "ADR-0234: a provider binding the Host reaches, a web console or an external app. Credentials are
+                        write-only; only whether one is stored is reported. A caller that may only view gets console and
+                        launch without the link or peer."
                       type: object
                       properties:
                         id:
@@ -144658,6 +145004,12 @@ paths:
                         providerId:
                           type: string
                           minLength: 1
+                        access:
+                          type: string
+                          enum:
+                            - bridge
+                            - web-console
+                            - external-app
                         adapter:
                           type: string
                           enum:
@@ -144669,31 +145021,67 @@ paths:
                         enabled:
                           type: boolean
                         endpoint:
+                          anyOf:
+                            - type: object
+                              properties:
+                                host:
+                                  type: string
+                                  minLength: 1
+                                port:
+                                  type: integer
+                                  minimum: 1
+                                  maximum: 65535
+                                pinnedIp:
+                                  type: string
+                                  minLength: 1
+                                class:
+                                  type: string
+                                  enum:
+                                    - private
+                                    - public
+                                confirmedAt:
+                                  type: integer
+                              required:
+                                - host
+                                - port
+                                - pinnedIp
+                                - class
+                                - confirmedAt
+                              additionalProperties: false
+                            - type: "null"
+                        console:
                           type: object
                           properties:
-                            host:
+                            url:
                               type: string
                               minLength: 1
-                            port:
-                              type: integer
-                              minimum: 1
-                              maximum: 65535
-                            pinnedIp:
-                              type: string
-                              minLength: 1
-                            class:
+                            profile:
                               type: string
                               enum:
-                                - private
-                                - public
-                            confirmedAt:
-                              type: integer
+                                - guacamole
+                                - meshcentral
+                                - generic
                           required:
-                            - host
-                            - port
-                            - pinnedIp
-                            - class
-                            - confirmedAt
+                            - profile
+                          additionalProperties: false
+                        launch:
+                          type: object
+                          properties:
+                            launcher:
+                              type: string
+                              enum:
+                                - rustdesk
+                            peerId:
+                              type: string
+                              minLength: 1
+                            server:
+                              type: string
+                              minLength: 1
+                            key:
+                              type: string
+                              minLength: 1
+                          required:
+                            - launcher
                           additionalProperties: false
                         viewOnly:
                           type: boolean
@@ -144708,6 +145096,7 @@ paths:
                       required:
                         - id
                         - providerId
+                        - access
                         - adapter
                         - priority
                         - enabled
@@ -210961,6 +211350,7 @@ components:
           - read_project_mcp_config
           - read_text_file
           - register_push_token
+          - remote_desktop_binding_launch
           - remote_desktop_credential_set
           - remote_desktop_session_close
           - remote_desktop_session_open
@@ -211487,10 +211877,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 940
-  generatedRequestSchemaCount: 940
+  internalCommandCount: 941
+  generatedRequestSchemaCount: 941
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 940
+  contractRequestSchemaCount: 941
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 940
+  generatedResponseSchemaCount: 941
   loopbackOnly: true

@@ -15,4 +15,21 @@ describe("defineRemoteDesktopProvider", () => {
     expect(def.id).toBe("vnc")
     expect(def.viewer).toBe(viewer)
   })
+
+  it("keeps a web console or external app definition as declared", () => {
+    const consoleDef = defineRemoteDesktopProvider({
+      id: "guac",
+      name: "Guacamole",
+      integrationMode: "web-console",
+      consoleProfile: "guacamole",
+    })
+    expect(consoleDef.consoleProfile).toBe("guacamole")
+    const app = defineRemoteDesktopProvider({
+      id: "rd",
+      name: "RustDesk",
+      integrationMode: "external-app",
+      launcher: "rustdesk",
+    })
+    expect(app.launcher).toBe("rustdesk")
+  })
 })

@@ -22,6 +22,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 import type {
   RemoteDesktopCredentialKind,
   RemoteDesktopHostRef,
+  RemoteDesktopLaunched,
   RemoteDesktopProbeOutcome,
   RemoteDesktopProbeRequest,
   RemoteDesktopSessionMode,
@@ -42,6 +43,7 @@ export const REMOTE_DESKTOP_ADMIN_OPERATIONS = [
   "remote_desktop_credential_set",
   "remote_desktop_target_probe",
   "remote_desktop_session_open",
+  "remote_desktop_binding_launch",
 ] as const
 
 /** A Host refusal: its stable `remote_desktop_*` code and an optional detail. */
@@ -240,4 +242,16 @@ export async function closeRemoteDesktopSession(
   sessionId: string
 ): Promise<void> {
   await call(host, "remote_desktop_session_close", { sessionId })
+}
+
+/**
+ * Where to go for a web console or external-app binding. Needs control
+ * (`host.admin` and an admin lease from a paired device): these bindings
+ * cannot be made read-only.
+ */
+export function launchRemoteDesktopBinding(
+  host: RemoteDesktopHostRef,
+  input: { targetId: string; bindingId: string }
+): Promise<RemoteDesktopLaunched> {
+  return call(host, "remote_desktop_binding_launch", input)
 }

@@ -17,6 +17,36 @@ export const LOCAL_REMOTE_DESKTOP_HOST: RemoteDesktopHostRef = { kind: "local" }
 /** The Host handshake adapter a binding uses. Closed list (ADR-0234 §4). */
 export type RemoteDesktopAdapter = "vnc" | "none"
 
+/**
+ * How a client reaches the machine (ADR-0234 Phase 5): the Host bridges it
+ * (VNC), the client opens the user's own web console, or the client hands an
+ * ID to a local app. Only `bridge` has sessions, a lease or credentials; the
+ * others are "permissions managed by the provider".
+ */
+export type RemoteDesktopAccess = "bridge" | "web-console" | "external-app"
+
+/** How a console link is checked. Closed list. */
+export type RemoteDesktopConsoleProfile = "guacamole" | "meshcentral" | "generic"
+
+/** External-app launchers the Host can build a link for. Closed list. */
+export type RemoteDesktopLauncher = "rustdesk"
+
+export interface RemoteDesktopConsole {
+  /** Absent when the caller may only view: opening needs control. */
+  url?: string
+  profile: RemoteDesktopConsoleProfile
+}
+
+/** No password, ever. Only `launcher` reaches a caller that may only view. */
+export interface RemoteDesktopAppLaunch {
+  launcher: RemoteDesktopLauncher
+  peerId?: string
+  /** A self-hosted ID server, `host[:port]`. */
+  server?: string
+  /** That server's public key. Not a secret. */
+  key?: string
+}
+
 /** `private` is a LAN address; `public` is plaintext over the internet. */
 export type RemoteDesktopEndpointClass = "private" | "public"
 
@@ -36,10 +66,15 @@ export interface RemoteDesktopEndpoint {
 export interface RemoteDesktopBinding {
   id: string
   providerId: string
+  /** Absent from a Host older than Phase 5, which only bridges. */
+  access?: RemoteDesktopAccess
   adapter: RemoteDesktopAdapter
   priority: number
   enabled: boolean
-  endpoint: RemoteDesktopEndpoint
+  /** What the user confirmed reaching; null only for an external app. */
+  endpoint: RemoteDesktopEndpoint | null
+  console?: RemoteDesktopConsole
+  launch?: RemoteDesktopAppLaunch
   /** The server enforces a separate view-only password. */
   viewOnly: boolean
   config: Record<string, unknown> | null
@@ -59,11 +94,15 @@ export interface RemoteDesktopBindingDraft {
   /** Only ids the Host minted; omit for a new binding. */
   id?: string
   providerId: string
+  access?: RemoteDesktopAccess
   adapter: RemoteDesktopAdapter
   priority?: number
   enabled?: boolean
-  host: string
-  port: number
+  /** `bridge` only. A web console's endpoint comes from its link. */
+  host?: string
+  port?: number
+  console?: { url: string; profile: RemoteDesktopConsoleProfile }
+  launch?: { launcher: RemoteDesktopLauncher; peerId: string; server?: string; key?: string }
   viewOnly?: boolean
   config?: Record<string, unknown> | null
   /** The user acknowledged reaching this endpoint. */
@@ -134,3 +173,8 @@ export interface RemoteDesktopSessionRenewed {
   expiresAt: number
   lease?: RemoteDesktopControlLease
 }
+
+/** Where a client goes for a binding the Host does not bridge. */
+export type RemoteDesktopLaunched =
+  | { kind: "web-console"; url: string; profile: RemoteDesktopConsoleProfile }
+  | { kind: "external-app"; launcher: RemoteDesktopLauncher; uri: string }

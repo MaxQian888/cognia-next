@@ -17,8 +17,9 @@ use crate::{
     error::{RemoteDesktopError, Result},
     host::{ProbeRequest, RemoteDesktopHost},
     session::{Principal, SessionMode},
-    target::TargetDraft,
+    target::{RemoteTarget, TargetDraft},
 };
+use cognia_problem::paging::Page;
 use parking_lot::RwLock;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -33,19 +34,22 @@ pub const COMMANDS: &[&str] = &[
     "remote_desktop_session_open",
     "remote_desktop_session_renew",
     "remote_desktop_session_close",
+    "remote_desktop_binding_launch",
 ];
 
 /// Whether a paired device needs `host.admin` and a host admin lease
 /// (ADR-0153) for this call: anything that changes what the Host can reach,
 /// connects to an endpoint, or takes control. A session open is a control
 /// request unless it literally asks for `view`, the way
-/// `payload_capability` reads it.
+/// `payload_capability` reads it. Launching a web console or an external app
+/// is control too: those bindings cannot be made read-only.
 pub fn requires_admin(name: &str, args: &Value) -> bool {
     match name {
         "remote_desktop_target_save"
         | "remote_desktop_target_delete"
         | "remote_desktop_credential_set"
-        | "remote_desktop_target_probe" => true,
+        | "remote_desktop_target_probe"
+        | "remote_desktop_binding_launch" => true,
         "remote_desktop_session_open" => args.get("mode").and_then(Value::as_str) != Some("view"),
         _ => false,
     }
@@ -144,6 +148,13 @@ struct OpenArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LaunchArgs {
+    target_id: String,
+    binding_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SessionArgs {
     session_id: String,
 }
@@ -151,6 +162,30 @@ struct SessionArgs {
 fn parse<T: DeserializeOwned>(args: Value) -> Result<T> {
     serde_json::from_value(args)
         .map_err(|error| RemoteDesktopError::with_detail("remote_desktop_invalid_request", error.to_string()))
+}
+
+/// What a caller that may only view sees of the targets: a web console's
+/// link and an external app's peer are what opening needs, and opening needs
+/// control, so they stay out. The console's host stays, so a client can say
+/// where the binding points.
+fn redact_for_viewers(page: Page<RemoteTarget>) -> Result<Value> {
+    let mut value = reply(page)?;
+    let bindings = value
+        .get_mut("items")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+        .filter_map(|target| target.get_mut("bindings").and_then(Value::as_array_mut))
+        .flatten();
+    for binding in bindings {
+        if let Some(console) = binding.get_mut("console").and_then(Value::as_object_mut) {
+            console.remove("url");
+        }
+        if let Some(app) = binding.get_mut("launch").and_then(Value::as_object_mut) {
+            app.retain(|field, _| field == "launcher");
+        }
+    }
+    Ok(value)
 }
 
 fn reply<T: Serialize>(value: T) -> Result<Value> {
@@ -171,7 +206,12 @@ pub async fn dispatch(state: &RemoteDesktopState, principal: &Principal, name: &
     match name {
         "remote_desktop_target_list" => {
             let args: ListArgs = parse(args)?;
-            reply(host.list_targets(args.page_size, args.page_token.as_deref()).await?)
+            let page = host.list_targets(args.page_size, args.page_token.as_deref()).await?;
+            if principal.admitted(SessionMode::Control) {
+                reply(page)
+            } else {
+                redact_for_viewers(page)
+            }
         }
         "remote_desktop_target_save" => {
             let args: SaveArgs = parse(args)?;
@@ -199,6 +239,10 @@ pub async fn dispatch(state: &RemoteDesktopState, principal: &Principal, name: &
                 host.open_session(principal, &args.target_id, &args.binding_id, args.mode, args.takeover)
                     .await?,
             )
+        }
+        "remote_desktop_binding_launch" => {
+            let args: LaunchArgs = parse(args)?;
+            reply(host.launch(principal, &args.target_id, &args.binding_id).await?)
         }
         "remote_desktop_session_renew" => {
             let args: SessionArgs = parse(args)?;
@@ -337,6 +381,45 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn viewers_see_where_a_binding_points_but_not_how_to_open_it() {
+        use crate::{
+            host::{RemoteDesktopHost, Resolve, ResolveFuture},
+            target::TargetStore,
+        };
+        struct Lan;
+        impl Resolve for Lan {
+            fn resolve(&self, _host: String, port: u16) -> ResolveFuture {
+                Box::pin(std::future::ready(Ok(vec![std::net::SocketAddr::new([10, 0, 0, 9].into(), port)])))
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let host = RemoteDesktopHost::with_parts(
+            TargetStore::open(dir.path()).unwrap(),
+            std::sync::Arc::new(crate::credentials::MemoryCredentials::default()),
+            std::sync::Arc::new(Lan),
+        );
+        let state = RemoteDesktopState::from_host(host);
+        let draft = json!({"draft": {"name": "Office", "bindings": [
+            {"providerId": "web.guacamole", "access": "web-console", "adapter": "none", "confirm": true,
+             "console": {"url": "https://gw.lan/#/client/abc", "profile": "guacamole"}},
+            {"providerId": "app.rustdesk", "access": "external-app", "adapter": "none",
+             "launch": {"launcher": "rustdesk", "peerId": "123456789", "server": "rd.lan", "key": "abc="}}
+        ]}});
+        call(&state, "remote_desktop_target_save", draft).await.unwrap();
+        let owner = call(&state, "remote_desktop_target_list", json!({})).await.unwrap();
+        let bindings = &owner["items"][0]["bindings"];
+        assert_eq!(bindings[0]["console"]["url"], "https://gw.lan/#/client/abc");
+        assert_eq!(bindings[1]["launch"]["peerId"], "123456789");
+        let viewer = Principal::device("phone", std::sync::Arc::new(|mode| mode == SessionMode::View));
+        let seen = dispatch(&state, &viewer, "remote_desktop_target_list", json!({})).await.unwrap();
+        let bindings = &seen["items"][0]["bindings"];
+        assert_eq!(bindings[0]["console"], json!({"profile": "guacamole"}));
+        assert_eq!(bindings[0]["endpoint"]["host"], "gw.lan");
+        assert_eq!(bindings[1]["launch"], json!({"launcher": "rustdesk"}));
+        assert!(!seen.to_string().contains("123456789") && !seen.to_string().contains("client/abc"));
+    }
+
     #[test]
     fn admin_operations_are_named_and_session_opens_escalate_unless_view() {
         for name in [
@@ -344,6 +427,7 @@ mod tests {
             "remote_desktop_target_delete",
             "remote_desktop_credential_set",
             "remote_desktop_target_probe",
+            "remote_desktop_binding_launch",
         ] {
             assert!(requires_admin(name, &json!({})), "{name}");
         }
@@ -358,7 +442,7 @@ mod tests {
         for args in [json!({"mode": "control"}), json!({}), json!({"mode": "VIEW"})] {
             assert!(requires_admin("remote_desktop_session_open", &args), "{args}");
         }
-        assert_eq!(COMMANDS.len(), 8);
+        assert_eq!(COMMANDS.len(), 9);
     }
 
     #[test]

@@ -12439,13 +12439,13 @@
         }
       }
     },
-    "cognia-remote-desktop-vnc": {
+    "cognia-remote-desktop-rustdesk": {
       "manifest": {
-        "id": "cognia-remote-desktop-vnc",
-        "name": "VNC Remote Desktop",
+        "id": "cognia-remote-desktop-rustdesk",
+        "name": "RustDesk Launcher",
         "nameKey": "manifest.name",
         "version": "0.1.0",
-        "description": "Opens VNC servers (TigerVNC, x11vnc, macOS Screen Sharing, RealVNC with VNC password) from the devices console. This desktop connects and authenticates; the viewer only ever sees an authenticated stream.",
+        "description": "Opens a machine's RustDesk ID in the RustDesk app installed on this device, from the devices console on desktop, Web and phone. Self-hosted ID servers and their public keys are supported. Cognia passes the ID only: RustDesk asks for the password, and Cognia cannot tell whether the connection succeeded.",
         "descriptionKey": "manifest.description",
         "type": "frontend",
         "capabilities": [],
@@ -12466,35 +12466,149 @@
         ],
         "runtimeCompatibility": {
           "browser": {
-            "availability": "blocked",
-            "reason": "Remote desktops are brokered by the desktop app (ADR-0234 Phase 2)."
+            "availability": "supported",
+            "entrypoint": "dist/index.js"
           },
           "tauri": {
             "availability": "supported",
             "entrypoint": "dist/index.js"
           },
           "mobile": {
+            "availability": "supported",
+            "entrypoint": "dist/index.js"
+          },
+          "headless": {
             "availability": "blocked",
-            "reason": "Phones reach remote desktops through a paired desktop in a later release (ADR-0234 Phase 3)."
+            "reason": "RustDesk opens on the device someone is using; a headless Host only keeps the binding for its paired devices (ADR-0234)."
+          }
+        },
+        "i18n": {
+          "locales": {
+            "en": {
+              "manifest.name": "RustDesk Launcher",
+              "manifest.description": "Opens a machine's RustDesk ID in the RustDesk app installed on this device, from the devices console on desktop, Web and phone. Self-hosted ID servers and their public keys are supported. Cognia passes the ID only: RustDesk asks for the password, and Cognia cannot tell whether the connection succeeded.",
+              "provider.name": "RustDesk",
+              "provider.description": "A RustDesk ID, opened in the RustDesk app on this device."
+            },
+            "zh-CN": {
+              "manifest.name": "RustDesk 启动器",
+              "manifest.description": "在桌面、网页和手机的设备控制台中，用本设备安装的 RustDesk 应用打开机器的 RustDesk ID。支持自建 ID 服务器及其公钥。Cognia 只传递 ID：密码由 RustDesk 询问，Cognia 也无法得知连接是否成功。",
+              "provider.name": "RustDesk",
+              "provider.description": "一个 RustDesk ID，在本设备的 RustDesk 应用中打开。"
+            }
+          }
+        }
+      },
+      "path": "builtin://cognia-remote-desktop-rustdesk",
+      "compatibilityDiagnostics": [],
+      "asset": {
+        "url": "/_cognia/builtin-plugins/cognia-remote-desktop-rustdesk/bac0bb857483e58e05d17de9124f00bea905f67f3d59c0c4bcdc075d7d846371.cjs",
+        "sha256": "bac0bb857483e58e05d17de9124f00bea905f67f3d59c0c4bcdc075d7d846371",
+        "sharedModules": [
+          "@cognia/plugin-sdk"
+        ],
+        "resourcesUrl": "/_cognia/builtin-plugins/cognia-remote-desktop-rustdesk/resources/",
+        "entryHashes": {
+          "dist/index.js": "bac0bb857483e58e05d17de9124f00bea905f67f3d59c0c4bcdc075d7d846371"
+        }
+      }
+    },
+    "cognia-remote-desktop-vnc": {
+      "manifest": {
+        "id": "cognia-remote-desktop-vnc",
+        "name": "VNC Remote Desktop",
+        "nameKey": "manifest.name",
+        "version": "0.1.0",
+        "description": "Opens VNC servers (TigerVNC, x11vnc, macOS Screen Sharing, RealVNC with VNC password) from the devices console on desktop, Web and phone. The Host connects and authenticates; the viewer only ever sees an authenticated stream.",
+        "descriptionKey": "manifest.description",
+        "type": "frontend",
+        "capabilities": [],
+        "main": "dist/index.js",
+        "author": {
+          "name": "cognia-next"
+        },
+        "license": "MIT",
+        "minAppVersion": "0.1.0",
+        "engines": {
+          "cognia": ">=0.1.0"
+        },
+        "permissions": [
+          "remote-desktop:provide"
+        ],
+        "activationEvents": [
+          "startup"
+        ],
+        "runtimeCompatibility": {
+          "browser": {
+            "availability": "supported",
+            "entrypoint": "dist/index.js"
+          },
+          "tauri": {
+            "availability": "supported",
+            "entrypoint": "dist/index.js"
+          },
+          "mobile": {
+            "availability": "supported",
+            "entrypoint": "dist/index.js"
+          },
+          "headless": {
+            "availability": "blocked",
+            "reason": "A viewer needs an interactive screen; a headless Host only bridges sessions for its paired devices (ADR-0234)."
           }
         },
         "i18n": {
           "locales": {
             "en": {
               "manifest.name": "VNC Remote Desktop",
-              "manifest.description": "Opens VNC servers (TigerVNC, x11vnc, macOS Screen Sharing, RealVNC with VNC password) from the devices console. This desktop connects and authenticates; the viewer only ever sees an authenticated stream.",
+              "manifest.description": "Opens VNC servers (TigerVNC, x11vnc, macOS Screen Sharing, RealVNC with VNC password) from the devices console on desktop, Web and phone. The Host connects and authenticates; the viewer only ever sees an authenticated stream.",
               "provider.name": "VNC",
               "provider.description": "VNC servers with no password or a VNC password.",
               "viewer.label": "Remote screen",
-              "viewer.viewOnly": "View only: input is not sent"
+              "viewer.viewOnly": "View only: input is not sent",
+              "touch.surfaceLabel": "Trackpad: drag to move the pointer, tap to click, tap with two fingers to right-click, drag with two fingers to scroll, press and hold to drag",
+              "touch.trackpad": "Trackpad",
+              "touch.direct": "Touch",
+              "touch.switchToDirect": "Trackpad mode. Switch to direct touch",
+              "touch.switchToTrackpad": "Direct touch mode. Switch to trackpad",
+              "keys.barLabel": "Special keys",
+              "keys.ctrl": "Ctrl",
+              "keys.alt": "Alt",
+              "keys.meta": "Super",
+              "keys.esc": "Esc",
+              "keys.tab": "Tab",
+              "keys.left": "Left arrow",
+              "keys.up": "Up arrow",
+              "keys.down": "Down arrow",
+              "keys.right": "Right arrow",
+              "keys.ctrlAltDel": "Ctrl+Alt+Del",
+              "keys.keyboard": "Keyboard",
+              "keys.keyboardInput": "Type to send keys to the remote screen"
             },
             "zh-CN": {
               "manifest.name": "VNC 远程桌面",
-              "manifest.description": "从设备控制台打开 VNC 服务器（TigerVNC、x11vnc、macOS 屏幕共享、使用 VNC 密码的 RealVNC）。由本机连接并认证，查看器只接收已认证的数据流。",
+              "manifest.description": "在桌面、网页和手机的设备控制台中打开 VNC 服务器（TigerVNC、x11vnc、macOS 屏幕共享、使用 VNC 密码的 RealVNC）。由主机连接并认证，查看器只接收已认证的数据流。",
               "provider.name": "VNC",
               "provider.description": "无密码或使用 VNC 密码的 VNC 服务器。",
               "viewer.label": "远程屏幕",
-              "viewer.viewOnly": "只读：不发送输入"
+              "viewer.viewOnly": "只读：不发送输入",
+              "touch.surfaceLabel": "触控板：拖动移动指针，轻点单击，双指轻点右键，双指拖动滚动，长按后拖动",
+              "touch.trackpad": "触控板",
+              "touch.direct": "触摸",
+              "touch.switchToDirect": "当前为触控板模式，切换为直接触摸",
+              "touch.switchToTrackpad": "当前为直接触摸模式，切换为触控板",
+              "keys.barLabel": "特殊按键",
+              "keys.ctrl": "Ctrl",
+              "keys.alt": "Alt",
+              "keys.meta": "Super",
+              "keys.esc": "Esc",
+              "keys.tab": "Tab",
+              "keys.left": "左方向键",
+              "keys.up": "上方向键",
+              "keys.down": "下方向键",
+              "keys.right": "右方向键",
+              "keys.ctrlAltDel": "Ctrl+Alt+Del",
+              "keys.keyboard": "键盘",
+              "keys.keyboardInput": "输入以向远程屏幕发送按键"
             }
           }
         }
@@ -12502,8 +12616,8 @@
       "path": "builtin://cognia-remote-desktop-vnc",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-remote-desktop-vnc/80d2d02328226e677e2f65f6415cd19c32d33a394a28cf84b21eb942f73cbc78.cjs",
-        "sha256": "80d2d02328226e677e2f65f6415cd19c32d33a394a28cf84b21eb942f73cbc78",
+        "url": "/_cognia/builtin-plugins/cognia-remote-desktop-vnc/87fe1373cb76183e242d2c3f96a4f68463cae77f00c05d222b97c63e9cb3c0b8.cjs",
+        "sha256": "87fe1373cb76183e242d2c3f96a4f68463cae77f00c05d222b97c63e9cb3c0b8",
         "sharedModules": [
           "@cognia/plugin-sdk",
           "@cognia/plugin-sdk/api/i18n",
@@ -12512,7 +12626,89 @@
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/cognia-remote-desktop-vnc/resources/",
         "entryHashes": {
-          "dist/index.js": "80d2d02328226e677e2f65f6415cd19c32d33a394a28cf84b21eb942f73cbc78"
+          "dist/index.js": "87fe1373cb76183e242d2c3f96a4f68463cae77f00c05d222b97c63e9cb3c0b8"
+        }
+      }
+    },
+    "cognia-remote-desktop-web-console": {
+      "manifest": {
+        "id": "cognia-remote-desktop-web-console",
+        "name": "Remote Desktop Web Consoles",
+        "nameKey": "manifest.name",
+        "version": "0.1.0",
+        "description": "Opens machines through your own Apache Guacamole or MeshCentral server from the devices console. You paste the console's page for a machine; the desktop app shows it in a separate browser view, and phones and the Web open it in a browser. Cognia stores no console password: the console signs you in and decides what you may do.",
+        "descriptionKey": "manifest.description",
+        "type": "frontend",
+        "capabilities": [],
+        "main": "dist/index.js",
+        "author": {
+          "name": "cognia-next"
+        },
+        "license": "MIT",
+        "minAppVersion": "0.1.0",
+        "engines": {
+          "cognia": ">=0.1.0"
+        },
+        "permissions": [
+          "remote-desktop:provide"
+        ],
+        "activationEvents": [
+          "startup"
+        ],
+        "runtimeCompatibility": {
+          "browser": {
+            "availability": "supported",
+            "entrypoint": "dist/index.js"
+          },
+          "tauri": {
+            "availability": "supported",
+            "entrypoint": "dist/index.js"
+          },
+          "mobile": {
+            "availability": "supported",
+            "entrypoint": "dist/index.js"
+          },
+          "headless": {
+            "availability": "blocked",
+            "reason": "A console is a page someone looks at; a headless Host only keeps the binding for its paired devices (ADR-0234)."
+          }
+        },
+        "i18n": {
+          "locales": {
+            "en": {
+              "manifest.name": "Remote Desktop Web Consoles",
+              "manifest.description": "Opens machines through your own Apache Guacamole or MeshCentral server from the devices console. You paste the console's page for a machine; the desktop app shows it in a separate browser view, and phones and the Web open it in a browser. Cognia stores no console password: the console signs you in and decides what you may do.",
+              "guacamole.name": "Apache Guacamole",
+              "guacamole.description": "A connection page of your Guacamole server (…/#/client/…). Reaches RDP, VNC and SSH machines behind it.",
+              "guacamole.example": "https://gateway.example.com/guacamole/#/client/…",
+              "meshcentral.name": "MeshCentral",
+              "meshcentral.description": "A device page of your MeshCentral server (…?gotonode=…). Opens that device's desktop.",
+              "meshcentral.example": "https://mesh.example.com/?gotonode=…"
+            },
+            "zh-CN": {
+              "manifest.name": "远程桌面 Web 控制台",
+              "manifest.description": "在设备控制台中通过你自己的 Apache Guacamole 或 MeshCentral 服务器打开机器。粘贴控制台中某台机器的页面链接；桌面应用会在独立的浏览视图中显示，手机和网页则在浏览器中打开。Cognia 不保存控制台密码：由控制台负责登录和权限。",
+              "guacamole.name": "Apache Guacamole",
+              "guacamole.description": "你的 Guacamole 服务器中的连接页面（…/#/client/…）。可访问其后的 RDP、VNC 和 SSH 机器。",
+              "guacamole.example": "https://gateway.example.com/guacamole/#/client/…",
+              "meshcentral.name": "MeshCentral",
+              "meshcentral.description": "你的 MeshCentral 服务器中的设备页面（…?gotonode=…）。打开该设备的桌面。",
+              "meshcentral.example": "https://mesh.example.com/?gotonode=…"
+            }
+          }
+        }
+      },
+      "path": "builtin://cognia-remote-desktop-web-console",
+      "compatibilityDiagnostics": [],
+      "asset": {
+        "url": "/_cognia/builtin-plugins/cognia-remote-desktop-web-console/08ee8a0883ab78ede4457a9c929236b250833ce1a203eacb58f400e7172db550.cjs",
+        "sha256": "08ee8a0883ab78ede4457a9c929236b250833ce1a203eacb58f400e7172db550",
+        "sharedModules": [
+          "@cognia/plugin-sdk"
+        ],
+        "resourcesUrl": "/_cognia/builtin-plugins/cognia-remote-desktop-web-console/resources/",
+        "entryHashes": {
+          "dist/index.js": "08ee8a0883ab78ede4457a9c929236b250833ce1a203eacb58f400e7172db550"
         }
       }
     },
@@ -14767,15 +14963,15 @@
       "path": "builtin://cognia-workflow-ai",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-workflow-ai/03615f2eef08b65380244965950b51d1544e7c3f6b1e6331a949f56e3056e34c.cjs",
-        "sha256": "03615f2eef08b65380244965950b51d1544e7c3f6b1e6331a949f56e3056e34c",
+        "url": "/_cognia/builtin-plugins/cognia-workflow-ai/ff27830efc833174c9de031f055054786503efc978fff3bd9f35e3e12cb9ecdc.cjs",
+        "sha256": "ff27830efc833174c9de031f055054786503efc978fff3bd9f35e3e12cb9ecdc",
         "sharedModules": [
           "@cognia/plugin-sdk",
           "@cognia/plugin-sdk/api/workflow-editor"
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/cognia-workflow-ai/resources/",
         "entryHashes": {
-          "dist/index.js": "03615f2eef08b65380244965950b51d1544e7c3f6b1e6331a949f56e3056e34c"
+          "dist/index.js": "ff27830efc833174c9de031f055054786503efc978fff3bd9f35e3e12cb9ecdc"
         }
       }
     },

@@ -219,7 +219,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "managed_desktop_control_release",
     "managed_desktop_control_input",
 
-    // External remote desktop targets and sessions (ADR-0234 Phase 3).
+    // External remote desktop targets and sessions (ADR-0234 Phases 3 and 5).
     "remote_desktop_target_list",
     "remote_desktop_target_save",
     "remote_desktop_target_delete",
@@ -228,6 +228,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "remote_desktop_session_open",
     "remote_desktop_session_renew",
     "remote_desktop_session_close",
+    "remote_desktop_binding_launch",
 
     // Shared media engine, with caller-owned binary transfers.
     "video_get_info",

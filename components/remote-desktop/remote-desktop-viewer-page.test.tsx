@@ -2,7 +2,12 @@ import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 let search = new URLSearchParams("target=t1&binding=b1&mode=control")
-jest.mock("next/navigation", () => ({ useSearchParams: () => search }))
+const push = jest.fn()
+jest.mock("next/navigation", () => ({ useSearchParams: () => search, useRouter: () => ({ push }) }))
+const localCall = jest.fn()
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  localTransport: { call: (...args: unknown[]) => localCall(...args) },
+}))
 let tauri = true
 jest.mock("@/lib/tauri", () => ({ isTauri: () => tauri, transport: { call: jest.fn() } }))
 
@@ -212,5 +217,92 @@ describe("RemoteDesktopViewerPage", () => {
     expect(
       await screen.findByText("The provider for this remote desktop is not installed or enabled.")
     ).toBeInTheDocument()
+  })
+
+  it("embeds a web console on the desktop and never opens a session for it", async () => {
+    registerRemoteDesktopProvider({
+      providerId: "cognia-remote-desktop-web-console.guacamole",
+      pluginId: "cognia-remote-desktop-web-console",
+      firstParty: true,
+      definition: {
+        id: "guacamole",
+        name: "Guacamole",
+        integrationMode: "web-console",
+        consoleProfile: "guacamole",
+      },
+    })
+    const consoleTarget: RemoteDesktopTarget = {
+      ...target,
+      bindings: [
+        {
+          ...target.bindings[0]!,
+          providerId: "cognia-remote-desktop-web-console.guacamole",
+          access: "web-console",
+          adapter: "none",
+          viewOnly: false,
+          console: { url: "https://gw.lan/#/client/x", profile: "guacamole" },
+        },
+      ],
+    }
+    localCall.mockImplementation(async (name: string) =>
+      name === "remote_desktop_local_call"
+        ? { kind: "web-console", url: "https://gw.lan/#/client/x", profile: "guacamole" }
+        : undefined
+    )
+    const open = jest.fn()
+    render(
+      <RemoteDesktopViewerPage
+        targetsDeps={{ list: async () => [consoleTarget] }}
+        sessionDeps={{ open, renew: jest.fn(), close: jest.fn() }}
+      />
+    )
+    expect(await screen.findByTestId("remote-console-view")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(localCall).toHaveBeenCalledWith(
+        "remote_console_open",
+        expect.objectContaining({
+          url: "https://gw.lan/#/client/x",
+        })
+      )
+    )
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it("offers RustDesk from a button instead of a session", async () => {
+    registerRemoteDesktopProvider({
+      providerId: "cognia-remote-desktop-rustdesk.rustdesk",
+      pluginId: "cognia-remote-desktop-rustdesk",
+      firstParty: true,
+      definition: {
+        id: "rustdesk",
+        name: "RustDesk",
+        integrationMode: "external-app",
+        launcher: "rustdesk",
+      },
+    })
+    const appTarget: RemoteDesktopTarget = {
+      ...target,
+      bindings: [
+        {
+          ...target.bindings[0]!,
+          providerId: "cognia-remote-desktop-rustdesk.rustdesk",
+          access: "external-app",
+          adapter: "none",
+          viewOnly: false,
+          endpoint: null,
+          launch: { launcher: "rustdesk", peerId: "123456789" },
+        },
+      ],
+    }
+    const open = jest.fn()
+    render(
+      <RemoteDesktopViewerPage
+        targetsDeps={{ list: async () => [appTarget] }}
+        sessionDeps={{ open, renew: jest.fn(), close: jest.fn() }}
+      />
+    )
+    expect(await screen.findByRole("button", { name: "Open in RustDesk" })).toBeEnabled()
+    expect(screen.getByText(/Cognia passes the ID and never the password/)).toBeInTheDocument()
+    expect(open).not.toHaveBeenCalled()
   })
 })

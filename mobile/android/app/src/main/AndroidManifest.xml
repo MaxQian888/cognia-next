@@ -98,9 +98,11 @@
     <!-- Permissions -->
 
     <!-- Package visibility (Android 11+) for CogniaAppHandoffPlugin: sign-in
-         hands a Feishu request to the Feishu app when it is installed. -->
+         hands a Feishu request to the Feishu app when it is installed, and a
+         remote desktop opens its RustDesk ID in RustDesk (ADR-0234). -->
     <queries>
         <package android:name="com.ss.android.lark" />
+        <package android:name="com.carriez.flutter_hbb" />
     </queries>
 
     <uses-permission android:name="android.permission.INTERNET" />

@@ -370,14 +370,31 @@ const remoteDesktopAdminLease = {
 }
 const remoteDesktopAdapter = z.enum(["vnc", "none"])
 const remoteDesktopPort = z.number().int().min(1).max(65535)
+// `bridge` carries host and port; a web console its link (the Host pins the
+// link's host); an external app the launcher's peer (ADR-0234 Phase 5).
 const remoteDesktopBindingDraft = z.object({
   id: z.string().min(1).optional(),
   providerId: z.string().min(1),
+  access: z.enum(["bridge", "web-console", "external-app"]).optional(),
   adapter: remoteDesktopAdapter,
   priority: z.number().int().nonnegative().optional(),
   enabled: z.boolean().optional(),
-  host: z.string().min(1),
-  port: remoteDesktopPort,
+  host: z.string().min(1).optional(),
+  port: remoteDesktopPort.optional(),
+  console: z
+    .object({
+      url: z.string().min(1).max(2048),
+      profile: z.enum(["guacamole", "meshcentral", "generic"]),
+    })
+    .optional(),
+  launch: z
+    .object({
+      launcher: z.literal("rustdesk"),
+      peerId: z.string().min(1).max(64),
+      server: z.string().max(300).optional(),
+      key: z.string().max(128).optional(),
+    })
+    .optional(),
   viewOnly: z.boolean().optional(),
   config: z.record(z.string(), z.unknown()).nullable().optional(),
   confirm: z.boolean().optional(),
@@ -1000,6 +1017,12 @@ const schemas = {
   }),
   remote_desktop_session_renew: z.object({ sessionId: z.string().min(1) }),
   remote_desktop_session_close: z.object({ sessionId: z.string().min(1) }),
+  // Web consoles and external apps cannot be made read-only: `host.admin`.
+  remote_desktop_binding_launch: z.object({
+    targetId: z.string().min(1),
+    bindingId: z.string().min(1),
+    ...remoteDesktopAdminLease,
+  }),
   scheduled_task_emit_event: z.object({
     eventType: z.string().min(1),
     eventSource: z.string().optional(),

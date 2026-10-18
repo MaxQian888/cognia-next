@@ -16,8 +16,12 @@
  * app through `cn.cognia.app:/auth/callback`, as it does from a browser tab.
  */
 
-/** A provider whose app can take the sign-in. */
-export type AppHandoffTarget = "feishu"
+/**
+ * An app the native plugin may hand a link to: Feishu for a sign-in, or
+ * RustDesk for a remote desktop (ADR-0234 Phase 5). The plugin fixes each
+ * target's package and accepted link shape natively.
+ */
+export type AppHandoffTarget = "feishu" | "rustdesk"
 
 /** Feishu opens a web page in its own WebView at this Applink path. */
 const FEISHU_WEB_URL_APPLINK = "https://applink.feishu.cn/client/web_url/open"

@@ -14345,15 +14345,36 @@
       "additionalProperties": false
     },
     "RemoteDesktopBinding": {
-      "description": "ADR-0234: a provider binding the Host reaches. Credentials are write-only; only whether one is stored is reported.",
+      "description": "ADR-0234: a provider binding the Host reaches, a web console or an external app. Credentials are write-only; only whether one is stored is reported. A caller that may only view gets console and launch without the link or peer.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "providerId": { "type": "string", "minLength": 1 },
+        "access": { "type": "string", "enum": ["bridge", "web-console", "external-app"] },
         "adapter": { "type": "string", "enum": ["vnc", "none"] },
         "priority": { "type": "integer", "minimum": 0 },
         "enabled": { "type": "boolean" },
-        "endpoint": { "$ref": "#/$defs/RemoteDesktopEndpoint" },
+        "endpoint": { "anyOf": [{ "$ref": "#/$defs/RemoteDesktopEndpoint" }, { "type": "null" }] },
+        "console": {
+          "type": "object",
+          "properties": {
+            "url": { "type": "string", "minLength": 1 },
+            "profile": { "type": "string", "enum": ["guacamole", "meshcentral", "generic"] }
+          },
+          "required": ["profile"],
+          "additionalProperties": false
+        },
+        "launch": {
+          "type": "object",
+          "properties": {
+            "launcher": { "type": "string", "enum": ["rustdesk"] },
+            "peerId": { "type": "string", "minLength": 1 },
+            "server": { "type": "string", "minLength": 1 },
+            "key": { "type": "string", "minLength": 1 }
+          },
+          "required": ["launcher"],
+          "additionalProperties": false
+        },
         "viewOnly": { "type": "boolean" },
         "config": { "type": ["object", "null"] },
         "hasControlCredential": { "type": "boolean" },
@@ -14362,6 +14383,7 @@
       "required": [
         "id",
         "providerId",
+        "access",
         "adapter",
         "priority",
         "enabled",
@@ -14450,6 +14472,31 @@
       },
       "required": ["expiresAt"],
       "additionalProperties": false
+    },
+    "RemoteDesktopLaunched": {
+      "description": "ADR-0234 Phase 5: where a client goes for a binding the Host does not bridge. Never a credential.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "web-console" },
+            "url": { "type": "string", "minLength": 1 },
+            "profile": { "type": "string", "enum": ["guacamole", "meshcentral", "generic"] }
+          },
+          "required": ["kind", "url", "profile"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "external-app" },
+            "launcher": { "type": "string", "enum": ["rustdesk"] },
+            "uri": { "type": "string", "minLength": 1 }
+          },
+          "required": ["kind", "launcher", "uri"],
+          "additionalProperties": false
+        }
+      ]
     }
   },
   "commands": {
@@ -14461,6 +14508,7 @@
     "remote_desktop_session_open": { "$ref": "#/$defs/RemoteDesktopSessionOpened" },
     "remote_desktop_session_renew": { "$ref": "#/$defs/RemoteDesktopSessionRenewed" },
     "remote_desktop_session_close": { "type": "null" },
+    "remote_desktop_binding_launch": { "$ref": "#/$defs/RemoteDesktopLaunched" },
     "sandbox_preview_context": { "$ref": "#/$defs/SandboxPreviewContext" },
     "sandbox_preview_create": { "$ref": "#/$defs/CreatedSandboxPreview" },
     "sandbox_preview_open": { "$ref": "#/$defs/CreatedSandboxPreview" },

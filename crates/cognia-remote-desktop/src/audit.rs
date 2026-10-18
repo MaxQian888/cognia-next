@@ -89,6 +89,7 @@ fn entry(
             | "remote_desktop.stream.claim"
             | "remote_desktop.stream.revoke"
             | "remote_desktop.stream.revoke_unconfirmed"
+            | "remote_desktop.binding.launch"
     ) || !matches!(target_kind, "sandbox" | "managed-desktop" | "external")
     {
         return None;
@@ -124,6 +125,8 @@ fn entry(
         ("class", &["private", "public"][..]),
         // Stream grants (ADR-0234 Phase 4): the role only, never a token or URL.
         ("role", &["viewer", "controller"][..]),
+        // Web consoles and external apps (Phase 5): never the link or the ID.
+        ("access", &["web-console", "external-app"][..]),
         (
             "reason",
             &[
@@ -307,6 +310,37 @@ mod tests {
         for kind in ["remote_desktop.stream.revoke", "remote_desktop.stream.revoke_unconfirmed"] {
             assert!(entry(kind, "sandbox", "d", "p", "refused", 0, json!({})).is_some());
         }
+    }
+
+    #[test]
+    fn launches_record_the_access_and_never_the_link_or_peer() {
+        let record = entry(
+            "remote_desktop.binding.launch",
+            "external",
+            "target",
+            "device:phone",
+            "allow",
+            0,
+            json!({"binding_id":"b1", "access":"external-app",
+                "uri":"rustdesk://connection/new/123456789", "url":"https://gw.example.com/#/client/x"}),
+        )
+        .unwrap();
+        assert_eq!(record["access"], "external-app");
+        assert_eq!(record["binding_id"], "b1");
+        let text = record.to_string();
+        assert!(!text.contains("123456789") && !text.contains("gw.example.com"));
+        let refused = entry(
+            "remote_desktop.binding.launch",
+            "external",
+            "target",
+            "local-owner",
+            "deny",
+            0,
+            json!({"access":"bridge", "code":"remote_desktop_binding_not_launchable"}),
+        )
+        .unwrap();
+        assert!(refused.get("access").is_none());
+        assert_eq!(refused["code"], "remote_desktop_binding_not_launchable");
     }
 
     #[test]

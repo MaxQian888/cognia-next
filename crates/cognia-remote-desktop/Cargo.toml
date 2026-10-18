@@ -27,6 +27,7 @@ tempfile.workspace = true
 hex.workspace = true
 # VncAuth is single DES over the server challenge (RFC 6143 §7.2.2).
 des = "0.9"
+url.workspace = true
 futures-util = { workspace = true, features = ["sink", "std"] }
 tokio-tungstenite = { workspace = true, features = ["handshake"] }
 

@@ -86,4 +86,50 @@ public class CogniaAppHandoffPluginTest {
             assertNull(url, offHost.resolved);
         }
     }
+
+    @Test
+    public void availabilityMatchesWhetherRustDeskTakesItsLinks() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Outcome outcome = new Outcome();
+        JSObject data = new JSObject();
+        data.put("target", "rustdesk");
+
+        plugin(context).isAvailable(call("isAvailable", data, outcome));
+
+        Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse("rustdesk://connection/new/000000000"));
+        probe.addCategory(Intent.CATEGORY_BROWSABLE);
+        probe.setPackage("com.carriez.flutter_hbb");
+        boolean installed = probe.resolveActivity(context.getPackageManager()) != null;
+        assertNotNull(outcome.resolved);
+        assertEquals(installed, outcome.resolved.getBool("available"));
+    }
+
+    @Test
+    public void rustDeskTakesOnlyItsConnectLink() {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        for (String url : new String[] {
+            "rustdesk://123456789",
+            "rustdesk://config/abc",
+            "rustdesk://password/abc",
+            "rustdesk://connection/new/123456789?password=x",
+            "rustdesk://connection/new/123456789?key=a&password=x",
+            "https://applink.feishu.cn/client/web_url/open",
+        }) {
+            Outcome refused = new Outcome();
+            JSObject data = new JSObject();
+            data.put("target", "rustdesk");
+            data.put("url", url);
+            plugin(context).open(call("open", data, refused));
+            assertEquals(url, "the link is not a RustDesk connect link", refused.rejected);
+            assertNull(url, refused.resolved);
+        }
+        String[] accepted = {
+            "rustdesk://connection/new/123456789",
+            "rustdesk://connection/new/123456789@rd.example.com:21116?key=Ab%2B%2F%3D",
+            "rustdesk://connection/new/Office_PC-2@[fd00::1]",
+        };
+        for (String url : accepted) {
+            assertEquals(url, true, CogniaAppHandoffPlugin.RUSTDESK_LINK.matcher(url).matches());
+        }
+    }
 }

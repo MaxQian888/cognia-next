@@ -5,6 +5,7 @@ import {
   __setRemoteDesktopClientDepsForTests,
   closeRemoteDesktopSession,
   deleteRemoteDesktopTarget,
+  launchRemoteDesktopBinding,
   listRemoteDesktopTargets,
   openRemoteDesktopSession,
   probeRemoteDesktop,
@@ -206,6 +207,42 @@ describe("a remote Host", () => {
         { targetId: "t", bindingId: "b", mode: "control", takeover: false, adminLease: "lease-1" },
       ],
     ])
+  })
+
+  it("launches a console or app binding with the admin lease, like a control open", async () => {
+    issueLease.mockResolvedValue({
+      token: "lease-1",
+      operations: [...REMOTE_DESKTOP_ADMIN_OPERATIONS],
+      expiresAt: 600_000,
+    })
+    remoteCall.mockResolvedValue({
+      kind: "external-app",
+      launcher: "rustdesk",
+      uri: "rustdesk://connection/new/123456789",
+    })
+    await expect(
+      launchRemoteDesktopBinding(remote, { targetId: "t", bindingId: "b" })
+    ).resolves.toEqual({
+      kind: "external-app",
+      launcher: "rustdesk",
+      uri: "rustdesk://connection/new/123456789",
+    })
+    expect(REMOTE_DESKTOP_ADMIN_OPERATIONS).toContain("remote_desktop_binding_launch")
+    expect(remoteCall).toHaveBeenCalledWith("remote_desktop_binding_launch", {
+      targetId: "t",
+      bindingId: "b",
+      adminLease: "lease-1",
+    })
+    localCall.mockResolvedValue({
+      kind: "web-console",
+      url: "https://gw/#/client/x",
+      profile: "guacamole",
+    })
+    await launchRemoteDesktopBinding(local, { targetId: "t", bindingId: "b" })
+    expect(localCall).toHaveBeenCalledWith("remote_desktop_local_call", {
+      name: "remote_desktop_binding_launch",
+      args: { targetId: "t", bindingId: "b" },
+    })
   })
 
   it("drops a refused lease so the next action asks again", async () => {

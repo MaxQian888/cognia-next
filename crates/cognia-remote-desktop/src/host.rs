@@ -5,6 +5,7 @@
 use crate::{
     audit,
     bridge::{Attachment, Bridge, BridgeTarget, ViewerStream, CONNECT_TIMEOUT, HANDSHAKE_TIMEOUT, TICKET_TTL},
+    console::{self, ConsoleProfile},
     credentials::{self, CredentialKind, CredentialStore, KeyringCredentials, MAX_CREDENTIAL_BYTES},
     endpoint::{self, Pinned},
     error::{RemoteDesktopError, Result},
@@ -13,7 +14,11 @@ use crate::{
         now_ms, Admission, Broker, EndReason, Principal, SessionMode, SessionOpened, SessionRenewed,
         TARGET_KIND,
     },
-    target::{validate_draft, Adapter, Binding, Endpoint, EndpointClass, RemoteTarget, TargetDraft, TargetStore},
+    launch::{self, Launcher},
+    target::{
+        validate_draft, Access, Adapter, Binding, BindingDraft, Endpoint, EndpointClass, RemoteTarget, TargetDraft,
+        TargetStore, WebConsole,
+    },
 };
 use cognia_problem::paging::{Page, PageRequest};
 use parking_lot::Mutex;
@@ -81,6 +86,16 @@ pub struct ProbeOutcome {
     pub rfb: Option<ProbeResult>,
 }
 
+/// What a client opens for a binding the Host does not bridge
+/// (`remote_desktop_binding_launch`). The provider authenticates the user;
+/// Cognia only says where to go.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Launched {
+    WebConsole { url: String, profile: ConsoleProfile },
+    ExternalApp { launcher: Launcher, uri: String },
+}
+
 pub struct RemoteDesktopHost {
     store: Arc<Mutex<TargetStore>>,
     credentials: Arc<dyn CredentialStore>,
@@ -105,8 +120,34 @@ fn class_str(class: EndpointClass) -> &'static str {
 
 /// Fields a live bridge depends on. Renaming or reprioritizing a binding
 /// leaves its sessions alone.
-fn session_relevant(binding: &Binding) -> (&Endpoint, Adapter, bool, bool) {
-    (&binding.endpoint, binding.adapter, binding.view_only, binding.enabled)
+fn session_relevant(binding: &Binding) -> (Access, Option<&Endpoint>, Adapter, bool, bool) {
+    (
+        binding.access,
+        binding.endpoint.as_ref(),
+        binding.adapter,
+        binding.view_only,
+        binding.enabled,
+    )
+}
+
+/// The host and port a draft binding asks the Host to pin: its own for a
+/// bridge, its URL's for a web console, none for an external app.
+fn endpoint_of(binding: &BindingDraft) -> Result<Option<(String, u16)>> {
+    Ok(match binding.access {
+        Access::Bridge => Some((
+            binding.host.clone().unwrap_or_default(),
+            binding.port.unwrap_or_default(),
+        )),
+        Access::WebConsole => {
+            let console = binding
+                .console
+                .as_ref()
+                .ok_or_else(|| RemoteDesktopError::new("remote_desktop_console_url_invalid"))?;
+            let link = console::parse(&console.url, console.profile)?;
+            Some((link.host, link.port))
+        }
+        Access::ExternalApp => None,
+    })
 }
 
 struct Saved {
@@ -170,7 +211,10 @@ impl RemoteDesktopHost {
         validate_draft(&draft)?;
         let mut pins = Vec::with_capacity(draft.bindings.len());
         for binding in &draft.bindings {
-            pins.push(self.pin(&binding.host, binding.port).await?);
+            pins.push(match endpoint_of(binding)? {
+                Some((host, port)) => Some(self.pin(&host, port).await?),
+                None => None,
+            });
         }
         let now = now_ms();
         let saved = self
@@ -280,7 +324,7 @@ impl RemoteDesktopHost {
                 let binding = store
                     .binding(&target_id_owned, &binding_id_owned)
                     .ok_or_else(|| RemoteDesktopError::new("remote_desktop_binding_not_found"))?;
-                if binding.adapter == Adapter::None && present {
+                if (binding.adapter == Adapter::None || binding.access != Access::Bridge) && present {
                     return Err(RemoteDesktopError::new("remote_desktop_binding_has_no_authentication"));
                 }
                 if kind == CredentialKind::View && !binding.view_only && present {
@@ -331,15 +375,11 @@ impl RemoteDesktopHost {
                 binding_id,
             } => {
                 let binding = self.binding(&target_id, &binding_id).await?;
-                let resolver = self.resolver.clone();
-                let endpoint = &binding.endpoint;
-                if !endpoint::still_pinned_with(&endpoint.host, endpoint.port, endpoint.pinned_ip, move |host, port| {
-                    resolver.resolve(host, port)
-                })
-                .await?
-                {
-                    return Err(RemoteDesktopError::new("remote_desktop_endpoint_changed"));
-                }
+                let endpoint = binding
+                    .endpoint
+                    .as_ref()
+                    .ok_or_else(|| RemoteDesktopError::new("remote_desktop_binding_has_no_endpoint"))?;
+                self.require_still_pinned(endpoint).await?;
                 (
                     Pinned {
                         ip: endpoint.pinned_ip,
@@ -373,6 +413,73 @@ impl RemoteDesktopHost {
             );
         }
         Ok(outcome)
+    }
+
+    async fn require_still_pinned(&self, endpoint: &Endpoint) -> Result<()> {
+        let resolver = self.resolver.clone();
+        if endpoint::still_pinned_with(&endpoint.host, endpoint.port, endpoint.pinned_ip, move |host, port| {
+            resolver.resolve(host, port)
+        })
+        .await?
+        {
+            Ok(())
+        } else {
+            Err(RemoteDesktopError::new("remote_desktop_endpoint_changed"))
+        }
+    }
+
+    /// Where a client goes for a web console or external-app binding. It
+    /// needs control (`host.admin` on a paired device): these bindings cannot
+    /// be made read-only. A console whose name moved needs saving again.
+    pub async fn launch(&self, principal: &Principal, target_id: &str, binding_id: &str) -> Result<Launched> {
+        let result = self.launch_inner(principal, target_id, binding_id).await;
+        let (decision, access) = match &result {
+            Ok(Launched::WebConsole { .. }) => ("allow", Access::WebConsole),
+            Ok(Launched::ExternalApp { .. }) => ("allow", Access::ExternalApp),
+            Err(_) => ("deny", Access::Bridge),
+        };
+        let mut fields = json!({"binding_id": binding_id});
+        if decision == "allow" {
+            fields["access"] = json!(access.as_str());
+        } else if let Err(error) = &result {
+            fields["code"] = json!(error.code);
+        }
+        audit::record_async(
+            "remote_desktop.binding.launch",
+            TARGET_KIND,
+            target_id,
+            principal.id(),
+            decision,
+            0,
+            fields,
+        )
+        .await;
+        result
+    }
+
+    async fn launch_inner(&self, principal: &Principal, target_id: &str, binding_id: &str) -> Result<Launched> {
+        if !principal.admitted(SessionMode::Control) {
+            return Err(RemoteDesktopError::new("remote_desktop_forbidden"));
+        }
+        let binding = self.binding(target_id, binding_id).await?;
+        if !binding.enabled {
+            return Err(RemoteDesktopError::new("remote_desktop_binding_disabled"));
+        }
+        match (binding.access, &binding.console, &binding.launch, &binding.endpoint) {
+            (Access::WebConsole, Some(console), _, Some(endpoint)) => {
+                self.require_still_pinned(endpoint).await?;
+                Ok(Launched::WebConsole {
+                    url: console.url.clone(),
+                    profile: console.profile,
+                })
+            }
+            (Access::ExternalApp, _, Some(app), _) => Ok(Launched::ExternalApp {
+                launcher: app.launcher,
+                uri: launch::uri(app),
+            }),
+            (Access::Bridge, ..) => Err(RemoteDesktopError::new("remote_desktop_binding_not_launchable")),
+            _ => Err(internal()),
+        }
     }
 
     async fn binding(&self, target_id: &str, binding_id: &str) -> Result<Binding> {
@@ -433,6 +540,9 @@ impl RemoteDesktopHost {
         if !binding.enabled {
             return Err(RemoteDesktopError::new("remote_desktop_binding_disabled"));
         }
+        let (Access::Bridge, Some(endpoint)) = (binding.access, binding.endpoint.clone()) else {
+            return Err(RemoteDesktopError::new("remote_desktop_binding_not_bridged"));
+        };
         let credential = match mode {
             SessionMode::View if binding.view_only && binding.has_view_credential => Some(CredentialKind::View),
             SessionMode::View => {
@@ -460,7 +570,7 @@ impl RemoteDesktopHost {
         };
         let bridge = Bridge::start(
             BridgeTarget {
-                addr: SocketAddr::new(binding.endpoint.pinned_ip, binding.endpoint.port),
+                addr: SocketAddr::new(endpoint.pinned_ip, endpoint.port),
                 adapter: binding.adapter,
                 password,
             },
@@ -504,7 +614,7 @@ fn save(
     store: &mut TargetStore,
     credentials: &dyn CredentialStore,
     draft: TargetDraft,
-    pins: Vec<Pinned>,
+    pins: Vec<Option<Pinned>>,
     now: i64,
 ) -> Result<Saved> {
     let existing = match &draft.id {
@@ -534,48 +644,92 @@ fn save(
             None => None,
         };
         let id = draft_binding.id.clone().unwrap_or_else(new_id);
-        let host = draft_binding.host.trim().trim_start_matches('[').trim_end_matches(']').to_owned();
-        let kept = previous.filter(|previous| {
-            previous.endpoint.host == host
-                && previous.endpoint.port == draft_binding.port
-                && previous.endpoint.pinned_ip == pin.ip
-        });
-        let confirmed_at = match kept {
-            Some(previous) => previous.endpoint.confirmed_at,
-            None if draft_binding.confirm => {
-                confirmed.push((id.clone(), pin.class));
-                now
+        let (endpoint, console, app) = match (draft_binding.access, pin) {
+            (Access::ExternalApp, _) => {
+                let app = draft_binding
+                    .launch
+                    .as_ref()
+                    .ok_or_else(|| RemoteDesktopError::new("remote_desktop_launch_peer_invalid"))?;
+                (None, None, Some(launch::normalize(app)?))
             }
-            None => {
-                return Err(RemoteDesktopError::with_detail(
-                    "remote_desktop_endpoint_unconfirmed",
-                    class_str(pin.class),
-                ))
+            (access, Some(pin)) => {
+                let (host, port, console) = match access {
+                    Access::WebConsole => {
+                        let draft_console = draft_binding
+                            .console
+                            .as_ref()
+                            .ok_or_else(|| RemoteDesktopError::new("remote_desktop_console_url_invalid"))?;
+                        let link = console::parse(&draft_console.url, draft_console.profile)?;
+                        console::require_transport(&link, pin.class)?;
+                        let console = WebConsole {
+                            url: link.url,
+                            profile: draft_console.profile,
+                        };
+                        (link.host, link.port, Some(console))
+                    }
+                    _ => (
+                        draft_binding
+                            .host
+                            .as_deref()
+                            .unwrap_or_default()
+                            .trim()
+                            .trim_start_matches('[')
+                            .trim_end_matches(']')
+                            .to_owned(),
+                        draft_binding.port.unwrap_or_default(),
+                        None,
+                    ),
+                };
+                let kept = previous
+                    .and_then(|previous| previous.endpoint.as_ref())
+                    .filter(|previous| previous.host == host && previous.port == port && previous.pinned_ip == pin.ip);
+                let confirmed_at = match kept {
+                    Some(previous) => previous.confirmed_at,
+                    None if draft_binding.confirm => {
+                        confirmed.push((id.clone(), pin.class));
+                        now
+                    }
+                    None => {
+                        return Err(RemoteDesktopError::with_detail(
+                            "remote_desktop_endpoint_unconfirmed",
+                            class_str(pin.class),
+                        ))
+                    }
+                };
+                let endpoint = Endpoint {
+                    host,
+                    port,
+                    pinned_ip: pin.ip,
+                    class: pin.class,
+                    confirmed_at,
+                };
+                (Some(endpoint), console, None)
             }
+            (_, None) => return Err(internal()),
         };
+        // Only a bridge with a VNC handshake uses credentials; anything else
+        // drops what the binding held before.
+        let authenticates = draft_binding.access == Access::Bridge && draft_binding.adapter != Adapter::None;
         let mut has_control = previous.is_some_and(|binding| binding.has_control_credential);
         let mut has_view = previous.is_some_and(|binding| binding.has_view_credential);
-        if draft_binding.adapter == Adapter::None && has_control {
+        if !authenticates && has_control {
             clear.push((id.clone(), CredentialKind::Control));
             has_control = false;
         }
-        if (!draft_binding.view_only || draft_binding.adapter == Adapter::None) && has_view {
+        if (!draft_binding.view_only || !authenticates) && has_view {
             clear.push((id.clone(), CredentialKind::View));
             has_view = false;
         }
         let binding = Binding {
             id: id.clone(),
             provider_id: draft_binding.provider_id.clone(),
+            access: draft_binding.access,
             adapter: draft_binding.adapter,
             priority: draft_binding.priority,
             enabled: draft_binding.enabled,
-            endpoint: Endpoint {
-                host,
-                port: draft_binding.port,
-                pinned_ip: pin.ip,
-                class: pin.class,
-                confirmed_at,
-            },
+            endpoint,
+            console,
+            launch: app,
             view_only: draft_binding.view_only,
             config: draft_binding.config.clone(),
             has_control_credential: has_control,
@@ -668,12 +822,15 @@ mod tests {
     fn binding_draft(host: &str, port: u16, adapter: Adapter, view_only: bool) -> BindingDraft {
         BindingDraft {
             id: None,
-            provider_id: "cognia.remote-desktop-vnc".into(),
+            provider_id: "cognia-remote-desktop-vnc.vnc".into(),
+            access: Access::Bridge,
             adapter,
             priority: 0,
             enabled: true,
-            host: host.into(),
-            port,
+            host: Some(host.into()),
+            port: Some(port),
+            console: None,
+            launch: None,
             view_only,
             config: serde_json::Value::Null,
             confirm: true,
@@ -698,11 +855,15 @@ mod tests {
                 .map(|binding| BindingDraft {
                     id: Some(binding.id.clone()),
                     provider_id: binding.provider_id.clone(),
+                    access: binding.access,
                     adapter: binding.adapter,
                     priority: binding.priority,
                     enabled: binding.enabled,
-                    host: binding.endpoint.host.clone(),
-                    port: binding.endpoint.port,
+                    host: (binding.access == Access::Bridge)
+                        .then(|| binding.endpoint.as_ref().unwrap().host.clone()),
+                    port: (binding.access == Access::Bridge).then(|| binding.endpoint.as_ref().unwrap().port),
+                    console: binding.console.clone(),
+                    launch: binding.launch.clone(),
                     view_only: binding.view_only,
                     config: binding.config.clone(),
                     confirm: false,
@@ -740,7 +901,7 @@ mod tests {
         let mut store = fixture.host.store.lock();
         let mut target = store.get(target_id).unwrap().clone();
         for binding in &mut target.bindings {
-            binding.endpoint.pinned_ip = "127.0.0.1".parse().unwrap();
+            binding.endpoint.as_mut().unwrap().pinned_ip = "127.0.0.1".parse().unwrap();
         }
         store.put(target).unwrap();
     }
@@ -760,13 +921,17 @@ mod tests {
             .unwrap();
         assert_eq!(target.name, "Studio NAS");
         let binding = &target.bindings[0];
-        assert_eq!(binding.endpoint.pinned_ip, "192.168.1.20".parse::<IpAddr>().unwrap());
-        assert_eq!(binding.endpoint.class, EndpointClass::Private);
-        assert!(binding.endpoint.confirmed_at > 0);
+        let endpoint = binding.endpoint.as_ref().unwrap();
+        assert_eq!(endpoint.pinned_ip, "192.168.1.20".parse::<IpAddr>().unwrap());
+        assert_eq!(endpoint.class, EndpointClass::Private);
+        assert!(endpoint.confirmed_at > 0);
         assert_eq!(binding.id.len(), 32);
         // An unchanged endpoint keeps its confirmation without re-confirming.
         let again = fixture.host.save_target(&me(), edit(&target)).await.unwrap();
-        assert_eq!(again.bindings[0].endpoint.confirmed_at, binding.endpoint.confirmed_at);
+        assert_eq!(
+            again.bindings[0].endpoint.as_ref().unwrap().confirmed_at,
+            endpoint.confirmed_at
+        );
         assert_eq!(again.created_at, target.created_at);
         // The name moving to a new address needs a fresh confirmation.
         *fixture.resolver.0.lock() = vec!["203.0.113.50".parse().unwrap(), "8.8.8.8".parse().unwrap()];
@@ -1042,7 +1207,7 @@ mod tests {
         let renamed = fixture.host.save_target(&me(), renamed).await.unwrap();
         fixture.host.renew_session(&me(), &opened.session_id).unwrap();
         let mut moved = edit(&renamed);
-        moved.bindings[0].port = 5901;
+        moved.bindings[0].port = Some(5901);
         moved.bindings[0].confirm = true;
         fixture.host.save_target(&me(), moved).await.unwrap();
         assert_eq!(
@@ -1103,5 +1268,197 @@ mod tests {
         fixture.host.close_session(&phone, &opened.session_id);
         drop(viewer);
         assert_eq!(server.await.unwrap(), rfb::vnc_auth_response("password", &[7; 16]));
+    }
+
+    fn console_draft(url: &str, profile: ConsoleProfile) -> BindingDraft {
+        BindingDraft {
+            access: Access::WebConsole,
+            adapter: Adapter::None,
+            host: None,
+            port: None,
+            console: Some(WebConsole {
+                url: url.into(),
+                profile,
+            }),
+            provider_id: "cognia-remote-desktop-web-console.guacamole".into(),
+            ..binding_draft("unused", 1, Adapter::None, false)
+        }
+    }
+
+    fn app_draft(peer_id: &str) -> BindingDraft {
+        BindingDraft {
+            access: Access::ExternalApp,
+            adapter: Adapter::None,
+            host: None,
+            port: None,
+            launch: Some(crate::launch::AppLaunch {
+                launcher: Launcher::Rustdesk,
+                peer_id: peer_id.into(),
+                server: Some("rd.example.com:21116".into()),
+                key: Some("Ab+/=".into()),
+            }),
+            provider_id: "cognia-remote-desktop-rustdesk.rustdesk".into(),
+            confirm: false,
+            ..binding_draft("unused", 1, Adapter::None, false)
+        }
+    }
+
+    #[tokio::test]
+    async fn consoles_pin_their_link_host_and_apps_need_no_endpoint() {
+        let fixture = fixture();
+        let target = fixture
+            .host
+            .save_target(
+                &me(),
+                draft(vec![
+                    console_draft("http://gw.lan:8080/guacamole/#/client/abc", ConsoleProfile::Guacamole),
+                    app_draft("123 456 789"),
+                ]),
+            )
+            .await
+            .unwrap();
+        let console = &target.bindings[0];
+        let endpoint = console.endpoint.as_ref().unwrap();
+        assert_eq!((endpoint.host.as_str(), endpoint.port), ("gw.lan", 8080));
+        assert_eq!(endpoint.class, EndpointClass::Private);
+        let app = &target.bindings[1];
+        assert!(app.endpoint.is_none());
+        assert_eq!(app.launch.as_ref().unwrap().peer_id, "123456789");
+        // Plain http over the internet would send the console sign-in in clear.
+        *fixture.resolver.0.lock() = vec!["8.8.8.8".parse().unwrap()];
+        let mut public = draft(vec![console_draft("http://gw.example.com/#/client/abc", ConsoleProfile::Guacamole)]);
+        public.bindings[0].confirm = true;
+        assert_eq!(
+            fixture.host.save_target(&me(), public).await.unwrap_err().code,
+            "remote_desktop_console_url_insecure"
+        );
+        let mut unconfirmed = draft(vec![console_draft("https://gw.example.com/#/client/abc", ConsoleProfile::Guacamole)]);
+        unconfirmed.bindings[0].confirm = false;
+        assert_eq!(
+            fixture.host.save_target(&me(), unconfirmed).await.unwrap_err().code,
+            "remote_desktop_endpoint_unconfirmed"
+        );
+    }
+
+    #[tokio::test]
+    async fn launching_needs_control_and_names_only_where_to_go() {
+        let fixture = fixture();
+        let target = fixture
+            .host
+            .save_target(
+                &me(),
+                draft(vec![
+                    console_draft("https://mesh.lan/?gotonode=node%2F%2Fabc", ConsoleProfile::Meshcentral),
+                    app_draft("123456789"),
+                    binding_draft("192.168.1.20", 5900, Adapter::Vnc, false),
+                ]),
+            )
+            .await
+            .unwrap();
+        let ids: Vec<String> = target.bindings.iter().map(|b| b.id.clone()).collect();
+        assert_eq!(
+            fixture.host.launch(&me(), &target.id, &ids[0]).await.unwrap(),
+            Launched::WebConsole {
+                url: "https://mesh.lan/?gotonode=node%2F%2Fabc&viewmode=11".into(),
+                profile: ConsoleProfile::Meshcentral,
+            }
+        );
+        let app = fixture.host.launch(&me(), &target.id, &ids[1]).await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&app).unwrap(),
+            json!({"kind": "external-app", "launcher": "rustdesk",
+                "uri": "rustdesk://connection/new/123456789@rd.example.com:21116?key=Ab%2B%2F%3D"})
+        );
+        assert_eq!(
+            fixture.host.launch(&me(), &target.id, &ids[2]).await.unwrap_err().code,
+            "remote_desktop_binding_not_launchable"
+        );
+        let observer = Principal::device("phone", Arc::new(|mode| mode == SessionMode::View));
+        assert_eq!(
+            fixture.host.launch(&observer, &target.id, &ids[1]).await.unwrap_err().code,
+            "remote_desktop_forbidden"
+        );
+        // Neither kind has a session to open.
+        for id in &ids[..2] {
+            assert_eq!(
+                fixture
+                    .host
+                    .open_session(&me(), &target.id, id, SessionMode::Control, false)
+                    .await
+                    .unwrap_err()
+                    .code,
+                "remote_desktop_binding_not_bridged"
+            );
+        }
+        // A console whose name moved needs saving again.
+        *fixture.resolver.0.lock() = vec!["192.168.1.99".parse().unwrap()];
+        assert_eq!(
+            fixture.host.launch(&me(), &target.id, &ids[0]).await.unwrap_err().code,
+            "remote_desktop_endpoint_changed"
+        );
+        *fixture.resolver.0.lock() = vec!["192.168.1.20".parse().unwrap()];
+        let mut disabled = edit(&target);
+        disabled.bindings[1].enabled = false;
+        fixture.host.save_target(&me(), disabled).await.unwrap();
+        assert_eq!(
+            fixture.host.launch(&me(), &target.id, &ids[1]).await.unwrap_err().code,
+            "remote_desktop_binding_disabled"
+        );
+    }
+
+    #[tokio::test]
+    async fn turning_a_bridge_into_a_console_clears_its_secrets_and_sessions() {
+        let fixture = fixture();
+        let target = fixture
+            .host
+            .save_target(&me(), draft(vec![binding_draft("192.168.1.20", 5900, Adapter::Vnc, true)]))
+            .await
+            .unwrap();
+        let id = target.bindings[0].id.clone();
+        for kind in [CredentialKind::Control, CredentialKind::View] {
+            fixture
+                .host
+                .set_credential(&me(), &target.id, &id, kind, Some("secret".into()))
+                .await
+                .unwrap();
+        }
+        let mut console = edit(&fixture.host.list_targets(None, None).await.unwrap().items[0]);
+        console.bindings[0] = BindingDraft {
+            id: Some(id.clone()),
+            view_only: false,
+            confirm: true,
+            ..console_draft("https://gw.lan/#/client/abc", ConsoleProfile::Guacamole)
+        };
+        let saved = fixture.host.save_target(&me(), console).await.unwrap();
+        let binding = &saved.bindings[0];
+        assert_eq!(binding.access, Access::WebConsole);
+        assert!(!binding.has_control_credential && !binding.has_view_credential);
+        assert!(fixture.credentials.entries.lock().is_empty());
+        assert_eq!(
+            fixture
+                .host
+                .set_credential(&me(), &saved.id, &id, CredentialKind::Control, Some("x".into()))
+                .await
+                .unwrap_err()
+                .code,
+            "remote_desktop_binding_has_no_authentication"
+        );
+        let app = fixture
+            .host
+            .save_target(&me(), draft(vec![app_draft("123456789")]))
+            .await
+            .unwrap();
+        assert_eq!(
+            fixture
+                .host
+                .probe(ProbeRequest::Saved {
+                    target_id: app.id.clone(),
+                    binding_id: app.bindings[0].id.clone(),
+                })
+                .await
+                .unwrap_err()
+                .code,
+            "remote_desktop_binding_has_no_endpoint"
+        );
     }
 }

@@ -198,6 +198,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn launching_a_console_or_app_needs_the_admin_grant_and_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = RemoteDesktopState::open(dir.path());
+        let args = json!({"targetId": "t", "bindingId": "b"});
+        let observer: Admission = &|_, mode| mode == SessionMode::View;
+        assert_eq!(
+            run(&state, "remote_desktop_binding_launch", args.clone(), device(), true, observer).await,
+            Err("remote_desktop_forbidden")
+        );
+        assert_eq!(
+            run(&state, "remote_desktop_binding_launch", args.clone(), device(), false, &|_, _| true).await,
+            Err("remote_desktop_admin_lease_required")
+        );
+        assert_eq!(
+            run(
+                &state,
+                "remote_desktop_binding_launch",
+                json!({"targetId": "t", "bindingId": "b", "adminLease": "lease"}),
+                device(),
+                true,
+                &|_, _| true
+            )
+            .await,
+            Err("remote_desktop_binding_not_found")
+        );
+    }
+
+    #[tokio::test]
     async fn the_lease_is_stripped_before_the_typed_arguments_are_read() {
         let dir = tempfile::tempdir().unwrap();
         let state = RemoteDesktopState::open(dir.path());

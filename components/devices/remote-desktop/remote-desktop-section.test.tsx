@@ -214,4 +214,118 @@ describe("RemoteDesktopSection", () => {
       )
     ).toBeInTheDocument()
   })
+
+  it("opens web consoles and RustDesk as provider-managed bindings", async () => {
+    registerRemoteDesktopProvider({
+      providerId: "cognia-remote-desktop-web-console.guacamole",
+      pluginId: "cognia-remote-desktop-web-console",
+      firstParty: true,
+      definition: {
+        id: "guacamole",
+        name: "Guacamole",
+        integrationMode: "web-console",
+        consoleProfile: "guacamole",
+      },
+    })
+    registerRemoteDesktopProvider({
+      providerId: "cognia-remote-desktop-rustdesk.rustdesk",
+      pluginId: "cognia-remote-desktop-rustdesk",
+      firstParty: true,
+      definition: {
+        id: "rustdesk",
+        name: "RustDesk",
+        integrationMode: "external-app",
+        launcher: "rustdesk",
+      },
+    })
+    const office = target({
+      bindings: [
+        binding({
+          id: "gw",
+          providerId: "cognia-remote-desktop-web-console.guacamole",
+          access: "web-console",
+          adapter: "none",
+          viewOnly: false,
+          hasControlCredential: false,
+          hasViewCredential: false,
+          console: { url: "https://gw.lan/#/client/x", profile: "guacamole" },
+          endpoint: {
+            host: "gw.lan",
+            port: 443,
+            pinnedIp: "10.0.0.5",
+            class: "private",
+            confirmedAt: 1,
+          },
+        }),
+        binding({
+          id: "rd",
+          providerId: "cognia-remote-desktop-rustdesk.rustdesk",
+          access: "external-app",
+          adapter: "none",
+          viewOnly: false,
+          hasControlCredential: false,
+          hasViewCredential: false,
+          endpoint: null,
+          launch: { launcher: "rustdesk", peerId: "123456789", server: "rd.lan" },
+        }),
+      ],
+    })
+    const launch = jest.fn().mockResolvedValue({
+      kind: "external-app",
+      launcher: "rustdesk",
+      uri: "rustdesk://connection/new/123456789@rd.lan",
+    })
+    const openAppOnDesktop = jest.fn().mockResolvedValue(undefined)
+    render(
+      <RemoteDesktopSection
+        host={LOCAL}
+        deps={{ list: async () => [office] }}
+        launchDeps={{ kind: "desktop", launch, openAppOnDesktop }}
+      />
+    )
+    expect(await screen.findByText("gw.lan")).toBeInTheDocument()
+    expect(screen.getByText("123456789 on rd.lan")).toBeInTheDocument()
+    expect(screen.getAllByText("Permissions managed by the provider")).toHaveLength(2)
+    expect(screen.queryByText("View-only password")).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Open console" }))
+    expect(push).toHaveBeenLastCalledWith(
+      "/devices/remote-desktop?target=t1&binding=gw&mode=control"
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Open in RustDesk" }))
+    await waitFor(() =>
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "RustDesk was asked to connect. Cognia cannot tell whether it did."
+      )
+    )
+    expect(openAppOnDesktop).toHaveBeenCalledWith("rustdesk://connection/new/123456789@rd.lan")
+  })
+
+  it("explains why a viewer cannot open what the Host withheld", async () => {
+    registerRemoteDesktopProvider({
+      providerId: "cognia-remote-desktop-rustdesk.rustdesk",
+      pluginId: "cognia-remote-desktop-rustdesk",
+      firstParty: true,
+      definition: {
+        id: "rustdesk",
+        name: "RustDesk",
+        integrationMode: "external-app",
+        launcher: "rustdesk",
+      },
+    })
+    const withheld = target({
+      bindings: [
+        binding({
+          providerId: "cognia-remote-desktop-rustdesk.rustdesk",
+          access: "external-app",
+          adapter: "none",
+          endpoint: null,
+          launch: { launcher: "rustdesk" },
+        }),
+      ],
+    })
+    render(<RemoteDesktopSection host={LOCAL} deps={{ list: async () => [withheld] }} />)
+    const open = await screen.findByRole("button", { name: "Open in RustDesk" })
+    expect(open).toBeDisabled()
+    expect(open).toHaveAttribute("title", expect.stringMatching(/needs control of the Host/))
+  })
 })

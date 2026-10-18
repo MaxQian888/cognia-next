@@ -5,7 +5,7 @@ description: "沙箱与外部机器通过 Host 持有的 Provider 绑定来查�
 
 # ADR 0234 — 远程桌面是由 Host 中转的 Provider 绑定
 
-**状态：** 已接受——用户于 2026-10-18 逐项确认全部决策。第 1–4 阶段已实现，规格与"实际实现"记录见 `docs/plans/2026-10-18-remote-desktop-phase{1,2,3,4}.md`；第 5 阶段待实现。  
+**状态：** 已接受——用户于 2026-10-18 逐项确认全部决策。全部五个阶段均已实现，规格与"实际实现"记录见 `docs/plans/2026-10-18-remote-desktop-phase{1,2,3,4,5}.md`。  
 **日期：** 2026-10-18  
 **范围：** 在 Tauri 桌面、Web 与手机客户端上，查看并人工控制本地 Docker CUA 沙箱、ADR-0233 托管桌面和用户自有的外部机器（VNC、Selkies、Guacamole/MeshCentral Web 控制台、RustDesk 启动）。Agent 对外部机器执行 Computer Use 不在范围内。  
 **相关：** [0005](./0005-remote-control)、[0020](./0020-computer-use-completeness)、[0088](./0088-pro-ide-code-server)、[0153](./0153-the-host-obtains-the-confirmation)、[0175](./0175-the-rpc-face-has-one-grammar-one-error-and-one-version)、[0196](./0196-a-library-crate-links-tauri-only-when-asked)、[0214](./0214-the-chat-dock-is-a-tabbed-browser-that-remembers-each-task)、[0224](./0224-an-always-on-host-is-a-peer-the-user-brings)、[0233](./0233-a-managed-desktop-accepts-a-delivered-commit)。  
@@ -123,8 +123,8 @@ Cognia 不实现远程桌面协议，而是在成熟引擎之上中转会话。*
 | Native | 沙箱与托管桌面，经租约控制。Viewer 不再只在设置页，而是成为对话 Dock 面板（`ContextPanelDefinition`、`components/artifacts/chat-dock-panels.tsx`），与 `computer-use-picture-in-picture.tsx` 并列 |
 | VNC | 第一个外部 Provider。noVNC 1.7 在导入时访问 `document` 并使用 top-level await，因此只在客户端经动态导入加载 |
 | Selkies | 仅用于本地 Docker CUA，作为用户本地构建的 opt-in 构建参数（默认编码器为 GPL，Cognia 不分发该镜像）。附着已有的 `:99` 显示，经第二个回环端口发布，启用 Secure Mode 且 `enable_collab=false`。由一个 Host 所有者串行化 token 表替换。释放时先撤销 Selkies 控制者，确认后才释放租约。若要进入托管桌面，需要修订 0233。*实际实现（第 4 阶段）：* opt-in 采用叠加在内置镜像上的变体镜像（`cognia-cua-desktop:0.3.46-2-selkies-2.0.0`），而不是在其 Dockerfile 上加构建参数，因此默认镜像与托管镜像保持 recipe 7；用户在许可说明后按连接开关选择 |
-| Guacamole、MeshCentral | 指向用户自有服务器的 Web 控制台绑定。桌面端用原生子 webview（`src-tauri/src/codeserver/webview.rs` 模式），手机用应用内浏览器，标注"由对方管理权限"。不内置 guacd 或 RDP 协议栈 |
-| RustDesk | 在已安装该应用的设备上用 `rustdesk://<ID>` 启动，URI 中永不带密码。Cognia 不声称连接已建立 |
+| Guacamole、MeshCentral | 指向用户自有服务器的 Web 控制台绑定。桌面端用原生子 webview（`src-tauri/src/codeserver/webview.rs` 模式），手机用应用内浏览器，标注"由对方管理权限"。不内置 guacd 或 RDP 协议栈。*实际实现（第 5 阶段）：* 绑定保存用户粘贴的控制台页面链接，按配置文件校验（Guacamole 需 `#/client/…`，MeshCentral 需 `gotonode`），从不保存控制台凭据；其主机与其他端点一样固定并确认。打开它与控制会话一样需要 `host.admin`。桌面端控制台 webview 使用独立的网站数据存储 |
+| RustDesk | 在已安装该应用的设备上用 `rustdesk://<ID>` 启动，URI 中永不带密码。Cognia 不声称连接已建立。*实际实现（第 5 阶段）：* Host 只构建一种链接 `rustdesk://connection/new/<id>[@server][?key=]`（从不生成 `config` 或 `password` 链接），每个客户端打开前都会复核，手机通过原生 `CogniaAppHandoff` 插件打开。启动器是 Host 的封闭列表，插件只能指定其一，不能自行构建 URI |
 | UU 远程 | 不支持：没有公开的集成协议 |
 
 RDP 只能经用户自己的 Guacamole 或 MeshCentral 接入，或在目标机器上安装 VNC / RustDesk。

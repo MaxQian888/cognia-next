@@ -2,11 +2,13 @@
 pub mod audit;
 pub mod bridge;
 pub mod commands;
+pub mod console;
 pub mod control;
 pub mod credentials;
 pub mod endpoint;
 pub mod error;
 pub mod host;
+pub mod launch;
 pub mod rfb;
 pub mod session;
 pub mod target;

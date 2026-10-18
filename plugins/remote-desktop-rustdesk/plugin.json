@@ -1,0 +1,55 @@
+{
+  "id": "cognia-remote-desktop-rustdesk",
+  "name": "RustDesk Launcher",
+  "nameKey": "manifest.name",
+  "version": "0.1.0",
+  "description": "Opens a machine's RustDesk ID in the RustDesk app installed on this device, from the devices console on desktop, Web and phone. Self-hosted ID servers and their public keys are supported. Cognia passes the ID only: RustDesk asks for the password, and Cognia cannot tell whether the connection succeeded.",
+  "descriptionKey": "manifest.description",
+  "type": "frontend",
+  "capabilities": [],
+  "main": "src/index.ts",
+  "author": {
+    "name": "cognia-next"
+  },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["remote-desktop:provide"],
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "headless": {
+      "availability": "blocked",
+      "reason": "RustDesk opens on the device someone is using; a headless Host only keeps the binding for its paired devices (ADR-0234)."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "RustDesk Launcher",
+        "manifest.description": "Opens a machine's RustDesk ID in the RustDesk app installed on this device, from the devices console on desktop, Web and phone. Self-hosted ID servers and their public keys are supported. Cognia passes the ID only: RustDesk asks for the password, and Cognia cannot tell whether the connection succeeded.",
+        "provider.name": "RustDesk",
+        "provider.description": "A RustDesk ID, opened in the RustDesk app on this device."
+      },
+      "zh-CN": {
+        "manifest.name": "RustDesk 启动器",
+        "manifest.description": "在桌面、网页和手机的设备控制台中，用本设备安装的 RustDesk 应用打开机器的 RustDesk ID。支持自建 ID 服务器及其公钥。Cognia 只传递 ID：密码由 RustDesk 询问，Cognia 也无法得知连接是否成功。",
+        "provider.name": "RustDesk",
+        "provider.description": "一个 RustDesk ID，在本设备的 RustDesk 应用中打开。"
+      }
+    }
+  }
+}

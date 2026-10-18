@@ -837,6 +837,12 @@ pub fn run() {
             // local owner's door to the same `remote_desktop_*` Host commands
             // paired devices reach over Companion.
             cognia_remote_desktop::commands::remote_desktop_local_call,
+            browser::remote_console::remote_console_close,
+            browser::remote_console::remote_console_open,
+            browser::remote_console::remote_console_reload,
+            browser::remote_console::remote_console_set_bounds,
+            browser::remote_console::remote_console_set_visible,
+            browser::remote_console::remote_desktop_open_app,
             capture::get_foreground_app,
             media::commands::video_get_info,
             media::commands::plugin_media_get_video_frame,

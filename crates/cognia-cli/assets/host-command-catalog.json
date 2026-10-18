@@ -61092,6 +61092,105 @@
       "outputTyped": true
     },
     {
+      "name": "remote_desktop_binding_launch",
+      "category": "development",
+      "resource": "remote",
+      "target": "execution",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "remote_desktop_binding_launch (host.admin)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bindingId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "admin_lease": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "targetId",
+          "bindingId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "description": "ADR-0234 Phase 5: where a client goes for a binding the Host does not bridge. Never a credential.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "web-console"
+              },
+              "url": {
+                "type": "string",
+                "minLength": 1
+              },
+              "profile": {
+                "type": "string",
+                "enum": [
+                  "guacamole",
+                  "meshcentral",
+                  "generic"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "url",
+              "profile"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "external-app"
+              },
+              "launcher": {
+                "type": "string",
+                "enum": [
+                  "rustdesk"
+                ]
+              },
+              "uri": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "kind",
+              "launcher",
+              "uri"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "outputTyped": true
+    },
+    {
       "name": "remote_desktop_credential_set",
       "category": "development",
       "resource": "remote",
@@ -61167,7 +61266,7 @@
           "bindings": {
             "type": "array",
             "items": {
-              "description": "ADR-0234: a provider binding the Host reaches. Credentials are write-only; only whether one is stored is reported.",
+              "description": "ADR-0234: a provider binding the Host reaches, a web console or an external app. Credentials are write-only; only whether one is stored is reported. A caller that may only view gets console and launch without the link or peer.",
               "type": "object",
               "properties": {
                 "id": {
@@ -61177,6 +61276,14 @@
                 "providerId": {
                   "type": "string",
                   "minLength": 1
+                },
+                "access": {
+                  "type": "string",
+                  "enum": [
+                    "bridge",
+                    "web-console",
+                    "external-app"
+                  ]
                 },
                 "adapter": {
                   "type": "string",
@@ -61193,38 +61300,93 @@
                   "type": "boolean"
                 },
                 "endpoint": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "host": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "port": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 65535
+                        },
+                        "pinnedIp": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "class": {
+                          "type": "string",
+                          "enum": [
+                            "private",
+                            "public"
+                          ]
+                        },
+                        "confirmedAt": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "host",
+                        "port",
+                        "pinnedIp",
+                        "class",
+                        "confirmedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "console": {
                   "type": "object",
                   "properties": {
-                    "host": {
+                    "url": {
                       "type": "string",
                       "minLength": 1
                     },
-                    "port": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 65535
-                    },
-                    "pinnedIp": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "class": {
+                    "profile": {
                       "type": "string",
                       "enum": [
-                        "private",
-                        "public"
+                        "guacamole",
+                        "meshcentral",
+                        "generic"
                       ]
-                    },
-                    "confirmedAt": {
-                      "type": "integer"
                     }
                   },
                   "required": [
-                    "host",
-                    "port",
-                    "pinnedIp",
-                    "class",
-                    "confirmedAt"
+                    "profile"
+                  ],
+                  "additionalProperties": false
+                },
+                "launch": {
+                  "type": "object",
+                  "properties": {
+                    "launcher": {
+                      "type": "string",
+                      "enum": [
+                        "rustdesk"
+                      ]
+                    },
+                    "peerId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "server": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "key": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "launcher"
                   ],
                   "additionalProperties": false
                 },
@@ -61247,6 +61409,7 @@
               "required": [
                 "id",
                 "providerId",
+                "access",
                 "adapter",
                 "priority",
                 "enabled",
@@ -61577,7 +61740,7 @@
                 "bindings": {
                   "type": "array",
                   "items": {
-                    "description": "ADR-0234: a provider binding the Host reaches. Credentials are write-only; only whether one is stored is reported.",
+                    "description": "ADR-0234: a provider binding the Host reaches, a web console or an external app. Credentials are write-only; only whether one is stored is reported. A caller that may only view gets console and launch without the link or peer.",
                     "type": "object",
                     "properties": {
                       "id": {
@@ -61587,6 +61750,14 @@
                       "providerId": {
                         "type": "string",
                         "minLength": 1
+                      },
+                      "access": {
+                        "type": "string",
+                        "enum": [
+                          "bridge",
+                          "web-console",
+                          "external-app"
+                        ]
                       },
                       "adapter": {
                         "type": "string",
@@ -61603,38 +61774,93 @@
                         "type": "boolean"
                       },
                       "endpoint": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "host": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "port": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 65535
+                              },
+                              "pinnedIp": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "class": {
+                                "type": "string",
+                                "enum": [
+                                  "private",
+                                  "public"
+                                ]
+                              },
+                              "confirmedAt": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "host",
+                              "port",
+                              "pinnedIp",
+                              "class",
+                              "confirmedAt"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "console": {
                         "type": "object",
                         "properties": {
-                          "host": {
+                          "url": {
                             "type": "string",
                             "minLength": 1
                           },
-                          "port": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 65535
-                          },
-                          "pinnedIp": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "class": {
+                          "profile": {
                             "type": "string",
                             "enum": [
-                              "private",
-                              "public"
+                              "guacamole",
+                              "meshcentral",
+                              "generic"
                             ]
-                          },
-                          "confirmedAt": {
-                            "type": "integer"
                           }
                         },
                         "required": [
-                          "host",
-                          "port",
-                          "pinnedIp",
-                          "class",
-                          "confirmedAt"
+                          "profile"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "launch": {
+                        "type": "object",
+                        "properties": {
+                          "launcher": {
+                            "type": "string",
+                            "enum": [
+                              "rustdesk"
+                            ]
+                          },
+                          "peerId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "server": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "key": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "launcher"
                         ],
                         "additionalProperties": false
                       },
@@ -61657,6 +61883,7 @@
                     "required": [
                       "id",
                       "providerId",
+                      "access",
                       "adapter",
                       "priority",
                       "enabled",
@@ -61889,6 +62116,14 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "access": {
+                      "type": "string",
+                      "enum": [
+                        "bridge",
+                        "web-console",
+                        "external-app"
+                      ]
+                    },
                     "adapter": {
                       "type": "string",
                       "enum": [
@@ -61912,6 +62147,56 @@
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 65535
+                    },
+                    "console": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048
+                        },
+                        "profile": {
+                          "type": "string",
+                          "enum": [
+                            "guacamole",
+                            "meshcentral",
+                            "generic"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "profile"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "launch": {
+                      "type": "object",
+                      "properties": {
+                        "launcher": {
+                          "type": "string",
+                          "const": "rustdesk"
+                        },
+                        "peerId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "server": {
+                          "type": "string",
+                          "maxLength": 300
+                        },
+                        "key": {
+                          "type": "string",
+                          "maxLength": 128
+                        }
+                      },
+                      "required": [
+                        "launcher",
+                        "peerId"
+                      ],
+                      "additionalProperties": false
                     },
                     "viewOnly": {
                       "type": "boolean"
@@ -61937,9 +62222,7 @@
                   },
                   "required": [
                     "providerId",
-                    "adapter",
-                    "host",
-                    "port"
+                    "adapter"
                   ],
                   "additionalProperties": false
                 }
@@ -61982,7 +62265,7 @@
           "bindings": {
             "type": "array",
             "items": {
-              "description": "ADR-0234: a provider binding the Host reaches. Credentials are write-only; only whether one is stored is reported.",
+              "description": "ADR-0234: a provider binding the Host reaches, a web console or an external app. Credentials are write-only; only whether one is stored is reported. A caller that may only view gets console and launch without the link or peer.",
               "type": "object",
               "properties": {
                 "id": {
@@ -61992,6 +62275,14 @@
                 "providerId": {
                   "type": "string",
                   "minLength": 1
+                },
+                "access": {
+                  "type": "string",
+                  "enum": [
+                    "bridge",
+                    "web-console",
+                    "external-app"
+                  ]
                 },
                 "adapter": {
                   "type": "string",
@@ -62008,38 +62299,93 @@
                   "type": "boolean"
                 },
                 "endpoint": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "host": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "port": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 65535
+                        },
+                        "pinnedIp": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "class": {
+                          "type": "string",
+                          "enum": [
+                            "private",
+                            "public"
+                          ]
+                        },
+                        "confirmedAt": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "host",
+                        "port",
+                        "pinnedIp",
+                        "class",
+                        "confirmedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "console": {
                   "type": "object",
                   "properties": {
-                    "host": {
+                    "url": {
                       "type": "string",
                       "minLength": 1
                     },
-                    "port": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 65535
-                    },
-                    "pinnedIp": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "class": {
+                    "profile": {
                       "type": "string",
                       "enum": [
-                        "private",
-                        "public"
+                        "guacamole",
+                        "meshcentral",
+                        "generic"
                       ]
-                    },
-                    "confirmedAt": {
-                      "type": "integer"
                     }
                   },
                   "required": [
-                    "host",
-                    "port",
-                    "pinnedIp",
-                    "class",
-                    "confirmedAt"
+                    "profile"
+                  ],
+                  "additionalProperties": false
+                },
+                "launch": {
+                  "type": "object",
+                  "properties": {
+                    "launcher": {
+                      "type": "string",
+                      "enum": [
+                        "rustdesk"
+                      ]
+                    },
+                    "peerId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "server": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "key": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "launcher"
                   ],
                   "additionalProperties": false
                 },
@@ -62062,6 +62408,7 @@
               "required": [
                 "id",
                 "providerId",
+                "access",
                 "adapter",
                 "priority",
                 "enabled",
@@ -100556,5 +100903,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "3db9d82ba02c350ba05564e500403b88abe223897caf1ddedb8a475bb3e3bb7f"
+  "catalogHash": "211ede7c17b285042918953f593bda88aa0df00ef04998cde5bea8afaebbda15"
 }

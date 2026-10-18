@@ -7,6 +7,8 @@ import {
   registerRemoteDesktopProvider,
   subscribeRemoteDesktopProviders,
   unregisterRemoteDesktopProvidersOf,
+  accessOfProvider,
+  type RemoteDesktopEmbeddedProvider,
   type RemoteDesktopProviderDefinition,
   type RemoteDesktopProviderRegistration,
 } from "./provider-registry"
@@ -14,8 +16,8 @@ import {
 const Viewer = () => null
 
 function definition(
-  overrides: Partial<RemoteDesktopProviderDefinition> = {}
-): RemoteDesktopProviderDefinition {
+  overrides: Partial<RemoteDesktopEmbeddedProvider> = {}
+): RemoteDesktopEmbeddedProvider {
   return {
     id: "vnc",
     name: "VNC",
@@ -30,7 +32,7 @@ function definition(
 
 function registration(
   overrides: Partial<RemoteDesktopProviderRegistration> = {},
-  def: Partial<RemoteDesktopProviderDefinition> = {}
+  def: Partial<RemoteDesktopEmbeddedProvider> = {}
 ): RemoteDesktopProviderRegistration {
   return {
     providerId: providerIdOf("cognia-remote-desktop-vnc", "vnc"),
@@ -60,13 +62,59 @@ describe("remote desktop provider registry", () => {
     unsubscribe()
   })
 
-  it("only implements embedded viewers, and refuses the dormant modes by name", () => {
-    expect(IMPLEMENTED_INTEGRATION_MODES).toEqual(["embedded"])
-    for (const integrationMode of ["native", "web-console", "external-app"] as const) {
-      expect(() => registerRemoteDesktopProvider(registration({}, { integrationMode }))).toThrow(
-        "remote_desktop_integration_unavailable"
-      )
+  it("implements embedded, web console and external app providers, and refuses native by name", () => {
+    expect(IMPLEMENTED_INTEGRATION_MODES).toEqual(["embedded", "web-console", "external-app"])
+    const native = { id: "native", name: "Native", integrationMode: "native" } as const
+    expect(() => registerRemoteDesktopProvider({ ...registration(), definition: native })).toThrow(
+      "remote_desktop_integration_unavailable"
+    )
+  })
+
+  it("lets any plugin register a web console, and external apps only through a closed launcher", () => {
+    const consoleDef: RemoteDesktopProviderDefinition = {
+      id: "guac",
+      name: "Guacamole",
+      integrationMode: "web-console",
+      consoleProfile: "guacamole",
     }
+    registerRemoteDesktopProvider({
+      providerId: providerIdOf("acme", "guac"),
+      pluginId: "acme",
+      firstParty: false,
+      definition: consoleDef,
+    })
+    expect(accessOfProvider(consoleDef)).toBe("web-console")
+    expect(() =>
+      registerRemoteDesktopProvider({
+        providerId: providerIdOf("acme", "odd"),
+        pluginId: "acme",
+        firstParty: false,
+        definition: { ...consoleDef, id: "odd", consoleProfile: "citrix" as never },
+      })
+    ).toThrow("remote_desktop_console_profile_unknown")
+    const app: RemoteDesktopProviderDefinition = {
+      id: "rd",
+      name: "RustDesk",
+      integrationMode: "external-app",
+      launcher: "rustdesk",
+    }
+    registerRemoteDesktopProvider({
+      providerId: providerIdOf("acme", "rd"),
+      pluginId: "acme",
+      firstParty: false,
+      definition: app,
+    })
+    expect(accessOfProvider(app)).toBe("external-app")
+    expect(() =>
+      registerRemoteDesktopProvider({
+        providerId: providerIdOf("acme", "anydesk"),
+        pluginId: "acme",
+        firstParty: false,
+        definition: { ...app, id: "anydesk", launcher: "anydesk" as never },
+      })
+    ).toThrow("remote_desktop_launcher_unknown")
+    expect(accessOfProvider(definition())).toBe("bridge")
+    expect(accessOfProvider({ id: "n", name: "N", integrationMode: "native" })).toBeNull()
   })
 
   it("keeps React viewers to first-party plugins", () => {
@@ -79,7 +127,8 @@ describe("remote desktop provider registry", () => {
         { viewer: { kind: "webview", viewId: "viewer" } }
       )
     )
-    expect(getRemoteDesktopProvider("acme.vnc")?.definition.viewer.kind).toBe("webview")
+    const registered = getRemoteDesktopProvider("acme.vnc")?.definition
+    expect(registered?.integrationMode === "embedded" && registered.viewer.kind).toBe("webview")
     expect(() =>
       registerRemoteDesktopProvider(
         registration(

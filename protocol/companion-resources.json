@@ -1368,7 +1368,15 @@
       "children": {
         "target": {},
         "credential": {},
-        "session": {}
+        "session": {},
+        "binding": {},
+        "app": {}
+      }
+    },
+    "remote_console": {
+      "children": {
+        "bounds": {},
+        "visible": {}
       }
     },
     "chat": {
