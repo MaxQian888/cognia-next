@@ -14,6 +14,8 @@ import {
   recordResultUsage,
   recordTeamUsage,
   recordWorkflowStepUsage,
+  externalAgentSurfaceUsage,
+  surfaceUsageFromUsageInfo,
   swallowUsageWrite,
   topByCost,
   totalsByAllSessions,
@@ -890,6 +892,23 @@ describe("recordSurfaceUsage — non-conversational surfaces", () => {
     expect(row?.surface).toBe("tts")
   })
 
+  it("groups under an exact session id when the producer names one", async () => {
+    const row = await recordSurfaceUsage({
+      surface: "plugin",
+      operationId: "bot:run_1:agent-turn",
+      scopeId: "ignored",
+      sessionId: "bot:run_1",
+      usage: { inputTokens: 10, providerId: "anthropic", model: "sonnet", runId: "run_1" },
+    })
+    expect(row).toMatchObject({
+      messageId: "plugin:bot:run_1:agent-turn",
+      sessionId: "bot:run_1",
+      surface: "plugin",
+      runId: "run_1",
+    })
+    expect(await listUsageForSession("bot:run_1")).toHaveLength(1)
+  })
+
   it("refuses a call with no surface or no operation id", async () => {
     expect(
       await recordSurfaceUsage({ surface: "ocr", operationId: "", usage: { inputTokens: 1 } })
@@ -956,5 +975,76 @@ describe("listLocalUsageForProjectSince", () => {
     )
     const rows = await listLocalUsageForProjectSince("p1", 10)
     expect(rows.map((r) => r.messageId)).toEqual(["a", "b"])
+  })
+})
+
+describe("surfaceUsageFromUsageInfo", () => {
+  it("keeps every billable tier of a turn", () => {
+    expect(
+      surfaceUsageFromUsageInfo({
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadInputTokens: 400,
+        cacheCreationInputTokens: 60,
+        cacheCreation5mInputTokens: 40,
+        cacheCreation1hInputTokens: 20,
+        serverToolUse: { web_search: 2 },
+        reasoningTokens: 5,
+        contextInputTokens: 90,
+        totalCostUsd: 0.3,
+        durationMs: 1_200,
+      })
+    ).toEqual({
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 400,
+      cacheCreationTokens: 60,
+      cacheCreation5mTokens: 40,
+      cacheCreation1hTokens: 20,
+      unitBreakdown: { requests: { web_search: 2 } },
+      reasoningTokens: 5,
+      contextInputTokens: 90,
+      costUsd: 0.3,
+      durationMs: 1_200,
+    })
+  })
+
+  it("leaves a wire-default zero cost for the ledger to price", async () => {
+    const row = await recordSurfaceUsage({
+      surface: "plugin",
+      operationId: "zero",
+      usage: surfaceUsageFromUsageInfo({ inputTokens: 1, totalCostUsd: 0 }),
+    })
+    expect(row).not.toHaveProperty("costSource")
+  })
+
+  it("freezes a cost authority's zero as a real figure", () => {
+    expect(
+      surfaceUsageFromUsageInfo({ inputTokens: 1, totalCostUsd: 0 }, { costAuthority: true })
+    ).toMatchObject({ costUsd: 0, costSource: "sdk", costKnown: true })
+    // A positive figure is the provider's either way; the ledger keeps it.
+    expect(
+      surfaceUsageFromUsageInfo({ inputTokens: 1, totalCostUsd: 0.1 }, { costAuthority: true })
+    ).not.toHaveProperty("costSource")
+  })
+})
+
+describe("externalAgentSurfaceUsage", () => {
+  it("never guesses a price the agent did not report", () => {
+    expect(externalAgentSurfaceUsage({ inputTokens: 10, outputTokens: 2 })).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 2,
+      costKnown: false,
+      costSource: "unknown",
+      usageBasis: "provider-reported",
+    })
+  })
+
+  it("keeps the agent's own USD figure", () => {
+    expect(externalAgentSurfaceUsage({ inputTokens: 10, totalCostUsd: 0.04 })).toMatchObject({
+      costUsd: 0.04,
+      costKnown: true,
+      costSource: "sdk",
+    })
   })
 })

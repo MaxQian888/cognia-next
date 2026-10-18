@@ -467,6 +467,54 @@ function carryFrozenFields(usage: SurfaceUsageInput): Partial<SessionUsageRow> {
 
 const num = (v: number | undefined): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
 
+/**
+ * A turn's {@link UsageInfo} in the shadow-row token shape, every tier kept:
+ * the TTL-split cache writes and server-tool requests are billed separately,
+ * so dropping them would under-price the row once it is frozen.
+ *
+ * A positive cost is the provider's and is kept. A zero is ambiguous: the
+ * Claude Agent SDK computes cost itself, so its zero is a real figure
+ * (`costAuthority`), while the AI-SDK result adapter emits zero when the
+ * provider reported none, and that row is left for the ledger to price.
+ */
+export function surfaceUsageFromUsageInfo(
+  usage: UsageInfo,
+  opts: { costAuthority?: boolean } = {}
+): SurfaceUsageInput {
+  return {
+    ...(opts.costAuthority && usage.totalCostUsd === 0
+      ? { costSource: "sdk" as const, costKnown: true }
+      : {}),
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cacheReadInputTokens,
+    cacheCreationTokens: usage.cacheCreationInputTokens,
+    cacheCreation5mTokens: usage.cacheCreation5mInputTokens,
+    cacheCreation1hTokens: usage.cacheCreation1hInputTokens,
+    costUsd: usage.totalCostUsd,
+    durationMs: usage.durationMs,
+    reasoningTokens: usage.reasoningTokens,
+    contextInputTokens: usage.contextInputTokens,
+    ...(usage.serverToolUse ? { unitBreakdown: { requests: usage.serverToolUse } } : {}),
+  }
+}
+
+/**
+ * The same, for a turn an external agent ran. Cognia never prices an external
+ * turn itself (its CLI may bill a subscription rather than the API), so only
+ * the agent's own USD figure is a cost and an unreported one is frozen as
+ * `unknown`, never a catalog guess: the posture of {@link recordExternalAgentUsage}.
+ */
+export function externalAgentSurfaceUsage(usage: UsageInfo): SurfaceUsageInput {
+  const costKnown = usage.totalCostUsd !== undefined
+  return {
+    ...surfaceUsageFromUsageInfo(usage),
+    costKnown,
+    costSource: costKnown ? "sdk" : "unknown",
+    usageBasis: "provider-reported",
+  }
+}
+
 /** Build a shadow row, or `null` when there's nothing worth recording. */
 function buildSurfaceRow(args: {
   messageId: string
@@ -660,13 +708,20 @@ export async function recordSurfaceUsage(args: {
   operationId: string
   /** Grouping key (project id, session id, job id). Defaults to the surface. */
   scopeId?: string
+  /**
+   * Exact grouping key, used verbatim instead of `<surface>:<scopeId>`. For
+   * spend that belongs to an existing conversation or run (a best-of-N
+   * candidate's child session, `bot:<runId>`), so it rolls up with that id
+   * rather than under a synthetic one.
+   */
+  sessionId?: string
   usage: SurfaceUsageInput
   at?: number
 }): Promise<SessionUsageRow | null> {
   if (!args.surface || !args.operationId) return null
   const row = buildSurfaceRow({
     messageId: `${args.surface}:${args.operationId}`,
-    sessionId: `${args.surface}:${args.scopeId ?? args.surface}`,
+    sessionId: args.sessionId || `${args.surface}:${args.scopeId ?? args.surface}`,
     surface: args.surface,
     usage: args.usage,
     at: args.at ?? Date.now(),

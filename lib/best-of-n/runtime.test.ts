@@ -70,12 +70,21 @@ jest.mock("@/lib/claude/run-and-capture", () => ({
   runAndCaptureAssistantReply: (...args: unknown[]) => run(...args),
 }))
 jest.mock("@/lib/claude/ipc", () => ({ interruptSession: jest.fn() }))
+const recordSurfaceUsage = jest.fn(async (..._args: unknown[]) => null as unknown)
+jest.mock("@/lib/db/session-usage", () => ({
+  ...jest.requireActual("@/lib/db/session-usage"),
+  recordSurfaceUsage: (...args: unknown[]) => recordSurfaceUsage(...args),
+}))
 const external = jest.fn()
 jest.mock("./external", () => ({
   runExternalCandidate: (...args: unknown[]) => external(...args),
 }))
 import { bestOfNTeam, createBestOfNExecution } from "./runtime"
 import { candidateGrant } from "./core"
+import {
+  __resetClaimedTurnUsageForTesting,
+  isTurnUsageClaimed,
+} from "@/lib/usage/claimed-turn-usage"
 
 const candidate = {
   candidateId: "candidate",
@@ -111,6 +120,8 @@ beforeEach(() => {
     files: [{ path: "a.ts", excluded: false }],
   })
   run.mockResolvedValue({ text: "done", resultSubtype: "success" })
+  recordSurfaceUsage.mockResolvedValue(null)
+  __resetClaimedTurnUsageForTesting()
 })
 
 it("binds a valid durable team without a planning or cross-candidate evidence gate", async () => {
@@ -169,7 +180,14 @@ it("runs only the child through the resolver and ordinary capture gate, without 
       }),
     })
   )
-  expect(run).toHaveBeenCalledWith("session", "Fix this", options, expect.any(Object))
+  // The resolved options reach the capture unedited; only this turn's id is added.
+  expect(run).toHaveBeenCalledWith(
+    "session",
+    "Fix this",
+    { ...options, turnId: expect.any(String) },
+    expect.any(Object)
+  )
+  expect(options).not.toHaveProperty("turnId")
   expect(run).toHaveBeenCalledTimes(1)
   expect(begin).toHaveBeenCalledWith(expect.objectContaining({ isolateFailure: true }))
   expect(capture).toHaveBeenCalledWith(
@@ -289,4 +307,132 @@ it("refuses the legacy unscoped external marker instead of guessing an agent", a
     })
   ).rejects.toThrow("unscoped external agent")
   expect(external).not.toHaveBeenCalled()
+})
+
+describe("usage ledger booking", () => {
+  const usage = {
+    inputTokens: 200,
+    outputTokens: 80,
+    cacheReadInputTokens: 1_000,
+    cacheCreationInputTokens: 30,
+    totalCostUsd: 0.05,
+    durationMs: 4_000,
+  }
+
+  it("books a Cognia candidate once, under its child session, team run and provider", async () => {
+    resolve.mockResolvedValue({ ...options, provider: "anthropic" })
+    run.mockResolvedValue({ text: "done", resultSubtype: "success", usage })
+    await execute()
+    const [, , sent] = run.mock.calls[0] as [string, string, SendOptions]
+    // The chat runtime that also ingests the child's stream leaves this turn alone.
+    expect(isTurnUsageClaimed("session", sent.turnId)).toBe(true)
+    expect(recordSurfaceUsage).toHaveBeenCalledTimes(1)
+    expect(recordSurfaceUsage).toHaveBeenCalledWith({
+      surface: "agent-team",
+      operationId: "best-of-n:group:candidate",
+      sessionId: "session",
+      usage: expect.objectContaining({
+        inputTokens: 200,
+        outputTokens: 80,
+        cacheReadTokens: 1_000,
+        cacheCreationTokens: 30,
+        costUsd: 0.05,
+        durationMs: 4_000,
+        model: "chosen",
+        providerId: "anthropic",
+        runId: "team",
+        projectId: "project",
+        turnId: sent.turnId,
+      }),
+    })
+  })
+
+  it("books what a failed attempt streamed before it ended", async () => {
+    run.mockImplementation(async (...args: unknown[]) => {
+      const cap = args[3] as { onEvent: (event: unknown) => void }
+      cap.onEvent({ type: "usage", usage: { inputTokens: 40, outputTokens: 2 } })
+      throw new Error("sidecar exited")
+    })
+    await expect(execute()).rejects.toThrow("sidecar exited")
+    expect(recordSurfaceUsage.mock.calls[0][0]).toMatchObject({
+      usage: { inputTokens: 40, outputTokens: 2, runId: "team" },
+    })
+    // The capture stream still reaches the durable child.
+    expect(dispatch.capture).toHaveBeenCalledWith(expect.objectContaining({ type: "usage" }))
+  })
+
+  it("treats a Claude SDK zero as a real figure and leaves an AI-SDK zero to be priced", async () => {
+    run.mockResolvedValue({ text: "done", usage: { inputTokens: 5, totalCostUsd: 0 } })
+    await execute()
+    expect(recordSurfaceUsage.mock.calls[0][0]).toMatchObject({
+      usage: { costUsd: 0, costSource: "sdk", costKnown: true },
+    })
+    resolve.mockResolvedValue({
+      ...options,
+      execution: { runtimeAdapter: "ai-sdk" } as SendOptions["execution"],
+    })
+    await execute({ ...group, budgetPolicy: { maxDurationMs: 10_000 } })
+    const priced = (recordSurfaceUsage.mock.calls[1][0] as { usage: Record<string, unknown> }).usage
+    expect(priced).not.toHaveProperty("costSource")
+  })
+
+  it("books nothing when the attempt reported no usage", async () => {
+    await execute()
+    expect(recordSurfaceUsage).not.toHaveBeenCalled()
+  })
+
+  it("never fails a candidate because the booking could not be written", async () => {
+    run.mockResolvedValue({ text: "done", resultSubtype: "success", usage })
+    recordSurfaceUsage.mockRejectedValue(new Error("db closed"))
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await expect(execute()).resolves.toMatchObject({ hasChanges: true })
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it("books an external candidate's own report without a provider bucket", async () => {
+    external.mockImplementation(async (input: { onUsage: (usage: unknown) => void }) => {
+      input.onUsage({ promptTokens: 300, completionTokens: 90, totalTokens: 390 })
+      return { text: "external done" }
+    })
+    await execute(durationOnly, codex)
+    const booked = recordSurfaceUsage.mock.calls[0][0] as {
+      operationId: string
+      sessionId: string
+      usage: Record<string, unknown>
+    }
+    expect(booked).toMatchObject({
+      surface: "agent-team",
+      operationId: "best-of-n:group:candidate",
+      sessionId: "session",
+      usage: {
+        inputTokens: 300,
+        outputTokens: 90,
+        model: "gpt-5",
+        runId: "team",
+        costSource: "unknown",
+        costKnown: false,
+        usageBasis: "provider-reported",
+      },
+    })
+    expect(booked.usage).not.toHaveProperty("providerId")
+  })
+
+  it("books an external candidate's report even when the run failed", async () => {
+    external.mockImplementation(async (input: { onUsage: (usage: unknown) => void }) => {
+      input.onUsage({
+        promptTokens: 10,
+        completionTokens: 1,
+        totalTokens: 11,
+        providerCost: { amount: 0.02, currency: "USD" },
+      })
+      throw new Error("External agent codex-1 returned a failure")
+    })
+    await expect(execute(durationOnly, codex)).rejects.toThrow("returned a failure")
+    expect(recordSurfaceUsage.mock.calls[0][0]).toMatchObject({
+      usage: { costUsd: 0.02, costSource: "sdk", costKnown: true },
+    })
+  })
 })

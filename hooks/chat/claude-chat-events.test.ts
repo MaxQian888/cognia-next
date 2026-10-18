@@ -97,6 +97,7 @@ jest.mock("@/lib/runtime/standalone-mode", () => ({
 }))
 
 import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
+import { __resetClaimedTurnUsageForTesting, claimTurnUsage } from "@/lib/usage/claimed-turn-usage"
 import {
   drainSteerVia,
   handleEvent,
@@ -1042,6 +1043,32 @@ describe("Router + Fusion turn wiring (ADR-0188)", () => {
     expect(assistantRun()).not.toHaveProperty("routerFusion")
     expect(mockRecordResultUsage).toHaveBeenCalledTimes(1)
     expect(mockRecordResultUsage.mock.calls[0][0]).not.toHaveProperty("ledger")
+  })
+
+  it("leaves a turn a headless caller claimed to that caller's own usage row", async () => {
+    try {
+      seed({ provider: "anthropic", model: "sonnet" })
+      claimTurnUsage("rf", "claimed-turn")
+      resultTurn()
+      await dispatch({
+        type: "event",
+        sessionId: "rf",
+        turnId: "claimed-turn",
+        event: { type: "result" },
+      })
+      expect(mockRecordResultUsage).not.toHaveBeenCalled()
+      // A later, unclaimed turn in the same session is still booked here.
+      resultTurn()
+      await dispatch({
+        type: "event",
+        sessionId: "rf",
+        turnId: "next-turn",
+        event: { type: "result" },
+      })
+      expect(mockRecordResultUsage).toHaveBeenCalledTimes(1)
+    } finally {
+      __resetClaimedTurnUsageForTesting()
+    }
   })
 
   it("seals a ledgered turn at its result and books the ledger's cost on the message and usage row", async () => {

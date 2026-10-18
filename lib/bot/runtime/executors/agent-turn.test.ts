@@ -4,7 +4,7 @@ import { runPluginAgentTurn } from "@/lib/plugin/api/agent-turn"
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 
 import { BotExecutorUnavailableError, type BotExecutorContext } from "./types"
-import { agentTurnPrompt, createAgentTurnBotExecutor } from "./agent-turn"
+import { agentTurnPrompt, agentTurnUsageBooking, createAgentTurnBotExecutor } from "./agent-turn"
 
 function envelope(): BotEventEnvelopeV1 {
   return {
@@ -100,12 +100,36 @@ describe("createAgentTurnBotExecutor", () => {
       grantSource: { kind: "bot", id: "acme:summary" },
       sessionKey: "boti_1",
       unattendedLabel: "Bot: Summary",
+      usage: {
+        operationId: "bot:run_1:agent-turn",
+        sessionId: "bot:run_1",
+        runId: "run_1",
+      },
     })
+    // The booking is a host option, never part of the plugin-facing request.
+    expect(run.mock.lastCall?.[0]).not.toHaveProperty("usage")
     await createAgentTurnBotExecutor()(ctx({ installationId: "boti_2" }))
     expect(run).toHaveBeenLastCalledWith(
       expect.anything(),
       expect.objectContaining({ sessionKey: "boti_2" })
     )
+  })
+
+  it("books the turn's usage under its run and the installation's project", async () => {
+    const run = jest.fn().mockResolvedValue({ sessionId: "s1", text: "" })
+    await createAgentTurnBotExecutor({ run })(
+      ctx({
+        runId: "run_9",
+        installation: { id: "boti_1", projectId: "proj_1" } as BotExecutorContext["installation"],
+      })
+    )
+    expect(run.mock.calls[0][0].usage).toEqual({
+      operationId: "bot:run_9:agent-turn",
+      sessionId: "bot:run_9",
+      runId: "run_9",
+      projectId: "proj_1",
+    })
+    expect(agentTurnUsageBooking(ctx())).not.toHaveProperty("projectId")
   })
 
   it("marks the run needs approval, naming the tools, when the turn was denied a permission", async () => {

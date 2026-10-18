@@ -10,5 +10,15 @@
   },
   "stopped": "其中 {percent}% 中途停止",
   "none": "暂无预估：同类运行不足",
-  "unavailable": "暂无预估：Bot 运行尚未记录用量"
+  "unavailable": "暂无预估：Bot 运行尚未记录用量",
+  "progress": {
+    "typical": {
+      "cost": "已花 {spent}，同类运行通常共 {typical}",
+      "tokens": "已用 {spent} token，同类运行通常共 {typical}"
+    },
+    "overRange": {
+      "cost": "已花 {spent}，高于同类运行的常见范围（最多约 {high}）",
+      "tokens": "已用 {spent} token，高于同类运行的常见范围（最多约 {high}）"
+    }
+  }
 }

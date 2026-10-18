@@ -39,12 +39,21 @@ jest.mock("@/lib/claude/build-options", () => ({
 jest.mock("@/lib/claude/unattended-park", () => ({
   createUnattendedPark: (options: Record<string, unknown>) => createUnattendedPark(options),
 }))
+const recordSurfaceUsage = jest.fn(async (..._args: unknown[]) => null as unknown)
+jest.mock("@/lib/db/session-usage", () => ({
+  ...jest.requireActual("@/lib/db/session-usage"),
+  recordSurfaceUsage: (...a: unknown[]) => recordSurfaceUsage(...a),
+}))
 jest.mock("@/lib/claude/run-and-capture", () => ({
   runAndCaptureAssistantReply: (...a: unknown[]) =>
     (runAndCaptureAssistantReply as (...args: unknown[]) => unknown)(...a),
 }))
 
 import { PluginAgentTurnError, runPluginAgentTurn } from "./agent-turn"
+import {
+  __resetClaimedTurnUsageForTesting,
+  isTurnUsageClaimed,
+} from "@/lib/usage/claimed-turn-usage"
 
 const caller = { grantSource: { kind: "plugin" as const, id: "acme" } }
 const owner = { kind: "plugin" as const, id: "acme" }
@@ -73,6 +82,8 @@ beforeEach(() => {
   resolveSendOptions.mockResolvedValue({ cwd: "/repo" })
   runAndCaptureAssistantReply.mockResolvedValue({ text: "done", messageId: "m1" })
   parkOutcome.mockResolvedValue({ kind: "expired" })
+  recordSurfaceUsage.mockResolvedValue(null)
+  __resetClaimedTurnUsageForTesting()
 })
 
 /** The host's own grant every unattended turn carries (ADR-0224 A7). */
@@ -381,5 +392,137 @@ describe("runPluginAgentTurn", () => {
     getSettings.mockRejectedValue(new Error("db closed"))
     await expect(runTurn(base)).resolves.toMatchObject({ text: "done" })
     expect(resolveSendOptions).toHaveBeenCalledWith(expect.objectContaining({ appSettings: null }))
+  })
+})
+
+describe("runPluginAgentTurn usage booking", () => {
+  const botCaller = { grantSource: { kind: "bot" as const, id: "acme:bot" } }
+  const booking = {
+    operationId: "bot:run_1:agent-turn",
+    sessionId: "bot:run_1",
+    runId: "run_1",
+    projectId: "proj_1",
+  }
+  const usage = {
+    inputTokens: 120,
+    outputTokens: 40,
+    cacheReadInputTokens: 300,
+    cacheCreationInputTokens: 50,
+    reasoningTokens: 10,
+    totalCostUsd: 0.012,
+    durationMs: 900,
+  }
+
+  it("books nothing and leaves the send untouched when the caller asked for no booking", async () => {
+    await runTurn(base)
+    const [, , sendOptions, opts] = runAndCaptureAssistantReply.mock.calls[0] as unknown[]
+    expect(sendOptions).not.toHaveProperty("turnId")
+    expect(opts).not.toHaveProperty("onEvent")
+    expect(recordSurfaceUsage).not.toHaveBeenCalled()
+  })
+
+  it("claims the turn and books it as a plugin row with provider, model and run", async () => {
+    resolveSendOptions.mockResolvedValue({ cwd: "/repo", provider: "anthropic", model: "sonnet" })
+    runAndCaptureAssistantReply.mockResolvedValue({ text: "done", messageId: "m1", usage } as never)
+    await runTurn(base, { ...botCaller, usage: booking })
+
+    const [sessionId, , sendOptions] = runAndCaptureAssistantReply.mock.calls[0] as unknown[]
+    const turnId = (sendOptions as { turnId?: string }).turnId
+    expect(turnId).toEqual(expect.any(String))
+    // The desktop chat runtime sees the same stream and must leave this turn alone.
+    expect(isTurnUsageClaimed(sessionId as string, turnId)).toBe(true)
+    expect(recordSurfaceUsage).toHaveBeenCalledTimes(1)
+    expect(recordSurfaceUsage).toHaveBeenCalledWith({
+      surface: "plugin",
+      operationId: "bot:run_1:agent-turn",
+      sessionId: "bot:run_1",
+      usage: expect.objectContaining({
+        inputTokens: 120,
+        outputTokens: 40,
+        cacheReadTokens: 300,
+        cacheCreationTokens: 50,
+        reasoningTokens: 10,
+        costUsd: 0.012,
+        durationMs: 900,
+        providerId: "anthropic",
+        model: "sonnet",
+        runId: "run_1",
+        projectId: "proj_1",
+        turnId,
+      }),
+    })
+  })
+
+  it("keeps a turn id the resolver already minted", async () => {
+    resolveSendOptions.mockResolvedValue({ cwd: "/repo", turnId: "turn-7" })
+    runAndCaptureAssistantReply.mockResolvedValue({ text: "done", messageId: "m1", usage } as never)
+    await runTurn(base, { ...botCaller, usage: booking })
+    expect(isTurnUsageClaimed("sess-new", "turn-7")).toBe(true)
+  })
+
+  it("falls back to the streamed usage when the result carries none", async () => {
+    runAndCaptureAssistantReply.mockImplementation(async (...args: unknown[]) => {
+      const opts = args[3] as { onEvent: (event: unknown) => void }
+      opts.onEvent({ type: "usage", usage: { inputTokens: 1 }, partial: true })
+      opts.onEvent({ type: "usage", usage: { inputTokens: 7, outputTokens: 3 } })
+      return { text: "done", messageId: "m1" }
+    })
+    await runTurn(base, { ...botCaller, usage: booking })
+    expect(recordSurfaceUsage.mock.calls[0][0]).toMatchObject({
+      usage: { inputTokens: 7, outputTokens: 3 },
+    })
+  })
+
+  it("still books what a failed turn spent, then reports the failure", async () => {
+    runAndCaptureAssistantReply.mockImplementation(async (...args: unknown[]) => {
+      const opts = args[3] as { onEvent: (event: unknown) => void }
+      opts.onEvent({ type: "usage", usage: { inputTokens: 50, outputTokens: 5 } })
+      throw new Error("sidecar exited")
+    })
+    await expect(runTurn(base, { ...botCaller, usage: booking })).rejects.toThrow("sidecar exited")
+    expect(recordSurfaceUsage.mock.calls[0][0]).toMatchObject({
+      usage: { inputTokens: 50, outputTokens: 5 },
+    })
+  })
+
+  it("books an external-agent turn without a provider bucket or a guessed price", async () => {
+    resolveSendOptions.mockResolvedValue({
+      cwd: "/repo",
+      provider: "cognia:external-agent:codex",
+      model: "gpt-5",
+    })
+    runAndCaptureAssistantReply.mockResolvedValue({
+      text: "done",
+      messageId: "m1",
+      usage: { inputTokens: 10, outputTokens: 2 },
+    } as never)
+    await runTurn(base, { ...botCaller, usage: booking })
+    const written = (recordSurfaceUsage.mock.calls[0][0] as { usage: Record<string, unknown> })
+      .usage
+    expect(written).not.toHaveProperty("providerId")
+    expect(written).toMatchObject({
+      model: "gpt-5",
+      costSource: "unknown",
+      costKnown: false,
+      usageBasis: "provider-reported",
+    })
+  })
+
+  it("never fails the turn when the booking cannot be written", async () => {
+    runAndCaptureAssistantReply.mockResolvedValue({ text: "done", messageId: "m1", usage } as never)
+    recordSurfaceUsage.mockRejectedValue(new Error("db closed"))
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await expect(runTurn(base, { ...botCaller, usage: booking })).resolves.toMatchObject({
+        status: "completed",
+      })
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it("books nothing when the turn reported no usage at all", async () => {
+    await runTurn(base, { ...botCaller, usage: booking })
+    expect(recordSurfaceUsage).not.toHaveBeenCalled()
   })
 })

@@ -16,6 +16,7 @@ import type {
   PluginAgentTurnRequest,
   PluginAgentTurnResult,
 } from "@cognia/plugin-sdk/api/agent-turn"
+import type { PluginAgentTurnUsageBooking } from "@/lib/plugin/api/agent-turn"
 
 import { BotExecutorUnavailableError, type BotExecutorContext, type BotExecutorFn } from "./types"
 
@@ -29,6 +30,7 @@ export interface AgentTurnExecutorDeps {
     permissionMode?: SendOptions["permissionMode"]
     composition?: AgentCompositionSelectionV1
     capabilityGrants?: PluginAgentTurnRequest["capabilityGrants"]
+    usage: PluginAgentTurnUsageBooking
   }) => Promise<
     Pick<PluginAgentTurnResult, "sessionId" | "text"> &
       Partial<Pick<PluginAgentTurnResult, "status" | "needsApproval">>
@@ -43,6 +45,20 @@ export function agentTurnPrompt(ctx: BotExecutorContext): string {
   return interpolateEnvelopeTemplate(ctx.definition.prompt ?? "", ctx.event, {
     config: ctx.config,
   })
+}
+
+/**
+ * Where the turn's spend lands in the usage ledger: one row per run, grouped
+ * under `bot:<runId>`. The turn is memoized as the run's `agent-turn` step, so
+ * the id is stable across a crash-replayed handler and a re-booking overwrites.
+ */
+export function agentTurnUsageBooking(ctx: BotExecutorContext): PluginAgentTurnUsageBooking {
+  return {
+    operationId: `bot:${ctx.runId}:agent-turn`,
+    sessionId: `bot:${ctx.runId}`,
+    runId: ctx.runId,
+    ...(ctx.installation.projectId ? { projectId: ctx.installation.projectId } : {}),
+  }
 }
 
 export function createAgentTurnBotExecutor(deps: AgentTurnExecutorDeps = {}): BotExecutorFn {
@@ -72,12 +88,13 @@ export function createAgentTurnBotExecutor(deps: AgentTurnExecutorDeps = {}): Bo
 
     const run =
       deps.run ??
-      (async (input) => {
+      (async ({ usage, ...input }) => {
         const { runPluginAgentTurn } = await import("@/lib/plugin/api/agent-turn")
         return runPluginAgentTurn(input, {
           grantSource: { kind: "bot", id: ctx.definition.id },
           sessionKey: ctx.installationId,
           unattendedLabel: `Bot: ${ctx.definition.name}`,
+          usage,
         })
       })
 
@@ -111,6 +128,8 @@ export function createAgentTurnBotExecutor(deps: AgentTurnExecutorDeps = {}): Bo
             permissionProfile: ctx.policy.permissionProfile ?? {},
           },
         ],
+        // Booked under this run whichever host runs it (ADR-0165 ledger).
+        usage: agentTurnUsageBooking(ctx),
       })
     )
 

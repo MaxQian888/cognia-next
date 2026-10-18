@@ -14,6 +14,7 @@ import { formatTokens, formatUsd } from "@/lib/observability/format-utils"
 import { formatDurationShort } from "@/lib/utils"
 
 import type { Quantiles, RunEstimate } from "./estimate"
+import type { RunProgressComparison } from "./progress"
 
 /** next-intl's `t` and the runtime translator both satisfy this. */
 export type EstimateTranslator = (key: string, values?: Record<string, string | number>) => string
@@ -61,4 +62,25 @@ export function formatRunEstimate(
     detail.push(t("stopped", { percent: Math.round(estimate.stoppedShare * 100) }))
   }
   return { summary: parts.join(" · "), detail: detail.join(" · ") }
+}
+
+/**
+ * One line comparing a live run with runs like it: "spent X of a typical Y",
+ * or, past the usual range, "X spent, above the usual range (up to Z)".
+ */
+export function formatRunProgress(
+  comparison: RunProgressComparison,
+  t: EstimateTranslator
+): { text: string; detail: string } {
+  const fmt = comparison.metric === "cost" ? formatUsd : formatTokens
+  const values = {
+    spent: fmt(comparison.spent),
+    typical: fmt(comparison.typical),
+    high: fmt(comparison.high),
+  }
+  const key = comparison.overRange ? "progress.overRange" : "progress.typical"
+  return {
+    text: t(`${key}.${comparison.metric}`, values),
+    detail: t(`confidence.${comparison.confidence}`, { count: comparison.sampleCount }),
+  }
 }

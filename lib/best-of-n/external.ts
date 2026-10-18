@@ -1,5 +1,9 @@
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
-import type { ExternalAgentEvent, ExternalAgentResult } from "@/types/agent/external-agent"
+import type {
+  ExternalAgentEvent,
+  ExternalAgentResult,
+  ExternalAgentTokenUsage,
+} from "@/types/agent/external-agent"
 import type { PermissionBoundExternalExecutionOptions } from "@/lib/ai/agent/external/policy/permission-ceiling"
 import type { ExternalAgentReadiness } from "@/lib/agent/ensure-external-agent-ready"
 
@@ -29,6 +33,11 @@ export interface ExternalCandidateInput {
   workingDirectory: string
   signal: AbortSignal
   onCapture(event: CaptureStreamEvent): void
+  /**
+   * The agent's own token report for the run, delivered before success is
+   * judged: a run that ends in failure has still spent what it reports.
+   */
+  onUsage?(usage: ExternalAgentTokenUsage): void
 }
 
 const production: ExternalCandidateDeps = {
@@ -82,6 +91,7 @@ export async function runExternalCandidate(
     onEvent,
     signal: input.signal,
   })
+  if (result.tokenUsage) input.onUsage?.(result.tokenUsage)
   if (!result.success)
     throw new Error(result.error || `External agent ${input.configId} returned a failure`)
   return { text: result.finalResponse ?? "" }

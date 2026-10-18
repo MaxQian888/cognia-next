@@ -1,5 +1,5 @@
 import { EMPTY_ESTIMATE, type RunEstimate } from "./estimate"
-import { formatRunEstimate } from "./format"
+import { formatRunEstimate, formatRunProgress } from "./format"
 
 /** Echoes the key and its values so assertions read the structure, not wording. */
 const t = (key: string, values?: Record<string, string | number>) =>
@@ -85,5 +85,27 @@ describe("formatRunEstimate", () => {
       t
     )
     expect(out.summary).toBe("duration(typical=30s,low=2.0s,high=59s)")
+  })
+})
+
+describe("formatRunProgress", () => {
+  const base = { typical: 2, high: 6, confidence: "few" as const, sampleCount: 8 }
+
+  it("says spent of typical in cost", () => {
+    expect(formatRunProgress({ ...base, metric: "cost", spent: 1.2, overRange: false }, t)).toEqual(
+      {
+        text: "progress.typical.cost(spent=$1.20,typical=$2.00,high=$6.00)",
+        detail: "confidence.few(count=8)",
+      }
+    )
+  })
+
+  it("says above the usual range in tokens", () => {
+    expect(
+      formatRunProgress(
+        { ...base, metric: "tokens", spent: 7000, typical: 1000, high: 5000, overRange: true },
+        t
+      ).text
+    ).toBe("progress.overRange.tokens(spent=7.0K,typical=1.0K,high=5.0K)")
   })
 })

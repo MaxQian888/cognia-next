@@ -65,3 +65,18 @@ it("turns an unsuccessful run into a failure, and never starts after cancellatio
   await expect(runExternalCandidate({ ...input, signal: aborted.signal }, f.deps)).rejects.toThrow()
   expect(f.execute).toHaveBeenCalledTimes(1)
 })
+
+it("reports the agent's token usage, also for a run that failed", async () => {
+  const f = deps(true)
+  const onUsage = jest.fn()
+  const tokenUsage = { promptTokens: 10, completionTokens: 4, totalTokens: 14 }
+  f.execute.mockResolvedValueOnce({ success: true, finalResponse: "done", tokenUsage } as never)
+  await runExternalCandidate({ ...input, onUsage }, f.deps)
+  expect(onUsage).toHaveBeenLastCalledWith(tokenUsage)
+  f.execute.mockResolvedValueOnce({ success: false, error: "boom", tokenUsage } as never)
+  await expect(runExternalCandidate({ ...input, onUsage }, f.deps)).rejects.toThrow("boom")
+  expect(onUsage).toHaveBeenCalledTimes(2)
+  // A run that reported nothing books nothing.
+  await runExternalCandidate({ ...input, onUsage }, f.deps)
+  expect(onUsage).toHaveBeenCalledTimes(2)
+})

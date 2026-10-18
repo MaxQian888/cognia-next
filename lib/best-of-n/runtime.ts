@@ -17,6 +17,9 @@ import {
   externalAgentIdFromProviderId,
   isExternalAgentProviderId,
 } from "@/lib/ai/agent/external/session/session-models"
+import type { SurfaceUsageInput } from "@/lib/db/session-usage"
+import { externalTokenUsageToUsageInfo } from "@/lib/claude/usage"
+import { claimTurnUsage, trackCaptureUsage } from "@/lib/usage/claimed-turn-usage"
 import { describeBestOfNAgent } from "./agents"
 import { runExternalCandidate } from "./external"
 import { BestOfNAttemptError, type BestOfNExecution, type BestOfNInput } from "./core"
@@ -108,15 +111,23 @@ export function createBestOfNExecution(): BestOfNExecution {
       }
     },
     async execute({ group, candidate, workspace, request, grant, signal }) {
-      const [{ getDb }, { getCharacter }, { getSettings }, { resolveSendOptions }, runner, ipc] =
-        await Promise.all([
-          import("@/lib/db/schema"),
-          import("@/lib/db/characters"),
-          import("@/lib/db/settings"),
-          import("@/lib/claude/build-options"),
-          import("@/lib/claude/run-and-capture"),
-          import("@/lib/claude/ipc"),
-        ])
+      const [
+        { getDb },
+        { getCharacter },
+        { getSettings },
+        { resolveSendOptions },
+        runner,
+        ipc,
+        usageLedger,
+      ] = await Promise.all([
+        import("@/lib/db/schema"),
+        import("@/lib/db/characters"),
+        import("@/lib/db/settings"),
+        import("@/lib/claude/build-options"),
+        import("@/lib/claude/run-and-capture"),
+        import("@/lib/claude/ipc"),
+        import("@/lib/db/session-usage"),
+      ])
       const character = await getCharacter(candidate.agent.agentId)
       if (!character) throw new Error(`Unknown best-of-N agent: ${candidate.agent.agentId}`)
       const bundle = await getWorkspaceBundle(workspace.bundleId)
@@ -166,6 +177,27 @@ export function createBestOfNExecution(): BestOfNExecution {
         lease: null,
       }
       let costUsd: number | null = null
+      // One ledger row per candidate (an attempt is never replayed), under the
+      // child conversation so it rolls up with the transcript it produced. A
+      // candidate is a child of the durable team run, hence `agent-team`.
+      const bookUsage = async (usage: SurfaceUsageInput | undefined) => {
+        if (!usage) return
+        try {
+          await usageLedger.recordSurfaceUsage({
+            surface: "agent-team",
+            operationId: `best-of-n:${group.groupId}:${candidate.candidateId}`,
+            sessionId: session.id,
+            usage: {
+              ...usage,
+              runId: group.teamRunId,
+              ...(request.projectId ? { projectId: request.projectId } : {}),
+            },
+          })
+        } catch (error) {
+          // A mirror of spend that already happened; never fails the attempt.
+          console.warn("Best-of-N usage booking failed", error)
+        }
+      }
       try {
         await dispatch.setWorkspace({ workspacePath: workspace.physicalRoot })
         await dispatch.attachControl(
@@ -239,14 +271,29 @@ export function createBestOfNExecution(): BestOfNExecution {
             // The external execute contract has no dollar cap and reports no cost.
             if (group.budgetPolicy.maxCostUsd != null)
               throw new Error("The selected runtime cannot enforce the best-of-N cost budget")
-            ;({ text } = await runExternalCandidate({
-              configId: externalConfigId,
-              prompt: request.prompt,
-              model: declared.kind === "external" ? candidate.agent.model : options?.model,
-              workingDirectory: workspace.physicalRoot,
-              signal: AbortSignal.any([signal, AbortSignal.timeout(remainingMs)]),
-              onCapture: dispatch.capture,
-            }))
+            const externalModel =
+              (declared.kind === "external" ? candidate.agent.model : options?.model) ?? undefined
+            let reported: SurfaceUsageInput | undefined
+            try {
+              ;({ text } = await runExternalCandidate({
+                configId: externalConfigId,
+                prompt: request.prompt,
+                model: externalModel,
+                workingDirectory: workspace.physicalRoot,
+                signal: AbortSignal.any([signal, AbortSignal.timeout(remainingMs)]),
+                onCapture: dispatch.capture,
+                onUsage: (usage) => {
+                  // The agent's own figures. Its provider is not a Cognia price
+                  // list, so the row gets no provider bucket and no guessed price.
+                  reported = {
+                    ...usageLedger.externalAgentSurfaceUsage(externalTokenUsageToUsageInfo(usage)),
+                    ...(externalModel ? { model: externalModel } : {}),
+                  }
+                },
+              }))
+            } finally {
+              await bookUsage(reported)
+            }
           } else {
             const sendOptions = options!
             // The frozen execution spec is the sidecar's runtime authority. The
@@ -264,17 +311,49 @@ export function createBestOfNExecution(): BestOfNExecution {
             ) {
               throw new Error("The selected runtime cannot enforce the best-of-N cost budget")
             }
-            const result = await runner.runAndCaptureAssistantReply(
-              session.id,
-              request.prompt,
-              sendOptions,
-              {
-                signal,
-                timeoutMs: remainingMs,
-                onEvent: dispatch.capture,
-                execution: { kind: "team", runId: group.teamRunId, taskId: candidate.candidateId },
-              }
-            )
+            // The desktop chat runtime ingests this child's stream too, and
+            // would book it as a `chat` row naming no provider. Claim the turn
+            // so the row below, with provider, model and run, is the only one.
+            const turnOptions = {
+              ...sendOptions,
+              turnId: sendOptions.turnId ?? crypto.randomUUID(),
+            }
+            claimTurnUsage(session.id, turnOptions.turnId)
+            const usageTracker = trackCaptureUsage()
+            let result: Awaited<ReturnType<typeof runner.runAndCaptureAssistantReply>> | undefined
+            try {
+              result = await runner.runAndCaptureAssistantReply(
+                session.id,
+                request.prompt,
+                turnOptions,
+                {
+                  signal,
+                  timeoutMs: remainingMs,
+                  onEvent: (event) => {
+                    usageTracker.observe(event)
+                    dispatch.capture(event)
+                  },
+                  execution: {
+                    kind: "team",
+                    runId: group.teamRunId,
+                    taskId: candidate.candidateId,
+                  },
+                }
+              )
+            } finally {
+              // Also for an attempt that was cancelled or failed: its calls were billed.
+              const usage = usageTracker.resolve(result?.usage)
+              await bookUsage(
+                usage && {
+                  ...usageLedger.surfaceUsageFromUsageInfo(usage, {
+                    costAuthority: runtimeAdapter === "claude-agent-sdk",
+                  }),
+                  ...(turnOptions.model ? { model: turnOptions.model } : {}),
+                  ...(turnOptions.provider ? { providerId: turnOptions.provider } : {}),
+                  turnId: turnOptions.turnId,
+                }
+              )
+            }
             const reportedCost = result.usage?.totalCostUsd
             // AI-SDK's result adapter emits zero when the provider supplies no
             // cost. Preserve unknown instead of turning that wire default into

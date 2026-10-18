@@ -10,5 +10,15 @@
   },
   "stopped": "{percent}% of them stopped early",
   "none": "No estimate yet: not enough similar runs",
-  "unavailable": "No estimate yet: bot runs do not record usage"
+  "unavailable": "No estimate yet: bot runs do not record usage",
+  "progress": {
+    "typical": {
+      "cost": "{spent} spent so far, similar runs typically total {typical}",
+      "tokens": "{spent} tokens so far, similar runs typically use {typical}"
+    },
+    "overRange": {
+      "cost": "{spent} spent so far, above the usual range for similar runs (up to {high})",
+      "tokens": "{spent} tokens so far, above the usual range for similar runs (up to {high})"
+    }
+  }
 }

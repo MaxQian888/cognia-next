@@ -39,7 +39,9 @@ import {
 import { createUnattendedPermissionResponder } from "@/lib/claude/unattended-permission-responder"
 import { createUnattendedPark } from "@/lib/claude/unattended-park"
 import type { AgentCapabilityGrantV1 } from "@cognia/agent-config-types/agent-capability-grant"
-import type { ChatSession } from "@cognia/agent-config-types"
+import type { ChatSession, SendOptions } from "@cognia/agent-config-types"
+import type { UsageInfo } from "@/lib/claude/adapter"
+import { claimTurnUsage, trackCaptureUsage } from "@/lib/usage/claimed-turn-usage"
 
 export {
   PluginAgentTurnError,
@@ -123,6 +125,27 @@ export interface RunPluginAgentTurnOptions {
   sessionKey?: string
   /** What a parked approval calls this turn ("Bot: Release notes"). */
   unattendedLabel?: string
+  /**
+   * Book this turn's spend in the usage ledger under the caller's identity.
+   *
+   * Without it the turn is booked only where the desktop chat runtime happens
+   * to ingest the session's stream, as a `chat` row that names no provider, so
+   * the spend misses the provider rollup and the cost-budget gate, and on the
+   * always-on host it is not booked at all. With it the turn is claimed (the
+   * chat runtime then skips it) and written here as a `plugin` row.
+   */
+  usage?: PluginAgentTurnUsageBooking
+}
+
+export interface PluginAgentTurnUsageBooking {
+  /** Deterministic per-turn id. A replayed turn MUST reuse it. */
+  operationId: string
+  /** The grouping key the row rolls up under, e.g. `bot:<runId>`. */
+  sessionId: string
+  /** The caller's run, for per-run spend. */
+  runId?: string
+  /** The owning project, for per-workspace budgets. */
+  projectId?: string
 }
 
 /**
@@ -131,6 +154,47 @@ export interface RunPluginAgentTurnOptions {
  */
 function unattendedGrant(source: { kind: "plugin" | "bot"; id?: string }): AgentCapabilityGrantV1 {
   return { schemaVersion: 1, source, permissionProfile: {} }
+}
+
+/**
+ * Write the booked row for one turn. Never fails the turn: the ledger is a
+ * mirror of spend that already happened, not a precondition of the reply.
+ */
+async function bookTurnUsage(
+  booking: PluginAgentTurnUsageBooking,
+  sendOptions: SendOptions,
+  usage: UsageInfo | undefined
+): Promise<void> {
+  if (!usage) return
+  try {
+    const [{ recordSurfaceUsage, surfaceUsageFromUsageInfo, externalAgentSurfaceUsage }, models] =
+      await Promise.all([
+        import("@/lib/db/session-usage"),
+        import("@/lib/ai/agent/external/session/session-models"),
+      ])
+    const external = models.isExternalAgentProviderId(sendOptions.provider)
+    await recordSurfaceUsage({
+      surface: "plugin",
+      operationId: booking.operationId,
+      sessionId: booking.sessionId,
+      usage: {
+        ...(external
+          ? externalAgentSurfaceUsage(usage)
+          : surfaceUsageFromUsageInfo(usage, {
+              costAuthority: sendOptions.execution?.runtimeAdapter === "claude-agent-sdk",
+            })),
+        ...(sendOptions.model ? { model: sendOptions.model } : {}),
+        // An external agent's own provider is not a Cognia price list, so it
+        // has no bucket in the provider rollup (as for interactive external turns).
+        ...(sendOptions.provider && !external ? { providerId: sendOptions.provider } : {}),
+        ...(sendOptions.turnId ? { turnId: sendOptions.turnId } : {}),
+        ...(booking.runId ? { runId: booking.runId } : {}),
+        ...(booking.projectId ? { projectId: booking.projectId } : {}),
+      },
+    })
+  } catch (error) {
+    console.warn("runPluginAgentTurn: usage booking failed", error)
+  }
 }
 
 export async function runPluginAgentTurn(
@@ -197,6 +261,14 @@ export async function runPluginAgentTurn(
       ...(request.signal ? { signal: request.signal } : {}),
     }),
   })
+  // Claimed before the send: the desktop chat runtime ingests this session's
+  // stream too, and must leave the turn to the row booked below.
+  const booking = options.usage
+  const usageTracker = booking ? trackCaptureUsage() : undefined
+  if (booking) {
+    sendOptions.turnId ??= crypto.randomUUID()
+    claimTurnUsage(sessionId, sendOptions.turnId)
+  }
   let result: Awaited<ReturnType<typeof runner.runAndCaptureAssistantReply>>
   try {
     result = await runner.runAndCaptureAssistantReply(sessionId, prompt, sendOptions, {
@@ -204,11 +276,15 @@ export async function runPluginAgentTurn(
       ...(request.timeoutMs ? { timeoutMs: request.timeoutMs } : {}),
       onPermissionRequest: permissions.onPermissionRequest,
       pauseTimeoutWhileAwaitingPermission: true,
+      ...(usageTracker ? { onEvent: usageTracker.observe } : {}),
     })
   } catch (error) {
+    // A turn that failed or was cancelled still paid for the calls it made.
+    if (booking) await bookTurnUsage(booking, sendOptions, usageTracker?.resolve())
     await permissions.finish(request.signal?.aborted ? "cancelled" : "failed")
     throw error
   }
+  if (booking) await bookTurnUsage(booking, sendOptions, usageTracker?.resolve(result.usage))
   await permissions.finish("completed")
 
   return {

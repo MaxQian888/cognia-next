@@ -76,6 +76,7 @@ import {
   type TranscriptRuntimeFence,
 } from "@/lib/chat/transcript/revision-events"
 import { recordResultUsage } from "@/lib/db/session-usage"
+import { isTurnUsageClaimed } from "@/lib/usage/claimed-turn-usage"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { useInFlightStore } from "@/stores/settings/in-flight-store"
@@ -1420,7 +1421,9 @@ export async function handleEvent(
         // The actual provider/model sent to the sidecar may differ from the
         // session record when alias routing or preset model_mapping changed it.
         const lastSendForSpan = useChatStore.getState().lastSendBySession[sessionId]
-        if (lastAssistant) {
+        // A headless caller that claimed this turn books it with the provider
+        // and run it knows; a second row here would count the spend twice.
+        if (lastAssistant && !isTurnUsageClaimed(sessionId, frame.turnId)) {
           const session = await getSession(sessionId).catch(() => undefined)
           await recordResultUsage({
             sessionId,
