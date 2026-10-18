@@ -623,6 +623,7 @@ pub fn is_allowed_control_method(method: &str) -> bool {
             | "reinitialize"
             | "runtimeStatus"
             | "reloadOutputStyles"
+            | "reloadExtensions"
             | "reloadPlugins"
             | "reloadSkills"
             | "rewindFiles"
@@ -1317,6 +1318,7 @@ mod tests {
             "reinitialize",
             "runtimeStatus",
             "reloadOutputStyles",
+            "reloadExtensions",
             "reloadPlugins",
             "reloadSkills",
             "rewindFiles",

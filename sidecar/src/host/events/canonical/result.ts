@@ -1,4 +1,4 @@
-import { asString, compact, type CanonicalEvent, type SdkMappingState } from "./common.ts"
+import { asString, asNumber, compact, type CanonicalEvent, type SdkMappingState } from "./common.ts"
 import { classifyStructuredOutcome } from "@cognia/agent-config-types/claude-agent-sdk-options"
 import {
   failureCodeFromResult,
@@ -46,7 +46,28 @@ export function fromResult(evt: Record<string, unknown>, state: SdkMappingState)
     return events
   }
   if (sdkSucceeded) {
-    events.push({ kind: "lifecycle", phase: "ended" })
+    const queueReason = (value: unknown) =>
+      typeof value === "string" &&
+      ["durable_post", "ephemeral_post", "retry_backoff", "hold", "none"].includes(value)
+        ? value.replaceAll("_", "-")
+        : undefined
+    const timing = compact({
+      firstContentMs: asNumber(evt.first_content_frame_ms),
+      firstStreamMs: asNumber(evt.first_stream_post_ms),
+      firstStreamAckMs: asNumber(evt.first_stream_post_ack_ms),
+      firstStreamQueueWaitMs: asNumber(evt.first_stream_post_queue_wait_ms),
+      firstStreamQueueReason: queueReason(evt.first_stream_post_queued_behind),
+      firstTextMs: asNumber(evt.first_text_post_ms),
+      firstTextQueueWaitMs: asNumber(evt.first_text_post_queue_wait_ms),
+      firstTextQueueReason: queueReason(evt.first_text_post_queued_behind),
+    })
+    events.push(
+      compact({
+        kind: "lifecycle",
+        phase: "ended",
+        timing: Object.keys(timing).length ? timing : undefined,
+      })
+    )
   } else {
     events.push(
       compact({

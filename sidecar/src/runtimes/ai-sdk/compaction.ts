@@ -23,6 +23,7 @@ import { runPluginHookHandler, PLUGIN_HOOK_BROADCAST } from "../../hooks/handler
 import { capToolResults } from "../../context/tool-result-cap.ts"
 import { unpairedToolCallIds } from "../../context/tool-message-pairing.ts"
 import { resolveAdapter } from "../../providers/protocol-adapters/registry.ts"
+import { SIWC_PROTOCOL } from "../../providers/siwc-fetch.ts"
 import {
   drainSideCallStream,
   estimatePromptTokens,
@@ -428,6 +429,10 @@ export function createCompactor({
       typeof comp.maxSummaryTokens === "number" && comp.maxSummaryTokens > 0
         ? comp.maxSummaryTokens
         : 500
+    const siwcSummary =
+      (comp.summary?.protocol ?? comp.summary?.credentials?.protocol ?? creds.protocol) ===
+        SIWC_PROTOCOL ||
+      (!comp.summary?.protocol && protocolAdapter.id === `ai-sdk:${SIWC_PROTOCOL}`)
     // Why the last AI summary produced nothing, for the manual caller.
     let summaryFailure: string | undefined
     const summarize = async (messages: ConversationMessage[]) => {
@@ -440,7 +445,7 @@ export function createCompactor({
           : transcript
       }
       const first = await summarizeOnce(transcript, summaryCap)
-      if (first.text || first.finishReason !== "length") return first.text
+      if (first.text || first.finishReason !== "length" || siwcSummary) return first.text
       // Ended at the cap without a word of summary: the budget went to
       // reasoning. One retry with room for it, never more.
       signal.throwIfAborted()
@@ -462,13 +467,26 @@ export function createCompactor({
         let summaryAdapter = protocolAdapter
         if (sum.protocol) {
           const alt = resolveAdapter(sum.protocol, sum.protocolAdapterSpec, {
+            ...(hostRpc
+              ? {
+                  nativeCall: (method: string, params: Record<string, unknown>) =>
+                    hostRpc.call(method, params, { timeoutMs: 70_000 }),
+                }
+              : {}),
             emit,
             sessionId,
             pendingProtocolExecs,
           })
           if (alt) summaryAdapter = alt
         }
-        const summaryParams = { ...modelParams, maxOutputTokens }
+        if (siwcSummary && state.turnLedgerGate?.active) {
+          throw new Error(
+            "SIWC preview cannot enforce the output-token cap required for a ledgered summary"
+          )
+        }
+        // The preview rejects max_output_tokens. Preserve an explicit user
+        // constraint for native validation, but do not invent an unsupported cap.
+        const summaryParams = siwcSummary ? { ...modelParams } : { ...modelParams, maxOutputTokens }
         const summaryProviderId = sum.credentials ? sum.providerId : provider
         const userContent = `${SUMMARY_TRANSCRIPT_PREAMBLE}\n\n<transcript>\n${transcript}\n</transcript>`
         // Router + Fusion: inside a ledgered turn the summary is a reserved call
@@ -523,7 +541,10 @@ export function createCompactor({
         const text = outcome.value.trim()
         if (text)
           return { text, ...(drained.finishReason ? { finishReason: drained.finishReason } : {}) }
-        summaryFailure = emptySummaryReason(drained, maxOutputTokens)
+        summaryFailure =
+          siwcSummary && drained.finishReason === "length"
+            ? "the SIWC summary ended without text; the preview does not support an output-token cap"
+            : emptySummaryReason(drained, maxOutputTokens)
         log("warn", `compaction summary produced no text: ${summaryFailure}`)
         return {
           text: null,
@@ -576,6 +597,12 @@ export function createCompactor({
         let visionAdapter = protocolAdapter
         if (sum.protocol) {
           const alt = resolveAdapter(sum.protocol, sum.protocolAdapterSpec, {
+            ...(hostRpc
+              ? {
+                  nativeCall: (method: string, params: Record<string, unknown>) =>
+                    hostRpc.call(method, params, { timeoutMs: 70_000 }),
+                }
+              : {}),
             emit,
             sessionId,
             pendingProtocolExecs,
@@ -584,6 +611,11 @@ export function createCompactor({
         }
         const visionModel = sum.model || state.model
         const visionProviderId = sum.credentials ? sum.providerId : provider
+        if (siwcSummary && state.turnLedgerGate?.active) {
+          throw new Error(
+            "SIWC preview cannot enforce the output-token cap required for a ledgered vision call"
+          )
+        }
         const outcome = await runLedgeredSideCall(
           state.turnLedgerGate,
           {
@@ -601,7 +633,7 @@ export function createCompactor({
                   {
                     role: "user",
                     content: [
-                      { type: "image", image: dataUrl, mediaType: "image/png" },
+                      { type: "file", data: dataUrl, mediaType: "image/png" },
                       {
                         type: "text",
                         text: "Transcribe ALL text visible in this image verbatim, preserving reading order. Output only the transcription, no commentary.",
@@ -609,7 +641,9 @@ export function createCompactor({
                     ],
                   },
                 ],
-                modelParams: { ...modelParams, maxOutputTokens: 1024 },
+                modelParams: siwcSummary
+                  ? { ...modelParams }
+                  : { ...modelParams, maxOutputTokens: 1024 },
                 tools: undefined,
                 maxSteps: 1,
                 credentials: sum.credentials || creds,

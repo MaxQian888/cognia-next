@@ -41,7 +41,60 @@ function Harness({ req }: { req: AcpElicitationRequest }) {
   return <ElicitationForm request={req} values={values} onValuesChange={setValues} />
 }
 
+function choiceOrTextRequest(): AcpElicitationRequest {
+  return request({
+    requestedSchema: {
+      type: "object",
+      properties: {
+        q0: { type: "string", title: "Which environment?", enum: ["Local", "Cloud"] },
+        q0_notes: { type: "string", title: "Which environment?", format: "multiline" },
+        q1: {
+          type: "array",
+          title: "Which checks?",
+          items: { type: "string", enum: ["Types", "Tests"] },
+        },
+        q1_notes: { type: "string", title: "Which checks?", format: "multiline" },
+      },
+      required: [],
+    },
+    _meta: {
+      userInput: {
+        questions: [
+          {
+            id: "q0",
+            notesField: "q0_notes",
+            question: "Which environment?",
+            options: [{ label: "Local", description: "Use this computer" }, { label: "Cloud" }],
+            multiple: false,
+            isOther: true,
+          },
+          {
+            id: "q1",
+            notesField: "q1_notes",
+            question: "Which checks?",
+            options: [{ label: "Types" }, { label: "Tests", description: "Run focused tests" }],
+            multiple: true,
+            isOther: true,
+          },
+        ],
+      },
+    },
+  })
+}
+
 describe("elicitation helpers", () => {
+  it("requires a choice or free text for every grouped question", () => {
+    const req = choiceOrTextRequest()
+    const complete = (values: ElicitationValues) =>
+      isElicitationComplete(req.requestedSchema!.properties, [], values, req)
+    expect(complete({})).toBe(false)
+    expect(complete({ q0: "Local", q1: [] })).toBe(false)
+    expect(complete({ q0: "Local", q1_notes: "   " })).toBe(false)
+    expect(complete({ q0: "Local", q1: ["Types", "Tests"] })).toBe(true)
+    expect(complete({ q0_notes: "My own environment", q1: ["Tests"] })).toBe(true)
+    expect(complete({ q0_notes: "Custom", q1_notes: "A custom check" })).toBe(true)
+  })
+
   it("reads choices from either ACP spelling, preferring oneOf's labels", () => {
     expect(elicitationChoices({ type: "string", oneOf: [{ const: "a", title: "Alpha" }] })).toEqual(
       [{ value: "a", label: "Alpha" }]
@@ -73,6 +126,70 @@ describe("elicitation helpers", () => {
 })
 
 describe("<ElicitationForm />", () => {
+  it("shows the selected option preview as text", async () => {
+    const req = choiceOrTextRequest()
+    const groups = (req._meta!.userInput as { questions: Array<{ options: unknown[] }> }).questions
+    groups[0].options = [
+      { label: "Local", preview: "<script>not executable</script>\nLocal plan" },
+      { label: "Cloud", preview: "Cloud plan" },
+    ]
+    render(<Harness req={req} />)
+    expect(screen.queryByText(/Local plan/)).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole("radio", { name: "Local" }))
+    expect(screen.getByText(/Local plan/)).toHaveTextContent("<script>not executable</script>")
+    expect(document.querySelector("script")).toBeNull()
+    await userEvent.click(screen.getByRole("radio", { name: "Cloud" }))
+    expect(screen.queryByText(/Local plan/)).not.toBeInTheDocument()
+    expect(screen.getByText("Cloud plan")).toBeInTheDocument()
+  })
+
+  it("uses only the notes field when a question offers no choices", () => {
+    const req = choiceOrTextRequest()
+    const groups = (req._meta!.userInput as { questions: Array<{ options: unknown[] }> }).questions
+    groups[0].options = []
+    req.requestedSchema!.properties.q0 = { type: "string", title: "Which environment?" }
+    render(<Harness req={req} />)
+    expect(screen.queryByLabelText("Which environment?")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("textbox", { name: "otherResponse" })).toHaveLength(2)
+  })
+
+  it("reuses choices and text fields with localized notes labels and option descriptions", async () => {
+    const user = userEvent.setup()
+    render(<Harness req={choiceOrTextRequest()} />)
+    expect(screen.getByText("Use this computer")).toBeInTheDocument()
+    expect(screen.getByText("Run focused tests")).toBeInTheDocument()
+    const notes = screen.getAllByRole("textbox", { name: "otherResponse" })
+    expect(notes).toHaveLength(2)
+    await user.type(notes[0], "A different environment")
+    expect(notes[0]).toHaveValue("A different environment")
+    await user.click(screen.getByRole("checkbox", { name: "Types" }))
+    await user.click(screen.getByRole("checkbox", { name: /Tests/ }))
+    expect(screen.getByRole("checkbox", { name: "Types" })).toBeChecked()
+    expect(screen.getByRole("checkbox", { name: /Tests/ })).toBeChecked()
+  })
+
+  it("honors portable property order, ignores duplicates and unknown fields, and appends omitted fields", () => {
+    render(
+      <Harness
+        req={request({
+          propertyOrder: ["second", "missing", "second"],
+          requestedSchema: {
+            type: "object",
+            properties: {
+              first: { type: "string" },
+              second: { type: "string" },
+              third: { type: "string" },
+            },
+          },
+        })}
+      />
+    )
+    expect(screen.getAllByRole("textbox").map((field) => field.id)).toEqual([
+      "elicitation-e1-second",
+      "elicitation-e1-first",
+      "elicitation-e1-third",
+    ])
+  })
   it("renders a choice list as radios", async () => {
     const user = userEvent.setup()
     render(

@@ -546,6 +546,58 @@ it("preserves the concurrently added CommandCode account transport", async () =>
 })
 
 describe("registered API subscriptions", () => {
+  it.each([true, false])(
+    "uses only a subscription vault account even with a manual key (vault available: %s)",
+    async (available) => {
+      const { registerPluginSubscriptionProvider, unregisterSubscriptionProvidersByPlugin } =
+        await import("@/lib/subscription/core/provider-registry")
+      const id = registerPluginSubscriptionProvider(
+        {
+          id: "plan",
+          name: "Coding Plan",
+          baseUrl: "https://plan.example/v1",
+          protocol: "openai",
+          models: ["model-a"],
+          billingMode: "subscription",
+        },
+        "billing-test"
+      )
+      try {
+        mockResolveFeatureProvider.mockReturnValue(
+          resolved({
+            apiKey: "payg-manual",
+            headers: { Authorization: "Bearer payg-manual" },
+          })
+        )
+        mockResolveManaged.mockResolvedValue(
+          available
+            ? {
+                apiKey: "subscription-key",
+                baseURL: "https://plan.example/v1",
+              }
+            : null
+        )
+        const result = await resolveProviderAttemptOptions(
+          id,
+          settings(id, {
+            apiKey: "payg-manual",
+            apiKeyRotationEnabled: true,
+            customHeaders: { Authorization: "Bearer payg-manual" },
+          })
+        )
+        if (available) {
+          expect(result.providerCredentials).toMatchObject({
+            apiKey: "subscription-key",
+            baseURL: "https://plan.example/v1",
+          })
+          expect(result.providerCredentials?.headers).toBeUndefined()
+        } else expect(result).toEqual({})
+        expect(mockSelectApiKey).not.toHaveBeenCalled()
+      } finally {
+        unregisterSubscriptionProvidersByPlugin("billing-test")
+      }
+    }
+  )
   it("shares retry output, input and summary limit calculation across chat and Room", () => {
     const options = {
       provider: "openai",

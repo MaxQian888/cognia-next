@@ -385,7 +385,24 @@
     "statusLabel": "Status",
     "stopped": "Stopped",
     "title": "Sidecar diagnostics",
-    "webOnly": "Desktop only"
+    "webOnly": "Desktop only",
+    "extensionsTitle": "Session extensions",
+    "extensionsDescription": "Load a local extension into the active session. The directory must be inside a trusted active workspace; acknowledged additions are retained for this conversation. Configure extension MCP servers through MCP settings.",
+    "extensionPath": "Absolute extension directory",
+    "preservePromptCache": "Hold changes that invalidate the prompt cache",
+    "addExtension": "Load extension",
+    "extensionsUnsupported": "The active runtime does not support live extension additions.",
+    "savedExtensions": "Saved conversation extensions",
+    "removeExtension": "Remove saved extension",
+    "clearExtensions": "Clear saved extensions",
+    "extensionsRemovalHint": "Removal changes the saved configuration for the next fresh runtime session. Extensions already loaded in a running session remain loaded until that session ends.",
+    "extensionsRemoved": "Saved extension configuration updated. The change takes effect in the next fresh runtime session.",
+    "extensionSessionUnavailable": "This conversation is no longer available. Extension settings could not be saved.",
+    "extensionResult": {
+      "applied": "Extension changes applied.",
+      "held": "Changes held. Turn off cache preservation to apply them.",
+      "partial": "Some extensions failed to load. Review the runtime diagnostics."
+    }
   },
   "tabs": {
     "a2ui": "A2UI bridge",

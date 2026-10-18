@@ -48,14 +48,14 @@ export function ReasoningToolRow({
       ariaLabel={label}
       testId="reasoning-row"
       dataKind="reasoning"
-      icon={<BrainIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
+      icon={<BrainIcon className="size-3.5 shrink-0" aria-hidden />}
       target={
         isStreaming ? (
           <Shimmer duration={1} className="font-mono text-xs">
             {label}
           </Shimmer>
         ) : (
-          <span className="truncate font-mono text-xs text-muted-foreground">{label}</span>
+          <span className="truncate font-mono text-xs">{label}</span>
         )
       }
       actions={

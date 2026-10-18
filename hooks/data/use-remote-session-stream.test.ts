@@ -331,6 +331,31 @@ describe("useRemoteSessionStream", () => {
     expect(result.current.pendingApproval).toBeNull()
   })
 
+  it("delivers structured approval answers over the payload-capable direct transport", async () => {
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+    act(() =>
+      streamHandler?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "form-1",
+        toolUseID: "tu",
+        toolName: "interaction",
+        input: {},
+      } as unknown as ClaudeEvent)
+    )
+    const updatedInput = { content: { branch: "main" } }
+    await act(async () => result.current.respond("allow", { updatedInput }))
+    expect(approveToolMock).toHaveBeenCalledWith(
+      "sess-1",
+      "form-1",
+      "allow",
+      undefined,
+      updatedInput
+    )
+    expect(enqueueHostStateIntentMock).not.toHaveBeenCalled()
+  })
+
   it("hands a deny's reason to the model: with the refusal directly, as a steer over HostState", async () => {
     const permission = (requestId: string) =>
       ({

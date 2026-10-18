@@ -23,6 +23,10 @@ import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 import { ProviderResolutionError } from "@/lib/ai/provider-resolution-error"
 import { browserDirectHeaders, getStreamingFetch } from "@/lib/runtime/streaming-fetch"
 import type { ClaudeEvent, SendOptions } from "@cognia/agent-config-types"
+import {
+  requestedRuntimeCapabilities,
+  runtimeFeatureValidationError,
+} from "@cognia/agent-contracts/session-operations"
 import { loggers } from "@cognia/logging"
 import { RoutingAttemptController } from "@cognia/provider-routing"
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
@@ -165,6 +169,20 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
   const stream = params.streamTextImpl ?? streamText
 
   try {
+    const invalidFeature = runtimeFeatureValidationError(sendOptions)
+    if (invalidFeature) throw new Error(invalidFeature)
+    // This engine has neither the host permission ladder nor native extension
+    // or subagent execution. A caller-supplied frozen grant cannot add them.
+    const [unsupportedFeature] = requestedRuntimeCapabilities(sendOptions)
+    if (unsupportedFeature) {
+      await emit({
+        type: "capability_error",
+        sessionId,
+        capability: unsupportedFeature,
+        command: "send",
+      })
+      throw new Error(`Standalone browser runtime does not implement "${unsupportedFeature}".`)
+    }
     const settings = useSettingsStore.getState().settings
     const plan = sendOptions.routingPlan
     const controller = plan

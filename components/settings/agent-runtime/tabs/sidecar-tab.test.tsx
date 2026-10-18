@@ -1,11 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 const getSidecarStatusMock = jest.fn()
 const restartSidecarMock = jest.fn()
 const getSessionMock = jest.fn()
+const updateSessionMock = jest.fn().mockResolvedValue(undefined)
 const activeSessionRef = { current: "s1" as string | null }
 const executionHandleRef = {
   current: null as null | {
+    reloadExtensions?: jest.Mock
+    spec?: { capabilities: { effective: string[] } }
     reloadPlugins: jest.Mock<Promise<unknown>, []>
     reloadSkills: jest.Mock<Promise<unknown>, []>
     reinitialize: jest.Mock<Promise<unknown>, []>
@@ -26,6 +29,7 @@ jest.mock("@/lib/claude/ipc", () => ({
 let hydratedRows = false
 jest.mock("@/lib/db/sessions", () => ({
   getSession: (...args: unknown[]) => getSessionMock(...args),
+  updateSession: (...args: unknown[]) => updateSessionMock(...args),
   // One open conversation plus rows the count must skip: an archived
   // conversation and embedded subagent / workflow-editor sessions.
   listSessions: () =>
@@ -103,8 +107,183 @@ describe("SidecarTab", () => {
     getSidecarStatusMock.mockReset()
     restartSidecarMock.mockReset()
     getSessionMock.mockReset()
+    updateSessionMock.mockReset().mockResolvedValue(undefined)
     hydratedRows = false
     executionHandleRef.current = null
+    jest.mocked(toast.error).mockClear()
+    jest.mocked(toast.success).mockClear()
+  })
+
+  it.each(["applied", "held", "partial"])(
+    "loads a portable extension and presents its %s disposition",
+    async (disposition) => {
+      const user = userEvent.setup()
+      const added = [{ kind: "directory", path: "/workspace/plugin", discoverMcp: false }]
+      const reloadExtensions = jest
+        .fn()
+        .mockResolvedValue({ disposition, added: disposition === "held" ? [] : added })
+      executionHandleRef.current = {
+        spec: { capabilities: { effective: ["extensions.dynamic"] } },
+        reloadExtensions,
+        reloadPlugins: jest.fn(),
+        reloadSkills: jest.fn(),
+        reinitialize: jest.fn(),
+      }
+      getSessionMock.mockResolvedValue({ runtimeExtensions: [] })
+      render(<SidecarTab />)
+      await user.type(screen.getByRole("textbox", { name: "extensionPath" }), "/workspace/plugin")
+      await user.click(screen.getByRole("button", { name: "addExtension" }))
+      expect(reloadExtensions).toHaveBeenCalledWith({
+        add: [{ kind: "directory", path: "/workspace/plugin" }],
+        preservePromptCache: true,
+      })
+      expect(await screen.findByText(`extensionResult.${disposition}`)).toBeInTheDocument()
+      if (disposition === "held") expect(updateSessionMock).not.toHaveBeenCalled()
+      else expect(updateSessionMock).toHaveBeenCalledWith("s1", { runtimeExtensions: added })
+      if (disposition === "held")
+        expect(screen.queryByText("/workspace/plugin")).not.toBeInTheDocument()
+      else expect(screen.getByText("/workspace/plugin")).toBeInTheDocument()
+    }
+  )
+
+  it("restores saved extensions and removes one when the active runtime has no support", async () => {
+    const user = userEvent.setup()
+    const refs = [
+      { kind: "directory", path: "/workspace/first", discoverMcp: false },
+      { kind: "directory", path: "/workspace/second", discoverMcp: false },
+    ]
+    getSessionMock.mockResolvedValue({ runtimeExtensions: refs })
+    render(<SidecarTab />)
+    const first = await screen.findByText("/workspace/first")
+    expect(screen.getByText("extensionsRemovalHint")).toBeInTheDocument()
+    await user.click(within(first.closest("li")!).getByRole("button", { name: "removeExtension" }))
+    expect(updateSessionMock).toHaveBeenCalledWith("s1", { runtimeExtensions: [refs[1]] })
+    await waitFor(() => expect(screen.queryByText("/workspace/first")).not.toBeInTheDocument())
+    expect(screen.getByText("/workspace/second")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "addExtension" })).toBeDisabled()
+    expect(screen.getByText("extensionsRemoved")).toBeInTheDocument()
+  })
+
+  it("clears saved extensions through session metadata even in web mode", async () => {
+    const user = userEvent.setup()
+    isTauriMock.mockReturnValue(false)
+    getSessionMock.mockResolvedValue({
+      runtimeExtensions: [{ kind: "directory", path: "/workspace/saved" }],
+    })
+    render(<SidecarTab />)
+    await screen.findByText("/workspace/saved")
+    await user.click(screen.getByRole("button", { name: "clearExtensions" }))
+    expect(updateSessionMock).toHaveBeenCalledWith("s1", { runtimeExtensions: [] })
+    await waitFor(() => expect(screen.queryByText("/workspace/saved")).not.toBeInTheDocument())
+  })
+
+  it("retains the saved list and surfaces a failed removal", async () => {
+    const user = userEvent.setup()
+    getSessionMock.mockResolvedValue({
+      runtimeExtensions: [{ kind: "directory", path: "/workspace/saved" }],
+    })
+    updateSessionMock.mockRejectedValue(new Error("database unavailable"))
+    render(<SidecarTab />)
+    await screen.findByText("/workspace/saved")
+    await user.click(screen.getByRole("button", { name: "clearExtensions" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("database unavailable"))
+    expect(screen.getByText("/workspace/saved")).toBeInTheDocument()
+    expect(screen.queryByText("extensionsRemoved")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "clearExtensions" })).not.toBeDisabled()
+  })
+
+  it("does not claim an acknowledged addition was saved when persistence fails", async () => {
+    const user = userEvent.setup()
+    executionHandleRef.current = {
+      spec: { capabilities: { effective: ["extensions.dynamic"] } },
+      reloadExtensions: jest.fn().mockResolvedValue({
+        disposition: "applied",
+        added: [{ kind: "directory", path: "/workspace/plugin" }],
+      }),
+      reloadPlugins: jest.fn(),
+      reloadSkills: jest.fn(),
+      reinitialize: jest.fn(),
+    }
+    getSessionMock.mockResolvedValue({ runtimeExtensions: [] })
+    updateSessionMock.mockRejectedValue(new Error("database unavailable"))
+    render(<SidecarTab />)
+    await user.type(screen.getByRole("textbox", { name: "extensionPath" }), "/workspace/plugin")
+    await user.click(screen.getByRole("button", { name: "addExtension" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("database unavailable"))
+    expect(screen.queryByText("extensionResult.applied")).not.toBeInTheDocument()
+    expect(screen.queryByText("/workspace/plugin")).not.toBeInTheDocument()
+  })
+
+  it.each(["applied", "held"])(
+    "handles an initial saved-ref read that completes after an %s addition",
+    async (disposition) => {
+      const user = userEvent.setup()
+      let resolveInitial!: (value: unknown) => void
+      const initial = new Promise((resolve) => {
+        resolveInitial = resolve
+      })
+      getSessionMock.mockReturnValueOnce(initial).mockResolvedValue({ runtimeExtensions: [] })
+      executionHandleRef.current = {
+        spec: { capabilities: { effective: ["extensions.dynamic"] } },
+        reloadExtensions: jest.fn().mockResolvedValue({
+          disposition,
+          added: disposition === "held" ? [] : [{ kind: "directory", path: "/workspace/plugin" }],
+        }),
+        reloadPlugins: jest.fn(),
+        reloadSkills: jest.fn(),
+        reinitialize: jest.fn(),
+      }
+      render(<SidecarTab />)
+      await user.type(screen.getByRole("textbox", { name: "extensionPath" }), "/workspace/plugin")
+      await user.click(screen.getByRole("button", { name: "addExtension" }))
+      await screen.findByText(`extensionResult.${disposition}`)
+      await act(async () =>
+        resolveInitial({
+          runtimeExtensions: [{ kind: "directory", path: "/workspace/initial" }],
+        })
+      )
+      if (disposition === "held") {
+        expect(screen.getByText("/workspace/initial")).toBeInTheDocument()
+        expect(screen.queryByText("/workspace/plugin")).not.toBeInTheDocument()
+      } else {
+        expect(screen.getByText("/workspace/plugin")).toBeInTheDocument()
+        expect(screen.queryByText("/workspace/initial")).not.toBeInTheDocument()
+      }
+    }
+  )
+
+  it("ignores a stale session read after switching conversations", async () => {
+    let resolveOld!: (value: unknown) => void
+    getSessionMock.mockImplementation((id: string) =>
+      id === "s1"
+        ? new Promise((resolve) => {
+            resolveOld = resolve
+          })
+        : Promise.resolve({
+            runtimeExtensions: [{ kind: "directory", path: "/workspace/current" }],
+          })
+    )
+    const { rerender } = render(<SidecarTab />)
+    activeSessionRef.current = "s2"
+    rerender(<SidecarTab />)
+    await screen.findByText("/workspace/current")
+    await act(async () =>
+      resolveOld({ runtimeExtensions: [{ kind: "directory", path: "/workspace/old" }] })
+    )
+    expect(screen.queryByText("/workspace/old")).not.toBeInTheDocument()
+    expect(screen.getByText("/workspace/current")).toBeInTheDocument()
+  })
+
+  it("disables live additions unless the active runtime advertises support", () => {
+    executionHandleRef.current = {
+      spec: { capabilities: { effective: [] } },
+      reloadPlugins: jest.fn(),
+      reloadSkills: jest.fn(),
+      reinitialize: jest.fn(),
+    }
+    render(<SidecarTab />)
+    expect(screen.getByRole("button", { name: "addExtension" })).toBeDisabled()
+    expect(screen.getByText("extensionsUnsupported")).toBeInTheDocument()
   })
 
   it("shows the Desktop-only badge in web mode", () => {

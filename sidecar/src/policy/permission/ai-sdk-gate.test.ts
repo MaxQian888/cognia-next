@@ -15,6 +15,40 @@ function mkConfRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "cognia-gate-conf-"))
 }
 
+test("portable ask policy requires a fresh human approval on both repeated AI SDK calls", async () => {
+  const pending = new Map()
+  const frames: Array<Record<string, unknown>> = []
+  const tool = "mcp__github__publish"
+  const gate = createToolPermissionGate({
+    emit: (frame) => {
+      frames.push(frame)
+      queueMicrotask(() => pending.get(frame.requestId)?.resolve({ behavior: "allow" }))
+    },
+    sessionId: "s",
+    pendingApprovals: pending,
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      alwaysAllowTools: [tool],
+      toolPermissionRules: [{ tool, decision: "ask" }],
+    },
+  })
+  await gate(tool, {})
+  await gate(tool, {})
+  assert.equal(frames.length, 2)
+  assert.ok(
+    frames.every(
+      (frame) => frame.requiresPerCallApproval === true && frame.suppressAlwaysAllowRule === true
+    )
+  )
+  const deny = createToolPermissionGate({
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      toolPermissionRules: [{ tool, decision: "deny" }],
+    },
+  })
+  await assert.rejects(deny(tool, {}), /permission ruleset/)
+})
+
 test("createToolPermissionGate: bypassPermissions allows without prompting", async () => {
   let emitted = 0
   const gate = createToolPermissionGate({

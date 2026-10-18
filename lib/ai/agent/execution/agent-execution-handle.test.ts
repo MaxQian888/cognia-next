@@ -329,6 +329,32 @@ describe("session controls", () => {
     })
   })
 
+  it("gates portable extension additions and forwards their typed intent", async () => {
+    const deps = makeDeps()
+    await expect(
+      createAgentExecutionHandle("s1", spec(), deps).reloadExtensions({
+        add: [{ kind: "directory", path: "/workspace/plugin" }],
+      })
+    ).rejects.toMatchObject({ capability: "extensions.dynamic" })
+    expect(deps.ipc.sessionControl).not.toHaveBeenCalled()
+    const handle = createAgentExecutionHandle(
+      "s1",
+      spec({ capabilities: { effective: ["extensions.dynamic"], disabledOptional: [] } }),
+      deps
+    )
+    const options = {
+      add: [{ kind: "directory" as const, path: "/workspace/plugin" }],
+      preservePromptCache: true,
+    }
+    await handle.reloadExtensions(options)
+    expect(deps.ipc.sessionControl).toHaveBeenCalledWith(
+      "s1",
+      "reloadExtensions",
+      { options },
+      { commandId: expect.any(String) }
+    )
+  })
+
   it("forwards each control under its SDK parameter names", async () => {
     const deps = makeDeps()
     const handle = createAgentExecutionHandle("s1", withControls(), deps)

@@ -4,7 +4,72 @@ import {
   resolveProviderUndoCapability,
   resolveSessionOperationCapabilities,
   type ExternalAgentNativeCompactionRoute,
+  requestedRuntimeCapabilities,
+  runtimeFeatureValidationError,
+  runtimeFeaturePolicyKey,
 } from "./session-operations"
+
+describe("portable runtime feature intent", () => {
+  it("uses a stable retention key for policy semantics and preserves default compatibility", () => {
+    expect(runtimeFeaturePolicyKey({})).toBeUndefined()
+    expect(
+      runtimeFeaturePolicyKey({ subagentRuntime: { contextMode: "isolated" } })
+    ).toBeUndefined()
+    const a = {
+      toolPermissionRules: [
+        { tool: "mcp__notes__write", decision: "ask" as const },
+        { tool: "mcp__notes__delete", decision: "deny" as const },
+      ],
+    }
+    expect(runtimeFeaturePolicyKey(a)).toBe(
+      runtimeFeaturePolicyKey({ toolPermissionRules: [...a.toolPermissionRules].reverse() })
+    )
+    expect(runtimeFeaturePolicyKey(a)).not.toBe(
+      runtimeFeaturePolicyKey({
+        toolPermissionRules: [{ tool: "mcp__notes__write", decision: "deny" }],
+      })
+    )
+    expect(
+      runtimeFeatureValidationError({
+        runtimeExtensions: [{ kind: "directory", path: "relative" }],
+      })
+    ).toBe("invalid_runtime_extensions")
+  })
+
+  it("requires support only for explicitly requested features", () => {
+    expect(requestedRuntimeCapabilities({ subagentRuntime: { contextMode: "isolated" } })).toEqual(
+      []
+    )
+    expect(
+      requestedRuntimeCapabilities({
+        subagentRuntime: { contextMode: "fork" },
+        agents: { child: { contextPolicy: { compactAtTokens: 1000 } } },
+        toolPermissionRules: [{ tool: "mcp__notes__write", decision: "ask" }],
+      })
+    ).toEqual(["subagents.context-fork", "subagents.auto-compaction", "tools.permission-policy"])
+  })
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects an invalid compaction window %s",
+    (compactAtTokens) => {
+      expect(
+        runtimeFeatureValidationError({ agents: { child: { contextPolicy: { compactAtTokens } } } })
+      ).toBe("invalid_subagent_compaction_window")
+    }
+  )
+  it("accepts positive windows and refuses malformed policy envelopes", () => {
+    expect(
+      runtimeFeatureValidationError({
+        agents: { child: { contextPolicy: { compactAtTokens: 1 } } },
+      })
+    ).toBeNull()
+    expect(
+      runtimeFeatureValidationError({ toolPermissionRules: [{ tool: "", decision: "ask" }] })
+    ).toBe("invalid_tool_permission_rules")
+    expect(runtimeFeatureValidationError({ agents: { child: null } } as never)).toBe(
+      "invalid_subagent_compaction_window"
+    )
+  })
+})
 
 describe("external-agent session capabilities", () => {
   it.each([true, false])(

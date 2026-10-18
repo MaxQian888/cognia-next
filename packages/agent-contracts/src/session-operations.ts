@@ -3,6 +3,154 @@ import type {
   ExternalAgentMessage,
   ExternalAgentExecutionOptions,
 } from "./external-agent"
+import type { AgentCapabilityId } from "./capability-ids"
+
+/** Portable constraints. Adapters translate these names into their native APIs. */
+export interface AgentToolPermissionRule {
+  name: string
+  decision: "ask" | "deny"
+}
+
+export interface AgentQualifiedToolPermissionRule {
+  tool: string
+  decision: "ask" | "deny"
+}
+
+export interface AgentSubagentRuntimeOptions {
+  /** Absent retains a fresh context; inheritance must always be explicit. */
+  contextMode?: "isolated" | "fork"
+}
+
+export interface AgentSubagentContextPolicy {
+  /** Positive token threshold; a runtime may only tighten its effective window. */
+  compactAtTokens?: number
+}
+
+export interface AgentLocalExtensionRef {
+  kind: "directory"
+  path: string
+  discoverMcp?: boolean
+}
+
+export interface AgentExtensionReloadOptions {
+  add?: AgentLocalExtensionRef[]
+  preservePromptCache?: boolean
+}
+
+export interface AgentExtensionReloadResult {
+  disposition: "applied" | "held" | "partial"
+  added: AgentLocalExtensionRef[]
+  /** Native diagnostics retained for the owning runtime's inspector. */
+  details?: unknown
+}
+
+export interface AgentRuntimeFeatureRequest {
+  subagentRuntime?: AgentSubagentRuntimeOptions
+  runtimeExtensions?: AgentLocalExtensionRef[]
+  agents?: Record<string, { contextPolicy?: AgentSubagentContextPolicy }>
+  toolPermissionRules?: readonly AgentQualifiedToolPermissionRule[]
+}
+
+/** Explicit requests require explicit runtime support, including legacy callers. */
+export function requestedRuntimeCapabilities(
+  request: AgentRuntimeFeatureRequest
+): AgentCapabilityId[] {
+  const capabilities: AgentCapabilityId[] = []
+  if (request.subagentRuntime?.contextMode === "fork") capabilities.push("subagents.context-fork")
+  if (
+    Object.values(request.agents ?? {}).some(
+      (agent) => agent.contextPolicy?.compactAtTokens !== undefined
+    )
+  )
+    capabilities.push("subagents.auto-compaction")
+  if (request.toolPermissionRules?.length) capabilities.push("tools.permission-policy")
+  if (request.runtimeExtensions?.length) capabilities.push("extensions.dynamic")
+  return capabilities
+}
+
+/** Secret-free retention identity for options that require a fresh runtime. */
+export function runtimeFeaturePolicyKey(request: AgentRuntimeFeatureRequest): string | undefined {
+  const agents = Object.entries(request.agents ?? {})
+    .filter(([, agent]) => agent.contextPolicy?.compactAtTokens !== undefined)
+    .map(([name, agent]) => [name, agent.contextPolicy!.compactAtTokens])
+    .sort(([a], [b]) => String(a).localeCompare(String(b)))
+  const rules = (request.toolPermissionRules ?? [])
+    .map((rule) => [rule.tool, rule.decision])
+    .sort(
+      ([a, decisionA], [b, decisionB]) => a.localeCompare(b) || decisionA.localeCompare(decisionB)
+    )
+  if (
+    request.subagentRuntime?.contextMode !== "fork" &&
+    !agents.length &&
+    !rules.length &&
+    !request.runtimeExtensions?.length
+  )
+    return undefined
+  return JSON.stringify({
+    contextMode: request.subagentRuntime?.contextMode ?? "isolated",
+    agents,
+    rules,
+    extensions: request.runtimeExtensions ?? [],
+  })
+}
+
+export function runtimeFeatureValidationError(request: AgentRuntimeFeatureRequest): string | null {
+  if (
+    request.subagentRuntime !== undefined &&
+    (!request.subagentRuntime ||
+      typeof request.subagentRuntime !== "object" ||
+      Array.isArray(request.subagentRuntime))
+  )
+    return "invalid_subagent_context_mode"
+  if (
+    request.agents !== undefined &&
+    (!request.agents || typeof request.agents !== "object" || Array.isArray(request.agents))
+  )
+    return "invalid_subagent_compaction_window"
+  const mode = request.subagentRuntime?.contextMode
+  if (mode !== undefined && mode !== "isolated" && mode !== "fork")
+    return "invalid_subagent_context_mode"
+  for (const agent of Object.values(request.agents ?? {})) {
+    if (
+      !agent ||
+      typeof agent !== "object" ||
+      (agent.contextPolicy !== undefined &&
+        (!agent.contextPolicy ||
+          typeof agent.contextPolicy !== "object" ||
+          Array.isArray(agent.contextPolicy)))
+    )
+      return "invalid_subagent_compaction_window"
+    const tokens = agent.contextPolicy?.compactAtTokens
+    if (tokens !== undefined && (!Number.isSafeInteger(tokens) || tokens <= 0))
+      return "invalid_subagent_compaction_window"
+  }
+  if (
+    request.toolPermissionRules !== undefined &&
+    (!Array.isArray(request.toolPermissionRules) ||
+      request.toolPermissionRules.some(
+        (rule) =>
+          !rule ||
+          typeof rule.tool !== "string" ||
+          !rule.tool.trim() ||
+          (rule.decision !== "ask" && rule.decision !== "deny")
+      ))
+  )
+    return "invalid_tool_permission_rules"
+  if (
+    request.runtimeExtensions !== undefined &&
+    (!Array.isArray(request.runtimeExtensions) ||
+      request.runtimeExtensions.some(
+        (ref) =>
+          !ref ||
+          ref.kind !== "directory" ||
+          typeof ref.path !== "string" ||
+          !/^(?:\/|[a-zA-Z]:[\\/])/.test(ref.path) ||
+          (ref.discoverMcp !== undefined && typeof ref.discoverMcp !== "boolean")
+      ))
+  )
+    return "invalid_runtime_extensions"
+  return null
+}
 
 export type ExternalAgentCapabilityStatus = "supported" | "unsupported" | "unknown"
 

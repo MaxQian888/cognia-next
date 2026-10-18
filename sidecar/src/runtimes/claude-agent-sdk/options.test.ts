@@ -13,6 +13,86 @@ import { createCallLedgerGate } from "../common/call-ledger-gate.ts"
 import { createDoomLoopGuard } from "../../policy/doom-loop.ts"
 import { createStderrLogSink } from "../../mcp/client/log.ts"
 
+test("portable extensions restore through the same trusted content boundary and expose neutral live control", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-extension-restore-"))
+  try {
+    const plugin = path.join(root, "extension")
+    fs.mkdirSync(plugin)
+    fs.writeFileSync(path.join(plugin, "SKILL.md"), "Explain repository conventions")
+    const sendOptions = {
+      cwd: root,
+      trustedWorkspaceRoots: [root],
+      toolSurface: "full",
+      runtimeExtensions: [{ kind: "directory" as const, path: plugin }],
+    }
+    const { options, session } = captureClaudeRuntime(sendOptions, () => ({
+      async *[Symbol.asyncIterator]() {},
+      interrupt() {},
+      close() {},
+    }))
+    assert.deepEqual(options.plugins, [
+      { type: "local", path: fs.realpathSync(plugin), skipMcpDiscovery: true },
+    ])
+    assert.equal(typeof session.reloadExtensions, "function")
+    session.closeInput()
+    fs.writeFileSync(path.join(plugin, "SKILL.md"), "Contact private.person@example.com")
+    assert.throws(
+      () =>
+        captureClaudeRuntime(sendOptions, () => ({
+          async *[Symbol.asyncIterator]() {},
+          interrupt() {},
+          close() {},
+        })),
+      /PII gate/
+    )
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("portable subagent options translate at the runtime boundary", () => {
+  const { options, session } = captureClaudeRuntime(
+    {
+      toolSurface: "full",
+      subagentRuntime: { contextMode: "fork" },
+      agents: {
+        reviewer: {
+          description: "Review",
+          prompt: "Review",
+          contextPolicy: { compactAtTokens: 120000 },
+        },
+      },
+    },
+    () => ({ async *[Symbol.asyncIterator]() {}, interrupt() {}, close() {} })
+  )
+  assert.equal(options.env?.CLAUDE_CODE_FORK_SUBAGENT, "1")
+  assert.equal(options.agents?.reviewer.autoCompactWindow, 120000)
+  assert.equal("contextPolicy" in options.agents!.reviewer, false)
+  session.closeInput()
+})
+
+test("an omitted permission mode stays manual and fork subagents stay disabled", () => {
+  const { options, session } = captureClaudeRuntime(
+    { env: { CLAUDE_CODE_FORK_SUBAGENT: "1" } },
+    () => ({ async *[Symbol.asyncIterator]() {}, interrupt() {}, close() {} })
+  )
+  assert.equal(options.permissionMode, "default")
+  assert.equal(options.env?.CLAUDE_CODE_FORK_SUBAGENT, "0")
+  session.closeInput()
+})
+
+test("an explicit permission mode and conversation fork survive SDK compatibility defaults", () => {
+  const { options, session } = captureClaudeRuntime(
+    { permissionMode: "plan", forkFromSessionId: "source-session" },
+    () => ({ async *[Symbol.asyncIterator]() {}, interrupt() {}, close() {} })
+  )
+  assert.equal(options.permissionMode, "plan")
+  assert.equal(options.forkSession, true)
+  assert.equal(options.resume, "source-session")
+  assert.equal(options.env?.CLAUDE_CODE_FORK_SUBAGENT, "0")
+  session.closeInput()
+})
+
 test("nested options and interaction callbacks reach the SDK after the final deny-all clamp", async () => {
   const { options, session, events } = captureClaudeRuntime(
     {

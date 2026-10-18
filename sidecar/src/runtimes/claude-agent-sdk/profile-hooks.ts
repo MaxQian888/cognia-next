@@ -1,5 +1,5 @@
-// An unattended run's permission profile, enforced ahead of the Claude Agent
-// SDK's own permission system (ADR-0224 A7).
+// Host permission profiles and portable per-tool policies, enforced ahead of
+// the Claude Agent SDK's own permission system (ADR-0224 A7).
 //
 // The SDK approves a call on its own before `canUseTool` is ever consulted:
 // `bypassPermissions` approves everything, `acceptEdits` approves its file
@@ -21,6 +21,7 @@ import type { HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk"
 
 import type { ApprovalAnswer } from "../../policy/permission/approval.ts"
 import type { PermissionSendOptions } from "../../policy/permission/ladder.ts"
+import { toolPermissionDecision } from "../../policy/permission/ladder.ts"
 import {
   buildPluginClassIndex,
   profileDenialMessage,
@@ -51,7 +52,7 @@ function decision(permissionDecision: "allow" | "deny", extra: Record<string, un
   }
 }
 
-/** The PreToolUse hook, or undefined for a turn without a profile. */
+/** The PreToolUse hook, absent when neither a profile nor per-tool policies apply. */
 export function buildProfileToolHooks({
   sendOptions,
   pluginToolNameAliases,
@@ -59,7 +60,7 @@ export function buildProfileToolHooks({
   profileApprovals,
 }: ProfileToolHookOptions): { PreToolUse: HookCallbackMatcher[] } | undefined {
   const profile = readPermissionProfile(sendOptions.permissionProfile)
-  if (!profile) return undefined
+  if (!profile && !sendOptions.toolPermissionRules) return undefined
   const pluginClasses = buildPluginClassIndex(sendOptions.pluginTools)
   return {
     PreToolUse: [
@@ -74,12 +75,22 @@ export function buildProfileToolHooks({
               modelToolName
             )
             const verdict = profileVerdict(profile, toolName, pluginClasses)
+            const toolPolicy = toolPermissionDecision(toolName, sendOptions.toolPermissionRules)
+            if (toolPolicy === "deny") {
+              return decision("deny", {
+                permissionDecisionReason: "denied by tool permission policy",
+              })
+            }
             if (verdict.kind === "deny") {
               return decision("deny", {
                 permissionDecisionReason: profileDenialMessage(toolName, verdict.cls),
               })
             }
-            if (verdict.kind !== "always-ask" || !toolUseID) return {}
+            if (verdict.kind !== "always-ask" && toolPolicy !== "ask") return {}
+            if (!toolUseID)
+              return decision("deny", {
+                permissionDecisionReason: "missing tool-use id for per-call approval",
+              })
             const toolInput =
               "tool_input" in input && input.tool_input && typeof input.tool_input === "object"
                 ? (input.tool_input as Record<string, unknown>)
@@ -93,7 +104,7 @@ export function buildProfileToolHooks({
             }
             profileApprovals.add(toolUseID)
             return decision("allow", {
-              permissionDecisionReason: "approved by a person for this unattended run",
+              permissionDecisionReason: "approved by a person for this tool call",
               ...(answer.updatedInput && typeof answer.updatedInput === "object"
                 ? { updatedInput: answer.updatedInput }
                 : {}),

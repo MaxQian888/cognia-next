@@ -109,6 +109,10 @@ export const RUNTIME_CAPABILITIES: Record<AgentRuntimeAdapterId, readonly AgentC
     "commands.dynamic",
     "session.manage",
     "plugins.native",
+    "extensions.dynamic",
+    "tools.permission-policy",
+    "subagents.context-fork",
+    "subagents.auto-compaction",
     "skills.native",
     "checkpoint",
     "mcp.dynamic",
@@ -149,6 +153,7 @@ export const RUNTIME_CAPABILITIES: Record<AgentRuntimeAdapterId, readonly AgentC
     "mcp",
     "permissions.interrupt-resume",
     "permissions.set-mode",
+    "tools.permission-policy",
     "thinking",
     "images",
     "rate-limit-handling",
@@ -184,6 +189,16 @@ export const RUNTIME_CAPABILITIES: Record<AgentRuntimeAdapterId, readonly AgentC
     "set-model",
   ],
 }
+
+// These features are implemented by host-backed adapters, not the browser's
+// standalone streamText engine. Keep the adapter vocabulary while narrowing
+// the resolved claim to the transport that will actually execute this turn.
+const HOST_ONLY_PORTABLE_CAPABILITIES: ReadonlySet<AgentCapabilityId> = new Set([
+  "extensions.dynamic",
+  "tools.permission-policy",
+  "subagents.context-fork",
+  "subagents.auto-compaction",
+])
 
 // ---- Input / output ---------------------------------------------------------
 
@@ -410,11 +425,21 @@ export function resolveAgentExecutionSpec(
   const theoreticalRuntimeCaps = externalProfile
     ? externalProfile.effective
     : RUNTIME_CAPABILITIES[adapter]
-  const runtimeCaps = input.environment.hostCapabilities
-    ? theoreticalRuntimeCaps.filter((capability) =>
-        input.environment.hostCapabilities!.includes(capability)
+  const standaloneBuiltin =
+    adapter !== "external" &&
+    !input.environment.isTauri &&
+    !input.environment.isHeadlessHost &&
+    !input.environment.pairedHost
+  const hostRuntimeCaps = standaloneBuiltin
+    ? theoreticalRuntimeCaps.filter(
+        (capability) => !HOST_ONLY_PORTABLE_CAPABILITIES.has(capability)
       )
     : theoreticalRuntimeCaps
+  const runtimeCaps = input.environment.hostCapabilities
+    ? hostRuntimeCaps.filter((capability) =>
+        input.environment.hostCapabilities!.includes(capability)
+      )
+    : hostRuntimeCaps
   const requires = input.policy?.requires ?? []
   const prefers = input.policy?.prefers ?? []
   const missingRequired = requires.filter((cap) => !runtimeCaps.includes(cap))

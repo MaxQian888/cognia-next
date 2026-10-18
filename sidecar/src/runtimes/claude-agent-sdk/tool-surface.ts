@@ -1,4 +1,5 @@
 import type { Options } from "@anthropic-ai/claude-agent-sdk"
+import { BUILTIN_TOOL_NAMES, LEGACY_TOOL_NAME_ALIASES } from "@anthropic-ai/claude-agent-sdk"
 import type { SendOptions } from "../../shared/wire/inbound.ts"
 import { anthropicPluginToolBridgeOptions } from "./plugin-bridge.ts"
 import type { SurfaceContext } from "./runtime-types.ts"
@@ -21,6 +22,56 @@ import {
 } from "../../policy/tool-search.ts"
 
 import { guardAnthropicRemoteMcpServers } from "../../mcp/relay/sdk-servers.ts"
+import { splitToolName } from "../../policy/tool-catalog/names.ts"
+import { toolPermissionDecision } from "../../policy/permission/ladder.ts"
+
+const nativeToolNames = new Set<string>(BUILTIN_TOOL_NAMES)
+const nativeToolAliases = new Map(
+  Object.entries(LEGACY_TOOL_NAME_ALIASES).filter(([, target]) => nativeToolNames.has(target))
+)
+
+/** Only the Claude adapter owns SDK aliases; policy patterns and MCP names stay exact. */
+export function normalizeClaudeToolNames(names: string[] | undefined): string[] | undefined {
+  return names?.map((name) => {
+    if (name.startsWith("mcp__")) return name
+    const suffixAt = name.indexOf("(")
+    const tool = suffixAt === -1 ? name : name.slice(0, suffixAt)
+    const canonical = nativeToolAliases.get(tool)
+    return canonical ? canonical + (suffixAt === -1 ? "" : name.slice(suffixAt)) : name
+  })
+}
+
+/** Native SDK registration supplements the host ladder; host approval remains authoritative. */
+export function applySdkToolPermissionPolicies<T extends Record<string, unknown>>(
+  servers: T,
+  rules: SendOptions["toolPermissionRules"]
+): T {
+  if (!rules?.length) return servers
+  const mapped: Record<string, unknown> = { ...servers }
+  for (const rule of rules) {
+    const { server, bare } = splitToolName(rule.tool)
+    const config = server ? mapped[server] : undefined
+    if (!config || typeof config !== "object" || !("type" in config) || config.type !== "sdk")
+      continue
+    const current = config as { tools?: Array<{ name: string; permission_policy?: string }> }
+    const existing = current.tools ?? []
+    const decision = toolPermissionDecision(rule.tool, rules)
+    const nativeDeny = existing.some(
+      (tool) => tool.name === bare && tool.permission_policy === "always_deny"
+    )
+    mapped[server!] = {
+      ...config,
+      tools: [
+        ...existing.filter((tool) => tool.name !== bare),
+        {
+          name: bare,
+          permission_policy: decision === "deny" || nativeDeny ? "always_deny" : "always_ask",
+        },
+      ],
+    }
+  }
+  return mapped as T
+}
 
 /**
  * Apply the runtime-wide deny-all contract at the final SDK boundary.
@@ -221,7 +272,16 @@ export function buildToolSurface({
   }
 
   return {
-    mergedMcpServers: mergedMcpServers as Options["mcpServers"],
+    mergedMcpServers: applySdkToolPermissionPolicies(
+      mergedMcpServers,
+      sendOptions.toolPermissionRules?.map((rule) => ({
+        ...rule,
+        tool:
+          modelPluginToolNameList(pluginToolNameAliases, PLUGIN_TOOLS_SERVER_NAME, [
+            rule.tool,
+          ])?.[0] ?? rule.tool,
+      }))
+    ) as Options["mcpServers"],
     pluginToolNameAliases,
     modelAllowedTools,
     disallowed,

@@ -3683,3 +3683,53 @@ test("a lower tool cap named in a rejection is learned and the request is resent
   const warning = events.find((event) => event.type === "runtime_warning")
   assert.match(String(warning?.message), /at most 40 tool definitions/)
 })
+
+test("SIWC ordinary chat requires Host RPC and selects Responses without legacy credentials", async () => {
+  for (const wired of [false, true]) {
+    const { events, emit } = captureEmit()
+    let captured: Record<string, unknown> | undefined
+    const session = dispatchAiSdk({
+      provider: "siwc-personal",
+      sessionId: `siwc-${wired}`,
+      firstPrompt: "hello",
+      sendOptions: {
+        model: "m",
+        providerCredentials: {
+          protocol: "chatgpt-siwc",
+          baseURL: "siwc://a/c",
+          apiFlavor: "responses",
+        },
+        builtinTools: {},
+        pluginTools: [],
+      },
+      emit,
+      log() {},
+      ...(wired
+        ? {
+            hostRpc: {
+              async call() {
+                throw new Error("fake stream must not access transport")
+              },
+            },
+          }
+        : {}),
+      streamText(args) {
+        captured = args
+        return {
+          stream: (async function* () {
+            yield { type: "finish", finishReason: "stop" }
+          })(),
+          usage: Promise.resolve({}),
+        }
+      },
+    })
+    await waitForEvent(events, (event) => event.type === "session_ended")
+    if (wired) {
+      assert.equal((captured!.model as { provider: string }).provider, "openai.responses")
+    } else {
+      assert.equal(captured, undefined)
+      assert.match(events.find((event) => event.type === "session_ended")!.error, /native Host/)
+    }
+    await session?.q.interrupt()
+  }
+})

@@ -17,6 +17,26 @@ import {
   buildControlResponse,
 } from "./control.ts"
 
+test("portable extension reload rejects malformed additions and accepts explicit options", () => {
+  assert.equal(
+    controlParamError("reloadExtensions", {
+      options: {
+        add: [{ kind: "directory", path: "/workspace/plugin" }],
+        preservePromptCache: true,
+      },
+    }),
+    null
+  )
+  for (const options of [
+    { add: [{ kind: "directory", path: "relative" }] },
+    { add: [{ kind: "remote", path: "/plugin" }] },
+    { addPlugins: [] },
+    { preservePromptCache: "yes" },
+  ]) {
+    assert.equal(controlParamError("reloadExtensions", { options }), "invalid_reload_options")
+  }
+})
+
 const MANIFEST: {
   methods: { name: string; exposure: string; capability: string; args: string[] }[]
 } = JSON.parse(

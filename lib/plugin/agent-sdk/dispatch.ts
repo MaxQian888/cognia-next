@@ -139,6 +139,13 @@ export async function dispatchSubagent(
     thisId = idOrDef.id
   }
 
+  // This rail starts a separate top-level session. Native subagent context
+  // policies cannot be applied to it; reject before hooks, credentials or spend.
+  if (def.contextPolicy?.compactAtTokens !== undefined) {
+    const { AgentCapabilityError } = await import("@/lib/ai/agent/execution/agent-execution-handle")
+    throw new AgentCapabilityError("subagents.auto-compaction", "dispatchSubagent")
+  }
+
   const pluginId = thisId.includes(":") ? thisId.slice(0, thisId.indexOf(":")) : "<builtin>"
   assertNoLeakingPiiDeep(pluginId, "plugin.agent.dispatchSubagent", [prompt, def.prompt])
 

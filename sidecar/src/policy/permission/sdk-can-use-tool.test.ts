@@ -50,6 +50,36 @@ const RG_ENTRY = {
   pathParams: ["path"],
 }
 
+test("interactive forms cannot be silently approved by bypass or standing grants", async () => {
+  const pending = new Map<string, PendingApproval>()
+  const frames: Array<Record<string, unknown>> = []
+  const tool = "Runtime:Elicitation"
+  const gate = mkGate(
+    { permissionMode: "bypassPermissions", alwaysAllowTools: [tool] },
+    {
+      pendingApprovals: pending,
+      emit: (frame) => {
+        frames.push(frame)
+        queueMicrotask(() =>
+          pending
+            .get(frame.requestId as string)
+            ?.resolve({ behavior: "allow", updatedInput: { response: "yes" } })
+        )
+      },
+    }
+  )
+  const result = await gate(tool, {}, { requiresInteraction: true })
+  assert.equal(frames.length, 1)
+  assert.equal(frames[0]!.requiresPerCallApproval, true)
+  assert.deepEqual(result.updatedInput, { response: "yes" })
+  const refused = await mkGate({ permissionMode: "dontAsk" })(
+    tool,
+    {},
+    { requiresInteraction: true }
+  )
+  assert.equal(refused.behavior, "deny")
+})
+
 test("anthropic canUseTool denies a declared-read plugin tool on a credential path", async () => {
   const root = mkRoot()
   const secret = path.join(root, ".ssh", "id_rsa")

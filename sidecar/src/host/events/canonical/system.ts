@@ -137,6 +137,8 @@ function map_task_started(evt: Record<string, unknown>): CanonicalEvent[] {
         kind: "task",
         phase: TASK_PHASE[String(evt.subtype)],
         taskId: String(evt.task_id ?? ""),
+        runId: asString(evt.run_id),
+        parentTaskId: asString(evt.parent_task_id),
         toolCallId: asString(evt.tool_use_id),
         description: asString(evt.description) ?? asString(patch.description),
         subagentType: asString(evt.subagent_type),
@@ -154,11 +156,17 @@ function map_background_tasks_changed(evt: Record<string, unknown>): CanonicalEv
   return [
     {
       kind: "task-inventory",
-      tasks: (Array.isArray(evt.tasks) ? evt.tasks : []).map((t: unknown) => ({
-        taskId: String(record(t).task_id ?? ""),
-        taskType: String(record(t).task_type ?? ""),
-        description: String(record(t).description ?? ""),
-      })),
+      tasks: (Array.isArray(evt.tasks) ? evt.tasks : []).map((t: unknown) =>
+        compact({
+          taskId: String(record(t).task_id ?? ""),
+          taskType: String(record(t).task_type ?? ""),
+          description: String(record(t).description ?? ""),
+          runId: asString(record(t).run_id),
+          parentTaskId: asString(record(t).parent_task_id),
+          subagentType: asString(record(t).subagent_type),
+          ambient: typeof record(t).ambient === "boolean" ? record(t).ambient : undefined,
+        })
+      ),
     },
   ]
 }

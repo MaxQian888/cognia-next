@@ -28,6 +28,14 @@ const server = (over: Partial<McpServer> = {}): McpServer => ({
 })
 
 describe("MCP server definitions", () => {
+  it("validates and fingerprints portable per-tool policies and mirrors them", () => {
+    const governed = server({ toolPermissionRules: [{ name: "publish", decision: "ask" }] })
+    expect(fingerprintMcpDefinition(governed)).not.toBe(fingerprintMcpDefinition(server()))
+    expect(toMcpServerSummary(governed).toolPermissionRules).toEqual(governed.toolPermissionRules)
+    expect(() =>
+      validateMcpDefinition(server({ toolPermissionRules: [{ name: "", decision: "ask" }] }))
+    ).toThrow()
+  })
   it("normalizes namespaces and rejects case-insensitive duplicates", () => {
     expect(normalizeMcpNamespace("  GitHub  ")).toBe("github")
     expect(() => assertUniqueMcpNamespace("GITHUB", [server()])).toThrow(McpDefinitionError)

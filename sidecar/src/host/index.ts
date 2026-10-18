@@ -21,6 +21,8 @@ import {
   controlPreflight,
   guardedControlParams,
   runtimeStatus,
+  routeReloadExtensions,
+  extensionControlPreflight,
 } from "./control/handle.ts"
 import { buildPermissionResult, routeCallReserveDecision } from "./commands/responses.ts"
 import { dropDuplicateCommand } from "./commands/ledger.ts"
@@ -34,7 +36,7 @@ import {
 } from "./smoke.ts"
 import readline from "node:readline"
 import { readVersionInfo } from "./version-info.ts"
-import { dispatch } from "../runtimes/index.ts"
+import { dispatch, validateRuntimeFeatures } from "../runtimes/index.ts"
 import { capabilityError } from "../runtimes/registry.ts"
 import { createEnvelopeEmitter } from "./events/envelope.ts"
 import { enginesFromEnv, loadEngines, loadedEngine } from "../runtimes/engines.ts"
@@ -210,6 +212,17 @@ export function createAgentHost({
       })
       return
     }
+    try {
+      validateRuntimeFeatures({ sessionId: sessionId!, sendOptions: options ?? {}, emit })
+    } catch (error) {
+      emit({
+        type: "session_ended",
+        sessionId,
+        error: errorMessage(error),
+        ...(options?.turnId ? { turnId: options.turnId } : {}),
+      })
+      return
+    }
     const existing = sessions.get(sessionId!)
     if (!retainedRuntimeSendIsSafe(existing, options)) {
       emit({
@@ -304,7 +317,18 @@ export function createAgentHost({
       return
     }
 
-    const rejection = controlPreflight(sessions.get(sessionId!)?.runtimeAdapterId, method, params)
+    const activeSession = sessions.get(sessionId!)
+    const guardedPluginReload =
+      method === "reloadPlugins" &&
+      (!!activeSession?.reloadExtensions || !!activeSession?.sendOptions?.runtimeExtensions?.length)
+    const rejection =
+      method === "reloadExtensions" || guardedPluginReload
+        ? extensionControlPreflight(
+            activeSession,
+            method as "reloadExtensions" | "reloadPlugins",
+            params
+          )
+        : controlPreflight(activeSession?.runtimeAdapterId, method, params)
     if (rejection) {
       // A capability miss ALSO gets the typed `capability_error` event, because
       // that is what the canonical event stream carries; the control_response is
@@ -319,6 +343,26 @@ export function createAgentHost({
     }
     if (method === "steer") {
       respond(routeSteer(sessions, { sessionId, ...params }))
+      return
+    }
+    if (method === "reloadExtensions" || guardedPluginReload) {
+      const outcome = await routeReloadExtensions(
+        sessions,
+        sessionId!,
+        method === "reloadPlugins"
+          ? {
+              preservePromptCache: (params?.options as { holdOnCacheImpact?: boolean } | undefined)
+                ?.holdOnCacheImpact,
+            }
+          : (params?.options as Parameters<typeof routeReloadExtensions>[2]),
+        undefined,
+        method as "reloadExtensions" | "reloadPlugins"
+      )
+      respond(
+        outcome.ok && method === "reloadPlugins"
+          ? { ok: true, result: (outcome.result as { details?: unknown }).details }
+          : outcome
+      )
       return
     }
     const s = sessions.get(sessionId!)

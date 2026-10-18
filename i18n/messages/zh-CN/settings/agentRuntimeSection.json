@@ -385,7 +385,24 @@
     "statusLabel": "状态",
     "stopped": "已停止",
     "title": "侧载诊断",
-    "webOnly": "仅桌面端可用"
+    "webOnly": "仅桌面端可用",
+    "extensionsTitle": "会话扩展",
+    "extensionsDescription": "将本地扩展加载到当前会话。目录必须位于已信任的活动工作区内；成功加载的扩展将在此对话中保留。扩展的 MCP 服务请在 MCP 设置中配置。",
+    "extensionPath": "扩展目录的绝对路径",
+    "preservePromptCache": "暂缓会使提示缓存失效的变更",
+    "addExtension": "加载扩展",
+    "extensionsUnsupported": "当前运行时不支持动态加载扩展。",
+    "savedExtensions": "此对话已保存的扩展",
+    "removeExtension": "移除已保存的扩展",
+    "clearExtensions": "清空已保存的扩展",
+    "extensionsRemovalHint": "移除操作仅修改下次新建运行时会话时使用的配置。当前运行中已加载的扩展将保留至该运行时会话结束。",
+    "extensionsRemoved": "已更新保存的扩展配置，变更将在下次新建运行时会话时生效。",
+    "extensionSessionUnavailable": "此对话已不存在，无法保存扩展设置。",
+    "extensionResult": {
+      "applied": "扩展变更已应用。",
+      "held": "变更已暂缓。关闭保留缓存后可重新应用。",
+      "partial": "部分扩展未能加载，请检查运行时诊断。"
+    }
   },
   "tabs": {
     "a2ui": "A2UI 桥接",

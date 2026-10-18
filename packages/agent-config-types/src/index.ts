@@ -7,6 +7,12 @@
 
 import type { ExternalAgentCogniaModelBinding } from "@cognia/agent-contracts/model-binding"
 import type { UIMessage } from "ai"
+import type {
+  AgentLocalExtensionRef,
+  AgentQualifiedToolPermissionRule,
+  AgentSubagentRuntimeOptions,
+  AgentToolPermissionRule,
+} from "@cognia/agent-contracts/session-operations"
 import type { UpdateCenterSettings } from "./updates"
 
 export * from "./collaboration"
@@ -497,6 +503,9 @@ export type SendOptions = {
   }
   /** Dynamic subagent definitions keyed by name. */
   agents?: Record<string, AgentDefinition>
+  subagentRuntime?: AgentSubagentRuntimeOptions
+  runtimeExtensions?: AgentLocalExtensionRef[]
+  toolPermissionRules?: AgentQualifiedToolPermissionRule[]
   /**
    * Run THIS turn's main thread AS the named subagent (its system prompt, tool
    * restrictions, and model). Must be a key present in {@link agents}. Equivalent
@@ -1262,6 +1271,7 @@ export type ApprovalDecision = "allow" | "allow_always" | "deny"
 
 /** What else a person said with an approval answer. */
 export interface ApprovalResponseOptions {
+  updatedInput?: Record<string, unknown>
   /**
    * Deny only: why, or what to do instead ("don't delete it, back it up"). It
    * reaches the model with the refusal so one answer can both stop the call
@@ -1529,6 +1539,7 @@ export type RuntimeSessionStatus =
       provider: string
       cwd?: string
       transcriptInvalidationId?: string
+      featurePolicyKey?: string
       active: boolean
     }
 
@@ -1558,6 +1569,7 @@ export type SessionControlMethod =
   | "reconnectMcpServer"
   | "reinitialize"
   | "reloadOutputStyles"
+  | "reloadExtensions"
   | "reloadPlugins"
   | "reloadSkills"
   | "rewindFiles"
@@ -1600,6 +1612,7 @@ export const SESSION_CONTROL_CAPABILITIES: Record<SessionControlMethod, AgentCap
   reconnectMcpServer: "mcp",
   reinitialize: "session.manage",
   reloadOutputStyles: "session.manage",
+  reloadExtensions: "extensions.dynamic",
   reloadPlugins: "plugins.native",
   reloadSkills: "skills.native",
   rewindFiles: "checkpoint",
@@ -1970,6 +1983,14 @@ export function isAgentTraceSpanEvent(evt: ClaudeEvent): evt is AgentTraceSpanEv
   return evt.type === "agent_trace_span"
 }
 
+/** A runtime rejected an operation outside its effective capability set. */
+export interface CapabilityErrorEvent {
+  type: "capability_error"
+  sessionId?: string
+  capability: AgentCapabilityId
+  command?: string
+}
+
 export type ClaudeEvent =
   | ReadyEvent
   | SidecarExitedEvent
@@ -1993,6 +2014,7 @@ export type ClaudeEvent =
   | ToolHostEvent
   | McpLogEvent
   | AgentTraceSpanEvent
+  | CapabilityErrorEvent
 
 // ---- Narrow subset of SDKMessage we care about ---------------------------
 // Full type lives in @anthropic-ai/claude-agent-sdk. We mirror only the bits
@@ -2075,6 +2097,8 @@ export interface SDKAssistantMessage {
   uuid: string
   session_id: string
   error?: string
+  /** Stable SDK task id of the subagent that produced the message. */
+  agent_id?: string
   /** Subagent type that produced this message (set on SDK-native subagent frames). */
   subagent_type?: string
   /** Task description for the spawning Task tool, when known. */
@@ -2087,6 +2111,9 @@ export interface SDKUserMessage {
   parent_tool_use_id: string | null
   uuid: string
   session_id: string
+  agent_id?: string
+  /** Structured tool output, independent of the model-facing content blocks. */
+  tool_use_result?: unknown
   /** Subagent type that produced this message (set on SDK-native subagent frames). */
   subagent_type?: string
 }
@@ -2149,6 +2176,8 @@ export interface SDKTaskStartedMessage {
   type: "system"
   subtype: "task_started"
   task_id: string
+  run_id?: string
+  parent_task_id?: string
   tool_use_id?: string
   description: string
   subagent_type?: string
@@ -2163,6 +2192,7 @@ export interface SDKTaskProgressMessage {
   type: "system"
   subtype: "task_progress"
   task_id: string
+  run_id?: string
   tool_use_id?: string
   description: string
   subagent_type?: string
@@ -2177,12 +2207,23 @@ export interface SDKTaskUpdatedMessage {
   type: "system"
   subtype: "task_updated"
   task_id: string
+  run_id?: string
   patch: {
     status?: "pending" | "running" | "completed" | "failed" | "killed" | "paused"
     description?: string
     error?: string
     is_backgrounded?: boolean
   }
+  uuid: string
+  session_id: string
+}
+
+export interface SDKTaskNotificationMessage {
+  type: "system"
+  subtype: "task_notification"
+  task_id: string
+  run_id?: string
+  status: "completed" | "failed" | "stopped"
   uuid: string
   session_id: string
 }
@@ -2196,6 +2237,7 @@ export type SDKMessage =
   | SDKTaskStartedMessage
   | SDKTaskProgressMessage
   | SDKTaskUpdatedMessage
+  | SDKTaskNotificationMessage
   | { type: string; session_id: string; [k: string]: unknown }
 
 /**
@@ -2450,6 +2492,7 @@ export interface KnowledgeReadingSettings {
 }
 
 export interface ChatSession {
+  runtimeExtensions?: AgentLocalExtensionRef[]
   knowledgeReading?: Partial<KnowledgeReadingSettings>
   /** Durable source/target link for an explicitly exported Codex snapshot. */
   codexHandoff?: {
@@ -3900,6 +3943,7 @@ export interface FileSharingPolicySettings {
 }
 
 export interface AppSettings {
+  subagentRuntime?: AgentSubagentRuntimeOptions
   knowledgeReading?: Partial<KnowledgeReadingSettings>
   id: "singleton"
   /** Opt-in local Chromium-cookie import for the embedded desktop browser. */
@@ -6564,6 +6608,7 @@ export interface McpServerTrust {
 export type McpToolRisk = "read" | "write" | "destructive"
 
 export interface McpServer {
+  toolPermissionRules?: AgentToolPermissionRule[]
   id: string
   name: string
   transport: McpTransport
@@ -6638,6 +6683,7 @@ export interface McpServer {
 }
 
 export interface McpServerSummary {
+  toolPermissionRules?: AgentToolPermissionRule[]
   id: string
   displayName: string
   transport: McpTransport

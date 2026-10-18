@@ -10,7 +10,8 @@
 // conversations,
 // and a deep-link strip to related Settings sections.
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import type { AgentLocalExtensionRef } from "@cognia/agent-contracts/session-operations"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -18,13 +19,16 @@ import { ExternalLinkIcon } from "lucide-react"
 
 import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
 
 import { isTauri } from "@/lib/tauri"
 import { getSidecarStatus, restartSidecar } from "@/lib/claude/ipc"
 import { useChatStore } from "@/stores/chat"
-import { getSession, listSessions } from "@/lib/db/sessions"
+import { getSession, listSessions, updateSession } from "@/lib/db/sessions"
 import { countExposedConversations } from "@/components/settings/agent-runtime/sdk-bound-conversations"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { useSidecarInfo } from "@/lib/claude/sidecar-info"
@@ -62,6 +66,22 @@ export function SidecarTab() {
   const [capabilityBusy, setCapabilityBusy] = useState<
     "reloadPlugins" | "reloadSkills" | "reinitialize" | null
   >(null)
+  const [extensionPath, setExtensionPath] = useState("")
+  const [preservePromptCache, setPreservePromptCache] = useState(true)
+  const [extensionResult, setExtensionResult] = useState<
+    "applied" | "held" | "partial" | "removed" | null
+  >(null)
+  const [extensionBusy, setExtensionBusy] = useState(false)
+  const [savedExtensions, setSavedExtensions] = useState<{
+    sessionId: string | null
+    refs: AgentLocalExtensionRef[]
+  }>({ sessionId: null, refs: [] })
+  const extensionRevision = useRef(0)
+  const extensionSessionId = useRef(activeSessionId)
+  const visibleExtensions =
+    savedExtensions.sessionId === activeSessionId ? savedExtensions.refs : []
+  const extensionsSupported =
+    executionHandle?.spec?.capabilities.effective.includes("extensions.dynamic") === true
   const [sdkSessionId, setSdkSessionId] = useState<string | null>(null)
 
   // Status & SDK-session-id reads are external IO; the warnings about
@@ -92,6 +112,10 @@ export function SidecarTab() {
 
   useEffect(() => {
     let cancelled = false
+    const revision = ++extensionRevision.current
+    extensionSessionId.current = activeSessionId
+    setSavedExtensions({ sessionId: activeSessionId, refs: [] })
+    setExtensionResult(null)
     if (!activeSessionId) {
       setSdkSessionId(null)
       return
@@ -99,9 +123,17 @@ export function SidecarTab() {
     void (async () => {
       try {
         const s = await getSession(activeSessionId)
-        if (!cancelled) setSdkSessionId(s?.sdkSessionId ?? null)
-      } catch {
-        if (!cancelled) setSdkSessionId(null)
+        if (!cancelled) {
+          setSdkSessionId(s?.sdkSessionId ?? null)
+          if (extensionRevision.current === revision) {
+            setSavedExtensions({ sessionId: activeSessionId, refs: s?.runtimeExtensions ?? [] })
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSdkSessionId(null)
+          toast.error(error instanceof Error ? error.message : String(error))
+        }
       }
     })()
     return () => {
@@ -136,6 +168,71 @@ export function SidecarTab() {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setCapabilityBusy(null)
+    }
+  }
+
+  const addExtension = async () => {
+    if (!executionHandle || !activeSessionId || !extensionPath.trim()) return
+    const path = extensionPath.trim()
+    const sessionId = activeSessionId
+    const revision = extensionRevision.current
+    setExtensionBusy(true)
+    setExtensionResult(null)
+    try {
+      let savedRefs: AgentLocalExtensionRef[] | undefined
+      const result = await executionHandle.reloadExtensions({
+        add: [{ kind: "directory", path }],
+        preservePromptCache,
+      })
+      if (result.disposition !== "held" && result.added.length) {
+        const session = await getSession(sessionId)
+        if (!session) throw new Error(t("extensionSessionUnavailable"))
+        const refs = new Map((session.runtimeExtensions ?? []).map((ref) => [ref.path, ref]))
+        for (const ref of result.added) refs.set(ref.path, ref)
+        const next = [...refs.values()]
+        await updateSession(sessionId, { runtimeExtensions: next })
+        savedRefs = next
+      }
+      if (extensionSessionId.current === sessionId && extensionRevision.current === revision) {
+        if (savedRefs) {
+          ++extensionRevision.current
+          setSavedExtensions({ sessionId, refs: savedRefs })
+        }
+        setExtensionResult(result.disposition)
+        if (result.disposition === "applied") {
+          setExtensionPath((current) => (current.trim() === path ? "" : current))
+        }
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    } finally {
+      setExtensionBusy(false)
+    }
+  }
+
+  const removeSavedExtensions = async (path?: string) => {
+    if (!activeSessionId) return
+    const sessionId = activeSessionId
+    const revision = extensionRevision.current
+    setExtensionBusy(true)
+    setExtensionResult(null)
+    try {
+      const session = await getSession(sessionId)
+      if (!session) throw new Error(t("extensionSessionUnavailable"))
+      const refs =
+        path === undefined
+          ? []
+          : (session.runtimeExtensions ?? []).filter((ref) => ref.path !== path)
+      await updateSession(sessionId, { runtimeExtensions: refs })
+      if (extensionSessionId.current === sessionId && extensionRevision.current === revision) {
+        ++extensionRevision.current
+        setSavedExtensions({ sessionId, refs })
+        setExtensionResult("removed")
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    } finally {
+      setExtensionBusy(false)
     }
   }
 
@@ -286,6 +383,75 @@ export function SidecarTab() {
             {t("liveHandleUnavailable")}
           </p>
         ) : null}
+      </SettingsBlock>
+
+      <SettingsBlock title={t("extensionsTitle")} description={t("extensionsDescription")}>
+        {visibleExtensions.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium">{t("savedExtensions")}</p>
+            <ul aria-label={t("savedExtensions")} className="divide-y rounded-lg border">
+              {visibleExtensions.map((ref) => (
+                <li key={ref.path} className="flex items-center justify-between gap-2 p-3">
+                  <span className="min-w-0 break-all font-mono text-xs">{ref.path}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={extensionBusy}
+                    onClick={() => void removeSavedExtensions(ref.path)}
+                  >
+                    {t("removeExtension")}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            <Button
+              variant="outline"
+              disabled={extensionBusy}
+              onClick={() => void removeSavedExtensions()}
+            >
+              {t("clearExtensions")}
+            </Button>
+            <p className="text-xs text-muted-foreground">{t("extensionsRemovalHint")}</p>
+          </div>
+        )}
+        <Label htmlFor="runtime-extension-path">{t("extensionPath")}</Label>
+        <Input
+          id="runtime-extension-path"
+          value={extensionPath}
+          onChange={(event) => setExtensionPath(event.target.value)}
+          disabled={!extensionsSupported || extensionBusy}
+        />
+        <div className="flex items-center gap-2">
+          <Switch
+            id="runtime-extension-cache"
+            checked={preservePromptCache}
+            onCheckedChange={setPreservePromptCache}
+            disabled={extensionBusy}
+          />
+          <Label htmlFor="runtime-extension-cache">{t("preservePromptCache")}</Label>
+        </div>
+        <Button
+          onClick={() => void addExtension()}
+          disabled={
+            !desktop ||
+            !activeSessionId ||
+            !extensionsSupported ||
+            extensionBusy ||
+            !extensionPath.trim()
+          }
+        >
+          {t("addExtension")}
+        </Button>
+        {!extensionsSupported && (
+          <p className="text-xs text-muted-foreground">{t("extensionsUnsupported")}</p>
+        )}
+        {extensionResult && (
+          <p role="status">
+            {extensionResult === "removed"
+              ? t("extensionsRemoved")
+              : t(`extensionResult.${extensionResult}`)}
+          </p>
+        )}
       </SettingsBlock>
 
       <SdkParityCard />

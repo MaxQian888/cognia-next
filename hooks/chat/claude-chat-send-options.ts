@@ -1,5 +1,6 @@
 "use client"
 
+import { runtimeFeaturePolicyKey } from "@cognia/agent-contracts/session-operations"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { getLoopRuntime } from "@/lib/loop/runtime"
 import type { AgentPlan } from "@/types/agent/plan"
@@ -105,7 +106,8 @@ export async function prepareTranscriptRuntimeSend(
       runtime.provider === options.provider &&
       runtime.cwd === options.cwd &&
       runtime.transcriptInvalidationId === session.runtimeTranscriptGeneration &&
-      runtime.active === false
+      runtime.active === false &&
+      runtime.featurePolicyKey === runtimeFeaturePolicyKey(options)
     ) {
       return {
         ...options,

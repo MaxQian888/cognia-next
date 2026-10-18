@@ -65,6 +65,10 @@ export type AgentCapabilityId =
   | "sandbox.native"
   | "observability.child"
   | "startup.prewarm"
+  | "extensions.dynamic"
+  | "tools.permission-policy"
+  | "subagents.context-fork"
+  | "subagents.auto-compaction"
 
 export const AGENT_CAPABILITY_IDS: readonly AgentCapabilityId[] = [
   "streaming",
@@ -107,6 +111,10 @@ export const AGENT_CAPABILITY_IDS: readonly AgentCapabilityId[] = [
   "sandbox.native",
   "observability.child",
   "startup.prewarm",
+  "extensions.dynamic",
+  "tools.permission-policy",
+  "subagents.context-fork",
+  "subagents.auto-compaction",
 ]
 
 /** Narrow helper used by tests + adapters when only capability ids are known at runtime. */

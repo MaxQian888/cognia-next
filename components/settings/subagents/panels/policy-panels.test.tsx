@@ -47,6 +47,7 @@ describe("NestingPanel", () => {
 
     await waitFor(() =>
       expect(save).toHaveBeenCalledWith({
+        subagentRuntime: { contextMode: "isolated" },
         subagentNesting: {
           enabled: true,
           maxDepth: 2,
@@ -57,6 +58,28 @@ describe("NestingPanel", () => {
         },
       })
     )
+  })
+
+  it("defaults to isolated context and persists an explicit fork independently of nesting", async () => {
+    render(<NestingPanel />)
+    expect(screen.getByRole("switch", { name: "forkContext" })).not.toBeChecked()
+    await userEvent.click(screen.getByRole("switch", { name: "forkContext" }))
+    await userEvent.click(screen.getByTestId("unsaved-bar-save"))
+    await waitFor(() => expect(save).toHaveBeenCalled())
+    expect(save.mock.calls[0][0]).toMatchObject({
+      subagentRuntime: { contextMode: "fork" },
+      subagentNesting: { enabled: false },
+    })
+  })
+
+  it("hydrates stored fork policy and discards edits without changing the setting", async () => {
+    storeSettings = { subagentRuntime: { contextMode: "fork" } }
+    render(<NestingPanel />)
+    expect(screen.getByRole("switch", { name: "forkContext" })).toBeChecked()
+    await userEvent.click(screen.getByRole("switch", { name: "forkContext" }))
+    await userEvent.click(screen.getByTestId("unsaved-bar-discard"))
+    expect(screen.getByRole("switch", { name: "forkContext" })).toBeChecked()
+    expect(save).not.toHaveBeenCalled()
   })
 
   it("discards back to the stored values", async () => {

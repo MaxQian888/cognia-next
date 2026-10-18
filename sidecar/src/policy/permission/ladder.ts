@@ -65,6 +65,7 @@ export interface PermissionSendOptions {
   permissionRuleset?: unknown
   suppressApprovalForTools?: unknown
   alwaysAllowTools?: unknown
+  toolPermissionRules?: unknown
   confinement?: ConfinementPolicy | null
   /** The whole sandbox launch policy; the ladder reads only its scope. */
   builtinProcessSandbox?: (SandboxScopePolicy & { [field: string]: unknown }) | null
@@ -99,6 +100,7 @@ export interface LadderPolicy {
    * dontAsk denies it.
    */
   perCallApproval?: ReadonlySet<string> | null
+  toolPermissionRules?: unknown
   /** An unattended run's permission profile; absent on interactive turns. */
   profile?: ResolvedPermissionProfile | null
   /** Plugin tool classes and the first-party sandboxed tools, from `pluginTools`. */
@@ -115,6 +117,8 @@ export interface LadderCall {
   doomGuard?: Pick<DoomLoopGuard, "check"> | null | undefined
   /** Whether anyone can answer a permission request (ai-sdk: emit + pending map). */
   canPrompt: boolean
+  /** A form or dialogue whose result requires a person's explicit input. */
+  requiresInteraction?: boolean
 }
 
 /** Steps that can only deny; the Agent SDK rail re-runs them on approved input. */
@@ -256,7 +260,9 @@ class CallState {
   mustAsk(): boolean {
     const { policy, toolName } = this.call
     return (
+      this.call.requiresInteraction === true ||
       requiresPerCallApproval(toolName, policy.perCallApproval) ||
+      toolPermissionDecision(toolName, policy.toolPermissionRules) === "ask" ||
       this.profileVerdict().kind === "always-ask"
     )
   }
@@ -338,6 +344,31 @@ export function requiresPerCallApproval(
   return server === PLUGIN_TOOLS_SERVER_NAME && perCallApproval.has(bare)
 }
 
+/** Exact portable tool policy. A deny wins even when duplicate rules are supplied. */
+export function toolPermissionDecision(
+  toolName: string,
+  rules: unknown
+): "ask" | "deny" | undefined {
+  if (rules === undefined) return undefined
+  if (!Array.isArray(rules)) throw new Error("toolPermissionRules must be an array")
+  let decision: "ask" | "deny" | undefined
+  for (const raw of rules) {
+    const rule = raw as { tool?: unknown; decision?: unknown } | null
+    if (
+      !rule ||
+      typeof rule.tool !== "string" ||
+      !rule.tool.trim() ||
+      (rule.decision !== "ask" && rule.decision !== "deny")
+    ) {
+      throw new Error("invalid toolPermissionRules entry")
+    }
+    if (rule.tool === toolName && (decision !== "deny" || rule.decision === "deny")) {
+      decision = rule.decision
+    }
+  }
+  return decision
+}
+
 function deny(reason: DenyReason): LadderOutcome {
   return { kind: "deny", reason }
 }
@@ -352,7 +383,10 @@ function runStep(step: LadderStep, state: CallState): LadderOutcome | undefined 
     case "input-pii":
       return hasNoLeakingPiiDeep(input) ? undefined : deny({ code: "input-pii" })
     case "ruleset":
-      return state.rulesetVerdict() === "deny" ? deny({ code: "ruleset" }) : undefined
+      return state.rulesetVerdict() === "deny" ||
+        toolPermissionDecision(toolName, policy.toolPermissionRules) === "deny"
+        ? deny({ code: "ruleset" })
+        : undefined
     case "sandbox-scope":
       try {
         assertToolCallWithinRoots(
@@ -386,7 +420,7 @@ function runStep(step: LadderStep, state: CallState): LadderOutcome | undefined 
       return verdict.kind === "deny" ? deny({ code: "profile", cls: verdict.cls }) : undefined
     }
     case "ask-user":
-      return toolName === ASK_USER_QUALIFIED ? ALLOW : undefined
+      return toolName === ASK_USER_QUALIFIED && !state.mustAsk() ? ALLOW : undefined
     case "doom":
       state.doomed = call.doomGuard ? call.doomGuard.check(toolName, input) === "ask" : false
       return undefined
@@ -398,7 +432,7 @@ function runStep(step: LadderStep, state: CallState): LadderOutcome | undefined 
           pluginServerName: PLUGIN_TOOLS_SERVER_NAME,
           readOnlyBuiltins: PLAN_EMULATION_BUILTINS,
         }) === "allow" || toolName === ASK_USER_QUALIFIED
-      return allowed ? ALLOW : deny({ code: "plan-mode" })
+      return allowed ? (state.mustAsk() ? undefined : ALLOW) : deny({ code: "plan-mode" })
     }
     case "dont-ask":
       if (policy.mode !== "dontAsk") return undefined
@@ -427,7 +461,9 @@ function runStep(step: LadderStep, state: CallState): LadderOutcome | undefined 
       return state.granted() ? ALLOW : undefined
     case "approval-channel":
       if (call.canPrompt) return undefined
-      return isReadOnlyBuiltin(toolName) ? ALLOW : deny({ code: "no-approval-channel" })
+      return isReadOnlyBuiltin(toolName) && !state.mustAsk()
+        ? ALLOW
+        : deny({ code: "no-approval-channel" })
   }
 }
 

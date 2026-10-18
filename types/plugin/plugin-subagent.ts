@@ -71,6 +71,8 @@ export interface PluginSubagentDef {
   provider?: string
   /** Max round-trips before the SDK stops looping the subagent. */
   maxTurns?: number
+  /** Runtime-neutral native-subagent context policy; unsupported dispatch rails reject it. */
+  contextPolicy?: import("@cognia/agent-contracts/session-operations").AgentSubagentContextPolicy
   /** Reasoning effort dial. */
   effort?: PluginSubagentEffort
   /**

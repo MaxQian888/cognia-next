@@ -254,6 +254,12 @@ export function dispatchAiSdk({
   // code adapter (plugin-contributed, forwarded via
   // sendOptions.protocolAdapterSpec).
   const resolvedAdapter = resolveAdapter(protocol, sendOptions.protocolAdapterSpec, {
+    ...(hostRpc
+      ? {
+          nativeCall: (method: string, params: Record<string, unknown>) =>
+            hostRpc.call(method, params, { timeoutMs: 70_000 }),
+        }
+      : {}),
     emit,
     sessionId,
     pendingProtocolExecs,

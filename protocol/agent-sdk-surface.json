@@ -1,7 +1,7 @@
 {
   "$schema": "./agent-sdk-surface.schema.json",
   "schemaVersion": 1,
-  "sdkVersion": "0.3.283",
+  "sdkVersion": "0.3.302",
   "generatedBy": "pnpm check:sdk-surface:write",
   "surface": {
     "options": {
@@ -897,6 +897,7 @@
       "AnyZodRawShape",
       "ApiKeySource",
       "AsyncHookJSONOutput",
+      "BUILTIN_TOOL_NAMES",
       "BackgroundTaskSummary",
       "BaseHookInput",
       "BaseOutputFormat",
@@ -937,6 +938,7 @@
       "InferShape",
       "InstructionsLoadedHookInput",
       "JsonSchemaOutputFormat",
+      "LEGACY_TOOL_NAME_ALIASES",
       "ListSessionsOptions",
       "ListSubagentsOptions",
       "McpClaudeAIProxyServerConfig",

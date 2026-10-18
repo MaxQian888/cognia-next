@@ -33,7 +33,68 @@ const elicitation: AcpElicitationRequest = {
   },
 }
 
+it("keeps a runtime question pending until a choice or free text is supplied", async () => {
+  const user = userEvent.setup()
+  const onRespond = jest.fn()
+  const request: AcpElicitationRequest = {
+    ...elicitation,
+    requestedSchema: {
+      type: "object",
+      properties: {
+        q0: { type: "string", title: "Environment", enum: ["Local", "Cloud"] },
+        q0_notes: { type: "string", format: "multiline" },
+      },
+    },
+    _meta: {
+      userInput: {
+        questions: [{ id: "q0", notesField: "q0_notes", question: "Environment", options: [] }],
+      },
+    },
+  }
+  render(
+    <PendingDecisionSurface
+      decision={{ kind: "elicitation", request }}
+      onElicitationRespond={onRespond}
+    />
+  )
+  const submit = screen.getByRole("button", { name: "submit" })
+  expect(submit).toBeDisabled()
+  await user.type(screen.getByRole("textbox", { name: /otherResponse/ }), "Custom")
+  expect(submit).toBeEnabled()
+  await user.click(submit)
+  expect(onRespond).toHaveBeenCalledWith({
+    requestId: request.id,
+    action: "accept",
+    content: { q0: "", q0_notes: "Custom" },
+  })
+})
+
 describe("<PendingDecisionSurface /> — tool approval", () => {
+  it("uses the shared elicitation form and returns structured values through an approval", async () => {
+    const user = userEvent.setup()
+    const onRespond = jest.fn()
+    render(
+      <PendingDecisionSurface
+        decision={{
+          kind: "tool-approval",
+          approval: {
+            ...approval,
+            toolName: "Runtime:Elicitation",
+            input: { elicitation, content: {} },
+          },
+        }}
+        onApprovalRespond={onRespond}
+      />
+    )
+    await user.type(screen.getByLabelText("Branch"), "main")
+    await user.click(screen.getByRole("button", { name: "submit" }))
+    expect(onRespond).toHaveBeenCalledWith("allow", {
+      updatedInput: {
+        elicitation,
+        content: { branch: "main" },
+      },
+    })
+  })
   it("offers all three answers while pending", async () => {
     const user = userEvent.setup()
     const onRespond = jest.fn()

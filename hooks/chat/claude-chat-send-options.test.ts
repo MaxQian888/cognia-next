@@ -138,6 +138,21 @@ describe("prepareTranscriptRuntimeSend", () => {
     expect(prepared.expectedRuntimeSessionId).toBeUndefined()
   })
 
+  it("restores canonical history before replacing a runtime whose tool policy changed", async () => {
+    jest.mocked(listMessages).mockResolvedValue([
+      { id: "prior", role: "user", parts: [{ type: "text", text: "Remember the migration" }] },
+      { id: "current", role: "user", parts: [{ type: "text", text: "Continue" }] },
+    ])
+    const prepared = await prepareTranscriptRuntimeSend("s1", {
+      provider: "openai",
+      turnId: "current",
+      toolPermissionRules: [{ tool: "mcp__notes__write", decision: "ask" }],
+    })
+    expect(JSON.stringify(prepared.initialConversation)).toContain("Remember the migration")
+    expect(JSON.stringify(prepared.initialConversation)).not.toContain("Continue")
+    expect(prepared.expectedRuntimeSessionId).toBeUndefined()
+  })
+
   it("pins verified live context and removes obsolete initialization history", async () => {
     const prepared = await prepareTranscriptRuntimeSend("s1", {
       provider: "openai",
@@ -162,6 +177,7 @@ describe("prepareTranscriptRuntimeSend", () => {
     { cwd: "/different-workspace" },
     { transcriptInvalidationId: "different-generation" },
     { active: true },
+    { featurePolicyKey: "changed-policy" },
   ])("reconstructs instead of reusing incompatible runtime %j", async (mismatch) => {
     const status = await sessionControl("s1", "runtimeStatus")
     jest.mocked(sessionControl).mockResolvedValue({ ...(status as object), ...mismatch })

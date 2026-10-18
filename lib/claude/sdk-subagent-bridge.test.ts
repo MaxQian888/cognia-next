@@ -33,6 +33,54 @@ beforeEach(() => {
 })
 
 describe("applySdkSubagentBridge — lifecycle", () => {
+  it("does not let a colliding task id from another session replace the current run", () => {
+    applySdkSubagentBridge(started({ run_id: "run-001" }), SID)
+    applySdkSubagentBridge(started({ run_id: "run-002" }), "other-chat")
+    expect(node("T1")!.context?.sessionId).toBe(SID)
+  })
+
+  it("settles a stopped task notification as cancelled and removes cancellation", () => {
+    applySdkSubagentBridge(started(), SID, { stopTask: jest.fn() })
+    applySdkSubagentBridge(
+      { ...started(), subtype: "task_notification", status: "stopped" } as never,
+      SID
+    )
+    expect(node("T1")!.status).toBe("cancelled")
+    expect(requestCancelSubagentRun("T1")).toBe(false)
+  })
+
+  it("starts a fresh run on resume and ignores late lifecycle events from the older run", () => {
+    applySdkSubagentBridge(started({ run_id: "run-001" }), SID)
+    applySdkSubagentBridge(
+      {
+        ...started({ run_id: "run-001" }),
+        subtype: "task_updated",
+        patch: { status: "completed" },
+      } as never,
+      SID
+    )
+    applySdkSubagentBridge(started({ run_id: "run-002" }), SID)
+    expect(node("T1")!.status).toBe("running")
+    applySdkSubagentBridge(
+      {
+        ...started({ run_id: "run-001" }),
+        subtype: "task_updated",
+        patch: { status: "failed" },
+      } as never,
+      SID
+    )
+    expect(node("T1")!.status).toBe("running")
+    applySdkSubagentBridge(
+      {
+        ...started({ run_id: "run-002" }),
+        subtype: "task_notification",
+        status: "completed",
+      } as never,
+      SID
+    )
+    expect(node("T1")!.status).toBe("completed")
+  })
+
   it("creates a running subagent on task_started attached to the session", () => {
     applySdkSubagentBridge(started(), SID)
     const n = node("T1")!
@@ -208,6 +256,43 @@ describe("applySdkSubagentBridge — lifecycle", () => {
 })
 
 describe("applySdkSubagentBridge — rich logs via parent_tool_use_id", () => {
+  it("drops a late child frame correlated with an older run after resume", () => {
+    applySdkSubagentBridge(started({ run_id: "run-001" }), SID)
+    applySdkSubagentBridge(started({ run_id: "run-002", tool_use_id: "tu-resumed" }), SID)
+    applySdkSubagentBridge(
+      {
+        type: "assistant",
+        agent_id: "T1",
+        parent_tool_use_id: "tu1",
+        uuid: "late",
+        session_id: "sdk",
+        message: {
+          id: "late",
+          role: "assistant",
+          content: [{ type: "text", text: "stale output" }],
+        },
+      } as never,
+      SID
+    )
+    expect(node("T1")!.logs).toHaveLength(0)
+  })
+
+  it("routes child frames by their authoritative agent_id without a parent tool pointer", () => {
+    applySdkSubagentBridge(started(), SID)
+    applySdkSubagentBridge(
+      {
+        type: "assistant",
+        agent_id: "T1",
+        parent_tool_use_id: null,
+        uuid: "u",
+        session_id: "sdk",
+        message: { id: "m", role: "assistant", content: [{ type: "text", text: "direct child" }] },
+      } as never,
+      SID
+    )
+    expect(node("T1")!.logs.some((l) => l.message === "direct child")).toBe(true)
+  })
+
   it("appends text + tool logs from forwarded subagent frames", () => {
     applySdkSubagentBridge(started(), SID)
     applySdkSubagentBridge(
@@ -307,6 +392,26 @@ describe("applySdkSubagentBridge — rich logs via parent_tool_use_id", () => {
 })
 
 describe("applySdkSubagentBridge — nested task correlation", () => {
+  it("uses parent_task_id when no spawning tool frame was forwarded", () => {
+    applySdkSubagentBridge(started(), SID)
+    applySdkSubagentBridge(
+      started({ task_id: "T2", tool_use_id: undefined, parent_task_id: "T1" }),
+      SID
+    )
+    expect(node("T2")!.parentSubagentId).toBe("T1")
+    expect(node("T2")!.depth).toBe(2)
+  })
+
+  it("treats an unknown explicit parent as a root instead of inferring another parent", () => {
+    applySdkSubagentBridge(started(), SID)
+    spawnBlockInsideT1("nested")
+    applySdkSubagentBridge(
+      started({ task_id: "T2", tool_use_id: "nested", parent_task_id: "unknown" }),
+      SID
+    )
+    expect(node("T2")!.parentSubagentId).toBeUndefined()
+  })
+
   /** Stream T1's child frame containing a spawning `tool_use` block. */
   function spawnBlockInsideT1(blockId: string) {
     applySdkSubagentBridge(

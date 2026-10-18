@@ -6,6 +6,20 @@ import { dirname, join } from "node:path"
 
 import { canonicalEventsFromSdkMessage, createSdkMappingState } from "./index.ts"
 
+test("rate limit metadata preserves disabled overage and limit scope", () => {
+  assert.deepEqual(
+    canonicalEventsFromSdkMessage({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "allowed",
+        overageEnabled: false,
+        limitScope: "group_pool",
+      },
+    }),
+    [{ kind: "rate-limit", status: "allowed", overageEnabled: false, limitScope: "group_pool" }]
+  )
+})
+
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..")
 const MANIFEST: {
   surface: {

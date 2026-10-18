@@ -63,6 +63,18 @@ beforeEach(() => {
 })
 
 describe("McpToolRulesCard", () => {
+  it("persists a portable approval policy and never lets it override a pattern deny", async () => {
+    render(<McpToolRulesCard server={server({ disallowedToolPatterns: ["write_*"] })} />)
+    fireEvent.change(screen.getByLabelText('policyAria:{"name":"read_file"}'), {
+      target: { value: "ask" },
+    })
+    await waitFor(() =>
+      expect(updateMcpServer).toHaveBeenCalledWith("mcp_1", {
+        toolPermissionRules: [{ name: "read_file", decision: "ask" }],
+      })
+    )
+    expect(screen.getByLabelText('policyAria:{"name":"write_file"}')).toBeDisabled()
+  })
   it("renders one switch per discovered tool", () => {
     render(<McpToolRulesCard server={server()} />)
     expect(screen.getAllByRole("switch")).toHaveLength(3)

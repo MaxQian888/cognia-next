@@ -50,6 +50,26 @@ test("a turn without a profile gets no hook", () => {
   )
 })
 
+test("portable tool policies bind before SDK bypass without an unattended profile", async () => {
+  const tool = "mcp__github__publish"
+  const { hook, asked } = setup(
+    { permissionMode: "bypassPermissions", toolPermissionRules: [{ tool, decision: "ask" }] },
+    { behavior: "allow" }
+  )
+  await hook({ tool_name: tool, tool_input: {} }, "policy-1", { signal })
+  assert.deepEqual(asked, [{ tool, id: "policy-1" }])
+  const denied = setup(
+    { permissionMode: "bypassPermissions", toolPermissionRules: [{ tool, decision: "deny" }] },
+    { behavior: "allow" }
+  )
+  const out = await denied.hook({ tool_name: tool, tool_input: {} }, "policy-2", { signal })
+  assert.equal(
+    (out.hookSpecificOutput as { permissionDecision: string }).permissionDecision,
+    "deny"
+  )
+  assert.deepEqual(denied.asked, [])
+})
+
 test("a denied class is refused before the SDK's bypass can approve it", async () => {
   const { hook, asked } = setup(
     { permissionMode: "bypassPermissions", permissionProfile: { ...CEILING, workspace: "deny" } },
@@ -77,7 +97,7 @@ test("an outbound call asks a person even under bypass, and the approval is hand
   assert.deepEqual(out.hookSpecificOutput, {
     hookEventName: "PreToolUse",
     permissionDecision: "allow",
-    permissionDecisionReason: "approved by a person for this unattended run",
+    permissionDecisionReason: "approved by a person for this tool call",
     updatedInput: { text: "hi" },
   })
   assert.ok(approvals.has("tu-2"))

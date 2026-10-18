@@ -131,3 +131,30 @@ describe("isToolRuleTightening", () => {
     expect(isToolRuleTightening(rules, rules, known)).toBe(true)
   })
 })
+import { normalizeToolPermissionRules } from "./tool-rules"
+
+test("portable permission policies normalize, deny wins, and relaxation needs review", () => {
+  expect(
+    toolDenyReason("publish", { toolPermissionRules: [{ name: "publish", decision: "deny" }] })
+  ).toBe("policy")
+  expect(
+    normalizeToolPermissionRules([
+      { name: " publish ", decision: "ask" },
+      { name: "publish", decision: "deny" },
+      { name: "publish", decision: "ask" },
+    ])
+  ).toEqual([{ name: "publish", decision: "deny" }])
+  expect(() => normalizeToolPermissionRules([{ name: "publish", decision: "allow" }])).toThrow()
+  expect(
+    isToolRuleTightening(
+      { toolPermissionRules: [{ name: "publish", decision: "ask" }] },
+      { toolPermissionRules: [{ name: "publish", decision: "deny" }] }
+    )
+  ).toBe(true)
+  expect(
+    isToolRuleTightening(
+      { toolPermissionRules: [{ name: "publish", decision: "deny" }] },
+      { toolPermissionRules: [{ name: "publish", decision: "ask" }] }
+    )
+  ).toBe(false)
+})

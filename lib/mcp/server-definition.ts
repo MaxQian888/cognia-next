@@ -6,6 +6,7 @@ import type {
   McpServerSummary,
   McpTransport,
 } from "@cognia/agent-config-types"
+import { normalizeToolPermissionRules } from "./tool-rules"
 
 const NAMESPACE_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/
 
@@ -154,9 +155,9 @@ export function assertMcpWireConfig(
     )
 }
 
-export function validateMcpDefinition<T extends Pick<McpServer, "name" | "transport" | "config">>(
-  server: T
-): T {
+export function validateMcpDefinition<
+  T extends Pick<McpServer, "name" | "transport" | "config" | "toolPermissionRules">,
+>(server: T): T {
   const name = server.name.trim()
   if (!NAMESPACE_PATTERN.test(name)) {
     throw new McpDefinitionError(
@@ -164,6 +165,7 @@ export function validateMcpDefinition<T extends Pick<McpServer, "name" | "transp
     )
   }
   validateMcpConfig(server.transport, server.config)
+  normalizeToolPermissionRules(server.toolPermissionRules)
   return server
 }
 
@@ -181,13 +183,19 @@ function canonical(value: unknown): string {
 
 /** Stable, non-secret-bearing fingerprint for review/cache invalidation. */
 export function fingerprintMcpDefinition(
-  server: Pick<McpServer, "name" | "transport" | "config" | "disallowedTools">
+  server: Pick<
+    McpServer,
+    "name" | "transport" | "config" | "disallowedTools" | "toolPermissionRules"
+  >
 ): string {
   const material = canonical({
     name: normalizeMcpNamespace(server.name),
     transport: server.transport,
     config: server.config,
     disallowedTools: [...(server.disallowedTools ?? [])].map((tool) => tool.trim()).sort(),
+    ...(server.toolPermissionRules?.length
+      ? { toolPermissionRules: normalizeToolPermissionRules(server.toolPermissionRules) }
+      : {}),
   })
   let first = 0x811c9dc5
   let second = 0x9e3779b9
@@ -224,6 +232,9 @@ export function toMcpServerSummary(
     ...(server.disallowedTools?.length ? { disallowedTools: [...server.disallowedTools] } : {}),
     ...(server.disallowedToolPatterns?.length
       ? { disallowedToolPatterns: [...server.disallowedToolPatterns] }
+      : {}),
+    ...(server.toolPermissionRules?.length
+      ? { toolPermissionRules: normalizeToolPermissionRules(server.toolPermissionRules) }
       : {}),
     ...(toolNames?.length ? { toolNames: [...toolNames] } : {}),
   }

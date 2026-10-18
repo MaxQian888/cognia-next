@@ -18,6 +18,11 @@ import type {
   ResolvedAgentExecutionSpec,
 } from "@cognia/agent-config-types/agent-execution"
 
+import type {
+  AgentExtensionReloadOptions,
+  AgentExtensionReloadResult,
+} from "@cognia/agent-contracts/session-operations"
+
 import * as ipc from "@/lib/claude/ipc"
 import type { RemoteExecutionContext } from "@/lib/claude/remote-execution"
 import { isCapabilityProtocolFailure } from "./capability-health"
@@ -97,6 +102,7 @@ export interface AgentExecutionHandle extends AgentSessionControlPort {
   // ---- plugins & skills -----------------------------------------------------
   /** Reload plugins from disk; returns the refreshed commands/agents/servers. */
   reloadPlugins(): Promise<unknown>
+  reloadExtensions(options?: AgentExtensionReloadOptions): Promise<AgentExtensionReloadResult>
   /** Reload skills from disk; returns the refreshed skill commands. */
   reloadSkills(): Promise<unknown>
 
@@ -377,6 +383,12 @@ export function createAgentExecutionHandle(
       )
     },
 
+    reloadExtensions(options) {
+      return this.control<AgentExtensionReloadResult>(
+        "reloadExtensions",
+        options ? { options } : undefined
+      )
+    },
     reloadPlugins() {
       return this.control("reloadPlugins")
     },

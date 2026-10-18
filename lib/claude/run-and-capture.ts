@@ -56,7 +56,10 @@ import {
 import { RouterFusionRefusalError } from "@/lib/router-fusion/gate/faults"
 import type { ExecutionLeaseInfo } from "@/lib/execution/types"
 import type { RemoteExecutionContext } from "./remote-execution"
-import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
+import {
+  assertExternalRuntimeFeatureSupport,
+  isExternalAgentProviderId,
+} from "@/lib/ai/agent/external/session/session-models"
 import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
 import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
 import { getImElicitationContext } from "@/lib/connectors/hitl/im-elicitation-context"
@@ -687,6 +690,9 @@ export async function runAndCaptureAssistantReply(
   options?: SendOptions,
   cap?: RunAndCaptureOptions
 ): Promise<RunAndCaptureResult> {
+  if (isExternalAgentProviderId(options?.provider)) {
+    await assertExternalRuntimeFeatureSupport(options ?? {})
+  }
   // Admission bypass: a caller that is already governed (or a context with no
   // broker, e.g. some CLI paths) opts out via `execution.skip`.
   if (cap?.execution?.skip) {
@@ -942,6 +948,7 @@ async function captureAssistantReplyCore(
   cap?: RunAndCaptureOptions
 ): Promise<RunAndCaptureResult> {
   if (isExternalAgentProviderId(options?.provider)) {
+    await assertExternalRuntimeFeatureSupport(options ?? {})
     return captureHostExternalReply(sessionId, prompt, options, cap)
   }
   const timeoutMs = cap?.timeoutMs ?? DEFAULT_TIMEOUT_MS

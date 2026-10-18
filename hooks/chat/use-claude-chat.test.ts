@@ -3336,6 +3336,117 @@ describe("useClaudeChat — actions", () => {
     )
   })
 
+  it.each([
+    [{ runtimeExtensions: [{ kind: "directory", path: "/trusted/plugin" }] }, "extensions.dynamic"],
+    [{ toolPermissionRules: [{ tool: "read", decision: "ask" }] }, "tools.permission-policy"],
+    [{ subagentRuntime: { contextMode: "fork" } }, "subagents.context-fork"],
+    [
+      { agents: { child: { contextPolicy: { compactAtTokens: 1000 } } } },
+      "subagents.auto-compaction",
+    ],
+  ])(
+    "rejects explicit external send options %j before hooks and runtime setup",
+    async (feature, capability) => {
+      useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await expect(
+          result.current.send("hi", {
+            ...feature,
+            execution: { capabilities: { effective: [capability] } },
+          } as never)
+        ).rejects.toMatchObject({ name: "AgentCapabilityError", capability })
+      })
+      expect(dispatchUserPromptSubmitMock).not.toHaveBeenCalled()
+      expect(ensureExternalAgentReadyMock).not.toHaveBeenCalled()
+      expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+      expect(executeOnRemoteHostAgentMock).not.toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it("rejects malformed explicit external options before the prompt hook", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await expect(
+        result.current.send("hi", { toolPermissionRules: "deny" } as never)
+      ).rejects.toThrow("invalid_tool_permission_rules")
+    })
+    expect(dispatchUserPromptSubmitMock).not.toHaveBeenCalled()
+    expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("settles a delegated turn that requests an unsupported portable feature", async () => {
+    getConnectedAgentsMock.mockReturnValue([{ config: { id: "ext-1" } }])
+    checkDelegationMock.mockReturnValue({ shouldDelegate: true, targetAgentId: "ext-1" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await expect(
+        result.current.send(
+          "hi",
+          {
+            runtimeExtensions: [{ kind: "directory", path: "/trusted/plugin" }],
+          },
+          { throwOnError: true }
+        )
+      ).rejects.toMatchObject({
+        name: "AgentCapabilityError",
+        capability: "extensions.dynamic",
+      })
+    })
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+    expect(ensureExternalAgentReadyMock).not.toHaveBeenCalled()
+    expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    expect(executeOnRemoteHostAgentMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("also rejects portable features for a host-owned external selection", async () => {
+    useAgentRuntimeStore.setState({
+      runtimeRef: {
+        kind: "host",
+        configId: "pi-1",
+        revision: "rev-1",
+        lifecycleGeneration: 1,
+        name: "Pi",
+      },
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await expect(
+        result.current.send("hi", { subagentRuntime: { contextMode: "fork" } })
+      ).rejects.toMatchObject({
+        name: "AgentCapabilityError",
+        capability: "subagents.context-fork",
+      })
+    })
+    expect(dispatchUserPromptSubmitMock).not.toHaveBeenCalled()
+    expect(executeOnRemoteHostAgentMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("accepts empty portable feature options on the existing external lane", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi", {
+        runtimeExtensions: [],
+        toolPermissionRules: [],
+        subagentRuntime: { contextMode: "isolated" },
+      })
+    })
+    expect(executeOnExternalAgentMock).toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
   // The model picker persists its pick on the conversation row and relies on
   // the turn replaying it (`applyModelToSession`). Nothing read the row back,
   // so a model chosen before the first turn — the only way to pick one on an
@@ -4824,6 +4935,26 @@ describe("useClaudeChat — actions", () => {
     })
     expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "allow")
     expect(chatState.clearApproval).toHaveBeenCalledWith("r-1", "sess-1")
+  })
+
+  it("respondToApproval preserves structured elicitation answers on the direct transport", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    const updatedInput = { content: { branch: "main" } }
+    await act(async () => {
+      await result.current.respondToApproval(
+        { sessionId: "sess-1", requestId: "form-1", toolName: "interaction", input: {} } as never,
+        "allow",
+        { updatedInput }
+      )
+    })
+    expect(approveToolMock).toHaveBeenCalledWith(
+      "sess-1",
+      "form-1",
+      "allow",
+      undefined,
+      updatedInput
+    )
   })
 
   it("respondToApproval through an execution handle journals the resolution approveTool would have", async () => {
@@ -10299,6 +10430,59 @@ describe("durable background result admission", () => {
 describe("precise external steering ownership", () => {
   beforeEach(() => {
     steerExternalSessionMock.mockClear()
+  })
+  it.each(["external", "builtin"])(
+    "refuses feature overrides on a queued %s turn before its runtime lane is bound",
+    async (lane) => {
+      isChatTurnQueuedMock.mockReturnValue(true)
+      if (lane === "external") {
+        useAgentRuntimeStore
+          .getState()
+          .setSessionRuntimeRef("sess-1", { kind: "external", agentId: "ext-1" })
+      }
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await expect(
+          result.current.send("continue", { subagentRuntime: { contextMode: "fork" } })
+        ).rejects.toMatchObject({
+          name: "AgentCapabilityError",
+          capability: "subagents.context-fork",
+          message: expect.stringContaining("steer"),
+        })
+      })
+      expect(chatState.enqueueSteer).not.toHaveBeenCalled()
+      expect(steerExternalSessionMock).not.toHaveBeenCalled()
+      expect(dispatchUserPromptSubmitMock).not.toHaveBeenCalled()
+      expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+    }
+  )
+  it("refuses unsupported feature overrides before steering or queueing an active external turn", async () => {
+    const { setSessionExternalLane } = await import("./steer-runtime")
+    chatState.status = "streaming"
+    setSessionExternalLane("sess-1", "ext-1")
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    try {
+      await act(async () => {
+        await expect(
+          result.current.send("continue", {
+            toolPermissionRules: [{ tool: "read", decision: "deny" }],
+          })
+        ).rejects.toMatchObject({
+          name: "AgentCapabilityError",
+          capability: "tools.permission-policy",
+        })
+      })
+      expect(steerExternalSessionMock).not.toHaveBeenCalled()
+      expect(chatState.enqueueSteer).not.toHaveBeenCalled()
+      expect(chatState.status).toBe("streaming")
+      expect(dispatchUserPromptSubmitMock).not.toHaveBeenCalled()
+      expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    } finally {
+      setSessionExternalLane("sess-1", null)
+    }
   })
   it.each([true, false])(
     "never guesses a native session when the exact link is available=%s",

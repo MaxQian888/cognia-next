@@ -28,6 +28,10 @@ export const ADAPTER_CAPABILITIES = {
     "commands.dynamic",
     "session.manage",
     "plugins.native",
+    "extensions.dynamic",
+    "tools.permission-policy",
+    "subagents.context-fork",
+    "subagents.auto-compaction",
     "skills.native",
     "checkpoint",
     "mcp.dynamic",
@@ -38,6 +42,7 @@ export const ADAPTER_CAPABILITIES = {
     "session.multi-turn",
     "permissions.interrupt-resume",
     "permissions.set-mode",
+    "tools.permission-policy",
     "set-model",
     "compaction",
   ]),
@@ -94,4 +99,19 @@ export function capabilitySupported(adapterId: string | undefined, capability: s
   const table = ADAPTER_CAPABILITIES[adapterId as keyof typeof ADAPTER_CAPABILITIES]
   if (!table) return true
   return table.has(capability)
+}
+
+/** New portable options require actual adapter support and any frozen ceiling. */
+export function runtimeFeatureSupported(
+  adapterId: string,
+  capability: string,
+  execution?: { capabilities?: { effective?: readonly string[] } }
+) {
+  const table = ADAPTER_CAPABILITIES[adapterId as keyof typeof ADAPTER_CAPABILITIES]
+  return (
+    !!table?.has(capability) &&
+    (!execution ||
+      (Array.isArray(execution.capabilities?.effective) &&
+        execution.capabilities.effective.includes(capability)))
+  )
 }

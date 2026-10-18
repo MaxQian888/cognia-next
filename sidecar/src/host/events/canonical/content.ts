@@ -88,8 +88,23 @@ export function fromUser(evt: Record<string, unknown>): CanonicalEvent[] {
 
   const events: CanonicalEvent[] = []
   let text = ""
-  for (const block of contentBlocks(evt.message)) {
+  const blocks = contentBlocks(evt.message)
+  // The structured twin belongs to one tool result, never to every block in
+  // an aggregated message from another runtime.
+  const metadata =
+    blocks.filter((b) => b.type === "tool_result").length === 1 ? record(evt.tool_use_result) : {}
+  for (const block of blocks) {
     if (block?.type === "tool_result") {
+      if (metadata.detachedToolCall === true && typeof block.tool_use_id === "string") {
+        events.push({
+          kind: "tool-progress",
+          toolName: asString(block.tool_name) ?? "",
+          toolCallId: block.tool_use_id,
+          elapsedMs: 0,
+          backgrounded: true,
+        })
+        continue
+      }
       events.push(
         compact({
           kind: "tool-result",
@@ -97,6 +112,8 @@ export function fromUser(evt: Record<string, unknown>): CanonicalEvent[] {
           toolCallId: asString(block.tool_use_id),
           result: block.content,
           isError: block.is_error === true ? true : undefined,
+          structuredContent: metadata.structuredContent,
+          structuredContentOmitted: metadata.structuredContentOmitted === true ? true : undefined,
         })
       )
     } else if (block?.type === "text") {

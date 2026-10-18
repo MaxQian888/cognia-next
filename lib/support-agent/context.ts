@@ -113,6 +113,9 @@ export function applySupportAgentSafety<T extends Record<string, unknown>>(optio
   ]
   next.mcpServers = {}
   delete next.agents
+  delete next.subagentRuntime
+  delete next.runtimeExtensions
+  delete next.toolPermissionRules
   delete next.agent
   delete next.additionalDirectories
   delete next.trustedWorkspaceRoots

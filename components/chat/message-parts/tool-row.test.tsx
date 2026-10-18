@@ -74,14 +74,18 @@ describe("InlineCopyButton", () => {
 describe("ToolRowShell", () => {
   it("keeps the row actions reachable without a hover", () => {
     copyMock.mockClear()
+    const onToggle = jest.fn()
     render(
       <ToolRowShell
         status="output-available"
         ariaLabel="row"
         testId="row"
+        onToggle={onToggle}
         lead={<span>$</span>}
         actions={<InlineCopyButton value="ls -la" label="copy command" testId="row-copy" />}
-      />
+      >
+        <div>Command output</div>
+      </ToolRowShell>
     )
     const button = screen.getByTestId("row-copy")
     const wrapper = button.parentElement
@@ -96,6 +100,11 @@ describe("ToolRowShell", () => {
     expect(button).toHaveFocus()
     fireEvent.click(button)
     expect(copyMock).toHaveBeenCalledWith("ls -la")
+    expect(onToggle).not.toHaveBeenCalled()
+    const toggle = screen.getByRole("button", { name: "row" })
+    expect(toggle).not.toContainElement(button)
+    fireEvent.click(toggle)
+    expect(onToggle).toHaveBeenCalledTimes(1)
   })
 
   it("leads with the status dot and the verb label by default", () => {

@@ -32,6 +32,7 @@ import { warmPool } from "./warm-pool.ts"
 import { buildToolSurface } from "./tool-surface.ts"
 import { buildAnthropicOptions } from "./options.ts"
 import { createAnthropicSession } from "./session.ts"
+import { createClaudeExtensionReloader } from "./sdk-options.ts"
 import { startAnthropicPump } from "./pump.ts"
 export { enforceAnthropicToolSurface } from "./tool-surface.ts"
 export { anthropicPluginToolBridgeOptions } from "./plugin-bridge.ts"
@@ -189,10 +190,23 @@ export function dispatchAnthropic(
     sendOptions,
   })
   session.pushUserMessage(firstPrompt)
+  let loadedPlugins: readonly { path: string; name?: string; source?: string }[] | undefined
   startAnthropicPump({
     sessionId,
     sendOptions,
-    emit,
+    emit: (frame) => {
+      if (frame.type === "event" && frame.event && typeof frame.event === "object") {
+        const event = frame.event as Record<string, unknown>
+        if (event.type === "system" && event.subtype === "init") {
+          loadedPlugins =
+            Array.isArray(event.plugins) &&
+            event.plugins.every((plugin) => plugin && typeof plugin.path === "string")
+              ? event.plugins
+              : undefined
+        }
+      }
+      emit(frame)
+    },
     log,
     q,
     mcpAutoReconnect,
@@ -202,5 +216,7 @@ export function dispatchAnthropic(
     mcpStderrSink,
     toolSession,
   })
-  return session
+  return Object.assign(session, {
+    reloadExtensions: createClaudeExtensionReloader(q, sendOptions, () => loadedPlugins),
+  })
 }

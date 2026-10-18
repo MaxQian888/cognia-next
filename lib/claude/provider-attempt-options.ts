@@ -208,7 +208,10 @@ export async function resolveSubscriptionProviderCredential(
   const config =
     appSettings.providerSettings?.[providerId] ??
     appSettings.customProviders?.find((provider) => provider.id === providerId)
-  const headers = { ...config?.customHeaders, ...credential.headers }
+  const headers = {
+    ...(definition?.billingMode === "subscription" ? {} : config?.customHeaders),
+    ...credential.headers,
+  }
   return {
     ...credential,
     ...(definition?.protocol && definition.source !== "builtin"
@@ -248,7 +251,9 @@ export async function resolveProviderAttemptOptions(
   const subscriptionDefinition = getSubscriptionProvider(providerId, appSettings.customProviders)
   const hasApiSubscription =
     !!subscriptionDefinition && subscriptionDefinition.authMode !== "anthropic-oauth"
-  const preferSubscriptionAccount = preferSelectedAccount && hasApiSubscription
+  const preferSubscriptionAccount =
+    (preferSelectedAccount || subscriptionDefinition?.billingMode === "subscription") &&
+    hasApiSubscription
   // ADR-0224 A6: the `/pair` Host this device drives holds a key for this
   // built-in provider and this device has none. The turn names the provider
   // and its endpoint; the Host fills the key (`fill_host_provider_key`), which
@@ -366,6 +371,9 @@ export async function resolveProviderAttemptOptions(
         providerCredentials.baseURL = vaultCredential.baseURL
         if (vaultCredential.protocol) providerCredentials.protocol = vaultCredential.protocol
         if (vaultCredential.apiFlavor) providerCredentials.apiFlavor = vaultCredential.apiFlavor
+        if (subscriptionDefinition?.billingMode === "subscription") {
+          delete providerCredentials.headers
+        }
         if (vaultCredential.headers) {
           providerCredentials.headers = {
             ...providerCredentials.headers,

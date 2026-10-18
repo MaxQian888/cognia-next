@@ -29,6 +29,7 @@ import {
   buildPerCallApprovalSet,
   decidePermission,
   requiresPerCallApproval,
+  toolPermissionDecision,
 } from "./ladder.ts"
 import type { DenyReason, PermissionSendOptions, RailProfile } from "./ladder.ts"
 
@@ -203,6 +204,7 @@ export function createToolPermissionGate({
         cwd: sendOptions?.cwd,
         pluginAccess,
         perCallApproval,
+        toolPermissionRules: sendOptions?.toolPermissionRules,
         profile,
         pluginClasses,
         sandboxAttested,
@@ -214,12 +216,15 @@ export function createToolPermissionGate({
     // the emitter and the pending map exist.
     const requestId = randomUUID()
     const verdict = profileVerdict(profile, toolName, pluginClasses)
-    const alwaysAsk = verdict.kind === "always-ask"
-    const permissionClass = alwaysAsk
-      ? verdict.cls
-      : profile
-        ? classesOfTool(toolName, pluginClasses)[0]
-        : undefined
+    const alwaysAsk =
+      verdict.kind === "always-ask" ||
+      toolPermissionDecision(toolName, sendOptions?.toolPermissionRules) === "ask"
+    const permissionClass =
+      verdict.kind === "always-ask"
+        ? verdict.cls
+        : profile
+          ? classesOfTool(toolName, pluginClasses)[0]
+          : undefined
     emit!({
       type: "permission_request",
       sessionId,
@@ -241,7 +246,12 @@ export function createToolPermissionGate({
     const decision = await awaitApproval({
       pendingApprovals: approvals!,
       requestId,
-      entry: { input },
+      entry: {
+        input,
+        ...(alwaysAsk || requiresPerCallApproval(toolName, perCallApproval)
+          ? { suppressAlwaysAllowRule: true }
+          : {}),
+      },
       signal,
       ttlMs,
       onTimeout: () =>

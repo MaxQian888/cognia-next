@@ -20,6 +20,28 @@ export interface CanonicalSourceReference {
   snippet?: string
 }
 
+/** Runtime-independent tool delivery metadata, persisted beside the textual fallback. */
+export interface AgentToolResultMetadata {
+  backgrounded?: boolean
+  structuredContent?: unknown
+  structuredContentOmitted?: boolean
+}
+
+export type AgentDeliveryQueueReason =
+  "durable-post" | "ephemeral-post" | "retry-backoff" | "hold" | "none"
+
+/** Durations measured from the runtime's turn origin; absent values are unknown. */
+export interface AgentTurnTiming {
+  firstContentMs?: number
+  firstStreamMs?: number
+  firstStreamAckMs?: number
+  firstStreamQueueWaitMs?: number
+  firstStreamQueueReason?: AgentDeliveryQueueReason
+  firstTextMs?: number
+  firstTextQueueWaitMs?: number
+  firstTextQueueReason?: AgentDeliveryQueueReason
+}
+
 /**
  * Structured assistant content that every renderer can preserve without
  * copying binary bodies into the durable event log.
@@ -75,7 +97,12 @@ export const MODEL_REQUEST_PURPOSES: readonly ModelRequestPurpose[] = [
 
 export type CanonicalAgentEvent =
   | { kind: "extension-ui"; id: string; update: AgentExtensionUiUpdate }
-  | { kind: "lifecycle"; phase: "started" | "ended" | "interrupted"; detail?: string }
+  | {
+      kind: "lifecycle"
+      phase: "started" | "ended" | "interrupted"
+      detail?: string
+      timing?: AgentTurnTiming
+    }
   | {
       /**
        * The caller's input that opened this turn.
@@ -113,6 +140,8 @@ export type CanonicalAgentEvent =
       input?: Record<string, unknown>
       result: unknown
       isError?: boolean
+      structuredContent?: unknown
+      structuredContentOmitted?: boolean
     }
   | {
       kind: "permission-request"
@@ -150,6 +179,7 @@ export type CanonicalAgentEvent =
       prompt: string
       /** JSON Schema describing the expected answer, when the source supplied one. */
       schema?: Record<string, unknown>
+      propertyOrder?: string[]
     }
   | {
       kind: "elicitation-resolved"
@@ -285,6 +315,8 @@ export type CanonicalAgentEvent =
       toolCallId: string
       toolName: string
       elapsedMs: number
+      /** The foreground call handed off to background work; no result yet. */
+      backgrounded?: boolean
       parentToolCallId?: string
       taskId?: string
       heartbeat?: boolean
@@ -316,6 +348,8 @@ export type CanonicalAgentEvent =
       kind: "task"
       phase: "started" | "updated" | "progress" | "settled"
       taskId: string
+      runId?: string
+      parentTaskId?: string
       toolCallId?: string
       description?: string
       subagentType?: string
@@ -329,7 +363,15 @@ export type CanonicalAgentEvent =
   | {
       /** The full set of live background tasks. Replaces, never merges. */
       kind: "task-inventory"
-      tasks: Array<{ taskId: string; taskType: string; description: string }>
+      tasks: Array<{
+        taskId: string
+        taskType: string
+        description: string
+        runId?: string
+        parentTaskId?: string
+        subagentType?: string
+        ambient?: boolean
+      }>
     }
   | {
       /**
@@ -438,6 +480,8 @@ export type CanonicalAgentEvent =
       /** Native subscription utilization, independent of token/cost accounting. */
       utilization?: number
       overageStatus?: "allowed" | "allowed_warning" | "rejected"
+      overageEnabled?: boolean
+      limitScope?: "service" | "channel" | "group_pool"
       /** Epoch seconds, as the provider reports it. */
       overageResetsAt?: number
       overageDisabledReason?: string

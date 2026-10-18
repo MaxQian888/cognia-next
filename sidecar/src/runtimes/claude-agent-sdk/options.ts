@@ -1,6 +1,6 @@
 import type { HookMap } from "../../hooks/kernel/types.ts"
 import type { Options } from "@anthropic-ai/claude-agent-sdk"
-import { enforceAnthropicToolSurface } from "./tool-surface.ts"
+import { enforceAnthropicToolSurface, normalizeClaudeToolNames } from "./tool-surface.ts"
 import type { OptionsContext } from "./runtime-types.ts"
 
 import { randomUUID } from "node:crypto"
@@ -23,6 +23,7 @@ import { createNativeHookExecutor } from "../../hooks/native-executor.ts"
 import { applyEmbeddedClaudeExecutable } from "./executable.ts"
 import {
   applyClaudeAgentSdkOptions,
+  resolveClaudeRuntimeExtensions,
   buildSdkInteractionCallbacks,
   intersectTrustedWorkspaceRoots,
 } from "./sdk-options.ts"
@@ -72,6 +73,10 @@ export function buildAnthropicOptions({
   // was inert without the attach; the renderer now warns at resolve time
   // instead of silently dropping (see `lib/claude/build-options.ts`).
   const baseEnv = buildSubprocessEnv(sendOptions)
+  // SDK 0.3.302 enables fork subagents by default. Keep Cognia's existing
+  // subagent behavior unless the portable context policy explicitly enables it.
+  baseEnv.CLAUDE_CODE_FORK_SUBAGENT =
+    sendOptions.subagentRuntime?.contextMode === "fork" ? "1" : "0"
   // A ledgered envelope must not hide transport retries inside the CLI: each
   // retry is another billed request the ledger never saw.
   if (ledgerGate.active) baseEnv.CLAUDE_CODE_MAX_RETRIES = "0"
@@ -147,7 +152,7 @@ export function buildAnthropicOptions({
     allowedTools: modelAllowedTools,
     disallowedTools: disallowed.size > 0 ? [...disallowed] : sendOptions.disallowedTools,
     additionalDirectories: sendOptions.additionalDirectories,
-    permissionMode: sendOptions.permissionMode,
+    permissionMode: sendOptions.permissionMode ?? "default",
     mcpServers: mergedMcpServers,
     maxTurns: sendOptions.maxTurns,
     // Hard USD ceiling for this single invocation. The SDK halts and emits a
@@ -160,7 +165,22 @@ export function buildAnthropicOptions({
     thinking: thinkingFromBudget(sendOptions.maxThinkingTokens),
     includePartialMessages: sendOptions.includePartialMessages,
     settingSources: sendOptions.settingSources,
-    agents: sendOptions.agents,
+    agents: sendOptions.agents
+      ? Object.fromEntries(
+          Object.entries(sendOptions.agents).map(([name, definition]) => {
+            const { contextPolicy, ...nativeDefinition } = definition
+            return [
+              name,
+              {
+                ...nativeDefinition,
+                ...(contextPolicy?.compactAtTokens !== undefined
+                  ? { autoCompactWindow: contextPolicy.compactAtTokens }
+                  : {}),
+              },
+            ]
+          })
+        )
+      : undefined,
     // Run THIS turn's main thread AS the named subagent (its system prompt, tool
     // restrictions, and model) — Claude Code's `@agent` / `--agent`. Set by
     // `resolveSendOptions` from the composer's `@`-mention, and only ever an id
@@ -254,6 +274,12 @@ export function buildAnthropicOptions({
     cwd: sendOptions.cwd,
     activeWorkspaceRoots: [sendOptions.cwd, ...(sendOptions.additionalDirectories ?? [])],
   })
+  if (sendOptions.runtimeExtensions?.length) {
+    const plugins = new Map((options.plugins ?? []).map((plugin) => [plugin.path, plugin]))
+    for (const plugin of resolveClaudeRuntimeExtensions(sendOptions, sendOptions.runtimeExtensions))
+      plugins.set(plugin.path, plugin)
+    options.plugins = [...plugins.values()]
+  }
   options.systemPrompt = foldSystemPrompt(
     sendOptions.claudeAgentSdk?.systemPrompt ?? sendOptions.systemPrompt,
     sendOptions.appendSystemPrompt
@@ -290,6 +316,21 @@ export function buildAnthropicOptions({
     sendOptions,
     pluginToolNameAliases
   ) as unknown as Options & Record<string, unknown>
+  options.allowedTools = normalizeClaudeToolNames(options.allowedTools)
+  options.disallowedTools = normalizeClaudeToolNames(options.disallowedTools)
+  if (Array.isArray(options.tools)) options.tools = normalizeClaudeToolNames(options.tools)
+  if (options.agents) {
+    options.agents = Object.fromEntries(
+      Object.entries(options.agents).map(([name, agent]) => [
+        name,
+        {
+          ...agent,
+          tools: normalizeClaudeToolNames(agent.tools),
+          disallowedTools: normalizeClaudeToolNames(agent.disallowedTools),
+        },
+      ])
+    )
+  }
   options = enforceAnthropicToolSurface(options, sendOptions)
   options = applyEmbeddedClaudeExecutable(options)
 

@@ -300,6 +300,58 @@ describe("mintSessionRouteTicket", () => {
 describe("required external agent gateway leases", () => {
   const input = { providerId: "anthropic", modelId: "claude-opus-5", sessionId: "task-a" } as const
 
+  it("keeps the sticky deployment across revoked per-turn tickets without reusing execution authority", async () => {
+    const first = await prepareExternalAgentGatewayRoute(input)
+    const firstRequest = mintMock.mock.calls[0][0]
+    await revokeMock(first.ticketId)
+    await prepareExternalAgentGatewayRoute(input)
+    const nextRequest = mintMock.mock.calls[1][0]
+    expect(nextRequest.candidates).toEqual(firstRequest.candidates)
+    expect(nextRequest.providerOverrides[0].deploymentId).toBe(
+      firstRequest.providerOverrides[0].deploymentId
+    )
+    expect(nextRequest.executionFingerprint).not.toBe(firstRequest.executionFingerprint)
+    expect(nextRequest.credentialAffinity).toBe("session-sticky")
+    expect(nextRequest.allowAuthFailover).toBe(false)
+  })
+
+  it("keeps an authorized model change on the same task deployment with fresh model authority", async () => {
+    enrichedMock.mockImplementation(() => ({
+      ...snapshot(),
+      providers: [
+        {
+          ...snapshot().providers[0],
+          apiKey: "default-key",
+          models: ["claude-opus-5", "claude-sonnet-5"],
+        },
+      ],
+    }))
+    await prepareExternalAgentGatewayRoute(input)
+    await prepareExternalAgentGatewayRoute({ ...input, modelId: "claude-sonnet-5" })
+    const [first, next] = mintMock.mock.calls.map(([request]) => request)
+    expect(next.candidates[0].deploymentId).toBe(first.candidates[0].deploymentId)
+    expect(next.candidates[0].modelId).toBe("claude-sonnet-5")
+    expect(next.executionFingerprint).not.toBe(first.executionFingerprint)
+  })
+
+  it("does not share sticky deployment identity across provider accounts of the same task", async () => {
+    credentialMock.mockImplementation(async (_provider, _settings, accountId) => ({
+      apiKey: `key-${accountId}`,
+      baseURL: "https://gateway.example/v1",
+    }))
+    await prepareExternalAgentGatewayRoute({ ...input, accountId: "a" })
+    await prepareExternalAgentGatewayRoute({ ...input, accountId: "b" })
+    const requests = mintMock.mock.calls.map(([request]) => request)
+    expect(requests[0].candidates[0].deploymentId).not.toBe(requests[1].candidates[0].deploymentId)
+  })
+
+  it("does not share a deployment across tasks using the same provider account", async () => {
+    await prepareExternalAgentGatewayRoute(input)
+    await prepareExternalAgentGatewayRoute({ ...input, sessionId: "task-b" })
+    const [first, next] = mintMock.mock.calls.map(([request]) => request)
+    expect(next.candidates[0].deploymentId).not.toBe(first.candidates[0].deploymentId)
+  })
+
   it("publishes a fresh snapshot and mints a task-only upstream even while the optional flag is off", async () => {
     flagMock.mockReturnValue(false)
     const result = await prepareExternalAgentGatewayRoute({

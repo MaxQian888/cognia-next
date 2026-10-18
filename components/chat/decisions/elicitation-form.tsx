@@ -33,6 +33,49 @@ import type {
 
 export type ElicitationValues = Record<string, AcpElicitationValue>
 
+interface ChoiceOrTextQuestion {
+  id: string
+  notesField: string
+  question: string
+  options: Array<{ label: string; description?: string; preview?: string }>
+}
+
+/** Paired choice/text fields supplied by a runtime's question adapter. */
+function choiceOrTextQuestions(request?: AcpElicitationRequest): ChoiceOrTextQuestion[] {
+  const userInput = request?._meta?.userInput
+  if (!userInput || typeof userInput !== "object" || Array.isArray(userInput)) return []
+  const questions = (userInput as Record<string, unknown>).questions
+  if (!Array.isArray(questions)) return []
+  const properties = request?.requestedSchema?.properties ?? {}
+  return questions.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return []
+    const group = value as Record<string, unknown>
+    if (
+      typeof group.id !== "string" ||
+      typeof group.notesField !== "string" ||
+      group.id === group.notesField ||
+      typeof group.question !== "string" ||
+      !Object.hasOwn(properties, group.id) ||
+      properties[group.notesField]?.type !== "string" ||
+      !Array.isArray(group.options)
+    )
+      return []
+    const options = group.options.flatMap((option: unknown) => {
+      if (!option || typeof option !== "object" || Array.isArray(option)) return []
+      const entry = option as Record<string, unknown>
+      if (typeof entry.label !== "string") return []
+      return [
+        {
+          label: entry.label,
+          ...(typeof entry.description === "string" ? { description: entry.description } : {}),
+          ...(typeof entry.preview === "string" ? { preview: entry.preview } : {}),
+        },
+      ]
+    })
+    return [{ id: group.id, notesField: group.notesField, question: group.question, options }]
+  })
+}
+
 /**
  * A schema fragment that can offer choices — a property, or an array's `items`.
  * Open-ended for the same reason `AcpElicitationPropertySchema` is: callers pass
@@ -92,17 +135,25 @@ export function initialElicitationValues(
 export function isElicitationComplete(
   properties: Record<string, AcpElicitationPropertySchema>,
   required: string[],
-  values: ElicitationValues
+  values: ElicitationValues,
+  request?: AcpElicitationRequest
 ): boolean {
-  return required.every((key) => {
-    if (!(key in properties)) return true
-    const value = values[key]
-    // A boolean is answered by being either true or false — `false` is a real
-    // answer to "confirm?", not a missing one.
-    if (properties[key].type === "boolean") return typeof value === "boolean"
-    if (Array.isArray(value)) return value.length > 0
-    return typeof value === "string" ? value.trim().length > 0 : value !== undefined
-  })
+  const hasAnswer = (value: AcpElicitationValue | undefined) =>
+    Array.isArray(value) ? value.length > 0 : typeof value === "string" && value.trim().length > 0
+  return (
+    choiceOrTextQuestions(request).every(
+      (question) => hasAnswer(values[question.id]) || hasAnswer(values[question.notesField])
+    ) &&
+    required.every((key) => {
+      if (!(key in properties)) return true
+      const value = values[key]
+      // A boolean is answered by being either true or false — `false` is a real
+      // answer to "confirm?", not a missing one.
+      if (properties[key].type === "boolean") return typeof value === "boolean"
+      if (Array.isArray(value)) return value.length > 0
+      return typeof value === "string" ? value.trim().length > 0 : value !== undefined
+    })
+  )
 }
 
 export interface ElicitationFormProps {
@@ -121,6 +172,10 @@ export function ElicitationForm({
 }: ElicitationFormProps) {
   const t = useTranslations("externalAgent.elicitation")
   const properties = request.requestedSchema?.properties ?? {}
+  const questions = choiceOrTextQuestions(request)
+  const orderedKeys = [
+    ...new Set([...(request.propertyOrder ?? []), ...Object.keys(properties)]),
+  ].filter((key) => Object.hasOwn(properties, key))
 
   const setValue = (key: string, value: AcpElicitationValue) =>
     onValuesChange({ ...values, [key]: value })
@@ -150,11 +205,20 @@ export function ElicitationForm({
 
   return (
     <div className="space-y-4" data-testid="elicitation-form">
-      {Object.entries(properties).map(([key, schema]) => {
+      {orderedKeys.map((key) => {
+        const schema = properties[key]
         const fieldId = `elicitation-${request.id}-${key}`
-        const label = schema.title || key
+        const notesQuestion = questions.find((question) => question.notesField === key)
+        const question = questions.find((question) => question.id === key)
+        if (question?.options.length === 0) return null
+        const label = notesQuestion
+          ? t("otherResponse", { question: notesQuestion.question })
+          : schema.title || key
+        const optionDescription = (value: string) =>
+          question?.options.find((option) => option.label === value)?.description
         const choices = elicitationChoices(schema)
         const value = values[key]
+        const preview = question?.options.find((option) => option.label === value)?.preview
 
         const selected = Array.isArray(value)
           ? value.filter((v): v is string => typeof v === "string")
@@ -196,7 +260,12 @@ export function ElicitationForm({
                         }
                       />
                       <Label htmlFor={`${fieldId}-${choice.value}`} className="font-normal">
-                        {choice.label}
+                        <span>{choice.label}</span>
+                        {optionDescription(choice.value) && (
+                          <span className="block text-xs text-muted-foreground">
+                            {optionDescription(choice.value)}
+                          </span>
+                        )}
                       </Label>
                     </div>
                   )
@@ -206,20 +275,32 @@ export function ElicitationForm({
               <>
                 <Label htmlFor={fieldId}>{label}</Label>
                 {choices.length > 0 ? (
-                  <RadioGroup
-                    value={typeof value === "string" ? value : ""}
-                    disabled={disabled}
-                    onValueChange={(next) => setValue(key, next)}
-                  >
-                    {choices.map((choice) => (
-                      <div key={choice.value} className="flex items-center gap-2">
-                        <RadioGroupItem id={`${fieldId}-${choice.value}`} value={choice.value} />
-                        <Label htmlFor={`${fieldId}-${choice.value}`} className="font-normal">
-                          {choice.label}
-                        </Label>
-                      </div>
-                    ))}
-                  </RadioGroup>
+                  <>
+                    <RadioGroup
+                      value={typeof value === "string" ? value : ""}
+                      disabled={disabled}
+                      onValueChange={(next) => setValue(key, next)}
+                    >
+                      {choices.map((choice) => (
+                        <div key={choice.value} className="flex items-center gap-2">
+                          <RadioGroupItem id={`${fieldId}-${choice.value}`} value={choice.value} />
+                          <Label htmlFor={`${fieldId}-${choice.value}`} className="font-normal">
+                            <span>{choice.label}</span>
+                            {optionDescription(choice.value) && (
+                              <span className="block text-xs text-muted-foreground">
+                                {optionDescription(choice.value)}
+                              </span>
+                            )}
+                          </Label>
+                        </div>
+                      ))}
+                    </RadioGroup>
+                    {preview && (
+                      <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">
+                        {preview}
+                      </pre>
+                    )}
+                  </>
                 ) : schema.format === "multiline" || schema.default !== undefined ? (
                   // A prefilled string is an `editor` dialog: the user is meant
                   // to revise a body of text, not retype one line.

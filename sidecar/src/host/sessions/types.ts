@@ -1,10 +1,15 @@
 import type { SendOptions, Prompt } from "../../shared/wire/inbound.ts"
+import type {
+  AgentExtensionReloadOptions,
+  AgentExtensionReloadResult,
+} from "@cognia/agent-contracts/session-operations"
 export type Log = (level: "info" | "warn" | "error", message: string) => void
 export type Frame = { type: string; sessionId?: string; turnId?: string; [key: string]: unknown }
 export type Emit = (frame: Frame) => void
 export type Outcome = { ok: true; result: unknown } | { ok: false; error: string }
 /** The host consumes capabilities, while each rail owns its complete session. */
 export interface HostSession {
+  reloadExtensions?(options?: AgentExtensionReloadOptions): Promise<AgentExtensionReloadResult>
   sdkSessionId?: string
   multiTurn?: boolean
   runtimeAdapterId?: string

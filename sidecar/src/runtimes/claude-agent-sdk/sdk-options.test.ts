@@ -11,6 +11,8 @@ import {
   intersectTrustedWorkspaceRoots,
   isWithinRoots,
   resolvePlugins,
+  createClaudeExtensionReloader,
+  resolveClaudeRuntimeExtensions,
   sendExpectsStructuredOutput,
   validateNativeSkillPaths,
   CHECKPOINT_REQUIRED_EXTRA_ARGS,
@@ -37,6 +39,160 @@ test("native content validation handles missing roots, file links, directory cyc
   })
   assert.deepEqual(intersectTrustedWorkspaceRoots(undefined, undefined), [])
   assert.equal(resolvePlugins([null, { type: "remote" }], []).warnings.length, 2)
+})
+
+test("portable extension admission attests trusted model-visible files and refuses native MCP discovery", () => {
+  withTempWorkspace((root) => {
+    const plugin = join(root, "extension")
+    mkdirSync(join(plugin, "agents"), { recursive: true })
+    writeFileSync(join(plugin, "agents", "agent.md"), "Explain the repository")
+    const send = { cwd: root, trustedWorkspaceRoots: [root] }
+    const refs = [{ kind: "directory" as const, path: plugin }]
+    assert.deepEqual(resolveClaudeRuntimeExtensions(send, refs), [
+      { type: "local", path: realpathSync(plugin), skipMcpDiscovery: true },
+    ])
+    assert.throws(
+      () => resolveClaudeRuntimeExtensions(send, [{ ...refs[0]!, discoverMcp: true }]),
+      /native MCP discovery is unsupported/
+    )
+    writeFileSync(join(plugin, "agents", "agent.md"), "Contact private.person@example.com")
+    assert.throws(() => resolveClaudeRuntimeExtensions(send, refs), /PII gate/)
+    writeFileSync(join(plugin, "agents", "agent.md"), "x".repeat(1024 * 1024 + 1))
+    assert.throws(() => resolveClaudeRuntimeExtensions(send, refs), /scan limits/)
+    rmSync(join(plugin, "agents", "agent.md"))
+    symlinkSync("/etc/passwd", join(plugin, "escape.md"))
+    assert.throws(() => resolveClaudeRuntimeExtensions(send, refs), /outside a trusted workspace/)
+  })
+})
+
+test("extension manifests cannot hide instructions outside the attested tree or leak descriptive content", () => {
+  withTempWorkspace((root) => {
+    const plugin = join(root, "extension")
+    mkdirSync(join(plugin, ".claude-plugin"), { recursive: true })
+    const manifest = join(plugin, ".claude-plugin", "plugin.json")
+    const refs = [{ kind: "directory" as const, path: plugin }]
+    const send = { cwd: root, trustedWorkspaceRoots: [root] }
+    writeFileSync(
+      manifest,
+      JSON.stringify({
+        name: "safe",
+        description: "Instructions",
+        author: { email: "author@example.com" },
+        env: { TOKEN: "transport@example.com" },
+      })
+    )
+    assert.doesNotThrow(() => resolveClaudeRuntimeExtensions(send, refs))
+    writeFileSync(
+      manifest,
+      JSON.stringify({ name: "safe", description: "private.person@example.com" })
+    )
+    assert.throws(() => resolveClaudeRuntimeExtensions(send, refs), /PII gate/)
+    writeFileSync(
+      manifest,
+      JSON.stringify({ name: "safe", descriptions: { env: "private.person@example.com" } })
+    )
+    assert.throws(() => resolveClaudeRuntimeExtensions(send, refs), /PII gate/)
+    writeFileSync(manifest, JSON.stringify({ name: "safe", commands: "/etc/passwd" }))
+    assert.throws(() => resolveClaudeRuntimeExtensions(send, refs), /outside a trusted workspace/)
+    writeFileSync(join(plugin, "prompt.data"), "private.person@example.com")
+    writeFileSync(manifest, JSON.stringify({ name: "safe", commands: "./prompt.data" }))
+    assert.throws(() => resolveClaudeRuntimeExtensions(send, refs), /PII gate/)
+    writeFileSync(manifest, JSON.stringify({ name: "safe" }))
+    writeFileSync(join(plugin, ".mcp.json"), JSON.stringify({ note: "private.person@example.com" }))
+    writeFileSync(manifest, JSON.stringify({ name: "safe", commands: "./.mcp.json" }))
+    assert.throws(() => resolveClaudeRuntimeExtensions(send, refs), /PII gate/)
+    writeFileSync(manifest, JSON.stringify({ name: "safe" }))
+    symlinkSync(join(plugin, "prompt.data"), join(plugin, "prompt.md"))
+    assert.throws(() => resolveClaudeRuntimeExtensions(send, refs), /PII gate/)
+  })
+})
+
+test("Claude extension reloader preserves held and partial results without mutating portable startup state", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cognia-sdk-live-extension-"))
+  try {
+    const plugin = join(root, "extension")
+    mkdirSync(plugin)
+    const send = { cwd: root, trustedWorkspaceRoots: [root] }
+    const requests: unknown[] = []
+    let nativeResult = { plugins: [] as Array<{ path: string }>, error_count: 0, held: true }
+    const reload = createClaudeExtensionReloader(
+      {
+        reloadPlugins: async (options) => {
+          requests.push(options)
+          return nativeResult as never
+        },
+      },
+      send,
+      () => []
+    )
+    const add = [{ kind: "directory" as const, path: plugin }]
+    assert.equal((await reload({ add, preservePromptCache: true })).disposition, "held")
+    assert.deepEqual(requests[0], {
+      addPlugins: [{ type: "local", path: realpathSync(plugin), skipMcpDiscovery: true }],
+      holdOnCacheImpact: true,
+    })
+    nativeResult = {
+      ...nativeResult,
+      plugins: [{ path: realpathSync(plugin) }],
+      held: false,
+      error_count: 1,
+    }
+    assert.equal((await reload({ add })).disposition, "partial")
+    assert.deepEqual(send, { cwd: root, trustedWorkspaceRoots: [root] })
+    Object.assign(send, { runtimeExtensions: add })
+    nativeResult = { ...nativeResult, plugins: [], error_count: 0 }
+    assert.equal((await reload({ add })).disposition, "partial")
+    assert.deepEqual((await reload({ add })).added, [])
+    const existing = createClaudeExtensionReloader(
+      { reloadPlugins: async () => nativeResult as never },
+      { ...send, runtimeExtensions: add },
+      () => [{ path: realpathSync(plugin) }]
+    )
+    writeFileSync(join(plugin, "SKILL.md"), "private.person@example.com")
+    await assert.rejects(existing(), /PII gate/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("portable reload refuses unproven SDK plugin inventory before native mutation", async () => {
+  let calls = 0
+  const query = {
+    reloadPlugins: async () => {
+      calls++
+      return { plugins: [], error_count: 0 } as never
+    },
+  }
+  await assert.rejects(createClaudeExtensionReloader(query, {})(), /inventory_unavailable/)
+  await assert.rejects(
+    createClaudeExtensionReloader(query, {}, () => [{ path: "/unattested" }])(),
+    /inventory_unattested/
+  )
+  assert.equal(calls, 0)
+})
+
+test("only the pinned SDK built-in sentinel identities bypass filesystem admission", async () => {
+  const builtin = {
+    path: "builtin",
+    name: "cc-plugin-agents-md",
+    source: "cc-plugin-agents-md@builtin",
+  }
+  const query = { reloadPlugins: async () => ({ plugins: [builtin], error_count: 0 }) as never }
+  assert.equal(
+    (await createClaudeExtensionReloader(query, {}, () => [builtin])()).disposition,
+    "applied"
+  )
+  await assert.rejects(
+    createClaudeExtensionReloader(query, {}, () => [{ ...builtin, name: "unknown" }])(),
+    /inventory_unattested/
+  )
+  const injected = {
+    reloadPlugins: async () => ({ plugins: [{ path: "/unattested" }], error_count: 0 }) as never,
+  }
+  await assert.rejects(
+    createClaudeExtensionReloader(injected, {}, () => [])(),
+    /invalid_extension_reload_result/
+  )
 })
 
 function withTempWorkspace(run: (root: string) => void) {
@@ -409,7 +565,7 @@ test("interaction descriptors build live callbacks on the existing approval roun
     },
     async (toolName, input) => {
       requests.push([toolName, input])
-      return toolName === "SDK:Elicitation"
+      return toolName === "Runtime:Elicitation"
         ? { behavior: "allow", updatedInput: { content: { answer: "yes" } } }
         : { behavior: "allow", updatedInput: { result: "confirmed" } }
     }
@@ -425,7 +581,7 @@ test("interaction descriptors build live callbacks on the existing approval roun
   )
   assert.deepEqual(
     requests.map(([name]) => name),
-    ["SDK:Elicitation", "SDK:Dialog:confirm"]
+    ["Runtime:Elicitation", "Runtime:Dialog:confirm"]
   )
 })
 
@@ -444,6 +600,57 @@ test("interaction callbacks fail closed on denial or PII-bearing responses", asy
     updatedInput: { content: { email: "alice@example.com" } },
   }))
   assert.deepEqual(await leaking.onElicitation!({}, {}), { action: "decline" })
+})
+
+test("elicitation callbacks preserve explicit field order in the shared form descriptor", async () => {
+  let captured: Record<string, unknown> | undefined
+  const callbacks = buildSdkInteractionCallbacks(
+    { elicitation: { enabled: true } },
+    async (_name, input) => {
+      captured = input
+      return { behavior: "deny" }
+    }
+  )
+  await callbacks.onElicitation!({
+    message: "Question",
+    requestedSchema: { type: "object", properties: { a: {}, b: {} } },
+    property_order: ["b", "a"],
+  })
+  assert.deepEqual((captured?.elicitation as Record<string, unknown>).propertyOrder, ["b", "a"])
+  await callbacks.onElicitation!({
+    requestedSchema: { type: "object", properties: { a: {}, b: {} } },
+  })
+  assert.deepEqual((captured?.elicitation as Record<string, unknown>).propertyOrder, ["a", "b"])
+})
+
+test("URL elicitation refuses unsafe targets before requesting approval", async () => {
+  let requests = 0
+  const callbacks = buildSdkInteractionCallbacks({ elicitation: { enabled: true } }, async () => {
+    requests++
+    return { behavior: "allow", updatedInput: {} }
+  })
+  assert.deepEqual(await callbacks.onElicitation!({ mode: "url", url: "javascript:alert(1)" }), {
+    action: "decline",
+  })
+  assert.equal(requests, 0)
+  assert.deepEqual(
+    await callbacks.onElicitation!({ mode: "url", url: "https://example.com/auth" }),
+    { action: "accept" }
+  )
+  assert.equal(requests, 1)
+  assert.deepEqual(
+    await callbacks.onElicitation!({ requestedSchema: { properties: { bad: null } } }),
+    { action: "decline" }
+  )
+  assert.equal(requests, 1)
+  for (const schema of [
+    { type: "object", properties: { password: { type: "string" } } },
+    { type: "object", properties: { name: { type: "string" } }, required: "name" },
+  ])
+    assert.deepEqual(await callbacks.onElicitation!({ requestedSchema: schema }), {
+      action: "decline",
+    })
+  assert.equal(requests, 1)
 })
 
 // ---- extraArgs --------------------------------------------------------------

@@ -1,7 +1,42 @@
 import type { JsonSchema } from "@/types/external-service"
+import type { AcpElicitationRequest } from "@cognia/agent-contracts/external-agent"
+import { elicitationFormSchemaSafetyError } from "@cognia/agent-contracts/external-agent"
 
-const SENSITIVE_FIELD_PATTERN =
-  /(?:password|passcode|secret|api[\s_-]*key|access[\s_-]*token|refresh[\s_-]*token|payment|card[\s_-]*(?:number|code)|cvv|cvc|pin)/i
+/** Adapt runtime interaction approvals, including older persisted SDK requests. */
+export function approvalElicitationRequest(approval: {
+  toolName: string
+  requestId: string
+  input: Record<string, unknown>
+}): AcpElicitationRequest | undefined {
+  if (!["Runtime:Elicitation", "SDK:Elicitation"].includes(approval.toolName)) return undefined
+  const raw = approval.input.elicitation ?? approval.input.request
+  if (!raw || typeof raw !== "object") return undefined
+  const request = raw as Partial<AcpElicitationRequest>
+  if (typeof request.message !== "string") return undefined
+  if (
+    request.mode !== "url" &&
+    request.requestedSchema !== undefined &&
+    elicitationFormSchemaSafetyError(request.requestedSchema)
+  )
+    return undefined
+  if (request.mode === "url") {
+    try {
+      const target = parseUrlElicitation(request.url)
+      return {
+        ...request,
+        id: approval.requestId,
+        mode: "url",
+        message: request.message,
+        url: target.href,
+        origin: target.origin,
+        raw: {},
+      }
+    } catch {
+      return undefined
+    }
+  }
+  return { ...request, id: approval.requestId, mode: "form", message: request.message, raw: {} }
+}
 
 export type McpElicitationValue = string | number | boolean | string[]
 
@@ -14,6 +49,7 @@ export interface McpElicitationProvenance {
 export interface McpFormElicitation {
   mode: "form"
   message: string
+  propertyOrder?: string[]
   requestedSchema: JsonSchema & {
     type: "object"
     properties: Record<string, JsonSchema>
@@ -47,6 +83,7 @@ interface RawElicitationRequest {
     mode?: "form" | "url"
     message?: string
     requestedSchema?: JsonSchema
+    propertyOrder?: string[]
     elicitationId?: string
     url?: string
   }
@@ -57,17 +94,8 @@ function assertSafeFormSchema(schema: JsonSchema | undefined): asserts schema is
   properties: Record<string, JsonSchema>
   required?: string[]
 } {
-  if (!schema || schema.type !== "object" || !schema.properties) {
-    throw new Error("MCP elicitation form requires an object schema")
-  }
-  for (const [name, property] of Object.entries(schema.properties)) {
-    const signals = [name, property.title, property.description, property.format]
-      .filter((value): value is string => typeof value === "string")
-      .join(" ")
-    if (SENSITIVE_FIELD_PATTERN.test(signals)) {
-      throw new Error(`MCP elicitation form cannot request sensitive field: ${name}`)
-    }
-  }
+  const error = elicitationFormSchemaSafetyError(schema)
+  if (error) throw new Error(error)
 }
 
 function parseUrlElicitation(url: string | undefined): URL {
@@ -109,6 +137,9 @@ export function createMcpElicitationRequest(
     mode: "form",
     message: params.message,
     requestedSchema: params.requestedSchema,
+    ...(Array.isArray(params.propertyOrder)
+      ? { propertyOrder: params.propertyOrder.filter((key) => typeof key === "string") }
+      : {}),
     provenance,
   }
 }

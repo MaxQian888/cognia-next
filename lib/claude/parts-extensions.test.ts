@@ -1,4 +1,5 @@
 import {
+  toolResultMetadata,
   hasMcpContent,
   isSourcesPart,
   isGroundingPart,
@@ -8,6 +9,21 @@ import {
   type McpResultBlock,
   type SubagentPart,
 } from "./parts-extensions"
+
+describe("portable tool result metadata", () => {
+  it("reads older transcripts and gives the portable metadata authority", () => {
+    expect(toolResultMetadata({ sdkToolResult: { detachedToolCall: true } })?.backgrounded).toBe(
+      true
+    )
+    expect(
+      toolResultMetadata({
+        toolResultMetadata: { backgrounded: false },
+        sdkToolResult: { detachedToolCall: true },
+      })
+    ).toEqual({ backgrounded: false })
+    expect(toolResultMetadata(null)).toBeUndefined()
+  })
+})
 
 describe("parts-extensions — isGroundingPart", () => {
   it("accepts a persisted claim-to-chunk assessment", () => {

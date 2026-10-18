@@ -16,6 +16,11 @@ import type { DispatchParams } from "./types.ts"
 // same `permission_request` round-trip (`pendingApprovals`). Plugin tools
 // round-trip through `pendingPluginToolCalls`. A2UI remains Anthropic-only.
 
+import {
+  requestedRuntimeCapabilities,
+  runtimeFeatureValidationError,
+} from "@cognia/agent-contracts/session-operations"
+import { runtimeFeatureSupported, capabilityError } from "./capabilities.ts"
 import { requireEngine } from "./engines.ts"
 import { resolveRuntimeAdapter } from "./registry.ts"
 
@@ -23,7 +28,31 @@ import { resolveRuntimeAdapter } from "./registry.ts"
 // telemetry surface; exported for tests.
 export const dispatchTelemetry = { legacyDispatchCount: 0, frozenDispatchCount: 0 }
 
+export function validateRuntimeFeatures(
+  params: Pick<DispatchParams, "sendOptions" | "emit" | "sessionId">
+) {
+  const adapterId = params.sendOptions?.execution?.runtimeAdapter
+  const validationError = runtimeFeatureValidationError(params.sendOptions)
+  if (validationError) throw new Error(validationError)
+  const effectiveAdapter =
+    adapterId ??
+    ((params.sendOptions.provider ?? "anthropic") === "anthropic" ? "claude-agent-sdk" : "ai-sdk")
+  for (const capability of requestedRuntimeCapabilities(params.sendOptions)) {
+    if (
+      !runtimeFeatureSupported(
+        effectiveAdapter,
+        capability,
+        adapterId ? params.sendOptions.execution : undefined
+      )
+    ) {
+      params.emit(capabilityError(params.sessionId, capability, "send"))
+      throw new Error(`unsupported capability: ${capability}`)
+    }
+  }
+}
+
 export function dispatch(params: DispatchParams) {
+  validateRuntimeFeatures(params)
   const adapterId = params.sendOptions?.execution?.runtimeAdapter
   if (adapterId) {
     const adapter = resolveRuntimeAdapter(adapterId)

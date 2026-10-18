@@ -14,6 +14,8 @@ function fixture(
     fail?: boolean
     /** Stream parts for the Nth (1-based) summary call; default one text delta. */
     script?: (call: number) => Record<string, unknown>[]
+    hostRpc?: Parameters<typeof createCompactor>[0]["hostRpc"]
+    streamTextOverride?: Parameters<typeof createCompactor>[0]["streamTextOverride"]
   } = {}
 ) {
   let complete!: () => void
@@ -75,6 +77,8 @@ function fixture(
     sessionId: "s",
     sdkSessionId: "sdk",
     protocolAdapter: adapter,
+    hostRpc: options.hostRpc,
+    streamTextOverride: options.streamTextOverride,
     pendingProtocolExecs: new Map(),
     pendingPluginHookCalls: pendingHooks,
     emit(event) {
@@ -232,6 +236,151 @@ test("cancellation cleans its plugin hook without touching other pending hooks",
   await f.compact.settle()
   assert.deepEqual([...f.pendingHooks.keys()], ["other"])
   assert.equal(f.calls(), 0)
+})
+
+function siwcWireFixture(rejectExplicitCap = false) {
+  const bodies: Record<string, unknown>[] = []
+  const timeouts: unknown[] = []
+  const streams = new Map<string, boolean>()
+  const response = { id: "fixture-response", created_at: 1, model: "m" }
+  const events = [
+    { type: "response.created", response },
+    {
+      type: "response.output_item.added",
+      output_index: 0,
+      item: {
+        type: "message",
+        id: "message",
+        role: "assistant",
+        status: "in_progress",
+        content: [],
+      },
+    },
+    {
+      type: "response.output_text.delta",
+      item_id: "message",
+      output_index: 0,
+      content_index: 0,
+      delta: "native summary",
+    },
+    {
+      type: "response.output_item.done",
+      output_index: 0,
+      item: {
+        type: "message",
+        id: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: "native summary", annotations: [] }],
+      },
+    },
+    {
+      type: "response.completed",
+      response: {
+        ...response,
+        status: "completed",
+        output: [],
+        usage: { input_tokens: 4, output_tokens: 2, total_tokens: 6 },
+      },
+    },
+  ]
+  const hostRpc: NonNullable<Parameters<typeof createCompactor>[0]["hostRpc"]> = {
+    async call(method, params, options) {
+      timeouts.push(options?.timeoutMs)
+      const args = params as Record<string, unknown>
+      if (method === "siwc.responses.open") {
+        const body = JSON.parse(String(args.body)) as Record<string, unknown>
+        bodies.push(body)
+        if (rejectExplicitCap && Object.hasOwn(body, "max_output_tokens"))
+          throw new Error("unsupported max_output_tokens")
+        const streamId = `stream-${bodies.length}`
+        streams.set(streamId, false)
+        return { streamId, status: 200, headers: { "content-type": "text/event-stream" } }
+      }
+      if (method === "siwc.responses.read") {
+        const id = String(args.streamId)
+        if (streams.get(id)) return { done: true }
+        streams.set(id, true)
+        return {
+          done: false,
+          chunkBase64: Buffer.from(
+            events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")
+          ).toString("base64"),
+        }
+      }
+      return null
+    },
+  }
+  return { bodies, hostRpc, timeouts }
+}
+
+for (const strategy of ["summary", "optical"] as const)
+  test(`SIWC ${strategy} compaction emits supported actual SDK wire without an invented output cap`, async () => {
+    const wire = siwcWireFixture()
+    const f = fixture({
+      hostRpc: wire.hostRpc,
+      compaction: {
+        strategy,
+        optical: { size: 512, verify: true, readabilityThreshold: 0, minSavings: 0, maxFrames: 16 },
+        summary: {
+          protocol: "chatgpt-siwc",
+          model: "m",
+          providerId: "siwc",
+          credentials: { baseURL: "siwc://a/c" },
+        },
+      },
+    })
+    if (strategy === "optical")
+      for (const message of f.conversation)
+        message.content = "plain readable words on a page. ".repeat(100)
+    await f.compact({}, {}, { force: true })
+    assert.ok(wire.bodies.length > 0)
+    for (const body of wire.bodies) {
+      assert.equal(body.stream, true)
+      assert.equal(body.store, false)
+      assert.equal(Object.hasOwn(body, "max_output_tokens"), false)
+      assert.ok(Array.isArray(body.input))
+    }
+    if (strategy === "optical")
+      assert.ok(wire.bodies.some((body) => JSON.stringify(body.input).includes("input_image")))
+    assert.ok(wire.timeouts.every((timeout) => timeout === 70_000))
+    assert.equal(f.calls(), 0)
+    assert.equal(boundaries(f.events).length, 1)
+  })
+
+test("SIWC preserves explicit output constraints for native rejection", async () => {
+  const wire = siwcWireFixture(true)
+  const f = fixture({
+    hostRpc: wire.hostRpc,
+    compaction: {
+      summary: { protocol: "chatgpt-siwc", model: "m", credentials: { baseURL: "siwc://a/c" } },
+    },
+  })
+  const before = JSON.stringify(f.conversation)
+  await f.compact({}, { maxOutputTokens: 123 }, { force: true })
+  assert.equal(wire.bodies[0]!.max_output_tokens, 123)
+  assert.equal(JSON.stringify(f.conversation), before)
+  assert.equal(f.calls(), 0)
+})
+
+test("SIWC ledgered auxiliary work refuses an unenforceable hard output budget before reservation", async () => {
+  const wire = siwcWireFixture()
+  const frames: Record<string, unknown>[] = []
+  const f = fixture({
+    hostRpc: wire.hostRpc,
+    compaction: {
+      summary: { protocol: "chatgpt-siwc", model: "m", credentials: { baseURL: "siwc://a/c" } },
+    },
+  })
+  f.state.turnLedgerGate = createCallLedgerGate({
+    sessionId: "s",
+    ledger: { runId: "run", mode: "per_call", deploymentId: "siwc::m" },
+    emit: (event) => frames.push(event),
+  })
+  await f.compact({}, {}, { force: true })
+  assert.equal(wire.bodies.length, 0)
+  assert.equal(frames.filter((event) => event.type === "call_reserve_request").length, 0)
+  assert.match(String(outcomes(f.events)[0]?.content), /cannot enforce the output-token cap/)
 })
 
 test("parent abort cancels preparation even before the model request completes", async () => {
@@ -573,4 +722,103 @@ test("a pair already broken before compaction does not block it", async () => {
   f.conversation.splice(1, 0, callMsg("interrupted"))
   await forceCompact(f)
   assert.equal(boundaries(f.events).length, 1)
+})
+
+test("SIWC compaction resolves its auxiliary adapter through the native Host", async () => {
+  let captured: Record<string, unknown> | undefined
+  const f = fixture({
+    compaction: {
+      summary: {
+        protocol: "chatgpt-siwc",
+        providerId: "siwc",
+        model: "m",
+        credentials: { protocol: "chatgpt-siwc", baseURL: "siwc://a/c" },
+      },
+    },
+    hostRpc: {
+      async call() {
+        throw new Error("fake stream must not invoke native")
+      },
+    },
+    streamTextOverride(args) {
+      captured = args
+      return {
+        stream: (async function* () {
+          yield { type: "text-delta", text: "safe summary" }
+          yield { type: "finish", finishReason: "stop" }
+        })(),
+        usage: Promise.resolve({}),
+      }
+    },
+  })
+  await f.compact({}, {}, { force: true })
+  assert.equal((captured!.model as { provider: string }).provider, "openai.responses")
+  assert.equal(f.calls(), 0, "must not fall back to the primary adapter")
+  assert.match(String(f.conversation[0]?.content), /safe summary/)
+})
+
+test("SIWC compaction without Host RPC fails closed instead of using the primary provider", async () => {
+  let streamCalled = false
+  const f = fixture({
+    compaction: {
+      summary: {
+        protocol: "chatgpt-siwc",
+        providerId: "siwc",
+        model: "m",
+        credentials: { baseURL: "siwc://a/c" },
+      },
+    },
+    streamTextOverride() {
+      streamCalled = true
+      throw new Error("must not reach streamText")
+    },
+  })
+  const before = JSON.stringify(f.conversation)
+  await f.compact({}, {}, { force: true })
+  assert.equal(streamCalled, false)
+  assert.equal(f.calls(), 0)
+  assert.equal(JSON.stringify(f.conversation), before)
+})
+
+test("SIWC optical read-back retains the native transport when resolving an auxiliary vision adapter", async () => {
+  const captured: Record<string, unknown>[] = []
+  const f = fixture({
+    compaction: {
+      strategy: "optical",
+      optical: { size: 512, verify: true, readabilityThreshold: 0, minSavings: 0, maxFrames: 16 },
+      summary: {
+        protocol: "chatgpt-siwc",
+        providerId: "siwc",
+        model: "m",
+        credentials: { baseURL: "siwc://a/c" },
+      },
+    },
+    hostRpc: {
+      async call() {
+        throw new Error("fake stream must not invoke native")
+      },
+    },
+    streamTextOverride(args) {
+      captured.push(args)
+      return {
+        stream: (async function* () {
+          yield { type: "text-delta", text: "transcribed words" }
+          yield { type: "finish", finishReason: "stop" }
+        })(),
+        usage: Promise.resolve({}),
+      }
+    },
+  })
+  for (const message of f.conversation)
+    message.content = "plain readable words on a page. ".repeat(100)
+  await f.compact({}, {}, { force: true })
+  assert.ok(captured.length > 0)
+  assert.ok(
+    captured.every((args) => (args.model as { provider: string }).provider === "openai.responses")
+  )
+  assert.ok(
+    captured.some((args) => JSON.stringify(args.messages).includes("image/png")),
+    "must execute the optical vision path"
+  )
+  assert.equal(f.calls(), 0)
 })

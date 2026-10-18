@@ -1,5 +1,12 @@
-import type { Options } from "@anthropic-ai/claude-agent-sdk"
+import type { Options, Query } from "@anthropic-ai/claude-agent-sdk"
 import type { ClaudeAgentSdkOptionsV1 } from "@cognia/agent-config-types/claude-agent-sdk-options"
+import type {
+  AgentExtensionReloadOptions,
+  AgentExtensionReloadResult,
+  AgentLocalExtensionRef,
+} from "@cognia/agent-contracts/session-operations"
+import { elicitationFormSchemaSafetyError } from "@cognia/agent-contracts/external-agent"
+import type { SendOptions } from "../../shared/wire/inbound.ts"
 import type { Dirent } from "node:fs"
 import type { createAnthropicCanUseTool } from "../../policy/permission/sdk-can-use-tool.ts"
 // Overlay `SendOptions.claudeAgentSdk` onto the SDK `query()` options
@@ -21,18 +28,27 @@ import type { createAnthropicCanUseTool } from "../../policy/permission/sdk-can-
 // value quietly overriding a deliberate nested one would be indistinguishable
 // from the feature not working.
 //
-// Two things this module refuses to do, and both are load-bearing:
+// Two constraints of the serialisable nested option overlay:
 //
 //   * It never constructs a callback or a live object. `hooks`, `canUseTool`,
 //     `onElicitation`, `onUserDialog`, `sessionStore`, `stderr` are built by
-//     the caller; the block carries only descriptors.
+//     the caller using the interaction helpers below; the block carries only descriptors.
 //   * It never honours a host-only capability. `executable`, `settings`,
 //     `pathToClaudeCodeExecutable`, `spawnClaudeCodeProcess` and friends are
 //     absent from the contract type, and `extraArgs` is filtered so a raw CLI
 //     flag cannot put them back.
 
-import { resolve as resolvePath, sep as pathSep } from "node:path"
-import { realpathSync, readdirSync } from "node:fs"
+import { resolve as resolvePath, sep as pathSep, extname, basename, dirname } from "node:path"
+import {
+  realpathSync,
+  readdirSync,
+  statSync,
+  openSync,
+  readSync,
+  closeSync,
+  fstatSync,
+  constants,
+} from "node:fs"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import {
   expectsStructuredOutput,
@@ -148,6 +164,236 @@ export function resolvePlugins(
   return { plugins: out, warnings }
 }
 
+/** Bound synchronous admission work before the SDK opens local model instructions. */
+function validateExtensionContent(paths: readonly string[], trustedRoots: readonly string[]) {
+  const visited = new Set<string>()
+  let entries = 0
+  let totalBytes = 0
+  const walk = (path: string, depth: number, forceText = false) => {
+    const canonical = canonicalExistingPath(path)
+    if (!canonical || !isWithinRoots(canonical, trustedRoots))
+      throw new Error("extension content resolves outside a trusted workspace")
+    if (!hasNoLeakingPiiDeep(canonical)) throw new Error("extension names blocked by the PII gate")
+    if (++entries > 4096 || depth > 32)
+      throw new Error("extension content exceeds admission scan limits")
+    const stat = statSync(canonical)
+    if (stat.isDirectory()) {
+      const visitKey = `${forceText}:${canonical}`
+      if (visited.has(visitKey)) return
+      visited.add(visitKey)
+      for (const entry of readdirSync(canonical))
+        walk(resolvePath(canonical, entry), depth + 1, forceText)
+      return
+    }
+    if (!stat.isFile())
+      throw new Error("extension content must contain only readable regular files")
+    const extensions = [extname(path).toLowerCase(), extname(canonical).toLowerCase()]
+    const isManifest = extensions.includes(".json")
+    if (
+      !extensions.some((extension) =>
+        [".md", ".mdx", ".txt", ".yaml", ".yml"].includes(extension)
+      ) &&
+      !isManifest &&
+      !forceText
+    )
+      return
+    if (stat.size > 1024 * 1024 || totalBytes + stat.size > 8 * 1024 * 1024)
+      throw new Error("extension content exceeds admission scan limits")
+    const fd = openSync(canonical, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    let text: string
+    try {
+      if (!fstatSync(fd).isFile()) throw new Error("extension content must be a regular file")
+      const bytes = Buffer.alloc(stat.size + 1)
+      let size = 0
+      while (size < bytes.length) {
+        const count = readSync(fd, bytes, size, bytes.length - size, null)
+        if (!count) break
+        size += count
+      }
+      if (size !== stat.size) throw new Error("extension content changed during admission")
+      totalBytes += size
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, size))
+    } finally {
+      closeSync(fd)
+    }
+    let modelContent: unknown = text
+    if (isManifest) {
+      const manifest: unknown = JSON.parse(text)
+      // Transport credentials are not model instructions. Native MCP discovery
+      // is disabled below; those servers must enter through the host relay.
+      modelContent =
+        forceText || extname(path).toLowerCase() !== ".json"
+          ? manifest
+          : basename(canonical) === ".mcp.json"
+            ? {}
+            : basename(canonical) === "plugin.json" &&
+                manifest &&
+                typeof manifest === "object" &&
+                !Array.isArray(manifest)
+              ? Object.fromEntries(
+                  Object.entries(manifest).filter(
+                    ([key]) => !["env", "headers", "mcpServers", "author"].includes(key)
+                  )
+                )
+              : manifest
+      if (basename(canonical) === "plugin.json" && manifest && typeof manifest === "object") {
+        for (const key of ["agents", "commands", "skills", "outputStyles"]) {
+          const refs = (manifest as Record<string, unknown>)[key]
+          for (const ref of typeof refs === "string" ? [refs] : Array.isArray(refs) ? refs : []) {
+            if (typeof ref !== "string")
+              throw new Error("extension manifest resource paths must be strings")
+            const base =
+              basename(dirname(canonical)) === ".claude-plugin"
+                ? dirname(dirname(canonical))
+                : dirname(canonical)
+            const target = resolvePath(base, ref)
+            // Reject glob references rather than treating an uninspected match as admitted.
+            if (/[*?\[\]{}]/.test(ref))
+              throw new Error("extension manifest resource globs are not supported by admission")
+            walk(target, depth + 1, true)
+          }
+        }
+      }
+    }
+    if (!hasNoLeakingPiiDeep(modelContent))
+      throw new Error("extension content blocked by the PII gate")
+  }
+  for (const path of paths) walk(path, 0)
+}
+
+/** One trust and content boundary for startup restoration and live additions. */
+export function resolveClaudeRuntimeExtensions(
+  sendOptions: Pick<
+    SendOptions,
+    "cwd" | "additionalDirectories" | "trustedWorkspaceRoots" | "toolSurface"
+  >,
+  extensions: readonly AgentLocalExtensionRef[] = []
+): NonNullable<Options["plugins"]> {
+  if (
+    !Array.isArray(extensions) ||
+    extensions.some(
+      (ref) =>
+        !ref ||
+        ref.kind !== "directory" ||
+        typeof ref.path !== "string" ||
+        !ref.path ||
+        (ref.discoverMcp !== undefined && typeof ref.discoverMcp !== "boolean")
+    )
+  )
+    throw new Error("invalid_runtime_extension")
+  if (!extensions.length) return []
+  if (sendOptions.toolSurface === "none") throw new Error("tool surface is disabled")
+  if (extensions.some((ref) => ref.discoverMcp === true))
+    throw new Error(
+      "extension native MCP discovery is unsupported; configure MCP servers through the host"
+    )
+  const roots = intersectTrustedWorkspaceRoots(sendOptions.trustedWorkspaceRoots, [
+    sendOptions.cwd,
+    ...(sendOptions.additionalDirectories ?? []),
+  ])
+  const resolved = resolvePlugins(
+    extensions.map((ref) => ({ type: "local", path: ref.path, skipMcpDiscovery: true })),
+    roots
+  )
+  if (
+    resolved.warnings.length ||
+    resolved.plugins.some((plugin) => !statSync(plugin.path).isDirectory())
+  )
+    throw new Error(
+      "extension paths must be existing directories inside a trusted active workspace"
+    )
+  if (!hasNoLeakingPiiDeep(resolved.plugins))
+    throw new Error("extension paths blocked by the PII gate")
+  validateExtensionContent(
+    resolved.plugins.map((plugin) => plugin.path),
+    roots
+  )
+  return resolved.plugins
+}
+
+type ClaudePluginInventoryEntry = { path: string; name?: string; source?: string }
+
+/** Built-ins shipped by the pinned SDK use a sentinel instead of a filesystem path. */
+function isSdkBuiltinPlugin(plugin: ClaudePluginInventoryEntry) {
+  return (
+    plugin.path === "builtin" &&
+    plugin.source === `${plugin.name}@builtin` &&
+    ["cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"].includes(
+      plugin.name ?? ""
+    )
+  )
+}
+
+/** Translate the portable operation; the host owns deadlines and acknowledged persistence. */
+export function createClaudeExtensionReloader(
+  query: Partial<Pick<Query, "reloadPlugins">>,
+  sendOptions: SendOptions,
+  currentPluginInventory: () => readonly ClaudePluginInventoryEntry[] | undefined = () => undefined
+) {
+  let acknowledgedInventory: readonly ClaudePluginInventoryEntry[] | undefined
+  return async (options: AgentExtensionReloadOptions = {}): Promise<AgentExtensionReloadResult> => {
+    if (typeof query.reloadPlugins !== "function") throw new Error("unsupported_provider")
+    // Refreshing reloads existing plugin files too: re-attest their current content.
+    const legacy = (sendOptions.claudeAgentSdk?.plugins ?? []).map((plugin) => ({
+      kind: "directory" as const,
+      path: plugin.path,
+      discoverMcp: plugin.skipMcpDiscovery !== true,
+    }))
+    const current = [...legacy, ...(sendOptions.runtimeExtensions ?? [])]
+    const currentPlugins = resolveClaudeRuntimeExtensions(sendOptions, current)
+    const inventory = acknowledgedInventory ?? currentPluginInventory()
+    if (!inventory) throw new Error("extension_inventory_unavailable")
+    const admitted = new Set(currentPlugins.map((plugin) => plugin.path))
+    if (
+      inventory.some(
+        (plugin) =>
+          !plugin ||
+          typeof plugin.path !== "string" ||
+          (!isSdkBuiltinPlugin(plugin) && !admitted.has(canonicalExistingPath(plugin.path) ?? ""))
+      )
+    )
+      throw new Error("extension_inventory_unattested")
+    const plugins = resolveClaudeRuntimeExtensions(sendOptions, options.add)
+    const result = await query.reloadPlugins({
+      ...(options.preservePromptCache !== undefined
+        ? { holdOnCacheImpact: options.preservePromptCache }
+        : {}),
+      ...(options.add !== undefined ? { addPlugins: plugins } : {}),
+    })
+    const expectedPaths = new Set([...currentPlugins, ...plugins].map((plugin) => plugin.path))
+    if (
+      !result ||
+      !Array.isArray(result.plugins) ||
+      result.plugins.some(
+        (plugin) =>
+          !plugin ||
+          typeof plugin.path !== "string" ||
+          (!isSdkBuiltinPlugin(plugin) &&
+            !expectedPaths.has(canonicalExistingPath(plugin.path) ?? ""))
+      ) ||
+      (result.held !== undefined && typeof result.held !== "boolean") ||
+      !Number.isSafeInteger(result.error_count) ||
+      result.error_count < 0
+    )
+      throw new Error("invalid_extension_reload_result")
+    acknowledgedInventory = result.plugins
+    const added =
+      result.held === true
+        ? []
+        : plugins.filter((plugin) => result.plugins.some((loaded) => loaded.path === plugin.path))
+    return {
+      disposition:
+        result.held === true
+          ? "held"
+          : result.error_count > 0 || added.length !== plugins.length
+            ? "partial"
+            : "applied",
+      added: added.map((plugin) => ({ kind: "directory", path: plugin.path, discoverMcp: false })),
+      details: result,
+    }
+  }
+}
+
 /**
  * Validate every provider-visible project skill entry by realpath.
  *
@@ -227,7 +473,18 @@ export function buildSdkInteractionCallbacks(
   if (!nested || typeof nested !== "object" || typeof requestApproval !== "function") return {}
   const callbacks: {
     onElicitation?: (
-      request: { title?: string; displayName?: string; description?: string },
+      request: {
+        title?: string
+        displayName?: string
+        description?: string
+        message?: string
+        serverName?: string
+        mode?: "form" | "url"
+        requestedSchema?: Record<string, unknown>
+        property_order?: string[]
+        url?: string
+        elicitationId?: string
+      },
       context?: { signal?: AbortSignal }
     ) => Promise<unknown>
     onUserDialog?: (
@@ -238,14 +495,53 @@ export function buildSdkInteractionCallbacks(
 
   if (nested.elicitation?.enabled) {
     callbacks.onElicitation = async (request, { signal } = {}) => {
+      let target: URL | undefined
+      if (request.mode === "url") {
+        try {
+          target = new URL(request.url ?? "")
+          const loopback = target.hostname === "localhost" || target.hostname === "127.0.0.1"
+          if (
+            target.username ||
+            target.password ||
+            (target.protocol !== "https:" && !(target.protocol === "http:" && loopback))
+          )
+            return { action: "decline" }
+        } catch {
+          return { action: "decline" }
+        }
+      }
+      const properties = request.requestedSchema?.properties
+      if (
+        request.mode !== "url" &&
+        request.requestedSchema !== undefined &&
+        elicitationFormSchemaSafetyError(request.requestedSchema)
+      ) {
+        return { action: "decline" }
+      }
+      const propertyOrder = Array.isArray(request.property_order)
+        ? request.property_order.filter((key): key is string => typeof key === "string")
+        : properties && typeof properties === "object"
+          ? Object.keys(properties)
+          : undefined
+      const elicitation = {
+        mode: request.mode ?? "form",
+        message: request.message ?? request.title ?? "",
+        requestedSchema: request.requestedSchema,
+        propertyOrder,
+        url: target?.href,
+        origin: target?.origin,
+        elicitationId: request.elicitationId,
+        raw: {},
+      }
       const outcome = await requestApproval(
-        "SDK:Elicitation",
-        { request, content: {} },
+        "Runtime:Elicitation",
+        { request, elicitation, content: {} },
         {
           signal,
           title: request?.title,
           displayName: request?.displayName,
           description: request?.description,
+          requiresInteraction: true,
         }
       )
       if (outcome?.behavior !== "allow") return { action: "decline" }
@@ -263,9 +559,9 @@ export function buildSdkInteractionCallbacks(
   if (nested.userDialog?.enabled) {
     callbacks.onUserDialog = async (request, { signal } = {}) => {
       const outcome = await requestApproval(
-        `SDK:Dialog:${request?.dialogKind ?? "unknown"}`,
+        `Runtime:Dialog:${request?.dialogKind ?? "unknown"}`,
         { request, result: request?.payload },
-        { signal, title: request?.dialogKind }
+        { signal, title: request?.dialogKind, requiresInteraction: true }
       )
       if (outcome?.behavior !== "allow") return { behavior: "cancelled" }
       const result = {

@@ -553,14 +553,16 @@ export function useRemoteSessionStream(
       if (!approval) return
       const reason = denialReasonOf(decision, options)
       try {
-        const queued = await enqueueHostStateIntentIfAvailable({
-          sessionId: approval.sessionId,
-          action: {
-            kind: "approval.respond",
-            requestId: approval.requestId,
-            decision,
-          },
-        })
+        const queued = options?.updatedInput
+          ? false
+          : await enqueueHostStateIntentIfAvailable({
+              sessionId: approval.sessionId,
+              action: {
+                kind: "approval.respond",
+                requestId: approval.requestId,
+                decision,
+              },
+            })
         if (queued) {
           setPendingApproval(null)
           if (reason) {
@@ -575,7 +577,11 @@ export function useRemoteSessionStream(
           approval.sessionId,
           approval.requestId,
           decision === "allow_always" ? "allow" : decision,
-          ...(reason ? ([denialMessageForModel(reason)] as const) : ([] as const))
+          ...(options?.updatedInput
+            ? ([reason ? denialMessageForModel(reason) : undefined, options.updatedInput] as const)
+            : reason
+              ? ([denialMessageForModel(reason)] as const)
+              : ([] as const))
         )
         setPendingApproval(null)
       } catch (err) {

@@ -13,6 +13,9 @@ interface FixtureFrame {
   errorCode?: string
   turnId?: string
   transcriptInvalidationId?: string
+  capability?: string
+  rpcId?: string
+  method?: string
 }
 import test from "node:test"
 import assert from "node:assert/strict"
@@ -96,7 +99,20 @@ test(
         const line = buffer.slice(0, end)
         buffer = buffer.slice(end + 1)
         try {
-          frames.push(JSON.parse(line))
+          const frame = JSON.parse(line) as FixtureFrame
+          frames.push(frame)
+          // The fixture has no workspace port allocator. Answer the real host
+          // request explicitly so process tools do not wait on an absent host.
+          if (frame.type === "host_rpc" && frame.method === "workspace.portEnv") {
+            child.stdin.write(
+              JSON.stringify({
+                type: "host_rpc_result",
+                rpcId: frame.rpcId,
+                ok: true,
+                result: null,
+              }) + "\n"
+            )
+          }
         } catch {
           /* ignore non-protocol SDK diagnostics */
         }
@@ -198,6 +214,28 @@ test(
       assert.equal(retained?.retained, true)
       assert.equal(retained?.active, false)
       assert.equal(typeof retained?.sdkSessionId, "string")
+      const unsupportedControlStart = frames.length
+      send({
+        type: "control",
+        requestId: "unsupported-extensions",
+        method: "reloadExtensions",
+        params: { options: {} },
+      })
+      const unsupportedReload = await wait(
+        (frame) =>
+          frame.type === "control_response" && frame.requestId === "unsupported-extensions",
+        unsupportedControlStart
+      )
+      assert.equal(unsupportedReload.error, "capability_error")
+      assert.equal(
+        frames
+          .slice(unsupportedControlStart)
+          .some(
+            (frame) =>
+              frame.type === "capability_error" && frame.capability === "extensions.dynamic"
+          ),
+        true
+      )
       assert.equal(
         (await refusedSend({ expectedRuntimeSessionId: "obsolete" })).errorCode,
         "RUNTIME_SESSION_NOT_RETAINED"

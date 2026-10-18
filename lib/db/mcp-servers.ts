@@ -23,6 +23,7 @@ import { loggers } from "@cognia/logging"
 import {
   isToolRuleTightening,
   normalizeToolRuleList,
+  normalizeToolPermissionRules,
   resolveDeniedToolNames,
 } from "@/lib/mcp/tool-rules"
 import { applyCapabilityOverlay } from "@/lib/workspace/capability-overlay"
@@ -82,6 +83,7 @@ export async function createMcpServer(
     pluginId?: string
     managedBy?: McpServer["managedBy"]
     toolRiskRules?: McpServer["toolRiskRules"]
+    toolPermissionRules?: McpServer["toolPermissionRules"]
     /** Bare MCP tool names denied whenever this server is selected. */
     disallowedTools?: string[]
     /** Glob deny rules expanded against the server's discovered tools. */
@@ -110,6 +112,9 @@ export async function createMcpServer(
     ...(partial.pluginId !== undefined ? { pluginId: partial.pluginId } : {}),
     ...(partial.managedBy !== undefined ? { managedBy: partial.managedBy } : {}),
     ...(partial.toolRiskRules !== undefined ? { toolRiskRules: partial.toolRiskRules } : {}),
+    ...(partial.toolPermissionRules !== undefined
+      ? { toolPermissionRules: normalizeToolPermissionRules(partial.toolPermissionRules) }
+      : {}),
     ...(partial.disallowedTools !== undefined
       ? { disallowedTools: normalizeDisallowedTools(partial.disallowedTools) }
       : {}),
@@ -162,6 +167,7 @@ export async function updateMcpServer(
       | "pluginId"
       | "managedBy"
       | "toolRiskRules"
+      | "toolPermissionRules"
       | "trust"
       | "origin"
     >
@@ -191,6 +197,9 @@ export async function updateMcpServer(
   if (patch.disallowedToolPatterns !== undefined) {
     next.disallowedToolPatterns = normalizeToolRuleList(patch.disallowedToolPatterns)
   }
+  if (patch.toolPermissionRules !== undefined) {
+    next.toolPermissionRules = normalizeToolPermissionRules(patch.toolPermissionRules)
+  }
   validateMcpDefinition(next)
   assertUniqueMcpNamespace(next.name, await db.mcpServers.toArray(), id)
 
@@ -203,8 +212,8 @@ export async function updateMcpServer(
   // the tools actually discovered, so swapping pinned names for a pattern that
   // covers them still reads as a tightening.
   const shapeChanged =
-    fingerprintMcpDefinition({ ...prev, disallowedTools: [] }) !==
-    fingerprintMcpDefinition({ ...next, disallowedTools: [] })
+    fingerprintMcpDefinition({ ...prev, disallowedTools: [], toolPermissionRules: [] }) !==
+    fingerprintMcpDefinition({ ...next, disallowedTools: [], toolPermissionRules: [] })
   const knownTools = await loadMcpServerToolNames(id)
   const rulesRelaxed = !isToolRuleTightening(prev, next, knownTools)
   const materialChange = shapeChanged || rulesRelaxed

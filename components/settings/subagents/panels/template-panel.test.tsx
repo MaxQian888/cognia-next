@@ -245,6 +245,53 @@ describe("tool scope (G2)", () => {
 })
 
 describe("editing lifecycle", () => {
+  it("disables adding a context policy for an unsupported runtime override", async () => {
+    templates.mine.config.externalPresetId = "claude-code"
+    render(<TemplatePanel templateId="mine" onNavigate={onNavigate} />)
+    await userEvent.click(screen.getByText("configTitle"))
+    expect(screen.getByRole("spinbutton", { name: "editorCompactAtTokens" })).toBeDisabled()
+  })
+
+  it("lets an invalid imported policy be cleared before saving a runtime override", async () => {
+    templates.mine.config = { provider: "openai", contextPolicy: { compactAtTokens: 64000 } }
+    render(<TemplatePanel templateId="mine" onNavigate={onNavigate} />)
+    await userEvent.click(screen.getByText("configTitle"))
+    await userEvent.clear(screen.getByRole("spinbutton", { name: "editorCompactAtTokens" }))
+    await userEvent.click(screen.getByTestId("unsaved-bar-save"))
+    await waitFor(() => expect(updateTemplate).toHaveBeenCalled())
+    expect(updateTemplate.mock.calls[0][1].config.contextPolicy).toBeUndefined()
+  })
+
+  it("persists a portable subagent compaction threshold", async () => {
+    render(<TemplatePanel templateId="mine" onNavigate={onNavigate} />)
+    await userEvent.click(screen.getByText("configTitle"))
+    await userEvent.type(screen.getByRole("spinbutton", { name: "editorCompactAtTokens" }), "64000")
+    await userEvent.click(screen.getByTestId("unsaved-bar-save"))
+    await waitFor(() => expect(updateTemplate).toHaveBeenCalled())
+    expect(updateTemplate.mock.calls[0][1].config.contextPolicy).toEqual({ compactAtTokens: 64000 })
+  })
+
+  it("rejects fractional compaction thresholds without discarding the draft", async () => {
+    render(<TemplatePanel templateId="mine" onNavigate={onNavigate} />)
+    await userEvent.click(screen.getByText("configTitle"))
+    await userEvent.type(screen.getByRole("spinbutton", { name: "editorCompactAtTokens" }), "1.5")
+    await userEvent.click(screen.getByTestId("unsaved-bar-save"))
+    await waitFor(() =>
+      expect(screen.getByTestId("unsaved-bar")).toHaveAttribute("data-status", "dirty")
+    )
+    expect(updateTemplate).not.toHaveBeenCalled()
+  })
+
+  it("clears an explicit compaction threshold back to inherited policy", async () => {
+    templates.mine.config.contextPolicy = { compactAtTokens: 64000 }
+    render(<TemplatePanel templateId="mine" onNavigate={onNavigate} />)
+    await userEvent.click(screen.getByText("configTitle"))
+    await userEvent.clear(screen.getByRole("spinbutton", { name: "editorCompactAtTokens" }))
+    await userEvent.click(screen.getByTestId("unsaved-bar-save"))
+    await waitFor(() => expect(updateTemplate).toHaveBeenCalled())
+    expect(updateTemplate.mock.calls[0][1].config.contextPolicy).toBeUndefined()
+  })
+
   it("keeps the bar hidden until something changes", () => {
     render(<TemplatePanel templateId="mine" onNavigate={onNavigate} />)
     expect(screen.queryByTestId("unsaved-bar")).not.toBeInTheDocument()

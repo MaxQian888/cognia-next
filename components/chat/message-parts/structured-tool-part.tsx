@@ -1,5 +1,7 @@
 "use client"
 
+import { toolResultMetadata } from "@/lib/claude/parts-extensions"
+
 /**
  * StructuredToolPart — every tool call that is neither Bash nor a file tool
  * (WebFetch / WebSearch, the cognia bridge tools wiki_search / wiki_read /
@@ -302,6 +304,7 @@ export const StructuredToolPart = memo(function StructuredToolPart({
   const t = useTranslations()
   const tRow = useTranslations("chat.toolRow")
   const tFlow = useTranslations("chat.agentFlow")
+  const backgrounded = toolResultMetadata(part)?.backgrounded === true
   const running = part.state === "input-available"
   const [internalOpen, setInternalOpen] = useState(
     defaultOpen ?? (running || part.state === "output-error")
@@ -327,6 +330,7 @@ export const StructuredToolPart = memo(function StructuredToolPart({
     .toolMetadata?.readOnlyHint
 
   const meta = useMemo((): { text: string; isError?: boolean } | null => {
+    if (backgrounded) return { text: tFlow("status.backgrounded") }
     switch (part.state) {
       case "input-available":
         return { text: tFlow("status.running") }
@@ -352,7 +356,7 @@ export const StructuredToolPart = memo(function StructuredToolPart({
       default:
         return null
     }
-  }, [part, spec, input, parsed, t, tFlow])
+  }, [part, spec, input, parsed, t, tFlow, backgrounded])
 
   const copyValue = spec?.copyValue?.(input, parsed) ?? target
   const statusKey: Record<ToolUIPart["state"], string> = {
@@ -367,13 +371,13 @@ export const StructuredToolPart = memo(function StructuredToolPart({
 
   return (
     <ToolRowShell
-      status={part.state}
+      status={backgrounded ? "info" : part.state}
       open={open}
       onToggle={() => (expanded !== undefined ? onToggle?.() : setInternalOpen((v) => !v))}
       ariaLabel={tRow("rowAria", {
         verb: verbLabel,
         target: target ?? "",
-        status: tFlow(`status.${statusKey[part.state]}`),
+        status: tFlow(`status.${backgrounded ? "backgrounded" : statusKey[part.state]}`),
       })}
       title={target}
       testId="structured-tool-part"

@@ -5,7 +5,29 @@ import {
   capabilityError,
   capabilitySupported,
   commandSupported,
+  runtimeFeatureSupported,
 } from "./capabilities.ts"
+
+test("portable features intersect real adapter support with frozen effective capabilities", () => {
+  const feature = "subagents.context-fork"
+  assert.equal(runtimeFeatureSupported("claude-agent-sdk", feature), true)
+  assert.equal(
+    runtimeFeatureSupported("claude-agent-sdk", feature, {
+      capabilities: { effective: [feature] },
+    }),
+    true
+  )
+  assert.equal(
+    runtimeFeatureSupported("claude-agent-sdk", feature, { capabilities: { effective: [] } }),
+    false
+  )
+  assert.equal(runtimeFeatureSupported("claude-agent-sdk", feature, {}), false)
+  assert.equal(
+    runtimeFeatureSupported("ai-sdk", feature, { capabilities: { effective: [feature] } }),
+    false
+  )
+  assert.equal(runtimeFeatureSupported("future-runtime", feature), false)
+})
 import { CONTROL_METHOD_CAPABILITIES } from "../host/control/control.ts"
 
 test("capability tables: subagents and steering are both claude-agent-sdk only", () => {

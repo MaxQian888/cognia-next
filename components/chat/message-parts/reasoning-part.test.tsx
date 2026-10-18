@@ -91,7 +91,11 @@ describe("ReasoningToolRow", () => {
 
   it("offers a copy affordance for the thinking text", () => {
     renderRow()
-    expect(screen.getByTestId("reasoning-copy")).toBeInTheDocument()
+    const toggle = screen.getByRole("button", { name: "reasoning.completed" })
+    fireEvent.click(screen.getByRole("button", { name: "reasoning.copy" }))
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(toggle)
+    expect(screen.getByTestId("reasoning-streamdown")).toHaveTextContent("weighing the options")
   })
 
   it("reports the settled duration once the wrapper has timed the turn", () => {

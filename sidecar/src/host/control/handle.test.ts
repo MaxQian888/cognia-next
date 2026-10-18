@@ -8,7 +8,150 @@ import {
   controlPreflight,
   guardedControlParams,
   runtimeStatus,
+  routeReloadExtensions,
+  extensionControlPreflight,
 } from "./handle.ts"
+
+test("legacy plugin refresh uses the same runtime reloader and its frozen capability", async () => {
+  let calls = 0
+  const session: HostSession = {
+    runtimeAdapterId: "claude-agent-sdk",
+    sendOptions: {
+      execution: {
+        runtimeAdapter: "claude-agent-sdk",
+        capabilities: { effective: ["plugins.native"] },
+      },
+    },
+    reloadExtensions: async (options) => {
+      calls++
+      assert.equal(options?.preservePromptCache, true)
+      return {
+        disposition: "held",
+        added: [],
+        details: { held: true, plugins: [], error_count: 0 },
+      }
+    },
+  }
+  assert.equal(
+    extensionControlPreflight(session, "reloadPlugins", { options: { holdOnCacheImpact: true } }),
+    null
+  )
+  const outcome = await routeReloadExtensions(
+    new Map([["s", session]]),
+    "s",
+    { preservePromptCache: true },
+    undefined,
+    "reloadPlugins"
+  )
+  assert.equal(outcome.ok, true)
+  assert.equal(calls, 1)
+  session.sendOptions!.execution!.capabilities!.effective = []
+  assert.deepEqual(extensionControlPreflight(session, "reloadPlugins", {}), {
+    error: "capability_error",
+    capability: "plugins.native",
+  })
+})
+
+test("neutral extension reload rejects unsupported legacy rails and narrowed frozen sessions", async () => {
+  let called = false
+  for (const session of [
+    { sendOptions: { provider: "openai" } },
+    {
+      runtimeAdapterId: "claude-agent-sdk",
+      sendOptions: {
+        execution: { runtimeAdapter: "claude-agent-sdk", capabilities: { effective: [] } },
+      },
+      reloadExtensions: async () => {
+        called = true
+        return { disposition: "applied" as const, added: [] }
+      },
+    },
+  ]) {
+    assert.deepEqual(await routeReloadExtensions(new Map([["s", session]]), "s"), {
+      ok: false,
+      error: "capability_error",
+    })
+  }
+  assert.equal(called, false)
+})
+test("live extension control invokes a neutral runtime port and commits only applied refs", async () => {
+  let held = true
+  const added = [{ kind: "directory" as const, path: "/workspace/plugin", discoverMcp: false }]
+  const calls: unknown[] = []
+  const session: HostSession = {
+    runtimeAdapterId: "claude-agent-sdk",
+    sendOptions: {},
+    reloadExtensions: async (options) => {
+      calls.push(options)
+      return { disposition: held ? "held" : "applied", added: held ? [] : added }
+    },
+  }
+  const sessions = new Map([["s", session]])
+  const options = { add: added, preservePromptCache: true }
+  await routeReloadExtensions(sessions, "s", options)
+  assert.equal(session.sendOptions?.runtimeExtensions, undefined)
+  held = false
+  assert.deepEqual(await routeReloadExtensions(sessions, "s", options), {
+    ok: true,
+    result: { disposition: "applied", added },
+  })
+  assert.deepEqual(session.sendOptions?.runtimeExtensions, added)
+  assert.deepEqual(calls, [options, options])
+})
+
+test("extension control rejects unsupported runtimes and retires uncertain timed out mutations", async () => {
+  const sessions: Map<string, HostSession> = new Map([
+    ["s", { runtimeAdapterId: "ai-sdk", sendOptions: { provider: "openai" } }],
+  ])
+  assert.deepEqual(await routeReloadExtensions(sessions, "s"), {
+    ok: false,
+    error: "capability_error",
+  })
+  let closed = false
+  sessions.set("s", {
+    runtimeAdapterId: "claude-agent-sdk",
+    reloadExtensions: () => new Promise(() => {}),
+    q: {
+      close() {
+        closed = true
+      },
+    },
+  })
+  assert.deepEqual(await routeReloadExtensions(sessions, "s", {}, 5), {
+    ok: false,
+    error: "control timed out",
+  })
+  assert.equal(closed, true)
+  assert.equal(sessions.has("s"), false)
+})
+
+test("a stale extension reload failure cannot retire a replacement session", async () => {
+  for (const failure of ["control timed out", "invalid_extension_reload_result"]) {
+    let rejectReload!: (reason: Error) => void
+    const session: HostSession = {
+      runtimeAdapterId: "claude-agent-sdk",
+      reloadExtensions: () =>
+        new Promise((_resolve, reject) => {
+          rejectReload = reject
+        }),
+    }
+    let replacementClosed = false
+    const replacement: HostSession = {
+      q: {
+        close() {
+          replacementClosed = true
+        },
+      },
+    }
+    const sessions = new Map([["s", session]])
+    const pending = routeReloadExtensions(sessions, "s", {}, 5)
+    sessions.set("s", replacement)
+    if (failure === "invalid_extension_reload_result") rejectReload(new Error(failure))
+    assert.deepEqual(await pending, { ok: false, error: failure })
+    assert.equal(replacementClosed, false)
+    assert.equal(sessions.get("s"), replacement)
+  }
+})
 
 test("runtimeStatus reports only the owning live AI runtime's nonsecret identity", () => {
   assert.deepEqual(runtimeStatus(undefined), { retained: false })

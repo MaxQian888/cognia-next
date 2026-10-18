@@ -1257,11 +1257,19 @@ function applyToolResults(messages: UIMessage[], evt: SDKUserMessage): UIMessage
 
   let next = messages
   let mutated = false
+  const rawMetadata = evt.tool_use_result
+  const metadata =
+    content.filter((b) => b.type === "tool_result").length === 1 &&
+    rawMetadata &&
+    typeof rawMetadata === "object" &&
+    !Array.isArray(rawMetadata)
+      ? (rawMetadata as Record<string, unknown>)
+      : undefined
 
   for (const block of content) {
     if ((block as { type?: string }).type !== "tool_result") continue
     const tr = block as BetaToolResultBlock
-    const updated = updateToolPart(next, tr)
+    const updated = updateToolPart(next, tr, metadata)
     if (updated !== next) {
       next = updated
       mutated = true
@@ -1279,7 +1287,11 @@ function parseToolResultJson(text: string): unknown {
   }
 }
 
-function updateToolPart(messages: UIMessage[], tr: BetaToolResultBlock): UIMessage[] {
+function updateToolPart(
+  messages: UIMessage[],
+  tr: BetaToolResultBlock,
+  metadata?: Record<string, unknown>
+): UIMessage[] {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg.role !== "assistant") continue
@@ -1318,6 +1330,18 @@ function updateToolPart(messages: UIMessage[], tr: BetaToolResultBlock): UIMessa
       state: tr.is_error ? "output-error" : "output-available",
       ...(tr.is_error ? { errorText: outputText } : { output: outputText }),
       ...(mcpContent ? { mcpContent } : {}),
+      sdkToolResult: undefined,
+      toolResultMetadata: metadata
+        ? {
+            ...(metadata.detachedToolCall === true ? { backgrounded: true } : {}),
+            ...(Object.hasOwn(metadata, "structuredContent")
+              ? { structuredContent: metadata.structuredContent }
+              : {}),
+            ...(metadata.structuredContentOmitted === true
+              ? { structuredContentOmitted: true }
+              : {}),
+          }
+        : undefined,
     }) as unknown as Part
 
     const newParts = msg.parts.slice()

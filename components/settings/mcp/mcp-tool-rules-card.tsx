@@ -27,6 +27,7 @@ import {
   matchesToolPattern,
   matchingToolPatterns,
   normalizeToolRuleList,
+  normalizeToolPermissionRules,
 } from "@/lib/mcp/tool-rules"
 import type { McpServer } from "@cognia/agent-config-types"
 
@@ -63,8 +64,16 @@ export function McpToolRulesCard({ server }: Props) {
     [server.disallowedToolPatterns]
   )
   const rules = useMemo(
-    () => ({ disallowedTools: explicit, disallowedToolPatterns: patterns }),
-    [explicit, patterns]
+    () => ({
+      disallowedTools: explicit,
+      disallowedToolPatterns: patterns,
+      toolPermissionRules: server.toolPermissionRules,
+    }),
+    [explicit, patterns, server.toolPermissionRules]
+  )
+  const policies = useMemo(
+    () => normalizeToolPermissionRules(server.toolPermissionRules),
+    [server.toolPermissionRules]
   )
 
   const filtered = useMemo(() => {
@@ -81,20 +90,26 @@ export function McpToolRulesCard({ server }: Props) {
   // removable instead of vanishing with the tool.
   const orphanRules = useMemo(() => {
     const known = new Set(tools.map((tool) => tool.name))
-    return explicit.filter((name) => !known.has(name))
-  }, [explicit, tools])
+    return [...new Set([...explicit, ...policies.map((rule) => rule.name)])].filter(
+      (name) => !known.has(name)
+    )
+  }, [explicit, tools, policies])
 
   const deniedCount = useMemo(
     () =>
       tools.filter(
-        (tool) => explicit.includes(tool.name) || matchingToolPatterns(tool.name, rules).length > 0
+        (tool) =>
+          explicit.includes(tool.name) ||
+          matchingToolPatterns(tool.name, rules).length > 0 ||
+          policies.some((rule) => rule.name === tool.name && rule.decision === "deny")
       ).length,
-    [tools, explicit, rules]
+    [tools, explicit, rules, policies]
   )
 
   const persist = async (patch: {
     disallowedTools?: string[]
     disallowedToolPatterns?: string[]
+    toolPermissionRules?: McpServer["toolPermissionRules"]
   }) => {
     setSaving(true)
     try {
@@ -114,7 +129,18 @@ export function McpToolRulesCard({ server }: Props) {
 
   const setToolAllowed = (name: string, allowed: boolean) => {
     const next = allowed ? explicit.filter((tool) => tool !== name) : [...explicit, name]
-    void persist({ disallowedTools: normalizeToolRuleList(next) })
+    void persist({
+      disallowedTools: normalizeToolRuleList(next),
+      ...(allowed && policies.some((rule) => rule.name === name && rule.decision === "deny")
+        ? { toolPermissionRules: policies.filter((rule) => rule.name !== name) }
+        : {}),
+    })
+  }
+
+  const setPolicy = (name: string, decision: string) => {
+    const next = policies.filter((rule) => rule.name !== name)
+    if (decision === "ask" || decision === "deny") next.push({ name, decision })
+    void persist({ toolPermissionRules: normalizeToolPermissionRules(next) })
   }
 
   const denyAllFiltered = () => {
@@ -126,7 +152,16 @@ export function McpToolRulesCard({ server }: Props) {
 
   const allowAllFiltered = () => {
     const names = new Set(filtered.map((tool) => tool.name))
-    void persist({ disallowedTools: explicit.filter((tool) => !names.has(tool)) })
+    void persist({
+      disallowedTools: explicit.filter((tool) => !names.has(tool)),
+      ...(policies.some((rule) => names.has(rule.name) && rule.decision === "deny")
+        ? {
+            toolPermissionRules: policies.filter(
+              (rule) => !names.has(rule.name) || rule.decision !== "deny"
+            ),
+          }
+        : {}),
+    })
   }
 
   const addPattern = (raw: string) => {
@@ -239,7 +274,8 @@ export function McpToolRulesCard({ server }: Props) {
                 filtered.map((tool) => {
                   const matched = matchingToolPatterns(tool.name, rules)
                   const pinned = explicit.includes(tool.name)
-                  const denied = pinned || matched.length > 0
+                  const policy = policies.find((rule) => rule.name === tool.name)?.decision
+                  const denied = pinned || matched.length > 0 || policy === "deny"
                   return (
                     <div
                       key={tool.name}
@@ -279,6 +315,17 @@ export function McpToolRulesCard({ server }: Props) {
                           </p>
                         )}
                       </div>
+                      <select
+                        className="max-w-36 rounded-md border bg-background px-1.5 py-1 text-xs"
+                        aria-label={t("policyAria", { name: tool.name })}
+                        value={policy ?? "default"}
+                        disabled={busy || pinned || matched.length > 0}
+                        onChange={(event) => setPolicy(tool.name, event.target.value)}
+                      >
+                        <option value="default">{t("policyDefault")}</option>
+                        <option value="ask">{t("policyAsk")}</option>
+                        <option value="deny">{t("policyDeny")}</option>
+                      </select>
                     </div>
                   )
                 })
@@ -374,7 +421,14 @@ export function McpToolRulesCard({ server }: Props) {
                     variant="ghost"
                     size="icon"
                     className="size-4"
-                    onClick={() => setToolAllowed(name, true)}
+                    onClick={() =>
+                      void persist({
+                        disallowedTools: explicit.filter((tool) => tool !== name),
+                        ...(policies.some((rule) => rule.name === name)
+                          ? { toolPermissionRules: policies.filter((rule) => rule.name !== name) }
+                          : {}),
+                      })
+                    }
                     disabled={busy}
                     aria-label={t("removeOrphan", { name })}
                   >

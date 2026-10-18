@@ -28,9 +28,14 @@ import {
   type PromptPreambleSummary,
 } from "@/lib/chat/prompt-preamble"
 import { createDiagnostic, type CogniaDiagnostic } from "@cognia/diagnostics"
+import {
+  requestedRuntimeCapabilities,
+  runtimeFeatureValidationError,
+} from "@cognia/agent-contracts/session-operations"
 import { createSilenceWatchdog, type SilenceWatchdog } from "@/lib/chat/silence-watchdog"
 import { resolveTurnSquad } from "@/lib/ai/agent/team/squad/resolve-turn-squad"
 import {
+  assertExternalRuntimeFeatureSupport,
   externalAgentRouteKey,
   isGatewaySessionLink,
   rememberGatewaySession,
@@ -188,6 +193,7 @@ import { executeProjectEnvironment } from "@/lib/project-environment/executor"
 import { resolveEnvironmentForRun } from "@/lib/project-environment/resolve-environment"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import {
+  AgentCapabilityError,
   createAgentExecutionHandle,
   type AgentExecutionHandle,
 } from "@/lib/ai/agent/execution/agent-execution-handle"
@@ -1871,6 +1877,19 @@ export function useClaudeChat() {
             rejectSend("turn_route_while_busy")
             return
           }
+          // Live and queued follow-ups carry content only, including while the
+          // initial turn awaits admission and has not bound its runtime lane.
+          if (opts) {
+            try {
+              const validationError = runtimeFeatureValidationError(opts)
+              if (validationError) throw new Error(validationError)
+              const [capability] = requestedRuntimeCapabilities(opts)
+              if (capability) throw new AgentCapabilityError(capability, "steer")
+            } catch (error) {
+              dispatchDiagnostic(toDiagnostic(error, { source: "chat", meta: { sessionId } }))
+              throw error
+            }
+          }
           const text = steerTextOf(content, callOptions?.attachmentManifest?.length ?? 0)
           const blocks = steerBlocksOf(content, callOptions?.attachmentManifest?.length ?? 0)
           if (!text && blocks.length === 0) return
@@ -2084,6 +2103,21 @@ export function useClaudeChat() {
         // The resolver chooses the safe lane and returns its exact decision.
         // Until then use the parent's runtime rather than the app-wide default.
         turnLane = runtimeRefForSession(session.surfaceBinding.sessionId)
+      }
+      // Explicit options bypass the builder; refuse before editor flushes,
+      // prompt hooks or provider work on the selected external lane.
+      if (!isSessionAside && opts && turnLane.kind !== "builtin" && opts.toolSurface !== "none") {
+        try {
+          await assertExternalRuntimeFeatureSupport(opts)
+        } catch (error) {
+          store
+            .getState()
+            .setSessionDiagnostic(
+              sessionId,
+              toDiagnostic(error, { source: "chat", meta: { sessionId } })
+            )
+          throw error
+        }
       }
       // Claim imported history before summary generation or editor writes, so a
       // concurrent source watcher cannot replace the snapshot being continued.
@@ -2342,6 +2376,9 @@ export function useClaudeChat() {
                   : { runtimeRef: routeLane.runtimeRef }
                 : undefined
           ))
+        if (turnLane.kind !== "builtin" && sendOptions.toolSurface !== "none") {
+          await assertExternalRuntimeFeatureSupport(sendOptions)
+        }
       } catch (err) {
         // RoutingNoCandidatesError (alias matched, every deployment down)
         // and any other resolver failure surface as the chat error instead
@@ -3625,6 +3662,7 @@ export function useClaudeChat() {
       }
       const refuseTurn = async (input: {
         diagnostic: CogniaDiagnostic
+        cause?: unknown
         /** Stable, low-cardinality reason. Doubles as the telemetry `errorType`. */
         errorCode: string
         /** True once `startDirectChatExecutionRun` has run for this turn. */
@@ -3666,7 +3704,19 @@ export function useClaudeChat() {
             detail: `${input.diagnostic.code}: ${input.diagnostic.detail || input.diagnostic.message || input.errorCode}`,
           })
         }
-        rejectSend(input.diagnostic.message || input.errorCode)
+        rejectSend(input.cause ?? (input.diagnostic.message || input.errorCode))
+      }
+      if (turnRuntimeRef) {
+        try {
+          await assertExternalRuntimeFeatureSupport(sendOptions)
+        } catch (error) {
+          await refuseTurn({
+            diagnostic: toDiagnostic(error, { source: "chat", meta: { sessionId } }),
+            errorCode: "external_runtime_feature_unsupported",
+            cause: error,
+          })
+          return
+        }
       }
       let abortStaleLocalRuntime = () => {}
       if (callOptions?.backgroundDelivery && !durableReceipt) {
@@ -6446,14 +6496,16 @@ export function useClaudeChat() {
         }
       }
       try {
-        const queued = await enqueueHostStateIntentIfAvailable({
-          sessionId: approval.sessionId,
-          action: {
-            kind: "approval.respond",
-            requestId: approval.requestId,
-            decision,
-          },
-        })
+        const queued = options?.updatedInput
+          ? false
+          : await enqueueHostStateIntentIfAvailable({
+              sessionId: approval.sessionId,
+              action: {
+                kind: "approval.respond",
+                requestId: approval.requestId,
+                decision,
+              },
+            })
         if (queued) {
           store.getState().clearApproval(approval.requestId, approval.sessionId)
           // The HostState answer is a fixed wire shape every paired Host
@@ -6480,7 +6532,11 @@ export function useClaudeChat() {
         await handle.resolvePermission(
           approval.requestId,
           decision,
-          ...(denialMessage ? ([{ message: denialMessage }] as const) : ([] as const))
+          ...(options?.updatedInput
+            ? ([{ message: denialMessage, updatedInput: options.updatedInput }] as const)
+            : denialMessage
+              ? ([{ message: denialMessage }] as const)
+              : ([] as const))
         )
         // `approveTool` journals the matching `permission-resolved`; this
         // branch never reaches it. Without the record the run's canonical log
@@ -6498,7 +6554,11 @@ export function useClaudeChat() {
           approval.sessionId,
           approval.requestId,
           decision === "allow_always" ? "allow" : decision,
-          ...(denialMessage ? ([denialMessage] as const) : ([] as const))
+          ...(options?.updatedInput
+            ? ([denialMessage, options.updatedInput] as const)
+            : denialMessage
+              ? ([denialMessage] as const)
+              : ([] as const))
         )
       }
       // The receipt asserts the backend received the decision, so it is written

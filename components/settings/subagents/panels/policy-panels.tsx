@@ -18,6 +18,8 @@ import { useTranslations } from "next-intl"
 
 import { useSettingsStore } from "@/stores/settings"
 import { UnsavedBar } from "@/components/settings/common/unsaved-bar"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 
 import { usePolicyDraft } from "../use-policy-draft"
 import { useReportPanelDirty } from "../panel-dirty-context"
@@ -71,10 +73,22 @@ export function NestingPanel() {
 
   // Reference changes with every settings write; `usePolicyDraft` only reads
   // it when the identity ("nesting") changes, which is what protects the draft.
-  const initial = useMemo(() => nestingValuesFromSettings(settings), [settings])
+  const initial = useMemo(
+    () => ({
+      nesting: nestingValuesFromSettings(settings),
+      contextMode: settings?.subagentRuntime?.contextMode ?? "isolated",
+    }),
+    [settings]
+  )
   const persist = useCallback(
     async (values: typeof initial) => {
-      await save({ subagentNesting: nestingValuesToSettings(values) })
+      await save({
+        subagentNesting: nestingValuesToSettings(values.nesting),
+        subagentRuntime: {
+          ...useSettingsStore.getState().settings?.subagentRuntime,
+          contextMode: values.contextMode,
+        },
+      })
     },
     [save]
   )
@@ -91,7 +105,22 @@ export function NestingPanel() {
       onSave={policy.save}
       onDiscard={policy.discard}
     >
-      <SubagentNestingCard value={policy.draft} onChange={policy.patch} />
+      <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+        <div className="space-y-0.5">
+          <Label htmlFor="subagent-context-fork">{t("forkContext")}</Label>
+          <p className="text-xs text-muted-foreground">{t("forkContextHint")}</p>
+        </div>
+        <Switch
+          id="subagent-context-fork"
+          checked={policy.draft.contextMode === "fork"}
+          onCheckedChange={(fork) => policy.patch({ contextMode: fork ? "fork" : "isolated" })}
+          aria-label={t("forkContext")}
+        />
+      </div>
+      <SubagentNestingCard
+        value={policy.draft.nesting}
+        onChange={(partial) => policy.patch({ nesting: { ...policy.draft.nesting, ...partial } })}
+      />
     </PolicyShell>
   )
 }

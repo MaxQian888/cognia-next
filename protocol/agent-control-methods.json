@@ -87,6 +87,13 @@
       "args": []
     },
     {
+      "name": "reloadExtensions",
+      "kind": "host",
+      "exposure": "control",
+      "capability": "extensions.dynamic",
+      "args": ["options"]
+    },
+    {
       "name": "reloadPlugins",
       "kind": "sdk",
       "exposure": "control",

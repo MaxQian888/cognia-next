@@ -5,6 +5,7 @@
 
 import type { ToolCall } from "@/lib/ai/agent"
 import type { ProviderName } from "@cognia/provider-types/provider"
+import type { AgentSubagentContextPolicy } from "@cognia/agent-contracts/session-operations"
 
 /**
  * SubAgent token usage statistics
@@ -143,6 +144,8 @@ export interface SubAgentConfig {
   model?: string
   /** Temperature override */
   temperature?: number
+  /** Optional per-subagent context policy, interpreted by the selected runtime. */
+  contextPolicy?: AgentSubagentContextPolicy
 
   /**
    * Back this sub-agent with an external CLI agent (Claude Code / Codex / …) by
@@ -178,6 +181,18 @@ export interface SubAgentConfig {
   allowNesting?: boolean
   /** Per-sub-agent override of the max nesting level (combined with the app cap via `min`). */
   maxNestingDepth?: number
+}
+
+/** Reject unsupported imported templates before they are persisted or projected. */
+export function assertSubagentContextPolicy(config: SubAgentConfig): void {
+  const threshold = config.contextPolicy?.compactAtTokens
+  if (threshold === undefined) return
+  if (!Number.isSafeInteger(threshold) || threshold <= 0) {
+    throw new TypeError("Subagent compaction threshold must be a positive safe integer")
+  }
+  if (config.provider || config.externalPresetId) {
+    throw new TypeError("Subagent context policy is unavailable for provider or external overrides")
+  }
 }
 
 /**

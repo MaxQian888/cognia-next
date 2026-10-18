@@ -95,6 +95,7 @@ import {
   listEnabledMcpServers,
   resolveMcpDisallowedToolNames,
 } from "@/lib/db/mcp-servers"
+import { normalizeToolPermissionRules } from "@/lib/mcp/tool-rules"
 import { getTeam } from "@/lib/db/teams"
 import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
@@ -184,6 +185,7 @@ import {
 import {
   applyCircuitBreakerSettings,
   buildRoutingEngineDeps,
+  isSiwcRoutingProvider,
 } from "@cognia/provider-routing/build-preview-engine"
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
@@ -312,7 +314,11 @@ async function resolveSubscriptionBackedSummaryCredentials(
   appSettings?: AppSettings
 ): Promise<SummaryCredentials | null> {
   const definition = getSubscriptionProvider(providerId, appSettings?.customProviders)
-  if (!resolved?.apiKey && definition?.authMode === "api-key" && !definition.legacyCredentialKind) {
+  if (
+    (!resolved?.apiKey || definition?.billingMode === "subscription") &&
+    definition?.authMode === "api-key" &&
+    !definition.legacyCredentialKind
+  ) {
     return resolveManagedSubscriptionCredential(definition, providerAccountId)
   }
   if (providerId === "commandcode" && !resolved?.apiKey) {
@@ -385,17 +391,18 @@ async function resolveSummaryProviderForCompaction(args: {
   )
 
   if (r.kind === "resolved") {
+    const definition = getSubscriptionProvider(args.providerId, args.appSettings.customProviders)
     const vaultCredentials = await resolveSubscriptionBackedSummaryCredentials(
       args.providerId,
       { apiKey: r.apiKey, baseURL: r.baseURL },
       providerAccountId,
       args.appSettings
     )
+    if (definition?.billingMode === "subscription" && !vaultCredentials) return null
     const credentials: SummaryCredentials = vaultCredentials ?? {
       apiKey: r.apiKey,
       baseURL: r.baseURL,
     }
-    const definition = getSubscriptionProvider(args.providerId, args.appSettings.customProviders)
     if (definition?.authMode === "api-key" && !credentials.apiKey) return null
     // A summary credential with no API key is only legitimate for a genuinely
     // keyless provider: a local inference engine (Ollama / LM Studio / …) or a
@@ -409,7 +416,11 @@ async function resolveSummaryProviderForCompaction(args: {
     if (!credentials.apiKey && !credentials.baseURL) return null
     if (definition?.source === "plugin" && definition.protocol === "openai") {
       credentials.apiFlavor = definition.apiFlavor ?? "chat"
-    } else if (!credentials.apiFlavor && r.apiFlavor) {
+    } else if (
+      definition?.billingMode !== "subscription" &&
+      !credentials.apiFlavor &&
+      r.apiFlavor
+    ) {
       credentials.apiFlavor = r.apiFlavor
     }
     const protocol = definition?.source === "plugin" ? definition.protocol! : r.protocol
@@ -1485,6 +1496,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // hand to `runAndCaptureAssistantReply`. Without a default, `agents: "chat"`
   // would match nothing — an unidentified turn never matches a narrowed hook.
   const opts: SendOptions = { agentKind: ctx.agentKind ?? "chat" }
+  if (appSettings?.subagentRuntime) opts.subagentRuntime = { ...appSettings.subagentRuntime }
+  if (session?.runtimeExtensions?.length)
+    opts.runtimeExtensions = session.runtimeExtensions.map((ref) => ({ ...ref }))
   if (asideRuntime) asideRuntimeByOptions.set(opts, asideRuntime.runtimeRef)
   if (isCliHost()) opts.backgroundProcessHost = "sidecar"
   if (ctx.turnId) opts.turnId = ctx.turnId
@@ -1839,7 +1853,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // health metrics, circuit breaker, today-spend mirror, rate window,
     // pricing, and the context-window resolver all live in
     // `lib/ai/routing/build-preview-engine.ts`.
-    const deps: RoutingEngineDeps = buildRoutingEngineDeps(appSettings)
+    const deps: RoutingEngineDeps = buildRoutingEngineDeps(appSettings, {
+      ...(manualRequested && isSiwcRoutingProvider(appSettings, providerId!)
+        ? { explicitProviderId: providerId }
+        : {}),
+    })
     // Rough token estimate of the outgoing prompt (CJK-aware). Uses the hoisted
     // `promptText` (also feeds auto-routing above). History/system additions are
     // not counted, keeping the check conservative-but-cheap (no awaits).
@@ -3413,6 +3431,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
 
     if (chosen.length > 0) {
+      const policies = chosen.flatMap((server) =>
+        normalizeToolPermissionRules(server.toolPermissionRules).map((rule) => ({
+          tool: `mcp__${server.name}__${rule.name}`,
+          decision: rule.decision,
+        }))
+      )
+      if (policies.length > 0) opts.toolPermissionRules = policies
       const denied = new Set(opts.disallowedTools ?? [])
       // Async because glob deny rules expand against the capability cache —
       // a pattern the user saved has to keep covering tools the server grew
@@ -5867,6 +5892,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // provider id still drives the runtime mapping.
       policy: {
         executionKind: "agent",
+        requires: (
+          await import("@cognia/agent-contracts/session-operations")
+        ).requestedRuntimeCapabilities(opts),
         ...(experimentalSdk
           ? { runtimePolicy: "claude-agent-sdk" as const, routePolicy: "gateway-required" as const }
           : {}),
@@ -6147,6 +6175,26 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     })
   }
 
+  const { requestedRuntimeCapabilities, runtimeFeatureValidationError } =
+    await import("@cognia/agent-contracts/session-operations")
+  const featureError = runtimeFeatureValidationError(opts)
+  if (featureError) throw new Error(featureError)
+  const { RUNTIME_CAPABILITIES } =
+    await import("@/lib/ai/agent/execution/resolve-agent-execution-spec")
+  const adapter =
+    opts.execution?.runtimeAdapter ??
+    ((opts.provider ?? "anthropic") === "anthropic" ? "claude-agent-sdk" : "ai-sdk")
+  for (const capability of requestedRuntimeCapabilities(opts)) {
+    if (
+      !(opts.execution?.capabilities.effective ?? RUNTIME_CAPABILITIES[adapter]).includes(
+        capability
+      )
+    ) {
+      const { AgentCapabilityError } =
+        await import("@/lib/ai/agent/execution/agent-execution-handle")
+      throw new AgentCapabilityError(capability, "send")
+    }
+  }
   return opts
 }
 

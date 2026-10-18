@@ -28,6 +28,7 @@ import { listSubagentEntries } from "@/lib/plugin/registries/subagent-registry"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubAgentTemplate } from "@/types/agent/sub-agent"
+import { assertSubagentContextPolicy } from "@/types/agent/sub-agent"
 
 /**
  * Single map keyed by the dispatcher-agent name (lowercase-with-dashes)
@@ -70,6 +71,7 @@ function projectPluginSubagent(entry: {
   if (entry.entry.disallowedTools) def.disallowedTools = entry.entry.disallowedTools
   if (entry.entry.model) def.model = entry.entry.model
   if (entry.entry.maxTurns !== undefined) def.maxTurns = entry.entry.maxTurns
+  if (entry.entry.contextPolicy) def.contextPolicy = { ...entry.entry.contextPolicy }
   if (entry.entry.effort) def.effort = entry.entry.effort
   if (entry.entry.color) def.color = entry.entry.color
   if (entry.entry.externalPresetId) def.externalPresetId = entry.entry.externalPresetId
@@ -119,6 +121,7 @@ function projectSubagentTemplate(tpl: SubAgentTemplate): {
   id: string
   def: AgentDefinition
 } {
+  assertSubagentContextPolicy(tpl.config)
   const def: AgentDefinition = {
     description: tpl.description,
     prompt: tpl.config.systemPrompt ?? tpl.taskTemplate ?? tpl.description,
@@ -126,6 +129,7 @@ function projectSubagentTemplate(tpl: SubAgentTemplate): {
   if (tpl.config.tools) def.tools = tpl.config.tools
   if (tpl.config.model) def.model = tpl.config.model
   if (tpl.config.maxSteps !== undefined) def.maxTurns = tpl.config.maxSteps
+  if (tpl.config.contextPolicy) def.contextPolicy = { ...tpl.config.contextPolicy }
   // External-CLI backing (A2): route this subagent to an external agent when the
   // template names a preset, so the dispatching model runs it on Claude Code /
   // Codex / … instead of the built-in executor.
@@ -278,6 +282,7 @@ export function resolveDispatchableSubagents(): Array<{ id: string; def: PluginS
         ...(tpl.config.tools ? { tools: tpl.config.tools } : {}),
         ...(tpl.config.model ? { model: tpl.config.model } : {}),
         ...(tpl.config.maxSteps !== undefined ? { maxTurns: tpl.config.maxSteps } : {}),
+        ...(tpl.config.contextPolicy ? { contextPolicy: { ...tpl.config.contextPolicy } } : {}),
         // External-CLI backing (A2): a template naming a preset dispatches to
         // that external agent, with its declared MCP servers forwarded into the
         // ACP session. Without these two, `dispatch_agent` would silently route

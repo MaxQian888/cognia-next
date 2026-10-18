@@ -586,3 +586,111 @@ describe("paired companion hosts", () => {
     expect(channelFromSpec(spec, standalone)).toBe("text")
   })
 })
+
+it("advertises portable features only on adapters that implement them", () => {
+  const requires = [
+    "extensions.dynamic",
+    "tools.permission-policy",
+    "subagents.context-fork",
+    "subagents.auto-compaction",
+  ] as const
+  const claude = resolveAgentExecutionSpec(
+    baseInput({ policy: { runtimePolicy: "claude-agent-sdk", requires: [...requires] } })
+  )
+  expect(claude.missingRequired).toEqual([])
+  const generic = resolveAgentExecutionSpec(
+    baseInput({ policy: { runtimePolicy: "ai-sdk", requires: [...requires] } })
+  )
+  expect(generic.missingRequired).toEqual([
+    "extensions.dynamic",
+    "subagents.context-fork",
+    "subagents.auto-compaction",
+  ])
+  expect(generic.spec.capabilities.effective).toContain("tools.permission-policy")
+})
+
+describe("portable features require the actual execution host", () => {
+  const portable = [
+    "extensions.dynamic",
+    "tools.permission-policy",
+    "subagents.context-fork",
+    "subagents.auto-compaction",
+  ] as const
+
+  it.each(["claude-agent-sdk", "ai-sdk"] as const)(
+    "does not advertise host-only features for standalone %s, even with host capability grants",
+    (runtimePolicy) => {
+      const result = resolveAgentExecutionSpec(
+        baseInput({
+          environment: {
+            ...web,
+            hostProfile: "web-standalone",
+            hostCapabilities: [...portable, "streaming"],
+          },
+          policy: { runtimePolicy, requires: [...portable] },
+        })
+      )
+      expect(result.missingRequired).toEqual(portable)
+      for (const capability of portable) {
+        expect(result.spec.capabilities.effective).not.toContain(capability)
+        expect(result.spec.capabilities.support?.[capability]?.support).toBe("unsupported")
+      }
+      expect(result.spec.capabilities.effective).toContain("streaming")
+    }
+  )
+
+  it.each([
+    desktop,
+    headless,
+    { ...web, pairedHost: true, hostProfile: "mobile-companion" as const },
+    { ...web, pairedHost: true, hostProfile: "cloud-companion" as const },
+  ])("preserves host-backed portable capabilities: %j", (environment) => {
+    const result = resolveAgentExecutionSpec(
+      baseInput({
+        environment,
+        policy: { runtimePolicy: "claude-agent-sdk", requires: [...portable] },
+      })
+    )
+    expect(result.missingRequired).toEqual([])
+    expect(result.spec.capabilities.effective).toEqual(expect.arrayContaining(portable))
+    const aiSdk = resolveAgentExecutionSpec(
+      baseInput({
+        environment,
+        policy: { runtimePolicy: "ai-sdk", requires: ["tools.permission-policy"] },
+      })
+    )
+    expect(aiSdk.missingRequired).toEqual([])
+    expect(aiSdk.spec.capabilities.effective).toContain("tools.permission-policy")
+  })
+
+  it("also narrows legacy standalone environments without an explicit capability ceiling", () => {
+    const result = resolveAgentExecutionSpec(
+      baseInput({
+        environment: web,
+        policy: { runtimePolicy: "claude-agent-sdk", requires: [...portable] },
+      })
+    )
+    expect(result.missingRequired).toEqual(portable)
+    expect(result.spec.capabilities.effective).toContain("streaming")
+    expect(result.spec.capabilities.effective).toContain("tools.ordinary")
+  })
+
+  it("preserves negotiated external transport support in a browser", () => {
+    const result = resolveAgentExecutionSpec(
+      baseInput({
+        environment: web,
+        surface: "team",
+        legacy: { runtime: "codex" },
+        policy: { requires: [...portable] },
+        externalCapabilities: {
+          effective: portable,
+          support: {},
+          profileDigest: "external-browser-host",
+          negotiated: true,
+        },
+      })
+    )
+    expect(result.missingRequired).toEqual([])
+    expect(result.spec.capabilities.effective).toEqual(portable)
+  })
+})

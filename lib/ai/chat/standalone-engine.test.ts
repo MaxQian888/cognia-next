@@ -127,6 +127,78 @@ beforeEach(() => {
 })
 
 describe("runStandaloneTurn", () => {
+  it.each([
+    ["extensions.dynamic", { runtimeExtensions: [{ kind: "directory", path: "/trusted/plugin" }] }],
+    ["tools.permission-policy", { toolPermissionRules: [{ tool: "Read", decision: "ask" }] }],
+    ["subagents.context-fork", { subagentRuntime: { contextMode: "fork" } }],
+    [
+      "subagents.auto-compaction",
+      {
+        agents: {
+          reviewer: {
+            description: "Review",
+            prompt: "Review",
+            contextPolicy: { compactAtTokens: 1000 },
+          },
+        },
+      },
+    ],
+  ])(
+    "rejects unsupported %s before provider resolution even with a spoofed frozen grant",
+    async (capability, options) => {
+      const stream = jest.fn(fakeStream([]))
+      const { events, promise } = run({
+        sendOptions: {
+          ...options,
+          execution: { capabilities: { effective: [capability] } },
+        } as SendOptions,
+        streamTextImpl: stream as never,
+      })
+      await promise
+      expect(events).toEqual([
+        { type: "capability_error", sessionId: "s1", capability, command: "send" },
+        { type: "session_ended", sessionId: "s1", error: expect.stringContaining(capability) },
+      ])
+      expect(mockResolve).not.toHaveBeenCalled()
+      expect(createFeatureProviderModel).not.toHaveBeenCalled()
+      expect(stream).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    { subagentRuntime: { contextMode: "invalid" } },
+    { runtimeExtensions: [{ kind: "directory", path: "relative" }] },
+    { toolPermissionRules: [{ tool: "Read", decision: "allow" }] },
+    { agents: { reviewer: { contextPolicy: { compactAtTokens: 0 } } } },
+  ])("rejects malformed portable options before provider resolution: %j", async (options) => {
+    const stream = jest.fn(fakeStream([]))
+    const { events, promise } = run({
+      sendOptions: options as SendOptions,
+      streamTextImpl: stream as never,
+    })
+    await promise
+    expect(events).toEqual([
+      { type: "session_ended", sessionId: "s1", error: expect.stringContaining("invalid_") },
+    ])
+    expect(mockResolve).not.toHaveBeenCalled()
+    expect(createFeatureProviderModel).not.toHaveBeenCalled()
+    expect(stream).not.toHaveBeenCalled()
+  })
+
+  it("keeps empty portable options and isolated subagents compatible", async () => {
+    const { events, promise } = run({
+      sendOptions: {
+        runtimeExtensions: [],
+        toolPermissionRules: [],
+        subagentRuntime: { contextMode: "isolated" },
+        agents: { reviewer: { description: "Review", prompt: "Review", contextPolicy: {} } },
+      } as SendOptions,
+    })
+    await promise
+    expect(mockResolve).toHaveBeenCalledTimes(1)
+    expect(events.at(-1)).toEqual({ type: "session_ended", sessionId: "s1" })
+  })
+
   it("waits for each event consumer before emitting the terminal event", async () => {
     let releaseFirstEvent: (() => void) | undefined
     const firstEventPersisted = new Promise<void>((resolve) => {

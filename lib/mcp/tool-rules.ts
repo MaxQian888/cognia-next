@@ -22,9 +22,43 @@
 /** Characters that must survive into the regexp as literals. */
 const REGEXP_SPECIALS = /[.+^${}()|[\]\\]/g
 
+import type { AgentToolPermissionRule } from "@cognia/agent-contracts/session-operations"
+
 export interface McpToolRules {
   disallowedTools?: readonly string[]
   disallowedToolPatterns?: readonly string[]
+  toolPermissionRules?: readonly AgentToolPermissionRule[]
+}
+
+/** Canonical portable policies. Reject malformed input instead of weakening a restriction. */
+export function normalizeToolPermissionRules(values: unknown): AgentToolPermissionRule[] {
+  if (values === undefined) return []
+  if (!Array.isArray(values)) throw new Error("Tool permission rules must be an array")
+  const rules = new Map<string, "ask" | "deny">()
+  for (const value of values) {
+    if (
+      !value ||
+      typeof value !== "object" ||
+      typeof value.name !== "string" ||
+      !value.name.trim() ||
+      (value.decision !== "ask" && value.decision !== "deny")
+    ) {
+      throw new Error("Tool permission rules require a name and ask or deny decision")
+    }
+    const name = value.name.trim()
+    if (rules.get(name) !== "deny") rules.set(name, value.decision)
+  }
+  return [...rules]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, decision]) => ({ name, decision }))
+}
+
+function toolRestriction(tool: string, rules: McpToolRules): number {
+  if (isToolDenied(tool, rules)) return 2
+  const policy = normalizeToolPermissionRules(rules.toolPermissionRules).find(
+    (rule) => rule.name === tool
+  )
+  return policy?.decision === "deny" ? 2 : policy?.decision === "ask" ? 1 : 0
 }
 
 /** Trim, drop blanks, de-duplicate, sort — the shape both fields persist in. */
@@ -77,15 +111,27 @@ export function isToolExplicitlyDenied(tool: string, rules: McpToolRules): boole
 
 /** True when either axis denies the tool. */
 export function isToolDenied(tool: string, rules: McpToolRules): boolean {
-  return isToolExplicitlyDenied(tool, rules) || matchingToolPatterns(tool, rules).length > 0
+  return (
+    isToolExplicitlyDenied(tool, rules) ||
+    matchingToolPatterns(tool, rules).length > 0 ||
+    normalizeToolPermissionRules(rules.toolPermissionRules).some(
+      (rule) => rule.name === tool && rule.decision === "deny"
+    )
+  )
 }
 
-export type McpToolDenyReason = "allowed" | "explicit" | "pattern"
+export type McpToolDenyReason = "allowed" | "explicit" | "pattern" | "policy"
 
 /** Why a tool is on or off, for the per-tool row in the settings UI. */
 export function toolDenyReason(tool: string, rules: McpToolRules): McpToolDenyReason {
   if (isToolExplicitlyDenied(tool, rules)) return "explicit"
   if (matchingToolPatterns(tool, rules).length > 0) return "pattern"
+  if (
+    normalizeToolPermissionRules(rules.toolPermissionRules).some(
+      (rule) => rule.name === tool && rule.decision === "deny"
+    )
+  )
+    return "policy"
   return "allowed"
 }
 
@@ -104,6 +150,9 @@ export function resolveDeniedToolNames(
   knownTools: readonly string[] = []
 ): string[] {
   const denied = new Set(normalizeToolRuleList(rules.disallowedTools))
+  for (const rule of normalizeToolPermissionRules(rules.toolPermissionRules)) {
+    if (rule.decision === "deny") denied.add(rule.name)
+  }
   const patterns = normalizeToolRuleList(rules.disallowedToolPatterns)
   if (patterns.length > 0) {
     for (const tool of knownTools) {
@@ -137,9 +186,11 @@ export function isToolRuleTightening(
     ...knownTools.map((tool) => tool.trim()).filter(Boolean),
     ...normalizeToolRuleList(prev.disallowedTools),
     ...normalizeToolRuleList(next.disallowedTools),
+    ...normalizeToolPermissionRules(prev.toolPermissionRules).map((rule) => rule.name),
+    ...normalizeToolPermissionRules(next.toolPermissionRules).map((rule) => rule.name),
   ])
   for (const tool of universe) {
-    if (isToolDenied(tool, prev) && !isToolDenied(tool, next)) return false
+    if (toolRestriction(tool, next) < toolRestriction(tool, prev)) return false
   }
   // A pattern that survives verbatim is fine; one that disappears could free
   // a not-yet-discovered tool, so treat a dropped pattern as a relaxation.

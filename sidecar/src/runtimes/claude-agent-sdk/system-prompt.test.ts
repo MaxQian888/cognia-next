@@ -54,7 +54,7 @@ test("thinkingFromBudget: positive → enabled with budgetTokens", () => {
   assert.deepEqual(thinkingFromBudget(8000), { type: "enabled", budgetTokens: 8000 })
 })
 
-test("thinkingFromBudget: zero disables thinking, invalid or missing stays unspecified", () => {
+test("thinkingFromBudget: zero requests disabled thinking, invalid or missing stays unspecified", () => {
   assert.deepEqual(thinkingFromBudget(0), { type: "disabled" })
   assert.equal(thinkingFromBudget(-1), undefined)
   assert.equal(thinkingFromBudget(undefined), undefined)

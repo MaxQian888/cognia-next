@@ -8,6 +8,24 @@ import {
 } from "./canonical-event"
 
 describe("canonical event vocabulary", () => {
+  it("round-trips portable delivery timing and quota metadata", () => {
+    const events: CanonicalAgentEvent[] = [
+      {
+        kind: "lifecycle",
+        phase: "ended",
+        timing: { firstTextQueueWaitMs: 0, firstTextQueueReason: "retry-backoff" },
+      },
+      { kind: "rate-limit", status: "allowed", overageEnabled: false, limitScope: "service" },
+      {
+        kind: "elicitation-request",
+        requestId: "form",
+        source: "runtime",
+        prompt: "Question",
+        propertyOrder: ["second", "first"],
+      },
+    ]
+    expect(JSON.parse(JSON.stringify(events))).toEqual(events)
+  })
   it("lists every kind once", () => {
     expect(new Set(CANONICAL_AGENT_EVENT_KINDS).size).toBe(CANONICAL_AGENT_EVENT_KINDS.length)
   })
@@ -211,6 +229,15 @@ describe("isAgentEventEnvelope", () => {
       { kind: "tool-summary", summary: "read three files", toolCallIds: ["t1"] },
       { kind: "auth", authenticating: false },
       { kind: "task", phase: "settled", taskId: "k1", status: "completed" },
+      { kind: "task", phase: "started", taskId: "child", runId: "run-2", parentTaskId: "parent" },
+      {
+        kind: "tool-progress",
+        toolCallId: "web",
+        toolName: "WebFetch",
+        elapsedMs: 0,
+        backgrounded: true,
+      },
+      { kind: "tool-result", toolName: "mcp", result: "fallback", structuredContentOmitted: true },
       { kind: "task-inventory", tasks: [{ taskId: "k1", taskType: "agent", description: "d" }] },
       { kind: "notification", key: "n1", text: "done", priority: "low" },
       { kind: "informational", content: "heads up", level: "notice" },

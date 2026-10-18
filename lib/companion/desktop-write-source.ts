@@ -1944,13 +1944,26 @@ async function mcpSetToolRules(payload: Record<string, unknown>): Promise<null> 
     payload.disallowedToolPatterns,
     "disallowedToolPatterns"
   )
-  if (disallowedTools === undefined && disallowedToolPatterns === undefined) {
-    throw new Error("mcp_set_tool_rules requires disallowedTools or disallowedToolPatterns")
+  const toolPermissionRules =
+    payload.toolPermissionRules === undefined
+      ? undefined
+      : (await import("@/lib/mcp/tool-rules")).normalizeToolPermissionRules(
+          payload.toolPermissionRules
+        )
+  if (
+    disallowedTools === undefined &&
+    disallowedToolPatterns === undefined &&
+    toolPermissionRules === undefined
+  ) {
+    throw new Error(
+      "mcp_set_tool_rules requires disallowedTools or disallowedToolPatterns or toolPermissionRules"
+    )
   }
   const { updateMcpServer } = await import("@/lib/db/mcp-servers")
   await updateMcpServer(id, {
     ...(disallowedTools !== undefined ? { disallowedTools } : {}),
     ...(disallowedToolPatterns !== undefined ? { disallowedToolPatterns } : {}),
+    ...(toolPermissionRules !== undefined ? { toolPermissionRules } : {}),
   })
   return null
 }

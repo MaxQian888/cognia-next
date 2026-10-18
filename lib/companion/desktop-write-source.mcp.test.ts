@@ -40,6 +40,21 @@ describe("dispatchCommand: mcp_set_enabled", () => {
 })
 
 describe("dispatchCommand: mcp_set_tool_rules", () => {
+  it("accepts portable policies and rejects a decision that could weaken approval", async () => {
+    await dispatchCommand("mcp_set_tool_rules", {
+      id: "mcp_1",
+      toolPermissionRules: [{ name: " publish ", decision: "ask" }],
+    })
+    expect(mcpServers.updateMcpServer).toHaveBeenCalledWith("mcp_1", {
+      toolPermissionRules: [{ name: "publish", decision: "ask" }],
+    })
+    await expect(
+      dispatchCommand("mcp_set_tool_rules", {
+        id: "mcp_1",
+        toolPermissionRules: [{ name: "publish", decision: "allow" }],
+      })
+    ).rejects.toThrow(/ask or deny/)
+  })
   it("replaces the exact deny list", async () => {
     await expect(
       dispatchCommand("mcp_set_tool_rules", { id: "mcp_1", disallowedTools: ["write_file"] })

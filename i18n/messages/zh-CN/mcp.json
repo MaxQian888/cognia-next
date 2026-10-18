@@ -367,6 +367,10 @@
     "updated": "已更新 MCP 服务器。"
   },
   "tools": {
+    "policyAria": "{name} 的权限策略",
+    "policyDefault": "默认策略",
+    "policyAsk": "每次询问",
+    "policyDeny": "始终拒绝",
     "allowAll": "全部允许",
     "allowToolAria": "允许 {name}",
     "countBadge": "已禁用 {denied}/{total}",
@@ -380,7 +384,7 @@
     "emptyDesktop": "还没有探测到工具。点击刷新以连接并读取该服务器的工具列表。",
     "loading": "正在加载工具…",
     "noMatch": "没有匹配的工具。",
-    "orphansHint": "这些工具已被禁用，但服务器当前不再提供它们。",
+    "orphansHint": "这些工具保留了权限规则，但服务器当前不再提供它们。",
     "orphansTitle": "找不到对应工具的规则",
     "patternHits": "· 当前 {count} 个",
     "patternLiteral": "没有 * 或 ?，这条规则只会匹配这一个完整工具名。",

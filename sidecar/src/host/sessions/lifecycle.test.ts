@@ -447,3 +447,22 @@ test("a loop with no ledger seam still takes the prompt", () => {
   routeSendIntoLiveLoop({ pushUserMessage: (p) => pushed.push(p) }, undefined, "hi")
   assert.deepEqual(pushed, ["hi"])
 })
+
+test("portable permission and subagent changes cannot reuse an older session policy", () => {
+  const existing = { multiTurn: true, q: { active: false }, sendOptions: { provider: "anthropic" } }
+  assert.equal(restartReason(existing, { subagentRuntime: { contextMode: "isolated" } }), null)
+  for (const options of [
+    { subagentRuntime: { contextMode: "fork" as const } },
+    { toolPermissionRules: [{ tool: "mcp__notes__write", decision: "ask" as const }] },
+    {
+      agents: {
+        child: {
+          description: "Review",
+          prompt: "Review",
+          contextPolicy: { compactAtTokens: 1000 },
+        },
+      },
+    },
+  ])
+    assert.equal(restartReason(existing, options), "runtime feature policy changed")
+})

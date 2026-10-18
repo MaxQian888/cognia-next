@@ -35,6 +35,76 @@ function asResult(extra: Partial<SDKResultMessage> & Record<string, unknown>): S
   return { type: "result", ...extra } as unknown as SDKResultMessage
 }
 
+describe("SDK 0.3.302 tool result compatibility", () => {
+  const call = (): UIMessage[] => [
+    {
+      id: "assistant-tool",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-WebFetch",
+          toolCallId: "fetch-1",
+          state: "input-available",
+          input: { url: "https://example.com" },
+        } as never,
+      ],
+    },
+  ]
+  const result = (tool_use_result: unknown): SDKUserMessage => ({
+    type: "user",
+    uuid: "result",
+    session_id: "sdk",
+    parent_tool_use_id: null,
+    tool_use_result,
+    message: {
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: "fetch-1", content: "model-facing fallback" }],
+    },
+  })
+
+  it("retains the background handoff marker instead of fabricating a tool output", () => {
+    const { messages } = applySdkEvent(call(), result({ detachedToolCall: true }))
+    expect(messages[0].parts[0]).toMatchObject({
+      state: "output-available",
+      toolResultMetadata: { backgrounded: true },
+      output: "model-facing fallback",
+    })
+  })
+
+  it("clears an earlier handoff marker when a producer supplies a later real result", () => {
+    const first = applySdkEvent(call(), result({ detachedToolCall: true }))
+    const second = applySdkEvent(first.messages, result(undefined))
+    expect(
+      (second.messages[0].parts[0] as { toolResultMetadata?: unknown }).toolResultMetadata
+    ).toBeUndefined()
+  })
+
+  it("preserves structured data and distinguishes an omitted object from an absent one", () => {
+    for (const metadata of [
+      { structuredContent: { value: 42 } },
+      { structuredContentOmitted: true },
+    ]) {
+      const { messages } = applySdkEvent(call(), result(metadata))
+      expect(messages[0].parts[0]).toMatchObject({
+        toolResultMetadata: metadata,
+        output: "model-facing fallback",
+      })
+    }
+  })
+
+  it("does not attach one structured twin to an aggregated set of tool results", () => {
+    const event = result({ structuredContent: { value: 42 } })
+    event.message.content = [
+      { type: "tool_result", tool_use_id: "fetch-1", content: "first" },
+      { type: "tool_result", tool_use_id: "other", content: "other" },
+    ]
+    const { messages } = applySdkEvent(call(), event)
+    expect(
+      (messages[0].parts[0] as { toolResultMetadata?: unknown }).toolResultMetadata
+    ).toBeUndefined()
+  })
+})
+
 describe("applySdkEvent — assistant", () => {
   it("appends a fresh assistant message with text and thinking parts", () => {
     const evt = asAssistant({

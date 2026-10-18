@@ -55,8 +55,9 @@ function foldPromptParts(base: unknown, append?: unknown): string | string[] | u
 
 /**
  * Translate the deprecated `maxThinkingTokens` budget into the typed `thinking`
- * config. Zero explicitly disables thinking; invalid or omitted budgets leave
- * the model default intact.
+ * config. Zero requests disabled thinking; SDK 0.3.300+ uses adaptive thinking
+ * on models that cannot disable it. Invalid or omitted budgets leave the
+ * model default intact.
  *
  */
 export function thinkingFromBudget(maxThinkingTokens: unknown): Options["thinking"] {

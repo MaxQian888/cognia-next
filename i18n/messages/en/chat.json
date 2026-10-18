@@ -33,6 +33,7 @@
     },
     "status": {
       "awaitingApproval": "Awaiting approval",
+      "backgrounded": "Continues in background",
       "completed": "Completed",
       "denied": "Denied",
       "error": "Error",

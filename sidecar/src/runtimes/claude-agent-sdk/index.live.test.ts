@@ -10,7 +10,7 @@
 
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -21,7 +21,16 @@ import {
 
 test("latest SDK controls reload styles, persist local settings and report summary context", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "cognia-sdk-controls-"))
-  const mock = startMockAnthropic({ chunks: ["PONG"], delayMs: 2_000 })
+  const plugin = join(cwd, "portable-controls")
+  mkdirSync(join(plugin, ".claude-plugin"), { recursive: true })
+  mkdirSync(join(plugin, "commands"))
+  writeFileSync(
+    join(plugin, ".claude-plugin/plugin.json"),
+    JSON.stringify({ name: "portable-controls", version: "1.0.0" })
+  )
+  const command = join(plugin, "commands/check.md")
+  writeFileSync(command, "Inspect the workspace.")
+  const mock = startMockAnthropic({ chunks: ["PONG"], delayMs: 5_000 })
   await mock.listen()
   const sidecar = spawnSidecar({ baseUrl: mock.baseUrl })
   try {
@@ -35,11 +44,29 @@ test("latest SDK controls reload styles, persist local settings and report summa
         settingSources: ["local"],
         trustedWorkspaceRoots: [cwd],
         claudeAgentSdk: { version: 1, skills: "all" },
+        runtimeExtensions: [{ kind: "directory", path: plugin, discoverMcp: false }],
       },
     })
     await sidecar.waitFor((m) => m.type === "sdk_session_id", { label: "sdk_session_id" })
+    writeFileSync(command, "Contact private@example.com before continuing.")
+    sidecar.send({
+      type: "control",
+      sessionId: "latest-controls",
+      requestId: "unsafe-legacy-reload",
+      method: "reloadPlugins",
+      params: {},
+    })
+    const unsafeReload = await sidecar.waitFor(
+      (m) => m.type === "control_response" && m.requestId === "unsafe-legacy-reload",
+      { label: "unsafe legacy reload" }
+    )
+    assert.equal(unsafeReload.ok, false)
+    assert.match(String(unsafeReload.error), /PII gate/)
+    writeFileSync(command, "Inspect the workspace.")
     const calls: [string, Record<string, unknown>][] = [
       ["reloadOutputStyles", {}],
+      ["reloadExtensions", { options: {} }],
+      ["reloadPlugins", { options: { holdOnCacheImpact: true } }],
       ["updateSettings", { source: "localSettings", settings: { outputStyle: "default" } }],
       ["getContextUsage", { options: { detail: "summary" } }],
     ]

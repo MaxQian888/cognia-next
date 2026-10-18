@@ -8,6 +8,16 @@ export function retainedRuntimeSendIsSafe(
   existing: HostSession | undefined,
   options?: SendOptions
 ) {
+  if (
+    existing?.multiTurn === true &&
+    (existing.sendOptions?.execution?.runtimeAdapter ??
+      ((existing.sendOptions?.provider ?? "anthropic") === "anthropic"
+        ? "claude-agent-sdk"
+        : "ai-sdk")) === "ai-sdk" &&
+    !Array.isArray(options?.initialConversation) &&
+    restartReason(existing, options) === "runtime feature policy changed"
+  )
+    return false
   if (typeof options?.expectedRuntimeSessionId !== "string") return true
   return (
     !!existing &&
@@ -32,6 +42,8 @@ export function providerVisibleSendPayloadIsSafe({
     appendSystemPrompt: options?.appendSystemPrompt,
     ...(options?.agents ? { agents: options.agents } : {}),
     ...(options?.pluginTools ? { pluginTools: options.pluginTools } : {}),
+    ...(options?.toolPermissionRules ? { toolPermissionRules: options.toolPermissionRules } : {}),
+    ...(options?.runtimeExtensions ? { runtimeExtensions: options.runtimeExtensions } : {}),
     ...(sdk
       ? {
           claudeAgentSdk: {

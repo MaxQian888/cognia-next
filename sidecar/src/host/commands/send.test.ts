@@ -2,6 +2,22 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import { providerVisibleSendPayloadIsSafe, retainedRuntimeSendIsSafe } from "./send.ts"
 
+test("a headless policy change cannot replace retained history without an explicit restore", () => {
+  const current = { multiTurn: true, q: { active: false }, sendOptions: { provider: "openai" } }
+  const options = {
+    provider: "openai",
+    toolPermissionRules: [{ tool: "mcp__notes__write", decision: "ask" as const }],
+  }
+  assert.equal(retainedRuntimeSendIsSafe(current, options), false)
+  assert.equal(
+    retainedRuntimeSendIsSafe(current, {
+      ...options,
+      initialConversation: [{ role: "user" as const, content: "Remember" }],
+    }),
+    true
+  )
+})
+
 test("restored history is PII-gated including nested tool results", () => {
   assert.equal(
     providerVisibleSendPayloadIsSafe({

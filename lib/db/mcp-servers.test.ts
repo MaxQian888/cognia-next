@@ -130,6 +130,35 @@ describe("createMcpServer", () => {
     expect((await getMcpServer(server.id))?.disallowedTools).toEqual(["browser_run_code_unsafe"])
   })
 
+  it("roundtrips portable permission policies, retaining trust on tightening and reopening on relaxation", async () => {
+    const server = await createMcpServer({
+      name: "policies",
+      transport: "stdio",
+      config: { command: "x" },
+      enabled: true,
+      trust: { state: "trusted" },
+      toolPermissionRules: [{ name: " publish ", decision: "ask" }],
+    })
+    expect((await getMcpServer(server.id))?.toolPermissionRules).toEqual([
+      { name: "publish", decision: "ask" },
+    ])
+    await updateMcpServer(server.id, {
+      toolPermissionRules: [{ name: "publish", decision: "deny" }],
+    })
+    expect(await getMcpServer(server.id)).toMatchObject({
+      enabled: true,
+      trust: { state: "trusted" },
+      toolPermissionRules: [{ name: "publish", decision: "deny" }],
+    })
+    await updateMcpServer(server.id, {
+      toolPermissionRules: [{ name: "publish", decision: "ask" }],
+    })
+    expect(await getMcpServer(server.id)).toMatchObject({
+      enabled: false,
+      trust: { state: "pending" },
+    })
+  })
+
   it("listMcpServersByPlugin returns only that plugin's rows", async () => {
     await createMcpServer({
       name: "g1",

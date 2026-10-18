@@ -565,7 +565,7 @@
     "packagedVsBuiltinFields": [],
     "evaluation": "pass",
     "exports": ["default", "manifest"],
-    "packagedVsBundleFields": []
+    "packagedVsBundleFields": ["subscriptionProviders"]
   },
   {
     "id": "cognia-ocr",

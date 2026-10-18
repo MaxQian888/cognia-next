@@ -7,6 +7,8 @@
 // `control_response` event. Keeping the allowlist + arg-mapping + response
 // shaping here (no I/O) makes them unit-testable via `pnpm sidecar:test`.
 
+import { isAbsolute } from "node:path"
+
 /**
  * Allowlisted SDK `Query` control methods. Defense-in-depth: the host refuses
  * any method outside this set so a malformed/hostile `control` line can never
@@ -23,6 +25,7 @@ export const CONTROL_METHODS = new Set([
   "reconnectMcpServer",
   "reinitialize",
   "reloadOutputStyles",
+  "reloadExtensions",
   "reloadPlugins",
   "reloadSkills",
   "rewindFiles",
@@ -64,6 +67,7 @@ export const CONTROL_METHOD_CAPABILITIES = {
   reconnectMcpServer: "mcp",
   reinitialize: "session.manage",
   reloadOutputStyles: "session.manage",
+  reloadExtensions: "extensions.dynamic",
   reloadPlugins: "plugins.native",
   reloadSkills: "skills.native",
   rewindFiles: "checkpoint",
@@ -143,6 +147,8 @@ export function controlArgs(method: string, params?: Record<string, unknown> | n
     case "updateSettings":
       return [p.source, p.settings]
     case "getContextUsage":
+      return [p.options]
+    case "reloadExtensions":
       return [p.options]
     case "reloadPlugins":
       return [p.options]
@@ -263,6 +269,30 @@ export function controlParamError(
         )
         ? null
         : "invalid_context_options"
+    case "reloadExtensions": {
+      if (p.options === undefined) return null
+      if (!p.options || typeof p.options !== "object" || Array.isArray(p.options))
+        return "invalid_reload_options"
+      for (const [key, value] of Object.entries(p.options)) {
+        if (key === "preservePromptCache" && typeof value === "boolean") continue
+        if (
+          key !== "add" ||
+          !Array.isArray(value) ||
+          value.some(
+            (ref) =>
+              !ref ||
+              typeof ref !== "object" ||
+              ref.kind !== "directory" ||
+              typeof ref.path !== "string" ||
+              !isAbsolute(ref.path) ||
+              Object.keys(ref).some((field) => !["kind", "path", "discoverMcp"].includes(field)) ||
+              (ref.discoverMcp !== undefined && typeof ref.discoverMcp !== "boolean")
+          )
+        )
+          return "invalid_reload_options"
+      }
+      return null
+    }
     case "reloadPlugins":
       if (p.options === undefined) return null
       return p.options &&

@@ -223,6 +223,13 @@ function EditableView({
   const persist = useCallback(
     async (next: SubAgentTemplate) => {
       if (!next.name.trim()) throw new Error(t("nameRequired"))
+      const threshold = next.config.contextPolicy?.compactAtTokens
+      if (threshold !== undefined && (!Number.isSafeInteger(threshold) || threshold <= 0)) {
+        throw new Error(t("compactAtTokensInvalid"))
+      }
+      if (threshold !== undefined && (next.config.provider || next.config.externalPresetId)) {
+        throw new Error(t("compactAtTokensUnsupported"))
+      }
       await onPersist({ ...next, name: next.name.trim() })
     },
     [onPersist, t]
@@ -514,6 +521,38 @@ function EditableView({
       {/* Advanced */}
       <motion.div variants={reduce ? undefined : STAGGER_CHILD}>
         <SettingsGroup title={t("configTitle")} defaultOpen={false}>
+          <div className="space-y-1">
+            <Label htmlFor="editor-compact-at-tokens" className="text-xs">
+              {t("editorCompactAtTokens")}
+            </Label>
+            <Input
+              id="editor-compact-at-tokens"
+              type="number"
+              min={1}
+              max={Number.MAX_SAFE_INTEGER}
+              step={1}
+              value={draft.config.contextPolicy?.compactAtTokens ?? ""}
+              disabled={
+                Boolean(draft.config.provider || draft.config.externalPresetId) &&
+                draft.config.contextPolicy?.compactAtTokens === undefined
+              }
+              onChange={(e) =>
+                updateConfig(
+                  "contextPolicy",
+                  e.target.value ? { compactAtTokens: Number(e.target.value) } : undefined
+                )
+              }
+              className="h-8 text-xs"
+              aria-label={t("editorCompactAtTokens")}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {t(
+                draft.config.provider || draft.config.externalPresetId
+                  ? "compactAtTokensUnsupported"
+                  : "editorCompactAtTokensHint"
+              )}
+            </p>
+          </div>
           <div className="grid gap-3 @md/subagent-pane:grid-cols-2">
             <div className="space-y-1">
               <Label className="text-xs">{t("editorMaxSteps")}</Label>

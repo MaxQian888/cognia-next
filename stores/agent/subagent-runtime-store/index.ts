@@ -24,6 +24,7 @@ import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
 import {
   BUILT_IN_SUBAGENT_TEMPLATES,
+  assertSubagentContextPolicy,
   type SubAgent,
   type SubAgentLog,
   type SubAgentStatus,
@@ -89,15 +90,19 @@ export const useSubagentRuntimeStore = create<SubagentRuntimeState>()(
     (set) => ({
       // ---- Templates --------------------------------------------------
       templates: seedTemplates(),
-      addTemplate: (t) =>
+      addTemplate: (t) => {
+        assertSubagentContextPolicy(t.config)
         set((s) => ({
           templates: { ...s.templates, [t.id]: t },
-        })),
+        }))
+      },
       updateTemplate: (id, patch) =>
         set((s) => {
           const existing = s.templates[id]
           if (!existing || existing.isBuiltIn) return s
-          return { templates: { ...s.templates, [id]: { ...existing, ...patch } } }
+          const next = { ...existing, ...patch }
+          assertSubagentContextPolicy(next.config)
+          return { templates: { ...s.templates, [id]: next } }
         }),
       deleteTemplate: (id) =>
         set((s) => {

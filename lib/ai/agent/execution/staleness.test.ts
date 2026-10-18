@@ -51,6 +51,23 @@ describe("currentVersions", () => {
 })
 
 describe("computeStaleness", () => {
+  it("invalidates certifications issued before the SDK 0.3.302 upgrade", () => {
+    const installed = currentVersions({ claudeCodeVersion: "2.1.302", suiteVersion: "2" })
+    const old = manifestWith({
+      agentSdkVersion: "0.3.283",
+      claudeCodeVersion: "2.1.283",
+      gatewayVersion: installed.gatewayVersion,
+      suiteVersion: installed.suiteVersion,
+    })
+    expect(computeStaleness(old, installed)).toEqual({
+      stale: true,
+      reasons: [
+        "agentSdkVersion: certified 0.3.283, current 0.3.302",
+        "claudeCodeVersion: certified 2.1.283, current 2.1.302",
+      ],
+    })
+  })
+
   it("is fresh when every certified axis matches the installed versions", () => {
     expect(computeStaleness(manifestWith({}), current)).toEqual({ stale: false, reasons: [] })
   })

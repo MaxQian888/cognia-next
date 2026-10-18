@@ -5,6 +5,32 @@
 // here so adapter / message renderer / a2ui-part can share a single source
 // of truth without leaking into the AI SDK's own typings.
 
+import type { AgentToolResultMetadata } from "@cognia/agent-contracts/canonical-event"
+
+/** Read older persisted SDK transcripts while every producer writes the portable shape. */
+export function toolResultMetadata(part: unknown): AgentToolResultMetadata | undefined {
+  if (!part || typeof part !== "object") return undefined
+  const value = part as {
+    toolResultMetadata?: AgentToolResultMetadata
+    sdkToolResult?: {
+      detachedToolCall?: boolean
+      structuredContent?: unknown
+      structuredContentOmitted?: boolean
+    }
+  }
+  if (value.toolResultMetadata) return value.toolResultMetadata
+  const legacy = value.sdkToolResult
+  return legacy
+    ? {
+        backgrounded: legacy.detachedToolCall,
+        ...(Object.hasOwn(legacy, "structuredContent")
+          ? { structuredContent: legacy.structuredContent }
+          : {}),
+        structuredContentOmitted: legacy.structuredContentOmitted,
+      }
+    : undefined
+}
+
 /**
  * Source of an A2UI message inside a chat assistant turn.
  *

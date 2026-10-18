@@ -463,7 +463,11 @@ export async function prepareExternalAgentGatewayRoute(
       input.providerId,
       input.modelId
     )
-    const deploymentId = `cognia-task-${crypto.randomUUID()}`
+    // A transcript continuation gets a fresh ticket, but its sticky credential
+    // lease must still name the same task/account deployment on the next turn.
+    const deploymentId = `cognia-task-${encodeURIComponent(
+      JSON.stringify([input.sessionId, input.providerId, providerAccountId ?? null])
+    )}`
     const taskProvider = {
       ...upstream,
       id: deploymentId,
@@ -525,7 +529,7 @@ export async function prepareExternalAgentGatewayRoute(
     const minted = await gatewayMintRouteTicket(
       {
         sessionId: input.sessionId,
-        executionFingerprint: input.executionFingerprint ?? deploymentId,
+        executionFingerprint: input.executionFingerprint ?? crypto.randomUUID(),
         candidates: [{ deploymentId, modelId: input.modelId }],
         providerOverrides: [taskProvider],
         model: input.modelId,

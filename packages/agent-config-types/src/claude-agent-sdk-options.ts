@@ -690,6 +690,7 @@ export type McpServerWireConfig = Exclude<AgentMcpServerConfig, { type: "sdk" }>
 
 /** Shared SDK subagent definition, including Cognia renderer dispatch metadata. */
 export interface AgentDefinition {
+  contextPolicy?: import("@cognia/agent-contracts/session-operations").AgentSubagentContextPolicy
   /** Natural-language description shown to the dispatcher agent. */
   description: string
   /** System prompt the subagent runs with. */

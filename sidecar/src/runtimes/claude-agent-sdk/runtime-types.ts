@@ -1,4 +1,4 @@
-import type { Options, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
+import type { Options, SDKUserMessage, Query } from "@anthropic-ai/claude-agent-sdk"
 import type { SendOptions } from "../../shared/wire/inbound.ts"
 import type { InputStream } from "../../shared/input-stream.ts"
 import type { HostRpcCaller } from "../../tools/state/host-background-shells.ts"
@@ -25,6 +25,7 @@ export interface RuntimeQuery extends AsyncIterable<RuntimeEvent> {
   interrupt(): unknown
   close?(): void
   reconnectMcpServer?(name: string): Promise<void>
+  reloadPlugins?: Query["reloadPlugins"]
 }
 export interface BaseContext {
   sessionId: string

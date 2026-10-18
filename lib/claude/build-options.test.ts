@@ -1580,6 +1580,84 @@ describe("resolveSendOptions — compaction config", () => {
     }
   })
 
+  it.each(["available", "missing", "locked"])(
+    "isolates subscription-only compaction credentials when the vault is %s",
+    async (vaultState) => {
+      const { registerPluginSubscriptionProvider, unregisterSubscriptionProvidersByPlugin } =
+        await import("@/lib/subscription/core/provider-registry")
+      const id = registerPluginSubscriptionProvider(
+        {
+          id: "coding",
+          name: "Summary coding subscription",
+          billingMode: "subscription",
+          baseUrl: "https://summary-subscription.test/coding/v1",
+          protocol: "anthropic",
+          models: ["summary-coding-model"],
+        },
+        "summary-billing-test"
+      )
+      mResolveAccountId.mockImplementation((providerId: string) =>
+        providerId === id ? "selected-summary-account" : null
+      )
+      if (vaultState === "locked")
+        mResolveManagedSubscriptionCredential.mockRejectedValue(new Error("Vault locked"))
+      else
+        mResolveManagedSubscriptionCredential.mockResolvedValue(
+          vaultState === "available"
+            ? {
+                apiKey: "selected-summary-secret",
+                baseURL: "https://summary-subscription.test/coding/v1",
+                headers: { "X-Account": "selected-summary-account" },
+              }
+            : null
+        )
+      try {
+        const opts = await resolveSendOptions({
+          character: makeChar({ id: "c1" }),
+          appSettings: {
+            defaultProvider: "anthropic",
+            providerSettings: {
+              [id]: {
+                enabled: true,
+                defaultModel: "summary-coding-model",
+                apiKey: "stale-metered-key",
+                apiKeys: ["stale-rotation-key"],
+                apiKeyRotationEnabled: true,
+                baseURL: "https://metered-summary.test/v1",
+                apiProtocol: "openai",
+                apiFlavor: "responses",
+                customHeaders: { Authorization: "Bearer stale-metered-key" },
+              },
+            },
+            compaction: {
+              enabled: true,
+              compressionModel: { provider: id, model: "summary-coding-model" },
+            },
+          } as unknown as AppSettings,
+        })
+        expect(mResolveManagedSubscriptionCredential).toHaveBeenCalledWith(
+          expect.objectContaining({ id, billingMode: "subscription" }),
+          "selected-summary-account"
+        )
+        if (vaultState === "available") {
+          expect(opts.compaction?.summary).toMatchObject({
+            providerId: id,
+            protocol: "anthropic",
+            credentials: {
+              apiKey: "selected-summary-secret",
+              baseURL: "https://summary-subscription.test/coding/v1",
+              headers: { "X-Account": "selected-summary-account" },
+            },
+          })
+          expect(JSON.stringify(opts.compaction?.summary)).not.toContain("stale-metered")
+          expect(opts.compaction?.summary?.credentials?.apiFlavor).toBeUndefined()
+        } else expect(opts.compaction?.summary).toBeUndefined()
+      } finally {
+        unregisterSubscriptionProvidersByPlugin("summary-billing-test")
+      }
+    }
+  )
+
   it("resolves a CommandCode summary provider from its subscription vault", async () => {
     mResolveCommandcodeVaultCredential.mockResolvedValue({
       apiKey: "cmd-summary-test",
@@ -3905,6 +3983,14 @@ describe("resolveSendOptions — unified built-in Skill delivery", () => {
 })
 
 describe("resolveSendOptions — MCP subset", () => {
+  it("projects selected MCP policies with exact runtime namespaces", async () => {
+    mListMcp.mockResolvedValue([
+      { id: "live", name: "GitHub", toolPermissionRules: [{ name: "publish", decision: "ask" }] },
+    ])
+    mBuildMap.mockReturnValueOnce({ GitHub: { command: "node" } })
+    const opts = await resolveSendOptions({})
+    expect(opts.toolPermissionRules).toEqual([{ tool: "mcp__GitHub__publish", decision: "ask" }])
+  })
   it("unions selected servers' namespaced deny rules into disallowedTools", async () => {
     mListMcp.mockResolvedValue([
       {
@@ -7992,4 +8078,86 @@ it("keeps the automatic delivery key renderer-only on ordinary sends", async () 
     backgroundDeliveryId: "delivery-1",
   })
   expect(opts).not.toHaveProperty("backgroundDeliveryId")
+})
+
+describe("portable runtime feature projection", () => {
+  it("forwards explicit subagent context mode and conversation extension refs", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "anthropic" }),
+      appSettings: { id: "singleton" as const, subagentRuntime: { contextMode: "fork" } },
+      session: makeSession({
+        id: "s1",
+        runtimeExtensions: [{ kind: "directory", path: "/workspace/plugin", discoverMcp: false }],
+      }),
+    })
+    expect(opts.subagentRuntime).toEqual({ contextMode: "fork" })
+    expect(opts.runtimeExtensions).toEqual([
+      { kind: "directory", path: "/workspace/plugin", discoverMcp: false },
+    ])
+  })
+  it("rejects a requested fork on a runtime that cannot implement it", async () => {
+    await expect(
+      resolveSendOptions({
+        character: makeChar({ id: "c1", providerId: "openai" }),
+        appSettings: { id: "singleton" as const, subagentRuntime: { contextMode: "fork" } },
+      })
+    ).rejects.toMatchObject({ capability: "subagents.context-fork" })
+  })
+})
+
+describe("SIWC explicit-only routing", () => {
+  const connection = {
+    id: "siwc-test",
+    name: "ChatGPT",
+    isCustom: true,
+    apiProtocol: "chatgpt-siwc",
+    enabled: true,
+    baseURL: "siwc://local/connection",
+    defaultModel: "siwc-model",
+    customModels: ["siwc-model"],
+  }
+  it("preserves a manually selected SIWC primary through the routing engine", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ providerId: connection.id, model: "siwc-model" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        defaultModel: "claude-sonnet-4-6",
+        providerSettings: {},
+        customProviders: [connection],
+      } as never,
+    })
+    expect(opts.provider).toBe(connection.id)
+    expect(opts.providerCredentials?.protocol).toBe("chatgpt-siwc")
+  })
+  it("does not promote an enabled SIWC connection from an alias mapping", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ providerId: "anthropic", model: "siwc-test-alias" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        defaultModel: "claude-sonnet-4-6",
+        providerSettings: {},
+        customProviders: [connection],
+        modelMappings: [
+          {
+            id: "siwc-test-alias",
+            alias: "siwc-test-alias",
+            enabled: true,
+            distribution: "priority",
+            providers: [
+              { providerId: connection.id, modelId: "siwc-model", priority: 0 },
+              { providerId: "anthropic", modelId: "claude-sonnet-4-6", priority: 1 },
+            ],
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      } as never,
+    })
+    expect(opts.provider).toBe("anthropic")
+    expect(
+      opts.routingPlan?.orderedCandidates.some(
+        (candidate) => candidate.providerId === connection.id
+      )
+    ).toBe(false)
+  })
 })

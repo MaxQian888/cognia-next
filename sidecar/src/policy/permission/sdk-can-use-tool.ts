@@ -31,6 +31,7 @@ import {
   decidePermission,
   firstHardDenial,
   requiresPerCallApproval,
+  toolPermissionDecision,
 } from "./ladder.ts"
 import type {
   DenyReason,
@@ -102,6 +103,7 @@ function livePolicy(sendOptions: PermissionSendOptions): LadderPolicy {
     cwd: sendOptions.cwd,
     pluginAccess: buildPluginAccessMap(sendOptions.pluginTools),
     perCallApproval: buildPerCallApprovalSet(sendOptions.pluginTools),
+    toolPermissionRules: sendOptions.toolPermissionRules,
     profile: readPermissionProfile(sendOptions.permissionProfile),
     pluginClasses: buildPluginClassIndex(sendOptions.pluginTools),
     sandboxAttested: readSandboxAttested(sendOptions.sandboxAttestation),
@@ -159,6 +161,7 @@ export function anthropicToolDenial(
 
 /** The permission-relevant slice of the Agent SDK's `canUseTool` options. */
 export interface CanUseToolContext {
+  requiresInteraction?: boolean
   signal?: AbortSignal
   toolUseID?: string
   title?: unknown
@@ -233,6 +236,7 @@ export function createAnthropicCanUseTool({
       signal: ctx?.signal,
       doomGuard,
       canPrompt: true,
+      requiresInteraction: ctx.requiresInteraction,
       policy,
     })
     if (outcome.kind === "deny") {
@@ -245,7 +249,9 @@ export function createAnthropicCanUseTool({
     // An always-ask class is approved per call exactly like a per-call plugin
     // tool: never remembered, never turned into a standing rule.
     const perCall =
+      ctx.requiresInteraction === true ||
       requiresPerCallApproval(toolName, buildPerCallApprovalSet(sendOptions.pluginTools)) ||
+      toolPermissionDecision(toolName, sendOptions.toolPermissionRules) === "ask" ||
       profile.kind === "always-ask"
     const permissionClass =
       profile.kind === "always-ask"

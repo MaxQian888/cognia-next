@@ -1,8 +1,47 @@
-import { createMcpElicitationRequest } from "./elicitation"
+import { approvalElicitationRequest, createMcpElicitationRequest } from "./elicitation"
+
+describe("runtime elicitation approval adapter", () => {
+  it("supports portable and historical interaction markers without reinterpreting ordinary tool input", () => {
+    const input = { elicitation: { mode: "form", message: "Question", propertyOrder: ["b", "a"] } }
+    for (const toolName of ["Runtime:Elicitation", "SDK:Elicitation"]) {
+      expect(approvalElicitationRequest({ toolName, requestId: "req", input })).toMatchObject({
+        id: "req",
+        propertyOrder: ["b", "a"],
+      })
+    }
+    expect(
+      approvalElicitationRequest({ toolName: "Read", requestId: "req", input })
+    ).toBeUndefined()
+    expect(
+      approvalElicitationRequest({
+        toolName: "Runtime:Elicitation",
+        requestId: "req",
+        input: { elicitation: { mode: "url", message: "Login", url: "javascript:alert(1)" } },
+      })
+    ).toBeUndefined()
+  })
+})
 
 const provenance = { serverId: "mcp_figma", serverName: "Figma" }
 
 describe("createMcpElicitationRequest", () => {
+  it("preserves portable presentation order for MCP forms", () => {
+    expect(
+      createMcpElicitationRequest(
+        {
+          params: {
+            message: "Question",
+            propertyOrder: ["second", "first"],
+            requestedSchema: {
+              type: "object",
+              properties: { first: { type: "string" }, second: { type: "string" } },
+            },
+          },
+        },
+        provenance
+      )
+    ).toMatchObject({ propertyOrder: ["second", "first"] })
+  })
   it("preserves structured form fields and server provenance", () => {
     expect(
       createMcpElicitationRequest(

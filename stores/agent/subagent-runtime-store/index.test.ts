@@ -43,6 +43,36 @@ beforeEach(() => {
 })
 
 describe("subagent-runtime-store — templates slice", () => {
+  it("rejects unsupported imported context policy without persisting the template", () => {
+    expect(() =>
+      snapshot().addTemplate({
+        id: "unsupported-policy",
+        name: "Unsupported",
+        description: "",
+        category: "general",
+        taskTemplate: "review",
+        config: { externalPresetId: "codex", contextPolicy: { compactAtTokens: 64000 } },
+      })
+    ).toThrow(/context policy is unavailable/)
+    expect(snapshot().templates["unsupported-policy"]).toBeUndefined()
+  })
+
+  it("rejects updates that add a provider override to a context policy", () => {
+    snapshot().addTemplate({
+      id: "policy",
+      name: "Policy",
+      description: "",
+      category: "general",
+      taskTemplate: "review",
+      config: { contextPolicy: { compactAtTokens: 64000 } },
+    })
+    expect(() =>
+      snapshot().updateTemplate("policy", {
+        config: { provider: "openai", contextPolicy: { compactAtTokens: 64000 } },
+      })
+    ).toThrow(/context policy is unavailable/)
+    expect(snapshot().templates.policy.config.provider).toBeUndefined()
+  })
   it("seeds built-in templates", () => {
     expect(Object.keys(snapshot().templates).length).toBe(BUILT_IN_SUBAGENT_TEMPLATES.length)
     expect(snapshot().templates["research-web"]?.isBuiltIn).toBe(true)

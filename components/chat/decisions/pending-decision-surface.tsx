@@ -1,5 +1,7 @@
 "use client"
 
+import { approvalElicitationRequest } from "@/lib/mcp/elicitation"
+
 /**
  * One open decision — body and actions — with no container of its own.
  *
@@ -103,10 +105,33 @@ export function PendingDecisionSurface({
 }: PendingDecisionSurfaceProps) {
   const terminal = TERMINAL_STATUSES.includes(status)
   const actionable = mode === "control" && !terminal
+  const approvalElicitation =
+    decision.kind === "tool-approval" ? approvalElicitationRequest(decision.approval) : undefined
 
   return (
     <div className="min-w-0 space-y-3" data-testid="pending-decision-surface" data-status={status}>
-      {decision.kind === "elicitation" ? (
+      {decision.kind === "tool-approval" && approvalElicitation ? (
+        <ElicitationDecision
+          request={approvalElicitation}
+          actionable={actionable}
+          responding={status === "responding"}
+          onRespond={async (response) => {
+            const run = async () => {
+              await onApprovalRespond?.(
+                response.action === "accept" ? "allow" : "deny",
+                response.action === "accept"
+                  ? {
+                      updatedInput: { ...decision.approval.input, content: response.content ?? {} },
+                    }
+                  : undefined
+              )
+            }
+            if (response.action === "accept" && confirmAllow) await confirmAllow(run)
+            else await run()
+          }}
+          onDismiss={terminal ? onDismiss : undefined}
+        />
+      ) : decision.kind === "elicitation" ? (
         <ElicitationDecision
           request={decision.request}
           actionable={actionable}
@@ -436,7 +461,7 @@ function ElicitationDecision({
     setValuesForRequest(request.id)
     setValues(initialElicitationValues(properties))
   }
-  const complete = isElicitationComplete(properties, required, values)
+  const complete = isElicitationComplete(properties, required, values, request)
 
   const respond = (action: AcpElicitationResponse["action"]) =>
     void onRespond?.({

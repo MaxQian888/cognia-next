@@ -8,6 +8,83 @@ import { capabilitySupported } from "../../runtimes/registry.ts"
 import { isControlMethod, controlMethodCapability, controlParamError } from "./control.ts"
 import { guardAnthropicRemoteMcpServers } from "../../mcp/relay/sdk-servers.ts"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import type {
+  AgentExtensionReloadOptions,
+  AgentExtensionReloadResult,
+} from "@cognia/agent-contracts/session-operations"
+import { runtimeFeaturePolicyKey } from "@cognia/agent-contracts/session-operations"
+import { runtimeFeatureSupported } from "../../runtimes/capabilities.ts"
+
+/** A new neutral operation resolves legacy rails without widening a frozen spec. */
+export function extensionControlPreflight(
+  session: HostSession | undefined,
+  method: "reloadExtensions" | "reloadPlugins",
+  params?: Record<string, unknown> | null
+) {
+  const validation = controlParamError(method, params)
+  if (!session) return validation ? { error: validation } : null
+  const adapter =
+    session.runtimeAdapterId ??
+    session.sendOptions?.execution?.runtimeAdapter ??
+    ((session.sendOptions?.provider ?? "anthropic") === "anthropic" ? "claude-agent-sdk" : "ai-sdk")
+  const capability = method === "reloadExtensions" ? "extensions.dynamic" : "plugins.native"
+  if (
+    !runtimeFeatureSupported(
+      adapter,
+      capability,
+      session.sendOptions?.execution?.runtimeAdapter ? session.sendOptions.execution : undefined
+    ) ||
+    !session.reloadExtensions
+  )
+    return { error: "capability_error", capability }
+  return validation ? { error: validation } : null
+}
+
+/** Optional runtime operation: vendor translation belongs to the owning adapter. */
+export async function routeReloadExtensions(
+  sessions: Map<string, HostSession>,
+  sessionId: string,
+  options: AgentExtensionReloadOptions = {},
+  timeoutMs = CONTROL_TIMEOUT_MS,
+  method: "reloadExtensions" | "reloadPlugins" = "reloadExtensions"
+): Promise<Outcome> {
+  const session = sessions.get(sessionId)
+  if (!session) return { ok: false, error: "no_active_session" }
+  const rejection = extensionControlPreflight(session, method, {
+    options:
+      method === "reloadPlugins"
+        ? options.preservePromptCache === undefined
+          ? {}
+          : { holdOnCacheImpact: options.preservePromptCache }
+        : options,
+  })
+  if (rejection) return { ok: false, error: rejection.error }
+  if (!session.reloadExtensions) return { ok: false, error: "unsupported_provider" }
+  const outcome = await runControlWithTimeout(
+    session.reloadExtensions,
+    session,
+    [options],
+    timeoutMs
+  )
+  if (!outcome.ok) {
+    if (
+      sessions.get(sessionId) === session &&
+      (outcome.error === "control timed out" || outcome.error === "invalid_extension_reload_result")
+    )
+      routeClose(sessions, { sessionId })
+    return outcome
+  }
+  if (sessions.get(sessionId) !== session) return { ok: false, error: "no_active_session" }
+  const result = outcome.result as AgentExtensionReloadResult
+  if (result.disposition !== "held" && result.added.length && session.sendOptions) {
+    const refs = new Map(
+      (session.sendOptions.runtimeExtensions ?? []).map((ref) => [ref.path, ref])
+    )
+    for (const ref of result.added) refs.set(ref.path, ref)
+    session.sendOptions.runtimeExtensions = [...refs.values()]
+  }
+  return outcome
+}
 
 /** A live-loop read, independent of the persisted native session catalog. */
 export function runtimeStatus(session: HostSession | undefined) {
@@ -22,6 +99,9 @@ export function runtimeStatus(session: HostSession | undefined) {
     ...(typeof session.sendOptions?.cwd === "string" ? { cwd: session.sendOptions.cwd } : {}),
     ...(typeof session.sendOptions?.transcriptInvalidationId === "string"
       ? { transcriptInvalidationId: session.sendOptions.transcriptInvalidationId }
+      : {}),
+    ...(runtimeFeaturePolicyKey(session.sendOptions ?? {})
+      ? { featurePolicyKey: runtimeFeaturePolicyKey(session.sendOptions ?? {}) }
       : {}),
     active: session.q?.active === true,
   }

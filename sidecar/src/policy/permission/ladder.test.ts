@@ -353,3 +353,58 @@ test("dontAsk denies a per-call tool even when granted", () => {
     assert.deepEqual(outcome, { kind: "deny", reason: { code: "dont-ask" } })
   }
 })
+
+test("portable tool policies override shortcuts, deny wins, and ask needs a channel", () => {
+  const steps = profile(["ruleset", "ask-user", "dont-ask", "bypass", "grants", "approval-channel"])
+  for (const mode of ["default", "auto", "bypassPermissions", "acceptEdits"]) {
+    const c = call(
+      READ,
+      {},
+      {
+        policy: policy({
+          mode,
+          alwaysAllow: [READ],
+          toolPermissionRules: [{ tool: READ, decision: "ask" }],
+        }),
+      }
+    )
+    assert.deepEqual(decidePermission(steps, c), { kind: "ask" })
+    assert.deepEqual(decidePermission(steps, { ...c, canPrompt: false }), {
+      kind: "deny",
+      reason: { code: "no-approval-channel" },
+    })
+  }
+  const c = call(
+    WRITE,
+    {},
+    {
+      policy: policy({
+        mode: "bypassPermissions",
+        toolPermissionRules: [
+          { tool: WRITE, decision: "deny" },
+          { tool: WRITE, decision: "ask" },
+        ],
+      }),
+    }
+  )
+  assert.deepEqual(decidePermission(steps, c), { kind: "deny", reason: { code: "ruleset" } })
+  assert.deepEqual(
+    decidePermission(
+      steps,
+      call(
+        READ,
+        {},
+        {
+          policy: policy({
+            mode: "dontAsk",
+            toolPermissionRules: [{ tool: READ, decision: "ask" }],
+          }),
+        }
+      )
+    ),
+    {
+      kind: "deny",
+      reason: { code: "dont-ask" },
+    }
+  )
+})

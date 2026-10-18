@@ -103,6 +103,18 @@ describe("buildSupportAgentContext", () => {
 })
 
 describe("applySupportAgentSafety", () => {
+  it("drops portable extension and subagent policy from a zero-tool support turn", () => {
+    const source = {
+      runtimeExtensions: [{ kind: "directory", path: "/workspace/plugin" }],
+      subagentRuntime: { contextMode: "fork" },
+      toolPermissionRules: [{ tool: "mcp__notes__write", decision: "ask" }],
+    }
+    const safe = applySupportAgentSafety(source)
+    expect(safe).not.toHaveProperty("runtimeExtensions")
+    expect(safe).not.toHaveProperty("subagentRuntime")
+    expect(safe).not.toHaveProperty("toolPermissionRules")
+    expect(source.runtimeExtensions).toHaveLength(1)
+  })
   it("removes host, keyring-adjacent, MCP, and subagent capabilities", () => {
     expect(
       applySupportAgentSafety({

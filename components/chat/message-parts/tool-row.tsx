@@ -181,6 +181,7 @@ export function ToolRowShell({
   actions?: ReactNode
   children?: ReactNode
 }) {
+  const isReasoning = dataKind === "reasoning"
   return (
     <div
       className={cn("group/trow not-prose", className)}
@@ -188,7 +189,12 @@ export function ToolRowShell({
       data-kind={dataKind}
       data-status={dataStatus ?? status}
     >
-      <div className="relative flex items-center gap-1 rounded-md px-1.5 py-1 transition-colors hover:bg-muted/50">
+      <div
+        className={cn(
+          "relative flex items-center gap-1 rounded-md px-1.5 py-1 transition-colors",
+          isReasoning ? "text-muted-foreground hover:text-foreground" : "hover:bg-muted/50"
+        )}
+      >
         {(() => {
           // No body → the row is a static status line: no chevron to expand
           // nothing, and no button semantics the click could never satisfy.
@@ -203,7 +209,8 @@ export function ToolRowShell({
               {children != null ? (
                 <ChevronRightIcon
                   className={cn(
-                    "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                    "ml-auto size-3.5 shrink-0 transition-transform",
+                    !isReasoning && "text-muted-foreground",
                     open && "rotate-90"
                   )}
                   aria-hidden
@@ -237,11 +244,12 @@ export function ToolRowShell({
         {actions ? (
           // Absolutely anchored left of the chevron so every row's ▸ keeps the
           // same right edge — in-flow actions used to push the chevron ~24px
-          // left on rows that had them. The muted chip covers the meta text it
-          // overlays only while hovered.
+          // left on rows that had them. Tool rows use a muted chip to cover
+          // the meta text while hovered.
           <div
             className={cn(
-              "absolute right-6 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-md bg-muted px-0.5",
+              "absolute right-6 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-md px-0.5",
+              !isReasoning && "bg-muted",
               HOVER_REVEAL_GROUP_BASE_CLASS,
               "group-hover/trow:opacity-100"
             )}

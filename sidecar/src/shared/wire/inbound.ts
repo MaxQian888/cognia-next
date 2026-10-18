@@ -3,6 +3,11 @@ import type {
   CodeAdapterSpec,
   OpenAiCompatibleVariantSpec,
 } from "./protocol-adapters.ts"
+import type {
+  AgentLocalExtensionRef,
+  AgentQualifiedToolPermissionRule,
+  AgentSubagentRuntimeOptions,
+} from "@cognia/agent-contracts/session-operations"
 import type { ConversationMessage } from "./conversation.ts"
 import type {
   AgentEffortLevel,
@@ -26,6 +31,9 @@ export interface SendOptions {
   systemPrompt?: unknown
   appendSystemPrompt?: unknown
   agents?: Record<string, AgentDefinition>
+  subagentRuntime?: AgentSubagentRuntimeOptions
+  runtimeExtensions?: AgentLocalExtensionRef[]
+  toolPermissionRules?: AgentQualifiedToolPermissionRule[]
   pluginTools?: readonly {
     name: string
     description?: string
@@ -46,6 +54,7 @@ export interface SendOptions {
     route?: { kind?: string; endpoint?: string }
     hostRef?: string
     runtimeAdapter?: string
+    capabilities?: { effective?: readonly string[] }
   }
   fallbackModel?: string
   resumeSessionId?: string

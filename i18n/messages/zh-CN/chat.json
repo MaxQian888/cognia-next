@@ -33,6 +33,7 @@
     },
     "status": {
       "awaitingApproval": "等待批准",
+      "backgrounded": "已转入后台继续运行",
       "completed": "已完成",
       "denied": "已拒绝",
       "error": "出错",

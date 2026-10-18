@@ -115,6 +115,11 @@ export function canonicalEventsFromSdkMessage(
           rateLimitType: asString(info.rateLimitType),
           resetsAt: asNumber(info.resetsAt),
           utilization: asNumber(info.utilization),
+          overageEnabled:
+            typeof info.overageEnabled === "boolean" ? info.overageEnabled : undefined,
+          limitScope: ["service", "channel", "group_pool"].includes(String(info.limitScope))
+            ? info.limitScope
+            : undefined,
           overageStatus: ["allowed", "allowed_warning", "rejected"].some(
             (value) => value === info.overageStatus
           )

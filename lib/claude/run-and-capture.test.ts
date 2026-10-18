@@ -2633,8 +2633,74 @@ describe("host-owned external agent capture", () => {
       lifecycleGeneration: 2,
     })
     startExternalTurnMock.mockReset()
+    getRemoteConfigMock.mockClear()
     stopExternalMock.mockClear()
     cancelExternalTurnMock.mockClear()
+  })
+
+  it.each([
+    [{ runtimeExtensions: [{ kind: "directory", path: "/trusted/plugin" }] }, "extensions.dynamic"],
+    [{ toolPermissionRules: [{ tool: "read", decision: "deny" }] }, "tools.permission-policy"],
+    [{ subagentRuntime: { contextMode: "fork" } }, "subagents.context-fork"],
+    [
+      { agents: { child: { contextPolicy: { compactAtTokens: 1000 } } } },
+      "subagents.auto-compaction",
+    ],
+  ])(
+    "refuses raw unsupported external options %j before admission or middleware",
+    async (feature, capability) => {
+      startExternalTurnMock.mockImplementation(async () => {
+        externalHandlers!.onTerminal("completed", undefined)
+        return { started: true }
+      })
+      const interceptor = jest.fn(async (request) => request)
+      registerInterceptor({
+        registrationId: "feature-guard",
+        pluginId: "p",
+        pluginInstanceId: "p#1",
+        generation: 1,
+        realmId: "global",
+        pointId: "model.request.prepare",
+        semantic: "transform",
+        trustTier: "community",
+        order: {},
+        timeoutMs: 1_000,
+        handler: interceptor as never,
+        source: "interceptors",
+        runtime: "frontend",
+      })
+      await expect(
+        runAndCaptureAssistantReply(SESSION, "hello", {
+          provider: "cognia:external-agent:pi-1",
+          ...feature,
+          execution: { capabilities: { effective: [capability] } },
+        } as never)
+      ).rejects.toMatchObject({ name: "AgentCapabilityError", capability })
+      expect(interceptor).not.toHaveBeenCalled()
+      expect(getRemoteConfigMock).not.toHaveBeenCalled()
+      expect(startExternalTurnMock).not.toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it("refuses malformed raw external features before starting a provider", async () => {
+    startExternalTurnMock.mockImplementation(async () => {
+      externalHandlers!.onTerminal("completed", undefined)
+      return { started: true }
+    })
+    await expect(
+      runAndCaptureAssistantReply(
+        SESSION,
+        "hello",
+        {
+          provider: "cognia:external-agent:pi-1",
+          runtimeExtensions: null,
+        } as never,
+        { execution: { skip: true } }
+      )
+    ).rejects.toThrow("invalid_runtime_extensions")
+    expect(startExternalTurnMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
   })
 
   it("dispatches Pi's provider marker to the host runner and captures its reply", async () => {

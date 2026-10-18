@@ -129,6 +129,27 @@ beforeEach(() => {
 })
 
 describe("dispatchSubagent", () => {
+  it.each([undefined, "claude-code"])(
+    "rejects unsupported context policy before dispatch on %s",
+    async (externalPresetId) => {
+      await expect(
+        dispatchSubagent(
+          {
+            ...subagent,
+            externalPresetId,
+            contextPolicy: { compactAtTokens: 64000 },
+          },
+          "review"
+        )
+      ).rejects.toMatchObject({
+        name: "AgentCapabilityError",
+        capability: "subagents.auto-compaction",
+      })
+      expect(mockRendererTurn).not.toHaveBeenCalled()
+      expect(externalExecute).not.toHaveBeenCalled()
+      expect(mockFireAgentHook).not.toHaveBeenCalled()
+    }
+  )
   it("forwards host-captured knowledge authority without dropping its revision ceiling", async () => {
     const knowledgeAccess = {
       entrypoint: "mcp" as const,

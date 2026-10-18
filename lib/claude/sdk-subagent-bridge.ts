@@ -9,8 +9,8 @@
  * logs come from assistant/user frames whose `parent_tool_use_id` maps back to
  * a known task (only present when `forwardSubagentText` is enabled).
  *
- * Nesting: `task_started` carries no parent pointer on the wire, so task→task
- * ancestry is reconstructed locally — every `tool_use` block streamed inside a
+ * Nesting uses the SDK's `parent_task_id` when present. Older producers fall
+ * back to local correlation — every `tool_use` block streamed inside a
  * task's forwarded child frames is recorded as owned by that task, and a later
  * `task_started` whose `tool_use_id` matches an owned block hangs off that
  * owner as a depth-N child (`parentSubagentId` edge, rendered by the same
@@ -34,24 +34,26 @@ import type {
   SDKTaskStartedMessage,
   SDKTaskProgressMessage,
   SDKTaskUpdatedMessage,
+  SDKTaskNotificationMessage,
   SDKAssistantMessage,
   SDKUserMessage,
   BetaContentBlock,
 } from "@cognia/agent-config-types"
 
 /** tool_use_id (the spawning Task tool_use) → task_id (our node key). */
-const toolUseToTask = new Map<string, string>()
+const toolUseToTask = new Map<string, { taskId: string; runId?: string }>()
 
 /**
  * tool_use block id → the task whose forwarded child frame CONTAINED it.
- * This is the nesting correlator: `task_started` carries no parent pointer
- * (the SDK wire has no task→task ancestry field), but when a subagent itself
+ * This is the fallback nesting correlator for older SDK producers. When a subagent itself
  * spawns a Task, the spawning `tool_use` block streams inside one of ITS
  * forwarded child frames — so the block's owner IS the nested task's parent.
  * Blocks owned by the top-level chat never enter this map (top-level frames
  * have no `parent_tool_use_id`), so a depth-1 task correlates to no parent.
  */
 const toolUseOwner = new Map<string, string>()
+/** A resumed task keeps its task id but gets a lexically newer run id. */
+const taskRuns = new Map<string, string>()
 const cancellableTaskIds = new Set<string>()
 
 export interface SdkSubagentControls {
@@ -62,6 +64,7 @@ export interface SdkSubagentControls {
 export function __resetSdkSubagentBridge(): void {
   toolUseToTask.clear()
   toolUseOwner.clear()
+  taskRuns.clear()
   for (const taskId of cancellableTaskIds) unregisterSubagentRun(taskId)
   cancellableTaskIds.clear()
 }
@@ -95,6 +98,7 @@ function mapStatus(s: string | undefined): SubAgentStatus | undefined {
     case "failed":
       return "failed"
     case "killed":
+    case "stopped":
       return "cancelled"
     default:
       return undefined
@@ -109,12 +113,17 @@ function onTaskStarted(
   // Only genuine Task-tool subagents (skip ambient / local_workflow housekeeping).
   if (!m.subagent_type || m.skip_transcript || m.task_type === "local_workflow") return
   const store = useSubagentRuntimeStore.getState()
-  if (store.subAgents[m.task_id]) return
-  if (m.tool_use_id) toolUseToTask.set(m.tool_use_id, m.task_id)
-  // Nesting correlation: a spawning tool_use seen inside another task's child
-  // frames means THAT task is this one's parent (see `toolUseOwner`).
-  const parentTaskId = m.tool_use_id ? toolUseOwner.get(m.tool_use_id) : undefined
-  const parent = parentTaskId ? store.subAgents[parentTaskId] : undefined
+  const existing = store.subAgents[m.task_id]
+  if (existing && existing.context?.sessionId !== sessionId) return
+  const previousRun = taskRuns.get(m.task_id)
+  if (m.run_id && previousRun && m.run_id < previousRun) return
+  if (existing && (!m.run_id || m.run_id === previousRun)) return
+  if (m.run_id) taskRuns.set(m.task_id, m.run_id)
+  if (m.tool_use_id) toolUseToTask.set(m.tool_use_id, { taskId: m.task_id, runId: m.run_id })
+  const parentTaskId =
+    m.parent_task_id ?? (m.tool_use_id ? toolUseOwner.get(m.tool_use_id) : undefined)
+  const candidate = parentTaskId ? store.subAgents[parentTaskId] : undefined
+  const parent = candidate?.context?.sessionId === sessionId ? candidate : undefined
   store.upsert(
     baseNode(m.task_id, sessionId, m.subagent_type, m.prompt ?? m.description ?? "", parent)
   )
@@ -124,9 +133,9 @@ function onTaskStarted(
   }
 }
 
-function onTaskProgress(m: SDKTaskProgressMessage): void {
+function onTaskProgress(m: SDKTaskProgressMessage, sessionId: string): void {
   const store = useSubagentRuntimeStore.getState()
-  if (!store.subAgents[m.task_id]) return
+  if (!isCurrentRun(m, sessionId)) return
   if (m.last_tool_name) {
     store.appendLog(m.task_id, {
       timestamp: new Date(),
@@ -142,11 +151,20 @@ function onTaskProgress(m: SDKTaskProgressMessage): void {
   }
 }
 
-function onTaskUpdated(m: SDKTaskUpdatedMessage): void {
+function isCurrentRun(m: { task_id: string; run_id?: string }, sessionId: string): boolean {
+  const node = useSubagentRuntimeStore.getState().subAgents[m.task_id]
+  const runId = taskRuns.get(m.task_id)
+  return node?.context?.sessionId === sessionId && (!m.run_id || !runId || m.run_id === runId)
+}
+
+function onTaskUpdated(
+  m: SDKTaskUpdatedMessage | SDKTaskNotificationMessage,
+  sessionId: string
+): void {
   const store = useSubagentRuntimeStore.getState()
   const sa = store.subAgents[m.task_id]
-  if (!sa) return
-  const status = mapStatus(m.patch?.status)
+  if (!sa || !isCurrentRun(m, sessionId)) return
+  const status = mapStatus(m.subtype === "task_notification" ? m.status : m.patch?.status)
   if (!status) return
   unregisterSubagentRun(m.task_id)
   cancellableTaskIds.delete(m.task_id)
@@ -156,17 +174,18 @@ function onTaskUpdated(m: SDKTaskUpdatedMessage): void {
     progress: status === "completed" ? 100 : sa.progress,
     completedAt: new Date(),
     lastActivityAt: new Date(),
-    ...(m.patch?.error ? { error: m.patch.error } : {}),
+    ...(m.subtype === "task_updated" && m.patch?.error ? { error: m.patch.error } : {}),
   })
 }
 
-function onChildFrame(evt: SDKAssistantMessage | SDKUserMessage): void {
+function onChildFrame(evt: SDKAssistantMessage | SDKUserMessage, sessionId: string): void {
   const parentId = evt.parent_tool_use_id
-  if (!parentId) return
-  const taskId = toolUseToTask.get(parentId)
+  const correlation = parentId ? toolUseToTask.get(parentId) : undefined
+  const taskId = evt.agent_id ?? correlation?.taskId
   if (!taskId) return
+  if (correlation?.runId && correlation.runId !== taskRuns.get(taskId)) return
   const store = useSubagentRuntimeStore.getState()
-  if (!store.subAgents[taskId]) return
+  if (store.subAgents[taskId]?.context?.sessionId !== sessionId) return
   const content = (evt as SDKAssistantMessage).message?.content
   if (!Array.isArray(content)) return
   for (const block of content as BetaContentBlock[]) {
@@ -229,12 +248,14 @@ export function applySdkSubagentBridge(
     if (evt.type === "system") {
       const sub = (evt as { subtype?: string }).subtype
       if (sub === "task_started") onTaskStarted(evt as SDKTaskStartedMessage, sessionId, controls)
-      else if (sub === "task_progress") onTaskProgress(evt as SDKTaskProgressMessage)
-      else if (sub === "task_updated") onTaskUpdated(evt as SDKTaskUpdatedMessage)
+      else if (sub === "task_progress") onTaskProgress(evt as SDKTaskProgressMessage, sessionId)
+      else if (sub === "task_updated") onTaskUpdated(evt as SDKTaskUpdatedMessage, sessionId)
+      else if (sub === "task_notification")
+        onTaskUpdated(evt as SDKTaskNotificationMessage, sessionId)
       return
     }
     if (evt.type === "assistant" || evt.type === "user") {
-      onChildFrame(evt as SDKAssistantMessage | SDKUserMessage)
+      onChildFrame(evt as SDKAssistantMessage | SDKUserMessage, sessionId)
     }
   } catch {
     // Best-effort: a bridge throw must never break the chat event loop.

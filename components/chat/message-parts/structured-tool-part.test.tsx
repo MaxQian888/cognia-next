@@ -36,7 +36,11 @@ jest.mock("@/hooks/ui", () => ({
 
 function part(
   type: string,
-  overrides: Partial<ToolUIPart> & { errorText?: string } = {}
+  overrides: Partial<ToolUIPart> & {
+    errorText?: string
+    sdkToolResult?: unknown
+    toolResultMetadata?: unknown
+  } = {}
 ): ToolUIPart {
   return {
     type,
@@ -49,6 +53,26 @@ function part(
 }
 
 describe("StructuredToolPart", () => {
+  it.each([
+    { sdkToolResult: { detachedToolCall: true } },
+    { toolResultMetadata: { backgrounded: true } },
+  ])("shows the background handoff without a completed status or HTTP result: %j", (metadata) => {
+    render(
+      <StructuredToolPart
+        part={part("tool-WebFetch", {
+          input: { url: "https://example.com" },
+          ...metadata,
+        })}
+      />
+    )
+    expect(screen.getByTestId("structured-tool-part")).toHaveAttribute("data-status", "info")
+    expect(screen.getByTestId("structured-tool-meta")).toHaveTextContent("status.backgrounded")
+    expect(screen.getByRole("button", { expanded: false })).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("status.backgrounded")
+    )
+  })
+
   it("renders WebFetch as a compact row with url target and HTTP meta", () => {
     render(
       <StructuredToolPart

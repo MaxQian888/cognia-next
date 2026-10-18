@@ -1,3 +1,4 @@
+import { runtimeFeaturePolicyKey } from "@cognia/agent-contracts/session-operations"
 import type { SendOptions, Prompt } from "../../shared/wire/inbound.ts"
 import type { HostSession, Emit, Frame, Log } from "./types.ts"
 import { errorMessage } from "../../shared/errors.ts"
@@ -145,6 +146,11 @@ export function restartReason(existing: HostSession, options?: SendOptions) {
   ) {
     return "transcript changed"
   }
+  if (
+    options &&
+    runtimeFeaturePolicyKey(options) !== runtimeFeaturePolicyKey(existing.sendOptions ?? {})
+  )
+    return "runtime feature policy changed"
   // Working directory changed — the SDK must respawn to pick up the new cwd.
   if (options?.cwd !== undefined && options.cwd !== existing.sendOptions?.cwd) {
     return "cwd changed"
@@ -247,7 +253,7 @@ export function routeClose(
   const s = sessionsMap.get(sessionId!)
   if (!s) return false
   try {
-    s.closeInput!()
+    s.closeInput?.()
     if (typeof s.q?.close === "function") s.q.close()
   } catch (err) {
     logFn("error", `close failed: ${errorMessage(err)}`)

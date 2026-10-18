@@ -45,12 +45,34 @@ function partWith(
     state?: string
     title?: string
     toolMetadata?: unknown
+    sdkToolResult?: unknown
+    toolResultMetadata?: unknown
   }
 ) {
   return { type, state: "output-available", ...extra } as never
 }
 
 describe("ToolCallRow", () => {
+  it.each([
+    { sdkToolResult: { detachedToolCall: true } },
+    { toolResultMetadata: { backgrounded: true } },
+  ])("labels a detached web tool as backgrounded rather than completed: %j", (metadata) => {
+    const { getByRole, getByTestId, getByText } = render(
+      <ToolCallRow
+        part={partWith("tool-WebFetch", {
+          input: { url: "https://example.com" },
+          ...metadata,
+        })}
+      />
+    )
+    expect(getByRole("button")).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("status.backgrounded")
+    )
+    expect(getByTestId("tool-call-row-WebFetch")).toHaveAttribute("data-status", "info")
+    expect(getByText("status.backgrounded")).toBeVisible()
+  })
+
   it("renders the tool name + target + status, body hidden by default", () => {
     const { getByText, queryByTestId, getByTestId } = render(
       <ToolCallRow part={part("tool-Read", { file_path: "/a/b/file.ts" })} />

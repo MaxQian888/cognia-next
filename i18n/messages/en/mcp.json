@@ -367,6 +367,10 @@
     "updated": "MCP server updated."
   },
   "tools": {
+    "policyAria": "Permission policy for {name}",
+    "policyDefault": "Default policy",
+    "policyAsk": "Ask every time",
+    "policyDeny": "Always deny",
     "allowAll": "Allow all",
     "allowToolAria": "Allow {name}",
     "countBadge": "{denied}/{total} off",
@@ -380,7 +384,7 @@
     "emptyDesktop": "No tools discovered yet. Refresh to connect and read this server's tool list.",
     "loading": "Loading tools…",
     "noMatch": "No tool matches this filter.",
-    "orphansHint": "These tools are denied but this server no longer reports them.",
+    "orphansHint": "These tools have saved permission rules but this server no longer reports them.",
     "orphansTitle": "Rules without a tool",
     "patternHits": "· {count} now",
     "patternLiteral": "No * or ? — this will only ever match that exact tool name.",

@@ -1,5 +1,7 @@
 "use client"
 
+import { toolResultMetadata } from "@/lib/claude/parts-extensions"
+
 /**
  * Compact single-line representation of a tool call, used by the "simplified"
  * agent-flow display mode and by every sub-agent tree. Shows an icon + tool
@@ -112,8 +114,9 @@ export const ToolCallRow = memo(function ToolCallRow({
   // Live output size while the tool is still running (Bash streams stdout);
   // null for tools that don't stream, leaving just the pulsing status glyph.
   const running = useMemo(() => describeRunningProgress(part), [part])
+  const backgrounded = toolResultMetadata(part)?.backgrounded === true
   const Icon = ICON_MAP[summary.iconKey]
-  const statusLabel = t(`status.${STATUS_KEY[part.state]}`)
+  const statusLabel = t(`status.${backgrounded ? "backgrounded" : STATUS_KEY[part.state]}`)
 
   const handleToggle = () => {
     if (controlled) onToggle?.()
@@ -126,7 +129,7 @@ export const ToolCallRow = memo(function ToolCallRow({
     // left rule. The status glyph that used to sit at the right edge is the
     // dot's job now.
     <ToolRowShell
-      status={part.state}
+      status={backgrounded ? "info" : part.state}
       open={open}
       onToggle={handleToggle}
       ariaLabel={t("rowAria", { name: displayName, status: statusLabel })}
@@ -164,14 +167,14 @@ export const ToolCallRow = memo(function ToolCallRow({
       badges={<ToolSemanticBadges readOnlyHint={readOnlyHint} />}
       meta={
         <>
-          {result ? (
+          {!backgrounded && result ? (
             <ToolResultChip descriptor={result} />
-          ) : running ? (
+          ) : !backgrounded && running ? (
             <RunningProgressChip lines={running.lines} />
           ) : null}
           <span
             className={
-              part.state === "approval-requested" || part.state === "output-denied"
+              backgrounded || part.state === "approval-requested" || part.state === "output-denied"
                 ? "shrink-0 text-[11px] text-amber-600"
                 : "sr-only"
             }
