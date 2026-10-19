@@ -15,11 +15,53 @@
  *
  * Any change to any of them is a miss. A hit is still refused when the rollout
  * failed for infrastructure reasons, was cancelled, is older than the reuse
- * window (providers drift), or when the snapshot's library skills drifted.
+ * window (providers drift), read from outside the machine (an MCP server or the
+ * web answers differently tomorrow, so the rollout is one sample of a moving
+ * world, not a repeatable experiment), or when the snapshot's library skills
+ * drifted.
  */
 
 import type { HarnessEvolutionStep } from "@/types/harness/evolution"
 import { canonicalHash } from "./snapshot"
+
+/** Tools that read the web. Probes may cut them; a rollout that used them is never reused. */
+export const WEB_READ_TOOL_NAMES: readonly string[] = [
+  "WebFetch",
+  "WebSearch",
+  "web_search",
+  "web_fetch",
+]
+
+/** MCP servers the app itself serves: their tools answer from this machine. */
+const FIRST_PARTY_TOOL_SERVERS: ReadonlySet<string> = new Set([
+  "cognia-tools",
+  "cognia-plugin-tools",
+  "a2ui-bridge",
+])
+
+/**
+ * The tools among `toolNames` whose answers come from outside the machine: a
+ * web reader, or any tool of an MCP server the app does not serve itself.
+ * Returned once each, in first-seen order.
+ */
+export function externalReadTools(toolNames: Iterable<string>): string[] {
+  const out = new Set<string>()
+  for (const name of toolNames) {
+    let server: string | undefined
+    let bare = name
+    if (name.startsWith("mcp__")) {
+      const rest = name.slice(5)
+      const i = rest.indexOf("__")
+      if (i > 0) {
+        server = rest.slice(0, i)
+        bare = rest.slice(i + 2)
+      }
+    }
+    if (WEB_READ_TOOL_NAMES.includes(bare)) out.add(name)
+    else if (server !== undefined && !FIRST_PARTY_TOOL_SERVERS.has(server)) out.add(name)
+  }
+  return [...out]
+}
 
 /** Rollouts older than this are re-run: models and providers drift. */
 export const ROLLOUT_REUSE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
@@ -66,6 +108,12 @@ export function rolloutReuseVerdict(
   }
   if (isInfrastructureError(step.evidence.error)) {
     return { reuse: false, reason: "the rollout failed for infrastructure reasons" }
+  }
+  if (step.evidence.externalReads?.length) {
+    return {
+      reuse: false,
+      reason: `the rollout read from outside the machine: ${step.evidence.externalReads.join(", ")}`,
+    }
   }
   const age = now - (step.endedAt ?? 0)
   if (age > (options.maxAgeMs ?? ROLLOUT_REUSE_MAX_AGE_MS)) {

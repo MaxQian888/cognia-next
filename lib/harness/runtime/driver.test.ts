@@ -15,6 +15,7 @@ import {
   makeExperience,
   makeRun,
   makeRunConfig,
+  makeSkill,
   makeTask,
 } from "../test-fixtures"
 import type { UsageRowLike } from "../ledger"
@@ -322,6 +323,29 @@ describe("planWaves", () => {
 })
 
 describe("driveHarnessRun", () => {
+  it("does not reuse a rollout of a harness whose library skills drifted", async () => {
+    const { w } = await makeWorld()
+    // The base carries a library skill the capture no longer finds as it was.
+    const drifted = await buildHarnessSnapshot({
+      id: "snap-base",
+      characterId: "agent-1",
+      characterName: "Analyst",
+      scope: "task",
+      components: makeComponents({
+        skills: [makeSkill({ sourceSkillId: "lib-1", sourceHash: "stale" })],
+      }),
+      execution: {},
+      runtimeFingerprint: "hrf1-a",
+      origin: { kind: "captured" },
+      createdAt: 1,
+    })
+    w.snapshots.set(drifted.id, drifted)
+    await driveHarnessRun("run-1", deps(w))
+    expect(stepOf(w, "dom1")?.keptBase).toBe(true)
+    expect(stepOf(w, "roll:dom1")?.cacheHitOf).toBeUndefined()
+    expect(w.calls.probe).toContain("roll:dom1#1")
+  })
+
   it("probes, composes, selects on evidence, reflects and waits for approval", async () => {
     const { w } = await makeWorld()
     const d = deps(w)

@@ -19,6 +19,7 @@ import type {
   HarnessExecutionEvidence,
 } from "@/types/harness/evolution"
 import { checkTally, isDelivered, runTaskChecks, type AcceptanceCheckOutcome } from "./checks"
+import { externalReadTools } from "./cache"
 import { canonicalHash } from "./snapshot"
 import { renderTrajectory, type TrajectorySummary } from "./trajectory"
 
@@ -122,6 +123,9 @@ export function buildExecutionEvidence(input: BuildEvidenceInput): HarnessExecut
   }
   const validation = runTaskChecks(input.task.checks, checkInput)
   const delivered = isDelivered(input.task, checkInput, input.error)
+  const externalReads = externalReadTools(
+    input.trajectory.entries.flatMap((e) => (e.kind === "action" ? [e.toolName] : []))
+  )
   return {
     snapshotId: input.snapshotId,
     inputFingerprint: input.task.inputHash,
@@ -149,6 +153,7 @@ export function buildExecutionEvidence(input: BuildEvidenceInput): HarnessExecut
       reason: redactEvidenceText(b.reason),
     })),
     delegations: [...input.trajectory.delegations],
+    ...(externalReads.length ? { externalReads } : {}),
     degraded: input.degraded,
     delivered,
     ...(input.error ? { error: redactEvidenceText(input.error) } : {}),

@@ -68,7 +68,12 @@ exactly like the Eval Lab target, with three additions passed as inputs, never a
 subagents, tool rules), a probe capability grant (no MCP unless allow-listed, no team or
 dispatch tools, known side-effecting tools denied, permission cap, turn and USD caps), and an
 isolated working directory (`none`, a scratch copy of input files, or a task-workspace bundle
-at a frozen git base). Every ask-tier permission request is denied and recorded. The
+at a frozen git base). The grant caps the permission mode at `default`, so every mutating call
+reaches a decision instead of a mode shortcut. A probe-specific responder answers those
+decisions unattended: file tools are allowed only inside the rollout's directory, shell
+commands only when the shared command classifier finds no remote, global install, privileged
+or system command and no path outside the directory, and everything else is denied and
+recorded on the rollout. First-party plugin tools are reduced to a short allowlist. The
 trajectory, deliverables, spans and usage are captured before the session is deleted.
 
 ### Propose–Probe–Compose, parallel and sequential
@@ -119,15 +124,142 @@ before it starts. Spend is booked on a new `harness-evolution` usage surface. Th
 off by default, and modes are `manual`, `failure-triggered` and `background`; nothing runs per
 message.
 
+## Implementation
+
+The engine is pure modules under `lib/harness/` with adapters in `lib/harness/runtime/`,
+four Dexie tables (`harnessSnapshots`, `harnessEvolutionRuns`, `harnessEvolutionSteps`,
+`harnessExperiences`, schema v247) and the UI in `components/harness/`. It is desktop-only:
+the settings section, the initializer and the background sweep are mounted on desktop, and a
+paired client whose Host owns the conversations does not start runs.
+
+### The run is a leased job
+
+The state machine is `queued → snapshotting → reference_running → proposing ⇄ probing ⇄
+composing → evaluating → reflecting → awaiting_approval → adopting → completed`. Reflection
+runs right after the decision and before the run waits on a person, so an approval that takes
+days holds no work and every model call is spent while the run is active; a failed reflection
+does not fail the run. A keep-base decision ends after reflecting, and a low-risk decision
+that settings allow to auto-adopt skips `awaiting_approval`.
+
+One driver owns a run through a renewed lease, and every run write is a compare-and-swap on a
+`version` field: a cancel from another window or a resumed driver wins, and the losing driver
+stops without writing. Steps are rows keyed by their Harness² label (`base1..k`, `inv1..k`,
+`dom1..k`, `agg1..k` / `c1..k`, `select`, `reflect`); a step that succeeded is never run
+again, and a step left `running` by a dead driver is re-run as a new attempt only when the run
+is resumed. At boot, runs whose lease lapsed become `interrupted`; nothing is re-spent
+silently. An infrastructure failure (timeout, outage, rate limit) retries a rollout once and
+then fails the run, because it is not evidence about the harness.
+
+### Spend is folded from the usage ledger
+
+The run never accumulates spend in memory. Before every step the ledger is folded again from
+the run's `harness-evolution` usage rows, and the step is refused when the worst observed
+cost of its kind, or the pre-start estimate before any observation, would cross a ceiling.
+The run then ends `budget_exceeded` with the base kept, except at a sequential round
+boundary, where it selects among the rounds it finished. A step whose provider reports no
+price marks the ledger's cost as a lower bound, and the token and call ceilings hold instead.
+`maxBudgetUsd` is enforced by the Claude Agent SDK lane; on other lanes it is advisory, and
+the rollout's evidence carries a caveat saying so.
+
+### Selection ranks evidence before judgement
+
+Each rollout gets a deterministic standing (no error, delivered, fewer failed checks, more
+passed checks, fewer tool failures). A candidate counts at its worst replicate; the base at
+its best and worst. A candidate below the base's worst is a regression and is out; a single
+final that dominates the base is chosen without a judge. Otherwise the contenders, the base
+among them, go to a blind judge under seeded anonymous ids. A judge failure, low confidence or
+a verdict for the base keeps the base. This reverses the Harness² failure where a judge
+preferred a 55-point run over a 95-point one.
+
+### Rollout reuse
+
+A rollout's cache key covers the harness content hash, the task input hash (prompt, input-file
+hashes, frozen git base, checks), an environment fingerprint (app version, runtime, executor
+model, isolation, turn ceiling, probe policy, tool-rule engine version) and the replicate
+index. A hit is refused when the rollout failed for infrastructure reasons or was cancelled,
+when it is older than seven days, when a library skill it carries drifted, or when it read
+from outside the machine: evidence records every web-reader or third-party MCP tool call
+(`externalReads`), and such a rollout is one sample of a moving world rather than a
+repeatable experiment.
+
+### Experience retrieval
+
+Retrieval filters entries by visibility (agent, workspace, global) and domain, ranks them by
+BM25 (the `@cognia/rag` index) over situation, lesson, conditions and tags plus structured
+matches, and penalises entries from another runtime fingerprint. An entry becomes `verified`
+when the adopted harness carried an edit the reflection found helpful, or when a later run
+that was given it reports help with no harm; repeated harm rejects it. Each agent's library
+is capped (`experienceCapPerAgent`, default 200) and evicts by utility.
+
+### Adopted tool rules hold in live conversations
+
+Probes apply a candidate's tool rules themselves. After adoption the same pure projection
+runs on the `tool.result.project` interceptor point (ADR-0189), which interactive chat,
+headless captures and scheduled runs all dispatch. The interceptor is registered only while
+some agent has adopted rules, because a registration makes every turn pay the tool-result
+review round-trip; probe sessions are excluded so rules are not applied twice. Call caps count
+per turn.
+
+### Triggers
+
+- `manual`: the agent's **Evolve** page starts a run from a form showing the ADR-0232
+  estimate and which ceilings it would cross.
+- `failure-triggered`: a turn that fails with a harness-shaped diagnostic
+  (`budgetExhausted`, `deadlineExceeded`, `contextWindowExceeded`, `dispatchRejectedCycle`,
+  `dispatchRejectedDepth`, `dispatchRejectedPolicy`) shows an offer under the error, with the
+  task pre-filled from the last user request. Offers respect a cooldown and per-agent
+  dismissal, and are not repeated while a run for that agent is unfinished. Provider outages
+  and permission denials are not harness failures and never offer.
+- `background`: the same failures queue a run instead. An hourly scheduler maintenance task
+  (`harness-evolution-sweep`) launches queued runs with at most `backgroundMaxRunsPerSweep`
+  in flight and none sooner than `backgroundIntervalHours` after the previous start, so a
+  day spends at most (24 / interval) × runs-per-sweep × the run budget. Queued runs older than
+  a week are cancelled.
+
+### Restoring an earlier version
+
+Version history lists every snapshot of an agent (captures, candidates, compositions,
+adoptions, restores). Restoring one creates a new `restored` snapshot whose parent is the
+current harness and writes it through the same `agent-harness` configuration apply, so a
+restore is itself undoable; it is rated with the adoption risk rules, recorded in the
+governance ledger, and refused when the agent's harness changed after the person reviewed the
+diff. Model, permissions and tools stay as they are.
+
+### Surfaces
+
+The agent detail page gains an **Evolve** mode (runs, experience library, version history), a
+run opens at `/agents/evolution?run=<id>` with a timeline, live budget meters, candidate
+comparison, the decision and the reflection, and Settings gains a Harness Evolution section
+(feature switch, start mode, defaults, budget, role models, probe-safe MCP servers, background
+pacing, library cap).
+
+### Benchmark
+
+`lib/harness/benchmark.ts` drives the real driver, store, checks, ledger, reuse and selection
+with simulated rollouts, editors and judges over eight scenarios with known right answers
+(clear improvement, harmful edit, misleading judge, uncertain tie, flaky executor, two-round
+sequential fix, budget stop, outage retry) and reports decision accuracy, false adoptions,
+missed improvements, budget violations and the R = 4k / P = 3k accounting. It costs nothing
+and needs no provider; it does not measure how good real editors are.
+
 ## Consequences
 
 - Probes reuse the chat resolver's clamps (tool filter, Restricted Mode, parent ceiling,
   finalizer); a candidate can never run with more capability than the agent.
 - Agents gain visible harness sections in their profile; evolved variants show exactly which
   fields an adoption owns.
-- Evidence and snapshots take local storage; trajectory text is capped and runs follow a
-  retention period.
+- Evidence and snapshots take local storage; trajectory text is capped, each agent keeps its
+  newest 100 finished runs plus every run whose adoption is still in effect, and snapshots
+  nothing references are pruned with them.
 - Selection often keeps the base. That is the intended outcome when the evidence does not
   support a change.
-- Rollouts that touch MCP servers or web tools are never cached, and tasks needing external
+- Rollouts that read MCP servers or web tools are never reused, and tasks needing external
   side effects cannot be probed unless the user allow-lists a read-only server.
+- Shell commands a probe's policy lets through run on this machine. A scratch directory or
+  worktree is not a sandbox; unless the agent runs in a sandbox runtime, every rollout's
+  evidence says so.
+- Adopted tool-result rules are not enforced on the Claude Agent SDK lane, and a call cap on an
+  auto-allowed tool is applied after the call has run.
+- External runtimes (Codex, Claude Code and other ADR-0217 agents) cannot be evolved; their
+  harness is not Cognia's to edit.
+- Runs, snapshots and experiences are device-local and do not sync.

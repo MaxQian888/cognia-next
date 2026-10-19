@@ -20862,6 +20862,7 @@
       "delivered": "Delivered",
       "emptyOutput": "(empty)",
       "errored": "Errored",
+      "externalReads": "Read from outside the machine (not reused in later runs): {list}",
       "metric": {
         "cost": "Cost",
         "latency": "Duration",

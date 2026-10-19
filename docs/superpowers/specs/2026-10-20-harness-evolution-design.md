@@ -142,7 +142,9 @@ scope. Steps are rollouts and editor sessions labelled exactly like Harness²
 identity R = 4k, P = 3k is checkable.
 
 State machine: `queued → snapshotting → reference_running → proposing → probing →
-composing → evaluating → reflecting → awaiting_approval → adopting → completed`, plus
+composing → evaluating → reflecting → awaiting_approval → adopting → completed`
+(reflection runs after the decision and before the wait for a person, so a pending approval
+holds no work; a keep-base decision ends after reflecting), plus
 `failed`, `cancelled`, `budget_exceeded`, `rejected`, `rolled_back` and `interrupted`
 (resumable). Sequential runs loop proposing/probing/composing per round. Each step is
 idempotent by label; on resume a completed step is reused, an in-flight rollout becomes
@@ -203,10 +205,12 @@ booked on the `harness-evolution` usage surface.
 
 ### 2.8 Modes and triggers
 
-`disabled` (default) | `manual` | `failure-triggered` (a failed or retried turn offers
-"improve this agent" and pre-fills the task from the turn) | `background` (a scheduler
-maintenance task drains queued failure-triggered tasks within a daily budget). Feature flag:
-`AppSettings.harnessEvolution.enabled` (absent = off).
+`disabled` (default) | `manual` | `failure-triggered` (a turn that fails with a
+harness-shaped diagnostic offers "improve this agent" and pre-fills the task from the last
+user request) | `background` (the same failures queue a run; an hourly scheduler
+maintenance task launches queued runs under a launch interval and an in-flight cap). Feature
+flag: `AppSettings.harnessEvolution.enabled` (absent = off). See §5.6 for the codes and
+pacing as built.
 
 ## 3. Security model
 
@@ -225,3 +229,99 @@ maintenance task drains queued failure-triggered tasks within a daily budget). F
 
 Model weights, automatic library consolidation beyond dedupe/merge/evict, cross-account
 experience sharing, and executable plugin generation.
+
+## 5. As built
+
+This section records where the implementation (commits af7dc546e5, d36564a0a4, 9540ffcdc7,
+8e25ed1a4d and the Phase 6 follow-up) differs from or sharpens the design above. ADR-0237's
+Implementation section is the user-facing summary.
+
+### 5.1 Reuse that changed during implementation
+
+| Design row (§1.1) | As built |
+| --- | --- |
+| Blind A/B via `buildBlindAssignments` | Selection assigns its own seeded anonymous ids with `@cognia/eval-core/seeded-random`: the base must be a contender and the order must be reproducible per run, which the A/B helper does not model. |
+| eval-core `deterministicScorers` | Task checks (`lib/harness/checks.ts`) read rollout evidence (deliverables, tool failures, acceptance outcomes) that the scorers do not see, and report `inconclusive` instead of a score when the evidence is missing. |
+| `enforceCostBudget` before each step | The run's ceilings are its own: before each step the ledger is folded from the run's usage rows (`lib/harness/ledger.ts`) and the step's worst observed cost is reserved against them. |
+| Spans → metrics | Metrics come from the captured usage and the trajectory recorder (`run-and-capture` stream); spans are linked by `traceId` only. |
+| Retrospective-driven failure trigger | The trigger reads the turn's `CogniaDiagnostic` code (§5.6); a retrospective is not required to offer a run. |
+| `evolution` agent mode | Shipped as `evolve` (`AGENT_DETAIL_MODES`), plus the `/agents/evolution?run=` route. |
+
+Reused as designed: `resolveSendOptions` + `runAndCaptureAssistantReply`, the capability
+grant, variants and `resolveCharacterById`, `applyEvalRecommendation` /
+`rollbackEvalRecommendation`, the governance ledger, task-workspace bundles, the usage ledger
+and `estimateLaunchNow`, skill validation and slugs, the interceptor registry, the shared
+command classifier, `@cognia/redact`, the `@cognia/rag` BM25 index and CJK tokenizer,
+`LineDiffView`, `formatUsd` / `formatTokens` / `formatMs`, and the settings shell.
+
+### 5.2 Probe permissions
+
+The grant caps the permission mode at `default` and carries the unattended permission
+profile. A probe responder decides every remaining ask: file tools inside the rollout
+directory are allowed, shell commands pass when the shared classifier finds no remote,
+global install, privileged/system command or outside path, and everything else is denied
+and recorded as a blocked action. First-party plugin tools are cut to an allowlist
+(`PROBE_ALLOWED_PLUGIN_TOOLS`). Evidence carries a caveat when shell commands ran outside a
+sandbox runtime.
+
+### 5.3 Budget per lane
+
+`maxBudgetUsd` is passed to every rollout; the Claude Agent SDK lane enforces it, other lanes
+treat it as advisory and the rollout records a caveat. A provider that reports no price makes
+the ledger's cost a lower bound, and token and call ceilings hold. A sequential run that cannot
+afford the next round stops at the round boundary and selects among finished rounds.
+
+### 5.4 Selection
+
+Standing per rollout is lexicographic: no error, delivered, fewer failed checks, more passed
+checks, fewer tool failures. Candidates count at their worst replicate; the base at its best
+and worst. Regressions are excluded, a sole dominant final is chosen without a judge, and
+otherwise the judge sees the contenders including the base. Judge failure, low confidence or a
+base verdict keeps the base.
+
+### 5.5 Rollout reuse
+
+The key is the harness content hash, task input hash, environment fingerprint and replicate.
+Reuse is refused for infrastructure failures, cancelled or unfinished rollouts, age over seven
+days, drifted library skills, and any rollout whose evidence lists `externalReads` (a web
+reader or a tool of an MCP server the app does not serve). The run viewer says when a rollout
+read from outside.
+
+### 5.6 Triggers
+
+Harness-shaped diagnostic codes: `budgetExhausted`, `deadlineExceeded`,
+`contextWindowExceeded`, `dispatchRejectedCycle`, `dispatchRejectedDepth`,
+`dispatchRejectedPolicy`. `decideFailureOffer` returns `offer` (failure-triggered), `enqueue`
+(background) or `none` with a reason (off, not a harness failure, unsupported agent, no
+prompt, cooldown, dismissed, already running). The initializer watches failed turns once per
+diagnostic and ignores failures present at boot. Background runs are launched by the
+`harness-evolution-sweep` task on an hourly tick: at most `backgroundMaxRunsPerSweep` in
+flight, none sooner than `backgroundIntervalHours` after the last start, queued runs older
+than a week cancelled. A queued run without a git commit falls back to `files` isolation.
+
+### 5.7 Live tool rules
+
+Adopted rules run on the `tool.result.project` interceptor point, registered only while some
+agent has adopted rules; probe sessions are excluded. Call caps count per turn (unkeyed call
+sites reset after ten idle minutes). Not enforced on the SDK lane; a call cap on an
+auto-allowed tool applies after the call ran.
+
+### 5.8 Version restore
+
+Restoring a snapshot creates a `restored` snapshot (parent: the current harness), applies it
+through `agent-harness` (`harness-restore:<id>`) so it can be rolled back, rates it with the
+adoption risk rules, records it in governance, and refuses when the agent's content hash
+changed since the preview. Model, permissions and tools are untouched.
+
+### 5.9 Retention and scope
+
+Each agent keeps its newest 100 finished runs plus runs whose adoption is in effect;
+unreferenced snapshots are pruned after them. The experience library is capped per agent
+(default 200). Tables are device-local; the settings section, initializer and sweep are
+desktop-only, and a paired client whose Host owns conversations does not start runs.
+
+### 5.10 Benchmark
+
+`lib/harness/benchmark.ts` runs the real driver, store, checks, ledger, reuse and selection
+with simulated rollouts, editors and judges over eight scenarios; results and how to run it are
+in [the benchmark report](./2026-10-20-harness-evolution-benchmark.md).

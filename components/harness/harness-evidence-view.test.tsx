@@ -18,6 +18,7 @@ describe("HarnessEvidenceView", () => {
           blockedActions: [{ toolName: "WebFetch", reason: "network is off during probes" }],
           caveats: ["tool rules observed, not enforced"],
           delegations: ["researcher"],
+          externalReads: ["mcp__github__get_issue"],
           metrics: { ...makeEvidence().metrics, costUsd: undefined, toolFailures: 2 },
         })}
       />
@@ -32,11 +33,15 @@ describe("HarnessEvidenceView", () => {
     expect(screen.getByText("WebFetch")).toBeInTheDocument()
     expect(screen.getByTestId("harness-evidence-caveats")).toHaveTextContent("not enforced")
     expect(screen.getByText("Delegated to: researcher")).toBeInTheDocument()
+    expect(screen.getByTestId("harness-evidence-external")).toHaveTextContent(
+      "mcp__github__get_issue"
+    )
     expect(screen.getByTestId("harness-evidence-output")).toHaveTextContent("Wrote report.md")
   })
 
   it("keeps the trajectory folded until asked", () => {
     render(<HarnessEvidenceView evidence={makeEvidence()} />)
+    expect(screen.queryByTestId("harness-evidence-external")).not.toBeInTheDocument()
     expect(screen.queryByTestId("harness-evidence-trajectory")).not.toBeInTheDocument()
     fireEvent.click(screen.getByText("Full trajectory"))
     expect(screen.getByTestId("harness-evidence-trajectory")).toHaveTextContent("[ACTION] Write")

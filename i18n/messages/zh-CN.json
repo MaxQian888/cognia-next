@@ -20862,6 +20862,7 @@
       "delivered": "已交付",
       "emptyOutput": "（空）",
       "errored": "出错",
+      "externalReads": "读取了本机以外的数据（之后的运行不会复用）：{list}",
       "metric": {
         "cost": "费用",
         "latency": "耗时",

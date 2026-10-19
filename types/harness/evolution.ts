@@ -331,6 +331,12 @@ export interface HarnessExecutionEvidence {
   blockedActions: HarnessBlockedAction[]
   /** Subagent / dispatch calls seen in the trajectory. */
   delegations: string[]
+  /**
+   * Tools the run called whose answers come from outside the machine (the web,
+   * a third-party MCP server). Such a rollout is not repeatable and is never
+   * reused for another run. Absent on rollouts recorded before it was tracked.
+   */
+  externalReads?: string[]
   /** True when the run degraded (no tools, text-only host). */
   degraded: boolean
   /** True when the run produced what the task asked for. */

@@ -46,7 +46,7 @@ import type {
 import type { HarnessExperience } from "@/types/harness/experience"
 import type { HarnessScope, HarnessSnapshotV1 } from "@/types/harness/snapshot"
 import { runWithConcurrency } from "@/lib/plugin/core/concurrency"
-import { canAfford, checkBudget, type Reservation } from "../budget"
+import { canAfford, type Reservation } from "../budget"
 import { isInfrastructureError, pickReusableRollout, rolloutCacheKey } from "../cache"
 import { buildContextTree, type ContextDecision, type ContextPoolEntry } from "../context-tree"
 import { environmentFingerprint, redactEvidenceText } from "../evidence"
@@ -81,7 +81,13 @@ import {
 import type { ReflectionCandidate, ReflectionInput } from "../reflect"
 import { assessHarnessRisk, requiresApproval } from "../risk"
 import { BASE_LABEL, selectFinal, type SelectionHarness, type SelectionJudge } from "../select"
-import { canonicalHash, diffHarness, forkHarnessSnapshot } from "../snapshot"
+import {
+  canonicalHash,
+  diffHarness,
+  driftedSkills,
+  forkHarnessSnapshot,
+  type CapturedSkillInput,
+} from "../snapshot"
 import { componentsToTree, unifiedTreeDiff } from "../tree"
 import type { CapturedHarness } from "./capture"
 import type { EditorSessionInput, EditorSessionOutcome } from "./editor-runner"
@@ -384,6 +390,8 @@ interface RunContext {
   base: HarnessSnapshotV1
   character: Character
   carriedSkillIds: string[]
+  /** The library skills as they were when this driver started, by id, for reuse drift checks. */
+  librarySkills: ReadonlyMap<string, CapturedSkillInput>
   environmentFingerprint: string
   surface: ProbeToolSurface
   retrieved: HarnessExperience[]
@@ -565,6 +573,7 @@ async function prepare(
     base,
     character: captured.character,
     carriedSkillIds: [...captured.carriedSkillIds],
+    librarySkills: new Map(captured.skills.map((input) => [input.skill.id, input])),
     environmentFingerprint: fingerprint,
     surface,
     retrieved: [],
@@ -900,11 +909,12 @@ async function rolloutStep(ctx: RunContext, planned: PlannedStep): Promise<Harne
     replicate: planned.replicate ?? 1,
   })
   const id = stepId(run.id, planned.label)
-  const reusable = pickReusableRollout(
-    (await ctx.deps.store.listRolloutsByCacheKey(key)).filter((s) => s.id !== id),
-    key,
-    ctx.deps.now()
-  )
+  const stored = (await ctx.deps.store.listRolloutsByCacheKey(key)).filter((s) => s.id !== id)
+  const reusable = stored.length
+    ? pickReusableRollout(stored, key, ctx.deps.now(), {
+        driftedSkills: await driftedSkills(snapshot, ctx.librarySkills),
+      })
+    : undefined
   if (reusable?.evidence) {
     const evidence = { ...reusable.evidence, snapshotId: snapshot.id }
     return executeStep(

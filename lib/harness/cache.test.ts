@@ -1,6 +1,7 @@
 import type { HarnessEvolutionStep, HarnessExecutionEvidence } from "@/types/harness/evolution"
 import {
   ROLLOUT_REUSE_MAX_AGE_MS,
+  externalReadTools,
   isInfrastructureError,
   pickReusableRollout,
   rolloutCacheKey,
@@ -62,6 +63,10 @@ describe("rolloutReuseVerdict", () => {
     [{ evidence: undefined }, /did not finish/],
     [{ evidence: { ...evidence, error: "request timed out" } }, /infrastructure/],
     [{ endedAt: 0 }, /older than the reuse window/],
+    [
+      { evidence: { ...evidence, externalReads: ["mcp__github__search_issues"] } },
+      /outside the machine: mcp__github__search_issues/,
+    ],
   ])("refuses %j", (overrides, reason) => {
     const verdict = rolloutReuseVerdict(step(overrides), "key", ROLLOUT_REUSE_MAX_AGE_MS + 1)
     expect(verdict.reuse).toBe(false)
@@ -78,6 +83,28 @@ describe("rolloutReuseVerdict", () => {
   it("refuses when library skills drifted", () => {
     const verdict = rolloutReuseVerdict(step(), "key", 2_000, { driftedSkills: ["report"] })
     expect(!verdict.reuse && verdict.reason).toMatch(/report/)
+  })
+})
+
+describe("externalReadTools", () => {
+  it("names web readers and third-party MCP tools once each", () => {
+    expect(
+      externalReadTools([
+        "Read",
+        "WebFetch",
+        "mcp__cognia-tools__web_search",
+        "mcp__cognia-tools__file_read",
+        "mcp__cognia-plugin-tools__load_skill",
+        "mcp__a2ui-bridge__a2ui_create_surface",
+        "mcp__github__search_issues",
+        "mcp__github__search_issues",
+        "Bash",
+      ])
+    ).toEqual(["WebFetch", "mcp__cognia-tools__web_search", "mcp__github__search_issues"])
+  })
+
+  it("treats a malformed MCP name as a bare tool", () => {
+    expect(externalReadTools(["mcp__nothing", "mcp____x"])).toEqual([])
   })
 })
 

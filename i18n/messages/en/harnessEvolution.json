@@ -119,6 +119,7 @@
     },
     "blocked": "Blocked by the probe policy",
     "delegations": "Delegated to: {list}",
+    "externalReads": "Read from outside the machine (not reused in later runs): {list}",
     "output": "Answer",
     "emptyOutput": "(empty)",
     "deliverables": "Files produced ({count})",

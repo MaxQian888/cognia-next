@@ -122,6 +122,22 @@ describe("buildExecutionEvidence", () => {
     expect(evidence.error).toBe("sidecar exited")
     expect(evidence.metrics).not.toHaveProperty("costUsd")
   })
+
+  it("records the tools that read from outside the machine", () => {
+    expect(buildExecutionEvidence(input())).not.toHaveProperty("externalReads")
+    const evidence = buildExecutionEvidence(
+      input({
+        trajectory: summarizeTrajectory([
+          { kind: "action", toolName: "mcp__github__get_issue", input: { n: 1 } },
+          { kind: "observation", toolName: "mcp__github__get_issue", output: "{}", isError: false },
+          { kind: "action", toolName: "WebSearch", input: { q: "x" } },
+          { kind: "observation", toolName: "WebSearch", output: "[]", isError: false },
+          { kind: "assistant", text: "done" },
+        ]),
+      })
+    )
+    expect(evidence.externalReads).toEqual(["mcp__github__get_issue", "WebSearch"])
+  })
 })
 
 describe("deterministic standing", () => {

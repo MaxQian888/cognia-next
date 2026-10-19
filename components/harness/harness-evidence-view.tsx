@@ -132,6 +132,11 @@ export function HarnessEvidenceView({ evidence }: { evidence: HarnessExecutionEv
           {t("delegations", { list: evidence.delegations.join(", ") })}
         </p>
       ) : null}
+      {evidence.externalReads?.length ? (
+        <p className="text-xs text-muted-foreground" data-testid="harness-evidence-external">
+          {t("externalReads", { list: evidence.externalReads.join(", ") })}
+        </p>
+      ) : null}
 
       <Section title={t("output")} defaultOpen>
         <Pre testId="harness-evidence-output">{evidence.output || t("emptyOutput")}</Pre>

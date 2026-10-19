@@ -37,6 +37,7 @@ import type {
   HarnessProbePolicy,
   HarnessRoleModel,
 } from "@/types/harness/evolution"
+import { WEB_READ_TOOL_NAMES } from "../cache"
 
 const BUILTIN_SERVER = "cognia-tools"
 const PLUGIN_SERVER = "cognia-plugin-tools"
@@ -149,12 +150,7 @@ export const PROBE_SESSION_TOOLS: ReadonlySet<string> = new Set([
 ])
 
 /** Tools that reach the network for reading. Denied when the probe policy cuts the network. */
-export const PROBE_WEB_TOOLS: readonly string[] = [
-  "WebFetch",
-  "WebSearch",
-  "web_search",
-  "web_fetch",
-]
+export const PROBE_WEB_TOOLS: readonly string[] = WEB_READ_TOOL_NAMES
 
 /**
  * First-party plugin tools a probe keeps. Everything else on the plugin

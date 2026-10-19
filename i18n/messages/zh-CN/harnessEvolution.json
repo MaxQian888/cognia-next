@@ -119,6 +119,7 @@
     },
     "blocked": "被探测策略拦截",
     "delegations": "委派给：{list}",
+    "externalReads": "读取了本机以外的数据（之后的运行不会复用）：{list}",
     "output": "回答",
     "emptyOutput": "（空）",
     "deliverables": "生成的文件（{count}）",
