@@ -41,20 +41,19 @@ FROM rust:1.99.0-trixie AS chef
 # workspace component list for image builds so cargo does not try to download
 # development components while preparing an otherwise compile-only image.
 ENV RUSTUP_TOOLCHAIN=1.99.0
-# cognia-server links the full app_lib, which (today) compiles the Tauri
-# desktop stack wholesale — the standard Tauri v2 Linux build deps are
-# required even though no WebView ever opens headless. Slimming this via a
-# no-tauri cargo feature on app_lib is a tracked follow-up (ADR-0059).
+# cognia-server is its own Tauri-free package (ADR-0196 P9), so no GTK or
+# WebKitGTK: the system libraries are the ones its `-sys` crates link. Host
+# screen capture (`xcap`, through cognia-automation) links PipeWire, GBM and
+# the Wayland client, and bindgens PipeWire with libclang; the operator CLI
+# links OpenSSL.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       time pkg-config libssl-dev libglib2.0-dev libgtk-3-dev \
-       libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
-       libayatana-appindicator3-dev librsvg2-dev libpipewire-0.3-dev libgbm-dev libclang-dev \
+       time pkg-config libssl-dev libpipewire-0.3-dev libgbm-dev libwayland-dev libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef --version 0.1.78 --locked
 # The workspace release profile is tuned for the desktop bundle (thin-LTO and
-# one codegen unit). Compiling that full app_lib graph exceeds the memory of a
-# standard Linux CI runner even though the headless image does not benefit from
+# one codegen unit). Compiling the server's graph that way exceeds the memory
+# of a standard Linux CI runner even though the headless image does not benefit from
 # whole-program desktop optimization. Keep release optimizations while making
 # the container build bounded and reproducible on those runners.
 ENV CARGO_PROFILE_RELEASE_LTO=false \
@@ -93,7 +92,8 @@ RUN if [ -n "${COGNIA_CARGO_REGISTRY_MIRROR}" ]; then \
         "${COGNIA_CARGO_REGISTRY_MIRROR}" > /usr/local/cargo/config.toml; \
     fi
 RUN /usr/bin/time -v cargo chef cook --release --locked --timings --recipe-path recipe.json \
-      --bin cognia-server --features container-exec,k8s-exec,workspace-runtime-exec,otel-export \
+      -p cognia-server --bin cognia-server \
+      --features container-exec,k8s-exec,workspace-runtime-exec,otel-export \
     && /usr/bin/time -v cargo chef cook --release --locked --timings --recipe-path recipe.json \
       -p cognia-cli --bin cognia \
     && /usr/bin/time -v cargo chef cook --release --locked --timings --recipe-path recipe.json \
@@ -103,11 +103,11 @@ RUN /usr/bin/time -v cargo chef cook --release --locked --timings --recipe-path 
     && /usr/bin/time -v cargo chef cook --release --locked --timings --recipe-path recipe.json \
       -p cognia-task-workspace --bin cognia-task-workspace-worker
 
-# The headless binary does not ship a desktop Tauri bundle. Its real sidecars
-# and native launchers are built below and staged by brain-builder. Suppress
-# desktop resource copying during Rust compilation, including cargo check.
+# The real sidecars and native launchers are built below and staged by
+# brain-builder. Every build here selects its package with `-p`: none of them
+# compiles the desktop package, and a build without `-p` would unify the
+# desktop's `tauri-host` features into the server's graph.
 FROM deps AS builder
-ENV TAURI_CONFIG='{"bundle":{"resources":[],"externalBin":[]}}'
 ARG COGNIA_SERVER_CARGO_FLAGS=""
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src-tauri ./src-tauri
@@ -123,6 +123,11 @@ COPY cli/src/x/agent-launcher.ts ./cli/src/x/agent-launcher.ts
 COPY hooks/matcher-conformance.json hooks/builtin-hooks.lockstep.json ./hooks/
 COPY test-fixtures/scheduler/cron-dialect.json ./test-fixtures/scheduler/cron-dialect.json
 COPY cli/src/serve/fixtures/bridge-frames.json ./cli/src/serve/fixtures/bridge-frames.json
+COPY lib/filespace/link-fixtures.json lib/filespace/path-fixtures.json ./lib/filespace/
+COPY lib/headless/runtimes/router-fusion.ts ./lib/headless/runtimes/router-fusion.ts
+COPY lib/router-fusion/gate/passthrough-bridge.ts ./lib/router-fusion/gate/passthrough-bridge.ts
+COPY test-fixtures/updates/host-catalog.json ./test-fixtures/updates/host-catalog.json
+COPY sidecar/codeserver-agent-ext/tests/fixtures/session-key.vector sidecar/codeserver-agent-ext/tests/fixtures/content-bearer.vector ./sidecar/codeserver-agent-ext/tests/fixtures/
 COPY docs/api/mobile-companion-api.openapi.yaml docs/api/headless-service-api.openapi.yaml ./docs/api/
 COPY packages/plugin-sdk/contract ./packages/plugin-sdk/contract
 COPY packages/logging/src/schemas/observability-event-v1.schema.json ./packages/logging/src/schemas/observability-event-v1.schema.json
@@ -133,11 +138,8 @@ COPY deploy/github-runner/cognia-runner.yml deploy/github-runner/bootstrap.mjs d
 # container-exec + k8s-exec (R13): the headless image ships both flavors of
 # the container backend, so COGNIA_EXEC_BACKEND=container works at T2
 # (Docker socket proxy) and =kubernetes at T3 (runner Pods, in-cluster).
-RUN /usr/bin/time -v cargo build --release --locked --timings --bin cognia-server \
+RUN /usr/bin/time -v cargo build --release --locked --timings -p cognia-server --bin cognia-server \
     --features container-exec,k8s-exec,workspace-runtime-exec,otel-export \
-    --config 'profile.release.package.cognia-next.opt-level=0' \
-    --config 'profile.release.package.cognia-next.codegen-units=256' \
-    --config 'profile.release.package.cognia-next.debug=0' \
     ${COGNIA_SERVER_CARGO_FLAGS}
 # Agent-first loopback operator CLI. It is intentionally shipped in the same
 # image so service-token issuance and the network peer both stay in-container.
@@ -160,7 +162,6 @@ COPY --from=builder /work/target/cargo-timings/ /
 
 # PR CI target: type/borrow-check the whole graph without codegen or linking.
 FROM deps AS check
-ENV TAURI_CONFIG='{"bundle":{"resources":[],"externalBin":[]}}'
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src-tauri ./src-tauri
 COPY crates ./crates
@@ -175,6 +176,11 @@ COPY cli/src/x/agent-launcher.ts ./cli/src/x/agent-launcher.ts
 COPY hooks/matcher-conformance.json hooks/builtin-hooks.lockstep.json ./hooks/
 COPY test-fixtures/scheduler/cron-dialect.json ./test-fixtures/scheduler/cron-dialect.json
 COPY cli/src/serve/fixtures/bridge-frames.json ./cli/src/serve/fixtures/bridge-frames.json
+COPY lib/filespace/link-fixtures.json lib/filespace/path-fixtures.json ./lib/filespace/
+COPY lib/headless/runtimes/router-fusion.ts ./lib/headless/runtimes/router-fusion.ts
+COPY lib/router-fusion/gate/passthrough-bridge.ts ./lib/router-fusion/gate/passthrough-bridge.ts
+COPY test-fixtures/updates/host-catalog.json ./test-fixtures/updates/host-catalog.json
+COPY sidecar/codeserver-agent-ext/tests/fixtures/session-key.vector sidecar/codeserver-agent-ext/tests/fixtures/content-bearer.vector ./sidecar/codeserver-agent-ext/tests/fixtures/
 COPY docs/api/mobile-companion-api.openapi.yaml docs/api/headless-service-api.openapi.yaml ./docs/api/
 COPY packages/plugin-sdk/contract ./packages/plugin-sdk/contract
 COPY packages/logging/src/schemas/observability-event-v1.schema.json ./packages/logging/src/schemas/observability-event-v1.schema.json
@@ -182,7 +188,7 @@ COPY protocol ./protocol
 COPY scripts/plugin/node-plugin-host.mjs ./scripts/plugin/node-plugin-host.mjs
 # cognia-github-runner embeds the runner definition it installs.
 COPY deploy/github-runner/cognia-runner.yml deploy/github-runner/bootstrap.mjs deploy/github-runner/package.json deploy/github-runner/package-lock.json deploy/github-runner/action.yml ./deploy/github-runner/
-RUN cargo check --release --locked --bin cognia-server --features container-exec,k8s-exec,workspace-runtime-exec,otel-export
+RUN cargo check --release --locked -p cognia-server --bin cognia-server --features container-exec,k8s-exec,workspace-runtime-exec,otel-export
 RUN cargo check --release --locked -p cognia-cli --bin cognia
 
 # ── Node: brain (cognia-agent) + sidecar bundle ─────────────────────────────
@@ -288,8 +294,8 @@ RUN node --version
 
 # ── Runtime: slim (sidecar-only execution plane) ────────────────────────────
 FROM node:26-trixie-slim AS runtime-slim
-# The binary dynamically links the Tauri desktop stack (see the chef-stage
-# note) — ship the runtime .so set alongside the headless essentials.
+# The runtime halves of the chef stage's libraries (PipeWire, GBM, Wayland
+# client, OpenSSL) alongside the headless essentials; no GTK or WebKitGTK.
 # bubblewrap is not optional: cognia-external-agent-launcher (shipped in the
 # brain layout below) refuses to spawn without `bwrap` on the PATH, and
 # SandboxError has no "continue unsandboxed" variant. Without it EVERY external
@@ -299,8 +305,7 @@ FROM node:26-trixie-slim AS runtime-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates libssl3t64 curl git bubblewrap \
-       libgtk-3-0t64 libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
-       libsoup-3.0-0 libayatana-appindicator3-1 librsvg2-2 libpipewire-0.3-0t64 libgbm1 \
+       libpipewire-0.3-0t64 libgbm1 libwayland-client0 \
     && rm -rf /var/lib/apt/lists/*
 # `/data/workspaces` is COGNIA_WORKSPACES_DIR (the per-run writable root the
 # sandbox binds) and `/data/pi-home/.pi/agent` is PI_CODING_AGENT_DIR, which

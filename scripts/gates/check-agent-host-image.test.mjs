@@ -122,17 +122,26 @@ test("runChecks reports the two shipped defects it was written to catch", () => 
   assert.match(problems, /stagePiExtension\(\)/)
 })
 
-test("headless Rust stages omit desktop bundle staging and retain the real brain layout", () => {
+// cognia-server is its own Tauri-free package (ADR-0196 P9). Every Rust build
+// in the image names its package: a bare `--bin cognia-server` selects the
+// whole workspace, unifies the desktop's `tauri-host` features into the
+// server's graph and needs WebKitGTK to build.
+test("headless Rust stages build named packages only and retain the real brain layout", () => {
   const dockerfile = readFileSync(
     new URL("../../Dockerfile.cognia-server", import.meta.url),
     "utf8"
   )
-  for (const stage of ["builder", "check"]) {
-    const source = stageText(dockerfile, stage)
-    const config = source.match(/^ENV TAURI_CONFIG='([^']+)'$/m)
-    assert.ok(config, `${stage} must explicitly disable desktop-only resource staging`)
-    assert.deepEqual(JSON.parse(config[1]).bundle, { resources: [], externalBin: [] })
-    assert.doesNotMatch(source, /COPY sidecar\//)
+  for (const stage of ["deps", "builder", "check"]) {
+    const source = stageText(dockerfile, stage).replace(/\\\n/g, " ")
+    const commands = [...source.matchAll(/cargo (?:chef cook|build|check) [^\n&]+/g)]
+    assert.ok(commands.length > 0, `${stage} runs cargo`)
+    for (const [command] of commands) {
+      assert.match(command, /(?:-p|--package) [\w-]+/, `${stage}: ${command}`)
+      assert.doesNotMatch(command, /(?:-p|--package) cognia-next\b/, `${stage}: ${command}`)
+    }
+    assert.doesNotMatch(source, /TAURI_CONFIG/)
+    // Only test fixtures: the sidecar tree itself is staged by brain-builder.
+    assert.doesNotMatch(source, /COPY sidecar\/(?!\S*\/tests\/fixtures\/)/)
     assert.doesNotMatch(source, /echo placeholder/)
   }
   const runtime = stageText(dockerfile, "runtime-slim")
@@ -171,8 +180,27 @@ test("server dependency cooking has the same capture linker prerequisite as fina
     "utf8"
   )
   const chef = dockerfile.split("FROM chef AS planner")[0]
-  assert.match(chef, /\blibgbm-dev\b/)
-  assert.match(dockerfile, /\blibgbm1\b/)
+  // `xcap` (host screen capture) links GBM, PipeWire and the Wayland client.
+  for (const library of ["libgbm-dev", "libpipewire-0.3-dev", "libwayland-dev"]) {
+    assert.match(chef, new RegExp(`\\b${library.replace(/[.]/g, "\\.")}\\b`))
+  }
+  for (const library of ["libgbm1", "libpipewire-0.3-0t64", "libwayland-client0"]) {
+    assert.match(
+      stageText(dockerfile, "runtime-slim"),
+      new RegExp(`\\b${library.replace(/[.]/g, "\\.")}\\b`)
+    )
+  }
+})
+
+test("the server image installs no desktop GUI stack", () => {
+  const dockerfile = readFileSync(
+    new URL("../../Dockerfile.cognia-server", import.meta.url),
+    "utf8"
+  )
+  assert.doesNotMatch(
+    dockerfile,
+    /libgtk|libwebkit2gtk|libjavascriptcoregtk|libsoup|libayatana|librsvg/
+  )
 })
 
 test("server dependency cooking prepares each shipped feature graph without workspace unification", () => {
@@ -195,7 +223,7 @@ test("server dependency cooking prepares each shipped feature graph without work
   const expected = [
     {
       bins: ["cognia-server"],
-      packages: [],
+      packages: ["cognia-server"],
       features: "container-exec,k8s-exec,workspace-runtime-exec,otel-export",
       release: true,
       locked: true,
