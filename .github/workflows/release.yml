@@ -354,6 +354,144 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+  # ADR-0224 A1 / ADR-0235 P3: the always-on host archives, one per catalog
+  # `archive` target in scripts/release/update-catalog.mjs. Each builds on a
+  # runner of its own platform and architecture: the brain ships this
+  # install's native addons. Linux builds on Ubuntu 22.04, the glibc 2.35
+  # floor the remote installer probes for, and the packager refuses any ELF
+  # file that needs a newer glibc. The archives are attached to the release;
+  # the signed update catalog lists them only once the offline signer adds
+  # their entries (`pnpm update:catalog host-entries --archive …`).
+  publish-host-archives:
+    name: Publish host archive (${{ matrix.target }})
+    needs: [quality, test, build-tauri]
+    permissions:
+      contents: write
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: darwin-arm64
+          - runner: macos-15-intel
+            target: darwin-x64
+          - runner: ubuntu-22.04
+            target: linux-x64
+          - runner: ubuntu-22.04-arm
+            target: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install repository Rust toolchain
+        run: rustup show active-toolchain
+      - if: runner.os == 'Linux'
+        name: Install the server's system libraries
+        # The same libraries Dockerfile.cognia-server's build stage installs:
+        # screen capture (PipeWire, GBM, EGL, Wayland), xkbcommon, OpenSSL,
+        # and libclang for bindgen.
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y --no-install-recommends
+          pkg-config libssl-dev libpipewire-0.3-dev libgbm-dev libegl-dev
+          libwayland-dev libxkbcommon-dev libclang-dev binutils xz-utils
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - if: runner.os == 'macOS'
+        name: Require Developer ID release signing
+        run: node scripts/ci/require-macos-release-signing.mjs
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - if: runner.os == 'macOS'
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - if: runner.os == 'macOS'
+        name: Store the notarization credentials
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: xcrun notarytool store-credentials cognia-host --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID"
+      - name: Prepare built-in plugins before compiling the host
+        run: node scripts/build/build-browser-builtin-plugins.mjs
+      # webclone, the code-graph grammars, the VS Code extension host and the
+      # native helpers the brain layout copies in.
+      - run: pnpm cli:release:prepare
+      - name: Build and package the host archive
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+        run: |
+          args=(--target "${{ matrix.target }}")
+          if [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            args+=(--sign "$APPLE_SIGNING_IDENTITY" --notarize cognia-host)
+          fi
+          NODE_OPTIONS=--max-old-space-size=8192 node scripts/build/package-host-archive.mjs "${args[@]}"
+      # Boot the unpacked archive the way its service runs it, with its own
+      # Node, and wait until /readyz reports the brain and sidecar ready.
+      - name: Smoke the unpacked archive
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          name="cognia-host-$version-${{ matrix.target }}"
+          smoke="$RUNNER_TEMP/host-smoke"
+          mkdir -p "$smoke/data"
+          tar -xzf "dist/host/$name.tar.gz" -C "$smoke"
+          root="$smoke/$name"
+          export COGNIA_DATA_DIR="$smoke/data"
+          export COGNIA_BRAIN_ENTRY="$root/brain/cli.mjs"
+          export COGNIA_SIDECAR_SCRIPT="$root/brain/sidecar/claude-host.mjs"
+          export NODE_ENV=production
+          export PATH="$root/node/bin:$PATH"
+          "$root/bin/cognia-server" init
+          "$root/bin/cognia-server" serve --bind-loopback --no-mdns --port 28777 > "$smoke/serve.log" 2>&1 &
+          pid=$!
+          for _ in $(seq 1 90); do
+            if curl -skf https://127.0.0.1:28777/readyz; then
+              kill "$pid"
+              exit 0
+            fi
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 2
+          done
+          curl -sk https://127.0.0.1:28777/readyz || true
+          cat "$smoke/serve.log"
+          kill "$pid" 2>/dev/null || true
+          exit 1
+      - name: Attach the host archive to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          name="cognia-host-$version-${{ matrix.target }}"
+          gh release upload "$GITHUB_REF_NAME" "dist/host/$name.tar.gz" "dist/host/$name.tar.gz.sha256" --clobber
+          {
+            echo "Host archive \`$name.tar.gz\`: \`$(cut -d' ' -f1 "dist/host/$name.tar.gz.sha256")\`"
+            echo
+            echo "Catalog entry (offline signer): \`pnpm update:catalog host-entries --version $version --channel <channel> --target ${{ matrix.target }} --archive $name.tar.gz --url https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$name.tar.gz --out <entries.json>\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   publish-agent-sdk:
     name: Publish Agent SDK
     needs: publish-agent-hosts

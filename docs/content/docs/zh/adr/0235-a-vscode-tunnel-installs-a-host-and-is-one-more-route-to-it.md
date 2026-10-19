@@ -121,7 +121,7 @@ TypeScript Dev Tunnels SDK（MIT，`@microsoft/dev-tunnels-*`）运行在 `servi
 - **支持的机器。** Linux x64 和 arm64，以及 macOS arm64 和 x64。Windows 直接拒绝并说明原因。
 - **先做无头构建。** 只有在 `cognia-server` 的 no-tauri 无头构建就绪后，才发布 Linux 归档。即 `cognia-server` 成为独立、不依赖 Tauri 的包：ADR-0196 的 P8（RPC families 经 `RpcHost` 迁入 `cognia-companion-rpc`）与 P9，也就是 ADR-0059 的后续事项，同时让服务端镜像瘦身。在 `app_lib` 上加 cargo feature 做不到：Linux 上 `tauri` 无条件链接 GTK（`muda` 依赖 gtk3）。Linux 归档是否去掉 `ocr-paddle`，在该阶段根据它对 glibc 基线的影响决定；低于记录基线的机器会在探测时被拒绝。
 - **归档打包。** `scripts/build/package-host-archive.mjs` 与 `scripts/release/update-catalog.mjs` 增加 `linux-x64` 和 `linux-arm64`，复用现有的清单、Node pin 和归档布局。Linux 的完整性由签名目录摘要加清单中的逐文件哈希保证；codesign 仍只用于 macOS。
-- **CI。** 第一个为四个目标构建 host 归档的 CI 作业，复用 `publish-agent-hosts` 的矩阵形态和现有的 `ubuntu-24.04-arm` runner。此后自更新像覆盖 macOS 一样覆盖 Linux。
+- **CI。** 第一个为四个目标构建 host 归档的 CI 作业，复用 `publish-agent-hosts` 的矩阵形态。Linux 部分运行在 `ubuntu-22.04` 和 `ubuntu-22.04-arm` 上，而不是 `images.yml` 使用的 `ubuntu-24.04-arm`：构建会链接构建机器 glibc 的符号版本，而归档必须能在安装器接受的 glibc 2.35 下限上加载。此后自更新像覆盖 macOS 一样覆盖 Linux。
 - **范围。** 只用用户态，不用 sudo。探测会检查 systemd linger；若未开启，会明确告知 Host 会在用户登出时停止，重启后要等用户登录才会运行。没有 systemd 或 launchd 的机器直接拒绝。
 - **已有安装。** 安装器通过 `service status --json` 检测已有安装，提供全新安装、修复或重新配对。它从不替换已有的 master key 或数据目录。
 - **生命周期。** “从机器上卸载”（`service uninstall` 加移除安装根目录）与“忘记 Host”是两个独立操作。删除数据目录需要第二次键入确认。升级是 Host 自更新，从不重跑安装器。

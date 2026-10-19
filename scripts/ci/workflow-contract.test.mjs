@@ -1190,3 +1190,40 @@ test("the Pro IDE E2E runs on its own impact against the pinned code-server", as
   const upload = job.steps.find((step) => step.name === "Upload performance result")
   assert.equal(upload.if, "always()")
 })
+
+test("tagged releases attach a smoked host archive for every catalog archive target", async () => {
+  const { HOST_TARGETS } = await import("../release/update-catalog.mjs")
+  const { LINUX_GLIBC_BASELINE } = await import("../build/package-host-archive.mjs")
+  const { jobs } = parse(await readWorkflow("release.yml"))
+  const job = jobs["publish-host-archives"]
+  assert.ok(job, "release.yml packages the host archives")
+  assert.ok(job.needs.includes("build-tauri"), "archives attach to the release build-tauri created")
+  assert.deepEqual(job.permissions, { contents: "write" })
+
+  const include = job.strategy.matrix.include
+  const archiveTargets = Object.keys(HOST_TARGETS).filter((t) => HOST_TARGETS[t] === "archive")
+  assert.deepEqual(include.map((entry) => entry.target).sort(), archiveTargets.sort())
+  for (const { runner, target } of include) {
+    // The brain carries the build machine's native addons: no cross builds.
+    const arm = /arm64$/.test(target)
+    if (target.startsWith("linux-")) {
+      // Built on the glibc floor the installer probes for (Ubuntu 22.04 = 2.35).
+      assert.equal(LINUX_GLIBC_BASELINE, "2.35")
+      assert.equal(runner, arm ? "ubuntu-22.04-arm" : "ubuntu-22.04", target)
+    } else {
+      assert.match(runner, arm ? /^macos-1\d$/ : /^macos-\d+-intel$/, target)
+    }
+  }
+
+  const steps = job.steps
+  const build = steps.findIndex((s) => s.name === "Build and package the host archive")
+  const smoke = steps.findIndex((s) => s.name === "Smoke the unpacked archive")
+  const attach = steps.findIndex((s) => s.name === "Attach the host archive to the release")
+  const prepare = steps.findIndex((s) => s.run === "pnpm cli:release:prepare")
+  assert.ok(prepare >= 0 && prepare < build && build < smoke && smoke < attach)
+  assert.match(steps[build].run, /package-host-archive\.mjs/)
+  assert.match(steps[build].run, /--notarize/)
+  assert.match(steps[smoke].run, /\/readyz/)
+  assert.match(steps[attach].run, /gh release upload/)
+  assert.match(steps[attach].run, /\.tar\.gz\.sha256/)
+})
