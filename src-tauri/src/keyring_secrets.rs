@@ -6,19 +6,7 @@
 
 pub use cognia_secrets::keyring_secrets::*;
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SecretStoreInput {
-    pub namespace: String,
-    pub key: String,
-    #[serde(default)]
-    pub value: Option<String>,
-}
-
-/// Legacy input name retained for source compatibility.
-pub type KeyringInput = SecretStoreInput;
+use serde::Serialize;
 
 /// Run secret-store work on the blocking pool. A write encrypts and fsyncs the
 /// whole store under its global lock, and every read waits on that lock; on

@@ -15,6 +15,21 @@
 //! `keyring_secret_*` `#[tauri::command]` shells live app-side.
 
 use crate::secret_store;
+use serde::{Deserialize, Serialize};
+
+/// The `(namespace, key[, value])` a secret-store command addresses, as the
+/// desktop IPC shells and the companion RPC arms both receive it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretStoreInput {
+    pub namespace: String,
+    pub key: String,
+    #[serde(default)]
+    pub value: Option<String>,
+}
+
+/// Legacy input name retained for source compatibility.
+pub type KeyringInput = SecretStoreInput;
 
 const SERVICE_PREFIX: &str = "com.cognia.";
 const SERVICE_SUFFIX: &str = "/v1";
@@ -96,6 +111,18 @@ pub fn clear(namespace: &str, key: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_secret_store_input_reads_the_wire_shape_and_defaults_its_value() {
+        let input: SecretStoreInput =
+            serde_json::from_value(serde_json::json!({ "namespace": "webhooks", "key": "k" }))
+                .expect("wire shape");
+        assert_eq!(
+            (input.namespace.as_str(), input.key.as_str()),
+            ("webhooks", "k")
+        );
+        assert_eq!(input.value, None);
+    }
 
     #[test]
     fn service_name_includes_namespace() {
