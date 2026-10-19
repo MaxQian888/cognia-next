@@ -180,11 +180,25 @@ test("server dependency cooking has the same capture linker prerequisite as fina
     "utf8"
   )
   const chef = dockerfile.split("FROM chef AS planner")[0]
-  // `xcap` (host screen capture) links GBM, PipeWire and the Wayland client.
-  for (const library of ["libgbm-dev", "libpipewire-0.3-dev", "libwayland-dev"]) {
+  // `xcap` (host screen capture) links GBM, PipeWire, EGL and Wayland; input
+  // automation links xkbcommon. The GUI stack used to bring these in.
+  for (const library of [
+    "libgbm-dev",
+    "libpipewire-0.3-dev",
+    "libegl-dev",
+    "libwayland-dev",
+    "libxkbcommon-dev",
+  ]) {
     assert.match(chef, new RegExp(`\\b${library.replace(/[.]/g, "\\.")}\\b`))
   }
-  for (const library of ["libgbm1", "libpipewire-0.3-0t64", "libwayland-client0"]) {
+  for (const library of [
+    "libgbm1",
+    "libpipewire-0.3-0t64",
+    "libegl1",
+    "libwayland-client0",
+    "libwayland-server0",
+    "libxkbcommon0",
+  ]) {
     assert.match(
       stageText(dockerfile, "runtime-slim"),
       new RegExp(`\\b${library.replace(/[.]/g, "\\.")}\\b`)

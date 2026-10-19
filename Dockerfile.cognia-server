@@ -42,13 +42,14 @@ FROM rust:1.99.0-trixie AS chef
 # development components while preparing an otherwise compile-only image.
 ENV RUSTUP_TOOLCHAIN=1.99.0
 # cognia-server is its own Tauri-free package (ADR-0196 P9), so no GTK or
-# WebKitGTK: the system libraries are the ones its `-sys` crates link. Host
-# screen capture (`xcap`, through cognia-automation) links PipeWire, GBM and
-# the Wayland client, and bindgens PipeWire with libclang; the operator CLI
-# links OpenSSL.
+# WebKitGTK: only the libraries its dependencies link. Host screen capture
+# (`xcap`, through cognia-automation) links PipeWire, GBM, EGL and the Wayland
+# client and server libraries, and bindgens PipeWire with libclang; input
+# automation links xkbcommon; the operator CLI links OpenSSL.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       time pkg-config libssl-dev libpipewire-0.3-dev libgbm-dev libwayland-dev libclang-dev \
+       time pkg-config libssl-dev libpipewire-0.3-dev libgbm-dev libegl-dev libwayland-dev \
+       libxkbcommon-dev libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef --version 0.1.78 --locked
 # The workspace release profile is tuned for the desktop bundle (thin-LTO and
@@ -294,8 +295,9 @@ RUN node --version
 
 # ── Runtime: slim (sidecar-only execution plane) ────────────────────────────
 FROM node:26-trixie-slim AS runtime-slim
-# The runtime halves of the chef stage's libraries (PipeWire, GBM, Wayland
-# client, OpenSSL) alongside the headless essentials; no GTK or WebKitGTK.
+# The runtime halves of the chef stage's libraries (PipeWire, GBM, EGL,
+# Wayland, xkbcommon, OpenSSL) alongside the headless essentials; no GTK or
+# WebKitGTK.
 # bubblewrap is not optional: cognia-external-agent-launcher (shipped in the
 # brain layout below) refuses to spawn without `bwrap` on the PATH, and
 # SandboxError has no "continue unsandboxed" variant. Without it EVERY external
@@ -305,7 +307,7 @@ FROM node:26-trixie-slim AS runtime-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates libssl3t64 curl git bubblewrap \
-       libpipewire-0.3-0t64 libgbm1 libwayland-client0 \
+       libpipewire-0.3-0t64 libgbm1 libegl1 libwayland-client0 libwayland-server0 libxkbcommon0 \
     && rm -rf /var/lib/apt/lists/*
 # `/data/workspaces` is COGNIA_WORKSPACES_DIR (the per-run writable root the
 # sandbox binds) and `/data/pi-home/.pi/agent` is PI_CODING_AGENT_DIR, which
