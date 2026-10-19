@@ -17,7 +17,8 @@
       "args": [],
       "lifecycle": "lazy",
       "idleTimeout": 10,
-      "requestTimeoutMs": 30000
+      "requestTimeoutMs": 30000,
+      "directTools": true
     }
   }
 }

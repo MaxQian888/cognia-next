@@ -6582,15 +6582,15 @@
       "path": "builtin://cognia-sandboxed-tools",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-sandboxed-tools/2112c8d7053a120d945123ee466ff33941cc9c16041b4accb43e0cf7e6d92fe1.cjs",
-        "sha256": "2112c8d7053a120d945123ee466ff33941cc9c16041b4accb43e0cf7e6d92fe1",
+        "url": "/_cognia/builtin-plugins/cognia-sandboxed-tools/ebd9c5d5ec2905630cec5e842fc48b22dd5a4ad0d7ef37fde2edc00a6e59dbb3.cjs",
+        "sha256": "ebd9c5d5ec2905630cec5e842fc48b22dd5a4ad0d7ef37fde2edc00a6e59dbb3",
         "sharedModules": [
           "@cognia/plugin-sdk",
           "@cognia/plugin-sdk/api/sandbox"
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/cognia-sandboxed-tools/resources/",
         "entryHashes": {
-          "dist/index.js": "2112c8d7053a120d945123ee466ff33941cc9c16041b4accb43e0cf7e6d92fe1"
+          "dist/index.js": "ebd9c5d5ec2905630cec5e842fc48b22dd5a4ad0d7ef37fde2edc00a6e59dbb3"
         }
       }
     },
@@ -14963,15 +14963,15 @@
       "path": "builtin://cognia-workflow-ai",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-workflow-ai/ff27830efc833174c9de031f055054786503efc978fff3bd9f35e3e12cb9ecdc.cjs",
-        "sha256": "ff27830efc833174c9de031f055054786503efc978fff3bd9f35e3e12cb9ecdc",
+        "url": "/_cognia/builtin-plugins/cognia-workflow-ai/4904036f8ce2831718d742e1d2243d6dd6a7a31c76b0978c412bc12cf423dd83.cjs",
+        "sha256": "4904036f8ce2831718d742e1d2243d6dd6a7a31c76b0978c412bc12cf423dd83",
         "sharedModules": [
           "@cognia/plugin-sdk",
           "@cognia/plugin-sdk/api/workflow-editor"
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/cognia-workflow-ai/resources/",
         "entryHashes": {
-          "dist/index.js": "ff27830efc833174c9de031f055054786503efc978fff3bd9f35e3e12cb9ecdc"
+          "dist/index.js": "4904036f8ce2831718d742e1d2243d6dd6a7a31c76b0978c412bc12cf423dd83"
         }
       }
     },
