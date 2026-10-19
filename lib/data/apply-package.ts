@@ -26,6 +26,7 @@ import type { LibraryFolder, LibraryItemRow } from "@/lib/db/files-library-types
 import type { MediaGenerationJobRow } from "@/lib/ai/media/video-jobs/types"
 import { remapVideoJobSession } from "@/lib/db/media-generation-jobs"
 import { applyCogsetBackup } from "./apply-cogsets"
+import { applyPromptOverrideBackup } from "./prompt-overrides-backup"
 import { parseInstallOriginRecord } from "@/lib/plugin/origin/install-origin"
 import { reconcileLibraryPins } from "@/lib/db/files-library-items"
 import type { DBScheduledTask } from "@/lib/db/scheduled-task-types"
@@ -276,6 +277,8 @@ export async function applyBackupPackage(
       db.retrievalTombstones,
       db.chatTemplates,
       db.documentTemplates,
+      db.promptOverrides,
+      db.promptOverrideRevisions,
       db.scheduledTasks,
       db.petProfile,
       db.petAchievements,
@@ -376,6 +379,15 @@ export async function applyBackupPackage(
         summary,
         idPrefix: "dtpl",
         respectBuiltIn: false,
+      })
+      // Prompt overrides restore as binding + revisions units on their
+      // natural (prompt, scope, target) key; see `prompt-overrides-backup.ts`.
+      await applyPromptOverrideBackup({
+        db,
+        bindings: env.promptOverrides,
+        revisions: env.promptOverrideRevisions,
+        opts,
+        summary,
       })
       // --- the desktop pet (singleton + what it earned) -------------------
       //

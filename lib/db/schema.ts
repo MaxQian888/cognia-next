@@ -435,7 +435,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 245
+export const CURRENT_SCHEMA_VERSION = 246
 
 /**
  * The immutable cumulative v240 schema baseline.
@@ -1053,12 +1053,20 @@ const MANAGED_DESKTOP_DELETION_SCHEMA = {
   managedDesktopDeletionOutbox: "id, phase, createdAt, ownerAccountId",
 }
 
+// v246 — code-owned prompt overrides (ADR-0236): one binding per
+// (prompt, scope, target) and its immutable revisions. `lib/db/prompt-overrides.ts`.
+const PROMPT_OVERRIDE_SCHEMA = {
+  promptOverrides: "&id, promptId, &[promptId+scope+targetId], updatedAt",
+  promptOverrideRevisions: "&id, bindingId, promptId, createdAt",
+}
+
 export const CURRENT_SCHEMA: Record<string, string | null> = {
   ...SCHEMA_V240,
   ...SESSION_LIST_SCHEMA,
   ...SESSION_LIST_SOURCE_SCHEMA,
   bestOfNRuns: "&id, parentSessionId, parentMessageId, updatedAt",
   ...MANAGED_DESKTOP_DELETION_SCHEMA,
+  ...PROMPT_OVERRIDE_SCHEMA,
 }
 
 let databaseConnectionSequence = 0
@@ -1076,6 +1084,9 @@ interface LegacyRemoteControlRunStatusRow {
 
 export class CogniaDB extends Dexie {
   bestOfNRuns!: Table<import("@/types/best-of-n").BestOfNRunSummary, string>
+  // v246 — code-owned prompt overrides (ADR-0236).
+  promptOverrides!: Table<import("./prompt-overrides").PromptOverrideBindingRow, string>
+  promptOverrideRevisions!: Table<import("./prompt-overrides").PromptOverrideRevisionRow, string>
   readonly connectionOwner: string
   readonly connectionId: string
   private readonly connectionCreatedAt: number

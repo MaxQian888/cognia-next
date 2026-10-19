@@ -306,6 +306,8 @@ export const CORE_TABLE_NAMES = [
   "projectEnvironments",
   "projectMiningRuns",
   "projects",
+  "promptOverrideRevisions",
+  "promptOverrides",
   "promptPresets",
   "providerBalanceSnapshots",
   "providerCatalogAliases",
@@ -455,6 +457,8 @@ export const PORTABLE_BACKUP_BINDINGS = {
   skillResources: "skillResources",
   teams: "teams",
   promptPresets: "promptPresets",
+  promptOverrides: "promptOverrides",
+  promptOverrideRevisions: "promptOverrideRevisions",
   mcpServers: "mcpServers",
   sessions: "sessions",
   messages: "messages",
@@ -1089,6 +1093,10 @@ const USER_CONTENT_TABLES = new Set<CoreTableName>([
   // declarations and launch spec that go with it. Prose, not metadata, so it
   // is classified with `promptPresets` rather than with the counter tables.
   "chatTemplates",
+  // A code-owned prompt override (ADR-0236) is instruction text the user
+  // wrote in place of a shipped template, so it is classified like a preset.
+  "promptOverrides",
+  "promptOverrideRevisions",
   "artifacts",
   "artifactVersions",
   // Files page metadata (ADR-0200): folder names the user typed, and a
@@ -1287,6 +1295,8 @@ const STORAGE_CATEGORY_OVERRIDES: Partial<Record<CoreTableName, StorageCategory>
   mcpServerSummaries: "mcp",
   mcpSyncJobs: "mcp",
   promptPresets: "preset",
+  promptOverrides: "preset",
+  promptOverrideRevisions: "preset",
   artifacts: "artifact",
   artifactVersions: "artifact",
   canvasDocuments: "canvas",
@@ -1354,6 +1364,12 @@ const WORKFLOW_APP_ROW_EXPIRY: DataRetentionPolicy = {
 }
 
 const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> = {
+  promptOverrideRevisions: {
+    mode: "cap",
+    enforcement: "domain",
+    reason:
+      "`lib/db/prompt-overrides.ts` keeps each binding's active and draft revision plus the newest 50 inactive ones, pruning on every mutation.",
+  },
   managedDesktopDeletionOutbox: {
     mode: "permanent",
     enforcement: "central",

@@ -5131,6 +5131,8 @@ schemaIt(
     await Dexie.delete(name)
     const previousSchema = { ...CURRENT_SCHEMA }
     delete previousSchema.managedDesktopDeletionOutbox
+    delete previousSchema.promptOverrides
+    delete previousSchema.promptOverrideRevisions
     const previous = new Dexie(name)
     previous.version(244).stores(previousSchema)
     await previous.table("executionRuns").put({ id: "existing-run", title: "Keep history" })
@@ -5138,7 +5140,7 @@ schemaIt(
     const current = new CogniaDB(name)
     try {
       await current.open()
-      expect(current.verno).toBe(245)
+      expect(current.verno).toBe(CURRENT_SCHEMA_VERSION)
       expect(await current.executionRuns.get("existing-run")).toMatchObject({
         title: "Keep history",
       })
@@ -5159,3 +5161,37 @@ schemaIt(
     }
   }
 )
+
+schemaIt("v246 adds prompt override bindings and revisions beside existing data", async () => {
+  const name = "cognia-prompt-overrides-v246"
+  await Dexie.delete(name)
+  const previousSchema = { ...CURRENT_SCHEMA }
+  delete previousSchema.promptOverrides
+  delete previousSchema.promptOverrideRevisions
+  const previous = new Dexie(name)
+  previous.version(245).stores(previousSchema)
+  await previous.table("promptPresets").put({ id: "p_keep", name: "Keep me" })
+  previous.close()
+  const current = new CogniaDB(name)
+  try {
+    await current.open()
+    expect(current.verno).toBe(CURRENT_SCHEMA_VERSION)
+    expect(await current.promptPresets.get("p_keep")).toMatchObject({ name: "Keep me" })
+    expect(current.promptOverrides.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["promptId", "[promptId+scope+targetId]", "updatedAt"])
+    )
+    expect(
+      current.promptOverrides.schema.indexes.find(
+        (index) => index.name === "[promptId+scope+targetId]"
+      )?.unique
+    ).toBe(true)
+    expect(current.promptOverrideRevisions.schema.indexes.map((index) => index.name)).toEqual([
+      "bindingId",
+      "promptId",
+      "createdAt",
+    ])
+  } finally {
+    current.close()
+    await Dexie.delete(name)
+  }
+})

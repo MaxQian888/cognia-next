@@ -148,6 +148,8 @@ export async function* buildBackupSections(
     yield* tableSections("twinJobs", db.twinJobs, iterate)
     yield* tableSections("chatTemplates", db.chatTemplates, iterate)
     yield* tableSections("documentTemplates", db.documentTemplates, iterate)
+    yield* tableSections("promptOverrides", db.promptOverrides, iterate)
+    yield* tableSections("promptOverrideRevisions", db.promptOverrideRevisions, iterate)
     yield* tableSections("petProfile", db.petProfile, iterate)
     yield* tableSections("petAchievements", db.petAchievements, iterate)
     yield* tableSections("petInventory", db.petInventory, iterate)

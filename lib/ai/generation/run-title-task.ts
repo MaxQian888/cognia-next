@@ -150,6 +150,11 @@ export async function runTitleTask(args: RunTitleTaskArgs): Promise<string | nul
       firstAssistantText: resultText,
       locale,
       kind,
+      promptContext: {
+        sessionId: session?.id,
+        workspaceId: session?.projectId,
+        agentId: session?.characterId,
+      },
     })
     if (!title) return null
 

@@ -35,6 +35,8 @@ const SHAPES: Record<
   promptPresets: "rows",
   chatTemplates: "rows",
   documentTemplates: "rows",
+  promptOverrides: "rows",
+  promptOverrideRevisions: "rows",
   libraryItems: "rows",
   libraryFolders: "rows",
   libraryAssets: "rows",

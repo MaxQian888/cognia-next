@@ -121,6 +121,8 @@ export async function buildBackupPackage(
     cogpackInstalls,
     chatTemplates,
     documentTemplates,
+    promptOverrides,
+    promptOverrideRevisions,
     scheduledTasks,
     petProfile,
     petAchievements,
@@ -185,6 +187,8 @@ export async function buildBackupPackage(
     readTable(db.cogpackInstalls),
     readTable(db.chatTemplates),
     readTable(db.documentTemplates),
+    readTable(db.promptOverrides),
+    readTable(db.promptOverrideRevisions),
     readTable(db.scheduledTasks),
     db.petProfile.get("global"),
     readTable(db.petAchievements),
@@ -308,6 +312,10 @@ export async function buildBackupPackage(
     // Same shape of thing as a chat template: every row is something the user
     // saved. The built-in document templates are code and never travel.
     documentTemplates,
+    // Every binding is something the user published over a shipped template;
+    // the shipped defaults themselves are code and never travel.
+    promptOverrides,
+    promptOverrideRevisions,
     // Configuration only. Run history stays on the machine that ran it.
     scheduledTasks,
     // The desktop pet. The profile is the singleton nothing can rebuild; the
@@ -402,6 +410,8 @@ export async function buildBackupPackage(
       "retrievalProfileDeks",
       "chatTemplates",
       "documentTemplates",
+      "promptOverrides",
+      "promptOverrideRevisions",
       "scheduledTasks",
       "petProfile",
       "petAchievements",

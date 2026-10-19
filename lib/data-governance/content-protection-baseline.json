@@ -249,6 +249,8 @@
   "projectEnvironments": "metadata-only",
   "projectMiningRuns": "metadata-only",
   "projects": "metadata-only",
+  "promptOverrideRevisions": "encrypted-content",
+  "promptOverrides": "encrypted-content",
   "promptPresets": "encrypted-content",
   "providerBalanceSnapshots": "metadata-only",
   "providerCatalogAliases": "metadata-only",

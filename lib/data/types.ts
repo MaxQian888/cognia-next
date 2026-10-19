@@ -9,6 +9,7 @@
 import type { SessionAsset } from "@/lib/db/session-assets"
 import type { SessionAssetSourceChunk, MessageMediaBackupRow } from "./session-assets-backup"
 import type { DBScheduledTask } from "@/lib/db/scheduled-task-types"
+import type { PromptOverrideBindingRow, PromptOverrideRevisionRow } from "@/lib/db/prompt-overrides"
 import type {
   AppSettings,
   Character,
@@ -148,6 +149,13 @@ export interface BackupPayloadV3 {
   chatTemplates?: ChatTemplateRow[]
   /** Document templates saved from Files or a canvas (ADR-0223). */
   documentTemplates?: DocumentTemplateRow[]
+  /**
+   * Code-owned prompt overrides (ADR-0236, schema v246): one binding per
+   * (prompt, scope, target) and its immutable revisions. Static instruction
+   * text the user wrote; restored as a unit by `applyPromptOverrideBackup`.
+   */
+  promptOverrides?: PromptOverrideBindingRow[]
+  promptOverrideRevisions?: PromptOverrideRevisionRow[]
   /**
    * Files page (ADR-0200, schema v231): favorites, folder membership and
    * "removed from Files" over artifacts, canvas documents, images and uploads,
