@@ -939,6 +939,75 @@ describe("useChatStore", () => {
   })
 
   describe("lastSendBySession", () => {
+    it("binds native predictions to their requested turn and pane, including after turn seal", () => {
+      const store = useChatStore.getState()
+      act(() => {
+        store.replaceSessionMessages("A", [msg("user-A", "A question")])
+        store.replaceSessionMessages("B", [msg("user-B", "B question")])
+        store.setLastSend("B", {
+          content: "B question",
+          options: { turnId: "turn-B", claudeAgentSdk: { version: 1, promptSuggestions: true } },
+          attemptIndex: 0,
+        })
+        store.clearLastSend("B")
+        store.receiveSessionPromptPrediction("B", "turn-A", "wrong turn")
+      })
+      expect(useChatStore.getState().sessions.B.promptPrediction?.text).toBeNull()
+      act(() => store.receiveSessionPromptPrediction("B", "turn-B", "  test B next  "))
+      expect(useChatStore.getState().sessions.B.promptPrediction?.text).toBe("test B next")
+      expect(useChatStore.getState().sessions.A.promptPrediction).toBeUndefined()
+      act(() => {
+        store.replaceSessionMessages("B", [msg("new-user-B", "changed direction")])
+        store.receiveSessionPromptPrediction("B", "turn-B", "stale prediction")
+      })
+      expect(useChatStore.getState().sessions.B.promptPrediction?.text).toBe("test B next")
+    })
+
+    it("retires a native prediction when the next dispatch does not request one", () => {
+      const store = useChatStore.getState()
+      act(() => {
+        store.replaceSessionMessages("B", [msg("user-B")])
+        store.setLastSend("B", {
+          content: "hi",
+          options: { turnId: "t1", claudeAgentSdk: { version: 1, promptSuggestions: true } },
+          attemptIndex: 0,
+        })
+        store.receiveSessionPromptPrediction("B", "t1", "next")
+        store.setLastSend("B", { content: "another", options: { turnId: "t2" }, attemptIndex: 0 })
+      })
+      expect(useChatStore.getState().sessions.B.promptPrediction).toBeUndefined()
+    })
+
+    it("rejects a pending native prediction after selecting a sibling response to the same user", () => {
+      const store = useChatStore.getState()
+      act(() => {
+        store.replaceSessionMessages("B", [
+          msg("user-B", "question"),
+          {
+            id: "reply-1",
+            role: "assistant",
+            parts: [{ type: "text", text: "first answer" }],
+            metadata: { branchGroupId: "answers", branchIndex: 0 },
+          },
+          {
+            id: "reply-2",
+            role: "assistant",
+            parts: [{ type: "text", text: "second answer" }],
+            metadata: { branchGroupId: "answers", branchIndex: 1 },
+          },
+        ])
+        store.setSessionActiveBranch("B", "answers", "reply-2")
+        store.setLastSend("B", {
+          content: "question",
+          options: { turnId: "tB", claudeAgentSdk: { version: 1, promptSuggestions: true } },
+          attemptIndex: 0,
+        })
+        store.setSessionActiveBranch("B", "answers", "reply-1")
+        store.receiveSessionPromptPrediction("B", "tB", "follow the second answer")
+      })
+      expect(useChatStore.getState().sessions.B.promptPrediction?.text).toBeNull()
+    })
+
     const makeEntry = (provider = "openai", attemptIndex = 0): LastSendCacheEntry => ({
       content: "hi",
       options: {

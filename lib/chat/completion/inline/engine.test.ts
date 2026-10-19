@@ -582,6 +582,46 @@ describe("InlineCompletionEngine — lifecycle", () => {
 })
 
 describe("InlineCompletionEngine — manual tier", () => {
+  it("allows a cold agent startup beyond the automatic provider watchdog", async () => {
+    const answer = deferred<InlineSuggestion[]>()
+    const { engine, scheduler } = build([manualProvider("manual", () => answer.promise)])
+    engine.feed("deploy ")
+    engine.requestManual()
+    await scheduler.advance(12_000)
+    expect(engine.getView().manualPending).toBe(true)
+    expect(engine.getView().completionError).toBe(false)
+    answer.resolve([agentHit("deploy the staging build")])
+    await drain()
+    expect(engine.getView().ghost).toBe("the staging build")
+    engine.dispose()
+  })
+
+  it("bounds cold startup and switches to the short silence watchdog after a partial", async () => {
+    let emit!: InlineEmitFn
+    const { engine, scheduler } = build([
+      {
+        id: "manual",
+        label: "Agent",
+        priority: 30,
+        manual: true,
+        getCompletions: (_context, _signal, onPartial) => {
+          emit = onPartial!
+          return new Promise<InlineSuggestion[]>(() => {})
+        },
+      },
+    ])
+    engine.feed("deploy ")
+    engine.requestManual()
+    await scheduler.advance(12_000)
+    emit([agentHit("deploy the staging build")])
+    await scheduler.advance(5_999)
+    expect(engine.getView().manualPending).toBe(true)
+    await scheduler.advance(1)
+    expect(engine.getView().manualPending).toBe(false)
+    expect(engine.getView().completionError).toBe(true)
+    engine.dispose()
+  })
+
   it("never runs a manual provider from feed(), however long you wait", async () => {
     let calls = 0
     const { engine, scheduler } = build([

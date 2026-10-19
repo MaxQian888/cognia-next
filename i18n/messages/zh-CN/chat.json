@@ -544,6 +544,14 @@
       "confirmTitle": "添加大文件夹？"
     },
     "followUps": {
+      "unavailable": "预测需要配置辅助模型，或在聊天设置中启用 Agent 回退。",
+      "error": "无法生成预测内容。",
+      "configure": "配置",
+      "retry": "重试",
+      "acceptHint": "按 Tab 或 → 编辑后再发送",
+      "sendHint": "点击直接发送 · 按 Tab 或 → 先编辑",
+      "accept": "编辑预测：{text}",
+      "send": "发送预测：{text}",
       "dismiss": "关闭建议",
       "label": "追问建议"
     },

@@ -33,6 +33,10 @@
  */
 
 import { hasNoLeakingPii } from "@cognia/redact"
+import {
+  classifyProviderErrorInfo,
+  isTransientErrorClass,
+} from "@cognia/provider-routing/error-classifier"
 import { buildGhostPrompt, sanitizeGhost } from "../ghost-prompt"
 import { commandQuery } from "./command-provider"
 import { extendsDraft } from "./rank"
@@ -209,10 +213,9 @@ export function createAiCompletionProvider(
         return accumulated
       }
 
-      // One retry for transient failures (dropped connection, 5xx): cheap
-      // insurance for a call that already costs a round-trip. NOT retried:
-      // an abort (the user moved on — that is the desired outcome, not a
-      // failure), and a second failure (whatever broke is not a blip).
+      // Retry a direct request only for classified transient failures with a
+      // short backoff. Agent turns require an explicit retry to avoid billing
+      // a second turn; permanent/unknown errors need configuration or user action.
       // A final failure RETHROWS so the engine can flag the round as failed
       // and offer retry — swallowing it would read as "no suggestion".
       let raw: string | null = null
@@ -222,7 +225,18 @@ export function createAiCompletionProvider(
           break
         } catch (err) {
           if (signal.aborted) return []
-          if (tries + 1 >= MAX_ATTEMPTS) throw err
+          const meta = err && typeof err === "object" ? err : {}
+          const status = "statusCode" in meta ? meta.statusCode : undefined
+          const info = classifyProviderErrorInfo(err instanceof Error ? err.message : String(err), {
+            ...(typeof status === "number" ? { httpStatus: status } : {}),
+          })
+          if (
+            manual ||
+            tries + 1 >= MAX_ATTEMPTS ||
+            !isTransientErrorClass(info.errorClass) ||
+            (info.retryAfterMs ?? 0) > RETRY_DELAY_MS
+          )
+            throw err
           await abortableDelay(RETRY_DELAY_MS, signal)
           if (signal.aborted) return []
         }

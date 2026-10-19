@@ -28,6 +28,21 @@ describe("ComposerAssistanceCard", () => {
     expect(screen.queryByLabelText("ghostText.debounceLabel")).not.toBeInTheDocument()
   })
 
+  it("defaults predictions to editable drafts and lets users explicitly opt into direct sending", async () => {
+    render(<ComposerAssistanceCard />)
+    expect(screen.getByLabelText("predictionDraft.label")).toBeChecked()
+    await userEvent.setup().click(screen.getByLabelText("predictionDraft.label"))
+    expect(save).toHaveBeenCalledWith({
+      composerAssistance: { suggestions: { acceptance: "send" } },
+    })
+  })
+
+  it("reflects a persisted direct-send preference", () => {
+    mockSettings = { composerAssistance: { suggestions: { acceptance: "send" } } }
+    render(<ComposerAssistanceCard />)
+    expect(screen.getByLabelText("predictionDraft.label")).not.toBeChecked()
+  })
+
   it("defaults the free local completion tier ON", () => {
     // The model tier is opt-in, so the local tier is what most users get; it
     // must not inherit the model tier's default-off.

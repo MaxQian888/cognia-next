@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import { act, renderHook, waitFor } from "@testing-library/react"
+import { useEffect } from "react"
 import { useComposerGhostText } from "./use-composer-ghost-text"
 import type { InlineCommandInfo } from "@/lib/chat/completion/inline/types"
 import { composeTurnText } from "@/lib/chat/prompt-preamble"
@@ -23,9 +24,15 @@ jest.mock("@/stores/settings/settings-store", () => ({
   }),
 }))
 
-const mockChatState = { messages: [] as { role: string; parts: unknown }[] }
+type TestMessage = { role: string; parts: unknown }
+const mockChatState = {
+  messages: [] as TestMessage[],
+  sessions: {} as Record<string, { messages: TestMessage[] }>,
+}
 jest.mock("@/stores/chat/chat-store", () => ({
   useChatStore: { getState: () => mockChatState },
+  useSessionVisibleMessages: (id: string) =>
+    mockChatState.sessions[id]?.messages ?? mockChatState.messages,
 }))
 
 const mockBuildClient = jest.fn()
@@ -365,5 +372,123 @@ describe("useComposerGhostText — agent tier", () => {
     act(() => result.current.feed("deploy "))
     await settle(100)
     expect(result.current.manualAvailable).toBe(false)
+  })
+})
+
+describe("useComposerGhostText — session isolation regression", () => {
+  beforeEach(() => {
+    mockSettingsState.settings = {
+      composerAssistance: { ghostText: { enabled: true, local: false, debounceMs: 200 } },
+    }
+    mockChatState.sessions = {}
+    mockChatState.messages = [
+      { role: "assistant", parts: [{ type: "text", text: "Active A context" }] },
+    ]
+    mockPii.mockReturnValue(true)
+    mockCanRunHeadless.mockReturnValue(false)
+    mockBuildClient.mockReset()
+  })
+
+  it("does not rerender indefinitely when a composer re-feeds the same empty input", () => {
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      if (renders > 10) throw new Error("Repeated empty-feed render loop")
+      const ghost = useComposerGhostText({ session, history: [], commands: [] })
+      // Composer trigger state can be recomputed while editing. Re-feeding an
+      // unchanged empty input must preserve the engine's cached empty view.
+      useEffect(() => ghost.feed(""))
+      return ghost
+    })
+    expect(result.current.ghost).toBe("")
+    expect(renders).toBeLessThanOrEqual(4)
+  })
+
+  it("uses only the owning session's visible transcript", async () => {
+    mockChatState.sessions["sess-1"] = {
+      messages: [{ role: "assistant", parts: [{ type: "text", text: "Visible B context" }] }],
+    }
+    const complete = jest.fn(async (_prompt: string) => " continuation")
+    mockBuildClient.mockReturnValue({ complete })
+    const { result } = render()
+    act(() => result.current.feed("Continue"))
+    await waitFor(() => expect(result.current.ghost).toBe(" continuation"))
+    expect(complete.mock.calls[0][0]).toContain("Visible B context")
+    expect(complete.mock.calls[0][0]).not.toContain("Active A context")
+  })
+
+  it("does not restore or accept another empty session's draft when switching panes", async () => {
+    mockSettingsState.settings = {
+      composerAssistance: { ghostText: { enabled: false, local: true } },
+    }
+    mockChatState.sessions["empty-a"] = { messages: [] }
+    mockChatState.sessions["empty-b"] = { messages: [] }
+    const { result, rerender } = renderHook(
+      ({ bound, history }) => useComposerGhostText({ session: bound, history, commands: [] }),
+      { initialProps: { bound: { id: "empty-a" } as never, history: ["hello A"] } }
+    )
+    act(() => result.current.feed("hello"))
+    await waitFor(() => expect(result.current.ghost).toBe(" A"))
+    rerender({ bound: { id: "empty-b" } as never, history: ["hello B"] })
+    expect(result.current.ghost).toBe("")
+    expect(result.current.accept()).toBeNull()
+    act(() => result.current.feed("hello"))
+    await waitFor(() => expect(result.current.ghost).toBe(" B"))
+    expect(mockBuildClient).not.toHaveBeenCalled()
+  })
+
+  it("requeries the existing draft after the configured model changes", async () => {
+    const complete = jest.fn(async (_prompt: string) => " old")
+    mockBuildClient.mockReturnValue({ complete })
+    const { result, rerender } = render()
+    act(() => result.current.feed("Continue"))
+    await waitFor(() => expect(result.current.ghost).toBe(" old"))
+    complete.mockResolvedValue(" new model")
+    mockSettingsState.settings = {
+      composerAssistance: {
+        model: { model: "replacement-model" },
+        ghostText: { enabled: true, local: false, debounceMs: 200 },
+      },
+    }
+    rerender()
+    await waitFor(() => expect(result.current.ghost).toBe(" new model"))
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(mockBuildClient.mock.calls.at(-1)?.[0].override).toEqual({ model: "replacement-model" })
+  })
+
+  it("preserves IME/popup suppression when rebuilding for a new branch", async () => {
+    mockChatState.sessions["sess-1"] = {
+      messages: [{ role: "assistant", parts: [{ type: "text", text: "Old branch" }] }],
+    }
+    const complete = jest.fn(async () => " continuation")
+    mockBuildClient.mockReturnValue({ complete })
+    const { result, rerender } = render()
+    act(() => result.current.feed("Continue", { suppress: true }))
+    mockChatState.sessions["sess-1"].messages = [
+      { role: "assistant", parts: [{ type: "text", text: "New branch" }] },
+    ]
+    rerender()
+    await settle(300)
+    expect(result.current.ghost).toBe("")
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it("drops cached draft predictions when the visible branch changes", async () => {
+    mockChatState.sessions["sess-1"] = {
+      messages: [{ role: "assistant", parts: [{ type: "text", text: "Old branch" }] }],
+    }
+    const complete = jest.fn(async (_prompt: string) => " old")
+    mockBuildClient.mockReturnValue({ complete })
+    const { result, rerender } = render()
+    act(() => result.current.feed("Continue"))
+    await waitFor(() => expect(result.current.ghost).toBe(" old"))
+    mockChatState.sessions["sess-1"].messages = [
+      { role: "assistant", parts: [{ type: "text", text: "New branch" }] },
+    ]
+    complete.mockResolvedValue(" new")
+    rerender()
+    await waitFor(() => expect(result.current.ghost).toBe(" new"))
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(complete.mock.calls[1][0]).toContain("New branch")
   })
 })

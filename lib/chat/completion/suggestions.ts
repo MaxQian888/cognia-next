@@ -14,7 +14,7 @@
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
 import { hasNoLeakingPii } from "@cognia/redact"
-import type { GhostMessage } from "./ghost-prompt"
+import { clipPredictionContext, type GhostMessage } from "./ghost-prompt"
 
 /** How many suggestions to request / surface. */
 export const DEFAULT_SUGGESTION_COUNT = 3
@@ -31,6 +31,8 @@ export interface SuggestionDeps {
   signal?: AbortSignal
   /** How many to request. Defaults to {@link DEFAULT_SUGGESTION_COUNT}. */
   count?: number
+  /** Preserve transport failures for callers that expose a retry state. */
+  propagateErrors?: boolean
 }
 
 export interface StarterContext {
@@ -52,7 +54,10 @@ const FOLLOWUP_SYSTEM = [
   "You suggest natural follow-up messages the user might send next, given the",
   "conversation so far. Each must be a short, ready-to-send message from the",
   "user's point of view (under 120 chars), building on the last assistant",
-  "reply. Output ONLY a JSON array of strings.",
+  "reply. Match the language and register of the user's recent messages, including",
+  "Chinese and mixed-language conversations. Do not invent unfinished work.",
+  "Return [] when there is no clear useful next step or the request is complete.",
+  "Output ONLY a JSON array of strings.",
 ].join(" ")
 
 /** Parse + clean a model reply into at most `count` usable suggestions. */
@@ -121,7 +126,8 @@ export async function suggestFollowUps(
   if (recent.length === 0) return []
   const transcript = recent
     .map(
-      (m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.text.slice(0, MESSAGE_SNIPPET)}`
+      (m) =>
+        `${m.role === "assistant" ? "Assistant" : "User"}: ${clipPredictionContext(m.text, MESSAGE_SNIPPET)}`
     )
     .join("\n")
   if (!isPiiSafe(transcript)) return []
@@ -139,7 +145,8 @@ export async function suggestFollowUps(
       maxTokens: 512,
       abortSignal: deps.signal,
     })
-  } catch {
+  } catch (error) {
+    if (deps.propagateErrors) throw error
     return []
   }
   return parseSuggestions(raw, count)

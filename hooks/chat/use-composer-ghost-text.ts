@@ -35,9 +35,9 @@
  * same engine and providers.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import { useChatStore } from "@/stores/chat/chat-store"
+import { useSessionVisibleMessages } from "@/stores/chat/chat-store"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { buildHeadlessTurnLlmClient, canRunHeadlessTurn } from "@/lib/ai/headless-turn-llm-client"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
@@ -67,8 +67,7 @@ const MAX_GHOST_TOKENS = 48
 /** Broker lease label for the agent tier, i.e. what it shows up as in the runs console. */
 const AGENT_TURN_LABEL = "Composer completion"
 
-function recentMessages(): GhostMessage[] {
-  const msgs = useChatStore.getState().messages
+function recentMessages(msgs: ReturnType<typeof useSessionVisibleMessages>): GhostMessage[] {
   return msgs.slice(-RECENT).map((m) => ({
     role: m.role === "assistant" ? "assistant" : "user",
     // Typed text: a suggestion keys off what was said, not off the context the
@@ -144,7 +143,23 @@ export function useComposerGhostText(
   options: UseComposerGhostTextOptions
 ): UseComposerGhostTextResult {
   const { session, history, commands } = options
-  const ghostSettings = useSettingsStore((s) => s.settings?.composerAssistance?.ghostText)
+  const settings = useSettingsStore((s) => s.settings)
+  const ghostSettings = settings?.composerAssistance?.ghostText
+  const visibleMessages = useSessionVisibleMessages(session?.id ?? null)
+  // A prediction belongs to a specific transcript and model configuration. A
+  // fresh engine drops its draft-keyed cache and aborts the previous request.
+  const contextKey = JSON.stringify([
+    session?.id,
+    session?.transcriptRevision,
+    visibleMessages.map((message) => [message.id, message.parts]),
+    session?.model,
+    session?.providerOverride,
+    session?.accountId,
+    session?.characterId,
+    settings?.composerAssistance?.model,
+    settings?.defaultProvider,
+    settings?.defaultModel,
+  ])
   // The model tier stays opt-in (it bills); the local tier is opt-out.
   const aiEnabled = ghostSettings?.enabled === true
   const localEnabled = ghostSettings?.local !== false
@@ -155,9 +170,36 @@ export function useComposerGhostText(
   )
   const maxCandidates = ghostSettings?.maxCandidates
 
-  const [rawView, setView] = useState<InlineEngineView>(EMPTY_VIEW)
+  const contextIdentity = useMemo(
+    () => ({
+      key: contextKey,
+      providers: settings?.providerSettings,
+      customProviders: settings?.customProviders,
+      modelMappings: settings?.modelMappings,
+      debounceMs,
+      maxCandidates,
+      localEnabled,
+      aiEnabled,
+    }),
+    [
+      contextKey,
+      settings?.providerSettings,
+      settings?.customProviders,
+      settings?.modelMappings,
+      debounceMs,
+      maxCandidates,
+      localEnabled,
+      aiEnabled,
+    ]
+  )
+  const [ownedView, setView] = useState({ context: contextIdentity, view: EMPTY_VIEW })
   const engineRef = useRef<InlineCompletionEngine | null>(null)
   const sessionId = session?.id ?? null
+  const lastInputRef = useRef<{
+    sessionId: string | null
+    value: string
+    suppress?: boolean
+  } | null>(null)
   // Whether a turn can be carried at all — Tauri, or a web tab with a paired
   // companion. Read once: it is a property of the shell, not of React state,
   // and re-reading it per render would rebuild the engine on every pass.
@@ -169,12 +211,14 @@ export function useComposerGhostText(
   const historyRef = useRef(history)
   const commandsRef = useRef(commands)
   const sessionRef = useRef(session)
+  const messagesRef = useRef(visibleMessages)
   // Synced after commit, never during render. Declared BEFORE the engine effect
   // so it lands first on every pass.
   useEffect(() => {
     historyRef.current = history
     commandsRef.current = commands
     sessionRef.current = session
+    messagesRef.current = visibleMessages
   })
 
   useEffect(() => {
@@ -269,30 +313,65 @@ export function useComposerGhostText(
         caret: draft.length,
         history: historyRef.current,
         commands: commandsRef.current,
-        recentMessages: recentMessages(),
+        recentMessages: recentMessages(messagesRef.current),
         surface: "gui",
         sessionId,
       }),
-      onChange: () => setView(engineRef.current?.getView() ?? EMPTY_VIEW),
+      onChange: () => {
+        const view = engineRef.current?.getView() ?? EMPTY_VIEW
+        // The engine reuses its empty view to make redundant feeds a no-op.
+        // Preserve that bailout while attaching the owning context identity.
+        setView((current) =>
+          current.context === contextIdentity && current.view === view
+            ? current
+            : { context: contextIdentity, view }
+        )
+      },
     })
     engineRef.current = engine
+    // A model/branch change invalidates predictions, but the draft itself has
+    // not changed, so the composer's value effect will not feed it again.
+    // Restore only this session's last feed, including IME/popup suppression.
+    const lastInput = lastInputRef.current
+    if (lastInput?.sessionId === sessionId) {
+      engine.feed(lastInput.value, { suppress: lastInput.suppress })
+    }
     return () => {
       engine.dispose()
       engineRef.current = null
-      setView(EMPTY_VIEW)
+      setView({ context: contextIdentity, view: EMPTY_VIEW })
     }
     // `session` identity is keyed by id; the tier flags rebuild the providers.
-  }, [sessionId, debounceMs, maxCandidates, localEnabled, aiEnabled, agentTierReachable])
+  }, [
+    sessionId,
+    contextIdentity,
+    debounceMs,
+    maxCandidates,
+    localEnabled,
+    aiEnabled,
+    agentTierReachable,
+    settings?.providerSettings,
+    settings?.customProviders,
+    settings?.modelMappings,
+  ])
 
   // Derived, not stored: with every tier off there is no engine to clear the
   // view, and resetting it from an effect would be a cascading render.
-  const view = enabled ? rawView : EMPTY_VIEW
+  const view = enabled && ownedView.context === contextIdentity ? ownedView.view : EMPTY_VIEW
 
-  const feed = useCallback((value: string, opts?: { suppress?: boolean }) => {
-    engineRef.current?.feed(value, opts)
-  }, [])
+  const feed = useCallback(
+    (value: string, opts?: { suppress?: boolean }) => {
+      lastInputRef.current = { sessionId, value, suppress: opts?.suppress }
+      engineRef.current?.feed(value, opts)
+    },
+    [sessionId]
+  )
 
-  const accept = useCallback((): string | null => engineRef.current?.accept() ?? null, [])
+  const accept = useCallback(
+    (): string | null =>
+      ownedView.context === contextIdentity ? (engineRef.current?.accept() ?? null) : null,
+    [ownedView.context, contextIdentity]
+  )
   const requestManual = useCallback(() => engineRef.current?.requestManual(), [])
   const retry = useCallback(() => engineRef.current?.retry(), [])
   const cycleNext = useCallback(() => engineRef.current?.cycleNext(), [])

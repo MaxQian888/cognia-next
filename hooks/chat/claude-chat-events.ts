@@ -1021,6 +1021,20 @@ export async function handleEvent(
     case "event": {
       const env = evt as SDKEventEnvelope
       const sessionId = env.sessionId
+      if (env.event.type === "prompt_suggestion") {
+        // The SDK can emit this after `result`/session seal. It is composer
+        // state, not a transcript mutation; the store fences its requested turn.
+        if (isCurrentEvent() && frame.turnId) {
+          useChatStore
+            .getState()
+            .receiveSessionPromptPrediction(
+              sessionId,
+              frame.turnId,
+              (env.event as unknown as { suggestion: string }).suggestion
+            )
+        }
+        return
+      }
       await projectDirectChatSdkMessage(sessionId, env.event)
       if (!isCurrentEvent()) return
       // Router + Fusion (ADR-0188): a ledgered Claude Agent SDK turn books its

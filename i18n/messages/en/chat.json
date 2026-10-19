@@ -544,6 +544,14 @@
       "confirmTitle": "Add large folder?"
     },
     "followUps": {
+      "unavailable": "Predictions need an assistance model or an enabled Agent fallback in Chat settings.",
+      "error": "Could not generate a prediction.",
+      "configure": "Configure",
+      "retry": "Retry",
+      "acceptHint": "Tab or → to edit before sending",
+      "sendHint": "Click to send · Tab or → to edit first",
+      "accept": "Edit prediction: {text}",
+      "send": "Send prediction: {text}",
       "dismiss": "Dismiss suggestions",
       "label": "Follow-up suggestions"
     },

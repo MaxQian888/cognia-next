@@ -54,7 +54,6 @@ import { PlanComposerDock } from "@/components/agent/plan/plan-composer-dock"
 import { useRunRecordPersistence } from "@/hooks/chat/use-run-record-persistence"
 import { useDeferredLoading } from "@/hooks/ui/use-deferred-loading"
 import { useStableCallback } from "@/hooks/ui/use-stable-callback"
-import { FollowUpSuggestions } from "./follow-up-suggestions"
 import { useStarterSuggestions } from "@/hooks/chat/use-starter-suggestions"
 import { Button } from "@/components/ui/button"
 import { ExternalAgentSessionPanel } from "@/components/agent/external-agent/session-panel"
@@ -1149,9 +1148,6 @@ export function ChatPane({
                   />
                   {boundId && <ComputerUsePictureInPicture sessionId={boundId} />}
                 </div>
-                <ChatColumn>
-                  <FollowUpSuggestions session={activeSession} onUseSample={onUseSample} />
-                </ChatColumn>
                 {errorAndFooter}
                 {/* The plan slot above the composer — three docks, mutually
                 exclusive by plan status. A plan awaiting a decision is reviewed

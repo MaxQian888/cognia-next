@@ -40,6 +40,19 @@ describe("buildGhostPrompt", () => {
     expect(prompt).toContain("msg-9")
   })
 
+  it("preserves the start and final result of a long reply within the context cap", () => {
+    const { prompt } = buildGhostPrompt({
+      draft: "接下来",
+      recentMessages: [
+        { role: "assistant", text: "START" + "x".repeat(2000) + "最终结果：构建通过" },
+      ],
+    })
+    const snippet = prompt.match(/<turn who="assistant">([\s\S]*?)<\/turn>/)?.[1]
+    expect(snippet).toContain("START")
+    expect(snippet).toContain("最终结果：构建通过")
+    expect(snippet?.length).toBeLessThanOrEqual(500)
+  })
+
   it("omits the conversation block when there is no usable history", () => {
     const { prompt } = buildGhostPrompt({
       draft: "x",

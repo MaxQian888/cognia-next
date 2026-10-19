@@ -158,6 +158,15 @@ export interface PendingCommandOverrides {
  * SDK event to the slice for `evt.sessionId`.
  */
 export interface SessionChatSlice {
+  /** Transient, turn-owned native prediction; never part of the transcript. */
+  promptPrediction?: {
+    turnId: string
+    requestedAt: number
+    userMessageId: string | null
+    text: string | null
+    contextKey?: string
+    branchKey?: string
+  }
   messages: UIMessage[]
   status: ChatStatus
   /**
@@ -928,6 +937,7 @@ interface ChatState {
   /** Drop ids from the ephemeral attachment list (e.g. after a skill is deleted). */
   removeEphemeralSkillIds: (ids: string[]) => void
   setLastSend: (sessionId: string, entry: LastSendCacheEntry) => void
+  receiveSessionPromptPrediction: (sessionId: string, turnId: string, text: string) => void
   bumpLastSendAttempt: (sessionId: string) => void
   markLastSendCommitted: (sessionId: string) => void
   clearLastSend: (sessionId: string) => void
@@ -1555,9 +1565,45 @@ export const useChatStore = create<ChatState>((set) => ({
       return next.length === s.ephemeralSkillIds.length ? s : { ephemeralSkillIds: next }
     }),
   setLastSend: (sessionId, entry) =>
-    set((s) => ({
-      lastSendBySession: { ...s.lastSendBySession, [sessionId]: entry },
-    })),
+    set((s) => {
+      const slice = sliceForId(s, sessionId)
+      const visible = selectVisibleMessages(slice.messages, slice.activeBranchByGroup)
+      const nativeRequested = entry.options.claudeAgentSdk?.promptSuggestions === true
+      return {
+        ...patchSliceState(s, sessionId, {
+          promptPrediction:
+            nativeRequested && entry.options.turnId
+              ? {
+                  turnId: entry.options.turnId,
+                  requestedAt: Date.now(),
+                  userMessageId: [...visible].reverse().find((m) => m.role === "user")?.id ?? null,
+                  text: null,
+                  branchKey: JSON.stringify(slice.activeBranchByGroup),
+                }
+              : undefined,
+        }),
+        lastSendBySession: { ...s.lastSendBySession, [sessionId]: entry },
+      }
+    }),
+  receiveSessionPromptPrediction: (sessionId, turnId, text) =>
+    set((s) => {
+      const slice = s.sessions[sessionId]
+      const prediction = slice?.promptPrediction
+      if (!slice || !prediction || prediction.turnId !== turnId) return s
+      if (prediction.branchKey !== JSON.stringify(slice.activeBranchByGroup)) return s
+      const visible = selectVisibleMessages(slice.messages, slice.activeBranchByGroup)
+      const userMessageId = [...visible].reverse().find((m) => m.role === "user")?.id ?? null
+      if (userMessageId !== prediction.userMessageId) return s
+      const cleaned = text.trim()
+      if (!cleaned || cleaned.length > 200 || prediction.text === cleaned) return s
+      return patchSliceState(s, sessionId, {
+        promptPrediction: {
+          ...prediction,
+          text: cleaned,
+          contextKey: promptPredictionContextKey(visible),
+        },
+      })
+    }),
   bumpLastSendAttempt: (sessionId) =>
     set((s) => {
       const cur = s.lastSendBySession[sessionId]
@@ -1677,6 +1723,13 @@ export function selectIsAtStreamCap(
 const EMPTY_MESSAGES: UIMessage[] = []
 const EMPTY_APPROVALS: PendingApproval[] = []
 const EMPTY_BRANCH_SELECTION: Record<string, string> = {}
+
+/** Invalidate native text when the selected thread changes after generation. */
+export function promptPredictionContextKey(messages: readonly UIMessage[]): string {
+  return JSON.stringify(
+    messages.slice(-6).map((message) => [message.id, message.role, message.parts])
+  )
+}
 
 /** Read a single session's slice (or a stable default when absent). */
 export function useSessionMessages(sessionId: string | null): UIMessage[] {

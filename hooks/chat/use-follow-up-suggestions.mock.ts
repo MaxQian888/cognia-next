@@ -7,6 +7,8 @@ import type { UseFollowUpSuggestionsResult } from "./use-follow-up-suggestions"
 let value: UseFollowUpSuggestionsResult = {
   suggestions: [],
   loading: false,
+  status: "no-prediction",
+  retry: () => {},
   dismiss: () => {},
 }
 

@@ -4409,6 +4409,8 @@ export interface AppSettings {
       starters?: boolean
       /** Follow-up suggestion chips after an assistant reply. Default ON. */
       followUps?: boolean
+      /** Accept into an editable draft by default; direct sending is opt-in. */
+      acceptance?: "draft" | "send"
       /**
        * Fall back to one headless AGENT TURN when no renderer-visible API key
        * resolves. Default OFF, and deliberately so.

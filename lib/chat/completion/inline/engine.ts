@@ -64,6 +64,8 @@ const realScheduler: InlineScheduler = {
 
 /** Async providers are abandoned after this long so one hang can't wedge the ghost. */
 const DEFAULT_PROVIDER_TIMEOUT_MS = 6_000
+/** A requested agent turn may cold-start a runtime before producing text. */
+const DEFAULT_MANUAL_STARTUP_TIMEOUT_MS = 30_000
 const DEFAULT_DEBOUNCE_MS = 500
 const DEFAULT_CACHE_TTL_MS = 30_000
 const CACHE_MAX = 32
@@ -93,6 +95,8 @@ export interface InlineEngineOptions {
   cacheTtlMs?: number
   /** Per-provider timeout for async providers, ms. Default 6_000. */
   providerTimeoutMs?: number
+  /** Initial manual-provider startup budget; partials use providerTimeoutMs thereafter. */
+  manualProviderTimeoutMs?: number
   scheduler?: InlineScheduler
   now?: () => number
 }
@@ -212,6 +216,7 @@ export class InlineCompletionEngine {
   private readonly maxCandidates: number
   private readonly cacheTtlMs: number
   private readonly providerTimeoutMs: number
+  private readonly manualProviderTimeoutMs: number
   private readonly scheduler: InlineScheduler
   private readonly clock: () => number
 
@@ -233,6 +238,8 @@ export class InlineCompletionEngine {
     this.maxCandidates = options.maxCandidates ?? DEFAULT_INLINE_MAX_CANDIDATES
     this.cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS
     this.providerTimeoutMs = options.providerTimeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS
+    this.manualProviderTimeoutMs =
+      options.manualProviderTimeoutMs ?? DEFAULT_MANUAL_STARTUP_TIMEOUT_MS
     this.scheduler = options.scheduler ?? realScheduler
     this.clock = options.now ?? Date.now
   }
@@ -615,8 +622,13 @@ export class InlineCompletionEngine {
 
     const results = await Promise.all(
       this.manualProviders.map((p) =>
-        this.callProvider(p, context, controller.signal, true, (partials) =>
-          this.applyPartial("manual", p.id, controller, partials)
+        this.callProvider(
+          p,
+          context,
+          controller.signal,
+          true,
+          (partials) => this.applyPartial("manual", p.id, controller, partials),
+          this.manualProviderTimeoutMs
         )
       )
     )
@@ -668,7 +680,8 @@ export class InlineCompletionEngine {
     context: InlineCompletionContext,
     signal: AbortSignal,
     withTimeout: boolean,
-    emit?: InlineEmitFn
+    emit?: InlineEmitFn,
+    startupTimeoutMs = this.providerTimeoutMs
   ): Promise<{ suggestions: InlineSuggestion[]; failed: boolean }> {
     try {
       if (!withTimeout) {
@@ -693,7 +706,7 @@ export class InlineCompletionEngine {
       const timeout = new Promise<InlineSuggestion[]>((resolve) => {
         fireTimeout = () => resolve([])
       })
-      const arm = () => {
+      const arm = (timeoutMs = this.providerTimeoutMs) => {
         if (timeoutHandle !== null) this.scheduler.clear(timeoutHandle)
         timeoutHandle = this.scheduler.set(() => {
           timedOut = true
@@ -702,9 +715,9 @@ export class InlineCompletionEngine {
           // listening.
           own.abort()
           fireTimeout?.()
-        }, this.providerTimeoutMs)
+        }, timeoutMs)
       }
-      arm()
+      arm(startupTimeoutMs)
       const emitWrapped = emit
         ? (partials: readonly InlineSuggestion[]) => {
             if (own.signal.aborted || timedOut || this.disposed) return

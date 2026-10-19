@@ -8083,8 +8083,16 @@
         "confirmTitle": "Add large folder?"
       },
       "followUps": {
+        "accept": "Edit prediction: {text}",
+        "acceptHint": "Tab or → to edit before sending",
+        "configure": "Configure",
         "dismiss": "Dismiss suggestions",
-        "label": "Follow-up suggestions"
+        "error": "Could not generate a prediction.",
+        "label": "Follow-up suggestions",
+        "retry": "Retry",
+        "send": "Send prediction: {text}",
+        "sendHint": "Click to send · Tab or → to edit first",
+        "unavailable": "Predictions need an assistance model or an enabled Agent fallback in Chat settings."
       },
       "ghostAccept": "Accept",
       "ghostCardAriaLabel": "Completion suggestion",
@@ -11686,6 +11694,10 @@
       "dontAsk": "dontAsk",
       "plan": "plan"
     },
+    "predictionAgentPending": "asking the agent…",
+    "predictionFailed": "prediction failed · alt+\\ retry",
+    "predictionQuerying": "predicting…",
+    "predictionStreaming": "receiving prediction…",
     "restartRequired": "Saved. Restart the CLI to apply screen reader mode.",
     "rewindAmbiguousCheckpoint": "Checkpoint #{seq} matches {count} checkpoints from earlier runs of this session, so nothing was restored.",
     "rewindNotRestored": "Not restored: {paths}.",
@@ -45462,8 +45474,8 @@
     },
     "composerAssistance": {
       "agentFallback": {
-        "hint": "When no API key is saved for these helpers, run one agent turn instead so they work on a subscription. Off by default — follow-ups fire after every reply, so this costs a turn each time.",
-        "label": "Use an agent turn when no API key is set"
+        "hint": "Allow chargeable native next-prompt predictions in Claude chats, or a helper Agent turn when no assistance API key is available. Off by default; prediction requests and helper turns consume subscription usage.",
+        "label": "Allow subscription predictions and Agent fallback"
       },
       "assistanceModel": {
         "description": "Which model these helpers call. Defaults to a cheap model on your chat provider — set one here if that provider has no API key saved.",
@@ -45489,6 +45501,10 @@
       "ghostTextLocal": {
         "hint": "Complete from your own history and commands without calling a model.",
         "label": "Local suggestions only"
+      },
+      "predictionDraft": {
+        "hint": "Accept predictions as editable drafts. Turn off to send immediately when clicking; Tab and → always fill a draft.",
+        "label": "Edit predictions before sending"
       },
       "replyCopilotMemory": {
         "hint": "Recall what you have told Cognia about people and plans when the IM reply copilot judges a conversation and drafts replies. Off by default: recalled facts are redacted but may be sent to a remote decision endpoint.",

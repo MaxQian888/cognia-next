@@ -59,6 +59,15 @@ Conversation:
 Partial message: "can you also cherry-pick it▍"
 Correct reply: " onto the release branch before tonight's cut?"`
 
+/** Keep the original intent and final outcome when a turn exceeds its budget. */
+export function clipPredictionContext(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text
+  const marker = "\n…\n"
+  const headLength = Math.floor((maxChars - marker.length) / 3)
+  const tailLength = maxChars - marker.length - headLength
+  return text.slice(0, headLength) + marker + text.slice(-tailLength)
+}
+
 /** Build the `{ system, prompt }` pair for `LlmClient.complete`. */
 export function buildGhostPrompt(ctx: GhostContext): { system: string; prompt: string } {
   const lines: string[] = []
@@ -71,7 +80,7 @@ export function buildGhostPrompt(ctx: GhostContext): { system: string; prompt: s
     // contain those words (quoted transcripts happen), and a tag the model
     // was told the format of cannot be confused with message content.
     for (const m of recent) {
-      lines.push(`<turn who="${m.role}">${m.text.slice(0, MESSAGE_SNIPPET)}</turn>`)
+      lines.push(`<turn who="${m.role}">${clipPredictionContext(m.text, MESSAGE_SNIPPET)}</turn>`)
     }
     lines.push("")
   }

@@ -113,21 +113,50 @@ describe("createAiCompletionProvider", () => {
     // Swallowing the error would read as "no suggestions" and could neither be
     // surfaced nor retried — the engine owns the error state, so the provider
     // reports the failure after its one transient-failure retry is spent.
-    const complete = jest.fn(constantComplete(null)).mockRejectedValue(new Error("upstream down"))
+    const complete = jest.fn(constantComplete(null)).mockRejectedValue(new Error("HTTP 503"))
     const provider = createAiCompletionProvider({ complete, isPiiSafe: () => true })
-    await expect(provider.getCompletions(ctx("fix "), signal())).rejects.toThrow("upstream down")
+    await expect(provider.getCompletions(ctx("fix "), signal())).rejects.toThrow("HTTP 503")
     expect(complete).toHaveBeenCalledTimes(2)
   })
 
   it("recovers when the retry succeeds", async () => {
     const complete = jest
       .fn<ReturnType<InlineCompleteFn>, Parameters<InlineCompleteFn>>()
-      .mockRejectedValueOnce(new Error("blip"))
+      .mockRejectedValueOnce(new Error("fetch failed"))
       .mockResolvedValue("the build")
     const provider = createAiCompletionProvider({ complete, isPiiSafe: () => true })
     const out = await provider.getCompletions(ctx("fix "), signal())
     expect(out[0].text).toBe("fix the build")
     expect(complete).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    "HTTP 401",
+    "HTTP 403",
+    "invalid_request",
+    "context window exceeded",
+    "unknown failure",
+  ])("does not re-bill a permanent or unknown failure: %s", async (message) => {
+    const complete = jest.fn(constantComplete(null)).mockRejectedValue(new Error(message))
+    const provider = createAiCompletionProvider({ complete, isPiiSafe: () => true })
+    await expect(provider.getCompletions(ctx("fix "), signal())).rejects.toThrow(message)
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not automatically re-run a billable Agent turn", async () => {
+    const complete = jest.fn(constantComplete(null)).mockRejectedValue(new Error("HTTP 503"))
+    const provider = createAgentCompletionProvider({ complete, isPiiSafe: () => true })
+    await expect(provider.getCompletions(ctx("fix "), signal())).rejects.toThrow("HTTP 503")
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves a long Retry-After to explicit retry", async () => {
+    const complete = jest
+      .fn(constantComplete(null))
+      .mockRejectedValue(new Error("HTTP 429 retry-after: 60 seconds"))
+    const provider = createAiCompletionProvider({ complete, isPiiSafe: () => true })
+    await expect(provider.getCompletions(ctx("fix "), signal())).rejects.toThrow("HTTP 429")
+    expect(complete).toHaveBeenCalledTimes(1)
   })
 
   it("does not retry a call that was aborted", async () => {
@@ -148,7 +177,7 @@ describe("createAiCompletionProvider", () => {
       // Reject, then abort while the provider waits out its backoff — the
       // delay is abortable, so this resolves fast instead of after 700ms.
       setTimeout(() => controller.abort(), 0)
-      throw new Error("blip")
+      throw new Error("fetch failed")
     })
     const provider = createAiCompletionProvider({ complete, isPiiSafe: () => true })
     expect(await provider.getCompletions(ctx("fix "), controller.signal)).toEqual([])
@@ -307,7 +336,7 @@ describe("createAiCompletionProvider", () => {
           if (calls === 1) {
             return (async function* () {
               yield "the "
-              throw new Error("connection reset")
+              throw new Error("ECONNRESET")
             })()
           }
           return streamOf(["the build"])()

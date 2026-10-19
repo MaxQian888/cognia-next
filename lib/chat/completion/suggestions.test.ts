@@ -96,6 +96,24 @@ describe("suggestFollowUps", () => {
     expect(calls[0].prompt).toContain("Assistant: Use Array.prototype.sort.")
   })
 
+  it("preserves long reply outcomes and asks for the user's language or abstention", async () => {
+    const { client, calls } = stubClient("[]")
+    await suggestFollowUps(
+      {
+        recentMessages: [
+          { role: "user", text: "验证构建" },
+          { role: "assistant", text: "START" + "x".repeat(2000) + "最终结果：构建通过" },
+        ],
+      },
+      { client, isPiiSafe: safe }
+    )
+    expect(calls[0].prompt).toContain("START")
+    expect(calls[0].prompt).toContain("最终结果：构建通过")
+    expect(calls[0].prompt.length).toBeLessThan(1000)
+    expect(calls[0].system).toMatch(/language.*user/i)
+    expect(calls[0].system).toContain("Return []")
+  })
+
   it("returns [] when there are no usable messages", async () => {
     const { client, calls } = stubClient("unused")
     const res = await suggestFollowUps(
@@ -129,6 +147,20 @@ describe("suggestFollowUps", () => {
     expect(
       await suggestFollowUps({ recentMessages: messages }, { client, isPiiSafe: safe })
     ).toEqual([])
+  })
+
+  it("can propagate generation failures so callers can distinguish retry from abstention", async () => {
+    const client: LlmClient = {
+      complete: async () => {
+        throw new Error("offline")
+      },
+    }
+    await expect(
+      suggestFollowUps(
+        { recentMessages: messages },
+        { client, isPiiSafe: safe, propagateErrors: true }
+      )
+    ).rejects.toThrow("offline")
   })
 
   it("uses the real PII gate when none is injected (benign transcript passes)", async () => {

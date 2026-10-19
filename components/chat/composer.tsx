@@ -265,6 +265,8 @@ import {
 } from "@/lib/chat/memory-target"
 import { useComposerCommandStore } from "@/stores/chat/composer-command-store"
 import { useComposerGhostText } from "@/hooks/chat/use-composer-ghost-text"
+import { useFollowUpSuggestions } from "@/hooks/chat/use-follow-up-suggestions"
+import { FollowUpSuggestions } from "./follow-up-suggestions"
 import type { InlineCommandInfo } from "@/lib/chat/completion/inline/types"
 import { useLatestTextInput } from "./composer/hooks/use-latest-text-input"
 import { useInputHistory } from "./composer/hooks/use-input-history"
@@ -787,6 +789,10 @@ function ComposerInner(props: InnerProps) {
     tokenEnd: number
   } | null>(null)
   const [isComposing, setIsComposing] = useState(false)
+  const [draftHydratedFor, setDraftHydratedFor] = useState<string | null>(null)
+  const predictionAcceptance = useSettingsStore(
+    (s) => s.settings?.composerAssistance?.suggestions?.acceptance ?? "draft"
+  )
   // Restored draft attachments whose binary did NOT survive (evicted by the
   // draft quota, or saved before binaries were persisted at all). Declared here
   // so `handleSend`'s clear path can reset it. Everything else is re-staged as
@@ -1927,12 +1933,16 @@ function ComposerInner(props: InnerProps) {
 
   // --- Submit handler ----------------------------------------------------
   const localActionInFlightRef = useRef(false)
+  const acceptedPredictionRef = useRef<{ sessionId: string | null; text: string } | null>(null)
   const submit = useCallback(async (): Promise<boolean> => {
     const text = textInput.value
+    const literalPrediction =
+      acceptedPredictionRef.current?.sessionId === sessionId &&
+      acceptedPredictionRef.current?.text === text
     if (localActionInFlightRef.current) return false
     // These local actions must remain available during a main-turn approval
     // wait. They never enter the main send lane or consume staged attachments.
-    const asideCommand = text.trim().match(/^\/(btw|side)(?:\s+([\s\S]*))?$/)
+    const asideCommand = !literalPrediction && text.trim().match(/^\/(btw|side)(?:\s+([\s\S]*))?$/)
     if (asideCommand) {
       if (localActionInFlightRef.current) return false
       const command = commandMap.get(asideCommand[1])
@@ -1966,7 +1976,7 @@ function ComposerInner(props: InnerProps) {
     // Validate before arming send protection: this return never enters the
     // dispatch's try/finally, and the user must be able to fill a chip and retry.
     const missingParams = unfilledRequiredParams(paramIds, effectiveBinding, paramDeclarations)
-    if (missingParams.length > 0) {
+    if (!literalPrediction && missingParams.length > 0) {
       toast.error(tTemplateParams("unfilled", { count: missingParams.length }))
       const first = paramTokens.find((seg) => seg.paramId === missingParams[0])
       const ta = textareaRef.current
@@ -1982,7 +1992,7 @@ function ComposerInner(props: InnerProps) {
     // Best-of-N owns the whole prompt, including subsequent lines. Letting the
     // general command batch split it would also send the trailing prose as a
     // second ordinary parent turn.
-    const bestOfNCommand = text.trim().match(/^\/best-of-n(?:\s+([\s\S]*))?$/)
+    const bestOfNCommand = !literalPrediction && text.trim().match(/^\/best-of-n(?:\s+([\s\S]*))?$/)
     if (bestOfNCommand) {
       if (localActionInFlightRef.current) return false
       const command = commandMap.get("best-of-n")
@@ -2014,7 +2024,10 @@ function ComposerInner(props: InnerProps) {
     // Inside a mixed batch the general pipeline would hand `/best-of-n` only
     // its own line and then send the remaining prose as an ordinary parent
     // turn. Refuse the batch before any command in it runs.
-    if (segments.some((segment) => segment.kind === "command" && segment.name === "best-of-n")) {
+    if (
+      !literalPrediction &&
+      segments.some((segment) => segment.kind === "command" && segment.name === "best-of-n")
+    ) {
       toast.error(tBestOfN("mixedBatch"))
       return false
     }
@@ -2171,6 +2184,15 @@ function ComposerInner(props: InnerProps) {
       // Platform recall cannot depend on folded maps cleared during submission.
       // Keep template tokens editable while retaining full paste/link bodies.
       history.record(props.session?.platformBinding ? restoreText(text) : text)
+
+      // A model prediction is literal text: direct acceptance must never execute
+      // a generated slash command, shell line or memory action.
+      if (literalPrediction) {
+        const ok = await props.onSubmit(text, filesToSend, precomputed)
+        if (ok === false) restoreInputAfterFailure()
+        else finalizeSend()
+        return ok !== false
+      }
 
       if (props.session?.platformBinding) {
         const ok = await props.onSubmit(
@@ -2425,6 +2447,66 @@ function ComposerInner(props: InnerProps) {
     return true
   }, [ghost, textInput])
 
+  // Predictions belong to this input's session and never replace a user's work.
+  // Wait for draft hydration so a late restore cannot overwrite an accepted prediction.
+  const predictionEligible =
+    !!props.session &&
+    props.session.kind !== "subagent" &&
+    !props.session.platformBinding &&
+    !props.disabled &&
+    !outboundBlocked &&
+    props.status !== "streaming" &&
+    !turnInFlight &&
+    !followUpInFlight &&
+    !isComposing &&
+    textValue === "" &&
+    attachments.files.length === 0 &&
+    restoredAttachments.length === 0 &&
+    (!persistDrafts || draftHydratedFor === props.session.id)
+  const prediction = useFollowUpSuggestions(props.session, { enabled: predictionEligible })
+  const acceptPrediction = useCallback(
+    (text: string, sendImmediately = false): boolean => {
+      if (
+        !predictionEligible ||
+        turnInFlightRef.current ||
+        followUpInFlightRef.current ||
+        textInput.value !== "" ||
+        attachments.files.length > 0 ||
+        attachmentPrepareCountRef.current > 0 ||
+        isComposing
+      )
+        return false
+      acceptedPredictionRef.current = { sessionId, text }
+      textInput.setInput(text)
+      setCaret(text.length)
+      if (sendImmediately) {
+        // Reuse this bound composer's validation, model routing and send protection.
+        void submit()
+      } else {
+        const input = textareaRef.current
+        requestAnimationFrame(() => {
+          // A session change remounts/resets the input; never focus a new owner.
+          if (input && input === textareaRef.current && input.value === text) {
+            input.setSelectionRange(text.length, text.length)
+            input.focus()
+          }
+        })
+      }
+      prediction.dismiss()
+      return true
+    },
+    [
+      predictionEligible,
+      sessionId,
+      textInput,
+      attachments.files.length,
+      attachmentPrepareCountRef,
+      isComposing,
+      prediction,
+      submit,
+    ]
+  )
+
   // --- Textarea key handling --------------------------------------------
   /**
    * Move the caret to the parameter after (or before) the caret and open it.
@@ -2520,6 +2602,26 @@ function ComposerInner(props: InnerProps) {
         const next = nextPermissionMode(permissionMode)
         setPermissionMode(next, props.session?.id ?? null)
         return
+      }
+      if (
+        predictionEligible &&
+        prediction.suggestions[0] &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        !isComposing &&
+        !e.nativeEvent.isComposing
+      ) {
+        if (e.key === "Tab" || e.key === "ArrowRight") {
+          if (acceptPrediction(prediction.suggestions[0])) e.preventDefault()
+          return
+        }
+        if (e.key === "Escape") {
+          e.preventDefault()
+          prediction.dismiss()
+          return
+        }
       }
       // Tab on an empty box accepts the typewriter hint like a ghost
       // completion — the whole hint lands in the input, caret at the end.
@@ -2766,6 +2868,9 @@ function ComposerInner(props: InnerProps) {
       activeParamId,
       ghost,
       acceptGhost,
+      acceptPrediction,
+      prediction,
+      predictionEligible,
       inputHistoryRecall,
       sendOnEnter,
       turnStatus,
@@ -2777,6 +2882,7 @@ function ComposerInner(props: InnerProps) {
 
   const onChange = useCallback(
     (e: ChangeEvent<HTMLTextAreaElement>) => {
+      acceptedPredictionRef.current = null
       textInput.setInput(e.target.value)
       setCaret(e.target.selectionStart ?? e.target.value.length)
       // A team room's members wait for the human to finish a sentence before
@@ -2861,7 +2967,6 @@ function ComposerInner(props: InnerProps) {
   )
 
   // ── Per-session draft persistence (Phase 3.2) ─────────────────────────
-  const [draftHydratedFor, setDraftHydratedFor] = useState<string | null>(null)
   useCameraRecovery(
     sessionId && (!persistDrafts || draftHydratedFor === sessionId)
       ? { kind: "chat", id: sessionId }
@@ -3423,6 +3528,17 @@ function ComposerInner(props: InnerProps) {
             {props.runStatus}
           </div>
         ) : null}
+        {predictionEligible && (
+          <FollowUpSuggestions
+            suggestions={prediction.suggestions}
+            onAccept={(text) => acceptPrediction(text, predictionAcceptance === "send")}
+            onDismiss={prediction.dismiss}
+            directSend={predictionAcceptance === "send"}
+            status={prediction.status}
+            onRetry={prediction.retry}
+            onConfigure={() => props.onOpenSettings("conversation")}
+          />
+        )}
         <ComposerBox
           skin={props.skin}
           compactLayout={compactLayout}

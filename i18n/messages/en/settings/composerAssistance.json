@@ -1,7 +1,7 @@
 {
   "agentFallback": {
-    "hint": "When no API key is saved for these helpers, run one agent turn instead so they work on a subscription. Off by default — follow-ups fire after every reply, so this costs a turn each time.",
-    "label": "Use an agent turn when no API key is set"
+    "hint": "Allow chargeable native next-prompt predictions in Claude chats, or a helper Agent turn when no assistance API key is available. Off by default; prediction requests and helper turns consume subscription usage.",
+    "label": "Allow subscription predictions and Agent fallback"
   },
   "assistanceModel": {
     "description": "Which model these helpers call. Defaults to a cheap model on your chat provider — set one here if that provider has no API key saved.",
@@ -14,6 +14,10 @@
   "enhance": {
     "hint": "Rewrite or vary your draft with a model, from the wand in the message box.",
     "label": "Prompt enhancement"
+  },
+  "predictionDraft": {
+    "label": "Edit predictions before sending",
+    "hint": "Accept predictions as editable drafts. Turn off to send immediately when clicking; Tab and → always fill a draft."
   },
   "followUps": {
     "hint": "Suggest follow-up messages after the assistant replies.",

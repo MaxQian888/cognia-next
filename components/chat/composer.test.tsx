@@ -1,8 +1,24 @@
+jest.mock("@/hooks/chat/use-follow-up-suggestions", () => ({
+  useFollowUpSuggestions: jest.fn(() => ({
+    suggestions: [],
+    loading: false,
+    dismiss: jest.fn(),
+    status: "ineligible",
+    retry: jest.fn(),
+  })),
+}))
 jest.mock("@/lib/i18n/runtime-translator", () => ({
   getRuntimeTranslator: async () => (key: string) => key,
 }))
 jest.mock("@/lib/best-of-n/entry", () => ({
   prepareBestOfNChat: jest.fn(async (_sessionId: string, prompt: string, n: number) => ({
+    session: {
+      id: _sessionId,
+      kind: "direct",
+      title: "Composer Test Chat",
+      createdAt: 0,
+      updatedAt: 0,
+    },
     requestId: "bon-request",
     prompt,
     n,
@@ -171,6 +187,7 @@ import { act } from "react"
 import type { ReactNode } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Composer } from "./composer"
+import { useFollowUpSuggestions } from "@/hooks/chat/use-follow-up-suggestions"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { composerReadSlice, useChatStore } from "@/stores/chat"
@@ -234,6 +251,13 @@ const mkSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
 })
 
 beforeEach(() => {
+  jest.mocked(useFollowUpSuggestions).mockReturnValue({
+    suggestions: [],
+    loading: false,
+    dismiss: jest.fn(),
+    status: "ineligible",
+    retry: jest.fn(),
+  })
   jest.mocked(useCameraRecovery).mockClear()
   useChatStore.getState().clear()
   useComposerIntentStore.setState({ pendingBySession: {} })
@@ -1803,5 +1827,216 @@ describe("Composer — best-of-N consumes exactly one send", () => {
     expect(ta).toHaveValue(mixed)
     error.mockRestore()
     unregisterSlashCommand("test.probe")
+  })
+})
+
+describe("Composer — next-prompt predictions", () => {
+  function renderPredictions(props: Partial<React.ComponentProps<typeof Composer>> = {}) {
+    const Wrapper = withAdapter(makeAdapter())
+    const onSend = jest.fn(async (_content: unknown) => undefined)
+    const session = mkSession({ id: "pane-b" })
+    jest.mocked(useFollowUpSuggestions).mockReturnValue({
+      suggestions: ["Explain the next step", "Show an example"],
+      loading: false,
+      dismiss: jest.fn(),
+      status: "ready",
+      retry: jest.fn(),
+    })
+    const view = render(
+      <Wrapper>
+        <Composer
+          session={session}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={onSend}
+          onStop={async () => undefined}
+          {...props}
+        />
+      </Wrapper>
+    )
+    const ta = view.container.querySelector("textarea")!
+    return { ...view, ta, onSend }
+  }
+
+  it("accepts into the bound pane's editable draft and sends only after explicit Enter", async () => {
+    useChatStore.setState({ activeSessionId: "pane-a" })
+    const { ta, onSend } = renderPredictions()
+    await waitFor(() => expect(screen.getByText("Explain the next step")).toBeVisible())
+    fireEvent.click(screen.getByText("Explain the next step"))
+    expect(ta).toHaveValue("Explain the next step")
+    expect(onSend).not.toHaveBeenCalled()
+    expect(useChatStore.getState().activeSessionId).toBe("pane-a")
+    fireEvent.change(ta, { target: { value: "Explain the next step in Chinese" } })
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await waitFor(() => expect(onSend).toHaveBeenCalled())
+    expect(stripPromptPreamble(onSend.mock.calls[0][0] as unknown as string)).toBe(
+      "Explain the next step in Chinese"
+    )
+  })
+
+  it.each(["Tab", "ArrowRight"])("accepts %s without sending", async (key) => {
+    const { ta, onSend } = renderPredictions()
+    await waitFor(() => expect(screen.getByText("Explain the next step")).toBeVisible())
+    fireEvent.keyDown(ta, { key })
+    expect(ta).toHaveValue("Explain the next step")
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it("keeps another pane's existing draft when accepting in the unfocused pane", async () => {
+    const Wrapper = withAdapter(makeAdapter())
+    useChatStore.setState({ activeSessionId: "pane-a" })
+    jest.mocked(useFollowUpSuggestions).mockImplementation((session) => ({
+      suggestions: session?.id === "pane-b" ? ["Only for B"] : [],
+      loading: false,
+      dismiss: jest.fn(),
+      status: "ready",
+      retry: jest.fn(),
+    }))
+    const onSendA = jest.fn()
+    const onSendB = jest.fn()
+    const { container } = render(
+      <Wrapper>
+        <Composer
+          session={mkSession({ id: "pane-a" })}
+          onSend={onSendA}
+          onStop={jest.fn()}
+          onStartNewSession={jest.fn()}
+          onOpenSettings={jest.fn()}
+        />
+        <Composer
+          session={mkSession({ id: "pane-b" })}
+          onSend={onSendB}
+          onStop={jest.fn()}
+          onStartNewSession={jest.fn()}
+          onOpenSettings={jest.fn()}
+        />
+      </Wrapper>
+    )
+    const [inputA, inputB] = container.querySelectorAll("textarea")
+    fireEvent.change(inputA, { target: { value: "A's draft" } })
+    await waitFor(() => expect(screen.getByText("Only for B")).toBeVisible())
+    fireEvent.click(screen.getByText("Only for B"))
+    expect(inputA).toHaveValue("A's draft")
+    expect(inputB).toHaveValue("Only for B")
+    expect(onSendA).not.toHaveBeenCalled()
+    expect(onSendB).not.toHaveBeenCalled()
+    fireEvent.keyDown(inputB, { key: "Enter" })
+    await waitFor(() => expect(onSendB).toHaveBeenCalledTimes(1))
+    expect(onSendA).not.toHaveBeenCalled()
+  })
+
+  it("does not accept a prediction during composition or with keyboard modifiers", async () => {
+    const { ta, onSend } = renderPredictions()
+    await waitFor(() => expect(screen.getByText("Explain the next step")).toBeVisible())
+    fireEvent.keyDown(ta, { key: "ArrowRight", ctrlKey: true })
+    expect(ta).toHaveValue("")
+    fireEvent.compositionStart(ta)
+    fireEvent.keyDown(ta, { key: "Tab", isComposing: true })
+    expect(ta).toHaveValue("")
+    fireEvent.compositionEnd(ta)
+    fireEvent.keyDown(ta, { key: "Tab" })
+    expect(ta).toHaveValue("Explain the next step")
+    fireEvent.keyDown(ta, { key: "ArrowRight" })
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it("Enter before acceptance does not send a prediction", async () => {
+    const { ta, onSend } = renderPredictions()
+    await waitFor(() => expect(screen.getByText("Explain the next step")).toBeVisible())
+    fireEvent.keyDown(ta, { key: "Enter" })
+    expect(ta).toHaveValue("")
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it("honours direct-send mode through the bound composer callback", async () => {
+    useSettingsStore.setState({
+      settings: { composerAssistance: { suggestions: { acceptance: "send" } } } as never,
+    })
+    useChatStore.setState({ activeSessionId: "pane-a" })
+    const { onSend } = renderPredictions()
+    await waitFor(() => expect(screen.getByText("Explain the next step")).toBeVisible())
+    fireEvent.click(screen.getByText("Explain the next step"))
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    expect(useChatStore.getState().activeSessionId).toBe("pane-a")
+  })
+
+  it.each(["send", "draft"] as const)(
+    "keeps generated command text literal in %s mode",
+    async (acceptance) => {
+      useSettingsStore.setState({
+        settings: { composerAssistance: { suggestions: { acceptance } } } as never,
+      })
+      const { ta, onSend } = renderPredictions()
+      jest.mocked(useFollowUpSuggestions).mockReturnValue({
+        suggestions: ["!echo predicted"],
+        loading: false,
+        dismiss: jest.fn(),
+        status: "ready",
+        retry: jest.fn(),
+      })
+      act(() =>
+        useSettingsStore.setState({
+          settings: {
+            composerAssistance: {
+              suggestions: { acceptance: acceptance === "send" ? "draft" : "send" },
+            },
+          } as never,
+        })
+      )
+      act(() =>
+        useSettingsStore.setState({
+          settings: { composerAssistance: { suggestions: { acceptance } } } as never,
+        })
+      )
+      await waitFor(() => expect(screen.getByText("!echo predicted")).toBeVisible())
+      const shellCalls = jest.mocked(execTerminalCommand).mock.calls.length
+      fireEvent.click(screen.getByText("!echo predicted"))
+      if (acceptance === "draft") {
+        expect(onSend).not.toHaveBeenCalled()
+        fireEvent.keyDown(ta, { key: "Enter" })
+      }
+      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+      expect(stripPromptPreamble(onSend.mock.calls[0][0] as string)).toBe("!echo predicted")
+      expect(execTerminalCommand).toHaveBeenCalledTimes(shellCalls)
+    }
+  )
+
+  it("suppresses predictions over a typed draft and during IME composition", async () => {
+    const { ta, onSend } = renderPredictions()
+    await waitFor(() => expect(screen.getByText("Explain the next step")).toBeVisible())
+    fireEvent.change(ta, { target: { value: "my draft" } })
+    expect(screen.queryByText("Explain the next step")).not.toBeInTheDocument()
+    fireEvent.keyDown(ta, { key: "Tab" })
+    expect(ta).toHaveValue("my draft")
+    fireEvent.change(ta, { target: { value: "" } })
+    fireEvent.compositionStart(ta)
+    fireEvent.keyDown(ta, { key: "ArrowRight", isComposing: true })
+    expect(ta).toHaveValue("")
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it.each([{ disabled: true }, { status: "streaming" as const }])(
+    "suppresses predictions while blocked: %j",
+    async (props) => {
+      const { ta } = renderPredictions(props)
+      await act(async () => undefined)
+      expect(screen.queryByText("Explain the next step")).not.toBeInTheDocument()
+      fireEvent.keyDown(ta, { key: "Tab" })
+      expect(ta).toHaveValue("")
+    }
+  )
+
+  it("suppresses predictions when an attachment is staged", async () => {
+    URL.createObjectURL = jest.fn(() => "blob:prediction-attachment")
+    URL.revokeObjectURL = jest.fn()
+    const { ta, container } = renderPredictions()
+    await waitFor(() => expect(screen.getByText("Explain the next step")).toBeVisible())
+    const input = container.querySelector('input[type="file"]')!
+    fireEvent.change(input, {
+      target: { files: [new File(["hello"], "notes.txt", { type: "text/plain" })] },
+    })
+    await waitFor(() => expect(screen.queryByText("Explain the next step")).not.toBeInTheDocument())
+    fireEvent.keyDown(ta, { key: "ArrowRight" })
+    expect(ta).toHaveValue("")
   })
 })

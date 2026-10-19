@@ -146,6 +146,18 @@ export function ComposerAssistanceCard() {
         onChange={(next) => update({ suggestions: { ...ca.suggestions, followUps: next } })}
       />
 
+      {followUpsEnabled ? (
+        <ToggleRow
+          id="composer-prediction-draft"
+          label={t("predictionDraft.label")}
+          hint={t("predictionDraft.hint")}
+          checked={ca.suggestions?.acceptance !== "send"}
+          onChange={(next) =>
+            update({ suggestions: { ...ca.suggestions, acceptance: next ? "draft" : "send" } })
+          }
+        />
+      ) : null}
+
       {startersEnabled || followUpsEnabled ? (
         <ToggleRow
           id="composer-agent-fallback"

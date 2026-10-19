@@ -97,6 +97,41 @@ jest.mock("@/lib/runtime/standalone-mode", () => ({
 }))
 
 import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
+
+it("routes a late native prediction to its requesting session without a transcript write", async () => {
+  const store = useChatStore.getState()
+  store.clear()
+  store.replaceSessionMessages("native-B", [
+    { id: "user-B", role: "user", parts: [{ type: "text", text: "B" }] },
+  ])
+  store.setLastSend("native-B", {
+    content: "B",
+    options: { turnId: "tB", claudeAgentSdk: { version: 1, promptSuggestions: true } },
+    attemptIndex: 0,
+  })
+  store.clearLastSend("native-B")
+  await handleEvent(
+    {
+      type: "event",
+      sessionId: "native-B",
+      turnId: "tB",
+      event: { type: "prompt_suggestion", suggestion: "verify B" },
+    } as never,
+    { current: "active-A" },
+    { current: [] },
+    { current: new Map() },
+    { current: new Map() },
+    { current: null },
+    {
+      messagesMirrorRef: { current: new Map() },
+      registry: {},
+      getExecutionHandle: () => undefined,
+    } as never
+  )
+  expect(useChatStore.getState().sessions["native-B"].promptPrediction?.text).toBe("verify B")
+  expect(useChatStore.getState().sessions["native-B"].messages).toHaveLength(1)
+})
+
 import { __resetClaimedTurnUsageForTesting, claimTurnUsage } from "@/lib/usage/claimed-turn-usage"
 import {
   drainSteerVia,
