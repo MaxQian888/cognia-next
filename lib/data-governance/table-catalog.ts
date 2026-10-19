@@ -201,6 +201,10 @@ export const CORE_TABLE_NAMES = [
   "governanceLineage",
   "governanceProvenance",
   "goalTemplates",
+  "harnessEvolutionRuns",
+  "harnessEvolutionSteps",
+  "harnessExperiences",
+  "harnessSnapshots",
   "hostDispatchQueue",
   "hostStateActions",
   "hostStateChannels",
@@ -1093,6 +1097,13 @@ const USER_CONTENT_TABLES = new Set<CoreTableName>([
   // declarations and launch spec that go with it. Prose, not metadata, so it
   // is classified with `promptPresets` rather than with the counter tables.
   "chatTemplates",
+  // Harness Evolution (ADR-0237): snapshots hold an agent's prompts, skills
+  // and scripts; runs hold the task prompt; steps hold rollout trajectories and
+  // deliverables; experiences hold lessons quoted from them. All user content.
+  "harnessSnapshots",
+  "harnessEvolutionRuns",
+  "harnessEvolutionSteps",
+  "harnessExperiences",
   // A code-owned prompt override (ADR-0236) is instruction text the user
   // wrote in place of a shipped template, so it is classified like a preset.
   "promptOverrides",
@@ -1249,6 +1260,8 @@ const LARGE_TABLES = new Set<CoreTableName>([
   "notificationDeliveryAttempts",
   "evalSamples",
   "evalScores",
+  // Rollout evidence: a capped trajectory and the deliverables of every probe.
+  "harnessEvolutionSteps",
   "integrationEvents",
   "issueEvents",
   "mcpAuditLog",
@@ -1295,6 +1308,10 @@ const STORAGE_CATEGORY_OVERRIDES: Partial<Record<CoreTableName, StorageCategory>
   mcpServerSummaries: "mcp",
   mcpSyncJobs: "mcp",
   promptPresets: "preset",
+  harnessSnapshots: "character",
+  harnessEvolutionRuns: "character",
+  harnessEvolutionSteps: "character",
+  harnessExperiences: "character",
   promptOverrides: "preset",
   promptOverrideRevisions: "preset",
   artifacts: "artifact",
@@ -1364,6 +1381,23 @@ const WORKFLOW_APP_ROW_EXPIRY: DataRetentionPolicy = {
 }
 
 const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> = {
+  harnessEvolutionRuns: {
+    mode: "cap",
+    enforcement: "domain",
+    reason:
+      "`lib/db/harness-evolution.ts` keeps each agent's newest 100 finished runs (and every run an adopted version came from), deleting older runs with their steps.",
+  },
+  harnessEvolutionSteps: {
+    mode: "cap",
+    enforcement: "domain",
+    reason: "Deleted with their run by the run cap in `lib/db/harness-evolution.ts`.",
+  },
+  harnessSnapshots: {
+    mode: "cap",
+    enforcement: "domain",
+    reason:
+      "`lib/db/harness-evolution.ts` deletes snapshots no surviving run, adoption or experience references.",
+  },
   promptOverrideRevisions: {
     mode: "cap",
     enforcement: "domain",

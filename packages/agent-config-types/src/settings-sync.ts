@@ -79,6 +79,7 @@ export const SETTINGS_SYNC = {
   backgroundTasks: { category: "desktop-only" },
   webTools: { category: "desktop-only" },
   webReader: { category: "desktop-only" },
+  harnessEvolution: { category: "desktop-only" },
   selfInvokeTools: { category: "desktop-only" },
   knowledgeReading: {
     category: "device-local",

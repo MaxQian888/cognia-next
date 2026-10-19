@@ -137,11 +137,17 @@ export function registerSkillLoadContext(
     skills: readonly Skill[]
     explicitSkillIds?: Iterable<string>
     allowDisabledSkillIds?: Iterable<string>
+    /**
+     * Resources for skills that exist only in memory for this run (Harness
+     * Evolution probes, ADR-0237). Looked up before the skill library.
+     */
+    resourcesBySkillId?: ReadonlyMap<string, SkillResource[]>
     turnId?: string
     attemptId?: string
   }
 ): void {
   const byId = new Map(input.skills.map((skill) => [skill.id, skill]))
+  const inMemoryResources = input.resourcesBySkillId
   for (const skill of input.skills) {
     for (const alias of [skill.slug, skill.canonicalId]) {
       if (alias) byId.set(alias, skill)
@@ -156,6 +162,14 @@ export function registerSkillLoadContext(
     allowDisabledSkillIds: input.allowDisabledSkillIds,
     getSkill: async (id) =>
       byId.get(id) ?? byId.get(resolveBuiltinSkillIdentity(id)?.bundleId ?? ""),
+    ...(inMemoryResources?.size
+      ? {
+          // The context keys skills by id, slug and canonical id; resources are
+          // keyed by the row id, so resolve the alias first.
+          listResources: async (id: string) =>
+            inMemoryResources.get(byId.get(id)?.id ?? id) ?? (await listRuntimeResources(id)),
+        }
+      : {}),
   })
 }
 

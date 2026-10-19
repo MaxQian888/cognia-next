@@ -66,6 +66,7 @@ export * from "./onboarding"
 export * from "./updates"
 export * from "./unattended-permission"
 export * from "./web-reader"
+export * from "./agent-harness"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 
@@ -4169,6 +4170,12 @@ export interface AppSettings {
    */
   webReader?: import("./web-reader").StoredWebReaderSettings
   /**
+   * Harness Evolution (ADR-0237): feature flag, start mode, default run shape,
+   * budget ceilings and per-role models. Absent ⇒ the feature is off.
+   * Desktop-only; normalised by `lib/harness/settings.ts`.
+   */
+  harnessEvolution?: import("./agent-harness").StoredHarnessEvolutionSettings
+  /**
    * Agent self-invocation tools (Claude Code parity). Opt-in (default off):
    * let the model call the `Skill` tool to load a skill's instructions, and/or
    * the `SlashCommand` tool to run a registered slash command. Host-routed
@@ -7013,6 +7020,12 @@ export interface Character {
    * itself keeps a full materialized profile as the fallback.
    */
   variant?: import("./agent-variant").CharacterVariantLink
+  /**
+   * Harness sections (ADR-0237): standing rules, durable domain facts, tool
+   * guidance, delegated subagents and declarative tool rules. Profile fields,
+   * so a variant inherits or owns them. Rendered by `resolveSendOptions`.
+   */
+  harness?: import("./agent-harness").CharacterHarness
   /** Whether this character is allowed to drive A2UI surfaces (4-tool whitelist + system prompt). */
   a2uiEnabled?: boolean
   /**

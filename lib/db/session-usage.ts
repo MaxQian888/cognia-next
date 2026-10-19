@@ -47,6 +47,8 @@ export type UsageSurface =
   /** Inbound traffic served through the local gateway (ADR-0165). */
   | "gateway"
   | "imported"
+  /** Harness Evolution probes, editor sessions and judges (ADR-0237). */
+  | "harness-evolution"
 
 /** Every metered surface, for exhaustive UI filters. */
 export const USAGE_SURFACES: readonly UsageSurface[] = [
@@ -66,6 +68,7 @@ export const USAGE_SURFACES: readonly UsageSurface[] = [
   "web-search",
   "gateway",
   "imported",
+  "harness-evolution",
 ]
 
 /**

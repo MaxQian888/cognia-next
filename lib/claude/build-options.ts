@@ -90,6 +90,12 @@ import {
 import { builtInDescriptorSkill, resolveSkillDelivery } from "@/lib/skills/delivery"
 import { resolveResidentSkillHostPolicies } from "@/lib/skills/host-policy"
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
+import { overlayResourcesById, type HarnessRuntimeOverlay } from "@/lib/harness/overlay"
+import {
+  clampSubagentTools,
+  harnessSubagentDefinitions,
+  renderHarnessSections,
+} from "@/lib/harness/render"
 import {
   buildMcpServerMapResolved,
   listEnabledMcpServers,
@@ -731,6 +737,13 @@ export interface BuildOptionsContext {
    * and ids already on the character are de-duped at resolve time.
    */
   ephemeralSkillIds?: string[]
+  /**
+   * Harness Evolution probe overlay (ADR-0237): in-memory skills, with their
+   * resources, that this one run sees in addition to the agent's own. They are
+   * never written to the skill library. A probe's ephemeral agent carries the
+   * candidate's other harness components itself.
+   */
+  harnessOverlay?: HarnessRuntimeOverlay
   /** Contextual built-in Skill intents resolved by the caller for this turn. */
   skillIntents?: string[]
   /** Host-authorized, request-scoped built-ins (for example onboarding cards). */
@@ -1592,6 +1605,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       skills = await listEnabledSkillsByIds(wantedIds, capabilityScope)
     }
   }
+  // ADR-0237: a probe's candidate skills join the set as the agent's own
+  // (implicit) skills. A grant's removals still apply to them.
+  if (ctx.harnessOverlay?.skills.length) {
+    const removed = new Set(grant?.skills?.remove ?? [])
+    const present = new Set(skills.map((skill) => skill.id))
+    for (const { skill } of ctx.harnessOverlay.skills) {
+      if (present.has(skill.id) || removed.has(skill.id) || removed.has(skill.slug ?? "")) continue
+      skills.push(skill)
+      present.add(skill.id)
+    }
+  }
+  const harnessResourcesById = overlayResourcesById(ctx.harnessOverlay)
   // ADR-0106 controlled trial. The recorded skill is saved `disabled` on
   // purpose — enabling it is the user's separate act after the trial — so it
   // cannot come through the resolution above, which honours that flag. Loading
@@ -2748,7 +2773,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     ])
     const resourcesById = new Map(
       await Promise.all(
-        skills.map(async (skill) => [skill.id, await listResourcesForSkill(skill.id)] as const)
+        skills.map(
+          async (skill) =>
+            [
+              skill.id,
+              harnessResourcesById.get(skill.id) ?? (await listResourcesForSkill(skill.id)),
+            ] as const
+        )
       )
     )
     progressiveCustomSkillHasResources = [...resourcesById.values()].some(
@@ -2873,9 +2904,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // and the builder protocol, on the runtime and model the user picked.
   const agentBuilderToolsSurfaced =
     session?.kind === "agent-builder" && Boolean(session.agentBuilder)
+  // ADR-0237: the agent's always-on harness sections (standing rules, domain
+  // facts, tool guidance), right after who the agent is.
+  const harnessSection = renderHarnessSections(character?.harness)
   const systemPrompt = [
     baseSystem,
     personaSection,
+    harnessSection,
     instructionSection,
     // The turn's own workspace (`activeProject` is `resolveSessionWorkspace`),
     // not whichever one is on screen.
@@ -5070,6 +5105,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.includePartialMessages = true
   }
 
+  // Names of the agent's own harness subagents registered below (ADR-0237);
+  // their tools are clamped to the sealed tool surface after the finalizer.
+  const harnessSubagentNames = new Set<string>()
+
   // --- Workflow-editor session branch (Phase C.6 → Workflow Copilot) ------
   // For sessions mounted inside the visual workflow editor's right
   // sidebar we replace the additive character / mode / twin / A2UI /
@@ -5214,9 +5253,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     } catch (err) {
       console.warn("direct-chat subagent registration failed:", err)
     }
+    // ADR-0237: the agent's own harness subagents. Registered after the
+    // registry so the agent's definition wins over a same-named template, and
+    // before project markdown agents so a workspace's own file still wins.
+    // Their tools are clamped to the sealed parent surface below.
+    const harnessAgents = harnessSubagentDefinitions(character?.harness)
+    for (const name of Object.keys(harnessAgents)) harnessSubagentNames.add(name)
+    if (harnessSubagentNames.size > 0) {
+      opts.agents = { ...(opts.agents ?? {}), ...harnessAgents }
+    }
   }
 
   // --- Project markdown subagents (.cognia/agents/*.md) --------------------
+  // A project file that reuses a harness subagent's name replaces it, so the
+  // harness clamp below no longer applies to that entry.
   // Merge the project-discovered markdown agents AFTER the registry/template
   // subagents so a project's `.cognia/agents/foo.md` wins on id collision. The
   // list is empty for workflow-editor sessions (discovery is skipped above), so
@@ -5229,6 +5279,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       const sdkMap = markdownAgentsToSdkMap(agents)
       if (Object.keys(sdkMap).length > 0) {
         opts.agents = { ...(opts.agents ?? {}), ...sdkMap }
+        for (const name of Object.keys(sdkMap)) harnessSubagentNames.delete(name)
       }
     } catch (err) {
       console.warn("project markdown subagent registration failed:", err)
@@ -5736,6 +5787,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           ...skillDelivery.explicit.map((skill) => skill.storageId),
         ],
         allowDisabledSkillIds: skillDelivery.requestScoped.map((skill) => skill.storageId),
+        ...(harnessResourcesById.size > 0 ? { resourcesBySkillId: harnessResourcesById } : {}),
         turnId: ctx.turnId,
         attemptId: ctx.executionIdentity?.attemptId,
       })
@@ -5777,6 +5829,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   }
   if (finalizedToolSurface.toolSurface !== undefined) {
     opts.toolSurface = finalizedToolSurface.toolSurface
+  }
+  // ADR-0237: a harness subagent can never hold a tool its parent lacks. The
+  // grant filter may already have dropped some of them from the map.
+  for (const name of harnessSubagentNames) {
+    const def = opts.agents?.[name]
+    if (def) {
+      opts.agents![name] = clampSubagentTools(def, opts.allowedTools, opts.disallowedTools)
+    }
   }
 
   if (asideBinding && asideRuntime?.runtimeRef.kind === "builtin") {

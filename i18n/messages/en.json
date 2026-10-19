@@ -58668,6 +58668,7 @@
         "eval": "Eval",
         "gateway": "Gateway",
         "goal": "Goal",
+        "harnessEvolution": "Harness evolution",
         "imported": "Imported",
         "label": "Surface",
         "memory": "Memory",

@@ -88,4 +88,12 @@ describe("projectToolOutputText", () => {
     const out = projectToolOutputText({ output: "x".repeat(TOOL_OUTPUT_MAX_CHARS) })
     expect(out).not.toContain("truncated")
   })
+
+  it("honours a caller's larger cap", () => {
+    const body = "y".repeat(TOOL_OUTPUT_MAX_CHARS + 2_000)
+    expect(projectToolOutputText({ output: body }, 20_000)).toBe(body)
+    const cut = projectToolOutputText({ output: body }, 1_000)
+    expect(cut.startsWith("y".repeat(1_000))).toBe(true)
+    expect(cut).toContain("[tool output truncated]")
+  })
 })

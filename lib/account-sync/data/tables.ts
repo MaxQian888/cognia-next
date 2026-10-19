@@ -219,6 +219,8 @@ const CHARACTER_FIELDS = {
   toolFilter: "sync",
   toolSearchRuntimeOverride: "sync",
   variant: "sync",
+  // ADR-0237 harness sections: profile text and declarative rules, like the prompt.
+  harness: "sync",
   a2uiEnabled: "sync",
   a2uiCatalogId: "sync",
   enableComputerUse: "sync",

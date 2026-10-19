@@ -5195,3 +5195,55 @@ schemaIt("v246 adds prompt override bindings and revisions beside existing data"
     await Dexie.delete(name)
   }
 })
+
+schemaIt("v247 adds the Harness Evolution tables beside existing data", async () => {
+  const name = "cognia-harness-evolution-v247"
+  await Dexie.delete(name)
+  const previousSchema = { ...CURRENT_SCHEMA }
+  delete previousSchema.harnessSnapshots
+  delete previousSchema.harnessEvolutionRuns
+  delete previousSchema.harnessEvolutionSteps
+  delete previousSchema.harnessExperiences
+  const previous = new Dexie(name)
+  previous.version(246).stores(previousSchema)
+  await previous.table("characters").put({ id: "agent-keep", name: "Keep me" })
+  previous.close()
+  const current = new CogniaDB(name)
+  try {
+    await current.open()
+    expect(current.verno).toBe(CURRENT_SCHEMA_VERSION)
+    expect(await current.characters.get("agent-keep")).toMatchObject({ name: "Keep me" })
+    expect(current.harnessSnapshots.schema.indexes.map((index) => index.name)).toEqual([
+      "characterId",
+      "contentHash",
+      "[characterId+createdAt]",
+      "createdAt",
+    ])
+    expect(current.harnessEvolutionRuns.schema.indexes.map((index) => index.name)).toEqual([
+      "characterId",
+      "status",
+      "dedupeKey",
+      "projectId",
+      "sessionId",
+      "[characterId+createdAt]",
+      "updatedAt",
+    ])
+    expect(current.harnessEvolutionSteps.schema.indexes.map((index) => index.name)).toEqual([
+      "runId",
+      "cacheKey",
+      "updatedAt",
+    ])
+    expect(current.harnessExperiences.schema.indexes.map((index) => index.name)).toEqual([
+      "characterId",
+      "scope",
+      "validationStatus",
+      "domain",
+      "projectId",
+      "sourceRunId",
+      "updatedAt",
+    ])
+  } finally {
+    current.close()
+    await Dexie.delete(name)
+  }
+})

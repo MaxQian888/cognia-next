@@ -435,7 +435,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 246
+export const CURRENT_SCHEMA_VERSION = 247
 
 /**
  * The immutable cumulative v240 schema baseline.
@@ -1060,6 +1060,18 @@ const PROMPT_OVERRIDE_SCHEMA = {
   promptOverrideRevisions: "&id, bindingId, promptId, createdAt",
 }
 
+// v247 — Harness Evolution (ADR-0237): content-addressed harness snapshots,
+// evolution runs and their steps (rollouts with evidence, editor stages), and
+// the experience library. `lib/db/harness-evolution.ts`.
+const HARNESS_EVOLUTION_SCHEMA = {
+  harnessSnapshots: "&id, characterId, contentHash, [characterId+createdAt], createdAt",
+  harnessEvolutionRuns:
+    "&id, characterId, status, dedupeKey, projectId, sessionId, [characterId+createdAt], updatedAt",
+  harnessEvolutionSteps: "&id, runId, cacheKey, updatedAt",
+  harnessExperiences:
+    "&id, characterId, scope, validationStatus, domain, projectId, sourceRunId, updatedAt",
+}
+
 export const CURRENT_SCHEMA: Record<string, string | null> = {
   ...SCHEMA_V240,
   ...SESSION_LIST_SCHEMA,
@@ -1067,6 +1079,7 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   bestOfNRuns: "&id, parentSessionId, parentMessageId, updatedAt",
   ...MANAGED_DESKTOP_DELETION_SCHEMA,
   ...PROMPT_OVERRIDE_SCHEMA,
+  ...HARNESS_EVOLUTION_SCHEMA,
 }
 
 let databaseConnectionSequence = 0
@@ -1087,6 +1100,11 @@ export class CogniaDB extends Dexie {
   // v246 — code-owned prompt overrides (ADR-0236).
   promptOverrides!: Table<import("./prompt-overrides").PromptOverrideBindingRow, string>
   promptOverrideRevisions!: Table<import("./prompt-overrides").PromptOverrideRevisionRow, string>
+  // v247 — Harness Evolution (ADR-0237).
+  harnessSnapshots!: Table<import("@/types/harness/snapshot").HarnessSnapshotV1, string>
+  harnessEvolutionRuns!: Table<import("@/types/harness/evolution").HarnessEvolutionRun, string>
+  harnessEvolutionSteps!: Table<import("@/types/harness/evolution").HarnessEvolutionStep, string>
+  harnessExperiences!: Table<import("@/types/harness/experience").HarnessExperience, string>
   readonly connectionOwner: string
   readonly connectionId: string
   private readonly connectionCreatedAt: number

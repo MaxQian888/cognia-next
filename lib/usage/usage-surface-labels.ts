@@ -33,6 +33,7 @@ const SURFACE_LABEL_KEYS: Record<UsageSurface, string> = {
   "web-search": "webSearch",
   gateway: "gateway",
   imported: "imported",
+  "harness-evolution": "harnessEvolution",
 }
 
 /**
