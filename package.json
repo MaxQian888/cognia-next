@@ -396,7 +396,7 @@
     "router-fusion:live-smoke:test": "node --test scripts/router-fusion/live-smoke.test.mjs",
     "compose:smoke": "node scripts/smoke/compose-smoke.mjs",
     "compose:smoke:runtime-environment": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/smoke/compose-runtime-environment.mjs",
-    "compose:smoke:runtime-environment:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test scripts/smoke/compose-runtime-environment.test.mjs",
+    "compose:smoke:runtime-environment:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test scripts/smoke/compose-runtime-environment.test.mjs scripts/smoke/compose-smoke.test.mjs",
     "// 16 ─── Maintenance & cleanup ───": "",
     "clean:cache": "node scripts/build/clean-stale-turbopack-cache.mjs --all",
     "clean:cache:test": "node --test scripts/build/clean-stale-turbopack-cache.test.mjs",

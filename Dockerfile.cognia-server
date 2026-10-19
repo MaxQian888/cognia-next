@@ -47,11 +47,11 @@ ENV RUSTUP_TOOLCHAIN=1.99.0
 # no-tauri cargo feature on app_lib is a tracked follow-up (ADR-0059).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       pkg-config libssl-dev libglib2.0-dev libgtk-3-dev \
+       time pkg-config libssl-dev libglib2.0-dev libgtk-3-dev \
        libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
        libayatana-appindicator3-dev librsvg2-dev libpipewire-0.3-dev libgbm-dev libclang-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN cargo install cargo-chef --locked
+RUN cargo install cargo-chef --version 0.1.78 --locked
 # The workspace release profile is tuned for the desktop bundle (thin-LTO and
 # one codegen unit). Compiling that full app_lib graph exceeds the memory of a
 # standard Linux CI runner even though the headless image does not benefit from
@@ -71,8 +71,11 @@ COPY crates ./crates
 COPY services/signaling-server/core ./services/signaling-server/core
 RUN cargo chef prepare --recipe-path recipe.json
 
-# The cook layer compiles every dependency of the workspace (tauri, wasmtime,
-# axum, …) and is reused as long as Cargo.lock + manifests are unchanged.
+# Cache the five shipping build graphs, including their distinct feature sets.
+# A workspace-wide cook unifies features differently from these commands and
+# makes the CLI/native helper builds recompile dependencies after every source
+# edit. Keep these invocations separate: merging packages changes their features.
+# One RUN retains all variants without exporting intermediate target snapshots.
 FROM chef AS deps
 ARG CARGO_REGISTRIES_CRATES_IO_INDEX
 ARG CARGO_HTTP_TIMEOUT
@@ -89,7 +92,16 @@ RUN if [ -n "${COGNIA_CARGO_REGISTRY_MIRROR}" ]; then \
       printf '[source.crates-io]\nreplace-with = "cognia-mirror"\n[source.cognia-mirror]\nregistry = "%s"\n' \
         "${COGNIA_CARGO_REGISTRY_MIRROR}" > /usr/local/cargo/config.toml; \
     fi
-RUN cargo chef cook --release --recipe-path recipe.json
+RUN /usr/bin/time -v cargo chef cook --release --locked --timings --recipe-path recipe.json \
+      --bin cognia-server --features container-exec,k8s-exec,workspace-runtime-exec,otel-export \
+    && /usr/bin/time -v cargo chef cook --release --locked --timings --recipe-path recipe.json \
+      -p cognia-cli --bin cognia \
+    && /usr/bin/time -v cargo chef cook --release --locked --timings --recipe-path recipe.json \
+      -p cognia-bootstrap-agent --bin cognia-bootstrap \
+    && /usr/bin/time -v cargo chef cook --release --locked --timings --recipe-path recipe.json \
+      -p cognia-exec-sandbox --bin cognia-external-agent-launcher --bin cognia-sandbox-exec \
+    && /usr/bin/time -v cargo chef cook --release --locked --timings --recipe-path recipe.json \
+      -p cognia-task-workspace --bin cognia-task-workspace-worker
 
 # The headless binary does not ship a desktop Tauri bundle. Its real sidecars
 # and native launchers are built below and staged by brain-builder. Suppress
@@ -121,7 +133,7 @@ COPY deploy/github-runner/cognia-runner.yml deploy/github-runner/bootstrap.mjs d
 # container-exec + k8s-exec (R13): the headless image ships both flavors of
 # the container backend, so COGNIA_EXEC_BACKEND=container works at T2
 # (Docker socket proxy) and =kubernetes at T3 (runner Pods, in-cluster).
-RUN cargo build --release --locked --bin cognia-server \
+RUN /usr/bin/time -v cargo build --release --locked --timings --bin cognia-server \
     --features container-exec,k8s-exec,workspace-runtime-exec,otel-export \
     --config 'profile.release.package.cognia-next.opt-level=0' \
     --config 'profile.release.package.cognia-next.codegen-units=256' \
@@ -129,18 +141,22 @@ RUN cargo build --release --locked --bin cognia-server \
     ${COGNIA_SERVER_CARGO_FLAGS}
 # Agent-first loopback operator CLI. It is intentionally shipped in the same
 # image so service-token issuance and the network peer both stay in-container.
-RUN cargo build --release --locked -p cognia-cli --bin cognia
+RUN /usr/bin/time -v cargo build --release --locked --timings -p cognia-cli --bin cognia
 # Small initialization utility: available beside the server before any Node runtime.
-RUN cargo build --release --locked -p cognia-bootstrap-agent --bin cognia-bootstrap
+RUN /usr/bin/time -v cargo build --release --locked --timings -p cognia-bootstrap-agent --bin cognia-bootstrap
 # The Brain layout ships the native helpers the CLI refuses to run without
 # (`NATIVE_HOSTS` in scripts/build/ensure-native-hosts.mjs): the external-agent
 # launcher, the sandbox exec shim and the task-workspace worker. Build them in
 # the Rust stage and pass the artifacts to brain-builder instead of installing
 # a second Rust toolchain in the Node stage. The first two live in the
 # Tauri-free `cognia-exec-sandbox` (ADR-0196), not the UI-automation crate.
-RUN cargo build --release --locked -p cognia-exec-sandbox \
+RUN /usr/bin/time -v cargo build --release --locked --timings -p cognia-exec-sandbox \
       --bin cognia-external-agent-launcher --bin cognia-sandbox-exec \
-    && cargo build --release --locked -p cognia-task-workspace --bin cognia-task-workspace-worker
+    && /usr/bin/time -v cargo build --release --locked --timings -p cognia-task-workspace --bin cognia-task-workspace-worker
+
+# Export diagnostics without adding compiler artifacts to either runtime image.
+FROM scratch AS build-timings
+COPY --from=builder /work/target/cargo-timings/ /
 
 # PR CI target: type/borrow-check the whole graph without codegen or linking.
 FROM deps AS check

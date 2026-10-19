@@ -263,8 +263,8 @@ async function signalingSubscribe(room, role, challenge) {
 async function signalingRelay() {
   const a = signalingWs("A")
   const b = signalingWs("B")
-  await a.open()
-  await b.open()
+  // Attach both listeners before either connection can finish opening.
+  await Promise.all([a.open(), b.open()])
   const [aChallenge, bChallenge, room] = await Promise.all([a.next(), b.next(), signalingRoom()])
   check(aChallenge?.kind === "challenge", "A received challenge")
   check(bChallenge?.kind === "challenge", "B received challenge")
@@ -1395,6 +1395,7 @@ export {
   pairDevice,
   rpc,
   SERVER_URL,
+  signalingRelay,
   waitForServerHealthz,
 }
 
