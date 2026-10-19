@@ -258,60 +258,7 @@ pub struct ProxyHttpRequestInput {
     pub block_private: Option<bool>,
 }
 
-/// True when the URL's host is a private / loopback / link-local / reserved
-/// address (or `localhost`) that a guarded fetch must refuse. Unparseable URLs
-/// and unresolved hostnames are treated as *not* private here — the caller's
-/// primary (TS) guard already rejects bad URLs; this is only a backstop against
-/// the fixed IP ranges. Mirrors `lib/web/fetch-guard.ts`.
-///
-/// Shared with `stream.rs` so the buffered and streaming bridges cannot drift
-/// into two different definitions of "private".
-pub(super) fn host_is_private(url: &str) -> bool {
-    use std::net::IpAddr;
-
-    let Ok(parsed) = reqwest::Url::parse(url) else {
-        return false;
-    };
-    let Some(host) = parsed.host_str() else {
-        return true; // no host → unsafe
-    };
-    let h = host.trim_end_matches('.').to_ascii_lowercase();
-    if h == "localhost" || h.ends_with(".localhost") {
-        return true;
-    }
-    // Strip brackets from an IPv6 literal host before parsing.
-    let bare = h.trim_start_matches('[').trim_end_matches(']');
-    match bare.parse::<IpAddr>() {
-        Ok(IpAddr::V4(v4)) => ipv4_is_private(v4),
-        Ok(IpAddr::V6(v6)) => ipv6_is_private(v6),
-        Err(_) => false,
-    }
-}
-
-fn ipv4_is_private(v4: std::net::Ipv4Addr) -> bool {
-    if v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_unspecified() {
-        return true;
-    }
-    if v4.is_multicast() || v4.is_broadcast() {
-        return true;
-    }
-    let [a, b, ..] = v4.octets();
-    // 100.64.0.0/10 CGNAT (std `is_shared` is unstable) + 240.0.0.0/4 reserved.
-    (a == 100 && (64..=127).contains(&b)) || a >= 240
-}
-
-fn ipv6_is_private(v6: std::net::Ipv6Addr) -> bool {
-    if v6.is_loopback() || v6.is_unspecified() || v6.is_multicast() {
-        return true;
-    }
-    // IPv4-mapped / -compatible — defer to the embedded IPv4 range check.
-    if let Some(v4) = v6.to_ipv4() {
-        return ipv4_is_private(v4);
-    }
-    let first = v6.segments()[0];
-    // fc00::/7 unique-local + fe80::/10 link-local.
-    (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
-}
+pub(super) use cognia_net::guarded_http::host_is_private;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -351,19 +298,17 @@ pub async fn proxy_http_request(
     use futures_util::StreamExt as _;
 
     let timeout = Duration::from_millis(input.timeout_ms.unwrap_or(30_000));
-    let redirect = match input.redirect.as_deref().unwrap_or("follow") {
-        "follow" => reqwest::redirect::Policy::limited(10),
-        "manual" => reqwest::redirect::Policy::none(),
-        "error" => reqwest::redirect::Policy::custom(|attempt| attempt.error("redirect blocked")),
-        value => return Err(format!("invalid redirect mode: {value}")),
-    };
-    let (builder, _route) = super::apply_reqwest_policy(
-        reqwest::Client::builder()
+    let make_builder = |url: &str| {
+        let builder = reqwest::Client::builder()
             .timeout(timeout)
-            .redirect(redirect),
-        &input.url,
-    )
-    .map_err(|error| serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))?;
+            .redirect(cognia_net::guarded_http::redirect_policy(
+                input.redirect.as_deref(),
+            )?);
+        super::apply_reqwest_policy(builder, url)
+            .map(|(builder, _route)| builder)
+            .map_err(|error| serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))
+    };
+    let builder = make_builder(&input.url)?;
     let client = builder
         .build()
         .map_err(|e| format!("client build failed: {e}"))?;
@@ -398,11 +343,15 @@ pub async fn proxy_http_request(
 
     let (generation, cancelled) = proxy_http_cancellations().register(&input.request_id);
     let request_id = input.request_id.clone();
-    let operation = async move {
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| format!("request failed: {}", e.without_url()))?;
+    let operation = async {
+        let resp = cognia_net::guarded_http::send(
+            req,
+            input.block_private,
+            input.redirect.as_deref(),
+            make_builder,
+            Some(timeout),
+        )
+        .await?;
         if resp
             .content_length()
             .is_some_and(|length| length > MAX_PROXY_HTTP_BODY_BYTES as u64)
@@ -432,7 +381,16 @@ pub async fn proxy_http_request(
     };
 
     let result = tokio::select! {
-        result = operation => result,
+        result = async {
+            if input.block_private == Some(true) {
+                // Bound DNS, every redirect and the body by the original budget.
+                tokio::time::timeout(timeout, operation)
+                    .await
+                    .map_err(|_| "request failed: operation timed out".to_string())?
+            } else {
+                operation.await
+            }
+        } => result,
         _ = cancelled => Err("request cancelled".to_string()),
     };
     proxy_http_cancellations().finish(&request_id, generation);
@@ -591,19 +549,27 @@ mod tests {
 
     #[tokio::test]
     async fn proxy_http_request_blocks_private_host_when_guarded() {
-        let res = proxy_http_request(ProxyHttpRequestInput {
-            request_id: "blocked-private".into(),
-            url: "http://169.254.169.254/latest/meta-data/".to_string(),
-            method: None,
-            body_base64: None,
-            headers: None,
-            timeout_ms: Some(1_000),
-            redirect: None,
-            block_private: Some(true),
-        })
-        .await;
-        assert!(res.is_err());
-        assert!(res.unwrap_err().contains("private/loopback"));
+        for url in [
+            "http://169.254.169.254/latest/meta-data/",
+            "http://localhost/",
+            "http://[::ffff:127.0.0.1]/",
+        ] {
+            let request_id = format!("blocked-private-{url}");
+            let error = proxy_http_request(ProxyHttpRequestInput {
+                request_id: request_id.clone(),
+                url: url.into(),
+                method: None,
+                body_base64: None,
+                headers: None,
+                timeout_ms: Some(1_000),
+                redirect: None,
+                block_private: Some(true),
+            })
+            .await
+            .unwrap_err();
+            assert!(error.starts_with("refusing to fetch a private/loopback address"));
+            assert!(!proxy_http_cancel(request_id));
+        }
     }
 
     #[test]
