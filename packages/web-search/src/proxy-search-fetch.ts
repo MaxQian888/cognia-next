@@ -12,6 +12,8 @@
 
 import { log } from "./log"
 import { webSearchFetch } from "./runtime-adapters"
+import { limitResponseBody } from "./bounded-response"
+import { RESPONSE_BYTE_CEILING } from "./operation-policy"
 
 /**
  * Search-specific fetch. Resolves the installed transport per call: providers
@@ -19,7 +21,10 @@ import { webSearchFetch } from "./runtime-adapters"
  * runs, so binding the transport once at import would pin the inert default.
  */
 export async function searchFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return webSearchFetch(input, init)
+  // Every provider body is read under the shared decoded-byte ceiling, so a
+  // runaway endpoint (a self-hosted SearXNG included) cannot be buffered,
+  // parsed or cached whole.
+  return limitResponseBody(await webSearchFetch(input, init), RESPONSE_BYTE_CEILING)
 }
 
 /**

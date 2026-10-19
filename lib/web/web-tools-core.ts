@@ -30,6 +30,7 @@ import {
   type OperationAdmission,
 } from "@cognia/web-search/operation-policy"
 import { isSearchCapabilityError } from "@cognia/web-search/search-type-router"
+import { SearchDomainPolicyError } from "@cognia/web-search/search-service"
 import { hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
 import type { FetchCacheLike } from "@/lib/web/fetch-cache"
 import { FetchTargetBlockedError } from "@/lib/web/fetch-guard"
@@ -243,7 +244,9 @@ export interface WebSearchDeps {
  */
 function executionFailureCode(err: unknown): PluginHostToolErrorCode {
   if (err instanceof FetchTargetBlockedError) return "blocked"
-  if (isSearchCapabilityError(err)) return "invalid-arguments"
+  if (isSearchCapabilityError(err) || err instanceof SearchDomainPolicyError) {
+    return "invalid-arguments"
+  }
   return "execution-failed"
 }
 
@@ -424,6 +427,7 @@ export async function webSearch(args: WebSearchArgs, deps: WebSearchDeps = {}): 
       code: executionFailureCode(err),
       error: err instanceof Error ? err.message : String(err),
       ...(isSearchCapabilityError(err) ? { reason: err.reason } : {}),
+      ...(err instanceof SearchDomainPolicyError ? { reason: "domain-policy-conflict" } : {}),
     }
   }
 }

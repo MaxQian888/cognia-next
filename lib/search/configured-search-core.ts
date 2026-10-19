@@ -27,9 +27,12 @@ import {
 } from "@cognia/web-search/search-constants"
 import { optimizeSearchQuery } from "@cognia/web-search/search-query-optimizer"
 import {
+  applyEnforcedPolicy,
   filterResponseByDomainPolicy,
   search,
+  SearchDomainPolicyError,
   stripUndefined,
+  type EnforcedSearchPolicy,
   type UnifiedSearchOptions,
 } from "@cognia/web-search/search-service"
 import { applySourceVerificationPolicy } from "@cognia/web-search/source-verification"
@@ -147,8 +150,10 @@ function constrainCallerOptions(
     const narrowed = overrides.includeDomains
       .map(normalizeSearchDomain)
       .filter((d): d is string => d !== null && domainWithin(d, hostInclude))
-    // Nothing the caller named is inside the host's sources: keep the host's.
-    constrained.includeDomains = narrowed.length > 0 ? narrowed : hostInclude
+    // Nothing the caller named is inside the host's sources: the request
+    // cannot be served without widening one side, so it fails before I/O.
+    if (narrowed.length === 0) throw new SearchDomainPolicyError()
+    constrained.includeDomains = narrowed
   }
   if (overrides.excludeDomains && host.excludeDomains?.length) {
     constrained.excludeDomains = [...new Set([...host.excludeDomains, ...overrides.excludeDomains])]
@@ -254,8 +259,26 @@ export async function searchWithSettings(
   // `search()`), NOT the call-time spread: a provider's own `defaultOptions`
   // must still beat them, and only the remaining `...overrides` fields count
   // as caller intent.
+  const assertStillCurrent = () => {
+    const callerSignal = request.signal ?? request.options?.signal
+    if (callerSignal?.aborted) {
+      throw callerSignal.reason instanceof Error && isAbortLike(callerSignal.reason)
+        ? callerSignal.reason
+        : new DOMException("Aborted", "AbortError")
+    }
+    if (request.activeScope && request.activeScope() !== request.scope) {
+      throw new SearchScopeChangedError()
+    }
+  }
   const baseOptions = defaultSearchOptions(settings)
   const overrides = constrainCallerOptions(request.options ?? {}, baseOptions)
+  // The same host policy is re-applied inside `search()` after each
+  // provider's own defaults merge, so no lower rung can weaken it.
+  const enforced: EnforcedSearchPolicy = {
+    ...(baseOptions.safeSearch === "strict" ? { safeSearch: "strict" as const } : {}),
+    ...(baseOptions.includeDomains?.length ? { includeDomains: baseOptions.includeDomains } : {}),
+    ...(baseOptions.excludeDomains?.length ? { excludeDomains: baseOptions.excludeDomains } : {}),
+  }
   const preferredProviders = overrides.preferredProviders ?? selectedProviderIds(settings)
   const provider =
     overrides.provider ??
@@ -279,6 +302,7 @@ export async function searchWithSettings(
     maxRetries: overrides.maxRetries ?? settings?.searchMaxRetries,
     preferredProviders,
     baseOptions,
+    enforced,
     ...(request.signal ? { abortSignal: request.signal } : {}),
     // Last, so a caller's own options can never route a generating search
     // around the ledger while the surface is on.
@@ -325,18 +349,28 @@ export async function searchWithSettings(
     generate: _generate,
     providerSettings: _providerSettings,
     baseOptions: _baseOptions,
+    enforced: _enforced,
     ...keyableOptions
   } = searchOptions
-  const effective: SearchOptions = {
-    ...baseOptions,
-    ...pinnedDefaults,
-    ...stripUndefined(keyableOptions),
-  }
+  const effective: SearchOptions = applyEnforcedPolicy(
+    {
+      ...baseOptions,
+      ...pinnedDefaults,
+      ...stripUndefined(keyableOptions),
+    },
+    enforced,
+    { callerIncludeDomains: Boolean(overrides.includeDomains?.length) }
+  )
   const cacheKeyOptions: SearchCacheKeyOptions = {
     ...effective,
     providerDefaults,
     safeSearchRequired: isSafeSearchMandatory(effective) || undefined,
-    allowFallback: searchOptions.allowFallback === false ? false : undefined,
+    // The resolved fallback policy (per-call pin OR the host switch): an entry
+    // produced by a fallback provider must not answer once fallback is off.
+    allowFallback:
+      searchOptions.allowFallback === false || searchOptions.fallbackEnabled === false
+        ? false
+        : undefined,
     scope: request.scope,
     policyRevision: searchPolicyRevision(
       settings && overrides.providerSettings
@@ -352,6 +386,8 @@ export async function searchWithSettings(
       ...(settings?.searchCacheTTL ? { defaultTTL: settings.searchCacheTTL } : {}),
       ...(settings?.searchCacheMaxEntries ? { maxSize: settings.searchCacheMaxEntries } : {}),
     })
+    // A cancelled or out-of-scope request publishes nothing, cached or not.
+    assertStillCurrent()
     const cached = cache.get(query, provider, cacheKeyOptions)
     if (cached) {
       const hit = applyResultPolicy(cached, settings, effective)
@@ -362,15 +398,7 @@ export async function searchWithSettings(
   const response = await search(query, searchOptions)
   // Final authority check: a cancelled request publishes nothing and writes
   // nothing, and a request that outlived its scope is discarded.
-  const callerSignal = request.signal ?? overrides.signal
-  if (callerSignal?.aborted) {
-    throw callerSignal.reason instanceof Error && isAbortLike(callerSignal.reason)
-      ? callerSignal.reason
-      : new DOMException("Aborted", "AbortError")
-  }
-  if (request.activeScope && request.activeScope() !== request.scope) {
-    throw new SearchScopeChangedError()
-  }
+  assertStillCurrent()
   if (cacheable) cache.set(query, response, provider, cacheKeyOptions)
   return applyResultPolicy(response, settings, effective)
 }

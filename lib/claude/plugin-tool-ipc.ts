@@ -544,22 +544,34 @@ export async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
   if (webToolDepsOverride) return webToolDepsOverride()
   try {
     const { useSettingsStore } = await import("@/stores/settings")
-    const [{ readerPolicyFromSettings }, { currentWebScope }, { getFetchCache }] =
-      await Promise.all([
-        import("@/lib/web/reader/reader-settings"),
-        import("@/lib/web/web-scope"),
-        import("@/lib/web/fetch-cache"),
-      ])
+    const [
+      { readerPolicyFromSettings },
+      { currentWebScope, webAuthorityRevision },
+      { getFetchCache },
+    ] = await Promise.all([
+      import("@/lib/web/reader/reader-settings"),
+      import("@/lib/web/web-scope"),
+      import("@/lib/web/fetch-cache"),
+    ])
     // Capture settings and authority together, after lazy imports can yield to
     // an account switch. Never bind departing credentials to the new scope.
     const s = useSettingsStore.getState().settings
     const scope = currentWebScope()
+    // The operation runs under the settings it was planned with. If the user
+    // turns web tools, a reader or a provider off — or changes a key — while
+    // it is in flight, the next outbound stage, cache hit or publish sees a
+    // different authority and stops.
+    const plannedAuthority = webAuthorityRevision(s)
+    const activeScope = () =>
+      webAuthorityRevision(useSettingsStore.getState().settings) === plannedAuthority
+        ? currentWebScope()
+        : `${currentWebScope()}\u0000revoked`
     const deps: WebToolRunDeps = {
       enabled: s?.webTools?.enabled ?? true,
       readerPolicy: readerPolicyFromSettings(s),
       credentialFor: (id) => s?.searchProviders?.[id]?.apiKey?.trim() || undefined,
       scope,
-      activeScope: currentWebScope,
+      activeScope,
       cache: getFetchCache(),
       // The plain browser cannot reach these readers across arbitrary origins.
       // Vendor APIs remain eligible; their own transport reports CORS failures.
@@ -585,7 +597,7 @@ export async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
           options,
           signal: options.signal,
           scope: deps.scope,
-          activeScope: currentWebScope,
+          activeScope,
           useCache: s?.searchCacheEnabled !== false,
         })
     }

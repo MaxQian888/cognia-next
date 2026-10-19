@@ -1022,6 +1022,28 @@ describe("independent reader policy actions", () => {
     })
   })
 
+  it("keeps the legacy always-distill switch and the Reader distillation in step", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        webTools: { enabled: true },
+        webReader: { ...freshInstallWebReader(), distillation: "off" },
+      }),
+    })
+    await useSettingsStore.getState().setWebToolsAlwaysDistill(true)
+    expect(useSettingsStore.getState().settings?.webReader).toMatchObject({
+      distillation: "required",
+    })
+    expect(useSettingsStore.getState().settings?.webTools?.alwaysDistill).toBe(true)
+    await useSettingsStore.getState().setWebToolsAlwaysDistill(false)
+    expect(useSettingsStore.getState().settings?.webReader).toMatchObject({ distillation: "off" })
+    // Turning the switch off never overrides a deliberately chosen best-effort.
+    await useSettingsStore.getState().setWebReaderDistillation("best-effort")
+    await useSettingsStore.getState().setWebToolsAlwaysDistill(false)
+    expect(useSettingsStore.getState().settings?.webReader).toMatchObject({
+      distillation: "best-effort",
+    })
+  })
+
   it("updates per-operation Cognia preferences independently", async () => {
     await useSettingsStore.getState().setWebToolsPreferCogniaSearch(true)
     await useSettingsStore.getState().setWebToolsPreferCogniaFetch(false)
@@ -1077,6 +1099,7 @@ describe("setWebToolsAllowPrivateHosts / setWebToolsAlwaysDistill", () => {
     })
     expect(dbSettings.saveSettings).toHaveBeenCalledWith({
       webTools: { enabled: true, nativeOnAnthropic: true, alwaysDistill: true },
+      webReader: expect.objectContaining({ distillation: "required" }),
     })
     expect(useSettingsStore.getState().settings?.webTools?.alwaysDistill).toBe(true)
   })

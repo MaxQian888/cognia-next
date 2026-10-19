@@ -6565,36 +6565,24 @@ describe("web access resolution (lib/chat/web-access.ts)", () => {
     expect(opts.allowedTools).not.toContain("WebSearch")
   })
 
-  it.each([
-    [undefined, false],
-    [{ level: "unsupported" }, true],
-    [{ level: "native" }, false],
-    [{ level: "unknown" }, true],
-  ])(
-    "respects an external fetch capability row %j with search compatibility",
-    async (fetch, cogniaFetch) => {
-      const { useAgentRuntimeStore } = jest.requireMock("@/stores/agent/agent-runtime-store")
-      const { getExternalAgentManager } = jest.requireMock("@/lib/ai/agent/external/manager")
-      useAgentRuntimeStore.getState.mockReturnValue({
-        runtime: "external",
-        externalAgentId: "agent",
-      })
-      getExternalAgentManager.mockReturnValue({
-        getAgentCapabilityProfile: () => ({
-          effective: {
-            "web.search": { level: "native" },
-            ...(fetch ? { "web.fetch": fetch } : {}),
-          },
-        }),
-      })
-      const opts = await resolveSendOptions({
-        character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
-      })
-      expect(webNames(opts)).not.toContain("web_search")
-      expect(webNames(opts).includes("web_fetch")).toBe(cogniaFetch)
-      expect(opts.allowedTools ?? []).not.toContain("WebSearch")
-    }
-  )
+  it("keeps Cognia's Reader for an external agent that only declares native search", async () => {
+    const { useAgentRuntimeStore } = jest.requireMock("@/stores/agent/agent-runtime-store")
+    const { getExternalAgentManager } = jest.requireMock("@/lib/ai/agent/external/manager")
+    useAgentRuntimeStore.getState.mockReturnValue({ runtime: "external", externalAgentId: "agent" })
+    getExternalAgentManager.mockReturnValue({
+      // A `web.fetch` row is not part of the capability vocabulary; it is
+      // ignored rather than read as evidence of a native fetch.
+      getAgentCapabilityProfile: () => ({
+        effective: { "web.search": { level: "native" }, "web.fetch": { level: "native" } },
+      }),
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+    })
+    expect(webNames(opts)).not.toContain("web_search")
+    expect(webNames(opts)).toContain("web_fetch")
+    expect(opts.allowedTools ?? []).not.toContain("WebSearch")
+  })
 
   it("discloses required distillation and only browser-reachable readers", async () => {
     const opts = await resolveSendOptions({
@@ -6621,14 +6609,12 @@ describe("web access resolution (lib/chat/web-access.ts)", () => {
     expect(fetch?.description).not.toContain("Enabled readers: direct, platform")
   })
 
-  it("keeps external native fetch when that runtime cannot search", async () => {
+  it("gives an external agent without native search both Cognia tools", async () => {
     const { useAgentRuntimeStore } = jest.requireMock("@/stores/agent/agent-runtime-store")
     const { getExternalAgentManager } = jest.requireMock("@/lib/ai/agent/external/manager")
     useAgentRuntimeStore.getState.mockReturnValue({ runtime: "external", externalAgentId: "agent" })
     getExternalAgentManager.mockReturnValue({
-      getAgentCapabilityProfile: () => ({
-        effective: { "web.search": { level: "unsupported" }, "web.fetch": { level: "native" } },
-      }),
+      getAgentCapabilityProfile: () => ({ effective: { "web.search": { level: "unsupported" } } }),
     })
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
@@ -6637,10 +6623,10 @@ describe("web access resolution (lib/chat/web-access.ts)", () => {
       } as AppSettings,
     })
     expect(webNames(opts)).toContain("web_search")
-    expect(webNames(opts)).not.toContain("web_fetch")
+    expect(webNames(opts)).toContain("web_fetch")
   })
 
-  it("uses the external fetch capability even when the selected provider is Anthropic", async () => {
+  it("routes an external agent's page reads through Cognia even when the selected provider is Anthropic", async () => {
     const { useAgentRuntimeStore } = jest.requireMock("@/stores/agent/agent-runtime-store")
     const { getExternalAgentManager } = jest.requireMock("@/lib/ai/agent/external/manager")
     useAgentRuntimeStore.getState.mockReturnValue({ runtime: "external", externalAgentId: "agent" })

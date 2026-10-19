@@ -4,7 +4,8 @@ import {
 } from "@/lib/runtime/runtime-target-context"
 import { getSearchCache } from "@cognia/web-search/search-cache"
 import { fetchCacheKey, getFetchCache } from "./fetch-cache"
-import { currentWebScope, onWebScopeChange } from "./web-scope"
+import type { AppSettings } from "@cognia/agent-config-types"
+import { currentWebScope, onWebScopeChange, webAuthorityRevision } from "./web-scope"
 
 afterEach(() => {
   clearActiveRuntimeTargetContext()
@@ -60,4 +61,54 @@ it("does not invalidate caches when the runtime identity is unchanged", () => {
   setActiveRuntimeTargetContext("acct_alpha", "local-host")
   expect(currentWebScope()).toBe(scope)
   expect(getFetchCache().get(key)).toBe("document")
+})
+
+describe("webAuthorityRevision", () => {
+  const base = {
+    webTools: { enabled: true },
+    searchProviders: {
+      tavily: { providerId: "tavily", apiKey: "tvly-secret", enabled: true, priority: 1 },
+    },
+  } as unknown as AppSettings
+
+  it("is stable for the same settings and never contains a raw key", () => {
+    expect(webAuthorityRevision(base)).toBe(webAuthorityRevision({ ...base }))
+    expect(webAuthorityRevision(base)).not.toContain("tvly-secret")
+  })
+
+  it("changes when web tools, a reader, a provider or a key change", () => {
+    const before = webAuthorityRevision(base)
+    expect(webAuthorityRevision({ ...base, webTools: { enabled: false } })).not.toBe(before)
+    expect(
+      webAuthorityRevision({ ...base, webTools: { enabled: true, allowPrivateHosts: true } })
+    ).not.toBe(before)
+    expect(
+      webAuthorityRevision({
+        ...base,
+        searchProviders: {
+          tavily: { providerId: "tavily", apiKey: "rotated", enabled: true, priority: 1 },
+        },
+      } as unknown as AppSettings)
+    ).not.toBe(before)
+    expect(
+      webAuthorityRevision({
+        ...base,
+        searchProviders: {
+          tavily: { providerId: "tavily", apiKey: "tvly-secret", enabled: false, priority: 1 },
+        },
+      } as unknown as AppSettings)
+    ).not.toBe(before)
+    expect(
+      webAuthorityRevision({
+        ...base,
+        webReader: {
+          version: 1,
+          defaultReader: "auto",
+          readers: {},
+          externalFallback: "off",
+          distillation: "required",
+        },
+      } as unknown as AppSettings)
+    ).not.toBe(before)
+  })
 })

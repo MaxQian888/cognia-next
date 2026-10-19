@@ -56,6 +56,13 @@ describe("proxy-search-fetch", () => {
       expect(resp.status).toBe(200)
       expect(fetchMock).toHaveBeenCalledWith("https://example.com", { method: "GET" })
     })
+
+    it("refuses a provider body declared larger than the shared ceiling", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response("{}", { headers: { "content-length": String(64 * 1024 * 1024) } })
+      )
+      await expect(searchFetch("https://example.com")).rejects.toThrow(/ceiling/)
+    })
   })
 
   describe("createSearchProviderFetch", () => {

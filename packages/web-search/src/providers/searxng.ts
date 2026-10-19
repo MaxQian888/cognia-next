@@ -91,12 +91,16 @@ export async function searchWithSearXNG(
 
   const requestUrl = `${endpoint.baseUrl}/search?${params.toString()}`
   const startTime = Date.now()
-  const response = await searxngFetch(requestUrl, {
+  // Without the endpoint grant, ask the host transport to refuse private
+  // targets too (the desktop proxy enforces it natively).
+  const init: RequestInit & { blockPrivateHosts?: boolean } = {
     method: "GET",
     signal: options.signal,
     redirect: "error",
     headers: { Accept: "application/json" },
-  })
+    ...(settings.allowPrivateEndpoint === true ? {} : { blockPrivateHosts: true }),
+  }
+  const response = await searxngFetch(requestUrl, init)
   // Transports that follow redirects regardless report the final URL; refuse
   // a response that came from a different origin than the configured one.
   if (response.url && new URL(response.url).origin !== new URL(endpoint.baseUrl).origin) {

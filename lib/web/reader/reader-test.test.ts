@@ -4,7 +4,7 @@ jest.mock("./vendor-readers", () => ({
 }))
 
 import { OperationAdmission } from "@cognia/web-search/operation-policy"
-import { READER_TEST_URL, testReaderConnection } from "./reader-test"
+import { READER_TEST_URL, readerTestUrl, testReaderConnection } from "./reader-test"
 
 const page = `<html><body><p>${"Example Domain text. ".repeat(20)}</p></body></html>`
 
@@ -28,6 +28,29 @@ describe("testReaderConnection", () => {
     expect(r).toEqual({ reader: "direct", ok: true, status: 200, testedAt: 42 })
     expect(fetchImpl).toHaveBeenCalledTimes(1)
     expect(String(fetchImpl.mock.calls[0][0])).toBe(READER_TEST_URL)
+  })
+
+  it("tests origin readers on a page they actually handle", async () => {
+    expect(readerTestUrl("platform")).toMatch(/^https:\/\/www\.youtube\.com\/watch\?v=/)
+    expect(readerTestUrl("fxtwitter")).toMatch(/^https:\/\/x\.com\/.+\/status\/\d+$/)
+    expect(readerTestUrl("jina")).toBe(READER_TEST_URL)
+    const fetchImpl = jest.fn(
+      async (_input: RequestInfo | URL) =>
+        ({
+          ok: true,
+          status: 200,
+          headers: { get: () => "application/json" },
+          json: async () => ({
+            tweet: { text: "just setting up my twttr", author: { name: "jack" } },
+          }),
+          text: async () => "{}",
+        }) as unknown as Response
+    )
+    await testReaderConnection("fxtwitter", {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      admission: new OperationAdmission(),
+    })
+    expect(String(fetchImpl.mock.calls[0][0])).toContain("api.fxtwitter.com/status/20")
   })
 
   it("fails a vendor reader without a stored credential and sends nothing", async () => {

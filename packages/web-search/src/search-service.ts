@@ -10,7 +10,12 @@ import type {
   SearchProviderSettings,
   SearchResult,
 } from "./types"
-import { getEnabledProviders, isProviderConfigured, isProviderRetired } from "./types"
+import {
+  getEnabledProviders,
+  isProviderConfigured,
+  isProviderRetired,
+  SEARCH_PROVIDERS,
+} from "./types"
 import { normalizeSearchDomain } from "./search-constants"
 import { getProviderHealth } from "./provider-health"
 import { stripUndefined } from "./strip-undefined"
@@ -64,6 +69,14 @@ export interface UnifiedSearchOptions extends SearchOptions {
    */
   baseOptions?: SearchOptions
   /**
+   * Host policy that no lower rung may weaken — neither caller fields nor a
+   * provider's own `defaultOptions`. Re-applied after every merge, so it also
+   * governs eligibility, the wire request and the host-side result filter:
+   * `strict` safe search stays strict, include domains are intersected (an
+   * empty intersection fails before I/O) and exclude domains are unioned.
+   */
+  enforced?: EnforcedSearchPolicy
+  /**
    * Max EXTRA attempts per provider on a transient failure (network / 429 / 5xx),
    * beyond the first try. Each extra attempt rotates to the next key in the
    * provider's pool (when multi-key) and waits an exponential backoff. Default 2.
@@ -81,6 +94,76 @@ export interface UnifiedSearchOptions extends SearchOptions {
   maxAttempts?: number
   /** Injectable RNG for deterministic tests (random rotation / jitter). */
   random?: () => number
+}
+
+export interface EnforcedSearchPolicy {
+  safeSearch?: "strict"
+  includeDomains?: string[]
+  excludeDomains?: string[]
+}
+
+/** A request whose own domain scope lies wholly outside the host's sources. */
+export class SearchDomainPolicyError extends Error {
+  constructor() {
+    super("None of the requested domains is within the sources allowed in Settings → Search")
+    this.name = "SearchDomainPolicyError"
+  }
+}
+
+function normalizedDomains(values: string[] | undefined): string[] {
+  return (values ?? []).map(normalizeSearchDomain).filter((d): d is string => d !== null)
+}
+
+function domainWithin(domain: string, allowed: string[]): boolean {
+  return allowed.some((base) => domain === base || domain.endsWith(`.${base}`))
+}
+
+/**
+ * Re-apply host policy over an already merged option set. Pure. When the
+ * merged include domains fall wholly outside the host's include list, a
+ * caller's own request fails with {@link SearchDomainPolicyError}; a lower
+ * rung's default (a provider's `defaultOptions`) simply yields to the host's.
+ */
+export function applyEnforcedPolicy(
+  options: SearchOptions,
+  enforced: EnforcedSearchPolicy | undefined,
+  { callerIncludeDomains = true }: { callerIncludeDomains?: boolean } = {}
+): SearchOptions {
+  if (!enforced) return options
+  const out: SearchOptions = { ...options }
+  if (enforced.safeSearch === "strict") out.safeSearch = "strict"
+  const hostInclude = normalizedDomains(enforced.includeDomains)
+  if (hostInclude.length > 0) {
+    const requested = normalizedDomains(options.includeDomains)
+    if (requested.length === 0) {
+      out.includeDomains = hostInclude
+    } else {
+      const narrowed = requested.filter((d) => domainWithin(d, hostInclude))
+      if (narrowed.length === 0 && callerIncludeDomains) throw new SearchDomainPolicyError()
+      out.includeDomains = narrowed.length > 0 ? narrowed : hostInclude
+    }
+  }
+  const hostExclude = normalizedDomains(enforced.excludeDomains)
+  if (hostExclude.length > 0) {
+    out.excludeDomains = [...new Set([...hostExclude, ...(options.excludeDomains ?? [])])]
+  }
+  return out
+}
+
+/**
+ * Grounding providers (a model generates an answer over its own search) bill a
+ * generation per call. They serve a request only when the user chose them —
+ * the explicit provider or one of the selected providers — never as an
+ * automatic fallback behind an ordinary search provider.
+ */
+function isAutoFallbackCandidate(
+  config: SearchProviderSettings,
+  chosen: ReadonlySet<SearchProviderType>
+): boolean {
+  return (
+    SEARCH_PROVIDERS[config.providerId]?.integration !== "grounding" ||
+    chosen.has(config.providerId)
+  )
 }
 
 /** Default extra attempts per provider before falling through to the next one. */
@@ -107,6 +190,7 @@ export async function search(
     allowFallback,
     providerSettings,
     baseOptions,
+    enforced,
     maxRetries = DEFAULT_MAX_RETRIES,
     retryBackoffMs,
     abortSignal,
@@ -146,6 +230,11 @@ export async function search(
   } else {
     providersToTry = orderProviders(enabledProviders, preferredProviders ?? [], false)
   }
+  const chosen = new Set<SearchProviderType>([
+    ...(provider ? [provider] : []),
+    ...(preferredProviders ?? []),
+  ])
+  providersToTry = providersToTry.filter((config) => isAutoFallbackCandidate(config, chosen))
 
   // Eligibility is decided per provider against the EFFECTIVE request (host
   // defaults < provider defaults < caller fields) before any I/O. An
@@ -161,11 +250,15 @@ export async function search(
     stripUndefined(searchOptions).searchType ??
     stripUndefined(config.defaultOptions ?? {}).searchType
   const effectiveFor = (config: SearchProviderSettings): SearchOptions => {
-    const merged: SearchOptions = {
-      ...(baseOptions ?? {}),
-      ...stripUndefined(config.defaultOptions ?? {}),
-      ...stripUndefined(searchOptions),
-    }
+    const merged: SearchOptions = applyEnforcedPolicy(
+      {
+        ...(baseOptions ?? {}),
+        ...stripUndefined(config.defaultOptions ?? {}),
+        ...stripUndefined(searchOptions),
+      },
+      enforced,
+      { callerIncludeDomains: Boolean(stripUndefined(searchOptions).includeDomains?.length) }
+    )
     if (!explicitType(config) && merged.searchType && merged.searchType !== "general") {
       const probe = checkProviderEligibility(config.providerId, config, merged)
       if (probe?.reason === "unsupported-type") return { ...merged, searchType: "general" }
@@ -356,6 +449,9 @@ export function filterResponseByDomainPolicy(
   const include = hasDomainConstraint(includeDomains) ? (includeDomains ?? []) : null
   const exclude = hasDomainConstraint(excludeDomains) ? (excludeDomains ?? []) : null
   if (!include && !exclude) return response
+  // Under a hard source scope an answer with no grounding result left cannot
+  // be traced to an allowed source, so it is not returned.
+  const ungrounded = (count: number) => include !== null && count === 0 && Boolean(response.answer)
 
   const keep = (url: string) =>
     (!include || urlMatchesAnyDomain(url, include)) &&
@@ -364,22 +460,21 @@ export function filterResponseByDomainPolicy(
   const images = response.images?.filter((image) => keep(image.url))
   const removedResults = response.results.length - results.length
   const removedImages = (response.images?.length ?? 0) - (images?.length ?? 0)
-  if (removedResults === 0 && removedImages === 0) return response
+  if (removedResults === 0 && removedImages === 0 && !ungrounded(results.length)) return response
 
+  const clearAnswer = removedResults > 0 || ungrounded(results.length)
   return {
     ...response,
     // The provider synthesized `answer` from the unfiltered result set, so it
     // can cite pages this filter just removed. Keep it only when the filter
-    // removed no result; otherwise it is grounded in excluded sources.
-    answer: removedResults === 0 ? response.answer : undefined,
+    // removed no result and at least one allowed result grounds it.
+    answer: clearAnswer ? undefined : response.answer,
     results,
     images: images && images.length > 0 ? images : undefined,
     totalResults: results.length,
     diagnostics: {
       ...(response.diagnostics ?? {}),
-      ...(removedResults > 0 && response.answer
-        ? { answerCleared: "policy-filtered" as const }
-        : {}),
+      ...(clearAnswer && response.answer ? { answerCleared: "policy-filtered" as const } : {}),
       removedByPolicy: {
         results: (response.diagnostics?.removedByPolicy?.results ?? 0) + removedResults,
         images: (response.diagnostics?.removedByPolicy?.images ?? 0) + removedImages,

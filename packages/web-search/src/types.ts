@@ -747,26 +747,66 @@ export interface SearchEndpointValidation {
   isPrivate?: boolean
 }
 
-function isPrivateEndpointHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "")
-  if (host === "localhost" || host.endsWith(".localhost")) return true
-  if (host === "local" || host.endsWith(".local")) return true
-  if (host.includes(":")) {
-    // IPv6: loopback, unique-local fc00::/7, link-local fe80::/10.
-    return host === "::1" || /^f[cd][0-9a-f]{0,2}:/.test(host) || /^fe[89ab][0-9a-f]?:/.test(host)
-  }
-  const parts = host.split(".")
-  if (parts.length !== 4 || !parts.every((p) => /^\d{1,3}$/.test(p))) return false
-  const [a, b] = parts.map(Number)
+function isPrivateIPv4Octets(a: number, b: number): boolean {
   return (
     a === 10 ||
     a === 127 ||
     a === 0 ||
+    a >= 224 ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||
     (a === 100 && b >= 64 && b <= 127)
   )
+}
+
+/** Expand an IPv6 literal (WHATWG-normalized or not) into eight 16-bit groups. */
+function ipv6Groups(host: string): number[] | null {
+  let text = host
+  // A trailing dotted quad (`::ffff:1.2.3.4`) is two groups.
+  const dotted = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(text)
+  if (dotted) {
+    const o = dotted.slice(1).map(Number)
+    if (o.some((n) => n > 255)) return null
+    text = `${text.slice(0, dotted.index)}${((o[0] << 8) | o[1]).toString(16)}:${((o[2] << 8) | o[3]).toString(16)}`
+  }
+  const halves = text.split("::")
+  if (halves.length > 2) return null
+  const head = halves[0] ? halves[0].split(":") : []
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : []
+  const missing = 8 - head.length - tail.length
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null
+  const parts = [...head, ...Array(halves.length === 2 ? missing : 0).fill("0"), ...tail]
+  const groups = parts.map((part) => (/^[0-9a-f]{1,4}$/.test(part) ? parseInt(part, 16) : NaN))
+  return groups.some(Number.isNaN) ? null : groups
+}
+
+function isPrivateEndpointHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "")
+  if (host === "localhost" || host.endsWith(".localhost")) return true
+  if (host === "local" || host.endsWith(".local")) return true
+  if (host.includes(":")) {
+    const groups = ipv6Groups(host)
+    // An undecodable literal is not one that can be cleared as public.
+    if (!groups) return true
+    // `::` unspecified and `::1` loopback.
+    if (groups.slice(0, 7).every((g) => g === 0) && groups[7] <= 1) return true
+    // IPv4-mapped (`::ffff:a.b.c.d`) and IPv4-compatible (`::a.b.c.d`)
+    // literals reach the v4 network, so they answer to the v4 rules.
+    if (groups.slice(0, 5).every((g) => g === 0) && (groups[5] === 0 || groups[5] === 0xffff)) {
+      return isPrivateIPv4Octets(groups[6] >> 8, groups[6] & 0xff)
+    }
+    return (
+      (groups[0] & 0xfe00) === 0xfc00 || // fc00::/7 unique-local
+      (groups[0] & 0xffc0) === 0xfe80 || // fe80::/10 link-local
+      (groups[0] & 0xffc0) === 0xfec0 || // fec0::/10 site-local
+      (groups[0] & 0xff00) === 0xff00 // ff00::/8 multicast
+    )
+  }
+  const parts = host.split(".")
+  if (parts.length !== 4 || !parts.every((p) => /^\d{1,3}$/.test(p))) return false
+  const [a, b] = parts.map(Number)
+  return isPrivateIPv4Octets(a, b)
 }
 
 /**

@@ -150,3 +150,10 @@ it("builds query-focused extraction only with an available utility model", async
     expect.objectContaining({ abortSignal: signal })
   )
 })
+
+it("reads through the DNS-guarded transport and keeps private hosts blocked by default", () => {
+  const deps = buildCliWebToolDeps(config())
+  expect(deps.fetchImpl).toEqual(expect.any(Function))
+  expect(deps.fetchImpl).not.toBe(globalThis.fetch)
+  expect(deps.allowPrivateHosts).toBe(false)
+})

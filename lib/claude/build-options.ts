@@ -3852,24 +3852,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         return { search: false, fetch: false }
       }
       const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-      const { isCapabilityUsable } =
-        await import("@cognia/agent-config-types/external-agent-capability")
       const profile = getExternalAgentManager().getAgentCapabilityProfile(
         runtimeState.externalAgentId
       )
-      const search = externalAgentNativeWebSearch(profile)
-      // Older capability profiles only have web.search. Respect an explicit
-      // fetch row when supplied by a newer runtime without widening the wire
-      // vocabulary owned by the external-agent contract here.
-      const fetchCell = (
-        profile?.effective as
-          | Record<string, { level: Parameters<typeof isCapabilityUsable>[0] } | undefined>
-          | undefined
-      )?.["web.fetch"]
-      return {
-        search,
-        fetch: fetchCell ? isCapabilityUsable(fetchCell.level) : search,
-      }
+      // The capability vocabulary declares native web SEARCH only. With no
+      // evidence of an independent native fetch, page reading stays on
+      // Cognia's Reader (and its policy) rather than being assumed native.
+      return { search: externalAgentNativeWebSearch(profile), fetch: false }
     } catch {
       return { search: false, fetch: false }
     }

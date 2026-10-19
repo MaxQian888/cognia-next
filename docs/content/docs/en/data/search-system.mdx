@@ -141,6 +141,8 @@ Core public facades:
 
 Failure fallback covers provider errors and responses that cannot satisfy the hard domain constraint. Desktop and web callers should use `searchWithAppSettings()` instead of assembling these options directly; it also ensures cached hits do not create a second provider request or usage charge.
 
+Host policy is re-applied after every merge, so neither a caller nor a provider's own `defaultOptions` can weaken it: strict safe search stays strict, include domains are intersected with the host's sources (a caller request wholly outside them fails before I/O with `SearchDomainPolicyError`; a provider default simply yields), and exclude domains are unioned. Under a hard source scope an answer with no allowed grounding result is cleared. Grounding providers (`google-ai`) bill a model generation per call, so they run only when chosen — the explicit or selected provider — and never as an automatic fallback. The cache key carries the resolved fallback policy, and a cancelled or out-of-scope request is never served a cache hit. Every provider body is read under the shared 8 MiB decoded-byte ceiling.
+
 `search()` resolves each attempt's options by precedence — host `baseOptions` < the provider's `defaultOptions` < explicit call-time fields (explicit `undefined` placeholders are stripped so they never clobber a lower rung) — and consults the shared in-memory circuit breaker (`provider-health.ts`): a provider past its consecutive-failure threshold is parked at the back of the try-order until a cooldown elapses, then a single half-open probe may close it. Persisted tuning (`searchProviderHealth` — enabled / failureThreshold / cooldownMs, clamped by `SEARCH_PROVIDER_HEALTH_LIMITS`) is pushed into the breaker on every configured call, and the cache key digests every candidate provider's `defaultOptions`, so editing an override busts the entries it shaped.
 
 ## Query Optimization
@@ -237,6 +239,8 @@ Tools settings choose **Prefer Cognia search** and **Prefer Cognia fetch** indep
 
 Remote readers disclose `Pages you read are sent to <vendor>`. No second key field is created. Missing vendor keys make the Reader unavailable and link back to that Search provider card. Priority up/down buttons order remote fallbacks and are keyboard accessible; a default reader can be `auto` or a specific reader. Auto tries applicable original-site/platform and direct reading, then enabled configured remote readers only when external fallback is permitted. Strict pins do not silently switch readers. Private targets, raw/non-GET requests, bodies and caller target headers use the guarded direct path rather than cloud delegation; authentication/paywall failures are not a reason to bypass access controls through another reader.
 
+Direct reads follow redirects one hop at a time, re-checking each hop against the private-host guard and dropping `Authorization`/`Cookie` on a cross-origin hop; a transport that can only follow redirects itself has its final URL checked before the body is used. The CLI additionally connects through a DNS-guarded transport that refuses a public name resolving to a private address. A missing or auth-walled file (401/404 served as a PDF) and a short HTTP-200 sign-in or subscription page are terminal, never handed to an external reader. Each origin reader serves only its own sites (`platform` never reaches FxTwitter for an X link). Reader connection tests use a page the reader handles: YouTube for `platform`, an X post for `fxtwitter`, `example.com` otherwise. A read stops before its next outbound stage, cache hit or publish when the account changes or the user changes the web settings it was planned under. The legacy **Always distill** switch and the Reader's distillation mode are one setting.
+
 ### Installation and upgrade policy
 
 - Fresh installation: direct and platform on; every remote reader off; `externalFallback: off`; `distillation: off`.
@@ -256,7 +260,7 @@ An agent cannot turn off required distillation. Distillation uses the existing m
 
 ### Limits, host restrictions and tests
 
-`packages/web-search/src/operation-policy.ts` defines 30 seconds total Search, 60 seconds total read, 20 seconds per Reader attempt, and at most 3 adapter attempts including retries and fallback. Each scope admits 2 concurrent Search operations and 2 concurrent reads, with up to 8 pending per operation kind. Reader cache TTL is 5 minutes; cache reuse still obeys the current policy and scope.
+`packages/web-search/src/operation-policy.ts` defines 30 seconds total Search, 60 seconds total read, 20 seconds per Reader attempt, and at most 3 adapter attempts including retries and fallback. Each scope admits 2 concurrent Search operations and 2 concurrent reads, with up to 8 pending per operation kind. Reader cache TTL is 5 minutes; cache reuse still obeys the current policy and scope. Time spent queued for a slot counts against the same read budget.
 
 In a plain browser, Jina, FxTwitter and original-site platform reading are unreachable because of CORS; direct and vendor endpoints remain subject to host transport/CORS constraints. Tauri and CLI use their own transport paths. On Capacitor, cancelling stops waiting and suppresses late results, but the native request may still complete; cancellation does not recall vendor work or guarantee a billing reversal.
 

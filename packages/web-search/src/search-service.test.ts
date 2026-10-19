@@ -587,6 +587,88 @@ describe("search() eligibility and policy", () => {
     expect(routeSearchMock).not.toHaveBeenCalled()
   })
 
+  it("never lets a provider's own defaults weaken host-enforced policy", async () => {
+    const settings = {
+      tavily: makeSettings("tavily", {
+        defaultOptions: {
+          safeSearch: "off",
+          excludeDomains: [],
+          includeDomains: ["other.example"],
+        },
+      }),
+    }
+    routeSearchMock.mockResolvedValueOnce(ok("tavily"))
+    await search("q", {
+      providerSettings: settings,
+      enforced: {
+        safeSearch: "strict",
+        includeDomains: ["allowed.example"],
+        excludeDomains: ["spam.example"],
+      },
+    })
+    expect(routeSearchMock.mock.calls[0][3]).toMatchObject({
+      safeSearch: "strict",
+      includeDomains: ["allowed.example"],
+      excludeDomains: ["spam.example"],
+    })
+  })
+
+  it("re-applies enforced policy over provider defaults on the wire request", async () => {
+    const settings = {
+      tavily: makeSettings("tavily", { defaultOptions: { safeSearch: "off", excludeDomains: [] } }),
+    }
+    routeSearchMock.mockResolvedValueOnce(ok("tavily"))
+    await search("q", {
+      providerSettings: settings,
+      enforced: { safeSearch: "strict", excludeDomains: ["spam.example"] },
+    })
+    expect(routeSearchMock.mock.calls[0][3]).toMatchObject({
+      safeSearch: "strict",
+      excludeDomains: ["spam.example"],
+    })
+  })
+
+  it("fails before I/O when the requested domains lie outside the host's sources", async () => {
+    const settings = { tavily: makeSettings("tavily") }
+    await expect(
+      search("q", {
+        providerSettings: settings,
+        includeDomains: ["other.example"],
+        enforced: { includeDomains: ["allowed.example"] },
+      })
+    ).rejects.toMatchObject({ name: "SearchDomainPolicyError" })
+    expect(routeSearchMock).not.toHaveBeenCalled()
+  })
+
+  it("never falls back to a grounding provider the user did not choose", async () => {
+    const settings = {
+      tavily: makeSettings("tavily", { priority: 1 }),
+      "google-ai": makeSettings("google-ai", { priority: 2 }),
+    }
+    routeSearchMock.mockRejectedValueOnce(Object.assign(new Error("bad"), { status: 400 }))
+    await expect(search("q", { provider: "tavily", providerSettings: settings })).rejects.toThrow()
+    expect(routeSearchMock.mock.calls.map((c) => c[1])).toEqual(["tavily"])
+  })
+
+  it("runs a grounding provider the user chose", async () => {
+    const settings = { "google-ai": makeSettings("google-ai") }
+    routeSearchMock.mockResolvedValueOnce(ok("google-ai"))
+    const r = await search("q", { provider: "google-ai", providerSettings: settings })
+    expect(r.provider).toBe("google-ai")
+  })
+
+  it("clears an answer with no allowed grounding result under a hard source scope", async () => {
+    const settings = { tavily: makeSettings("tavily") }
+    routeSearchMock.mockResolvedValueOnce({ ...ok("tavily"), results: [], answer: "unsourced" })
+    const r = await search("q", {
+      providerSettings: settings,
+      fallbackEnabled: false,
+      enforced: { includeDomains: ["allowed.example"] },
+    })
+    expect(r.answer).toBeUndefined()
+    expect(r.diagnostics?.answerCleared).toBe("policy-filtered")
+  })
+
   it("makes providers that cannot enforce strict safe search ineligible", async () => {
     const settings = {
       exa: makeSettings("exa", { priority: 1 }),

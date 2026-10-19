@@ -40,20 +40,52 @@ describe("composeDeepSeekQuery", () => {
         },
         now
       )
-    ).toBe("rust async site:docs.rs -site:spam.io after:2026-10-12 lang:en")
+    ).toEqual({
+      query: "rust async site:docs.rs -site:spam.io after:2026-10-12 lang:en",
+      dropped: [],
+    })
   })
 
   it("leaves several include domains to the host filter", () => {
-    expect(composeDeepSeekQuery("q", { includeDomains: ["a.com", "b.com"] }, now)).toBe("q")
+    expect(composeDeepSeekQuery("q", { includeDomains: ["a.com", "b.com"] }, now).query).toBe("q")
   })
 
-  it("drops operators that would exceed the 128-character bound, never the query", () => {
+  it("drops operators that would exceed the 128-character bound, never the query, and reports them", () => {
     const query = "x".repeat(120)
-    expect(composeDeepSeekQuery(query, { excludeDomains: ["example.com"] }, now)).toBe(query)
+    expect(
+      composeDeepSeekQuery(
+        query,
+        { excludeDomains: ["example.com"], recency: "day", language: "en" },
+        now
+      )
+    ).toEqual({ query: `${query} lang:en`, dropped: ["domains", "recency"] })
+  })
+
+  it("refuses operator values that are not domains or language tags (they bypass the query gate)", () => {
+    expect(() => composeDeepSeekQuery("q", { language: "en alice@example.com" }, now)).toThrow(
+      /language/
+    )
+    expect(() => composeDeepSeekQuery("q", { excludeDomains: ["a.com bob@x.io"] }, now)).toThrow(
+      /domain/
+    )
   })
 })
 
 describe("searchWithDeepSeek", () => {
+  it("rejects a malformed language before any request", async () => {
+    await expect(
+      searchWithDeepSeek("public query", "k", { language: "en alice@example.com" })
+    ).rejects.toMatchObject({ status: 400 })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("discloses recency/language it could not fit as degraded controls", async () => {
+    fetchMock.mockResolvedValueOnce(resp({ json: { results: [] } }))
+    const r = await searchWithDeepSeek("x".repeat(128), "k", { recency: "day", language: "en" })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).query).toBe("x".repeat(128))
+    expect(r.diagnostics?.degradedControls).toEqual(["recency", "language"])
+  })
+
   it("rejects an over-long query before any request", async () => {
     await expect(searchWithDeepSeek("x".repeat(129), "k")).rejects.toMatchObject({ status: 400 })
     expect(fetchMock).not.toHaveBeenCalled()

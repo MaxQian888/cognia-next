@@ -531,7 +531,13 @@ export async function routeSearch(
   log.debug(`Routing ${searchType} search to ${provider}`)
 
   const response = await searchFn(query, settings, mergedOptions)
-  const degraded = degradedControlsFor(provider, mergedOptions)
+  // Static capability gaps plus whatever the adapter itself could not apply.
+  const degraded = [
+    ...new Set([
+      ...(response.diagnostics?.degradedControls ?? []),
+      ...degradedControlsFor(provider, mergedOptions),
+    ]),
+  ]
   const engine = resolveEngine(provider, settings, mergedOptions)
   return {
     ...response,

@@ -594,3 +594,198 @@ describe("jina URL shape", () => {
     expect(jinaUrl("https://a.example")).toBe("https://r.jina.ai/https://a.example")
   })
 })
+
+describe("adversarial review regressions", () => {
+  function redirectTo(location: string, status = 302): Response {
+    return {
+      ok: false,
+      status,
+      headers: { get: (k: string) => (k.toLowerCase() === "location" ? location : null) },
+      text: async () => "",
+    } as unknown as Response
+  }
+
+  it("re-checks every redirect hop against the private-host guard", async () => {
+    const { deps, fetchImpl } = host((url) =>
+      url === "https://public.example/r"
+        ? redirectTo("http://169.254.169.254/latest")
+        : res(ARTICLE)
+    )
+    expect(await readWithPolicy({ url: "https://public.example/r" }, deps)).toMatchObject({
+      ok: false,
+      code: "blocked",
+    })
+    expect(fetchImpl.mock.calls.map((c) => String(c[0]))).toEqual(["https://public.example/r"])
+    expect(fetchImpl.mock.calls[0][1]).toMatchObject({ redirect: "manual" })
+  })
+
+  it("follows a public redirect hop and drops credentials on a cross-origin hop", async () => {
+    const { deps, fetchImpl } = host((url) =>
+      url === "https://a.example/old" ? redirectTo("https://b.example/new", 301) : res(ARTICLE)
+    )
+    const r = await readWithPolicy(
+      { url: "https://a.example/old", headers: { Authorization: "Bearer t", Accept: "text/html" } },
+      deps
+    )
+    expect(r).toMatchObject({ ok: true, reader: "direct" })
+    const second = fetchImpl.mock.calls[1][1] as RequestInit
+    expect(String(fetchImpl.mock.calls[1][0])).toBe("https://b.example/new")
+    expect(second.headers).toEqual({ Accept: "text/html" })
+  })
+
+  it("checks the final URL when the transport can only follow redirects itself", async () => {
+    const { deps } = host((_url, init) =>
+      init?.redirect === "manual"
+        ? ({
+            type: "opaqueredirect",
+            status: 0,
+            ok: false,
+            headers: { get: () => null },
+          } as unknown as Response)
+        : (Object.assign(res(ARTICLE), { url: "http://10.0.0.5/admin" }) as Response)
+    )
+    expect(await readWithPolicy({ url: "https://public.example/r" }, deps)).toMatchObject({
+      ok: false,
+      code: "blocked",
+    })
+  })
+
+  it("never lets a pinned platform reader reach FxTwitter for an X link", async () => {
+    const { deps, fetchImpl } = host(() => res("{}", { contentType: "application/json" }))
+    const r = await readWithPolicy({ url: "https://x.com/a/status/123", reader: "platform" }, deps)
+    expect(r).toMatchObject({ ok: false })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it("treats an auth-walled or missing PDF as terminal, never as a document for Jina", async () => {
+    for (const status of [401, 404]) {
+      const { deps, fetchImpl } = host(
+        (url) =>
+          url.startsWith("https://r.jina.ai/")
+            ? res("# leaked")
+            : res("", { status, contentType: "application/pdf" }),
+        { policy: policy({ enable: ["direct", "jina"], externalFallback: true }) }
+      )
+      const r = await readWithPolicy({ url: "https://site.example/private.pdf" }, deps)
+      expect(r).toMatchObject({ ok: false })
+      expect(fetchImpl.mock.calls.some((c) => String(c[0]).startsWith("https://r.jina.ai/"))).toBe(
+        false
+      )
+    }
+  })
+
+  it("treats a 200 sign-in wall as terminal instead of thin content for Jina", async () => {
+    const { deps, fetchImpl } = host(
+      (url) =>
+        url.startsWith("https://r.jina.ai/")
+          ? res("# leaked")
+          : res("<html><body><p>Sign in to continue</p></body></html>"),
+      { policy: policy({ enable: ["direct", "jina"], externalFallback: true }) }
+    )
+    expect(await readWithPolicy({ url: "https://site.example/account" }, deps)).toMatchObject({
+      ok: false,
+      reason: "auth-required",
+    })
+    expect(fetchImpl.mock.calls.some((c) => String(c[0]).startsWith("https://r.jina.ai/"))).toBe(
+      false
+    )
+  })
+
+  it("bounds a Jina response by the same byte ceiling", async () => {
+    const { deps } = host(
+      (url) =>
+        url.startsWith("https://r.jina.ai/")
+          ? res("# x".repeat(40), { contentLength: 9_000_000 })
+          : res("<html><body></body></html>"),
+      { policy: policy({ enable: ["direct", "jina"], externalFallback: true }), byteCeiling: 1000 }
+    )
+    expect(await readWithPolicy({ url: "https://spa.example/" }, deps)).toMatchObject({
+      ok: false,
+      reason: "too-large",
+    })
+  })
+
+  it("does not serve a cached vendor read once its credential is gone, nor after cancellation", async () => {
+    const cache = new FetchCache()
+    let key: string | undefined = "k"
+    readWithVendorMock.mockResolvedValue({
+      kind: "content",
+      reader: "tavily",
+      source: "tavily",
+      text: LONG_TEXT,
+      contentType: "text/markdown",
+      status: 200,
+      statusSource: "reader-service",
+      extraction: "markdown",
+    })
+    const { deps } = host(() => res(ARTICLE), {
+      policy: policy({ enable: ["tavily"], defaultReader: "tavily" }),
+      credentialFor: () => key,
+      cache,
+      scope: "s",
+    })
+    expect(await readWithPolicy({ url: "https://site.example/a" }, deps)).toMatchObject({
+      ok: true,
+    })
+    const controller = new AbortController()
+    controller.abort()
+    expect(
+      await readWithPolicy(
+        { url: "https://site.example/a" },
+        { ...deps, signal: controller.signal }
+      )
+    ).toMatchObject({ ok: false, reason: "cancelled" })
+    key = undefined
+    const r = await readWithPolicy({ url: "https://site.example/a" }, deps)
+    expect(r).toMatchObject({ ok: false })
+    expect((r as { cacheHit?: boolean }).cacheHit).toBeUndefined()
+  })
+
+  it("distills JSON and plain text under best-effort, not only under required", async () => {
+    const summarize = jest.fn(async () => "the answer")
+    const { deps } = host(() => res('{"a":1}', { contentType: "application/json" }), {
+      policy: policy({ distillation: "best-effort" }),
+      summarize,
+    })
+    const r = await readWithPolicy({ url: "https://api.example/data", prompt: "what is a?" }, deps)
+    expect(summarize).toHaveBeenCalled()
+    expect(r).toMatchObject({ ok: true, distilled: true })
+  })
+
+  it("counts time queued for a slot against the read budget", async () => {
+    const admission = new OperationAdmission()
+    const holds = [await admission.acquire("s", "read"), await admission.acquire("s", "read")]
+    const { deps, fetchImpl } = host(() => res(ARTICLE), {
+      admission,
+      scope: "s",
+      policy: policy({ timeoutMs: 30 }),
+    })
+    const r = await readWithPolicy({ url: "https://site.example/a" }, deps)
+    expect(r).toMatchObject({ ok: false, reason: "timeout" })
+    expect(fetchImpl).not.toHaveBeenCalled()
+    holds.forEach((release) => release())
+  })
+
+  it("stops before the next reader once the authority changed mid-read", async () => {
+    let authority = "s"
+    const { deps, fetchImpl } = host(
+      (url) => {
+        if (url.startsWith("https://r.jina.ai/")) return res("# remote")
+        authority = "revoked"
+        return res("<html><body></body></html>")
+      },
+      {
+        policy: policy({ enable: ["direct", "jina"], externalFallback: true }),
+        scope: "s",
+        activeScope: () => authority,
+      }
+    )
+    expect(await readWithPolicy({ url: "https://spa.example/" }, deps)).toMatchObject({
+      ok: false,
+      reason: "scope-changed",
+    })
+    expect(fetchImpl.mock.calls.some((c) => String(c[0]).startsWith("https://r.jina.ai/"))).toBe(
+      false
+    )
+  })
+})

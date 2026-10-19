@@ -1,3 +1,4 @@
+import type { WebReaderSettingsV1 } from "@cognia/agent-config-types"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 
 import { ToolSettingsSection } from "./tool-settings-section"
@@ -53,6 +54,7 @@ const settingsState = {
       preferCogniaSearch?: boolean
       preferCogniaFetch?: boolean
     },
+    webReader: undefined as WebReaderSettingsV1 | undefined,
   },
   setBuiltinToolEnabled,
   setWebToolsEnabled,
@@ -139,6 +141,19 @@ describe("ToolSettingsSection", () => {
     expect(setWebToolsAlwaysDistill).toHaveBeenCalledWith(true)
     fireEvent.click(screen.getByLabelText("toggleAriaLabel:webAllowPrivateTitle"))
     expect(setWebToolsAllowPrivateHosts).toHaveBeenCalledWith(true)
+  })
+
+  it("shows always-distill as on whenever the Reader requires distillation", () => {
+    settingsState.settings.webReader = {
+      version: 1,
+      defaultReader: "auto",
+      readers: { direct: { enabled: true, priority: 0 } },
+      externalFallback: "off",
+      distillation: "required",
+    }
+    render(<ToolSettingsSection />)
+    expect(screen.getByLabelText("toggleAriaLabel:webAlwaysDistillTitle")).toBeChecked()
+    settingsState.settings.webReader = undefined
   })
 
   it("hides the web sub-toggles when web tools are disabled", () => {

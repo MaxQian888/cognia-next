@@ -159,6 +159,25 @@ describe("validateSearchEndpoint", () => {
     expect(validateSearchEndpoint("http://[::1]:8080")).toMatchObject({ ok: true, isPrivate: true })
     expect(validateSearchEndpoint("http://example.com").issue).toBe("insecure-public-endpoint")
   })
+
+  it("classifies IPv4-mapped and other non-public IPv6 literals as private", () => {
+    for (const url of [
+      "https://[::ffff:127.0.0.1]",
+      "https://[::ffff:7f00:1]",
+      "https://[::ffff:a9fe:a9fe]",
+      "https://[::]",
+      "https://[fd00::1]",
+      "https://[fec0::1]",
+      "https://[0:0:0:0:0:0:0:1]",
+    ]) {
+      expect(validateSearchEndpoint(url)).toMatchObject({ ok: true, isPrivate: true })
+    }
+    expect(validateSearchEndpoint("https://[2606:4700::1111]")).toMatchObject({
+      ok: true,
+      isPrivate: false,
+    })
+    expect(validateSearchEndpoint("https://[::ffff:8.8.8.8]")).toMatchObject({ isPrivate: false })
+  })
 })
 
 describe("DEFAULT_SEARCH_PROVIDER_SETTINGS", () => {

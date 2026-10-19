@@ -14,8 +14,22 @@ import { MAX_OPERATION_ATTEMPTS, READ_ATTEMPT_BUDGET_MS } from "@cognia/web-sear
 import { readWithPolicy, type ReaderHostDeps } from "./configured-reader"
 import type { ReaderPolicy } from "./reader-settings"
 
-/** A stable, public, tiny page every reader can read. */
+/** A stable, public, tiny page every general reader can read. */
 export const READER_TEST_URL = "https://example.com/"
+
+/**
+ * Origin readers serve only their own sites, so each is tested on a stable
+ * public page it actually handles: YouTube's first upload, X's first post.
+ */
+export const READER_TEST_URLS: Partial<Record<WebReaderId, string>> = {
+  platform: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+  fxtwitter: "https://x.com/jack/status/20",
+}
+
+/** The URL a connection test of `reader` reads. */
+export function readerTestUrl(reader: WebReaderId): string {
+  return READER_TEST_URLS[reader] ?? READER_TEST_URL
+}
 
 export interface ReaderTestResult {
   reader: WebReaderId
@@ -54,7 +68,7 @@ export async function testReaderConnection(
     revision: `reader-test|${reader}`,
   }
   const result = await readWithPolicy(
-    { url: deps.url ?? READER_TEST_URL, reader },
+    { url: deps.url ?? readerTestUrl(reader), reader },
     {
       policy,
       fetchImpl: deps.fetchImpl,

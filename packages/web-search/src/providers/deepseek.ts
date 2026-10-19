@@ -14,6 +14,7 @@
  */
 
 import type { SearchOptions, SearchRecency, SearchResponse, SearchResult } from "../types"
+import { normalizeSearchDomain } from "../search-constants"
 import { deepseekFetch, ProviderHttpError, readErrorDetail } from "../proxy-search-fetch"
 
 export const DEEPSEEK_SEARCH_URL = "https://api.deepseek.com/v1/tools/search"
@@ -52,31 +53,69 @@ function isoDateFor(recency: SearchRecency | undefined, now: number): string | u
   return new Date(now - span * 86_400_000).toISOString().slice(0, 10)
 }
 
+/** A BCP 47-shaped language tag (`en`, `zh-CN`, `pt-BR`). */
+const LANGUAGE_TAG = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/
+
+type DeepSeekControl = "domains" | "recency" | "language"
+
+export interface ComposedDeepSeekQuery {
+  query: string
+  /** Controls the caller asked for that did not fit the vendor's query bound. */
+  dropped: DeepSeekControl[]
+}
+
 /**
  * Append filter operators while the composed query stays within the vendor's
- * 128-character bound. Operators that do not fit are left out (the host still
- * applies domain policy to the results); the bare query never is.
+ * 128-character bound. Operators that do not fit are left out and reported in
+ * `dropped` (the host still applies domain policy to the results); the bare
+ * query never is.
+ *
+ * Operator values are joined into the query text sent to the vendor, so each
+ * one must be a well-formed domain or language tag. Anything else is refused
+ * here, before any request: only the bare query passed the host's PII gate.
  */
 export function composeDeepSeekQuery(
   query: string,
   options: Pick<SearchOptions, "includeDomains" | "excludeDomains" | "recency" | "language">,
   now: number = Date.now()
-): string {
-  const operators: string[] = []
+): ComposedDeepSeekQuery {
+  const domain = (value: string) => {
+    const normalized = normalizeSearchDomain(value)
+    if (!normalized || !/^[a-z0-9.-]+$/.test(normalized)) {
+      throw new ProviderHttpError("DeepSeek", 400, "domain filters must be plain host names")
+    }
+    return normalized
+  }
+  if (options.language && !LANGUAGE_TAG.test(options.language)) {
+    throw new ProviderHttpError(
+      "DeepSeek",
+      400,
+      "language must be a language tag such as en or zh-CN"
+    )
+  }
+  const operators: Array<[DeepSeekControl, string]> = []
   // A single include domain maps to `site:`; several would AND together, so
   // they are left to the host-side include filter instead.
-  if (options.includeDomains?.length === 1) operators.push(`site:${options.includeDomains[0]}`)
-  for (const domain of options.excludeDomains ?? []) operators.push(`-site:${domain}`)
+  if (options.includeDomains?.length === 1) {
+    operators.push(["domains", `site:${domain(options.includeDomains[0])}`])
+  }
+  for (const excluded of options.excludeDomains ?? []) {
+    operators.push(["domains", `-site:${domain(excluded)}`])
+  }
   const after = isoDateFor(options.recency, now)
-  if (after) operators.push(`after:${after}`)
-  if (options.language) operators.push(`lang:${options.language}`)
+  if (after) operators.push(["recency", `after:${after}`])
+  if (options.language) operators.push(["language", `lang:${options.language}`])
   let composed = query
-  for (const op of operators) {
+  const dropped = new Set<DeepSeekControl>()
+  for (const [control, op] of operators) {
     const next = `${composed} ${op}`
-    if ([...next].length > DEEPSEEK_QUERY_MAX_CHARS) continue
+    if ([...next].length > DEEPSEEK_QUERY_MAX_CHARS) {
+      dropped.add(control)
+      continue
+    }
     composed = next
   }
-  return composed
+  return { query: composed, dropped: [...dropped] }
 }
 
 export async function searchWithDeepSeek(
@@ -96,6 +135,7 @@ export async function searchWithDeepSeek(
   }
   const count = Math.min(Math.max(1, Math.floor(options.maxResults ?? 10)), DEEPSEEK_COUNT_MAX)
   const needContent = Boolean(options.includeRawContent)
+  const composed = composeDeepSeekQuery(trimmed, options)
   const startTime = Date.now()
 
   const response = await deepseekFetch(DEEPSEEK_SEARCH_URL, {
@@ -103,7 +143,7 @@ export async function searchWithDeepSeek(
     signal: options.signal,
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      query: composeDeepSeekQuery(trimmed, options),
+      query: composed.query,
       count,
       need_content: needContent,
     }),
@@ -133,6 +173,17 @@ export async function searchWithDeepSeek(
     results,
     responseTime: Date.now() - startTime,
     totalResults: results.length,
+    // Excluded domains that did not fit are still removed host-side; recency
+    // and language that did not fit are not, so the response says so.
+    ...(composed.dropped.some((c) => c !== "domains")
+      ? {
+          diagnostics: {
+            degradedControls: composed.dropped.filter(
+              (c): c is "recency" | "language" => c !== "domains"
+            ),
+          },
+        }
+      : {}),
   }
 }
 

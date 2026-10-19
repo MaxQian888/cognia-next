@@ -57,6 +57,8 @@ describe("searchWithSearXNG", () => {
       safesearch: "2",
     })
     expect(init.redirect).toBe("error")
+    // No endpoint grant ⇒ the host transport is asked to refuse private targets too.
+    expect(init.blockPrivateHosts).toBe(true)
     expect(init.headers.Authorization).toBeUndefined()
     expect(r.results).toEqual([
       {
@@ -88,6 +90,14 @@ describe("searchWithSearXNG", () => {
     await expect(
       searchWithSearXNG("q", { baseUrl: "http://127.0.0.1:8888", allowPrivateEndpoint: true })
     ).resolves.toMatchObject({ provider: "searxng" })
+    expect(fetchMock.mock.calls[0][1].blockPrivateHosts).toBeUndefined()
+  })
+
+  it("refuses an IPv4-mapped loopback endpoint without the grant", async () => {
+    await expect(
+      searchWithSearXNG("q", { baseUrl: "https://[::ffff:127.0.0.1]" })
+    ).rejects.toMatchObject({ status: 403 })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it("refuses a response that was redirected to another origin", async () => {

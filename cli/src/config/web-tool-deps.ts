@@ -9,6 +9,7 @@ import { getFetchCache } from "@/lib/web/fetch-cache"
 import { readerPolicyFromSettings } from "@/lib/web/reader/reader-settings"
 import { buildFetchExtractor } from "@/lib/web/web-tools-core"
 
+import { createGuardedWebFetch } from "./guarded-web-fetch"
 import type { ResolvedConfig } from "./schema"
 import { toBuildContext } from "./to-build-context"
 
@@ -23,8 +24,14 @@ export function buildCliWebToolDeps(config: ResolvedConfig): WebToolRunDeps {
     featureId: "web_fetch_extract",
   })
 
+  const allowPrivateHosts = settings?.webTools?.allowPrivateHosts === true
+
   return {
     enabled: config.webTools !== false,
+    // Connection-time DNS guard: the Reader checks URLs and redirect hops, this
+    // refuses a public name that resolves to a private address.
+    fetchImpl: createGuardedWebFetch({ allowPrivateHosts }),
+    allowPrivateHosts,
     readerPolicy: readerPolicyFromSettings(settings),
     credentialFor: (id) => settings?.searchProviders?.[id]?.apiKey?.trim() || undefined,
     cache: getFetchCache(),

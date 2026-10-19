@@ -127,6 +127,8 @@ export async function search(
 
 故障回退同时覆盖 Provider 报错和无法满足 Domain 强约束的响应。桌面与 Web 调用方应使用 `searchWithAppSettings()`，从而保证缓存命中不会再次发起 Provider 请求或重复计费。
 
+宿主策略在每次合并后重新施加，调用方和 Provider 自身的 `defaultOptions` 都无法削弱：严格安全搜索保持严格；include 域名与宿主来源取交集（调用方请求完全在来源之外时，在任何网络请求前以 `SearchDomainPolicyError` 失败；Provider 默认值则让位于宿主列表）；exclude 域名取并集。在硬性来源范围下，没有任何允许来源支撑的 answer 会被清除。Grounding 类 Provider（`google-ai`）每次调用都会产生模型生成费用，因此只在被选中时（显式或已选 Provider）运行，绝不作为自动回退。缓存键包含最终解析的回退策略；已取消或 scope 已变化的请求不会命中缓存。所有 Provider 响应体都受共享的 8 MiB 解码字节上限约束。
+
 `search()` 按优先级合并每次尝试的参数——宿主 `baseOptions` < provider 的 `defaultOptions` < 调用方显式字段（显式的 `undefined` 占位会被剥掉，不会覆盖下层值）——并查询共享的内存熔断器（`provider-health.ts`）：连续失败超过阈值的 provider 被排到队尾，冷却期满后允许一次半开探测，成功即闭合。持久化调参（`searchProviderHealth`——enabled / failureThreshold / cooldownMs，按 `SEARCH_PROVIDER_HEALTH_LIMITS` 收敛）在每次配置化调用时推入熔断器；缓存 key 会摘要每个候选 provider 的 `defaultOptions`，改动 override 即让相关条目失效。
 
 ## 查询优化
@@ -223,6 +225,8 @@ SearXNG 端点必须为绝对 URL，不得包含凭据、查询参数或片段�
 
 远程阅读器明确说明「您阅读的页面会发送至服务商」，不重复设置密钥字段。缺少密钥时显示不可用并提供返回对应搜索卡片的链接。上移/下移按钮调整远程回退顺序并支持键盘操作，默认阅读器可选 auto 或指定 ID。auto 先尝试适用的原站/平台及直接阅读，仅在允许外部回退时按优先级尝试已启用且已配置的远程阅读器。严格指定的阅读器不会静默切换。私有目标、raw/非 GET、请求体及调用方目标请求头走受保护的直接通路，不转发给云阅读器；认证或付费墙失败不能成为通过其他阅读器绕过访问控制的理由。
 
+直接阅读逐跳跟随重定向，每一跳都重新经过私网地址检查，跨源跳转时移除 `Authorization`/`Cookie`；只能自行跟随重定向的传输层会在使用响应体前检查最终 URL。CLI 还通过 DNS 防护传输层连接，拒绝解析到私网地址的公共域名。缺失或需要认证的文件（以 PDF 返回的 401/404）以及简短的 HTTP 200 登录/订阅页面属于终止失败，绝不交给外部阅读器。每个原站阅读器只处理自己的站点（`platform` 不会为 X 链接访问 FxTwitter）。阅读器连接测试使用该阅读器实际支持的页面：`platform` 用 YouTube，`fxtwitter` 用 X 帖子，其余用 `example.com`。当账号切换，或用户修改了规划本次读取时所依据的网页设置时，读取会在下一次外发、缓存命中或发布前停止。旧的「始终蒸馏」开关与阅读器的蒸馏模式是同一项设置。
+
 ### 新安装与升级默认值
 
 - 新安装：direct、platform 开启；所有远程阅读器关闭；`externalFallback: off`；`distillation: off`。
@@ -242,7 +246,7 @@ Agent 不能关闭 required 策略。蒸馏经过已有模型预算与 PII 门�
 
 ### 预算、宿主限制与测试
 
-`packages/web-search/src/operation-policy.ts` 规定：Search 总预算 30 秒，阅读总预算 60 秒，每次阅读器尝试最多 20 秒，每次操作最多 3 次适配器尝试（含重试与回退）。每个 scope 允许 2 个并发 Search 和 2 个并发阅读，各操作类型最多排队 8 个。阅读缓存 TTL 为 5 分钟，复用仍受当前策略与 scope 约束。
+`packages/web-search/src/operation-policy.ts` 规定：Search 总预算 30 秒，阅读总预算 60 秒，每次阅读器尝试最多 20 秒，每次操作最多 3 次适配器尝试（含重试与回退）。每个 scope 允许 2 个并发 Search 和 2 个并发阅读，各操作类型最多排队 8 个。阅读缓存 TTL 为 5 分钟，复用仍受当前策略与 scope 约束。排队等待槽位的时间同样计入阅读总预算。
 
 普通浏览器受 CORS 限制，无法使用 Jina、FxTwitter 和原站平台阅读；direct 与服务商端点也取决于宿主传输和 CORS 条件。Tauri 与 CLI 使用各自的传输路径。Capacitor 上取消会停止等待并抑制迟到结果，但已发出的原生请求可能继续完成；取消不撤回服务商工作，也不保证退款。
 

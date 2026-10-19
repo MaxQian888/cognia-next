@@ -34,6 +34,7 @@ import {
   namespaced,
 } from "@/lib/settings/builtin-tools"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
+import { normalizeWebReaderSettings } from "@/lib/web/reader/reader-settings"
 
 import { AlwaysAllowList } from "./always-allow-list"
 import { ToolCatalogBrowser } from "./tool-catalog-browser"
@@ -105,7 +106,13 @@ export function ToolSettingsSection() {
   const webPreferCogniaSearch = settings?.webTools?.preferCogniaSearch ?? legacyWebPreferCognia
   const webPreferCogniaFetch = settings?.webTools?.preferCogniaFetch ?? legacyWebPreferCognia
   const webAllowPrivateHosts = settings?.webTools?.allowPrivateHosts ?? false
-  const webAlwaysDistill = settings?.webTools?.alwaysDistill ?? false
+  // Reads follow the Reader's distillation mode; the switch shows whether it
+  // is `required`, whichever control set it.
+  const webAlwaysDistill =
+    normalizeWebReaderSettings(settings?.webReader, {
+      rowExists: settings != null,
+      webTools: settings?.webTools,
+    }).effective.distillation === "required"
   const skillToolEnabled = settings?.selfInvokeTools?.skill ?? false
   const slashCommandToolEnabled = settings?.selfInvokeTools?.slashCommand ?? false
   const teamCollaborationToolEnabled = settings?.selfInvokeTools?.teamCollaboration ?? false

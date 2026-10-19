@@ -90,6 +90,7 @@ jest.mock("@/lib/web/web-tools-core", () => ({
   buildFetchExtractor: jest.fn(() => async () => "extracted"),
 }))
 jest.mock("@cognia/web-search/search-cache", () => ({
+  opaqueDigest: jest.requireActual("@cognia/web-search/search-cache").opaqueDigest,
   getSearchCache: jest.fn(() => ({
     setConfig: jest.fn(),
     get: jest.fn(() => null),
@@ -1375,6 +1376,20 @@ describe("resolveWebToolDeps (default resolver)", () => {
     expect(deps.transportCancels).toBe(true)
   })
 
+  it("revokes an in-flight operation when the user changes its web authority", async () => {
+    const deps = await resolveWebToolDeps()
+    expect(deps.activeScope!()).toBe(deps.scope)
+    mockSettings = { ...mockSettings, webTools: { enabled: false } }
+    expect(deps.activeScope!()).not.toBe(deps.scope)
+    mockSettings = { ...mockSettings, webTools: undefined }
+    expect(deps.activeScope!()).toBe(deps.scope)
+    mockSettings = {
+      ...mockSettings,
+      searchProviders: { tavily: { providerId: "tavily", enabled: true, apiKey: "rotated" } },
+    }
+    expect(deps.activeScope!()).not.toBe(deps.scope)
+  })
+
   it("uses cancellable proxy fetch and allows every reader on Tauri", async () => {
     const { isTauri } = await import("@/lib/native/utils")
     ;(isTauri as jest.Mock).mockReturnValue(true)
@@ -1443,7 +1458,10 @@ describe("resolveWebToolDeps (default resolver)", () => {
     jest.doMock("@/lib/web/web-scope", () => {
       // Simulate the new account loading while the scope module is imported.
       mockSettings = { searchProviders: { tavily: { apiKey: "arriving-key" } } }
-      return { currentWebScope: () => "arriving-account" }
+      return {
+        currentWebScope: () => "arriving-account",
+        webAuthorityRevision: jest.requireActual("@/lib/web/web-scope").webAuthorityRevision,
+      }
     })
     try {
       const deps = await resolveWebToolDeps()

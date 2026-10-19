@@ -1107,9 +1107,21 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     },
 
     setWebToolsAlwaysDistill: async (alwaysDistill) => {
-      const current = get().settings?.webTools
+      // The legacy switch and the Reader's distillation mode are one setting:
+      // reads follow `webReader.distillation`, so the switch writes it too
+      // (on ⇒ required; off ⇒ off only when it was required, leaving a chosen
+      // best-effort alone).
+      const settings = get().settings ?? (await getSettings())
+      const current = settings.webTools
+      const reader = effectiveWebReader(settings)
+      const distillation = alwaysDistill
+        ? "required"
+        : reader.distillation === "required"
+          ? "off"
+          : reader.distillation
       const next = await saveSettings({
         webTools: { enabled: current?.enabled ?? true, ...current, alwaysDistill },
+        webReader: { ...reader, distillation },
       })
       set({ settings: next })
     },

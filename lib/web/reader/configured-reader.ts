@@ -53,8 +53,13 @@ import {
   RESPONSE_BYTE_CEILING,
   type OperationAdmission,
 } from "@cognia/web-search/operation-policy"
+import { readBodyBounded, ResponseTooLargeError } from "@cognia/web-search/bounded-response"
 import type { PluginHostToolErrorCode } from "@/types/plugin/plugin-host-tools"
-import { assertFetchTargetAllowed, FetchTargetBlockedError } from "@/lib/web/fetch-guard"
+import {
+  assertFetchTargetAllowed,
+  evaluateFetchTarget,
+  FetchTargetBlockedError,
+} from "@/lib/web/fetch-guard"
 import { fetchCacheKey, representationSize, type FetchCacheLike } from "@/lib/web/fetch-cache"
 import { platformReaderFor, scrapePlatform } from "./dispatch"
 import { readViaJina } from "./jina"
@@ -103,7 +108,12 @@ export interface ReaderHostDeps {
   cache?: FetchCacheLike
   /** Runtime/account scope (opaque); isolates cache and admission. */
   scope?: string
-  /** Current scope at completion; a mismatch discards the read. */
+  /**
+   * The current authority. Compared with `scope` before every outbound stage,
+   * before a cache hit is served and before publishing; a mismatch (account
+   * switch, or the host revoking the settings this read was planned under)
+   * stops the read.
+   */
   activeScope?: () => string | undefined
   allowPrivateHosts?: boolean
   /** The stored vendor credential for a vendor reader, or undefined. */
@@ -158,7 +168,7 @@ const MIN_LOCAL_EXTRACT = 200
 const ANTI_BOT_MARKERS =
   /(just a moment|cf-chl|cf_chl|attention required|captcha|ddos-guard|datadome|perimeterx|_incapsula_|access denied by|checking your browser)/i
 const LOGIN_MARKERS =
-  /(sign[ -]?in to continue|log[ -]?in to continue|subscribe to (?:continue|read)|paywall|members only)/i
+  /(sign[ -]?in to continue|log[ -]?in to continue|please (?:sign|log)[ -]?in|subscribe to (?:continue|read)|paywall|members only|登录后(?:查看|继续|阅读)|请先登录)/i
 
 function fail(
   code: PluginHostToolErrorCode,
@@ -198,45 +208,8 @@ export function windowText(
   return { slice, total, start, truncated, ...(truncated ? { nextOffset: end } : {}) }
 }
 
-class BodyTooLargeError extends Error {
-  constructor() {
-    super("Response body exceeds the transport byte ceiling")
-    this.name = "BodyTooLargeError"
-  }
-}
-
-/**
- * Read a response body with a decoded-byte ceiling. Streams when the
- * transport exposes a body stream (browser/Node fetch), stopping and
- * cancelling at the ceiling; otherwise reads the (already transport-bounded)
- * text and checks its size.
- */
-async function readBodyBounded(res: Response, ceiling: number): Promise<string> {
-  const declared = Number(res.headers?.get?.("content-length") ?? "")
-  if (Number.isFinite(declared) && declared > ceiling) throw new BodyTooLargeError()
-  const stream = (res as { body?: ReadableStream<Uint8Array> | null }).body
-  if (stream && typeof stream.getReader === "function") {
-    const reader = stream.getReader()
-    const decoder = new TextDecoder()
-    let received = 0
-    let text = ""
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      received += value.byteLength
-      if (received > ceiling) {
-        await reader.cancel().catch(() => {})
-        throw new BodyTooLargeError()
-      }
-      text += decoder.decode(value, { stream: true })
-    }
-    return text + decoder.decode()
-  }
-  const text = await res.text()
-  // UTF-16 length is a lower bound on UTF-8 bytes; enough to refuse runaways.
-  if (text.length > ceiling) throw new BodyTooLargeError()
-  return text
-}
+/** Redirect hops a direct read follows, each re-checked against the target guard. */
+const MAX_DIRECT_REDIRECTS = 5
 
 function classifyOriginStatus(status: number, body: string): ReadFailureClass | undefined {
   if (status === 404 || status === 410) return "not-found"
@@ -477,17 +450,26 @@ export async function readWithPolicy(
 
   const admission = deps.admission ?? getOperationAdmission()
   const scope = deps.scope ?? "default"
+  // The whole-read deadline starts before admission: time spent queued for a
+  // slot counts against the same budget.
+  const deadline = createOperationDeadline(policy.timeoutMs, deps.signal)
   let release: (() => void) | undefined
   try {
-    release = await admission.acquire(scope, "read", deps.signal)
+    release = await admission.acquire(scope, "read", deadline.signal)
   } catch (error) {
+    deadline.dispose()
     if (error instanceof OperationAdmissionError) {
       return fail("rate-limited", "admission-full", error.message)
     }
-    return fail("execution-failed", "cancelled", "web_fetch was cancelled")
+    return deadline.timedOut() && !deps.signal?.aborted
+      ? fail(
+          "execution-failed",
+          "timeout",
+          `web_fetch exceeded its ${Math.round(policy.timeoutMs / 1000)}s budget waiting for a slot`
+        )
+      : fail("execution-failed", "cancelled", "web_fetch was cancelled")
   }
 
-  const deadline = createOperationDeadline(policy.timeoutMs, deps.signal)
   try {
     return await runRead(request, resolved, deps, deadline.signal, () => deadline.timedOut())
   } finally {
@@ -562,9 +544,23 @@ async function runRead(
         distillation: policy.distillation,
       })
     : ""
+  const scopeChanged = () => Boolean(deps.activeScope && deps.activeScope() !== deps.scope)
+  const scopeChangedResult = () =>
+    fail(
+      "execution-failed",
+      "scope-changed",
+      "Read discarded: the account, runtime or Reader settings changed during the request"
+    )
   if (cacheable) {
     const hit = deps.cache!.get(cacheKey) as ReadRepresentation | null
-    if (hit) return shapeWindow(hit, request, { cacheHit: true })
+    // A hit is published under the same authority as a fresh read: not after
+    // cancellation, not across a scope change, and only while the reader that
+    // produced it is still enabled, credentialed and reachable here.
+    if (hit && readerUsable(hit.reader, deps)) {
+      if (signal.aborted) return cancelledResult()
+      if (scopeChanged()) return scopeChangedResult()
+      return shapeWindow(hit, request, { cacheHit: true })
+    }
   }
 
   const maxAttempts = Math.max(1, policy.maxAttempts)
@@ -589,6 +585,8 @@ async function runRead(
       break
     }
     if (!readerUsable(reader, deps)) continue
+    // Nothing leaves the host under an authority that has since changed.
+    if (scopeChanged()) return scopeChangedResult()
     attempted.push(reader)
 
     let outcome: StageOutcome
@@ -662,11 +660,14 @@ async function runRead(
 
   if (signal.aborted) return cancelledResult()
 
-  // Required distillation never returns raw text: a readable non-HTML body
-  // (plain text, JSON, XML, …) becomes text and goes through the extractor.
+  // Whenever this read distills (a `prompt`, best-effort or required), a
+  // readable non-HTML body (plain text, JSON, XML, …) becomes text and goes
+  // through the extractor. Required distillation never returns raw text; raw
+  // requests are direct-only and never reach here with a question.
   if (
     !produced &&
-    policy.distillation === "required" &&
+    question !== undefined &&
+    resolved.format !== "raw" &&
     terminal?.kind === "http" &&
     terminal.ok &&
     terminal.body.trim()
@@ -695,13 +696,7 @@ async function runRead(
   if ("code" in rep) return rep
 
   // Final authority check before publishing or caching.
-  if (deps.activeScope && deps.activeScope() !== deps.scope) {
-    return fail(
-      "execution-failed",
-      "scope-changed",
-      "Read discarded: the account or runtime changed during the request"
-    )
-  }
+  if (scopeChanged()) return scopeChangedResult()
   let cacheBypass: string | undefined
   if (cacheable && rep.ok && !rep.binary) {
     const stored = deps.cache!.set(cacheKey, rep, representationSize(rep))
@@ -732,6 +727,17 @@ async function runStage(
         return await readDirect(resolved, deps, fetchImpl, attempt.signal)
       case "platform":
       case "fxtwitter": {
+        // Each origin reader serves only its own sites: `platform` must never
+        // reach FxTwitter for an X link (a third party the user may have
+        // disabled), and neither applies to an ordinary page.
+        if (platformReaderFor(resolved.url) !== reader) {
+          return {
+            kind: "failure",
+            reader,
+            failure: "unavailable",
+            detail: `the ${reader} reader does not handle this site`,
+          }
+        }
         const scraped = await scrapePlatform(resolved.url, fetchImpl, attempt.signal)
         if (!scraped || !scraped.markdown.trim()) {
           return {
@@ -754,17 +760,24 @@ async function runStage(
         }
       }
       case "jina": {
-        const outcome = await readViaJina(resolved.url, fetchImpl, attempt.signal)
+        const outcome = await readViaJina(
+          resolved.url,
+          fetchImpl,
+          attempt.signal,
+          deps.byteCeiling ?? RESPONSE_BYTE_CEILING
+        )
         if (!outcome.ok) {
           return {
             kind: "failure",
             reader,
             failure:
-              outcome.status === 429
-                ? "vendor-rate-limit"
-                : outcome.error === "empty_content"
-                  ? "thin"
-                  : "vendor-error",
+              outcome.error === "too_large"
+                ? "too-large"
+                : outcome.status === 429
+                  ? "vendor-rate-limit"
+                  : outcome.error === "empty_content"
+                    ? "thin"
+                    : "vendor-error",
             detail: boundedDetail(outcome.error),
             ...(outcome.status !== undefined
               ? { status: outcome.status, statusSource: "reader-service" as const }
@@ -810,6 +823,96 @@ async function runStage(
   }
 }
 
+function isStageOutcome(value: Response | StageOutcome): value is StageOutcome {
+  return typeof (value as { kind?: unknown }).kind === "string"
+}
+
+function blockedRedirect(detail: string): StageOutcome {
+  return { kind: "failure", reader: "direct", failure: "blocked", detail: boundedDetail(detail) }
+}
+
+/** Is `url` a target this read may reach (same guard as the first hop)? */
+function redirectAllowed(url: string, deps: ReaderHostDeps): boolean {
+  return evaluateFetchTarget(url, { allowPrivateHosts: deps.allowPrivateHosts === true }).allowed
+}
+
+/**
+ * Issue the direct request, following redirects one hop at a time so every
+ * hop passes the same target guard as the first (a public URL must not
+ * bounce the request onto a private or metadata address). Transports that
+ * cannot expose a redirect (a browser's opaque redirect) are retried with
+ * automatic following, and their final URL is checked before the body is
+ * used; a transport that follows on its own is checked the same way.
+ */
+async function fetchDirectGuarded(
+  resolved: ResolvedRequest,
+  headers: Record<string, string>,
+  deps: ReaderHostDeps,
+  fetchImpl: typeof fetch,
+  signal: AbortSignal
+): Promise<Response | StageOutcome> {
+  let url = resolved.url
+  let method = resolved.method
+  let body = resolved.body
+  let hopHeaders = headers
+  for (let hop = 0; ; hop++) {
+    const res = await fetchImpl(url, {
+      method,
+      headers: hopHeaders,
+      ...(body !== undefined ? { body } : {}),
+      signal,
+      redirect: "manual",
+    })
+    if (res.type === "opaqueredirect") {
+      const followed = await fetchImpl(url, {
+        method,
+        headers: hopHeaders,
+        ...(body !== undefined ? { body } : {}),
+        signal,
+        redirect: "follow",
+      })
+      if (followed.url && !redirectAllowed(followed.url, deps)) {
+        await followed.body?.cancel().catch(() => {})
+        return blockedRedirect(`redirected to a blocked target: ${followed.url}`)
+      }
+      return followed
+    }
+    const location = res.status >= 300 && res.status < 400 ? res.headers?.get?.("location") : null
+    if (!location) {
+      if (res.url && res.url !== url && !redirectAllowed(res.url, deps)) {
+        await res.body?.cancel().catch(() => {})
+        return blockedRedirect(`redirected to a blocked target: ${res.url}`)
+      }
+      return res
+    }
+    await res.body?.cancel().catch(() => {})
+    if (hop >= MAX_DIRECT_REDIRECTS) return blockedRedirect("too many redirects")
+    let next: URL
+    try {
+      next = new URL(location, url)
+    } catch {
+      return blockedRedirect("redirect to an invalid URL")
+    }
+    if (!redirectAllowed(next.toString(), deps)) {
+      return blockedRedirect(`redirected to a blocked target: ${next.toString()}`)
+    }
+    // Credentials the caller addressed to one origin never follow to another.
+    if (next.origin !== new URL(url).origin) {
+      hopHeaders = Object.fromEntries(
+        Object.entries(hopHeaders).filter(
+          ([name]) => !/^(authorization|cookie|proxy-authorization)$/i.test(name)
+        )
+      )
+    }
+    // 303, and 301/302 after a non-GET, continue as a bodyless GET.
+    if (res.status === 303 || ((res.status === 301 || res.status === 302) && method !== "GET")) {
+      method = "GET"
+      body = undefined
+    }
+    url = next.toString()
+  }
+}
+
 async function readDirect(
   resolved: ResolvedRequest,
   deps: ReaderHostDeps,
@@ -820,12 +923,9 @@ async function readDirect(
   if (deps.userAgent && !headers["User-Agent"]) headers["User-Agent"] = deps.userAgent
   let res: Response
   try {
-    res = await fetchImpl(resolved.url, {
-      method: resolved.method,
-      headers,
-      ...(resolved.body !== undefined ? { body: resolved.body } : {}),
-      signal,
-    })
+    const fetched = await fetchDirectGuarded(resolved, headers, deps, fetchImpl, signal)
+    if (isStageOutcome(fetched)) return fetched
+    res = fetched
   } catch (error) {
     if (signal.aborted || isAbortLike(error)) throw error
     if (error instanceof FetchTargetBlockedError) {
@@ -837,6 +937,21 @@ async function readDirect(
   const mayExtract = resolved.format !== "raw"
 
   if (mayExtract && !isTextualContentType(contentType)) {
+    await res.body?.cancel().catch(() => {})
+    // Origin status first: an auth wall or a missing file served as a PDF is
+    // terminal, never a document to hand to a converting reader.
+    if (!res.ok) {
+      const failure = classifyOriginStatus(res.status, "")
+      return {
+        kind: "http",
+        reader: "direct",
+        ok: false,
+        status: res.status,
+        contentType,
+        body: "",
+        ...(failure ? { failure } : {}),
+      }
+    }
     return {
       kind: "binary",
       reader: "direct",
@@ -851,7 +966,7 @@ async function readDirect(
   try {
     raw = await readBodyBounded(res, deps.byteCeiling ?? RESPONSE_BYTE_CEILING)
   } catch (error) {
-    if (error instanceof BodyTooLargeError) {
+    if (error instanceof ResponseTooLargeError) {
       return {
         kind: "failure",
         reader: "direct",
@@ -883,6 +998,19 @@ async function readDirect(
     try {
       const parsed = await parseHTML(raw, { includeLinks: false, includeImages: false })
       const text = parsed.text?.trim() ?? ""
+      // A short page that is only a sign-in / subscription wall is an auth
+      // failure even with a 200: it is terminal, and its URL is never handed
+      // to an external reader as merely "thin".
+      if (text.length < MIN_LOCAL_EXTRACT && LOGIN_MARKERS.test(text || raw)) {
+        return {
+          kind: "failure",
+          reader: "direct",
+          failure: "auth-required",
+          detail: "the page asks to sign in or subscribe",
+          status: res.status,
+          statusSource: "origin",
+        }
+      }
       if (text) {
         return {
           kind: "content",

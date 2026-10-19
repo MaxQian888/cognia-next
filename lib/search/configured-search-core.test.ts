@@ -530,6 +530,63 @@ describe("searchWithSettings — result policy (R03) and scope", () => {
     expect(searchMock.mock.calls[0][1].includeDomains).toEqual(["en.wikipedia.org"])
   })
 
+  it("fails before I/O when the caller's domains lie wholly outside the host's sources", async () => {
+    await expect(
+      searchWithSettings("q", {
+        settings: settings({
+          searchSafeSearchLevel: "moderate",
+          defaultSearchSources: ["wikipedia"],
+        } as Partial<AppSettings>),
+        options: { includeDomains: ["other.example"] },
+      })
+    ).rejects.toMatchObject({ name: "SearchDomainPolicyError" })
+    expect(searchMock).not.toHaveBeenCalled()
+  })
+
+  it("hands the host policy to the executor as enforced, so provider defaults cannot weaken it", async () => {
+    searchMock.mockResolvedValueOnce({ ...withBlocked, results: [] })
+    await searchWithSettings("q", {
+      settings: settings({
+        searchSafeSearchLevel: "strict",
+        defaultSearchSources: ["wikipedia"],
+        defaultExcludeDomains: ["spam.example"],
+      } as Partial<AppSettings>),
+    })
+    expect(searchMock.mock.calls[0][1].enforced).toMatchObject({
+      safeSearch: "strict",
+      excludeDomains: ["spam.example"],
+    })
+    expect(searchMock.mock.calls[0][1].enforced.includeDomains.length).toBeGreaterThan(0)
+  })
+
+  it("keys the cache by the resolved fallback policy, including the host switch", async () => {
+    searchMock.mockResolvedValue({ ...withBlocked, answer: undefined })
+    await searchWithSettings("q", { settings: policySettings() })
+    await searchWithSettings("q", {
+      settings: { ...policySettings(), searchFallbackEnabled: false },
+    })
+    expect(cacheGetMock.mock.calls[0][2].allowFallback).toBeUndefined()
+    expect(cacheGetMock.mock.calls[1][2].allowFallback).toBe(false)
+  })
+
+  it("never serves a cache hit to a cancelled or out-of-scope request", async () => {
+    cacheGetMock.mockReturnValue(withBlocked)
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      searchWithSettings("q", { settings: policySettings(), signal: controller.signal })
+    ).rejects.toThrow(/Abort/)
+    await expect(
+      searchWithSettings("q", {
+        settings: policySettings(),
+        scope: "acct-a",
+        activeScope: () => "acct-b",
+      })
+    ).rejects.toThrow(/account or runtime changed/)
+    expect(cacheGetMock).not.toHaveBeenCalled()
+    cacheGetMock.mockReset()
+  })
+
   it("discards a result whose scope changed in flight and never caches it", async () => {
     searchMock.mockResolvedValueOnce({ ...withBlocked })
     let scope = "acct-a"
