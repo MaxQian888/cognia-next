@@ -549,6 +549,9 @@ cognia-power = { path = "../crates/cognia-power", features = ["test-support"] }
 # Fleet's test mode (no recovery file, no `git` capture) and the runtime lock
 # the companion RPC tests hold.
 cognia-fleet = { path = "../crates/cognia-fleet", features = ["test-support"] }
+# Host archives laid out like `package-host-archive.mjs` writes them, for the
+# `cognia-server stage` tests.
+cognia-host-service = { path = "../crates/cognia-host-service", features = ["test-support"] }
 # HTTP mock server for connectors::http_client and attachments tests.
 # (`tempfile` is in `[dependencies]` for runtime plugin staging and is
 # transitively available in unit tests, so it isn't re-declared here.)

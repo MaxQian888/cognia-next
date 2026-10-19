@@ -266,6 +266,34 @@ enum CliCommand {
         #[command(subcommand)]
         command: ServiceCommand,
     },
+    /// Verify a host archive against what the signed catalog says it is, and
+    /// unpack it into an install home (ADR-0235).
+    ///
+    /// The digest, the manifest's version, target and command contract, every
+    /// file hash and the install layout are all checked before anything is
+    /// renamed into place. A remote installer stages into a scratch home and
+    /// then runs `service install --install-root <printed directory>`, so a
+    /// fresh install and a same-version repair take one path and the running
+    /// copy is never unpacked over. Prints `{version, target, directory}`.
+    Stage {
+        /// The downloaded `cognia-host-<version>-<target>.tar.gz`.
+        #[arg(long)]
+        archive: PathBuf,
+        /// Install home to stage into (`<home>/versions/<version>`).
+        #[arg(long)]
+        home: PathBuf,
+        #[arg(long)]
+        version: String,
+        #[arg(long)]
+        target: String,
+        /// The archive's sha256, from the verified catalog.
+        #[arg(long)]
+        sha256: String,
+        #[arg(long)]
+        contract_version: u32,
+        #[arg(long)]
+        catalog_hash: String,
+    },
     /// The loopback listener a dev-tunnel forward targets (ADR-0235 §4).
     ///
     /// Off by default. A forward must target this listener and never the
@@ -346,6 +374,16 @@ enum ServiceCommand {
         /// Port the service was installed with.
         #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
         port: u16,
+        /// Print one JSON object instead of text: the service, its install
+        /// home, the master key and readiness. For a remote installer
+        /// (ADR-0235), which plans from it.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+        /// Data dir the service was installed with. Defaults to the one
+        /// `install` uses for this user; a system service's lives in the home
+        /// of the account it runs as.
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
     },
 }
 
@@ -803,7 +841,24 @@ async fn run_service_command(
             );
             Ok(())
         }
-        ServiceCommand::Status { scope, port } => {
+        ServiceCommand::Status {
+            scope,
+            port,
+            json: true,
+            data_dir,
+        } => {
+            let data_dir = data_dir
+                .clone()
+                .unwrap_or_else(|| server::default_status_data_dir(platform, &ctx));
+            let report =
+                server::status_report((*scope).into(), platform, &ctx, &SystemIo, &data_dir);
+            let readiness = probe_readiness(*port).await;
+            let mut value = serde_json::to_value(&report).map_err(|e| e.to_string())?;
+            value["readiness"] = serde_json::to_value(&readiness).map_err(|e| e.to_string())?;
+            println!("{value}");
+            Ok(())
+        }
+        ServiceCommand::Status { scope, port, .. } => {
             let status = cognia_host_service::status(
                 &server::server_service_identity(),
                 (*scope).into(),
@@ -825,15 +880,43 @@ async fn run_service_command(
                     "not running"
                 }
             );
-            println!("Readiness:  {}", probe_readyz(*port).await);
+            println!("Readiness:  {}", describe(&probe_readiness(*port).await));
             Ok(())
+        }
+    }
+}
+
+/// `/readyz` on the loopback port, as data: what `service status` prints and
+/// what `--json` reports.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Readiness {
+    /// The server answered at all.
+    answered: bool,
+    ready: bool,
+    /// Checks holding readiness back, sorted.
+    failing: Vec<String>,
+    /// Why the server refused the brain, when it did.
+    brain_refusal: Option<String>,
+    /// Why there was no answer.
+    error: Option<String>,
+}
+
+impl Readiness {
+    fn unanswered(error: String) -> Self {
+        Self {
+            answered: false,
+            ready: false,
+            failing: Vec::new(),
+            brain_refusal: None,
+            error: Some(error),
         }
     }
 }
 
 /// `GET /readyz` on the loopback port. The host's certificate is self-signed,
 /// so the probe skips verification; it only ever talks to 127.0.0.1.
-async fn probe_readyz(port: u16) -> String {
+async fn probe_readiness(port: u16) -> Readiness {
     let client = match reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .timeout(std::time::Duration::from_secs(5))
@@ -841,25 +924,26 @@ async fn probe_readyz(port: u16) -> String {
         .build()
     {
         Ok(client) => client,
-        Err(error) => return format!("unknown (no loopback client: {error})"),
+        Err(error) => return Readiness::unanswered(format!("no loopback client: {error}")),
     };
     let url = format!("https://127.0.0.1:{port}/readyz");
     let response = match client.get(&url).send().await {
         Ok(response) => response,
-        Err(error) => return format!("no answer on 127.0.0.1:{port} ({error})"),
+        Err(error) => {
+            return Readiness::unanswered(format!("no answer on 127.0.0.1:{port} ({error})"))
+        }
     };
     let http_status = response.status();
     let body = response
         .json::<serde_json::Value>()
         .await
         .unwrap_or(serde_json::Value::Null);
-    describe_readiness(http_status.is_success(), &body)
+    readiness_from(http_status.is_success(), &body)
 }
 
-/// One line for `service status` from a `/readyz` answer: ready, or the
-/// checks that are holding it back.
-fn describe_readiness(ok: bool, body: &serde_json::Value) -> String {
-    let mut failing: Vec<&str> = body
+/// A `/readyz` answer as [`Readiness`].
+fn readiness_from(ok: bool, body: &serde_json::Value) -> Readiness {
+    let mut failing: Vec<String> = body
         .get("checks")
         .and_then(serde_json::Value::as_object)
         .map(|checks| {
@@ -869,20 +953,47 @@ fn describe_readiness(ok: bool, body: &serde_json::Value) -> String {
                     "draining" => value.as_bool() == Some(true),
                     _ => value.as_bool() == Some(false),
                 })
-                .map(|(name, _)| name.as_str())
+                .map(|(name, _)| name.clone())
                 .collect()
         })
         .unwrap_or_default();
     failing.sort_unstable();
-    let summary = match (ok, failing.is_empty()) {
-        (true, true) => "ready".to_owned(),
-        (_, false) => format!("not ready ({})", failing.join(", ")),
-        (false, true) => "not ready".to_owned(),
+    Readiness {
+        answered: true,
+        ready: ok && failing.is_empty(),
+        failing,
+        brain_refusal: describe_brain_refusal(body),
+        error: None,
+    }
+}
+
+/// One line for `service status`: ready, the checks holding it back, or why
+/// nothing answered.
+fn describe(readiness: &Readiness) -> String {
+    if !readiness.answered {
+        return match &readiness.error {
+            Some(error) if error.starts_with("no loopback client") => format!("unknown ({error})"),
+            Some(error) => error.clone(),
+            None => "unknown".to_owned(),
+        };
+    }
+    let summary = if readiness.ready {
+        "ready".to_owned()
+    } else if readiness.failing.is_empty() {
+        "not ready".to_owned()
+    } else {
+        format!("not ready ({})", readiness.failing.join(", "))
     };
-    match describe_brain_refusal(body) {
+    match &readiness.brain_refusal {
         Some(refusal) => format!("{summary}; {refusal}"),
         None => summary,
     }
+}
+
+/// One line for `service status` from a `/readyz` answer.
+#[cfg(test)]
+fn describe_readiness(ok: bool, body: &serde_json::Value) -> String {
+    describe(&readiness_from(ok, body))
 }
 
 /// Why the server refused the brain, from `/readyz`'s `brainRefusal`. A
@@ -915,6 +1026,34 @@ fn data_dir() -> PathBuf {
     dirs::data_dir()
         .map(|d| d.join("cognia-server"))
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// What `stage` prints: where the verified version now sits.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StagedRelease {
+    version: String,
+    target: String,
+    directory: PathBuf,
+}
+
+/// Stage a host archive into `home` after verifying it against `expected`.
+fn run_stage(
+    archive: &std::path::Path,
+    home: &std::path::Path,
+    expected: &cognia_host_service::install_home::ExpectedRelease,
+) -> Result<StagedRelease, String> {
+    let home = cognia_host_service::install_home::InstallHome::new(home);
+    std::fs::create_dir_all(home.versions_dir())
+        .map_err(|error| format!("create {}: {error}", home.versions_dir().display()))?;
+    let directory = home
+        .stage_archive(archive, expected)
+        .map_err(|error| error.to_string())?;
+    Ok(StagedRelease {
+        version: expected.version.clone(),
+        target: expected.target.clone(),
+        directory,
+    })
 }
 
 /// Apply one `tunnel-ingress` subcommand to the saved config and return it.
@@ -1138,6 +1277,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let CliCommand::Init { keychain } = &cli.command {
         return run_init(&data_dir(), *keychain).map_err(Into::into);
     }
+    if let CliCommand::Stage {
+        archive,
+        home,
+        version,
+        target,
+        sha256,
+        contract_version,
+        catalog_hash,
+    } = &cli.command
+    {
+        // Pure file work, like `tunnel-ingress`: it runs before the service
+        // exists, from the one binary extracted out of the archive.
+        let staged = run_stage(
+            archive,
+            home,
+            &cognia_host_service::install_home::ExpectedRelease {
+                version: version.clone(),
+                target: target.clone(),
+                sha256: sha256.clone(),
+                contract_version: *contract_version,
+                catalog_hash: catalog_hash.clone(),
+            },
+        )?;
+        println!("{}", serde_json::to_string(&staged)?);
+        return Ok(());
+    }
     if let CliCommand::TunnelIngress { command } = &cli.command {
         // A config file only: no store, key or listener is touched, so the
         // bootstrapper can run it before the service is first installed.
@@ -1328,6 +1493,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         CliCommand::DesktopHost { .. }
         | CliCommand::Service { .. }
         | CliCommand::Init { .. }
+        | CliCommand::Stage { .. }
         | CliCommand::TunnelIngress { .. } => {
             unreachable!("handled before headless initialization")
         }
@@ -3626,6 +3792,121 @@ mod tests {
                 command: ProfilesCommand::CredentialList
             }
         ));
+    }
+
+    #[test]
+    fn stage_verifies_an_archive_against_the_catalog_before_unpacking_it() {
+        use cognia_host_service::install_home::ExpectedRelease;
+        use cognia_host_service::test_support::{write_archive, TEST_CATALOG_HASH};
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (archive, sha256) = write_archive(dir.path(), "1.4.0", "linux-x64", |_| {});
+        let expected = ExpectedRelease {
+            version: "1.4.0".into(),
+            target: "linux-x64".into(),
+            sha256: sha256.clone(),
+            contract_version: 3,
+            catalog_hash: TEST_CATALOG_HASH.into(),
+        };
+        let home = dir.path().join("scratch-home");
+
+        // A digest the catalog does not name is refused, and nothing is staged.
+        let wrong = ExpectedRelease {
+            sha256: "0".repeat(64),
+            ..expected.clone()
+        };
+        let refused = super::run_stage(&archive, &home, &wrong).unwrap_err();
+        assert!(refused.contains("sha256"), "{refused}");
+        assert!(!home.join("versions/1.4.0").exists());
+
+        // A target the catalog does not name is refused too.
+        let other_target = ExpectedRelease {
+            target: "linux-arm64".into(),
+            ..expected.clone()
+        };
+        assert!(super::run_stage(&archive, &home, &other_target).is_err());
+
+        let staged = super::run_stage(&archive, &home, &expected).expect("staged");
+        assert_eq!(staged.directory, home.join("versions/1.4.0"));
+        assert!(staged.directory.join("bin/cognia-server").is_file());
+        assert_eq!(
+            serde_json::to_value(&staged).unwrap(),
+            serde_json::json!({
+                "version": "1.4.0",
+                "target": "linux-x64",
+                "directory": home.join("versions/1.4.0"),
+            })
+        );
+    }
+
+    #[test]
+    fn stage_and_status_json_parse_as_the_installer_invokes_them() {
+        use super::{Cli, CliCommand, ServiceCommand};
+        use clap::Parser as _;
+        let cli = Cli::try_parse_from([
+            "cognia-server",
+            "stage",
+            "--archive",
+            "/tmp/a.tar.gz",
+            "--home",
+            "/tmp/h",
+            "--version",
+            "1.4.0",
+            "--target",
+            "linux-x64",
+            "--sha256",
+            "ab",
+            "--contract-version",
+            "3",
+            "--catalog-hash",
+            "cd",
+        ])
+        .expect("stage arguments");
+        assert!(matches!(
+            cli.command,
+            CliCommand::Stage { contract_version: 3, ref version, .. } if version == "1.4.0"
+        ));
+        let cli = Cli::try_parse_from([
+            "cognia-server",
+            "service",
+            "status",
+            "--scope",
+            "user",
+            "--json",
+            "--data-dir",
+            "/srv/cognia",
+        ])
+        .expect("status arguments");
+        let CliCommand::Service {
+            command: ServiceCommand::Status { json, data_dir, .. },
+        } = cli.command
+        else {
+            panic!("parsed as another command");
+        };
+        assert!(json);
+        assert_eq!(data_dir, Some(std::path::PathBuf::from("/srv/cognia")));
+    }
+
+    #[test]
+    fn readiness_reports_unanswered_probes_as_data_and_as_the_old_text() {
+        let unanswered = super::Readiness::unanswered("no answer on 127.0.0.1:1 (refused)".into());
+        assert_eq!(
+            super::describe(&unanswered),
+            "no answer on 127.0.0.1:1 (refused)"
+        );
+        let json = serde_json::to_value(&unanswered).unwrap();
+        assert_eq!(json["answered"], false);
+        assert_eq!(json["ready"], false);
+        let no_client = super::Readiness::unanswered("no loopback client: tls".into());
+        assert_eq!(
+            super::describe(&no_client),
+            "unknown (no loopback client: tls)"
+        );
+        let held = super::readiness_from(
+            false,
+            &serde_json::json!({ "checks": { "brain": false, "storage": true } }),
+        );
+        assert!(held.answered && !held.ready);
+        assert_eq!(held.failing, vec!["brain".to_string()]);
     }
 
     #[test]

@@ -13,6 +13,8 @@ use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
+
 use crate::install_home::InstallHome;
 use crate::{RestartPolicy, ServicePlatform, ServiceScope, ServiceSpec};
 
@@ -600,6 +602,66 @@ pub fn install_server_service(
     })
 }
 
+/// What `cognia-server service status --json` reports: the facts a remote
+/// installer plans a fresh install, a repair, a re-pair or an uninstall from
+/// (ADR-0235). Readiness is probed over the network by the binary and added
+/// beside this.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerStatusReport {
+    pub scope: &'static str,
+    pub definition_path: PathBuf,
+    pub installed: bool,
+    /// The service manager has it loaded (launchd) or active (systemd).
+    pub running: bool,
+    pub data_dir: PathBuf,
+    /// Where the master key of this scope lives, and whether it exists there.
+    /// An installer must keep it: without it the host's secrets cannot be
+    /// read, and `service install` never replaces one.
+    pub master_key_path: PathBuf,
+    pub master_key_present: bool,
+    /// The version the install home's `current` points at.
+    pub current_version: Option<String>,
+    pub installed_versions: Vec<String>,
+    /// A self-update between switching `current` and committing.
+    pub pending_update: Option<crate::install_home::PendingUpdate>,
+}
+
+/// The data dir `install` uses for a scope when none is passed. A system
+/// service's data dir belongs to the account it runs as, which only `install`
+/// knows; status callers pass it explicitly there.
+pub fn default_status_data_dir(
+    platform: ServicePlatform,
+    ctx: &crate::InstallerContext,
+) -> PathBuf {
+    default_data_dir(platform, &ctx.home)
+}
+
+/// The server service's state and its install home under `data_dir`.
+pub fn status_report(
+    scope: ServiceScope,
+    platform: ServicePlatform,
+    ctx: &crate::InstallerContext,
+    io: &dyn crate::ServiceIo,
+    data_dir: &Path,
+) -> ServerStatusReport {
+    let service = crate::status(&server_service_identity(), scope, platform, ctx, io);
+    let home = InstallHome::in_data_dir(data_dir);
+    let master_key = MasterKeyPlacement::default_for(platform, scope, data_dir);
+    ServerStatusReport {
+        scope: scope.as_str(),
+        definition_path: service.definition_path,
+        installed: service.installed,
+        running: service.running,
+        data_dir: data_dir.to_path_buf(),
+        master_key_present: io.exists(master_key.path()),
+        master_key_path: master_key.path().to_path_buf(),
+        current_version: home.current_version(),
+        installed_versions: home.installed_versions(),
+        pending_update: home.pending(),
+    }
+}
+
 /// The service identity `uninstall` and `status` act on: the server's label and
 /// unit, independent of how it was installed.
 pub fn server_service_identity() -> ServiceSpec {
@@ -916,6 +978,65 @@ mod tests {
         let again = install_server_service(&req, &env(&ctx, &everything, &account, false), &io)
             .unwrap();
         assert!(!again.master_key_created);
+    }
+
+    #[test]
+    fn the_status_report_names_what_an_installer_must_keep() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = crate::InstallerContext {
+            home: dir.path().join("home"),
+            uid: 501,
+        };
+        let data = dir.path().join("data");
+        let io = RecordingIo::default();
+
+        let fresh = status_report(ServiceScope::User, ServicePlatform::Linux, &ctx, &io, &data);
+        assert!(!fresh.installed);
+        assert!(!fresh.master_key_present);
+        assert_eq!(fresh.master_key_path, data.join(MASTER_KEY_FILE_NAME));
+        assert_eq!(fresh.current_version, None);
+        assert!(fresh.installed_versions.is_empty());
+        assert_eq!(
+            fresh.definition_path,
+            dir.path()
+                .join("home/.config/systemd/user/cognia-server.service")
+        );
+
+        let everything = |_: &Path| true;
+        let unpacked = dir.path().join("cognia-host-1.4.0-linux-x64");
+        crate::test_support::write_install(&unpacked, "1.4.0", "linux-x64");
+        let mut req = request(ServiceScope::User);
+        req.data_dir = Some(data.clone());
+        req.install_root = Some(unpacked);
+        let mut install_env = env(&ctx, &everything, &account, false);
+        install_env.platform = ServicePlatform::Linux;
+        install_server_service(&req, &install_env, &io).unwrap();
+
+        let installed = status_report(ServiceScope::User, ServicePlatform::Linux, &ctx, &io, &data);
+        assert!(installed.installed);
+        assert!(installed.running, "the fake service manager reports active");
+        assert!(installed.master_key_present);
+        assert_eq!(installed.current_version.as_deref(), Some("1.4.0"));
+        assert_eq!(installed.installed_versions, vec!["1.4.0".to_string()]);
+        assert_eq!(installed.pending_update, None);
+        let json = serde_json::to_value(&installed).unwrap();
+        assert_eq!(json["scope"], "user");
+        assert_eq!(json["masterKeyPresent"], true);
+        assert_eq!(json["currentVersion"], "1.4.0");
+        assert!(json["pendingUpdate"].is_null());
+    }
+
+    #[test]
+    fn a_status_defaults_to_the_data_dir_install_uses() {
+        let ctx = installer_ctx();
+        assert_eq!(
+            default_status_data_dir(ServicePlatform::Linux, &ctx),
+            PathBuf::from("/Users/admin/.local/share/cognia-server")
+        );
+        assert_eq!(
+            default_status_data_dir(ServicePlatform::MacOs, &ctx),
+            PathBuf::from("/Users/admin/Library/Application Support/cognia-server")
+        );
     }
 
     #[derive(Default)]
