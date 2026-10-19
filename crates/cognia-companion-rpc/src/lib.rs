@@ -5,6 +5,7 @@ pub mod headless;
 pub mod mcp_oauth;
 pub mod pair_invitation;
 pub mod project_environment;
+pub mod rpc_host;
 pub mod shell;
 pub mod sidecar_runtime;
 

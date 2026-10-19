@@ -113,16 +113,12 @@ fn remote_context_error(code: &'static str) -> (StatusCode, Json<RpcError>) {
 
 /// Headless emitter: publishes into the companion EventBus so every
 /// `/ws/events` subscriber (the brain's acp-client, phones) receives the
-/// frozen payloads. Lives app-side (ADR-0067): the extracted external-agent
-/// crate defines the `AgentEventEmitter` seam, and this is the one impl that
-/// needs the companion EventBus.
-pub struct BusAgentEmitter(pub std::sync::Arc<super::event_bus::EventBus>);
-
-impl crate::external_agent::exec_backend::AgentEventEmitter for BusAgentEmitter {
-    fn emit(&self, channel: &str, payload: Value) {
-        self.0.publish(channel.to_string(), payload);
-    }
-}
+/// frozen payloads. Defined beside `RpcHost` in `cognia-companion-rpc`.
+pub use cognia_companion_rpc::rpc_host::BusAgentEmitter;
+// Every family reaches the host through `RpcHost`; the families' `use super::*`
+// brings the trait into scope.
+#[allow(unused_imports)]
+use super::dispatch_host::RpcHost;
 
 pub use super::rpc_error::RpcError;
 

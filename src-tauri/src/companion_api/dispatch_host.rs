@@ -36,9 +36,14 @@ use axum::{http::StatusCode, Json};
 use super::rpc::RpcError;
 use super::SharedState;
 use crate::headless::HeadlessServices;
+pub use cognia_companion_rpc::rpc_host::{OcrProgressEmitter, RpcHost};
 
 /// The process hosting this RPC dispatch: the desktop Tauri app, or the
 /// headless `cognia-server` service registry.
+///
+/// Both arms answer [`RpcHost`]: the desktop arm here, the headless arm by
+/// delegating to the registry's own implementation in `cognia-companion-rpc`,
+/// so a family that moved into that crate sees the same host either way.
 #[derive(Clone)]
 pub enum DispatchHost {
     Tauri(tauri::AppHandle),
@@ -46,19 +51,6 @@ pub enum DispatchHost {
 }
 
 impl DispatchHost {
-    /// Resolve the data directory owned by the execution host.
-    pub fn data_dir(&self) -> Result<std::path::PathBuf, String> {
-        match self {
-            Self::Tauri(app) => {
-                use tauri::Manager;
-                app.path()
-                    .app_data_dir()
-                    .map_err(|error| format!("resolve host app data directory: {error}"))
-            }
-            Self::Headless(services) => Ok(services.data_dir.clone()),
-        }
-    }
-
     /// Resolve the host for the current process: the Tauri `AppHandle` when
     /// the WebView shell is up, else the headless services registry installed
     /// by `cognia-server` at boot. `None` in bare unit-test states — the
@@ -79,65 +71,73 @@ impl DispatchHost {
             Self::Headless(_) => Err(RpcError::headless_unsupported(name)),
         }
     }
+}
 
-    /// The headless services registry, when this host is headless.
-    #[allow(dead_code)] // consumed by later slices (R10/R12).
-    pub fn headless(&self) -> Option<&Arc<HeadlessServices>> {
+#[async_trait::async_trait]
+impl RpcHost for DispatchHost {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Tauri(_) => "tauri",
+            Self::Headless(services) => RpcHost::kind(services),
+        }
+    }
+
+    fn data_dir(&self) -> Result<std::path::PathBuf, String> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.path()
+                    .app_data_dir()
+                    .map_err(|error| format!("resolve host app data directory: {error}"))
+            }
+            Self::Headless(services) => RpcHost::data_dir(services),
+        }
+    }
+
+    fn headless(&self) -> Option<&Arc<HeadlessServices>> {
         match self {
             Self::Tauri(_) => None,
             Self::Headless(services) => Some(services),
         }
     }
 
-    /// Resolve `root` to the canonical workspace whose live workbench this
-    /// caller may drive, for whichever process owns it (ADR-0088).
-    ///
+    fn resource_dir(&self) -> Option<std::path::PathBuf> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager as _;
+                app.path().resource_dir().ok()
+            }
+            Self::Headless(services) => RpcHost::resource_dir(services),
+        }
+    }
+
     /// The agent-drive verbs were classified `target: "client"`, so a desktop
     /// that had taken over a remote host sent every one of them to its own
-    /// machine, where no instance for that root exists. Agent open / diff /
-    /// save-all silently did nothing and the theme sync repainted the LOCAL
-    /// settings.json. Routing them makes "which machine owns this workbench"
-    /// the dispatcher's question rather than the caller's.
-    ///
-    /// The two hosts differ only here, which is why only this is a method and
-    /// the verbs themselves are free functions in `agent_channel::verbs`. On
-    /// the desktop `authorize_workspace_root` has already canonicalized the
-    /// root against the active project and the instance map is not
-    /// device-scoped, so there is nothing left to check. The headless host
-    /// additionally records which devices may drive an instance.
-    pub async fn ide_canonical_root(&self, root: &str, device_id: &str) -> Result<String, String> {
+    /// machine, where no instance for that root exists. Routing them makes
+    /// "which machine owns this workbench" the dispatcher's question rather
+    /// than the caller's. On the desktop `authorize_workspace_root` has already
+    /// canonicalized the root against the active project and the instance map
+    /// is not device-scoped, so there is nothing left to check.
+    async fn ide_canonical_root(&self, root: &str, device_id: &str) -> Result<String, String> {
         match self {
             Self::Tauri(_) => Ok(root.to_string()),
             Self::Headless(services) => {
-                services
-                    .code_server
-                    .authorize_agent_root(root, device_id)
-                    .await
+                RpcHost::ide_canonical_root(services, root, device_id).await
             }
         }
     }
 
-    /// Start (or reuse) a workbench for `root` on whichever host owns it.
-    ///
-    /// The four lifecycle verbs below were headless-only, which made a paired
+    /// The four lifecycle verbs were headless-only, which made a paired
     /// phone's `codeserver_ensure` answer `503 headless_host_required` on a
-    /// desktop-hosted companion server. The manifest classifies them
-    /// `target: execution` over http/websocket/webrtc, so the client was told
-    /// it could call them; the dispatcher then said no. Branching them the way
-    /// the read verbs above already branch closes that.
+    /// desktop-hosted companion server.
     ///
-    /// Both hosts hand a paired device the `/ide/relay/{id}` front door. On a
-    /// headless host the instance is device-scoped already. On the desktop the
-    /// workbench runs with `--auth none` and full terminals for its owner, so
-    /// relaying it off the machine needs the owner's approval for this device
-    /// and this project: without one, the desktop is asked
-    /// ([`crate::codeserver::relay_grants::CODESERVER_RELAY_GRANT_EVENT`]) and
-    /// the caller is told to wait (`CODESERVER_RELAY_GRANT_REQUIRED`).
-    ///
-    /// `via_relay` is false for a caller on this machine's loopback plane: it
-    /// reaches the workbench directly through [`Self::ide_loopback_port`], so
-    /// it needs neither a relay id nor an approval.
-    pub async fn ide_ensure(
+    /// Both hosts hand a paired device the `/ide/relay/{id}` front door. On
+    /// the desktop the workbench runs with `--auth none` and full terminals
+    /// for its owner, so relaying it off the machine needs the owner's
+    /// approval for this device and this project: without one, the desktop is
+    /// asked ([`crate::codeserver::relay_grants::CODESERVER_RELAY_GRANT_EVENT`])
+    /// and the caller is told to wait (`CODESERVER_RELAY_GRANT_REQUIRED`).
+    async fn ide_ensure(
         &self,
         root: &str,
         profile: crate::codeserver::profile::IdeProfile,
@@ -173,17 +173,16 @@ impl DispatchHost {
                     profile, root, relay_path,
                 ))
             }
-            Self::Headless(services) => services.code_server.ensure(root, profile, device_id).await,
+            Self::Headless(services) => {
+                RpcHost::ide_ensure(services, root, profile, device_id, via_relay).await
+            }
         }
     }
 
-    /// Whether a workbench is serving `root`, and under which profile.
-    ///
     /// The desktop map is not device-scoped — `authorize_workspace_root` has
     /// already bound the root to the active project — so `device_id` is only
-    /// consulted on the headless side, which additionally records which devices
-    /// may drive an instance.
-    pub async fn ide_status(
+    /// consulted on the headless side.
+    async fn ide_status(
         &self,
         root: &str,
         device_id: &str,
@@ -213,12 +212,11 @@ impl DispatchHost {
                     _ => crate::codeserver::remote::stopped_status(),
                 })
             }
-            Self::Headless(services) => services.code_server.status(root, device_id).await,
+            Self::Headless(services) => RpcHost::ide_status(services, root, device_id).await,
         }
     }
 
-    /// Stop the workbench serving `root`. `true` when one was running.
-    pub async fn ide_stop(&self, root: &str) -> bool {
+    async fn ide_stop(&self, root: &str) -> bool {
         match self {
             Self::Tauri(app) => {
                 use tauri::Manager;
@@ -226,12 +224,11 @@ impl DispatchHost {
                     .stop(root)
                     .await
             }
-            Self::Headless(services) => services.code_server.stop(root).await,
+            Self::Headless(services) => RpcHost::ide_stop(services, root).await,
         }
     }
 
-    /// Stop every workbench this host owns.
-    pub async fn ide_stop_all(&self) {
+    async fn ide_stop_all(&self) {
         match self {
             Self::Tauri(app) => {
                 use tauri::Manager;
@@ -239,18 +236,13 @@ impl DispatchHost {
                     .stop_all()
                     .await
             }
-            Self::Headless(services) => services.code_server.stop_all().await,
+            Self::Headless(services) => RpcHost::ide_stop_all(services).await,
         }
     }
 
-    /// The workbench's loopback port for `root`, when this host is running one
-    /// and the caller may drive it.
-    ///
-    /// Only ever disclosed to a caller on the loopback plane, which the arm
-    /// enforces. On the desktop the port comes from the local instance map,
-    /// which the desktop's own renderer already reads through
-    /// `codeserver_status`.
-    pub async fn ide_loopback_port(&self, root: &str, device_id: &str) -> Option<u16> {
+    /// On the desktop the port comes from the local instance map, which the
+    /// desktop's own renderer already reads through `codeserver_status`.
+    async fn ide_loopback_port(&self, root: &str, device_id: &str) -> Option<u16> {
         match self {
             Self::Tauri(app) => {
                 use tauri::Manager;
@@ -260,16 +252,14 @@ impl DispatchHost {
                     .await;
                 port
             }
-            Self::Headless(services) => services.code_server.loopback_port(root, device_id).await,
+            Self::Headless(services) => RpcHost::ide_loopback_port(services, root, device_id).await,
         }
     }
 
-    /// Open a project-relative file through code-server's own CLI bridge.
-    ///
     /// Unlike the verbs above this one needs the running instance's binary and
     /// data directories, which only the owning state holds, so it stays a
     /// per-host branch.
-    pub async fn ide_open_file(
+    async fn ide_open_file(
         &self,
         root: &str,
         device_id: &str,
@@ -285,15 +275,12 @@ impl DispatchHost {
                     .await
             }
             Self::Headless(services) => {
-                services
-                    .code_server
-                    .open_file(root, device_id, path, line, column)
-                    .await
+                RpcHost::ide_open_file(services, root, device_id, path, line, column).await
             }
         }
     }
 
-    pub async fn ide_read_user_settings(
+    async fn ide_read_user_settings(
         &self,
         profile: crate::codeserver::profile::IdeProfile,
     ) -> Result<String, String> {
@@ -308,11 +295,11 @@ impl DispatchHost {
                 .await
                 .map_err(|error| format!("read code-server settings task: {error}"))?
             }
-            Self::Headless(services) => services.code_server.read_user_settings(profile).await,
+            Self::Headless(services) => RpcHost::ide_read_user_settings(services, profile).await,
         }
     }
 
-    pub async fn ide_write_user_settings(
+    async fn ide_write_user_settings(
         &self,
         contents: String,
         profile: crate::codeserver::profile::IdeProfile,
@@ -329,15 +316,12 @@ impl DispatchHost {
                 .map_err(|error| format!("write code-server settings task: {error}"))?
             }
             Self::Headless(services) => {
-                services
-                    .code_server
-                    .write_user_settings(contents, profile)
-                    .await
+                RpcHost::ide_write_user_settings(services, contents, profile).await
             }
         }
     }
 
-    pub async fn ide_read_runtime_args(
+    async fn ide_read_runtime_args(
         &self,
         profile: crate::codeserver::profile::IdeProfile,
     ) -> Result<String, String> {
@@ -352,11 +336,11 @@ impl DispatchHost {
                 .await
                 .map_err(|error| format!("read code-server runtime args task: {error}"))?
             }
-            Self::Headless(services) => services.code_server.read_runtime_args(profile).await,
+            Self::Headless(services) => RpcHost::ide_read_runtime_args(services, profile).await,
         }
     }
 
-    pub async fn ide_write_runtime_args(
+    async fn ide_write_runtime_args(
         &self,
         contents: String,
         profile: crate::codeserver::profile::IdeProfile,
@@ -373,166 +357,47 @@ impl DispatchHost {
                 .map_err(|error| format!("write code-server runtime args task: {error}"))?
             }
             Self::Headless(services) => {
-                services
-                    .code_server
-                    .write_runtime_args(contents, profile)
-                    .await
+                RpcHost::ide_write_runtime_args(services, contents, profile).await
             }
         }
     }
 
-    /// The sidecar supervisor state for this host (Tauri-managed on desktop,
-    /// registry-owned headless). Panics if the desktop app never managed
-    /// `SidecarState` — identical to the old `app.state::<T>()` behavior.
-    pub fn sidecar_state(&self) -> crate::claude::SidecarState {
+    /// Panics if the desktop app never managed `SidecarState` — identical to
+    /// the old `app.state::<T>()` behavior.
+    fn sidecar_state(&self) -> crate::claude::SidecarState {
         match self {
             Self::Tauri(app) => {
                 use tauri::Manager;
                 app.state::<crate::claude::SidecarState>().inner().clone()
             }
-            Self::Headless(services) => services.sidecar.clone(),
+            Self::Headless(services) => RpcHost::sidecar_state(services),
         }
     }
 
-    /// The provider-env store for this host.
-    pub fn api_keys(&self) -> crate::api_key::ApiKeyState {
+    fn api_keys(&self) -> crate::api_key::ApiKeyState {
         match self {
             Self::Tauri(app) => {
                 use tauri::Manager;
                 app.state::<crate::api_key::ApiKeyState>().inner().clone()
             }
-            Self::Headless(services) => services.api_keys.clone(),
+            Self::Headless(services) => RpcHost::api_keys(services),
         }
     }
 
-    /// Snapshot the embedded MCP server status from the process that owns it.
-    pub fn mcp_server_status(&self) -> crate::mcp_server::types::McpServerStatus {
+    fn mcp_server_status(&self) -> crate::mcp_server::types::McpServerStatus {
         match self {
             Self::Tauri(app) => {
                 use tauri::Manager;
                 app.state::<crate::mcp_server::McpServerState>().status()
             }
-            Self::Headless(services) => services.mcp_server.status(),
+            Self::Headless(services) => RpcHost::mcp_server_status(services),
         }
     }
 
-    /// The desktop's resource dir, where a terminal host this starts finds its
-    /// shell-integration scripts; `None` on the headless server.
-    fn resource_dir(&self) -> Option<std::path::PathBuf> {
-        match self {
-            Self::Tauri(app) => {
-                use tauri::Manager as _;
-                app.path().resource_dir().ok()
-            }
-            Self::Headless(_) => None,
-        }
-    }
-
-    /// Snapshot durable host-owned terminal sessions visible to the caller.
-    pub async fn terminal_list_all(
-        &self,
-        device_id: &str,
-    ) -> Result<Vec<cognia_terminal::host::HostSessionInfo>, String> {
-        #[cfg(test)]
-        if let Self::Headless(services) = self {
-            return Ok(services.terminal_sessions_for_tests.read().await.clone());
-        }
-        let resource_dir = self.resource_dir();
-        crate::terminal_host_bridge::terminal_host_remote_list(resource_dir.as_deref(), device_id)
-            .await
-    }
-
-    pub async fn terminal_list_for_project(
-        &self,
-        device_id: &str,
-        project_id: &str,
-    ) -> Result<Vec<cognia_terminal::host::HostSessionInfo>, String> {
-        Ok(self
-            .terminal_list_all(device_id)
-            .await?
-            .into_iter()
-            .filter(|session| session.project_id.as_deref() == Some(project_id))
-            .collect())
-    }
-
-    /// Terminate a durable host-owned terminal after taking its controller
-    /// lease on behalf of the authenticated device.
-    pub async fn terminal_kill(&self, device_id: &str, session_id: &str) -> Result<(), String> {
-        let resource_dir = self.resource_dir();
-        crate::terminal_host_bridge::terminal_host_remote_kill(
-            resource_dir.as_deref(),
-            device_id,
-            session_id,
-        )
-        .await
-    }
-
-    /// The terminal host's own settings, as the file on disk has them.
-    ///
-    /// Host-neutral: they live next to the terminal host, not in Tauri state,
-    /// so the desktop and a headless `cognia-server` answer identically.
-    pub async fn terminal_host_status(
-        &self,
-    ) -> Result<crate::terminal_host_bridge::TerminalHostStatus, String> {
-        crate::terminal_host_bridge::terminal_host_remote_status().await
-    }
-
-    /// Apply terminal-host settings on behalf of an authenticated administrator.
-    pub async fn terminal_host_configure(
-        &self,
-        settings: crate::terminal_host_service::TerminalHostSettings,
-    ) -> Result<crate::terminal_host_bridge::TerminalHostStatus, String> {
-        let resource_dir = self.resource_dir();
-        crate::terminal_host_bridge::terminal_host_remote_configure(
-            resource_dir.as_deref(),
-            settings,
-        )
-        .await
-    }
-
-    /// Run one SFTP operation on the terminal host (ADR-0162).
-    ///
-    /// The host refuses the frame this reaches unless the connection is local,
-    /// so this call is the only door and the RPC layer above it is the only
-    /// gate. `payload` is the frame body: it names an operation and a
-    /// synchronized profile, never a destination the caller chose.
-    pub async fn terminal_host_sftp(
-        &self,
-        payload: serde_json::Value,
-    ) -> Result<serde_json::Value, String> {
-        let resource_dir = self.resource_dir();
-        crate::terminal_host_bridge::terminal_host_sftp(resource_dir.as_deref(), payload).await
-    }
-
-    /// Install a paired device's terminal profiles on the host.
-    pub async fn terminal_host_sync_profiles(
-        &self,
-        device_id: &str,
-        profiles: Vec<serde_json::Value>,
-    ) -> Result<usize, String> {
-        let resource_dir = self.resource_dir();
-        crate::terminal_host_bridge::terminal_host_remote_sync_profiles(
-            resource_dir.as_deref(),
-            device_id,
-            profiles,
-        )
-        .await
-    }
-
-    /// The sidecar host seam for this host — what `sidecar::spawn` needs.
-    pub fn sidecar_host(&self) -> Arc<dyn crate::claude::host::SidecarHost> {
+    fn sidecar_host(&self) -> Arc<dyn crate::claude::host::SidecarHost> {
         match self {
             Self::Tauri(app) => Arc::new(crate::claude::host::TauriSidecarHost(app.clone())),
-            Self::Headless(services) => Arc::clone(&services.sidecar_host),
-        }
-    }
-
-    /// `"tauri"` | `"headless"` — for logs and error strings.
-    #[allow(dead_code)]
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Self::Tauri(_) => "tauri",
-            Self::Headless(_) => "headless",
+            Self::Headless(services) => RpcHost::sidecar_host(services),
         }
     }
 
@@ -549,44 +414,36 @@ impl DispatchHost {
     // whose own doc comment claims "one code path with the headless RPC arms"),
     // so the fix is an accessor, not a second implementation.
 
-    /// The process/exec backend that owns external agents on this host.
-    pub fn exec_backend(&self) -> Arc<dyn crate::external_agent::exec_backend::ExecBackend> {
+    fn exec_backend(&self) -> Arc<dyn crate::external_agent::exec_backend::ExecBackend> {
         match self {
             Self::Tauri(app) => {
                 use tauri::Manager;
                 app.state::<crate::external_agent::commands::ExternalAgentState>()
                     .exec()
             }
-            Self::Headless(services) => Arc::clone(&services.exec),
+            Self::Headless(services) => RpcHost::exec_backend(services),
         }
     }
 
-    /// Where agent lifecycle events are published for this host: the Tauri
-    /// event channels the desktop UI already listens on, or the companion
-    /// EventBus a remote client reads through `/ws/events`.
-    pub fn agent_event_emitter(
+    /// The Tauri event channels the desktop UI already listens on, or the
+    /// companion EventBus a remote client reads through `/ws/events`.
+    fn agent_event_emitter(
         &self,
     ) -> Arc<dyn crate::external_agent::exec_backend::AgentEventEmitter> {
         match self {
             Self::Tauri(app) => {
                 Arc::new(crate::external_agent::commands::TauriAgentEmitter { app: app.clone() })
             }
-            Self::Headless(services) => {
-                Arc::new(super::rpc::BusAgentEmitter(Arc::clone(&services.event_bus)))
-            }
+            Self::Headless(services) => RpcHost::agent_event_emitter(services),
         }
     }
 
-    /// The spawn policy this host applies to a REMOTE spawn request.
-    ///
     /// Deliberately the strict `SpawnPolicy` on both hosts, never the desktop's
     /// laxer `validate_desktop`: that relaxation exists because a local Tauri
     /// `invoke` implies a human sitting at the machine, which is exactly the
     /// premise a network-reachable arm does not get to assume. Remote spawn is
     /// RCE-grade on a desktop for the same reason it is in the cloud.
-    pub fn remote_spawn_policy(
-        &self,
-    ) -> Result<crate::external_agent::presets::SpawnPolicy, String> {
+    fn remote_spawn_policy(&self) -> Result<crate::external_agent::presets::SpawnPolicy, String> {
         match self {
             Self::Tauri(app) => {
                 let data_root = crate::external_agent::dsh_runtime::host_data_root(app)?;
@@ -594,142 +451,13 @@ impl DispatchHost {
                     &data_root,
                 ))
             }
-            Self::Headless(services) => Ok(services.spawn_policy.clone()),
+            Self::Headless(services) => RpcHost::remote_spawn_policy(services),
         }
     }
 
-    // ── Plugin runtimes ─────────────────────────────────────────────────────
-    //
-    // Both hosts own these outright — the desktop `.manage()`s the very same
-    // state types at boot (`lib.rs`), and the underlying helpers are already
-    // written as `*_for_state(state, …)`. The arms were nonetheless reachable
-    // only on headless, so a paired phone could grant a plugin permission or
-    // invoke a plugin API against a cloud host and not against the desktop it
-    // was actually paired to.
-
-    // Plain reference accessors, not combinators: Tauri's `State::inner()`
-    // hands back `&'r T` whose lifetime comes from the manager borrow rather
-    // than from the temporary `State` value, so both arms can yield a
-    // reference tied to `&self`. (The generic-future combinator this replaced
-    // could not express "the returned future borrows the argument" and failed
-    // to compile.) Returning an owned `Arc` is not an option either —
-    // `PluginRuntimeState` is not `Clone`, and a clone would be a different
-    // registry even if it were.
-
-    /// Native plugin install/permission/snapshot service this host owns.
-    pub fn plugin_runtime(&self) -> &crate::plugin_api::PluginRuntimeState {
-        match self {
-            Self::Tauri(app) => {
-                use tauri::Manager;
-                app.state::<crate::plugin_api::PluginRuntimeState>().inner()
-            }
-            Self::Headless(services) => services.plugin_runtime.as_ref(),
-        }
-    }
-
-    /// VS Code extension sidecar registry — what the system LSP host arms need.
-    pub fn vscode_plugins(&self) -> &crate::plugin_api::vscode::VscodeExtensionState {
-        match self {
-            Self::Tauri(app) => {
-                use tauri::Manager;
-                app.state::<crate::plugin_api::vscode::VscodeExtensionState>()
-                    .inner()
-            }
-            Self::Headless(services) => services.vscode_plugins.as_ref(),
-        }
-    }
-
-    /// Connector adapter registry + the single-owner runtime lease.
-    ///
-    /// Both hosts own one: the desktop as Tauri managed state, the headless
-    /// container inside `HeadlessServices`. Host-neutral because the lease is
-    /// the arbiter between EVERY runtime attached to this companion — the
-    /// desktop's own webview and any brain process pointed at it — and an arm
-    /// that only exists on one host cannot arbitrate between two.
-    pub fn connectors_state(&self) -> &crate::connectors::ConnectorsState {
-        match self {
-            Self::Tauri(app) => {
-                use tauri::Manager;
-                app.state::<crate::connectors::ConnectorsState>().inner()
-            }
-            Self::Headless(services) => &services.connectors,
-        }
-    }
-
-    /// Native OCR backend registry this host owns.
-    ///
-    /// Async because the headless registry installs its compiled backends
-    /// lazily on first use; the desktop's is built at startup. Returns an
-    /// owned clone — `NativeOcrRegistry` is `Clone` and the desktop's Tauri
-    /// `State` borrow cannot outlive the call.
-    pub async fn ocr_registry(&self) -> crate::ocr::NativeOcrRegistry {
-        match self {
-            Self::Tauri(app) => {
-                use tauri::Manager;
-                app.state::<crate::ocr::NativeOcrRegistry>().inner().clone()
-            }
-            Self::Headless(services) => services.ocr_registry().await.clone(),
-        }
-    }
-
-    /// Where `ocr://download-progress` is published.
-    ///
-    /// The desktop emits on the Tauri event channel its UI listens to; the
-    /// headless host publishes to the companion `EventBus`, which a remote
-    /// client reads through `/ws/events`. Same topic name either way, so a
-    /// paired device sees model-download progress on both hosts.
-    pub fn ocr_progress_emitter(
-        &self,
-    ) -> std::sync::Arc<dyn Fn(crate::ocr::DownloadProgressEvent) + Send + Sync> {
-        match self {
-            Self::Tauri(app) => {
-                use tauri::Emitter as _;
-                let app = app.clone();
-                std::sync::Arc::new(move |event| {
-                    let _ = app.emit("ocr://download-progress", event);
-                })
-            }
-            Self::Headless(services) => {
-                let bus = std::sync::Arc::clone(&services.event_bus);
-                std::sync::Arc::new(move |event| {
-                    // A progress frame that will not serialize is dropped, not
-                    // fatal — the download itself is unaffected.
-                    if let Ok(payload) = serde_json::to_value(event) {
-                        bus.publish("ocr://download-progress".to_string(), payload);
-                    }
-                })
-            }
-        }
-    }
-
-    /// Publish a host-originated event on `topic`, whichever host this is.
-    ///
-    /// The desktop `emit`s and lets `event_channels`'s forwarder relay the
-    /// frame onto the bus for paired devices; a headless host has no Tauri
-    /// runtime, so it publishes straight to the bus. Emitting AND publishing on
-    /// the desktop would deliver the frame twice to every remote subscriber,
-    /// which is why this is a match and not a helper that does both.
-    ///
-    /// The topic must be catalogued in `event_channels::EVENT_CHANNELS`, or it
-    /// reaches the desktop renderer and no remote client at all.
-    pub fn publish_host_event(&self, topic: &str, payload: serde_json::Value) {
-        match self {
-            Self::Tauri(app) => {
-                use tauri::Emitter as _;
-                let _ = app.emit(topic, payload);
-            }
-            Self::Headless(services) => {
-                services.event_bus.publish(topic.to_string(), payload);
-            }
-        }
-    }
-
-    /// Apply this host's OS confinement to an already policy-validated spawn.
-    ///
     /// The desktop wraps children in its sandbox host (the local Tauri command
     /// does the same); the headless container relies on the `ExecBackend` it
-    /// was configured with (local / bollard / kube) for isolation, so there is
-    /// nothing to wrap.
+    /// was configured with, see its own implementation.
     ///
     /// # The two confinements are mutually exclusive
     ///
@@ -745,21 +473,11 @@ impl DispatchHost {
     /// back to this host, so it is wrapped like any other spawn; with one,
     /// the router wraps a fallback itself.
     ///
-    /// # Per-configuration state roots (ADR-0216)
-    ///
-    /// `COGNIA_AGENT_STATE_KEY` names a private state root on THIS host. The
-    /// desktop wrapper resolves it; a headless local-process spawn leaves it
-    /// for the process table, which resolves it unsandboxed. A launch confined
-    /// anywhere else (a runtime-environment container, a container or
-    /// Kubernetes exec backend) cannot see the host's login roots and could
-    /// not reach a host path in its env, so the key is dropped there.
-    ///
-    /// `backend` is the one the spawn will go to, fetched once by the caller:
-    /// the desktop's router is installed after startup, and a config hardened
-    /// for one backend must not be spawned on another.
-    pub fn harden_spawn_config(
+    /// `COGNIA_AGENT_STATE_KEY` (ADR-0216) names a private state root on THIS
+    /// host, which the desktop wrapper resolves.
+    fn harden_spawn_config(
         &self,
-        mut config: crate::external_agent::process::ExternalAgentSpawnConfig,
+        config: crate::external_agent::process::ExternalAgentSpawnConfig,
         backend: &dyn crate::external_agent::exec_backend::ExecBackend,
     ) -> Result<crate::external_agent::process::ExternalAgentSpawnConfig, String> {
         match self {
@@ -767,23 +485,102 @@ impl DispatchHost {
                 config,
                 backend.routes_sandboxes(),
             ),
-            Self::Headless(_) => {
-                if !state_key_reaches_host_process_table(&config, backend.kind()) {
-                    cognia_external_agent::state_isolation::strip_state_key(&mut config);
-                }
-                Ok(config)
-            }
+            Self::Headless(services) => RpcHost::harden_spawn_config(services, config, backend),
         }
     }
-}
 
-/// Whether a headless spawn runs in this host's own process table, where a
-/// private state root can be resolved (by `ExternalAgentProcessManager`).
-fn state_key_reaches_host_process_table(
-    config: &crate::external_agent::process::ExternalAgentSpawnConfig,
-    backend_kind: &str,
-) -> bool {
-    config.sandbox.is_none() && backend_kind == "local-process"
+    // ── Plugin runtimes ─────────────────────────────────────────────────────
+    //
+    // Both hosts own these outright — the desktop `.manage()`s the very same
+    // state types at boot (`lib.rs`), and the underlying helpers are already
+    // written as `*_for_state(state, …)`. The arms were nonetheless reachable
+    // only on headless, so a paired phone could grant a plugin permission or
+    // invoke a plugin API against a cloud host and not against the desktop it
+    // was actually paired to.
+    //
+    // Plain reference accessors: Tauri's `State::inner()` hands back `&'r T`
+    // whose lifetime comes from the manager borrow rather than from the
+    // temporary `State` value, so both arms can yield a reference tied to
+    // `&self`. Returning an owned `Arc` is not an option — `PluginRuntimeState`
+    // is not `Clone`, and a clone would be a different registry even if it
+    // were.
+
+    fn plugin_runtime(&self) -> &crate::plugin_api::PluginRuntimeState {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::plugin_api::PluginRuntimeState>().inner()
+            }
+            Self::Headless(services) => RpcHost::plugin_runtime(services),
+        }
+    }
+
+    fn vscode_plugins(&self) -> &crate::plugin_api::vscode::VscodeExtensionState {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::plugin_api::vscode::VscodeExtensionState>()
+                    .inner()
+            }
+            Self::Headless(services) => RpcHost::vscode_plugins(services),
+        }
+    }
+
+    /// Host-neutral because the lease is the arbiter between EVERY runtime
+    /// attached to this companion — the desktop's own webview and any brain
+    /// process pointed at it — and an arm that only exists on one host cannot
+    /// arbitrate between two.
+    fn connectors_state(&self) -> &crate::connectors::ConnectorsState {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::connectors::ConnectorsState>().inner()
+            }
+            Self::Headless(services) => RpcHost::connectors_state(services),
+        }
+    }
+
+    /// The headless registry installs its compiled backends lazily on first
+    /// use; the desktop's is built at startup.
+    async fn ocr_registry(&self) -> crate::ocr::NativeOcrRegistry {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::ocr::NativeOcrRegistry>().inner().clone()
+            }
+            Self::Headless(services) => RpcHost::ocr_registry(services).await,
+        }
+    }
+
+    /// The desktop emits on the Tauri event channel its UI listens to. Same
+    /// topic name on both hosts, so a paired device sees model-download
+    /// progress either way.
+    fn ocr_progress_emitter(&self) -> OcrProgressEmitter {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Emitter as _;
+                let app = app.clone();
+                std::sync::Arc::new(move |event| {
+                    let _ = app.emit("ocr://download-progress", event);
+                })
+            }
+            Self::Headless(services) => RpcHost::ocr_progress_emitter(services),
+        }
+    }
+
+    /// The desktop `emit`s and lets `event_channels`'s forwarder relay the
+    /// frame onto the bus for paired devices. Emitting AND publishing on the
+    /// desktop would deliver the frame twice to every remote subscriber,
+    /// which is why this is a match and not a helper that does both.
+    fn publish_host_event(&self, topic: &str, payload: serde_json::Value) {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Emitter as _;
+                let _ = app.emit(topic, payload);
+            }
+            Self::Headless(services) => RpcHost::publish_host_event(services, topic, payload),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -837,26 +634,6 @@ mod tests {
         assert!(!desktop_wrapper_applies(&spawn_config(true), true));
         assert!(desktop_wrapper_applies(&spawn_config(true), false));
         assert!(desktop_wrapper_applies(&spawn_config(false), true));
-    }
-
-    /// ADR-0216. A state key only means something where this host's process
-    /// table runs the child; a container never sees the host's login roots.
-    #[test]
-    fn a_state_key_reaches_only_a_local_process_table() {
-        assert!(state_key_reaches_host_process_table(
-            &spawn_config(false),
-            "local-process"
-        ));
-        assert!(!state_key_reaches_host_process_table(
-            &spawn_config(true),
-            "local-process"
-        ));
-        for kind in ["container", "workspace-runtime", "workspace-routing"] {
-            assert!(!state_key_reaches_host_process_table(
-                &spawn_config(false),
-                kind
-            ));
-        }
     }
 
     #[test]

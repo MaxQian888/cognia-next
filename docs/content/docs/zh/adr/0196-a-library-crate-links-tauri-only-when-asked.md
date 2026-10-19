@@ -133,9 +133,9 @@ headless 服务端移到 `crates/cognia-server`（lib + bin），不链接 Tauri
 | --- | --- | --- |
 | P0–P3 | 全部：修复并拆分 setup、工作区治理与门禁、分层修正、每个库 crate 的 `tauri-host`，以及 observability 不依赖 Tauri 的 `tracing-host`（trace context 传播） | `desktop-host` 中其余供 `cognia-server` 使用的日志部分（P9） |
 | P4 | `cognia-companion-connectivity`、`-bus`、`-contract`、`-security` | — |
-| P5 | `RendererPort`；`CompanionRuntime`（分发与应用的路由）及 headless 槽位；`RpcError`、payload 能力门禁与审批权限检查移入核心；`cognia-power` 与 Wake-on-LAN 移出应用 | `RpcHost`（P5.3，随 P8）、拆分 `commands.rs` |
+| P5 | `RendererPort`；`CompanionRuntime`（分发与应用的路由）及 headless 槽位；`RpcError`、payload 能力门禁与审批权限检查移入核心；`cognia-power` 与 Wake-on-LAN 移出应用；`RpcHost`（P5.3）：`cognia-companion-rpc` 中的对象安全 trait，桌面的 `DispatchHost` 与 headless registry 都实现它 | 拆分 `commands.rs` |
 | P6 | `cognia-codex-app`、`cognia-browser-cookies`、`cognia-hooks`、`cognia-fleet`、`cognia-task-workspace-host`、`cognia-terminal::host_client` 与 `::host_bridge`，GitHub 工作区与仓库导入并入 `cognia-git`；`cognia-elevated-setup`；`cognia-jobs::host` 的 supervisor/host RPC；`cognia-sidecar` 定位器、supervisor、Langfuse、Pi 完整性校验与命令核心；`cognia-codeserver`；`cognia-terminal::sftp_service` | — |
-| P8 | `cognia-companion-rpc` 的 project environment、shell 与共享命令服务 | RPC 族、宿主适配器与 headless registry |
+| P8 | `cognia-companion-rpc` 的 project environment、shell 与共享命令服务；headless registry；managed 与 remote desktop 族；`RpcHost` 接缝 | 其余 RPC 族与分发核心 |
 | P7 | `cognia-companion`：核心（51 个文件、4.4 万行）；`companion_api` 成为门面，外加分发表、命令外壳与 `wiring` | — |
 
 计划与代码相遇之处：

@@ -24,7 +24,7 @@ use crate::skills::{
     types::NativeSkill,
 };
 
-use super::dispatch_host::DispatchHost;
+use super::dispatch_host::{DispatchHost, RpcHost};
 
 static SERVICES: Lazy<Mutex<HashMap<PathBuf, Arc<SkillBundleUploadService>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
