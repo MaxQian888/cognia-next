@@ -38,6 +38,13 @@ use cognia_sidecar::supervisor::SidecarState;
 /// Where a host publishes `ocr://download-progress` frames.
 pub type OcrProgressEmitter = Arc<dyn Fn(cognia_ocr::DownloadProgressEvent) + Send + Sync>;
 
+/// The computer-use runtime a host runs (ADR-0020), and where its kill switch
+/// announces itself. Only the desktop has one.
+pub struct HostAutomation<'a> {
+    pub state: &'a cognia_automation::automation::commands::AutomationState,
+    pub events: Arc<dyn cognia_automation::automation::host::AutomationEventSink>,
+}
+
 /// The process hosting a companion RPC dispatch, seen through what the
 /// families need from it.
 #[async_trait]
@@ -254,6 +261,57 @@ pub trait RpcHost: Send + Sync {
     /// catalogued in `event_channels::EVENT_CHANNELS`, or it reaches no remote
     /// client at all.
     fn publish_host_event(&self, topic: &str, payload: Value);
+
+    /// The `cognia` data root inside [`Self::data_dir`]: a subdirectory on the
+    /// desktop, the data dir itself on a headless host.
+    fn cognia_data_dir(&self) -> Result<PathBuf, String>;
+
+    // ── Host-owned state the families address directly ──────────────────────
+
+    /// The workflow runtime (scheduler mirror, waitpoints, integration
+    /// ingress). `None` while the desktop has not managed it yet.
+    fn workflow_state(&self) -> Option<&cognia_scheduling::workflow::WorkflowState>;
+
+    /// The embedded MCP server this host owns.
+    fn mcp_server(&self) -> &cognia_mcp_server::McpServerState;
+
+    /// The MCP sidecar script this host launches, when it ships one.
+    fn mcp_sidecar_path(&self) -> Option<PathBuf>;
+
+    /// Where the MCP server's orchestration proxy publishes exec events.
+    fn mcp_orchestration_sink(
+        &self,
+    ) -> cognia_mcp_server::orchestration_proxy::OrchestrationEventSink;
+
+    /// The computer-use runtime, which only the desktop runs.
+    fn automation(&self) -> Option<HostAutomation<'_>>;
+
+    /// What the embedded MCP server needs to drive computer use, on a host
+    /// built with it (`cognia-mcp-server/desktop-automation`).
+    fn mcp_automation_binding(&self) -> Option<cognia_mcp_server::AutomationBinding>;
+
+    /// The desktop's companion server lifecycle (bind mode, tunnel, ports).
+    /// `None` on a headless host, whose listener is configured at boot.
+    fn companion_server(&self) -> Option<&cognia_companion::CompanionServerState>;
+
+    /// The version this host reports to a pairing client.
+    fn app_version(&self) -> String;
+
+    /// The LLM gateway this host owns. `None` before the desktop has
+    /// initialised it.
+    fn gateway(&self) -> Option<&cognia_gateway::GatewayState>;
+
+    /// Where a gateway this host starts publishes its request log.
+    fn gateway_event_host(
+        &self,
+        event_bus: Arc<EventBus>,
+    ) -> Arc<dyn cognia_gateway::host::GatewayHost>;
+
+    /// The sidecar tree whose Pi permission extension this host verifies.
+    fn pi_sidecar_dir(&self) -> Option<PathBuf>;
+
+    /// The Codex App control host. Only the desktop drives the Codex App.
+    fn codex_app_host(&self) -> Option<Box<dyn cognia_codex_app::CodexAppHost + '_>>;
 }
 
 /// The [`AgentEventEmitter`] that publishes agent lifecycle events on the
@@ -264,6 +322,20 @@ impl AgentEventEmitter for BusAgentEmitter {
     fn emit(&self, channel: &str, payload: Value) {
         self.0.publish(channel.to_string(), payload);
     }
+}
+
+/// A headless host has no renderer: orchestration exec events go to the
+/// connected brain over the socket bridge.
+pub fn headless_orchestration_event_sink(
+) -> cognia_mcp_server::orchestration_proxy::OrchestrationEventSink {
+    use cognia_companion::bridge_transport::BridgeTransport;
+
+    Arc::new(move |event| {
+        let payload = serde_json::to_value(event).map_err(|error| error.to_string())?;
+        let bridge = cognia_companion::ws_bridge::socket_bridge_transport()
+            .ok_or_else(|| "headless Brain bridge is disconnected".to_string())?;
+        bridge.emit(cognia_mcp_server::orchestration_proxy::EXEC_EVENT, payload)
+    })
 }
 
 /// Whether a headless spawn runs in this host's own process table, where a
@@ -444,6 +516,64 @@ impl RpcHost for Arc<HeadlessServices> {
     fn publish_host_event(&self, topic: &str, payload: Value) {
         self.event_bus.publish(topic.to_string(), payload);
     }
+
+    fn cognia_data_dir(&self) -> Result<PathBuf, String> {
+        Ok(self.data_dir.clone())
+    }
+
+    fn workflow_state(&self) -> Option<&cognia_scheduling::workflow::WorkflowState> {
+        Some(self.workflow.as_ref())
+    }
+
+    fn mcp_server(&self) -> &cognia_mcp_server::McpServerState {
+        self.mcp_server.as_ref()
+    }
+
+    fn mcp_sidecar_path(&self) -> Option<PathBuf> {
+        Some(crate::headless::resolve_mcp_sidecar_path())
+    }
+
+    fn mcp_orchestration_sink(
+        &self,
+    ) -> cognia_mcp_server::orchestration_proxy::OrchestrationEventSink {
+        headless_orchestration_event_sink()
+    }
+
+    fn automation(&self) -> Option<HostAutomation<'_>> {
+        None
+    }
+
+    fn mcp_automation_binding(&self) -> Option<cognia_mcp_server::AutomationBinding> {
+        None
+    }
+
+    fn companion_server(&self) -> Option<&cognia_companion::CompanionServerState> {
+        None
+    }
+
+    fn app_version(&self) -> String {
+        // Synced with the app's version by `version:sync`.
+        env!("CARGO_PKG_VERSION").to_string()
+    }
+
+    fn gateway(&self) -> Option<&cognia_gateway::GatewayState> {
+        Some(self.gateway.as_ref())
+    }
+
+    fn gateway_event_host(
+        &self,
+        event_bus: Arc<EventBus>,
+    ) -> Arc<dyn cognia_gateway::host::GatewayHost> {
+        Arc::new(crate::gateway_host::HeadlessGatewayHost { event_bus })
+    }
+
+    fn pi_sidecar_dir(&self) -> Option<PathBuf> {
+        cognia_sidecar::pi_extension::headless_sidecar_dir()
+    }
+
+    fn codex_app_host(&self) -> Option<Box<dyn cognia_codex_app::CodexAppHost + '_>> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -482,6 +612,46 @@ mod tests {
         assert!(Arc::ptr_eq(dyn_host.headless().expect("headless"), &host));
         assert_eq!(dyn_host.data_dir().expect("data dir"), host.data_dir);
         assert_eq!(dyn_host.resource_dir(), None);
+    }
+
+    /// The headless registry owns every piece of host state a family
+    /// addresses, and has none of the desktop-only runtimes.
+    #[test]
+    fn the_headless_accessors_hand_back_the_registry_s_own_instances() {
+        let host = host();
+        let dyn_host: &dyn RpcHost = &host;
+        assert_eq!(dyn_host.cognia_data_dir().expect("data dir"), host.data_dir);
+        assert!(std::ptr::eq(
+            dyn_host.workflow_state().expect("workflow"),
+            host.workflow.as_ref()
+        ));
+        assert!(std::ptr::eq(
+            dyn_host.mcp_server(),
+            host.mcp_server.as_ref()
+        ));
+        assert!(std::ptr::eq(
+            dyn_host.gateway().expect("gateway"),
+            host.gateway.as_ref()
+        ));
+        assert_eq!(
+            dyn_host.mcp_sidecar_path(),
+            Some(crate::headless::resolve_mcp_sidecar_path())
+        );
+        assert_eq!(dyn_host.app_version(), env!("CARGO_PKG_VERSION"));
+        assert!(dyn_host.automation().is_none());
+        assert!(dyn_host.mcp_automation_binding().is_none());
+        assert!(dyn_host.companion_server().is_none());
+        assert!(dyn_host.codex_app_host().is_none());
+    }
+
+    #[test]
+    fn a_headless_gateway_publishes_on_the_bus_it_is_given() {
+        let host = host();
+        let bus = EventBus::new();
+        assert!(host
+            .gateway_event_host(Arc::clone(&bus))
+            .emit("gateway://request-log", serde_json::json!({})));
+        assert_eq!(bus.high_water_seq(), 1);
     }
 
     /// ADR-0216. A state key only means something where this host's process

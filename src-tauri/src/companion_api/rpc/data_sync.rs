@@ -276,8 +276,6 @@ pub(super) async fn dispatch(
     tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    use tauri::Manager as _;
-
     let _ = (state, host, device_id, tenant_id, scope);
     let result = match name {
         // ── Sync down (M4.7) ──────────────────────────────────────────────────
@@ -661,10 +659,7 @@ pub(super) async fn dispatch(
         "workflow_approval_list" | "workflow_approval_respond"
             if waitpoint_command_needs_ts_authority(
                 name,
-                matches!(
-                    host,
-                    super::super::dispatch_host::DispatchHost::Headless(_)
-                ),
+                host.headless().is_some(),
             ) =>
         {
             let args = inject_caller_device_id(name, args, device_id);
@@ -687,16 +682,10 @@ pub(super) async fn dispatch(
         // asleep and the renderer observes the terminal row when it resumes
         // polling (`getWorkflowWaitpoint` reads native-first).
         "workflow_approval_list" => {
-            let rows = match host {
-                super::super::dispatch_host::DispatchHost::Tauri(app) => app
-                    .state::<crate::workflow::WorkflowState>()
-                    .mirror
-                    .list_pending_waitpoints(),
-                super::super::dispatch_host::DispatchHost::Headless(services) => {
-                    services.workflow.mirror.list_pending_waitpoints()
-                }
-            }
-            .map_err(|error| RpcError::internal(error.to_string()))?;
+            let rows = super::service_plane::workflow_state(host)?
+                .mirror
+                .list_pending_waitpoints()
+                .map_err(|error| RpcError::internal(error.to_string()))?;
             let approvals: Vec<Value> = rows
                 .into_iter()
                 .filter(|row| row.kind == "approval" || row.kind == "risk_gate")
@@ -743,18 +732,11 @@ pub(super) async fn dispatch(
                 }),
                 updated_at: resolved_at,
             };
-            let (changed, exists) = match host {
-                super::super::dispatch_host::DispatchHost::Tauri(app) => {
-                    let workflow = app.state::<crate::workflow::WorkflowState>();
-                    let changed = workflow.mirror.decide_waitpoint(&input);
-                    let exists = workflow.mirror.get_waitpoint(&approval_id);
-                    (changed, exists)
-                }
-                super::super::dispatch_host::DispatchHost::Headless(services) => {
-                    let changed = services.workflow.mirror.decide_waitpoint(&input);
-                    let exists = services.workflow.mirror.get_waitpoint(&approval_id);
-                    (changed, exists)
-                }
+            let (changed, exists) = {
+                let workflow = super::service_plane::workflow_state(host)?;
+                let changed = workflow.mirror.decide_waitpoint(&input);
+                let exists = workflow.mirror.get_waitpoint(&approval_id);
+                (changed, exists)
             };
             let changed = changed.map_err(|error| RpcError::internal(error.to_string()))?;
             let exists = exists

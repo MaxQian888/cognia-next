@@ -119,7 +119,10 @@ pub(super) async fn dispatch(
     _account_id: Option<&str>,
     _scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    let app = &crate::codex_app_dispatch::TauriCodexAppHost(host.tauri_app(name)?);
+    let app = host
+        .codex_app_host()
+        .ok_or_else(|| RpcError::headless_unsupported(name))?;
+    let app = app.as_ref();
     match name {
         "codex_app_runtime_status" => crate::codex_app_dispatch::codex_app_runtime_status_impl(app)
             .await

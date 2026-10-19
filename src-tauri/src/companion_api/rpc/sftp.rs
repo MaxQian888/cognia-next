@@ -42,13 +42,10 @@ pub(super) async fn dispatch(
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let _ = (state, tenant_id, scope);
-    // A headless host has no `AppHandle`, and the bridge does not need one:
+    // A headless host has no resource dir, and the bridge does not need one:
     // it reaches or starts the terminal host from the endpoint on disk.
-    let app = match host {
-        super::super::dispatch_host::DispatchHost::Tauri(app) => Some(app),
-        super::super::dispatch_host::DispatchHost::Headless(_) => None,
-    };
-    crate::sftp_service::dispatch_sftp(app, name, &args, device_id)
+    let resource_dir = host.resource_dir();
+    cognia_terminal::sftp_service::dispatch_sftp(resource_dir.as_deref(), name, &args, device_id)
         .await
         .map_err(to_rpc_error)
 }

@@ -361,12 +361,8 @@ async fn dispatch_arm(
         let agent_id: Option<String> = optional(&args, "agentId")?;
         let task_id: Option<String> = optional(&args, "taskId")?;
         let data_dir = host
-            .data_dir()
+            .cognia_data_dir()
             .map_err(|error| served(name, EnvironmentServiceError::Store(error)))?;
-        let data_dir = match host {
-            super::super::dispatch_host::DispatchHost::Tauri(_) => data_dir.join("cognia"),
-            super::super::dispatch_host::DispatchHost::Headless(_) => data_dir,
-        };
         return to_json(
             pool::delivery_page(&data_dir, agent_id.as_deref(), task_id.as_deref(), &request)
                 .map_err(|error| served(name, error))?,

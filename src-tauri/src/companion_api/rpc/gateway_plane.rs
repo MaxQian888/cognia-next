@@ -42,19 +42,20 @@ fn with_gateway<R>(
     host: &super::super::dispatch_host::DispatchHost,
     f: impl FnOnce(&GatewayState, &'static str) -> R,
 ) -> Result<R, (StatusCode, Json<RpcError>)> {
-    use tauri::Manager as _;
-    if let Some(services) = host.headless() {
-        return Ok(f(&services.gateway, "headless"));
-    }
-    let Some(app) = crate::companion_api::host::tauri_app(&state.renderer) else {
-        return Err(no_gateway("gateway state is unavailable on this host"));
-    };
-    let Some(gateway) = app.try_state::<GatewayState>() else {
+    let _ = state;
+    let Some(gateway) = host.gateway() else {
         return Err(no_gateway(
             "the LLM gateway has not been initialised on this desktop",
         ));
     };
-    Ok(f(&gateway, "desktop"))
+    Ok(f(
+        gateway,
+        if host.headless().is_some() {
+            "headless"
+        } else {
+            "desktop"
+        },
+    ))
 }
 
 /// Bind a remote process's gateway environment to its authenticated task lease.
@@ -226,35 +227,18 @@ async fn ensure_task_listener(
     ticket_id: &str,
     generation: u64,
 ) -> Result<u16, (StatusCode, Json<RpcError>)> {
-    use tauri::Manager as _;
-    let start = if let Some(services) = host.headless() {
-        if services.gateway.status().running {
-            Ok(())
-        } else {
-            services
-                .gateway
-                .start_for_task(
-                    Arc::new(crate::headless::gateway_host::HeadlessGatewayHost {
-                        event_bus: Arc::clone(&state.event_bus),
-                    }),
-                    ticket_id,
-                )
-                .await
-        }
+    let gateway = host
+        .gateway()
+        .ok_or_else(|| no_gateway("gateway host unavailable"))?;
+    let start = if gateway.status().running {
+        Ok(())
     } else {
-        let app = crate::companion_api::host::tauri_app(&state.renderer)
-            .ok_or_else(|| no_gateway("gateway host unavailable"))?;
-        let gateway = app.state::<GatewayState>();
-        if gateway.status().running {
-            Ok(())
-        } else {
-            gateway
-                .start_for_task(
-                    Arc::new(crate::gateway::host::TauriGatewayHost(app.clone())),
-                    ticket_id,
-                )
-                .await
-        }
+        gateway
+            .start_for_task(
+                host.gateway_event_host(Arc::clone(&state.event_bus)),
+                ticket_id,
+            )
+            .await
     };
     let status = with_gateway(state, host, |gateway, _| gateway.status())?;
     let port = status.bound_port.filter(|_| status.running);
@@ -382,7 +366,6 @@ pub(super) async fn dispatch(
     tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    use tauri::Manager as _;
     let _ = (device_id, tenant_id, scope);
     match name {
         "agent_gateway_lease_prepare" => {
@@ -590,21 +573,15 @@ pub(super) async fn dispatch(
             let model: String = required(&args, "model")?;
             // The probe is async, so hold the owning handle rather than a
             // borrowed guard across the await.
-            let rows = if let Some(services) = host.headless() {
-                services.gateway.probe_upstream(&model).await
-            } else {
-                let Some(app) = crate::companion_api::host::tauri_app(&state.renderer).cloned()
-                else {
-                    return Err(no_gateway("gateway state is unavailable on this host"));
-                };
-                let Some(gateway) = app.try_state::<GatewayState>() else {
-                    return Err(no_gateway(
-                        "the LLM gateway has not been initialised on this desktop",
-                    ));
-                };
-                gateway.probe_upstream(&model).await
-            }
-            .map_err(RpcError::service_unavailable)?;
+            let Some(gateway) = host.gateway() else {
+                return Err(no_gateway(
+                    "the LLM gateway has not been initialised on this desktop",
+                ));
+            };
+            let rows = gateway
+                .probe_upstream(&model)
+                .await
+                .map_err(RpcError::service_unavailable)?;
             serde_json::to_value(rows).map_err(|e| RpcError::internal(e.to_string()))
         }
 

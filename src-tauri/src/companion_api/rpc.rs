@@ -72,7 +72,6 @@ use sha2::{Digest, Sha256};
 use crate::{
     agents::commands as agent_commands,
     claude::{commands as claude_commands, sidecar::kill_sidecar},
-    mcp_server::orchestration_proxy::OrchestrationEventSink,
     skills::{install, native as skills_native, registry},
 };
 
@@ -114,7 +113,7 @@ fn remote_context_error(code: &'static str) -> (StatusCode, Json<RpcError>) {
 /// Headless emitter: publishes into the companion EventBus so every
 /// `/ws/events` subscriber (the brain's acp-client, phones) receives the
 /// frozen payloads. Defined beside `RpcHost` in `cognia-companion-rpc`.
-pub use cognia_companion_rpc::rpc_host::BusAgentEmitter;
+pub use cognia_companion_rpc::rpc_host::{headless_orchestration_event_sink, BusAgentEmitter};
 // Every family reaches the host through `RpcHost`; the families' `use super::*`
 // brings the trait into scope.
 #[allow(unused_imports)]
@@ -3534,8 +3533,6 @@ async fn sync_external_bridge_verifiers(
     host: &super::dispatch_host::DispatchHost,
     data_dir: &std::path::Path,
 ) -> Result<(), (StatusCode, Json<RpcError>)> {
-    use tauri::Manager;
-
     let bridge_data_dir = data_dir.to_path_buf();
     let clients = tokio::task::spawn_blocking(move || {
         super::external_bridge::active_clients(&bridge_data_dir)
@@ -3543,37 +3540,16 @@ async fn sync_external_bridge_verifiers(
     .await
     .map_err(|error| RpcError::internal(error.to_string()))?
     .map_err(external_bridge_rpc_error)?;
-    let result = match host {
-        super::dispatch_host::DispatchHost::Tauri(app) => app
-            .state::<crate::mcp_server::McpServerState>()
-            .replace_bridge_clients(&clients),
-        super::dispatch_host::DispatchHost::Headless(services) => {
-            services.mcp_server.replace_bridge_clients(&clients)
-        }
-    };
-    match result {
+    match host.mcp_server().replace_bridge_clients(&clients) {
         Ok(()) | Err(crate::mcp_server::types::McpServerError::NotRunning) => Ok(()),
         Err(error) => Err(mcp_server_rpc_error(error)),
     }
-}
-
-fn headless_orchestration_event_sink() -> OrchestrationEventSink {
-    use super::bridge_transport::BridgeTransport;
-
-    std::sync::Arc::new(move |event| {
-        let payload = serde_json::to_value(event).map_err(|error| error.to_string())?;
-        let bridge = super::ws_bridge::socket_bridge_transport()
-            .ok_or_else(|| "headless Brain bridge is disconnected".to_string())?;
-        bridge.emit(crate::mcp_server::orchestration_proxy::EXEC_EVENT, payload)
-    })
 }
 
 async fn external_bridge_start_for_host(
     host: &super::dispatch_host::DispatchHost,
     restart: bool,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    use tauri::Manager;
-
     let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
     let bridge_data_dir = data_dir.clone();
     let (config, clients) = tokio::task::spawn_blocking(move || {
@@ -3599,17 +3575,9 @@ async fn external_bridge_start_for_host(
     super::external_bridge::set_runtime_state(&data_dir, "starting", None);
 
     if restart {
-        let stopped = match host {
-            super::dispatch_host::DispatchHost::Tauri(app) => {
-                crate::mcp_server::commands::mcp_server_stop_for_state(
-                    app.state::<crate::mcp_server::McpServerState>().inner(),
-                )
-            }
-            super::dispatch_host::DispatchHost::Headless(services) => {
-                crate::mcp_server::commands::mcp_server_stop_for_state(services.mcp_server.as_ref())
-            }
-        };
-        if let Err(error) = stopped {
+        if let Err(error) =
+            crate::mcp_server::commands::mcp_server_stop_for_state(host.mcp_server())
+        {
             super::external_bridge::set_runtime_state(
                 &data_dir,
                 "degraded",
@@ -3619,47 +3587,20 @@ async fn external_bridge_start_for_host(
         }
     }
 
-    let started = match host {
-        super::dispatch_host::DispatchHost::Tauri(app) => {
-            let sidecar_path =
-                crate::mcp_server::commands::resolve_sidecar_path(app).ok_or_else(|| {
-                    RpcError::service_unavailable(
-                        "External Bridge MCP sidecar is not installed".to_string(),
-                    )
-                })?;
-            let automation = app.state::<crate::automation::commands::AutomationState>();
-            app.state::<crate::mcp_server::McpServerState>()
-                .start_with_clients(
-                    config.port,
-                    clients,
-                    settings_json,
-                    sidecar_path.to_string_lossy().into_owned(),
-                    Some((
-                        automation.handle.clone(),
-                        crate::automation::dispatcher::Enforcement::from_state(&automation),
-                    )),
-                    Some(crate::mcp_server::orchestration_proxy::tauri_event_sink(
-                        app.clone(),
-                    )),
-                )
-                .await
-        }
-        super::dispatch_host::DispatchHost::Headless(services) => {
-            services
-                .mcp_server
-                .start_with_clients(
-                    config.port,
-                    clients,
-                    settings_json,
-                    crate::headless::resolve_mcp_sidecar_path()
-                        .to_string_lossy()
-                        .into_owned(),
-                    None,
-                    Some(headless_orchestration_event_sink()),
-                )
-                .await
-        }
-    };
+    let sidecar_path = host.mcp_sidecar_path().ok_or_else(|| {
+        RpcError::service_unavailable("External Bridge MCP sidecar is not installed".to_string())
+    })?;
+    let started = host
+        .mcp_server()
+        .start_with_clients(
+            config.port,
+            clients,
+            settings_json,
+            sidecar_path.to_string_lossy().into_owned(),
+            host.mcp_automation_binding(),
+            Some(host.mcp_orchestration_sink()),
+        )
+        .await;
 
     match started {
         Ok(port) => {
@@ -3900,17 +3841,15 @@ pub(super) async fn dispatch(
             let event_host = host.clone();
             let events: cognia_companion_rpc::managed_desktops::HostEventSink =
                 std::sync::Arc::new(move |topic, value| event_host.publish_host_event(topic, value));
-            Some(match &host {
-                super::dispatch_host::DispatchHost::Tauri(app) => {
-                    use tauri::Manager;
-                    let automation = app.state::<crate::automation::commands::AutomationState>();
-                    cognia_companion_rpc::managed_desktops::ManagedControlRuntime {
-                        enforcement: crate::automation::dispatcher::Enforcement::from_state(&automation),
-                        events,
-                        refresh_persisted: false,
-                    }
-                }
-                super::dispatch_host::DispatchHost::Headless(_) => {
+            Some(match host.automation() {
+                Some(automation) => cognia_companion_rpc::managed_desktops::ManagedControlRuntime {
+                    enforcement: crate::automation::dispatcher::Enforcement::from_state(
+                        automation.state,
+                    ),
+                    events,
+                    refresh_persisted: false,
+                },
+                None => {
                     cognia_companion_rpc::managed_desktops::headless_control_runtime(events).await
                         .map_err(|error| (StatusCode::BAD_REQUEST, Json(RpcError::new(error.code.clone(), error.to_string()))))?
                 }

@@ -86,15 +86,7 @@ pub(super) async fn dispatch(
         // refused with "has not been verified on this host" while the Host that
         // would run it held a perfectly good extension.
         "resolve_pi_extension" => {
-            let sidecar_dir = match &host {
-                super::super::dispatch_host::DispatchHost::Tauri(app) => {
-                    crate::claude::sidecar::sidecar_dir(app).ok()
-                }
-                super::super::dispatch_host::DispatchHost::Headless(_) => {
-                    crate::pi_extension::headless_sidecar_dir()
-                }
-            };
-            to_json(crate::pi_extension::verify_for_host(sidecar_dir))
+            to_json(crate::pi_extension::verify_for_host(host.pi_sidecar_dir()))
         }
 
         "ocr_list_native_backends" => {
@@ -398,21 +390,9 @@ pub(super) async fn dispatch(
         "external_bridge_start" => external_bridge_start_for_host(host, false).await,
         "external_bridge_restart" => external_bridge_start_for_host(host, true).await,
         "external_bridge_stop" => {
-            use tauri::Manager;
             let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
-            let result = match host {
-                super::super::dispatch_host::DispatchHost::Tauri(app) => {
-                    crate::mcp_server::commands::mcp_server_stop_for_state(
-                        app.state::<crate::mcp_server::McpServerState>().inner(),
-                    )
-                }
-                super::super::dispatch_host::DispatchHost::Headless(services) => {
-                    crate::mcp_server::commands::mcp_server_stop_for_state(
-                        services.mcp_server.as_ref(),
-                    )
-                }
-            };
-            result.map_err(mcp_server_rpc_error)?;
+            crate::mcp_server::commands::mcp_server_stop_for_state(host.mcp_server())
+                .map_err(mcp_server_rpc_error)?;
             super::super::external_bridge::set_runtime_state(&data_dir, "stopped", None);
             Ok(Value::Null)
         }
@@ -556,93 +536,41 @@ pub(super) async fn dispatch(
 
         // ── MCP server ────────────────────────────────────────────────────────
         "mcp_server_start" | "mcp_server_restart" => {
-            use tauri::Manager;
-
             let port: u16 = required(&args, "port")?;
             let token: String = required(&args, "token")?;
             let settings_json: String = required_aliased(&args, "settings_json", "settingsJson")?;
             if name == "mcp_server_restart" {
-                match &host {
-                    crate::companion_api::dispatch_host::DispatchHost::Tauri(app) => {
-                        crate::mcp_server::commands::mcp_server_stop_for_state(
-                            app.state::<crate::mcp_server::McpServerState>().inner(),
-                        )
-                        .map_err(mcp_server_rpc_error)?;
-                    }
-                    crate::companion_api::dispatch_host::DispatchHost::Headless(services) => {
-                        crate::mcp_server::commands::mcp_server_stop_for_state(
-                            services.mcp_server.as_ref(),
-                        )
-                        .map_err(mcp_server_rpc_error)?;
-                    }
-                }
+                crate::mcp_server::commands::mcp_server_stop_for_state(host.mcp_server())
+                    .map_err(mcp_server_rpc_error)?;
             }
-
-            match &host {
-                crate::companion_api::dispatch_host::DispatchHost::Tauri(app) => {
-                    // Same resolver the settings snippet reads, so the path we
-                    // spawn and the path we tell the user to paste cannot
-                    // diverge — they did, and neither existed.
-                    let sidecar_path = crate::mcp_server::commands::resolve_sidecar_path(app)
-                        .ok_or_else(|| {
-                            RpcError::internal(
-                                "External Bridge MCP sidecar is not installed (expected \
-                                 sidecar/cognia-mcp.mjs in the app resources)"
-                                    .to_string(),
-                            )
-                        })?;
-                    let automation = app.state::<crate::automation::commands::AutomationState>();
-                    app.state::<crate::mcp_server::McpServerState>()
-                        .start(
-                            port,
-                            token,
-                            settings_json,
-                            sidecar_path.to_string_lossy().into_owned(),
-                            Some((
-                                automation.handle.clone(),
-                                crate::automation::dispatcher::Enforcement::from_state(&automation),
-                            )),
-                            Some(crate::mcp_server::orchestration_proxy::tauri_event_sink(
-                                app.clone(),
-                            )),
-                        )
-                        .await
-                        .map(|bound| json!(bound))
-                        .map_err(mcp_server_rpc_error)
-                }
-                crate::companion_api::dispatch_host::DispatchHost::Headless(services) => {
-                    crate::mcp_server::commands::mcp_server_start_for_state(
-                        services.mcp_server.as_ref(),
-                        port,
-                        token,
-                        settings_json,
-                        crate::headless::resolve_mcp_sidecar_path()
-                            .to_string_lossy()
-                            .into_owned(),
-                        None,
-                        Some(headless_orchestration_event_sink()),
-                    )
-                    .await
-                    .map(|bound| json!(bound))
-                    .map_err(mcp_server_rpc_error)
-                }
-            }
-        }
-        "mcp_server_stop" => match &host {
-            crate::companion_api::dispatch_host::DispatchHost::Tauri(app) => {
-                use tauri::Manager;
-                crate::mcp_server::commands::mcp_server_stop_for_state(
-                    app.state::<crate::mcp_server::McpServerState>().inner(),
+            // Same resolver the settings snippet reads, so the path we spawn
+            // and the path we tell the user to paste cannot diverge — they
+            // did, and neither existed.
+            let sidecar_path = host.mcp_sidecar_path().ok_or_else(|| {
+                RpcError::internal(
+                    "External Bridge MCP sidecar is not installed (expected \
+                     sidecar/cognia-mcp.mjs in the app resources)"
+                        .to_string(),
                 )
+            })?;
+            crate::mcp_server::commands::mcp_server_start_for_state(
+                host.mcp_server(),
+                port,
+                token,
+                settings_json,
+                sidecar_path.to_string_lossy().into_owned(),
+                host.mcp_automation_binding(),
+                Some(host.mcp_orchestration_sink()),
+            )
+            .await
+            .map(|bound| json!(bound))
+            .map_err(mcp_server_rpc_error)
+        }
+        "mcp_server_stop" => {
+            crate::mcp_server::commands::mcp_server_stop_for_state(host.mcp_server())
                 .map(|_| Value::Null)
                 .map_err(mcp_server_rpc_error)
-            }
-            crate::companion_api::dispatch_host::DispatchHost::Headless(services) => {
-                crate::mcp_server::commands::mcp_server_stop_for_state(services.mcp_server.as_ref())
-                    .map(|_| Value::Null)
-                    .map_err(mcp_server_rpc_error)
-            }
-        },
+        }
         "mcp_server_status" => {
             let status = host.mcp_server_status();
             serde_json::to_value(status).map_err(|e| RpcError::internal(e.to_string()))

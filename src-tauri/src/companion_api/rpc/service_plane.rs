@@ -176,21 +176,22 @@ fn map_langfuse_ingest_error(detail: String) -> (StatusCode, Json<RpcError>) {
 /// renderer invokes the Tauri commands directly, and the headless brain has no
 /// `invoke`, so until these arms existed its `tauri-bridge.ts` dropped every
 /// call on the floor and cognia-server ran daemons nobody registered with.
-fn workflow_state(
+/// The desktop's computer-use runtime, or the historical per-arm
+/// `503 headless_unsupported` on a host that has none.
+fn host_automation<'a>(
+    host: &'a super::super::dispatch_host::DispatchHost,
+    name: &str,
+) -> Result<super::super::dispatch_host::HostAutomation<'a>, (StatusCode, Json<RpcError>)> {
+    host.automation()
+        .ok_or_else(|| RpcError::headless_unsupported(name))
+}
+
+pub(super) fn workflow_state(
     host: &super::super::dispatch_host::DispatchHost,
 ) -> Result<&crate::workflow::WorkflowState, (StatusCode, Json<RpcError>)> {
-    use tauri::Manager as _;
-    match host {
-        super::super::dispatch_host::DispatchHost::Tauri(app) => app
-            .try_state::<crate::workflow::WorkflowState>()
-            .map(|state| state.inner())
-            .ok_or_else(|| {
-                RpcError::service_unavailable("workflow state is not managed yet".to_string())
-            }),
-        super::super::dispatch_host::DispatchHost::Headless(services) => {
-            Ok(services.workflow.as_ref())
-        }
-    }
+    host.workflow_state().ok_or_else(|| {
+        RpcError::service_unavailable("workflow state is not managed yet".to_string())
+    })
 }
 
 pub(super) async fn dispatch(
@@ -202,8 +203,6 @@ pub(super) async fn dispatch(
     tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    use tauri::Manager as _;
-
     let _ = (state, host, device_id, tenant_id, scope);
     if matches!(
         name,
@@ -339,10 +338,7 @@ pub(super) async fn dispatch(
                         } else if scope == Some("service") {
                             crate::companion_api::host_identity::current().ok().and_then(|binding| crate::companion_api::host_identity::namespace_for_tenant(&binding.remote_tenant_id))
                         } else { None }.ok_or_else(|| RpcError::forbidden("delivery_source_account_required"))?;
-                        let directory = match host {
-                            super::super::dispatch_host::DispatchHost::Tauri(_) => host.data_dir().map_err(RpcError::internal)?.join("cognia"),
-                            super::super::dispatch_host::DispatchHost::Headless(_) => host.data_dir().map_err(RpcError::internal)?,
-                        };
+                        let directory = host.cognia_data_dir().map_err(RpcError::internal)?;
                         let task = authority.task_id.clone();
                         let device = authority.device_id.clone().unwrap_or_else(|| device_id.to_owned());
                         let (config, source) = tokio::task::spawn_blocking(move || {
@@ -418,10 +414,7 @@ pub(super) async fn dispatch(
                     ).await.map_err(RpcError::internal)
                 },
                 async {
-                    let directory = match host {
-                        super::super::dispatch_host::DispatchHost::Tauri(_) => host.data_dir().map_err(RpcError::internal)?.join("cognia"),
-                        super::super::dispatch_host::DispatchHost::Headless(_) => host.data_dir().map_err(RpcError::internal)?,
-                    };
+                    let directory = host.cognia_data_dir().map_err(RpcError::internal)?;
                     let source_store = cognia_sandbox_pool::provenance::SourceStore::new(&directory);
                     let reader = source_store.clone();
                     let task = task_id.clone();
@@ -443,10 +436,7 @@ pub(super) async fn dispatch(
                         .map_err(RpcError::forbidden)
                 },
                 async {
-                    let directory = match host {
-                        super::super::dispatch_host::DispatchHost::Tauri(_) => host.data_dir().map_err(RpcError::internal)?.join("cognia"),
-                        super::super::dispatch_host::DispatchHost::Headless(_) => host.data_dir().map_err(RpcError::internal)?,
-                    };
+                    let directory = host.cognia_data_dir().map_err(RpcError::internal)?;
                     let owner = tenant_id.and_then(crate::companion_api::host_identity::namespace_for_tenant)
                         .or_else(|| (scope == Some("service")).then(|| crate::companion_api::host_identity::current().ok()
                             .and_then(|b| crate::companion_api::host_identity::namespace_for_tenant(&b.remote_tenant_id))).flatten());
@@ -828,20 +818,9 @@ pub(super) async fn dispatch(
         "integration_ingress_register" => {
             let input: crate::workflow::triggers::webhook_router::IntegrationIngressEntry =
                 required(&args, "input")?;
-            let result = match host {
-                super::super::dispatch_host::DispatchHost::Tauri(app) => {
-                    let workflow = app.state::<crate::workflow::WorkflowState>();
-                    crate::workflow::commands::integration_ingress_register_for_state(
-                        workflow.inner(),
-                        input,
-                    )
-                }
-                super::super::dispatch_host::DispatchHost::Headless(services) => {
-                    crate::workflow::commands::integration_ingress_register_for_state(
-                        services.workflow.as_ref(),
-                        input,
-                    )
-                }
+            let result = {
+                let workflow = workflow_state(host)?;
+                crate::workflow::commands::integration_ingress_register_for_state(workflow, input)
             }
             .map_err(RpcError::internal)?;
             to_json(result)
@@ -849,20 +828,11 @@ pub(super) async fn dispatch(
 
         "integration_ingress_unregister" => {
             let route_id: String = required_aliased(&args, "route_id", "routeId")?;
-            match host {
-                super::super::dispatch_host::DispatchHost::Tauri(app) => {
-                    let workflow = app.state::<crate::workflow::WorkflowState>();
-                    crate::workflow::commands::integration_ingress_unregister_for_state(
-                        workflow.inner(),
-                        route_id,
-                    )
-                }
-                super::super::dispatch_host::DispatchHost::Headless(services) => {
-                    crate::workflow::commands::integration_ingress_unregister_for_state(
-                        services.workflow.as_ref(),
-                        route_id,
-                    )
-                }
+            {
+                let workflow = workflow_state(host)?;
+                crate::workflow::commands::integration_ingress_unregister_for_state(
+                    workflow, route_id,
+                )
             }
             .map(|_| Value::Null)
             .map_err(RpcError::internal)
@@ -870,20 +840,9 @@ pub(super) async fn dispatch(
 
         "integration_ingress_get_url" => {
             let route_id: String = required_aliased(&args, "route_id", "routeId")?;
-            let result = match host {
-                super::super::dispatch_host::DispatchHost::Tauri(app) => {
-                    let workflow = app.state::<crate::workflow::WorkflowState>();
-                    crate::workflow::commands::integration_ingress_get_url_for_state(
-                        workflow.inner(),
-                        route_id,
-                    )
-                }
-                super::super::dispatch_host::DispatchHost::Headless(services) => {
-                    crate::workflow::commands::integration_ingress_get_url_for_state(
-                        services.workflow.as_ref(),
-                        route_id,
-                    )
-                }
+            let result = {
+                let workflow = workflow_state(host)?;
+                crate::workflow::commands::integration_ingress_get_url_for_state(workflow, route_id)
             }
             .map_err(RpcError::internal)?;
             to_json(result)
@@ -891,20 +850,9 @@ pub(super) async fn dispatch(
 
         "integration_ingress_poll" => {
             let limit: Option<usize> = optional(&args, "limit")?;
-            let result = match host {
-                super::super::dispatch_host::DispatchHost::Tauri(app) => {
-                    let workflow = app.state::<crate::workflow::WorkflowState>();
-                    crate::workflow::commands::integration_ingress_poll_for_state(
-                        workflow.inner(),
-                        limit,
-                    )
-                }
-                super::super::dispatch_host::DispatchHost::Headless(services) => {
-                    crate::workflow::commands::integration_ingress_poll_for_state(
-                        services.workflow.as_ref(),
-                        limit,
-                    )
-                }
+            let result = {
+                let workflow = workflow_state(host)?;
+                crate::workflow::commands::integration_ingress_poll_for_state(workflow, limit)
             }
             .map_err(RpcError::internal)?;
             to_json(result)
@@ -914,20 +862,11 @@ pub(super) async fn dispatch(
             let page = page_request(&args)?;
             // The spool answers its newest 500 at most. The page walks them.
             let limit = Some(500usize);
-            let result = match host {
-                super::super::dispatch_host::DispatchHost::Tauri(app) => {
-                    let workflow = app.state::<crate::workflow::WorkflowState>();
-                    crate::workflow::commands::integration_ingress_deadletters_for_state(
-                        workflow.inner(),
-                        limit,
-                    )
-                }
-                super::super::dispatch_host::DispatchHost::Headless(services) => {
-                    crate::workflow::commands::integration_ingress_deadletters_for_state(
-                        services.workflow.as_ref(),
-                        limit,
-                    )
-                }
+            let result = {
+                let workflow = workflow_state(host)?;
+                crate::workflow::commands::integration_ingress_deadletters_for_state(
+                    workflow, limit,
+                )
             }
             .map_err(RpcError::internal)?;
             super::super::paging::Page::slice_all(result, &page, 100)
@@ -938,22 +877,13 @@ pub(super) async fn dispatch(
         "integration_ingress_deadletter" => {
             let route_id: String = required_aliased(&args, "route_id", "routeId")?;
             let delivery_id: String = required_aliased(&args, "delivery_id", "deliveryId")?;
-            let result = match host {
-                super::super::dispatch_host::DispatchHost::Tauri(app) => {
-                    let workflow = app.state::<crate::workflow::WorkflowState>();
-                    crate::workflow::commands::integration_ingress_deadletter_for_state(
-                        workflow.inner(),
-                        route_id,
-                        delivery_id,
-                    )
-                }
-                super::super::dispatch_host::DispatchHost::Headless(services) => {
-                    crate::workflow::commands::integration_ingress_deadletter_for_state(
-                        services.workflow.as_ref(),
-                        route_id,
-                        delivery_id,
-                    )
-                }
+            let result = {
+                let workflow = workflow_state(host)?;
+                crate::workflow::commands::integration_ingress_deadletter_for_state(
+                    workflow,
+                    route_id,
+                    delivery_id,
+                )
             }
             .map_err(RpcError::internal)?;
             to_json(result)
@@ -962,22 +892,13 @@ pub(super) async fn dispatch(
         "integration_ingress_requeue" => {
             let route_id: String = required_aliased(&args, "route_id", "routeId")?;
             let delivery_id: String = required_aliased(&args, "delivery_id", "deliveryId")?;
-            let result = match host {
-                super::super::dispatch_host::DispatchHost::Tauri(app) => {
-                    let workflow = app.state::<crate::workflow::WorkflowState>();
-                    crate::workflow::commands::integration_ingress_requeue_for_state(
-                        workflow.inner(),
-                        route_id,
-                        delivery_id,
-                    )
-                }
-                super::super::dispatch_host::DispatchHost::Headless(services) => {
-                    crate::workflow::commands::integration_ingress_requeue_for_state(
-                        services.workflow.as_ref(),
-                        route_id,
-                        delivery_id,
-                    )
-                }
+            let result = {
+                let workflow = workflow_state(host)?;
+                crate::workflow::commands::integration_ingress_requeue_for_state(
+                    workflow,
+                    route_id,
+                    delivery_id,
+                )
             }
             .map_err(RpcError::internal)?;
             to_json(result)
@@ -1069,37 +990,20 @@ pub(super) async fn dispatch(
         "integration_ingress_ack" | "integration_ingress_nack" => {
             let route_id: String = required_aliased(&args, "route_id", "routeId")?;
             let delivery_id: String = required_aliased(&args, "delivery_id", "deliveryId")?;
-            let result = match host {
-                super::super::dispatch_host::DispatchHost::Tauri(app) => {
-                    let workflow = app.state::<crate::workflow::WorkflowState>();
-                    if name == "integration_ingress_ack" {
-                        crate::workflow::commands::integration_ingress_ack_for_state(
-                            workflow.inner(),
-                            route_id,
-                            delivery_id,
-                        )
-                    } else {
-                        crate::workflow::commands::integration_ingress_nack_for_state(
-                            workflow.inner(),
-                            route_id,
-                            delivery_id,
-                        )
-                    }
-                }
-                super::super::dispatch_host::DispatchHost::Headless(services) => {
-                    if name == "integration_ingress_ack" {
-                        crate::workflow::commands::integration_ingress_ack_for_state(
-                            services.workflow.as_ref(),
-                            route_id,
-                            delivery_id,
-                        )
-                    } else {
-                        crate::workflow::commands::integration_ingress_nack_for_state(
-                            services.workflow.as_ref(),
-                            route_id,
-                            delivery_id,
-                        )
-                    }
+            let result = {
+                let workflow = workflow_state(host)?;
+                if name == "integration_ingress_ack" {
+                    crate::workflow::commands::integration_ingress_ack_for_state(
+                        workflow,
+                        route_id,
+                        delivery_id,
+                    )
+                } else {
+                    crate::workflow::commands::integration_ingress_nack_for_state(
+                        workflow,
+                        route_id,
+                        delivery_id,
+                    )
                 }
             };
             result.map(|_| Value::Null).map_err(RpcError::internal)
@@ -1834,23 +1738,22 @@ pub(super) async fn dispatch(
                 serde_json::from_value(args).map_err(|e| {
                     RpcError::malformed(format!("automation_consent_respond args: {e}"))
                 })?;
-            let app = host.tauri_app(name)?;
-            let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
-                app.state();
-            crate::automation::commands::automation_consent_respond(automation_state, respond_args)
-                .await
-                .map(|_| Value::Null)
-                .map_err(RpcError::internal)
+            let automation = host_automation(host, name)?;
+            crate::automation::commands::automation_consent_respond_for_broker(
+                &automation.state.consent,
+                respond_args,
+            );
+            Ok(Value::Null)
         }
 
         "automation_consent_pending" => {
             if host.headless().is_some() {
                 return Err(RpcError::headless_unsupported(name));
             }
-            let app = host.tauri_app(name)?;
-            let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
-                app.state();
-            let pending = automation_state.consent.pending_requests();
+            let pending = host_automation(host, name)?
+                .state
+                .consent
+                .pending_requests();
             to_json(pending)
         }
 
@@ -1867,52 +1770,39 @@ pub(super) async fn dispatch(
             if host.headless().is_some() {
                 return Err(RpcError::headless_unsupported(name));
             }
-            let app = host.tauri_app(name)?;
-            let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
-                app.state();
-            crate::automation::commands::automation_kill_switch_engaged(automation_state)
-                .await
-                .map_err(RpcError::internal)
-                .and_then(|engaged| to_json(engaged))
+            to_json(
+                host_automation(host, name)?
+                    .state
+                    .gate
+                    .kill_switch_engaged(),
+            )
         }
 
         "automation_settings_get" => {
             if host.headless().is_some() {
                 return Err(RpcError::headless_unsupported(name));
             }
-            let app = host.tauri_app(name)?;
-            let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
-                app.state();
-            crate::automation::commands::automation_settings_get(automation_state)
-                .await
-                .map_err(RpcError::internal)
-                .and_then(|settings| to_json(settings))
+            to_json(host_automation(host, name)?.state.gate.settings())
         }
 
         "automation_audit_snapshot" => {
             if host.headless().is_some() {
                 return Err(RpcError::headless_unsupported(name));
             }
-            let app = host.tauri_app(name)?;
-            let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
-                app.state();
-            crate::automation::commands::automation_audit_snapshot(automation_state)
-                .await
-                .map_err(RpcError::internal)
-                .and_then(|entries| to_json(entries))
+            to_json(host_automation(host, name)?.state.audit.snapshot())
         }
 
         "automation_kill_switch" => {
             if host.headless().is_some() {
                 return Err(RpcError::headless_unsupported(name));
             }
-            let app = host.tauri_app(name)?;
-            let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
-                app.state();
-            crate::automation::commands::automation_kill_switch(app.clone(), automation_state)
-                .await
-                .map(|_| Value::Null)
-                .map_err(RpcError::internal)
+            let automation = host_automation(host, name)?;
+            crate::automation::kill_switch::engage(
+                automation.events.as_ref(),
+                automation.state,
+                crate::automation::kill_switch::KillSwitchCause::Renderer,
+            );
+            Ok(Value::Null)
         }
 
         // Remote Session Control — read-only capability probe. A paired device
@@ -1930,10 +1820,8 @@ pub(super) async fn dispatch(
         // `tunnelBaseUrl`, not an unsupported command. The LAN address and the
         // TLS fingerprint are process-global and answer correctly on both hosts.
         "companion_endpoints" => {
-            let (tunnel_base_url, bind_lan, data_dir) = match host.tauri_app(name) {
-                Ok(app) => {
-                    let server_state: tauri::State<'_, super::super::CompanionServerState> =
-                        app.state();
+            let (tunnel_base_url, bind_lan, data_dir) = match host.companion_server() {
+                Some(server_state) => {
                     let tunnel = server_state
                         .tunnel
                         .current()
@@ -1950,7 +1838,7 @@ pub(super) async fn dispatch(
                 }
                 // Headless: no tunnel launcher, and the listener is bound
                 // `0.0.0.0`, so leave `bind_lan` unknown (= assume LAN).
-                Err(_) => (None, None, None),
+                None => (None, None, None),
             };
             let server_id = super::super::healthz::derive_server_id(&state.secret.read());
             Ok(endpoints_response(

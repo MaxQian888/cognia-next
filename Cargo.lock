@@ -2193,6 +2193,7 @@ dependencies = [
  "cognia-agent-state",
  "cognia-automation",
  "cognia-codeserver",
+ "cognia-codex-app",
  "cognia-companion",
  "cognia-connectors",
  "cognia-core",

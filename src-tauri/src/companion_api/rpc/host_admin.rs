@@ -106,11 +106,8 @@ fn hub(
 /// server state when there is one, else the process-global the headless
 /// binary sets when it binds the plane.
 fn browser_bound_port(host: &super::super::dispatch_host::DispatchHost) -> Option<u16> {
-    if let super::super::dispatch_host::DispatchHost::Tauri(app) = host {
-        use tauri::Manager as _;
-        if let Some(state) = app.try_state::<crate::companion_api::CompanionServerState>() {
-            return state.browser_port();
-        }
+    if let Some(state) = host.companion_server() {
+        return state.browser_port();
     }
     crate::companion_api::browser_advertised_port()
 }
@@ -267,14 +264,11 @@ pub(super) async fn dispatch(
 
         // ── Pairing ────────────────────────────────────────────────────────
         "companion_create_owner_invitation" => {
-            let (base_url, fingerprint, app_version) = match host {
-                super::super::dispatch_host::DispatchHost::Tauri(app) => {
-                    use tauri::Manager as _;
-                    let state = app
-                        .try_state::<crate::companion_api::CompanionServerState>()
-                        .ok_or_else(|| {
-                            RpcError::internal("companion server state unavailable".to_string())
-                        })?;
+            let (base_url, fingerprint, app_version) = match host.headless() {
+                None => {
+                    let state = host.companion_server().ok_or_else(|| {
+                        RpcError::internal("companion server state unavailable".to_string())
+                    })?;
                     let port = state
                         .bound_port()
                         .unwrap_or(crate::companion_api::server::DEFAULT_PORT);
@@ -299,13 +293,9 @@ pub(super) async fn dispatch(
                     } else {
                         crate::companion_api::tls_fingerprint()
                     };
-                    (
-                        base_url,
-                        fingerprint,
-                        app.package_info().version.to_string(),
-                    )
+                    (base_url, fingerprint, host.app_version())
                 }
-                super::super::dispatch_host::DispatchHost::Headless(_) => {
+                Some(_) => {
                     let port = crate::companion_api::advertised_port();
                     let base_url = std::env::var("COGNIA_PUBLIC_URL")
                         .ok()
@@ -315,7 +305,7 @@ pub(super) async fn dispatch(
                     (
                         base_url,
                         crate::companion_api::tls_fingerprint(),
-                        env!("CARGO_PKG_VERSION").to_string(),
+                        host.app_version(),
                     )
                 }
             };
@@ -338,9 +328,8 @@ pub(super) async fn dispatch(
 
         // ── Server status ──────────────────────────────────────────────────
         "companion_server_status" => {
-            if let super::super::dispatch_host::DispatchHost::Tauri(app) = host {
-                use tauri::Manager as _;
-                if let Some(state) = app.try_state::<crate::companion_api::CompanionServerState>() {
+            {
+                if let Some(state) = host.companion_server() {
                     let bind_mode = match state.bind_mode() {
                         Some(crate::companion_api::BindMode::Loopback) => "loopback",
                         Some(crate::companion_api::BindMode::Lan) => "lan",

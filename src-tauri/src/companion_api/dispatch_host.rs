@@ -36,7 +36,7 @@ use axum::{http::StatusCode, Json};
 use super::rpc::RpcError;
 use super::SharedState;
 use crate::headless::HeadlessServices;
-pub use cognia_companion_rpc::rpc_host::{OcrProgressEmitter, RpcHost};
+pub use cognia_companion_rpc::rpc_host::{HostAutomation, OcrProgressEmitter, RpcHost};
 
 /// The process hosting this RPC dispatch: the desktop Tauri app, or the
 /// headless `cognia-server` service registry.
@@ -579,6 +579,132 @@ impl RpcHost for DispatchHost {
                 let _ = app.emit(topic, payload);
             }
             Self::Headless(services) => RpcHost::publish_host_event(services, topic, payload),
+        }
+    }
+
+    fn cognia_data_dir(&self) -> Result<std::path::PathBuf, String> {
+        match self {
+            Self::Tauri(_) => Ok(self.data_dir()?.join("cognia")),
+            Self::Headless(services) => RpcHost::cognia_data_dir(services),
+        }
+    }
+
+    fn workflow_state(&self) -> Option<&crate::workflow::WorkflowState> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.try_state::<crate::workflow::WorkflowState>()
+                    .map(|state| state.inner())
+            }
+            Self::Headless(services) => RpcHost::workflow_state(services),
+        }
+    }
+
+    fn mcp_server(&self) -> &crate::mcp_server::McpServerState {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::mcp_server::McpServerState>().inner()
+            }
+            Self::Headless(services) => RpcHost::mcp_server(services),
+        }
+    }
+
+    /// The sidecar bundled in the app resources, else the `~/.cognia`
+    /// user-install convention: the same resolver the settings snippet reads,
+    /// so the path spawned and the path the user is told to paste agree.
+    fn mcp_sidecar_path(&self) -> Option<std::path::PathBuf> {
+        match self {
+            Self::Tauri(app) => crate::mcp_server::commands::resolve_sidecar_path(app),
+            Self::Headless(services) => RpcHost::mcp_sidecar_path(services),
+        }
+    }
+
+    fn mcp_orchestration_sink(
+        &self,
+    ) -> crate::mcp_server::orchestration_proxy::OrchestrationEventSink {
+        match self {
+            Self::Tauri(app) => {
+                crate::mcp_server::orchestration_proxy::tauri_event_sink(app.clone())
+            }
+            Self::Headless(services) => RpcHost::mcp_orchestration_sink(services),
+        }
+    }
+
+    fn automation(&self) -> Option<HostAutomation<'_>> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                Some(HostAutomation {
+                    state: app
+                        .state::<crate::automation::commands::AutomationState>()
+                        .inner(),
+                    events: Arc::new(app.clone()),
+                })
+            }
+            Self::Headless(services) => RpcHost::automation(services),
+        }
+    }
+
+    fn mcp_automation_binding(&self) -> Option<crate::mcp_server::AutomationBinding> {
+        self.automation().map(|automation| {
+            (
+                automation.state.handle.clone(),
+                crate::automation::dispatcher::Enforcement::from_state(automation.state),
+            )
+        })
+    }
+
+    fn companion_server(&self) -> Option<&super::CompanionServerState> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.try_state::<super::CompanionServerState>()
+                    .map(|state| state.inner())
+            }
+            Self::Headless(services) => RpcHost::companion_server(services),
+        }
+    }
+
+    fn app_version(&self) -> String {
+        match self {
+            Self::Tauri(app) => app.package_info().version.to_string(),
+            Self::Headless(services) => RpcHost::app_version(services),
+        }
+    }
+
+    fn gateway(&self) -> Option<&crate::gateway::GatewayState> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.try_state::<crate::gateway::GatewayState>()
+                    .map(|state| state.inner())
+            }
+            Self::Headless(services) => RpcHost::gateway(services),
+        }
+    }
+
+    fn gateway_event_host(
+        &self,
+        event_bus: Arc<super::event_bus::EventBus>,
+    ) -> Arc<dyn crate::gateway::host::GatewayHost> {
+        match self {
+            Self::Tauri(app) => Arc::new(crate::gateway::host::TauriGatewayHost(app.clone())),
+            Self::Headless(services) => RpcHost::gateway_event_host(services, event_bus),
+        }
+    }
+
+    fn pi_sidecar_dir(&self) -> Option<std::path::PathBuf> {
+        match self {
+            Self::Tauri(app) => crate::claude::sidecar::sidecar_dir(app).ok(),
+            Self::Headless(services) => RpcHost::pi_sidecar_dir(services),
+        }
+    }
+
+    fn codex_app_host(&self) -> Option<Box<dyn crate::codex_app_dispatch::CodexAppHost + '_>> {
+        match self {
+            Self::Tauri(app) => Some(Box::new(crate::codex_app_dispatch::TauriCodexAppHost(app))),
+            Self::Headless(services) => RpcHost::codex_app_host(services),
         }
     }
 }
