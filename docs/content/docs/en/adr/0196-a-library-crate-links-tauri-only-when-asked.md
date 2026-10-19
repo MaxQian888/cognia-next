@@ -201,7 +201,7 @@ tests with and without `tauri-host`, `cargo check -p cognia-next`,
 | P4 | `cognia-companion-connectivity`, `-bus`, `-contract`, `-security` | — |
 | P5 | `RendererPort`; `CompanionRuntime` (dispatch and the app's routes) and the headless slots; `RpcError`, the payload capability gate and the approval-authority check in the core; `cognia-power` and Wake-on-LAN out of the app; `RpcHost` (P5.3), an object-safe trait in `cognia-companion-rpc` that the desktop's `DispatchHost` and the headless registry both implement | The `commands.rs` split |
 | P6 | `cognia-codex-app`, `cognia-browser-cookies`, `cognia-hooks`, `cognia-fleet`, `cognia-task-workspace-host`, `cognia-terminal::host_client` and `::host_bridge`, GitHub workspace and repo import into `cognia-git`; `cognia-elevated-setup`; the job supervisor host/RPC runtime in `cognia-jobs::host`; `cognia-sidecar` locator, supervisor, Langfuse, Pi integrity verifier and command core; `cognia-codeserver`; `cognia-terminal::sftp_service` | — |
-| P8 | `cognia-companion-rpc` project environment, shell execution and shared command services; the headless registry; the managed and remote desktop families; the `RpcHost` seam | The other RPC families and the dispatch core |
+| P8 | `cognia-companion-rpc` project environment, shell execution and shared command services; the headless registry; the `RpcHost` seam; the dispatch core and every RPC family (`cognia_companion_rpc::rpc`), with the desktop-only state behind typed accessors the desktop's `DispatchHost` answers; `src-tauri/src` is down to 70k lines | — |
 | P7 | `cognia-companion`: the core (51 files, 44k lines); `companion_api` is a facade plus the dispatch table, command shells and `wiring` | — |
 
 Where the plan met the code:

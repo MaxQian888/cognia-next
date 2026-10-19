@@ -13,7 +13,7 @@
 //! the planes that authenticate an operator, never on the agent's port.
 
 use super::*;
-use crate::gateway::GatewayState;
+use cognia_gateway::GatewayState;
 use std::sync::Arc;
 
 pub(super) const COMMANDS: &[&str] = &[
@@ -39,7 +39,7 @@ fn no_gateway(detail: &str) -> (StatusCode, Json<RpcError>) {
 /// The gateway this host owns, whichever host that is.
 fn with_gateway<R>(
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     f: impl FnOnce(&GatewayState, &'static str) -> R,
 ) -> Result<R, (StatusCode, Json<RpcError>)> {
     let _ = state;
@@ -61,7 +61,7 @@ fn with_gateway<R>(
 /// Bind a remote process's gateway environment to its authenticated task lease.
 /// Service callers retain the existing local gateway path.
 pub(super) async fn authorize_task_agent_control(
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device: &str,
     agent_id: &str,
 ) -> Result<(), (StatusCode, Json<RpcError>)> {
@@ -83,11 +83,11 @@ pub(super) async fn authorize_task_agent_control(
 }
 
 fn validate_task_endpoints(
-    config: &crate::external_agent::process::ExternalAgentSpawnConfig,
+    config: &cognia_external_agent::process::ExternalAgentSpawnConfig,
     payload: &Value,
     endpoint: &str,
 ) -> Result<(), String> {
-    crate::gateway::task_lease::validate_task_endpoints(
+    cognia_gateway::task_lease::validate_task_endpoints(
         &config.env,
         &config.args,
         payload,
@@ -97,11 +97,11 @@ fn validate_task_endpoints(
 
 pub(super) fn authorize_task_spawn(
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device: &str,
     tenant: Option<&str>,
     scope: Option<&str>,
-    config: &mut crate::external_agent::process::ExternalAgentSpawnConfig,
+    config: &mut cognia_external_agent::process::ExternalAgentSpawnConfig,
 ) -> Result<
     Option<cognia_external_agent::spawn_authority::GatewayAuthority>,
     (StatusCode, Json<RpcError>),
@@ -162,8 +162,8 @@ pub(super) fn authorize_task_spawn(
 /// callers on the desktop keep their existing local gateway path.
 fn authorize_host_task_spawn(
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
-    config: &crate::external_agent::process::ExternalAgentSpawnConfig,
+    host: &dyn crate::rpc_host::RpcHost,
+    config: &cognia_external_agent::process::ExternalAgentSpawnConfig,
 ) -> Result<
     Option<cognia_external_agent::spawn_authority::GatewayAuthority>,
     (StatusCode, Json<RpcError>),
@@ -223,7 +223,7 @@ fn authorize_host_task_spawn(
 /// ticket it cannot use. Answers the bound port.
 async fn ensure_task_listener(
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     ticket_id: &str,
     generation: u64,
 ) -> Result<u16, (StatusCode, Json<RpcError>)> {
@@ -361,7 +361,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     scope: Option<&str>,
@@ -372,7 +372,7 @@ pub(super) async fn dispatch(
             let tenant = tenant_id.ok_or_else(|| {
                 RpcError::forbidden("gateway task requires an authenticated account")
             })?;
-            let mut request: crate::gateway::task_lease::TaskLeaseRequest =
+            let mut request: cognia_gateway::task_lease::TaskLeaseRequest =
                 serde_json::from_value(args.get("request").cloned().unwrap_or(Value::Null))
                     .map_err(|_| {
                         RpcError::validation_failed("invalid gateway task request".into())
@@ -381,7 +381,7 @@ pub(super) async fn dispatch(
                 gateway.status().account_generation
             })?;
             request.upstream_client = Some(
-                crate::gateway::task_lease::validate_public_upstream(&request.provider.base_url)
+                cognia_gateway::task_lease::validate_public_upstream(&request.provider.base_url)
                     .await
                     .map_err(RpcError::validation_failed)?,
             );
@@ -390,7 +390,7 @@ pub(super) async fn dispatch(
             let authority_device = device_id.to_owned();
             request.authority = Some(Arc::new(move || {
                 !deny_list.is_revoked(&authority_tenant, &authority_device)
-                    && crate::companion_api::security_store::security_store().is_some_and(|store| {
+                    && cognia_companion::security_store::security_store().is_some_and(|store| {
                         store
                             .has_capability(&authority_tenant, &authority_device, "process.spawn")
                             .unwrap_or(false)
@@ -442,7 +442,7 @@ pub(super) async fn dispatch(
                     "Host gateway tasks are prepared by the Host itself",
                 ));
             }
-            let request: crate::gateway::task_lease::HostTaskLeaseRequest =
+            let request: cognia_gateway::task_lease::HostTaskLeaseRequest =
                 serde_json::from_value(args.get("request").cloned().unwrap_or(Value::Null))
                     .map_err(|_| {
                         RpcError::validation_failed("invalid gateway task request".into())
@@ -527,20 +527,17 @@ pub(super) async fn dispatch(
         }
 
         "gateway_mint_route_ticket" => {
-            let request: crate::cli_bridge::provider_admin::BridgeTicketRequest =
-                required(&args, "request")?;
+            let request: crate::provider_admin::BridgeTicketRequest = required(&args, "request")?;
             with_gateway(state, host, |gateway, _| {
-                let minted =
-                    crate::cli_bridge::provider_admin::mint_bridge_ticket(gateway, request)
-                        .map_err(|(status, message)| match status {
-                            StatusCode::SERVICE_UNAVAILABLE => {
-                                RpcError::service_unavailable(message)
-                            }
-                            StatusCode::NOT_FOUND | StatusCode::BAD_REQUEST => {
-                                RpcError::validation_failed(message)
-                            }
-                            _ => RpcError::internal(message),
-                        })?;
+                let minted = crate::provider_admin::mint_bridge_ticket(gateway, request).map_err(
+                    |(status, message)| match status {
+                        StatusCode::SERVICE_UNAVAILABLE => RpcError::service_unavailable(message),
+                        StatusCode::NOT_FOUND | StatusCode::BAD_REQUEST => {
+                            RpcError::validation_failed(message)
+                        }
+                        _ => RpcError::internal(message),
+                    },
+                )?;
                 let status = gateway.status();
                 let port = status.bound_port.filter(|_| status.running);
                 let mut payload = serde_json::json!({
@@ -593,10 +590,8 @@ pub(super) async fn dispatch(
 mod tests {
     use super::*;
 
-    fn headless_host() -> super::super::super::dispatch_host::DispatchHost {
-        super::super::super::dispatch_host::DispatchHost::Headless(
-            crate::headless::HeadlessServices::stub_for_tests(),
-        )
+    fn headless_host() -> std::sync::Arc<crate::headless::HeadlessServices> {
+        crate::headless::HeadlessServices::stub_for_tests()
     }
 
     #[tokio::test]
@@ -615,7 +610,7 @@ mod tests {
 
     #[test]
     fn task_launch_cannot_redirect_host_lease_credentials() {
-        let mut config: crate::external_agent::process::ExternalAgentSpawnConfig =
+        let mut config: cognia_external_agent::process::ExternalAgentSpawnConfig =
             serde_json::from_value(
                 serde_json::json!({"id":"task", "command":"codex", "args":[], "env":{}}),
             )
@@ -635,7 +630,7 @@ mod tests {
         assert!(validate_task_endpoints(&config, &payload, endpoint).is_err());
     }
 
-    fn gateway_task_spawn(token: &str) -> crate::external_agent::process::ExternalAgentSpawnConfig {
+    fn gateway_task_spawn(token: &str) -> cognia_external_agent::process::ExternalAgentSpawnConfig {
         serde_json::from_value(serde_json::json!({
             "id": "gateway-task-t1", "command": "kimi", "args": [],
             "env": {
@@ -711,9 +706,8 @@ mod tests {
     fn a_headless_service_launch_must_hold_a_live_host_task_lease() {
         let state = super::super::tests::test_state();
         let services = crate::headless::HeadlessServices::stub_for_tests();
-        let host =
-            super::super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
-        let mut plain: crate::external_agent::process::ExternalAgentSpawnConfig =
+        let host = Arc::clone(&services);
+        let mut plain: cognia_external_agent::process::ExternalAgentSpawnConfig =
             serde_json::from_value(
                 serde_json::json!({"id": "a", "command": "kimi", "args": [], "env": {}}),
             )

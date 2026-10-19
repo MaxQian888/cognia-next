@@ -16773,7 +16773,7 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "x-cognia-wire-source": "src-tauri/src/companion_api/rpc.rs endpoints_response",
+        "x-cognia-wire-source": "crates/cognia-companion-rpc/src/rpc.rs endpoints_response",
         "description": "Where else this host can be reached. `lanBaseUrl` is null on a loopback-bound server or a host with no routable interface; `tunnelBaseUrl` is null when no tunnel is running. `fingerprint` pins the self-signed certificate.",
         "required": [
           "lanBaseUrl",
@@ -100903,5 +100903,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "211ede7c17b285042918953f593bda88aa0df00ef04998cde5bea8afaebbda15"
+  "catalogHash": "f4f376e7b6850a697990a6131ab56bd499379474d07bba1a69ff1613ecad91ec"
 }

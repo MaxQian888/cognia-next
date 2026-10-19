@@ -46,27 +46,26 @@ pub(super) const COMMANDS: &[&str] = &[
 /// This host's updater (ADR-0224 A10); the desktop app has none.
 fn host_updater(
     name: &str,
-) -> Result<Arc<crate::companion_api::host_update::HostUpdater>, (StatusCode, Json<RpcError>)> {
-    crate::companion_api::host_update::installed()
-        .ok_or_else(|| RpcError::headless_host_required(name))
+) -> Result<Arc<cognia_companion::host_update::HostUpdater>, (StatusCode, Json<RpcError>)> {
+    cognia_companion::host_update::installed().ok_or_else(|| RpcError::headless_host_required(name))
 }
 
 /// The brain's headless runtimes (ADR-0059 W2): what it holds, or the error a
 /// caller can act on. A desktop has no brain to ask.
 async fn brain_runtimes(
     name: &str,
-    action: crate::companion_api::runtime_control::RuntimeControlAction,
+    action: cognia_companion::runtime_control::RuntimeControlAction,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    if crate::companion_api::runtime::headless().is_none() {
+    if cognia_companion::runtime::headless().is_none() {
         return Err(RpcError::headless_host_required(name));
     }
-    crate::companion_api::runtime_control::call_brain(action)
+    cognia_companion::runtime_control::call_brain(action)
         .await
         .map_err(runtime_control_error)
 }
 
 fn runtime_control_error(
-    error: crate::companion_api::runtime_control::RuntimeControlError,
+    error: cognia_companion::runtime_control::RuntimeControlError,
 ) -> (StatusCode, Json<RpcError>) {
     let status = match error.code.as_str() {
         "invalid_argument" => StatusCode::BAD_REQUEST,
@@ -90,8 +89,8 @@ fn update_refused(message: String) -> (StatusCode, Json<RpcError>) {
 /// The signaling hub, or the structured error a caller can act on.
 fn hub(
     name: &str,
-) -> Result<Arc<crate::companion_api::signaling::SignalingHub>, (StatusCode, Json<RpcError>)> {
-    crate::companion_api::signaling::installed_hub().ok_or_else(|| {
+) -> Result<Arc<cognia_companion::signaling::SignalingHub>, (StatusCode, Json<RpcError>)> {
+    cognia_companion::signaling::installed_hub().ok_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(RpcError::new(
@@ -105,18 +104,18 @@ fn hub(
 /// Where the browser listener is actually bound right now: the desktop's
 /// server state when there is one, else the process-global the headless
 /// binary sets when it binds the plane.
-fn browser_bound_port(host: &super::super::dispatch_host::DispatchHost) -> Option<u16> {
+fn browser_bound_port(host: &dyn crate::rpc_host::RpcHost) -> Option<u16> {
     if let Some(state) = host.companion_server() {
         return state.browser_port();
     }
-    crate::companion_api::browser_advertised_port()
+    cognia_companion::browser_advertised_port()
 }
 
 pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     scope: Option<&str>,
@@ -127,7 +126,7 @@ pub(super) async fn dispatch(
         "companion_signaling_status" => to_json(hub(name)?.status()),
 
         "companion_signaling_configure" => {
-            let patch: crate::companion_api::signaling::SignalingConfigPatch =
+            let patch: cognia_companion::signaling::SignalingConfigPatch =
                 required(&args, "patch")?;
             let hub = hub(name)?;
             // A headless Host has no renderer to re-push this at boot, so it
@@ -136,7 +135,7 @@ pub(super) async fn dispatch(
             // `AppSettings` and needs no file.
             if state.renderer.is_none() {
                 let data_dir = host.data_dir().map_err(RpcError::internal)?;
-                crate::companion_api::signaling_config::save(Some(&data_dir), &patch)
+                cognia_companion::signaling_config::save(Some(&data_dir), &patch)
                     .map_err(RpcError::internal)?;
             }
             hub.apply_patch(patch);
@@ -156,8 +155,8 @@ pub(super) async fn dispatch(
         // ── Browser access (plaintext loopback plane) ──────────────────────
         "companion_browser_access_get" => {
             let data_dir = host.data_dir().map_err(RpcError::internal)?;
-            let config = crate::companion_api::browser_access::load(Some(&data_dir));
-            to_json(crate::companion_api::commands::browser_access_summary_from(
+            let config = cognia_companion::browser_access::load(Some(&data_dir));
+            to_json(crate::command_services::browser_access_summary_from(
                 config,
                 browser_bound_port(host),
             ))
@@ -172,43 +171,41 @@ pub(super) async fn dispatch(
             // `save_and_apply`, as the desktop command does: a headless Host
             // switched off from the Connectivity settings must stop taking
             // submissions now, not at its next restart.
-            let saved = crate::companion_api::browser_access::save_and_apply(
+            let saved = cognia_companion::browser_access::save_and_apply(
                 Some(&data_dir),
-                crate::companion_api::browser_access::BrowserAccessConfig {
+                cognia_companion::browser_access::BrowserAccessConfig {
                     enabled,
                     allowed_origins,
-                    port: port
-                        .unwrap_or(crate::companion_api::browser_access::DEFAULT_BROWSER_PORT),
+                    port: port.unwrap_or(cognia_companion::browser_access::DEFAULT_BROWSER_PORT),
                 },
             )
             .map_err(RpcError::internal)?;
-            to_json(crate::companion_api::commands::browser_access_summary_from(
+            to_json(crate::command_services::browser_access_summary_from(
                 saved,
                 browser_bound_port(host),
             ))
         }
 
         // ── Push credentials ───────────────────────────────────────────────
-        "companion_push_status" => to_json(
-            crate::companion_api::commands::companion_push_status().map_err(RpcError::internal)?,
-        ),
+        "companion_push_status" => {
+            to_json(crate::command_services::companion_push_status().map_err(RpcError::internal)?)
+        }
 
         "companion_push_configure_hms" => {
             let app_id: String = required_aliased(&args, "app_id", "appId")?;
             let client_secret: String = required_aliased(&args, "client_secret", "clientSecret")?;
-            crate::companion_api::commands::companion_push_configure_hms(app_id, client_secret)
+            crate::command_services::companion_push_configure_hms(app_id, client_secret)
                 .map_err(RpcError::internal)?;
             Ok(Value::Null)
         }
         "companion_push_clear_hms" => {
-            crate::companion_api::commands::companion_push_clear_hms()
-                .map_err(RpcError::internal)?;
+            crate::command_services::companion_push_clear_hms().map_err(RpcError::internal)?;
             Ok(Value::Null)
         }
         "companion_push_configure_fcm" => {
             let service_account_json: String =
                 required_aliased(&args, "service_account_json", "serviceAccountJson")?;
-            crate::companion_api::commands::companion_push_configure_fcm(service_account_json)
+            crate::command_services::companion_push_configure_fcm(service_account_json)
                 .map_err(RpcError::internal)?;
             Ok(Value::Null)
         }
@@ -220,7 +217,7 @@ pub(super) async fn dispatch(
             let private_key_pem: String =
                 required_aliased(&args, "private_key_pem", "privateKeyPem")?;
             let production: bool = required(&args, "production")?;
-            crate::companion_api::commands::companion_push_configure_apns(
+            crate::command_services::companion_push_configure_apns(
                 key_id,
                 team_id,
                 bundle_id,
@@ -232,14 +229,12 @@ pub(super) async fn dispatch(
         }
 
         "companion_push_clear_fcm" => {
-            crate::companion_api::commands::companion_push_clear_fcm()
-                .map_err(RpcError::internal)?;
+            crate::command_services::companion_push_clear_fcm().map_err(RpcError::internal)?;
             Ok(Value::Null)
         }
 
         "companion_push_clear_apns" => {
-            crate::companion_api::commands::companion_push_clear_apns()
-                .map_err(RpcError::internal)?;
+            crate::command_services::companion_push_clear_apns().map_err(RpcError::internal)?;
             Ok(Value::Null)
         }
 
@@ -250,7 +245,7 @@ pub(super) async fn dispatch(
             let level: String = required(&args, "level")?;
             let href: Option<String> = optional(&args, "href")?;
             to_json(
-                crate::companion_api::commands::broadcast_notification_push(
+                crate::command_services::broadcast_notification_push(
                     &state.push_tokens,
                     &notification_id,
                     &source,
@@ -271,18 +266,16 @@ pub(super) async fn dispatch(
                     })?;
                     let port = state
                         .bound_port()
-                        .unwrap_or(crate::companion_api::server::DEFAULT_PORT);
+                        .unwrap_or(cognia_companion::server::DEFAULT_PORT);
                     let (base_url, is_tunnel) = if let Some(info) = state.tunnel.current() {
                         (info.public_url, true)
                     } else if let Some(hostname) = state.tunnel.named_public_url() {
                         (hostname, true)
                     } else {
                         let host = match state.bind_mode() {
-                            Some(crate::companion_api::BindMode::Lan) => {
-                                crate::companion_api::commands::advertised_lan_host(
-                                    state.data_dir(),
-                                )
-                                .unwrap_or_else(|| "127.0.0.1".to_string())
+                            Some(cognia_companion::BindMode::Lan) => {
+                                crate::command_services::advertised_lan_host(state.data_dir())
+                                    .unwrap_or_else(|| "127.0.0.1".to_string())
                             }
                             _ => "127.0.0.1".to_string(),
                         };
@@ -291,12 +284,12 @@ pub(super) async fn dispatch(
                     let fingerprint = if is_tunnel {
                         String::new()
                     } else {
-                        crate::companion_api::tls_fingerprint()
+                        cognia_companion::tls_fingerprint()
                     };
                     (base_url, fingerprint, host.app_version())
                 }
                 Some(_) => {
-                    let port = crate::companion_api::advertised_port();
+                    let port = cognia_companion::advertised_port();
                     let base_url = std::env::var("COGNIA_PUBLIC_URL")
                         .ok()
                         .map(|value| value.trim().to_string())
@@ -304,17 +297,17 @@ pub(super) async fn dispatch(
                         .unwrap_or_else(|| format!("https://127.0.0.1:{port}"));
                     (
                         base_url,
-                        crate::companion_api::tls_fingerprint(),
+                        cognia_companion::tls_fingerprint(),
                         host.app_version(),
                     )
                 }
             };
             let host_id = {
                 let secret = state.secret.read();
-                crate::companion_api::healthz::derive_server_id(&secret)
+                cognia_companion::healthz::derive_server_id(&secret)
             };
             to_json(
-                crate::companion_api::commands::issue_owner_invitation(
+                crate::command_services::issue_owner_invitation(
                     base_url,
                     fingerprint,
                     app_version,
@@ -331,11 +324,11 @@ pub(super) async fn dispatch(
             {
                 if let Some(state) = host.companion_server() {
                     let bind_mode = match state.bind_mode() {
-                        Some(crate::companion_api::BindMode::Loopback) => "loopback",
-                        Some(crate::companion_api::BindMode::Lan) => "lan",
+                        Some(cognia_companion::BindMode::Loopback) => "loopback",
+                        Some(cognia_companion::BindMode::Lan) => "lan",
                         None => "none",
                     };
-                    return to_json(crate::companion_api::commands::CompanionServerStatus {
+                    return to_json(crate::command_services::CompanionServerStatus {
                         running: state.is_running(),
                         bind_mode,
                         bound_port: state.bound_port(),
@@ -345,12 +338,12 @@ pub(super) async fn dispatch(
             // Headless: the listener this request arrived on is the server,
             // so "running" is by construction, and the binding is whatever
             // the `serve` flags chose.
-            let port = crate::companion_api::advertised_port();
-            to_json(crate::companion_api::commands::CompanionServerStatus {
+            let port = cognia_companion::advertised_port();
+            to_json(crate::command_services::CompanionServerStatus {
                 running: port > 0,
                 bind_mode: if port == 0 {
                     "none"
-                } else if crate::companion_api::bind_loopback_only() {
+                } else if cognia_companion::bind_loopback_only() {
                     "loopback"
                 } else {
                     "lan"
@@ -360,10 +353,9 @@ pub(super) async fn dispatch(
         }
 
         // ── Self-update (ADR-0224 A10) ─────────────────────────────────────
-        "host_update_status" => Ok(crate::companion_api::host_update::status_value_live(env!(
-            "CARGO_PKG_VERSION"
-        ))
-        .await),
+        "host_update_status" => {
+            Ok(cognia_companion::host_update::status_value_live(env!("CARGO_PKG_VERSION")).await)
+        }
 
         "host_update_refresh" => host_updater(name)?
             .check(true)
@@ -395,16 +387,15 @@ pub(super) async fn dispatch(
         "host_runtime_status" => {
             brain_runtimes(
                 name,
-                crate::companion_api::runtime_control::RuntimeControlAction::List,
+                cognia_companion::runtime_control::RuntimeControlAction::List,
             )
             .await
         }
 
         "host_runtime_restart" => {
             let runtime: String = required(&args, "name")?;
-            let action =
-                crate::companion_api::runtime_control::RuntimeControlAction::restart(&runtime)
-                    .map_err(runtime_control_error)?;
+            let action = cognia_companion::runtime_control::RuntimeControlAction::restart(&runtime)
+                .map_err(runtime_control_error)?;
             log::info!("host_runtime_restart: {runtime} restarted by device {device_id}");
             brain_runtimes(name, action).await
         }
@@ -427,16 +418,16 @@ mod tests {
         assert!(COMMANDS.contains(&"companion_push_clear_hms"));
         for name in COMMANDS {
             assert!(
-                crate::companion_api::rpc::known_commands().contains(name),
+                crate::rpc::known_commands().contains(name),
                 "{name} is dispatched here but missing from KNOWN_COMMANDS"
             );
-            let descriptor = crate::companion_api::command_manifest::commands()
+            let descriptor = cognia_companion::command_manifest::commands()
                 .iter()
                 .find(|command| command.name == *name)
                 .unwrap_or_else(|| panic!("{name} is not in the command manifest"));
             assert_eq!(
                 descriptor.target,
-                crate::companion_api::command_manifest::CommandTarget::HostAdmin,
+                cognia_companion::command_manifest::CommandTarget::HostAdmin,
                 "{name} target"
             );
             assert_eq!(descriptor.capability, "host.admin", "{name} capability");
@@ -450,7 +441,7 @@ mod tests {
         // No test in this binary installs a headless runtime.
         let err = brain_runtimes(
             "host_runtime_status",
-            crate::companion_api::runtime_control::RuntimeControlAction::List,
+            cognia_companion::runtime_control::RuntimeControlAction::List,
         )
         .await
         .expect_err("no headless runtime in tests");
@@ -467,7 +458,7 @@ mod tests {
             ("runtime_control_failed", StatusCode::BAD_GATEWAY),
         ] {
             let (got, body) =
-                runtime_control_error(crate::companion_api::runtime_control::RuntimeControlError {
+                runtime_control_error(cognia_companion::runtime_control::RuntimeControlError {
                     code: code.to_string(),
                     message: "m".to_string(),
                 });
@@ -493,9 +484,9 @@ mod tests {
     /// browser-access summary read when there is no desktop server state.
     #[test]
     fn browser_advertised_port_round_trips_through_the_global() {
-        crate::companion_api::set_browser_advertised_port(27891);
-        assert_eq!(crate::companion_api::browser_advertised_port(), Some(27891));
-        crate::companion_api::set_browser_advertised_port(0);
-        assert_eq!(crate::companion_api::browser_advertised_port(), None);
+        cognia_companion::set_browser_advertised_port(27891);
+        assert_eq!(cognia_companion::browser_advertised_port(), Some(27891));
+        cognia_companion::set_browser_advertised_port(0);
+        assert_eq!(cognia_companion::browser_advertised_port(), None);
     }
 }

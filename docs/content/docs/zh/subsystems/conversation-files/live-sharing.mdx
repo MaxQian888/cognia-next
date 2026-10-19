@@ -143,7 +143,7 @@ brain / WebView 推送 ────┘     │                 └── SFTP（
 ```
 
 - **一套命令面。** `crates/cognia-file-share/src/rpc.rs` 包含十五个 `file_*` 命令；桌面的 Tauri 外壳
-  （`commands.rs`，`tauri-host` 特性）和伴侣 RPC（`src-tauri/src/companion_api/rpc/file_share.rs`）都分发到这里，
+  （`commands.rs`，`tauri-host` 特性）和伴侣 RPC（`crates/cognia-companion-rpc/src/rpc/file_share.rs`）都分发到这里，
   因此已配对手机发送的参数与 WebView 完全相同。仅限宿主：`file_share_activate`、`file_space_sync`、
   `file_share_policy_set`。读取（`file_share_status`、`file_grant_list`、`file_audit_list`）需要 `host.observe`
   并按令牌分页。授权变更（`file_grant_create/revoke/suspend/resume`、`file_credential_rotate`）是
@@ -177,7 +177,7 @@ README）。SFTPGo 采用 AGPL-3.0 许可，从不打包进应用。
 | 关注点 | 模块 |
 | --- | --- |
 | 存储、网关、监听器、SFTPGo、服务 | `crates/cognia-file-share/` |
-| 命令面 | `crates/cognia-file-share/src/rpc.rs`、`src-tauri/src/companion_api/rpc/file_share.rs` |
+| 命令面 | `crates/cognia-file-share/src/rpc.rs`、`crates/cognia-companion-rpc/src/rpc/file_share.rs` |
 | 宿主安装、账号绑定、进程行 | `src-tauri/src/startup/host_services.rs`、`src-tauri/src/account_auth/`、`src-tauri/src/process_registry/` |
 | 桥接（挂载表、资源读取） | `crates/cognia-companion/src/filespace_bridge.rs`、`crates/cognia-companion-bus/src/desktop_messages_bridge.rs` |
 | 线上类型 | `types/filespace/live.ts` |

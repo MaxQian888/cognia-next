@@ -2,8 +2,8 @@
 //! this boundary owns caller-scoped source handles, workspace authorization,
 //! and bounded binary transfers for HTTP and WebRTC alike.
 use super::*;
-use crate::media::{service, MediaSourceRegistry, VideoError};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use cognia_media::{service, MediaSourceRegistry, VideoError};
 use parking_lot::Mutex;
 use std::{
     collections::HashMap,
@@ -48,7 +48,7 @@ static CALLERS: once_cell::sync::Lazy<
         HashMap<
             CallerKey,
             (
-                std::sync::Weak<super::super::CompanionState>,
+                std::sync::Weak<cognia_companion::CompanionState>,
                 Arc<MediaCaller>,
             ),
         >,
@@ -91,7 +91,7 @@ fn media_error(error: VideoError) -> (StatusCode, Json<RpcError>) {
 impl MediaCaller {
     fn authorize_source(
         &self,
-        host: &super::super::dispatch_host::DispatchHost,
+        host: &dyn crate::rpc_host::RpcHost,
         file: &str,
     ) -> Result<String, (StatusCode, Json<RpcError>)> {
         let path = Path::new(file)
@@ -201,7 +201,7 @@ impl MediaCaller {
 }
 
 async fn write_export(
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     destination: &str,
     overwrite: bool,
     bytes: &[u8],
@@ -240,7 +240,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     _scope: Option<&str>,
@@ -427,12 +427,12 @@ mod tests {
     use super::*;
 
     fn state() -> SharedState {
-        use super::super::super::*;
+        use cognia_companion::*;
         Arc::new(CompanionState {
             secret: parking_lot::RwLock::new(uuid::Uuid::new_v4().as_bytes().to_vec()),
             deny_list: Arc::new(deny_list::DenyList::new()),
             renderer: None,
-            runtime: crate::companion_api::runtime::unwired(),
+            runtime: cognia_companion::runtime::unwired(),
             idempotency: Arc::new(idempotency::IdempotencyCache::new()),
             event_bus: event_bus::EventBus::new(),
             sync_bridge: sync_bridge::SyncBridge::new(),
@@ -474,7 +474,7 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );
-        let host = super::super::super::dispatch_host::DispatchHost::Headless(services);
+        let host = services;
         let call = |name: &'static str, args| {
             dispatch(
                 name,

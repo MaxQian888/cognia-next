@@ -12,7 +12,7 @@ pub(super) const COMMANDS: &[&str] = &[
 ];
 
 fn authorize_cwd(
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     cwd: &mut Option<String>,
 ) -> Result<(), (StatusCode, Json<RpcError>)> {
     if let Some(value) = cwd.take() {
@@ -22,13 +22,13 @@ fn authorize_cwd(
 }
 
 async fn authorized_thread_cwd(
-    app: &dyn crate::codex_app_dispatch::CodexAppHost,
-    host: &super::super::dispatch_host::DispatchHost,
+    app: &dyn cognia_codex_app::CodexAppHost,
+    host: &dyn crate::rpc_host::RpcHost,
     thread_id: &str,
 ) -> Result<String, (StatusCode, Json<RpcError>)> {
-    let metadata = crate::codex_app_dispatch::codex_app_task_read_impl(
+    let metadata = cognia_codex_app::codex_app_task_read_impl(
         app,
-        crate::codex_app_dispatch::CodexAppTaskReadRequest {
+        cognia_codex_app::CodexAppTaskReadRequest {
             thread_id: thread_id.to_string(),
             include_turns: Some(false),
         },
@@ -49,7 +49,7 @@ fn path_within(path: &std::path::Path, root: &std::path::Path) -> bool {
 
 fn authorize_inputs(
     cwd: Option<&str>,
-    input: &[crate::codex_app_dispatch::CodexAppTurnInput],
+    input: &[cognia_codex_app::CodexAppTurnInput],
 ) -> Result<(), (StatusCode, Json<RpcError>)> {
     let cwd = cwd.ok_or_else(|| {
         RpcError::forbidden("remote Codex App sends with local context require an authorized cwd")
@@ -73,17 +73,13 @@ fn authorize_inputs(
 
     for input in input {
         let (path, context_only) = match input {
-            crate::codex_app_dispatch::CodexAppTurnInput::LocalImage { path, .. }
-            | crate::codex_app_dispatch::CodexAppTurnInput::LocalAudio { path } => {
-                (Some(path), false)
-            }
-            crate::codex_app_dispatch::CodexAppTurnInput::Skill { path, .. }
-            | crate::codex_app_dispatch::CodexAppTurnInput::Mention { path, .. } => {
-                (Some(path), true)
-            }
-            crate::codex_app_dispatch::CodexAppTurnInput::Text { .. }
-            | crate::codex_app_dispatch::CodexAppTurnInput::Image { .. }
-            | crate::codex_app_dispatch::CodexAppTurnInput::Audio { .. } => (None, false),
+            cognia_codex_app::CodexAppTurnInput::LocalImage { path, .. }
+            | cognia_codex_app::CodexAppTurnInput::LocalAudio { path } => (Some(path), false),
+            cognia_codex_app::CodexAppTurnInput::Skill { path, .. }
+            | cognia_codex_app::CodexAppTurnInput::Mention { path, .. } => (Some(path), true),
+            cognia_codex_app::CodexAppTurnInput::Text { .. }
+            | cognia_codex_app::CodexAppTurnInput::Image { .. }
+            | cognia_codex_app::CodexAppTurnInput::Audio { .. } => (None, false),
         };
         let Some(path) = path else { continue };
         let canonical = std::path::Path::new(path).canonicalize().map_err(|error| {
@@ -105,7 +101,7 @@ fn authorize_inputs(
 }
 
 fn authorize_turn_inputs(
-    request: &crate::codex_app_dispatch::CodexAppTaskSendRequest,
+    request: &cognia_codex_app::CodexAppTaskSendRequest,
 ) -> Result<(), (StatusCode, Json<RpcError>)> {
     authorize_inputs(request.cwd.as_deref(), &request.input)
 }
@@ -114,7 +110,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     _state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     _device_id: &str,
     _account_id: Option<&str>,
     _scope: Option<&str>,
@@ -124,11 +120,11 @@ pub(super) async fn dispatch(
         .ok_or_else(|| RpcError::headless_unsupported(name))?;
     let app = app.as_ref();
     match name {
-        "codex_app_runtime_status" => crate::codex_app_dispatch::codex_app_runtime_status_impl(app)
+        "codex_app_runtime_status" => cognia_codex_app::codex_app_runtime_status_impl(app)
             .await
             .map_err(|error| RpcError::service_unavailable(format!("{error:#}"))),
         "codex_app_task_list" => {
-            let mut request: crate::codex_app_dispatch::CodexAppTaskListRequest =
+            let mut request: cognia_codex_app::CodexAppTaskListRequest =
                 required(&args, "request")?;
             if request.cwd.is_none() {
                 return Err(RpcError::forbidden(
@@ -136,53 +132,52 @@ pub(super) async fn dispatch(
                 ));
             }
             authorize_cwd(host, &mut request.cwd)?;
-            crate::codex_app_dispatch::codex_app_task_list_impl(app, request)
+            cognia_codex_app::codex_app_task_list_impl(app, request)
                 .await
                 .map_err(|error| RpcError::internal(format!("{error:#}")))
         }
         "codex_app_task_read" => {
-            let request: crate::codex_app_dispatch::CodexAppTaskReadRequest =
-                required(&args, "request")?;
+            let request: cognia_codex_app::CodexAppTaskReadRequest = required(&args, "request")?;
             authorized_thread_cwd(app, host, &request.thread_id).await?;
-            crate::codex_app_dispatch::codex_app_task_read_impl(app, request)
+            cognia_codex_app::codex_app_task_read_impl(app, request)
                 .await
                 .map_err(|error| RpcError::internal(format!("{error:#}")))
         }
         "codex_app_task_create" => {
-            let mut request: crate::codex_app_dispatch::CodexAppTaskCreateRequest =
+            let mut request: cognia_codex_app::CodexAppTaskCreateRequest =
                 required(&args, "request")?;
             request.cwd = authorize_workspace_root(host, request.cwd)?;
             authorize_inputs(Some(&request.cwd), &request.input)?;
-            crate::codex_app_dispatch::codex_app_task_create_impl(app, request)
+            cognia_codex_app::codex_app_task_create_impl(app, request)
                 .await
                 .map_err(|error| RpcError::internal(format!("{error:#}")))
         }
         "codex_app_task_send" => {
-            let mut request: crate::codex_app_dispatch::CodexAppTaskSendRequest =
+            let mut request: cognia_codex_app::CodexAppTaskSendRequest =
                 required(&args, "request")?;
             request.cwd = Some(authorized_thread_cwd(app, host, &request.thread_id).await?);
             authorize_turn_inputs(&request)?;
-            crate::codex_app_dispatch::codex_app_task_send_impl(app, request)
+            cognia_codex_app::codex_app_task_send_impl(app, request)
                 .await
                 .map_err(|error| RpcError::internal(format!("{error:#}")))
         }
         "codex_app_task_interrupt" => {
-            let request: crate::codex_app_dispatch::CodexAppTaskInterruptRequest =
+            let request: cognia_codex_app::CodexAppTaskInterruptRequest =
                 required(&args, "request")?;
             authorized_thread_cwd(app, host, &request.thread_id).await?;
-            crate::codex_app_dispatch::codex_app_task_interrupt_impl(app, request)
+            cognia_codex_app::codex_app_task_interrupt_impl(app, request)
                 .await
                 .map_err(|error| RpcError::internal(format!("{error:#}")))
         }
         "codex_app_task_open" => {
             let thread_id: String = required(&args, "threadId")?;
             authorized_thread_cwd(app, host, &thread_id).await?;
-            crate::codex_app_dispatch::codex_app_task_open_impl(app, thread_id)
+            cognia_codex_app::codex_app_task_open_impl(app, thread_id)
                 .await
                 .map_err(|error| RpcError::internal(format!("{error:#}")))
         }
         "codex_app_inventory" => {
-            let mut request: crate::codex_app_dispatch::CodexAppInventoryRequest =
+            let mut request: cognia_codex_app::CodexAppInventoryRequest =
                 required(&args, "request")?;
             if request.cwd.is_none() {
                 return Err(RpcError::forbidden(
@@ -193,7 +188,7 @@ pub(super) async fn dispatch(
             if let Some(thread_id) = request.thread_id.as_deref() {
                 request.cwd = Some(authorized_thread_cwd(app, host, thread_id).await?);
             }
-            crate::codex_app_dispatch::codex_app_inventory_impl(app, request)
+            cognia_codex_app::codex_app_inventory_impl(app, request)
                 .await
                 .and_then(|inventory| serde_json::to_value(inventory).map_err(anyhow::Error::from))
                 .map_err(|error| RpcError::internal(format!("{error:#}")))
@@ -224,9 +219,9 @@ mod tests {
         let cwd = tempfile::tempdir().unwrap();
         let inside = tempfile::NamedTempFile::new_in(cwd.path()).unwrap();
         let outside = tempfile::NamedTempFile::new().unwrap();
-        let request = |path: &std::path::Path| crate::codex_app_dispatch::CodexAppTaskSendRequest {
+        let request = |path: &std::path::Path| cognia_codex_app::CodexAppTaskSendRequest {
             thread_id: "01989a8f-7b2b-7aa2-a8b8-c859418ac18f".into(),
-            input: vec![crate::codex_app_dispatch::CodexAppTurnInput::LocalImage {
+            input: vec![cognia_codex_app::CodexAppTurnInput::LocalImage {
                 path: path.display().to_string(),
                 detail: None,
             }],

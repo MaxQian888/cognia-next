@@ -117,6 +117,14 @@ Each spike is an opt-in script in an owned scratch directory, run against a disp
 - **Approach (revised 2026-10-19).** This phase executes ADR-0196 P8 and P9. The RPC families (`src-tauri/src/companion_api/rpc*`, `commands.rs`, `dispatch_host.rs`, about 27k lines) move into `cognia-companion-rpc` behind the `RpcHost` trait. `cognia-server` then moves to `crates/cognia-server`, with no `tauri` in `cargo tree -p cognia-server -i tauri`. An `app_lib` feature cannot work: on Linux, `tauri` depends on `gtk` unconditionally, and `muda` needs gtk3.
 - **Audit (2026-10-19).** Besides re-exports of Tauri-free crates, the binary still needs from `app_lib`: `companion_api::{commands, wiring, push_dispatchers}`, `headless::{brain, deployment_id, gateway_host, tenant_lease}`, `shutdown`, `jobs` and `init_structured_tracing`. The dispatcher reaches these local desktop modules: `browser`, `claude`, `cli_bridge`, `codeserver`, `codex_app_dispatch`, `fleet`, `github`, `keyring_secrets`, `perf`, `pi_extension`, `process_registry`, `recovery`, `session_import_watch`, `sftp_service` and `terminal_host_bridge`.
 - **Scheduling.** `rpc.rs` takes several commits a day from other sessions, so the move runs in a separate worktree in family-sized batches, each rebased and committed on its own. P4 proceeds first against macOS archives.
+- **Progress (2026-10-19).** ADR-0196 P8 is done, in four behavior-neutral commits from a separate worktree:
+  - the `RpcHost` seam;
+  - the RPC tree's Tauri-free helpers moved down into crates;
+  - every desktop-only branch behind a typed accessor;
+  - the dispatch core, all RPC families and `skill_transactions` moved into `cognia_companion_rpc::rpc`. The desktop keeps `DispatchHost`, its `RpcHost`, the environment IPC shells (`companion_api/environment_commands.rs`) and `wiring`.
+
+  `cognia_git::commands` and the gateway-task deletion helpers now build without `tauri-host`. `cargo tree -p cognia-companion-rpc -i tauri` is empty. ADR-0196 P9 (the `crates/cognia-server` package and the image) is next.
+
 - **Decide here, with evidence:** whether `ocr-paddle` stays in the Linux build. Choose from the resulting glibc baseline and the headless OCR need, and record the baseline in this plan.
 - **Verification:** `ldd`/`readelf` on the headless binary shows no `libgtk`, `libwebkit2gtk` or `libjavascriptcore`. The existing headless conformance and server smoke tests pass. The server image switches to the headless binary and drops the GTK/WebKit runtime packages.
 

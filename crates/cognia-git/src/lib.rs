@@ -17,8 +17,10 @@ pub mod code_adoption;
 // ADR-0196 P6 — the Twin git-history importer, out of `app_lib`, where it was
 // the last direct `git2` user.
 pub mod code_repo;
-/// The Tauri command shells; only `src-tauri` enables them (ADR-0196).
-#[cfg(feature = "tauri-host")]
+/// The command surface. The bodies are host-neutral, so the companion RPC
+/// families call them on any host; the `#[tauri::command]` shells over them,
+/// and the watcher commands that need an `AppHandle`, are behind `tauri-host`,
+/// which only `src-tauri` enables (ADR-0196).
 pub mod commands;
 pub mod commit;
 pub mod diff;

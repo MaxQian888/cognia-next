@@ -2,7 +2,7 @@
 //
 // A paired phone manages the DESKTOP's library. Its `files_library_*` calls
 // reach the companion server, ride the generic desktop-writes bridge
-// (`src-tauri/src/companion_api/rpc/data_sync.rs`) to this renderer, and are
+// (`crates/cognia-companion-rpc/src/rpc/data_sync.rs`) to this renderer, and are
 // delegated here by `lib/companion/desktop-write-source.ts`, the way the
 // `pet_*` family is. Every change goes through the code the desktop's own
 // page uses — `lib/db/files-library-*`, rename, duplicate, the Trash purge

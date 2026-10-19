@@ -16,7 +16,7 @@
  * The settings persist through the existing Dexie `settings` singleton
  * (`lib/db/settings.ts:saveSettings`), which is the same path the mobile
  * `app_settings_update` RPC ultimately rides — the allowlist in
- * `src-tauri/src/companion_api/rpc.rs` covers these keys (see ADR-0021).
+ * `crates/cognia-companion-rpc/src/rpc.rs` covers these keys (see ADR-0021).
  *
  * The status pane below the form polls two Tauri commands every 3 s:
  *   - `companion_signaling_status` — hub-level enabled flag + signaling URL

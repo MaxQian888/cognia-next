@@ -611,7 +611,7 @@ pub fn task_workspace_bundle_list() -> Result<Vec<WorkspaceBundle>, String> {
 /// lease can reach. This one takes a GitHub installation token, and a
 /// credential a `service.internal` caller is trusted with must not become
 /// addressable from a phone. It is registered only in
-/// `companion_api/rpc/service_plane.rs`, which is loopback-only and
+/// `cognia-companion-rpc/src/rpc/service_plane.rs`, which is loopback-only and
 /// service-token gated.
 ///
 /// A caller that sends no token gets the one this host keeps for the

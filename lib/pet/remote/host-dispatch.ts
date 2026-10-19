@@ -2,7 +2,7 @@
 //
 // A paired phone cares for the DESKTOP pet. Its `pet_*` calls reach the
 // companion server, ride the generic desktop-writes bridge
-// (`src-tauri/src/companion_api/rpc/data_sync.rs`) to this renderer, and are
+// (`crates/cognia-companion-rpc/src/rpc/data_sync.rs`) to this renderer, and are
 // delegated here by `lib/companion/desktop-write-source.ts`, the same way the
 // `perf_*` family is. Everything that changes the pet goes through the code
 // the desktop's own UI uses: the access gate for care actions, the shop for

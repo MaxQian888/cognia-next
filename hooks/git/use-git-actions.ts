@@ -135,7 +135,7 @@ export interface UseGitActionsResult {
  *    fine, it just lives elsewhere.
  *  - `branchNotFullyMerged` becomes the force-delete confirmation.
  *
- * NOTE: `kind` survives only on the desktop. `companion_api/rpc/source_control`
+ * NOTE: `kind` survives only on the desktop. `cognia-companion-rpc/src/rpc/source_control`
  * flattens every git failure with `RpcError::internal(e.to_string())`, so
  * `asGitError` answers null over a paired transport and these paths fall back
  * to the toast. Tracked separately from this hook.

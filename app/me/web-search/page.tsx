@@ -5,7 +5,7 @@
  * default result count injected into search calls, and the cloud→system
  * fallback. All four fields (`searchEnabled`, `defaultSearchProvider`,
  * `searchMaxResults`, `searchFallbackEnabled`) are in the `app_settings_update`
- * allowlist (`companion_api/rpc.rs`). The preferred provider + fallback are
+ * allowlist (`cognia-companion-rpc/src/rpc.rs`). The preferred provider + fallback are
  * write-up only (NOT mirrored desktop→phone in `CROSS_PLATFORM_SETTING_KEYS`),
  * matching the Wave-2 `composerBehavior` precedent.
  *

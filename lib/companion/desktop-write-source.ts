@@ -31,12 +31,12 @@
  *
  * The authoritative routing table lives on the Rust side — a command only
  * reaches here if one of these dispatches it to the writes bridge:
- *   - `src-tauri/src/companion_api/rpc/data_sync.rs` (the bulk of the surface)
- *   - `src-tauri/src/companion_api/rpc/service_plane.rs` (`app_settings_update`)
+ *   - `crates/cognia-companion-rpc/src/rpc/data_sync.rs` (the bulk of the surface)
+ *   - `crates/cognia-companion-rpc/src/rpc/service_plane.rs` (`app_settings_update`)
  *   - `src-tauri/src/companion_api/workflow_api.rs` (`workflow_api_*`)
  *   - `src-tauri/src/gateway_brain_bridge.rs` (`router_fusion_run_*` and
  *     `router_fusion_passthrough_*`, ADR-0188 B2)
- *   - `src-tauri/src/companion_api/rpc/chat.rs` (`paired_turn_*`, a paired
+ *   - `crates/cognia-companion-rpc/src/rpc/chat.rs` (`paired_turn_*`, a paired
  *     device's direct turn admitted before the sidecar sees it)
  * An arm with no counterpart there is unreachable; a Rust route with no arm
  * here fails with `unknown desktop-write command`.
@@ -355,7 +355,7 @@ export async function dispatchCommand(
   }
   // Durable admission of a paired device's direct turn, asked for by the
   // companion server before it hands the prompt to the sidecar (`send_arm` in
-  // `src-tauri/src/companion_api/rpc/chat.rs`). Internal: no device reaches it.
+  // `crates/cognia-companion-rpc/src/rpc/chat.rs`). Internal: no device reaches it.
   const pairedTurn = await import("@/lib/work-submission/paired-turn-adapter")
   if (pairedTurn.isPairedTurnCommand(command)) {
     return pairedTurn.dispatchPairedTurnCommand(command, payload)
@@ -580,7 +580,7 @@ export async function dispatchCommand(
     // is asleep. A headless brain has no such mirror — nothing there can call
     // the `workflow_waitpoint_create` Tauri command — so Rust diverts both
     // commands here, where this host's Dexie is the only authority. See the
-    // guard in `src-tauri/src/companion_api/rpc/data_sync.rs`.
+    // guard in `crates/cognia-companion-rpc/src/rpc/data_sync.rs`.
     case "workflow_approval_list":
       return workflowApprovalList()
     case "workflow_approval_respond":

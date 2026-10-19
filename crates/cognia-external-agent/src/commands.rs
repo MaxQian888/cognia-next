@@ -193,31 +193,7 @@ pub async fn delete_gateway_task_for_backend(
     delete_gateway_task_for_device(task_id, backend, None).await
 }
 
-fn ensure_gateway_task_stopped(task_id: &str, ids: &[String]) -> Result<(), String> {
-    let prefix = format!("gateway-task-{task_id}");
-    if ids.iter().any(|id| id == &prefix || id.starts_with(&format!("{prefix}:"))) {
-        Err("Stop the gateway task before deleting its state".into())
-    } else { Ok(()) }
-}
-
-pub async fn authorize_gateway_task_deletion(
-    task_id: &str,
-    backend: &dyn exec_backend::ExecBackend,
-    device: Option<&str>,
-) -> Result<(), String> {
-    if backend.kind() != "local-process" {
-        return Err("Gateway task state deletion requires a local process backend".into());
-    }
-    ensure_gateway_task_stopped(task_id, &backend.list().await)?;
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .ok_or("Gateway task requires a host home directory")?;
-    let task_id = task_id.to_owned();
-    let device = device.map(str::to_owned);
-    tokio::task::spawn_blocking(move || crate::gateway_task::authorize_task_deletion(
-        &task_id, std::path::Path::new(&home), device.as_deref(),
-    )).await.map_err(|_| "Gateway task deletion preflight failed".to_string())?
-}
+pub use crate::gateway_task::authorize_gateway_task_deletion;
 
 pub async fn delete_gateway_task_for_device(
     task_id: &str,
@@ -509,14 +485,6 @@ pub async fn external_agent_detect_runtimes(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn deletion_preflight_refuses_live_task_and_session_processes() {
-        assert!(ensure_gateway_task_stopped("one", &["gateway-task-one".into()]).is_err());
-        assert!(ensure_gateway_task_stopped("one", &["gateway-task-one:native-session".into()]).is_err());
-        assert!(ensure_gateway_task_stopped("one", &["gateway-task-onetwo".into()]).is_ok());
-        assert!(ensure_gateway_task_stopped("one", &[]).is_ok());
-    }
 
     #[tokio::test]
     async fn check_command_exists_rejects_empty_and_unknown() {

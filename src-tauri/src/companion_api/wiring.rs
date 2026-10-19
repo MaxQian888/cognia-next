@@ -38,7 +38,17 @@ impl CompanionRuntime for AppCompanionRuntime {
         principal: &DeviceContext,
         plane: ExecutionPlane,
     ) -> DispatchResult {
-        super::rpc::dispatch_canonical(name, args, state, principal, plane).await
+        let host = super::dispatch_host::DispatchHost::from_state(state);
+        super::rpc::dispatch_canonical(
+            name,
+            args,
+            state,
+            principal,
+            plane,
+            host.as_ref()
+                .map(|host| host as &dyn super::dispatch_host::RpcHost),
+        )
+        .await
     }
 
     fn ide_relay_routes(&self) -> Router<SharedState> {

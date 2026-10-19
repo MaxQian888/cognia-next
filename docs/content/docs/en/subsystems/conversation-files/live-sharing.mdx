@@ -165,7 +165,7 @@ brain / WebView push ────┘     │                 └── SFTP (rus
 
 - **One command surface.** `crates/cognia-file-share/src/rpc.rs` holds the fifteen `file_*` commands; the
   desktop's Tauri shells (`commands.rs`, `tauri-host` feature) and the companion RPC
-  (`src-tauri/src/companion_api/rpc/file_share.rs`) both dispatch into it, so a paired phone sends the same
+  (`crates/cognia-companion-rpc/src/rpc/file_share.rs`) both dispatch into it, so a paired phone sends the same
   arguments the WebView does. Host-only: `file_share_activate`, `file_space_sync`, `file_share_policy_set`.
   Reads (`file_share_status`, `file_grant_list`, `file_audit_list`) need `host.observe` and page by token.
   Grant changes (`file_grant_create/revoke/suspend/resume`, `file_credential_rotate`) are `workspace.write`
@@ -208,7 +208,7 @@ never bundled into the app.
 | Concern | Module |
 | --- | --- |
 | Store, gateway, listeners, SFTPGo, service | `crates/cognia-file-share/` |
-| Command surface | `crates/cognia-file-share/src/rpc.rs`, `src-tauri/src/companion_api/rpc/file_share.rs` |
+| Command surface | `crates/cognia-file-share/src/rpc.rs`, `crates/cognia-companion-rpc/src/rpc/file_share.rs` |
 | Host install, account binding, process rows | `src-tauri/src/startup/host_services.rs`, `src-tauri/src/account_auth/`, `src-tauri/src/process_registry/` |
 | Bridge (mount tables, asset reads) | `crates/cognia-companion/src/filespace_bridge.rs`, `crates/cognia-companion-bus/src/desktop_messages_bridge.rs` |
 | Wire types | `types/filespace/live.ts` |

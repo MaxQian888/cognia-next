@@ -82,6 +82,10 @@ impl RpcHost for DispatchHost {
         }
     }
 
+    fn to_shared(&self) -> Arc<dyn RpcHost> {
+        Arc::new(self.clone())
+    }
+
     fn data_dir(&self) -> Result<std::path::PathBuf, String> {
         match self {
             Self::Tauri(app) => {

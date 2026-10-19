@@ -66,7 +66,7 @@ flowchart TB
 
   subgraph Host["💻 Host (desktop WebView or headless brain)"]
     direction TB
-    RPC[companion_api/rpc/data_sync.rs<br/>sync_pull arm]
+    RPC[cognia-companion-rpc/src/rpc/data_sync.rs<br/>sync_pull arm]
     Registry[sync_registry.rs<br/>default_tables · 48]
     Bridge[sync_bridge.rs<br/>SyncBridge.pull · 30 s]
     Source[lib/sync/desktop-sync-source.ts<br/>readDexieDelta · finalizeDelta]
@@ -132,7 +132,7 @@ flowchart TB
 
 | File | Purpose |
 | --- | --- |
-| `src-tauri/src/companion_api/rpc/data_sync.rs` | The `sync_pull` and `sync_list_tables` arms: argument checks, tenant, registry, bridge selection |
+| `crates/cognia-companion-rpc/src/rpc/data_sync.rs` | The `sync_pull` and `sync_list_tables` arms: argument checks, tenant, registry, bridge selection |
 | `crates/cognia-companion-bus/src/sync_registry.rs` | `SyncTableRegistry`, `default_tables()` (48 descriptors: `name`, `description`, `has_tombstones`) |
 | `crates/cognia-companion-bus/src/sync_bridge.rs` | `SyncBridge.pull`: emits the request, awaits the response, 30 s timeout |
 | `src-tauri/src/companion_api/commands.rs` | `companion_sync_pull_response`, the WebView's reply path |

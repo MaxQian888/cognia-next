@@ -58,7 +58,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     scope: Option<&str>,
@@ -74,7 +74,7 @@ pub(super) async fn dispatch(
         // `windows-media-ocr` backends where they cannot run. There is nothing
         // desktop-only about the arms, only about two of the backends.
         "external_agent_detect_runtimes" => {
-            to_json(crate::external_agent::version_probe::detect_runtimes().await)
+            to_json(cognia_external_agent::version_probe::detect_runtimes().await)
         }
 
         // Pi ships no permission prompts of its own, so the extension that
@@ -85,9 +85,9 @@ pub(super) async fn dispatch(
         // verdict stayed undefined, and every Pi session on a companion was
         // refused with "has not been verified on this host" while the Host that
         // would run it held a perfectly good extension.
-        "resolve_pi_extension" => {
-            to_json(crate::pi_extension::verify_for_host(host.pi_sidecar_dir()))
-        }
+        "resolve_pi_extension" => to_json(cognia_sidecar::pi_extension::verify_for_host(
+            host.pi_sidecar_dir(),
+        )),
 
         "ocr_list_native_backends" => {
             let ids = host
@@ -114,7 +114,7 @@ pub(super) async fn dispatch(
         }
 
         "ocr_extract_native" => {
-            let payload: crate::ocr::NativeOcrInvokePayload = required(&args, "payload")?;
+            let payload: cognia_ocr::NativeOcrInvokePayload = required(&args, "payload")?;
             let result = host
                 .ocr_registry()
                 .await
@@ -127,7 +127,7 @@ pub(super) async fn dispatch(
         "ocr_model_status" => {
             let backend: String = required(&args, "backend")?;
             let variant: Option<String> = optional(&args, "variant")?;
-            crate::ocr::native::ocr_model_status(backend, variant)
+            cognia_ocr::native::ocr_model_status(backend, variant)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -143,7 +143,7 @@ pub(super) async fn dispatch(
             // Progress delivery is the only host-specific part, and
             // `ocr_progress_emitter()` owns that split; the download itself is
             // the same code on both hosts.
-            let result = crate::ocr::native::ocr_download_model_with_emitter(
+            let result = cognia_ocr::native::ocr_download_model_with_emitter(
                 backend,
                 variant,
                 request_id,
@@ -156,7 +156,7 @@ pub(super) async fn dispatch(
 
         "ocr_cancel_model_download" => {
             let request_id: String = required_aliased(&args, "request_id", "requestId")?;
-            to_json(crate::ocr::native::ocr_cancel_model_download(request_id))
+            to_json(cognia_ocr::native::ocr_cancel_model_download(request_id))
         }
 
         // ── Skills ────────────────────────────────────────────────────────────
@@ -173,7 +173,7 @@ pub(super) async fn dispatch(
             .and_then(|r| serde_json::to_value(r).map_err(|e| RpcError::internal(e.to_string()))),
 
         "skills_install_native" => {
-            let request: crate::skills::types::InstallSkillRequest = required(&args, "request")?;
+            let request: cognia_skills::types::InstallSkillRequest = required(&args, "request")?;
             tokio::task::spawn_blocking(move || install::skills_install_native(request))
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))?
@@ -195,9 +195,9 @@ pub(super) async fn dispatch(
         }
 
         "skills_catalog_get" => {
-            let host = host.clone();
+            let host = host.to_shared();
             tokio::task::spawn_blocking(move || {
-                super::super::skill_transactions::catalog_get(&host)
+                crate::skill_transactions::catalog_get(host.as_ref())
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -206,12 +206,12 @@ pub(super) async fn dispatch(
         }
 
         "skills_bundle_upload_open" => {
-            let request: crate::skills::bundle::BundleUploadOpenRequest =
+            let request: cognia_skills::bundle::BundleUploadOpenRequest =
                 required(&args, "request")?;
-            let host = host.clone();
+            let host = host.to_shared();
             let device_id = device_id.to_owned();
             tokio::task::spawn_blocking(move || {
-                super::super::skill_transactions::upload_open(&host, &device_id, request)
+                crate::skill_transactions::upload_open(host.as_ref(), &device_id, request)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -224,11 +224,11 @@ pub(super) async fn dispatch(
             let offset: u64 = required(&args, "offset")?;
             let data_base64: String = required_aliased(&args, "data_base64", "dataBase64")?;
             let chunk_hash: String = required_aliased(&args, "chunk_hash", "chunkHash")?;
-            let host = host.clone();
+            let host = host.to_shared();
             let device_id = device_id.to_owned();
             tokio::task::spawn_blocking(move || {
-                super::super::skill_transactions::upload_write(
-                    &host,
+                crate::skill_transactions::upload_write(
+                    host.as_ref(),
                     &device_id,
                     &handle_id,
                     offset,
@@ -244,10 +244,10 @@ pub(super) async fn dispatch(
 
         "skills_bundle_upload_commit" => {
             let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
-            let host = host.clone();
+            let host = host.to_shared();
             let device_id = device_id.to_owned();
             tokio::task::spawn_blocking(move || {
-                super::super::skill_transactions::upload_commit(&host, &device_id, &handle_id)
+                crate::skill_transactions::upload_commit(host.as_ref(), &device_id, &handle_id)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -257,10 +257,10 @@ pub(super) async fn dispatch(
 
         "skills_bundle_upload_abort" => {
             let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
-            let host = host.clone();
+            let host = host.to_shared();
             let device_id = device_id.to_owned();
             tokio::task::spawn_blocking(move || {
-                super::super::skill_transactions::upload_abort(&host, &device_id, &handle_id)
+                crate::skill_transactions::upload_abort(host.as_ref(), &device_id, &handle_id)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -270,10 +270,10 @@ pub(super) async fn dispatch(
 
         "skills_install_atomic" => {
             let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
-            let host = host.clone();
+            let host = host.to_shared();
             let device_id = device_id.to_owned();
             tokio::task::spawn_blocking(move || {
-                super::super::skill_transactions::install_atomic(&host, &device_id, &handle_id)
+                crate::skill_transactions::install_atomic(host.as_ref(), &device_id, &handle_id)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -282,11 +282,11 @@ pub(super) async fn dispatch(
         }
 
         "skills_uninstall" => {
-            let target: crate::skills::install::SkillsTarget = required(&args, "target")?;
+            let target: cognia_skills::install::SkillsTarget = required(&args, "target")?;
             let dir_name: String = required_aliased(&args, "dir_name", "dirName")?;
-            let host = host.clone();
+            let host = host.to_shared();
             tokio::task::spawn_blocking(move || {
-                super::super::skill_transactions::uninstall(&host, target, &dir_name)
+                crate::skill_transactions::uninstall(host.as_ref(), target, &dir_name)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -297,7 +297,7 @@ pub(super) async fn dispatch(
         "external_bridge_config_get" => {
             let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
             tokio::task::spawn_blocking(move || {
-                super::super::external_bridge::config_get(&data_dir)
+                cognia_companion::external_bridge::config_get(&data_dir)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -306,19 +306,19 @@ pub(super) async fn dispatch(
         }
 
         "external_bridge_config_update" => {
-            let update: super::super::external_bridge::ExternalBridgeConfigUpdate =
+            let update: cognia_companion::external_bridge::ExternalBridgeConfigUpdate =
                 required(&args, "update")?;
             let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
             let running = host.mcp_server_status().running;
             let bridge_data_dir = data_dir.clone();
             let updated = tokio::task::spawn_blocking(move || {
-                super::super::external_bridge::config_update(&bridge_data_dir, update)
+                cognia_companion::external_bridge::config_update(&bridge_data_dir, update)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
             .map_err(external_bridge_rpc_error)?;
             if running {
-                super::super::external_bridge::set_runtime_state(
+                cognia_companion::external_bridge::set_runtime_state(
                     &data_dir,
                     "degraded",
                     Some("configuration changed; restart required".into()),
@@ -334,7 +334,7 @@ pub(super) async fn dispatch(
             let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
             let bridge_data_dir = data_dir.clone();
             let created = tokio::task::spawn_blocking(move || {
-                super::super::external_bridge::client_create(
+                cognia_companion::external_bridge::client_create(
                     &bridge_data_dir,
                     name,
                     scopes,
@@ -351,7 +351,7 @@ pub(super) async fn dispatch(
         "external_bridge_client_list" => {
             let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
             tokio::task::spawn_blocking(move || {
-                super::super::external_bridge::client_list(&data_dir)
+                cognia_companion::external_bridge::client_list(&data_dir)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -364,7 +364,7 @@ pub(super) async fn dispatch(
             let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
             let bridge_data_dir = data_dir.clone();
             let rotated = tokio::task::spawn_blocking(move || {
-                super::super::external_bridge::client_rotate(&bridge_data_dir, &client_id)
+                cognia_companion::external_bridge::client_rotate(&bridge_data_dir, &client_id)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -378,7 +378,7 @@ pub(super) async fn dispatch(
             let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
             let bridge_data_dir = data_dir.clone();
             let revoked = tokio::task::spawn_blocking(move || {
-                super::super::external_bridge::client_revoke(&bridge_data_dir, &client_id)
+                cognia_companion::external_bridge::client_revoke(&bridge_data_dir, &client_id)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -391,9 +391,9 @@ pub(super) async fn dispatch(
         "external_bridge_restart" => external_bridge_start_for_host(host, true).await,
         "external_bridge_stop" => {
             let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
-            crate::mcp_server::commands::mcp_server_stop_for_state(host.mcp_server())
+            cognia_mcp_server::commands::mcp_server_stop_for_state(host.mcp_server())
                 .map_err(mcp_server_rpc_error)?;
-            super::super::external_bridge::set_runtime_state(&data_dir, "stopped", None);
+            cognia_companion::external_bridge::set_runtime_state(&data_dir, "stopped", None);
             Ok(Value::Null)
         }
 
@@ -401,7 +401,7 @@ pub(super) async fn dispatch(
             let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
             let server_status = host.mcp_server_status();
             tokio::task::spawn_blocking(move || {
-                super::super::external_bridge::status(&data_dir, &server_status)
+                cognia_companion::external_bridge::status(&data_dir, &server_status)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -443,14 +443,17 @@ pub(super) async fn dispatch(
                 // device is not — which is also decision L23: configuring a
                 // connector is administrator work.
                 _ if is_owner_device(device_id, tenant_id) => true,
-                _ => super::super::host_consent::take_approved(device_id, &operations),
+                _ => cognia_companion::host_consent::take_approved(device_id, &operations),
             };
 
             if !confirmed {
-                let ask =
-                    super::super::host_consent::request(device_id, tenant_id, operations.clone());
+                let ask = cognia_companion::host_consent::request(
+                    device_id,
+                    tenant_id,
+                    operations.clone(),
+                );
                 host.publish_host_event(
-                    super::super::host_consent::CONSENT_CHANNEL,
+                    cognia_companion::host_consent::CONSENT_CHANNEL,
                     serde_json::to_value(&ask).unwrap_or(Value::Null),
                 );
                 // 428, and the code travels in the message so a console
@@ -461,7 +464,7 @@ pub(super) async fn dispatch(
                     ask.code
                 )))
             } else {
-                super::super::admin_lease::issue(
+                cognia_companion::admin_lease::issue(
                     device_id,
                     operations,
                     ttl_seconds,
@@ -473,10 +476,10 @@ pub(super) async fn dispatch(
         }
 
         "host_admin_lease_revoke" => {
-            super::super::admin_lease::revoke_device(device_id);
+            cognia_companion::admin_lease::revoke_device(device_id);
             // An open ask outlives nothing: a device that just gave up its
             // leases has no business collecting an approval granted for them.
-            super::super::host_consent::forget_device(device_id);
+            cognia_companion::host_consent::forget_device(device_id);
             Ok(Value::Null)
         }
 
@@ -492,7 +495,7 @@ pub(super) async fn dispatch(
                     "REMOTE_SCOPE_DENIED: listing escalation requests requires host.admin".into(),
                 ));
             }
-            let open = super::super::host_consent::pending();
+            let open = cognia_companion::host_consent::pending();
             // A device is shown only what it may answer. The self-approval rule
             // lives in `host_consent::resolve`, but a list that included the
             // caller's own ask would offer an action the host is about to
@@ -520,15 +523,15 @@ pub(super) async fn dispatch(
             // A device answers as itself so it cannot answer for itself; the
             // desktop operator and the host console answer as the host.
             let approver = match scope {
-                Some("service") | Some("owner") => super::super::host_consent::Approver::Host,
-                _ => super::super::host_consent::Approver::Device(device_id),
+                Some("service") | Some("owner") => cognia_companion::host_consent::Approver::Host,
+                _ => cognia_companion::host_consent::Approver::Device(device_id),
             };
-            let answered = super::super::host_consent::resolve(&request_id, approve, approver)
+            let answered = cognia_companion::host_consent::resolve(&request_id, approve, approver)
                 .map_err(external_bridge_rpc_error)?;
             // Same channel as the ask: an approver surface elsewhere needs to
             // drop the row it is still showing.
             host.publish_host_event(
-                super::super::host_consent::CONSENT_CHANNEL,
+                cognia_companion::host_consent::CONSENT_CHANNEL,
                 serde_json::to_value(&answered).unwrap_or(Value::Null),
             );
             to_json(answered)
@@ -540,7 +543,7 @@ pub(super) async fn dispatch(
             let token: String = required(&args, "token")?;
             let settings_json: String = required_aliased(&args, "settings_json", "settingsJson")?;
             if name == "mcp_server_restart" {
-                crate::mcp_server::commands::mcp_server_stop_for_state(host.mcp_server())
+                cognia_mcp_server::commands::mcp_server_stop_for_state(host.mcp_server())
                     .map_err(mcp_server_rpc_error)?;
             }
             // Same resolver the settings snippet reads, so the path we spawn
@@ -553,7 +556,7 @@ pub(super) async fn dispatch(
                         .to_string(),
                 )
             })?;
-            crate::mcp_server::commands::mcp_server_start_for_state(
+            cognia_mcp_server::commands::mcp_server_start_for_state(
                 host.mcp_server(),
                 port,
                 token,
@@ -567,7 +570,7 @@ pub(super) async fn dispatch(
             .map_err(mcp_server_rpc_error)
         }
         "mcp_server_stop" => {
-            crate::mcp_server::commands::mcp_server_stop_for_state(host.mcp_server())
+            cognia_mcp_server::commands::mcp_server_stop_for_state(host.mcp_server())
                 .map(|_| Value::Null)
                 .map_err(mcp_server_rpc_error)
         }
@@ -644,7 +647,7 @@ fn host_admin_authorized(device_id: &str, tenant_id: Option<&str>, scope: Option
         return true;
     }
     tenant_id
-        .zip(super::super::security_store::security_store())
+        .zip(cognia_companion::security_store::security_store())
         .is_some_and(|(tenant_id, security)| {
             security
                 .has_capability(tenant_id, device_id, "host.admin")
@@ -659,7 +662,7 @@ fn host_admin_authorized(device_id: &str, tenant_id: Option<&str>, scope: Option
 /// needs someone to approve its escalations. Only the Owner is the root.
 fn is_owner_device(device_id: &str, tenant_id: Option<&str>) -> bool {
     tenant_id
-        .zip(super::super::security_store::security_store())
+        .zip(cognia_companion::security_store::security_store())
         .is_some_and(|(tenant_id, security)| {
             security
                 .is_owner_device(tenant_id, device_id)

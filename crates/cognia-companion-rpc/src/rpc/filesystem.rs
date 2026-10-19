@@ -137,16 +137,16 @@ static TRANSFER_IO_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const
 
 /// Keep conflicts distinct; the stable message prefix carries their hash in
 /// the existing three-field RPC error envelope.
-fn workspace_write_error(error: crate::files::WorkspaceWriteError) -> (StatusCode, Json<RpcError>) {
+fn workspace_write_error(error: cognia_files::files::WorkspaceWriteError) -> (StatusCode, Json<RpcError>) {
     match error {
-        crate::files::WorkspaceWriteError::Conflict { .. } => (
+        cognia_files::files::WorkspaceWriteError::Conflict { .. } => (
             StatusCode::CONFLICT,
             Json(RpcError::new("workspace_file_conflict", error.to_string())),
         ),
-        crate::files::WorkspaceWriteError::InvalidPrecondition { message } => {
+        cognia_files::files::WorkspaceWriteError::InvalidPrecondition { message } => {
             RpcError::validation_failed(message)
         }
-        crate::files::WorkspaceWriteError::Other { message } => RpcError::internal(message),
+        cognia_files::files::WorkspaceWriteError::Other { message } => RpcError::internal(message),
     }
 }
 
@@ -214,7 +214,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     account_id: Option<&str>,
     scope: Option<&str>,
@@ -230,7 +230,7 @@ pub(super) async fn dispatch(
         "read_text_file" => {
             let path: String = required(&args, "path")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::read_text_file_impl(path, crate::files::FsOrigin::Remote)
+                cognia_files::files::read_text_file_impl(path, cognia_files::files::FsOrigin::Remote)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -241,7 +241,7 @@ pub(super) async fn dispatch(
             let path: String = required(&args, "path")?;
             let content: String = required(&args, "content")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::write_text_file_impl(path, content, crate::files::FsOrigin::Remote)
+                cognia_files::files::write_text_file_impl(path, content, cognia_files::files::FsOrigin::Remote)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -253,7 +253,7 @@ pub(super) async fn dispatch(
             let content: String = required(&args, "content")?;
             let allowed_roots: Vec<String> = required(&args, "allowedRoots")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::write_text_file_confined(path, content, allowed_roots)
+                cognia_files::files::write_text_file_confined(path, content, allowed_roots)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -263,7 +263,7 @@ pub(super) async fn dispatch(
         "ensure_dir" => {
             let path: String = required(&args, "path")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::ensure_dir_impl(path, crate::files::FsOrigin::Remote)
+                cognia_files::files::ensure_dir_impl(path, cognia_files::files::FsOrigin::Remote)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -274,14 +274,14 @@ pub(super) async fn dispatch(
             let path: String = required(&args, "path")?;
             let allowed_roots: Vec<String> = required(&args, "allowedRoots")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::ensure_dir_confined(path, allowed_roots)
+                cognia_files::files::ensure_dir_confined(path, allowed_roots)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
             .map(|_| Value::Null)
             .map_err(RpcError::internal)
         }
-        "default_export_dir" => tokio::task::spawn_blocking(crate::files::default_export_dir)
+        "default_export_dir" => tokio::task::spawn_blocking(cognia_files::files::default_export_dir)
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
             .map(Value::String)
@@ -291,7 +291,7 @@ pub(super) async fn dispatch(
             let query: String = optional(&args, "query")?.unwrap_or_default();
             let limit: Option<usize> = optional(&args, "limit")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_search_workspace(root, query, limit)
+                cognia_files::files::fs_search_workspace(root, query, limit)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -307,7 +307,7 @@ pub(super) async fn dispatch(
             // A chat-only device's matches never come from a sensitive file.
             let allow_sensitive = sensitive_reads_allowed(device_id, scope);
             tokio::task::spawn_blocking(move || {
-                crate::files::search_workspace_content(
+                cognia_files::files::search_workspace_content(
                     root,
                     query,
                     is_regex,
@@ -327,7 +327,7 @@ pub(super) async fn dispatch(
             let max_bytes: Option<usize> = optional(&args, "maxBytes")?;
             let allow_sensitive = authorize_workspace_read(&root, &rel_path, device_id, scope)?;
             tokio::task::spawn_blocking(move || {
-                crate::files::read_workspace_file(root, rel_path, max_bytes, allow_sensitive)
+                cognia_files::files::read_workspace_file(root, rel_path, max_bytes, allow_sensitive)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -340,7 +340,7 @@ pub(super) async fn dispatch(
             let max_bytes: Option<usize> = optional(&args, "maxBytes")?;
             let allow_sensitive = authorize_workspace_read(&root, &rel_path, device_id, scope)?;
             tokio::task::spawn_blocking(move || {
-                crate::files::read_workspace_file_versioned(root, rel_path, max_bytes, allow_sensitive)
+                cognia_files::files::read_workspace_file_versioned(root, rel_path, max_bytes, allow_sensitive)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -353,7 +353,7 @@ pub(super) async fn dispatch(
             let max_bytes: Option<usize> = optional(&args, "maxBytes")?;
             let allow_sensitive = authorize_workspace_read(&root, &rel_path, device_id, scope)?;
             tokio::task::spawn_blocking(move || {
-                crate::files::read_workspace_file_base64(root, rel_path, max_bytes, allow_sensitive)
+                cognia_files::files::read_workspace_file_base64(root, rel_path, max_bytes, allow_sensitive)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -367,7 +367,7 @@ pub(super) async fn dispatch(
             let length: usize = required(&args, "length")?;
             let allow_sensitive = authorize_workspace_read(&root, &rel_path, device_id, scope)?;
             tokio::task::spawn_blocking(move || {
-                crate::files::read_workspace_file_chunk(
+                cognia_files::files::read_workspace_file_chunk(
                     root,
                     rel_path,
                     offset,
@@ -388,7 +388,7 @@ pub(super) async fn dispatch(
             let expected_sha256: Option<String> = optional(&args, "expectedSha256")?;
             let expect_absent: Option<bool> = optional(&args, "expectAbsent")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_write_workspace_file(
+                cognia_files::files::fs_write_workspace_file(
                     root, rel_path, content, encoding, expected_sha256, expect_absent,
                 )
             })
@@ -419,17 +419,17 @@ pub(super) async fn dispatch(
             .map_err(RpcError::internal)
             .and_then(to_json)
         }
-        "task_workspace_status" => to_json(crate::task_workspace::task_workspace_status()),
+        "task_workspace_status" => to_json(cognia_task_workspace_host::host_surface::task_workspace_status()),
         "task_workspace_begin" => {
             let input: cognia_task_workspace::BeginTaskRun = required(&args, "input")?;
             let sink: std::sync::Arc<dyn cognia_task_workspace::TaskWorkspaceEventSink> =
-                std::sync::Arc::new(crate::task_workspace::BusResourceEventSink(
+                std::sync::Arc::new(cognia_task_workspace_host::host_surface::BusResourceEventSink(
                     std::sync::Arc::clone(&state.event_bus),
                 ));
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::begin_hosted_turn(
+                cognia_task_workspace_host::host_surface::begin_hosted_turn(
                     input.session_id.clone(),
-                    crate::task_workspace::TaskWorkspaceTurnEnvelope {
+                    cognia_task_workspace_host::host_surface::TaskWorkspaceTurnEnvelope {
                         task_id: input.task_id,
                         run_id: input.run_id,
                         parent_run_id: input.parent_run_id,
@@ -459,11 +459,11 @@ pub(super) async fn dispatch(
             let logical_root_id: String = required(&args, "logicalRootId")?;
             let input: cognia_task_workspace::BeginTaskRun = required(&args, "input")?;
             let sink: std::sync::Arc<dyn cognia_task_workspace::TaskWorkspaceEventSink> =
-                std::sync::Arc::new(crate::task_workspace::BusResourceEventSink(
+                std::sync::Arc::new(cognia_task_workspace_host::host_surface::BusResourceEventSink(
                     std::sync::Arc::clone(&state.event_bus),
                 ));
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::begin_hosted_bundle_turn(
+                cognia_task_workspace_host::host_surface::begin_hosted_bundle_turn(
                     bundle_id,
                     logical_root_id,
                     input,
@@ -480,11 +480,11 @@ pub(super) async fn dispatch(
             let request: cognia_task_workspace::BeginWorkspaceBundleTurn =
                 required(&args, "request")?;
             let sink: std::sync::Arc<dyn cognia_task_workspace::TaskWorkspaceEventSink> =
-                std::sync::Arc::new(crate::task_workspace::BusResourceEventSink(
+                std::sync::Arc::new(cognia_task_workspace_host::host_surface::BusResourceEventSink(
                     std::sync::Arc::clone(&state.event_bus),
                 ));
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::begin_hosted_workspace_bundle_turn(bundle_id, request, sink)
+                cognia_task_workspace_host::host_surface::begin_hosted_workspace_bundle_turn(bundle_id, request, sink)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -496,7 +496,7 @@ pub(super) async fn dispatch(
             let final_state: Option<cognia_task_workspace::RunState> =
                 optional(&args, "finalState")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.settle_workspace_bundle_turn(
+                cognia_task_workspace_host::host_surface::service()?.settle_workspace_bundle_turn(
                     &bundle_turn_id,
                     final_state.unwrap_or(cognia_task_workspace::RunState::Ready),
                 )
@@ -509,7 +509,7 @@ pub(super) async fn dispatch(
         "task_workspace_bundle_turn_abort" => {
             let bundle_turn_id: String = required(&args, "bundleTurnId")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.abort_workspace_bundle_turn(&bundle_turn_id)
+                cognia_task_workspace_host::host_surface::service()?.abort_workspace_bundle_turn(&bundle_turn_id)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -518,26 +518,26 @@ pub(super) async fn dispatch(
         }
         "task_workspace_bundle_turn_get" => {
             let bundle_turn_id: String = required(&args, "bundleTurnId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.get_workspace_bundle_turn(&bundle_turn_id))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "task_workspace_managed_get" => {
             let workspace_id: String = required(&args, "workspaceId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.get_managed_workspace(&workspace_id))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
-        "task_workspace_managed_list" => crate::task_workspace::service()
+        "task_workspace_managed_list" => cognia_task_workspace_host::host_surface::service()
             .and_then(|service| service.list_managed_workspaces())
             .map_err(RpcError::internal)
             .and_then(to_json),
         "task_workspace_environment_list" => {
             let root_dir: Option<String> = optional(&args, "rootDir")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service().and_then(|service| {
+                cognia_task_workspace_host::host_surface::service().and_then(|service| {
                     service
                         .list_workspace_environments(root_dir.as_deref().map(std::path::Path::new))
                 })
@@ -549,19 +549,19 @@ pub(super) async fn dispatch(
         }
         "task_workspace_bundle_get" => {
             let bundle_id: String = required(&args, "bundleId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.get_workspace_bundle(&bundle_id))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
-        "task_workspace_bundle_list" => crate::task_workspace::service()
+        "task_workspace_bundle_list" => cognia_task_workspace_host::host_surface::service()
             .and_then(|service| service.list_workspace_bundles())
             .map_err(RpcError::internal)
             .and_then(to_json),
         "task_workspace_bundle_acquire" => {
             let input: cognia_task_workspace::AcquireWorkspaceBundle = required(&args, "input")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.acquire_workspace_bundle(input)
+                cognia_task_workspace_host::host_surface::service()?.acquire_workspace_bundle(input)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -572,7 +572,7 @@ pub(super) async fn dispatch(
             let bundle_id: String = required(&args, "bundleId")?;
             let request: cognia_task_workspace::BundleHandoffRequest = required(&args, "request")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.apply_workspace_bundle(&bundle_id, request)
+                cognia_task_workspace_host::host_surface::service()?.apply_workspace_bundle(&bundle_id, request)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -583,7 +583,7 @@ pub(super) async fn dispatch(
             let bundle_id: String = required(&args, "bundleId")?;
             let request: cognia_task_workspace::BundleHandoffRequest = required(&args, "request")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?
+                cognia_task_workspace_host::host_surface::service()?
                     .retry_workspace_bundle_handoff(&bundle_id, request)
             })
             .await
@@ -593,7 +593,7 @@ pub(super) async fn dispatch(
         }
         "task_workspace_bundle_handoff_get" => {
             let bundle_turn_id: String = required(&args, "bundleTurnId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.get_bundle_handoff_outcome(&bundle_turn_id))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -602,7 +602,7 @@ pub(super) async fn dispatch(
             let bundle_id: String = required(&args, "bundleId")?;
             let bundle_turn_id: String = required(&args, "bundleTurnId")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?
+                cognia_task_workspace_host::host_surface::service()?
                     .undo_workspace_bundle_handoff(&bundle_id, &bundle_turn_id)
             })
             .await
@@ -612,26 +612,26 @@ pub(super) async fn dispatch(
         }
         "task_workspace_bundle_handoff_undo_get" => {
             let bundle_turn_id: String = required(&args, "bundleTurnId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.get_bundle_handoff_undo_outcome(&bundle_turn_id))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "task_workspace_reconcile" => tokio::task::spawn_blocking(move || {
-            crate::task_workspace::service()?.reconcile_known_worktrees()
+            cognia_task_workspace_host::host_surface::service()?.reconcile_known_worktrees()
         })
         .await
         .map_err(|error| RpcError::internal(error.to_string()))?
         .map_err(RpcError::internal)
         .and_then(to_json),
-        "task_workspace_policy_get" => crate::task_workspace::service()
+        "task_workspace_policy_get" => cognia_task_workspace_host::host_surface::service()
             .map(|service| service.workspace_lifecycle_policy())
             .map_err(RpcError::internal)
             .and_then(to_json),
         "task_workspace_policy_set" => {
             let policy: cognia_task_workspace::WorkspaceLifecyclePolicy =
                 required(&args, "policy")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.set_workspace_lifecycle_policy(policy))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -639,14 +639,14 @@ pub(super) async fn dispatch(
         "task_workspace_port_lease_get" => {
             let workspace_id: String = required(&args, "workspaceId")?;
             let namespace: Option<String> = optional(&args, "namespace")?;
-            crate::task_workspace::task_workspace_port_lease_get(workspace_id, namespace)
+            cognia_task_workspace_host::host_surface::task_workspace_port_lease_get(workspace_id, namespace)
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "task_workspace_port_lease_ensure" => {
             let workspace_id: String = required(&args, "workspaceId")?;
             let namespace: Option<String> = optional(&args, "namespace")?;
-            crate::task_workspace::task_workspace_port_lease_ensure(workspace_id, namespace)
+            cognia_task_workspace_host::host_surface::task_workspace_port_lease_ensure(workspace_id, namespace)
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
@@ -654,7 +654,7 @@ pub(super) async fn dispatch(
             let cwd: String = required(&args, "cwd")?;
             let workspace_id: Option<String> = optional(&args, "workspaceId")?;
             let namespace: Option<String> = optional(&args, "namespace")?;
-            crate::task_workspace::task_workspace_port_lease_resolve(cwd, workspace_id, namespace)
+            cognia_task_workspace_host::host_surface::task_workspace_port_lease_resolve(cwd, workspace_id, namespace)
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
@@ -662,7 +662,7 @@ pub(super) async fn dispatch(
             let cwd: String = required(&args, "cwd")?;
             let workspace_id: Option<String> = optional(&args, "workspaceId")?;
             let namespace: Option<String> = optional(&args, "namespace")?;
-            crate::task_workspace::task_workspace_port_lease_resolve_ensure(cwd, workspace_id, namespace)
+            cognia_task_workspace_host::host_surface::task_workspace_port_lease_resolve_ensure(cwd, workspace_id, namespace)
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
@@ -671,7 +671,7 @@ pub(super) async fn dispatch(
             let key: String = required(&args, "key")?;
             let root: String = required(&args, "root")?;
             let namespace: Option<String> = optional(&args, "namespace")?;
-            crate::task_workspace::task_workspace_port_lease_subject_ensure(kind, key, root, namespace)
+            cognia_task_workspace_host::host_surface::task_workspace_port_lease_subject_ensure(kind, key, root, namespace)
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
@@ -679,7 +679,7 @@ pub(super) async fn dispatch(
             let kind: cognia_task_workspace::ExternalPortSubjectKind = required(&args, "kind")?;
             let key: String = required(&args, "key")?;
             let namespace: Option<String> = optional(&args, "namespace")?;
-            crate::task_workspace::task_workspace_port_lease_subject_get(kind, key, namespace)
+            cognia_task_workspace_host::host_surface::task_workspace_port_lease_subject_get(kind, key, namespace)
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
@@ -688,7 +688,7 @@ pub(super) async fn dispatch(
             let key: String = required(&args, "key")?;
             let namespace: Option<String> = optional(&args, "namespace")?;
             let lease_id: Option<String> = optional(&args, "leaseId")?;
-            crate::task_workspace::task_workspace_port_lease_subject_release(
+            cognia_task_workspace_host::host_surface::task_workspace_port_lease_subject_release(
                 kind, key, namespace, lease_id,
             )
                 .map_err(RpcError::internal)
@@ -697,41 +697,41 @@ pub(super) async fn dispatch(
         "task_workspace_port_lease_release" => {
             let workspace_id: String = required(&args, "workspaceId")?;
             let namespace: Option<String> = optional(&args, "namespace")?;
-            crate::task_workspace::task_workspace_port_lease_release(workspace_id, namespace)
+            cognia_task_workspace_host::host_surface::task_workspace_port_lease_release(workspace_id, namespace)
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "task_workspace_port_lease_list" => {
-            crate::task_workspace::task_workspace_port_lease_list()
+            cognia_task_workspace_host::host_surface::task_workspace_port_lease_list()
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "task_workspace_maintenance_run" => {
             let request: Option<cognia_task_workspace::WorkspaceMaintenanceRequest> =
                 optional(&args, "request")?;
-            crate::task_workspace::task_workspace_maintenance_run(request)
+            cognia_task_workspace_host::host_surface::task_workspace_maintenance_run(request)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "task_workspace_maintenance_events" => {
             let page = page_request(&args)?;
-            crate::task_workspace::service()
-                .and_then(|service| crate::task_workspace::maintenance_events_page(&service, &page))
+            cognia_task_workspace_host::host_surface::service()
+                .and_then(|service| cognia_task_workspace_host::host_surface::maintenance_events_page(&service, &page))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "task_workspace_managed_pin" => {
             let workspace_id: String = required(&args, "workspaceId")?;
             let pinned: bool = required(&args, "pinned")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.set_managed_workspace_pinned(&workspace_id, pinned))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "task_workspace_managed_permanent" => {
             let workspace_id: String = required(&args, "workspaceId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.make_workspace_permanent(&workspace_id))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -739,7 +739,7 @@ pub(super) async fn dispatch(
         "task_workspace_managed_archive" => {
             let workspace_id: String = required(&args, "workspaceId")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.archive_managed_workspace(&workspace_id)
+                cognia_task_workspace_host::host_surface::service()?.archive_managed_workspace(&workspace_id)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -749,7 +749,7 @@ pub(super) async fn dispatch(
         "task_workspace_managed_adopt" => {
             let workspace_id: String = required(&args, "workspaceId")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.adopt_imported_workspace(&workspace_id)
+                cognia_task_workspace_host::host_surface::service()?.adopt_imported_workspace(&workspace_id)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -761,7 +761,7 @@ pub(super) async fn dispatch(
             let source_root: String = required(&args, "sourceRoot")?;
             let path: String = required(&args, "path")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.adopt_workspace_environment(
+                cognia_task_workspace_host::host_surface::service()?.adopt_workspace_environment(
                     &environment_id,
                     std::path::Path::new(&source_root),
                     std::path::Path::new(&path),
@@ -775,7 +775,7 @@ pub(super) async fn dispatch(
         "task_workspace_environment_create_branch" => {
             let workspace_id: String = required(&args, "workspaceId")?;
             let branch: String = required(&args, "branch")?;
-            crate::task_workspace::task_workspace_environment_create_branch(workspace_id, branch)
+            cognia_task_workspace_host::host_surface::task_workspace_environment_create_branch(workspace_id, branch)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -783,28 +783,28 @@ pub(super) async fn dispatch(
         "task_workspace_environment_delete_branch" => {
             let workspace_id: String = required(&args, "workspaceId")?;
             let branch: String = required(&args, "branch")?;
-            crate::task_workspace::task_workspace_environment_delete_branch(workspace_id, branch)
+            cognia_task_workspace_host::host_surface::task_workspace_environment_delete_branch(workspace_id, branch)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "task_workspace_changeset_get" => {
             let changeset_id: String = required(&args, "changesetId")?;
-            crate::task_workspace::task_workspace_changeset_get(changeset_id)
+            cognia_task_workspace_host::host_surface::task_workspace_changeset_get(changeset_id)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
         }
         "task_workspace_changeset_list" => {
             let filter: cognia_task_workspace::ChangesetFilter = required(&args, "filter")?;
-            crate::task_workspace::task_workspace_changeset_list(filter)
+            cognia_task_workspace_host::host_surface::task_workspace_changeset_list(filter)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
         }
         "task_workspace_changeset_eligibility" => {
             let changeset_id: String = required(&args, "changesetId")?;
-            crate::task_workspace::task_workspace_changeset_eligibility(changeset_id)
+            cognia_task_workspace_host::host_surface::task_workspace_changeset_eligibility(changeset_id)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
@@ -812,35 +812,35 @@ pub(super) async fn dispatch(
         "task_workspace_integration_analyze" => {
             let changeset_ids: Vec<String> = required(&args, "changesetIds")?;
             let target_ref: Option<String> = optional(&args, "targetRef")?;
-            crate::task_workspace::task_workspace_integration_analyze(changeset_ids, target_ref)
+            cognia_task_workspace_host::host_surface::task_workspace_integration_analyze(changeset_ids, target_ref)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
         }
         "task_workspace_integration_get" => {
             let integration_id: String = required(&args, "integrationId")?;
-            crate::task_workspace::task_workspace_integration_get(integration_id)
+            cognia_task_workspace_host::host_surface::task_workspace_integration_get(integration_id)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
         }
         "task_workspace_integration_list" => {
-            let filter: crate::task_workspace::IntegrationRunFilter = required(&args, "filter")?;
-            crate::task_workspace::task_workspace_integration_list(filter)
+            let filter: cognia_task_workspace_host::host_surface::IntegrationRunFilter = required(&args, "filter")?;
+            cognia_task_workspace_host::host_surface::task_workspace_integration_list(filter)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
         }
         "task_workspace_changeset_capture" => {
             let input: cognia_task_workspace::CaptureChangeset = required(&args, "input")?;
-            crate::task_workspace::task_workspace_changeset_capture(input)
+            cognia_task_workspace_host::host_surface::task_workspace_changeset_capture(input)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
         }
         "task_workspace_changeset_mark_ready" => {
             let changeset_id: String = required(&args, "changesetId")?;
-            crate::task_workspace::task_workspace_changeset_mark_ready(changeset_id)
+            cognia_task_workspace_host::host_surface::task_workspace_changeset_mark_ready(changeset_id)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
@@ -848,7 +848,7 @@ pub(super) async fn dispatch(
         "task_workspace_changeset_record_review" => {
             let changeset_id: String = required(&args, "changesetId")?;
             let review: cognia_task_workspace::ChangesetReview = required(&args, "review")?;
-            crate::task_workspace::task_workspace_changeset_record_review(changeset_id, review)
+            cognia_task_workspace_host::host_surface::task_workspace_changeset_record_review(changeset_id, review)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
@@ -856,7 +856,7 @@ pub(super) async fn dispatch(
         "task_workspace_changeset_record_check" => {
             let changeset_id: String = required(&args, "changesetId")?;
             let check: cognia_task_workspace::ChangesetCheck = required(&args, "check")?;
-            crate::task_workspace::task_workspace_changeset_record_check(changeset_id, check)
+            cognia_task_workspace_host::host_surface::task_workspace_changeset_record_check(changeset_id, check)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
@@ -865,7 +865,7 @@ pub(super) async fn dispatch(
             let changeset_id: String = required(&args, "changesetId")?;
             let head_sha: String = required(&args, "headSha")?;
             let approver: String = required(&args, "approver")?;
-            crate::task_workspace::task_workspace_changeset_approve(
+            cognia_task_workspace_host::host_surface::task_workspace_changeset_approve(
                 changeset_id,
                 head_sha,
                 approver,
@@ -876,50 +876,50 @@ pub(super) async fn dispatch(
         }
         "task_workspace_changeset_abandon" => {
             let changeset_id: String = required(&args, "changesetId")?;
-            crate::task_workspace::task_workspace_changeset_abandon(changeset_id)
+            cognia_task_workspace_host::host_surface::task_workspace_changeset_abandon(changeset_id)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
         }
         "task_workspace_canonical_root" => {
             let path = authorize_workspace_root(host, required(&args, "path")?)?;
-            crate::task_workspace::task_workspace_canonical_root(path).await.map_err(RpcError::internal).and_then(to_json)
+            cognia_task_workspace_host::host_surface::task_workspace_canonical_root(path).await.map_err(RpcError::internal).and_then(to_json)
         }
         "best_of_n_start" => {
             let input: cognia_task_workspace::StartBestOfN = required(&args, "input")?;
-            crate::task_workspace::best_of_n_start(input).await.map_err(RpcError::internal).and_then(to_json)
+            cognia_task_workspace_host::host_surface::best_of_n_start(input).await.map_err(RpcError::internal).and_then(to_json)
         }
         "best_of_n_cancel" => {
             let input: cognia_task_workspace::BestOfNMutation = required(&args, "input")?;
-            crate::task_workspace::best_of_n_cancel(input).await.map_err(RpcError::internal).and_then(to_json)
+            cognia_task_workspace_host::host_surface::best_of_n_cancel(input).await.map_err(RpcError::internal).and_then(to_json)
         }
         "best_of_n_archive" => {
             let input: cognia_task_workspace::BestOfNMutation = required(&args, "input")?;
-            crate::task_workspace::best_of_n_archive(input).await.map_err(RpcError::internal).and_then(to_json)
+            cognia_task_workspace_host::host_surface::best_of_n_archive(input).await.map_err(RpcError::internal).and_then(to_json)
         }
         "best_of_n_candidate_progress" => {
             let input: cognia_task_workspace::BestOfNCandidateProgress = required(&args, "input")?;
-            crate::task_workspace::best_of_n_candidate_progress(input).await.map_err(RpcError::internal).and_then(to_json)
+            cognia_task_workspace_host::host_surface::best_of_n_candidate_progress(input).await.map_err(RpcError::internal).and_then(to_json)
         }
         "best_of_n_recover" => {
             let input: cognia_task_workspace::BestOfNMutation = required(&args, "input")?;
-            crate::task_workspace::best_of_n_recover(input).await.map_err(RpcError::internal).and_then(to_json)
+            cognia_task_workspace_host::host_surface::best_of_n_recover(input).await.map_err(RpcError::internal).and_then(to_json)
         }
         "best_of_n_get" => {
             let group_id: String = required(&args, "groupId")?;
-            crate::task_workspace::best_of_n_get(group_id).await.map_err(RpcError::internal).and_then(to_json)
+            cognia_task_workspace_host::host_surface::best_of_n_get(group_id).await.map_err(RpcError::internal).and_then(to_json)
         }
         "best_of_n_list" => {
-            crate::task_workspace::best_of_n_list().await.map_err(RpcError::internal).and_then(to_json)
+            cognia_task_workspace_host::host_surface::best_of_n_list().await.map_err(RpcError::internal).and_then(to_json)
         }
         // Authentication or automated approval cannot manufacture an interactive user.
         "best_of_n_select" => Err((StatusCode::FORBIDDEN, Json(RpcError::new(
             "best_of_n_interactive_user_required",
-            crate::task_workspace::best_of_n_remote_selection_error(),
+            cognia_task_workspace_host::host_surface::best_of_n_remote_selection_error(),
         )))),
         "task_workspace_integration_prepare" => {
             let input: cognia_task_workspace::PrepareIntegration = required(&args, "input")?;
-            crate::task_workspace::task_workspace_integration_prepare(input)
+            cognia_task_workspace_host::host_surface::task_workspace_integration_prepare(input)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
@@ -928,7 +928,7 @@ pub(super) async fn dispatch(
             let integration_id: String = required(&args, "integrationId")?;
             let candidate_sha: String = required(&args, "candidateSha")?;
             let check: cognia_task_workspace::ChangesetCheck = required(&args, "check")?;
-            crate::task_workspace::task_workspace_integration_record_check(
+            cognia_task_workspace_host::host_surface::task_workspace_integration_record_check(
                 integration_id,
                 candidate_sha,
                 check,
@@ -941,7 +941,7 @@ pub(super) async fn dispatch(
             let integration_id: String = required(&args, "integrationId")?;
             let candidate_sha: String = required(&args, "candidateSha")?;
             let required_checks: Vec<String> = required(&args, "requiredChecks")?;
-            crate::task_workspace::task_workspace_integration_publish(
+            cognia_task_workspace_host::host_surface::task_workspace_integration_publish(
                 integration_id,
                 candidate_sha,
                 required_checks,
@@ -952,7 +952,7 @@ pub(super) async fn dispatch(
         }
         "task_workspace_integration_rebuild" => {
             let integration_id: String = required(&args, "integrationId")?;
-            crate::task_workspace::task_workspace_integration_rebuild(integration_id)
+            cognia_task_workspace_host::host_surface::task_workspace_integration_rebuild(integration_id)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
@@ -960,7 +960,7 @@ pub(super) async fn dispatch(
         "task_workspace_integration_drop_item" => {
             let integration_id: String = required(&args, "integrationId")?;
             let changeset_id: String = required(&args, "changesetId")?;
-            crate::task_workspace::task_workspace_integration_drop_item(
+            cognia_task_workspace_host::host_surface::task_workspace_integration_drop_item(
                 integration_id,
                 changeset_id,
             )
@@ -970,14 +970,14 @@ pub(super) async fn dispatch(
         }
         "task_workspace_integration_abort" => {
             let integration_id: String = required(&args, "integrationId")?;
-            crate::task_workspace::task_workspace_integration_abort(integration_id)
+            cognia_task_workspace_host::host_surface::task_workspace_integration_abort(integration_id)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
         }
         "task_workspace_integration_rollback" => {
             let integration_id: String = required(&args, "integrationId")?;
-            crate::task_workspace::task_workspace_integration_rollback(integration_id)
+            cognia_task_workspace_host::host_surface::task_workspace_integration_rollback(integration_id)
                 .await
                 .map_err(scm_command_error)
                 .and_then(to_json)
@@ -985,7 +985,7 @@ pub(super) async fn dispatch(
         "task_workspace_managed_restore" => {
             let workspace_id: String = required(&args, "workspaceId")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.restore_managed_workspace(&workspace_id)
+                cognia_task_workspace_host::host_surface::service()?.restore_managed_workspace(&workspace_id)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -995,7 +995,7 @@ pub(super) async fn dispatch(
         "task_workspace_managed_delete" => {
             let workspace_id: String = required(&args, "workspaceId")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.delete_managed_workspace(&workspace_id)
+                cognia_task_workspace_host::host_surface::service()?.delete_managed_workspace(&workspace_id)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -1008,7 +1008,7 @@ pub(super) async fn dispatch(
                 optional(&args, "finalState")?;
             let settle_run_id = run_id.clone();
             let resources = tokio::task::spawn_blocking(move || {
-                let service = crate::task_workspace::service()?;
+                let service = cognia_task_workspace_host::host_surface::service()?;
                 match final_state.unwrap_or(cognia_task_workspace::RunState::Ready) {
                     cognia_task_workspace::RunState::Ready => service.settle_run(&settle_run_id),
                     cognia_task_workspace::RunState::Failed => {
@@ -1027,28 +1027,28 @@ pub(super) async fn dispatch(
         }
         "task_workspace_get" => {
             let task_id: String = required(&args, "taskId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.get_task(&task_id))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "task_workspace_list" => {
             let session_id: Option<String> = optional(&args, "sessionId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.list_tasks(session_id.as_deref()))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "task_workspace_list_runs" => {
             let task_id: String = required(&args, "taskId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.list_runs(&task_id))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
         "task_workspace_list_resources" => {
             let task_id: String = required(&args, "taskId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.list_resources(&task_id))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -1056,9 +1056,9 @@ pub(super) async fn dispatch(
         "task_workspace_list_resource_events" => {
             let run_id: String = required(&args, "runId")?;
             let page = page_request(&args)?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| {
-                    crate::task_workspace::resource_events_page(&service, &run_id, &page)
+                    cognia_task_workspace_host::host_surface::resource_events_page(&service, &run_id, &page)
                 })
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -1067,8 +1067,8 @@ pub(super) async fn dispatch(
             let page = page_request(&args)?;
             // A scan of the whole ledger when it has changed: off the runtime.
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()
-                    .and_then(|service| crate::task_workspace::resource_index_page(&service, &page))
+                cognia_task_workspace_host::host_surface::service()
+                    .and_then(|service| cognia_task_workspace_host::host_surface::resource_index_page(&service, &page))
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -1081,7 +1081,7 @@ pub(super) async fn dispatch(
             let offset: u64 = required(&args, "offset")?;
             let length: u64 = required(&args, "length")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service().and_then(|service| {
+                cognia_task_workspace_host::host_surface::service().and_then(|service| {
                     service.read_resource_capture(&run_id, &path, offset, length)
                 })
             })
@@ -1092,7 +1092,7 @@ pub(super) async fn dispatch(
         }
         "task_workspace_get_resource_summary" => {
             let run_id: String = required(&args, "runId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.get_resource_summary(&run_id))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -1103,7 +1103,7 @@ pub(super) async fn dispatch(
             let old_path: Option<String> = optional(&args, "oldPath")?;
             let kind: cognia_task_workspace::ResourceEventKind = required(&args, "kind")?;
             let tool_call_id: Option<String> = optional(&args, "toolCallId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| {
                     service.record_tool_event(
                         &run_id,
@@ -1119,7 +1119,7 @@ pub(super) async fn dispatch(
         "task_workspace_export_resource_manifest" => {
             let task_id: String = required(&args, "taskId")?;
             let run_id: Option<String> = optional(&args, "runId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.export_resource_manifest(&task_id, run_id.as_deref()))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -1127,7 +1127,7 @@ pub(super) async fn dispatch(
         "task_workspace_get_resource" => {
             let task_id: String = required(&args, "taskId")?;
             let path: String = required(&args, "path")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.list_resources(&task_id))
                 .map(|resources| {
                     resources
@@ -1140,7 +1140,7 @@ pub(super) async fn dispatch(
         }
         "task_workspace_get_patch_set" => {
             let run_id: String = required(&args, "runId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.get_patch_set(&run_id))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -1154,7 +1154,7 @@ pub(super) async fn dispatch(
                 device_id,
                 scope,
             )?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.read_patch_diff(&run_id, &path, allow_sensitive))
                 .map(Value::String)
                 .map_err(RpcError::internal)
@@ -1171,7 +1171,7 @@ pub(super) async fn dispatch(
                 scope,
             )?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.read_resource(
+                cognia_task_workspace_host::host_surface::service()?.read_resource(
                     &run_id,
                     &rel_path,
                     offset.unwrap_or(0),
@@ -1194,7 +1194,7 @@ pub(super) async fn dispatch(
                 scope,
             )?;
             run_transfer_io(move || {
-                crate::task_workspace::service()?.open_resource_download(
+                cognia_task_workspace_host::host_surface::service()?.open_resource_download(
                     &run_id,
                     &rel_path,
                     allow_sensitive,
@@ -1208,14 +1208,14 @@ pub(super) async fn dispatch(
             let offset: u64 = required(&args, "offset")?;
             let length: Option<usize> = optional(&args, "length")?;
             run_transfer_io(move || {
-                crate::task_workspace::service()?.read_download_chunk(&handle_id, offset, length)
+                cognia_task_workspace_host::host_surface::service()?.read_download_chunk(&handle_id, offset, length)
             })
             .await
             .and_then(to_json)
         }
         "task_resource_download_close" => {
             let handle_id: String = required(&args, "handleId")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.close_resource_download(&handle_id))
                 .map(|_| Value::Null)
                 .map_err(RpcError::internal)
@@ -1227,7 +1227,7 @@ pub(super) async fn dispatch(
             let expected_hash: String = required(&args, "expectedHash")?;
             let allow_sensitive: Option<bool> = optional(&args, "allowSensitive")?;
             run_transfer_io(move || {
-                crate::task_workspace::service()?.open_resource_upload(
+                cognia_task_workspace_host::host_surface::service()?.open_resource_upload(
                     &run_id,
                     &rel_path,
                     expected_size,
@@ -1244,7 +1244,7 @@ pub(super) async fn dispatch(
             let data_base64: String = required(&args, "dataBase64")?;
             let chunk_hash: String = required(&args, "chunkHash")?;
             run_transfer_io(move || {
-                crate::task_workspace::service()?.write_upload_chunk(
+                cognia_task_workspace_host::host_surface::service()?.write_upload_chunk(
                     &handle_id,
                     offset,
                     &data_base64,
@@ -1257,7 +1257,7 @@ pub(super) async fn dispatch(
         "task_resource_upload_commit" => {
             let handle_id: String = required(&args, "handleId")?;
             run_transfer_io(move || {
-                crate::task_workspace::service()?.commit_resource_upload(&handle_id)
+                cognia_task_workspace_host::host_surface::service()?.commit_resource_upload(&handle_id)
             })
             .await
             .and_then(to_json)
@@ -1265,7 +1265,7 @@ pub(super) async fn dispatch(
         "task_resource_upload_abort" => {
             let handle_id: String = required(&args, "handleId")?;
             run_transfer_io(move || {
-                crate::task_workspace::service()?.abort_resource_upload(&handle_id)
+                cognia_task_workspace_host::host_surface::service()?.abort_resource_upload(&handle_id)
             })
             .await
             .map(|_| Value::Null)
@@ -1275,13 +1275,13 @@ pub(super) async fn dispatch(
         // staging area, and the apply that turns it into a checkout. Every
         // write is interactive in the manifest, so each call carries the
         // admin lease the hand-over was granted.
-        "code_snapshot_limits_get" => crate::task_workspace::code_snapshot_limits_get()
+        "code_snapshot_limits_get" => cognia_task_workspace_host::host_surface::code_snapshot_limits_get()
             .map_err(RpcError::internal)
             .and_then(to_json),
         "code_snapshot_upload_open" => {
             let size_bytes: u64 = required(&args, "sizeBytes")?;
             let sha256: String = required(&args, "sha256")?;
-            crate::task_workspace::code_snapshot_upload_open(size_bytes, sha256)
+            cognia_task_workspace_host::host_surface::code_snapshot_upload_open(size_bytes, sha256)
                 .await
                 .map_err(RpcError::validation_failed)
                 .and_then(to_json)
@@ -1295,7 +1295,7 @@ pub(super) async fn dispatch(
                 .acquire()
                 .await
                 .map_err(|error| RpcError::internal(error.to_string()))?;
-            let written = crate::task_workspace::code_snapshot_upload_write_chunk(
+            let written = cognia_task_workspace_host::host_surface::code_snapshot_upload_write_chunk(
                 upload_id,
                 offset,
                 data_base64,
@@ -1309,28 +1309,28 @@ pub(super) async fn dispatch(
         }
         "code_snapshot_upload_commit" => {
             let upload_id: String = required(&args, "uploadId")?;
-            crate::task_workspace::code_snapshot_upload_commit(upload_id)
+            cognia_task_workspace_host::host_surface::code_snapshot_upload_commit(upload_id)
                 .await
                 .map_err(RpcError::validation_failed)
                 .and_then(to_json)
         }
         "code_snapshot_upload_cancel" => {
             let upload_id: String = required(&args, "uploadId")?;
-            crate::task_workspace::code_snapshot_upload_cancel(upload_id)
+            cognia_task_workspace_host::host_surface::code_snapshot_upload_cancel(upload_id)
                 .await
                 .map(|_| Value::Null)
                 .map_err(RpcError::validation_failed)
         }
         "code_snapshot_apply" => {
             let input: cognia_task_workspace::ApplyCodeSnapshot = required(&args, "input")?;
-            crate::task_workspace::code_snapshot_apply(input)
+            cognia_task_workspace_host::host_surface::code_snapshot_apply(input)
                 .await
                 .map_err(RpcError::validation_failed)
                 .and_then(to_json)
         }
         "code_checkout_export" => {
             let input: cognia_task_workspace::ExportCodeCheckout = required(&args, "input")?;
-            crate::task_workspace::code_checkout_export(input)
+            cognia_task_workspace_host::host_surface::code_checkout_export(input)
                 .await
                 .map_err(RpcError::validation_failed)
                 .and_then(to_json)
@@ -1339,14 +1339,14 @@ pub(super) async fn dispatch(
             let result_id: String = required(&args, "resultId")?;
             let offset: u64 = required(&args, "offset")?;
             run_transfer_io(move || {
-                crate::task_workspace::service()?.read_code_result_chunk(&result_id, offset)
+                cognia_task_workspace_host::host_surface::service()?.read_code_result_chunk(&result_id, offset)
             })
             .await
             .and_then(to_json)
         }
         "code_result_discard" => {
             let result_id: String = required(&args, "resultId")?;
-            crate::task_workspace::code_result_discard(result_id)
+            cognia_task_workspace_host::host_surface::code_result_discard(result_id)
                 .await
                 .map(|_| Value::Null)
                 .map_err(RpcError::validation_failed)
@@ -1357,7 +1357,7 @@ pub(super) async fn dispatch(
                 optional(&args, "selection")?;
             let allow_irreversible: Option<bool> = optional(&args, "allowIrreversible")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.apply_patch_set_with_options(
+                cognia_task_workspace_host::host_surface::service()?.apply_patch_set_with_options(
                     &run_id,
                     &selection.unwrap_or_default(),
                     allow_irreversible.unwrap_or(false),
@@ -1371,7 +1371,7 @@ pub(super) async fn dispatch(
         "task_workspace_undo" => {
             let run_id: String = required(&args, "runId")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.undo_patch_set(&run_id)
+                cognia_task_workspace_host::host_surface::service()?.undo_patch_set(&run_id)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -1380,7 +1380,7 @@ pub(super) async fn dispatch(
         }
         "task_workspace_restore_snapshot" => {
             let run_id: String = required(&args, "runId")?;
-            crate::task_workspace::task_workspace_restore_snapshot(run_id)
+            cognia_task_workspace_host::host_surface::task_workspace_restore_snapshot(run_id)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -1388,7 +1388,7 @@ pub(super) async fn dispatch(
         "task_workspace_pin" => {
             let task_id: String = required(&args, "taskId")?;
             let pinned: bool = required(&args, "pinned")?;
-            crate::task_workspace::service()
+            cognia_task_workspace_host::host_surface::service()
                 .and_then(|service| service.set_task_pinned(&task_id, pinned))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -1401,7 +1401,7 @@ pub(super) async fn dispatch(
                 required(&args, "resolution")?;
             let allow_irreversible: Option<bool> = optional(&args, "allowIrreversible")?;
             tokio::task::spawn_blocking(move || {
-                crate::task_workspace::service()?.resolve_conflict_with_options(
+                cognia_task_workspace_host::host_surface::service()?.resolve_conflict_with_options(
                     &run_id,
                     &selection.unwrap_or_default(),
                     resolution,
@@ -1414,7 +1414,7 @@ pub(super) async fn dispatch(
             .and_then(to_json)
         }
         "task_workspace_prune" => {
-            tokio::task::spawn_blocking(move || crate::task_workspace::service()?.prune())
+            tokio::task::spawn_blocking(move || cognia_task_workspace_host::host_surface::service()?.prune())
                 .await
                 .map_err(|error| RpcError::internal(error.to_string()))?
                 .map_err(RpcError::internal)
@@ -1438,10 +1438,10 @@ pub(super) async fn dispatch(
                 })
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))?
-                .map(|path| crate::files::WorkspaceRootsReport {
-                    roots: vec![crate::files::WorkspaceRoot {
+                .map(|path| cognia_files::files::WorkspaceRootsReport {
+                    roots: vec![cognia_files::files::WorkspaceRoot {
                         path,
-                        source: crate::files::WORKSPACE_ROOT_SOURCE_HEADLESS.to_string(),
+                        source: cognia_files::files::WORKSPACE_ROOT_SOURCE_HEADLESS.to_string(),
                     }],
                 })
                 .map_err(|error| {
@@ -1449,7 +1449,7 @@ pub(super) async fn dispatch(
                 })
                 .and_then(to_json)
             } else {
-                to_json(crate::files::fs_workspace_roots())
+                to_json(cognia_files::files::fs_workspace_roots())
             }
         }
         "fs_list_workspace_dir" => {
@@ -1457,7 +1457,7 @@ pub(super) async fn dispatch(
             let rel_path: Option<String> = optional(&args, "relPath")?;
             let include_ignored: Option<bool> = optional(&args, "includeIgnored")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_list_workspace_dir(root, rel_path, include_ignored)
+                cognia_files::files::fs_list_workspace_dir(root, rel_path, include_ignored)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -1468,7 +1468,7 @@ pub(super) async fn dispatch(
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let rel_path: String = required(&args, "relPath")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_stat_workspace_file(root, rel_path)
+                cognia_files::files::fs_stat_workspace_file(root, rel_path)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -1479,7 +1479,7 @@ pub(super) async fn dispatch(
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let rel_path: String = required(&args, "relPath")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_create_workspace_dir(root, rel_path)
+                cognia_files::files::fs_create_workspace_dir(root, rel_path)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -1491,7 +1491,7 @@ pub(super) async fn dispatch(
             let rel_path: String = required(&args, "relPath")?;
             let recursive: Option<bool> = optional(&args, "recursive")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_delete_workspace_entry(root, rel_path, recursive)
+                cognia_files::files::fs_delete_workspace_entry(root, rel_path, recursive)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -1503,7 +1503,7 @@ pub(super) async fn dispatch(
             let from_rel_path: String = required(&args, "fromRelPath")?;
             let to_rel_path: String = required(&args, "toRelPath")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_rename_workspace_entry(root, from_rel_path, to_rel_path)
+                cognia_files::files::fs_rename_workspace_entry(root, from_rel_path, to_rel_path)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -1516,7 +1516,7 @@ pub(super) async fn dispatch(
             let to_rel_path: String = required(&args, "toRelPath")?;
             let recursive: Option<bool> = optional(&args, "recursive")?;
             tokio::task::spawn_blocking(move || {
-                crate::files::fs_copy_workspace_entry(root, from_rel_path, to_rel_path, recursive)
+                cognia_files::files::fs_copy_workspace_entry(root, from_rel_path, to_rel_path, recursive)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -1544,7 +1544,7 @@ mod tests {
     #[test]
     fn workspace_write_conflict_preserves_current_hash_and_http_status() {
         for current_sha256 in [None, Some("a".repeat(64))] {
-            let error = crate::files::WorkspaceWriteError::Conflict {
+            let error = cognia_files::files::WorkspaceWriteError::Conflict {
                 current_sha256: current_sha256.clone(),
             };
             let (status, Json(rpc_error)) = workspace_write_error(error);
@@ -1556,7 +1556,7 @@ mod tests {
             ).unwrap();
             assert_eq!(payload, json!({ "currentSha256": current_sha256 }));
         }
-        assert_eq!(workspace_write_error(crate::files::WorkspaceWriteError::InvalidPrecondition {
+        assert_eq!(workspace_write_error(cognia_files::files::WorkspaceWriteError::InvalidPrecondition {
             message: "invalid hash".into(),
         }).0, StatusCode::BAD_REQUEST);
     }

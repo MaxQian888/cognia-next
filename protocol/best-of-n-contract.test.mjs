@@ -78,7 +78,7 @@ test("every best-of-N command has a concrete output schema and registered dispat
     readFileSync(new URL("./companion-response-schemas.json", import.meta.url), "utf8")
   )
   const source = readFileSync(
-    new URL("../src-tauri/src/companion_api/rpc/filesystem.rs", import.meta.url),
+    new URL("../crates/cognia-companion-rpc/src/rpc/filesystem.rs", import.meta.url),
     "utf8"
   )
   for (const name of [...schemas.keys()].filter((name) => name.startsWith("best_of_n_"))) {

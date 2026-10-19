@@ -32,7 +32,7 @@ pub async fn workflow_register_trigger(
 }
 
 /// The body behind [`workflow_register_trigger`], shared with the service-plane
-/// arm (`companion_api/rpc/service_plane.rs`) so the headless brain registers
+/// arm (`cognia-companion-rpc/src/rpc/service_plane.rs`) so the headless brain registers
 /// its triggers with the same daemons the desktop renderer does. Every
 /// `workflow_*_for_state` below exists for the same reason: the Tauri command
 /// is one face of the body, the internal-plane RPC is the other, and neither

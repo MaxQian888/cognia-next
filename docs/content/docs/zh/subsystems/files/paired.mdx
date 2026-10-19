@@ -54,7 +54,7 @@ flowchart LR
 
 ## 命令
 
-23 个命令都是 `target: execution`，经 `src-tauri/src/companion_api/rpc/data_sync.rs` 桥接到桌面端渲染进程，
+23 个命令都是 `target: execution`，经 `crates/cognia-companion-rpc/src/rpc/data_sync.rs` 桥接到桌面端渲染进程，
 并由 `lib/companion/desktop-write-source.ts` 整组委派，与 `pet_*` 一族相同。服务器会把经过验证的
 `callerDeviceId` 注入每一个命令。读取使用 `client.read` 并跳过幂等缓存；写入使用 `client.write`，并要求
 `Idempotency-Key`。

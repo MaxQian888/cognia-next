@@ -65,7 +65,7 @@ pub use cognia_external_agent as external_agent;
 // the crate) is re-exported, because the 23 `#[tauri::command]` fns must be
 // referenced at their definition site; this keeps every `files::…` entry in
 // generate_handler! and every `crate::files::…` call site in
-// `companion_api/rpc/*`, `companion_api/acp` and `codeserver` unchanged.
+// `cognia-companion-rpc/src/rpc/*`, `companion_api/acp` and `codeserver` unchanged.
 pub use cognia_files::files;
 pub mod fleet;
 mod fonts;
@@ -91,7 +91,7 @@ mod keyring_secrets;
 // ADR-0067 Tier C — extracted alongside `crash`, which dissolves the
 // `logging` <-> `crash` and `logging` <-> `telemetry` cycles. Re-aliased for
 // `logging::tracing_setup::init()`, `logging::commands::…` and the
-// `logging::query::…` reads in `companion_api/rpc/diagnostics.rs`.
+// `logging::query::…` reads in `cognia-companion-rpc/src/rpc/diagnostics.rs`.
 pub use cognia_observability::logging;
 
 /// Install Cognia's structured tracing subscriber for non-Tauri entrypoints.
@@ -1165,19 +1165,19 @@ pub fn run() {
             settings::write_claude_local_settings,
             shell::shell_exec,
             project_environment::project_environment_execute,
-            companion_api::rpc::environment::sandbox_preview_context,
-            companion_api::rpc::environment::sandbox_preview_create,
-            companion_api::rpc::environment::sandbox_preview_list,
-            companion_api::rpc::environment::sandbox_preview_revoke,
-            companion_api::rpc::environment::sandbox_preview_open,
-            companion_api::rpc::environment::sandbox_snapshot_create,
-            companion_api::rpc::environment::sandbox_snapshot_list,
-            companion_api::rpc::environment::sandbox_snapshot_get,
-            companion_api::rpc::environment::sandbox_snapshot_delete,
-            companion_api::rpc::environment::sandbox_snapshot_pin,
-            companion_api::rpc::environment::sandbox_snapshot_fork,
-            companion_api::rpc::environment::sandbox_snapshot_restore,
-            companion_api::rpc::environment::environment_local_call,
+            companion_api::environment_commands::sandbox_preview_context,
+            companion_api::environment_commands::sandbox_preview_create,
+            companion_api::environment_commands::sandbox_preview_list,
+            companion_api::environment_commands::sandbox_preview_revoke,
+            companion_api::environment_commands::sandbox_preview_open,
+            companion_api::environment_commands::sandbox_snapshot_create,
+            companion_api::environment_commands::sandbox_snapshot_list,
+            companion_api::environment_commands::sandbox_snapshot_get,
+            companion_api::environment_commands::sandbox_snapshot_delete,
+            companion_api::environment_commands::sandbox_snapshot_pin,
+            companion_api::environment_commands::sandbox_snapshot_fork,
+            companion_api::environment_commands::sandbox_snapshot_restore,
+            companion_api::environment_commands::environment_local_call,
             cognia_companion_rpc::managed_desktops::managed_desktop_local_call,
             cognia_companion::remote_sandboxes::commands::remote_sandboxes_get,
             cognia_companion::remote_sandboxes::commands::remote_sandboxes_set,
@@ -2148,7 +2148,7 @@ mod tests {
     fn backup_stream_helper_is_registered_only_on_the_local_invoke_surface() {
         let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
         assert!(source.contains("commands::backup_stream_temporary_path,"));
-        assert!(!include_str!("companion_api/rpc/filesystem.rs")
+        assert!(!include_str!("../../crates/cognia-companion-rpc/src/rpc/filesystem.rs")
             .contains("backup_stream_temporary_path"));
     }
 

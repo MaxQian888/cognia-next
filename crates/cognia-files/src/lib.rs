@@ -8,7 +8,7 @@
 //!
 //! `app_lib` re-exports that submodule as `pub use cognia_files::files;`, so
 //! the 23 `files::…` entries in `generate_handler!` and every
-//! `crate::files::…` call site in `companion_api/rpc/*`, `companion_api/acp`
+//! `crate::files::…` call site in `cognia-companion-rpc/src/rpc/*`, `companion_api/acp`
 //! and `codeserver` resolve unchanged.
 //!
 //! The allowed-roots and remote-git-workspace registries are process-global

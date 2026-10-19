@@ -6,7 +6,7 @@
  * unified `transport`, so the SAME functions work on Tauri desktop
  * (invoke) and over the companion API from a phone / companion-connected
  * browser (HTTP/RTC). The Rust side exposes these as `/api/_rpc/fleet_*`
- * dispatch arms (see `companion_api/rpc.rs`).
+ * dispatch arms (see `cognia-companion-rpc/src/rpc.rs`).
  */
 
 import { transport } from "@/lib/tauri"

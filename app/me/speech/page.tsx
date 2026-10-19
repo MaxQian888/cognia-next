@@ -4,7 +4,7 @@
  * Mobile Speech & voice page — text-to-speech master toggle, provider, the
  * per-provider voice, the common rate/pitch/volume controls, auto-play, and
  * the speech-to-text language. Every field here is in the `app_settings_update`
- * allowlist (`APP_SETTINGS_MOBILE_ALLOWED_KEYS`, `companion_api/rpc.rs`), so
+ * allowlist (`APP_SETTINGS_MOBILE_ALLOWED_KEYS`, `cognia-companion-rpc/src/rpc.rs`), so
  * writes sync to the desktop the same way the rest of `/me/*` does.
  *
  * Same plumbing as `app/me/preferences/page.tsx`: optimistic `save()` into the

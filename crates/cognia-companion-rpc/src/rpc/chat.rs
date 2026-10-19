@@ -49,7 +49,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     scope: Option<&str>,
@@ -277,7 +277,7 @@ pub(super) async fn dispatch(
             let message: Option<String> = optional(&args, "message")?;
             let updated_input: Option<Value> =
                 optional_aliased(&args, "updated_input", "updatedInput")?;
-            let context: Option<super::super::remote_execution::RemoteExecutionContext> =
+            let context: Option<cognia_companion::remote_execution::RemoteExecutionContext> =
                 optional_aliased(&args, "remote_execution_context", "remoteExecutionContext")?;
             authorize_approval(context.as_ref(), device_id, scope, &session_id, &request_id)?;
             claude_commands::claude_approve_impl(
@@ -302,7 +302,7 @@ pub(super) async fn dispatch(
                 optional_aliased(&args, "updated_input", "updatedInput")?;
             let command_id: Option<String> = optional_aliased(&args, "command_id", "commandId")?;
             let interrupt: Option<bool> = optional(&args, "interrupt")?;
-            let context: Option<super::super::remote_execution::RemoteExecutionContext> =
+            let context: Option<cognia_companion::remote_execution::RemoteExecutionContext> =
                 optional_aliased(&args, "remote_execution_context", "remoteExecutionContext")?;
             authorize_approval(context.as_ref(), device_id, scope, &session_id, &request_id)?;
             claude_commands::claude_approve_impl_with_id(
@@ -348,9 +348,9 @@ pub(super) async fn dispatch(
         "claude_plugin_tool_response" => {
             let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
             let tool_use_id: String = required_aliased(&args, "tool_use_id", "toolUseId")?;
-            let context: super::super::remote_execution::RemoteExecutionContext =
+            let context: cognia_companion::remote_execution::RemoteExecutionContext =
                 required_aliased(&args, "remote_execution_context", "remoteExecutionContext")?;
-            super::super::remote_execution::global()
+            cognia_companion::remote_execution::global()
                 .validate_and_consume(
                     &context,
                     device_id,
@@ -376,9 +376,9 @@ pub(super) async fn dispatch(
         "claude_tool_result_decision" => {
             let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
             let review_id: String = required_aliased(&args, "review_id", "reviewId")?;
-            let context: super::super::remote_execution::RemoteExecutionContext =
+            let context: cognia_companion::remote_execution::RemoteExecutionContext =
                 required_aliased(&args, "remote_execution_context", "remoteExecutionContext")?;
-            super::super::remote_execution::global()
+            cognia_companion::remote_execution::global()
                 .validate_and_consume(&context, device_id, &session_id, &review_id, unix_time_ms())
                 .map_err(remote_context_error)?;
             let updated_tool_output: Option<Value> = args
@@ -398,7 +398,7 @@ pub(super) async fn dispatch(
 
         "claude_protocol_adapter_message" => {
             let message: Value = required(&args, "message")?;
-            let context: super::super::remote_execution::RemoteExecutionContext =
+            let context: cognia_companion::remote_execution::RemoteExecutionContext =
                 required_aliased(&args, "remote_execution_context", "remoteExecutionContext")?;
             let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
             let exec_id = message
@@ -423,7 +423,7 @@ pub(super) async fn dispatch(
                 message.get("type").and_then(Value::as_str),
                 Some("protocol_adapter_done" | "protocol_adapter_error")
             );
-            super::super::remote_execution::global()
+            cognia_companion::remote_execution::global()
                 .validate_pending_message(
                     &context,
                     device_id,
@@ -549,9 +549,10 @@ pub(super) async fn dispatch(
         "secret_store_get" | "keyring_secret_get" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let input: crate::keyring_secrets::SecretStoreInput = required(&args, "input")?;
+            let input: cognia_secrets::keyring_secrets::SecretStoreInput =
+                required(&args, "input")?;
             let value = tokio::task::spawn_blocking(move || {
-                crate::keyring_secrets::get(&input.namespace, &input.key)
+                cognia_secrets::keyring_secrets::get(&input.namespace, &input.key)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -562,13 +563,14 @@ pub(super) async fn dispatch(
         "secret_store_set" | "keyring_secret_set" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let input: crate::keyring_secrets::SecretStoreInput = required(&args, "input")?;
+            let input: cognia_secrets::keyring_secrets::SecretStoreInput =
+                required(&args, "input")?;
             let value = input
                 .value
                 .clone()
                 .ok_or_else(|| RpcError::malformed(format!("{name}.input.value is required")))?;
             tokio::task::spawn_blocking(move || {
-                crate::keyring_secrets::set(&input.namespace, &input.key, &value)
+                cognia_secrets::keyring_secrets::set(&input.namespace, &input.key, &value)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -579,9 +581,10 @@ pub(super) async fn dispatch(
         "secret_store_delete" | "keyring_secret_clear" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let input: crate::keyring_secrets::SecretStoreInput = required(&args, "input")?;
+            let input: cognia_secrets::keyring_secrets::SecretStoreInput =
+                required(&args, "input")?;
             tokio::task::spawn_blocking(move || {
-                crate::keyring_secrets::clear(&input.namespace, &input.key)
+                cognia_secrets::keyring_secrets::clear(&input.namespace, &input.key)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -627,15 +630,15 @@ pub(super) async fn dispatch(
 /// Omitting the context is not a way around the first rule: a request the
 /// registry knows as remote-scoped is refused on this path outright.
 ///
-/// [`RemoteExecutionContext`]: super::super::remote_execution::RemoteExecutionContext
+/// [`RemoteExecutionContext`]: cognia_companion::remote_execution::RemoteExecutionContext
 fn authorize_approval(
-    context: Option<&super::super::remote_execution::RemoteExecutionContext>,
+    context: Option<&cognia_companion::remote_execution::RemoteExecutionContext>,
     device_id: &str,
     scope: Option<&str>,
     session_id: &str,
     request_id: &str,
 ) -> Result<(), (StatusCode, Json<RpcError>)> {
-    let registry = super::super::remote_execution::global();
+    let registry = cognia_companion::remote_execution::global();
     if let Some(context) = context {
         return registry
             .validate_and_consume(context, device_id, session_id, request_id, unix_time_ms())
@@ -671,7 +674,7 @@ async fn admit_paired_turn(
     message_id: Option<&str>,
     request_id: &str,
 ) -> Result<Option<String>, (StatusCode, Json<RpcError>)> {
-    let Some(args) = super::super::paired_turn::admission_args(
+    let Some(args) = cognia_companion::paired_turn::admission_args(
         caller.scope,
         caller.tenant_id,
         session_id,
@@ -684,18 +687,20 @@ async fn admit_paired_turn(
     // Same binding HostState uses: the account and Host id come from the
     // authenticated request, overwriting anything a client could send.
     let args = super::host_state::bind_authority(args, state, caller.tenant_id, caller.device_id)?;
-    let transport = super::super::ws_bridge::resolve_bridge_transport(state)
+    let transport = cognia_companion::ws_bridge::resolve_bridge_transport(state)
         .map_err(RpcError::service_unavailable)?;
     let result = std::sync::Arc::clone(&state.desktop_writes_bridge)
         .dispatch(
             transport.as_ref(),
-            super::super::paired_turn::ADMIT,
+            cognia_companion::paired_turn::ADMIT,
             args,
-            crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+            cognia_companion::desktop_writes_bridge::DEFAULT_TIMEOUT,
         )
         .await
-        .map_err(|error| map_desktop_write_bridge_error(super::super::paired_turn::ADMIT, error))?;
-    super::super::paired_turn::interpret_admission(result)
+        .map_err(|error| {
+            map_desktop_write_bridge_error(cognia_companion::paired_turn::ADMIT, error)
+        })?;
+    cognia_companion::paired_turn::interpret_admission(result)
 }
 
 /// The turn was admitted but never reached the runtime: seal it as failed so
@@ -704,13 +709,13 @@ async fn admit_paired_turn(
 /// settles an orphan once its lease lapses.
 async fn abandon_paired_turn(state: &SharedState, submission_id: &str, error_code: &str) {
     let outcome = async {
-        let transport = super::super::ws_bridge::resolve_bridge_transport(state)?;
+        let transport = cognia_companion::ws_bridge::resolve_bridge_transport(state)?;
         std::sync::Arc::clone(&state.desktop_writes_bridge)
             .dispatch(
                 transport.as_ref(),
-                super::super::paired_turn::ABANDON,
+                cognia_companion::paired_turn::ABANDON,
                 serde_json::json!({ "submissionId": submission_id, "errorCode": error_code }),
-                crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+                cognia_companion::desktop_writes_bridge::DEFAULT_TIMEOUT,
             )
             .await
     }
@@ -749,7 +754,7 @@ fn fill_host_provider_key(options: &mut claude_commands::SendOptions, caller: Se
 
 async fn send_arm(
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     caller: SendCaller<'_>,
     session_id: String,
     prompt: Value,
@@ -759,7 +764,7 @@ async fn send_arm(
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let device_id = caller.device_id;
     let mut options = options;
-    let context = super::super::remote_execution::global().register(
+    let context = cognia_companion::remote_execution::global().register(
         &opaque_host_id(state),
         device_id,
         &session_id,
@@ -775,15 +780,21 @@ async fn send_arm(
         );
     if let Some(send_options) = options.as_mut() {
         if let Some(envelope) = send_options.extra.remove("taskWorkspace") {
-            let envelope: crate::task_workspace::TaskWorkspaceTurnEnvelope =
+            let envelope: cognia_task_workspace_host::host_surface::TaskWorkspaceTurnEnvelope =
                 serde_json::from_value(envelope)
                     .map_err(|error| RpcError::malformed(error.to_string()))?;
             let sink: std::sync::Arc<dyn cognia_task_workspace::TaskWorkspaceEventSink> =
-                std::sync::Arc::new(crate::task_workspace::BusResourceEventSink(
-                    std::sync::Arc::clone(&state.event_bus),
-                ));
-            let run = crate::task_workspace::begin_hosted_turn(session_id.clone(), envelope, sink)
-                .map_err(RpcError::internal)?;
+                std::sync::Arc::new(
+                    cognia_task_workspace_host::host_surface::BusResourceEventSink(
+                        std::sync::Arc::clone(&state.event_bus),
+                    ),
+                );
+            let run = cognia_task_workspace_host::host_surface::begin_hosted_turn(
+                session_id.clone(),
+                envelope,
+                sink,
+            )
+            .map_err(RpcError::internal)?;
             send_options.cwd = Some(run.execution_root);
         }
         fill_host_provider_key(send_options, caller);
@@ -873,7 +884,7 @@ mod tests {
     /// bug this test exists to catch.
     #[test]
     fn canonical_control_verbs_carry_exactly_their_alias_authority() {
-        use super::super::super::command_manifest::descriptor;
+        use cognia_companion::command_manifest::descriptor;
         for (canonical, alias) in [
             ("agent_send", "claude_send"),
             ("agent_interrupt", "claude_interrupt"),
@@ -894,7 +905,7 @@ mod tests {
             // Reachability is decided by the transport list, not by intent.
             assert!(
                 !a.transports
-                    .contains(&super::super::super::command_manifest::CommandTransport::Internal),
+                    .contains(&cognia_companion::command_manifest::CommandTransport::Internal),
                 "{canonical} is still confined to the internal transport"
             );
             // And the arm has to exist on both sides, or the manifest is
@@ -925,7 +936,7 @@ mod tests {
     #[test]
     fn approval_without_context_refuses_a_remote_scoped_request() {
         let session = format!("session-{}", uuid::Uuid::new_v4());
-        let registry = super::super::super::remote_execution::global();
+        let registry = cognia_companion::remote_execution::global();
         let context = registry.register("host", "phone-a", &session, unix_time_ms());
         registry
             .register_pending(&context, "req-1")

@@ -42,7 +42,7 @@ mod chat;
 mod codex_app;
 mod data_sync;
 mod diagnostics;
-pub(crate) mod environment;
+pub mod environment;
 mod file_share;
 mod filesystem;
 mod gateway_plane;
@@ -69,13 +69,11 @@ use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::{
-    agents::commands as agent_commands,
-    claude::{commands as claude_commands, sidecar::kill_sidecar},
-    skills::{install, native as skills_native, registry},
-};
+use cognia_agents::commands as agent_commands;
+use cognia_sidecar::{commands as claude_commands, supervisor::kill_sidecar};
+use cognia_skills::{install, native as skills_native, registry};
 
-use super::{middleware::DeviceContext, SharedState};
+use cognia_companion::{middleware::DeviceContext, SharedState};
 
 fn unix_time_ms() -> u64 {
     std::time::SystemTime::now()
@@ -113,13 +111,13 @@ fn remote_context_error(code: &'static str) -> (StatusCode, Json<RpcError>) {
 /// Headless emitter: publishes into the companion EventBus so every
 /// `/ws/events` subscriber (the brain's acp-client, phones) receives the
 /// frozen payloads. Defined beside `RpcHost` in `cognia-companion-rpc`.
-pub use cognia_companion_rpc::rpc_host::{headless_orchestration_event_sink, BusAgentEmitter};
+pub use crate::rpc_host::{headless_orchestration_event_sink, BusAgentEmitter};
 // Every family reaches the host through `RpcHost`; the families' `use super::*`
 // brings the trait into scope.
 #[allow(unused_imports)]
-use super::dispatch_host::RpcHost;
+use crate::rpc_host::RpcHost;
 
-pub use super::rpc_error::RpcError;
+pub use cognia_companion::rpc_error::RpcError;
 
 const TWIN_DRAFT_REVIEW_CONFLICT_SENTINEL: &str = "[TWIN_DRAFT_REVIEW_CONFLICT]";
 
@@ -138,7 +136,7 @@ fn map_desktop_write_bridge_error(command: &str, detail: String) -> (StatusCode,
     RpcError::internal(detail)
 }
 
-pub(super) fn terminal_rpc_authorization(
+pub fn terminal_rpc_authorization(
     device_id: &str,
     host_remote_access_enabled: bool,
     has_terminal_capability: bool,
@@ -161,7 +159,7 @@ async fn ensure_terminal_rpc_authorized(
 ) -> Result<(), (StatusCode, Json<RpcError>)> {
     terminal_rpc_authorization(
         device_id,
-        crate::terminal_host_service::terminal_remote_access_enabled().await,
+        cognia_terminal::terminal_host_service::terminal_remote_access_enabled().await,
         canonical_device_has_capability(device_id, "terminal.open"),
     )
 }
@@ -1418,7 +1416,7 @@ const KNOWN_COMMANDS: &[&str] = &[
 /// Every name the shared dispatcher accepts. Read from the generated command
 /// table (ADR-0175): the contract's non-client descriptors, in contract order.
 pub fn known_commands() -> &'static [&'static str] {
-    super::command_manifest::remote_command_names()
+    cognia_companion::command_manifest::remote_command_names()
 }
 
 /// Commands in this list skip the idempotency cache entirely.
@@ -1781,8 +1779,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
 
 /// Commands that require the elevated **remote-control** capability — the
 /// device must hold the capabilities
-/// [`super::device_grants::GrantKind::Control`] maps onto, checked against the
-/// SecurityStore by [`super::remote_execution::authorize_capability`]. These
+/// [`cognia_companion::device_grants::GrantKind::Control`] maps onto, checked against the
+/// SecurityStore by [`cognia_companion::remote_execution::authorize_capability`]. These
 /// attach to and steer host-owned agent sessions, control host goal loops, or
 /// resolve host computer-use consent.
 ///
@@ -2200,9 +2198,9 @@ static KNOWN_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
 #[cfg(test)]
 static READ_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
     once_cell::sync::Lazy::new(|| {
-        super::command_manifest::commands()
+        cognia_companion::command_manifest::commands()
             .iter()
-            .filter(|command| command.operation == super::command_manifest::CommandOperation::Read)
+            .filter(|command| command.operation == cognia_companion::command_manifest::CommandOperation::Read)
             .map(|command| command.name.as_str())
             .collect()
     });
@@ -2289,7 +2287,7 @@ fn is_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bo
 
 #[cfg(test)]
 fn canonical_device_capability(device_id: &str, command: &str) -> bool {
-    let Some(descriptor) = super::command_manifest::descriptor(command) else {
+    let Some(descriptor) = cognia_companion::command_manifest::descriptor(command) else {
         return false;
     };
     canonical_device_has_capability(device_id, &descriptor.capability)
@@ -2299,7 +2297,7 @@ fn canonical_device_has_capability(device_id: &str, capability: &str) -> bool {
     if device_id.trim().is_empty() {
         return false;
     }
-    let Some(store) = super::security_store::security_store() else {
+    let Some(store) = cognia_companion::security_store::security_store() else {
         return false;
     };
     let Ok(Some(tenant_id)) = store.active_device_tenant(device_id) else {
@@ -2310,7 +2308,7 @@ fn canonical_device_has_capability(device_id: &str, capability: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) use super::workspace_access::device_can_control;
+pub(crate) use cognia_companion::workspace_access::device_can_control;
 
 /// Commands whose TS dispatch arm needs the authenticated caller's device id
 /// (ADR-0060). The bridge arm injects `callerDeviceId` into the payload for
@@ -2539,7 +2537,7 @@ fn inject_caller_device_id(name: &str, mut args: Value, device_id: &str) -> Valu
 fn inject_caller_event_streams(name: &str, mut args: Value, device_id: &str) -> Value {
     if name == "session_attach" {
         if let Value::Object(map) = &mut args {
-            let leases = super::event_leases::leases_for(device_id);
+            let leases = cognia_companion::event_leases::leases_for(device_id);
             map.insert(
                 "callerEventStreams".to_string(),
                 serde_json::to_value(leases).unwrap_or(Value::Array(Vec::new())),
@@ -2584,7 +2582,7 @@ fn inject_caller_device_grants(
         }
         let grants = tenant_id
             .and_then(|tenant_id| {
-                super::security_store::security_store().map(|store| (tenant_id, store))
+                cognia_companion::security_store::security_store().map(|store| (tenant_id, store))
             })
             .and_then(|(tenant_id, store)| {
                 store
@@ -2837,9 +2835,9 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
 
 static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
     once_cell::sync::Lazy::new(|| {
-        super::command_manifest::commands()
+        cognia_companion::command_manifest::commands()
             .iter()
-            .filter(|command| command.target == super::command_manifest::CommandTarget::Service)
+            .filter(|command| command.target == cognia_companion::command_manifest::CommandTarget::Service)
             .map(|command| command.name.as_str())
             .collect()
     });
@@ -2932,7 +2930,7 @@ fn can_control_response_value(allowed: bool) -> Value {
 /// this desktop is currently reachable on.
 ///
 /// The QR pair payload carries exactly one `baseUrl` (tunnel takes priority
-/// over LAN — see [`super::commands::companion_create_owner_invitation`]), which leaves
+/// over LAN — see [`crate::command_services::companion_create_owner_invitation`]), which leaves
 /// every paired client with a single-channel view of a multi-channel host:
 ///
 ///   * paired on the LAN → never learns the tunnel URL, so leaving the network
@@ -2967,7 +2965,7 @@ fn endpoints_response(
 /// `None` when the server is loopback-bound / the host has no routable
 /// interface.
 ///
-/// Mirrors the LAN branch of [`super::commands::companion_create_owner_invitation`]:
+/// Mirrors the LAN branch of [`crate::command_services::companion_create_owner_invitation`]:
 /// same `detect_lan_ip` probe, same HTTPS scheme (M2.9 self-signed
 /// termination). `bind_mode` is only consultable through the Tauri-managed
 /// `CompanionServerState`; a headless `cognia-server` always binds `0.0.0.0`
@@ -2977,11 +2975,11 @@ fn lan_base_url(bind_lan: Option<bool>, data_dir: Option<&std::path::Path>) -> O
     if bind_lan == Some(false) {
         return None;
     }
-    let port = match super::advertised_port() {
-        0 => super::server::DEFAULT_PORT,
+    let port = match cognia_companion::advertised_port() {
+        0 => cognia_companion::server::DEFAULT_PORT,
         p => p,
     };
-    let host = crate::companion_api::commands::advertised_lan_host(data_dir)?;
+    let host = crate::command_services::advertised_lan_host(data_dir)?;
     Some(format!("https://{host}:{port}"))
 }
 
@@ -2993,7 +2991,7 @@ fn lan_base_url(bind_lan: Option<bool>, data_dir: Option<&std::path::Path>) -> O
 /// `packages/agent-config-types/src/settings-sync.ts` — the one table that also
 /// drives the down-mirror and the OpenAPI enum, so the three can no longer
 /// drift apart. Edit that table, then run `pnpm settings-sync:gen`.
-use super::settings_sync_generated::APP_SETTINGS_MOBILE_ALLOWED_KEYS;
+use cognia_companion::settings_sync_generated::APP_SETTINGS_MOBILE_ALLOWED_KEYS;
 
 /// Public read-only accessor for the mobile-side `app_settings_update`
 /// allowlist. Used by the OpenAPI `spec_parity` test (Wave 3.6) and by the
@@ -3172,7 +3170,7 @@ pub async fn rpc_handler(
             name.as_str(),
             "plugin_media_read_chunk" | "plugin_media_close_transfer"
         ) {
-            crate::companion_api::rate_limit::RequestClass::MediaTransfer
+            cognia_companion::rate_limit::RequestClass::MediaTransfer
         } else if is_read_only
             || (name == "claude_session_control"
                 && args
@@ -3182,11 +3180,11 @@ pub async fn rpc_handler(
         {
             // A read-only SDK control method is charged as a read, the same
             // rule `remote_execution::request_rate_limit_class` applies.
-            crate::companion_api::rate_limit::RequestClass::ReadOnly
+            cognia_companion::rate_limit::RequestClass::ReadOnly
         } else {
-            crate::companion_api::rate_limit::RequestClass::Mutating
+            cognia_companion::rate_limit::RequestClass::Mutating
         };
-        if let crate::companion_api::rate_limit::RateLimitDecision::Reject { retry_after } =
+        if let cognia_companion::rate_limit::RateLimitDecision::Reject { retry_after } =
             state.rate_limiter.check_class(&ctx.device_id, class)
         {
             return Err(RpcError::rate_limited(retry_after.as_secs()));
@@ -3203,14 +3201,14 @@ pub async fn rpc_handler(
                 .begin(&ctx.device_id, &name, key, &args)
                 .map_err(|error| RpcError::internal(error.to_string()))?
             {
-                super::idempotency::IdempotencyDecision::Execute => {}
-                super::idempotency::IdempotencyDecision::Cached(cached) => {
+                cognia_companion::idempotency::IdempotencyDecision::Execute => {}
+                cognia_companion::idempotency::IdempotencyDecision::Cached(cached) => {
                     return Ok((response_headers, Json(cached)));
                 }
-                super::idempotency::IdempotencyDecision::Conflict => {
+                cognia_companion::idempotency::IdempotencyDecision::Conflict => {
                     return Err(RpcError::idempotency_conflict());
                 }
-                super::idempotency::IdempotencyDecision::Indeterminate => {
+                cognia_companion::idempotency::IdempotencyDecision::Indeterminate => {
                     return Err(RpcError::idempotency_indeterminate());
                 }
             }
@@ -3229,7 +3227,7 @@ pub async fn rpc_handler(
     // headless services registry installed by `cognia-server` at boot. Absent
     // both (bare unit-test states) → 503, preserving the historical
     // test-mode contract.
-    let host = super::dispatch_host::DispatchHost::from_state(&state).ok_or_else(|| {
+    let host = crate::headless::headless_services().ok_or_else(|| {
         RpcError::service_unavailable("app_handle not available (test mode)".to_string())
     })?;
 
@@ -3244,10 +3242,10 @@ pub async fn rpc_handler(
         Some(&ctx.scope),
         // This handler is test-only and is not behind the loopback listener,
         // so it gets the plane that discloses nothing.
-        super::remote_execution::ExecutionPlane::Network,
+        cognia_companion::remote_execution::ExecutionPlane::Network,
     )
     .await;
-    super::metrics::record_rpc_call(dispatched.is_ok());
+    cognia_companion::metrics::record_rpc_call(dispatched.is_ok());
     let result = dispatched?;
 
     // Commit the result (non-read-only + idempotency key present).
@@ -3267,31 +3265,36 @@ pub async fn rpc_handler(
 /// authentication, capability, approval, transport, and durable-idempotency
 /// checks. This is intentionally the only non-HTTP entry into the dispatch
 /// table; protocol adapters must call `remote_execution::execute` instead.
-pub(super) async fn dispatch_canonical(
+///
+/// `host` is the process's dispatch host, which only the runtime that built
+/// `state` can name (the desktop's `AppHandle`, or the headless registry);
+/// `None` in bare unit-test states answers the historical test-mode 503.
+pub async fn dispatch_canonical(
     name: &str,
     args: Value,
     state: &SharedState,
     ctx: &DeviceContext,
-    plane: super::remote_execution::ExecutionPlane,
+    plane: cognia_companion::remote_execution::ExecutionPlane,
+    host: Option<&dyn RpcHost>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     if name == "app_settings_update" {
         validate_app_settings_update(&args)?;
     }
-    let host = super::dispatch_host::DispatchHost::from_state(state).ok_or_else(|| {
+    let host = host.ok_or_else(|| {
         RpcError::service_unavailable("app_handle not available (test mode)".to_string())
     })?;
     let result = dispatch(
         name,
         args,
         state,
-        &host,
+        host,
         &ctx.device_id,
         Some(&ctx.tenant_id),
         Some(&ctx.scope),
         plane,
     )
     .await;
-    super::metrics::record_rpc_call(result.is_ok());
+    cognia_companion::metrics::record_rpc_call(result.is_ok());
     result
 }
 
@@ -3304,8 +3307,8 @@ pub(super) async fn dispatch_canonical(
 /// both the Tauri AppHandle and the headless store are absent.
 fn pick_data_plane(
     state: &SharedState,
-) -> Result<super::data_plane::DataPlane, (StatusCode, Json<RpcError>)> {
-    super::data_plane::DataPlane::pick(state).ok_or_else(|| {
+) -> Result<cognia_companion::data_plane::DataPlane, (StatusCode, Json<RpcError>)> {
+    cognia_companion::data_plane::DataPlane::pick(state).ok_or_else(|| {
         RpcError::internal(
             "no data plane available — neither a Tauri AppHandle nor a headless AppStore is configured"
                 .to_string(),
@@ -3315,7 +3318,7 @@ fn pick_data_plane(
 
 async fn publish_direct_transcript_revision(
     state: &SharedState,
-    data_plane: &super::data_plane::DataPlane,
+    data_plane: &cognia_companion::data_plane::DataPlane,
     session_id: &str,
 ) {
     let Some(revision) = data_plane.direct_transcript_revision(session_id).await else {
@@ -3390,7 +3393,7 @@ fn optional<T: DeserializeOwned>(
 }
 
 fn authorize_workspace_root(
-    host: &crate::companion_api::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     requested: String,
 ) -> Result<String, (StatusCode, Json<RpcError>)> {
     if let Some(services) = host.headless() {
@@ -3399,7 +3402,7 @@ fn authorize_workspace_root(
             .validate_workspace_root(&requested)
             .map_err(|error| RpcError::forbidden(format!("workspace root denied: {error}")));
     }
-    if !crate::files::is_remote_workspace_path_allowed(&requested) {
+    if !cognia_files::files::is_remote_workspace_path_allowed(&requested) {
         return Err(RpcError::forbidden(
             "workspace root is not registered by the active desktop project",
         ));
@@ -3448,7 +3451,7 @@ fn authorize_workspace_read(
         return Ok(true);
     }
     // A path that does not resolve is left to the read, which reports it.
-    if crate::files::is_sensitive_workspace_read(root, rel_path).unwrap_or(false) {
+    if cognia_files::files::is_sensitive_workspace_read(root, rel_path).unwrap_or(false) {
         return Err(RpcError::forbidden(format!(
             "{rel_path} is a sensitive file (credentials or repository internals); reading it from a paired device needs remote control"
         )));
@@ -3461,11 +3464,11 @@ fn authorize_workspace_read(
 /// `serde_json::to_value(x).map_err(...)` boilerplate across the native arms.
 /// The paging half of a request (ADR-0175 B3). A legacy spelling or a token
 /// this host did not issue is a 400 that names the parameter.
-fn page_request(args: &Value) -> Result<super::paging::PageRequest, (StatusCode, Json<RpcError>)> {
-    super::paging::PageRequest::from_args(args).map_err(paging_error)
+fn page_request(args: &Value) -> Result<cognia_companion::paging::PageRequest, (StatusCode, Json<RpcError>)> {
+    cognia_companion::paging::PageRequest::from_args(args).map_err(paging_error)
 }
 
-fn paging_error(error: super::paging::PagingError) -> (StatusCode, Json<RpcError>) {
+fn paging_error(error: cognia_companion::paging::PagingError) -> (StatusCode, Json<RpcError>) {
     RpcError::malformed(error.to_string())
 }
 
@@ -3474,9 +3477,9 @@ fn to_json<T: serde::Serialize>(value: T) -> Result<Value, (StatusCode, Json<Rpc
 }
 
 fn mcp_server_rpc_error(
-    error: crate::mcp_server::types::McpServerError,
+    error: cognia_mcp_server::types::McpServerError,
 ) -> (StatusCode, Json<RpcError>) {
-    use crate::mcp_server::types::McpServerError;
+    use cognia_mcp_server::types::McpServerError;
 
     let message = error.to_string();
     match error {
@@ -3530,32 +3533,32 @@ fn structured_remote_rpc_error(
 }
 
 async fn sync_external_bridge_verifiers(
-    host: &super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     data_dir: &std::path::Path,
 ) -> Result<(), (StatusCode, Json<RpcError>)> {
     let bridge_data_dir = data_dir.to_path_buf();
     let clients = tokio::task::spawn_blocking(move || {
-        super::external_bridge::active_clients(&bridge_data_dir)
+        cognia_companion::external_bridge::active_clients(&bridge_data_dir)
     })
     .await
     .map_err(|error| RpcError::internal(error.to_string()))?
     .map_err(external_bridge_rpc_error)?;
     match host.mcp_server().replace_bridge_clients(&clients) {
-        Ok(()) | Err(crate::mcp_server::types::McpServerError::NotRunning) => Ok(()),
+        Ok(()) | Err(cognia_mcp_server::types::McpServerError::NotRunning) => Ok(()),
         Err(error) => Err(mcp_server_rpc_error(error)),
     }
 }
 
 async fn external_bridge_start_for_host(
-    host: &super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     restart: bool,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let data_dir = host.data_dir().map_err(external_bridge_rpc_error)?;
     let bridge_data_dir = data_dir.clone();
     let (config, clients) = tokio::task::spawn_blocking(move || {
         Ok::<_, String>((
-            super::external_bridge::config_get(&bridge_data_dir)?,
-            super::external_bridge::active_clients(&bridge_data_dir)?,
+            cognia_companion::external_bridge::config_get(&bridge_data_dir)?,
+            cognia_companion::external_bridge::active_clients(&bridge_data_dir)?,
         ))
     })
     .await
@@ -3572,13 +3575,13 @@ async fn external_bridge_start_for_host(
         "httpPort": config.port,
     }))
     .map_err(|error| RpcError::internal(error.to_string()))?;
-    super::external_bridge::set_runtime_state(&data_dir, "starting", None);
+    cognia_companion::external_bridge::set_runtime_state(&data_dir, "starting", None);
 
     if restart {
         if let Err(error) =
-            crate::mcp_server::commands::mcp_server_stop_for_state(host.mcp_server())
+            cognia_mcp_server::commands::mcp_server_stop_for_state(host.mcp_server())
         {
-            super::external_bridge::set_runtime_state(
+            cognia_companion::external_bridge::set_runtime_state(
                 &data_dir,
                 "degraded",
                 Some(error.to_string()),
@@ -3604,11 +3607,11 @@ async fn external_bridge_start_for_host(
 
     match started {
         Ok(port) => {
-            super::external_bridge::set_runtime_state(&data_dir, "running", None);
+            cognia_companion::external_bridge::set_runtime_state(&data_dir, "running", None);
             Ok(json!(port))
         }
         Err(error) => {
-            super::external_bridge::set_runtime_state(
+            cognia_companion::external_bridge::set_runtime_state(
                 &data_dir,
                 "degraded",
                 Some(error.to_string()),
@@ -3618,8 +3621,8 @@ async fn external_bridge_start_for_host(
     }
 }
 
-fn plugin_rpc_error(error: crate::plugin_api::PluginError) -> (StatusCode, Json<RpcError>) {
-    use crate::plugin_api::PluginError;
+fn plugin_rpc_error(error: cognia_plugin_runtime::PluginError) -> (StatusCode, Json<RpcError>) {
+    use cognia_plugin_runtime::PluginError;
 
     let message = error.to_string();
     match error {
@@ -3649,7 +3652,7 @@ fn plugin_rpc_error(error: crate::plugin_api::PluginError) -> (StatusCode, Json<
 }
 
 fn vscode_rpc_error(
-    error: crate::plugin_api::vscode::commands::VscodeCommandError,
+    error: cognia_plugin_runtime::vscode::commands::VscodeCommandError,
 ) -> (StatusCode, Json<RpcError>) {
     let status = match error.code.as_str() {
         "bad_manifest" | "missing_main" | "bad_bundle_format" | "unsafe_main" | "bad_response"
@@ -3698,7 +3701,7 @@ fn remote_lsp_method_allowed(method: &str) -> bool {
 /// Each arm deserialises the JSON `args`, obtains the necessary Tauri state
 /// via `host.tauri_app(name)?.state::<T>()` (a per-arm `503
 /// headless_unsupported` when this process is a headless `cognia-server` —
-/// see the availability table in [`super::dispatch_host`]), calls the
+/// see the availability table in [`crate::rpc_host`]), calls the
 /// underlying function (not the IPC wrapper), and serialises the result back
 /// to [`Value`].
 ///
@@ -3706,17 +3709,17 @@ fn remote_lsp_method_allowed(method: &str) -> bool {
 /// requires `tauri::Window`), it must be excluded from the V1 allowlist.
 ///
 /// Visibility note (ADR-0021): exposed as `pub(super)` so the WebRTC
-/// signaling module (`super::signaling::dispatch`) can route DataChannel
+/// signaling module (`cognia_companion::signaling::dispatch`) can route DataChannel
 /// RPCs through the same allowlist without re-implementing 1k+ lines.
 pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     scope: Option<&str>,
-    plane: super::remote_execution::ExecutionPlane,
+    plane: cognia_companion::remote_execution::ExecutionPlane,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     validate_completion_command_fields(name, &args)?;
     // Remote Session Control gate. Runs for both the HTTP `rpc_handler` and
@@ -3728,7 +3731,7 @@ pub(super) async fn dispatch(
             .get("adminLease")
             .or_else(|| args.get("admin_lease"))
             .and_then(Value::as_str);
-        super::admin_lease::validate(device_id, name, admin_lease)
+        cognia_companion::admin_lease::validate(device_id, name, admin_lease)
             .map_err(external_bridge_rpc_error)?;
     }
 
@@ -3753,11 +3756,11 @@ pub(super) async fn dispatch(
         return Err(RpcError::unknown_command(name));
     }
 
-    if super::browser_gateway::is_browser_rpc(name) {
+    if cognia_companion::browser_gateway::is_browser_rpc(name) {
         let tenant_id = tenant_id.ok_or_else(|| {
             RpcError::forbidden("browser RPC requires an account-bound device token")
         })?;
-        return super::browser_gateway::dispatch_browser_rpc(name, args, tenant_id, device_id)
+        return cognia_companion::browser_gateway::dispatch_browser_rpc(name, args, tenant_id, device_id)
             .await
             .map_err(|error| {
                 let status = match error.code.as_str() {
@@ -3820,7 +3823,7 @@ pub(super) async fn dispatch(
         return terminal::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }
 
-    if cognia_companion_rpc::managed_desktops::COMMANDS.contains(&name) {
+    if crate::managed_desktops::COMMANDS.contains(&name) {
         // The envelope was authenticated above; the domain DTO deliberately
         // rejects unknown fields and never accepts caller-supplied identity.
         let admin_check = if STEP_UP_COMMANDS.contains(&name) {
@@ -3828,9 +3831,9 @@ pub(super) async fn dispatch(
             let device = device_id.to_owned();
             let operation = name.to_owned();
             Some(std::sync::Arc::new(move || {
-                super::admin_lease::validate(&device, &operation, token.as_deref())
+                cognia_companion::admin_lease::validate(&device, &operation, token.as_deref())
                     .map_err(|_| cognia_automation::cua_sandbox::managed::refused("managed_desktop_control_admin_lease_expired"))
-            }) as cognia_companion_rpc::managed_desktops::AdminAuthorityCheck)
+            }) as crate::managed_desktops::AdminAuthorityCheck)
         } else { None };
         let mut args = args;
         if let Some(args) = args.as_object_mut() {
@@ -3838,25 +3841,25 @@ pub(super) async fn dispatch(
             args.remove("admin_lease");
         }
         let runtime = if name == "managed_desktop_control_input" {
-            let event_host = host.clone();
-            let events: cognia_companion_rpc::managed_desktops::HostEventSink =
+            let event_host = host.to_shared();
+            let events: crate::managed_desktops::HostEventSink =
                 std::sync::Arc::new(move |topic, value| event_host.publish_host_event(topic, value));
             Some(match host.automation() {
-                Some(automation) => cognia_companion_rpc::managed_desktops::ManagedControlRuntime {
-                    enforcement: crate::automation::dispatcher::Enforcement::from_state(
+                Some(automation) => crate::managed_desktops::ManagedControlRuntime {
+                    enforcement: cognia_automation::automation::dispatcher::Enforcement::from_state(
                         automation.state,
                     ),
                     events,
                     refresh_persisted: false,
                 },
                 None => {
-                    cognia_companion_rpc::managed_desktops::headless_control_runtime(events).await
+                    crate::managed_desktops::headless_control_runtime(events).await
                         .map_err(|error| (StatusCode::BAD_REQUEST, Json(RpcError::new(error.code.clone(), error.to_string()))))?
                 }
             })
         } else { None };
-        return cognia_companion_rpc::managed_desktops::dispatch(
-            name, args, cognia_companion_rpc::managed_desktops::Caller {
+        return crate::managed_desktops::dispatch(
+            name, args, crate::managed_desktops::Caller {
                 device_id, tenant_id, scope, local: false,
             }, runtime, admin_check,
         ).await.map_err(|error| (
@@ -3865,14 +3868,14 @@ pub(super) async fn dispatch(
         ));
     }
 
-    if cognia_companion_rpc::remote_desktops::COMMANDS.contains(&name) {
+    if crate::remote_desktops::COMMANDS.contains(&name) {
         // ADR-0234 Phase 3: the router re-checks pairing, refuses agents and
         // requires the admin lease for a control open; identity comes only
         // from the authenticated envelope.
-        return cognia_companion_rpc::remote_desktops::dispatch(
+        return crate::remote_desktops::dispatch(
             name,
             args,
-            cognia_companion_rpc::remote_desktops::Caller { device_id, tenant_id, scope },
+            crate::remote_desktops::Caller { device_id, tenant_id, scope },
         )
         .await
         .map_err(|error| {

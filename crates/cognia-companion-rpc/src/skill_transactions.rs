@@ -14,7 +14,7 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde::Serialize;
 
-use crate::skills::{
+use cognia_skills::{
     bundle::{BundleUploadHandle, BundleUploadOpenRequest, SkillBundleUploadService},
     install::{
         skills_install_atomic_at_roots, InstallSkillMirroredResponse, SkillInstallRoots,
@@ -24,7 +24,7 @@ use crate::skills::{
     types::NativeSkill,
 };
 
-use super::dispatch_host::{DispatchHost, RpcHost};
+use crate::rpc_host::RpcHost;
 
 static SERVICES: Lazy<Mutex<HashMap<PathBuf, Arc<SkillBundleUploadService>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -39,7 +39,7 @@ pub struct HostSkillsCatalog {
     pub codex: Vec<NativeSkill>,
 }
 
-fn roots(host: &DispatchHost) -> Result<SkillInstallRoots, String> {
+fn roots(host: &dyn RpcHost) -> Result<SkillInstallRoots, String> {
     let data_dir = host.data_dir()?;
     let home = dirs::home_dir();
     Ok(SkillInstallRoots {
@@ -53,7 +53,7 @@ fn roots(host: &DispatchHost) -> Result<SkillInstallRoots, String> {
     })
 }
 
-fn upload_root(host: &DispatchHost) -> Result<PathBuf, String> {
+fn upload_root(host: &dyn RpcHost) -> Result<PathBuf, String> {
     Ok(host
         .data_dir()?
         .join("cognia")
@@ -61,7 +61,7 @@ fn upload_root(host: &DispatchHost) -> Result<PathBuf, String> {
         .join(".uploads"))
 }
 
-fn service(host: &DispatchHost) -> Result<Arc<SkillBundleUploadService>, String> {
+fn service(host: &dyn RpcHost) -> Result<Arc<SkillBundleUploadService>, String> {
     let upload_root = upload_root(host)?;
     let mut services = SERVICES.lock();
     if let Some(service) = services.get(&upload_root) {
@@ -79,7 +79,7 @@ fn scan(root: Option<&Path>) -> Result<Vec<NativeSkill>, String> {
     }
 }
 
-pub fn catalog_get(host: &DispatchHost) -> Result<HostSkillsCatalog, String> {
+pub fn catalog_get(host: &dyn RpcHost) -> Result<HostSkillsCatalog, String> {
     let roots = roots(host)?;
     Ok(HostSkillsCatalog {
         cognia: scan(roots.cognia.as_deref())?,
@@ -89,7 +89,7 @@ pub fn catalog_get(host: &DispatchHost) -> Result<HostSkillsCatalog, String> {
 }
 
 pub fn upload_open(
-    host: &DispatchHost,
+    host: &dyn RpcHost,
     device_id: &str,
     request: BundleUploadOpenRequest,
 ) -> Result<BundleUploadHandle, String> {
@@ -102,7 +102,7 @@ pub fn upload_open(
 }
 
 pub fn upload_write(
-    host: &DispatchHost,
+    host: &dyn RpcHost,
     device_id: &str,
     handle_id: &str,
     offset: u64,
@@ -113,12 +113,12 @@ pub fn upload_write(
     service(host)?.write_chunk(handle_id, offset, data_base64, chunk_hash)
 }
 
-pub fn upload_commit(host: &DispatchHost, device_id: &str, handle_id: &str) -> Result<(), String> {
+pub fn upload_commit(host: &dyn RpcHost, device_id: &str, handle_id: &str) -> Result<(), String> {
     require_upload_owner(host, device_id, handle_id)?;
     service(host)?.commit(handle_id)
 }
 
-pub fn upload_abort(host: &DispatchHost, device_id: &str, handle_id: &str) -> Result<(), String> {
+pub fn upload_abort(host: &dyn RpcHost, device_id: &str, handle_id: &str) -> Result<(), String> {
     require_upload_owner(host, device_id, handle_id)?;
     let result = service(host)?.abort(handle_id);
     UPLOAD_OWNERS
@@ -128,7 +128,7 @@ pub fn upload_abort(host: &DispatchHost, device_id: &str, handle_id: &str) -> Re
 }
 
 pub fn install_atomic(
-    host: &DispatchHost,
+    host: &dyn RpcHost,
     device_id: &str,
     handle_id: &str,
 ) -> Result<InstallSkillMirroredResponse, String> {
@@ -142,7 +142,7 @@ pub fn install_atomic(
 }
 
 fn require_upload_owner(
-    host: &DispatchHost,
+    host: &dyn RpcHost,
     device_id: &str,
     handle_id: &str,
 ) -> Result<(), String> {
@@ -155,7 +155,7 @@ fn require_upload_owner(
 }
 
 pub fn uninstall(
-    host: &DispatchHost,
+    host: &dyn RpcHost,
     target: SkillsTarget,
     dir_name: &str,
 ) -> Result<UninstallResult, String> {
@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn upload_handle_is_created_under_the_host_service() {
-        let host = DispatchHost::Headless(HeadlessServices::stub_for_tests());
+        let host = HeadlessServices::stub_for_tests();
         let handle = upload_open(
             &host,
             "device-a",
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn upload_handle_is_bound_to_the_device_that_opened_it() {
-        let host = DispatchHost::Headless(HeadlessServices::stub_for_tests());
+        let host = HeadlessServices::stub_for_tests();
         let handle = upload_open(
             &host,
             "device-a",
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn uninstall_rejects_path_traversal() {
-        let host = DispatchHost::Headless(HeadlessServices::stub_for_tests());
+        let host = HeadlessServices::stub_for_tests();
         let error = uninstall(&host, SkillsTarget::Cognia, "../escape").unwrap_err();
         assert_eq!(error, "invalid skill directory name");
     }

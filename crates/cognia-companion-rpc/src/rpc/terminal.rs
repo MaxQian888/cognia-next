@@ -20,7 +20,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     account_id: Option<&str>,
     scope: Option<&str>,
@@ -64,13 +64,13 @@ pub(super) async fn dispatch(
             // `shell: true` runs `command` as a full shell line (cmd /C, sh -c)
             // — what a remote client needs to replay history-style commands.
             let shell: Option<bool> = optional(&args, "shell")?;
-            let (command, exec_args) = crate::terminal::exec::resolve_shell_mode(
+            let (command, exec_args) = cognia_terminal::exec::resolve_shell_mode(
                 command,
                 exec_args,
                 shell.unwrap_or(false),
             )
             .map_err(RpcError::validation_failed)?;
-            crate::terminal::exec::terminal_exec_inner(
+            cognia_terminal::exec::terminal_exec_inner(
                 cwd, command, exec_args, env, timeout_ms, None,
             )
             .await
@@ -83,7 +83,7 @@ pub(super) async fn dispatch(
             let show_hidden: Option<bool> = optional(&args, "showHidden")?;
             let limit: Option<usize> = optional(&args, "limit")?;
             tokio::task::spawn_blocking(move || {
-                crate::terminal::complete::complete_paths_inner(
+                cognia_terminal::complete::complete_paths_inner(
                     &cwd,
                     &fragment,
                     show_hidden.unwrap_or(false),
@@ -104,12 +104,12 @@ pub(super) async fn dispatch(
             let page = page_request(&args)?;
             tokio::task::spawn_blocking(move || {
                 let path_value = std::env::var("PATH").unwrap_or_default();
-                let all = crate::terminal::path_scan::list_path_executables_inner(
+                let all = cognia_terminal::path_scan::list_path_executables_inner(
                     &path_value,
                     &prefix,
-                    crate::companion_api::paging::MAX_PAGE_SIZE as usize,
+                    cognia_companion::paging::MAX_PAGE_SIZE as usize,
                 );
-                crate::companion_api::paging::Page::slice_all(all, &page, 50)
+                cognia_companion::paging::Page::slice_all(all, &page, 50)
             })
             .await
             .map_err(|e| RpcError::internal(e.to_string()))?
@@ -119,7 +119,7 @@ pub(super) async fn dispatch(
         "terminal_kill_port" => {
             let port: u16 = required(&args, "port")?;
             // netstat/lsof + kill shell out — keep them off the async runtime.
-            tokio::task::spawn_blocking(move || crate::terminal::commands::terminal_kill_port(port))
+            tokio::task::spawn_blocking(move || cognia_terminal::commands::terminal_kill_port(port))
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))?
                 .map_err(RpcError::internal)
@@ -134,16 +134,16 @@ pub(super) async fn dispatch(
         // launched from a multiplexer, never anything about the caller.
         "terminal_detect_multiplexer" => {
             ensure_terminal_rpc_authorized(device_id).await?;
-            to_json(crate::terminal::multiplexer::detect_multiplexer().await)
+            to_json(cognia_terminal::multiplexer::detect_multiplexer().await)
         }
         "terminal_list_tmux_sessions" => {
             ensure_terminal_rpc_authorized(device_id).await?;
-            to_json(crate::terminal::multiplexer::list_tmux_sessions().await)
+            to_json(cognia_terminal::multiplexer::list_tmux_sessions().await)
         }
         "terminal_list_tmux_windows" => {
             ensure_terminal_rpc_authorized(device_id).await?;
             let session_name: String = required_aliased(&args, "session_name", "sessionName")?;
-            to_json(crate::terminal::multiplexer::list_tmux_windows(&session_name).await)
+            to_json(cognia_terminal::multiplexer::list_tmux_windows(&session_name).await)
         }
 
         // ── Terminal host administration ──────────────────────────────────
@@ -175,7 +175,7 @@ pub(super) async fn dispatch(
             // it impossible to ever turn on remotely. The authority is the
             // manifest's `host.admin` capability, which owner devices hold and
             // chat-only ones do not.
-            let settings: crate::terminal_host_service::TerminalHostSettings =
+            let settings: cognia_terminal::terminal_host_service::TerminalHostSettings =
                 required(&args, "settings")?;
             to_json(
                 host.terminal_host_configure(settings)

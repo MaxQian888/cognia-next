@@ -33,7 +33,7 @@ test("results routes use existing authenticated transports and cannot create or 
     assert.ok(
       read("crates/cognia-companion-rpc/src/managed_desktops.rs").includes(`"${command.name}"`)
     )
-    assert.ok(read("src-tauri/src/companion_api/rpc.rs").includes(`"${command.name}"`))
+    assert.ok(read("crates/cognia-companion-rpc/src/rpc.rs").includes(`"${command.name}"`))
     assert.ok(!/create|share|export/.test(command.name))
   }
   assert.match(

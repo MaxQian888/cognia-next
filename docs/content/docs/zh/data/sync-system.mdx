@@ -60,7 +60,7 @@ flowchart TB
 
   subgraph Host["💻 Host（桌面 WebView 或无头 brain）"]
     direction TB
-    RPC[companion_api/rpc/data_sync.rs<br/>sync_pull 分支]
+    RPC[cognia-companion-rpc/src/rpc/data_sync.rs<br/>sync_pull 分支]
     Registry[sync_registry.rs<br/>default_tables · 48]
     Bridge[sync_bridge.rs<br/>SyncBridge.pull · 30 s]
     Source[lib/sync/desktop-sync-source.ts<br/>readDexieDelta · finalizeDelta]
@@ -126,7 +126,7 @@ flowchart TB
 
 | 文件 | 作用 |
 | --- | --- |
-| `src-tauri/src/companion_api/rpc/data_sync.rs` | `sync_pull` 与 `sync_list_tables` 分支：参数检查、租户、注册表、桥选择 |
+| `crates/cognia-companion-rpc/src/rpc/data_sync.rs` | `sync_pull` 与 `sync_list_tables` 分支：参数检查、租户、注册表、桥选择 |
 | `crates/cognia-companion-bus/src/sync_registry.rs` | `SyncTableRegistry`、`default_tables()`（48 个描述符：`name`、`description`、`has_tombstones`） |
 | `crates/cognia-companion-bus/src/sync_bridge.rs` | `SyncBridge.pull`：发出请求、等待响应，30 秒超时 |
 | `src-tauri/src/companion_api/commands.rs` | `companion_sync_pull_response`，WebView 的回复路径 |

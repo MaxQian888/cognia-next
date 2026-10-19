@@ -12,7 +12,7 @@
  *
  * The companion server now asks this module to admit each device-originated
  * turn before it hands the prompt over (`send_arm` in
- * `src-tauri/src/companion_api/rpc/chat.rs`). Admission writes the user's
+ * `crates/cognia-companion-rpc/src/rpc/chat.rs`). Admission writes the user's
  * message under the client's own id, accepts and claims a submission, and keeps
  * its lease alive until the persister settles it on `session_ended`.
  *

@@ -5,6 +5,7 @@
 //! Every command returns `Result<T, GitError>` so the renderer can switch on
 //! `err.kind` (see `error.rs`).
 
+#[cfg(feature = "tauri-host")]
 use tauri::{AppHandle, State};
 
 use super::branch::DefaultBranch;
@@ -15,6 +16,7 @@ use super::types::{
     GitFileChange, GitFileDiffStat, GitIdentity, GitRef, GitRemote, GitRepoState, GitStashEntry,
     GitStatus, GitTag, GitWorktree, RebaseTodoEntry,
 };
+#[cfg(feature = "tauri-host")]
 use super::watcher::GitWatcherState;
 use super::{
     blame, branch, commit, diff, diff_stat, history, interactive_rebase, merge, read, remote, repo,
@@ -34,7 +36,7 @@ where
 
 // ---------------------------------------------------------------- reads (git2)
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_is_repo(repo_path: String) -> Result<bool, GitError> {
     blocking("git_is_repo", move || {
         Ok(read::open_repo(&repo_path).is_ok())
@@ -42,22 +44,22 @@ pub async fn git_is_repo(repo_path: String) -> Result<bool, GitError> {
     .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_repo_state(repo_path: String) -> Result<GitRepoState, GitError> {
     blocking("git_repo_state", move || Ok(read::repo_state(&repo_path))).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_status(repo_path: String) -> Result<GitStatus, GitError> {
     blocking("git_status", move || status::status(&repo_path)).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_diff_stat(repo_path: String) -> Result<Vec<GitFileDiffStat>, GitError> {
     blocking("git_diff_stat", move || diff_stat::diff_stat(&repo_path)).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_diff_file(
     repo_path: String,
     path: String,
@@ -69,7 +71,7 @@ pub async fn git_diff_file(
     .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_diff_commit(
     repo_path: String,
     sha: String,
@@ -81,7 +83,7 @@ pub async fn git_diff_commit(
     .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_commit_files(
     repo_path: String,
     sha: String,
@@ -92,7 +94,7 @@ pub async fn git_commit_files(
     .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_diff_refs_files(
     repo_path: String,
     base: String,
@@ -104,7 +106,7 @@ pub async fn git_diff_refs_files(
     .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_diff_refs_file(
     repo_path: String,
     base: String,
@@ -120,12 +122,12 @@ pub async fn git_diff_refs_file(
 /// Aggregate staged diff text (`git diff --cached`) — the AI commit-message
 /// prompt input. Async (shells out via `exec`), so it is NOT wrapped in
 /// `blocking`.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_diff_staged_all(repo_path: String) -> Result<String, GitError> {
     diff::staged_all_text(&repo_path).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_log(
     repo_path: String,
     max_count: usize,
@@ -137,7 +139,7 @@ pub async fn git_log(
     .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_file_history(
     repo_path: String,
     path: String,
@@ -149,14 +151,14 @@ pub async fn git_file_history(
     .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_refs(repo_path: String) -> Result<Vec<GitRef>, GitError> {
     blocking("git_refs", move || history::refs(&repo_path)).await
 }
 
 /// Per-line blame (`git blame --porcelain`) for the working-tree file. Async
 /// (shells out via `exec`), so not wrapped in `blocking`.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_blame(
     repo_path: String,
     path: String,
@@ -173,7 +175,7 @@ pub async fn git_blame(
 /// `worktree list --porcelain -z`, or a repository whose worktree bookkeeping
 /// is unreadable, should cost the placement annotation, not the branch list
 /// the whole panel is built on.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_branches(repo_path: String) -> Result<Vec<GitBranch>, GitError> {
     let walk_path = repo_path.clone();
     let branches = blocking("git_branches", move || branch::list_branches(&walk_path)).await?;
@@ -181,7 +183,7 @@ pub async fn git_branches(repo_path: String) -> Result<Vec<GitBranch>, GitError>
     Ok(branch::annotate_placements(branches, &worktrees))
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_default_branch(
     repo_path: String,
     remote: Option<String>,
@@ -189,29 +191,29 @@ pub async fn git_default_branch(
     branch::default_branch(&repo_path, remote.as_deref().unwrap_or("origin")).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_remotes(repo_path: String) -> Result<Vec<GitRemote>, GitError> {
     blocking("git_remotes", move || remote::list_remotes(&repo_path)).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_tags(repo_path: String) -> Result<Vec<GitTag>, GitError> {
     blocking("git_tags", move || tag::list_tags(&repo_path)).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stash_list(repo_path: String) -> Result<Vec<GitStashEntry>, GitError> {
     blocking("git_stash_list", move || stash::list_stashes(&repo_path)).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_conflicts(repo_path: String) -> Result<Vec<GitConflict>, GitError> {
     blocking("git_conflicts", move || merge::list_conflicts(&repo_path)).await
 }
 
 // ------------------------------------------------- mutations / network (system)
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stage(
     repo_path: String,
     paths: Vec<String>,
@@ -223,7 +225,7 @@ pub async fn git_stage(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_unstage(
     repo_path: String,
     paths: Vec<String>,
@@ -235,7 +237,7 @@ pub async fn git_unstage(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_discard(
     repo_path: String,
     paths: Vec<String>,
@@ -247,12 +249,12 @@ pub async fn git_discard(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_discard_all(repo_path: String, include_untracked: bool) -> Result<(), GitError> {
     stage::discard_all(&repo_path, include_untracked).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_commit(
     repo_path: String,
     message: String,
@@ -262,12 +264,12 @@ pub async fn git_commit(
     commit::commit(&repo_path, &message, amend, signoff).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_checkout_branch(repo_path: String, name: String) -> Result<(), GitError> {
     branch::checkout(&repo_path, &name).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_create_branch(
     repo_path: String,
     name: String,
@@ -277,7 +279,7 @@ pub async fn git_create_branch(
     branch::create(&repo_path, &name, checkout, from.as_deref()).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_delete_branch(
     repo_path: String,
     name: String,
@@ -286,7 +288,7 @@ pub async fn git_delete_branch(
     branch::delete(&repo_path, &name, force).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_rename_branch(
     repo_path: String,
     old: Option<String>,
@@ -297,7 +299,7 @@ pub async fn git_rename_branch(
 
 // ---- worktrees (agent-team per-dispatch isolation) ----
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_worktree_add(
     repo_path: String,
     path: String,
@@ -307,7 +309,7 @@ pub async fn git_worktree_add(
     worktree::add(&repo_path, &path, &branch, base_ref.as_deref()).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_worktree_remove(
     repo_path: String,
     path: String,
@@ -317,12 +319,12 @@ pub async fn git_worktree_remove(
     worktree::remove(&repo_path, &path, force, delete_branch.as_deref()).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_worktree_list(repo_path: String) -> Result<Vec<GitWorktree>, GitError> {
     worktree::list(&repo_path).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_worktree_commit(
     worktree_path: String,
     message: String,
@@ -330,12 +332,12 @@ pub async fn git_worktree_commit(
     worktree::commit(&worktree_path, &message).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_worktree_prune(repo_path: String) -> Result<(), GitError> {
     worktree::prune(&repo_path).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_fetch(
     repo_path: String,
     remote: Option<String>,
@@ -366,7 +368,7 @@ pub async fn git_fetch(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_pull(
     repo_path: String,
     remote: Option<String>,
@@ -376,7 +378,7 @@ pub async fn git_pull(
     remote::pull(&repo_path, remote.as_deref(), branch.as_deref(), rebase).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_push(
     repo_path: String,
     remote: Option<String>,
@@ -394,22 +396,22 @@ pub async fn git_push(
     .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_sync(repo_path: String) -> Result<AheadBehind, GitError> {
     remote::sync(&repo_path).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_remote_add(repo_path: String, name: String, url: String) -> Result<(), GitError> {
     remote::add(&repo_path, &name, &url).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_remote_remove(repo_path: String, name: String) -> Result<(), GitError> {
     remote::remove(&repo_path, &name).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_create_tag(
     repo_path: String,
     name: String,
@@ -419,22 +421,22 @@ pub async fn git_create_tag(
     tag::create(&repo_path, &name, message.as_deref(), target.as_deref()).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_delete_tag(repo_path: String, name: String) -> Result<(), GitError> {
     tag::delete(&repo_path, &name).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_push_tag(repo_path: String, remote: String, name: String) -> Result<(), GitError> {
     tag::push(&repo_path, &remote, &name).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_reset(repo_path: String, mode: String, target: String) -> Result<(), GitError> {
     reset::reset(&repo_path, &mode, &target).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_restore(
     repo_path: String,
     paths: Vec<String>,
@@ -444,39 +446,39 @@ pub async fn git_restore(
     restore::restore(&repo_path, &paths, staged, source.as_deref()).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_rebase(repo_path: String, onto: String) -> Result<(), GitError> {
     sequencer::rebase(&repo_path, &onto).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_cherry_pick(repo_path: String, sha: String) -> Result<(), GitError> {
     sequencer::cherry_pick(&repo_path, &sha).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_revert(repo_path: String, sha: String) -> Result<(), GitError> {
     sequencer::revert(&repo_path, &sha).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_sequencer_continue(repo_path: String) -> Result<(), GitError> {
     sequencer::sequencer_continue(&repo_path).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_sequencer_abort(repo_path: String) -> Result<(), GitError> {
     sequencer::sequencer_abort(&repo_path).await
 }
 
 // ---------------------------------------------------------------- stacks
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stack_capabilities(repo_path: String) -> Result<StackCapabilities, GitError> {
     stack::capabilities(&repo_path).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stack_parents(repo_path: String) -> Result<Vec<(String, String)>, GitError> {
     blocking("git_stack_parents", move || {
         Ok(stack::parent_map(&repo_path)?.into_iter().collect())
@@ -484,7 +486,7 @@ pub async fn git_stack_parents(repo_path: String) -> Result<Vec<(String, String)
     .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stack_set_parent(
     repo_path: String,
     branch: String,
@@ -493,7 +495,7 @@ pub async fn git_stack_set_parent(
     stack::set_parent(&repo_path, &branch, parent.as_deref()).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stack_validate(
     repo_path: String,
     branches: Vec<String>,
@@ -501,7 +503,7 @@ pub async fn git_stack_validate(
     stack::validate(&repo_path, &branches).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stack_restack(
     repo_path: String,
     onto: String,
@@ -510,7 +512,7 @@ pub async fn git_stack_restack(
     stack::restack(&repo_path, &onto, &branches).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stack_history(
     repo_path: String,
     branch: String,
@@ -518,7 +520,7 @@ pub async fn git_stack_history(
     stack::history(&repo_path, &branch).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stack_revert(
     repo_path: String,
     branch: String,
@@ -527,7 +529,7 @@ pub async fn git_stack_revert(
     stack::revert_to_history(&repo_path, &branch, &history_ref).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stack_push(
     repo_path: String,
     remote: String,
@@ -536,7 +538,7 @@ pub async fn git_stack_push(
     stack::push_stack(&repo_path, &remote, &branches).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_rebase_commits(
     repo_path: String,
     base: String,
@@ -547,7 +549,7 @@ pub async fn git_rebase_commits(
     .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_interactive_rebase(
     repo_path: String,
     base: String,
@@ -556,7 +558,7 @@ pub async fn git_interactive_rebase(
     interactive_rebase::run(&repo_path, &base, &entries).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stash_push(
     repo_path: String,
     message: Option<String>,
@@ -572,22 +574,22 @@ pub async fn git_stash_push(
     .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stash_pop(repo_path: String, index: usize) -> Result<(), GitError> {
     stash::pop(&repo_path, index).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stash_apply(repo_path: String, index: usize) -> Result<(), GitError> {
     stash::apply(&repo_path, index).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_stash_drop(repo_path: String, index: usize) -> Result<(), GitError> {
     stash::drop(&repo_path, index).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_resolve_conflict(
     repo_path: String,
     path: String,
@@ -605,12 +607,12 @@ pub async fn git_resolve_conflict(
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_init(path: String) -> Result<(), GitError> {
     repo::init(&path).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_clone(remote_url: String, destination: String) -> Result<String, GitError> {
     repo::clone_repo(&remote_url, &destination).await
 }
@@ -619,7 +621,7 @@ pub async fn git_clone(remote_url: String, destination: String) -> Result<String
 /// bounded) — the entry point for callers that did not type the URL, such as a
 /// plugin acquiring a repository to document. `git_clone` stays unguarded for
 /// the Source Control panel, where the user supplied the remote themselves.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_clone_guarded(
     remote_url: String,
     destination: String,
@@ -636,7 +638,7 @@ pub async fn git_clone_guarded(
 /// existed since the crate was written and was never exposed as a command, so
 /// the only way to read a historical file was to abuse `git_diff_refs_file` and
 /// hope the file happened to differ.
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_read_blob_at_ref(
     repo_path: String,
     git_ref: String,
@@ -648,12 +650,12 @@ pub async fn git_read_blob_at_ref(
     .await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_identity(repo_path: String) -> Result<GitIdentity, GitError> {
     blocking("git_identity", move || repo::identity(&repo_path)).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_set_identity(
     repo_path: String,
     name: String,
@@ -663,23 +665,24 @@ pub async fn git_set_identity(
     repo::set_identity(&repo_path, &name, &email, global).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_ignore_add(repo_path: String, pattern: String) -> Result<(), GitError> {
     repo::ignore_add(&repo_path, &pattern).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_merge(repo_path: String, branch: String) -> Result<(), GitError> {
     merge::merge(&repo_path, &branch).await
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn git_merge_abort(repo_path: String) -> Result<(), GitError> {
     merge::merge_abort(&repo_path).await
 }
 
 // --------------------------------------------------------------------- watcher
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn git_watch_start(
     state: State<'_, GitWatcherState>,
@@ -689,6 +692,7 @@ pub async fn git_watch_start(
     super::watcher::start(&state, &app, &repo_path)
 }
 
+#[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn git_watch_stop(
     state: State<'_, GitWatcherState>,

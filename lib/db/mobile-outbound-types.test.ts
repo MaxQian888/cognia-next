@@ -10,7 +10,7 @@
  *   through `transport.call`, i.e. `POST /internal/_rpc/<name>` on the paired
  *   desktop. They must therefore appear in `KNOWN_COMMANDS` so the drain does
  *   not 404, and have a `match` arm in one of the per-domain dispatch
- *   submodules under `src-tauri/src/companion_api/rpc/` (`rpc.rs::dispatch` is
+ *   submodules under `crates/cognia-companion-rpc/src/rpc/` (`rpc.rs::dispatch` is
  *   only a thin gate that forwards to `<domain>::dispatch` when the name is in
  *   that domain's `COMMANDS` slice). They must also be listed in
  *   `tests/e2e/mobile/outbound-queue.spec.ts` COMMAND_KINDS, minus the gaps
@@ -37,9 +37,9 @@ import path from "node:path"
 import { MOBILE_OUTBOUND_COMMANDS, type MobileOutboundJobRow } from "./mobile-outbound-types"
 
 const REPO_ROOT = path.join(__dirname, "..", "..")
-const COMPANION_API_DIR = path.join(REPO_ROOT, "src-tauri", "src", "companion_api")
-const RPC_RS = path.join(COMPANION_API_DIR, "rpc.rs")
-const RPC_DISPATCH_DIR = path.join(COMPANION_API_DIR, "rpc")
+const COMPANION_RPC_DIR = path.join(REPO_ROOT, "crates", "cognia-companion-rpc", "src")
+const RPC_RS = path.join(COMPANION_RPC_DIR, "rpc.rs")
+const RPC_DISPATCH_DIR = path.join(COMPANION_RPC_DIR, "rpc")
 const E2E_SPEC = path.join(REPO_ROOT, "tests", "e2e", "mobile", "outbound-queue.spec.ts")
 const COLLAB_DISPATCHER = path.join(REPO_ROOT, "lib", "collab", "outbound-dispatcher.ts")
 
@@ -171,7 +171,7 @@ describe("MOBILE_OUTBOUND_COMMANDS spec parity", () => {
       if (!hasArrow && !hasPipeBefore && !hasPipeAfter) {
         throw new Error(
           `MOBILE_OUTBOUND_COMMANDS["${cmd}"] has no dispatch arm in ` +
-            `src-tauri/src/companion_api/rpc.rs or any src-tauri/src/companion_api/rpc/*.rs ` +
+            `crates/cognia-companion-rpc/src/rpc.rs or any crates/cognia-companion-rpc/src/rpc/*.rs ` +
             `submodule — add it to the owning domain's \`COMMANDS\` slice AND give it either an ` +
             `explicit \`"${cmd}" =>\` arm or a slot in a pipe-separated group inside that ` +
             `domain's \`dispatch\` (e.g. the mobile-write group in rpc/data_sync.rs), then list ` +

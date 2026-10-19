@@ -4,7 +4,7 @@
 #![cfg(test)]
 
 use super::*;
-use crate::companion_api::{
+use cognia_companion::{
     deny_list::DenyList, idempotency::IdempotencyCache, jwt::issue_device_jwt, CompanionState,
 };
 use axum::{
@@ -27,7 +27,7 @@ async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &crate::companion_api::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     scope: Option<&str>,
@@ -40,7 +40,7 @@ async fn dispatch(
         device_id,
         tenant_id,
         scope,
-        crate::companion_api::remote_execution::ExecutionPlane::Network,
+        cognia_companion::remote_execution::ExecutionPlane::Network,
     )
     .await
 }
@@ -64,11 +64,11 @@ fn remote_completion_commands_have_exact_remote_authority() {
     ];
 
     for (name, capability) in expected {
-        let descriptor = crate::companion_api::command_manifest::descriptor(name)
+        let descriptor = cognia_companion::command_manifest::descriptor(name)
             .unwrap_or_else(|| panic!("{name} must have a manifest descriptor"));
         assert_eq!(
             descriptor.target,
-            crate::companion_api::command_manifest::CommandTarget::Execution,
+            cognia_companion::command_manifest::CommandTarget::Execution,
             "{name} target"
         );
         assert_eq!(descriptor.capability, capability, "{name} capability");
@@ -117,7 +117,7 @@ fn thread_handoff_commands_have_exact_remote_authority_and_reject_extra_fields()
     ];
 
     for (name, capability, step_up) in expected {
-        let descriptor = crate::companion_api::command_manifest::descriptor(name)
+        let descriptor = cognia_companion::command_manifest::descriptor(name)
             .unwrap_or_else(|| panic!("{name} must have a manifest descriptor"));
         assert_eq!(descriptor.capability, capability, "{name} capability");
         assert_eq!(STEP_UP_COMMANDS.contains(&name), step_up, "{name} step-up");
@@ -188,12 +188,12 @@ fn transcript_refusals_publish_their_protocol_code() {
 /// which the crate can no longer see.
 #[test]
 fn bus_emitter_publishes_the_frozen_payload() {
-    use crate::external_agent::exec_backend::{stdout_payload, AgentEventEmitter, STDOUT_CHANNEL};
-    let bus = crate::companion_api::event_bus::EventBus::new();
+    use cognia_external_agent::exec_backend::{stdout_payload, AgentEventEmitter, STDOUT_CHANNEL};
+    let bus = cognia_companion::event_bus::EventBus::new();
     let emitter = BusAgentEmitter(std::sync::Arc::clone(&bus));
     emitter.emit(STDOUT_CHANNEL, stdout_payload("a1", "hello"));
     match bus.subscribe(Some(0), 0) {
-        crate::companion_api::event_bus::SubscribeResult::Ok { replay, .. } => {
+        cognia_companion::event_bus::SubscribeResult::Ok { replay, .. } => {
             assert_eq!(replay.len(), 1);
             assert_eq!(replay[0].event_type, STDOUT_CHANNEL);
             assert_eq!(
@@ -207,14 +207,14 @@ fn bus_emitter_publishes_the_frozen_payload() {
 
 #[tokio::test]
 async fn headless_orchestration_sink_uses_the_service_only_brain_bridge() {
-    let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-    crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
+    let _guard = cognia_companion::ws_bridge::test_support::lock_slot().await;
+    cognia_companion::ws_bridge::test_support::clear_socket_for_testing();
     let owner_state = test_state();
     let mut receiver =
-        crate::companion_api::ws_bridge::test_support::install_socket_for_testing(&owner_state);
+        cognia_companion::ws_bridge::test_support::install_socket_for_testing(&owner_state);
     let sink = headless_orchestration_event_sink();
 
-    sink(crate::mcp_server::orchestration_proxy::ExecEvent {
+    sink(cognia_mcp_server::orchestration_proxy::ExecEvent {
         id: "request-1".to_string(),
         command: "workflowRunCreate".to_string(),
         args: serde_json::json!({ "arguments": [{ "deploymentId": "deployment-1" }] }),
@@ -228,11 +228,11 @@ async fn headless_orchestration_sink_uses_the_service_only_brain_bridge() {
     assert_eq!(frame["type"], "event");
     assert_eq!(
         frame["event"],
-        crate::mcp_server::orchestration_proxy::EXEC_EVENT
+        cognia_mcp_server::orchestration_proxy::EXEC_EVENT
     );
     assert_eq!(frame["payload"]["id"], "request-1");
     assert_eq!(frame["payload"]["command"], "workflowRunCreate");
-    crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
+    cognia_companion::ws_bridge::test_support::clear_socket_for_testing();
 }
 const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
 const ACCOUNT_ID: &str = "local_acct_a";
@@ -240,28 +240,28 @@ const ACCOUNT_ID: &str = "local_acct_a";
 /// Shared with the per-family test modules (`gateway_plane`, ...): they need a
 /// `SharedState` to call `dispatch`, and rebuilding this fifteen-field literal
 /// in each of them would make the next field addition a multi-file edit.
-pub(super) fn test_state() -> super::super::SharedState {
-    use crate::companion_api::event_bus::EventBus;
+pub(super) fn test_state() -> cognia_companion::SharedState {
+    use cognia_companion::event_bus::EventBus;
     Arc::new(CompanionState {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
         renderer: None,
-        runtime: crate::companion_api::runtime::unwired(),
+        runtime: cognia_companion::runtime::unwired(),
         idempotency: Arc::new(IdempotencyCache::new()),
         event_bus: EventBus::new(),
-        sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+        sync_bridge: cognia_companion::sync_bridge::SyncBridge::new(),
         desktop_messages_bridge:
-            crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            cognia_companion::desktop_messages_bridge::DesktopMessagesBridge::new(),
         desktop_writes_bridge:
-            crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-        sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-        rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-        push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
+            cognia_companion::desktop_writes_bridge::DesktopWritesBridge::new(),
+        sync_registry: cognia_companion::sync_registry::SyncTableRegistry::with_defaults(),
+        rate_limiter: cognia_companion::rate_limit::RateLimiter::with_defaults(),
+        push_tokens: cognia_companion::push::PushTokenRegistry::new(),
     })
 }
 
-fn build_router(state: super::super::SharedState) -> Router {
-    use super::super::middleware;
+fn build_router(state: cognia_companion::SharedState) -> Router {
+    use cognia_companion::middleware;
     use axum::{middleware::from_fn_with_state, routing::post};
 
     Router::new()
@@ -385,8 +385,8 @@ fn lan_base_url_is_https_with_the_advertised_port_when_lan_bound() {
         match lan_base_url(bind_lan, None) {
             Some(url) => {
                 assert!(url.starts_with("https://"), "expected https, got {url}");
-                let port = match super::super::advertised_port() {
-                    0 => super::super::server::DEFAULT_PORT,
+                let port = match cognia_companion::advertised_port() {
+                    0 => cognia_companion::server::DEFAULT_PORT,
                     p => p,
                 };
                 assert!(
@@ -396,7 +396,7 @@ fn lan_base_url_is_https_with_the_advertised_port_when_lan_bound() {
             }
             None => {
                 assert!(
-                    crate::companion_api::commands::detect_lan_ip().is_none(),
+                    crate::command_services::detect_lan_ip().is_none(),
                     "lan_base_url returned None despite a routable interface"
                 );
             }
@@ -486,7 +486,7 @@ fn fleet_writes_are_control_gated() {
 
 #[test]
 fn fleet_permission_respond_uses_the_manifest_capability() {
-    let descriptor = super::super::command_manifest::descriptor("fleet_permission_respond")
+    let descriptor = cognia_companion::command_manifest::descriptor("fleet_permission_respond")
         .expect("registered command");
     assert!(!descriptor.capability.is_empty());
     assert!(!canonical_device_has_capability(
@@ -509,13 +509,13 @@ async fn fleet_get_snapshot_read_is_not_control_gated() {
 
 #[tokio::test]
 async fn fleet_get_snapshot_dispatch_returns_the_runtime_snapshot() {
-    let _guard = crate::fleet::TEST_RUNTIME_LOCK.lock().await;
+    let _guard = cognia_fleet::TEST_RUNTIME_LOCK.lock().await;
     // Ingest a uniquely-identified session into the process-global runtime.
     // A unique ppid too: the registry evicts same-pid/new-session rows, and
     // another (unlocked) test ingesting with a shared pid would drop ours.
     let sid = "rpc-fleet-snapshot-001";
-    crate::fleet::runtime().ingest(&crate::fleet::registry::FleetEvent {
-        agent: crate::fleet::registry::FleetAgent::ClaudeCode,
+    cognia_fleet::runtime().ingest(&cognia_fleet::registry::FleetEvent {
+        agent: cognia_fleet::registry::FleetAgent::ClaudeCode,
         event: "SessionStart".into(),
         pid: None,
         ppid: Some(918_273),
@@ -560,7 +560,7 @@ async fn missing_auth_returns_401() {
 async fn service_scope_startup_burst_does_not_consume_device_quota() {
     let state = test_state();
     let context = DeviceContext {
-        device_id: crate::companion_api::jwt::SERVICE_DEVICE_ID.to_string(),
+        device_id: cognia_companion::jwt::SERVICE_DEVICE_ID.to_string(),
         tenant_id: ACCOUNT_ID.to_string(),
         scope: "service".to_string(),
         granted_scopes: Vec::new(),
@@ -595,7 +595,7 @@ async fn command_requiring_app_handle_returns_503_in_test_mode() {
     // `DispatchHost::from_state` consults the process-global headless
     // services slot — hold the shared global-slot lock so a concurrent
     // test's install doesn't turn this 503 into a headless dispatch.
-    let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+    let _guard = cognia_companion::ws_bridge::test_support::lock_slot().await;
     crate::headless::install_headless_services(None);
     let state = test_state(); // app_handle is None
     let router = build_router(state);
@@ -608,19 +608,17 @@ async fn command_requiring_app_handle_returns_503_in_test_mode() {
 
 // ── DispatchHost (ADR-0059 R5) ────────────────────────────────────────────
 
-fn headless_host() -> super::super::dispatch_host::DispatchHost {
-    super::super::dispatch_host::DispatchHost::Headless(
-        crate::headless::HeadlessServices::stub_for_tests(),
-    )
+fn headless_host() -> std::sync::Arc<crate::headless::HeadlessServices> {
+    crate::headless::HeadlessServices::stub_for_tests()
 }
 
-fn headless_host_for_account(local_account_id: &str) -> super::super::dispatch_host::DispatchHost {
+fn headless_host_for_account(local_account_id: &str) -> std::sync::Arc<crate::headless::HeadlessServices> {
     let services = crate::headless::HeadlessServices::stub_for_tests();
     services
         .plugin_runtime
         .activate_account(local_account_id)
         .expect("activate the same plugin account production binds at boot");
-    super::super::dispatch_host::DispatchHost::Headless(services)
+    services
 }
 
 /// Remote supervision of a desktop host's automation engine.
@@ -716,11 +714,11 @@ async fn headless_dispatch_rejects_desktop_automation_consent_commands() {
 /// the degraded SQLite store, no AppHandle anywhere.
 #[tokio::test]
 async fn headless_dispatch_serves_the_data_plane_from_the_store() {
-    use crate::companion_api::store::AppStore;
-    let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-    crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
-    let store = crate::companion_api::store::sqlite::SqliteAppStore::in_memory().expect("open");
-    crate::companion_api::data_plane::install_headless_store(Some(
+    use cognia_companion::store::AppStore;
+    let _guard = cognia_companion::ws_bridge::test_support::lock_slot().await;
+    cognia_companion::ws_bridge::test_support::clear_socket_for_testing();
+    let store = cognia_companion::store::sqlite::SqliteAppStore::in_memory().expect("open");
+    cognia_companion::data_plane::install_headless_store(Some(
         store.clone() as Arc<dyn AppStore>
     ));
 
@@ -759,7 +757,7 @@ async fn headless_dispatch_serves_the_data_plane_from_the_store() {
     assert_eq!(refused.1 .0.code, "malformed_request");
     assert!(refused.1 .0.message.contains("limit"));
 
-    crate::companion_api::data_plane::install_headless_store(None);
+    cognia_companion::data_plane::install_headless_store(None);
 }
 
 /// Process-owned service status is available without a WebView. A fresh
@@ -1042,10 +1040,10 @@ fn agent_control_commands_are_their_own_tier() {
 fn attaching_needs_no_step_up_lease() {
     for name in ["session_attach", "session_detach"] {
         let descriptor =
-            crate::companion_api::command_manifest::descriptor(name).expect("registered");
+            cognia_companion::command_manifest::descriptor(name).expect("registered");
         assert_eq!(
             descriptor.approval,
-            crate::companion_api::command_manifest::CommandApproval::None,
+            cognia_companion::command_manifest::CommandApproval::None,
             "{name} runs on every viewer open and every renewal; a step-up lease cannot gate it"
         );
     }
@@ -1068,14 +1066,14 @@ fn attachment_upload_carries_remote_control_without_a_step_up_lease() {
         "session_attachment_upload_abort",
     ] {
         let descriptor =
-            crate::companion_api::command_manifest::descriptor(name).expect("registered");
+            cognia_companion::command_manifest::descriptor(name).expect("registered");
         assert_eq!(
             descriptor.capability, "workspace.write",
             "{name} moves bytes the Host will hand to a model"
         );
         assert_eq!(
             descriptor.approval,
-            crate::companion_api::command_manifest::CommandApproval::None,
+            cognia_companion::command_manifest::CommandApproval::None,
             "{name} runs hundreds of times per file; a step-up lease cannot gate it"
         );
     }
@@ -1282,21 +1280,21 @@ async fn service_scope_executes_terminal_command_on_the_headless_host() {
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn spawn_arm_enforces_the_policy_and_audits_both_outcomes() {
-    if !crate::external_agent::command_resolver::check_command_exists("node") {
+    if !cognia_external_agent::command_resolver::check_command_exists("node") {
         eprintln!("skip: node not on PATH");
         return;
     }
-    let _audit_guard = crate::companion_api::audit::test_guard();
+    let _audit_guard = cognia_companion::audit::test_guard();
     let state = test_state();
     let tmp = tempfile::tempdir().expect("tempdir");
     let audit_path = tmp.path().join("audit.log");
-    crate::companion_api::audit::install_at_for_testing(Some(audit_path.clone()));
+    cognia_companion::audit::install_at_for_testing(Some(audit_path.clone()));
 
     // Headless services with a smoke-enabled policy + temp workspaces.
     let services = {
-        use crate::claude::host::HeadlessSidecarHost;
-        let event_bus = crate::companion_api::event_bus::EventBus::new();
-        let api_keys = crate::api_key::ApiKeyState::new();
+        use crate::sidecar_runtime::HeadlessSidecarHost;
+        let event_bus = cognia_companion::event_bus::EventBus::new();
+        let api_keys = cognia_secrets::api_key::ApiKeyState::new();
         let sidecar_host = Arc::new(HeadlessSidecarHost::new(
             std::path::PathBuf::from("missing.mjs"),
             Arc::clone(&event_bus),
@@ -1306,12 +1304,12 @@ async fn spawn_arm_enforces_the_policy_and_audits_both_outcomes() {
             sidecar_host,
             api_keys,
             event_bus,
-            crate::external_agent::presets::SpawnPolicy::new(tmp.path().join("workspaces"), true),
+            cognia_external_agent::presets::SpawnPolicy::new(tmp.path().join("workspaces"), true),
             tmp.path().join("plugins"),
         )
         .expect("headless services for the spawn-policy test")
     };
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
 
     // Deny: bash is not allowlisted.
     let err = dispatch(
@@ -1447,7 +1445,7 @@ async fn spawn_arm_enforces_the_policy_and_audits_both_outcomes() {
     );
     assert!(!audit.contains("not for the log"));
 
-    crate::companion_api::audit::install_at_for_testing(None);
+    cognia_companion::audit::install_at_for_testing(None);
 }
 
 #[test]
@@ -1544,7 +1542,7 @@ fn connector_keyring_arms_are_step_up_not_service_only() {
             "{name} must be reachable from a device plane"
         );
         assert!(KNOWN_COMMANDS.contains(&name), "{name} must be allowlisted");
-        let descriptor = crate::companion_api::command_manifest::descriptor(name)
+        let descriptor = cognia_companion::command_manifest::descriptor(name)
             .expect("keyring arm must have a manifest descriptor");
         assert_eq!(descriptor.capability, "host.admin", "{name}");
     }
@@ -1552,7 +1550,7 @@ fn connector_keyring_arms_are_step_up_not_service_only() {
 
 #[test]
 fn managed_desktop_mutations_require_admin_leases_but_observation_does_not() {
-    for name in cognia_companion_rpc::managed_desktops::COMMANDS {
+    for name in crate::managed_desktops::COMMANDS {
         let mutation = matches!(*name,
             "managed_desktop_authorize" | "managed_desktop_prepare_template" |
             "managed_desktop_create" | "managed_desktop_connect" | "managed_desktop_delete" |
@@ -1560,7 +1558,7 @@ fn managed_desktop_mutations_require_admin_leases_but_observation_does_not() {
             "managed_desktop_control_release" | "managed_desktop_control_input");
         assert_eq!(STEP_UP_COMMANDS.contains(name), mutation, "{name}");
         assert!(KNOWN_COMMANDS.contains(name), "{name}");
-        let descriptor = crate::companion_api::command_manifest::descriptor(name).unwrap();
+        let descriptor = cognia_companion::command_manifest::descriptor(name).unwrap();
         assert_eq!(descriptor.capability, if mutation { "host.admin" } else { "host.observe" });
     }
 }
@@ -1570,8 +1568,8 @@ fn managed_desktop_mutations_require_admin_leases_but_observation_does_not() {
 /// observe baseline, and a control open escalates by payload.
 #[test]
 fn remote_desktop_commands_split_observe_from_admin() {
-    use crate::companion_api::command_manifest::{descriptor, CommandApproval, CommandTarget};
-    for name in cognia_companion_rpc::remote_desktops::COMMANDS {
+    use cognia_companion::command_manifest::{descriptor, CommandApproval, CommandTarget};
+    for name in crate::remote_desktops::COMMANDS {
         let admin = matches!(*name,
             "remote_desktop_target_save" | "remote_desktop_target_delete" |
             "remote_desktop_credential_set" | "remote_desktop_target_probe");
@@ -1587,7 +1585,7 @@ fn remote_desktop_commands_split_observe_from_admin() {
         assert!(!is_service_only_command(name), "{name}");
     }
     assert_eq!(
-        crate::companion_api::payload_capability::payload_required_capability(
+        cognia_companion::payload_capability::payload_required_capability(
             "remote_desktop_session_open",
             &serde_json::json!({"mode": "control"})
         ),
@@ -1600,9 +1598,9 @@ async fn managed_desktop_dispatch_refuses_missing_invalid_and_revoked_leases() {
     let state = test_state();
     let host = headless_host();
     let device = "managed-desktop-lease-test";
-    let lease = super::super::admin_lease::issue(device,
+    let lease = cognia_companion::admin_lease::issue(device,
         vec!["managed_desktop_create".into()], Some(600), true).unwrap();
-    super::super::admin_lease::revoke_device(device);
+    cognia_companion::admin_lease::revoke_device(device);
     for token in [None, Some("invalid"), Some(lease.token.as_str())] {
         let mut args = json!({"providerConfigId":"p","quoteId":"q","authorizationId":"a","idempotencyKey":"once"});
         if let Some(token) = token { args["adminLease"] = json!(token); }
@@ -1636,7 +1634,7 @@ fn the_consent_arms_are_not_gated_by_the_lease_they_grant() {
             "{name} must be reachable from a device plane — on a headless host \
              another paired device is the only approver there is"
         );
-        let descriptor = crate::companion_api::command_manifest::descriptor(name)
+        let descriptor = cognia_companion::command_manifest::descriptor(name)
             .expect("consent arm must have a manifest descriptor");
         assert_eq!(descriptor.capability, "host.admin", "{name}");
     }
@@ -1774,7 +1772,7 @@ fn only_the_attachment_listing_sits_in_the_read_tier() {
 async fn connectors_registry_arms_round_trip() {
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
 
     dispatch(
         "connectors_register",
@@ -1839,7 +1837,7 @@ async fn connectors_registry_arms_round_trip() {
 async fn connector_runtime_lease_arms_enforce_one_headless_owner() {
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
 
     let acquire = |owner_id: &'static str| {
         dispatch(
@@ -1904,7 +1902,7 @@ async fn connector_runtime_lease_arms_admit_a_device_principal() {
     // companion both ended up dialing the same bots.
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
 
     assert!(!super::is_service_only_command(
         "connectors_runtime_lease_acquire"
@@ -2051,7 +2049,7 @@ async fn connector_runtime_lease_arms_admit_a_device_principal() {
 async fn connector_runtime_lease_rejects_invalid_input_as_validation_failed() {
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(services);
+    let host = services;
 
     let (status, Json(error)) = dispatch(
         "connectors_runtime_lease_acquire",
@@ -2073,7 +2071,7 @@ async fn connector_runtime_lease_rejects_invalid_input_as_validation_failed() {
 async fn github_workspace_housekeeping_arms_reach_the_headless_host() {
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
     let root = tempfile::TempDir::new().expect("temporary workspace root");
     let workspace = root.path().join("issue-worktree");
     std::fs::create_dir(&workspace).expect("workspace");
@@ -2109,14 +2107,19 @@ async fn github_workspace_housekeeping_arms_reach_the_headless_host() {
 
 // ── Host secrets (ADR-0224 A6) ───────────────────────────────────────────
 
+/// The host-secret store is process-global. A test that compares two list
+/// snapshots must not see another test's write land between them.
+static HOST_SECRET_STORE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// A provider key and a git token set by a paired device come back from the
 /// list as names with their writer, never as values; the service-only load is
 /// the one place a value comes out, and delete removes both.
 #[tokio::test]
 async fn host_secret_arms_seal_attribute_and_never_return_values() {
+    let _store = HOST_SECRET_STORE.lock().await;
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
     let device = |name: &'static str, args: Value| {
         let state = &state;
         let host = &host;
@@ -2205,9 +2208,10 @@ async fn host_secret_arms_seal_attribute_and_never_return_values() {
 /// before anything is stored.
 #[tokio::test]
 async fn host_secret_writes_from_the_service_plane_are_unattributed() {
+    let _store = HOST_SECRET_STORE.lock().await;
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
     dispatch(
         "connectors_keyring_set",
         json!({ "adapterId": "hs-svc", "credential": "botToken", "value": "b" }),
@@ -2246,7 +2250,7 @@ async fn host_secret_writes_from_the_service_plane_are_unattributed() {
 /// returns values never leaves the loopback plane.
 #[test]
 fn host_secret_and_host_configuration_approval_classes_are_pinned() {
-    use crate::companion_api::command_manifest::{descriptor, CommandApproval};
+    use cognia_companion::command_manifest::{descriptor, CommandApproval};
     for name in [
         "host_provider_credential_set",
         "host_provider_credential_delete",
@@ -2290,9 +2294,10 @@ fn host_secret_and_host_configuration_approval_classes_are_pinned() {
 /// read (hermetic via the `cfg(test)` in-memory secret store).
 #[tokio::test]
 async fn connectors_keyring_arms_round_trip_camel_and_snake() {
+    let _store = HOST_SECRET_STORE.lock().await;
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
 
     macro_rules! call {
         ($name:expr, $args:expr $(,)?) => {
@@ -2506,7 +2511,7 @@ async fn remote_notification_protocol_is_bounded_and_event_bus_backed() {
     .expect("publish notification");
     assert_eq!(result["id"], "notification-1");
     match state.event_bus.subscribe(Some(0), 0) {
-        crate::companion_api::event_bus::SubscribeResult::Ok { replay, .. } => {
+        cognia_companion::event_bus::SubscribeResult::Ok { replay, .. } => {
             let event = replay
                 .iter()
                 .find(|event| event.event_type == "notification://remote")
@@ -2551,7 +2556,7 @@ async fn remote_notification_protocol_is_bounded_and_event_bus_backed() {
     .expect("publish with source");
     assert_eq!(result["id"], "notification-2");
     match state.event_bus.subscribe(Some(0), 0) {
-        crate::companion_api::event_bus::SubscribeResult::Ok { replay, .. } => {
+        cognia_companion::event_bus::SubscribeResult::Ok { replay, .. } => {
             let event = replay
                 .iter()
                 .find(|event| event.payload["id"] == "notification-2")
@@ -2576,7 +2581,7 @@ async fn remote_notification_protocol_is_bounded_and_event_bus_backed() {
 
 #[tokio::test]
 async fn plugin_lifecycle_arms_use_the_headless_process_registry() {
-    let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+    let _guard = cognia_companion::ws_bridge::test_support::lock_slot().await;
     let state = test_state();
     let host = headless_host();
     let mut plugin_events = match host
@@ -2585,8 +2590,8 @@ async fn plugin_lifecycle_arms_use_the_headless_process_registry() {
         .event_bus
         .subscribe(None, 0)
     {
-        crate::companion_api::event_bus::SubscribeResult::Ok { receiver, .. } => receiver,
-        crate::companion_api::event_bus::SubscribeResult::ResyncRequired => {
+        cognia_companion::event_bus::SubscribeResult::Ok { receiver, .. } => receiver,
+        cognia_companion::event_bus::SubscribeResult::ResyncRequired => {
             panic!("fresh plugin event subscription must not require resync")
         }
     };
@@ -2777,7 +2782,7 @@ async fn wasm_runtime_arms_use_the_headless_process_registry() {
     )
     .await
     .expect("set plugin status");
-    assert!(crate::plugin_api::lifecycle::plugin_get_all_for_state(
+    assert!(cognia_plugin_runtime::lifecycle::plugin_get_all_for_state(
         services.plugin_runtime.as_ref()
     )
     .await
@@ -2811,8 +2816,8 @@ async fn plugin_api_facade_uses_the_headless_gateway_and_capabilities() {
     std::fs::create_dir_all(&plugin_dir).expect("create native plugin root");
     services.plugin_runtime.plugins.write().insert(
         plugin_id.clone(),
-        crate::plugin_api::PluginRecord {
-            snapshot: crate::plugin_api::PluginRuntimeSnapshot {
+        cognia_plugin_runtime::PluginRecord {
+            snapshot: cognia_plugin_runtime::PluginRuntimeSnapshot {
                 plugin_id: plugin_id.clone(),
                 version: "1.0.0".into(),
                 status: "loaded".into(),
@@ -3049,7 +3054,7 @@ def helper(a, b):
 async fn vscode_runtime_arms_use_the_headless_process_registry() {
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
     let plugin_id = format!("rpc-vscode-{}", uuid::Uuid::new_v4());
     let plugin_dir = services.plugin_runtime.plugin_dir(&plugin_id);
     std::fs::create_dir_all(plugin_dir.join("out")).expect("create VS Code plugin root");
@@ -3104,7 +3109,7 @@ rl.on("line", (line) => {
         .vscode_plugins
         .sidecars
         .read()
-        .contains_key(crate::plugin_api::vscode::commands::LSP_HOST_KEY));
+        .contains_key(cognia_plugin_runtime::vscode::commands::LSP_HOST_KEY));
     assert_eq!(
         call!(
             "lsp_host_request",
@@ -3172,7 +3177,7 @@ rl.on("line", (line) => {
     call!(
         "plugin_unload_vscode",
         json!({
-            "pluginId": crate::plugin_api::vscode::commands::LSP_HOST_KEY,
+            "pluginId": cognia_plugin_runtime::vscode::commands::LSP_HOST_KEY,
             "generation": "system",
         })
     )
@@ -3187,7 +3192,7 @@ rl.on("line", (line) => {
 async fn connectors_health_reports_the_headless_ingress() {
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
 
     dispatch(
         "connectors_register",
@@ -3226,7 +3231,7 @@ async fn connectors_health_reports_the_headless_ingress() {
 async fn integration_ingress_uses_the_headless_workflow_state() {
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
     let route_id = format!("route-{}", uuid::Uuid::new_v4());
     let input = json!({
         "routeId": route_id,
@@ -3295,7 +3300,7 @@ async fn integration_ingress_uses_the_headless_workflow_state() {
 async fn workflow_mirror_commands_serve_the_headless_workflow_state() {
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
     let run_id = format!("run_mirror_{}", uuid::Uuid::new_v4().simple());
     let persist = json!({
         "input": {
@@ -3418,11 +3423,11 @@ async fn workflow_mirror_commands_serve_the_headless_workflow_state() {
 async fn headless_approval_rpc_never_answers_from_the_local_mirror() {
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
     services
         .workflow
         .mirror
-        .create_waitpoint(&crate::workflow::types::WorkflowWaitpointRow {
+        .create_waitpoint(&cognia_scheduling::workflow::types::WorkflowWaitpointRow {
             id: "approval-1".into(),
             kind: "approval".into(),
             status: "pending".into(),
@@ -3482,7 +3487,7 @@ async fn headless_approval_rpc_never_answers_from_the_local_mirror() {
 async fn connectors_http_request_rejects_malformed_args() {
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
 
     let err = dispatch(
         "connectors_http_request",
@@ -3503,7 +3508,7 @@ async fn connectors_http_request_rejects_malformed_args() {
 async fn headless_matrix_crypto_close_reaches_the_shared_native_session_store() {
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
-    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let host = Arc::clone(&services);
 
     let result = dispatch(
         "connectors_matrix_crypto_close",
@@ -3525,9 +3530,9 @@ async fn headless_matrix_crypto_close_reaches_the_shared_native_session_store() 
 /// resolved delta).
 #[tokio::test]
 async fn headless_sync_pull_routes_through_the_connected_brain() {
-    let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
+    let _guard = cognia_companion::ws_bridge::test_support::lock_slot().await;
     let state = test_state();
-    let mut rx = crate::companion_api::ws_bridge::test_support::install_socket_for_testing(&state);
+    let mut rx = cognia_companion::ws_bridge::test_support::install_socket_for_testing(&state);
 
     let dispatch_task = {
         let state = Arc::clone(&state);
@@ -3562,7 +3567,7 @@ async fn headless_sync_pull_routes_through_the_connected_brain() {
     // Respond exactly as ws_bridge::route_respond would.
     state
         .sync_bridge
-        .resolve(crate::companion_api::sync_bridge::SyncPullResponse {
+        .resolve(cognia_companion::sync_bridge::SyncPullResponse {
             request_id,
             delta: Some(json!({ "rows": [] })),
             error: None,
@@ -3574,7 +3579,7 @@ async fn headless_sync_pull_routes_through_the_connected_brain() {
         .expect("sync_pull must succeed via the brain");
     assert_eq!(result, json!({ "rows": [] }));
 
-    crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
+    cognia_companion::ws_bridge::test_support::clear_socket_for_testing();
 }
 
 // ── Malformed args → 400 ──────────────────────────────────────────────────
@@ -3621,17 +3626,17 @@ async fn idempotency_cache_hit_returns_cached_body() {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
         renderer: None,
-        runtime: crate::companion_api::runtime::unwired(),
+        runtime: cognia_companion::runtime::unwired(),
         idempotency: cache,
-        event_bus: crate::companion_api::event_bus::EventBus::new(),
-        sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+        event_bus: cognia_companion::event_bus::EventBus::new(),
+        sync_bridge: cognia_companion::sync_bridge::SyncBridge::new(),
         desktop_messages_bridge:
-            crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            cognia_companion::desktop_messages_bridge::DesktopMessagesBridge::new(),
         desktop_writes_bridge:
-            crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-        sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-        rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-        push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
+            cognia_companion::desktop_writes_bridge::DesktopWritesBridge::new(),
+        sync_registry: cognia_companion::sync_registry::SyncTableRegistry::with_defaults(),
+        rate_limiter: cognia_companion::rate_limit::RateLimiter::with_defaults(),
+        push_tokens: cognia_companion::push::PushTokenRegistry::new(),
     });
 
     let router = build_router(state);
@@ -3668,17 +3673,17 @@ async fn different_idempotency_keys_run_independently() {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
         renderer: None,
-        runtime: crate::companion_api::runtime::unwired(),
+        runtime: cognia_companion::runtime::unwired(),
         idempotency: cache,
-        event_bus: crate::companion_api::event_bus::EventBus::new(),
-        sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+        event_bus: cognia_companion::event_bus::EventBus::new(),
+        sync_bridge: cognia_companion::sync_bridge::SyncBridge::new(),
         desktop_messages_bridge:
-            crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            cognia_companion::desktop_messages_bridge::DesktopMessagesBridge::new(),
         desktop_writes_bridge:
-            crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-        sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-        rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-        push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
+            cognia_companion::desktop_writes_bridge::DesktopWritesBridge::new(),
+        sync_registry: cognia_companion::sync_registry::SyncTableRegistry::with_defaults(),
+        rate_limiter: cognia_companion::rate_limit::RateLimiter::with_defaults(),
+        push_tokens: cognia_companion::push::PushTokenRegistry::new(),
     });
     let jwt = device_jwt("dev2");
 
@@ -3710,17 +3715,17 @@ async fn read_only_commands_skip_cache() {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
         renderer: None,
-        runtime: crate::companion_api::runtime::unwired(),
+        runtime: cognia_companion::runtime::unwired(),
         idempotency: Arc::clone(&cache),
-        event_bus: crate::companion_api::event_bus::EventBus::new(),
-        sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+        event_bus: cognia_companion::event_bus::EventBus::new(),
+        sync_bridge: cognia_companion::sync_bridge::SyncBridge::new(),
         desktop_messages_bridge:
-            crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            cognia_companion::desktop_messages_bridge::DesktopMessagesBridge::new(),
         desktop_writes_bridge:
-            crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-        sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-        rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-        push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
+            cognia_companion::desktop_writes_bridge::DesktopWritesBridge::new(),
+        sync_registry: cognia_companion::sync_registry::SyncTableRegistry::with_defaults(),
+        rate_limiter: cognia_companion::rate_limit::RateLimiter::with_defaults(),
+        push_tokens: cognia_companion::push::PushTokenRegistry::new(),
     });
 
     let router = build_router(state);
@@ -3771,17 +3776,17 @@ async fn expired_idempotency_key_causes_re_execution() {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
         renderer: None,
-        runtime: crate::companion_api::runtime::unwired(),
+        runtime: cognia_companion::runtime::unwired(),
         idempotency: cache,
-        event_bus: crate::companion_api::event_bus::EventBus::new(),
-        sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+        event_bus: cognia_companion::event_bus::EventBus::new(),
+        sync_bridge: cognia_companion::sync_bridge::SyncBridge::new(),
         desktop_messages_bridge:
-            crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            cognia_companion::desktop_messages_bridge::DesktopMessagesBridge::new(),
         desktop_writes_bridge:
-            crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-        sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-        rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-        push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
+            cognia_companion::desktop_writes_bridge::DesktopWritesBridge::new(),
+        sync_registry: cognia_companion::sync_registry::SyncTableRegistry::with_defaults(),
+        rate_limiter: cognia_companion::rate_limit::RateLimiter::with_defaults(),
+        push_tokens: cognia_companion::push::PushTokenRegistry::new(),
     });
 
     let router = build_router(state);
@@ -3836,7 +3841,7 @@ fn every_known_command_has_a_dispatch_arm() {
         // browser gateway before the general match table. Treat that
         // gateway as a real dispatch arm instead of reporting the entire
         // family as a false-positive runtime 404.
-        .filter(|cmd| !crate::companion_api::browser_gateway::is_browser_rpc(cmd))
+        .filter(|cmd| !cognia_companion::browser_gateway::is_browser_rpc(cmd))
         .filter(|cmd| !body.contains(&format!("\"{cmd}\"")))
         .collect();
 
@@ -4117,7 +4122,7 @@ async fn dispatch_coverage_session_list() {
 
 #[tokio::test]
 async fn direct_message_mutations_publish_the_transcript_revision_shape() {
-    use crate::companion_api::{
+    use cognia_companion::{
         data_plane::DataPlane,
         event_bus::SubscribeResult,
         store::{sqlite::SqliteAppStore, AppStore},
@@ -4215,17 +4220,17 @@ async fn session_list_skips_idempotency_cache() {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
         renderer: None,
-        runtime: crate::companion_api::runtime::unwired(),
+        runtime: cognia_companion::runtime::unwired(),
         idempotency: Arc::clone(&cache),
-        event_bus: crate::companion_api::event_bus::EventBus::new(),
-        sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+        event_bus: cognia_companion::event_bus::EventBus::new(),
+        sync_bridge: cognia_companion::sync_bridge::SyncBridge::new(),
         desktop_messages_bridge:
-            crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            cognia_companion::desktop_messages_bridge::DesktopMessagesBridge::new(),
         desktop_writes_bridge:
-            crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-        sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-        rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-        push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
+            cognia_companion::desktop_writes_bridge::DesktopWritesBridge::new(),
+        sync_registry: cognia_companion::sync_registry::SyncTableRegistry::with_defaults(),
+        rate_limiter: cognia_companion::rate_limit::RateLimiter::with_defaults(),
+        push_tokens: cognia_companion::push::PushTokenRegistry::new(),
     });
 
     let router = build_router(state);
@@ -4984,17 +4989,17 @@ async fn app_settings_update_rejects_unknown_key() {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
         renderer: None,
-        runtime: crate::companion_api::runtime::unwired(),
+        runtime: cognia_companion::runtime::unwired(),
         idempotency: Arc::clone(&cache),
-        event_bus: crate::companion_api::event_bus::EventBus::new(),
-        sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+        event_bus: cognia_companion::event_bus::EventBus::new(),
+        sync_bridge: cognia_companion::sync_bridge::SyncBridge::new(),
         desktop_messages_bridge:
-            crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            cognia_companion::desktop_messages_bridge::DesktopMessagesBridge::new(),
         desktop_writes_bridge:
-            crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-        sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-        rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-        push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
+            cognia_companion::desktop_writes_bridge::DesktopWritesBridge::new(),
+        sync_registry: cognia_companion::sync_registry::SyncTableRegistry::with_defaults(),
+        rate_limiter: cognia_companion::rate_limit::RateLimiter::with_defaults(),
+        push_tokens: cognia_companion::push::PushTokenRegistry::new(),
     });
 
     let router = build_router(state);
@@ -5038,17 +5043,17 @@ async fn app_settings_update_accepts_color_theme_key() {
         secret: RwLock::new(SECRET.to_vec()),
         deny_list: Arc::new(DenyList::new()),
         renderer: None,
-        runtime: crate::companion_api::runtime::unwired(),
+        runtime: cognia_companion::runtime::unwired(),
         idempotency: Arc::clone(&cache),
-        event_bus: crate::companion_api::event_bus::EventBus::new(),
-        sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+        event_bus: cognia_companion::event_bus::EventBus::new(),
+        sync_bridge: cognia_companion::sync_bridge::SyncBridge::new(),
         desktop_messages_bridge:
-            crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            cognia_companion::desktop_messages_bridge::DesktopMessagesBridge::new(),
         desktop_writes_bridge:
-            crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-        sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-        rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-        push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
+            cognia_companion::desktop_writes_bridge::DesktopWritesBridge::new(),
+        sync_registry: cognia_companion::sync_registry::SyncTableRegistry::with_defaults(),
+        rate_limiter: cognia_companion::rate_limit::RateLimiter::with_defaults(),
+        push_tokens: cognia_companion::push::PushTokenRegistry::new(),
     });
 
     let router = build_router(state);
@@ -5177,7 +5182,7 @@ fn command_families_cover_known_non_browser_commands_once() {
     let expected: std::collections::HashSet<_> = KNOWN_COMMANDS
         .iter()
         .copied()
-        .filter(|name| !super::super::browser_gateway::is_browser_rpc(name))
+        .filter(|name| !cognia_companion::browser_gateway::is_browser_rpc(name))
         .collect();
     let missing: Vec<_> = expected.difference(&unique).copied().collect();
     assert!(missing.is_empty(), "unrouted known commands: {missing:?}");
@@ -5209,12 +5214,12 @@ fn execution_run_detail_is_read_only_and_scoped_to_agent_authority() {
     assert!(READ_ONLY_COMMANDS.contains(&"execution_run_detail"));
     assert!(!CONTROL_COMMANDS.contains(&"execution_run_detail"));
     assert!(data_sync::COMMANDS.contains(&"execution_run_detail"));
-    let descriptor = crate::companion_api::command_manifest::descriptor("execution_run_detail")
+    let descriptor = cognia_companion::command_manifest::descriptor("execution_run_detail")
         .expect("run detail must have a manifest descriptor");
     assert_eq!(descriptor.capability, "agent.run");
     assert_eq!(
         descriptor.target,
-        crate::companion_api::command_manifest::CommandTarget::Execution
+        cognia_companion::command_manifest::CommandTarget::Execution
     );
 }
 
@@ -5224,7 +5229,7 @@ fn run_approval_commands_are_lease_free_and_bound_to_the_device() {
     // a paired chat's permission request. No admin lease (a headless host has
     // nobody to approve one), the Control grant's `agent.run`, and the
     // approver is the authenticated device, never one the payload names.
-    use crate::companion_api::command_manifest::{descriptor, CommandApproval, CommandTarget};
+    use cognia_companion::command_manifest::{descriptor, CommandApproval, CommandTarget};
     for command in [
         "execution_run_approval_list",
         "execution_run_approval_respond",
@@ -5273,12 +5278,12 @@ fn router_fusion_companion_commands_are_classified_and_bound_to_the_device() {
             CALLER_DEVICE_ID_COMMANDS.contains(command),
             "{command} must bind callerDeviceId"
         );
-        let descriptor = crate::companion_api::command_manifest::descriptor(command)
+        let descriptor = cognia_companion::command_manifest::descriptor(command)
             .expect("companion Router + Fusion commands have a manifest descriptor");
         assert_eq!(descriptor.capability, "agent.run");
         assert_eq!(
             descriptor.target,
-            crate::companion_api::command_manifest::CommandTarget::Execution
+            cognia_companion::command_manifest::CommandTarget::Execution
         );
         let bound = inject_caller_device_id(
             command,
@@ -5300,11 +5305,11 @@ fn bot_lifecycle_commands_require_workspace_write_authority() {
     for command in ["bot_console_read", "bot_installation_mutate"] {
         assert!(KNOWN_COMMANDS.contains(&command));
         assert!(data_sync::COMMANDS.contains(&command));
-        let descriptor = crate::companion_api::command_manifest::descriptor(command).unwrap();
+        let descriptor = cognia_companion::command_manifest::descriptor(command).unwrap();
         assert_eq!(descriptor.capability, "workspace.write");
         assert_eq!(
             descriptor.target,
-            crate::companion_api::command_manifest::CommandTarget::Execution
+            cognia_companion::command_manifest::CommandTarget::Execution
         );
     }
     assert!(READ_ONLY_COMMANDS.contains(&"bot_console_read"));
@@ -5347,25 +5352,25 @@ fn pet_remote_care_commands_are_bridged_and_bind_the_caller() {
             "verified-device",
         );
         assert_eq!(bound["callerDeviceId"], json!("verified-device"));
-        let descriptor = crate::companion_api::command_manifest::descriptor(command)
+        let descriptor = cognia_companion::command_manifest::descriptor(command)
             .expect("pet commands have a manifest descriptor");
         assert_eq!(
             descriptor.target,
-            crate::companion_api::command_manifest::CommandTarget::Execution
+            cognia_companion::command_manifest::CommandTarget::Execution
         );
     }
     // The runtime reads idempotency caching and the rate-limit class from the
     // generated manifest, so pin that, not just the legacy test arrays.
-    use crate::companion_api::command_manifest::{CommandIdempotency, CommandOperation};
+    use cognia_companion::command_manifest::{CommandIdempotency, CommandOperation};
     for command in reads {
         assert!(READ_ONLY_COMMANDS_SET.contains(command), "{command} reads");
-        let descriptor = crate::companion_api::command_manifest::descriptor(command).unwrap();
+        let descriptor = cognia_companion::command_manifest::descriptor(command).unwrap();
         assert_eq!(descriptor.capability, "client.read");
         assert_eq!(descriptor.operation, CommandOperation::Read, "{command} reads");
     }
     for command in writes {
         assert!(!READ_ONLY_COMMANDS_SET.contains(command), "{command} writes");
-        let descriptor = crate::companion_api::command_manifest::descriptor(command).unwrap();
+        let descriptor = cognia_companion::command_manifest::descriptor(command).unwrap();
         assert_eq!(descriptor.capability, "client.write");
         assert_ne!(descriptor.operation, CommandOperation::Read, "{command} writes");
         // A retried care action must replay its first answer, never run twice.
@@ -5411,7 +5416,7 @@ fn files_library_commands_are_bridged_and_bind_the_caller() {
         "files_library_upload_commit",
         "files_library_upload_abort",
     ];
-    use crate::companion_api::command_manifest::{CommandIdempotency, CommandOperation};
+    use cognia_companion::command_manifest::{CommandIdempotency, CommandOperation};
     for command in reads.iter().chain(writes.iter()) {
         assert!(KNOWN_COMMANDS.contains(command), "{command} is known");
         assert!(data_sync::COMMANDS.contains(command), "{command} is bridged");
@@ -5429,23 +5434,23 @@ fn files_library_commands_are_bridged_and_bind_the_caller() {
             "verified-device",
         );
         assert_eq!(bound["callerDeviceId"], json!("verified-device"));
-        let descriptor = crate::companion_api::command_manifest::descriptor(command)
+        let descriptor = cognia_companion::command_manifest::descriptor(command)
             .expect("files library commands have a manifest descriptor");
         assert_eq!(
             descriptor.target,
-            crate::companion_api::command_manifest::CommandTarget::Execution
+            cognia_companion::command_manifest::CommandTarget::Execution
         );
     }
     for command in reads {
         assert!(READ_ONLY_COMMANDS_SET.contains(command), "{command} reads");
         assert!(READ_ONLY_COMMANDS.contains(&command), "{command} skips the cache");
-        let descriptor = crate::companion_api::command_manifest::descriptor(command).unwrap();
+        let descriptor = cognia_companion::command_manifest::descriptor(command).unwrap();
         assert_eq!(descriptor.capability, "client.read");
         assert_eq!(descriptor.operation, CommandOperation::Read, "{command} reads");
     }
     for command in writes {
         assert!(!READ_ONLY_COMMANDS_SET.contains(command), "{command} writes");
-        let descriptor = crate::companion_api::command_manifest::descriptor(command).unwrap();
+        let descriptor = cognia_companion::command_manifest::descriptor(command).unwrap();
         assert_eq!(descriptor.capability, "client.write");
         assert_ne!(descriptor.operation, CommandOperation::Read, "{command} writes");
         // A retried move, Trash or upload must replay its first answer.
@@ -5468,7 +5473,7 @@ fn files_library_commands_are_bridged_and_bind_the_caller() {
 /// lease; the requests are scoped to nothing on the device.
 #[test]
 fn glance_commands_are_bridged_observe_reads_and_one_settings_write() {
-    use crate::companion_api::command_manifest::{
+    use cognia_companion::command_manifest::{
         descriptor, CommandIdempotency, CommandOperation, CommandTarget,
     };
     let reads = ["glance_subscribe", "glance_request"];

@@ -11,7 +11,7 @@
 
 use super::*;
 
-pub(super) use crate::sftp_service::COMMANDS;
+pub(super) use cognia_terminal::sftp_service::COMMANDS;
 
 /// Which status an SFTP failure deserves.
 ///
@@ -20,7 +20,9 @@ pub(super) use crate::sftp_service::COMMANDS;
 /// is the caller's mistake. A machine that could not be dialled is a gateway
 /// failure and worth retrying. Everything else is the remote machine having
 /// been reached and having said no, which is neither.
-fn to_rpc_error(failure: crate::sftp_service::SftpFailure) -> (StatusCode, Json<RpcError>) {
+fn to_rpc_error(
+    failure: cognia_terminal::sftp_service::SftpFailure,
+) -> (StatusCode, Json<RpcError>) {
     let status = match failure.code.as_str() {
         "sftp_invalid_request" | "unknown_command" => StatusCode::BAD_REQUEST,
         "sftp_connect_failed" => StatusCode::BAD_GATEWAY,
@@ -36,7 +38,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     scope: Option<&str>,
@@ -62,7 +64,7 @@ mod tests {
     /// which is the difference between a retry, a reconnect and a stop.
     #[test]
     fn each_failure_reaches_the_status_its_situation_deserves() {
-        use crate::sftp_service::SftpFailure;
+        use cognia_terminal::sftp_service::SftpFailure;
 
         let status_of = |code: &str| to_rpc_error(SftpFailure::new(code, "why")).0;
         assert_eq!(status_of("sftp_invalid_request"), StatusCode::BAD_REQUEST);
@@ -83,7 +85,7 @@ mod tests {
 
     #[test]
     fn the_message_survives_the_mapping() {
-        use crate::sftp_service::SftpFailure;
+        use cognia_terminal::sftp_service::SftpFailure;
 
         // `classifyFileTreeFailure` reads this text, because an SFTP server
         // already says "Permission denied" in words the renderer can classify.

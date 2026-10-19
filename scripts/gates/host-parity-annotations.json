@@ -537,7 +537,7 @@
       "side": "desktop-only",
       "reason": "Reads the local desktop AutomationState audit trail of OS input automation. There is no OS automation engine or corresponding audit state on a headless host.",
       "implementation": "crates/cognia-automation/src/automation/commands.rs",
-      "test": "src-tauri/src/companion_api/rpc/tests.rs",
+      "test": "crates/cognia-companion-rpc/src/rpc/tests.rs",
       "testName": "headless_dispatch_rejects_desktop_automation_consent_commands"
     },
     "automation_kill_switch": {
@@ -545,7 +545,7 @@
       "side": "desktop-only",
       "reason": "Stops the local desktop automation engine via kill_switch::engage and AppHandle, including pending OS input and desktop consent. A remote device may halt its paired desktop, but a headless host has no such engine.",
       "implementation": "crates/cognia-automation/src/automation/commands.rs",
-      "test": "src-tauri/src/companion_api/rpc/tests.rs",
+      "test": "crates/cognia-companion-rpc/src/rpc/tests.rs",
       "testName": "headless_dispatch_rejects_desktop_automation_consent_commands"
     },
     "automation_kill_switch_engaged": {
@@ -553,7 +553,7 @@
       "side": "desktop-only",
       "reason": "Reads the desktop OS automation emergency-stop gate. Returning false on a headless host would invent the state of an engine that does not exist there.",
       "implementation": "crates/cognia-automation/src/automation/commands.rs",
-      "test": "src-tauri/src/companion_api/rpc/tests.rs",
+      "test": "crates/cognia-companion-rpc/src/rpc/tests.rs",
       "testName": "headless_dispatch_rejects_desktop_automation_consent_commands"
     },
     "automation_settings_get": {
@@ -561,7 +561,7 @@
       "side": "desktop-only",
       "reason": "Reads the desktop AutomationState permission gate for accessibility/input automation. Headless hosts have no desktop automation permission surface to configure.",
       "implementation": "crates/cognia-automation/src/automation/commands.rs",
-      "test": "src-tauri/src/companion_api/rpc/tests.rs",
+      "test": "crates/cognia-companion-rpc/src/rpc/tests.rs",
       "testName": "headless_dispatch_rejects_desktop_automation_consent_commands"
     }
   }

@@ -2,7 +2,7 @@
 //! (ADR-0182, ADR-0183).
 //!
 //! The reads and writes themselves live in
-//! [`crate::companion_api::environment_pool`], beside the wire types they
+//! [`cognia_companion::environment_pool`], beside the wire types they
 //! answer with. This file is the dispatch face: argument names, the
 //! authority question, the audit record, and the refusal shapes.
 //!
@@ -11,7 +11,7 @@
 //! An approval is the act that lets a repository's own image run agents with
 //! this tenant's workspaces mounted, so the authority question is not "can
 //! this device reach the plane" but "is this person a maintainer of this
-//! workspace". [`crate::companion_api::workspace_access`] asks the
+//! workspace". [`cognia_companion::workspace_access`] asks the
 //! collaboration server; its `host_owner` covers the case it cannot see — a
 //! single-tenant deployment whose one person is the owner principal.
 //!
@@ -23,12 +23,12 @@ use cognia_environment::approval::{ApprovalRequest, EgressGrantRequest};
 use cognia_environment::catalog::CatalogEntry;
 
 use super::*;
-use crate::companion_api::environment_pool::{self as pool, EnvironmentServiceError, PoolServices};
-use crate::companion_api::sandbox_previews::{self, CreateSandboxPreview};
-use crate::companion_api::sandbox_snapshots::{
+use cognia_companion::environment_pool::{self as pool, EnvironmentServiceError, PoolServices};
+use cognia_companion::sandbox_previews::{self, CreateSandboxPreview};
+use cognia_companion::sandbox_snapshots::{
     self, CreateSandboxSnapshot, ForkSandboxSnapshot, RestoreSandboxSnapshot,
 };
-use crate::companion_api::workspace_access::{
+use cognia_companion::workspace_access::{
     acting_person, require_approval_authority, require_environment_authority,
 };
 
@@ -42,7 +42,7 @@ const LOCAL_PREVIEW_COMMANDS: &[&str] = &[
     "sandbox_preview_open",
 ];
 
-pub(super) const COMMANDS: &[&str] = &[
+pub const COMMANDS: &[&str] = &[
     "sandbox_preview_context",
     "sandbox_preview_create",
     "sandbox_preview_list",
@@ -189,7 +189,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     scope: Option<&str>,
@@ -211,10 +211,11 @@ const LOCAL_DEVICE: &str = "local";
 /// its brain reads the catalog, the driver status and the declarations
 /// through the same `environment_*` names. Locally those are this one
 /// command, answering through the same arms a paired client reaches, so the
-/// two can never disagree; the person at the desktop is its host owner.
-#[tauri::command]
-pub async fn environment_local_call(
-    app: tauri::AppHandle,
+/// two can never disagree; the person at the desktop is its host owner. The
+/// desktop's `#[tauri::command]` shells over this live in
+/// `app_lib::companion_api::environment_commands`.
+pub async fn local_call(
+    host: std::sync::Arc<dyn RpcHost>,
     name: String,
     args: Option<Value>,
 ) -> Result<Value, RpcError> {
@@ -231,7 +232,6 @@ pub async fn environment_local_call(
     // pool, driving its async parts (registry, driver) from there.
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
-        let host = super::super::dispatch_host::DispatchHost::Tauri(app);
         if LOCAL_PREVIEW_COMMANDS.contains(&name.as_str()) {
             return runtime.block_on(dispatch_local_preview(
                 &name,
@@ -241,7 +241,7 @@ pub async fn environment_local_call(
         runtime.block_on(dispatch_arm(
             &name,
             args.unwrap_or_else(|| Value::Object(Default::default())),
-            &host,
+            host.as_ref(),
             LOCAL_DEVICE,
             None,
             None,
@@ -349,7 +349,7 @@ async fn dispatch_local_preview(
 async fn dispatch_arm(
     name: &str,
     args: Value,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     scope: Option<&str>,
@@ -486,7 +486,7 @@ async fn dispatch_arm(
             let updating = name.ends_with("update");
             let written = pool::write_catalog_entry(&services, entry, updating, unix_time_secs())
                 .map_err(|e| served(name, e))?;
-            super::super::audit::record_async(
+            cognia_companion::audit::record_async(
                 "environment_catalog_write",
                 device_id,
                 scope.unwrap_or(""),
@@ -508,7 +508,7 @@ async fn dispatch_arm(
                 .admission
                 .with_store(|store| store.revoke_tenant_entry(&id, unix_time_secs()))
                 .map_err(|error| served(name, error.into()))?;
-            super::super::audit::record_async(
+            cognia_companion::audit::record_async(
                 "environment_catalog_write",
                 device_id,
                 scope.unwrap_or(""),
@@ -623,7 +623,7 @@ async fn dispatch_arm(
                 .admission
                 .with_store(|store| store.record_approval(&record))
                 .map_err(|error| served(name, error.into()))?;
-            super::super::audit::record_async(
+            cognia_companion::audit::record_async(
                 "environment_approval",
                 device_id,
                 scope.unwrap_or(""),
@@ -663,7 +663,7 @@ async fn dispatch_arm(
                 .admission
                 .with_store(|store| store.revoke_approval(&id, &revoked_by, unix_time_secs()))
                 .map_err(|error| served(name, error.into()))?;
-            super::super::audit::record_async(
+            cognia_companion::audit::record_async(
                 "environment_approval",
                 device_id,
                 scope.unwrap_or(""),
@@ -689,7 +689,7 @@ async fn dispatch_arm(
                 .admission
                 .with_store(|store| store.record_egress_grant(&grant))
                 .map_err(|error| served(name, error.into()))?;
-            super::super::audit::record_async(
+            cognia_companion::audit::record_async(
                 "environment_egress_grant",
                 device_id,
                 scope.unwrap_or(""),
@@ -729,7 +729,7 @@ async fn dispatch_arm(
                 .admission
                 .with_store(|store| store.revoke_egress_grant(&id, unix_time_secs()))
                 .map_err(|error| served(name, error.into()))?;
-            super::super::audit::record_async(
+            cognia_companion::audit::record_async(
                 "environment_egress_grant",
                 device_id,
                 scope.unwrap_or(""),
@@ -876,7 +876,7 @@ mod tests {
     /// like one with an empty catalog.
     #[test]
     fn every_command_refuses_with_the_switch_when_the_pool_is_off() {
-        crate::companion_api::environment_pool::uninstall();
+        cognia_companion::environment_pool::uninstall();
         for command in COMMANDS {
             let (status, body) = refusal(services(command), "the pool is off");
             assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{command}");
@@ -918,163 +918,4 @@ mod tests {
         );
         assert_eq!(status, StatusCode::NOT_FOUND);
     }
-}
-
-/// Named IPC shells share the companion authority and dispatch implementation.
-#[tauri::command]
-pub async fn sandbox_snapshot_create(
-    app: tauri::AppHandle,
-    request: CreateSandboxSnapshot,
-) -> Result<Value, RpcError> {
-    environment_local_call(
-        app,
-        "sandbox_snapshot_create".into(),
-        Some(serde_json::json!({"request": request})),
-    )
-    .await
-}
-#[tauri::command]
-pub async fn sandbox_snapshot_list(
-    app: tauri::AppHandle,
-    project_id: String,
-    page_size: Option<u32>,
-    page_token: Option<String>,
-) -> Result<Value, RpcError> {
-    environment_local_call(
-        app,
-        "sandbox_snapshot_list".into(),
-        Some(serde_json::json!({"projectId": project_id, "pageSize": page_size, "pageToken": page_token})),
-    )
-    .await
-}
-#[tauri::command]
-pub async fn sandbox_snapshot_get(
-    app: tauri::AppHandle,
-    snapshot_id: String,
-) -> Result<Value, RpcError> {
-    environment_local_call(
-        app,
-        "sandbox_snapshot_get".into(),
-        Some(serde_json::json!({"snapshotId": snapshot_id})),
-    )
-    .await
-}
-#[tauri::command]
-pub async fn sandbox_snapshot_delete(
-    app: tauri::AppHandle,
-    snapshot_id: String,
-) -> Result<Value, RpcError> {
-    environment_local_call(
-        app,
-        "sandbox_snapshot_delete".into(),
-        Some(serde_json::json!({"snapshotId": snapshot_id})),
-    )
-    .await
-}
-#[tauri::command]
-pub async fn sandbox_snapshot_pin(
-    app: tauri::AppHandle,
-    snapshot_id: String,
-    pinned: bool,
-) -> Result<Value, RpcError> {
-    environment_local_call(
-        app,
-        "sandbox_snapshot_pin".into(),
-        Some(serde_json::json!({"snapshotId": snapshot_id, "pinned": pinned})),
-    )
-    .await
-}
-#[tauri::command]
-pub async fn sandbox_snapshot_fork(
-    app: tauri::AppHandle,
-    request: ForkSandboxSnapshot,
-) -> Result<Value, RpcError> {
-    environment_local_call(
-        app,
-        "sandbox_snapshot_fork".into(),
-        Some(serde_json::json!({"request": request})),
-    )
-    .await
-}
-#[tauri::command]
-pub async fn sandbox_snapshot_restore(
-    app: tauri::AppHandle,
-    request: RestoreSandboxSnapshot,
-) -> Result<Value, RpcError> {
-    environment_local_call(
-        app,
-        "sandbox_snapshot_restore".into(),
-        Some(serde_json::json!({"request": request})),
-    )
-    .await
-}
-
-/// Desktop-local shells bypass remote dispatch. The loopback service contract
-/// also forbids receipts for create/open: capability plaintext is never stored.
-#[tauri::command]
-pub async fn sandbox_preview_create(
-    app: tauri::AppHandle,
-    request: CreateSandboxPreview,
-) -> Result<Value, RpcError> {
-    environment_local_call(
-        app,
-        "sandbox_preview_create".into(),
-        Some(serde_json::json!({"request": request})),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn sandbox_preview_list(
-    app: tauri::AppHandle,
-    project_id: String,
-    workspace_id: Option<String>,
-    page_size: Option<u32>,
-    page_token: Option<String>,
-) -> Result<Value, RpcError> {
-    environment_local_call(
-        app,
-        "sandbox_preview_list".into(),
-        Some(serde_json::json!({"projectId": project_id, "workspaceId": workspace_id, "pageSize": page_size, "pageToken": page_token})),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn sandbox_preview_revoke(
-    app: tauri::AppHandle,
-    grant_id: String,
-) -> Result<Value, RpcError> {
-    environment_local_call(
-        app,
-        "sandbox_preview_revoke".into(),
-        Some(serde_json::json!({"grantId": grant_id})),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn sandbox_preview_open(
-    app: tauri::AppHandle,
-    grant_id: String,
-) -> Result<Value, RpcError> {
-    environment_local_call(
-        app,
-        "sandbox_preview_open".into(),
-        Some(serde_json::json!({"grantId": grant_id})),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn sandbox_preview_context(
-    app: tauri::AppHandle,
-    project_id: String,
-) -> Result<Value, RpcError> {
-    environment_local_call(
-        app,
-        "sandbox_preview_context".into(),
-        Some(serde_json::json!({"projectId": project_id})),
-    )
-    .await
 }

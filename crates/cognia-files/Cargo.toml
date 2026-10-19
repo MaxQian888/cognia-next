@@ -3,7 +3,7 @@
 # 23 `#[tauri::command]`s and the process-global allowed-roots / remote
 # git-workspace registries, none of which touch `AppHandle`. Its only outward
 # edge was `crate::agents::paths::vendor_roots()` (now a path dep), while
-# 37 of its 38 inbound edges come from `companion_api/rpc/*` — extracting it
+# 37 of its 38 inbound edges come from `cognia-companion-rpc/src/rpc/*` — extracting it
 # clears those blocking edges ahead of the companion_api work.
 #
 # Owns `gray_matter` (front-matter parsing for slash commands / skills) and

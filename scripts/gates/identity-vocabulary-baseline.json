@@ -852,40 +852,40 @@
     "crates/cognia-companion/src/remote_execution.rs": {
       "bareAccountIdRust": 10
     },
-    "src-tauri/src/companion_api/rpc.rs": {
+    "crates/cognia-companion-rpc/src/rpc.rs": {
       "bareAccountIdRust": 18
     },
-    "src-tauri/src/companion_api/rpc/chat.rs": {
+    "crates/cognia-companion-rpc/src/rpc/chat.rs": {
       "bareAccountIdRust": 2
     },
-    "src-tauri/src/companion_api/rpc/data_sync.rs": {
+    "crates/cognia-companion-rpc/src/rpc/data_sync.rs": {
       "bareAccountIdRust": 8
     },
-    "src-tauri/src/companion_api/rpc/diagnostics.rs": {
+    "crates/cognia-companion-rpc/src/rpc/diagnostics.rs": {
       "bareAccountIdRust": 10
     },
-    "src-tauri/src/companion_api/rpc/filesystem.rs": {
+    "crates/cognia-companion-rpc/src/rpc/filesystem.rs": {
       "bareAccountIdRust": 2
     },
-    "src-tauri/src/companion_api/rpc/host_state.rs": {
+    "crates/cognia-companion-rpc/src/rpc/host_state.rs": {
       "bareAccountIdRust": 10
     },
-    "src-tauri/src/companion_api/rpc/native_tools.rs": {
+    "crates/cognia-companion-rpc/src/rpc/native_tools.rs": {
       "bareAccountIdRust": 18
     },
-    "src-tauri/src/companion_api/rpc/plugins.rs": {
+    "crates/cognia-companion-rpc/src/rpc/plugins.rs": {
       "bareAccountIdRust": 7
     },
-    "src-tauri/src/companion_api/rpc/service_plane.rs": {
+    "crates/cognia-companion-rpc/src/rpc/service_plane.rs": {
       "bareAccountIdRust": 2
     },
-    "src-tauri/src/companion_api/rpc/source_control.rs": {
+    "crates/cognia-companion-rpc/src/rpc/source_control.rs": {
       "bareAccountIdRust": 18
     },
-    "src-tauri/src/companion_api/rpc/terminal.rs": {
+    "crates/cognia-companion-rpc/src/rpc/terminal.rs": {
       "bareAccountIdRust": 2
     },
-    "src-tauri/src/companion_api/rpc/tests.rs": {
+    "crates/cognia-companion-rpc/src/rpc/tests.rs": {
       "bareAccountIdRust": 1
     },
     "crates/cognia-companion/src/signaling/dispatch.rs": {

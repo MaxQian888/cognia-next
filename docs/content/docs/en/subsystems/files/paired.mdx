@@ -58,7 +58,7 @@ unreachable the page is closed rather than stale, because nothing is mirrored an
 
 ## Commands
 
-All 23 are `target: execution`, bridged through `src-tauri/src/companion_api/rpc/data_sync.rs` to the
+All 23 are `target: execution`, bridged through `crates/cognia-companion-rpc/src/rpc/data_sync.rs` to the
 desktop renderer and delegated wholesale from `lib/companion/desktop-write-source.ts`, like the `pet_*`
 family. The server injects the verified `callerDeviceId` into every one. Reads use `client.read` and
 skip the idempotency cache; writes use `client.write` and require an `Idempotency-Key`.

@@ -22,12 +22,14 @@ export const COMPANION_CORE_DIR = "crates/cognia-companion/src"
 export const COMPANION_BUS_DIR = "crates/cognia-companion-bus/src"
 /** `cognia-companion-contract`: the generated command table and settings allowlist. */
 export const COMPANION_CONTRACT_DIR = "crates/cognia-companion-contract/src"
+/** `cognia-companion-rpc`: the RPC dispatch table and its families (ADR-0196 P8). */
+export const COMPANION_RPC_DIR = "crates/cognia-companion-rpc/src"
 
 export const COMPANION_SOURCES = Object.freeze({
   /** The RPC router: `KNOWN_COMMANDS`, `SERVICE_ONLY_COMMANDS`, the core arms. */
-  rpcRouter: `${COMPANION_API_DIR}/rpc.rs`,
+  rpcRouter: `${COMPANION_RPC_DIR}/rpc.rs`,
   /** The per-family dispatch files, `<dir>/<family>.rs`; see {@link rpcFamilyFile}. */
-  rpcFamilyDir: `${COMPANION_API_DIR}/rpc`,
+  rpcFamilyDir: `${COMPANION_RPC_DIR}/rpc`,
   /** Keys its arms on the same command literals as the RPC families. */
   browserGateway: `${COMPANION_CORE_DIR}/browser_gateway.rs`,
   eventChannels: `${COMPANION_BUS_DIR}/event_channels.rs`,

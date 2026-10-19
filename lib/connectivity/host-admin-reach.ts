@@ -59,7 +59,7 @@ function blocked(block: HostAdminBlock): HostAdminReach {
 /**
  * Commands that only the desktop process can answer. Everything else the
  * Connectivity settings call is on the host-admin plane (see
- * `src-tauri/src/companion_api/rpc/host_admin.rs`).
+ * `crates/cognia-companion-rpc/src/rpc/host_admin.rs`).
  */
 export const DESKTOP_SHELL_COMMANDS: readonly string[] = Object.freeze([
   "companion_tunnel_start",

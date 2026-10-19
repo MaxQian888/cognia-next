@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 //
 // The raw `read_text_file` / `write_text_file` / `ensure_dir` commands accept an
 // arbitrary absolute path and are reachable from BOTH the renderer and a paired
-// remote device (companion RPC re-dispatches them — see companion_api/rpc.rs).
+// remote device (companion RPC re-dispatches them — see cognia-companion-rpc/src/rpc.rs).
 // Neither caller is authoritative, so the path must be gated in Rust.
 //
 // This process-global set (modelled on `hooks::trust`) holds the directories the

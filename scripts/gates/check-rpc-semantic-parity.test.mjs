@@ -268,11 +268,15 @@ test("selectArmFiles adds the delegated sources and drops test modules", () => {
   // Without the delegated file every SFTP command parses as arm-less, and the
   // gate reports 14 runtime 404s that do not exist.
   const selected = selectArmFiles(
-    ["src-tauri/src/companion_api/rpc/chat.rs", "src-tauri/src/companion_api/rpc/tests.rs", ""],
+    [
+      "crates/cognia-companion-rpc/src/rpc/chat.rs",
+      "crates/cognia-companion-rpc/src/rpc/tests.rs",
+      "",
+    ],
     { exists: () => true }
   )
   assert.deepEqual(selected, [
-    "src-tauri/src/companion_api/rpc/chat.rs",
+    "crates/cognia-companion-rpc/src/rpc/chat.rs",
     "crates/cognia-terminal/src/sftp_service.rs",
     "crates/cognia-file-share/src/rpc.rs",
     "crates/cognia-remote-desktop/src/commands.rs",

@@ -10,10 +10,10 @@ import {
 describe("local environment commands", () => {
   it("are exactly the Host arm's COMMANDS", () => {
     const source = readFileSync(
-      join(process.cwd(), "src-tauri/src/companion_api/rpc/environment.rs"),
+      join(process.cwd(), "crates/cognia-companion-rpc/src/rpc/environment.rs"),
       "utf8"
     )
-    const block = source.match(/pub\(super\) const COMMANDS: &\[&str\] = &\[([\s\S]*?)\];/)
+    const block = source.match(/pub const COMMANDS: &\[&str\] = &\[([\s\S]*?)\];/)
     expect(block).not.toBeNull()
     const rust = [...(block?.[1] ?? "").matchAll(/"([a-z_]+)"/g)].map((match) => match[1])
     expect(new Set(rust)).toEqual(new Set(LOCAL_ENVIRONMENT_COMMANDS))

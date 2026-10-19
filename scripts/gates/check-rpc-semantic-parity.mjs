@@ -1294,7 +1294,7 @@ const read = (p) => readFileSync(join(REPO_ROOT, p), "utf8")
 const readJson = (p) => JSON.parse(read(p))
 
 /**
- * Dispatch sources whose arms do NOT live under `companion_api/rpc/`.
+ * Dispatch sources whose arms do NOT live under `cognia-companion-rpc/src/rpc/`.
  *
  * `rpc/sftp.rs` is a one-line hand-off to `sftp_service::dispatch_sftp`, and
  * that function is where the arms actually are, because the desktop's own
@@ -1309,7 +1309,7 @@ export const DELEGATED_ARM_FILES = [
 ]
 
 /**
- * The files to scan for dispatch arms: every tracked `companion_api/rpc/*.rs`
+ * The files to scan for dispatch arms: every tracked `cognia-companion-rpc/src/rpc/*.rs`
  * that is not a test module, plus {@link DELEGATED_ARM_FILES}, minus anything
  * that is not actually on disk.
  *

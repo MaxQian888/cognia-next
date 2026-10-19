@@ -9,7 +9,7 @@
  * and merge-update exactly like `biometricRequiredFor` in the preferences page,
  * preserving sibling keys (`model`, `expanded`, `labelSummary`, …). The parent
  * keys `conversationTitle` / `conversationTimeline` are in the
- * `app_settings_update` allowlist (`companion_api/rpc.rs`).
+ * `app_settings_update` allowlist (`cognia-companion-rpc/src/rpc.rs`).
  */
 
 import { useTranslations } from "next-intl"

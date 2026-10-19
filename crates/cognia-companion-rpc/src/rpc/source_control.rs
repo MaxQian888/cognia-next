@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Clone)]
 struct RemoteGitTarget {
-    workspace: crate::files::RemoteGitWorkspace,
+    workspace: cognia_files::files::RemoteGitWorkspace,
     relative_path: String,
     resolved_path: std::path::PathBuf,
     workspace_ref: Option<HostWorkspaceRef>,
@@ -46,20 +46,20 @@ fn relative_path_from_args(
 #[derive(Clone)]
 enum GitWorkspaceSource {
     DesktopRegistry,
-    HeadlessPolicy(crate::external_agent::presets::SpawnPolicy),
+    HeadlessPolicy(cognia_external_agent::presets::SpawnPolicy),
 }
 
 impl GitWorkspaceSource {
-    fn for_host(host: &super::super::dispatch_host::DispatchHost) -> Self {
+    fn for_host(host: &dyn crate::rpc_host::RpcHost) -> Self {
         match host.headless() {
             Some(services) => Self::HeadlessPolicy(services.spawn_policy.clone()),
             None => Self::DesktopRegistry,
         }
     }
 
-    fn list(&self, account_id: &str) -> Vec<crate::files::RemoteGitWorkspace> {
+    fn list(&self, account_id: &str) -> Vec<cognia_files::files::RemoteGitWorkspace> {
         match self {
-            Self::DesktopRegistry => crate::files::list_remote_git_workspaces(account_id),
+            Self::DesktopRegistry => cognia_files::files::list_remote_git_workspaces(account_id),
             Self::HeadlessPolicy(policy) => list_headless_git_workspaces(policy),
         }
     }
@@ -69,16 +69,16 @@ impl GitWorkspaceSource {
         account_id: &str,
         workspace_id: &str,
         relative_path: &str,
-    ) -> Result<(crate::files::RemoteGitWorkspace, std::path::PathBuf), String> {
+    ) -> Result<(cognia_files::files::RemoteGitWorkspace, std::path::PathBuf), String> {
         match self {
-            Self::DesktopRegistry => crate::files::resolve_remote_git_workspace_path(
+            Self::DesktopRegistry => cognia_files::files::resolve_remote_git_workspace_path(
                 account_id,
                 workspace_id,
                 Some(relative_path),
             ),
             Self::HeadlessPolicy(policy) => {
                 let workspace = resolve_headless_git_workspace(policy, workspace_id)?;
-                let resolved = crate::files::resolve_git_workspace_relative_path(
+                let resolved = cognia_files::files::resolve_git_workspace_relative_path(
                     &workspace,
                     Some(relative_path),
                 )?;
@@ -104,9 +104,9 @@ fn headless_workspace_dir_name(workspace_id: &str) -> Option<&str> {
 }
 
 fn resolve_headless_git_workspace(
-    policy: &crate::external_agent::presets::SpawnPolicy,
+    policy: &cognia_external_agent::presets::SpawnPolicy,
     workspace_id: &str,
-) -> Result<crate::files::RemoteGitWorkspace, String> {
+) -> Result<cognia_files::files::RemoteGitWorkspace, String> {
     let name = headless_workspace_dir_name(workspace_id)
         .ok_or_else(|| "Git workspace is not authorized for this account".to_string())?;
     // `validate_workspace_root` joins a relative name onto the workspaces root,
@@ -118,7 +118,7 @@ fn resolve_headless_git_workspace(
     if !std::path::Path::new(&path).is_dir() {
         return Err("Git workspace is not authorized for this account".to_string());
     }
-    Ok(crate::files::RemoteGitWorkspace {
+    Ok(cognia_files::files::RemoteGitWorkspace {
         workspace_id: name.to_string(),
         display_name: name.to_string(),
         path,
@@ -126,8 +126,8 @@ fn resolve_headless_git_workspace(
 }
 
 fn list_headless_git_workspaces(
-    policy: &crate::external_agent::presets::SpawnPolicy,
-) -> Vec<crate::files::RemoteGitWorkspace> {
+    policy: &cognia_external_agent::presets::SpawnPolicy,
+) -> Vec<cognia_files::files::RemoteGitWorkspace> {
     let Ok(root) = policy.validate_workspace_root(".") else {
         return Vec::new();
     };
@@ -140,7 +140,7 @@ fn list_headless_git_workspaces(
         .filter_map(|entry| {
             let name = entry.file_name().to_str()?.to_string();
             headless_workspace_dir_name(&name)?;
-            Some(crate::files::RemoteGitWorkspace {
+            Some(cognia_files::files::RemoteGitWorkspace {
                 workspace_id: name.clone(),
                 display_name: name,
                 path: entry.path().to_string_lossy().into_owned(),
@@ -200,7 +200,7 @@ fn relative_key_for(name: &str) -> &'static str {
 /// leave `git_clone_guarded` with a ref it accepts in validation and then
 /// silently ignores.
 fn prepare_workspace_ref_args(
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     name: &str,
     mut args: Value,
     scope: Option<&str>,
@@ -232,7 +232,7 @@ fn prepare_workspace_ref_args(
             segments,
         } => (plugin_id, segments),
     };
-    let resolved = crate::plugin_api::api_bridge::plugin_workspace_repo_dir_for_state(
+    let resolved = cognia_plugin_runtime::api_bridge::plugin_workspace_repo_dir_for_state(
         host.plugin_runtime(),
         plugin_id,
         segments,
@@ -264,7 +264,7 @@ fn prepare_workspace_ref_args(
         }
     }
     let target = RemoteGitTarget {
-        workspace: crate::files::RemoteGitWorkspace {
+        workspace: cognia_files::files::RemoteGitWorkspace {
             workspace_id: format!("plugin-cache:{plugin_id}"),
             display_name: plugin_id.clone(),
             path: cache_root.to_string_lossy().into_owned(),
@@ -275,7 +275,7 @@ fn prepare_workspace_ref_args(
     };
     if name != "git_clone_guarded"
         && name != "git_init"
-        && crate::git::read::repository_boundaries(&target.resolved_path.to_string_lossy()).is_ok()
+        && cognia_git::read::repository_boundaries(&target.resolved_path.to_string_lossy()).is_ok()
     {
         authorize_discovered_repository(&target)?;
     }
@@ -286,7 +286,7 @@ fn authorize_discovered_repository(
     target: &RemoteGitTarget,
 ) -> Result<(), (StatusCode, Json<RpcError>)> {
     let (workdir, git_dir) =
-        crate::git::read::repository_boundaries(&target.resolved_path.to_string_lossy())
+        cognia_git::read::repository_boundaries(&target.resolved_path.to_string_lossy())
             .map_err(|error| RpcError::internal(sanitize_text(&error.to_string(), target)))?;
     let root = std::path::Path::new(&target.workspace.path)
         .canonicalize()
@@ -354,7 +354,7 @@ fn prepare_remote_args(
             authorize_discovered_repository(&target)?;
         }
         "git_repo_state" | "git_is_repo" => {
-            if crate::git::read::repository_boundaries(&resolved).is_ok() {
+            if cognia_git::read::repository_boundaries(&resolved).is_ok() {
                 authorize_discovered_repository(&target)?;
             }
             object.insert("repoPath".into(), Value::String(resolved));
@@ -552,7 +552,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     account_id: Option<&str>,
     scope: Option<&str>,
@@ -583,28 +583,28 @@ pub(super) async fn dispatch(
         // client), so the entire git client works over Companion unchanged.
         "git_is_repo" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_is_repo(repo_path)
+            cognia_git::commands::git_is_repo(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
         }
         "git_repo_state" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_repo_state(repo_path)
+            cognia_git::commands::git_repo_state(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
         }
         "git_status" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_status(repo_path)
+            cognia_git::commands::git_status(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
         }
         "git_diff_stat" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_diff_stat(repo_path)
+            cognia_git::commands::git_diff_stat(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -613,7 +613,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let path: String = required(&args, "path")?;
             let staged: bool = required(&args, "staged")?;
-            crate::git::commands::git_diff_file(repo_path, path, staged)
+            cognia_git::commands::git_diff_file(repo_path, path, staged)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -622,7 +622,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let sha: String = required(&args, "sha")?;
             let path: String = required(&args, "path")?;
-            crate::git::commands::git_diff_commit(repo_path, sha, path)
+            cognia_git::commands::git_diff_commit(repo_path, sha, path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -630,7 +630,7 @@ pub(super) async fn dispatch(
         "git_commit_files" => {
             let repo_path: String = required(&args, "repoPath")?;
             let sha: String = required(&args, "sha")?;
-            crate::git::commands::git_commit_files(repo_path, sha)
+            cognia_git::commands::git_commit_files(repo_path, sha)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -639,7 +639,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let max_count: usize = required(&args, "maxCount")?;
             let skip: usize = required(&args, "skip")?;
-            crate::git::commands::git_log(repo_path, max_count, skip)
+            cognia_git::commands::git_log(repo_path, max_count, skip)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -648,35 +648,35 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let path: String = required(&args, "path")?;
             let max_count: usize = required(&args, "maxCount")?;
-            crate::git::commands::git_file_history(repo_path, path, max_count)
+            cognia_git::commands::git_file_history(repo_path, path, max_count)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
         }
         "git_branches" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_branches(repo_path)
+            cognia_git::commands::git_branches(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
         }
         "git_remotes" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_remotes(repo_path)
+            cognia_git::commands::git_remotes(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
         }
         "git_stash_list" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_stash_list(repo_path)
+            cognia_git::commands::git_stash_list(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
         }
         "git_conflicts" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_conflicts(repo_path)
+            cognia_git::commands::git_conflicts(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -685,7 +685,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let paths: Vec<String> = required(&args, "paths")?;
             let hunk_patch: Option<String> = optional(&args, "hunkPatch")?;
-            crate::git::commands::git_stage(repo_path, paths, hunk_patch)
+            cognia_git::commands::git_stage(repo_path, paths, hunk_patch)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -694,7 +694,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let paths: Vec<String> = required(&args, "paths")?;
             let hunk_patch: Option<String> = optional(&args, "hunkPatch")?;
-            crate::git::commands::git_unstage(repo_path, paths, hunk_patch)
+            cognia_git::commands::git_unstage(repo_path, paths, hunk_patch)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -703,7 +703,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let paths: Vec<String> = required(&args, "paths")?;
             let hunk_patch: Option<String> = optional(&args, "hunkPatch")?;
-            crate::git::commands::git_discard(repo_path, paths, hunk_patch)
+            cognia_git::commands::git_discard(repo_path, paths, hunk_patch)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -711,7 +711,7 @@ pub(super) async fn dispatch(
         "git_discard_all" => {
             let repo_path: String = required(&args, "repoPath")?;
             let include_untracked: bool = required(&args, "includeUntracked")?;
-            crate::git::commands::git_discard_all(repo_path, include_untracked)
+            cognia_git::commands::git_discard_all(repo_path, include_untracked)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -721,7 +721,7 @@ pub(super) async fn dispatch(
             let message: String = required(&args, "message")?;
             let amend: bool = required(&args, "amend")?;
             let signoff: bool = required(&args, "signoff")?;
-            crate::git::commands::git_commit(repo_path, message, amend, signoff)
+            cognia_git::commands::git_commit(repo_path, message, amend, signoff)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -729,7 +729,7 @@ pub(super) async fn dispatch(
         "git_checkout_branch" => {
             let repo_path: String = required(&args, "repoPath")?;
             let name: String = required(&args, "name")?;
-            crate::git::commands::git_checkout_branch(repo_path, name)
+            cognia_git::commands::git_checkout_branch(repo_path, name)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -739,7 +739,7 @@ pub(super) async fn dispatch(
             let name: String = required(&args, "name")?;
             let checkout: bool = required(&args, "checkout")?;
             let from: Option<String> = optional(&args, "from")?;
-            crate::git::commands::git_create_branch(repo_path, name, checkout, from)
+            cognia_git::commands::git_create_branch(repo_path, name, checkout, from)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -748,7 +748,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let name: String = required(&args, "name")?;
             let force: bool = required(&args, "force")?;
-            crate::git::commands::git_delete_branch(repo_path, name, force)
+            cognia_git::commands::git_delete_branch(repo_path, name, force)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -757,7 +757,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let old: Option<String> = optional(&args, "old")?;
             let new_name: String = required(&args, "newName")?;
-            crate::git::commands::git_rename_branch(repo_path, old, new_name)
+            cognia_git::commands::git_rename_branch(repo_path, old, new_name)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -767,8 +767,8 @@ pub(super) async fn dispatch(
             let remote: Option<String> = optional(&args, "remote")?;
             let prune: bool = optional(&args, "prune")?.unwrap_or(false);
             let refspec: Option<String> = optional(&args, "refspec")?;
-            let token: Option<crate::git::repo::SecretToken> = optional(&args, "token")?;
-            crate::git::commands::git_fetch(repo_path, remote, prune, refspec, token)
+            let token: Option<cognia_git::repo::SecretToken> = optional(&args, "token")?;
+            cognia_git::commands::git_fetch(repo_path, remote, prune, refspec, token)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -778,7 +778,7 @@ pub(super) async fn dispatch(
             let remote: Option<String> = optional(&args, "remote")?;
             let branch: Option<String> = optional(&args, "branch")?;
             let rebase: bool = optional(&args, "rebase")?.unwrap_or(false);
-            crate::git::commands::git_pull(repo_path, remote, branch, rebase)
+            cognia_git::commands::git_pull(repo_path, remote, branch, rebase)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -789,7 +789,7 @@ pub(super) async fn dispatch(
             let branch: Option<String> = optional(&args, "branch")?;
             let set_upstream: bool = optional(&args, "setUpstream")?.unwrap_or(false);
             let force_with_lease: bool = optional(&args, "forceWithLease")?.unwrap_or(false);
-            crate::git::commands::git_push(
+            cognia_git::commands::git_push(
                 repo_path,
                 remote,
                 branch,
@@ -802,7 +802,7 @@ pub(super) async fn dispatch(
         }
         "git_sync" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_sync(repo_path)
+            cognia_git::commands::git_sync(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -812,7 +812,7 @@ pub(super) async fn dispatch(
             let message: Option<String> = optional(&args, "message")?;
             let include_untracked: bool = optional(&args, "includeUntracked")?.unwrap_or(false);
             let keep_index: bool = optional(&args, "keepIndex")?.unwrap_or(false);
-            crate::git::commands::git_stash_push(repo_path, message, include_untracked, keep_index)
+            cognia_git::commands::git_stash_push(repo_path, message, include_untracked, keep_index)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -820,7 +820,7 @@ pub(super) async fn dispatch(
         "git_stash_pop" => {
             let repo_path: String = required(&args, "repoPath")?;
             let index: usize = required(&args, "index")?;
-            crate::git::commands::git_stash_pop(repo_path, index)
+            cognia_git::commands::git_stash_pop(repo_path, index)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -828,7 +828,7 @@ pub(super) async fn dispatch(
         "git_stash_apply" => {
             let repo_path: String = required(&args, "repoPath")?;
             let index: usize = required(&args, "index")?;
-            crate::git::commands::git_stash_apply(repo_path, index)
+            cognia_git::commands::git_stash_apply(repo_path, index)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -836,7 +836,7 @@ pub(super) async fn dispatch(
         "git_stash_drop" => {
             let repo_path: String = required(&args, "repoPath")?;
             let index: usize = required(&args, "index")?;
-            crate::git::commands::git_stash_drop(repo_path, index)
+            cognia_git::commands::git_stash_drop(repo_path, index)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -845,15 +845,15 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let path: String = required(&args, "path")?;
             let merged_content: Option<String> = optional(&args, "mergedContent")?;
-            let side: Option<crate::git::types::ConflictSide> = optional(&args, "side")?;
-            crate::git::commands::git_resolve_conflict(repo_path, path, merged_content, side)
+            let side: Option<cognia_git::types::ConflictSide> = optional(&args, "side")?;
+            cognia_git::commands::git_resolve_conflict(repo_path, path, merged_content, side)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
         }
         "git_merge_abort" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_merge_abort(repo_path)
+            cognia_git::commands::git_merge_abort(repo_path)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -862,7 +862,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let base: String = required(&args, "base")?;
             let target: String = required(&args, "target")?;
-            crate::git::commands::git_diff_refs_files(repo_path, base, target)
+            cognia_git::commands::git_diff_refs_files(repo_path, base, target)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -872,21 +872,21 @@ pub(super) async fn dispatch(
             let base: String = required(&args, "base")?;
             let target: String = required(&args, "target")?;
             let path: String = required(&args, "path")?;
-            crate::git::commands::git_diff_refs_file(repo_path, base, target, path)
+            cognia_git::commands::git_diff_refs_file(repo_path, base, target, path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
         }
         "git_diff_staged_all" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_diff_staged_all(repo_path)
+            cognia_git::commands::git_diff_staged_all(repo_path)
                 .await
                 .map(Value::String)
                 .map_err(|e| RpcError::internal(e.to_string()))
         }
         "git_refs" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_refs(repo_path)
+            cognia_git::commands::git_refs(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -895,21 +895,21 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let path: String = required(&args, "path")?;
             let rev: Option<String> = optional(&args, "rev")?;
-            crate::git::commands::git_blame(repo_path, path, rev)
+            cognia_git::commands::git_blame(repo_path, path, rev)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
         }
         "git_tags" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_tags(repo_path)
+            cognia_git::commands::git_tags(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
         }
         "git_worktree_list" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_worktree_list(repo_path)
+            cognia_git::commands::git_worktree_list(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -917,7 +917,7 @@ pub(super) async fn dispatch(
         "git_rebase_commits" => {
             let repo_path: String = required(&args, "repoPath")?;
             let base: String = required(&args, "base")?;
-            crate::git::commands::git_rebase_commits(repo_path, base)
+            cognia_git::commands::git_rebase_commits(repo_path, base)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -927,7 +927,7 @@ pub(super) async fn dispatch(
             let path: String = required(&args, "path")?;
             let branch: String = required(&args, "branch")?;
             let base_ref: Option<String> = optional(&args, "baseRef")?;
-            crate::git::commands::git_worktree_add(repo_path, path, branch, base_ref)
+            cognia_git::commands::git_worktree_add(repo_path, path, branch, base_ref)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -937,22 +937,27 @@ pub(super) async fn dispatch(
             let path: String = required(&args, "path")?;
             let force: bool = required(&args, "force")?;
             let delete_branch: Option<String> = optional(&args, "deleteBranch")?;
-            crate::task_workspace::git_worktree_remove(repo_path, path, force, delete_branch)
-                .await
-                .map(|_| Value::Null)
-                .map_err(|e| RpcError::internal(e.to_string()))
+            cognia_task_workspace_host::host_surface::git_worktree_remove(
+                repo_path,
+                path,
+                force,
+                delete_branch,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(|e| RpcError::internal(e.to_string()))
         }
         "git_worktree_commit" => {
             let worktree_path: String = required(&args, "worktreePath")?;
             let message: String = required(&args, "message")?;
-            crate::git::commands::git_worktree_commit(worktree_path, message)
+            cognia_git::commands::git_worktree_commit(worktree_path, message)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
         }
         "git_worktree_prune" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_worktree_prune(repo_path)
+            cognia_git::commands::git_worktree_prune(repo_path)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -961,7 +966,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let name: String = required(&args, "name")?;
             let url: String = required(&args, "url")?;
-            crate::git::commands::git_remote_add(repo_path, name, url)
+            cognia_git::commands::git_remote_add(repo_path, name, url)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -969,7 +974,7 @@ pub(super) async fn dispatch(
         "git_remote_remove" => {
             let repo_path: String = required(&args, "repoPath")?;
             let name: String = required(&args, "name")?;
-            crate::git::commands::git_remote_remove(repo_path, name)
+            cognia_git::commands::git_remote_remove(repo_path, name)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -979,7 +984,7 @@ pub(super) async fn dispatch(
             let name: String = required(&args, "name")?;
             let message: Option<String> = optional(&args, "message")?;
             let target: Option<String> = optional(&args, "target")?;
-            crate::git::commands::git_create_tag(repo_path, name, message, target)
+            cognia_git::commands::git_create_tag(repo_path, name, message, target)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -987,7 +992,7 @@ pub(super) async fn dispatch(
         "git_delete_tag" => {
             let repo_path: String = required(&args, "repoPath")?;
             let name: String = required(&args, "name")?;
-            crate::git::commands::git_delete_tag(repo_path, name)
+            cognia_git::commands::git_delete_tag(repo_path, name)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -996,7 +1001,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let remote: String = required(&args, "remote")?;
             let name: String = required(&args, "name")?;
-            crate::git::commands::git_push_tag(repo_path, remote, name)
+            cognia_git::commands::git_push_tag(repo_path, remote, name)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -1005,7 +1010,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let mode: String = required(&args, "mode")?;
             let target: String = required(&args, "target")?;
-            crate::git::commands::git_reset(repo_path, mode, target)
+            cognia_git::commands::git_reset(repo_path, mode, target)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -1015,7 +1020,7 @@ pub(super) async fn dispatch(
             let paths: Vec<String> = required(&args, "paths")?;
             let staged: bool = required(&args, "staged")?;
             let source: Option<String> = optional(&args, "source")?;
-            crate::git::commands::git_restore(repo_path, paths, staged, source)
+            cognia_git::commands::git_restore(repo_path, paths, staged, source)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -1023,7 +1028,7 @@ pub(super) async fn dispatch(
         "git_rebase" => {
             let repo_path: String = required(&args, "repoPath")?;
             let onto: String = required(&args, "onto")?;
-            crate::git::commands::git_rebase(repo_path, onto)
+            cognia_git::commands::git_rebase(repo_path, onto)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -1031,7 +1036,7 @@ pub(super) async fn dispatch(
         "git_cherry_pick" => {
             let repo_path: String = required(&args, "repoPath")?;
             let sha: String = required(&args, "sha")?;
-            crate::git::commands::git_cherry_pick(repo_path, sha)
+            cognia_git::commands::git_cherry_pick(repo_path, sha)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -1039,21 +1044,21 @@ pub(super) async fn dispatch(
         "git_revert" => {
             let repo_path: String = required(&args, "repoPath")?;
             let sha: String = required(&args, "sha")?;
-            crate::git::commands::git_revert(repo_path, sha)
+            cognia_git::commands::git_revert(repo_path, sha)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
         }
         "git_sequencer_continue" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_sequencer_continue(repo_path)
+            cognia_git::commands::git_sequencer_continue(repo_path)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
         }
         "git_sequencer_abort" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_sequencer_abort(repo_path)
+            cognia_git::commands::git_sequencer_abort(repo_path)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -1061,15 +1066,15 @@ pub(super) async fn dispatch(
         "git_interactive_rebase" => {
             let repo_path: String = required(&args, "repoPath")?;
             let base: String = required(&args, "base")?;
-            let entries: Vec<crate::git::types::RebaseTodoEntry> = required(&args, "entries")?;
-            crate::git::commands::git_interactive_rebase(repo_path, base, entries)
+            let entries: Vec<cognia_git::types::RebaseTodoEntry> = required(&args, "entries")?;
+            cognia_git::commands::git_interactive_rebase(repo_path, base, entries)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
         }
         "git_init" => {
             let path: String = required(&args, "path")?;
-            crate::git::commands::git_init(path)
+            cognia_git::commands::git_init(path)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -1077,7 +1082,7 @@ pub(super) async fn dispatch(
         "git_clone" => {
             let remote_url: String = required(&args, "remoteUrl")?;
             let destination: String = required(&args, "destination")?;
-            crate::git::commands::git_clone(remote_url, destination)
+            cognia_git::commands::git_clone(remote_url, destination)
                 .await
                 .map(Value::String)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -1085,8 +1090,8 @@ pub(super) async fn dispatch(
         "git_clone_guarded" => {
             let remote_url: String = required(&args, "remoteUrl")?;
             let destination: String = required(&args, "destination")?;
-            let guards: Option<crate::git::repo::CloneGuards> = optional(&args, "guards")?;
-            crate::git::commands::git_clone_guarded(remote_url, destination, guards)
+            let guards: Option<cognia_git::repo::CloneGuards> = optional(&args, "guards")?;
+            cognia_git::commands::git_clone_guarded(remote_url, destination, guards)
                 .await
                 .map(Value::String)
                 .map_err(|error| RpcError::internal(error.to_string()))
@@ -1094,9 +1099,9 @@ pub(super) async fn dispatch(
         "git_identity" => {
             let repo_path: String = required(&args, "repoPath")?;
             let identity = if remote_target.is_some() {
-                crate::git::repo::identity_local(&repo_path)
+                cognia_git::repo::identity_local(&repo_path)
             } else {
-                crate::git::repo::identity(&repo_path)
+                cognia_git::repo::identity(&repo_path)
             }
             .map_err(|e| RpcError::internal(e.to_string()))?;
             serde_json::to_value(identity)
@@ -1112,7 +1117,7 @@ pub(super) async fn dispatch(
                     "remote Git identity may only be changed for the selected repository",
                 ));
             }
-            crate::git::commands::git_set_identity(repo_path, name, email, global)
+            cognia_git::commands::git_set_identity(repo_path, name, email, global)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -1120,7 +1125,7 @@ pub(super) async fn dispatch(
         "git_ignore_add" => {
             let repo_path: String = required(&args, "repoPath")?;
             let pattern: String = required(&args, "pattern")?;
-            crate::git::commands::git_ignore_add(repo_path, pattern)
+            cognia_git::commands::git_ignore_add(repo_path, pattern)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -1128,7 +1133,7 @@ pub(super) async fn dispatch(
         "git_merge" => {
             let repo_path: String = required(&args, "repoPath")?;
             let branch: String = required(&args, "branch")?;
-            crate::git::commands::git_merge(repo_path, branch)
+            cognia_git::commands::git_merge(repo_path, branch)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -1141,7 +1146,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let git_ref: String = required(&args, "gitRef")?;
             let path: String = required(&args, "path")?;
-            crate::git::commands::git_read_blob_at_ref(repo_path, git_ref, path)
+            cognia_git::commands::git_read_blob_at_ref(repo_path, git_ref, path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -1149,21 +1154,21 @@ pub(super) async fn dispatch(
         "git_default_branch" => {
             let repo_path: String = required(&args, "repoPath")?;
             let remote: Option<String> = optional(&args, "remote")?;
-            crate::git::commands::git_default_branch(repo_path, remote)
+            cognia_git::commands::git_default_branch(repo_path, remote)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
         }
         "git_stack_capabilities" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_stack_capabilities(repo_path)
+            cognia_git::commands::git_stack_capabilities(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
         }
         "git_stack_parents" => {
             let repo_path: String = required(&args, "repoPath")?;
-            crate::git::commands::git_stack_parents(repo_path)
+            cognia_git::commands::git_stack_parents(repo_path)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -1172,7 +1177,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let branch: String = required(&args, "branch")?;
             let parent: Option<String> = optional(&args, "parent")?;
-            crate::git::commands::git_stack_set_parent(repo_path, branch, parent)
+            cognia_git::commands::git_stack_set_parent(repo_path, branch, parent)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -1180,7 +1185,7 @@ pub(super) async fn dispatch(
         "git_stack_validate" => {
             let repo_path: String = required(&args, "repoPath")?;
             let branches: Vec<String> = required(&args, "branches")?;
-            crate::git::commands::git_stack_validate(repo_path, branches)
+            cognia_git::commands::git_stack_validate(repo_path, branches)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -1189,7 +1194,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let onto: String = required(&args, "onto")?;
             let branches: Vec<String> = required(&args, "branches")?;
-            crate::git::commands::git_stack_restack(repo_path, onto, branches)
+            cognia_git::commands::git_stack_restack(repo_path, onto, branches)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -1197,7 +1202,7 @@ pub(super) async fn dispatch(
         "git_stack_history" => {
             let repo_path: String = required(&args, "repoPath")?;
             let branch: String = required(&args, "branch")?;
-            crate::git::commands::git_stack_history(repo_path, branch)
+            cognia_git::commands::git_stack_history(repo_path, branch)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -1206,7 +1211,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let branch: String = required(&args, "branch")?;
             let history_ref: String = required(&args, "historyRef")?;
-            crate::git::commands::git_stack_revert(repo_path, branch, history_ref)
+            cognia_git::commands::git_stack_revert(repo_path, branch, history_ref)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -1215,7 +1220,7 @@ pub(super) async fn dispatch(
             let repo_path: String = required(&args, "repoPath")?;
             let remote: String = required(&args, "remote")?;
             let branches: Vec<String> = required(&args, "branches")?;
-            crate::git::commands::git_stack_push(repo_path, remote, branches)
+            cognia_git::commands::git_stack_push(repo_path, remote, branches)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -1238,9 +1243,9 @@ pub(super) async fn dispatch(
                             workspace: workspace.clone(),
                             workspace_ref: None,
                         };
-                        let mut state = crate::git::read::repo_state(&workspace.path);
+                        let mut state = cognia_git::read::repo_state(&workspace.path);
                         if state.is_repo && authorize_discovered_repository(&target).is_err() {
-                            state = crate::git::types::GitRepoState {
+                            state = cognia_git::types::GitRepoState {
                                 is_repo: false,
                                 root_dir: None,
                                 detached_head: false,
@@ -1296,10 +1301,10 @@ mod tests {
     }
 
     fn register_workspace(account_id: &str, workspace_id: &str, root: &std::path::Path) {
-        crate::files::fs_set_allowed_roots(
+        cognia_files::files::fs_set_allowed_roots(
             vec![root.to_string_lossy().to_string()],
             Some(account_id.to_string()),
-            Some(vec![crate::files::GitWorkspaceRegistration {
+            Some(vec![cognia_files::files::GitWorkspaceRegistration {
                 workspace_id: workspace_id.to_string(),
                 display_name: "Authorized workspace".to_string(),
                 path: root.to_string_lossy().to_string(),
@@ -1360,7 +1365,7 @@ mod tests {
     async fn upward_repository_discovery_is_rejected_but_nested_repository_is_allowed() {
         let _roots = lock_roots();
         let parent = tempfile::TempDir::new().unwrap();
-        crate::git::repo::init(&parent.path().to_string_lossy())
+        cognia_git::repo::init(&parent.path().to_string_lossy())
             .await
             .unwrap();
         let granted_child = parent.path().join("granted");
@@ -1378,7 +1383,7 @@ mod tests {
 
         let nested = granted_child.join("nested");
         std::fs::create_dir_all(&nested).unwrap();
-        crate::git::repo::init(&nested.to_string_lossy())
+        cognia_git::repo::init(&nested.to_string_lossy())
             .await
             .unwrap();
         assert!(prepare_remote_args(
@@ -1396,12 +1401,12 @@ mod tests {
     async fn remote_worktree_requests_keep_the_authorized_repository_path() {
         let _roots = lock_roots();
         let root = tempfile::TempDir::new().unwrap();
-        crate::git::repo::init(&root.path().to_string_lossy())
+        cognia_git::repo::init(&root.path().to_string_lossy())
             .await
             .unwrap();
         let nested = root.path().join("nested-worktree");
         std::fs::create_dir_all(&nested).unwrap();
-        crate::git::repo::init(&nested.to_string_lossy())
+        cognia_git::repo::init(&nested.to_string_lossy())
             .await
             .unwrap();
         register_workspace("acct-worktree", "workspace-worktree", root.path());
@@ -1443,7 +1448,7 @@ mod tests {
     }
 
     fn headless_source(root: &std::path::Path) -> GitWorkspaceSource {
-        GitWorkspaceSource::HeadlessPolicy(crate::external_agent::presets::SpawnPolicy::new(
+        GitWorkspaceSource::HeadlessPolicy(cognia_external_agent::presets::SpawnPolicy::new(
             root.to_path_buf(),
             false,
         ))
@@ -1564,7 +1569,7 @@ mod tests {
     fn remote_results_replace_host_paths_and_local_remote_urls() {
         let root = tempfile::TempDir::new().unwrap();
         let target = RemoteGitTarget {
-            workspace: crate::files::RemoteGitWorkspace {
+            workspace: cognia_files::files::RemoteGitWorkspace {
                 workspace_id: "workspace-redact".into(),
                 display_name: "Redacted".into(),
                 path: root.path().to_string_lossy().to_string(),

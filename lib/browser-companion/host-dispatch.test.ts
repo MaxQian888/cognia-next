@@ -44,7 +44,7 @@ describe("browser companion command surface", () => {
 describe("the Rust and TypeScript command lists agree", () => {
   it("lists the same names on both sides", async () => {
     const { readFile } = await import("node:fs/promises")
-    const source = await readFile("src-tauri/src/companion_api/rpc.rs", "utf8")
+    const source = await readFile("crates/cognia-companion-rpc/src/rpc.rs", "utf8")
     const block = source.slice(source.indexOf("pub(super) const BROWSER_COMPANION_COMMANDS"))
     const names = [...block.slice(0, block.indexOf("];")).matchAll(/"([a-z_]+)"/g)].map(
       (match) => match[1]
@@ -54,7 +54,7 @@ describe("the Rust and TypeScript command lists agree", () => {
 
   it("registers each of them in KNOWN_COMMANDS", async () => {
     const { readFile } = await import("node:fs/promises")
-    const source = await readFile("src-tauri/src/companion_api/rpc.rs", "utf8")
+    const source = await readFile("crates/cognia-companion-rpc/src/rpc.rs", "utf8")
     const known = source.slice(
       source.indexOf("const KNOWN_COMMANDS"),
       source.indexOf("pub fn known_commands()")

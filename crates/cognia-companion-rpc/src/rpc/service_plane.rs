@@ -121,7 +121,7 @@ fn task_shell_runtime() -> Result<
     std::sync::Arc<dyn cognia_sandbox_pool::runtime::SandboxRuntimeControl>,
     (StatusCode, Json<RpcError>),
 > {
-    crate::companion_api::environment_pool::installed()
+    cognia_companion::environment_pool::installed()
         .and_then(|pool| pool.runtime)
         .ok_or_else(|| {
             (
@@ -179,16 +179,16 @@ fn map_langfuse_ingest_error(detail: String) -> (StatusCode, Json<RpcError>) {
 /// The desktop's computer-use runtime, or the historical per-arm
 /// `503 headless_unsupported` on a host that has none.
 fn host_automation<'a>(
-    host: &'a super::super::dispatch_host::DispatchHost,
+    host: &'a dyn crate::rpc_host::RpcHost,
     name: &str,
-) -> Result<super::super::dispatch_host::HostAutomation<'a>, (StatusCode, Json<RpcError>)> {
+) -> Result<crate::rpc_host::HostAutomation<'a>, (StatusCode, Json<RpcError>)> {
     host.automation()
         .ok_or_else(|| RpcError::headless_unsupported(name))
 }
 
 pub(super) fn workflow_state(
-    host: &super::super::dispatch_host::DispatchHost,
-) -> Result<&crate::workflow::WorkflowState, (StatusCode, Json<RpcError>)> {
+    host: &dyn crate::rpc_host::RpcHost,
+) -> Result<&cognia_scheduling::workflow::WorkflowState, (StatusCode, Json<RpcError>)> {
     host.workflow_state().ok_or_else(|| {
         RpcError::service_unavailable("workflow state is not managed yet".to_string())
     })
@@ -198,7 +198,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     scope: Option<&str>,
@@ -210,7 +210,7 @@ pub(super) async fn dispatch(
     ) {
         let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
         super::gateway_plane::authorize_task_agent_control(host, device_id, &agent_id).await?;
-        if crate::companion_api::environment_pool::installed()
+        if cognia_companion::environment_pool::installed()
             .and_then(|pool| pool.runtime)
             .and_then(|runtime| runtime.agent_origin_allowed(&agent_id, device_id))
             == Some(false)
@@ -228,7 +228,7 @@ pub(super) async fn dispatch(
         // checked again inside `call` for every operation.
         "companion_browser_extension_status" => {
             let browser: String = required_aliased(&args, "device_id", "deviceId")?;
-            to_json(crate::companion_api::ws_browser_companion::rpc_device_status(&browser))
+            to_json(cognia_companion::ws_browser_companion::rpc_device_status(&browser))
         }
 
         // Split by effect (`ws_browser_companion::READ_OPERATIONS`): a look
@@ -241,7 +241,7 @@ pub(super) async fn dispatch(
                 .unwrap_or_else(|| Value::Object(Default::default()));
             let timeout_ms: Option<u64> = optional_aliased(&args, "timeout_ms", "timeoutMs")?;
             if name == "companion_browser_extension_read" {
-                crate::companion_api::ws_browser_companion::rpc_read(
+                cognia_companion::ws_browser_companion::rpc_read(
                     &browser,
                     &operation,
                     operation_args,
@@ -249,7 +249,7 @@ pub(super) async fn dispatch(
                 )
                 .await
             } else {
-                crate::companion_api::ws_browser_companion::rpc_call(
+                cognia_companion::ws_browser_companion::rpc_call(
                     &browser,
                     &operation,
                     operation_args,
@@ -261,7 +261,7 @@ pub(super) async fn dispatch(
 
         "companion_browser_extension_notify" => {
             let browser: String = required_aliased(&args, "device_id", "deviceId")?;
-            crate::companion_api::ws_browser_companion::rpc_notify_status(&browser);
+            cognia_companion::ws_browser_companion::rpc_notify_status(&browser);
             Ok(Value::Null)
         }
 
@@ -271,7 +271,7 @@ pub(super) async fn dispatch(
         // SpawnPolicy preset allowlist before it touches the exec backend.
         "spawn_external_agent" => {
             let policy = host.remote_spawn_policy().map_err(RpcError::internal)?;
-            let mut config: crate::external_agent::process::ExternalAgentSpawnConfig =
+            let mut config: cognia_external_agent::process::ExternalAgentSpawnConfig =
                 required(&args, "config")?;
             let mut gateway_authority = super::gateway_plane::authorize_task_spawn(
                 state,
@@ -296,7 +296,7 @@ pub(super) async fn dispatch(
                 Err(violation) => {
                     let mut fields = summary;
                     fields["reason"] = Value::String(violation.to_string());
-                    super::super::audit::record_async(
+                    cognia_companion::audit::record_async(
                         "external_agent_spawn",
                         device_id,
                         scope.unwrap_or(""),
@@ -313,7 +313,7 @@ pub(super) async fn dispatch(
                     fields["cwd"] = Value::String(validated.config.cwd.clone().unwrap_or_default());
                     fields["dropped_env_keys"] =
                         serde_json::to_value(&validated.dropped_env_keys).unwrap_or(Value::Null);
-                    super::super::audit::record_async(
+                    cognia_companion::audit::record_async(
                         "external_agent_spawn",
                         device_id,
                         scope.unwrap_or(""),
@@ -334,16 +334,16 @@ pub(super) async fn dispatch(
                         hardened.env.insert(cognia_external_agent::spawn_authority::DELIVERY_SOURCE_ENV.into(), declaration);
                         let authority = gateway_authority.as_mut().ok_or_else(|| RpcError::forbidden("delivery_source_gateway_required"))?;
                         let owner = if let Some(tenant) = tenant_id {
-                            crate::companion_api::host_identity::namespace_for_tenant(tenant)
+                            cognia_companion::host_identity::namespace_for_tenant(tenant)
                         } else if scope == Some("service") {
-                            crate::companion_api::host_identity::current().ok().and_then(|binding| crate::companion_api::host_identity::namespace_for_tenant(&binding.remote_tenant_id))
+                            cognia_companion::host_identity::current().ok().and_then(|binding| cognia_companion::host_identity::namespace_for_tenant(&binding.remote_tenant_id))
                         } else { None }.ok_or_else(|| RpcError::forbidden("delivery_source_account_required"))?;
                         let directory = host.cognia_data_dir().map_err(RpcError::internal)?;
                         let task = authority.task_id.clone();
                         let device = authority.device_id.clone().unwrap_or_else(|| device_id.to_owned());
                         let (config, source) = tokio::task::spawn_blocking(move || {
-                            let host_id = crate::headless::deployment_id::resolve(&directory)?;
-                            let source = cognia_companion_rpc::delivery_admission::consume(
+                            let host_id = crate::deployment_id::resolve(&directory)?;
+                            let source = crate::delivery_admission::consume(
                                 &directory, &owner, &host_id, &device, &task, &mut hardened)?;
                             Ok::<_, String>((hardened, source))
                         }).await.map_err(|_| RpcError::internal("delivery_source_admission_failed".into()))?.map_err(RpcError::forbidden)?;
@@ -355,7 +355,7 @@ pub(super) async fn dispatch(
                         device_id,
                         cognia_external_agent::spawn_authority::with_gateway(
                             gateway_authority,
-                            crate::external_agent::exec_backend::spawn_with_events(
+                            cognia_external_agent::exec_backend::spawn_with_events(
                                 backend.as_ref(),
                                 host.agent_event_emitter(),
                                 hardened,
@@ -372,7 +372,7 @@ pub(super) async fn dispatch(
         "send_to_external_agent" => {
             let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
             let message: String = required(&args, "message")?;
-            super::super::audit::record_async(
+            cognia_companion::audit::record_async(
                 "external_agent_send",
                 device_id,
                 scope.unwrap_or(""),
@@ -389,7 +389,7 @@ pub(super) async fn dispatch(
 
         "kill_external_agent" => {
             let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
-            super::super::audit::record_async(
+            cognia_companion::audit::record_async(
                 "external_agent_kill",
                 device_id,
                 scope.unwrap_or(""),
@@ -407,9 +407,9 @@ pub(super) async fn dispatch(
         "external_agent_delete_gateway_task" => {
             let task_id: String = required_aliased(&args, "task_id", "taskId")?;
             let backend = host.exec_backend();
-            cognia_companion_rpc::delivery_admission::delete_with_source_fence(
+            crate::delivery_admission::delete_with_source_fence(
                 async {
-                    crate::external_agent::commands::authorize_gateway_task_deletion(
+                    cognia_external_agent::gateway_task::authorize_gateway_task_deletion(
                         &task_id, backend.as_ref(), (scope != Some("service")).then_some(device_id),
                     ).await.map_err(RpcError::internal)
                 },
@@ -423,37 +423,37 @@ pub(super) async fn dispatch(
                         .map_err(RpcError::internal)?;
                     if !has_source { return Ok(()); }
                     let owner = if let Some(tenant) = tenant_id {
-                        crate::companion_api::host_identity::namespace_for_tenant(tenant)
+                        cognia_companion::host_identity::namespace_for_tenant(tenant)
                     } else if scope == Some("service") {
-                        crate::companion_api::host_identity::current().ok().and_then(|binding| crate::companion_api::host_identity::namespace_for_tenant(&binding.remote_tenant_id))
+                        cognia_companion::host_identity::current().ok().and_then(|binding| cognia_companion::host_identity::namespace_for_tenant(&binding.remote_tenant_id))
                     } else { None }.ok_or_else(|| RpcError::forbidden("delivery_source_account_required"))?;
                     let task = task_id.clone();
                     let device = (scope != Some("service")).then(|| device_id.to_owned());
                     tokio::task::spawn_blocking(move || {
-                        let host_id = crate::headless::deployment_id::resolve(&directory)?;
+                        let host_id = crate::deployment_id::resolve(&directory)?;
                         source_store.revoke_owned_task(&owner, &host_id, &task, device.as_deref())
                     }).await.map_err(|_| RpcError::internal("delivery_source_revocation_failed".into()))?
                         .map_err(RpcError::forbidden)
                 },
                 async {
                     let directory = host.cognia_data_dir().map_err(RpcError::internal)?;
-                    let owner = tenant_id.and_then(crate::companion_api::host_identity::namespace_for_tenant)
-                        .or_else(|| (scope == Some("service")).then(|| crate::companion_api::host_identity::current().ok()
-                            .and_then(|b| crate::companion_api::host_identity::namespace_for_tenant(&b.remote_tenant_id))).flatten());
+                    let owner = tenant_id.and_then(cognia_companion::host_identity::namespace_for_tenant)
+                        .or_else(|| (scope == Some("service")).then(|| cognia_companion::host_identity::current().ok()
+                            .and_then(|b| cognia_companion::host_identity::namespace_for_tenant(&b.remote_tenant_id))).flatten());
                     let root = directory.clone();
-                    let host_id = tokio::task::spawn_blocking(move || crate::headless::deployment_id::resolve(&root))
+                    let host_id = tokio::task::spawn_blocking(move || crate::deployment_id::resolve(&root))
                         .await.map_err(|_| RpcError::internal("delivery_source_unavailable".into()))?.map_err(RpcError::internal)?;
-                    let admission = cognia_companion_rpc::managed_desktops::task_deletion_admission(
-                        cognia_companion_rpc::managed_desktops::Caller { device_id,tenant_id,scope,local:false },
+                    let admission = crate::managed_desktops::task_deletion_admission(
+                        crate::managed_desktops::Caller { device_id,tenant_id,scope,local:false },
                         host_id.clone(),owner.clone());
-                    cognia_companion_rpc::managed_desktop_results::delete_task_history(&directory, owner, host_id, task_id.clone(),
+                    crate::managed_desktop_results::delete_task_history(&directory, owner, host_id, task_id.clone(),
                         (scope != Some("service")).then(|| device_id.to_owned()), admission,
-                        crate::external_agent::commands::delete_gateway_task_for_device(
+                        cognia_external_agent::gateway_task::delete_gateway_task_for_device(
                             &task_id, backend.as_ref(), (scope != Some("service")).then_some(device_id),
                         )).await.map_err(RpcError::internal)
                 },
             ).await?;
-            super::super::audit::record_async(
+            cognia_companion::audit::record_async(
                 "external_agent_gateway_task_deleted",
                 device_id,
                 scope.unwrap_or(""),
@@ -492,7 +492,7 @@ pub(super) async fn dispatch(
                 optional(&args, "env")?.unwrap_or_default();
             let stdin: Option<String> = optional(&args, "stdin")?;
             let timeout_ms: u64 = required(&args, "timeoutMs")?;
-            let denied = |violation: crate::external_agent::presets::PolicyViolation| {
+            let denied = |violation: cognia_external_agent::presets::PolicyViolation| {
                 RpcError::forbidden(format!("task shell denied by policy: {violation}"))
             };
             let workspace_root = policy
@@ -537,7 +537,7 @@ pub(super) async fn dispatch(
                 }
                 Err(error) => fields["reason"] = Value::String(error.code.clone()),
             }
-            super::super::audit::record_async(
+            cognia_companion::audit::record_async(
                 "environment_task_shell",
                 device_id,
                 scope.unwrap_or(""),
@@ -568,7 +568,7 @@ pub(super) async fn dispatch(
             // plugin connector is most likely to run on, serving an endpoint
             // that refuses everything.
             let verification: Option<
-                crate::connectors::sigverify::declarative::WebhookVerificationSpec,
+                cognia_connectors::sigverify::declarative::WebhookVerificationSpec,
             > = optional(&args, "verification")?;
             if let Some(spec) = verification.as_ref() {
                 // Checked before the row lands, exactly as the Tauri command
@@ -582,7 +582,7 @@ pub(super) async fn dispatch(
             }
             services.connectors.inner.lock().registered_adapters.insert(
                 adapter_id.clone(),
-                crate::connectors::types::AdapterRegistration {
+                cognia_connectors::types::AdapterRegistration {
                     adapter_id,
                     adapter_type,
                     webhook_path: None,
@@ -673,8 +673,8 @@ pub(super) async fn dispatch(
         // Tauri command's, so `lib/workflow/runtime/tauri-bridge.ts` sends one
         // payload shape to both hosts.
         "workflow_register_trigger" => {
-            let input: crate::workflow::types::RegisterTriggerInput = required(&args, "input")?;
-            crate::workflow::commands::workflow_register_trigger_for_state(
+            let input: cognia_scheduling::workflow::types::RegisterTriggerInput = required(&args, "input")?;
+            cognia_scheduling::workflow::commands::workflow_register_trigger_for_state(
                 workflow_state(host)?,
                 input,
             )
@@ -684,7 +684,7 @@ pub(super) async fn dispatch(
         "workflow_unregister_trigger" => {
             let workflow_id: String = required_aliased(&args, "workflow_id", "workflowId")?;
             let trigger_id: String = required_aliased(&args, "trigger_id", "triggerId")?;
-            crate::workflow::commands::workflow_unregister_trigger_for_state(
+            cognia_scheduling::workflow::commands::workflow_unregister_trigger_for_state(
                 workflow_state(host)?,
                 workflow_id,
                 trigger_id,
@@ -695,7 +695,7 @@ pub(super) async fn dispatch(
         "workflow_file_watch_ack" => {
             let workflow_id: String = required_aliased(&args, "workflow_id", "workflowId")?;
             let trigger_id: String = required_aliased(&args, "trigger_id", "triggerId")?;
-            crate::workflow::commands::workflow_file_watch_ack_for_state(
+            cognia_scheduling::workflow::commands::workflow_file_watch_ack_for_state(
                 workflow_state(host)?,
                 workflow_id,
                 trigger_id,
@@ -706,7 +706,7 @@ pub(super) async fn dispatch(
         "workflow_get_webhook_url" => {
             let workflow_id: String = required_aliased(&args, "workflow_id", "workflowId")?;
             let trigger_id: String = required_aliased(&args, "trigger_id", "triggerId")?;
-            let url = crate::workflow::commands::workflow_get_webhook_url_for_state(
+            let url = cognia_scheduling::workflow::commands::workflow_get_webhook_url_for_state(
                 workflow_state(host)?,
                 workflow_id,
                 trigger_id,
@@ -721,7 +721,7 @@ pub(super) async fn dispatch(
             let body: String = required(&args, "body")?;
             let headers: Option<std::collections::BTreeMap<String, String>> =
                 optional(&args, "headers")?;
-            let answered = crate::workflow::commands::workflow_webhook_respond_for_state(
+            let answered = cognia_scheduling::workflow::commands::workflow_webhook_respond_for_state(
                 workflow_state(host)?,
                 correlation_id,
                 status,
@@ -732,8 +732,8 @@ pub(super) async fn dispatch(
             Ok(Value::Bool(answered))
         }
         "workflow_persist_run_state" => {
-            let input: crate::workflow::types::PersistRunStateInput = required(&args, "input")?;
-            crate::workflow::commands::workflow_persist_run_state_for_state(
+            let input: cognia_scheduling::workflow::types::PersistRunStateInput = required(&args, "input")?;
+            cognia_scheduling::workflow::commands::workflow_persist_run_state_for_state(
                 workflow_state(host)?,
                 input,
             )
@@ -741,7 +741,7 @@ pub(super) async fn dispatch(
             .map_err(RpcError::internal)
         }
         "workflow_reload_in_flight_runs" => {
-            let rows = crate::workflow::commands::workflow_reload_in_flight_runs_for_state(
+            let rows = cognia_scheduling::workflow::commands::workflow_reload_in_flight_runs_for_state(
                 workflow_state(host)?,
             )
             .map_err(RpcError::internal)?;
@@ -749,7 +749,7 @@ pub(super) async fn dispatch(
         }
         "workflow_ack_completed" => {
             let run_id: String = required_aliased(&args, "run_id", "runId")?;
-            crate::workflow::commands::workflow_ack_completed_for_state(
+            cognia_scheduling::workflow::commands::workflow_ack_completed_for_state(
                 workflow_state(host)?,
                 run_id,
             )
@@ -757,9 +757,9 @@ pub(super) async fn dispatch(
             .map_err(RpcError::internal)
         }
         "workflow_waitpoint_create" => {
-            let waitpoint: crate::workflow::types::WorkflowWaitpointRow =
+            let waitpoint: cognia_scheduling::workflow::types::WorkflowWaitpointRow =
                 required(&args, "waitpoint")?;
-            let row = crate::workflow::commands::workflow_waitpoint_create_for_state(
+            let row = cognia_scheduling::workflow::commands::workflow_waitpoint_create_for_state(
                 workflow_state(host)?,
                 waitpoint,
             )
@@ -768,7 +768,7 @@ pub(super) async fn dispatch(
         }
         "workflow_waitpoint_get" => {
             let waitpoint_id: String = required_aliased(&args, "waitpoint_id", "waitpointId")?;
-            let row = crate::workflow::commands::workflow_waitpoint_get_for_state(
+            let row = cognia_scheduling::workflow::commands::workflow_waitpoint_get_for_state(
                 workflow_state(host)?,
                 waitpoint_id,
             )
@@ -776,16 +776,16 @@ pub(super) async fn dispatch(
             to_json(row)
         }
         "workflow_waitpoint_list_pending" => {
-            let rows = crate::workflow::commands::workflow_waitpoint_list_pending_for_state(
+            let rows = cognia_scheduling::workflow::commands::workflow_waitpoint_list_pending_for_state(
                 workflow_state(host)?,
             )
             .map_err(RpcError::internal)?;
             to_json(rows)
         }
         "workflow_waitpoint_decide" => {
-            let input: crate::workflow::types::WorkflowWaitpointDecisionInput =
+            let input: cognia_scheduling::workflow::types::WorkflowWaitpointDecisionInput =
                 required(&args, "input")?;
-            let changed = crate::workflow::commands::workflow_waitpoint_decide_for_state(
+            let changed = cognia_scheduling::workflow::commands::workflow_waitpoint_decide_for_state(
                 workflow_state(host)?,
                 input,
             )
@@ -793,8 +793,8 @@ pub(super) async fn dispatch(
             Ok(Value::Bool(changed))
         }
         "workflow_wait_event_persist" => {
-            let event: crate::workflow::types::WorkflowWaitEventRow = required(&args, "event")?;
-            crate::workflow::commands::workflow_wait_event_persist_for_state(
+            let event: cognia_scheduling::workflow::types::WorkflowWaitEventRow = required(&args, "event")?;
+            cognia_scheduling::workflow::commands::workflow_wait_event_persist_for_state(
                 workflow_state(host)?,
                 event,
             )
@@ -803,7 +803,7 @@ pub(super) async fn dispatch(
         }
         "workflow_wait_event_prune" => {
             let now: i64 = required(&args, "now")?;
-            let pruned = crate::workflow::commands::workflow_wait_event_prune_for_state(
+            let pruned = cognia_scheduling::workflow::commands::workflow_wait_event_prune_for_state(
                 workflow_state(host)?,
                 now,
             )
@@ -816,11 +816,11 @@ pub(super) async fn dispatch(
         // service-token gate above keeps webhook material and route secrets
         // inaccessible to paired-device principals.
         "integration_ingress_register" => {
-            let input: crate::workflow::triggers::webhook_router::IntegrationIngressEntry =
+            let input: cognia_scheduling::workflow::triggers::webhook_router::IntegrationIngressEntry =
                 required(&args, "input")?;
             let result = {
                 let workflow = workflow_state(host)?;
-                crate::workflow::commands::integration_ingress_register_for_state(workflow, input)
+                cognia_scheduling::workflow::commands::integration_ingress_register_for_state(workflow, input)
             }
             .map_err(RpcError::internal)?;
             to_json(result)
@@ -830,7 +830,7 @@ pub(super) async fn dispatch(
             let route_id: String = required_aliased(&args, "route_id", "routeId")?;
             {
                 let workflow = workflow_state(host)?;
-                crate::workflow::commands::integration_ingress_unregister_for_state(
+                cognia_scheduling::workflow::commands::integration_ingress_unregister_for_state(
                     workflow, route_id,
                 )
             }
@@ -842,7 +842,7 @@ pub(super) async fn dispatch(
             let route_id: String = required_aliased(&args, "route_id", "routeId")?;
             let result = {
                 let workflow = workflow_state(host)?;
-                crate::workflow::commands::integration_ingress_get_url_for_state(workflow, route_id)
+                cognia_scheduling::workflow::commands::integration_ingress_get_url_for_state(workflow, route_id)
             }
             .map_err(RpcError::internal)?;
             to_json(result)
@@ -852,7 +852,7 @@ pub(super) async fn dispatch(
             let limit: Option<usize> = optional(&args, "limit")?;
             let result = {
                 let workflow = workflow_state(host)?;
-                crate::workflow::commands::integration_ingress_poll_for_state(workflow, limit)
+                cognia_scheduling::workflow::commands::integration_ingress_poll_for_state(workflow, limit)
             }
             .map_err(RpcError::internal)?;
             to_json(result)
@@ -864,12 +864,12 @@ pub(super) async fn dispatch(
             let limit = Some(500usize);
             let result = {
                 let workflow = workflow_state(host)?;
-                crate::workflow::commands::integration_ingress_deadletters_for_state(
+                cognia_scheduling::workflow::commands::integration_ingress_deadletters_for_state(
                     workflow, limit,
                 )
             }
             .map_err(RpcError::internal)?;
-            super::super::paging::Page::slice_all(result, &page, 100)
+            cognia_companion::paging::Page::slice_all(result, &page, 100)
                 .map_err(paging_error)
                 .and_then(to_json)
         }
@@ -879,7 +879,7 @@ pub(super) async fn dispatch(
             let delivery_id: String = required_aliased(&args, "delivery_id", "deliveryId")?;
             let result = {
                 let workflow = workflow_state(host)?;
-                crate::workflow::commands::integration_ingress_deadletter_for_state(
+                cognia_scheduling::workflow::commands::integration_ingress_deadletter_for_state(
                     workflow,
                     route_id,
                     delivery_id,
@@ -894,7 +894,7 @@ pub(super) async fn dispatch(
             let delivery_id: String = required_aliased(&args, "delivery_id", "deliveryId")?;
             let result = {
                 let workflow = workflow_state(host)?;
-                crate::workflow::commands::integration_ingress_requeue_for_state(
+                cognia_scheduling::workflow::commands::integration_ingress_requeue_for_state(
                     workflow,
                     route_id,
                     delivery_id,
@@ -916,7 +916,7 @@ pub(super) async fn dispatch(
             // beside it use. The Tauri handler takes `input` too, so one wire
             // shape serves the desktop invoke and the loopback RPC.
             let input: cognia_task_workspace::EnsureRemoteSource = required(&args, "input")?;
-            crate::task_workspace::task_workspace_remote_source_ensure(input)
+            cognia_task_workspace_host::host_surface::task_workspace_remote_source_ensure(input)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -928,7 +928,7 @@ pub(super) async fn dispatch(
         // the host's stored git credential.
         "task_workspace_project_source_ensure" => {
             let input: cognia_task_workspace::EnsureProjectSource = required(&args, "input")?;
-            crate::task_workspace::task_workspace_project_source_ensure(input)
+            cognia_task_workspace_host::host_surface::task_workspace_project_source_ensure(input)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -937,7 +937,7 @@ pub(super) async fn dispatch(
         "task_workspace_session_scratch_ensure" => {
             let input: cognia_task_workspace::EnsureSessionScratchWorkspace =
                 required(&args, "input")?;
-            crate::task_workspace::task_workspace_session_scratch_ensure(input)
+            cognia_task_workspace_host::host_surface::task_workspace_session_scratch_ensure(input)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -948,24 +948,24 @@ pub(super) async fn dispatch(
         // names a path on this host.
         "code_snapshot_checkout_get" => {
             let checkout_id: String = required(&args, "checkoutId")?;
-            crate::task_workspace::code_snapshot_checkout_get(checkout_id)
+            cognia_task_workspace_host::host_surface::code_snapshot_checkout_get(checkout_id)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
 
         "github_workspace_clone" => {
-            let command_args: crate::github::workspace::CloneArgs = required(&args, "args")?;
-            crate::github::workspace::github_workspace_clone(command_args)
+            let command_args: cognia_git::github::workspace::CloneArgs = required(&args, "args")?;
+            cognia_git::github::workspace::github_workspace_clone(command_args)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
 
         "github_workspace_commit_and_push" => {
-            let command_args: crate::github::workspace::CommitAndPushArgs =
+            let command_args: cognia_git::github::workspace::CommitAndPushArgs =
                 required(&args, "args")?;
-            crate::github::workspace::github_workspace_commit_and_push(command_args)
+            cognia_git::github::workspace::github_workspace_commit_and_push(command_args)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -973,7 +973,7 @@ pub(super) async fn dispatch(
 
         "github_workspace_remove" => {
             let path: String = required(&args, "path")?;
-            crate::github::workspace::github_workspace_remove(path)
+            cognia_git::github::workspace::github_workspace_remove(path)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -981,7 +981,7 @@ pub(super) async fn dispatch(
 
         "github_workspace_stat" => {
             let path: String = required(&args, "path")?;
-            crate::github::workspace::github_workspace_stat(path)
+            cognia_git::github::workspace::github_workspace_stat(path)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -993,13 +993,13 @@ pub(super) async fn dispatch(
             let result = {
                 let workflow = workflow_state(host)?;
                 if name == "integration_ingress_ack" {
-                    crate::workflow::commands::integration_ingress_ack_for_state(
+                    cognia_scheduling::workflow::commands::integration_ingress_ack_for_state(
                         workflow,
                         route_id,
                         delivery_id,
                     )
                 } else {
-                    crate::workflow::commands::integration_ingress_nack_for_state(
+                    cognia_scheduling::workflow::commands::integration_ingress_nack_for_state(
                         workflow,
                         route_id,
                         delivery_id,
@@ -1102,7 +1102,7 @@ pub(super) async fn dispatch(
                 .get("payload")
                 .cloned()
                 .ok_or_else(|| RpcError::malformed("missing 'payload'".to_string()))?;
-            let snapshot: crate::provider_profiles::CatalogSnapshotDoc =
+            let snapshot: cognia_agent_state::provider_profiles::CatalogSnapshotDoc =
                 serde_json::from_value(payload)
                     .map_err(|e| RpcError::malformed(format!("catalog refresh payload: {e}")))?;
             let profiles = std::sync::Arc::clone(&services.profiles);
@@ -1130,7 +1130,7 @@ pub(super) async fn dispatch(
             // On the headless front door the `/connectors` ingress router is
             // mounted by the companion server itself — there is no separately
             // started local axum server (and thus no distinct bound address).
-            to_json(crate::connectors::types::ConnectorsHealth {
+            to_json(cognia_connectors::types::ConnectorsHealth {
                 server_running: true,
                 bound_addr: None,
                 registered_adapter_count: count,
@@ -1146,7 +1146,7 @@ pub(super) async fn dispatch(
         // on a desktop-hosted companion server for a command the client was
         // told it could call.
         //
-        // Nothing below needs `HeadlessServices`: `crate::connectors::keyring`
+        // Nothing below needs `HeadlessServices`: `cognia_connectors::keyring`
         // is a process-global module over the OS keychain, the same one the
         // Tauri commands in `crates/cognia-connectors/src/commands.rs` wrap.
         // Both hosts run in the process that owns that keychain, so the arm is
@@ -1160,9 +1160,9 @@ pub(super) async fn dispatch(
             // credential is listed under "Secrets on this host" and goes when
             // that device is revoked.
             let writer = secret_writer(device_id, tenant_id, scope);
-            let name = crate::connectors::keyring::account_key(&adapter_id, &credential);
+            let name = cognia_connectors::keyring::account_key(&adapter_id, &credential);
             tokio::task::spawn_blocking(move || {
-                crate::connectors::keyring::set(&adapter_id, &credential, &value)?;
+                cognia_connectors::keyring::set(&adapter_id, &credential, &value)?;
                 cognia_secrets::host_secrets::note_written(
                     cognia_secrets::host_secrets::HostSecretKind::Connector,
                     &name,
@@ -1180,7 +1180,7 @@ pub(super) async fn dispatch(
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
             let value = tokio::task::spawn_blocking(move || {
-                crate::connectors::keyring::get(&adapter_id, &credential)
+                cognia_connectors::keyring::get(&adapter_id, &credential)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -1191,9 +1191,9 @@ pub(super) async fn dispatch(
         "connectors_keyring_delete" => {
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
-            let name = crate::connectors::keyring::account_key(&adapter_id, &credential);
+            let name = cognia_connectors::keyring::account_key(&adapter_id, &credential);
             tokio::task::spawn_blocking(move || {
-                crate::connectors::keyring::delete(&adapter_id, &credential)?;
+                cognia_connectors::keyring::delete(&adapter_id, &credential)?;
                 cognia_secrets::host_secrets::note_deleted(
                     cognia_secrets::host_secrets::HostSecretKind::Connector,
                     &name,
@@ -1209,7 +1209,7 @@ pub(super) async fn dispatch(
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let accounts: Vec<String> = required(&args, "accounts")?;
             let present = tokio::task::spawn_blocking(move || {
-                crate::connectors::keyring::list(&adapter_id, &accounts)
+                cognia_connectors::keyring::list(&adapter_id, &accounts)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -1235,7 +1235,7 @@ pub(super) async fn dispatch(
             .map_err(|error| RpcError::internal(error.to_string()))?
             .map_err(RpcError::internal)?;
             announce_sweep(swept, host);
-            super::super::paging::Page::slice_all(entries, &page, 100)
+            cognia_companion::paging::Page::slice_all(entries, &page, 100)
                 .map_err(paging_error)
                 .and_then(to_json)
         }
@@ -1296,8 +1296,8 @@ pub(super) async fn dispatch(
         "connectors_http_request" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let req: crate::connectors::types::TauriHttpRequest = required(&args, "req")?;
-            let resp = crate::connectors::http_client::http_request(req)
+            let req: cognia_connectors::types::TauriHttpRequest = required(&args, "req")?;
+            let resp = cognia_connectors::http_client::http_request(req)
                 .await
                 .map_err(RpcError::internal)?;
             to_json(resp)
@@ -1318,15 +1318,15 @@ pub(super) async fn dispatch(
             // fresh id while the adapter was still listening on the old one.
             let handle_id: Option<String> = optional_aliased(&args, "handle_id", "handleId")?;
             let emitter =
-                std::sync::Arc::new(super::super::connector_events::ConnectorEventEmitter(
+                std::sync::Arc::new(cognia_companion::connector_events::ConnectorEventEmitter(
                     std::sync::Arc::clone(&services.event_bus),
                 ));
             let handle_id = match handle_id {
                 Some(id) => {
-                    crate::connectors::ws_client::open_ws_with_handle(emitter, url, headers, id)
+                    cognia_connectors::ws_client::open_ws_with_handle(emitter, url, headers, id)
                         .await
                 }
-                None => crate::connectors::ws_client::open_ws(emitter, url, headers).await,
+                None => cognia_connectors::ws_client::open_ws(emitter, url, headers).await,
             }
             .map_err(RpcError::internal)?;
             to_json(handle_id)
@@ -1345,11 +1345,11 @@ pub(super) async fn dispatch(
             let data: Option<String> = optional(&args, "data")?;
             let binary: Option<Vec<u8>> = optional(&args, "binary")?;
             match (data, binary) {
-                (Some(data), None) => crate::connectors::ws_client::ws_send(&handle_id, data)
+                (Some(data), None) => cognia_connectors::ws_client::ws_send(&handle_id, data)
                     .await
                     .map_err(RpcError::internal)?,
                 (None, Some(binary)) => {
-                    crate::connectors::ws_client::ws_send_binary(&handle_id, binary)
+                    cognia_connectors::ws_client::ws_send_binary(&handle_id, binary)
                         .await
                         .map_err(RpcError::internal)?
                 }
@@ -1366,7 +1366,7 @@ pub(super) async fn dispatch(
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
-            crate::connectors::ws_client::ws_close(&handle_id)
+            cognia_connectors::ws_client::ws_close(&handle_id)
                 .await
                 .map_err(RpcError::internal)?;
             Ok(Value::Null)
@@ -1377,7 +1377,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let call_json: String = required_aliased(&args, "call_json", "callJson")?;
-            crate::connectors::ws_server::send(&adapter_id, call_json)
+            cognia_connectors::ws_server::send(&adapter_id, call_json)
                 .await
                 .map_err(RpcError::internal)?;
             Ok(Value::Null)
@@ -1387,16 +1387,16 @@ pub(super) async fn dispatch(
         // on `host.headless()`: it reads the in-process WS registry, which
         // exists on the desktop shell too, and a host gate would add a
         // class-C host-parity entry (that baseline may only shrink).
-        "connectors_onebot_probe" => to_json(crate::connectors::ws_server::live_clients()),
+        "connectors_onebot_probe" => to_json(cognia_connectors::ws_server::live_clients()),
 
         // ADR-0131 — Discord multipart upload. Same reasoning as the probe:
         // pure HTTP against Discord, no AppHandle, so no host gate.
         "connectors_discord_upload" => {
-            let req: crate::connectors::discord_upload::ConnectorDiscordUploadRequest =
+            let req: cognia_connectors::discord_upload::ConnectorDiscordUploadRequest =
                 serde_json::from_value(args).map_err(|e| {
                     RpcError::malformed(format!("connectors_discord_upload args: {e}"))
                 })?;
-            let message_id = crate::connectors::discord_upload::upload(req)
+            let message_id = cognia_connectors::discord_upload::upload(req)
                 .await
                 .map_err(RpcError::internal)?;
             to_json(message_id)
@@ -1408,10 +1408,10 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let emitter =
-                std::sync::Arc::new(super::super::connector_events::ConnectorEventEmitter(
+                std::sync::Arc::new(cognia_companion::connector_events::ConnectorEventEmitter(
                     std::sync::Arc::clone(&services.event_bus),
                 ));
-            let handle_id = crate::connectors::lark_ws::open(emitter, adapter_id)
+            let handle_id = cognia_connectors::lark_ws::open(emitter, adapter_id)
                 .await
                 .map_err(RpcError::internal)?;
             to_json(handle_id)
@@ -1421,7 +1421,7 @@ pub(super) async fn dispatch(
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
-            crate::connectors::lark_ws::close(&handle_id)
+            cognia_connectors::lark_ws::close(&handle_id)
                 .await
                 .map_err(RpcError::internal)?;
             Ok(Value::Null)
@@ -1432,7 +1432,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let callback_id: String = required_aliased(&args, "callback_id", "callbackId")?;
             let response: serde_json::Value = required(&args, "response")?;
-            to_json(crate::connectors::lark_callback_reply::respond(
+            to_json(cognia_connectors::lark_callback_reply::respond(
                 &callback_id,
                 response,
             ))
@@ -1441,7 +1441,7 @@ pub(super) async fn dispatch(
         "connectors_reset_all_ws" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let count = crate::connectors::commands::connectors_reset_all_ws()
+            let count = cognia_connectors::commands::connectors_reset_all_ws()
                 .await
                 .map_err(RpcError::internal)?;
             to_json(count)
@@ -1459,7 +1459,7 @@ pub(super) async fn dispatch(
             // "never expires, LRU only". Both must reach the cache, so this
             // stays an Option rather than being defaulted here.
             let ttl_ms: Option<u64> = optional_aliased(&args, "ttl_ms", "ttlMs")?;
-            let attachment = crate::connectors::attachments::fetch_attachment(
+            let attachment = cognia_connectors::attachments::fetch_attachment(
                 adapter_id, remote_ref, source_url, headers, ttl_ms,
             )
             .await
@@ -1473,7 +1473,7 @@ pub(super) async fn dispatch(
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let remote_ref: String = required_aliased(&args, "remote_ref", "remoteRef")?;
             let max_bytes: u64 = required_aliased(&args, "max_bytes", "maxBytes")?;
-            let bytes = crate::connectors::attachments::read_attachment_base64(
+            let bytes = cognia_connectors::attachments::read_attachment_base64(
                 &adapter_id,
                 &remote_ref,
                 max_bytes,
@@ -1484,7 +1484,7 @@ pub(super) async fn dispatch(
 
         // Cache upkeep — the sweep `lib/connectors/housekeeping-scheduler.ts`
         // runs every cycle. Deliberately NOT gated on `host.headless()` the way
-        // the two arms above are: `crate::connectors::attachments` resolves its
+        // the two arms above are: `cognia_connectors::attachments` resolves its
         // directory from `dirs::data_dir()` and takes no host handle — the
         // desktop `#[tauri::command]` wrappers call these very functions with no
         // AppHandle — so refusing a desktop host would deny a request it is
@@ -1496,7 +1496,7 @@ pub(super) async fn dispatch(
         // same shape the Tauri wrappers use.
         "connectors_attachment_list" => {
             let entries =
-                tokio::task::spawn_blocking(crate::connectors::attachments::list_attachments)
+                tokio::task::spawn_blocking(cognia_connectors::attachments::list_attachments)
                     .await
                     .map_err(|error| {
                         RpcError::internal(format!("attachment list task failed: {error}"))
@@ -1508,7 +1508,7 @@ pub(super) async fn dispatch(
         "connectors_attachment_delete" => {
             let cache_keys: Vec<String> = required_aliased(&args, "cache_keys", "cacheKeys")?;
             let report = tokio::task::spawn_blocking(move || {
-                crate::connectors::attachments::delete_attachments(cache_keys)
+                cognia_connectors::attachments::delete_attachments(cache_keys)
             })
             .await
             .map_err(|error| RpcError::internal(format!("attachment delete task failed: {error}")))?
@@ -1519,7 +1519,7 @@ pub(super) async fn dispatch(
         "connectors_attachment_evict_adapter" => {
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let report = tokio::task::spawn_blocking(move || {
-                crate::connectors::attachments::evict_adapter_attachments(&adapter_id)
+                cognia_connectors::attachments::evict_adapter_attachments(&adapter_id)
             })
             .await
             .map_err(|error| RpcError::internal(format!("attachment evict task failed: {error}")))?
@@ -1530,7 +1530,7 @@ pub(super) async fn dispatch(
         "connectors_attachment_enforce_budget" => {
             let max_total_bytes: u64 = required_aliased(&args, "max_total_bytes", "maxTotalBytes")?;
             let report = tokio::task::spawn_blocking(move || {
-                crate::connectors::attachments::enforce_cache_budget(max_total_bytes)
+                cognia_connectors::attachments::enforce_cache_budget(max_total_bytes)
             })
             .await
             .map_err(|error| RpcError::internal(format!("attachment budget task failed: {error}")))?
@@ -1541,9 +1541,9 @@ pub(super) async fn dispatch(
         "connectors_media_upload" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let req: crate::connectors::types::ConnectorMediaUploadRequest =
+            let req: cognia_connectors::types::ConnectorMediaUploadRequest =
                 required(&args, "req")?;
-            let uri = crate::connectors::media_upload::upload_media(req)
+            let uri = cognia_connectors::media_upload::upload_media(req)
                 .await
                 .map_err(RpcError::internal)?;
             to_json(uri)
@@ -1552,9 +1552,9 @@ pub(super) async fn dispatch(
         "connectors_matrix_crypto_init" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let req: crate::connectors::matrix_crypto::MatrixCryptoInitRequest =
+            let req: cognia_connectors::matrix_crypto::MatrixCryptoInitRequest =
                 required(&args, "req")?;
-            crate::connectors::matrix_crypto::matrix_crypto_init(req)
+            cognia_connectors::matrix_crypto::matrix_crypto_init(req)
                 .await
                 .map_err(RpcError::internal)?;
             Ok(Value::Null)
@@ -1564,7 +1564,7 @@ pub(super) async fn dispatch(
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
-            crate::connectors::matrix_crypto::matrix_crypto_close(&adapter_id)
+            cognia_connectors::matrix_crypto::matrix_crypto_close(&adapter_id)
                 .await
                 .map_err(RpcError::internal)?;
             Ok(Value::Null)
@@ -1575,7 +1575,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let requests =
-                crate::connectors::matrix_crypto::matrix_crypto_outgoing_requests(adapter_id)
+                cognia_connectors::matrix_crypto::matrix_crypto_outgoing_requests(adapter_id)
                     .await
                     .map_err(RpcError::internal)?;
             to_json(requests)
@@ -1584,9 +1584,9 @@ pub(super) async fn dispatch(
         "connectors_matrix_crypto_mark_request_sent" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let req: crate::connectors::matrix_crypto::MatrixCryptoMarkSentRequest =
+            let req: cognia_connectors::matrix_crypto::MatrixCryptoMarkSentRequest =
                 required(&args, "req")?;
-            crate::connectors::matrix_crypto::matrix_crypto_mark_request_sent(req)
+            cognia_connectors::matrix_crypto::matrix_crypto_mark_request_sent(req)
                 .await
                 .map_err(RpcError::internal)?;
             Ok(Value::Null)
@@ -1595,9 +1595,9 @@ pub(super) async fn dispatch(
         "connectors_matrix_crypto_receive_sync_changes" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let req: crate::connectors::matrix_crypto::MatrixCryptoReceiveSyncRequest =
+            let req: cognia_connectors::matrix_crypto::MatrixCryptoReceiveSyncRequest =
                 required(&args, "req")?;
-            crate::connectors::matrix_crypto::matrix_crypto_receive_sync_changes(req)
+            cognia_connectors::matrix_crypto::matrix_crypto_receive_sync_changes(req)
                 .await
                 .map_err(RpcError::internal)?;
             Ok(Value::Null)
@@ -1606,9 +1606,9 @@ pub(super) async fn dispatch(
         "connectors_matrix_crypto_decrypt_event" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let req: crate::connectors::matrix_crypto::MatrixCryptoDecryptRequest =
+            let req: cognia_connectors::matrix_crypto::MatrixCryptoDecryptRequest =
                 required(&args, "req")?;
-            let response = crate::connectors::matrix_crypto::matrix_crypto_decrypt_event(req)
+            let response = cognia_connectors::matrix_crypto::matrix_crypto_decrypt_event(req)
                 .await
                 .map_err(RpcError::internal)?;
             to_json(response)
@@ -1617,9 +1617,9 @@ pub(super) async fn dispatch(
         "connectors_matrix_crypto_encrypt_event" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let req: crate::connectors::matrix_crypto::MatrixCryptoEncryptRequest =
+            let req: cognia_connectors::matrix_crypto::MatrixCryptoEncryptRequest =
                 required(&args, "req")?;
-            let response = crate::connectors::matrix_crypto::matrix_crypto_encrypt_event(req)
+            let response = cognia_connectors::matrix_crypto::matrix_crypto_encrypt_event(req)
                 .await
                 .map_err(RpcError::internal)?;
             to_json(response)
@@ -1628,9 +1628,9 @@ pub(super) async fn dispatch(
         "connectors_matrix_crypto_share_room_key" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let req: crate::connectors::matrix_crypto::MatrixCryptoShareRoomKeyRequest =
+            let req: cognia_connectors::matrix_crypto::MatrixCryptoShareRoomKeyRequest =
                 required(&args, "req")?;
-            let requests = crate::connectors::matrix_crypto::matrix_crypto_share_room_key(req)
+            let requests = cognia_connectors::matrix_crypto::matrix_crypto_share_room_key(req)
                 .await
                 .map_err(RpcError::internal)?;
             to_json(requests)
@@ -1639,9 +1639,9 @@ pub(super) async fn dispatch(
         "connectors_matrix_crypto_update_tracked_users" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let req: crate::connectors::matrix_crypto::MatrixCryptoTrackUsersRequest =
+            let req: cognia_connectors::matrix_crypto::MatrixCryptoTrackUsersRequest =
                 required(&args, "req")?;
-            crate::connectors::matrix_crypto::matrix_crypto_update_tracked_users(req)
+            cognia_connectors::matrix_crypto::matrix_crypto_update_tracked_users(req)
                 .await
                 .map_err(RpcError::internal)?;
             Ok(Value::Null)
@@ -1650,10 +1650,10 @@ pub(super) async fn dispatch(
         "connectors_matrix_crypto_get_missing_sessions" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let req: crate::connectors::matrix_crypto::MatrixCryptoMissingSessionsRequest =
+            let req: cognia_connectors::matrix_crypto::MatrixCryptoMissingSessionsRequest =
                 required(&args, "req")?;
             let requests =
-                crate::connectors::matrix_crypto::matrix_crypto_get_missing_sessions(req)
+                cognia_connectors::matrix_crypto::matrix_crypto_get_missing_sessions(req)
                     .await
                     .map_err(RpcError::internal)?;
             to_json(requests)
@@ -1662,9 +1662,9 @@ pub(super) async fn dispatch(
         "connectors_matrix_encrypted_media_upload" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let req: crate::connectors::types::MatrixEncryptedMediaUploadRequest =
+            let req: cognia_connectors::types::MatrixEncryptedMediaUploadRequest =
                 required(&args, "req")?;
-            let response = crate::connectors::media_upload::upload_matrix_encrypted_media(req)
+            let response = cognia_connectors::media_upload::upload_matrix_encrypted_media(req)
                 .await
                 .map_err(RpcError::internal)?;
             to_json(response)
@@ -1673,9 +1673,9 @@ pub(super) async fn dispatch(
         "connectors_matrix_encrypted_media_fetch" => {
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let req: crate::connectors::types::MatrixEncryptedMediaFetchRequest =
+            let req: cognia_connectors::types::MatrixEncryptedMediaFetchRequest =
                 required(&args, "req")?;
-            let response = crate::connectors::attachments::fetch_matrix_encrypted_attachment(req)
+            let response = cognia_connectors::attachments::fetch_matrix_encrypted_attachment(req)
                 .await
                 .map_err(RpcError::internal)?;
             to_json(response)
@@ -1692,7 +1692,7 @@ pub(super) async fn dispatch(
                 Some(v) => Some(v),
                 None => optional(&args, "durationMs")?,
             };
-            let file_key = crate::connectors::lark_upload::upload_file(
+            let file_key = cognia_connectors::lark_upload::upload_file(
                 &access_token,
                 &source_url,
                 &file_type,
@@ -1713,7 +1713,7 @@ pub(super) async fn dispatch(
                 Some(v) => Some(v),
                 None => optional(&args, "imageType")?,
             };
-            let image_key = crate::connectors::lark_upload::upload_image(
+            let image_key = cognia_connectors::lark_upload::upload_image(
                 &access_token,
                 &source_url,
                 image_type.as_deref(),
@@ -1734,12 +1734,12 @@ pub(super) async fn dispatch(
             if host.headless().is_some() {
                 return Err(RpcError::headless_unsupported(name));
             }
-            let respond_args: crate::automation::commands::ConsentRespondArgs =
+            let respond_args: cognia_automation::automation::commands::ConsentRespondArgs =
                 serde_json::from_value(args).map_err(|e| {
                     RpcError::malformed(format!("automation_consent_respond args: {e}"))
                 })?;
             let automation = host_automation(host, name)?;
-            crate::automation::commands::automation_consent_respond_for_broker(
+            cognia_automation::automation::commands::automation_consent_respond_for_broker(
                 &automation.state.consent,
                 respond_args,
             );
@@ -1797,10 +1797,10 @@ pub(super) async fn dispatch(
                 return Err(RpcError::headless_unsupported(name));
             }
             let automation = host_automation(host, name)?;
-            crate::automation::kill_switch::engage(
+            cognia_automation::automation::kill_switch::engage(
                 automation.events.as_ref(),
                 automation.state,
-                crate::automation::kill_switch::KillSwitchCause::Renderer,
+                cognia_automation::automation::kill_switch::KillSwitchCause::Renderer,
             );
             Ok(Value::Null)
         }
@@ -1829,7 +1829,7 @@ pub(super) async fn dispatch(
                         .or_else(|| server_state.tunnel.named_public_url());
                     let bind_lan = server_state
                         .bind_mode()
-                        .map(|mode| matches!(mode, super::super::BindMode::Lan));
+                        .map(|mode| matches!(mode, cognia_companion::BindMode::Lan));
                     (
                         tunnel,
                         bind_lan,
@@ -1840,11 +1840,11 @@ pub(super) async fn dispatch(
                 // `0.0.0.0`, so leave `bind_lan` unknown (= assume LAN).
                 None => (None, None, None),
             };
-            let server_id = super::super::healthz::derive_server_id(&state.secret.read());
+            let server_id = cognia_companion::healthz::derive_server_id(&state.secret.read());
             Ok(endpoints_response(
                 lan_base_url(bind_lan, data_dir.as_deref()),
                 tunnel_base_url,
-                super::super::tls_fingerprint(),
+                cognia_companion::tls_fingerprint(),
                 server_id,
             ))
         }
@@ -1865,7 +1865,7 @@ pub(super) async fn dispatch(
             let capture_tool_content: bool =
                 optional_aliased(&args, "capture_tool_content", "captureToolContent")?
                     .unwrap_or(false);
-            crate::companion_api::langfuse::credentials_set_for_account_async(
+            cognia_sidecar::langfuse::credentials_set_for_account_async(
                 account.to_string(),
                 enabled,
                 base_url,
@@ -1877,7 +1877,7 @@ pub(super) async fn dispatch(
             )
             .await
             .map_err(RpcError::validation_failed)?;
-            crate::claude::sidecar::restart_sidecar_for_config(host.sidecar_state())
+            cognia_sidecar::supervisor::restart_sidecar_for_config(host.sidecar_state())
                 .await
                 .map_err(RpcError::internal)?;
             Ok(Value::Null)
@@ -1885,7 +1885,7 @@ pub(super) async fn dispatch(
 
         "langfuse_credentials_status" => {
             let account = langfuse_account(tenant_id)?;
-            let status = crate::companion_api::langfuse::credentials_status_for_account_async(
+            let status = cognia_sidecar::langfuse::credentials_status_for_account_async(
                 account.to_string(),
             )
             .await
@@ -1895,12 +1895,12 @@ pub(super) async fn dispatch(
 
         "langfuse_credentials_clear" => {
             let account = langfuse_account(tenant_id)?;
-            crate::companion_api::langfuse::credentials_clear_for_account_async(
+            cognia_sidecar::langfuse::credentials_clear_for_account_async(
                 account.to_string(),
             )
             .await
             .map_err(RpcError::internal)?;
-            crate::claude::sidecar::restart_sidecar_for_config(host.sidecar_state())
+            cognia_sidecar::supervisor::restart_sidecar_for_config(host.sidecar_state())
                 .await
                 .map_err(RpcError::internal)?;
             Ok(Value::Null)
@@ -1908,7 +1908,7 @@ pub(super) async fn dispatch(
 
         "langfuse_connection_test" => {
             let account = langfuse_account(tenant_id)?;
-            let status = crate::companion_api::langfuse::connection_test_for_account(account)
+            let status = cognia_sidecar::langfuse::connection_test_for_account(account)
                 .await
                 .map_err(RpcError::internal)?;
             to_json(status)
@@ -1916,9 +1916,9 @@ pub(super) async fn dispatch(
 
         "langfuse_trace_ingest" => {
             let account = langfuse_account(tenant_id)?;
-            let batch: crate::companion_api::langfuse::AgentTraceBatchV1 =
+            let batch: cognia_sidecar::langfuse::AgentTraceBatchV1 =
                 required(&args, "batch")?;
-            let result = crate::companion_api::langfuse::trace_ingest_for_account(account, batch)
+            let result = cognia_sidecar::langfuse::trace_ingest_for_account(account, batch)
                 .await
                 .map_err(map_langfuse_ingest_error)?;
             to_json(result)
@@ -1936,14 +1936,14 @@ pub(super) async fn dispatch(
             validate_app_settings_update(&args)?;
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             // Connected brain first, desktop WebView second (ADR-0059 R4/R5).
-            let transport = super::super::ws_bridge::resolve_bridge_transport(state)
+            let transport = cognia_companion::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
             bridge
                 .dispatch(
                     transport.as_ref(),
                     name,
                     args,
-                    crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+                    cognia_companion::desktop_writes_bridge::DEFAULT_TIMEOUT,
                 )
                 .await
                 .map_err(RpcError::internal)
@@ -1982,7 +1982,7 @@ fn secret_writer(
         return None;
     }
     let label = tenant_id.and_then(|tenant| {
-        crate::companion_api::security_store::security_store()?
+        cognia_companion::security_store::security_store()?
             .list_devices(tenant)
             .ok()?
             .into_iter()
@@ -2020,11 +2020,11 @@ fn host_secret_target(
 /// caller's tenant claim (see `sweep_revoked_host_device_secrets`). Blocking:
 /// run it off the async executor.
 fn sweep_revoked_writers() -> usize {
-    crate::companion_api::device_lifecycle::sweep_revoked_host_device_secrets()
+    cognia_companion::device_lifecycle::sweep_revoked_host_device_secrets()
 }
 
 /// Tell the runtime its provider keys may have changed.
-fn announce_sweep(swept: usize, host: &super::super::dispatch_host::DispatchHost) {
+fn announce_sweep(swept: usize, host: &dyn crate::rpc_host::RpcHost) {
     if swept > 0 {
         host.publish_host_event(SECRETS_CHANGED_EVENT, json!({ "action": "swept" }));
     }

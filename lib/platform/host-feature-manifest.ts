@@ -666,7 +666,7 @@ export function buildLocalHostFeatureManifest({
         // badge it has no way to fill in.
         //
         // Desktop only, because only the desktop answers it. The arm lives in
-        // `src-tauri/src/companion_api/rpc/native_tools.rs`. The headless
+        // `crates/cognia-companion-rpc/src/rpc/native_tools.rs`. The headless
         // brain's dispatch (`cli/src/runtime/external/node-backend.ts`) has no
         // case for it and falls through to its unknown-command default, so
         // naming it here for a headless host would let a companion past this

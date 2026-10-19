@@ -7,7 +7,7 @@
 // the pet twice: the XP, the coins and the cooldown all move once per intent.
 // So the arms that change the pet also key on the `idempotencyKey` in the body,
 // scoped to the AUTHENTICATED device (`callerDeviceId` is injected server-side,
-// see `CALLER_DEVICE_ID_COMMANDS` in `src-tauri/src/companion_api/rpc.rs`), so
+// see `CALLER_DEVICE_ID_COMMANDS` in `crates/cognia-companion-rpc/src/rpc.rs`), so
 // one device can neither replay nor pre-empt another's intent.
 //
 // The in-flight promise is what is stored, not only the settled value: a retry

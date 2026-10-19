@@ -41,7 +41,7 @@ automation / data / about). Some sub-pages embed the shared desktop section comp
   permissionMode, defaultSystemPrompt, defaultMaxThinkingTokens, bareMode,
   debugMode, briefMode.
 - Phone → desktop allows **~36** keys (`APP_SETTINGS_MOBILE_ALLOWED_KEYS` in
-  `src-tauri/src/companion_api/rpc.rs`): appearance, webrtc, tts, search, model
+  `crates/cognia-companion-rpc/src/rpc.rs`): appearance, webrtc, tts, search, model
   default, conversation, sidebar/pins, telemetry, mic — all non-credential
   preference fields. Enforced server-side (400 on a disallowed key) with
   OpenAPI spec-parity + Rust unit tests.

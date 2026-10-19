@@ -52,6 +52,10 @@ pub trait RpcHost: Send + Sync {
     /// `"tauri"` | `"headless"`, for logs and error strings.
     fn kind(&self) -> &'static str;
 
+    /// An owned handle on this same host, for work that outlives the call
+    /// (a blocking-pool task, an event sink).
+    fn to_shared(&self) -> Arc<dyn RpcHost>;
+
     /// The data directory owned by the execution host.
     fn data_dir(&self) -> Result<PathBuf, String>;
 
@@ -351,6 +355,10 @@ fn state_key_reaches_host_process_table(
 impl RpcHost for Arc<HeadlessServices> {
     fn kind(&self) -> &'static str {
         "headless"
+    }
+
+    fn to_shared(&self) -> Arc<dyn RpcHost> {
+        Arc::new(Arc::clone(self))
     }
 
     fn data_dir(&self) -> Result<PathBuf, String> {

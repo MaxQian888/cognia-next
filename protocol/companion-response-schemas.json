@@ -3054,7 +3054,7 @@
     },
     "CompanionEndpoints": {
       "type": "object",
-      "x-cognia-wire-source": "src-tauri/src/companion_api/rpc.rs endpoints_response",
+      "x-cognia-wire-source": "crates/cognia-companion-rpc/src/rpc.rs endpoints_response",
       "description": "Where else this host can be reached. `lanBaseUrl` is null on a loopback-bound server or a host with no routable interface; `tunnelBaseUrl` is null when no tunnel is running. `fingerprint` pins the self-signed certificate.",
       "required": ["lanBaseUrl", "tunnelBaseUrl", "fingerprint", "serverId"],
       "properties": {

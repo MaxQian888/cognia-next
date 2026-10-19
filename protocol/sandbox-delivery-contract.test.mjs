@@ -28,14 +28,23 @@ test("delivery history is a paged host read on every companion transport", () =>
 })
 
 test("delivery reads stay reachable with the pool off and bypass the idempotency cache", () => {
-  const source = read("src-tauri/src/companion_api/rpc/environment.rs")
+  const source = read("crates/cognia-companion-rpc/src/rpc/environment.rs")
   const dispatch = source.slice(source.indexOf("async fn dispatch_arm("))
   assert.ok(
     dispatch.indexOf(`name == "${command}"`) < dispatch.indexOf("let services = services(name)?")
   )
-  assert.match(dispatch, /DispatchHost::Tauri\(_\) => data_dir\.join\("cognia"\)/)
-  assert.match(dispatch, /DispatchHost::Headless\(_\) => data_dir/)
-  const rpc = read("src-tauri/src/companion_api/rpc.rs")
+  // Delivery history lives in the host's cognia data root: a `cognia/`
+  // subdirectory on the desktop, the data dir itself on a headless host.
+  assert.match(dispatch, /host\s*\.cognia_data_dir\(\)/)
+  assert.match(
+    read("src-tauri/src/companion_api/dispatch_host.rs"),
+    /Self::Tauri\(_\) => Ok\(self\.data_dir\(\)\?\.join\("cognia"\)\)/
+  )
+  assert.match(
+    read("crates/cognia-companion-rpc/src/rpc_host.rs"),
+    /fn cognia_data_dir\(&self\) -> Result<PathBuf, String> \{\s*Ok\(self\.data_dir\.clone\(\)\)/
+  )
+  const rpc = read("crates/cognia-companion-rpc/src/rpc.rs")
   assert.equal(rpc.split(`"${command}"`).length - 1, 2)
   assert.ok(
     read("src-tauri/src/companion_api/output_registry.rs").includes(

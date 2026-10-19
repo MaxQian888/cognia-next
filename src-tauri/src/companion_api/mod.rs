@@ -8,28 +8,32 @@
 //!
 //! What stays is what names the app:
 //!
-//! - [`rpc`] and [`dispatch_host`] — the RPC dispatch table and the host it
-//!   runs arms on (the desktop `AppHandle` or the headless services);
+//! - [`dispatch_host`] — the desktop's [`rpc::RpcHost`]: the host the RPC
+//!   dispatch table (`cognia_companion_rpc::rpc`, re-exported as [`rpc`])
+//!   runs arms on, either the desktop `AppHandle` or the headless services;
+//! - [`environment_commands`] — the desktop IPC shells over the environment
+//!   family;
 //! - [`commands`] — the Tauri command shells the renderer calls;
 //! - [`wiring`] — the app's [`runtime::CompanionRuntime`], which hands the
 //!   core its dispatcher and the routes it cannot name;
 //! - [`host`] — the WebView renderer adapter (`TauriRenderer`);
-//! - [`skill_transactions`], `langfuse`, and the parity tests that read the
-//!   dispatch table against the published contract.
+//! - `langfuse`, and the parity tests that read the dispatch table against
+//!   the published contract.
 
 pub use cognia_companion::*;
 
 mod command_contract_parity;
 pub mod commands;
 pub mod dispatch_host;
+pub mod environment_commands;
 mod event_catalog_parity;
 /// The crate's renderer port plus the desktop's WebView adapter.
 pub mod host;
 pub(crate) mod langfuse;
 /// What every dispatchable arm answers with (ADR-0175 B4).
 mod output_registry;
-pub mod rpc;
-pub mod skill_transactions;
+pub use cognia_companion_rpc::rpc;
+pub use cognia_companion_rpc::skill_transactions;
 pub mod spec_parity;
 pub mod wiring;
 

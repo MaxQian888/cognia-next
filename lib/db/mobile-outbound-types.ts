@@ -11,9 +11,9 @@ import type { CollabFieldClash } from "@/lib/collab/client"
 // entry below MUST satisfy three invariants:
 //   1. At least one production UI surface enqueues it (grep `enqueue\({`
 //      across components/mobile + app/share-target).
-//   2. The Rust RPC dispatcher (`src-tauri/src/companion_api/rpc.rs`) lists
+//   2. The Rust RPC dispatcher (`crates/cognia-companion-rpc/src/rpc.rs`) lists
 //      the same name in `KNOWN_COMMANDS` AND one of the per-domain modules
-//      under `src-tauri/src/companion_api/rpc/` (`data_sync.rs` for the
+//      under `crates/cognia-companion-rpc/src/rpc/` (`data_sync.rs` for the
 //      bridged desktop writes) has a `match` arm that routes it to a real
 //      handler. Drift here surfaces as 404 unknown_command when the queue
 //      runner drains.

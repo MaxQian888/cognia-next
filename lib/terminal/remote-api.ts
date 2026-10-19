@@ -9,7 +9,7 @@
  * (companion `/api/_rpc/*`), and the WebRTC RPC tier.
  *
  * Server side: local arms in `src-tauri/src/terminal/`, remote arms in
- * `src-tauri/src/companion_api/rpc.rs` (the `terminal_*` section). Over the
+ * `crates/cognia-companion-rpc/src/rpc.rs` (the `terminal_*` section). Over the
  * companion transport, `exec` / `kill` / `killPort` / `completePaths` require
  * the device's remote-control capability (403 otherwise); the listings are
  * plain paired reads.
@@ -65,7 +65,7 @@ export interface RemoteExecRequest {
 // over the WS frames), and killing goes through `killFromDock` → `session.kill()`.
 // The transport-routed twins that used to live here had no callers, no type-level
 // dormancy note, and no pinning test — three-of-three missing is dead code, not
-// intentional dormancy. The Rust arms in `companion_api/rpc.rs` remain, so
+// intentional dormancy. The Rust arms in `cognia-companion-rpc/src/rpc.rs` remain, so
 // restoring one is a single export away.
 
 /**

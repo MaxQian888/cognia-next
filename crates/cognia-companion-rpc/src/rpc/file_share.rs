@@ -50,7 +50,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     scope: Option<&str>,
@@ -119,9 +119,7 @@ mod tests {
     #[tokio::test]
     async fn a_device_cannot_reach_the_host_only_arms() {
         let state = super::super::tests::test_state();
-        let host = super::super::super::dispatch_host::DispatchHost::Headless(
-            crate::headless::HeadlessServices::stub_for_tests(),
-        );
+        let host = crate::headless::HeadlessServices::stub_for_tests();
         for name in cognia_file_share::rpc::HOST_ONLY_COMMANDS {
             let error = dispatch(name, serde_json::json!({}), &state, &host, "dev-1", None, None)
                 .await

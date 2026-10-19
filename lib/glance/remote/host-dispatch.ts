@@ -1,7 +1,7 @@
 // Host-side arms for glance on a paired phone (ADR-0225 §7, §9).
 //
 // A phone's `glance_*` calls reach the companion server, ride the generic
-// desktop-writes bridge (`src-tauri/src/companion_api/rpc/data_sync.rs`) to
+// desktop-writes bridge (`crates/cognia-companion-rpc/src/rpc/data_sync.rs`) to
 // this renderer, and are delegated here by `lib/companion/desktop-write-source.ts`,
 // the way the `pet_*` and `files_library_*` families are.
 //

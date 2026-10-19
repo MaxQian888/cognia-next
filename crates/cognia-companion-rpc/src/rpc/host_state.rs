@@ -16,7 +16,7 @@ pub(super) const COMMANDS: &[&str] = &[
 /// `host_state_submit` carries a *batch* of intents whose authorization is
 /// per-action: `draft.replace` needs only remote control, while
 /// `transcript.truncate` needs session management. The command-level gate in
-/// [`super::super::remote_execution::authorize_capability`] can only decide the
+/// [`cognia_companion::remote_execution::authorize_capability`] can only decide the
 /// batch as a whole, so the TS authority re-checks each action against these
 /// server-supplied grants and returns a per-action receipt.
 pub(super) fn bind_authority(
@@ -34,7 +34,7 @@ pub(super) fn bind_authority(
 /// Authentication and grants use tenant IDs; the brain owns a local account
 /// namespace. Resolve only the persisted binding, never a client-supplied ID.
 fn caller_account_namespace(tenant_id: &str) -> Result<String, (StatusCode, Json<RpcError>)> {
-    super::super::host_identity::namespace_for_tenant(tenant_id)
+    cognia_companion::host_identity::namespace_for_tenant(tenant_id)
         .ok_or_else(|| RpcError::forbidden("tenant has no bound host account"))
 }
 
@@ -42,7 +42,7 @@ fn caller_account_namespace(tenant_id: &str) -> Result<String, (StatusCode, Json
 /// or absent SecurityStore yields an empty set, which fails every per-action
 /// check closed rather than open.
 fn caller_device_grants(account_id: &str, device_id: &str) -> Vec<String> {
-    super::super::security_store::security_store()
+    cognia_companion::security_store::security_store()
         .and_then(|store| {
             store
                 .capability_snapshot(account_id, device_id)
@@ -84,21 +84,19 @@ mod tests {
 
     #[test]
     fn tenant_scope_resolves_only_its_bound_local_account() {
-        use crate::companion_api::security_store::{
-            install_security_store, test_guard, SecurityStore,
-        };
+        use cognia_companion::security_store::{install_security_store, test_guard, SecurityStore};
         let _guard = test_guard();
         struct Cleanup;
         impl Drop for Cleanup {
             fn drop(&mut self) {
                 install_security_store(None);
-                crate::companion_api::host_identity::unbind_local_account();
+                cognia_companion::host_identity::unbind_local_account();
             }
         }
         let _cleanup = Cleanup;
         install_security_store(Some(SecurityStore::in_memory().unwrap()));
         let binding =
-            crate::companion_api::host_identity::bind_local_account_from_operator("local_acct_a")
+            cognia_companion::host_identity::bind_local_account_from_operator("local_acct_a")
                 .unwrap();
         assert_eq!(
             caller_account_namespace(&binding.remote_tenant_id).unwrap(),

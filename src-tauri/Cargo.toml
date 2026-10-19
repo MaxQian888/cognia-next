@@ -382,7 +382,7 @@ local-ip-address = "0.6"
 notify.workspace = true
 flate2.workspace = true
 tar.workspace = true
-# Auto-cleanup temp dirs at runtime (`companion_api/rpc/media.rs`,
+# Auto-cleanup temp dirs at runtime (`cognia-companion-rpc/src/rpc/media.rs`,
 # `cli_bridge`, `codeserver`); most other uses are unit tests.
 tempfile.workspace = true
 # Zip archives in `cli_bridge` (plugin bundles the `cognia plugin build` CLI

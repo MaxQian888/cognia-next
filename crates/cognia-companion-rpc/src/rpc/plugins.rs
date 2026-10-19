@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::companion_api::remote_execution::ExecutionPlane;
+use cognia_companion::remote_execution::ExecutionPlane;
 
 pub(super) const COMMANDS: &[&str] = &[
     "plugin_list",
@@ -119,11 +119,11 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     scope: Option<&str>,
-    plane: super::super::remote_execution::ExecutionPlane,
+    plane: cognia_companion::remote_execution::ExecutionPlane,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let _ = (state, host, device_id, tenant_id, scope);
     let result = match name {
@@ -133,7 +133,7 @@ pub(super) async fn dispatch(
         // mutations take effect on the next renderer reload.
         "plugin_list" => {
             if let Some(services) = host.headless() {
-                return crate::plugin_api::lifecycle::plugin_get_all_for_state(
+                return cognia_plugin_runtime::lifecycle::plugin_get_all_for_state(
                     services.plugin_runtime.as_ref(),
                 )
                 .await
@@ -141,7 +141,7 @@ pub(super) async fn dispatch(
                 .and_then(to_json);
             }
             let st = host.plugin_runtime();
-            crate::plugin_api::lifecycle::plugin_get_all_for_state(st)
+            cognia_plugin_runtime::lifecycle::plugin_get_all_for_state(st)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -149,7 +149,7 @@ pub(super) async fn dispatch(
         "plugin_runtime_snapshot" => {
             let plugin_id: String = required(&args, "pluginId")?;
             if let Some(services) = host.headless() {
-                return crate::plugin_api::lifecycle::plugin_runtime_snapshot_for_state(
+                return cognia_plugin_runtime::lifecycle::plugin_runtime_snapshot_for_state(
                     services.plugin_runtime.as_ref(),
                     plugin_id,
                 )
@@ -158,7 +158,7 @@ pub(super) async fn dispatch(
                 .and_then(to_json);
             }
             let st = host.plugin_runtime();
-            crate::plugin_api::lifecycle::plugin_runtime_snapshot_for_state(st, plugin_id)
+            cognia_plugin_runtime::lifecycle::plugin_runtime_snapshot_for_state(st, plugin_id)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -168,11 +168,11 @@ pub(super) async fn dispatch(
             let source: String = required(&args, "source")?;
             let payload_val: Value =
                 optional(&args, "payload")?.unwrap_or_else(|| serde_json::json!({}));
-            let payload: crate::plugin_api::lifecycle::InstallPayload =
+            let payload: cognia_plugin_runtime::lifecycle::InstallPayload =
                 serde_json::from_value(payload_val)
                     .map_err(|e| RpcError::malformed(format!("plugin_install.payload: {e}")))?;
             if let Some(services) = host.headless() {
-                let snapshot = crate::plugin_api::lifecycle::plugin_install_for_state(
+                let snapshot = cognia_plugin_runtime::lifecycle::plugin_install_for_state(
                     services.plugin_runtime.as_ref(),
                     plugin_id,
                     source,
@@ -191,10 +191,12 @@ pub(super) async fn dispatch(
                 return to_json(snapshot);
             }
             let st = host.plugin_runtime();
-            crate::plugin_api::lifecycle::plugin_install_for_state(st, plugin_id, source, payload)
-                .await
-                .map_err(|e| RpcError::internal(e.to_string()))
-                .and_then(to_json)
+            cognia_plugin_runtime::lifecycle::plugin_install_for_state(
+                st, plugin_id, source, payload,
+            )
+            .await
+            .map_err(|e| RpcError::internal(e.to_string()))
+            .and_then(to_json)
         }
         "plugin_install_from_github" => {
             let repo: String = required(&args, "repo")?;
@@ -205,7 +207,7 @@ pub(super) async fn dispatch(
             let defer_commit: bool = optional(&args, "deferCommit")?.unwrap_or(false);
             if let Some(services) = host.headless() {
                 let result =
-                    crate::plugin_api::github::installer::plugin_install_from_github_for_state(
+                    cognia_plugin_runtime::github::installer::plugin_install_from_github_for_state(
                         services.plugin_runtime.as_ref(),
                         repo,
                         git_ref,
@@ -228,7 +230,7 @@ pub(super) async fn dispatch(
                 return to_json(result);
             }
             let st = host.plugin_runtime();
-            crate::plugin_api::github::installer::plugin_install_from_github_for_state(
+            cognia_plugin_runtime::github::installer::plugin_install_from_github_for_state(
                 st,
                 repo,
                 git_ref,
@@ -243,7 +245,7 @@ pub(super) async fn dispatch(
         "plugin_uninstall" => {
             let plugin_id: String = required(&args, "pluginId")?;
             if let Some(services) = host.headless() {
-                crate::plugin_api::lifecycle::plugin_uninstall_for_state(
+                cognia_plugin_runtime::lifecycle::plugin_uninstall_for_state(
                     services.plugin_runtime.as_ref(),
                     plugin_id.clone(),
                 )
@@ -260,7 +262,7 @@ pub(super) async fn dispatch(
                 return Ok(Value::Null);
             }
             let st = host.plugin_runtime();
-            crate::plugin_api::lifecycle::plugin_uninstall_for_state(st, plugin_id)
+            cognia_plugin_runtime::lifecycle::plugin_uninstall_for_state(st, plugin_id)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -315,7 +317,7 @@ pub(super) async fn dispatch(
                 .require_complete(device_id, &upload_id)
                 .map_err(transfer_error)?;
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
-            let transport = super::super::ws_bridge::resolve_bridge_transport(state)
+            let transport = cognia_companion::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
             bridge
                 .dispatch(transport.as_ref(), name, args, TRANSFER_INSTALL_TIMEOUT)
@@ -360,7 +362,7 @@ pub(super) async fn dispatch(
             let public_key_hex: Option<String> = optional(&args, "publicKeyHex")?;
             let require_signature: Option<bool> = optional(&args, "requireSignature")?;
             if let Some(services) = host.headless() {
-                return crate::plugin_api::marketplace::plugin_stage_version_for_state(
+                return cognia_plugin_runtime::marketplace::plugin_stage_version_for_state(
                     services.plugin_runtime.as_ref(),
                     plugin_id,
                     version,
@@ -375,7 +377,7 @@ pub(super) async fn dispatch(
                 .and_then(to_json);
             }
             let state = host.plugin_runtime();
-            crate::plugin_api::marketplace::plugin_stage_version_for_state(
+            cognia_plugin_runtime::marketplace::plugin_stage_version_for_state(
                 state,
                 plugin_id,
                 version,
@@ -393,7 +395,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required(&args, "pluginId")?;
             let transaction_id: String = required(&args, "transactionId")?;
             if let Some(services) = host.headless() {
-                let committed = crate::plugin_api::marketplace::commit_staged_update_for_state(
+                let committed = cognia_plugin_runtime::marketplace::commit_staged_update_for_state(
                     services.plugin_runtime.as_ref(),
                     &plugin_id,
                     &transaction_id,
@@ -410,7 +412,7 @@ pub(super) async fn dispatch(
                 return to_json(committed);
             }
             let state = host.plugin_runtime();
-            crate::plugin_api::marketplace::commit_staged_update_for_state(
+            cognia_plugin_runtime::marketplace::commit_staged_update_for_state(
                 state,
                 &plugin_id,
                 &transaction_id,
@@ -422,7 +424,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required(&args, "pluginId")?;
             let transaction_id: String = required(&args, "transactionId")?;
             if let Some(services) = host.headless() {
-                return crate::plugin_api::marketplace::discard_staged_update_for_state(
+                return cognia_plugin_runtime::marketplace::discard_staged_update_for_state(
                     services.plugin_runtime.as_ref(),
                     &plugin_id,
                     &transaction_id,
@@ -431,7 +433,7 @@ pub(super) async fn dispatch(
                 .map_err(|error| RpcError::internal(error.to_string()));
             }
             let state = host.plugin_runtime();
-            crate::plugin_api::marketplace::discard_staged_update_for_state(
+            cognia_plugin_runtime::marketplace::discard_staged_update_for_state(
                 state,
                 &plugin_id,
                 &transaction_id,
@@ -443,7 +445,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required(&args, "pluginId")?;
             let transaction_id: String = required(&args, "transactionId")?;
             if let Some(services) = host.headless() {
-                return crate::plugin_api::marketplace::finalize_staged_update_for_state(
+                return cognia_plugin_runtime::marketplace::finalize_staged_update_for_state(
                     services.plugin_runtime.as_ref(),
                     &plugin_id,
                     &transaction_id,
@@ -452,7 +454,7 @@ pub(super) async fn dispatch(
                 .map_err(|error| RpcError::internal(error.to_string()));
             }
             let state = host.plugin_runtime();
-            crate::plugin_api::marketplace::finalize_staged_update_for_state(
+            cognia_plugin_runtime::marketplace::finalize_staged_update_for_state(
                 state,
                 &plugin_id,
                 &transaction_id,
@@ -464,7 +466,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required(&args, "pluginId")?;
             let label: Option<String> = optional(&args, "label")?;
             if let Some(services) = host.headless() {
-                return crate::plugin_api::backup::plugin_backup_create_for_state(
+                return cognia_plugin_runtime::backup::plugin_backup_create_for_state(
                     services.plugin_runtime.as_ref(),
                     plugin_id,
                     label,
@@ -474,7 +476,7 @@ pub(super) async fn dispatch(
                 .and_then(to_json);
             }
             let st = host.plugin_runtime();
-            crate::plugin_api::backup::plugin_backup_create_for_state(st, plugin_id, label)
+            cognia_plugin_runtime::backup::plugin_backup_create_for_state(st, plugin_id, label)
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))
                 .and_then(to_json)
@@ -483,7 +485,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required(&args, "pluginId")?;
             let backup_id: String = required(&args, "backupId")?;
             if let Some(services) = host.headless() {
-                crate::plugin_api::backup::plugin_backup_restore_for_state(
+                cognia_plugin_runtime::backup::plugin_backup_restore_for_state(
                     services.plugin_runtime.as_ref(),
                     plugin_id.clone(),
                     backup_id,
@@ -501,7 +503,7 @@ pub(super) async fn dispatch(
                 return Ok(Value::Null);
             }
             let st = host.plugin_runtime();
-            crate::plugin_api::backup::plugin_backup_restore_for_state(st, plugin_id, backup_id)
+            cognia_plugin_runtime::backup::plugin_backup_restore_for_state(st, plugin_id, backup_id)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -510,7 +512,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required(&args, "pluginId")?;
             let backup_id: String = required(&args, "backupId")?;
             if let Some(services) = host.headless() {
-                return crate::plugin_api::backup::plugin_backup_delete_for_state(
+                return cognia_plugin_runtime::backup::plugin_backup_delete_for_state(
                     services.plugin_runtime.as_ref(),
                     plugin_id,
                     backup_id,
@@ -520,7 +522,7 @@ pub(super) async fn dispatch(
                 .map_err(|e| RpcError::internal(e.to_string()));
             }
             let st = host.plugin_runtime();
-            crate::plugin_api::backup::plugin_backup_delete_for_state(st, plugin_id, backup_id)
+            cognia_plugin_runtime::backup::plugin_backup_delete_for_state(st, plugin_id, backup_id)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))
@@ -534,7 +536,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let status: String = required(&args, "status")?;
             tokio::task::spawn_blocking(move || {
-                crate::plugin_api::lifecycle::plugin_set_status_for_state(
+                cognia_plugin_runtime::lifecycle::plugin_set_status_for_state(
                     plugin_runtime.as_ref(),
                     plugin_id,
                     status,
@@ -553,7 +555,7 @@ pub(super) async fn dispatch(
                 Some(value) => Some(value),
                 None => optional(&args, "expires_at")?,
             };
-            let grant = crate::plugin_api::permissions::grant_permission_for_state(
+            let grant = cognia_plugin_runtime::permissions::grant_permission_for_state(
                 host.plugin_runtime(),
                 plugin_id,
                 permission,
@@ -565,7 +567,7 @@ pub(super) async fn dispatch(
         }
         "plugin_permission_list" => {
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
-            let permissions = crate::plugin_api::permissions::list_permissions_for_state(
+            let permissions = cognia_plugin_runtime::permissions::list_permissions_for_state(
                 host.plugin_runtime(),
                 plugin_id,
             )
@@ -575,7 +577,7 @@ pub(super) async fn dispatch(
         "plugin_permission_revoke" => {
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let permission: String = required(&args, "permission")?;
-            crate::plugin_api::permissions::revoke_permission_for_state(
+            cognia_plugin_runtime::permissions::revoke_permission_for_state(
                 host.plugin_runtime(),
                 plugin_id,
                 permission,
@@ -600,7 +602,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let domains: Vec<String> = required(&args, "domains")?;
-            let rules: Option<Vec<crate::plugin_api::NetworkAccessRule>> =
+            let rules: Option<Vec<cognia_plugin_runtime::NetworkAccessRule>> =
                 optional(&args, "rules")?;
             services
                 .plugin_runtime
@@ -616,7 +618,7 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let python_path: Option<String> = optional(&args, "pythonPath")?;
-            crate::plugin_api::python::commands::plugin_python_initialize_for_state(
+            cognia_plugin_runtime::python::commands::plugin_python_initialize_for_state(
                 services.python_plugins.as_ref(),
                 python_path,
                 None,
@@ -630,7 +632,7 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             to_json(
-                crate::plugin_api::python::commands::plugin_python_runtime_info_for_state(
+                cognia_plugin_runtime::python::commands::plugin_python_runtime_info_for_state(
                     services.python_plugins.as_ref(),
                 ),
             )
@@ -644,9 +646,9 @@ pub(super) async fn dispatch(
             let main_module: String = required_aliased(&args, "main_module", "mainModule")?;
             let dependencies: Option<Vec<String>> = optional(&args, "dependencies")?;
             let config: Option<Value> = optional(&args, "config")?;
-            let host_settings: Option<crate::plugin_api::python::commands::PythonHostSettings> =
+            let host_settings: Option<cognia_plugin_runtime::python::commands::PythonHostSettings> =
                 optional(&args, "hostSettings")?;
-            crate::plugin_api::python::commands::plugin_python_load_for_state(
+            cognia_plugin_runtime::python::commands::plugin_python_load_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -668,7 +670,7 @@ pub(super) async fn dispatch(
             let event: String = required(&args, "event")?;
             let hook_name: String = required(&args, "name")?;
             let payload: Value = required(&args, "payload")?;
-            crate::plugin_api::python::commands::plugin_python_call_hook_generation_for_state(
+            cognia_plugin_runtime::python::commands::plugin_python_call_hook_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -687,7 +689,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let config: Value = required(&args, "config")?;
-            crate::plugin_api::python::commands::plugin_python_push_config_generation_for_state(
+            cognia_plugin_runtime::python::commands::plugin_python_push_config_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -704,7 +706,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
-            crate::plugin_api::python::commands::plugin_python_get_tools_generation_for_state(
+            cognia_plugin_runtime::python::commands::plugin_python_get_tools_generation_for_state(
                 services.python_plugins.as_ref(),
                 plugin_id,
                 generation,
@@ -720,7 +722,7 @@ pub(super) async fn dispatch(
             let generation: String = required(&args, "generation")?;
             let tool_name: String = required_aliased(&args, "tool_name", "toolName")?;
             let tool_args: Value = required(&args, "args")?;
-            crate::plugin_api::python::commands::plugin_python_call_tool_generation_for_state(
+            cognia_plugin_runtime::python::commands::plugin_python_call_tool_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -739,7 +741,7 @@ pub(super) async fn dispatch(
             let generation: String = required(&args, "generation")?;
             let function_name: String = required_aliased(&args, "function_name", "functionName")?;
             let call_args: Vec<Value> = required(&args, "args")?;
-            crate::plugin_api::python::commands::plugin_python_call_generation_for_state(
+            cognia_plugin_runtime::python::commands::plugin_python_call_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -758,7 +760,7 @@ pub(super) async fn dispatch(
             let generation: String = required(&args, "generation")?;
             let code: String = required(&args, "code")?;
             let locals: Option<Value> = optional(&args, "locals")?;
-            crate::plugin_api::python::commands::plugin_python_eval_generation_for_state(
+            cognia_plugin_runtime::python::commands::plugin_python_eval_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -776,7 +778,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let module_name: String = required_aliased(&args, "module_name", "moduleName")?;
-            crate::plugin_api::python::commands::plugin_python_import_generation_for_state(
+            cognia_plugin_runtime::python::commands::plugin_python_import_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -795,7 +797,7 @@ pub(super) async fn dispatch(
             let module_name: String = required_aliased(&args, "module_name", "moduleName")?;
             let function_name: String = required_aliased(&args, "function_name", "functionName")?;
             let call_args: Vec<Value> = required(&args, "args")?;
-            crate::plugin_api::python::commands::plugin_python_module_call_generation_for_state(
+            cognia_plugin_runtime::python::commands::plugin_python_module_call_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -815,7 +817,7 @@ pub(super) async fn dispatch(
             let generation: String = required(&args, "generation")?;
             let module_name: String = required_aliased(&args, "module_name", "moduleName")?;
             let attr_name: String = required_aliased(&args, "attr_name", "attrName")?;
-            crate::plugin_api::python::commands::plugin_python_module_getattr_generation_for_state(
+            cognia_plugin_runtime::python::commands::plugin_python_module_getattr_generation_for_state(
                 services.python_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -832,7 +834,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
-            crate::plugin_api::python::commands::plugin_python_is_initialized_generation_for_state(
+            cognia_plugin_runtime::python::commands::plugin_python_is_initialized_generation_for_state(
                 services.python_plugins.as_ref(),
                 plugin_id,
                 generation,
@@ -848,7 +850,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             to_json(
-                crate::plugin_api::python::commands::plugin_python_get_info_generation_for_state(
+                cognia_plugin_runtime::python::commands::plugin_python_get_info_generation_for_state(
                     services.python_plugins.as_ref(),
                     &plugin_id,
                     &generation,
@@ -863,10 +865,10 @@ pub(super) async fn dispatch(
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let dependencies: Vec<String> = required(&args, "dependencies")?;
             let venv_scope: Option<String> = optional_aliased(&args, "venv_scope", "venvScope")?;
-            let host_settings: Option<crate::plugin_api::python::commands::PythonHostSettings> =
+            let host_settings: Option<cognia_plugin_runtime::python::commands::PythonHostSettings> =
                 optional_aliased(&args, "host_settings", "hostSettings")?;
             to_json(
-                crate::plugin_api::python::commands::plugin_python_install_deps_for_state(
+                cognia_plugin_runtime::python::commands::plugin_python_install_deps_for_state(
                     services.python_plugins.as_ref(),
                     services.plugin_runtime.as_ref(),
                     &plugin_id,
@@ -884,7 +886,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
-            crate::plugin_api::python::commands::plugin_python_unload_generation_for_state(
+            cognia_plugin_runtime::python::commands::plugin_python_unload_generation_for_state(
                 services.python_plugins.as_ref(),
                 &plugin_id,
                 &generation,
@@ -898,16 +900,16 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             to_json(
-                crate::plugin_api::python::commands::plugin_python_list_for_state(
+                cognia_plugin_runtime::python::commands::plugin_python_list_for_state(
                     services.python_plugins.as_ref(),
                 ),
             )
         }
 
         "plugin_api_invoke" => {
-            let request: crate::plugin_api::api_bridge::PluginApiInvokeRequest =
+            let request: cognia_plugin_runtime::api_bridge::PluginApiInvokeRequest =
                 required(&args, "request")?;
-            let response = crate::plugin_api::api_bridge::plugin_api_invoke_for_state(
+            let response = cognia_plugin_runtime::api_bridge::plugin_api_invoke_for_state(
                 host.plugin_runtime(),
                 request,
             )
@@ -916,9 +918,9 @@ pub(super) async fn dispatch(
             to_json(response)
         }
         "plugin_api_batch_invoke" => {
-            let request: crate::plugin_api::api_bridge::BatchInvokeRequest =
+            let request: cognia_plugin_runtime::api_bridge::BatchInvokeRequest =
                 required(&args, "request")?;
-            let response = crate::plugin_api::api_bridge::plugin_api_batch_invoke_for_state(
+            let response = cognia_plugin_runtime::api_bridge::plugin_api_batch_invoke_for_state(
                 host.plugin_runtime(),
                 request,
             )
@@ -927,12 +929,12 @@ pub(super) async fn dispatch(
             to_json(response)
         }
         "plugin_get_capabilities" => {
-            to_json(crate::plugin_api::api_bridge::plugin_get_capabilities_for_host(false))
+            to_json(cognia_plugin_runtime::api_bridge::plugin_get_capabilities_for_host(false))
         }
         "plugin_workspace_repo_remove" => {
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let segments: Vec<String> = required(&args, "segments")?;
-            crate::plugin_api::api_bridge::plugin_workspace_repo_remove_for_state(
+            cognia_plugin_runtime::api_bridge::plugin_workspace_repo_remove_for_state(
                 host.plugin_runtime(),
                 &plugin_id,
                 &segments,
@@ -941,10 +943,10 @@ pub(super) async fn dispatch(
             .and_then(to_json)
         }
 
-        "codeserver_supported" => to_json(crate::codeserver::download::resolve_platform().is_ok()),
+        "codeserver_supported" => to_json(cognia_codeserver::download::resolve_platform().is_ok()),
         "codeserver_ensure" => {
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
-            let profile = optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
+            let profile = optional::<cognia_codeserver::profile::IdeProfile>(&args, "profile")?
                 .unwrap_or_default();
             // A caller on this machine's loopback plane embeds the workbench
             // directly; everyone else goes through the relay.
@@ -1018,7 +1020,7 @@ pub(super) async fn dispatch(
                 .ide_canonical_root(&root, device_id)
                 .await
                 .map_err(RpcError::service_unavailable)?;
-            crate::codeserver::agent_channel::verbs::open(&canonical, &path, line, column)
+            cognia_codeserver::agent_channel::verbs::open(&canonical, &path, line, column)
                 .await
                 .map_err(RpcError::service_unavailable)
         }
@@ -1031,7 +1033,7 @@ pub(super) async fn dispatch(
                 .ide_canonical_root(&root, device_id)
                 .await
                 .map_err(RpcError::service_unavailable)?;
-            crate::codeserver::agent_channel::verbs::apply_edit(&canonical, &path, line, column)
+            cognia_codeserver::agent_channel::verbs::apply_edit(&canonical, &path, line, column)
                 .await
                 .map_err(RpcError::service_unavailable)
         }
@@ -1041,7 +1043,7 @@ pub(super) async fn dispatch(
                 .ide_canonical_root(&root, device_id)
                 .await
                 .map_err(RpcError::service_unavailable)?;
-            crate::codeserver::agent_channel::verbs::read_active(&canonical)
+            cognia_codeserver::agent_channel::verbs::read_active(&canonical)
                 .await
                 .map_err(RpcError::service_unavailable)
         }
@@ -1052,7 +1054,7 @@ pub(super) async fn dispatch(
                 .ide_canonical_root(&root, device_id)
                 .await
                 .map_err(RpcError::service_unavailable)?;
-            crate::codeserver::agent_channel::verbs::save_all(&canonical, path.as_deref())
+            cognia_codeserver::agent_channel::verbs::save_all(&canonical, path.as_deref())
                 .await
                 .map_err(RpcError::service_unavailable)
         }
@@ -1069,7 +1071,7 @@ pub(super) async fn dispatch(
                 .ide_canonical_root(&root, device_id)
                 .await
                 .map_err(RpcError::service_unavailable)?;
-            crate::codeserver::agent_channel::verbs::show_diff(
+            cognia_codeserver::agent_channel::verbs::show_diff(
                 &canonical,
                 &path,
                 &content,
@@ -1085,7 +1087,7 @@ pub(super) async fn dispatch(
                 .ide_canonical_root(&root, device_id)
                 .await
                 .map_err(RpcError::service_unavailable)?;
-            crate::codeserver::agent_channel::verbs::reveal(&canonical, &path)
+            cognia_codeserver::agent_channel::verbs::reveal(&canonical, &path)
                 .await
                 .map_err(RpcError::service_unavailable)
         }
@@ -1098,7 +1100,7 @@ pub(super) async fn dispatch(
                 .ide_canonical_root(&root, device_id)
                 .await
                 .map_err(RpcError::service_unavailable)?;
-            crate::codeserver::agent_channel::verbs::run_in_terminal(
+            cognia_codeserver::agent_channel::verbs::run_in_terminal(
                 &canonical,
                 &command,
                 cwd.as_deref(),
@@ -1115,7 +1117,7 @@ pub(super) async fn dispatch(
                 .ide_canonical_root(&root, device_id)
                 .await
                 .map_err(RpcError::service_unavailable)?;
-            crate::codeserver::agent_channel::verbs::notify(&canonical, &message, kind.as_deref())
+            cognia_codeserver::agent_channel::verbs::notify(&canonical, &message, kind.as_deref())
                 .await
                 .map_err(RpcError::service_unavailable)
         }
@@ -1126,12 +1128,12 @@ pub(super) async fn dispatch(
                 .ide_canonical_root(&root, device_id)
                 .await
                 .map_err(RpcError::service_unavailable)?;
-            crate::codeserver::agent_channel::verbs::workspace_snapshot(&canonical, snapshot)
+            cognia_codeserver::agent_channel::verbs::workspace_snapshot(&canonical, snapshot)
                 .await
                 .map_err(RpcError::service_unavailable)
         }
         "codeserver_read_user_settings" => {
-            let profile = optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
+            let profile = optional::<cognia_codeserver::profile::IdeProfile>(&args, "profile")?
                 .unwrap_or_default();
             host.ide_read_user_settings(profile)
                 .await
@@ -1143,7 +1145,7 @@ pub(super) async fn dispatch(
         }
         "codeserver_write_user_settings" => {
             let contents: String = required(&args, "contents")?;
-            let profile = optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
+            let profile = optional::<cognia_codeserver::profile::IdeProfile>(&args, "profile")?
                 .unwrap_or_default();
             host.ide_write_user_settings(contents, profile)
                 .await
@@ -1151,7 +1153,7 @@ pub(super) async fn dispatch(
                 .map_err(RpcError::service_unavailable)
         }
         "codeserver_read_runtime_args" => {
-            let profile = optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
+            let profile = optional::<cognia_codeserver::profile::IdeProfile>(&args, "profile")?
                 .unwrap_or_default();
             host.ide_read_runtime_args(profile)
                 .await
@@ -1163,7 +1165,7 @@ pub(super) async fn dispatch(
         }
         "codeserver_write_runtime_args" => {
             let contents: String = required(&args, "contents")?;
-            let profile = optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
+            let profile = optional::<cognia_codeserver::profile::IdeProfile>(&args, "profile")?
                 .unwrap_or_default();
             host.ide_write_runtime_args(contents, profile)
                 .await
@@ -1174,7 +1176,7 @@ pub(super) async fn dispatch(
             let services = host
                 .headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let request: crate::codeserver::proxy::ProxyBuildRequest = required(&args, "request")?;
+            let request: cognia_codeserver::proxy::ProxyBuildRequest = required(&args, "request")?;
             let code_server = std::sync::Arc::clone(&services.code_server);
             let artifact = tokio::task::spawn_blocking(move || code_server.build_proxy(request))
                 .await
@@ -1189,7 +1191,7 @@ pub(super) async fn dispatch(
             let services = host
                 .headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            let artifact: crate::codeserver::proxy::ProxyArtifact = required(&args, "artifact")?;
+            let artifact: cognia_codeserver::proxy::ProxyArtifact = required(&args, "artifact")?;
             to_json(services.code_server.install_proxy_artifact(&artifact).await)
         }
         "codeserver_list_proxies" => {
@@ -1215,8 +1217,11 @@ pub(super) async fn dispatch(
                 paths
                     .iter()
                     .map(|path| {
-                        crate::files::validate_confined_path(path, std::slice::from_ref(&root))
-                            .map(|value| value.to_string_lossy().into_owned())
+                        cognia_files::files::validate_confined_path(
+                            path,
+                            std::slice::from_ref(&root),
+                        )
+                        .map(|value| value.to_string_lossy().into_owned())
                     })
                     .collect::<Result<Vec<_>, _>>()
             })
@@ -1236,7 +1241,7 @@ pub(super) async fn dispatch(
             let id: Value = required(&args, "id")?;
             let result: Option<Value> = optional(&args, "result")?;
             let error: Option<Value> = optional(&args, "error")?;
-            crate::codeserver::agent_channel::global()
+            cognia_codeserver::agent_channel::global()
                 .respond(&root, generation, id, result, error)
                 .await
                 .map(|()| Value::Null)
@@ -1246,18 +1251,20 @@ pub(super) async fn dispatch(
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let generation: u64 = required(&args, "generation")?;
             let params: Value = required(&args, "params")?;
-            crate::codeserver::agent_channel::global()
+            cognia_codeserver::agent_channel::global()
                 .notify_provider(&root, generation, params)
                 .await
                 .map(|()| Value::Null)
                 .map_err(RpcError::service_unavailable)
         }
-        "lsp_host_ensure" => crate::plugin_api::vscode::commands::ensure_system_lsp_host_for_state(
-            host.vscode_plugins(),
-        )
-        .await
-        .map(|_| Value::Null)
-        .map_err(vscode_rpc_error),
+        "lsp_host_ensure" => {
+            cognia_plugin_runtime::vscode::commands::ensure_system_lsp_host_for_state(
+                host.vscode_plugins(),
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(vscode_rpc_error)
+        }
         "lsp_host_request" => {
             let method: String = required(&args, "method")?;
             if !remote_lsp_method_allowed(&method) {
@@ -1270,9 +1277,9 @@ pub(super) async fn dispatch(
                 Some(value) => value.to_string(),
                 None => "null".to_string(),
             };
-            crate::plugin_api::vscode::commands::plugin_invoke_vscode_rpc_for_state(
+            cognia_plugin_runtime::vscode::commands::plugin_invoke_vscode_rpc_for_state(
                 host.vscode_plugins(),
-                crate::plugin_api::vscode::commands::LSP_HOST_KEY.to_string(),
+                cognia_plugin_runtime::vscode::commands::LSP_HOST_KEY.to_string(),
                 method,
                 payload_json,
             )
@@ -1284,7 +1291,7 @@ pub(super) async fn dispatch(
             let services = host
                 .headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            crate::plugin_api::vscode::commands::ensure_system_lsp_host_for_state(
+            cognia_plugin_runtime::vscode::commands::ensure_system_lsp_host_for_state(
                 services.vscode_plugins.as_ref(),
             )
             .await
@@ -1298,7 +1305,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let manifest_json: String = required_aliased(&args, "manifest_json", "manifestJson")?;
             let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
-            crate::plugin_api::vscode::commands::plugin_load_vscode_for_state(
+            cognia_plugin_runtime::vscode::commands::plugin_load_vscode_for_state(
                 services.vscode_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -1318,7 +1325,7 @@ pub(super) async fn dispatch(
             let config_json: String = required_aliased(&args, "config_json", "configJson")?;
             let workspace_root: Option<String> =
                 optional_aliased(&args, "workspace_root", "workspaceRoot")?;
-            crate::plugin_api::vscode::commands::plugin_activate_vscode_generation_for_state(
+            cognia_plugin_runtime::vscode::commands::plugin_activate_vscode_generation_for_state(
                 services.vscode_plugins.as_ref(),
                 plugin_id,
                 generation,
@@ -1335,7 +1342,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
-            crate::plugin_api::vscode::commands::plugin_deactivate_vscode_generation_for_state(
+            cognia_plugin_runtime::vscode::commands::plugin_deactivate_vscode_generation_for_state(
                 services.vscode_plugins.as_ref(),
                 plugin_id,
                 generation,
@@ -1349,7 +1356,7 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
-            crate::plugin_api::vscode::commands::plugin_vscode_uninstall_for_state(
+            cognia_plugin_runtime::vscode::commands::plugin_vscode_uninstall_for_state(
                 services.vscode_plugins.as_ref(),
                 plugin_id,
             )
@@ -1363,7 +1370,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
-            crate::plugin_api::vscode::commands::plugin_unload_vscode_generation_for_state(
+            cognia_plugin_runtime::vscode::commands::plugin_unload_vscode_generation_for_state(
                 services.vscode_plugins.as_ref(),
                 plugin_id,
                 generation,
@@ -1380,7 +1387,7 @@ pub(super) async fn dispatch(
             let generation: String = required(&args, "generation")?;
             let method: String = required(&args, "method")?;
             let payload_json: String = required_aliased(&args, "payload_json", "payloadJson")?;
-            crate::plugin_api::vscode::commands::plugin_invoke_vscode_rpc_generation_for_state(
+            cognia_plugin_runtime::vscode::commands::plugin_invoke_vscode_rpc_generation_for_state(
                 services.vscode_plugins.as_ref(),
                 plugin_id,
                 generation,
@@ -1398,7 +1405,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let response_json: String = required_aliased(&args, "response_json", "responseJson")?;
-            crate::plugin_api::vscode::commands::plugin_vscode_send_response_generation_for_state(
+            cognia_plugin_runtime::vscode::commands::plugin_vscode_send_response_generation_for_state(
                 services.vscode_plugins.as_ref(),
                 plugin_id,
                 generation,
@@ -1419,7 +1426,7 @@ pub(super) async fn dispatch(
             let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
             let entry: String = required(&args, "entry")?;
             let extra_args: Option<Vec<String>> = optional(&args, "extraArgs")?;
-            crate::plugin_api::lifecycle::plugin_launch_js_for_state(
+            cognia_plugin_runtime::lifecycle::plugin_launch_js_for_state(
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 plugin_path,
@@ -1441,7 +1448,7 @@ pub(super) async fn dispatch(
             let callback_id: String = required_aliased(&args, "callback_id", "callbackId")?;
             let callback_args: Value = required(&args, "args")?;
             let generation: String = required(&args, "generation")?;
-            crate::plugin_api::lifecycle::plugin_invoke_js_callback_for_state(
+            cognia_plugin_runtime::lifecycle::plugin_invoke_js_callback_for_state(
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 plugin_path,
@@ -1462,7 +1469,7 @@ pub(super) async fn dispatch(
             let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
             let entry: String = required(&args, "entry")?;
             let generation: String = required(&args, "generation")?;
-            crate::plugin_api::lifecycle::plugin_deactivate_js_for_state(
+            cognia_plugin_runtime::lifecycle::plugin_deactivate_js_for_state(
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 plugin_path,
@@ -1480,7 +1487,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
-            crate::plugin_api::lifecycle::plugin_stop_js_for_state(
+            cognia_plugin_runtime::lifecycle::plugin_stop_js_for_state(
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 generation,
@@ -1495,7 +1502,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
-            crate::plugin_api::lifecycle::plugin_js_status_for_state(
+            cognia_plugin_runtime::lifecycle::plugin_js_status_for_state(
                 services.plugin_runtime.as_ref(),
                 plugin_id,
                 generation,
@@ -1515,7 +1522,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let manifest_json: String = required_aliased(&args, "manifest_json", "manifestJson")?;
             let plugin_path: String = required_aliased(&args, "plugin_path", "pluginPath")?;
-            crate::plugin_api::wasm::commands::plugin_wasm_load_for_state(
+            cognia_plugin_runtime::wasm::commands::plugin_wasm_load_for_state(
                 services.wasm_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -1533,7 +1540,7 @@ pub(super) async fn dispatch(
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
             let config_json: String = required_aliased(&args, "config_json", "configJson")?;
-            crate::plugin_api::wasm::commands::plugin_wasm_activate_generation_for_state(
+            cognia_plugin_runtime::wasm::commands::plugin_wasm_activate_generation_for_state(
                 services.wasm_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -1550,7 +1557,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
-            crate::plugin_api::wasm::commands::plugin_wasm_deactivate_generation_for_state(
+            cognia_plugin_runtime::wasm::commands::plugin_wasm_deactivate_generation_for_state(
                 services.wasm_plugins.as_ref(),
                 plugin_id,
                 generation,
@@ -1567,7 +1574,7 @@ pub(super) async fn dispatch(
             let generation: String = required(&args, "generation")?;
             let export_name: String = required_aliased(&args, "export_name", "exportName")?;
             let payload_json: String = required_aliased(&args, "payload_json", "payloadJson")?;
-            crate::plugin_api::wasm::commands::plugin_wasm_call_generation_for_state(
+            cognia_plugin_runtime::wasm::commands::plugin_wasm_call_generation_for_state(
                 services.wasm_plugins.as_ref(),
                 services.plugin_runtime.as_ref(),
                 plugin_id,
@@ -1585,7 +1592,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let generation: String = required(&args, "generation")?;
-            crate::plugin_api::wasm::commands::plugin_wasm_unload_generation_for_state(
+            cognia_plugin_runtime::wasm::commands::plugin_wasm_unload_generation_for_state(
                 services.wasm_plugins.as_ref(),
                 plugin_id,
                 generation,
@@ -1598,7 +1605,7 @@ pub(super) async fn dispatch(
             let services = host
                 .headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
-            crate::plugin_api::wasm::commands::plugin_wasm_list_for_state(
+            cognia_plugin_runtime::wasm::commands::plugin_wasm_list_for_state(
                 services.wasm_plugins.as_ref(),
             )
             .await
@@ -1626,7 +1633,7 @@ fn discloses_loopback_port(plane: ExecutionPlane, running: bool) -> bool {
 /// The status says whether repeating the request can help: a missing build,
 /// an invalid root or a cancelled download will fail the same way again.
 fn codeserver_rpc_error(message: String) -> (StatusCode, Json<RpcError>) {
-    use crate::codeserver::error_code::CodeServerErrorCode as Code;
+    use cognia_codeserver::error_code::CodeServerErrorCode as Code;
     let Some(code) = Code::of(&message) else {
         return RpcError::service_unavailable(message);
     };

@@ -1,7 +1,7 @@
 use super::*;
 
 fn fleet_event_payload(tenant_id: &str) -> Result<Value, (StatusCode, Json<RpcError>)> {
-    let mut payload = serde_json::to_value(crate::fleet::runtime().snapshot_for_tenant(tenant_id))
+    let mut payload = serde_json::to_value(cognia_fleet::runtime().snapshot_for_tenant(tenant_id))
         .map_err(|error| RpcError::internal(error.to_string()))?;
     payload
         .as_object_mut()
@@ -36,7 +36,7 @@ pub(super) const COMMANDS: &[&str] = &[
 ];
 
 fn require_owner(
-    security: &super::super::security_store::SecurityStore,
+    security: &cognia_companion::security_store::SecurityStore,
     tenant_id: &str,
     device_id: &str,
 ) -> Result<(), (StatusCode, Json<RpcError>)> {
@@ -59,7 +59,7 @@ fn require_owner(
 /// `agent.worker`), and that refusal answers 403 `capability_outside_device_class`
 /// rather than falling into the 500 every other store error takes here.
 fn set_worker_grant(
-    security: &super::super::security_store::SecurityStore,
+    security: &cognia_companion::security_store::SecurityStore,
     tenant_id: &str,
     actor_device_id: &str,
     target_device_id: &str,
@@ -83,7 +83,7 @@ fn set_worker_grant(
             now,
         )
         .map_err(|error| match error {
-            super::super::security_store::SecurityStoreError::CapabilityOutsideDeviceClass => {
+            cognia_companion::security_store::SecurityStoreError::CapabilityOutsideDeviceClass => {
                 RpcError::capability_outside_device_class(error.to_string())
             }
             other => RpcError::internal(other.to_string()),
@@ -92,7 +92,7 @@ fn set_worker_grant(
 }
 
 fn is_active_owner(
-    devices: &[super::super::security_store::DeviceSummary],
+    devices: &[cognia_companion::security_store::DeviceSummary],
     device_id: &str,
 ) -> bool {
     devices.iter().any(|device| {
@@ -104,7 +104,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     account_id: Option<&str>,
     scope: Option<&str>,
@@ -119,10 +119,11 @@ pub(super) async fn dispatch(
             // `transport.call("logs_query", { query })` sends on every
             // platform) and a bare flattened query object.
             let raw = args.get("query").cloned().unwrap_or_else(|| args.clone());
-            let query: crate::logging::query::NativeLogQuery = serde_json::from_value(raw)
-                .map_err(|e| RpcError::malformed(format!("invalid logs query: {e}")))?;
+            let query: cognia_observability::logging::query::NativeLogQuery =
+                serde_json::from_value(raw)
+                    .map_err(|e| RpcError::malformed(format!("invalid logs query: {e}")))?;
             let result = tokio::task::spawn_blocking(move || {
-                crate::logging::query::query_native_logs(&query)
+                cognia_observability::logging::query::query_native_logs(&query)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -130,10 +131,12 @@ pub(super) async fn dispatch(
             to_json(result)
         }
         "logs_list_files" => {
-            let files = tokio::task::spawn_blocking(crate::logging::query::list_native_log_files)
-                .await
-                .map_err(|error| RpcError::internal(error.to_string()))?
-                .map_err(RpcError::internal)?;
+            let files = tokio::task::spawn_blocking(
+                cognia_observability::logging::query::list_native_log_files,
+            )
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
             to_json(files)
         }
 
@@ -146,13 +149,13 @@ pub(super) async fn dispatch(
             let tenant_id = account_id.ok_or_else(|| {
                 RpcError::forbidden("fleet snapshot requires an authenticated tenant")
             })?;
-            to_json(crate::fleet::runtime().snapshot_for_tenant(tenant_id))
+            to_json(cognia_fleet::runtime().snapshot_for_tenant(tenant_id))
         }
-        "fleet_opencode_outbox_status" => crate::fleet::fleet_opencode_outbox_status()
+        "fleet_opencode_outbox_status" => cognia_fleet::commands::fleet_opencode_outbox_status()
             .await
             .map_err(RpcError::internal)
             .and_then(to_json),
-        "fleet_opencode_outbox_repair" => crate::fleet::fleet_opencode_outbox_repair()
+        "fleet_opencode_outbox_repair" => cognia_fleet::commands::fleet_opencode_outbox_repair()
             .await
             .map_err(RpcError::internal)
             .and_then(to_json),
@@ -160,7 +163,7 @@ pub(super) async fn dispatch(
             let tenant_id = account_id.ok_or_else(|| {
                 RpcError::forbidden("worker enrollment requires an authenticated tenant")
             })?;
-            let security = super::super::security_store::security_store().ok_or_else(|| {
+            let security = cognia_companion::security_store::security_store().ok_or_else(|| {
                 RpcError::internal("companion security store is unavailable".to_string())
             })?;
             require_owner(&security, tenant_id, device_id)?;
@@ -171,7 +174,7 @@ pub(super) async fn dispatch(
                 ));
             }
             let fingerprint: String = required(&args, "fingerprint")?;
-            let now = super::super::security_store::unix_time_secs();
+            let now = cognia_companion::security_store::unix_time_secs();
             let ttl = 10 * 60;
             let enrollment = security
                 .create_worker_enrollment(tenant_id, device_id, now, ttl)
@@ -188,14 +191,14 @@ pub(super) async fn dispatch(
             let tenant_id = account_id.ok_or_else(|| {
                 RpcError::forbidden("worker listing requires an authenticated tenant")
             })?;
-            let security = super::super::security_store::security_store().ok_or_else(|| {
+            let security = cognia_companion::security_store::security_store().ok_or_else(|| {
                 RpcError::internal("companion security store is unavailable".to_string())
             })?;
             require_owner(&security, tenant_id, device_id)?;
             let devices = security
                 .list_worker_devices(tenant_id)
                 .map_err(|error| RpcError::internal(error.to_string()))?;
-            to_json(super::super::ws_worker::worker_device_summaries(
+            to_json(cognia_companion::ws_worker::worker_device_summaries(
                 tenant_id, devices,
             ))
         }
@@ -203,7 +206,7 @@ pub(super) async fn dispatch(
             let tenant_id = account_id.ok_or_else(|| {
                 RpcError::forbidden("worker administration requires an authenticated tenant")
             })?;
-            let security = super::super::security_store::security_store().ok_or_else(|| {
+            let security = cognia_companion::security_store::security_store().ok_or_else(|| {
                 RpcError::internal("companion security store is unavailable".to_string())
             })?;
             require_owner(&security, tenant_id, device_id)?;
@@ -215,7 +218,7 @@ pub(super) async fn dispatch(
                 device_id,
                 &target_device_id,
                 allowed,
-                super::super::security_store::unix_time_secs(),
+                cognia_companion::security_store::unix_time_secs(),
             )?;
             Ok(Value::Null)
         }
@@ -223,25 +226,25 @@ pub(super) async fn dispatch(
             let tenant_id = account_id.ok_or_else(|| {
                 RpcError::forbidden("fleet projection requires an authenticated tenant")
             })?;
-            let input: crate::fleet::registry::ManagedFleetSession = required(&args, "input")?;
-            crate::fleet::runtime().project_managed_session(input);
+            let input: cognia_fleet::registry::ManagedFleetSession = required(&args, "input")?;
+            cognia_fleet::runtime().project_managed_session(input);
             state.event_bus.publish(
-                crate::fleet::UPDATE_EVENT.to_string(),
+                cognia_fleet::UPDATE_EVENT.to_string(),
                 fleet_event_payload(tenant_id)?,
             );
             Ok(Value::Null)
         }
         "fleet_project_worker_load" => {
-            let loads: Vec<super::super::ws_worker::WorkerLoadProjection> =
+            let loads: Vec<cognia_companion::ws_worker::WorkerLoadProjection> =
                 required(&args, "loads")?;
-            super::super::ws_worker::project_worker_load(
+            cognia_companion::ws_worker::project_worker_load(
                 account_id.ok_or_else(|| {
                     RpcError::forbidden("worker load projection requires an authenticated tenant")
                 })?,
                 loads,
             );
             state.event_bus.publish(
-                crate::fleet::UPDATE_EVENT.to_string(),
+                cognia_fleet::UPDATE_EVENT.to_string(),
                 fleet_event_payload(account_id.ok_or_else(|| {
                     RpcError::forbidden("fleet projection requires an authenticated tenant")
                 })?)?,
@@ -253,10 +256,10 @@ pub(super) async fn dispatch(
                 RpcError::forbidden("fleet projection requires an authenticated tenant")
             })?;
             let session_id: String = required(&args, "sessionId")?;
-            let removed = crate::fleet::runtime().remove_managed_session(&session_id);
+            let removed = cognia_fleet::runtime().remove_managed_session(&session_id);
             if removed {
                 state.event_bus.publish(
-                    crate::fleet::UPDATE_EVENT.to_string(),
+                    cognia_fleet::UPDATE_EVENT.to_string(),
                     fleet_event_payload(tenant_id)?,
                 );
             }
@@ -264,8 +267,8 @@ pub(super) async fn dispatch(
         }
         "fleet_permission_respond" => {
             let request_id: String = required(&args, "requestId")?;
-            let behavior: crate::fleet::PermissionBehavior = required(&args, "behavior")?;
-            to_json(crate::fleet::runtime().respond_permission(&request_id, behavior))
+            let behavior: cognia_fleet::PermissionBehavior = required(&args, "behavior")?;
+            to_json(cognia_fleet::runtime().respond_permission(&request_id, behavior))
         }
         "fleet_question_respond" => {
             // Without this arm an AskUserQuestion stranded anyone who wasn't at
@@ -273,11 +276,11 @@ pub(super) async fn dispatch(
             // snapshot but had no way to answer it, so it simply timed out.
             let request_id: String = required(&args, "requestId")?;
             let selections: Vec<Vec<u32>> = required(&args, "selections")?;
-            to_json(crate::fleet::runtime().respond_question(&request_id, selections))
+            to_json(cognia_fleet::runtime().respond_question(&request_id, selections))
         }
         "fleet_question_reject" => {
             let request_id: String = required(&args, "requestId")?;
-            to_json(crate::fleet::runtime().reject_question(&request_id))
+            to_json(cognia_fleet::runtime().reject_question(&request_id))
         }
         "fleet_opencode_send_message" => {
             let session_id: String = required(&args, "sessionId")?;
@@ -285,7 +288,7 @@ pub(super) async fn dispatch(
             if text.trim().is_empty() {
                 return Err(RpcError::malformed("text must not be empty".to_string()));
             }
-            crate::fleet::fleet_opencode_send_message(session_id, text)
+            cognia_fleet::commands::fleet_opencode_send_message(session_id, text)
                 .await
                 .map_err(RpcError::internal)
                 .and_then(to_json)
@@ -293,7 +296,7 @@ pub(super) async fn dispatch(
         "fleet_focus_terminal" => {
             let agent: String = required(&args, "agent")?;
             let session_id: String = required(&args, "sessionId")?;
-            crate::fleet::control::focus_session_terminal(&agent, &session_id)
+            cognia_fleet::control::focus_session_terminal(&agent, &session_id)
                 .await
                 .map(|()| Value::Null)
                 .map_err(RpcError::internal)
@@ -301,7 +304,7 @@ pub(super) async fn dispatch(
         "fleet_interrupt_session" => {
             let agent: String = required(&args, "agent")?;
             let session_id: String = required(&args, "sessionId")?;
-            crate::fleet::control::interrupt_session(&agent, &session_id)
+            cognia_fleet::control::interrupt_session(&agent, &session_id)
                 .await
                 .map(|()| Value::Null)
                 .map_err(RpcError::internal)
@@ -309,13 +312,13 @@ pub(super) async fn dispatch(
 
         // ── Lark dual-entry (plan 2026-07-24, service scope) ─────────────────
         "lark_entry_issue" => {
-            super::super::lark_entry::rpc_entry_issue(state, &args).map_err(RpcError::internal)
+            cognia_companion::lark_entry::rpc_entry_issue(state, &args).map_err(RpcError::internal)
         }
         "lark_result_complete" => {
-            super::super::lark_entry::rpc_result_complete(&args).map_err(RpcError::internal)
+            cognia_companion::lark_entry::rpc_result_complete(&args).map_err(RpcError::internal)
         }
         "lark_metrics_record" => {
-            super::super::lark_entry::rpc_metrics_record(&args).map_err(RpcError::internal)
+            cognia_companion::lark_entry::rpc_metrics_record(&args).map_err(RpcError::internal)
         }
         unknown => Err(RpcError::unknown_command(unknown)),
     };
@@ -324,8 +327,8 @@ pub(super) async fn dispatch(
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::security_store::DeviceSummary;
     use super::*;
+    use cognia_companion::security_store::DeviceSummary;
 
     #[test]
     fn command_family_is_non_empty_and_unique() {
@@ -354,7 +357,7 @@ mod tests {
     /// at any device id in the tenant, a browser companion included.
     #[test]
     fn fleet_worker_set_refuses_a_browser_device_and_still_serves_an_ordinary_one() {
-        use super::super::super::security_store::SecurityStore;
+        use cognia_companion::security_store::SecurityStore;
         let store = SecurityStore::in_memory().unwrap();
         let challenge = store.issue_challenge("tenant-a", 100, 60).unwrap();
         let invitation = store

@@ -271,7 +271,7 @@ pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,
-    host: &super::super::dispatch_host::DispatchHost,
+    host: &dyn crate::rpc_host::RpcHost,
     device_id: &str,
     tenant_id: Option<&str>,
     scope: Option<&str>,
@@ -288,9 +288,9 @@ pub(super) async fn dispatch(
             let provider_str: String = required(&args, "provider")?;
             let token: String = required(&args, "token")?;
             let provider = match provider_str.as_str() {
-                "fcm" => crate::companion_api::push::PushProvider::Fcm,
-                "apns" => crate::companion_api::push::PushProvider::Apns,
-                "hms" => crate::companion_api::push::PushProvider::Hms,
+                "fcm" => cognia_companion::push::PushProvider::Fcm,
+                "apns" => cognia_companion::push::PushProvider::Apns,
+                "hms" => cognia_companion::push::PushProvider::Hms,
                 other => {
                     return Err(RpcError::malformed(format!(
                         "register_push_token.provider must be 'fcm', 'apns', or 'hms', got '{other}'"
@@ -301,7 +301,7 @@ pub(super) async fn dispatch(
             let device_locale: Option<String> = optional(&args, "device_locale")?;
             state
                 .push_tokens
-                .register(crate::companion_api::push::PushTokenRecord {
+                .register(cognia_companion::push::PushTokenRecord {
                     device_id: device_id.to_string(),
                     provider,
                     token,
@@ -429,7 +429,7 @@ pub(super) async fn dispatch(
             // Connected brain first, desktop WebView second (ADR-0059 R4/R5);
             // 503 while a headless server's brain is down — sync has no
             // degraded-store path.
-            let transport = super::super::ws_bridge::resolve_bridge_transport(state)
+            let transport = cognia_companion::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
             // The principal's `tenant_id` is a *tenant*; the responder on the
             // far side (`desktop-sync-source`) checks it against its unlocked
@@ -437,7 +437,7 @@ pub(super) async fn dispatch(
             // same fix applied to `companion://device-paired`: two id spaces
             // that only matched while the tenant was a hardcoded literal.
             let account_namespace =
-                crate::companion_api::host_identity::event_namespace_for_tenant(tenant_id);
+                cognia_companion::host_identity::event_namespace_for_tenant(tenant_id);
             bridge
                 .pull(
                     transport.as_ref(),
@@ -446,7 +446,7 @@ pub(super) async fn dispatch(
                     account_namespace,
                     content_protocol_version,
                     cursor,
-                    crate::companion_api::sync_bridge::DEFAULT_TIMEOUT,
+                    cognia_companion::sync_bridge::DEFAULT_TIMEOUT,
                 )
                 .await
                 .map_err(RpcError::internal)
@@ -493,13 +493,13 @@ pub(super) async fn dispatch(
             let page = page_request(&args)?;
             let updated_before: Option<i64> = optional(&args, "updatedBefore")?;
             let offset = page.offset().map_err(paging_error)?;
-            let limit = page.page_size_or(super::super::paging::DEFAULT_PAGE_SIZE);
+            let limit = page.page_size_or(cognia_companion::paging::DEFAULT_PAGE_SIZE);
             let dp = pick_data_plane(state)?;
             let legacy = dp
                 .list_sessions(limit, wire_offset(offset)?, updated_before)
                 .await
                 .map_err(RpcError::internal)?;
-            let (page, extras) = super::super::paging::Page::from_legacy_offset_page(
+            let (page, extras) = cognia_companion::paging::Page::from_legacy_offset_page(
                 legacy,
                 "rows",
                 offset,
@@ -512,13 +512,13 @@ pub(super) async fn dispatch(
             let session_id: String = required(&args, "session_id")?;
             let page = page_request(&args)?;
             let offset = page.offset().map_err(paging_error)?;
-            let limit = page.page_size_or(super::super::paging::DEFAULT_PAGE_SIZE);
+            let limit = page.page_size_or(cognia_companion::paging::DEFAULT_PAGE_SIZE);
             let dp = pick_data_plane(state)?;
             let legacy = dp
                 .get_messages_by_session(session_id, Some(limit), Some(wire_offset(offset)?))
                 .await
                 .map_err(RpcError::internal)?;
-            let (page, extras) = super::super::paging::Page::from_legacy_offset_page(
+            let (page, extras) = cognia_companion::paging::Page::from_legacy_offset_page(
                 legacy,
                 "rows",
                 offset,
@@ -564,7 +564,7 @@ pub(super) async fn dispatch(
                 )
                 .await
                 .map_err(RpcError::transcript)?;
-            let (page, extras) = super::super::paging::Page::from_legacy_cursor_page(
+            let (page, extras) = cognia_companion::paging::Page::from_legacy_cursor_page(
                 legacy,
                 "messages",
                 "nextCursor",
@@ -590,13 +590,13 @@ pub(super) async fn dispatch(
         // ── Rust-owned background jobs and durable monitors ─────────────────
         // These calls never depend on a renderer bridge, so they keep working
         // on a headless host and when the desktop WebView is suspended.
-        "background_job_list" => crate::jobs::dispatch_host_rpc("jobs.list", &args)
+        "background_job_list" => cognia_jobs::host::dispatch_host_rpc("jobs.list", &args)
             .await
             .map_err(RpcError::internal),
-        "background_job_read" => crate::jobs::dispatch_host_rpc("jobs.read", &args)
+        "background_job_read" => cognia_jobs::host::dispatch_host_rpc("jobs.read", &args)
             .await
             .map_err(RpcError::internal),
-        "background_job_kill" => crate::jobs::dispatch_host_rpc("jobs.kill", &args)
+        "background_job_kill" => cognia_jobs::host::dispatch_host_rpc("jobs.kill", &args)
             .await
             .map_err(RpcError::internal),
         "background_job_spawn_scheduled" => {
@@ -604,7 +604,7 @@ pub(super) async fn dispatch(
             let command: String = required(&args, "command")?;
             let cwd: std::path::PathBuf = required(&args, "cwd")?;
             let label: Option<String> = optional(&args, "label")?;
-            crate::jobs::background_job_spawn_scheduled(task_id, command, cwd, label)
+            cognia_jobs::commands::background_job_spawn_scheduled(task_id, command, cwd, label)
                 .await
                 .map_err(RpcError::internal)
         }
@@ -618,14 +618,14 @@ pub(super) async fn dispatch(
             let argv: Vec<String> = optional(&args, "args")?.unwrap_or_default();
             let cwd: std::path::PathBuf = required(&args, "cwd")?;
             let label: Option<String> = optional(&args, "label")?;
-            crate::jobs::background_job_spawn_session(session_id, command, program, argv, cwd, label)
+            cognia_jobs::commands::background_job_spawn_session(session_id, command, program, argv, cwd, label)
                 .await
                 .map_err(RpcError::internal)
         }
-        "background_monitor_list" => crate::jobs::dispatch_host_rpc("monitors.list", &args)
+        "background_monitor_list" => cognia_jobs::host::dispatch_host_rpc("monitors.list", &args)
             .await
             .map_err(RpcError::internal),
-        "background_monitor_cancel" => crate::jobs::dispatch_host_rpc("monitors.cancel", &args)
+        "background_monitor_cancel" => cognia_jobs::host::dispatch_host_rpc("monitors.cancel", &args)
             .await
             .map_err(RpcError::internal),
         "background_monitor_register_scheduled" => {
@@ -633,7 +633,7 @@ pub(super) async fn dispatch(
             let condition: cognia_jobs::MonitorCondition = required(&args, "condition")?;
             let expires_at_ms: Option<i64> = optional(&args, "expiresAtMs")?;
             let label: Option<String> = optional(&args, "label")?;
-            crate::jobs::background_monitor_register_scheduled(
+            cognia_jobs::commands::background_monitor_register_scheduled(
                 task_id,
                 condition,
                 expires_at_ms,
@@ -664,14 +664,14 @@ pub(super) async fn dispatch(
         {
             let args = inject_caller_device_id(name, args, device_id);
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
-            let transport = super::super::ws_bridge::resolve_bridge_transport(state)
+            let transport = cognia_companion::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
             bridge
                 .dispatch(
                     transport.as_ref(),
                     name,
                     args,
-                    crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+                    cognia_companion::desktop_writes_bridge::DEFAULT_TIMEOUT,
                 )
                 .await
                 .map_err(|error| map_desktop_write_bridge_error(name, error))
@@ -718,7 +718,7 @@ pub(super) async fn dispatch(
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|duration| duration.as_millis() as i64)
                 .unwrap_or(0);
-            let input = crate::workflow::types::WorkflowWaitpointDecisionInput {
+            let input = cognia_scheduling::workflow::types::WorkflowWaitpointDecisionInput {
                 id: approval_id.clone(),
                 status: if decision == "approved" {
                     "resolved".to_string()
@@ -1107,7 +1107,7 @@ pub(super) async fn dispatch(
                     | "browser_attachment_upload_commit"
                     | "browser_attachment_upload_abort"
             )
-                && !crate::companion_api::browser_access::submissions_enabled()
+                && !cognia_companion::browser_access::submissions_enabled()
             {
                 return Err(RpcError::browser_submissions_disabled());
             }
@@ -1135,14 +1135,14 @@ pub(super) async fn dispatch(
             let (args, paging) = bridged_page_args(name, args)?;
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             // Connected brain first, desktop WebView second (ADR-0059 R4/R5).
-            let transport = super::super::ws_bridge::resolve_bridge_transport(state)
+            let transport = cognia_companion::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
             let result = bridge
                 .dispatch(
                     transport.as_ref(),
                     name,
                     args,
-                    crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+                    cognia_companion::desktop_writes_bridge::DEFAULT_TIMEOUT,
                 )
                 .await
                 .map_err(|error| map_desktop_write_bridge_error(name, error))?;
@@ -1151,7 +1151,7 @@ pub(super) async fn dispatch(
             // it without waiting for a poll. Best-effort by design.
             if matches!(name, "browser_context_submit" | "browser_context_cancel") {
                 if let Some(tenant_id) = tenant_id {
-                    crate::companion_api::ws_browser_companion::notify_status(tenant_id, device_id);
+                    cognia_companion::ws_browser_companion::notify_status(tenant_id, device_id);
                 }
             }
             Ok(bridged_page_result(name, paging, result))
@@ -1164,14 +1164,14 @@ pub(super) async fn dispatch(
         | "thread_handoff_status" => {
             let args = super::host_state::bind_authority(args, state, tenant_id, device_id)?;
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
-            let transport = super::super::ws_bridge::resolve_bridge_transport(state)
+            let transport = cognia_companion::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
             bridge
                 .dispatch(
                     transport.as_ref(),
                     name,
                     args,
-                    crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+                    cognia_companion::desktop_writes_bridge::DEFAULT_TIMEOUT,
                 )
                 .await
                 .map_err(|error| map_desktop_write_bridge_error(name, error))
@@ -1200,7 +1200,7 @@ pub(super) async fn dispatch(
             let attempt_no: Option<u32> = optional(&args, "attemptNo")?;
             let code: Option<String> = optional(&args, "code")?;
             let message: Option<String> = optional(&args, "message")?;
-            let registry = super::super::remote_execution::global();
+            let registry = cognia_companion::remote_execution::global();
             let origin = match registry.session_response_origin(
                 device_id,
                 &session_id,
@@ -1212,14 +1212,14 @@ pub(super) async fn dispatch(
             };
             let args = bind_reservation_origin(inject_caller_device_id(name, args, device_id), &origin);
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
-            let transport = super::super::ws_bridge::resolve_bridge_transport(state)
+            let transport = cognia_companion::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
             let verdict = bridge
                 .dispatch(
                     transport.as_ref(),
                     name,
                     args,
-                    crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+                    cognia_companion::desktop_writes_bridge::DEFAULT_TIMEOUT,
                 )
                 .await
                 .map_err(|error| map_desktop_write_bridge_error(name, error))?;
@@ -1337,7 +1337,7 @@ fn bridged_page_args(
     };
     let page = page_request(&args)?;
     let offset = page.offset().map_err(paging_error)?;
-    let page_size = page.page_size_or(super::super::paging::DEFAULT_PAGE_SIZE);
+    let page_size = page.page_size_or(cognia_companion::paging::DEFAULT_PAGE_SIZE);
     let mut object = match args {
         Value::Object(map) => map,
         _ => serde_json::Map::new(),
@@ -1386,7 +1386,7 @@ fn bridged_page_result(name: &str, paging: Option<BridgedPaging>, result: Value)
     };
     object.remove("ok");
     let more = paging.offset_paged && items.len() as u32 >= paging.page_size;
-    let page = super::super::paging::Page::from_offset(items, paging.offset, more);
+    let page = cognia_companion::paging::Page::from_offset(items, paging.offset, more);
     page.into_value_with(object)
 }
 
@@ -1397,9 +1397,7 @@ mod tests {
     #[tokio::test]
     async fn hms_registration_and_revocation_work_on_a_headless_host() {
         let state = super::super::tests::test_state();
-        let host = crate::companion_api::dispatch_host::DispatchHost::Headless(
-            crate::headless::HeadlessServices::stub_for_tests(),
-        );
+        let host = crate::headless::HeadlessServices::stub_for_tests();
         dispatch(
             "register_push_token",
             serde_json::json!({"provider":"hms", "token":"huawei-token"}),
@@ -1413,7 +1411,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             state.push_tokens.get("hms-test-phone").unwrap().provider,
-            crate::companion_api::push::PushProvider::Hms
+            cognia_companion::push::PushProvider::Hms
         );
         dispatch(
             "revoke_push_token",
@@ -1431,7 +1429,7 @@ mod tests {
 
     #[test]
     fn a_reservation_answer_is_refused_unless_the_caller_sent_the_turn() {
-        let registry = super::super::super::remote_execution::global();
+        let registry = cognia_companion::remote_execution::global();
         let session = "data-sync-reserve-owner-session";
         let context = registry.register("host-a", "device-owner", session, unix_time_ms());
         registry
@@ -1478,7 +1476,7 @@ mod tests {
 
     #[test]
     fn a_host_started_turn_has_no_device_to_answer_its_reservations() {
-        let registry = super::super::super::remote_execution::global();
+        let registry = cognia_companion::remote_execution::global();
         let refusal = registry
             .session_response_origin(
                 "device-any",
@@ -1524,7 +1522,7 @@ mod tests {
 
     #[test]
     fn bridged_paging_translates_the_wire_shape_and_wraps_the_legacy_answer() {
-        let token = super::super::super::paging::PageToken::Offset(20).encode();
+        let token = cognia_companion::paging::PageToken::Offset(20).encode();
         let (args, paging) = bridged_page_args(
             "workflow_run_list",
             serde_json::json!({ "workflowId": "wf", "pageSize": 10, "pageToken": token }),
@@ -1544,8 +1542,8 @@ mod tests {
         assert_eq!(
             page["nextPageToken"]
                 .as_str()
-                .map(super::super::super::paging::PageToken::decode),
-            Some(Ok(super::super::super::paging::PageToken::Offset(30)))
+                .map(cognia_companion::paging::PageToken::decode),
+            Some(Ok(cognia_companion::paging::PageToken::Offset(30)))
         );
 
         // memory_list has no offset underneath: one page, extras kept, and a
@@ -1590,8 +1588,8 @@ mod tests {
         assert_eq!(
             page["nextPageToken"]
                 .as_str()
-                .map(super::super::super::paging::PageToken::decode),
-            Some(Ok(super::super::super::paging::PageToken::Offset(2)))
+                .map(cognia_companion::paging::PageToken::decode),
+            Some(Ok(cognia_companion::paging::PageToken::Offset(2)))
         );
         let (_, paging) = bridged_page_args("browser_context_list", serde_json::json!({})).unwrap();
         let page = bridged_page_result(
