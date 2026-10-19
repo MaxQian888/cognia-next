@@ -38,7 +38,11 @@ import type {
   SDKEventEnvelope,
 } from "@cognia/agent-config-types"
 import { listMessages } from "@/lib/db/messages"
-import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
+import {
+  enqueueHostStateIntentIfAvailable,
+  withdrawUnsentHostStateMessages,
+} from "@/lib/db/mobile-outbound-queue"
+import { restoreWithdrawnToComposer } from "@/lib/chat/restore-withdrawn"
 import { denialMessageForModel, denialReasonOf } from "@/lib/chat/approval-routing"
 import {
   uploadSessionAttachment,
@@ -527,10 +531,23 @@ export function useRemoteSessionStream(
     // Nothing in flight — don't fire a spurious interrupt RPC.
     if (statusRef.current !== "streaming") return
     try {
+      // Stop goes out ahead of the sends still waiting in the outbox (it names
+      // the turn it was pressed against), and those sends would otherwise each
+      // start a new turn right after it. They come back to the composer.
+      const withdrawn = await withdrawUnsentHostStateMessages(sessionId)
       const queued = await enqueueHostStateIntentIfAvailable({
         sessionId,
         action: { kind: "turn.abort" },
       })
+      if (withdrawn.length > 0) {
+        const ids = new Set(withdrawn.map((message) => message.messageId))
+        messagesRef.current = messagesRef.current.filter((message) => !ids.has(message.id))
+        setMessages(messagesRef.current)
+        void restoreWithdrawnToComposer(sessionId, withdrawn).catch((error) =>
+          console.error("restoring unsent messages failed", error)
+        )
+        toast.info(t("detail.unsentRestored", { count: withdrawn.length }))
+      }
       if (queued) {
         setStatusBoth("idle")
         return

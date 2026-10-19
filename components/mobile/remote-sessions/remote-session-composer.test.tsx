@@ -1,8 +1,9 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+import { dispatchComposerAppend } from "@/lib/chat/composer-append"
 import {
   RemoteSessionComposer,
   type RemoteSessionComposerProps,
@@ -364,6 +365,64 @@ describe("RemoteSessionComposer", () => {
     expect(screen.queryByTestId("remote-send")).not.toBeInTheDocument()
     await user.click(screen.getByTestId("remote-interrupt"))
     expect(onInterrupt).toHaveBeenCalled()
+  })
+
+  describe("material handed back from outside", () => {
+    it("appends put-back text for this conversation and names files that could not come back", async () => {
+      setup()
+      await waitFor(() => expect(screen.getByTestId("remote-composer-input")).toBeEnabled())
+      fireEvent.change(screen.getByTestId("remote-composer-input"), {
+        target: { value: "draft" },
+      })
+
+      let claimed = false
+      act(() => {
+        claimed = dispatchComposerAppend({
+          sessionId: "ses-1",
+          text: "first\n\nsecond",
+          missing: ["shot.png"],
+        })
+      })
+
+      expect(claimed).toBe(true)
+      // One line: the input would otherwise glue the two messages together.
+      expect(screen.getByTestId("remote-composer-input")).toHaveValue("draft first second")
+      expect(toastWarning).toHaveBeenCalledTimes(1)
+    })
+
+    it("stages handed-back files through the same gate as the paperclip", async () => {
+      setup()
+      act(() => {
+        dispatchComposerAppend({ sessionId: "ses-1", files: [pngFile("back.png")] })
+      })
+      await waitFor(() =>
+        expect(screen.getByTestId("remote-staged-attachments")).toBeInTheDocument()
+      )
+      expect(prepareMock).toHaveBeenCalled()
+    })
+
+    it("leaves events for other conversations, and un-addressed ones, unclaimed", () => {
+      setup()
+      let other = true
+      let unaddressed = true
+      act(() => {
+        other = dispatchComposerAppend({ sessionId: "ses-2", text: "x" })
+        unaddressed = dispatchComposerAppend({ text: "y" })
+      })
+      expect(other).toBe(false)
+      expect(unaddressed).toBe(false)
+      expect(screen.getByTestId("remote-composer-input")).toHaveValue("")
+    })
+
+    it("keeps a submit request as a draft, since this composer cannot send on its own", () => {
+      setup()
+      const onSubmitted = jest.fn()
+      act(() => {
+        dispatchComposerAppend({ sessionId: "ses-1", text: "later", submit: true, onSubmitted })
+      })
+      expect(onSubmitted).toHaveBeenCalledWith(false)
+      expect(screen.getByTestId("remote-composer-input")).toHaveValue("later")
+    })
   })
 
   it("blocks sending while the transport is down and says why", async () => {

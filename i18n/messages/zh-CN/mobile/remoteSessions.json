@@ -86,7 +86,8 @@
       "progress": "{total} 个测试中通过 {passed} 个",
       "skipped": "{count} 个跳过"
     },
-    "title": "实时会话"
+    "title": "实时会话",
+    "unsentRestored": "{count, plural, =1 {已停止。未发送的消息已放回输入框。} other {已停止。# 条未发送的消息已放回输入框。}}"
   },
   "list": {
     "empty": "已连接的桌面上还没有会话。",

@@ -52,8 +52,14 @@ jest.mock("@/lib/claude/ipc", () => ({
   interruptSession: (...a: unknown[]) => interruptMock(...a),
   approveTool: (...a: unknown[]) => approveToolMock(...a),
 }))
+const withdrawUnsentMock = jest.fn().mockResolvedValue([])
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueueHostStateIntentIfAvailable: (...args: unknown[]) => enqueueHostStateIntentMock(...args),
+  withdrawUnsentHostStateMessages: (...args: unknown[]) => withdrawUnsentMock(...args),
+}))
+const restoreWithdrawnMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/chat/restore-withdrawn", () => ({
+  restoreWithdrawnToComposer: (...args: unknown[]) => restoreWithdrawnMock(...args),
 }))
 
 const listMessagesMock = jest.fn().mockResolvedValue([])
@@ -91,6 +97,8 @@ beforeEach(() => {
   interruptMock.mockClear().mockResolvedValue(undefined)
   approveToolMock.mockClear().mockResolvedValue(undefined)
   enqueueHostStateIntentMock.mockReset().mockResolvedValue(null)
+  withdrawUnsentMock.mockReset().mockResolvedValue([])
+  restoreWithdrawnMock.mockReset().mockResolvedValue(undefined)
   listMessagesMock.mockClear().mockResolvedValue([])
   runSyncDownMock.mockClear().mockResolvedValue([])
   toastError.mockClear()
@@ -472,6 +480,34 @@ describe("useRemoteSessionStream", () => {
     expect(sendPromptMock).not.toHaveBeenCalled()
     expect(interruptMock).not.toHaveBeenCalled()
     expect(approveToolMock).not.toHaveBeenCalled()
+  })
+
+  it("hands the sends Stop overtook back to the composer and drops their bubbles", async () => {
+    enqueueHostStateIntentMock.mockResolvedValue({ id: "queued", status: "pending" })
+    listMessagesMock.mockResolvedValue([
+      { id: "u0", role: "user", parts: [] },
+      { id: "m-unsent", role: "user", parts: [] },
+    ])
+    const withdrawn = [
+      { actionId: "a-1", messageId: "m-unsent", text: "wait", attachmentNames: ["shot.png"] },
+    ]
+    withdrawUnsentMock.mockResolvedValue(withdrawn)
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(result.current.messages).toHaveLength(2))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+
+    await act(async () => {
+      await result.current.send("go")
+      await result.current.interrupt()
+    })
+
+    // Withdrawn before Stop is queued, so the outbox never holds both.
+    expect(withdrawUnsentMock.mock.invocationCallOrder[0]).toBeLessThan(
+      enqueueHostStateIntentMock.mock.invocationCallOrder.at(-1)!
+    )
+    expect(restoreWithdrawnMock).toHaveBeenCalledWith("sess-1", withdrawn)
+    expect(result.current.messages.map((message) => message.id)).not.toContain("m-unsent")
+    expect(toast.info).toHaveBeenCalledWith("detail.unsentRestored")
   })
 
   it("marks the session ended on session_ended and clears any pending approval", async () => {

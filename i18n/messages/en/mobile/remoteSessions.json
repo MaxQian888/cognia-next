@@ -86,7 +86,8 @@
       "progress": "{passed}/{total} tests passed",
       "skipped": "{count} skipped"
     },
-    "title": "Live session"
+    "title": "Live session",
+    "unsentRestored": "{count, plural, =1 {Stopped. Your unsent message is back in the message box.} other {Stopped. Your # unsent messages are back in the message box.}}"
   },
   "list": {
     "empty": "No sessions on the connected desktop yet.",

@@ -245,14 +245,22 @@ export type AllowedHostStateIntent =
       text: string
       mentions?: HostStateContextRef[]
       promptPreamble?: HostStatePromptPreamble
+      /** See {@link HostStateTurnFence}. */
+      expectedTurnId?: string
     }
   | {
       kind: "turn.followup"
       text: string
       mentions?: HostStateContextRef[]
       promptPreamble?: HostStatePromptPreamble
+      /** See {@link HostStateTurnFence}. */
+      expectedTurnId?: string
     }
-  | { kind: "turn.abort" }
+  | {
+      kind: "turn.abort"
+      /** See {@link HostStateTurnFence}. */
+      expectedTurnId?: string
+    }
   | {
       kind: "approval.respond"
       requestId: string
@@ -264,6 +272,23 @@ export type AllowedHostStateIntent =
   | { kind: "session.import"; envelope: HostStateJsonValue }
 
 export type HostStateIntentKind = AllowedHostStateIntent["kind"]
+
+/**
+ * The turn a live control was aimed at.
+ *
+ * A steer, follow-up or stop names "the turn running now", and "now" is when
+ * the person pressed it — not when an outbox finally delivered it. The client
+ * stamps the `activeTurn.turnId` its replica showed at that moment, and the
+ * Host refuses the control (`host_state_turn_superseded`) once a different
+ * turn, or none, is running. Optional: an unstamped control keeps the old
+ * session-scoped meaning, and a client stamps only for a Host that advertises
+ * {@link HOST_STATE_TURN_FENCE_OPERATION}, because an older Host's closed guard
+ * refuses the field.
+ */
+export type HostStateTurnFence = { expectedTurnId?: string }
+
+/** Capability marker: this Host understands `expectedTurnId`. Not a command. */
+export const HOST_STATE_TURN_FENCE_OPERATION = "host_state_turn_fence"
 
 const INTENT_KINDS: readonly HostStateIntentKind[] = [
   "session.create",
@@ -1936,13 +1961,17 @@ function isAllowedIntent(value: unknown): value is AllowedHostStateIntent {
     case "turn.steer":
     case "turn.followup":
       return (
-        hasOnlyKeys(value, ["kind", "text", "mentions", "promptPreamble"]) &&
+        hasOnlyKeys(value, ["kind", "text", "mentions", "promptPreamble", "expectedTurnId"]) &&
         typeof value.text === "string" &&
         (value.mentions === undefined || isContextRefList(value.mentions)) &&
-        (value.promptPreamble === undefined || isPromptPreamble(value.promptPreamble))
+        (value.promptPreamble === undefined || isPromptPreamble(value.promptPreamble)) &&
+        (value.expectedTurnId === undefined || nonEmptyString(value.expectedTurnId))
       )
     case "turn.abort":
-      return hasOnlyKeys(value, ["kind"])
+      return (
+        hasOnlyKeys(value, ["kind", "expectedTurnId"]) &&
+        (value.expectedTurnId === undefined || nonEmptyString(value.expectedTurnId))
+      )
     case "approval.respond":
       return (
         hasOnlyKeys(value, ["kind", "requestId", "decision"]) &&

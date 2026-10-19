@@ -73,6 +73,18 @@ export const MAX_HOST_STATE_SNAPSHOT_BYTES = 512 * 1024
 export const MAX_HOST_STATE_ACTION_BATCH = 50
 /** Backlog ceiling while a client is not `ready`. See `bufferEvent`. */
 export const MAX_BUFFERED_HOST_STATE_EVENTS = 2_000
+/**
+ * Whether a fenced live control arrived after its turn (see
+ * `HostStateTurnFence`). A control stamped while a turn ran is refused once a
+ * different turn, or none, is the active one; an unstamped control is never.
+ */
+function supersededTurn(
+  state: Extract<HostStateChannelState, { kind: "session" }>,
+  expectedTurnId: string | undefined
+): boolean {
+  return expectedTurnId !== undefined && state.activeTurn?.turnId !== expectedTurnId
+}
+
 /** Turn statuses a steer or follow-up can still reach. */
 const LIVE_TURN_STATUSES: ReadonlySet<string> = new Set(["queued", "running", "awaiting-decision"])
 
@@ -2107,6 +2119,20 @@ function mutationForAction(
     ...(targetRequestId ? { targetRequestId } : {}),
   })
 
+  if (
+    (action.action.kind === "turn.steer" ||
+      action.action.kind === "turn.followup" ||
+      action.action.kind === "turn.abort") &&
+    supersededTurn(state, action.action.expectedTurnId)
+  ) {
+    return {
+      rejection: {
+        code: "host_state_turn_superseded",
+        message: "The turn this was meant for is no longer running.",
+        currentRevision: state.revision,
+      },
+    }
+  }
   switch (action.action.kind) {
     case "session.rename":
       return { mutation: { kind: "session.renamed", title: action.action.title, revision } }

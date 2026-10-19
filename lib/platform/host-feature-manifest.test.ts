@@ -92,6 +92,7 @@ describe("host feature manifest", () => {
         "host_state_status",
         "session_mark_read",
         "session_mark_unread",
+        "host_state_turn_fence",
       ],
     })
     expect(manifest.features["room.host-run"]).toEqual({

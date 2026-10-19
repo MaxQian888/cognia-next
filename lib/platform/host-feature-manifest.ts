@@ -1,4 +1,5 @@
 import { getDocumentAcceptExtensions } from "@cognia/document/support-matrix"
+import { HOST_STATE_TURN_FENCE_OPERATION } from "@cognia/agent-config-types/host-state"
 import { APP_VERSION } from "@/lib/app-version"
 import {
   COMPOSER_MAX_ATTACHMENTS,
@@ -586,6 +587,12 @@ export function buildLocalHostFeatureManifest({
         "host_state_status",
         "session_mark_read",
         "session_mark_unread",
+        // A capability marker, not a command: `host_state_submit` accepts
+        // `expectedTurnId` on steer, follow-up and stop. Advertised as an
+        // operation rather than a feature version because clients compare
+        // `session.state-sync` to version 1 exactly, and a bump would turn
+        // HostState off on every one of them.
+        HOST_STATE_TURN_FENCE_OPERATION,
       ],
     }
     // Advertised on both hosts that can actually spawn a process. The

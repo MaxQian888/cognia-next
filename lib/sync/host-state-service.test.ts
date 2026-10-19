@@ -534,6 +534,59 @@ describe("HostStateService", () => {
     expect(dispatchRuntime).not.toHaveBeenCalled()
   })
 
+  it("refuses a live control fenced to a turn that is no longer the running one", async () => {
+    const dispatchRuntime = jest.fn(async () => ({ correlationId: "ok" }))
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => 100,
+      dispatchRuntime,
+      publish: jest.fn(async () => undefined),
+    })
+    await service.start({ now: 0, heartbeat: false })
+    await service.projectRuntimeEnvelope(
+      runtimeEnvelope({ kind: "lifecycle", phase: "started" }, "evt-start")
+    )
+    const snapshot = await service.snapshot({ ...scope, channel })
+    const running = (snapshot.state as { activeTurn: { turnId: string } | null }).activeTurn
+    expect(running?.turnId).toEqual(expect.any(String))
+
+    const stale = await service.submit(
+      {
+        ...scope,
+        actions: [
+          action({ kind: "turn.steer", text: "for the old one", expectedTurnId: "turn-gone" }),
+          action(
+            { kind: "turn.abort", expectedTurnId: "turn-gone" },
+            { actionId: "abort-1", clientSeq: 2 }
+          ),
+        ],
+      },
+      owner
+    )
+    expect(stale.results.map((result) => result.outcome)).toEqual(["rejected", "rejected"])
+    expect(stale.results[0]).toMatchObject({
+      rejection: { code: "host_state_turn_superseded" },
+    })
+    expect(dispatchRuntime).not.toHaveBeenCalled()
+
+    const current = await service.submit(
+      {
+        ...scope,
+        actions: [
+          action(
+            { kind: "turn.steer", text: "for this one", expectedTurnId: running!.turnId },
+            { actionId: "steer-2", clientSeq: 3 }
+          ),
+        ],
+      },
+      owner
+    )
+    expect(current.results[0]).toMatchObject({ outcome: "applied" })
+    expect(dispatchRuntime).toHaveBeenCalledTimes(1)
+  })
+
   it("retries a failed message dispatch on the sweep once it is due", async () => {
     let clock = 1_000
     const dispatchRuntime = jest

@@ -121,7 +121,10 @@ import {
 import {
   enqueueHostStateIntentIfAvailable,
   hostStateSessionIntentAvailable,
+  withdrawUnsentHostStateMessages,
+  type WithdrawnHostStateMessage,
 } from "@/lib/db/mobile-outbound-queue"
+import { restoreWithdrawnToComposer } from "@/lib/chat/restore-withdrawn"
 import { SessionCoalescingRegistry } from "@/hooks/chat/stream-coalescing"
 import {
   getSession,
@@ -6151,7 +6154,13 @@ export function useClaudeChat() {
       const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
       let hostStateAbortQueued = false
+      let withdrawn: WithdrawnHostStateMessage[] = []
       try {
+        // Stop is delivered ahead of sends the outbox has not offered yet (it
+        // names the turn it was pressed against), and each of those would
+        // otherwise start a new turn right after it. They go back to the
+        // composer with the queued follow-ups below.
+        withdrawn = await withdrawUnsentHostStateMessages(sessionId)
         hostStateAbortQueued = Boolean(
           await enqueueHostStateIntentIfAvailable({
             sessionId,
@@ -6186,6 +6195,20 @@ export function useClaudeChat() {
             if (count > 0) toast.info(tSteer("restoredOnStop", { count }))
           })
           .catch((error) => console.error("steer put-back on stop failed", error))
+      }
+      // Sends still sitting unoffered in the outbox are the same: Stop overtook
+      // them, so their bubbles come down and their text goes back to the
+      // composer (their files' bytes are on the Host; the composer names them).
+      if (withdrawn.length > 0) {
+        const ids = new Set(withdrawn.map((message) => message.messageId))
+        const current = store.getState().sessions[sessionId]?.messages ?? []
+        store.getState().replaceSessionMessages(
+          sessionId,
+          current.filter((message) => !ids.has(message.id))
+        )
+        void restoreWithdrawnToComposer(sessionId, withdrawn)
+          .then(() => toast.info(tSteer("restoredOnStop", { count: withdrawn.length })))
+          .catch((error) => console.error("unsent message put-back on stop failed", error))
       }
 
       // Seal the renderer state before waiting for the IPC acknowledgement.

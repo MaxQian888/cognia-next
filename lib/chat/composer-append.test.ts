@@ -38,6 +38,11 @@ describe("composerAppendHasContent", () => {
     expect(composerAppendHasContent({ carried: [{ preamble: "<x>" }] })).toBe(true)
     expect(composerAppendHasContent({ replyTo: { messageId: "m", preview: "p" } })).toBe(true)
   })
+
+  it("counts files that could not come back, so an attachment-only put-back is still claimed", () => {
+    expect(composerAppendHasContent({ missing: ["shot.png"] })).toBe(true)
+    expect(composerAppendHasContent({ missing: [] })).toBe(false)
+  })
 })
 
 it("carries an explicit submit request and its acknowledgement to the claiming bridge", () => {

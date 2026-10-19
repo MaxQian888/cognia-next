@@ -2,6 +2,7 @@
 
 import "fake-indexeddb/auto"
 
+import { AccountContentCipher, activateAccountContentCipher } from "@/lib/accounts/content-cipher"
 import { LEGACY_MIXED_TARGET_ID } from "@/lib/runtime/target-registry"
 import {
   CLAIM_ABANDONED_AFTER_MS,
@@ -29,6 +30,7 @@ import {
   retryDeadletter,
   supersededHostStateDraftIds,
   withdrawQueuedAction,
+  withdrawUnsentHostStateMessages,
 } from "./mobile-outbound-queue"
 import type { MobileOutboundJobRow } from "./mobile-outbound-types"
 import { __resetDbForTesting, activateAccountDatabase, getDb } from "./schema"
@@ -41,6 +43,7 @@ import {
   setActiveRuntimeTargetContext,
 } from "@/lib/runtime/runtime-target-context"
 import {
+  HOST_STATE_TURN_FENCE_OPERATION,
   createEmptyHostStateSession,
   sessionIndexChannel,
   sessionStateChannel,
@@ -1414,5 +1417,182 @@ describe("HostState rows across Host restarts and draft bursts", () => {
 
     await expect(claimNext(1_000, scope)).resolves.toMatchObject({ id: "d3" })
     expect((await getDb().mobileOutboundQueue.toArray()).map((row) => row.id)).toEqual(["d3"])
+  })
+})
+
+describe("Stop: turn fence, priority and withdrawal", () => {
+  const channel = sessionStateChannel(scope.targetId, "s-stop")
+
+  beforeEach(async () => {
+    activateAccountDatabase(scope.accountId, scope.targetId)
+    await getDb().delete()
+    __resetDbForTesting()
+    activateAccountDatabase(scope.accountId, scope.targetId)
+    setActiveRuntimeTargetContext(scope.accountId, scope.targetId)
+    __resetRuntimeSnapshotForTesting()
+    localStorage.clear()
+    // `messages` is an encrypted table; the bubbles below need an open cipher.
+    activateAccountContentCipher(
+      await AccountContentCipher.createForTesting(scope.accountId, getDb().name)
+    )
+    await getDb().hostStateChannels.put({
+      channel,
+      hostId: "host-authority",
+      hostGeneration: 2,
+      hostSeq: 5,
+      revision: 4,
+      digest: "digest",
+      state: {
+        ...createEmptyHostStateSession(scope.targetId, "s-stop"),
+        turn: "running",
+        activeTurn: { turnId: "turn-1", startedAt: 50 },
+      },
+      updatedAt: 100,
+    })
+  })
+
+  afterEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    __resetRuntimeSnapshotForTesting()
+  })
+
+  function negotiate(operations: string[]) {
+    setRuntimeSnapshot({
+      target: { id: scope.targetId, kind: "companion", platform: "web", hostKind: "desktop" },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: { compatible: true, operations, grants: [] },
+    })
+  }
+
+  function intentOf(row: MobileOutboundJobRow | null): Record<string, unknown> {
+    return (row?.payload as { actions: Array<{ action: Record<string, unknown> }> }).actions[0]
+      .action
+  }
+
+  async function send(messageId: string, nowMs: number, attachments: string[] = []) {
+    return enqueueHostStateIntentIfAvailable({
+      sessionId: "s-stop",
+      actionId: `action-${messageId}`,
+      nowMs,
+      action: {
+        kind: "message.enqueue",
+        messageId,
+        text: `text of ${messageId}`,
+        attachments: attachments.map((name) => ({ name, mediaType: "image/png", size: 3 })),
+      },
+    })
+  }
+
+  it("stamps live controls with the turn the replica shows running once the Host understands it", async () => {
+    negotiate(["host_state_submit", HOST_STATE_TURN_FENCE_OPERATION])
+    const abort = await enqueueHostStateIntentIfAvailable({
+      sessionId: "s-stop",
+      action: { kind: "turn.abort" },
+    })
+    const steer = await enqueueHostStateIntentIfAvailable({
+      sessionId: "s-stop",
+      action: { kind: "turn.steer", text: "also" },
+    })
+    const message = await send("m1", 10)
+    expect(intentOf(abort)).toEqual({ kind: "turn.abort", expectedTurnId: "turn-1" })
+    expect(intentOf(steer)).toMatchObject({ expectedTurnId: "turn-1" })
+    expect(intentOf(message)).not.toHaveProperty("expectedTurnId")
+  })
+
+  it("leaves controls unstamped for a Host that did not advertise the fence", async () => {
+    negotiate(["host_state_submit"])
+    const abort = await enqueueHostStateIntentIfAvailable({
+      sessionId: "s-stop",
+      action: { kind: "turn.abort" },
+    })
+    expect(intentOf(abort)).toEqual({ kind: "turn.abort" })
+  })
+
+  it("leaves a control unstamped when the replica shows no running turn", async () => {
+    negotiate(["host_state_submit", HOST_STATE_TURN_FENCE_OPERATION])
+    await getDb().hostStateChannels.update(channel, {
+      state: createEmptyHostStateSession(scope.targetId, "s-stop"),
+    })
+    const abort = await enqueueHostStateIntentIfAvailable({
+      sessionId: "s-stop",
+      action: { kind: "turn.abort" },
+    })
+    expect(intentOf(abort)).toEqual({ kind: "turn.abort" })
+  })
+
+  it("claims a Stop ahead of the sends queued before it, but never beside one on the wire", async () => {
+    negotiate(["host_state_submit"])
+    const first = await send("m1", 10)
+    await getDb().mobileOutboundQueue.update(first!.id, { nextAttemptAt: 50_000 })
+    await send("m2", 11)
+    const stop = await enqueueHostStateIntentIfAvailable({
+      sessionId: "s-stop",
+      nowMs: 12,
+      action: { kind: "turn.abort" },
+    })
+
+    // The head is backing off; Stop goes anyway.
+    await expect(claimNext(1_000, scope)).resolves.toMatchObject({ id: stop!.id })
+    // While Stop is on the wire nothing else on its channel goes beside it.
+    await getDb().mobileOutboundQueue.update(first!.id, { nextAttemptAt: 0 })
+    await expect(claimNext(1_000, scope)).resolves.toBeNull()
+    await releaseClaim(stop!.id)
+
+    // A send already on the wire holds Stop back until it comes home.
+    await getDb().mobileOutboundQueue.update(first!.id, { status: "sending", claimedAt: 1_000 })
+    await expect(claimNext(1_000, scope)).resolves.toBeNull()
+  })
+
+  it("takes back only the sends no Host can have seen, with their optimistic bubbles", async () => {
+    negotiate(["host_state_submit"])
+    const unsent = await send("m1", 10, ["shot.png"])
+    const offered = await send("m2", 11)
+    await offerHostStateRow(offered!.id)
+    const later = await send("m3", 12)
+    await getDb().messages.bulkPut(
+      ["m1", "m2", "m3"].map((id) => ({
+        id,
+        sessionId: "s-stop",
+        role: "user" as const,
+        parts: [{ type: "text" as const, text: id }],
+        metadata: { hostState: { actionId: `action-${id}`, optimistic: true } },
+        createdAt: 1,
+      }))
+    )
+
+    await expect(withdrawUnsentHostStateMessages("s-stop")).resolves.toEqual([
+      {
+        actionId: "action-m1",
+        messageId: "m1",
+        text: "text of m1",
+        attachmentNames: ["shot.png"],
+      },
+      { actionId: "action-m3", messageId: "m3", text: "text of m3", attachmentNames: [] },
+    ])
+    const left = await getDb().mobileOutboundQueue.toArray()
+    expect(left.map((row) => row.id)).toEqual([offered!.id])
+    expect(left.some((row) => row.id === unsent!.id || row.id === later!.id)).toBe(false)
+    expect((await getDb().messages.toArray()).map((message) => message.id)).toEqual(["m2"])
+  })
+
+  it("keeps a bubble the Host already confirmed, and withdraws nothing off HostState", async () => {
+    negotiate(["host_state_submit"])
+    await send("m1", 10)
+    await getDb().messages.put({
+      id: "m1",
+      sessionId: "s-stop",
+      role: "user",
+      parts: [{ type: "text", text: "m1" }],
+      metadata: { hostState: { actionId: "action-m1" } },
+      createdAt: 1,
+    })
+    await expect(withdrawUnsentHostStateMessages("s-stop")).resolves.toHaveLength(1)
+    expect(await getDb().messages.get("m1")).toBeDefined()
+
+    negotiate([])
+    await send("m2", 11)
+    await expect(withdrawUnsentHostStateMessages("s-stop")).resolves.toEqual([])
   })
 })

@@ -7,6 +7,7 @@
 import { nanoid } from "nanoid"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import {
+  HOST_STATE_TURN_FENCE_OPERATION,
   hostStateIntentTargetsSessionIndex,
   isHostStateAction,
   sessionIndexChannel,
@@ -14,6 +15,7 @@ import {
   type AllowedHostStateIntent,
   type HostStateActionOutcome,
   type HostStateAction,
+  type HostStateChannelState,
 } from "@cognia/agent-config-types/host-state"
 
 import type {
@@ -143,6 +145,8 @@ export async function enqueueHostStateIntentIfAvailable(
   const negotiated = await hostStateSubmitNegotiated()
   assertActive()
   if (!negotiated) return null
+  const turnFence = isLiveControlIntent(input.action) && (await hostStateTurnFenceNegotiated())
+  assertActive()
   // Host-state is addressed in the HOST's namespace. `local` is what this
   // client calls the pairing; the Host writes its channels under the scope it
   // declared in the manifest, and refuses a submit under any other target. A
@@ -216,7 +220,7 @@ export async function enqueueHostStateIntentIfAvailable(
         ? { baseRevision: input.baseRevision ?? confirmed.revision }
         : {}),
       createdAt: now,
-      action: input.action,
+      action: turnFence ? fenceToActiveTurn(input.action, confirmed.state) : input.action,
     }
     if (!isHostStateAction(action)) throw new Error("host_state_invalid_action")
     const row = hostStateQueueRow(action, {
@@ -541,6 +545,38 @@ async function hostStateSubmitNegotiated(): Promise<boolean> {
   return hostStateSubmitNegotiatedIn(getRuntimeSnapshot())
 }
 
+async function hostStateTurnFenceNegotiated(): Promise<boolean> {
+  const { getRuntimeSnapshot } = await import("@/lib/runtime/runtime-snapshot-store")
+  return getRuntimeSnapshot().host?.operations.includes(HOST_STATE_TURN_FENCE_OPERATION) === true
+}
+
+function isLiveControlIntent(
+  intent: AllowedHostStateIntent
+): intent is Extract<
+  AllowedHostStateIntent,
+  { kind: "turn.steer" | "turn.followup" | "turn.abort" }
+> {
+  return (
+    intent.kind === "turn.steer" || intent.kind === "turn.followup" || intent.kind === "turn.abort"
+  )
+}
+
+/**
+ * Stamp a live control with the turn this client's replica shows running now
+ * (see `HostStateTurnFence`). Stamped here, at enqueue — the moment the person
+ * pressed it — so an outbox that delivers it later cannot aim it at whatever
+ * turn runs then. No running turn on the replica means nothing to aim at, and
+ * the control keeps its old session-wide meaning.
+ */
+function fenceToActiveTurn(
+  intent: AllowedHostStateIntent,
+  state: HostStateChannelState
+): AllowedHostStateIntent {
+  if (!isLiveControlIntent(intent) || intent.expectedTurnId !== undefined) return intent
+  const turnId = state.kind === "session" ? state.activeTurn?.turnId : undefined
+  return turnId ? { ...intent, expectedTurnId: turnId } : intent
+}
+
 /**
  * True when this device is a paired client whose Host owns the session rows:
  * there is an active runtime target and the Host negotiated HostState submit.
@@ -616,6 +652,15 @@ const IN_FLIGHT_STATUSES: readonly MobileOutboundStatus[] = ["pending", "sending
  * Channels are independent of each other, so one stalled session never blocks
  * another, and rows with no channel (the legacy RPC jobs) are unordered as
  * they always were.
+ *
+ * **Stop jumps the line.** A `turn.abort` is claimable ahead of its channel
+ * head, and ahead of every other ready row, as long as nothing on its channel
+ * is on the wire. Stop names the turn it was pressed against
+ * (`expectedTurnId`), so delivering it before the sends queued ahead of it
+ * cannot stop one of them instead; holding it behind a stalled send left the
+ * turn the user wanted stopped running until the link recovered. The sends it
+ * jumped were either returned to the composer by Stop
+ * ({@link withdrawUnsentHostStateMessages}) or already offered, and go next.
  */
 export async function claimNext(
   nowMs: number = Date.now(),
@@ -651,6 +696,12 @@ export async function claimNext(
       }
     }
 
+    const channelsOnTheWire = new Set(
+      outstanding.flatMap((row) => (row.status === "sending" && row.channel ? [row.channel] : []))
+    )
+    const isStop = (row: MobileOutboundJobRow) =>
+      queuedHostStateAction(row)?.action.kind === "turn.abort"
+
     const ready = outstanding
       .filter(
         (row) => row.status === "pending" && row.nextAttemptAt <= nowMs && !excludedIds.has(row.id)
@@ -659,11 +710,19 @@ export async function claimNext(
         (row) =>
           !row.channel ||
           typeof row.clientSeq !== "number" ||
-          channelHead.get(row.channel) === row.clientSeq
+          // The head waits for a Stop that jumped it to come back first.
+          (!channelsOnTheWire.has(row.channel) &&
+            (channelHead.get(row.channel) === row.clientSeq || isStop(row)))
       )
-      // Oldest first, then by id so two rows created in the same millisecond
-      // still claim in a stable order rather than whichever Dexie enumerated.
-      .sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
+      // Stops first; then oldest first, then by id so two rows created in the
+      // same millisecond still claim in a stable order rather than whichever
+      // Dexie enumerated.
+      .sort(
+        (left, right) =>
+          Number(isStop(right)) - Number(isStop(left)) ||
+          left.createdAt - right.createdAt ||
+          left.id.localeCompare(right.id)
+      )
 
     const next = ready[0]
     if (!next) return null
@@ -1123,6 +1182,88 @@ export async function withdrawQueuedAction(
     if (row.status !== "pending") return "not-withdrawable"
     await db.mobileOutboundQueue.delete(id)
     return row.attempts > 0 ? "withdrawn-unconfirmed" : "withdrawn"
+  })
+}
+
+/** A conversation send {@link withdrawUnsentHostStateMessages} took back. */
+export interface WithdrawnHostStateMessage {
+  actionId: string
+  messageId: string
+  text: string
+  /**
+   * The files it carried. Only their references were queued — the bytes are
+   * on the Host, staged for this send — so the composer can name them but not
+   * re-attach them.
+   */
+  attachmentNames: string[]
+}
+
+/**
+ * Take back the conversation sends Stop overtakes: `message.enqueue` rows on
+ * `sessionId`'s channel that no Host can have seen (never claimed, never
+ * offered), oldest first, together with the optimistic bubbles the replica
+ * drew for them.
+ *
+ * Stop is delivered ahead of them (see {@link claimNext}). Left queued, each
+ * would then start a fresh turn the moment the stopped one ended — exactly
+ * what pressing Stop said not to do. They are the user's own words, so the
+ * caller hands them back to the composer instead of dropping them.
+ *
+ * A row a Host may hold (offered, or on the wire right now) is left alone: it
+ * owes a receipt, and withdrawing it here cannot unsend it.
+ *
+ * Returns nothing when the active target did not negotiate HostState.
+ */
+export async function withdrawUnsentHostStateMessages(
+  sessionId: string
+): Promise<WithdrawnHostStateMessage[]> {
+  const local = getActiveRuntimeTargetContext()
+  if (!local || !sessionId) return []
+  if (!(await hostStateSubmitNegotiated())) return []
+  const scope = (await negotiatedHostStateScope()) ?? {
+    accountId: local.accountId,
+    targetId: local.targetId,
+  }
+  const channel = sessionStateChannel(scope.targetId, sessionId)
+  const db = getDb()
+  return db.transaction("rw", db.mobileOutboundQueue, db.messages, async () => {
+    const rows = await db.mobileOutboundQueue
+      .where("status")
+      .equals("pending")
+      .filter(
+        (row) =>
+          row.protocol === "host-state" &&
+          row.accountId === local.accountId &&
+          row.targetId === local.targetId &&
+          row.channel === channel &&
+          row.attempts === 0 &&
+          row.offeredHostGeneration === undefined
+      )
+      .toArray()
+    const unsent = rows
+      .flatMap((row) => {
+        const action = queuedHostStateAction(row)
+        return action?.action.kind === "message.enqueue"
+          ? [{ row, action, intent: action.action }]
+          : []
+      })
+      .sort((left, right) => (left.row.clientSeq ?? 0) - (right.row.clientSeq ?? 0))
+    if (unsent.length === 0) return []
+    await db.mobileOutboundQueue.bulkDelete(unsent.map(({ row }) => row.id))
+    for (const { action, intent } of unsent) {
+      const bubble = await db.messages.get(intent.messageId)
+      const metadata = bubble?.metadata?.hostState as
+        { actionId?: unknown; optimistic?: unknown } | undefined
+      if (metadata?.actionId === action.actionId && metadata.optimistic === true) {
+        await db.messages.delete(intent.messageId)
+      }
+    }
+    return unsent.map(({ action, intent }) => ({
+      actionId: action.actionId,
+      messageId: intent.messageId,
+      text: intent.text,
+      attachmentNames: intent.attachments.map((attachment) => attachment.name),
+    }))
   })
 }
 

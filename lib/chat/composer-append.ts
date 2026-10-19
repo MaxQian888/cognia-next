@@ -59,7 +59,10 @@ export function composerAppendHasContent(detail: ComposerAppendDetail | undefine
     detail.files?.length ||
     detail.citations?.length ||
     detail.carried?.length ||
-    detail.replyTo
+    detail.replyTo ||
+    // Naming the files that could not come back is worth claiming on its own:
+    // an attachment-only message put back has nothing else to say.
+    detail.missing?.length
   )
 }
 

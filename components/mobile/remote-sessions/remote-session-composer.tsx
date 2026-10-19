@@ -66,6 +66,11 @@ import {
   CompanionFusionModePicker,
   type CompanionComposerMode,
 } from "@/components/router-fusion/companion/companion-fusion-mode-picker"
+import {
+  COMPOSER_APPEND_EVENT,
+  composerAppendHasContent,
+  type ComposerAppendDetail,
+} from "@/lib/chat/composer-append"
 import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
 import { listParamTokens } from "@/lib/chat/template/param-segments"
 
@@ -120,6 +125,7 @@ export function RemoteSessionComposer({
 }: RemoteSessionComposerProps) {
   const t = useTranslations("mobile.remoteSessions.detail")
   const tFusion = useTranslations("routerFusionCompanion.composer")
+  const tPutBack = useTranslations("chat.composer.putBack")
   const [fusionMode, setFusionMode] = useState<CompanionComposerMode>("direct")
   // The host stopped offering runs (switch off, grant revoked): the message
   // goes out as an ordinary send again rather than into a refusal.
@@ -227,7 +233,7 @@ export function RemoteSessionComposer({
   }, [draft, restoredFor, sessionId, staged])
 
   const acceptFiles = useCallback(
-    async (incoming: FileList | null) => {
+    async (incoming: FileList | readonly File[] | null) => {
       if (!incoming || incoming.length === 0 || !uploads) return
       const prepared = await prepareComposerAttachments(Array.from(incoming), {
         maxFileSize: uploads.maxBytes,
@@ -272,6 +278,37 @@ export function RemoteSessionComposer({
     },
     [t, uploads]
   )
+
+  // Material handed back from outside the composer — chiefly the sends Stop
+  // took out of the outbox (`restoreWithdrawnToComposer`). Only events
+  // addressed to this conversation are taken: the phone has one composer, but
+  // an un-addressed event means "the focused desktop session", not this one.
+  // Text and files are what this composer can hold; citations, a reply target
+  // and context envelopes have nowhere to live here and are left behind.
+  useEffect(() => {
+    const onAppend = (event: Event) => {
+      const detail = (event as CustomEvent<ComposerAppendDetail>).detail
+      if (!composerAppendHasContent(detail) || detail.claimed) return
+      if (detail.sessionId !== sessionId) return
+      detail.claimed = true
+      // A single-line input drops line breaks, which would glue two messages
+      // into one word; spaces keep them readable.
+      const text = detail.text?.replace(/\s*\n+\s*/g, " ").trim()
+      if (text) setDraft((current) => (current.trim() ? `${current} ${text}` : text))
+      const missing = [...(detail.missing ?? [])]
+      if (detail.files?.length) {
+        if (uploads) void acceptFiles(detail.files)
+        else missing.push(...detail.files.map((file) => file.name))
+      }
+      if (missing.length > 0) {
+        toast.warning(tPutBack("missing", { count: missing.length, names: missing.join(", ") }))
+      }
+      // This composer has no programmatic send: the text stays a draft.
+      if (detail.submit) detail.onSubmitted?.(false)
+    }
+    window.addEventListener(COMPOSER_APPEND_EVENT, onAppend)
+    return () => window.removeEventListener(COMPOSER_APPEND_EVENT, onAppend)
+  }, [acceptFiles, sessionId, tPutBack, uploads])
 
   const removeStaged = useCallback((id: string) => {
     setStaged((current) => {
