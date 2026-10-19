@@ -49,4 +49,14 @@ describe("notifyConversationOverIM", () => {
       directed: true,
     })
   })
+
+  it("records in the center only when the caller already answered the conversation", async () => {
+    await notifyConversationOverIM({
+      conversationKey: "telegram:tg-1:9",
+      title: "Reply failed",
+      centerOnly: true,
+    })
+    const input = notifyMock.mock.calls[0][0] as Record<string, unknown>
+    expect(input.channels).toEqual(["center"])
+  })
 })

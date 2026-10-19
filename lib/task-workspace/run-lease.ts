@@ -1,7 +1,9 @@
-import { releaseOpenBundleTurn } from "./abandoned-turns"
+import { releaseOpenBundleTurn, rememberOpenBundleTurn } from "./abandoned-turns"
 import {
   abortWorkspaceBundleTurn,
   beginWorkspaceBundleTurn,
+  getWorkspaceBundleTurn,
+  isWorkspaceBusyRefusal,
   settleWorkspaceBundleTurn,
   type BeginTaskWorkspaceTurn,
 } from "./client"
@@ -55,6 +57,9 @@ export async function openWorkspaceBundleTurnLease(
       run: input,
     })
   } catch (error) {
+    // Reconciled while the approval scope is still open: the abort it may
+    // issue is an interactive workspace command like the begin itself.
+    await reconcileUnansweredBegin(bundle.bundleId, input, error)
     approval?.close()
     throw error
   }
@@ -119,5 +124,45 @@ export async function openWorkspaceBundleTurnLease(
     additionalAliases: lease.additionalAliases,
     settle,
     abort,
+  }
+}
+
+/**
+ * End a turn whose begin may have committed even though its answer was lost.
+ *
+ * A begin that fails in transport (a dropped companion request, a brain that
+ * restarted mid-call) says nothing about the host: it may well have opened the
+ * turn and be holding the conversation's working copy for it. The client never
+ * learned the turn existed, so nothing would settle it, and the host's own
+ * init recovery only runs when the host restarts. Every later turn in that
+ * conversation was refused with `pipeline workspace is already active`.
+ *
+ * The host keys a bundle turn by the caller's `turnId`, so that id is enough
+ * to ask. A turn found open on this bundle is aborted. When even the question
+ * cannot be answered, the id is recorded for the reclaim path the next refusal
+ * already runs ({@link releaseOpenBundleTurn}), which aborts it once nobody
+ * claims it and forgets it if the host never had it.
+ *
+ * Skipped for a busy refusal, which is the host definitively declining the
+ * turn, and for a begin with no caller id, whose host-minted id is unknowable.
+ */
+async function reconcileUnansweredBegin(
+  bundleId: string,
+  input: BeginTaskWorkspaceTurn,
+  error: unknown
+): Promise<void> {
+  const turnId = input.turnId?.trim()
+  if (!turnId || isWorkspaceBusyRefusal(error)) return
+  try {
+    const turn = await getWorkspaceBundleTurn(turnId)
+    if (!turn || turn.bundleId !== bundleId || turn.settledAt !== null) return
+    await abortWorkspaceBundleTurn(turnId)
+  } catch {
+    rememberOpenBundleTurn({
+      bundleTurnId: turnId,
+      sessionId: input.sessionId,
+      openedAt: Date.now(),
+    })
+    releaseOpenBundleTurn(turnId)
   }
 }

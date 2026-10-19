@@ -36,6 +36,7 @@ import {
   shouldEmbedInboundText,
   recentGroupContextBlock,
   withConversationContext,
+  incompleteRunStop,
   type RunAndCaptureFn,
 } from "./runtime"
 import { hasNoLeakingPii } from "@cognia/redact"
@@ -1532,6 +1533,42 @@ describe("installRuntime — ai-run (capture failure)", () => {
     expect(errAudits).toHaveLength(1)
     expect(errAudits[0].reason).toBe("ai_run_capture_failed")
     expect(errAudits[0].message).toContain("sidecar died")
+  })
+
+  it("parks the inbound job as recovery_required so recovery controls stay available", async () => {
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockRejectedValueOnce(new Error("sidecar died"))
+    const event = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_capture_recovery",
+      messageId: "capture-recovery",
+    })
+    const inboundJob = await enqueueConnectorInboundJob(event, "queue")
+
+    await callHandler(event, "ai-run", RESOLVED, inboundJob.id)
+
+    expect(await getDb().connectorInboundJobs.get(inboundJob.id)).toEqual(
+      expect.objectContaining({
+        status: "recovery_required",
+        recoveryReason: "ai_run_capture_failed",
+        lastError: "sidecar died",
+      })
+    )
+  })
+
+  it("does not offer recovery for a PII block", async () => {
+    const piiErr = new Error("PII gate blocked auto-mode send")
+    piiErr.name = "PiiGateBlocked"
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockRejectedValueOnce(piiErr)
+    const event = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_pii_no_recovery",
+      messageId: "pii-no-recovery",
+    })
+    const inboundJob = await enqueueConnectorInboundJob(event, "queue")
+
+    await callHandler(event, "ai-run", RESOLVED, inboundJob.id)
+
+    expect((await getDb().connectorInboundJobs.get(inboundJob.id))?.status).not.toBe(
+      "recovery_required"
+    )
   })
 
   it("does NOT write a duplicate ai_run_capture_failed audit when the PII gate blocks", async () => {
@@ -3507,6 +3544,162 @@ describe("installRuntime — ai-run (dispatch-failure IM notification)", () => {
 
     expect(mockStartTeamRunFromIM).toHaveBeenCalledTimes(1)
     expect(notifyMock).not.toHaveBeenCalled()
+  })
+
+  async function failureReplies(key: string) {
+    return (await getDb().outboundQueue.toArray()).filter(
+      (job) =>
+        job.conversationKey === key &&
+        job.request.metadata?.idempotencyKey?.startsWith("im-failure:")
+    )
+  }
+
+  async function seedSession(key: string, id: string): Promise<void> {
+    await getDb().sessions.add({
+      id,
+      title: "t",
+      kind: "direct",
+      platformConversationKey: key,
+      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+      createdAt: 0,
+      updatedAt: 0,
+    } as never)
+  }
+
+  it("answers the user directly when a team fails to start, without a second IM push", async () => {
+    const key = "telegram:adapter_1:chat_teamfail_reply"
+    await seedAdapter("adapter_1")
+    mockStartTeamRunFromIM.mockResolvedValueOnce({
+      started: false,
+      reason: "team_not_found",
+    } as never)
+    await seedSession(key, "s_tfr")
+    await upsertOverride({ conversationKey: key, sessionId: "s_tfr", teamId: "ghost" })
+    const event = makeEvent({ conversationKey: key, messageId: "teamfail-msg" })
+
+    await callHandler(event, "ai-run")
+    await flushNotify()
+
+    const replies = await failureReplies(key)
+    expect(replies).toHaveLength(1)
+    expect(replies[0].request.metadata?.idempotencyKey).toBe(
+      `im-failure:${event.adapterId}:teamfail-msg`
+    )
+    expect(replies[0].request.segments[0]).toEqual(
+      expect.objectContaining({ type: "text", text: expect.stringContaining("Dispatch failed") })
+    )
+    expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({ centerOnly: true }))
+  })
+
+  it("answers the user when the workflow launch throws, and still rethrows for the bus", async () => {
+    const key = "telegram:adapter_1:chat_wfthrow_reply"
+    await seedAdapter("adapter_1")
+    mockStartWorkflowFromIM.mockRejectedValueOnce(new Error("admission refused"))
+    await seedSession(key, "s_wft")
+    await upsertOverride({ conversationKey: key, sessionId: "s_wft", workflowId: "wf_1" })
+
+    await expect(callHandler(makeEvent({ conversationKey: key }), "ai-run")).rejects.toThrow(
+      "admission refused"
+    )
+
+    expect(await failureReplies(key)).toHaveLength(1)
+  })
+
+  it("answers a failed direct run only when no live card speaks for it", async () => {
+    const offKey = "telegram:adapter_1:chat_capture_liveoff"
+    const onKey = "telegram:adapter_1:chat_capture_liveon"
+    await upsertOverride({
+      conversationKey: offKey,
+      sessionId: "ses_placeholder",
+      liveActivity: false,
+    })
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock)
+      .mockRejectedValueOnce(new Error("sidecar died"))
+      .mockRejectedValueOnce(new Error("sidecar died"))
+
+    await callHandler(makeEvent({ conversationKey: offKey }), "ai-run")
+    await callHandler(makeEvent({ conversationKey: onKey }), "ai-run")
+    await flushNotify()
+
+    expect(await failureReplies(offKey)).toHaveLength(1)
+    expect(await failureReplies(onKey)).toHaveLength(0)
+  })
+
+  it("keeps a drafting conversation's failures off the end user's chat", async () => {
+    const key = "telegram:adapter_1:chat_draft_teamfail"
+    await seedAdapter("adapter_1")
+    mockStartTeamRunFromIM.mockResolvedValueOnce({
+      started: false,
+      reason: "team_not_found",
+    } as never)
+    await seedSession(key, "s_dtf")
+    await upsertOverride({ conversationKey: key, sessionId: "s_dtf", teamId: "ghost" })
+
+    await callHandler(makeEvent({ conversationKey: key }), "draft-prepare")
+    await flushNotify()
+
+    expect(await failureReplies(key)).toHaveLength(0)
+    expect(notifyMock).toHaveBeenCalledWith(expect.not.objectContaining({ centerOnly: true }))
+  })
+})
+
+describe("installRuntime — ai-run (stopped at a limit)", () => {
+  it("maps SDK result subtypes to a stop report", () => {
+    expect(incompleteRunStop(undefined)).toBeNull()
+    expect(incompleteRunStop("success")).toBeNull()
+    expect(incompleteRunStop("degraded")).toBeNull()
+    expect(incompleteRunStop("error_max_turns")?.reason).toBe("max_turns")
+    expect(incompleteRunStop("error_max_budget_usd")?.reason).toBe("max_budget")
+    expect(incompleteRunStop("error_during_execution")?.reason).toBe("incomplete")
+  })
+
+  it("finishes the run failed and marks the delivered partial reply as incomplete", async () => {
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockResolvedValueOnce({
+      text: "partial answer",
+      messageId: "uuid-max-turns",
+      resultSubtype: "error_max_turns",
+    })
+    const key = "telegram:adapter_1:chat_max_turns"
+
+    await callHandler(makeEvent({ conversationKey: key }), "ai-run")
+
+    const run = await getDb().executionRuns.where("kind").equals("agent-turn").first()
+    const types = (await getDb().executionRunEvents.where("runId").equals(run!.id).toArray()).map(
+      (item) => item.type
+    )
+    expect(types).toContain("run.failed")
+    expect(types).not.toContain("run.completed")
+    const reply = (await getDb().outboundQueue.toArray()).find(
+      (job) => job.request.metadata?.idempotencyKey === "airun:uuid-max-turns"
+    )
+    const text = reply!.request.segments
+      .map((segment) => ("text" in segment ? segment.text : "md" in segment ? segment.md : ""))
+      .join("")
+    expect(text).toContain("partial answer")
+    expect(text).toContain("Stopped at the turn limit")
+    const audits = await getDb().connectorAudit.toArray()
+    expect(audits.find((a) => a.reason === "ai_run_stopped_incomplete")?.fields).toEqual(
+      expect.objectContaining({ stop: "max_turns", resultSubtype: "error_max_turns" })
+    )
+  })
+
+  it("leaves a normal finish completed with no note", async () => {
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockResolvedValueOnce({
+      text: "full answer",
+      messageId: "uuid-success",
+      resultSubtype: "success",
+    })
+
+    await callHandler(makeEvent({ conversationKey: "telegram:adapter_1:chat_success" }), "ai-run")
+
+    const run = await getDb().executionRuns.where("kind").equals("agent-turn").first()
+    const types = (await getDb().executionRunEvents.where("runId").equals(run!.id).toArray()).map(
+      (item) => item.type
+    )
+    expect(types).toContain("run.completed")
+    expect(
+      (await getDb().connectorAudit.toArray()).some((a) => a.reason === "ai_run_stopped_incomplete")
+    ).toBe(false)
   })
 })
 

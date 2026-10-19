@@ -9,9 +9,9 @@
  * table, NOT `connectorAudit`. At 2 880 rows/day per adapter they used to
  * churn the audit writer's global 5 000-row `pruneOldest` on every append
  * and evict real operator-visible events. The dedicated table keeps the
- * audit log a record of real events; the 48 h per-adapter retention sweep
- * below is the heartbeat table's bound (an indexed `[adapterId+at]` range
- * delete — no JS `kind` filter, since the whole table is heartbeats).
+ * audit log a record of real events; the 48 h retention sweep below is the
+ * heartbeat table's bound (an indexed `at` range delete drained in batches —
+ * no JS `kind` filter, since the whole table is heartbeats).
  */
 
 import type { AdapterHealth, PlatformAdapter } from "@/types/connectors/adapter"
@@ -22,6 +22,15 @@ import { getConnectorRuntimeSupervisor } from "@/lib/connectors/runtime-supervis
 export const HEARTBEAT_INTERVAL_MS = 30_000
 export const HEARTBEAT_RETENTION_MS = 48 * 60 * 60 * 1000
 export const HEARTBEAT_RETENTION_BATCH = 1000
+/**
+ * Upper bound on batches one sweep drains. The sweep runs once a day while
+ * every adapter writes 2 880 rows a day, so a single 1 000-row batch let the
+ * expired backlog grow by ~1 880 rows per adapter per day. Draining batch by
+ * batch (one short transaction each) clears a normal day in a few batches;
+ * the cap only stops a pathological backlog from monopolising one sweep, and
+ * the next sweep resumes where this one stopped.
+ */
+export const HEARTBEAT_RETENTION_MAX_BATCHES = 500
 
 async function pendingOutboundCount(adapterId: string): Promise<number> {
   // Dexie's `between` default is upper-open, so we count the two states
@@ -45,19 +54,26 @@ export async function sweepConnectorHeartbeats(
     now?: number
     retentionMs?: number
     batchLimit?: number
+    maxBatches?: number
   } = {}
 ): Promise<number> {
   const now = options.now ?? Date.now()
   const cutoff = now - (options.retentionMs ?? HEARTBEAT_RETENTION_MS)
-  const batchLimit = options.batchLimit ?? HEARTBEAT_RETENTION_BATCH
+  const batchLimit = Math.max(1, options.batchLimit ?? HEARTBEAT_RETENTION_BATCH)
+  const maxBatches = Math.max(1, options.maxBatches ?? HEARTBEAT_RETENTION_MAX_BATCHES)
   const db = getDb()
-  const ids = (await db.connectorHeartbeats
-    .where("at")
-    .below(cutoff)
-    .limit(batchLimit)
-    .primaryKeys()) as string[]
-  if (ids.length > 0) await db.connectorHeartbeats.bulkDelete(ids)
-  return ids.length
+  let deleted = 0
+  for (let batch = 0; batch < maxBatches; batch++) {
+    const ids = (await db.connectorHeartbeats
+      .where("at")
+      .below(cutoff)
+      .limit(batchLimit)
+      .primaryKeys()) as string[]
+    if (ids.length > 0) await db.connectorHeartbeats.bulkDelete(ids)
+    deleted += ids.length
+    if (ids.length < batchLimit) break
+  }
+  return deleted
 }
 
 /**

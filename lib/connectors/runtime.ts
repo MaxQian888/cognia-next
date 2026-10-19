@@ -265,6 +265,45 @@ const IM_FAILURE_NOTICE = {
 } as const
 
 /**
+ * How a turn that stopped at a hard ceiling is reported, keyed by the SDK
+ * `result` subtype `runAndCapture` surfaces as `resultSubtype`.
+ *
+ * Such a turn still returns whatever text it produced, so it used to flow down
+ * the success path: the run finished `completed`, the live card said done, and
+ * the IM user read a cut-off answer as the whole one. Any other `error_*`
+ * subtype is the SDK reporting a run that ended before finishing, so it gets
+ * the generic entry. Bilingual for the same reason as {@link IM_FAILURE_NOTICE}.
+ */
+const INCOMPLETE_RUN_STOP = {
+  error_max_turns: {
+    reason: "max_turns",
+    summary: "Stopped at the turn limit",
+    note: "（已达到轮数上限，回复可能不完整。/ Stopped at the turn limit; this reply may be incomplete.）",
+  },
+  error_max_budget_usd: {
+    reason: "max_budget",
+    summary: "Stopped at the budget limit",
+    note: "（已达到预算上限，回复可能不完整。/ Stopped at the budget limit; this reply may be incomplete.）",
+  },
+  other: {
+    reason: "incomplete",
+    summary: "Stopped before finishing",
+    note: "（运行未正常结束，回复可能不完整。/ The run stopped before finishing; this reply may be incomplete.）",
+  },
+} as const
+
+/** The stop report for a captured turn, or `null` when it finished normally. */
+export function incompleteRunStop(
+  resultSubtype: string | undefined
+): (typeof INCOMPLETE_RUN_STOP)[keyof typeof INCOMPLETE_RUN_STOP] | null {
+  if (!resultSubtype?.startsWith("error")) return null
+  if (resultSubtype === "error_max_turns" || resultSubtype === "error_max_budget_usd") {
+    return INCOMPLETE_RUN_STOP[resultSubtype]
+  }
+  return INCOMPLETE_RUN_STOP.other
+}
+
+/**
  * Fire-and-forget an IM failure notice (control-plane notifications): lands in
  * the Notification Center always, and pushes to IM when the conversation opted
  * in. Coalesced via `notifyConversationOverIM`'s `dedupeKey`. The dynamic
@@ -274,7 +313,8 @@ const IM_FAILURE_NOTICE = {
 function notifyImFailure(
   conversationKey: string,
   notice: { title: string; body: string },
-  dedupeKey: string
+  dedupeKey: string,
+  options: { centerOnly?: boolean } = {}
 ): void {
   void import("@/lib/notifications/conversation-notify")
     .then(({ notifyConversationOverIM }) =>
@@ -284,9 +324,51 @@ function notifyImFailure(
         title: notice.title,
         body: notice.body,
         dedupeKey,
+        ...(options.centerOnly ? { centerOnly: true } : {}),
       })
     )
     .catch(() => undefined)
+}
+
+/**
+ * Answer the user's own message with a failure notice, in the conversation it
+ * came from.
+ *
+ * {@link notifyImFailure} is the proactive channel: it reaches IM only when
+ * the conversation opted into `proactivePush`, and that opt-in is right for
+ * notices nobody asked for. A failure to handle a message the user just sent
+ * is not one of those: it is the reply to that message. Routing it through the
+ * opt-in left the user with silence whenever nothing else spoke for the run
+ * (a team or workflow that never started, or a direct run with the live card
+ * turned off). So the notice is enqueued as an ordinary reply, and the center
+ * gets its record without a second IM push.
+ *
+ * The idempotency key is the inbound message's own, so a recovery replay of
+ * the same message cannot answer it twice. Should the enqueue itself fail, the
+ * proactive channel is still tried.
+ */
+async function replyImFailure(
+  event: NormalizedInboundEvent,
+  notice: { title: string; body: string },
+  dedupeKey: string
+): Promise<void> {
+  try {
+    await enqueueOutbound({
+      adapterId: event.adapterId,
+      conversationKey: event.conversationKey,
+      request: {
+        conversationRef: event.conversationRef,
+        deliveryTarget: deliveryTargetFromEvent(event),
+        segments: [{ type: "text", text: `${notice.title}\n${notice.body}` }],
+        metadata: { idempotencyKey: `im-failure:${event.adapterId}:${event.messageId}` },
+      },
+      source: "ai-run",
+    })
+  } catch {
+    notifyImFailure(event.conversationKey, notice, dedupeKey)
+    return
+  }
+  notifyImFailure(event.conversationKey, notice, dedupeKey, { centerOnly: true })
 }
 
 /** Resolved outbound target for one ai-run reply — see `resolveRespondViaTarget`. */
@@ -1295,11 +1377,21 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               sourceMessageId: storedMsg.id,
             },
           })
-          notifyImFailure(
-            event.conversationKey,
-            IM_FAILURE_NOTICE.dispatchFailed,
-            `dispatch-error:${event.conversationKey}`
-          )
+          // A drafting conversation answers its end user only through the
+          // operator, so its failures stay on the proactive channel.
+          if (requireAcceptance) {
+            notifyImFailure(
+              event.conversationKey,
+              IM_FAILURE_NOTICE.dispatchFailed,
+              `dispatch-error:${event.conversationKey}`
+            )
+          } else {
+            await replyImFailure(
+              event,
+              IM_FAILURE_NOTICE.dispatchFailed,
+              `dispatch-error:${event.conversationKey}`
+            )
+          }
           break
         }
 
@@ -1425,11 +1517,20 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             },
           })
           if (!res.started) {
-            notifyImFailure(
-              event.conversationKey,
-              IM_FAILURE_NOTICE.dispatchFailed,
-              `dispatch-error:${event.conversationKey}`
-            )
+            // No run started, so no run card will ever speak for this message.
+            if (requireAcceptance) {
+              notifyImFailure(
+                event.conversationKey,
+                IM_FAILURE_NOTICE.dispatchFailed,
+                `dispatch-error:${event.conversationKey}`
+              )
+            } else {
+              await replyImFailure(
+                event,
+                IM_FAILURE_NOTICE.dispatchFailed,
+                `dispatch-error:${event.conversationKey}`
+              )
+            }
           }
           break
         }
@@ -1527,12 +1628,25 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             break
           }
 
-          const res = await startWorkflowFromIM({
-            workflowId: effectiveWorkflowId,
-            runParams,
-            triggeredFrom,
-            permissionCeiling,
-          })
+          let res: Awaited<ReturnType<typeof startWorkflowFromIM>>
+          try {
+            res = await startWorkflowFromIM({
+              workflowId: effectiveWorkflowId,
+              runParams,
+              triggeredFrom,
+              permissionCeiling,
+            })
+          } catch (err) {
+            // An admission or preflight refusal is rethrown so the bus still
+            // audits it and parks the job for recovery, but the user who sent
+            // the message hears about it first.
+            await replyImFailure(
+              event,
+              IM_FAILURE_NOTICE.dispatchFailed,
+              `dispatch-error:${event.conversationKey}`
+            )
+            throw err
+          }
           if (res.ok) {
             await routeContext.bindExecutionRun(res.runId)
           }
@@ -1551,8 +1665,8 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           // capture-failure branch below) — the audit row alone leaves the IM
           // user with silence.
           if (!res.ok) {
-            notifyImFailure(
-              event.conversationKey,
+            await replyImFailure(
+              event,
               IM_FAILURE_NOTICE.dispatchFailed,
               `dispatch-error:${event.conversationKey}`
             )
@@ -2039,13 +2153,35 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           } catch {
             /* best-effort — the original error is what matters */
           }
-          // Proactively surface the failure: the user otherwise gets silence
-          // on a sidecar error.
-          notifyImFailure(
-            event.conversationKey,
-            IM_FAILURE_NOTICE.replyFailed,
-            `airun-error:${event.conversationKey}`
-          )
+          // A capture failure may have stopped mid-run, after tool calls had
+          // side effects, so the inbound job must stay eligible for the
+          // operator's continue-safely / confirmed-retry controls, which both
+          // require `recovery_required`. Left alone, the bus would complete
+          // the job as soon as this handler returns. A deliberate PII block
+          // and a user cancel are final outcomes, not interrupted work.
+          if (!isPiiBlocked && !captureSignal.aborted) {
+            await markConnectorInboundJobRecoveryRequired(
+              routeContext.inboundJobId,
+              requireAcceptance ? "draft_prepare_capture_failed" : "ai_run_capture_failed",
+              { error: err instanceof Error ? err.message : String(err) }
+            ).catch(() => undefined)
+          }
+          // Surface the failure: the user otherwise gets silence on a sidecar
+          // error. With the live card on, the card already reports the failed
+          // run in the conversation, so only the proactive channel is added.
+          if (liveActivityEnabled || requireAcceptance) {
+            notifyImFailure(
+              event.conversationKey,
+              IM_FAILURE_NOTICE.replyFailed,
+              `airun-error:${event.conversationKey}`
+            )
+          } else {
+            await replyImFailure(
+              event,
+              IM_FAILURE_NOTICE.replyFailed,
+              `airun-error:${event.conversationKey}`
+            )
+          }
           // Close the agent-trace root span on a failed capture so it doesn't
           // dangle. Idempotent + no-op when minting was skipped (suppressed).
           if (sendOptions.spanId) {
@@ -2081,11 +2217,19 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               reason: "canonical-log-write-failed",
             })
           )
-          notifyImFailure(
-            event.conversationKey,
-            IM_FAILURE_NOTICE.replyFailed,
-            `airun-canonical:${event.conversationKey}`
-          )
+          if (liveActivityEnabled || requireAcceptance) {
+            notifyImFailure(
+              event.conversationKey,
+              IM_FAILURE_NOTICE.replyFailed,
+              `airun-canonical:${event.conversationKey}`
+            )
+          } else {
+            await replyImFailure(
+              event,
+              IM_FAILURE_NOTICE.replyFailed,
+              `airun-canonical:${event.conversationKey}`
+            )
+          }
           break
         }
 
@@ -2093,9 +2237,30 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           await setSdkSessionId(session.id, captured.sdkSessionId).catch(() => undefined)
         }
 
+        const limitStop = incompleteRunStop(captured.resultSubtype)
+        if (limitStop) {
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "adapter.error",
+            at: Date.now(),
+            conversationKey: event.conversationKey,
+            reason: "ai_run_stopped_incomplete",
+            message: limitStop.summary,
+            fields: {
+              sourceMessageId: storedMsg.id,
+              resultSubtype: captured.resultSubtype,
+              stop: limitStop.reason,
+            },
+          }).catch(() => undefined)
+        }
+
         let terminalProjectionRecorded = false
         try {
-          await runProducer.finish("completed", Date.now(), "Response ready")
+          await runProducer.finish(
+            limitStop ? "failed" : "completed",
+            Date.now(),
+            limitStop?.summary ?? "Response ready"
+          )
           terminalProjectionRecorded = true
         } catch {
           /* best-effort — the final reply still flows through below */
@@ -2126,10 +2291,20 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // InlineKeyboardMarkup / Discord Embed+Components / OneBot
         // basic segments + plainTextMirror).
         const recoveredPrefix = previousRecoveryAnchor?.partialOutput ?? ""
-        const recoveredText =
+        const answerText =
           recoveredPrefix && !captured.text.startsWith(recoveredPrefix)
             ? `${recoveredPrefix}${captured.text}`
             : captured.text
+        // The partial answer is still worth delivering, but never as if it
+        // were the whole one: the note is the only signal an IM user without
+        // the live card gets that the run hit its ceiling. Folded into the
+        // answer text rather than sent as its own segment, because the Lark
+        // result card takes the last text segment as the answer.
+        const recoveredText = limitStop
+          ? answerText.trim()
+            ? `${answerText}\n\n${limitStop.note}`
+            : limitStop.note
+          : answerText
         let outboundSegments: MessageSegment[] = assistantReplyToSegments({
           text: recoveredText,
           a2uiSurfaces: captured.a2uiSurfaces,
@@ -2229,7 +2404,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               : await getAdapterInstance(outboundTarget.adapterId)
           const carded = withLarkResultCard(outboundSegments, {
             presentation: presentationRow?.settings?.cardPresentation,
-            status: "done",
+            status: limitStop ? "interrupted" : "done",
             // The card's blockquote stands in for the platform reply-quote
             // only when quoting is off; a private chat never needs it.
             quote: !quoteReply && event.channel.kind !== "private" ? event.plainText : undefined,
@@ -2279,7 +2454,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
                     ? {
                         resultCard: {
                           runId: executionRunId,
-                          status: "done" as const,
+                          status: limitStop ? ("interrupted" as const) : ("done" as const),
                           sourceMessageId: storedMsg.id,
                         },
                       }

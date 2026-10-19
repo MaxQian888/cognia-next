@@ -1,11 +1,17 @@
 const beginBundleTurn = jest.fn()
 const settleBundleTurn = jest.fn()
 const abortBundleTurn = jest.fn()
+const getBundleTurn = jest.fn()
 
 jest.mock("./client", () => ({
   beginWorkspaceBundleTurn: (...args: unknown[]) => beginBundleTurn(...args),
   settleWorkspaceBundleTurn: (...args: unknown[]) => settleBundleTurn(...args),
   abortWorkspaceBundleTurn: (...args: unknown[]) => abortBundleTurn(...args),
+  getWorkspaceBundleTurn: (...args: unknown[]) => getBundleTurn(...args),
+  isWorkspaceBusyRefusal: (error: unknown) =>
+    /pipeline workspace is already active/i.test(
+      error instanceof Error ? error.message : String(error)
+    ),
 }))
 
 // Only the minting is stubbed. The bind/close registry stays real, because the
@@ -18,8 +24,10 @@ jest.mock("./user-action", () => {
 })
 
 const releaseTurn = jest.fn()
+const rememberTurn = jest.fn()
 jest.mock("./abandoned-turns", () => ({
   releaseOpenBundleTurn: (...args: unknown[]) => releaseTurn(...args),
+  rememberOpenBundleTurn: (...args: unknown[]) => rememberTurn(...args),
 }))
 
 import { boundApprovalScopeTurnIds, closeApprovalScopeForTurn } from "./user-action"
@@ -347,5 +355,84 @@ describe("a lease settle that does not land", () => {
     await lease?.settle("ready")
 
     expect(releaseTurn).not.toHaveBeenCalled()
+  })
+})
+
+describe("a begin whose answer was lost", () => {
+  const bundle = { bundleId: "bundle-1", leases: [] }
+  const input = {
+    taskId: "task-1",
+    sessionId: "session-1",
+    runId: "run-1",
+    turnId: "connector-turn-1",
+    agentId: "lark",
+    agentKind: "connector",
+    workspaceRoot: "/aliases/app",
+  }
+  let close: jest.Mock
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    close = jest.fn()
+    openScope.mockResolvedValue({ close })
+    abortBundleTurn.mockResolvedValue({ resources: [] })
+    beginBundleTurn.mockRejectedValue(new Error("companion request dropped"))
+  })
+
+  it("aborts the turn the host committed, before closing the approval scope", async () => {
+    getBundleTurn.mockResolvedValue({
+      bundleTurnId: "connector-turn-1",
+      bundleId: "bundle-1",
+      settledAt: null,
+    })
+    abortBundleTurn.mockImplementation(async () => {
+      expect(close).not.toHaveBeenCalled()
+      return { resources: [] }
+    })
+
+    await expect(openWorkspaceBundleTurnLease(bundle, "app", input)).rejects.toThrow(
+      "companion request dropped"
+    )
+
+    expect(getBundleTurn).toHaveBeenCalledWith("connector-turn-1")
+    expect(abortBundleTurn).toHaveBeenCalledWith("connector-turn-1")
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(rememberTurn).not.toHaveBeenCalled()
+  })
+
+  it("leaves alone a turn the host never opened, already settled, or opened on another bundle", async () => {
+    for (const found of [
+      null,
+      { bundleTurnId: "connector-turn-1", bundleId: "bundle-1", settledAt: 5 },
+      { bundleTurnId: "connector-turn-1", bundleId: "bundle-2", settledAt: null },
+    ]) {
+      getBundleTurn.mockResolvedValueOnce(found)
+      await expect(openWorkspaceBundleTurnLease(bundle, "app", input)).rejects.toThrow()
+    }
+    expect(abortBundleTurn).not.toHaveBeenCalled()
+    expect(rememberTurn).not.toHaveBeenCalled()
+  })
+
+  it("hands the id to the reclaim path when the host cannot be asked", async () => {
+    getBundleTurn.mockRejectedValue(new Error("host unreachable"))
+
+    await expect(openWorkspaceBundleTurnLease(bundle, "app", input)).rejects.toThrow(
+      "companion request dropped"
+    )
+
+    expect(rememberTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ bundleTurnId: "connector-turn-1", sessionId: "session-1" })
+    )
+    expect(releaseTurn).toHaveBeenCalledWith("connector-turn-1")
+  })
+
+  it("does not reconcile a busy refusal or a begin without a caller turn id", async () => {
+    beginBundleTurn.mockRejectedValueOnce(new Error("pipeline workspace is already active"))
+    await expect(openWorkspaceBundleTurnLease(bundle, "app", input)).rejects.toThrow()
+    const { turnId: _omitted, ...withoutTurnId } = input
+    await expect(openWorkspaceBundleTurnLease(bundle, "app", withoutTurnId)).rejects.toThrow()
+
+    expect(getBundleTurn).not.toHaveBeenCalled()
+    expect(rememberTurn).not.toHaveBeenCalled()
   })
 })

@@ -30,6 +30,12 @@ export interface NotifyConversationInput {
   /** Counts toward the directed/red-badge tally (e.g. input-required). */
   directed?: boolean
   icon?: string
+  /**
+   * Record the event in the center only, without the opt-in IM push. For a
+   * caller that has already answered the conversation directly, so an opted-in
+   * conversation does not receive the same notice twice.
+   */
+  centerOnly?: boolean
 }
 
 /**
@@ -43,7 +49,7 @@ export async function notifyConversationOverIM(input: NotifyConversationInput): 
     level: input.level ?? "info",
     title: input.title,
     body: input.body,
-    channels: ["center", "im"],
+    channels: input.centerOnly ? ["center"] : ["center", "im"],
     dedupeKey: input.dedupeKey,
     actions: input.actions,
     directed: input.directed,

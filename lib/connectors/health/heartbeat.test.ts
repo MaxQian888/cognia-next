@@ -259,6 +259,56 @@ describe("recordHeartbeatNow", () => {
   })
 })
 
+describe("sweepConnectorHeartbeats", () => {
+  async function seedExpired(count: number, at: number): Promise<void> {
+    await getDb().connectorHeartbeats.bulkPut(
+      Array.from({ length: count }, (_, i) => ({
+        id: `hb-old-${i}`,
+        adapterId: `lark-${i % 3}`,
+        kind: "adapter.heartbeat" as const,
+        at: at - i,
+      }))
+    )
+  }
+
+  it("drains an expired backlog larger than one batch in a single sweep", async () => {
+    const now = 500_000_000
+    // A day of one adapter's heartbeats (2 880) against a 1 000-row batch:
+    // the old single-batch sweep left 1 880 expired rows behind every day.
+    await seedExpired(2_880, now - 100_000)
+    await getDb().connectorHeartbeats.put({
+      id: "hb-fresh",
+      adapterId: "lark-0",
+      kind: "adapter.heartbeat",
+      at: now,
+    })
+
+    await expect(
+      sweepConnectorHeartbeats({ now, retentionMs: 60_000, batchLimit: 1_000 })
+    ).resolves.toBe(2_880)
+    expect(await getDb().connectorHeartbeats.count()).toBe(1)
+    expect(await getDb().connectorHeartbeats.get("hb-fresh")).toBeDefined()
+  })
+
+  it("stops at maxBatches so the next sweep resumes the remainder", async () => {
+    const now = 500_000_000
+    await seedExpired(25, now - 100_000)
+
+    await expect(
+      sweepConnectorHeartbeats({ now, retentionMs: 60_000, batchLimit: 10, maxBatches: 2 })
+    ).resolves.toBe(20)
+    expect(await getDb().connectorHeartbeats.count()).toBe(5)
+    await expect(
+      sweepConnectorHeartbeats({ now, retentionMs: 60_000, batchLimit: 10, maxBatches: 2 })
+    ).resolves.toBe(5)
+    expect(await getDb().connectorHeartbeats.count()).toBe(0)
+  })
+
+  it("ends after one empty query when nothing has expired", async () => {
+    await expect(sweepConnectorHeartbeats({ now: 1_000, retentionMs: 60_000 })).resolves.toBe(0)
+  })
+})
+
 describe("heartbeat constants", () => {
   it("uses 30s default interval and 48h default retention", () => {
     expect(HEARTBEAT_INTERVAL_MS).toBe(30_000)
