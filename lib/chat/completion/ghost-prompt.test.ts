@@ -1,4 +1,8 @@
-import { buildGhostPrompt, sanitizeGhost, MAX_GHOST_LEN } from "./ghost-prompt"
+import { buildGhostPrompt, sanitizeGhost, GHOST_TEXT_PROMPT, MAX_GHOST_LEN } from "./ghost-prompt"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 describe("buildGhostPrompt", () => {
   it("includes the draft and a system prompt", () => {
@@ -104,5 +108,33 @@ describe("sanitizeGhost", () => {
     const long = " " + "x".repeat(MAX_GHOST_LEN + 50)
     const out = sanitizeGhost(long, "draft")
     expect(out).toHaveLength(MAX_GHOST_LEN)
+  })
+})
+
+describe("customized ghost-text prompt (ADR-0236)", () => {
+  afterEach(() => __setPromptOverrideSnapshotForTests(null))
+
+  it("ships the default system text unchanged and applies a session override", () => {
+    expect(buildGhostPrompt({ draft: "hi" }).system).toBe(GHOST_TEXT_PROMPT.defaultBody)
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: GHOST_TEXT_PROMPT.id,
+          scope: "session",
+          targetId: "s-1",
+          revisionId: "por",
+          body: "Continue in British English.",
+          contractVersion: GHOST_TEXT_PROMPT.contractVersion,
+        },
+      ])
+    )
+    expect(buildGhostPrompt({ draft: "hi", promptContext: { sessionId: "s-1" } }).system).toBe(
+      "Continue in British English."
+    )
+    // Another session keeps the shipped text.
+    expect(buildGhostPrompt({ draft: "hi", promptContext: { sessionId: "s-2" } }).system).toBe(
+      GHOST_TEXT_PROMPT.defaultBody
+    )
   })
 })

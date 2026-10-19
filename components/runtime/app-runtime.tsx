@@ -30,6 +30,7 @@ import { StorageRetentionInitializer } from "@/components/providers/initializers
 import { OnlineEvalInitializer } from "@/components/providers/initializers/online-eval-initializer"
 import { StoragePersistenceInitializer } from "@/components/providers/initializers/storage-persistence-initializer"
 import { ProjectStoreInitializer } from "@/components/providers/initializers/project-store-initializer"
+import { PromptOverridesInitializer } from "@/components/providers/initializers/prompt-overrides-initializer"
 import { IssueTrackerInitializer } from "@/components/providers/initializers/issue-tracker-initializer"
 import { PlanNotificationInitializer } from "@/components/providers/initializers/plan-notification-initializer"
 import { ImNotifyInitializer } from "@/components/providers/initializers/im-notify-initializer"
@@ -270,6 +271,10 @@ export function AppRuntime({ children }: { children: React.ReactNode }) {
                               PwaLifecycleInitializer above the gate. */}
                             <PwaBadgeInitializer />
                             <ProjectStoreInitializer />
+                            {/* Customized built-in prompts (ADR-0236): keeps the
+                              override snapshot loaded for keystroke-path
+                              consumers that resolve synchronously. */}
+                            <PromptOverridesInitializer />
                             <IssueTrackerInitializer />
                             {/* Handler for the Approve / Discard buttons on a
                              * plan-awaiting-approval notification (ADR-0045). */}

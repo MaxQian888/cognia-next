@@ -173,6 +173,7 @@ export function createAiCompletionProvider(
       const { system, prompt } = buildGhostPrompt({
         draft,
         recentMessages: context.recentMessages,
+        ...(context.sessionId ? { promptContext: { sessionId: context.sessionId } } : {}),
       })
       // The gate runs on the assembled prompt, so it covers the draft AND the
       // conversation context that would travel with it.

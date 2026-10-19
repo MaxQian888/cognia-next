@@ -26,6 +26,12 @@
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
 import { hasNoLeakingPii } from "@cognia/redact"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import {
+  definePrompt,
+  type PromptDefinitionV1,
+  type PromptResolutionContext,
+} from "@/lib/prompts/types"
 
 /** The rewrite intents the composer exposes. */
 export type EnhanceMode = "improve" | "concise" | "detailed" | "technical" | "simpler" | "variants"
@@ -49,6 +55,8 @@ export interface EnhanceDeps {
   /** PII gate. Defaults to the shared `hasNoLeakingPii`. */
   isPiiSafe?: (text: string) => boolean
   signal?: AbortSignal
+  /** The composer's session and workspace, for customized wording (ADR-0236). */
+  promptContext?: PromptResolutionContext
 }
 
 export type EnhanceResult =
@@ -56,24 +64,74 @@ export type EnhanceResult =
   | { kind: "variants"; variants: string[] }
   | { kind: "skipped"; reason: "pii" | "empty" | "no-output" }
 
-const SYSTEM_PROMPT = [
-  "You are a prompt-editing assistant embedded in a chat composer.",
-  "The user is drafting a message to an AI assistant and wants it improved.",
-  "Rewrite their draft per the requested style while preserving the original",
-  "intent, any quoted text, code, file paths, and @-mentions verbatim.",
-  "Do not answer the prompt — only rewrite it. Output ONLY the rewritten",
-  "message: no preamble, no surrounding quotes, no markdown code fences,",
-  "no commentary.",
-].join(" ")
+const ENHANCE_SCOPES = ["account", "workspace", "session"] as const
 
-const MODE_INSTRUCTION: Record<Exclude<EnhanceMode, "variants">, string> = {
-  improve:
-    "Make it clearer, more specific, and well-structured. Resolve ambiguity and state the goal explicitly.",
-  concise: "Make it shorter and more focused on the essential ask. Remove filler.",
-  detailed:
-    "Expand it with the specific details, constraints, and context an assistant would need.",
-  technical: "Use precise, domain-appropriate technical terminology.",
-  simpler: "Simplify it to plain, basic language a non-expert would use.",
+export const ENHANCE_SYSTEM_PROMPT = definePrompt({
+  id: "completion.enhance.system",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "completion",
+  operation: "replace-template",
+  scopes: ENHANCE_SCOPES,
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app"],
+  maxChars: 4_000,
+  outputContract:
+    "The reply replaces the draft (code fences and one pair of wrapping quotes are stripped); in variants mode it must be a JSON array of strings, which the host asks for in the request.",
+  consumers: ["lib/chat/completion/enhance.ts"],
+  defaultBody: [
+    "You are a prompt-editing assistant embedded in a chat composer.",
+    "The user is drafting a message to an AI assistant and wants it improved.",
+    "Rewrite their draft per the requested style while preserving the original",
+    "intent, any quoted text, code, file paths, and @-mentions verbatim.",
+    "Do not answer the prompt — only rewrite it. Output ONLY the rewritten",
+    "message: no preamble, no surrounding quotes, no markdown code fences,",
+    "no commentary.",
+  ].join(" "),
+})
+
+/** The one-line style each rewrite mode asks for, sent as `Requested style:`. */
+function enhanceStylePrompt(mode: Exclude<EnhanceMode, "variants">, defaultBody: string) {
+  return definePrompt({
+    id: `completion.enhance.style.${mode}`,
+    contractVersion: 1,
+    kind: "feature-template",
+    group: "completion",
+    operation: "replace-template",
+    scopes: ENHANCE_SCOPES,
+    activation: "next-operation",
+    risk: "ordinary",
+    hosts: ["app"],
+    maxChars: 1_000,
+    consumers: ["lib/chat/completion/enhance.ts"],
+    defaultBody,
+  })
+}
+
+export const ENHANCE_STYLE_PROMPTS: Readonly<
+  Record<Exclude<EnhanceMode, "variants">, PromptDefinitionV1>
+> = {
+  improve: enhanceStylePrompt(
+    "improve",
+    "Make it clearer, more specific, and well-structured. Resolve ambiguity and state the goal explicitly."
+  ),
+  concise: enhanceStylePrompt(
+    "concise",
+    "Make it shorter and more focused on the essential ask. Remove filler."
+  ),
+  detailed: enhanceStylePrompt(
+    "detailed",
+    "Expand it with the specific details, constraints, and context an assistant would need."
+  ),
+  technical: enhanceStylePrompt(
+    "technical",
+    "Use precise, domain-appropriate technical terminology."
+  ),
+  simpler: enhanceStylePrompt(
+    "simpler",
+    "Simplify it to plain, basic language a non-expert would use."
+  ),
 }
 
 /** Strip ``` fences and a single pair of wrapping quotes from a rewrite. */
@@ -92,13 +150,8 @@ function cleanRewrite(raw: string): string {
   return out
 }
 
-function buildRewritePrompt(draft: string, mode: Exclude<EnhanceMode, "variants">): string {
-  return [
-    `Requested style: ${MODE_INSTRUCTION[mode]}`,
-    "",
-    "Draft message to rewrite:",
-    draft,
-  ].join("\n")
+function buildRewritePrompt(draft: string, style: string): string {
+  return [`Requested style: ${style}`, "", "Draft message to rewrite:", draft].join("\n")
 }
 
 function buildVariantsPrompt(draft: string, count: number): string {
@@ -130,9 +183,13 @@ export async function enhancePrompt(
   const isPiiSafe = deps.isPiiSafe ?? hasNoLeakingPii
   if (!isPiiSafe(draft)) return { kind: "skipped", reason: "pii" }
 
+  const resolve = async (def: PromptDefinitionV1) =>
+    (await resolvePromptAsync(def, { context: deps.promptContext })).text
+  const system = await resolve(ENHANCE_SYSTEM_PROMPT)
+
   if (mode === "variants") {
     const raw = await deps.client.complete(buildVariantsPrompt(draft, DEFAULT_VARIANT_COUNT), {
-      system: SYSTEM_PROMPT,
+      system,
       temperature: 0.7,
       maxTokens: 1_024,
       abortSignal: deps.signal,
@@ -152,8 +209,9 @@ export async function enhancePrompt(
     return { kind: "variants", variants }
   }
 
-  const raw = await deps.client.complete(buildRewritePrompt(draft, mode), {
-    system: SYSTEM_PROMPT,
+  const style = await resolve(ENHANCE_STYLE_PROMPTS[mode])
+  const raw = await deps.client.complete(buildRewritePrompt(draft, style), {
+    system,
     temperature: 0.3,
     maxTokens: 2_048,
     abortSignal: deps.signal,

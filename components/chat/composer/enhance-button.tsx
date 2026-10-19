@@ -100,7 +100,10 @@ export function EnhanceButton({
       }
       setBusy(true)
       try {
-        const result = await enhancePrompt(value, mode, { client })
+        const result = await enhancePrompt(value, mode, {
+          client,
+          promptContext: { sessionId: session?.id, workspaceId: session?.projectId },
+        })
         if (result.kind === "rewrite") {
           setPreview({ kind: "rewrite", original: value, text: result.text })
         } else if (result.kind === "variants") {

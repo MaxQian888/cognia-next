@@ -138,6 +138,11 @@ async function generate(
           client,
           signal: controller.signal,
           propagateErrors: true,
+          promptContext: {
+            sessionId: session.id,
+            workspaceId: session.projectId,
+            agentId: session.characterId,
+          },
         }
       ),
       deadline,

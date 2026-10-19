@@ -14,9 +14,17 @@
 import { BRIEF_MODE_PROMPT } from "@/lib/agent/prompts/brief-mode"
 import { CLI_BASE_IDENTITY_PROMPT } from "@/lib/agent/prompts/cli-base"
 import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_PROMPT } from "@/lib/agent/prompts/plan-mode"
+import { CANVAS_ACTION_PROMPTS } from "@/lib/ai/generation/canvas-actions"
 import { SELECTION_SUMMARY_PROMPT } from "@/lib/ai/generation/summarize-material"
 import { CONVERSATION_SUMMARY_PROMPT } from "@/lib/ai/generation/summarizer"
 import { TITLE_CHAT_PROMPT, TITLE_WORK_PROMPT } from "@/lib/ai/generation/title"
+import { ENHANCE_STYLE_PROMPTS, ENHANCE_SYSTEM_PROMPT } from "@/lib/chat/completion/enhance"
+import { GHOST_TEXT_PROMPT } from "@/lib/chat/completion/ghost-prompt"
+import {
+  FOLLOW_UP_SUGGESTIONS_PROMPT,
+  STARTER_SUGGESTIONS_PROMPT,
+} from "@/lib/chat/completion/suggestions"
+import { TERMINAL_COMPLETION_PROMPT } from "@/lib/terminal/completion/prompt"
 import {
   COMPACT_HANDOFF_PROMPT,
   POST_COMPACTION_RECOVERY_PROMPT,
@@ -37,6 +45,14 @@ export const PROMPT_DEFINITIONS: readonly PromptDefinitionV1[] = [
   TITLE_WORK_PROMPT,
   CONVERSATION_SUMMARY_PROMPT,
   SELECTION_SUMMARY_PROMPT,
+  ...Object.values(CANVAS_ACTION_PROMPTS),
+  // completion
+  GHOST_TEXT_PROMPT,
+  STARTER_SUGGESTIONS_PROMPT,
+  FOLLOW_UP_SUGGESTIONS_PROMPT,
+  ENHANCE_SYSTEM_PROMPT,
+  ...Object.values(ENHANCE_STYLE_PROMPTS),
+  TERMINAL_COMPLETION_PROMPT,
 ]
 
 const BY_ID = new Map<string, PromptDefinitionV1>()

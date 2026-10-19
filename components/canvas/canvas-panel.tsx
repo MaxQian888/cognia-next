@@ -625,6 +625,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
           targetLanguage: opts.targetLanguage,
           prompt: opts.prompt ?? activeDoc.aiWorkbench?.promptDraft ?? undefined,
           attachments,
+          promptContext: { sessionId: activeDoc.sessionId, workspaceId: activeDoc.projectId },
         })
       } catch (error) {
         settleHistory({

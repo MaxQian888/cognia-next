@@ -38,7 +38,10 @@ import {
   type PromptSource,
 } from "./types"
 
-const log = loggers.ai.child("prompts")
+// Created on first use: this module sits under many feature modules, and a
+// logger built at import time would make each of them fail to load wherever a
+// test stubs the logging package with only the namespace it reads itself.
+let log: ReturnType<typeof loggers.ai.child> | null = null
 
 export interface ResolvePromptOptions {
   context?: PromptResolutionContext
@@ -122,6 +125,7 @@ function signal(def: PromptDefinitionV1, reason: PromptFallbackReason): void {
           ? "prompt_resolution_failed"
           : "prompt_authority_unavailable"
   // Bounded fields only: the prompt id and the reason, never the text.
+  log ??= loggers.ai.child("prompts")
   log.warn(code, { promptId: def.id, reason })
 }
 

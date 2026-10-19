@@ -12,6 +12,9 @@
  * Kept model-free so the fiddly cleanup is unit-testable.
  */
 
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt, type PromptResolutionContext } from "@/lib/prompts/types"
+
 /** Hard cap on a single ghost suffix (chars). */
 export const MAX_GHOST_LEN = 160
 /** How many recent messages to feed the model as continuity context. */
@@ -29,6 +32,8 @@ export interface GhostContext {
   draft: string
   /** Recent conversation turns for continuity (most-recent last). */
   recentMessages?: readonly GhostMessage[]
+  /** The owning session, so a session-scoped customization applies (ADR-0236). */
+  promptContext?: PromptResolutionContext
 }
 
 /**
@@ -40,7 +45,21 @@ export interface GhostContext {
  * cap stays a backstop rather than the thing shaping the sentence. One
  * few-shot anchors the format better than another sentence of description.
  */
-const SYSTEM_PROMPT = `You write inline completions for a chat composer — ghost text that trails what the user is typing TO an assistant, like Copilot for prose.
+export const GHOST_TEXT_PROMPT = definePrompt({
+  id: "completion.ghost-text",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "completion",
+  operation: "replace-template",
+  scopes: ["account", "session"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app", "cli"],
+  maxChars: 8_000,
+  outputContract:
+    "The reply is shown as dim text after the caret: one line, at most 160 characters, with an echoed draft prefix and the caret marker removed.",
+  consumers: ["lib/chat/completion/ghost-prompt.ts"],
+  defaultBody: `You write inline completions for a chat composer — ghost text that trails what the user is typing TO an assistant, like Copilot for prose.
 
 You are given the recent conversation and the user's partial message. Predict the most likely continuation.
 
@@ -57,7 +76,8 @@ Conversation:
 <turn who="user">can you pick up the deploy fix?</turn>
 <turn who="assistant">merged an hour ago</turn>
 Partial message: "can you also cherry-pick it▍"
-Correct reply: " onto the release branch before tonight's cut?"`
+Correct reply: " onto the release branch before tonight's cut?"`,
+})
 
 /** Keep the original intent and final outcome when a turn exceeds its budget. */
 export function clipPredictionContext(text: string, maxChars: number): string {
@@ -68,7 +88,11 @@ export function clipPredictionContext(text: string, maxChars: number): string {
   return text.slice(0, headLength) + marker + text.slice(-tailLength)
 }
 
-/** Build the `{ system, prompt }` pair for `LlmClient.complete`. */
+/**
+ * Build the `{ system, prompt }` pair for `LlmClient.complete`. Synchronous:
+ * it runs on a keystroke debounce, so it reads the loaded override snapshot
+ * rather than waiting on the database.
+ */
 export function buildGhostPrompt(ctx: GhostContext): { system: string; prompt: string } {
   const lines: string[] = []
   const recent = (ctx.recentMessages ?? [])
@@ -89,7 +113,8 @@ export function buildGhostPrompt(ctx: GhostContext): { system: string; prompt: s
   // up by `sanitizeGhost`.
   lines.push("Partial message to continue:")
   lines.push(`${ctx.draft}▍`)
-  return { system: SYSTEM_PROMPT, prompt: lines.join("\n") }
+  const system = resolvePrompt(GHOST_TEXT_PROMPT, { context: ctx.promptContext }).text
+  return { system, prompt: lines.join("\n") }
 }
 
 /** Strip ``` fences, leaving the inner text. */

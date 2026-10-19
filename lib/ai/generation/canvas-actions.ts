@@ -20,6 +20,12 @@ import type { CanvasActionAttachment, CanvasWorkbenchActionType } from "@/types/
 import { webviewSafeTelemetry } from "@/lib/ai/webview-safe-telemetry"
 import { hasNoLeakingPii } from "@cognia/redact"
 import type { LanguageModel } from "ai"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import {
+  definePrompt,
+  type PromptDefinitionV1,
+  type PromptResolutionContext,
+} from "@/lib/prompts/types"
 
 // The pure diff → hunk → apply engine was extracted to `canvas-review` (no
 // `ai`/provider imports) so persisted/widely-imported consumers (the artifact
@@ -52,86 +58,163 @@ export interface CanvasActionExecutionOptions {
   attachments?: CanvasActionAttachment[]
 }
 
-export const ACTION_PROMPTS: Record<CanvasActionType, string> = {
-  custom: `You are an expert editing assistant working inside a document canvas.
-Apply the user's instruction to the provided content while preserving valid syntax, formatting, and intent.
-Return ONLY the updated content without any explanation.`,
+/** What the app's own runs add: cancellation and the document's prompt context. */
+export interface CanvasActionRunOptions extends CanvasActionExecutionOptions {
+  abortSignal?: AbortSignal
+  /**
+   * The canvas document's session and workspace, so a customized action
+   * prompt for either applies (ADR-0236). The plugin path never sets it:
+   * a plugin resolves at account scope only.
+   */
+  promptContext?: PromptResolutionContext
+}
 
-  review: `You are a code/text reviewer. Analyze the following content and provide a detailed review including:
+/** Actions whose output replaces the document (or selection) text. */
+const CONTENT_ACTIONS: readonly CanvasActionType[] = [
+  "custom",
+  "fix",
+  "improve",
+  "simplify",
+  "expand",
+  "translate",
+  "format",
+]
+
+/**
+ * One editable template per action (ADR-0236). The host keeps everything
+ * around it: the `Language:` / `Target language:` lines it prepends, the user
+ * instruction and attachments it appends, and which half of the output it
+ * applies, so an edited body can change the wording but not the plumbing.
+ */
+function canvasActionPrompt(action: CanvasActionType, defaultBody: string): PromptDefinitionV1 {
+  const content = CONTENT_ACTIONS.includes(action)
+  return definePrompt({
+    id: `generation.canvas.${action}`,
+    contractVersion: 1,
+    kind: "feature-template",
+    group: "generation",
+    operation: "replace-template",
+    scopes: ["account", "workspace", "session"],
+    activation: "next-operation",
+    risk: "ordinary",
+    hosts: ["app"],
+    maxChars: 8_000,
+    outputContract: content
+      ? "The reply replaces the document or selection text, so it should be the content alone."
+      : "The reply is shown beside the document as an explanation; nothing is applied.",
+    consumers: ["lib/ai/generation/canvas-actions.ts"],
+    defaultBody,
+  })
+}
+
+export const CANVAS_ACTION_PROMPTS: Readonly<Record<CanvasActionType, PromptDefinitionV1>> = {
+  custom: canvasActionPrompt(
+    "custom",
+    `You are an expert editing assistant working inside a document canvas.
+Apply the user's instruction to the provided content while preserving valid syntax, formatting, and intent.
+Return ONLY the updated content without any explanation.`
+  ),
+
+  review: canvasActionPrompt(
+    "review",
+    `You are a code/text reviewer. Analyze the following content and provide a detailed review including:
 - Overall quality assessment
 - Potential issues or bugs
 - Suggestions for improvement
 - Best practices that could be applied
 
-Provide your review in a clear, structured format.`,
+Provide your review in a clear, structured format.`
+  ),
 
-  fix: `You are an expert debugger and fixer. Analyze the following content and fix any issues you find:
+  fix: canvasActionPrompt(
+    "fix",
+    `You are an expert debugger and fixer. Analyze the following content and fix any issues you find:
 - Fix bugs, errors, or logical issues
 - Correct syntax errors
 - Fix typos and grammatical errors
 - Ensure proper formatting
 
-Return ONLY the fixed content without any explanation. Preserve the original structure and style.`,
+Return ONLY the fixed content without any explanation. Preserve the original structure and style.`
+  ),
 
-  improve: `You are an expert at improving code and text quality. Enhance the following content by:
+  improve: canvasActionPrompt(
+    "improve",
+    `You are an expert at improving code and text quality. Enhance the following content by:
 - Improving readability and clarity
 - Optimizing performance (for code)
 - Following best practices
 - Enhancing structure and organization
 
-Return ONLY the improved content without any explanation. Preserve the original intent.`,
+Return ONLY the improved content without any explanation. Preserve the original intent.`
+  ),
 
-  explain: `You are an expert teacher. Explain the following content in detail:
+  explain: canvasActionPrompt(
+    "explain",
+    `You are an expert teacher. Explain the following content in detail:
 - What it does and how it works
 - Key concepts and components
 - Step-by-step breakdown
 - Any important considerations
 
-Provide a clear, educational explanation suitable for someone learning.`,
+Provide a clear, educational explanation suitable for someone learning.`
+  ),
 
-  simplify: `You are an expert at simplification. Simplify the following content by:
+  simplify: canvasActionPrompt(
+    "simplify",
+    `You are an expert at simplification. Simplify the following content by:
 - Reducing complexity while preserving meaning
 - Using simpler language or constructs
 - Removing unnecessary parts
 - Making it more concise
 
-Return ONLY the simplified content without any explanation.`,
+Return ONLY the simplified content without any explanation.`
+  ),
 
-  expand: `You are an expert at elaboration. Expand the following content by:
+  expand: canvasActionPrompt(
+    "expand",
+    `You are an expert at elaboration. Expand the following content by:
 - Adding more detail and context
 - Including examples where helpful
 - Elaborating on key points
 - Adding documentation or comments (for code)
 
-Return ONLY the expanded content without any explanation.`,
+Return ONLY the expanded content without any explanation.`
+  ),
 
-  translate: `You are a professional translator. Translate the following content to the target language specified.
+  translate: canvasActionPrompt(
+    "translate",
+    `You are a professional translator. Translate the following content to the target language specified.
 If no target language is specified, translate to English.
 Preserve the original formatting, structure, and meaning.
 
-Return ONLY the translated content without any explanation.`,
+Return ONLY the translated content without any explanation.`
+  ),
 
-  format: `You are an expert at formatting. Format the following content properly:
+  format: canvasActionPrompt(
+    "format",
+    `You are an expert at formatting. Format the following content properly:
 - Apply consistent indentation
 - Fix spacing and alignment
 - Organize structure logically
 - Follow standard formatting conventions
 
-Return ONLY the formatted content without any explanation.`,
+Return ONLY the formatted content without any explanation.`
+  ),
 
-  run: `You are a code execution simulator. Analyze the following code and describe what would happen if it were executed:
+  run: canvasActionPrompt(
+    "run",
+    `You are a code execution simulator. Analyze the following code and describe what would happen if it were executed:
 - Expected output
 - Side effects
 - Potential runtime errors
 - Performance considerations
 
-Note: This is a simulation, not actual execution.`,
+Note: This is a simulation, not actual execution.`
+  ),
 }
 
 function isContentAction(actionType: CanvasActionType): boolean {
-  return ["custom", "fix", "improve", "simplify", "expand", "translate", "format"].includes(
-    actionType
-  )
+  return CONTENT_ACTIONS.includes(actionType)
 }
 
 function buildAttachmentContext(attachments?: CanvasActionAttachment[]): string {
@@ -162,17 +245,19 @@ function buildInstructionContext(prompt?: string): string {
   return `\n\nUser instruction:\n${prompt.trim()}`
 }
 
-function buildCanvasPrompts(
+async function buildCanvasPrompts(
   actionType: CanvasActionType,
   content: string,
-  options?: CanvasActionExecutionOptions
-): {
+  options?: CanvasActionRunOptions
+): Promise<{
   systemPrompt: string
   userPrompt: string
-} {
-  const { language, targetLanguage, selection, prompt, attachments } = options || {}
+}> {
+  const { language, targetLanguage, selection, prompt, attachments, promptContext } = options || {}
 
-  let systemPrompt = ACTION_PROMPTS[actionType]
+  let systemPrompt = (
+    await resolvePromptAsync(CANVAS_ACTION_PROMPTS[actionType], { context: promptContext })
+  ).text
   const userPrompt = selection && selection.trim() ? selection : content
 
   if (
@@ -237,9 +322,11 @@ export async function runCanvasAction(
   model: LanguageModel,
   actionType: CanvasActionType,
   content: string,
-  options?: CanvasActionExecutionOptions & { abortSignal?: AbortSignal }
+  options?: CanvasActionRunOptions
 ): Promise<string> {
-  const { systemPrompt, userPrompt } = buildCanvasPrompts(actionType, content, options)
+  const { systemPrompt, userPrompt } = await buildCanvasPrompts(actionType, content, options)
+  // A cancel that landed while the prompt resolved never reaches the provider.
+  options?.abortSignal?.throwIfAborted()
   assertPromptIsSendable(systemPrompt, userPrompt)
 
   const result = await generateText({
@@ -262,9 +349,11 @@ export async function streamCanvasAction(
   actionType: CanvasActionType,
   content: string,
   onDelta: (delta: string) => void,
-  options?: CanvasActionExecutionOptions & { abortSignal?: AbortSignal }
+  options?: CanvasActionRunOptions
 ): Promise<string> {
-  const { systemPrompt, userPrompt } = buildCanvasPrompts(actionType, content, options)
+  const { systemPrompt, userPrompt } = await buildCanvasPrompts(actionType, content, options)
+  // A cancel that landed while the prompt resolved never reaches the provider.
+  options?.abortSignal?.throwIfAborted()
   assertPromptIsSendable(systemPrompt, userPrompt)
 
   const result = streamText({
@@ -287,6 +376,16 @@ export async function streamCanvasAction(
 }
 
 /**
+ * The plugin-facing options, copied field by field: a plugin object carrying
+ * `promptContext` at runtime must not pick a session's customized prompt.
+ */
+function pluginOptions(options?: CanvasActionExecutionOptions): CanvasActionExecutionOptions {
+  if (!options) return {}
+  const { language, targetLanguage, selection, prompt, attachments } = options
+  return { language, targetLanguage, selection, prompt, attachments }
+}
+
+/**
  * Execute a canvas action from a provider config (the plugin-facing shape).
  * A thin wrapper over {@link runCanvasAction} that keeps the result-envelope
  * contract plugins are written against.
@@ -301,7 +400,7 @@ export async function executeCanvasAction(
 
   try {
     const modelInstance = getProviderModel({ provider, model, apiKey, baseURL, apiFlavor, headers })
-    const text = await runCanvasAction(modelInstance, actionType, content, options)
+    const text = await runCanvasAction(modelInstance, actionType, content, pluginOptions(options))
 
     return {
       success: true,
@@ -332,8 +431,8 @@ export async function executeCanvasAction(
 export function buildCanvasActionPrompts(
   actionType: CanvasActionType,
   content: string,
-  options?: CanvasActionExecutionOptions
-): { systemPrompt: string; userPrompt: string } {
+  options?: CanvasActionRunOptions
+): Promise<{ systemPrompt: string; userPrompt: string }> {
   return buildCanvasPrompts(actionType, content, options)
 }
 
@@ -405,7 +504,7 @@ export async function executeCanvasActionStreaming(
       actionType,
       content,
       callbacks.onToken,
-      options
+      pluginOptions(options)
     )
     callbacks.onComplete(fullText)
   } catch (error) {
