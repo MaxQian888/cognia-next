@@ -11,7 +11,7 @@
  * working directory so a runtime `/cd` re-resolves it on the next turn.
  */
 
-import { PLAN_MODE_PROMPT } from "@/lib/claude/plan-mode-prompt"
+import { PLAN_MODE_PROMPT } from "@/lib/agent/prompts/plan-mode"
 
 import { buildShellEnvironmentSection } from "./shell-environment-prompt"
 
@@ -42,7 +42,7 @@ export interface DefaultSystemPromptInput {
 /**
  * The Plan-mode workflow guidance appended when the session is read-only
  * (`permissionMode === "plan"`). Re-exported from the shared single source
- * (`lib/claude/plan-mode-prompt.ts`) that the GUI's `PLAN_MODE_SNIPPET` also
+ * (`lib/agent/prompts/plan-mode.ts`) that the GUI's `PLAN_MODE_SNIPPET` also
  * re-exports — the two surfaces must not drift. Kept as a named constant so
  * the `/plan explore` pipeline and tests can reference the exact contract.
  * Names the built-in read-only `Explore` / `Plan` subagents and both

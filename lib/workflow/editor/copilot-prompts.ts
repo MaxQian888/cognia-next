@@ -19,7 +19,7 @@
  * registered by the plugin for non-copilot (scripting / import) use.
  */
 
-import type { AgentDefinition } from "./subagents/types"
+import type { AgentDefinition } from "@/lib/claude/agents/subagents/types"
 
 /**
  * Tools the Workflow Copilot may invoke. Anything not in this list is

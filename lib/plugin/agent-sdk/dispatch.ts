@@ -28,7 +28,7 @@ import type {
 import { assertNoLeakingPiiDeep } from "@/lib/plugin/api/plugin-pii-gate"
 import { fireAgentHook, type AgentHookContext } from "@/lib/ai/agent/external/agent-hooks"
 import { getDispatchBudget, isDispatchBudgetExhausted } from "@/lib/claude/agents/dispatch-budget"
-import { composeSubagentSystemPrompt } from "@/lib/claude/agents/subagent-prompt-frame"
+import { composeSubagentSystemPrompt } from "@/lib/agent/prompts/subagent-frame"
 import {
   envelopeForBudgetExhausted,
   envelopeForRejection,

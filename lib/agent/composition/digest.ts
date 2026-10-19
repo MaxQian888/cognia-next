@@ -47,9 +47,52 @@ export async function digestValue(
   return `sha256:${await hash(canonicalizeJson(value))}`
 }
 
-/** Digest of the final system prompt, exactly as it will be sent. */
+/** Digest of one system prompt string. */
 export function digestPrompt(prompt: string, hash?: Sha256Hex): Promise<string> {
   return digestValue(prompt, hash)
+}
+
+/**
+ * Every system-prompt field a send carries before runtime translation.
+ *
+ * The runtimes fold these differently (the SDK adapter sends `sdkSystemPrompt`
+ * in place of `systemPrompt` and keeps `appendSystemPrompt` as later blocks;
+ * the standalone engine joins base and append), but each of them sends all of
+ * the fields that are set. A digest over only one field would let a change to
+ * another reach the model under an unchanged identity.
+ */
+export interface PromptSurface {
+  /** The base prompt: a string, or an SDK custom/preset object. */
+  systemPrompt?: unknown
+  /** Session-stable sections then the per-turn tail, appended after the base. */
+  appendSystemPrompt?: string
+  /** `SendOptions.claudeAgentSdk.systemPrompt`, which replaces the base on the SDK runtime. */
+  sdkSystemPrompt?: unknown
+}
+
+/**
+ * Digest of a send's whole prompt surface.
+ *
+ * A surface that is just a base string digests exactly as `digestPrompt` did,
+ * so an unchanged plain prompt keeps its historical identity. Anything else is
+ * digested as a tagged object, which can never collide with a plain string. A
+ * blank append is dropped because every runtime drops it before sending.
+ */
+export function digestPromptSurface(surface: PromptSurface, hash?: Sha256Hex): Promise<string> {
+  const append = surface.appendSystemPrompt?.trim() ? surface.appendSystemPrompt : undefined
+  const base = surface.systemPrompt
+  if (surface.sdkSystemPrompt === undefined && append === undefined) {
+    if (base === undefined || typeof base === "string") return digestPrompt(base ?? "", hash)
+  }
+  return digestValue(
+    {
+      surface: "prompt-surface-1",
+      base: base ?? null,
+      append: append ?? null,
+      sdk: surface.sdkSystemPrompt ?? null,
+    },
+    hash
+  )
 }
 
 /**

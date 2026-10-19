@@ -37,7 +37,7 @@ import type { McpServer, SendOptions } from "@cognia/agent-config-types"
 import type { PluginToolManifestEntry } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 
-import { composeSubagentSystemPrompt } from "@/lib/claude/agents/subagent-prompt-frame"
+import { composeSubagentSystemPrompt } from "@/lib/agent/prompts/subagent-frame"
 
 import { buildCliOperatingRules } from "../config/default-system-prompt"
 import { type ResolvedConfig } from "../config/schema"

@@ -1,4 +1,4 @@
-import { BUILT_IN_AGENT_MODES, getAgentMode, getAgentModeByType } from "./agent-mode"
+import { BUILT_IN_AGENT_MODES, getAgentMode, getAgentModeByType } from "./built-ins"
 import type { AgentModeType } from "@cognia/provider-types/agent-mode"
 import type { RoutingContext } from "@cognia/provider-types/auto-router"
 

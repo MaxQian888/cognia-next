@@ -17,7 +17,7 @@ import {
 } from "@/lib/ai/agent/execution/agent-execution-handle"
 import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
 import { getAgentExecutionFlags } from "@/lib/ai/agent/execution/feature-flags"
-import { WORKFLOW_COPILOT_ALLOWED_TOOLS } from "@/lib/claude/agents/workflow-copilot-prompt"
+import { WORKFLOW_COPILOT_ALLOWED_TOOLS } from "@/lib/workflow/editor/copilot-prompts"
 
 import {
   createAgentSession,

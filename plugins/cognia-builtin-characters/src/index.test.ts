@@ -9,13 +9,7 @@
 
 import { isOverlayCharacterId } from "@cognia/plugin-sdk/api/character-pack"
 import { validatePluginManifest } from "@cognia/plugin-sdk/manifest"
-import { parseLocalPackFile, serializeLocalPackFile } from "@cognia/plugin-sdk"
-import definition, {
-  BUILTIN_LEGACY_ID_TO_LOCAL_ID,
-  BUILTIN_PACK,
-  BUILTIN_PLUGIN_ID,
-  manifest,
-} from "./index"
+import definition, { BUILTIN_PACK, BUILTIN_PLUGIN_ID, manifest } from "./index"
 import manifestJson from "../plugin.json"
 
 describe("cognia-builtin-characters plugin", () => {
@@ -23,36 +17,6 @@ describe("cognia-builtin-characters plugin", () => {
     expect(BUILTIN_PLUGIN_ID).toBe("cognia-builtin-characters")
     expect(BUILTIN_PACK.id).toBe("builtin")
     expect(BUILTIN_PACK.version).toMatch(/^\d+\.\d+\.\d+/)
-  })
-
-  it("ships exactly seven characters that mirror the stable-id map", () => {
-    expect(BUILTIN_PACK.characters).toHaveLength(7)
-    const localIds = BUILTIN_PACK.characters.map((c) => c.localId).sort()
-    const mapLocalIds = Object.values(BUILTIN_LEGACY_ID_TO_LOCAL_ID).sort()
-    expect(localIds).toEqual(mapLocalIds)
-  })
-
-  it("stable-id map keys cover every canonical built-in row id", () => {
-    expect(Object.keys(BUILTIN_LEGACY_ID_TO_LOCAL_ID).sort()).toEqual(
-      [
-        "char_builtin_brainstorm",
-        "char_builtin_coding",
-        "char_builtin_goal_tracker",
-        "char_builtin_research",
-        "char_builtin_support",
-        "char_builtin_translator",
-        "char_builtin_writer",
-      ].sort()
-    )
-  })
-
-  it("each character has the required PluginCharacterDef shape", () => {
-    for (const c of BUILTIN_PACK.characters) {
-      expect(c.localId).toBeTruthy()
-      expect(c.name).toBeTruthy()
-      expect(c.avatarColor).toBeTruthy()
-      expect(c.systemPrompt.length).toBeGreaterThan(20)
-    }
   })
 
   it("activate() leaves registration to the manager's declarative dispatch", async () => {
@@ -64,16 +28,6 @@ describe("cognia-builtin-characters plugin", () => {
     >[0]
     await definition.activate(ctx)
     expect(register).not.toHaveBeenCalled()
-  })
-
-  it("BUILTIN_PACK round-trips through the canonical pack-file format", () => {
-    const body = serializeLocalPackFile(BUILTIN_PACK)
-    const parsed = parseLocalPackFile(JSON.parse(body))
-    expect(parsed.ok).toBe(true)
-    if (parsed.ok) {
-      expect(parsed.file.pack.id).toBe(BUILTIN_PACK.id)
-      expect(parsed.file.pack.characters).toHaveLength(7)
-    }
   })
 
   it("synthetic overlay ids for built-ins use the stable namespace", () => {

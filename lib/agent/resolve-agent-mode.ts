@@ -8,7 +8,7 @@
  * and having two copies of it is how the send path and the pickers disagree.
  */
 
-import { BUILT_IN_AGENT_MODES } from "@/types/agent/agent-mode"
+import { BUILT_IN_AGENT_MODES } from "@/lib/agent/modes/built-ins"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"

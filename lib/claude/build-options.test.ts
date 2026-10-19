@@ -7812,6 +7812,25 @@ describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
     expect(opts.execution).toBeTruthy()
   })
 
+  // F1: the composition digest used to hash `systemPrompt ?? appendSystemPrompt`,
+  // so with a base prompt present an output-style (or Plan, goal, …) section
+  // that only lands in the appended text left the turn's identity unchanged.
+  it("gives a send whose only change is an appended section a new composition digest", async () => {
+    const digest = async (outputStyle: string) => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", systemPrompt: "base identity" }),
+        session: makeSession({ id: "s1", outputStyle } as ChatSession),
+      })
+      const execution = opts.execution as unknown as { composition?: { compositionDigest: string } }
+      return { append: opts.appendSystemPrompt, digest: execution.composition?.compositionDigest }
+    }
+    const bullets = await digest("bullets")
+    const teacher = await digest("teacher")
+    expect(bullets.append).not.toBe(teacher.append)
+    expect(bullets.digest).toEqual(expect.any(String))
+    expect(bullets.digest).not.toBe(teacher.digest)
+  })
+
   it("still stamps when the route-tickets flag is on, so the switch issues tickets", async () => {
     // The Settings → Gateway → Route tickets switch writes only this flag, and
     // it is the only thing that makes a `gateway` route eligible at all.

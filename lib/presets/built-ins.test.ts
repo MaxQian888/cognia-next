@@ -2,7 +2,7 @@
 // invariants the seeder relies on (stable ids, ascending sortOrder, single
 // timestamp, uniqueness of ids/categories within expected sets).
 
-import { BUILT_IN_PRESET_IDS, buildBuiltInPresets } from "./preset-built-ins"
+import { BUILT_IN_PRESET_IDS, buildBuiltInPresets } from "./built-ins"
 
 describe("buildBuiltInPresets", () => {
   it("returns 12 distinct rows", () => {

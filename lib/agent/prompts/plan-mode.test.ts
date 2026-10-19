@@ -1,4 +1,4 @@
-import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "./plan-mode-prompt"
+import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "./plan-mode"
 
 // Drift tripwire: both surfaces (GUI PLAN_MODE_SNIPPET, CLI
 // PLAN_MODE_PROMPT_SECTION) re-export this constant. These contract phrases
@@ -26,7 +26,7 @@ describe("PLAN_MODE_PROMPT contract", () => {
   })
 
   it("re-exports identically on both surfaces", async () => {
-    const { PLAN_MODE_SNIPPET } = await import("./build-options")
+    const { PLAN_MODE_SNIPPET } = await import("@/lib/claude/build-options")
     expect(PLAN_MODE_SNIPPET).toBe(PLAN_MODE_PROMPT)
   })
 })

@@ -16,7 +16,7 @@ It also distinguishes the `SystemPromptPreset` template type from a Character.
   `"id, name, updatedAt, isBuiltIn"`) — purely additive, no upgrade hooks. CRUD lives in
   `lib/db/characters.ts` (`listCharacters` 92-120, `duplicateCharacter` 276-329, `seedBuiltInCharacters`
   497-560). `SystemPromptPreset` (`types.ts:1943-1981`, `promptPresets` table) is a *config template*,
-  not a persona — 12 built-ins seeded by `lib/db/preset-built-ins.ts:18-173`.
+  not a persona — 12 built-ins seeded by `lib/presets/built-ins.ts:18-173`.
 </TLDR>
 
 ## The `Character` Interface
@@ -217,7 +217,7 @@ export interface SystemPromptPreset {
 }
 ```
 
-Presets persist in the `promptPresets` table. The **12 built-ins** are constructed by `buildBuiltInPresets` in `lib/db/preset-built-ins.ts:18-173` and seeded idempotently via `seedBuiltInPresets` (`lib/db/seed.ts`):
+Presets persist in the `promptPresets` table. The **12 built-ins** are constructed by `buildBuiltInPresets` in `lib/presets/built-ins.ts:18-173` and seeded idempotently via `seedBuiltInPresets` (`lib/db/seed.ts`):
 
 | Preset id | Name | Category |
 | --- | --- | --- |

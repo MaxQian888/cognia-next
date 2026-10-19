@@ -32,7 +32,7 @@ export const CODE_REVIEWER_AGENT_ID = "code-reviewer"
  * METHOD only. The runtime frames every dispatched child with the environment
  * block and the shared dispatched-subagent contract (final message is all the
  * dispatcher reads, no questions back, whether it may delegate), see
- * `lib/claude/agents/subagent-prompt-frame.ts`. Restating that contract here
+ * `lib/agent/prompts/subagent-frame.ts`. Restating that contract here
  * would drift from the frame and contradict it for a nesting-enabled child.
  */
 

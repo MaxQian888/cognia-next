@@ -11,7 +11,7 @@ import {
   PLAN_AGENT_ID,
 } from "./catalog"
 import { isNamedAgentColor, normalizeAgentColor } from "@/lib/claude/agents/agent-color"
-import { SUBAGENT_CONTRACT_TAG } from "@/lib/claude/agents/subagent-prompt-frame"
+import { SUBAGENT_CONTRACT_TAG } from "@/lib/agent/prompts/subagent-frame"
 
 describe("the built-in catalog", () => {
   it("ships one entry per id, with no duplicates", () => {

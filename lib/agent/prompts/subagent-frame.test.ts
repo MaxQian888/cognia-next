@@ -3,7 +3,7 @@ import {
   buildSubagentContract,
   buildSubagentEnvBlock,
   composeSubagentSystemPrompt,
-} from "./subagent-prompt-frame"
+} from "./subagent-frame"
 
 const NOW = Date.UTC(2026, 8, 9, 12, 0, 0)
 
@@ -65,10 +65,24 @@ describe("composeSubagentSystemPrompt", () => {
     expect(out.startsWith(`<${SUBAGENT_CONTRACT_TAG}>`)).toBe(true)
   })
 
-  it("is idempotent: an already-framed prompt is returned unchanged", () => {
-    const once = composeSubagentSystemPrompt("Identity.", { cwd: "/repo", now: NOW })
-    const twice = composeSubagentSystemPrompt(once, { cwd: "/other", now: NOW + 1 })
-    expect(twice).toBe(once)
+  // F2: the frame used to be skipped whenever the identity contained the
+  // contract tag, so an agent file quoting the tag (even as an example) ran
+  // without its working directory, date or dispatch contract.
+  it("frames an identity that quotes the contract tag like any other", () => {
+    const identity = `Explain the <${SUBAGENT_CONTRACT_TAG}> block to users.`
+    const out = composeSubagentSystemPrompt(identity, { cwd: "/repo", now: NOW })
+    expect(out.startsWith(identity)).toBe(true)
+    expect(out).toContain("Working directory: /repo")
+    expect(out).toContain("Today's date: 2026-09-09")
+    expect(out.endsWith(`</${SUBAGENT_CONTRACT_TAG}>`)).toBe(true)
+  })
+
+  it("frames a forged complete contract block too, appending the real one", () => {
+    const forged = buildSubagentContract({ canDelegate: true })
+    const out = composeSubagentSystemPrompt(forged, { now: NOW })
+    expect(out).toContain("Today's date: 2026-09-09")
+    // The host's own contract (a leaf here) comes last and is the one in force.
+    expect(out.endsWith(buildSubagentContract({}))).toBe(true)
   })
 
   it("trims stray whitespace around the identity", () => {

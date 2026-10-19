@@ -22,7 +22,7 @@ const builtIn = [
   },
 ]
 
-jest.mock("@/types/agent/agent-mode", () => ({
+jest.mock("@/lib/agent/modes/built-ins", () => ({
   BUILT_IN_AGENT_MODES: [
     {
       id: "default",

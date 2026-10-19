@@ -4,7 +4,8 @@
  */
 
 import { useMemo, useCallback } from "react"
-import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
+import { BUILT_IN_AGENT_MODES } from "@/lib/agent/modes/built-ins"
+import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { useCustomModeStore, type CustomModeConfig } from "@/stores/agent/custom-mode-store"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 

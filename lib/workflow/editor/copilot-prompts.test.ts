@@ -18,7 +18,7 @@ import {
   WORKFLOW_COPILOT_SUBAGENT_NAMES,
   buildWorkflowCopilotPrompt,
   workflowCopilotAgent,
-} from "./workflow-copilot-prompt"
+} from "./copilot-prompts"
 
 const DIRECT_MUTATION_TOOLS = [
   "wf_add_node",

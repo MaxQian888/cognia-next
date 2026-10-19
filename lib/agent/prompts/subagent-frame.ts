@@ -11,16 +11,19 @@
  * of it.
  *
  * This module composes the shared frame once, read by the CLI runner and the
- * app dispatch path alike, so the two cannot drift. It is idempotent: a prompt
- * that already carries the contract marker is returned unchanged, which keeps
- * a nested dispatch (a child framing a grandchild) from stacking frames.
+ * app dispatch path alike, so the two cannot drift. Both callers frame a
+ * definition's raw identity, never an already-framed prompt: a nested dispatch
+ * frames the grandchild's own definition, so the frame cannot stack. The
+ * identity is editable text (user agent files, Prompt Center overrides), so
+ * nothing in it is read as evidence that the frame was applied; an identity
+ * that quotes the contract tag still gets the host's environment and contract.
  *
  * Pure and shell-agnostic. Every environment fact is passed in and omitted
  * when unknown, so the renderer (no `process.platform`) and the CLI produce
  * the same shape.
  */
 
-/** Marker element. Its presence means the frame has already been applied. */
+/** Element the host contract is wrapped in. Output only; never parsed back. */
 export const SUBAGENT_CONTRACT_TAG = "subagent_contract"
 
 export interface SubagentPromptFrameInput {
@@ -82,7 +85,6 @@ export function composeSubagentSystemPrompt(
   input: SubagentPromptFrameInput = {}
 ): string {
   const identity = (prompt ?? "").trim()
-  if (identity.includes(`<${SUBAGENT_CONTRACT_TAG}>`)) return identity
   const env = buildSubagentEnvBlock(input)
   return [identity, env, buildSubagentContract(input)].filter(Boolean).join("\n\n")
 }

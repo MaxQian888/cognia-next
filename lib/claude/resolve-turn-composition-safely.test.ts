@@ -14,13 +14,13 @@ describe("resolveTurnCompositionSafely", () => {
     mockResolve.mockResolvedValue({ presetId: "standard" })
     await resolveTurnCompositionSafely({
       sessionId: "s1",
-      systemPrompt: "sys",
+      prompt: { systemPrompt: "sys", appendSystemPrompt: "tail" },
       toolNames: ["read", "grep"],
       executionFingerprint: "fp_1",
     })
     expect(mockResolve).toHaveBeenCalledWith({
       sessionId: "s1",
-      systemPrompt: "sys",
+      prompt: { systemPrompt: "sys", appendSystemPrompt: "tail" },
       tools: [
         { name: "read", schema: null, visibility: "native" },
         { name: "grep", schema: null, visibility: "native" },

@@ -144,7 +144,7 @@ import {
 } from "@/lib/agent/agent-profile-policy"
 import { loadAgentEnvSecret } from "@/lib/agent/agent-env-keyring"
 import { namespacedA2UIToolNames } from "@/lib/a2ui/mcp-tool-schemas"
-import { A2UI_SYSTEM_PROMPT } from "@/lib/ai/prompts/a2ui-prompts"
+import { A2UI_SYSTEM_PROMPT } from "@/lib/a2ui/prompts"
 import { buildAgentA2UICatalogSection } from "@/lib/a2ui/agent-catalog-prompt"
 import { buildVisualOutputSection } from "@/lib/ai/prompts/visual-output-prompts"
 import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
@@ -192,7 +192,7 @@ import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 import { DEFAULT_SKILL_CATALOG_TOKEN_BUDGET } from "@/lib/skills/prompt-budget"
 import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
-import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "./plan-mode-prompt"
+import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "@/lib/agent/prompts/plan-mode"
 import { resolveProviderAttemptOptions } from "./provider-attempt-options"
 import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
 import {
@@ -268,7 +268,7 @@ export const BRIEF_OUTPUT_SNIPPET =
 /**
  * Snippet appended to `appendSystemPrompt` when the session is in plan mode
  * (`permissionMode === "plan"`). Re-exported from the shared single source
- * (`plan-mode-prompt.ts`) that the CLI's `PLAN_MODE_PROMPT_SECTION` also
+ * (`lib/agent/prompts/plan-mode.ts`) that the CLI's `PLAN_MODE_PROMPT_SECTION` also
  * re-exports — the two surfaces must not drift. The export name is kept for
  * the ACP route and tests.
  */
@@ -5130,7 +5130,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         buildWorkflowCopilotPrompt,
         WORKFLOW_COPILOT_ALLOWED_TOOLS,
         WORKFLOW_COPILOT_DISALLOWED_TOOLS,
-      } = await import("@/lib/claude/agents/workflow-copilot-prompt")
+      } = await import("@/lib/workflow/editor/copilot-prompts")
       // Overwrite — not union. The additive stack above has already run
       // (character prompt, skills, mode, A2UI capability prompt, goal,
       // twin runtime) but for this session kind we deliberately drop
@@ -6003,7 +6003,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // treats as `native`.
     const composition = await resolveTurnCompositionSafely({
       sessionId: session?.id,
-      systemPrompt: opts.systemPrompt ?? opts.appendSystemPrompt,
+      prompt: {
+        systemPrompt: opts.systemPrompt,
+        appendSystemPrompt: opts.appendSystemPrompt,
+        sdkSystemPrompt: opts.claudeAgentSdk?.systemPrompt,
+      },
       toolNames: opts.allowedTools,
       executionFingerprint: spec.executionFingerprint,
       selection: ctx.compositionSelection,

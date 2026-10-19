@@ -11,7 +11,7 @@ import {
   presetFromAgentMode,
   visiblePresets,
 } from "./preset-catalog"
-import { BUILT_IN_AGENT_MODES } from "@/types/agent/agent-mode"
+import { BUILT_IN_AGENT_MODES } from "@/lib/agent/modes/built-ins"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { SDK_CORE_TOOL_NAMES } from "@/lib/skills/recording/tool-catalog"
 

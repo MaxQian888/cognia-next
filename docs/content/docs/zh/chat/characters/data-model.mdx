@@ -14,7 +14,7 @@ description: Character 接口、Dexie characters 表、lib/db/characters.ts CRUD
   `"id, name, updatedAt, isBuiltIn"`）—— 纯增量，无升级钩子。CRUD 位于
   `lib/db/characters.ts`（`listCharacters` 92-120, `duplicateCharacter` 276-329, `seedBuiltInCharacters`
   497-560）。`SystemPromptPreset`（`types.ts:1943-1981`, `promptPresets` 表）是一个 *配置模板*，
-  而非人格 —— 12 个内置项由 `lib/db/preset-built-ins.ts:18-173` 植入。
+  而非人格 —— 12 个内置项由 `lib/presets/built-ins.ts:18-173` 植入。
 </TLDR>
 
 ## `Character` 接口
@@ -212,7 +212,7 @@ export interface SystemPromptPreset {
 }
 ```
 
-预设持久化在 `promptPresets` 表中。**12 个内置项**由 `lib/db/preset-built-ins.ts:18-173` 中的 `buildBuiltInPresets` 构造，并通过 `seedBuiltInPresets`（`lib/db/seed.ts`）幂等植入：
+预设持久化在 `promptPresets` 表中。**12 个内置项**由 `lib/presets/built-ins.ts:18-173` 中的 `buildBuiltInPresets` 构造，并通过 `seedBuiltInPresets`（`lib/db/seed.ts`）幂等植入：
 
 | 预设 id | 名称 | 类别 |
 | --- | --- | --- |

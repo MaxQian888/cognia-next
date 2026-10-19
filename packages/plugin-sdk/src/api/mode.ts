@@ -7,7 +7,7 @@
 
 export { defineMode } from "../define/define-mode"
 
-export { BUILT_IN_AGENT_MODES, getAgentMode, getAgentModeByType } from "@/types/agent/agent-mode"
+export { BUILT_IN_AGENT_MODES, getAgentMode, getAgentModeByType } from "@/lib/agent/modes/built-ins"
 
 export type { AgentModeConfig, AgentModeType, CustomAgentMode } from "@/types/agent/agent-mode"
 export type { PluginModeDef } from "@/types/plugin"

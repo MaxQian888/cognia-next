@@ -23,7 +23,8 @@ import path from "node:path"
 
 import { z } from "zod"
 
-import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
+import { BUILT_IN_AGENT_MODES } from "@/lib/agent/modes/built-ins"
+import type { AgentModeConfig } from "@/types/agent/agent-mode"
 
 import { PERMISSION_MODES } from "./schema"
 
