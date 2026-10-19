@@ -10,7 +10,12 @@
 import { spawn, type SpawnOptions } from "node:child_process"
 import { constants as osConstants } from "node:os"
 
-import { writeTemporaryCodexHome, type TemporaryCodexHome } from "./codex-config"
+import {
+  CODEX_GATEWAY_PROVIDER_ID,
+  CODEX_GATEWAY_WIRE_API,
+  writeTemporaryCodexHome,
+  type TemporaryCodexHome,
+} from "./codex-config"
 import type { SupportedAgent } from "./detect-cli"
 import type { ChildProxyEnv } from "./egress-proxy"
 
@@ -152,22 +157,20 @@ function buildClaudeConfig(config: AgentLaunchConfig): AgentEnvConfig {
 /** The `-c` overrides that point Codex at the gateway as a named provider. */
 export function codexProviderOverrides(gatewayBaseUrl: string): string[] {
   const base = `${gatewayBaseUrl.replace(/\/$/, "")}/v1`
+  const provider = `model_providers.${CODEX_GATEWAY_PROVIDER_ID}`
   return [
     "-c",
-    "model_provider=cognia",
+    `model_provider=${CODEX_GATEWAY_PROVIDER_ID}`,
     "-c",
-    'model_providers.cognia.name="Cognia gateway"',
+    `${provider}.name="Cognia gateway"`,
     "-c",
-    `model_providers.cognia.base_url="${base}"`,
+    `${provider}.base_url="${base}"`,
     "-c",
-    "model_providers.cognia.env_key=COGNIA_GATEWAY_KEY",
-    // `wire_api = "chat"`, NOT `"responses"`: the gateway's Responses
-    // translation (crates/cognia-gateway/src/translate/responses.rs) refuses
-    // `stream: true` and any non-null `tools`, and Codex sends both on every
-    // turn. Chat Completions is the wire that actually works end to end.
-    // Do not "fix" this back to responses without changing that translator.
+    `${provider}.env_key=COGNIA_GATEWAY_KEY`,
+    // Responses is the only wire Codex still accepts: `"chat"` is refused at
+    // config load since February 2026. See `CODEX_GATEWAY_WIRE_API`.
     "-c",
-    "model_providers.cognia.wire_api=chat",
+    `${provider}.wire_api=${CODEX_GATEWAY_WIRE_API}`,
   ]
 }
 

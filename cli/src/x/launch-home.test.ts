@@ -17,9 +17,11 @@ import {
 function fakeFs() {
   const files = new Map<string, string>()
   const dirs = new Set<string>()
+  const writes: string[] = []
   return {
     files,
     dirs,
+    writes,
     fs: {
       existsSync: (p: string) => files.has(String(p)) || dirs.has(String(p)),
       mkdirSync: (p: string) => {
@@ -27,7 +29,13 @@ function fakeFs() {
         return undefined
       },
       writeFileSync: (p: string, data: string | NodeJS.ArrayBufferView) => {
+        writes.push(String(p))
         files.set(String(p), String(data))
+      },
+      readFileSync: (p: string) => {
+        const data = files.get(String(p))
+        if (data === undefined) throw new Error(`ENOENT: ${p}`)
+        return data
       },
     },
   }
@@ -88,7 +96,52 @@ describe("resolveLaunchHome", () => {
     expect(toml).toContain('model_provider = "cognia"')
     expect(toml).toContain('base_url = "http://127.0.0.1:47823/v1"')
     expect(toml).toContain('model = "o3"')
-    expect(toml).toContain('wire_api = "chat"')
+    expect(toml).toContain('wire_api = "responses"')
+    expect(plan).not.toHaveProperty("migratedConfig")
+  })
+
+  it("migrates an existing codex profile still on the retired chat wire, keeping the rest", () => {
+    const { fs, files, writes } = fakeFs()
+    const dir = launchHomeDir(CLI_HOME, "codex", DEFAULT_PROFILE)
+    const config = path.join(dir, "config.toml")
+    const legacy = [
+      'model_provider = "cognia"',
+      "",
+      "[model_providers.cognia]",
+      'base_url = "http://127.0.0.1:40000/v1"',
+      'wire_api = "chat"',
+      "",
+      '[projects."/Users/u/repo"]',
+      'trust_level = "trusted"',
+      "",
+    ].join("\n")
+    files.set(config, legacy)
+    const plan = resolveLaunchHome({
+      agent: "codex",
+      cliHome: CLI_HOME,
+      gatewayBaseUrl: GATEWAY,
+      fs,
+    })
+    expect(plan).toMatchObject({ mode: "isolated", migratedConfig: config })
+    expect(files.get(config)).toBe(legacy.replace('wire_api = "chat"', 'wire_api = "responses"'))
+    expect(writes).toEqual([config])
+  })
+
+  it("leaves an up-to-date codex profile untouched and unwritten", () => {
+    const { fs, files, writes } = fakeFs()
+    const dir = launchHomeDir(CLI_HOME, "codex", DEFAULT_PROFILE)
+    const config = path.join(dir, "config.toml")
+    const current = '[model_providers.cognia]\nwire_api = "responses"\n'
+    files.set(config, current)
+    const plan = resolveLaunchHome({
+      agent: "codex",
+      cliHome: CLI_HOME,
+      gatewayBaseUrl: GATEWAY,
+      fs,
+    })
+    expect(plan).not.toHaveProperty("migratedConfig")
+    expect(files.get(config)).toBe(current)
+    expect(writes).toEqual([])
   })
 
   it("keeps profiles apart", () => {

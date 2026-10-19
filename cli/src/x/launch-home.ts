@@ -24,7 +24,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { renderCodexConfigToml } from "./codex-config"
+import { migrateCodexProfileConfigToml, renderCodexConfigToml } from "./codex-config"
 import type { SupportedAgent } from "./detect-cli"
 
 export const DEFAULT_PROFILE = "default"
@@ -45,6 +45,11 @@ export type LaunchHomePlan =
       dir: string
       /** Variables that point the agent at the profile home. */
       env: Record<string, string>
+      /**
+       * Set when an existing Codex profile `config.toml` still named the
+       * retired chat wire and was rewritten in place: the file's path.
+       */
+      migratedConfig?: string
     }
   | {
       mode: "shared"
@@ -74,6 +79,7 @@ export interface LaunchHomeFs {
   existsSync: (path: string) => boolean
   mkdirSync: (path: string, options: { recursive: true; mode: number }) => unknown
   writeFileSync: (path: string, data: string, options: { mode: number }) => void
+  readFileSync: (path: string, encoding: "utf8") => string
 }
 
 export class LaunchProfileError extends Error {
@@ -127,6 +133,7 @@ export function resolveLaunchHome(input: LaunchHomeInput): LaunchHomePlan {
 
   const dir = launchHomeDir(input.cliHome, input.agent, profile)
   fsImpl.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  let migratedConfig: string | undefined
 
   if (input.agent === "claude") {
     const seed = path.join(dir, ".claude.json")
@@ -143,6 +150,17 @@ export function resolveLaunchHome(input: LaunchHomeInput): LaunchHomePlan {
       fsImpl.writeFileSync(config, renderCodexConfigToml(input.gatewayBaseUrl, input.model), {
         mode: 0o600,
       })
+    } else {
+      // A profile written before Codex dropped the chat wire still names it,
+      // and Codex refuses to load a config that does — at the latest for
+      // `codex resume` or any tool that reads this CODEX_HOME without our
+      // argv. Codex also writes this file (project trust), so it is patched,
+      // never regenerated.
+      const migration = migrateCodexProfileConfigToml(fsImpl.readFileSync(config, "utf8"))
+      if (migration.migrated) {
+        fsImpl.writeFileSync(config, migration.text, { mode: 0o600 })
+        migratedConfig = config
+      }
     }
   }
 
@@ -151,6 +169,7 @@ export function resolveLaunchHome(input: LaunchHomeInput): LaunchHomePlan {
     profile,
     dir,
     env: { [AGENT_HOME_ENV[input.agent]]: dir },
+    ...(migratedConfig ? { migratedConfig } : {}),
   }
 }
 

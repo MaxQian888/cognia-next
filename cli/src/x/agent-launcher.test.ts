@@ -46,7 +46,7 @@ describe("buildAgentConfig", () => {
     expect(config.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("claude-opus-5")
   })
 
-  it("builds codex config with provider overrides on argv and the chat wire", () => {
+  it("builds codex config with provider overrides on argv and the responses wire", () => {
     const config = buildAgentConfig({
       agent: "codex",
       model: "o3",
@@ -63,8 +63,9 @@ describe("buildAgentConfig", () => {
       "--model",
       "o3",
     ])
-    expect(config.args.join(" ")).toContain("model_providers.cognia.wire_api=chat")
-    expect(config.args.join(" ")).not.toContain("responses")
+    // Codex refuses `wire_api = "chat"` at config load (removed Feb 2026).
+    expect(config.args.join(" ")).toContain("model_providers.cognia.wire_api=responses")
+    expect(config.args.join(" ")).not.toContain("wire_api=chat")
   })
 
   it("omits the argv overrides when the codex home fallback is requested", () => {

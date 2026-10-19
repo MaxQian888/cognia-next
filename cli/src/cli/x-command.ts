@@ -134,6 +134,31 @@ export function ticketRequestFor(agent: string, model: string, cwd: string): Tic
   }
 }
 
+/**
+ * Codex speaks only the Responses API, and the local proxy forwards
+ * `/v1/responses` unchanged: it does not translate protocols the way the
+ * gateway does. OpenAI's own endpoint serves it; a custom OpenAI-compatible
+ * upstream may serve only Chat Completions, and Codex has no other wire to
+ * fall back to. Warn before launch rather than let the first turn 404.
+ * `null` when the upstream is OpenAI's own.
+ */
+export function codexProxyResponsesWarning(openaiBaseUrl: string | undefined): string | null {
+  if (!openaiBaseUrl) return null
+  let host: string
+  try {
+    host = new URL(openaiBaseUrl).hostname.toLowerCase()
+  } catch {
+    host = ""
+  }
+  if (host === "api.openai.com") return null
+  return (
+    `\x1b[33m⚠\x1b[0m Codex speaks only the OpenAI Responses API, and the local proxy ` +
+    `forwards /v1/responses to ${openaiBaseUrl} unchanged.\n` +
+    `  If that upstream serves only Chat Completions, every turn will fail. ` +
+    `Start Cognia so the gateway translates, or pass --gateway <url>.\n`
+  )
+}
+
 const MODE_LABELS: Record<GatewayConnection["mode"], string> = {
   "desktop-gateway-ticket": "cognia gateway (route ticket)",
   "desktop-gateway-key": "cognia gateway (API key)",
@@ -268,6 +293,9 @@ export async function xCommand(args: ParsedArgs, deps: XCommandDeps = {}): Promi
           `  Set ${agent === "claude" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"} or configure a provider in ~/.cognia/config.json\n`
       )
     }
+    const responsesWarning =
+      agent === "codex" ? codexProxyResponsesWarning(proxyConfig.openaiBaseUrl) : null
+    if (responsesWarning) out.error(responsesWarning)
   }
 
   out.write(`\x1b[36m→\x1b[0m Connected via ${MODE_LABELS[gateway.mode]} (${gateway.baseUrl})\n`)
@@ -297,6 +325,12 @@ export async function xCommand(args: ParsedArgs, deps: XCommandDeps = {}): Promi
     return 1
   }
   out.write(`\x1b[36m→\x1b[0m Home: ${describeLaunchHome(home)}\n`)
+  if (home.mode === "isolated" && home.migratedConfig) {
+    out.write(
+      `\x1b[36m→\x1b[0m Updated ${home.migratedConfig}: wire_api "chat" → "responses" ` +
+        `(Codex no longer accepts the chat wire)\n`
+    )
+  }
   out.write(`\x1b[36m→\x1b[0m Launching ${agent}...\n\n`)
 
   // Launch agent

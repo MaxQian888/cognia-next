@@ -4,6 +4,7 @@
 
 import { parseArgv } from "./args"
 import {
+  codexProxyResponsesWarning,
   executionFingerprintFor,
   findBaseUrl,
   ticketRequestFor,
@@ -719,5 +720,97 @@ describe("xCommand launch isolation, gateway and proxy", () => {
       )
     ).toBe("https://relay.example/anthropic")
     expect(findBaseUrl({ relay: { protocol: "anthropic" } }, "anthropic")).toBeUndefined()
+  })
+
+  it("reports a codex profile whose retired chat wire was migrated", async () => {
+    const config = "/home/u/.cognia/x/codex/default/config.toml"
+    const h = harness(["x", "codex", "--model", "m"], {
+      detect: async () => ({ installed: true, path: "/usr/bin/codex" }),
+      launchHome: () => ({
+        mode: "isolated",
+        profile: "default",
+        dir: "/home/u/.cognia/x/codex/default",
+        env: { CODEX_HOME: "/home/u/.cognia/x/codex/default" },
+        migratedConfig: config,
+      }),
+    })
+    expect(await h.run()).toBe(0)
+    expect(h.lines.join("")).toContain(`Updated ${config}: wire_api "chat" → "responses"`)
+  })
+
+  it("says nothing about migration when the profile was already current", async () => {
+    const h = harness(["x", "codex", "--model", "m"], {
+      detect: async () => ({ installed: true, path: "/usr/bin/codex" }),
+    })
+    expect(await h.run()).toBe(0)
+    expect(h.lines.join("")).not.toContain("wire_api")
+  })
+
+  describe("codex over the fallback proxy", () => {
+    const viaProxy = (agent: "claude" | "codex", baseURL?: string) =>
+      harness(["x", agent, "--model", "m"], {
+        detect: async () => ({ installed: true, path: `/usr/bin/${agent}` }),
+        loadConfig: () => ({
+          ...MOCK_CONFIG,
+          cliHome: "/home/u/.cognia",
+          providers: {
+            ...MOCK_CONFIG.providers,
+            openai: {
+              protocol: "openai",
+              apiKey: "sk-openai-test-key",
+              ...(baseURL ? { baseURL } : {}),
+            },
+          },
+        }),
+        connect: async (cfg) => {
+          if (typeof cfg === "function") cfg()
+          return {
+            baseUrl: "http://127.0.0.1:55555",
+            apiKey: "proxy-key",
+            shutdown: async () => {},
+            mode: "node-proxy" as const,
+          }
+        },
+      })
+
+    it("warns that a custom upstream must serve the Responses API", async () => {
+      const h = viaProxy("codex", "https://api.deepseek.com/v1")
+      expect(await h.run()).toBe(0)
+      const errors = h.errors.join("")
+      expect(errors).toContain("Codex speaks only the OpenAI Responses API")
+      expect(errors).toContain("https://api.deepseek.com/v1")
+    })
+
+    it("stays quiet for OpenAI's own endpoint, for claude, and through the gateway", async () => {
+      const openai = viaProxy("codex")
+      await openai.run()
+      expect(openai.errors.join("")).not.toContain("Responses API")
+
+      const claude = viaProxy("claude", "https://api.deepseek.com/v1")
+      await claude.run()
+      expect(claude.errors.join("")).not.toContain("Responses API")
+
+      const gateway = harness(["x", "codex", "--model", "m"], {
+        detect: async () => ({ installed: true, path: "/usr/bin/codex" }),
+      })
+      await gateway.run()
+      expect(gateway.errors.join("")).not.toContain("Responses API")
+    })
+  })
+
+  describe("codexProxyResponsesWarning", () => {
+    it("is null without a custom upstream or for api.openai.com in any case", () => {
+      expect(codexProxyResponsesWarning(undefined)).toBeNull()
+      expect(codexProxyResponsesWarning("")).toBeNull()
+      expect(codexProxyResponsesWarning("https://api.openai.com/v1")).toBeNull()
+      expect(codexProxyResponsesWarning("https://API.OpenAI.com")).toBeNull()
+    })
+
+    it("names any other upstream, including one it cannot parse", () => {
+      expect(codexProxyResponsesWarning("https://openrouter.ai/api/v1")).toContain(
+        "forwards /v1/responses to https://openrouter.ai/api/v1 unchanged"
+      )
+      expect(codexProxyResponsesWarning("not a url")).toContain("to not a url unchanged")
+    })
   })
 })

@@ -3,13 +3,16 @@ import os from "node:os"
 import path from "node:path"
 
 import {
+  CODEX_GATEWAY_WIRE_API,
   codexHomeFallbackRequested,
+  migrateCodexProfileConfigToml,
   renderCodexConfigToml,
+  splitTomlKey,
   writeTemporaryCodexHome,
 } from "./codex-config"
 
 describe("renderCodexConfigToml", () => {
-  it("points the cognia provider at the gateway's /v1 with the chat wire", () => {
+  it("points the cognia provider at the gateway's /v1 with the responses wire", () => {
     const toml = renderCodexConfigToml("http://127.0.0.1:47823/", "gpt-5")
     expect(toml).toContain('model_provider = "cognia"')
     expect(toml).toContain('model = "gpt-5"')
@@ -17,8 +20,155 @@ describe("renderCodexConfigToml", () => {
     expect(toml).toContain('env_key = "COGNIA_GATEWAY_KEY"')
     expect(toml).toContain('cli_auth_credentials_store = "file"')
     expect(toml).toContain("requires_openai_auth = false")
-    expect(toml).toContain('wire_api = "chat"')
-    expect(toml).not.toContain("responses")
+    expect(toml).toContain('wire_api = "responses"')
+    expect(toml).not.toContain('"chat"')
+    expect(CODEX_GATEWAY_WIRE_API).toBe("responses")
+  })
+
+  it("is already current: migrating a fresh render changes nothing", () => {
+    const toml = renderCodexConfigToml("http://127.0.0.1:47823", "gpt-5")
+    expect(migrateCodexProfileConfigToml(toml)).toEqual({ text: toml, migrated: false })
+  })
+})
+
+describe("splitTomlKey", () => {
+  it.each([
+    ["wire_api", ["wire_api"]],
+    ["model_providers.cognia", ["model_providers", "cognia"]],
+    [" model_providers . cognia ", ["model_providers", "cognia"]],
+    ['"model_providers".cognia', ["model_providers", "cognia"]],
+    ["model_providers.'cognia'", ["model_providers", "cognia"]],
+    ['"a.b".c', ["a.b", "c"]],
+    ['projects."/Users/u/repo"', ["projects", "/Users/u/repo"]],
+  ])("splits %s", (raw, parts) => {
+    expect(splitTomlKey(raw)).toEqual(parts)
+  })
+
+  it.each(["", "a..b", "a b", '"open', '"a" b', 'a"b"', "a.", ".a", "a=b"])("refuses %j", (raw) => {
+    expect(splitTomlKey(raw)).toBeNull()
+  })
+})
+
+describe("migrateCodexProfileConfigToml", () => {
+  // What `cognia-agent x codex` wrote before the wire changed.
+  const LEGACY = [
+    "# Written by cognia-agent x codex for ONE launch. Not your ~/.codex/config.toml.",
+    'model_provider = "cognia"',
+    'cli_auth_credentials_store = "file"',
+    'model = "o3"',
+    "",
+    "[model_providers.cognia]",
+    'name = "Cognia gateway"',
+    'base_url = "http://127.0.0.1:47823/v1"',
+    'env_key = "COGNIA_GATEWAY_KEY"',
+    "requires_openai_auth = false",
+    'wire_api = "chat"',
+    "",
+  ].join("\n")
+
+  it("rewrites the legacy launcher file to the responses wire and nothing else", () => {
+    const { text, migrated } = migrateCodexProfileConfigToml(LEGACY)
+    expect(migrated).toBe(true)
+    expect(text).toBe(LEGACY.replace('wire_api = "chat"', 'wire_api = "responses"'))
+  })
+
+  it("keeps what Codex and the user added to the profile", () => {
+    const input = [
+      LEGACY.trimEnd() + "  # pinned by hand",
+      "",
+      '[projects."/Users/u/repo"]',
+      'trust_level = "trusted"',
+      "",
+      "[mcp_servers.docs]",
+      'command = "npx"',
+      'args = ["-y", "docs-mcp"]',
+      "",
+    ].join("\n")
+    const { text, migrated } = migrateCodexProfileConfigToml(input)
+    expect(migrated).toBe(true)
+    expect(text).toBe(
+      input.replace(
+        'wire_api = "chat"  # pinned by hand',
+        'wire_api = "responses"  # pinned by hand'
+      )
+    )
+  })
+
+  it("preserves CRLF line endings and indentation", () => {
+    const input = '[model_providers.cognia]\r\n  wire_api   =   "chat"\r\nname = "x"\r\n'
+    expect(migrateCodexProfileConfigToml(input)).toEqual({
+      text: '[model_providers.cognia]\r\n  wire_api   =   "responses"\r\nname = "x"\r\n',
+      migrated: true,
+    })
+  })
+
+  it("understands single quotes, quoted table names and dotted keys", () => {
+    expect(
+      migrateCodexProfileConfigToml("[\"model_providers\".'cognia']\nwire_api = 'chat'\n").text
+    ).toBe('["model_providers".\'cognia\']\nwire_api = "responses"\n')
+    expect(
+      migrateCodexProfileConfigToml('[model_providers]\ncognia.wire_api = "chat"\n').text
+    ).toBe('[model_providers]\ncognia.wire_api = "responses"\n')
+    expect(migrateCodexProfileConfigToml('model_providers.cognia.wire_api = "chat"\n').text).toBe(
+      'model_providers.cognia.wire_api = "responses"\n'
+    )
+  })
+
+  it("rewrites an inline cognia provider table", () => {
+    const input =
+      '[model_providers]\ncognia = { name = "Cognia gateway", wire_api = "chat", base_url = "x" }\n'
+    expect(migrateCodexProfileConfigToml(input)).toEqual({
+      text: input.replace('wire_api = "chat"', 'wire_api = "responses"'),
+      migrated: true,
+    })
+  })
+
+  it("leaves another provider's chat wire to the user", () => {
+    const input = '[model_providers.ollama]\nwire_api = "chat"\n'
+    expect(migrateCodexProfileConfigToml(input)).toEqual({ text: input, migrated: false })
+    const inline = '[model_providers]\nollama = { wire_api = "chat" }\n'
+    expect(migrateCodexProfileConfigToml(inline)).toEqual({ text: inline, migrated: false })
+  })
+
+  it("only rewrites the provider's own key, not a value that merely says chat", () => {
+    const input = [
+      "[model_providers.cognia]",
+      'name = "chat"',
+      'wire_api = "chat-ish"',
+      "[model_providers.cognia.http_headers]",
+      'wire_api = "chat"',
+      "",
+    ].join("\n")
+    expect(migrateCodexProfileConfigToml(input)).toEqual({ text: input, migrated: false })
+  })
+
+  it("ignores a header-like line inside a multi-line string", () => {
+    const input = [
+      'developer_instructions = """',
+      "[model_providers.cognia]",
+      'wire_api = "chat"',
+      '"""',
+      "[model_providers.cognia]",
+      'wire_api = "chat"',
+      "",
+    ].join("\n")
+    const { text, migrated } = migrateCodexProfileConfigToml(input)
+    expect(migrated).toBe(true)
+    expect(text.split("\n")).toEqual([
+      'developer_instructions = """',
+      "[model_providers.cognia]",
+      'wire_api = "chat"',
+      '"""',
+      "[model_providers.cognia]",
+      'wire_api = "responses"',
+      "",
+    ])
+  })
+
+  it("leaves a file without a cognia provider byte-for-byte alone", () => {
+    for (const input of ["", "\n", 'model = "gpt-5"\n', "[[profiles]]\nname = 'x'\n"]) {
+      expect(migrateCodexProfileConfigToml(input)).toEqual({ text: input, migrated: false })
+    }
   })
 })
 
