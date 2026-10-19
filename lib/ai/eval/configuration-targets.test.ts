@@ -78,4 +78,38 @@ describe("evaluation recommendation configuration targets", () => {
       deps.write({ targetType: "default-model", targetId: "global" }, { modelId: "m" })
     ).rejects.toThrow(/providerId/)
   })
+
+  it("reads and writes an agent's evolved harness through the effective agent", async () => {
+    const patches: unknown[] = []
+    const deps = createEvalConfigurationApplicationDeps({
+      getSettings: async () => ({}) as never,
+      saveSettings: async () => ({}) as never,
+      getCharacter: async () => undefined,
+      resolveCharacter: async (id) =>
+        id === "agent"
+          ? ({ id, systemPrompt: "p", harness: { memory: "m" }, skillIds: ["s"] } as never)
+          : undefined,
+      updateCharacter: async (_id, patch) => void patches.push(patch),
+      getWorkflow: async () => undefined,
+      updateWorkflow: async () => undefined,
+      saveRecord: async () => {},
+      getRecord: async () => undefined,
+      updateRecord: async () => {},
+      now: () => 1,
+      newId: () => "apply",
+    })
+    expect(await deps.read({ targetType: "agent-harness", targetId: "agent" })).toEqual({
+      systemPrompt: "p",
+      harness: { memory: "m" },
+      skillIds: ["s"],
+    })
+    await deps.write(
+      { targetType: "agent-harness", targetId: "agent" },
+      { systemPrompt: "q", harness: null, skillIds: [] }
+    )
+    expect(patches).toEqual([{ systemPrompt: "q", harness: undefined, skillIds: [] }])
+    await expect(deps.read({ targetType: "agent-harness", targetId: "gone" })).rejects.toThrow(
+      /not found/
+    )
+  })
 })

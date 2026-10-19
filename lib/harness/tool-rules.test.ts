@@ -98,23 +98,37 @@ describe("toolMatches", () => {
   })
 })
 
-describe("evaluatePreToolUse", () => {
-  it("denies past the cap with the reason, and does not count denied calls", () => {
+describe("call caps", () => {
+  it("denies at the gate once the executed count reaches the cap", () => {
     const state = createToolRuleState()
     expect(evaluatePreToolUse(rules, state, "Bash")).toEqual({ action: "allow" })
-    expect(evaluatePreToolUse(rules, state, "Bash")).toEqual({ action: "allow" })
+    projectToolResult(rules, state, "Bash", "ok", false)
+    projectToolResult(rules, state, "Bash", "ok", false)
     const denied = evaluatePreToolUse(rules, state, "Bash")
     expect(denied).toMatchObject({ action: "deny", ruleId: "bash-cap" })
     expect(denied.action === "deny" && denied.reason).toMatch(/Stop retrying.*limited to 2/)
-    evaluatePreToolUse(rules, state, "Bash")
     expect(state.calls.get("bash-cap:Bash")).toBe(2)
+  })
+
+  it("withholds the result of a call that ran past its cap", () => {
+    const state = createToolRuleState()
+    projectToolResult(rules, state, "Bash", "1", false)
+    projectToolResult(rules, state, "Bash", "2", false)
+    const third = projectToolResult(rules, state, "Bash", [{ type: "image" }], false)
+    expect(third).toEqual({
+      changed: true,
+      output: expect.stringMatching(/^\[harness rule bash-cap\] Result withheld\. Stop retrying\./),
+      appliedRuleIds: ["bash-cap"],
+    })
   })
 
   it("never touches tools a rule does not cover", () => {
     const state = createToolRuleState()
     for (let i = 0; i < 10; i++) {
       expect(evaluatePreToolUse(rules, state, "Read")).toEqual({ action: "allow" })
+      projectToolResult(rules, state, "Read", "x", false)
     }
+    expect(state.calls.size).toBe(0)
   })
 })
 
@@ -137,7 +151,7 @@ describe("toolResultText", () => {
 describe("projectToolResult", () => {
   it("trims the middle of a long result and names the cut", () => {
     const body = `${"a".repeat(400)}${"m".repeat(2000)}${"z".repeat(400)}`
-    const out = projectToolResult(rules, "Read", body, false)
+    const out = projectToolResult(rules, createToolRuleState(), "Read", body, false)
     expect(out.changed).toBe(true)
     expect(out.appliedRuleIds).toEqual(["trim"])
     expect(out.output.startsWith("a".repeat(300))).toBe(true)
@@ -146,22 +160,34 @@ describe("projectToolResult", () => {
   })
 
   it("appends a hint to a matching error, case-insensitively", () => {
-    const out = projectToolResult(rules, "Bash", "enoent: no such file", true)
+    const out = projectToolResult(
+      rules,
+      createToolRuleState(),
+      "Bash",
+      "enoent: no such file",
+      true
+    )
     expect(out.output).toBe(
       "enoent: no such file\n\n[harness hint enoent] List the directory first."
     )
-    expect(projectToolResult(rules, "Bash", "permission denied", true).changed).toBe(false)
+    expect(
+      projectToolResult(rules, createToolRuleState(), "Bash", "permission denied", true).changed
+    ).toBe(false)
   })
 
   it("reminds after a successful write but not after a failed one", () => {
-    expect(projectToolResult(rules, "Write", "ok", false).output).toMatch(
+    expect(projectToolResult(rules, createToolRuleState(), "Write", "ok", false).output).toMatch(
       /\[harness reminder verify\] Re-open the file\.$/
     )
-    expect(projectToolResult(rules, "Write", "disk full", true).appliedRuleIds).toEqual([])
+    expect(
+      projectToolResult(rules, createToolRuleState(), "Write", "disk full", true).appliedRuleIds
+    ).toEqual([])
   })
 
   it("never rewrites a non-text result", () => {
-    expect(projectToolResult(rules, "Read", [{ type: "image" }], false)).toEqual({
+    expect(
+      projectToolResult(rules, createToolRuleState(), "Read", [{ type: "image" }], false)
+    ).toEqual({
       changed: false,
       output: "",
       appliedRuleIds: [],
@@ -174,7 +200,8 @@ describe("rule presence", () => {
     expect(hasPreToolRules(rules)).toBe(true)
     expect(hasResultRules(rules)).toBe(true)
     expect(hasPreToolRules([rules[1]])).toBe(false)
-    expect(hasResultRules([rules[0]])).toBe(false)
+    expect(hasResultRules([rules[0]])).toBe(true)
+    expect(hasResultRules([])).toBe(false)
     expect(hasPreToolRules(undefined)).toBe(false)
   })
 })

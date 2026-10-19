@@ -7,7 +7,9 @@
  *
  * - `error-hint`        a recurring error signature gets a targeted hint
  * - `trim-output`       a noisy result is cut down before it crowds context
- * - `call-cap`          a runaway tool is denied past N calls, with a reason
+ * - `call-cap`          a runaway tool is stopped past N calls per turn, with a reason:
+ *                        denied at a permission gate, or its result withheld when
+ *                        the call never reached one
  * - `verify-after-write` a write is followed by a reminder to re-check it
  *
  * Every rule can only add text, shorten a result or deny a call. Nothing here
@@ -172,7 +174,10 @@ export function toolMatches(pattern: string, toolName: string): boolean {
   return pattern === toolName
 }
 
-/** Per-turn counters for `call-cap` rules. */
+/**
+ * Per-turn counters for `call-cap` rules: how many calls of each capped tool
+ * actually ran this turn. A call the gate denied does not count.
+ */
 export interface ToolRuleState {
   calls: Map<string, number>
 }
@@ -184,9 +189,14 @@ export function createToolRuleState(): ToolRuleState {
 export type PreToolDecision =
   { action: "allow" } | { action: "deny"; reason: string; ruleId: string }
 
+function capReason(rule: Extract<HarnessToolRule, { kind: "call-cap" }>, toolName: string): string {
+  return `${rule.reason} (harness rule ${rule.id}: ${toolName} is limited to ${rule.maxCalls} calls per turn)`
+}
+
 /**
- * Decide a call before it runs. Counts the call when it is allowed, so a capped
- * tool's denied attempts do not keep raising its count.
+ * Decide a call before it runs, for the calls that reach a pre-execution gate
+ * (a permission request). Reads the counter; {@link projectToolResult} is what
+ * advances it, once the call has run.
  */
 export function evaluatePreToolUse(
   rules: readonly HarnessToolRule[],
@@ -195,20 +205,9 @@ export function evaluatePreToolUse(
 ): PreToolDecision {
   for (const rule of rules) {
     if (rule.kind !== "call-cap" || !toolMatches(rule.tool, toolName)) continue
-    const key = `${rule.id}:${toolName}`
-    const used = state.calls.get(key) ?? 0
-    if (used >= rule.maxCalls) {
-      return {
-        action: "deny",
-        ruleId: rule.id,
-        reason: `${rule.reason} (harness rule ${rule.id}: ${toolName} is limited to ${rule.maxCalls} calls per turn)`,
-      }
+    if ((state.calls.get(`${rule.id}:${toolName}`) ?? 0) >= rule.maxCalls) {
+      return { action: "deny", ruleId: rule.id, reason: capReason(rule, toolName) }
     }
-  }
-  for (const rule of rules) {
-    if (rule.kind !== "call-cap" || !toolMatches(rule.tool, toolName)) continue
-    const key = `${rule.id}:${toolName}`
-    state.calls.set(key, (state.calls.get(key) ?? 0) + 1)
   }
   return { action: "allow" }
 }
@@ -249,13 +248,36 @@ export interface ToolResultProjection {
   appliedRuleIds: string[]
 }
 
-/** Apply the result-side rules to one tool result. Pure. */
+/**
+ * Apply the result-side rules to one tool result, and count the call against
+ * any `call-cap` covering it.
+ *
+ * A call past its cap that ran anyway (an auto-allowed tool never reaches a
+ * pre-execution gate) has its result withheld and replaced by the cap's reason:
+ * the model gets the teaching message instead of more of what kept it looping.
+ * Every other rule only reshapes text, so a non-text result is left alone
+ * (though it is still counted).
+ */
 export function projectToolResult(
   rules: readonly HarnessToolRule[],
+  state: ToolRuleState,
   toolName: string,
   result: unknown,
   isError: boolean
 ): ToolResultProjection {
+  for (const rule of rules) {
+    if (rule.kind !== "call-cap" || !toolMatches(rule.tool, toolName)) continue
+    const key = `${rule.id}:${toolName}`
+    const used = (state.calls.get(key) ?? 0) + 1
+    state.calls.set(key, used)
+    if (used > rule.maxCalls) {
+      return {
+        changed: true,
+        output: `[harness rule ${rule.id}] Result withheld. ${capReason(rule, toolName)}`,
+        appliedRuleIds: [rule.id],
+      }
+    }
+  }
   const original = toolResultText(result)
   if (original === null) return { changed: false, output: "", appliedRuleIds: [] }
   let body = original
@@ -294,7 +316,7 @@ export function hasPreToolRules(rules: readonly HarnessToolRule[] | undefined): 
   return (rules ?? []).some((r) => r.kind === "call-cap")
 }
 
-/** Rules a run should apply to results (everything but `call-cap`). */
+/** Rules a run should apply to results: all of them, since results advance call caps. */
 export function hasResultRules(rules: readonly HarnessToolRule[] | undefined): boolean {
-  return (rules ?? []).some((r) => r.kind !== "call-cap")
+  return (rules ?? []).length > 0
 }

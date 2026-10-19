@@ -89,6 +89,7 @@ export interface BuildEvidenceInput {
   degraded: boolean
   error?: string
   traceId?: string
+  caveats?: readonly string[]
 }
 
 function capText(text: string, max: number): string {
@@ -152,6 +153,7 @@ export function buildExecutionEvidence(input: BuildEvidenceInput): HarnessExecut
     delivered,
     ...(input.error ? { error: redactEvidenceText(input.error) } : {}),
     ...(input.traceId ? { traceId: input.traceId } : {}),
+    ...(input.caveats?.length ? { caveats: [...input.caveats] } : {}),
   }
 }
 
@@ -195,6 +197,7 @@ export function renderRolloutMarkdown(label: string, evidence: HarnessExecutionE
   ]
   if (evidence.degraded) lines.push("- degraded: the run had no tools or no working directory")
   if (evidence.error) lines.push(`- error: ${evidence.error}`)
+  for (const caveat of evidence.caveats ?? []) lines.push(`- caveat: ${caveat}`)
   if (evidence.validation.length) {
     lines.push("", "## Checks", "")
     for (const v of evidence.validation) {

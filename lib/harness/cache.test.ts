@@ -1,6 +1,7 @@
 import type { HarnessEvolutionStep, HarnessExecutionEvidence } from "@/types/harness/evolution"
 import {
   ROLLOUT_REUSE_MAX_AGE_MS,
+  isInfrastructureError,
   pickReusableRollout,
   rolloutCacheKey,
   rolloutReuseVerdict,
@@ -87,5 +88,15 @@ describe("pickReusableRollout", () => {
     const broken = step({ id: "c", endedAt: 1_900, status: "failed" })
     expect(pickReusableRollout([old, broken, fresh], "key", 2_000)?.id).toBe("b")
     expect(pickReusableRollout([broken], "key", 2_000)).toBeUndefined()
+  })
+})
+
+describe("isInfrastructureError", () => {
+  it("separates outages from failures the harness caused", () => {
+    expect(isInfrastructureError("Request timed out after 600s")).toBe(true)
+    expect(isInfrastructureError("429 rate limit exceeded")).toBe(true)
+    expect(isInfrastructureError("The provider is overloaded")).toBe(true)
+    expect(isInfrastructureError("The turn ended with error_max_turns")).toBe(false)
+    expect(isInfrastructureError(undefined)).toBe(false)
   })
 })

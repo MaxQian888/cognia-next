@@ -200,6 +200,8 @@ export interface HarnessRunDecision {
   chosenSnapshotId?: string
   /** Risk class of the chosen harness's diff against the base. */
   risk?: HarnessRiskClass
+  /** What made it that class, one line per change. */
+  riskReasons?: string[]
   /** Whether a person must approve before adoption. */
   requiresApproval: boolean
 }
@@ -214,6 +216,13 @@ export interface HarnessRunAdoption {
   targetCharacterId?: string
   variantCreated?: boolean
   setAsWorkspaceDefault?: boolean
+  /** Workspace scope: the project's default agent before, `null` when it had none. */
+  previousWorkspaceDefaultId?: string | null
+  /** Session scope: the conversation that was switched, and the agent it had. */
+  sessionId?: string
+  previousCharacterId?: string
+  /** Who let the harness in: a person, or the low-risk auto-adopt setting. */
+  approvedBy: "person" | "auto-low-risk"
   decisionId?: string
   adoptedAt: number
   rolledBackAt?: number
@@ -242,7 +251,12 @@ export interface HarnessEvolutionRun {
   finalLabels: string[]
   decision?: HarnessRunDecision
   adoption?: HarnessRunAdoption
+  /** Lessons this run produced or reinforced. */
   experienceIds: string[]
+  /** Lessons the editors were given from the library. */
+  retrievedExperienceIds?: string[]
+  /** Why a sequential run ended before its last round (converged, budget). */
+  stopReason?: string
   ledger: HarnessBudgetLedger
   /** Why a terminal non-success status was reached. */
   error?: string
@@ -324,6 +338,52 @@ export interface HarnessExecutionEvidence {
   error?: string
   /** Trace id of the run's spans, when tracing captured it. */
   traceId?: string
+  /**
+   * Conditions that limit what the rollout shows, stated so an editor and a
+   * person do not over-read it (e.g. tool rules observed but not enforced on
+   * this runtime, a budget the runtime could not enforce).
+   */
+  caveats?: string[]
+}
+
+/** How the final selection reached its decision, for the run viewer. */
+export interface HarnessSelectionRecord {
+  method: "deterministic" | "judge" | "tie-break" | "no-candidate"
+  /** Finals that did worse than the base's worst rollout. */
+  regressed: string[]
+  /** Finals that beat every base rollout. */
+  dominant: string[]
+  /** Finals left out because they were identical to the base harness. */
+  unchanged: string[]
+  /** Anonymous id → label, when a judge ran. */
+  anonymized?: Record<string, string>
+  verdict?: {
+    best: string
+    ranking: string[]
+    confidence: "high" | "medium" | "low"
+    evidence: Record<string, string>
+  }
+}
+
+/** What the reflection attributed, for the run viewer and the library. */
+export interface HarnessReflectionRecord {
+  edits: {
+    component: string
+    candidates: string[]
+    change: string
+    observed: string
+    verdict: "helped" | "hurt" | "no observed effect" | "confounded"
+  }[]
+  /** Verdicts on the lessons the editors were given. */
+  retrieved: { id: string; verdict: "helped" | "hurt" | "no observed effect" }[]
+  /** The library entry the lesson was stored as or merged into. */
+  experienceId?: string
+  /** Set when the stored entry was merged into an existing one. */
+  mergedInto?: string
+  /** Entries the new lesson contradicts. */
+  conflictsWith?: string[]
+  /** Why the reflector's lesson was not kept. */
+  droppedExperience?: string
 }
 
 export interface HarnessEvolutionStep {
@@ -351,6 +411,10 @@ export interface HarnessEvolutionStep {
   inputTokens: number
   outputTokens: number
   modelCalls: number
+  /** Select: how the decision was reached. */
+  selection?: HarnessSelectionRecord
+  /** Reflect: the attribution and what the library did with it. */
+  reflection?: HarnessReflectionRecord
   /** Rollouts: the step whose evidence was reused, and the key it matched. */
   cacheHitOf?: string
   cacheKey?: string

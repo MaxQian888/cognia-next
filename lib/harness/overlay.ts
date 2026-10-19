@@ -96,7 +96,13 @@ export interface MaterializedHarnessRun {
 export function materializeHarnessRun(
   snapshot: Pick<HarnessSnapshotV1, "id" | "components">,
   base: Character,
-  now: number
+  now: number,
+  /**
+   * Skill ids of the base that are not part of the editable harness (product
+   * built-ins, disabled or missing rows). They load exactly as they do for the
+   * agent, so a probe sees the same skill set it would after adoption.
+   */
+  carriedSkillIds: readonly string[] = []
 ): MaterializedHarnessRun {
   const { components } = snapshot
   const character: Character = {
@@ -111,8 +117,8 @@ export function materializeHarnessRun(
     },
     // Every skill of the snapshot arrives through the overlay; the library
     // rows the base references must not also load, or a modified skill would
-    // be present twice (old and new).
-    skillIds: [],
+    // be present twice (old and new). Only the skills outside the harness stay.
+    skillIds: [...carriedSkillIds],
   }
   delete character.variant
   return {

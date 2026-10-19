@@ -3,8 +3,15 @@
  * production module imports this file.
  */
 
-import type { HarnessEvolutionTask } from "@/types/harness/evolution"
+import type {
+  HarnessEvolutionRun,
+  HarnessEvolutionRunConfig,
+  HarnessEvolutionTask,
+  HarnessExecutionEvidence,
+} from "@/types/harness/evolution"
+import type { HarnessExperience } from "@/types/harness/experience"
 import type { HarnessComponentsV1, HarnessSkillV1 } from "@/types/harness/snapshot"
+import { DEFAULT_HARNESS_BUDGET, emptyLedger } from "./budget"
 
 export function makeSkill(overrides: Partial<HarnessSkillV1> = {}): HarnessSkillV1 {
   return {
@@ -56,6 +63,118 @@ export function makeTask(overrides: Partial<HarnessEvolutionTask> = {}): Harness
     checks: [{ kind: "deliverable-file", path: "report.md" }],
     source: { kind: "custom" },
     inputHash: "task-hash",
+    ...overrides,
+  }
+}
+
+export function makeRunConfig(
+  overrides: Partial<HarnessEvolutionRunConfig> = {}
+): HarnessEvolutionRunConfig {
+  return {
+    mode: "parallel",
+    k: 1,
+    scope: "task",
+    editable: ["systemPrompt", "guardrails", "memory", "toolGuidance", "skills"],
+    models: {},
+    budget: { ...DEFAULT_HARNESS_BUDGET },
+    autoAdoptLowRisk: false,
+    useExperiences: true,
+    editorChannel: "structured",
+    probe: { allowedMcpServerIds: [], networkOff: false },
+    seed: 7,
+    ...overrides,
+  }
+}
+
+export function makeRun(overrides: Partial<HarnessEvolutionRun> = {}): HarnessEvolutionRun {
+  return {
+    id: "run-1",
+    characterId: "agent-1",
+    characterName: "Analyst",
+    trigger: "manual",
+    task: makeTask(),
+    config: makeRunConfig(),
+    status: "queued",
+    round: 0,
+    finalLabels: [],
+    experienceIds: [],
+    ledger: emptyLedger(),
+    dedupeKey: "hrd1-x",
+    version: 1,
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  }
+}
+
+export function makeEvidence(
+  overrides: Partial<HarnessExecutionEvidence> = {}
+): HarnessExecutionEvidence {
+  return {
+    snapshotId: "snap-base",
+    inputFingerprint: "task-hash",
+    environmentFingerprint: "hef1-env",
+    output: "Wrote report.md",
+    trajectory: '[ACTION] Write {"file_path":"report.md"}\n[OBSERVATION] ok',
+    deliverables: [{ path: "report.md", bytes: 8, text: "# Report" }],
+    metrics: {
+      inputTokens: 1000,
+      outputTokens: 200,
+      cacheReadTokens: 0,
+      costUsd: 0.01,
+      latencyMs: 5000,
+      toolCalls: 3,
+      toolFailures: 0,
+      steps: 3,
+    },
+    validation: [{ check: "deliverable report.md", passed: true, status: "passed" }],
+    blockedActions: [],
+    delegations: [],
+    degraded: false,
+    delivered: true,
+    ...overrides,
+  }
+}
+
+export function makeExperience(overrides: Partial<HarnessExperience> = {}): HarnessExperience {
+  return {
+    id: "exp-1",
+    scope: "agent",
+    characterId: "agent-1",
+    domain: "office/reports",
+    problemPattern: "CSV inputs use semicolon separators and the agent parses them as commas",
+    lesson: "memory.md: state that CSV files may use ; and to check the header first",
+    evidenceSummary: "base1 misparsed data.csv; dom1 with the note parsed it",
+    confidence: "medium",
+    applicableConditions: ["csv input"],
+    excludedConditions: ["excel files"],
+    components: ["memory"],
+    edits: [
+      {
+        component: "memory.md",
+        candidates: ["dom1"],
+        change: "note on separators",
+        observed: "dom1 parsed the file",
+        verdict: "helped",
+      },
+    ],
+    baseSnapshotId: "snap-base",
+    evidenceRefs: ["run-0:dom1"],
+    sourceRunId: "run-0",
+    changeSummary: "memory.md: note on separators (helped)",
+    observedBenefits: ["dom1 parsed the file"],
+    knownLimitations: [],
+    validationStatus: "proposed",
+    runtimeFingerprint: "hrf1-a",
+    tags: ["csv"],
+    supportRunIds: ["run-0"],
+    conflictsWith: [],
+    retrievedCount: 0,
+    helpedCount: 0,
+    hurtCount: 0,
+    disabled: false,
+    createdAt: 1,
+    updatedAt: 1,
     ...overrides,
   }
 }

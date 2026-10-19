@@ -2,11 +2,14 @@
  * The run state machine (ADR-0237).
  *
  *   queued → snapshotting → reference_running → proposing ⇄ probing ⇄ composing
- *          → evaluating → awaiting_approval → adopting → reflecting → completed
+ *          → evaluating → reflecting → awaiting_approval → adopting → completed
  *
- * Sequential runs loop proposing → probing → composing once per round; a
- * keep-base decision goes from evaluating straight to reflecting; a low-risk
- * decision the settings allow to auto-adopt skips awaiting_approval. Every
+ * Sequential runs loop proposing → probing → composing once per round.
+ * Reflection runs right after the decision, before the run waits on a person,
+ * so every model call is spent while the run is still active and an approval
+ * that takes days holds no work. A keep-base decision ends after reflecting; a
+ * low-risk decision the settings allow to auto-adopt skips awaiting_approval.
+ * A reflection that fails does not fail the run. Every
  * non-terminal status can fail, be cancelled, exceed its budget or be
  * interrupted (the app quit holding its lease); an interrupted run resumes into
  * the phase its steps say it reached. A completed run that adopted a harness can
@@ -65,10 +68,10 @@ const TRANSITIONS: Record<HarnessRunStatus, readonly HarnessRunStatus[]> = {
   proposing: ["probing", "composing", ...ABORTS],
   probing: ["proposing", "composing", "evaluating", ...ABORTS],
   composing: ["probing", "proposing", "evaluating", ...ABORTS],
-  evaluating: ["awaiting_approval", "adopting", "reflecting", "completed", ...ABORTS],
+  evaluating: ["reflecting", ...ABORTS],
+  reflecting: ["awaiting_approval", "adopting", "completed", ...ABORTS],
   awaiting_approval: ["adopting", "rejected", "cancelled", "failed"],
-  adopting: ["reflecting", "completed", ...ABORTS],
-  reflecting: ["completed", ...ABORTS],
+  adopting: ["completed", ...ABORTS],
   interrupted: [...WORK_PHASES, "awaiting_approval", "failed", "cancelled", "budget_exceeded"],
   completed: ["rolled_back"],
   failed: [],
@@ -113,6 +116,8 @@ export type HarnessRunPatch = Partial<
     | "decision"
     | "adoption"
     | "experienceIds"
+    | "retrievedExperienceIds"
+    | "stopReason"
     | "ledger"
     | "error"
     | "owner"

@@ -88,6 +88,39 @@ function result(
   }
 }
 
+/**
+ * The JSON object in a model's answer: the whole text, a fenced block, or the
+ * first balanced `{…}` in prose ("Here is my answer: {…}"). For reading model
+ * answers only; a task's `output-json` check stays strict.
+ */
+export function extractEmbeddedJsonObject(text: string): unknown {
+  const direct = extractJsonObject(text)
+  if (direct !== undefined) return direct
+  for (let start = text.indexOf("{"); start >= 0; start = text.indexOf("{", start + 1)) {
+    let depth = 0
+    let inString = false
+    let escaped = false
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i]
+      if (inString) {
+        if (escaped) escaped = false
+        else if (ch === "\\") escaped = true
+        else if (ch === '"') inString = false
+        continue
+      }
+      if (ch === '"') inString = true
+      else if (ch === "{") depth++
+      else if (ch === "}" && --depth === 0) {
+        try {
+          return JSON.parse(text.slice(start, i + 1))
+        } catch {
+          break
+        }
+      }
+    }
+  }
+  return undefined
+}
 export function runTaskCheck(
   check: HarnessTaskCheck,
   input: TaskCheckInput

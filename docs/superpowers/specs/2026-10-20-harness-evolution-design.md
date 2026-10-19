@@ -142,7 +142,7 @@ scope. Steps are rollouts and editor sessions labelled exactly like Harness²
 identity R = 4k, P = 3k is checkable.
 
 State machine: `queued → snapshotting → reference_running → proposing → probing →
-composing → evaluating → awaiting_approval → adopting → reflecting → completed`, plus
+composing → evaluating → reflecting → awaiting_approval → adopting → completed`, plus
 `failed`, `cancelled`, `budget_exceeded`, `rejected`, `rolled_back` and `interrupted`
 (resumable). Sequential runs loop proposing/probing/composing per round. Each step is
 idempotent by label; on resume a completed step is reused, an in-flight rollout becomes

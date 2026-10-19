@@ -41,6 +41,15 @@ export async function rolloutCacheKey(input: RolloutCacheKeyInput): Promise<stri
 const INFRASTRUCTURE_ERROR =
   /\b(timed? ?out|timeout|aborted|cancel|sidecar|network|ECONN|rate.?limit|overloaded|5\d\d)\b/i
 
+/**
+ * Whether a rollout's error says it never got a fair attempt (a timeout, a
+ * provider outage, a rate limit). Such a rollout is neither reused nor
+ * counted as evidence about its harness.
+ */
+export function isInfrastructureError(message: string | undefined): boolean {
+  return !!message && INFRASTRUCTURE_ERROR.test(message)
+}
+
 export type RolloutReuseVerdict = { reuse: true } | { reuse: false; reason: string }
 
 /** Whether a stored rollout may stand in for a new one with the same key. */
@@ -55,7 +64,7 @@ export function rolloutReuseVerdict(
   if (step.status !== "succeeded" || !step.evidence) {
     return { reuse: false, reason: "the rollout did not finish" }
   }
-  if (step.evidence.error && INFRASTRUCTURE_ERROR.test(step.evidence.error)) {
+  if (isInfrastructureError(step.evidence.error)) {
     return { reuse: false, reason: "the rollout failed for infrastructure reasons" }
   }
   const age = now - (step.endedAt ?? 0)

@@ -1,4 +1,12 @@
-import { makeComponents, makeSkill, makeTask } from "./test-fixtures"
+import {
+  makeComponents,
+  makeEvidence,
+  makeExperience,
+  makeRun,
+  makeRunConfig,
+  makeSkill,
+  makeTask,
+} from "./test-fixtures"
 import { validateHarnessCandidate } from "./validate"
 import { HARNESS_COMPONENT_NAMES } from "@/types/harness/snapshot"
 
@@ -20,5 +28,10 @@ describe("harness test fixtures", () => {
     expect(makeSkill({ key: "other" }).key).toBe("other")
     expect(makeComponents({ skills: [] }).skills).toEqual([])
     expect(makeTask({ domain: "coding" }).domain).toBe("coding")
+    expect(makeRunConfig({ k: 3 }).k).toBe(3)
+    expect(makeRun({ status: "probing" }).status).toBe("probing")
+    expect(makeRun().config.editable).not.toContain("toolRules")
+    expect(makeEvidence({ delivered: false }).delivered).toBe(false)
+    expect(makeExperience({ id: "e2" }).id).toBe("e2")
   })
 })

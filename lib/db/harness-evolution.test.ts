@@ -301,7 +301,7 @@ describe("pruneHarnessHistory", () => {
         status: "completed",
         createdAt: 1,
         baseSnapshotId: "root",
-        adoption: { scope: "session", adoptedAt: 1 },
+        adoption: { scope: "session", adoptedAt: 1, approvedBy: "person" },
       })
     )
     await createHarnessRun(

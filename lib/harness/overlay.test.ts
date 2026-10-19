@@ -70,4 +70,14 @@ describe("materializeHarnessRun", () => {
     expect(byId.get("harness:snap-2:csv-report")?.[0].path).toBe("scripts/summarize.py")
     expect(overlayResourcesById(undefined).size).toBe(0)
   })
+
+  it("keeps the skills outside the harness exactly as the agent loads them", () => {
+    const { character } = materializeHarnessRun(
+      { id: "snap-3", components: makeComponents() },
+      base,
+      9,
+      ["builtin-x", "disabled-y"]
+    )
+    expect(character.skillIds).toEqual(["builtin-x", "disabled-y"])
+  })
 })

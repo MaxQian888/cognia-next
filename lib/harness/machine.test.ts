@@ -83,18 +83,21 @@ describe("run statuses", () => {
       "composing",
       "probing",
       "evaluating",
+      "reflecting",
       "awaiting_approval",
       "adopting",
-      "reflecting",
       "completed",
       "rolled_back",
     ]
     for (let i = 1; i < path.length; i++) expect(canTransition(path[i - 1], path[i])).toBe(true)
   })
 
-  it("allows keep-base and auto-adopt shortcuts but nothing out of a terminal status", () => {
+  it("reflects before approval, allows keep-base and auto-adopt shortcuts, nothing out of a terminal status", () => {
     expect(canTransition("evaluating", "reflecting")).toBe(true)
-    expect(canTransition("evaluating", "adopting")).toBe(true)
+    expect(canTransition("evaluating", "adopting")).toBe(false)
+    expect(canTransition("reflecting", "completed")).toBe(true)
+    expect(canTransition("reflecting", "adopting")).toBe(true)
+    expect(canTransition("adopting", "reflecting")).toBe(false)
     expect(canTransition("awaiting_approval", "rejected")).toBe(true)
     expect(canTransition("queued", "evaluating")).toBe(false)
     for (const status of [

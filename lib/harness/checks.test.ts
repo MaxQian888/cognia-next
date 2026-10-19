@@ -2,6 +2,7 @@ import type { HarnessTaskCheck } from "@/types/harness/evolution"
 import {
   checkTally,
   describeCheck,
+  extractEmbeddedJsonObject,
   extractJsonObject,
   isDelivered,
   runTaskCheck,
@@ -59,6 +60,17 @@ describe("runTaskCheck", () => {
       status: "failed",
       detail: "2 tests failed",
     })
+  })
+})
+
+describe("extractEmbeddedJsonObject", () => {
+  it("also finds the first balanced object in prose", () => {
+    expect(extractEmbeddedJsonObject('{"a":1}')).toEqual({ a: 1 })
+    expect(extractEmbeddedJsonObject('Sure! {"a":{"b":"}"}} trailing')).toEqual({ a: { b: "}" } })
+    expect(extractEmbeddedJsonObject('{broken} then {"ok":true}')).toEqual({ ok: true })
+    expect(extractEmbeddedJsonObject('say "\\"{" {"x":"\\"q"}')).toEqual({ x: '"q' })
+    expect(extractEmbeddedJsonObject("{ never closed")).toBeUndefined()
+    expect(extractEmbeddedJsonObject("nothing")).toBeUndefined()
   })
 })
 
