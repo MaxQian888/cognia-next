@@ -67,6 +67,17 @@ describe("TrustPage", () => {
     render(<TrustPage locale="zh" />)
     expect(screen.getByRole("heading", { name: zh.trust.evidence.title })).toBeInTheDocument()
   })
+
+  it("ends on the close band, not on the footer with nowhere to go", () => {
+    const { container } = render(<TrustPage locale="en" />)
+    const main = container.querySelector("main") ?? container
+    const sections = main.querySelectorAll(":scope > section, :scope > * > section")
+    const last = sections[sections.length - 1]
+    expect(last?.querySelector('[data-slot="page-close"]')).not.toBeNull()
+    expect(
+      screen.getByRole("heading", { level: 2, name: en.common.pageClose.title })
+    ).toBeInTheDocument()
+  })
 })
 
 /** Escape a claim string for use inside an accessible-name RegExp. */

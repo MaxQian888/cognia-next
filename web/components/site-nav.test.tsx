@@ -96,7 +96,54 @@ describe("SiteNav product menu", () => {
   })
 })
 
+describe("SiteNav use-case menu", () => {
+  it("links the two scenario pages, which no other route reaches", () => {
+    renderNav()
+    const trigger = screen.getByRole("button", { name: en.nav.useCasesMenu.label })
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(trigger)
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+    for (const item of en.nav.useCasesMenu.items) {
+      expect(screen.getByRole("link", { name: new RegExp(item.label) })).toHaveAttribute(
+        "href",
+        item.route
+      )
+    }
+  })
+
+  it("keeps each dropdown's state its own", () => {
+    renderNav()
+    const product = screen.getByRole("button", { name: en.nav.productMenu.label })
+    const useCases = screen.getByRole("button", { name: en.nav.useCasesMenu.label })
+    fireEvent.click(useCases)
+    expect(product).toHaveAttribute("aria-expanded", "false")
+    expect(useCases).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("closes once a destination in it is followed", () => {
+    renderNav()
+    const trigger = screen.getByRole("button", { name: en.nav.useCasesMenu.label })
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole("link", { name: /Research/ }))
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("lists /surfaces under Product", () => {
+    renderNav()
+    fireEvent.click(screen.getByRole("button", { name: en.nav.productMenu.label }))
+    expect(screen.getByRole("link", { name: /Surfaces/ })).toHaveAttribute("href", "/surfaces")
+  })
+})
+
 describe("SiteNav mobile sheet", () => {
+  it("groups the sheet's menu entries under their menu names", () => {
+    renderNav()
+    fireEvent.click(screen.getByRole("button", { name: en.nav.openMenu }))
+    const sheet = document.getElementById("site-nav-sheet") as HTMLElement
+    expect(within(sheet).getByText(en.nav.productMenu.label)).toBeInTheDocument()
+    expect(within(sheet).getByText(en.nav.useCasesMenu.label)).toBeInTheDocument()
+  })
+
   it("opens and closes from the menu button", () => {
     renderNav()
     const trigger = screen.getByRole("button", { name: en.nav.openMenu })
@@ -154,6 +201,7 @@ describe("SiteNav mobile sheet", () => {
     fireEvent.click(screen.getByRole("button", { name: en.nav.openMenu }))
     const labels = [
       ...en.nav.productMenu.items.map((i) => i.label),
+      ...en.nav.useCasesMenu.items.map((i) => i.label),
       ...en.nav.links.map((l) => l.label),
       en.nav.sourceLabel,
     ]

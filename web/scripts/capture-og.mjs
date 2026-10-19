@@ -50,6 +50,7 @@ export const OG_ROUTES = [
     slug: "use-cases-research",
     eyebrowKey: "research",
   },
+  { route: "/surfaces", metaKey: "surfaces", slug: "surfaces", eyebrowKey: "surfaces" },
   { route: "/changelog", metaKey: "changelog", slug: "changelog", eyebrowKey: "changelog" },
 ]
 

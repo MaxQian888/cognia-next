@@ -9,7 +9,9 @@ jest.mock("motion/react", () => ({
 import { render, screen } from "@testing-library/react"
 import { en } from "@web/content/en"
 import { zh } from "@web/content/zh"
-import { SplitReveal, splitStagger, splitWords, type SplitToken } from "./split-reveal"
+import cjkWords from "@web/content/generated/cjk-words.json"
+import { normalizeTitle, wordStarts } from "@web/lib/cjk-words"
+import { SplitReveal, cjkGlue, splitStagger, splitWords, type SplitToken } from "./split-reveal"
 
 const words = (tokens: SplitToken[]) =>
   tokens.map((token) => (token.kind === "word" ? token.text : " "))
@@ -101,14 +103,44 @@ describe("splitWords", () => {
     for (const title of [
       en.home.hero.title,
       zh.home.hero.title,
-      en.home.film.title,
-      zh.home.film.title,
+      en.home.signature.title,
+      zh.home.signature.title,
     ]) {
       const joined = splitWords(title)
         .map((token) => (token.kind === "word" ? token.text : " "))
         .join("")
       expect(joined).toBe(title.trim().replace(/\s+/gu, " "))
     }
+  })
+})
+
+describe("cjkGlue", () => {
+  const segmenter = new Intl.Segmenter("zh", { granularity: "word" })
+  /** Rejoin the units, with "|" wherever a line may break between two of them. */
+  const breaks = (text: string, starts = wordStarts(normalizeTitle(text), segmenter)) => {
+    const tokens = splitWords(text)
+    const glue = cjkGlue(tokens, starts)
+    return tokens
+      .map((token, i) => {
+        if (token.kind === "space") return " "
+        const seam = i < tokens.length - 1 && tokens[i + 1].kind === "word" && !glue[i]
+        return token.text + (seam ? "|" : "")
+      })
+      .join("")
+  }
+
+  it("keeps each Chinese word on one line and allows breaks only between words", () => {
+    expect(breaks("在任何地方做决定。")).toBe("在|任何|地方|做|决定。")
+  })
+
+  it("keeps punctuation with its word and never glues across a space or into Latin", () => {
+    expect(breaks("在桌面开工，在任何地方")).toBe("在|桌面|开工，|在|任何|地方")
+    expect(breaks("开放 AI Agent 工作空间")).toBe("开放 AI Agent 工作|空间")
+  })
+
+  it("glues nothing without boundaries or in a Latin headline", () => {
+    expect(cjkGlue(splitWords("在任何地方"), undefined).some(Boolean)).toBe(false)
+    expect(breaks("One task end to end.")).toBe("One task end to end.")
   })
 })
 
@@ -180,6 +212,25 @@ describe("SplitReveal", () => {
     reduced = true
     const { container } = render(<SplitReveal text="Watch one task." />)
     expect(container.querySelector("h2")).toHaveAttribute("data-split", "static")
+  })
+
+  it("groups a Chinese title's words in nowrap spans from the build's boundaries", () => {
+    const title = zh.surfaces.header.title
+    expect(cjkWords).toHaveProperty([normalizeTitle(title)])
+    const { container } = render(<SplitReveal as="h1" text={title} />)
+    const groups = [...container.querySelectorAll("[data-split-group]")]
+    expect(groups.map((group) => group.textContent)).toContain("任何")
+    expect(groups.every((group) => group.classList.contains("whitespace-nowrap"))).toBe(true)
+    // Grouping adds no text: the title still reads exactly once.
+    expect(container.querySelector("h1")?.textContent).toBe(title)
+    expect(container.querySelectorAll(".split-mask")).toHaveLength(
+      splitWords(title).filter((token) => token.kind === "word").length
+    )
+  })
+
+  it("leaves a Latin title ungrouped", () => {
+    const { container } = render(<SplitReveal text="One task end to end." />)
+    expect(container.querySelector("[data-split-group]")).toBeNull()
   })
 
   it("passes its class to the heading element", () => {

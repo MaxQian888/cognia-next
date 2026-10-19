@@ -56,6 +56,11 @@ export const en: SiteCopy = {
       description:
         "Every change written for the people it affects, aggregated from the repository's changeset entries.",
     },
+    surfaces: {
+      title: "Surfaces",
+      description:
+        "The desktop runs the work. A paired phone, your chat platforms, a terminal and a browser extension reach the same workspace, each with only what you granted it.",
+    },
   },
 
   nav: {
@@ -77,6 +82,26 @@ export const en: SiteCopy = {
           label: "Knowledge",
           route: "/product#knowledge",
           description: "Long-term memory, captured material and project context.",
+        },
+        {
+          label: "Surfaces",
+          route: "/surfaces",
+          description: "Phone, chat, terminal and browser reaching the same workspace.",
+        },
+      ],
+    },
+    useCasesMenu: {
+      label: "Use cases",
+      items: [
+        {
+          label: "Software development",
+          route: "/use-cases/development",
+          description: "Review a release, fix the failing check, draft the notes.",
+        },
+        {
+          label: "Research",
+          route: "/use-cases/research",
+          description: "Read sources, extract findings, keep every citation.",
         },
       ],
     },
@@ -107,9 +132,17 @@ export const en: SiteCopy = {
         links: [
           { label: "Chat", route: "/product#chat" },
           { label: "Agents", route: "/product#agents" },
-          { label: "Workflows", route: "/workflows" },
           { label: "Knowledge", route: "/product#knowledge" },
+          { label: "Surfaces", route: "/surfaces" },
+          { label: "Workflows", route: "/workflows" },
           { label: "Plugins", route: "/plugins" },
+        ],
+      },
+      {
+        title: "Use cases",
+        links: [
+          { label: "Software development", route: "/use-cases/development" },
+          { label: "Research", route: "/use-cases/research" },
         ],
       },
       {
@@ -132,6 +165,7 @@ export const en: SiteCopy = {
         title: "Resources",
         links: [
           { label: "Docs", docsPath: "/docs" },
+          { label: "Questions", route: "/#faq" },
           { label: "Trust", route: "/trust" },
           {
             label: "Security",
@@ -167,12 +201,18 @@ export const en: SiteCopy = {
     readDocs: "Read the docs",
     asOf: "as of {date}",
     stale: "last successful read {date}",
-    learnMore: "Learn more",
+    learnMore: "Read the docs",
+    openPage: "Open the page",
     contextPathLabel: "Shared context path across the workbench",
     breadcrumbHome: "Home",
     onThisPage: "On this page",
     copyCommand: "Copy",
     copiedCommand: "Copied",
+    pageClose: {
+      eyebrow: "Try it",
+      title: "Run it on your own machine.",
+      body: "Clone the repository and build the desktop app. Every part this page names is documented in full.",
+    },
   },
 
   footage: {
@@ -309,14 +349,36 @@ export const en: SiteCopy = {
         ],
       },
     },
+    agents: {
+      teamLabel: "Agent team",
+      leadLabel: "Lead",
+      members: [
+        { name: "Lead", role: "Plans the review and merges results", state: "Awaiting approval" },
+        { name: "Fixer", role: "Repairs the failing check", state: "Done" },
+        { name: "Tester", role: "Re-runs the check", state: "Running" },
+        { name: "Writer", role: "Drafts the launch notes", state: "Queued" },
+      ],
+      toolsLabel: "Tools",
+      reviewLabel: "Review gate",
+      reviewBody: "The lead reviews every teammate's change before the push is proposed.",
+    },
+    memory: {
+      panelLabel: "Long-term memory",
+      searchQuery: "checkout rounding",
+      entries: [
+        { text: "JPY has no minor units: round totals to whole yen.", state: "Kept" },
+        { text: "Release branches are named release/<major>.<minor>.<patch>.", state: "Kept" },
+        { text: "Launch notes for each release go in launch-notes.md.", state: "Awaiting review" },
+      ],
+      sourceLabel: "Source",
+      pendingLabel: "Reviewed before it is kept",
+    },
   },
 
   home: {
     film: {
-      eyebrow: "The task, filmed",
-      title: "Watch one task run from request to approval.",
-      subtitle:
-        "Forty-four seconds of the real app: it reads the project, reproduces the failing check, shows the diff, passes the check, writes the notes — and stops before the push.",
+      label: "Full recording · {seconds} s",
+      lead: "The real app, start to finish: it reads the project, reproduces the failing check, shows the diff, passes the check, writes the notes — and stops before the push.",
       videoLabel:
         "Film: Cognia running the release task, from the request to the approval checkpoint on the push.",
       playLabel: "Play the film",
@@ -327,15 +389,6 @@ export const en: SiteCopy = {
       title: "Your open workspace for AI agents.",
       subtitle:
         "Connect your models and tools. Plan, act, and review every step in one desktop workbench.",
-      trustRail: [
-        { label: "Open source", detail: "AGPL-3.0-or-later, public repository" },
-        {
-          label: "Bring your models",
-          detail: "Local runtimes, your own keys, your own subscription",
-        },
-        { label: "Permissioned actions", detail: "Tools declare what they touch; you confirm" },
-        { label: "Desktop first", detail: "Local files, terminal, long-running tasks" },
-      ],
       ticket: {
         label: "The task on this page",
         repositoryLabel: "Repository",
@@ -350,7 +403,7 @@ export const en: SiteCopy = {
     },
 
     signature: {
-      eyebrow: "One task, end to end",
+      eyebrow: "The task, recorded",
       title: "One task. Every step visible.",
       subtitle: "Plan, tools, approvals, tests, and artifacts stay in one reviewable thread.",
       taskLabel: "Task",
@@ -423,6 +476,8 @@ export const en: SiteCopy = {
       playLabel: "Play",
       pauseLabel: "Pause",
       stepOf: "Step {current} of {total}",
+      useCasesLabel: "The same loop, through a whole scenario",
+      stepsLabel: "Or step through it at your own pace",
     },
 
     workbench: {
@@ -468,7 +523,7 @@ export const en: SiteCopy = {
       eyebrow: "Desktop first",
       title: "A workspace that stays close to the work.",
       subtitle:
-        "The work is on your machine: the files, the terminal, the repository, the tools. So is the workspace.",
+        "The work is on your machine: the files, the terminal, the repository and the tools. The workspace runs there too.",
       capabilities: [
         {
           label: "Files and projects",
@@ -492,7 +547,11 @@ export const en: SiteCopy = {
         },
       ],
       stageAlt:
-        "A close crop of the Cognia desktop shell: the command palette open over the integrated terminal, with a notification reporting a completed background task.",
+        "A close crop of the Cognia desktop app: every check has passed, the launch notes are drafted, and the approval to push release/2.4.0 is waiting for you.",
+      otherSurfaces: {
+        label: "Also reaches this workspace",
+        linkLabel: "See every surface",
+      },
     },
 
     run: {
@@ -515,7 +574,6 @@ export const en: SiteCopy = {
           leaves: "Nothing, when the endpoint is on your machine",
           receives: "The runtime you configured",
           tools: "The tools you grant the session",
-          approval: "Writes outside the project, and any external call",
           docsPath: "/docs/chat/provider-system",
         },
         {
@@ -525,7 +583,6 @@ export const en: SiteCopy = {
           leaves: "The prompt and the context you attach to it",
           receives: "The provider you chose",
           tools: "The tools you grant the session",
-          approval: "Writes outside the project, and any external call",
           docsPath: "/docs/chat/provider-system",
         },
         {
@@ -535,7 +592,6 @@ export const en: SiteCopy = {
           leaves: "The prompt and the context you attach to it",
           receives: "The subscription's provider",
           tools: "The tools that subscription's agent supports",
-          approval: "Writes outside the project, and any external call",
           docsPath: "/docs/chat/claude-subscription-oauth",
         },
         {
@@ -546,55 +602,11 @@ export const en: SiteCopy = {
           leaves: "The same context, to whichever route is selected",
           receives: "The next provider in your route",
           tools: "Unchanged by the switch",
-          approval: "Unchanged by the switch",
           docsPath: "/docs/chat/provider-system",
         },
       ],
-      note: "Local, offline, self-hosted and private are four different things. Each row above says which one it is.",
-    },
-
-    connections: {
-      eyebrow: "Connections with consequences",
-      title: "Connect tools without losing the task.",
-      subtitle:
-        "A connection is only useful if you can say what it reads, what it may do, and when it has to ask.",
-      headings: {
-        reads: "Reads",
-        canAct: "Can act",
-        requiresApproval: "Requires approval",
-      },
-      items: [
-        {
-          key: "repository",
-          name: "Repository",
-          reads: "Code, issues and the diff under review",
-          canAct: "Propose a branch, a commit, a pull request",
-          requiresApproval: "Anything pushed to the remote",
-        },
-        {
-          key: "mcp",
-          name: "MCP tool",
-          reads: "The inputs you pass to the call",
-          canAct: "Run the tool the server exposes",
-          requiresApproval: "First use, and any call marked sensitive",
-        },
-        {
-          key: "plugin",
-          name: "Plugin",
-          reads: "Only the capabilities its manifest declares",
-          canAct: "Produce or update an artifact in the workspace",
-          requiresApproval: "Every capability outside its declared set",
-        },
-        {
-          key: "im",
-          name: "Chat and notifications",
-          reads: "The messages addressed to it",
-          canAct: "Report progress and ask for a decision",
-          requiresApproval: "Acting on a reply that changes anything",
-        },
-      ],
-      catalogueNote:
-        "The full provider, MCP, plugin and connector catalogs live in the documentation rather than on this page.",
+      approvalShared:
+        "Writes outside the project, and any external call. The same under every strategy, and unchanged when a fallback switches models.",
       agents: {
         label: "Agent interop",
         note: "Run these agents inside the workspace over ACP, or import their existing session history. Each runs with the tools and permissions you grant it, and its steps land in the same reviewable thread.",
@@ -618,8 +630,7 @@ export const en: SiteCopy = {
     trust: {
       eyebrow: "Trust receipts",
       title: "Built in the open. Controlled in use.",
-      subtitle:
-        "Four things you can check yourself, without taking a marketing page's word for any of them.",
+      subtitle: "Source, data, permission and record: each one you can check yourself.",
       cards: [
         {
           key: "source",
@@ -650,13 +661,6 @@ export const en: SiteCopy = {
           route: "/trust",
         },
       ],
-      provenanceLabel: "How one action is accounted for",
-      provenance: [
-        { label: "Source", value: "The repository and the diff the agent read" },
-        { label: "Action", value: "The step that proposed the change" },
-        { label: "Permission", value: "The checkpoint you confirmed" },
-        { label: "Result", value: "The artifact, and the test output behind it" },
-      ],
       statsLabel: "From the repository",
       starsLabel: "Stars",
       contributorsLabel: "Contributors",
@@ -665,111 +669,226 @@ export const en: SiteCopy = {
       noReleasesYet: "None published yet",
     },
 
+    faq: {
+      eyebrow: "Questions",
+      title: "What people ask before they install it.",
+      items: [
+        {
+          key: "price",
+          question: "Is Cognia free?",
+          answer:
+            "Yes. The whole application is open source under AGPL-3.0-or-later, and there is no paid tier in the repository. If you pay for anything, it is the model you connect: a provider key, a subscription you already have, or nothing at all for a local runtime.",
+          link: {
+            label: "Read the license",
+            href: "https://github.com/MaxQian888/cognia-next/blob/master/LICENSE",
+          },
+        },
+        {
+          key: "install",
+          question: "Can I install it today?",
+          answer:
+            "The download page always shows the current state: an installer for your platform once a release is published, and until then the steps to build the desktop app from source on macOS, Windows or Linux.",
+          link: { label: "Open the download page", route: "/download" },
+        },
+        {
+          key: "models",
+          question: "Which models can I use?",
+          answer:
+            "Cloud providers with your own key, such as OpenAI, Anthropic, Google, DeepSeek, OpenRouter and Bedrock; subscriptions you already pay for; or local runtimes such as Ollama and LM Studio. Keys are kept in your operating system's keyring.",
+          link: { label: "Provider documentation", docsPath: "/docs/chat/provider-system" },
+        },
+        {
+          key: "data",
+          question: "Where does my data live?",
+          answer:
+            "On your machine. Conversations and workspace data are stored by the app locally, and search vectors in a SQLite file in its data directory. What leaves is what you send to the model you chose and the tools you approve. Account sync is optional, end-to-end encrypted, and still in beta.",
+          link: { label: "Storage documentation", docsPath: "/docs/data/storage" },
+        },
+        {
+          key: "agents",
+          question: "Does it work with the coding agent I already use?",
+          answer:
+            "Claude Code, Codex, Gemini CLI, OpenCode and others run inside the workspace through ACP or a dedicated adapter, and sessions from several of them can be imported. The run section above marks which agent supports which.",
+          link: { label: "External agents", docsPath: "/docs/chat/external-agents" },
+        },
+        {
+          key: "surfaces",
+          question: "Do the phone, chat and browser need the desktop app?",
+          answer:
+            "Yes. The desktop runs the work. A paired phone, your chat platforms, the terminal and the browser extension reach the same workspace, and each holds only the permissions you granted it.",
+          link: { label: "See every surface", route: "/surfaces" },
+        },
+        {
+          key: "contribute",
+          question: "How do I report a problem or contribute?",
+          answer:
+            "Open an issue or a pull request on GitHub. The contributing guide covers the setup, and security reports follow the security policy rather than the public tracker.",
+          link: {
+            label: "Contributing guide",
+            href: "https://github.com/MaxQian888/cognia-next/blob/master/CONTRIBUTING.md",
+          },
+        },
+      ],
+    },
     finalCta: {
       eyebrow: "Start here",
       title: "Bring your agents into one open workspace.",
-      support: "Desktop first. Open source. Built for real work.",
+      support: "License, platforms and release state, each checkable in the repository.",
       indexLabel: "What you get today",
       rows: [
-        { key: "license", label: "License" },
-        { key: "platforms", label: "Platforms" },
+        { key: "platforms", label: "Builds on" },
         { key: "release", label: "Latest release" },
         { key: "changes", label: "Changes waiting" },
       ],
-      changesSuffix: "entries since the last release",
+      changesSuffix: "entries recorded, not yet released",
+      buildLabel: "Build it from source",
     },
 
-    entryPoints: {
-      eyebrow: "One workspace, many entry points",
-      title: "Start on the desktop. Decide from wherever you are.",
+    sectionIndex: {
+      hero: "Overview",
+      task: "One task",
+      workbench: "Workbench",
+      desktop: "Desktop",
+      run: "Run",
+      trust: "Trust",
+      faq: "Questions",
+      start: "Start",
+    },
+    lensLabel: "Inspect product interface",
+    fileTreeLabel: "Repository file tree",
+    terminal: {
+      title: "Terminal",
+      playLabel: "Play",
+      pauseLabel: "Pause",
+      restartLabel: "Restart",
+      completeLabel: "Terminal sequence complete",
+      awaitingLabel: "waiting for your approval",
+    },
+  },
+
+  product: {
+    header: {
+      eyebrow: "Product",
+      title: "One workspace, four parts, one working context.",
       subtitle:
-        "The task lives on your machine. The desktop runs it, and your phone, the chat platform you already use, a terminal and the browser all reach the same thread, each with only the authority you gave that device.",
-      sequenceLabel:
-        "How one task moves between devices: started on the desktop, approved from the phone, reported in chat, resumed from the terminal, and fed a page from the browser.",
-      stations: [
-        {
-          key: "desktop",
-          name: "Desktop",
-          role: "Runs the task",
-          body: "macOS, Windows and Linux. The files, the terminal and the agent are on the same machine.",
-        },
-        {
-          key: "mobile",
-          name: "Phone",
-          role: "Approves the checkpoint",
-          body: "The paired iOS or Android app shows the approval that is waiting, and nothing the pairing did not grant.",
-        },
-        {
-          key: "im",
-          name: "Chat",
-          role: "Receives the result",
-          body: "Progress and questions arrive where you already are. A reply that would change anything still asks first.",
-        },
-        {
-          key: "cli",
-          name: "Terminal",
-          role: "Resumes the session",
-          body: "The same agent loop as the desktop, from a shell, picking up the session where it left off.",
-        },
-        {
-          key: "browser",
-          name: "Browser",
-          role: "Adds a page",
-          body: "The companion extension captures a page you chose and hands it to the workspace over a paired, loopback-only channel.",
-        },
-      ],
-      frames: {
-        desktop: { threadLabel: "Thread", stateLabel: "State" },
-        mobile: { heading: "Approval waiting" },
-        im: {
-          sender: "Cognia",
-          heading: "Check fixed",
-          filesLabel: "files changed",
-          notesLabel: "Launch notes drafted",
-          replyHint: "Reply to decide the next step",
-        },
-        cli: { comment: "resume the most recent session" },
-        browser: {
-          heading: "Browser companion",
-          pageTitle: "Rounding rules for zero-decimal currencies",
-          captureLabel: "Capture page",
-          shortcutLabel: "Shortcut",
-        },
-      },
-      channelsLabel: "Chat platforms with an adapter in the repository",
-      channels: [
-        "Telegram",
-        "Slack",
-        "Discord",
-        "Lark",
-        "DingTalk",
-        "WeCom",
-        "WeChat Official Accounts",
-        "WeChat",
-        "Matrix",
-        "OneBot",
-        "QQ",
-      ],
-      note: "Every surface above is rebuilt in this page from the same demo task. Each device holds only the capability the host granted it.",
+        "Each surface below is a real part of the application. Every entry links to the documentation that describes how it actually behaves.",
     },
-
+    sections: [
+      {
+        id: "chat",
+        title: "Chat",
+        subtitle:
+          "The thread is where a task starts and where its record stays. It carries plans, tool calls, approvals and the files involved.",
+        entries: [
+          {
+            key: "chat",
+            name: "Threads that hold the work",
+            body: "A conversation keeps the plan, the diffs, the approvals and the artifacts it produced, instead of scattering them across messages.",
+            docsPath: "/docs/chat/chat-and-skills",
+          },
+          {
+            key: "slash",
+            name: "Slash commands and skills",
+            body: "Named commands run repeatable work from the composer, with the same permission rules as anything else.",
+            docsPath: "/docs/chat/slash-commands",
+          },
+          {
+            key: "providers",
+            name: "Provider system",
+            body: "Local runtimes, your own keys, an existing subscription, and routing rules for when one is unavailable.",
+            docsPath: "/docs/chat/provider-system",
+          },
+        ],
+      },
+      {
+        id: "agents",
+        title: "Agents",
+        subtitle:
+          "Agents are named, scoped and reviewable. They carry their own tools and their own gates rather than inheriting everything.",
+        entries: [
+          {
+            key: "agents",
+            name: "Agent teams",
+            body: "Several agents on one task, each with a role, with a lead that reviews before work merges.",
+            docsPath: "/docs/chat/agent-teams",
+          },
+          {
+            key: "execution",
+            name: "Unified execution",
+            body: "One execution path for built-in and external agents, so behaviour does not change with the backend.",
+            docsPath: "/docs/subsystems/unified-agent-execution",
+          },
+          {
+            key: "external",
+            name: "External agents",
+            body: "Run agent backends you already use, hosted by the workspace rather than replaced by it.",
+            docsPath: "/docs/chat/external-agents",
+          },
+        ],
+      },
+      {
+        id: "knowledge",
+        title: "Knowledge",
+        subtitle:
+          "What the workspace remembers between tasks, where each piece came from, and how to remove it.",
+        entries: [
+          {
+            key: "memory",
+            name: "Long-term memory",
+            body: "Durable notes with their source attached, surfaced when a task needs them rather than injected everywhere.",
+            docsPath: "/docs/subsystems/long-term-memory",
+          },
+          {
+            key: "capture",
+            name: "Knowledge capture",
+            body: "Bring in pages, documents and screenshots, and keep the extraction next to the original.",
+            docsPath: "/docs/subsystems/knowledge-capture",
+          },
+          {
+            key: "storage",
+            name: "Local storage and search",
+            body: "Where the workspace keeps things on disk, and how search reaches them.",
+            docsPath: "/docs/data/storage",
+          },
+        ],
+      },
+      {
+        id: "desktop",
+        title: "Desktop",
+        subtitle: "The parts that only exist because the workspace runs on your machine.",
+        entries: [
+          {
+            key: "terminal",
+            name: "Integrated terminal",
+            body: "Run the command, keep the output attached to the task that needed it.",
+            docsPath: "/docs/subsystems/integrated-terminal",
+          },
+          {
+            key: "ide",
+            name: "Editor and Pro IDE",
+            body: "Read and edit project files in place, with a full editor when the change is bigger than a diff.",
+            docsPath: "/docs/subsystems/pro-ide",
+          },
+          {
+            key: "scm",
+            name: "Source control",
+            body: "Stage, review and commit from the workspace, with the diff the agent produced in front of you.",
+            docsPath: "/docs/subsystems/source-control",
+          },
+        ],
+      },
+    ],
+    figureCaptions: {
+      chat: "The thread on the signature task: plan, tool calls and the checkpoint in one column.",
+      agents: "An agent team on the same task, each member with its own tools and one review gate.",
+      knowledge: "What the task left behind, each entry with the file it came from.",
+      desktop: "The command palette, terminal and notification of the desktop shell.",
+    },
     panorama: {
       eyebrow: "The whole instrument",
       title: "One codebase. Every part in the open.",
       subtitle:
-        "What is inside the workspace, counted from the repository when this page was built rather than claimed in a slide.",
-      figuresLabel: "Counted at build time",
-      figures: {
-        plugins: "In-tree plugins",
-        connectors: "Chat platform adapters",
-        workflowNodeKinds: "Workflow node kinds",
-        crates: "Rust crates",
-        packages: "Workspace packages",
-        adrs: "Recorded design decisions",
-        testFiles: "Test files",
-      },
-      figuresNote:
-        "Directory listings and file counts over the checkout. Any of them can be reproduced with a single ls.",
+        "Every subsystem on one of four lanes: work, remember, reach and control, each linked to where it is explained.",
       lanes: [
         {
           key: "work",
@@ -912,193 +1031,6 @@ export const en: SiteCopy = {
               route: "/product#desktop",
             },
           ],
-        },
-      ],
-    },
-
-    sectionIndex: {
-      hero: "Overview",
-      film: "Film",
-      task: "One task",
-      workbench: "Workbench",
-      desktop: "Desktop",
-      entries: "Entry points",
-      run: "Run",
-      connections: "Connections",
-      system: "The instrument",
-      trust: "Trust",
-      start: "Start",
-    },
-    contextTrace: {
-      srLabel: "Context signals consumed for this task",
-      items: [
-        { key: "repository", label: "Repository read" },
-        { key: "branch", label: "Branch identified" },
-        { key: "files", label: "Files scanned" },
-        { key: "plan", label: "Plan formed" },
-        { key: "approval", label: "Approval requested" },
-        { key: "tests", label: "Tests run" },
-      ],
-    },
-    lensLabel: "Inspect product interface",
-    fileTreeLabel: "Repository file tree",
-    terminal: {
-      title: "Terminal",
-      playLabel: "Play",
-      pauseLabel: "Pause",
-      restartLabel: "Restart",
-      completeLabel: "Terminal sequence complete",
-    },
-    connectionFlow: {
-      label: "How Cognia connects to external systems",
-      centerNode: "Cognia",
-    },
-  },
-
-  product: {
-    header: {
-      eyebrow: "Product",
-      title: "One workspace, five surfaces, one working context.",
-      subtitle:
-        "Each surface below is a real part of the application. Every entry links to the documentation that describes how it actually behaves.",
-    },
-    sections: [
-      {
-        id: "chat",
-        title: "Chat",
-        subtitle:
-          "The thread is where a task starts and where its record stays. It carries plans, tool calls, approvals and the files involved.",
-        entries: [
-          {
-            key: "chat",
-            name: "Threads that hold the work",
-            body: "A conversation keeps the plan, the diffs, the approvals and the artifacts it produced, instead of scattering them across messages.",
-            docsPath: "/docs/chat/chat-and-skills",
-          },
-          {
-            key: "slash",
-            name: "Slash commands and skills",
-            body: "Named commands run repeatable work from the composer, with the same permission rules as anything else.",
-            docsPath: "/docs/chat/slash-commands",
-          },
-          {
-            key: "providers",
-            name: "Provider system",
-            body: "Local runtimes, your own keys, an existing subscription, and routing rules for when one is unavailable.",
-            docsPath: "/docs/chat/provider-system",
-          },
-        ],
-      },
-      {
-        id: "agents",
-        title: "Agents",
-        subtitle:
-          "Agents are named, scoped and reviewable. They carry their own tools and their own gates rather than inheriting everything.",
-        entries: [
-          {
-            key: "agents",
-            name: "Agent teams",
-            body: "Several agents on one task, each with a role, with a lead that reviews before work merges.",
-            docsPath: "/docs/chat/agent-teams",
-          },
-          {
-            key: "execution",
-            name: "Unified execution",
-            body: "One execution path for built-in and external agents, so behaviour does not change with the backend.",
-            docsPath: "/docs/subsystems/unified-agent-execution",
-          },
-          {
-            key: "external",
-            name: "External agents",
-            body: "Run agent backends you already use, hosted by the workspace rather than replaced by it.",
-            docsPath: "/docs/chat/external-agents",
-          },
-        ],
-      },
-      {
-        id: "knowledge",
-        title: "Knowledge",
-        subtitle:
-          "What the workspace remembers between tasks, where each piece came from, and how to remove it.",
-        entries: [
-          {
-            key: "memory",
-            name: "Long-term memory",
-            body: "Durable notes with their source attached, surfaced when a task needs them rather than injected everywhere.",
-            docsPath: "/docs/subsystems/long-term-memory",
-          },
-          {
-            key: "capture",
-            name: "Knowledge capture",
-            body: "Bring in pages, documents and screenshots, and keep the extraction next to the original.",
-            docsPath: "/docs/subsystems/knowledge-capture",
-          },
-          {
-            key: "storage",
-            name: "Local storage and search",
-            body: "Where the workspace keeps things on disk, and how search reaches them.",
-            docsPath: "/docs/data/storage",
-          },
-        ],
-      },
-      {
-        id: "desktop",
-        title: "Desktop",
-        subtitle: "The parts that only exist because the workspace runs on your machine.",
-        entries: [
-          {
-            key: "terminal",
-            name: "Integrated terminal",
-            body: "Run the command, keep the output attached to the task that needed it.",
-            docsPath: "/docs/subsystems/integrated-terminal",
-          },
-          {
-            key: "ide",
-            name: "Editor and Pro IDE",
-            body: "Read and edit project files in place, with a full editor when the change is bigger than a diff.",
-            docsPath: "/docs/subsystems/pro-ide",
-          },
-          {
-            key: "scm",
-            name: "Source control",
-            body: "Stage, review and commit from the workspace, with the diff the agent produced in front of you.",
-            docsPath: "/docs/subsystems/source-control",
-          },
-        ],
-      },
-    ],
-    showcase: {
-      title: "The systems behind the visible workbench.",
-      subtitle:
-        "Chat is only the entry point. Context, interactive surfaces, connected conversations, and durable automation keep the work moving after the first reply.",
-      items: [
-        {
-          key: "context",
-          title: "Context workbench",
-          body: "Assemble project files, captured resources, instructions, and prior artifacts into the exact context a task may use, without expanding every prompt by default.",
-          detail: "Files · resources · instructions",
-          docsPath: "/docs/ui/context-workbench",
-        },
-        {
-          key: "surfaces",
-          title: "Canvas and interactive apps",
-          body: "Turn model output into editable artifacts, visual canvases, and A2UI interfaces whose state and interactions remain part of the task record.",
-          detail: "Canvas · A2UI · artifacts",
-          docsPath: "/docs/subsystems/a2ui",
-        },
-        {
-          key: "connections",
-          title: "Connected inbox",
-          body: "Bring Slack, Lark, Discord, Telegram, Matrix, and other adapter conversations into one inbox with explicit inbound and outbound policies.",
-          detail: "Inbox · adapters · dispatch rules",
-          docsPath: "/docs/subsystems/platform-connectors",
-        },
-        {
-          key: "automation",
-          title: "Schedules and durable goals",
-          body: "Run recurring work while the desktop app is minimized, retain its history, and let longer objectives continue through reviewable steps.",
-          detail: "Scheduler · goals · run history",
-          docsPath: "/docs/subsystems/scheduler",
         },
       ],
     },
@@ -1285,6 +1217,53 @@ export const en: SiteCopy = {
         ],
       },
     ],
+    connections: {
+      eyebrow: "Connections with consequences",
+      title: "Connect tools without losing the task.",
+      subtitle:
+        "A connection is only useful if you can say what it reads, what it may do, and when it has to ask.",
+      headings: {
+        reads: "Reads",
+        canAct: "Can act",
+        requiresApproval: "Requires approval",
+      },
+      items: [
+        {
+          key: "repository",
+          name: "Repository",
+          reads: "Code, issues and the diff under review",
+          canAct: "Propose a branch, a commit, a pull request",
+          requiresApproval: "Anything pushed to the remote",
+        },
+        {
+          key: "mcp",
+          name: "MCP tool",
+          reads: "The inputs you pass to the call",
+          canAct: "Run the tool the server exposes",
+          requiresApproval: "First use, and any call marked sensitive",
+        },
+        {
+          key: "plugin",
+          name: "Plugin",
+          reads: "Only the capabilities its manifest declares",
+          canAct: "Produce or update an artifact in the workspace",
+          requiresApproval: "Every capability outside its declared set",
+        },
+        {
+          key: "im",
+          name: "Chat and notifications",
+          reads: "The messages addressed to it",
+          canAct: "Report progress and ask for a decision",
+          requiresApproval: "Acting on a reply that changes anything",
+        },
+      ],
+      catalogueNote:
+        "The full provider, MCP, plugin and connector catalogs live in the documentation rather than on this page.",
+    },
+    connectionFlow: {
+      label: "How Cognia connects to external systems",
+      centerNode: "Cognia",
+    },
     flow: {
       title: "From existing capability to installed extension.",
       subtitle:
@@ -1517,6 +1496,266 @@ export const en: SiteCopy = {
     },
     platformsTitle: "Platforms",
     platformHint: { label: "Detected", unknown: "Platform not detected" },
+  },
+
+  surfaces: {
+    header: {
+      eyebrow: "Surfaces",
+      title: "Start at the desk. Decide from anywhere.",
+      subtitle:
+        "The desktop runs the work. Every other surface reaches the same thread and holds only what that device was granted.",
+    },
+    entryPoints: {
+      eyebrow: "One task, five stops",
+      title: "Follow one task from the desk to your pocket and back.",
+      subtitle:
+        "The task lives on your machine. The desktop runs it, and your phone, the chat platform you already use, a terminal and the browser all reach the same thread, each with only the authority you gave that device.",
+      sequenceLabel:
+        "How one task moves between devices: started on the desktop, approved from the phone, reported in chat, resumed from the terminal, and fed a page from the browser.",
+      stations: [
+        {
+          key: "desktop",
+          name: "Desktop",
+          role: "Runs the task",
+          body: "macOS, Windows and Linux. The files, the terminal and the agent are on the same machine.",
+        },
+        {
+          key: "mobile",
+          name: "Phone",
+          role: "Approves the checkpoint",
+          body: "The paired iOS or Android app shows the approval that is waiting, and nothing the pairing did not grant.",
+        },
+        {
+          key: "im",
+          name: "Chat",
+          role: "Receives the result",
+          body: "Progress and questions arrive where you already are. A reply that would change anything still asks first.",
+        },
+        {
+          key: "cli",
+          name: "Command line",
+          role: "Resumes the session",
+          body: "The same agent loop as the desktop, from a shell, picking up the session where it left off.",
+        },
+        {
+          key: "browser",
+          name: "Browser",
+          role: "Adds a page",
+          body: "The companion extension captures a page you chose and hands it to the workspace over a paired, loopback-only channel.",
+        },
+      ],
+      frames: {
+        desktop: { threadLabel: "Thread", stateLabel: "State" },
+        mobile: { heading: "Approval waiting" },
+        im: {
+          sender: "Cognia",
+          heading: "Check fixed",
+          filesLabel: "files changed",
+          notesLabel: "Launch notes drafted",
+          replyHint: "Reply to decide the next step",
+        },
+        cli: { comment: "resume the most recent session" },
+        browser: {
+          heading: "Browser companion",
+          pageTitle: "Rounding rules for zero-decimal currencies",
+          captureLabel: "Capture page",
+          shortcutLabel: "Shortcut",
+        },
+      },
+      channelsLabel: "Chat platforms with an adapter in the repository",
+      channels: [
+        "Telegram",
+        "Slack",
+        "Discord",
+        "Lark",
+        "DingTalk",
+        "WeCom",
+        "WeChat Official Accounts",
+        "WeChat",
+        "Matrix",
+        "OneBot",
+        "QQ",
+      ],
+      note: "Every surface above is rebuilt in this page from the same demo task.",
+    },
+    sections: [
+      {
+        id: "desktop",
+        title: "Desktop",
+        subtitle:
+          "The machine that runs the work: files, terminal, repositories and agents together.",
+        entries: [
+          {
+            key: "platforms",
+            name: "macOS, Windows and Linux",
+            body: "One codebase builds the desktop shell for all three, with the same workspace on each.",
+            docsPath: "/docs/core/runtime-and-tauri",
+          },
+          {
+            key: "tray",
+            name: "Tray panel",
+            body: "Running work and pending approvals at a glance from the menu bar, without opening the window.",
+            docsPath: "/docs/subsystems/tray-panel",
+          },
+          {
+            key: "terminal",
+            name: "Integrated terminal",
+            body: "A real shell beside the thread, which you can share with a paired device and revoke at any time.",
+            docsPath: "/docs/subsystems/integrated-terminal",
+          },
+        ],
+      },
+      {
+        id: "mobile",
+        title: "Phone",
+        subtitle:
+          "iOS and Android apps paired to your desktop, built from this repository like the desktop app. They follow, approve and reply; the desktop still runs the work.",
+        entries: [
+          {
+            key: "pair",
+            name: "Pair by QR code",
+            body: "Scan a code on the desktop. The invitation expires, and the connection runs over WebRTC, through a relay only when the two networks cannot meet directly.",
+            docsPath: "/docs/ui/mobile-architecture/discovery-pairing",
+          },
+          {
+            key: "approve",
+            name: "Approve checkpoints",
+            body: "A tool call waiting for you shows up on the phone with what it would run and where. Approve or deny it there.",
+            docsPath: "/docs/subsystems/remote-control",
+          },
+          {
+            key: "follow",
+            name: "Follow the thread",
+            body: "Read and reply in the conversation, stop a run, or open a terminal the desktop has shared with this phone.",
+            docsPath: "/docs/ui/mobile-architecture",
+          },
+        ],
+      },
+      {
+        id: "im",
+        title: "Chat platforms",
+        subtitle:
+          "Progress and questions arrive where you already talk, through the adapters that ship in the repository.",
+        entries: [
+          {
+            key: "deliver",
+            name: "Results where you are",
+            body: "A finished task, a question or a checkpoint is posted to the channel you connected, linked to its thread.",
+            docsPath: "/docs/subsystems/platform-connectors",
+          },
+          {
+            key: "gate",
+            name: "Replies that act still ask",
+            body: "Inbound messages pass a gate first. A reply that would change something waits for the same approval as on the desktop.",
+            docsPath: "/docs/subsystems/platform-connectors/inbound-gating",
+          },
+          {
+            key: "cards",
+            name: "Cards, not walls of text",
+            body: "Assistant surfaces are projected into each platform's own rich messages, and button presses route back to the task.",
+            docsPath: "/docs/subsystems/platform-connectors/ai-and-a2ui",
+          },
+        ],
+      },
+      {
+        id: "cli",
+        title: "Command line",
+        subtitle:
+          "cognia-agent runs the same agent loop in a shell, for the work that starts there.",
+        entries: [
+          {
+            key: "resume",
+            name: "Pick up where you stopped",
+            body: "cognia-agent chat --continue resumes the most recent session in the terminal you are in.",
+            docsPath: "/docs/subsystems/cognia-agent-tui",
+          },
+          {
+            key: "handoff",
+            name: "Hand a session to the desktop",
+            body: "cognia-agent handoff copies a terminal session into the running desktop app, so it continues with the full workbench.",
+            docsPath: "/docs/subsystems/cli-app-bridge",
+          },
+          {
+            key: "tooling",
+            name: "Plugin tooling",
+            body: "A separate cognia command scaffolds, lints and signs plugins from the same repository.",
+            docsPath: "/docs/subsystems/cognia-cli",
+          },
+        ],
+      },
+      {
+        id: "browser",
+        title: "Browser",
+        subtitle:
+          "An extension for Chrome and Edge that hands pages to the workspace over a loopback-only channel.",
+        entries: [
+          {
+            key: "capture",
+            name: "Capture a page",
+            body: "Send the page, a selection or the article text to a task with a keyboard shortcut you can change.",
+            docsPath: "/docs/subsystems/companion-api",
+          },
+          {
+            key: "panel",
+            name: "Side panel",
+            body: "Talk to the workspace from the browser's side panel without leaving the page you are reading.",
+            docsPath: "/docs/subsystems/companion-api",
+          },
+          {
+            key: "scope",
+            name: "Asks only when you pair",
+            body: "Access to the local desktop is requested at pairing, not on install, and the extension does not run in private windows.",
+            docsPath: "/docs/subsystems/companion-api/server-and-auth",
+          },
+        ],
+      },
+    ],
+    flow: {
+      title: "Every surface follows one lifecycle.",
+      subtitle:
+        "Pairing a device is a grant, not a login. It can be read, narrowed and taken back.",
+      steps: [
+        {
+          key: "pair",
+          label: "Pair",
+          body: "The desktop issues a short-lived invitation; the device redeems it once.",
+          docsPath: "/docs/ui/mobile-architecture/discovery-pairing",
+        },
+        {
+          key: "grant",
+          label: "Grant",
+          body: "The device receives named capabilities, never the desktop's full reach.",
+          docsPath: "/docs/subsystems/companion-api/server-and-auth",
+        },
+        {
+          key: "reach",
+          label: "Reach",
+          body: "Every request it makes is checked against that grant and recorded under the task.",
+          docsPath: "/docs/subsystems/companion-api",
+        },
+        {
+          key: "revoke",
+          label: "Revoke",
+          body: "Forget the device on the desktop and its next request is refused.",
+          docsPath: "/docs/subsystems/remote-control",
+        },
+      ],
+    },
+  },
+
+  inventory: {
+    figuresLabel: "Counted at build time",
+    figures: {
+      plugins: "In-tree plugins",
+      connectors: "Chat platform adapters",
+      workflowNodeKinds: "Workflow node kinds",
+      crates: "Rust crates",
+      packages: "Workspace packages",
+      adrs: "Recorded design decisions",
+      testFiles: "Test files",
+    },
+    figuresNote:
+      "Directory listings and file counts over the checkout. Any of them can be reproduced with a single ls.",
   },
 
   useCases: {

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import type { CSSProperties, HTMLAttributes, ReactNode } from "react"
 
 let reduced = false
@@ -41,6 +41,18 @@ describe("StageLens", () => {
       </StageLens>
     )
     expect(screen.getByTestId("stage-content")).toBeInTheDocument()
+  })
+
+  it("draws a rim around the magnified circle so it never reads as a double image", () => {
+    const { container } = render(
+      <StageLens ariaLabel="Inspect">
+        <div data-testid="stage-content">Product</div>
+      </StageLens>
+    )
+    fireEvent.mouseEnter(screen.getByRole("region", { name: "Inspect" }))
+    const rim = container.querySelector(".rounded-full.border.border-hairline-strong")
+    expect(rim).not.toBeNull()
+    expect((rim as HTMLElement).style.width).toBe("150px")
   })
 
   describe("coarse pointer", () => {

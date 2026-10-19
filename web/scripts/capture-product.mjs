@@ -71,8 +71,10 @@ export const SECTIONS = [
     key: "desktop",
     requireVisible: [CHAT_SURFACE_SELECTOR],
     // A macro crop of the shell rather than the whole window — the spec asks
-    // for a close read of the workspace chrome, not a shrunken desktop.
-    clip: { x: 0, y: 0, width: 960, height: 600 },
+    // for a close read of the workspace chrome, not a shrunken desktop. Framed
+    // on the thread and the push approval it halts on, so the dialog's actions
+    // ("Allow once") are inside the crop rather than cut at its right edge.
+    clip: { x: 250, y: 40, width: 960, height: 600 },
   },
 ]
 

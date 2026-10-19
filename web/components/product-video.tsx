@@ -1,7 +1,7 @@
 "use client"
 
 import { useInView, useReducedMotion } from "motion/react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type CSSProperties } from "react"
 
 import { Icon } from "@web/components/icon"
 import { BorderBeam } from "@web/components/ui/border-beam"
@@ -21,6 +21,18 @@ interface CommonProps {
 
 interface AmbientProps extends CommonProps {
   mode: "ambient"
+  /**
+   * Fraction of the recording's height to crop off the bottom. The hero loop's
+   * camera keeps the app's bottom chrome in shot, a flat band that left the
+   * picture filling three quarters of its frame.
+   */
+  cropBottom?: number
+  /**
+   * Frame aspect below `sm`, narrower than the recording: the sides are
+   * cropped, centred, so the picture is larger on a phone. Safe only for a
+   * film whose camera keeps its subject centred, as the hero loop's does.
+   */
+  narrowAspect?: number
 }
 
 interface FilmProps extends CommonProps {
@@ -56,15 +68,21 @@ export type ProductVideoProps = AmbientProps | FilmProps
  */
 export function ProductVideo(props: ProductVideoProps) {
   const { video, label, caption, note, className } = props
+  const crop = props.mode === "ambient" ? (props.cropBottom ?? 0) : 0
+  const visibleHeight = video.height * (1 - crop)
+  const wideAspect = `${video.width} / ${visibleHeight}`
+  const narrowAspect =
+    props.mode === "ambient" && props.narrowAspect ? String(props.narrowAspect) : wideAspect
 
   return (
     <figure className={className} data-video={props.mode}>
       <div
-        className="relative overflow-hidden rounded-stage border border-on-stage-hairline bg-stage"
-        style={{ aspectRatio: `${video.width} / ${video.height}` }}
+        data-slot="video-frame"
+        className="relative overflow-hidden rounded-stage border border-on-stage-hairline bg-stage [aspect-ratio:var(--frame-narrow)] sm:[aspect-ratio:var(--frame-wide)]"
+        style={{ "--frame-wide": wideAspect, "--frame-narrow": narrowAspect } as CSSProperties}
       >
         {props.mode === "ambient" ? (
-          <AmbientPlayer video={video} label={label} />
+          <AmbientPlayer video={video} label={label} cropBottom={crop} />
         ) : (
           <FilmPlayer
             video={video}
@@ -83,15 +101,25 @@ export function ProductVideo(props: ProductVideoProps) {
           transition={{ repeat: 1 }}
         />
       </div>
-      <figcaption className="mt-3 flex flex-col gap-1 font-mono text-xs text-muted">
-        {caption ? <span>{caption}</span> : null}
-        <span>{note}</span>
+      {/* The caption is a sentence and sets in the reading face; the note is
+       * the provenance marker, which the Operational Mono Rule keeps in mono. */}
+      <figcaption className="mt-3 flex flex-col gap-1 text-muted">
+        {caption ? <span className="text-sm">{caption}</span> : null}
+        <span className="font-mono text-xs">{note}</span>
       </figcaption>
     </figure>
   )
 }
 
-function AmbientPlayer({ video, label }: { video: ProductVideoAsset; label: string }) {
+function AmbientPlayer({
+  video,
+  label,
+  cropBottom,
+}: {
+  video: ProductVideoAsset
+  label: string
+  cropBottom: number
+}) {
   const ref = useRef<HTMLVideoElement>(null)
   const reduced = useReducedMotion() ?? false
   const mounted = useHasMounted()
@@ -126,7 +154,11 @@ function AmbientPlayer({ video, label }: { video: ProductVideoAsset; label: stri
   return (
     <video
       ref={ref}
-      className="block h-full w-full object-cover"
+      // Sized by height, so the cropped band falls below the frame, and
+      // centred, so a narrower frame crops both sides evenly. The frame's
+      // aspect never exceeds the visible picture's, so the width always fills.
+      className="absolute left-1/2 top-0 block w-auto min-w-full max-w-none -translate-x-1/2 object-cover"
+      style={{ height: `${100 / (1 - cropBottom)}%` }}
       src={video.src}
       poster={video.poster}
       width={video.width}

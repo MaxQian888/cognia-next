@@ -10,7 +10,7 @@ jest.mock("motion/react", () => ({
   motion: {},
 }))
 
-import { DesktopTerminal } from "./desktop-terminal"
+import { DesktopTerminal, transcript } from "./desktop-terminal"
 
 const copy = {
   title: "Terminal",
@@ -18,6 +18,7 @@ const copy = {
   pauseLabel: "Pause",
   restartLabel: "Restart",
   completeLabel: "Terminal sequence complete",
+  awaitingLabel: "waiting for your approval",
 }
 
 describe("DesktopTerminal", () => {
@@ -59,5 +60,11 @@ describe("DesktopTerminal", () => {
       expect(screen.queryByRole("button", { name: "Restart" })).toBeNull()
       expect(screen.getByText("Terminal sequence complete")).toHaveAttribute("aria-live", "polite")
     })
+  })
+
+  it("runs the check before it proposes the push, and ends waiting for approval", () => {
+    const lines = transcript(copy).map((line) => line.key)
+    expect(lines.indexOf("test-command")).toBeLessThan(lines.indexOf("approval"))
+    expect(lines.at(-1)).toBe("awaiting")
   })
 })

@@ -74,9 +74,9 @@ export function HeroWorkbench({ copy, alt, caption, className }: HeroWorkbenchPr
           transition={{ repeat: 1 }}
         />
       </div>
-      <figcaption className="mt-3 flex flex-col gap-1 font-mono text-xs text-muted">
-        <span>{caption}</span>
-        <span>{copy.note}</span>
+      <figcaption className="mt-3 flex flex-col gap-1 text-muted">
+        <span className="text-sm">{caption}</span>
+        <span className="font-mono text-xs">{copy.note}</span>
       </figcaption>
     </figure>
   )

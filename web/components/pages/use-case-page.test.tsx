@@ -109,4 +109,15 @@ describe("UseCasePage — research", () => {
     render(<UseCasePage locale="zh" variant="research" />)
     expect(screen.getByText(zh.useCases.research.provenance)).toBeInTheDocument()
   })
+
+  it("ends on the close band, not on the footer with nowhere to go", () => {
+    const { container } = render(<UseCasePage locale="en" variant="development" />)
+    const main = container.querySelector("main") ?? container
+    const sections = main.querySelectorAll(":scope > section, :scope > * > section")
+    const last = sections[sections.length - 1]
+    expect(last?.querySelector('[data-slot="page-close"]')).not.toBeNull()
+    expect(
+      screen.getByRole("heading", { level: 2, name: en.common.pageClose.title })
+    ).toBeInTheDocument()
+  })
 })

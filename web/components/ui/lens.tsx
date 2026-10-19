@@ -79,33 +79,53 @@ export function Lens({
     const { x, y } = currentPosition
 
     return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration }}
-        aria-hidden
-        inert
-        className="absolute inset-0 overflow-hidden"
-        style={{
-          maskImage,
-          WebkitMaskImage: maskImage,
-          transformOrigin: `${x}px ${y}px`,
-          zIndex: 1,
-        }}
-      >
-        <div
-          className="absolute inset-0"
+      <React.Fragment key="lens">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration }}
+          aria-hidden
+          inert
+          className="absolute inset-0 overflow-hidden"
           style={{
-            transform: `scale(${zoomFactor})`,
+            maskImage,
+            WebkitMaskImage: maskImage,
             transformOrigin: `${x}px ${y}px`,
+            zIndex: 1,
           }}
         >
-          {children}
-        </div>
-      </motion.div>
+          <div
+            className="absolute inset-0"
+            style={{
+              transform: `scale(${zoomFactor})`,
+              transformOrigin: `${x}px ${y}px`,
+            }}
+          >
+            {children}
+          </div>
+        </motion.div>
+        {/* The rim, outside the masked layer so its edge is not clipped: without
+         * it the magnified circle reads as a double exposure of the page. */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration }}
+          aria-hidden
+          data-lens-rim=""
+          className="pointer-events-none absolute rounded-full border border-hairline-strong shadow-[0_8px_24px_-12px_rgb(0_0_0/0.35)]"
+          style={{
+            width: lensSize,
+            height: lensSize,
+            left: x - lensSize / 2,
+            top: y - lensSize / 2,
+            zIndex: 2,
+          }}
+        />
+      </React.Fragment>
     )
-  }, [currentPosition, maskImage, zoomFactor, children, duration])
+  }, [currentPosition, maskImage, zoomFactor, children, duration, lensSize])
 
   return (
     <div

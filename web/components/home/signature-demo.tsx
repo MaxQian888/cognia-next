@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, type ReactNode } from "react"
 import { useReducedMotion } from "motion/react"
 import { Icon, type IconName } from "@web/components/icon"
 import { TaskArtifact } from "@web/components/product/task-artifact"
@@ -18,6 +18,20 @@ interface SignatureDemoProps {
   copy: SignatureCopy
   reconstruction: ReconstructionCopy
   fileTreeLabel?: string
+  /**
+   * Rendered under the demo, outside the pinned stage: the homepage passes
+   * the links to the scenario pages, which carry this loop through a whole
+   * piece of work. Built by the server and handed in, so the links need no
+   * client code of their own.
+   */
+  footer?: ReactNode
+  /**
+   * The product film, rendered between the task and the steps: the section
+   * tells the one task twice over — watch it, then step through it — instead
+   * of a neighbouring section telling it a second time. Omitted when the film
+   * has not been rendered.
+   */
+  film?: ReactNode
 }
 
 /** Index of the approval step — where autoplay stops and waits (spec §6.1). */
@@ -94,9 +108,10 @@ function StepPanel({
             <span aria-hidden className={`text-sm ${TONE_CLASS[step.tone]}`}>
               {TONE_MARK[step.tone]}
             </span>
-            <span
-              className={`font-mono text-xs uppercase tracking-widest ${TONE_CLASS[step.tone]}`}
-            >
+            {/* The words read in ink; the tone rides on the mark and icon
+             * beside them. Cyan is 1.69:1 on this substrate and the token's
+             * own rule is that it is a line, a dot or a fill, never text. */}
+            <span className="font-mono text-xs uppercase tracking-widest text-on-stage">
               {step.status}
             </span>
           </div>
@@ -139,7 +154,14 @@ function StepPanel({
  *    Spec §6.3 requires this to be the absence of the effect, not a fast
  *    version of it.
  */
-export function SignatureDemo({ copy, reconstruction, fileTreeLabel, index }: SignatureDemoProps) {
+export function SignatureDemo({
+  copy,
+  reconstruction,
+  fileTreeLabel,
+  index,
+  footer,
+  film,
+}: SignatureDemoProps) {
   const reduced = useReducedMotion() ?? false
   const rail = useStepRail({
     total: copy.steps.length,
@@ -193,8 +215,20 @@ export function SignatureDemo({ copy, reconstruction, fileTreeLabel, index }: Si
         {copy.task}
       </p>
 
+      {film ? (
+        <>
+          <div className="mt-14">{film}</div>
+          <p
+            data-slot="steps-label"
+            className="mt-16 border-t border-hairline pt-6 font-mono text-xs uppercase tracking-widest text-muted"
+          >
+            {copy.stepsLabel}
+          </p>
+        </>
+      ) : null}
+
       {reduced ? (
-        <ol className="mt-14 flex flex-col gap-6">
+        <ol className={`${film ? "mt-8" : "mt-14"} flex flex-col gap-6`}>
           {copy.steps.map((step) => (
             <li key={step.key}>
               <p className="mb-3 font-mono text-xs uppercase tracking-widest text-muted">
@@ -221,7 +255,7 @@ export function SignatureDemo({ copy, reconstruction, fileTreeLabel, index }: Si
           style={
             pinned ? { height: `calc(100dvh + ${(copy.steps.length - 1) * 45}dvh)` } : undefined
           }
-          className="mt-14"
+          className={film ? "mt-8" : "mt-14"}
         >
           <div
             data-pinned-viewport={pinned ? "" : undefined}
@@ -323,22 +357,6 @@ export function SignatureDemo({ copy, reconstruction, fileTreeLabel, index }: Si
                     {format(copy.stepOf, { current: activeIndex + 1, total: copy.steps.length })}
                   </p>
                 </div>
-
-                {/* Pinned, the page heading above has scrolled away, so the one
-                 * task the whole site follows (spec §9) is restated beside the
-                 * controls. Keeping it in the control cluster avoids a tall,
-                 * disconnected void between the step count and the task. */}
-                {pinned ? (
-                  <div data-pinned-task-summary="" className="mt-8 border-t border-hairline pt-6">
-                    <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-muted">
-                      <Icon name="agents" size={14} />
-                      {copy.taskLabel}
-                    </p>
-                    <p className="mt-3 border-l-2 border-action pl-3 text-sm leading-relaxed text-ink">
-                      {copy.task}
-                    </p>
-                  </div>
-                ) : null}
               </div>
 
               {/* Keying on the step id restarts the fade-through, so the state
@@ -357,6 +375,7 @@ export function SignatureDemo({ copy, reconstruction, fileTreeLabel, index }: Si
           </div>
         </div>
       )}
+      {footer ? <div className="mt-12">{footer}</div> : null}
     </Section>
   )
 }

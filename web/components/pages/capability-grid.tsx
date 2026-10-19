@@ -19,6 +19,12 @@ interface CapabilityGridProps {
    * the entries already close the grid, so the grid always closes.
    */
   aside?: ReactNode
+  /**
+   * `stack` lays the entries in one column at every width, for a section that
+   * sets them beside a figure; the aside is ignored there, because the figure
+   * already fills the row.
+   */
+  layout?: "grid" | "stack"
 }
 
 /**
@@ -52,15 +58,18 @@ export function CapabilityGrid({
   locale,
   tone = "paper",
   docsOrigin,
-  aside,
+  aside: asideProp,
+  layout = "grid",
 }: CapabilityGridProps) {
   const cell = tone === "paper" ? "bg-paper" : "bg-surface"
+  const aside = layout === "stack" ? undefined : asideProp
+  const columns = layout === "stack" ? "" : "md:grid-cols-2 xl:grid-cols-3"
 
   return (
     <RevealGroup
       as="ul"
       count={entries.length + (aside ? 1 : 0)}
-      className="grid gap-px bg-hairline md:grid-cols-2 xl:grid-cols-3"
+      className={`grid gap-px bg-hairline ${columns}`}
     >
       {entries.map((entry, index) => (
         <RevealItem key={entry.key} as="li" className={`trace flex flex-col p-6 md:p-8 ${cell}`}>

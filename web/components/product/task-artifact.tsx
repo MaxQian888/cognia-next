@@ -250,7 +250,12 @@ function ArtifactArtifact({ copy }: { copy: TaskArtifactsCopy["artifact"] }) {
         <MetaRow label={copy.versionLabel} value={DEMO_TASK.artifact.version} />
       </dl>
 
-      <div className="flex flex-col gap-5 rounded-panel border border-on-stage-hairline p-4">
+      {/* Ruled, not boxed: the step panel is already the frame, and a
+       * bordered block inside it read as a card inside a card. */}
+      <div
+        data-slot="artifact-sections"
+        className="flex flex-col gap-5 border-t border-on-stage-hairline pt-5"
+      >
         {copy.sections.map((section) => (
           <section key={section.title}>
             <h4 className="font-mono text-[10px] uppercase tracking-widest text-on-stage">

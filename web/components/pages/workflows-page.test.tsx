@@ -50,4 +50,15 @@ describe("WorkflowsPage", () => {
     render(<WorkflowsPage locale="zh" />)
     expect(screen.getByRole("heading", { name: zh.workflows.guarantees.title })).toBeInTheDocument()
   })
+
+  it("ends on the close band, not on the footer with nowhere to go", () => {
+    const { container } = render(<WorkflowsPage locale="en" />)
+    const main = container.querySelector("main") ?? container
+    const sections = main.querySelectorAll(":scope > section, :scope > * > section")
+    const last = sections[sections.length - 1]
+    expect(last?.querySelector('[data-slot="page-close"]')).not.toBeNull()
+    expect(
+      screen.getByRole("heading", { level: 2, name: en.common.pageClose.title })
+    ).toBeInTheDocument()
+  })
 })

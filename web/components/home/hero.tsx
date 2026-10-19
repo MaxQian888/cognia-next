@@ -1,8 +1,6 @@
 import { DownloadCta } from "@web/components/download-cta"
-import { Icon, type IconName } from "@web/components/icon"
 import { Reveal } from "@web/components/reveal"
 import { formatIndex } from "@web/components/section"
-import { RevealGroup, RevealItem } from "@web/components/reveal-group"
 import { SplitReveal } from "@web/components/split-reveal"
 import { HeroTaskTicket } from "@web/components/home/hero-task-ticket"
 import { HeroWorkbench } from "@web/components/home/hero-workbench"
@@ -22,10 +20,10 @@ interface HeroProps {
 }
 
 /**
- * One mark per trust-rail cell, by position. The rail is a fixed four, and its
- * copy carries no key to index by.
+ * The hero loop's bottom band: the app's own bottom chrome, which the camera
+ * keeps in every shot. Measured on the render (912 of 1000 rows are picture).
  */
-const TRUST_RAIL_ICONS: IconName[] = ["source", "model", "approval", "system"]
+const HERO_LOOP_CROP = 0.088
 
 /**
  * Hero (spec 4.1), on the execution stage.
@@ -116,6 +114,8 @@ export function Hero({ locale, copy, releaseState, docsOrigin, index }: HeroProp
               <ProductVideo
                 mode="ambient"
                 video={loop}
+                cropBottom={HERO_LOOP_CROP}
+                narrowAspect={4 / 3}
                 label={hero.stageAlt}
                 caption={hero.stageCaption}
                 note={copy.footage.recordingNote}
@@ -130,25 +130,13 @@ export function Hero({ locale, copy, releaseState, docsOrigin, index }: HeroProp
           </Reveal>
         </div>
 
+        {/* The first screen ends on the task, not on a row of promises: the
+         * four claims that used to sit here (open source, your models,
+         * permissioned actions, desktop first) are what the trust and run
+         * sections prove, and stating them here as well made both thinner. */}
         <Reveal trigger="mount" delay={0.15} className="mt-12">
           <HeroTaskTicket copy={hero.ticket} reconstruction={copy.reconstruction} />
         </Reveal>
-
-        <RevealGroup
-          as="ul"
-          count={hero.trustRail.length}
-          className="mt-10 grid grid-cols-2 gap-px bg-hairline md:grid-cols-4"
-        >
-          {hero.trustRail.map((item, index) => (
-            <RevealItem key={item.label} as="li" className="bg-paper pt-1 md:pr-6">
-              <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-ink">
-                <Icon name={TRUST_RAIL_ICONS[index]} size={14} className="text-muted" />
-                {item.label}
-              </p>
-              <p className="mt-2 text-sm leading-relaxed text-muted">{item.detail}</p>
-            </RevealItem>
-          ))}
-        </RevealGroup>
       </div>
     </section>
   )

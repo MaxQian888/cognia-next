@@ -55,6 +55,11 @@ export const zh: SiteCopy = {
       title: "变更日志",
       description: "每一条变更都写给它影响的人，由仓库里的 changeset 条目聚合而成。",
     },
+    surfaces: {
+      title: "多端入口",
+      description:
+        "桌面端负责运行。已配对的手机、你在用的聊天平台、终端和浏览器扩展触达同一个工作空间，各自只握有你授予的权限。",
+    },
   },
 
   nav: {
@@ -76,6 +81,26 @@ export const zh: SiteCopy = {
           label: "知识",
           route: "/product#knowledge",
           description: "长期记忆、捕获的材料与项目上下文。",
+        },
+        {
+          label: "多端入口",
+          route: "/surfaces",
+          description: "手机、聊天、终端与浏览器触达同一个工作空间。",
+        },
+      ],
+    },
+    useCasesMenu: {
+      label: "用例",
+      items: [
+        {
+          label: "软件开发",
+          route: "/use-cases/development",
+          description: "审阅一次发布，修好失败的检查，起草发布说明。",
+        },
+        {
+          label: "研究",
+          route: "/use-cases/research",
+          description: "读资料、抽出结论，每一条都留着出处。",
         },
       ],
     },
@@ -106,9 +131,17 @@ export const zh: SiteCopy = {
         links: [
           { label: "对话", route: "/product#chat" },
           { label: "Agent", route: "/product#agents" },
-          { label: "工作流", route: "/workflows" },
           { label: "知识", route: "/product#knowledge" },
+          { label: "多端入口", route: "/surfaces" },
+          { label: "工作流", route: "/workflows" },
           { label: "插件", route: "/plugins" },
+        ],
+      },
+      {
+        title: "用例",
+        links: [
+          { label: "软件开发", route: "/use-cases/development" },
+          { label: "研究", route: "/use-cases/research" },
         ],
       },
       {
@@ -131,6 +164,7 @@ export const zh: SiteCopy = {
         title: "资源",
         links: [
           { label: "文档", docsPath: "/docs" },
+          { label: "常见问题", route: "/#faq" },
           { label: "信任", route: "/trust" },
           {
             label: "安全",
@@ -166,12 +200,18 @@ export const zh: SiteCopy = {
     readDocs: "阅读文档",
     asOf: "数据截至 {date}",
     stale: "上次成功读取 {date}",
-    learnMore: "了解更多",
+    learnMore: "阅读文档",
+    openPage: "查看页面",
     contextPathLabel: "贯穿工作台的共享上下文路径",
     breadcrumbHome: "首页",
     onThisPage: "本页内容",
     copyCommand: "复制",
     copiedCommand: "已复制",
+    pageClose: {
+      eyebrow: "动手试试",
+      title: "在自己的机器上跑起来。",
+      body: "克隆仓库，构建桌面应用。本页提到的每个部分，文档里都有完整说明。",
+    },
   },
 
   footage: {
@@ -305,14 +345,36 @@ export const zh: SiteCopy = {
         ],
       },
     },
+    agents: {
+      teamLabel: "Agent 团队",
+      leadLabel: "负责人",
+      members: [
+        { name: "负责人", role: "规划这次审阅，合并各方结果", state: "等待批准" },
+        { name: "修复者", role: "修好失败的检查", state: "已完成" },
+        { name: "测试者", role: "重跑这项检查", state: "进行中" },
+        { name: "撰写者", role: "起草发布说明", state: "排队中" },
+      ],
+      toolsLabel: "工具",
+      reviewLabel: "审阅关卡",
+      reviewBody: "每位成员的改动都先经负责人审阅，之后才会提出推送。",
+    },
+    memory: {
+      panelLabel: "长期记忆",
+      searchQuery: "结账 取整",
+      entries: [
+        { text: "日元没有辅币单位：总额取整到整数日元。", state: "已保留" },
+        { text: "发布分支按 release/<主>.<次>.<修订> 命名。", state: "已保留" },
+        { text: "每次发布的发布说明写在 launch-notes.md。", state: "等待审阅" },
+      ],
+      sourceLabel: "来源",
+      pendingLabel: "审阅后才会保留",
+    },
   },
 
   home: {
     film: {
-      eyebrow: "任务实录",
-      title: "看一条任务从请求一路跑到审批。",
-      subtitle:
-        "44 秒的真实应用：读项目、复现失败的检查、给出 diff、让检查通过、写好说明——然后在推送之前停下来。",
+      label: "完整录屏 · {seconds} 秒",
+      lead: "真实应用，从头到尾：读项目、复现失败的检查、给出 diff、让检查通过、写好说明——然后在推送之前停下来。",
       videoLabel: "影片：Cognia 运行发布任务，从请求一直到推送前的审批检查点。",
       playLabel: "播放影片",
       captionsLabel: "中文",
@@ -321,12 +383,6 @@ export const zh: SiteCopy = {
       eyebrow: "开源 AI 工作空间",
       title: "你的开放 AI Agent 工作空间。",
       subtitle: "连接自己的模型与工具，在一个桌面工作台中计划、执行并审阅每一步。",
-      trustRail: [
-        { label: "开源", detail: "AGPL-3.0-or-later，仓库公开" },
-        { label: "自带模型", detail: "本地运行时、自己的密钥、自己的订阅" },
-        { label: "受权限约束的动作", detail: "工具声明它会碰什么，由你确认" },
-        { label: "桌面优先", detail: "本地文件、终端、长时间任务" },
-      ],
       ticket: {
         label: "本页跟随的任务",
         repositoryLabel: "仓库",
@@ -341,7 +397,7 @@ export const zh: SiteCopy = {
     },
 
     signature: {
-      eyebrow: "一条任务，从头到尾",
+      eyebrow: "任务实录",
       title: "一条任务。每一步都看得见。",
       subtitle: "计划、工具、审批、测试与产物，留在同一条可审阅的线程里。",
       taskLabel: "任务",
@@ -414,6 +470,8 @@ export const zh: SiteCopy = {
       playLabel: "播放",
       pauseLabel: "暂停",
       stepOf: "第 {current} 步，共 {total} 步",
+      useCasesLabel: "同一套流程，放进完整的场景里看",
+      stepsLabel: "或者按自己的节奏，一步一步看",
     },
 
     workbench: {
@@ -446,7 +504,7 @@ export const zh: SiteCopy = {
     desktop: {
       eyebrow: "桌面优先",
       title: "一个贴着工作本身的工作空间。",
-      subtitle: "工作在你的机器上：文件、终端、仓库、工具。工作空间也在。",
+      subtitle: "工作就在你的机器上：文件、终端、仓库和工具，工作空间也跑在这里。",
       capabilities: [
         { label: "文件与项目", body: "打开一个真实的项目目录。Agent 读写的就是你读写的那些文件。" },
         { label: "集成终端与编辑器", body: "跑命令、读输出、改文件——不用离开这条任务。" },
@@ -458,7 +516,11 @@ export const zh: SiteCopy = {
         },
       ],
       stageAlt:
-        "Cognia 桌面外壳的局部特写：命令面板浮在集成终端之上，一条通知正在回报刚完成的后台任务。",
+        "Cognia 桌面应用的局部特写：检查已全部通过，发布说明已起草，推送 release/2.4.0 的审批框正在等你确认。",
+      otherSurfaces: {
+        label: "同样能触达这个工作空间",
+        linkLabel: "查看全部入口",
+      },
     },
 
     run: {
@@ -481,7 +543,6 @@ export const zh: SiteCopy = {
           leaves: "当端点在你机器上时，什么都不离开",
           receives: "你配置的那个运行时",
           tools: "你授予这次会话的工具",
-          approval: "写到项目之外，以及任何外部调用",
           docsPath: "/docs/chat/provider-system",
         },
         {
@@ -491,7 +552,6 @@ export const zh: SiteCopy = {
           leaves: "提示词，以及你附加给它的上下文",
           receives: "你选择的那个 provider",
           tools: "你授予这次会话的工具",
-          approval: "写到项目之外，以及任何外部调用",
           docsPath: "/docs/chat/provider-system",
         },
         {
@@ -501,7 +561,6 @@ export const zh: SiteCopy = {
           leaves: "提示词，以及你附加给它的上下文",
           receives: "该订阅背后的 provider",
           tools: "该订阅的 Agent 支持的工具",
-          approval: "写到项目之外，以及任何外部调用",
           docsPath: "/docs/chat/claude-subscription-oauth",
         },
         {
@@ -511,53 +570,10 @@ export const zh: SiteCopy = {
           leaves: "同一份上下文，发往被选中的那条路由",
           receives: "路由里的下一个 provider",
           tools: "不因切换而改变",
-          approval: "不因切换而改变",
           docsPath: "/docs/chat/provider-system",
         },
       ],
-      note: "本地、离线、自托管、私有，是四件不同的事。上表每一行都说清了自己是哪一件。",
-    },
-
-    connections: {
-      eyebrow: "有后果的连接",
-      title: "接上工具，别丢了任务。",
-      subtitle: "一个连接只有在你能说清它读什么、能做什么、什么时候必须问，才是有用的。",
-      headings: {
-        reads: "读取",
-        canAct: "可执行",
-        requiresApproval: "需要审批",
-      },
-      items: [
-        {
-          key: "repository",
-          name: "代码仓库",
-          reads: "代码、issue，以及待审阅的 diff",
-          canAct: "提出分支、提交、Pull Request",
-          requiresApproval: "任何推送到远端的动作",
-        },
-        {
-          key: "mcp",
-          name: "MCP 工具",
-          reads: "你传给这次调用的输入",
-          canAct: "运行该 server 暴露的工具",
-          requiresApproval: "首次使用，以及任何被标记为敏感的调用",
-        },
-        {
-          key: "plugin",
-          name: "插件",
-          reads: "仅限它 manifest 中声明的能力",
-          canAct: "在工作空间中产出或更新产物",
-          requiresApproval: "声明范围之外的每一项能力",
-        },
-        {
-          key: "im",
-          name: "聊天与通知",
-          reads: "发给它的那些消息",
-          canAct: "回报进展、请求一个决定",
-          requiresApproval: "依据回复去改变任何东西",
-        },
-      ],
-      catalogueNote: "完整的 provider、MCP、插件与连接器目录在文档里，不在这一页。",
+      approvalShared: "写到项目之外，以及任何外部调用。每种方式都一样，回退切换模型时也不变。",
       agents: {
         label: "Agent 互通",
         note: "通过 ACP 在工作空间内运行这些 agent，或导入它们已有的会话历史。每个 agent 只在你授予的工具与权限内运行，其步骤进入同一条可审阅的线程。",
@@ -581,7 +597,7 @@ export const zh: SiteCopy = {
     trust: {
       eyebrow: "可核对的信任",
       title: "在开放中构建。在使用中受控。",
-      subtitle: "四件你可以自己核验的事——不用相信一个营销页面对其中任何一件的说法。",
+      subtitle: "源码、数据、权限与记录，每一项都能自己核对。",
       cards: [
         {
           key: "source",
@@ -612,13 +628,6 @@ export const zh: SiteCopy = {
           route: "/trust",
         },
       ],
-      provenanceLabel: "一个动作是如何被交代清楚的",
-      provenance: [
-        { label: "来源", value: "Agent 读过的仓库与 diff" },
-        { label: "动作", value: "提出这次改动的那一步" },
-        { label: "权限", value: "你确认过的那个检查点" },
-        { label: "结果", value: "产物，以及它背后的测试输出" },
-      ],
       statsLabel: "来自仓库",
       starsLabel: "Star",
       contributorsLabel: "贡献者",
@@ -627,109 +636,222 @@ export const zh: SiteCopy = {
       noReleasesYet: "尚未发布",
     },
 
+    faq: {
+      eyebrow: "常见问题",
+      title: "安装之前，大家最常问的几件事。",
+      items: [
+        {
+          key: "price",
+          question: "Cognia 免费吗？",
+          answer:
+            "免费。整个应用以 AGPL-3.0-or-later 开源，仓库里没有任何付费版本。如果要花钱，花在你接入的模型上：provider 密钥、你已有的订阅，或者用本地运行时，一分钱也不用。",
+          link: {
+            label: "阅读许可证",
+            href: "https://github.com/MaxQian888/cognia-next/blob/master/LICENSE",
+          },
+        },
+        {
+          key: "install",
+          question: "现在能装吗？",
+          answer:
+            "下载页始终显示当前状态：发布之后给出适合你平台的安装包；在那之前，给出在 macOS、Windows 或 Linux 上从源码构建桌面端的步骤。",
+          link: { label: "打开下载页", route: "/download" },
+        },
+        {
+          key: "models",
+          question: "能用哪些模型？",
+          answer:
+            "用自己的密钥接入云端 provider，例如 OpenAI、Anthropic、Google、DeepSeek、OpenRouter 和 Bedrock；用你已经付费的订阅；或者用 Ollama、LM Studio 这类本地运行时。密钥存在操作系统的钥匙串里。",
+          link: { label: "Provider 文档", docsPath: "/docs/chat/provider-system" },
+        },
+        {
+          key: "data",
+          question: "我的数据存在哪里？",
+          answer:
+            "存在你的机器上。对话和工作空间数据由应用在本地保存，检索用的向量存在数据目录里的一个 SQLite 文件中。离开机器的，只有你发给所选模型的内容和你批准的工具调用。账号同步是可选的，端到端加密，目前仍是测试版。",
+          link: { label: "存储文档", docsPath: "/docs/data/storage" },
+        },
+        {
+          key: "agents",
+          question: "能和我已经在用的编程 Agent 一起用吗？",
+          answer:
+            "Claude Code、Codex、Gemini CLI、OpenCode 等可以通过 ACP 或专门的适配器在工作空间里运行，其中几种的会话还能导入。上面「运行方式」一节标明了每个 Agent 支持哪一项。",
+          link: { label: "外部 Agent 文档", docsPath: "/docs/chat/external-agents" },
+        },
+        {
+          key: "surfaces",
+          question: "手机、聊天和浏览器需要桌面端吗？",
+          answer:
+            "需要。工作由桌面端运行。已配对的手机、聊天平台、终端和浏览器扩展触达同一个工作空间，各自只握有你授予它的那部分权限。",
+          link: { label: "查看全部入口", route: "/surfaces" },
+        },
+        {
+          key: "contribute",
+          question: "怎么反馈问题或参与贡献？",
+          answer:
+            "在 GitHub 上提 issue 或 pull request。贡献指南写了环境搭建；安全问题请按安全策略报告，不要发到公开的 issue 里。",
+          link: {
+            label: "贡献指南",
+            href: "https://github.com/MaxQian888/cognia-next/blob/master/CONTRIBUTING.md",
+          },
+        },
+      ],
+    },
     finalCta: {
       eyebrow: "从这里开始",
       title: "把你的 Agent 收进一个开放的工作空间。",
-      support: "桌面优先。开源。为真实工作而建。",
+      support: "许可证、平台与发布状态，都能在仓库里核对。",
       indexLabel: "今天你能拿到什么",
       rows: [
-        { key: "license", label: "许可证" },
-        { key: "platforms", label: "支持平台" },
+        { key: "platforms", label: "可构建平台" },
         { key: "release", label: "最新发布" },
         { key: "changes", label: "待发布的变更" },
       ],
-      changesSuffix: "条，自上次发布以来",
+      changesSuffix: "条已记录，尚未发布",
+      buildLabel: "从源码构建",
     },
 
-    entryPoints: {
-      eyebrow: "一个工作区，多个入口",
-      title: "在桌面开工，在任何地方做决定。",
-      subtitle:
-        "任务留在你的机器上。桌面端负责运行，而手机、你已在用的聊天平台、终端和浏览器都能触达同一条线程，每台设备只握有你授予它的那部分权限。",
-      sequenceLabel:
-        "一条任务如何在设备之间流转：在桌面启动，在手机上批准，在聊天里收到结果，从终端续跑，再从浏览器送入一个页面。",
-      stations: [
-        {
-          key: "desktop",
-          name: "桌面",
-          role: "运行任务",
-          body: "macOS、Windows 和 Linux。文件、终端和 agent 都在同一台机器上。",
-        },
-        {
-          key: "mobile",
-          name: "手机",
-          role: "批准检查点",
-          body: "已配对的 iOS 或 Android 应用只显示正在等待的批准，配对没有授予的一概不显示。",
-        },
-        {
-          key: "im",
-          name: "聊天",
-          role: "接收结果",
-          body: "进度和提问送到你已经在的地方。任何会改变什么的回复，仍然先问过你。",
-        },
-        {
-          key: "cli",
-          name: "终端",
-          role: "续跑会话",
-          body: "与桌面端同一套 agent 循环，在 shell 里从上次停下的地方接着跑。",
-        },
-        {
-          key: "browser",
-          name: "浏览器",
-          role: "送入页面",
-          body: "伴侣扩展捕获你选中的页面，通过已配对、仅限本机回环的通道交给工作区。",
-        },
-      ],
-      frames: {
-        desktop: { threadLabel: "线程", stateLabel: "状态" },
-        mobile: { heading: "等待批准" },
-        im: {
-          sender: "Cognia",
-          heading: "检查已修复",
-          filesLabel: "个文件改动",
-          notesLabel: "发布说明已起草",
-          replyHint: "回复以决定下一步",
-        },
-        cli: { comment: "续跑最近一次会话" },
-        browser: {
-          heading: "浏览器伴侣",
-          pageTitle: "零小数货币的取整规则",
-          captureLabel: "捕获页面",
-          shortcutLabel: "快捷键",
-        },
+    sectionIndex: {
+      hero: "概览",
+      task: "一条任务",
+      workbench: "工作台",
+      desktop: "桌面",
+      run: "运行方式",
+      trust: "信任",
+      faq: "常见问题",
+      start: "开始",
+    },
+    lensLabel: "检视产品界面",
+    fileTreeLabel: "仓库文件树",
+    terminal: {
+      title: "终端",
+      playLabel: "播放",
+      pauseLabel: "暂停",
+      restartLabel: "重新开始",
+      completeLabel: "终端序列已完成",
+      awaitingLabel: "等待你的批准",
+    },
+  },
+
+  product: {
+    header: {
+      eyebrow: "产品",
+      title: "一个工作空间，四个模块，一份工作上下文。",
+      subtitle: "下面每一个界面都是应用里真实存在的部分。每一条都链到描述它实际行为的文档。",
+    },
+    sections: [
+      {
+        id: "chat",
+        title: "对话",
+        subtitle:
+          "线程是一条任务开始的地方，也是它的记录留下的地方。它承载计划、工具调用、审批与相关文件。",
+        entries: [
+          {
+            key: "chat",
+            name: "承载工作的线程",
+            body: "一次会话把计划、diff、审批与它产出的产物留在一起，而不是散落在一堆消息里。",
+            docsPath: "/docs/chat/chat-and-skills",
+          },
+          {
+            key: "slash",
+            name: "斜杠命令与技能",
+            body: "具名命令从输入框运行可重复的工作，遵守与其他一切相同的权限规则。",
+            docsPath: "/docs/chat/slash-commands",
+          },
+          {
+            key: "providers",
+            name: "Provider 体系",
+            body: "本地运行时、自己的密钥、已有订阅，以及某一个不可用时的路由规则。",
+            docsPath: "/docs/chat/provider-system",
+          },
+        ],
       },
-      channelsLabel: "仓库中带有适配器的聊天平台",
-      channels: [
-        "Telegram",
-        "Slack",
-        "Discord",
-        "飞书",
-        "钉钉",
-        "企业微信",
-        "微信公众号",
-        "微信",
-        "Matrix",
-        "OneBot",
-        "QQ",
-      ],
-      note: "以上每个界面都由本页基于同一条演示任务重建。每台设备只握有宿主授予它的能力。",
+      {
+        id: "agents",
+        title: "Agent",
+        subtitle: "Agent 有名字、有边界、可审阅。它们带着自己的工具与关卡，而不是继承一切。",
+        entries: [
+          {
+            key: "agents",
+            name: "Agent 团队",
+            body: "多个 Agent 处理同一条任务，各有分工，由一个 lead 在工作合并前先审阅。",
+            docsPath: "/docs/chat/agent-teams",
+          },
+          {
+            key: "execution",
+            name: "统一执行",
+            body: "内置与外部 Agent 走同一条执行路径，因此行为不会随后端而变。",
+            docsPath: "/docs/subsystems/unified-agent-execution",
+          },
+          {
+            key: "external",
+            name: "外部 Agent",
+            body: "运行你本来就在用的 Agent 后端——由工作空间托管，而不是被它取代。",
+            docsPath: "/docs/chat/external-agents",
+          },
+        ],
+      },
+      {
+        id: "knowledge",
+        title: "知识",
+        subtitle: "工作空间在任务之间记住的东西、每一条的来源，以及如何删掉它。",
+        entries: [
+          {
+            key: "memory",
+            name: "长期记忆",
+            body: "带着来源的持久笔记，在任务需要时才浮现，而不是到处注入。",
+            docsPath: "/docs/subsystems/long-term-memory",
+          },
+          {
+            key: "capture",
+            name: "知识捕获",
+            body: "把网页、文档与截图带进来，并把抽取结果留在原件旁边。",
+            docsPath: "/docs/subsystems/knowledge-capture",
+          },
+          {
+            key: "storage",
+            name: "本地存储与检索",
+            body: "工作空间在磁盘上把东西放在哪里，以及检索如何抵达它们。",
+            docsPath: "/docs/data/storage",
+          },
+        ],
+      },
+      {
+        id: "desktop",
+        title: "桌面",
+        subtitle: "那些只因为工作空间跑在你机器上才存在的部分。",
+        entries: [
+          {
+            key: "terminal",
+            name: "集成终端",
+            body: "跑那条命令，并把输出留在需要它的那条任务旁边。",
+            docsPath: "/docs/subsystems/integrated-terminal",
+          },
+          {
+            key: "ide",
+            name: "编辑器与 Pro IDE",
+            body: "就地读写项目文件；当改动大过一个 diff 时，还有一个完整编辑器。",
+            docsPath: "/docs/subsystems/pro-ide",
+          },
+          {
+            key: "scm",
+            name: "源代码管理",
+            body: "在工作空间里暂存、审阅与提交，Agent 产出的 diff 就摆在你面前。",
+            docsPath: "/docs/subsystems/source-control",
+          },
+        ],
+      },
+    ],
+    figureCaptions: {
+      chat: "演示任务的那条线程：计划、工具调用和检查点在同一列里。",
+      agents: "同一条任务上的 Agent 团队，每个成员各有工具，共用一道审阅关卡。",
+      knowledge: "这条任务留下了什么，每一条都标着它来自哪个文件。",
+      desktop: "桌面外壳里的命令面板、终端和系统通知。",
     },
-
     panorama: {
       eyebrow: "整台仪器",
       title: "一套代码库，每个部件都公开。",
-      subtitle: "工作区里有什么，在本页构建时直接从仓库数出来，而不是在幻灯片里宣称。",
-      figuresLabel: "构建时计数",
-      figures: {
-        plugins: "仓内插件",
-        connectors: "聊天平台适配器",
-        workflowNodeKinds: "工作流节点类型",
-        crates: "Rust crate",
-        packages: "工作区包",
-        adrs: "已记录的设计决策",
-        testFiles: "测试文件",
-      },
-      figuresNote: "都是对检出目录的列举与文件计数，任何一项都能用一条 ls 复现。",
+      subtitle: "每个子系统归到四条线上：工作、记忆、触达与控制，各自链到它的说明。",
       lanes: [
         {
           key: "work",
@@ -872,190 +994,6 @@ export const zh: SiteCopy = {
               route: "/product#desktop",
             },
           ],
-        },
-      ],
-    },
-
-    sectionIndex: {
-      hero: "概览",
-      film: "影片",
-      task: "一条任务",
-      workbench: "工作台",
-      desktop: "桌面",
-      entries: "入口",
-      run: "运行方式",
-      connections: "连接",
-      system: "整台仪器",
-      trust: "信任",
-      start: "开始",
-    },
-    contextTrace: {
-      srLabel: "本任务消费的上下文信号",
-      items: [
-        { key: "repository", label: "读取仓库" },
-        { key: "branch", label: "识别分支" },
-        { key: "files", label: "扫描文件" },
-        { key: "plan", label: "生成计划" },
-        { key: "approval", label: "请求批准" },
-        { key: "tests", label: "运行测试" },
-      ],
-    },
-    lensLabel: "检视产品界面",
-    fileTreeLabel: "仓库文件树",
-    terminal: {
-      title: "终端",
-      playLabel: "播放",
-      pauseLabel: "暂停",
-      restartLabel: "重新开始",
-      completeLabel: "终端序列已完成",
-    },
-    connectionFlow: {
-      label: "Cognia 如何连接外部系统",
-      centerNode: "Cognia",
-    },
-  },
-
-  product: {
-    header: {
-      eyebrow: "产品",
-      title: "一个工作空间，五个界面，一份工作上下文。",
-      subtitle: "下面每一个界面都是应用里真实存在的部分。每一条都链到描述它实际行为的文档。",
-    },
-    sections: [
-      {
-        id: "chat",
-        title: "对话",
-        subtitle:
-          "线程是一条任务开始的地方，也是它的记录留下的地方。它承载计划、工具调用、审批与相关文件。",
-        entries: [
-          {
-            key: "chat",
-            name: "承载工作的线程",
-            body: "一次会话把计划、diff、审批与它产出的产物留在一起，而不是散落在一堆消息里。",
-            docsPath: "/docs/chat/chat-and-skills",
-          },
-          {
-            key: "slash",
-            name: "斜杠命令与技能",
-            body: "具名命令从输入框运行可重复的工作，遵守与其他一切相同的权限规则。",
-            docsPath: "/docs/chat/slash-commands",
-          },
-          {
-            key: "providers",
-            name: "Provider 体系",
-            body: "本地运行时、自己的密钥、已有订阅，以及某一个不可用时的路由规则。",
-            docsPath: "/docs/chat/provider-system",
-          },
-        ],
-      },
-      {
-        id: "agents",
-        title: "Agent",
-        subtitle: "Agent 有名字、有边界、可审阅。它们带着自己的工具与关卡，而不是继承一切。",
-        entries: [
-          {
-            key: "agents",
-            name: "Agent 团队",
-            body: "多个 Agent 处理同一条任务，各有分工，由一个 lead 在工作合并前先审阅。",
-            docsPath: "/docs/chat/agent-teams",
-          },
-          {
-            key: "execution",
-            name: "统一执行",
-            body: "内置与外部 Agent 走同一条执行路径，因此行为不会随后端而变。",
-            docsPath: "/docs/subsystems/unified-agent-execution",
-          },
-          {
-            key: "external",
-            name: "外部 Agent",
-            body: "运行你本来就在用的 Agent 后端——由工作空间托管，而不是被它取代。",
-            docsPath: "/docs/chat/external-agents",
-          },
-        ],
-      },
-      {
-        id: "knowledge",
-        title: "知识",
-        subtitle: "工作空间在任务之间记住的东西、每一条的来源，以及如何删掉它。",
-        entries: [
-          {
-            key: "memory",
-            name: "长期记忆",
-            body: "带着来源的持久笔记，在任务需要时才浮现，而不是到处注入。",
-            docsPath: "/docs/subsystems/long-term-memory",
-          },
-          {
-            key: "capture",
-            name: "知识捕获",
-            body: "把网页、文档与截图带进来，并把抽取结果留在原件旁边。",
-            docsPath: "/docs/subsystems/knowledge-capture",
-          },
-          {
-            key: "storage",
-            name: "本地存储与检索",
-            body: "工作空间在磁盘上把东西放在哪里，以及检索如何抵达它们。",
-            docsPath: "/docs/data/storage",
-          },
-        ],
-      },
-      {
-        id: "desktop",
-        title: "桌面",
-        subtitle: "那些只因为工作空间跑在你机器上才存在的部分。",
-        entries: [
-          {
-            key: "terminal",
-            name: "集成终端",
-            body: "跑那条命令，并把输出留在需要它的那条任务旁边。",
-            docsPath: "/docs/subsystems/integrated-terminal",
-          },
-          {
-            key: "ide",
-            name: "编辑器与 Pro IDE",
-            body: "就地读写项目文件；当改动大过一个 diff 时，还有一个完整编辑器。",
-            docsPath: "/docs/subsystems/pro-ide",
-          },
-          {
-            key: "scm",
-            name: "源代码管理",
-            body: "在工作空间里暂存、审阅与提交，Agent 产出的 diff 就摆在你面前。",
-            docsPath: "/docs/subsystems/source-control",
-          },
-        ],
-      },
-    ],
-    showcase: {
-      title: "可见工作台背后的系统。",
-      subtitle:
-        "对话只是入口。上下文、交互界面、外部会话与持久自动化，让工作在第一条回复之后继续向前。",
-      items: [
-        {
-          key: "context",
-          title: "上下文工作台",
-          body: "把项目文件、捕获资源、仓库说明与既有产物组合成任务真正可以使用的上下文，而不是默认塞进每一次提示词。",
-          detail: "文件 · 资源 · 仓库说明",
-          docsPath: "/docs/ui/context-workbench",
-        },
-        {
-          key: "surfaces",
-          title: "画布与交互应用",
-          body: "把模型输出变成可编辑产物、视觉画布与 A2UI 界面，状态和交互仍然留在任务记录中。",
-          detail: "Canvas · A2UI · 产物",
-          docsPath: "/docs/subsystems/a2ui",
-        },
-        {
-          key: "connections",
-          title: "连接后的收件箱",
-          body: "把 Slack、飞书、Discord、Telegram、Matrix 等适配器的会话带回同一个收件箱，并明确控制入站与出站策略。",
-          detail: "收件箱 · 适配器 · 分发规则",
-          docsPath: "/docs/subsystems/platform-connectors",
-        },
-        {
-          key: "automation",
-          title: "定时任务与持久目标",
-          body: "桌面应用最小化后仍可执行重复工作、保留运行历史，并让较长目标沿着可审阅的步骤持续推进。",
-          detail: "Scheduler · 目标 · 运行历史",
-          docsPath: "/docs/subsystems/scheduler",
         },
       ],
     },
@@ -1240,6 +1178,51 @@ export const zh: SiteCopy = {
         ],
       },
     ],
+    connections: {
+      eyebrow: "有后果的连接",
+      title: "接上工具，别丢了任务。",
+      subtitle: "一个连接只有在你能说清它读什么、能做什么、什么时候必须问，才是有用的。",
+      headings: {
+        reads: "读取",
+        canAct: "可执行",
+        requiresApproval: "需要审批",
+      },
+      items: [
+        {
+          key: "repository",
+          name: "代码仓库",
+          reads: "代码、issue，以及待审阅的 diff",
+          canAct: "提出分支、提交、Pull Request",
+          requiresApproval: "任何推送到远端的动作",
+        },
+        {
+          key: "mcp",
+          name: "MCP 工具",
+          reads: "你传给这次调用的输入",
+          canAct: "运行该 server 暴露的工具",
+          requiresApproval: "首次使用，以及任何被标记为敏感的调用",
+        },
+        {
+          key: "plugin",
+          name: "插件",
+          reads: "仅限它 manifest 中声明的能力",
+          canAct: "在工作空间中产出或更新产物",
+          requiresApproval: "声明范围之外的每一项能力",
+        },
+        {
+          key: "im",
+          name: "聊天与通知",
+          reads: "发给它的那些消息",
+          canAct: "回报进展、请求一个决定",
+          requiresApproval: "依据回复去改变任何东西",
+        },
+      ],
+      catalogueNote: "完整的 provider、MCP、插件与连接器目录在文档里，不在这一页。",
+    },
+    connectionFlow: {
+      label: "Cognia 如何连接外部系统",
+      centerNode: "Cognia",
+    },
     flow: {
       title: "从已有能力到已安装扩展。",
       subtitle:
@@ -1467,6 +1450,260 @@ export const zh: SiteCopy = {
     },
     platformsTitle: "平台",
     platformHint: { label: "已识别", unknown: "未能识别平台" },
+  },
+
+  surfaces: {
+    header: {
+      eyebrow: "多端入口",
+      title: "在桌面开工，在任何地方做决定。",
+      subtitle:
+        "桌面端负责运行。其他每个入口都触达同一条线程，并且只握有这台设备被授予的那部分权限。",
+    },
+    entryPoints: {
+      eyebrow: "一条任务，五个入口",
+      title: "跟着一条任务，从桌面走到手边，再回到桌面。",
+      subtitle:
+        "任务留在你的机器上。桌面端负责运行，而手机、你已在用的聊天平台、终端和浏览器都能触达同一条线程，每台设备只握有你授予它的那部分权限。",
+      sequenceLabel:
+        "一条任务如何在设备之间流转：在桌面启动，在手机上批准，在聊天里收到结果，从终端续跑，再从浏览器送入一个页面。",
+      stations: [
+        {
+          key: "desktop",
+          name: "桌面",
+          role: "运行任务",
+          body: "macOS、Windows 和 Linux。文件、终端和 agent 都在同一台机器上。",
+        },
+        {
+          key: "mobile",
+          name: "手机",
+          role: "批准检查点",
+          body: "已配对的 iOS 或 Android 应用只显示正在等待的批准，配对没有授予的一概不显示。",
+        },
+        {
+          key: "im",
+          name: "聊天",
+          role: "接收结果",
+          body: "进度和提问送到你已经在的地方。任何会改变什么的回复，仍然先问过你。",
+        },
+        {
+          key: "cli",
+          name: "命令行",
+          role: "续跑会话",
+          body: "与桌面端同一套 agent 循环，在 shell 里从上次停下的地方接着跑。",
+        },
+        {
+          key: "browser",
+          name: "浏览器",
+          role: "送入页面",
+          body: "伴侣扩展捕获你选中的页面，通过已配对、仅限本机回环的通道交给工作区。",
+        },
+      ],
+      frames: {
+        desktop: { threadLabel: "线程", stateLabel: "状态" },
+        mobile: { heading: "等待批准" },
+        im: {
+          sender: "Cognia",
+          heading: "检查已修复",
+          filesLabel: "个文件改动",
+          notesLabel: "发布说明已起草",
+          replyHint: "回复以决定下一步",
+        },
+        cli: { comment: "续跑最近一次会话" },
+        browser: {
+          heading: "浏览器伴侣",
+          pageTitle: "零小数货币的取整规则",
+          captureLabel: "捕获页面",
+          shortcutLabel: "快捷键",
+        },
+      },
+      channelsLabel: "仓库中带有适配器的聊天平台",
+      channels: [
+        "Telegram",
+        "Slack",
+        "Discord",
+        "飞书",
+        "钉钉",
+        "企业微信",
+        "微信公众号",
+        "微信",
+        "Matrix",
+        "OneBot",
+        "QQ",
+      ],
+      note: "以上每个界面都由本页基于同一条演示任务重建。",
+    },
+    sections: [
+      {
+        id: "desktop",
+        title: "桌面",
+        subtitle: "运行工作的那台机器：文件、终端、仓库和 Agent 都在一起。",
+        entries: [
+          {
+            key: "platforms",
+            name: "macOS、Windows 与 Linux",
+            body: "同一套代码构建三个平台的桌面外壳，每个平台上都是同一个工作空间。",
+            docsPath: "/docs/core/runtime-and-tauri",
+          },
+          {
+            key: "tray",
+            name: "托盘面板",
+            body: "不打开窗口，从菜单栏一眼看到正在跑的工作和等待中的批准。",
+            docsPath: "/docs/subsystems/tray-panel",
+          },
+          {
+            key: "terminal",
+            name: "集成终端",
+            body: "线程旁边的真实 shell，可以分享给已配对的设备，也可以随时收回。",
+            docsPath: "/docs/subsystems/integrated-terminal",
+          },
+        ],
+      },
+      {
+        id: "mobile",
+        title: "手机",
+        subtitle:
+          "与桌面配对的 iOS 和 Android 应用，和桌面端一样从这个仓库构建。它们跟进、批准、回复；运行仍在桌面端。",
+        entries: [
+          {
+            key: "pair",
+            name: "扫码配对",
+            body: "扫描桌面上的二维码。邀请会过期，连接走 WebRTC，只有两边网络无法直连时才经过中继。",
+            docsPath: "/docs/ui/mobile-architecture/discovery-pairing",
+          },
+          {
+            key: "approve",
+            name: "批准检查点",
+            body: "等你确认的工具调用会出现在手机上，写明它要执行什么、作用在哪里，在手机上直接批准或拒绝。",
+            docsPath: "/docs/subsystems/remote-control",
+          },
+          {
+            key: "follow",
+            name: "跟进线程",
+            body: "在对话里阅读和回复、停止一次运行，或者打开桌面分享给这台手机的终端。",
+            docsPath: "/docs/ui/mobile-architecture",
+          },
+        ],
+      },
+      {
+        id: "im",
+        title: "聊天平台",
+        subtitle: "进度和提问送到你本来就在聊天的地方，通过仓库里自带的平台适配器。",
+        entries: [
+          {
+            key: "deliver",
+            name: "结果送到你所在的地方",
+            body: "任务完成、提出问题或停在检查点时，消息发到你连接的频道，并链接回对应的线程。",
+            docsPath: "/docs/subsystems/platform-connectors",
+          },
+          {
+            key: "gate",
+            name: "会改变东西的回复仍要确认",
+            body: "收到的消息先经过一道关卡。会改变什么的回复，和在桌面端一样要等你批准。",
+            docsPath: "/docs/subsystems/platform-connectors/inbound-gating",
+          },
+          {
+            key: "cards",
+            name: "卡片，而不是大段文字",
+            body: "助手的界面被转成各平台自己的富消息卡片，按下的按钮会回到对应的任务里。",
+            docsPath: "/docs/subsystems/platform-connectors/ai-and-a2ui",
+          },
+        ],
+      },
+      {
+        id: "cli",
+        title: "命令行",
+        subtitle: "cognia-agent 在 shell 里运行同一套 Agent 循环，适合从终端开始的工作。",
+        entries: [
+          {
+            key: "resume",
+            name: "从上次停下的地方继续",
+            body: "cognia-agent chat --continue 在当前终端里续上最近一次会话。",
+            docsPath: "/docs/subsystems/cognia-agent-tui",
+          },
+          {
+            key: "handoff",
+            name: "把会话交给桌面端",
+            body: "cognia-agent handoff 把终端里的会话复制到正在运行的桌面应用，在完整的工作台里接着做。",
+            docsPath: "/docs/subsystems/cli-app-bridge",
+          },
+          {
+            key: "tooling",
+            name: "插件工具",
+            body: "另一个 cognia 命令负责插件的脚手架、检查和签名，同样在这个仓库里。",
+            docsPath: "/docs/subsystems/cognia-cli",
+          },
+        ],
+      },
+      {
+        id: "browser",
+        title: "浏览器",
+        subtitle: "适用于 Chrome 和 Edge 的扩展，通过仅限本机回环的通道把页面交给工作空间。",
+        entries: [
+          {
+            key: "capture",
+            name: "捕获页面",
+            body: "用可以自定义的快捷键，把整页、选中的内容或正文送进一条任务。",
+            docsPath: "/docs/subsystems/companion-api",
+          },
+          {
+            key: "panel",
+            name: "侧边栏",
+            body: "在浏览器侧边栏里和工作空间对话，不用离开正在读的页面。",
+            docsPath: "/docs/subsystems/companion-api",
+          },
+          {
+            key: "scope",
+            name: "配对时才申请权限",
+            body: "访问本机桌面的权限在配对时才申请，安装时不会；扩展也不会在无痕窗口中运行。",
+            docsPath: "/docs/subsystems/companion-api/server-and-auth",
+          },
+        ],
+      },
+    ],
+    flow: {
+      title: "每个入口走同一套生命周期。",
+      subtitle: "配对一台设备是一次授权，不是一次登录。它看得见、收得窄，也收得回。",
+      steps: [
+        {
+          key: "pair",
+          label: "配对",
+          body: "桌面端签发一个短时效的邀请，设备只能兑换一次。",
+          docsPath: "/docs/ui/mobile-architecture/discovery-pairing",
+        },
+        {
+          key: "grant",
+          label: "授权",
+          body: "设备拿到的是有名字的几项能力，而不是桌面端的全部权限。",
+          docsPath: "/docs/subsystems/companion-api/server-and-auth",
+        },
+        {
+          key: "reach",
+          label: "触达",
+          body: "它发出的每个请求都按这份授权检查，并记在对应的任务名下。",
+          docsPath: "/docs/subsystems/companion-api",
+        },
+        {
+          key: "revoke",
+          label: "收回",
+          body: "在桌面端移除这台设备，它的下一个请求就会被拒绝。",
+          docsPath: "/docs/subsystems/remote-control",
+        },
+      ],
+    },
+  },
+
+  inventory: {
+    figuresLabel: "构建时计数",
+    figures: {
+      plugins: "仓内插件",
+      connectors: "聊天平台适配器",
+      workflowNodeKinds: "工作流节点类型",
+      crates: "Rust crate",
+      packages: "工作区包",
+      adrs: "已记录的设计决策",
+      testFiles: "测试文件",
+    },
+    figuresNote: "都是对检出目录的列举与文件计数，任何一项都能用一条 ls 复现。",
   },
 
   useCases: {

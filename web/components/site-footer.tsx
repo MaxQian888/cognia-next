@@ -22,7 +22,7 @@ export function SiteFooter({ locale, copy, docsOrigin }: SiteFooterProps) {
   return (
     <footer className="border-t border-hairline bg-surface">
       <div className="mx-auto max-w-shell px-5 py-16 lg:px-8">
-        <div className="grid gap-2 md:grid-cols-3 md:gap-10">
+        <div className="grid gap-2 md:grid-cols-4 md:gap-10">
           {copy.footer.columns.map((column) => (
             <details
               key={column.title}

@@ -231,13 +231,12 @@ describe("SignatureDemo when scroll-pinned", () => {
     expect(container.querySelector("#task .signature-stage")).toBeInTheDocument()
   })
 
-  it("keeps the task summary with the controls instead of pinning it to the viewport floor", () => {
+  it("states the task once, not again beside the pinned controls", () => {
     const { container } = render(
       <SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />
     )
-    const summary = container.querySelector("#task [data-pinned-task-summary]")
-    expect(summary).toHaveClass("mt-8")
-    expect(summary).not.toHaveClass("mt-auto")
+    expect(screen.getAllByText(en.home.signature.task)).toHaveLength(1)
+    expect(container.querySelector("#task [data-pinned-task-summary]")).toBeNull()
   })
 
   it("does not mount cursor overlays inside the interactive artifact", () => {
@@ -365,5 +364,43 @@ describe("SignatureDemo localisation", () => {
     expect(
       screen.getByRole("heading", { name: zh.home.signature.steps[0].headline })
     ).toBeInTheDocument()
+  })
+
+  it("opens on the film when there is one, then labels the steps under it", () => {
+    reduced = true
+    const { container } = render(
+      <SignatureDemo
+        copy={en.home.signature}
+        reconstruction={en.reconstruction}
+        film={<p>the film</p>}
+      />
+    )
+    const film = screen.getByText("the film")
+    const label = screen.getByText(en.home.signature.stepsLabel)
+    const firstStep = container.querySelector("#task ol")
+    expect(film.closest("section")).toHaveAttribute("id", "task")
+    expect(film.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(
+      label.compareDocumentPosition(firstStep!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it("has no steps label without a film to set them apart from", () => {
+    reduced = true
+    render(<SignatureDemo copy={en.home.signature} reconstruction={en.reconstruction} />)
+    expect(screen.queryByText(en.home.signature.stepsLabel)).toBeNull()
+  })
+
+  it("renders a footer handed in by the page under the demo", () => {
+    reduced = true
+    render(
+      <SignatureDemo
+        copy={en.home.signature}
+        reconstruction={en.reconstruction}
+        footer={<p>scenario links</p>}
+      />
+    )
+    const footer = screen.getByText("scenario links")
+    expect(footer.closest("section")).toHaveAttribute("id", "task")
   })
 })

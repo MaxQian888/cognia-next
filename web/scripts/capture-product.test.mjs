@@ -108,9 +108,10 @@ test("the matrix is hero, workbench and desktop, each waiting on the chat surfac
       '[data-testid="artifact-workspace-dock"]'
     )
   )
+  // Framed on the thread and the whole push approval, actions included.
   assert.deepEqual(SECTIONS.find((s) => s.key === "desktop").clip, {
-    x: 0,
-    y: 0,
+    x: 250,
+    y: 40,
     width: 960,
     height: 600,
   })

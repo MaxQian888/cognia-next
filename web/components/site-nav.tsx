@@ -2,7 +2,7 @@
 
 import { useEffect } from "react"
 import { createPortal } from "react-dom"
-import type { SiteCopy } from "@web/content/types"
+import type { NavMenu, SiteCopy } from "@web/content/types"
 import type { ReleaseState } from "@web/lib/evidence"
 import { useDismissable } from "@web/hooks/use-dismissable"
 import { BrandMark } from "./brand-mark"
@@ -41,12 +41,6 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
   // look like a ref read during render to the compiler's lint rule. Separate
   // bindings keep the boundary visible to the reader too.
   const {
-    open: menuOpen,
-    toggle: toggleMenu,
-    containerRef: menuRef,
-    triggerRef: menuTriggerRef,
-  } = useDismissable<HTMLDivElement>()
-  const {
     open: sheetOpen,
     toggle: toggleSheet,
     close: closeSheet,
@@ -78,10 +72,14 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
     "/product#chat": "chat",
     "/product#agents": "agents",
     "/product#knowledge": "knowledge",
+    "/surfaces": "mobile",
+    "/use-cases/development": "terminal",
+    "/use-cases/research": "artifact",
     "/workflows": "workflow",
     "/plugins": "plugin",
     "/trust": "trust",
   }
+  const menus = [copy.nav.productMenu, copy.nav.useCasesMenu]
 
   return (
     <header className="sticky top-0 z-50 border-b border-hairline bg-paper/85 backdrop-blur-sm">
@@ -107,56 +105,15 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
         </SiteLink>
 
         <div className="hidden items-center gap-1 lg:flex">
-          <div className="relative">
-            <button
-              ref={menuTriggerRef}
-              type="button"
-              onClick={toggleMenu}
-              aria-expanded={menuOpen}
-              aria-haspopup="true"
-              className="inline-flex items-center gap-1.5 rounded-control px-3 py-2 text-sm text-muted transition-colors hover:text-ink"
-            >
-              {copy.nav.productMenu.label}
-              <Icon
-                name="chevronDown"
-                size={14}
-                className={cn("transition-transform duration-200", menuOpen && "rotate-180")}
-              />
-            </button>
-            {menuOpen ? (
-              <div
-                ref={menuRef}
-                className="absolute left-0 top-full w-80 rounded-panel border border-hairline bg-surface p-2 shadow-sm"
-              >
-                <ul>
-                  {copy.nav.productMenu.items.map((item) => (
-                    <li key={item.route}>
-                      <SiteLink
-                        target={item}
-                        locale={locale}
-                        docsOrigin={docsOrigin}
-                        className="flex gap-3 rounded-control px-3 py-2 transition-colors hover:bg-paper"
-                      >
-                        {NAV_ICON[item.route] ? (
-                          <Icon
-                            name={NAV_ICON[item.route]}
-                            size={16}
-                            className="mt-0.5 shrink-0 text-muted"
-                          />
-                        ) : null}
-                        <span className="block">
-                          <span className="block text-sm text-ink">{item.label}</span>
-                          <span className="mt-0.5 block text-xs leading-relaxed text-muted">
-                            {item.description}
-                          </span>
-                        </span>
-                      </SiteLink>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </div>
+          {menus.map((menu) => (
+            <NavDropdown
+              key={menu.label}
+              menu={menu}
+              icons={NAV_ICON}
+              locale={locale}
+              docsOrigin={docsOrigin}
+            />
+          ))}
 
           {primaryLinks.map((link) => (
             <SiteLink
@@ -242,22 +199,31 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
               }}
               className="fixed inset-x-0 bottom-0 top-16 z-40 overflow-y-auto overscroll-contain border-t border-hairline bg-paper px-5 py-8 lg:hidden"
             >
+              {menus.map((menu) => (
+                <div key={menu.label} className="mb-6">
+                  <p className="font-mono text-xs uppercase tracking-widest text-muted">
+                    {menu.label}
+                  </p>
+                  <ul className="mt-1 flex flex-col">
+                    {menu.items.map((item) => (
+                      <li key={item.route}>
+                        <SiteLink
+                          target={item}
+                          locale={locale}
+                          docsOrigin={docsOrigin}
+                          className="flex items-center gap-3 border-b border-hairline py-4 text-lg text-ink"
+                        >
+                          {NAV_ICON[item.route] ? (
+                            <Icon name={NAV_ICON[item.route]} size={16} className="text-muted" />
+                          ) : null}
+                          {item.label}
+                        </SiteLink>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
               <ul className="flex flex-col gap-1">
-                {copy.nav.productMenu.items.map((item) => (
-                  <li key={item.route}>
-                    <SiteLink
-                      target={item}
-                      locale={locale}
-                      docsOrigin={docsOrigin}
-                      className="flex items-center gap-3 border-b border-hairline py-4 text-lg text-ink"
-                    >
-                      {NAV_ICON[item.route] ? (
-                        <Icon name={NAV_ICON[item.route]} size={16} className="text-muted" />
-                      ) : null}
-                      {item.label}
-                    </SiteLink>
-                  </li>
-                ))}
                 {primaryLinks.map((link) => (
                   <li key={link.route}>
                     <SiteLink
@@ -311,5 +277,78 @@ export function SiteNav({ locale, route, copy, releaseState, docsOrigin }: SiteN
           )
         : null}
     </header>
+  )
+}
+
+interface NavDropdownProps {
+  menu: NavMenu
+  icons: Record<string, IconName>
+  locale: Locale
+  docsOrigin?: string
+}
+
+/**
+ * One labelled dropdown in the bar. Each owns its dismissal, so opening one
+ * and pressing outside it — including on the other trigger — closes it, and
+ * Escape returns focus to the control that opened it.
+ */
+function NavDropdown({ menu, icons, locale, docsOrigin }: NavDropdownProps) {
+  const { open, toggle, close, containerRef, triggerRef } = useDismissable<HTMLDivElement>()
+  return (
+    <div className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-haspopup="true"
+        className="inline-flex items-center gap-1.5 rounded-control px-3 py-2 text-sm text-muted transition-colors hover:text-ink"
+      >
+        {menu.label}
+        <Icon
+          name="chevronDown"
+          size={14}
+          className={cn("transition-transform duration-200", open && "rotate-180")}
+        />
+      </button>
+      {open ? (
+        <div
+          ref={containerRef}
+          // Following a link closes the menu: the bar survives client-side
+          // navigation, and an anchor on the same page would leave it open.
+          onClick={(event) => {
+            if ((event.target as Element).closest("a")) close()
+          }}
+          className="nav-menu absolute left-0 top-full w-80 rounded-panel border border-hairline bg-surface p-2 shadow-sm"
+        >
+          <ul>
+            {menu.items.map((item) => (
+              <li key={item.route}>
+                <SiteLink
+                  target={item}
+                  locale={locale}
+                  docsOrigin={docsOrigin}
+                  className="flex gap-3 rounded-control px-3 py-2 transition-colors hover:bg-paper"
+                >
+                  {icons[item.route] ? (
+                    <Icon
+                      name={icons[item.route]}
+                      size={16}
+                      className="mt-0.5 shrink-0 text-muted"
+                    />
+                  ) : null}
+                  <span className="block">
+                    <span className="block text-sm text-ink">{item.label}</span>
+                    <span className="mt-0.5 block text-sm leading-relaxed text-muted">
+                      {item.description}
+                    </span>
+                  </span>
+                </SiteLink>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
   )
 }

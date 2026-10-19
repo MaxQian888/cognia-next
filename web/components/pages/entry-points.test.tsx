@@ -23,7 +23,7 @@ import { CAPTURE_SHORTCUT, CLI_RESUME_COMMAND, EntryPoints, HANDOFF_STEP_MS } fr
 function renderEntries(locale: "en" | "zh" = "en") {
   const copy = locale === "en" ? en : zh
   return render(
-    <EntryPoints copy={copy.home.entryPoints} reconstruction={copy.reconstruction} index={5} />
+    <EntryPoints copy={copy.surfaces.entryPoints} reconstruction={copy.reconstruction} index={5} />
   )
 }
 
@@ -47,7 +47,7 @@ describe("EntryPoints", () => {
       "cli",
       "browser",
     ])
-    for (const station of en.home.entryPoints.stations) {
+    for (const station of en.surfaces.entryPoints.stations) {
       expect(screen.getByText(station.role)).toBeInTheDocument()
       expect(screen.getByText(station.body)).toBeInTheDocument()
     }
@@ -118,7 +118,7 @@ describe("EntryPoints", () => {
   it("labels the frames as reconstructions and describes the sequence once for assistive technology", () => {
     renderEntries()
     expect(screen.getByText(`${en.reconstruction.label}.`)).toBeInTheDocument()
-    expect(screen.getByText(en.home.entryPoints.sequenceLabel)).toHaveClass("sr-only")
+    expect(screen.getByText(en.surfaces.entryPoints.sequenceLabel)).toHaveClass("sr-only")
   })
 
   it("lists one chat platform per adapter directory in the repository", () => {
@@ -127,8 +127,8 @@ describe("EntryPoints", () => {
     const adapters = readdirSync(join(__dirname, "../../../lib/connectors/adapters"), {
       withFileTypes: true,
     }).filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"))
-    expect(en.home.entryPoints.channels).toHaveLength(adapters.length)
-    expect(zh.home.entryPoints.channels).toHaveLength(adapters.length)
+    expect(en.surfaces.entryPoints.channels).toHaveLength(adapters.length)
+    expect(zh.surfaces.entryPoints.channels).toHaveLength(adapters.length)
   })
 
   it("quotes the resume command and the capture shortcut from their defining modules", () => {
@@ -138,10 +138,17 @@ describe("EntryPoints", () => {
     expect(wxt).toContain(CAPTURE_SHORTCUT)
   })
 
+  it("sets the chat platform names in the reading face, not mono", () => {
+    renderEntries()
+    for (const channel of en.surfaces.entryPoints.channels) {
+      expect(screen.getByText(channel)).not.toHaveClass("font-mono")
+    }
+  })
+
   it("renders the Chinese copy", () => {
     renderEntries("zh")
-    expect(screen.getByRole("heading", { name: zh.home.entryPoints.title })).toBeInTheDocument()
-    for (const channel of zh.home.entryPoints.channels) {
+    expect(screen.getByRole("heading", { name: zh.surfaces.entryPoints.title })).toBeInTheDocument()
+    for (const channel of zh.surfaces.entryPoints.channels) {
       expect(screen.getByText(channel)).toBeInTheDocument()
     }
   })

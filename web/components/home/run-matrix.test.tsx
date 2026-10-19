@@ -27,7 +27,8 @@ describe("RunMatrix", () => {
   it("uses a real table so row and column relationships survive a screen reader", () => {
     renderMatrix()
     const table = screen.getByRole("table")
-    expect(within(table).getAllByRole("row")).toHaveLength(en.home.run.strategies.length + 1)
+    // Header, one row per strategy, and the shared confirmation row.
+    expect(within(table).getAllByRole("row")).toHaveLength(en.home.run.strategies.length + 2)
   })
 
   it("asks the four questions the spec requires of every strategy", () => {
@@ -37,26 +38,30 @@ describe("RunMatrix", () => {
       en.home.run.headings.leaves,
       en.home.run.headings.receives,
       en.home.run.headings.tools,
-      en.home.run.headings.approval,
     ]) {
       expect(within(table).getByRole("columnheader", { name: heading })).toBeInTheDocument()
     }
+    // The fourth is answered once, for every strategy, in the footer row.
+    expect(
+      within(table).getByRole("rowheader", { name: en.home.run.headings.approval })
+    ).toBeInTheDocument()
   })
 
-  it("answers all four for every strategy", () => {
+  it("states what needs confirmation once rather than once per strategy", () => {
+    renderMatrix()
+    const table = screen.getByRole("table")
+    const cell = within(table).getByText(en.home.run.approvalShared)
+    expect(cell).toHaveAttribute("colspan", "3")
+    expect(screen.getAllByText(en.home.run.approvalShared)).toHaveLength(2) // table + stacked
+  })
+
+  it("answers the per-strategy three for every strategy", () => {
     renderMatrix()
     const table = screen.getByRole("table")
     for (const strategy of en.home.run.strategies) {
       const row = within(table).getByRole("row", { name: new RegExp(strategy.name) })
-      for (const answer of [
-        strategy.leaves,
-        strategy.receives,
-        strategy.tools,
-        strategy.approval,
-      ]) {
-        // `getAllByText`: the fallback row legitimately gives the same answer
-        // for tools and approval — both are unchanged by a provider switch.
-        expect(within(row).getAllByText(answer).length).toBeGreaterThan(0)
+      for (const answer of [strategy.leaves, strategy.receives, strategy.tools]) {
+        expect(within(row).getByText(answer)).toBeInTheDocument()
       }
     }
   })
@@ -75,11 +80,6 @@ describe("RunMatrix", () => {
   it("shows no provider logo wall — the matrix is the content", () => {
     const { container } = renderMatrix()
     expect(container.querySelectorAll("img")).toHaveLength(0)
-  })
-
-  it("keeps the note distinguishing local, offline, self-hosted and private", () => {
-    renderMatrix()
-    expect(screen.getByText(en.home.run.note)).toBeInTheDocument()
   })
 
   it("repeats the column names as labels in the stacked layout", () => {
@@ -102,5 +102,11 @@ describe("RunMatrix", () => {
     renderMatrix("zh")
     const link = screen.getAllByRole("link", { name: zh.common.learnMore })[0]
     expect(link.getAttribute("href")).toContain(`${DOCS}/zh/`)
+  })
+
+  it("closes on the agents the workspace can run or import", () => {
+    renderMatrix()
+    const list = screen.getByRole("list", { name: en.home.run.agents.label })
+    expect(within(list).getAllByRole("listitem")).toHaveLength(en.home.run.agents.items.length)
   })
 })

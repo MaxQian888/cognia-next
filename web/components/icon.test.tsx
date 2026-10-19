@@ -55,4 +55,9 @@ describe("Icon", () => {
     const { container } = render(<Icon name="alert" className="text-approval" />)
     expect(svgOf(container).getAttribute("class")).toContain("text-approval")
   })
+
+  it("names the phone surface", () => {
+    const { container } = render(<Icon name="mobile" />)
+    expect(svgOf(container)).toBeInTheDocument()
+  })
 })

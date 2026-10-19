@@ -34,6 +34,7 @@ function renderTrust(data: Evidence = evidence(), locale: "en" | "zh" = "en") {
     <TrustSection
       copy={copy.home.trust}
       common={copy.common}
+      inventoryCopy={copy.inventory}
       evidence={data}
       locale={locale}
       docsOrigin={DOCS}
@@ -44,8 +45,6 @@ function renderTrust(data: Evidence = evidence(), locale: "en" | "zh" = "en") {
 describe("TrustSection bento", () => {
   it("renders the four evidence cards", () => {
     renderTrust()
-    // Scoped to the bento: "Source" also labels a step on the provenance rail,
-    // and an unscoped query would match both.
     const bento = screen.getByRole("list", { name: en.home.trust.title })
     for (const card of en.home.trust.cards) {
       expect(within(bento).getByText(card.label)).toBeInTheDocument()
@@ -53,12 +52,10 @@ describe("TrustSection bento", () => {
     }
   })
 
-  it("distinguishes the bento's Source card from the rail's Source step", () => {
+  it("has no provenance rail retelling the task's steps beside the claims", () => {
     renderTrust()
-    const bento = screen.getByRole("list", { name: en.home.trust.title })
-    const rail = screen.getByRole("complementary", { name: en.home.trust.provenanceLabel })
-    expect(within(bento).getByText("Source")).toBeInTheDocument()
-    expect(within(rail).getByText("Source")).toBeInTheDocument()
+    expect(screen.queryByRole("complementary")).toBeNull()
+    expect(screen.getAllByText("Source")).toHaveLength(1)
   })
 
   it("links the source card at the repository", () => {
@@ -76,25 +73,27 @@ describe("TrustSection bento", () => {
   })
 })
 
-describe("TrustSection provenance rail", () => {
-  it("threads source, action, permission and result", () => {
-    renderTrust()
-    const rail = screen.getByRole("complementary", { name: en.home.trust.provenanceLabel })
-    expect(rail).toBeInTheDocument()
-    for (const step of en.home.trust.provenance) {
-      expect(within(rail).getByText(step.label)).toBeInTheDocument()
-      expect(within(rail).getByText(step.value)).toBeInTheDocument()
-    }
+describe("TrustSection column lines", () => {
+  it("lays the claims and both figure bands on the same four columns and padding", () => {
+    const { container } = renderTrust()
+    const bands = ["trust-cards", "trust-stats", "inventory"].map(
+      (slot) => container.querySelector(`[data-slot="${slot}"]`) as HTMLElement
+    )
+    for (const band of bands) expect(band).toHaveClass("lg:grid-cols-4")
+    const firstCells = bands.map((band) => band.firstElementChild as HTMLElement)
+    for (const cell of firstCells) expect(cell).toHaveClass("px-5", "py-6", "md:px-6")
   })
 })
 
 describe("TrustSection figures", () => {
-  it("reads every figure from the evidence snapshot", () => {
+  it("reads every figure from the evidence snapshot and shows it at its value", () => {
     const { container } = renderTrust()
     expect(screen.getByText("52")).toBeInTheDocument()
     expect(screen.getByText("2")).toBeInTheDocument()
     expect(screen.getByText("AGPL-3.0")).toBeInTheDocument()
-    expect(container.querySelectorAll('[data-slot="number-ticker"]')).toHaveLength(2)
+    // No count-up: a figure read or captured halfway would be a wrong one.
+    expect(container.querySelector('[data-slot="number-ticker"]')).toBeNull()
+    expect(container.querySelector('[data-figure="testFiles"]')).toHaveTextContent("9,496")
   })
 
   it("says there is no release rather than printing a zero or a blank", () => {
@@ -151,13 +150,23 @@ describe("TrustSection figures", () => {
   })
 })
 
+describe("TrustSection counted figures", () => {
+  it("closes on the figures counted from the checkout, beside the repository figures", () => {
+    const { container } = renderTrust()
+    expect(screen.getByText(en.inventory.figuresLabel)).toBeInTheDocument()
+    expect(container.querySelectorAll("[data-figure]")).toHaveLength(7)
+    expect(container.querySelector('[data-figure="plugins"]')).toHaveTextContent("59")
+  })
+})
+
 describe("TrustSection localisation", () => {
-  it("renders the Chinese cards and rail", () => {
+  it("renders the Chinese cards", () => {
     renderTrust(evidence(), "zh")
     expect(screen.getByRole("heading", { name: zh.home.trust.title })).toBeInTheDocument()
-    expect(
-      screen.getByRole("complementary", { name: zh.home.trust.provenanceLabel })
-    ).toBeInTheDocument()
+    const bento = screen.getByRole("list", { name: zh.home.trust.title })
+    for (const card of zh.home.trust.cards) {
+      expect(within(bento).getByText(card.label)).toBeInTheDocument()
+    }
   })
 
   it("localises the freshness label", () => {

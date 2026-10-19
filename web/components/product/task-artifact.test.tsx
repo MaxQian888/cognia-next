@@ -156,6 +156,15 @@ describe("TaskArtifact: artifact", () => {
   })
 })
 
+describe("TaskArtifact: artifact framing", () => {
+  it("rules the notes' sections instead of boxing them inside the step panel", () => {
+    const { container } = render(<TaskArtifact kind="artifact" copy={en.reconstruction} />)
+    const sections = container.querySelector('[data-slot="artifact-sections"]')
+    expect(sections).toHaveClass("border-t")
+    expect(sections).not.toHaveClass("rounded-panel")
+  })
+})
+
 describe("TaskArtifact localisation", () => {
   it("renders the Chinese prose while keeping the untranslated technical strings", () => {
     render(<TaskArtifact kind="context" copy={zh.reconstruction} />)

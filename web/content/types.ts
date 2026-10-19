@@ -35,6 +35,7 @@ export interface MetaCopy {
   useCasesDevelopment: RouteMeta
   useCasesResearch: RouteMeta
   changelog: RouteMeta
+  surfaces: RouteMeta
 }
 
 export interface NavLink {
@@ -47,13 +48,18 @@ export interface NavMenuItem extends NavLink {
   description: string
 }
 
+/** A labelled dropdown in the bar and a group in the mobile sheet. */
+export interface NavMenu {
+  label: string
+  items: NavMenuItem[]
+}
+
 export interface NavCopy {
   brand: string
-  /** §5: Product collects Chat, Agents and Knowledge as anchors on /product. */
-  productMenu: {
-    label: string
-    items: NavMenuItem[]
-  }
+  /** §5: Product collects Chat, Agents and Knowledge as anchors on /product, plus /surfaces. */
+  productMenu: NavMenu
+  /** The two scenario pages, which no other route links into. */
+  useCasesMenu: NavMenu
   links: NavLink[]
   docsLabel: string
   sourceLabel: string
@@ -122,7 +128,10 @@ export interface CommonCopy {
   readDocs: string
   asOf: string
   stale: string
+  /** Every `learnMore` link opens the documentation, so it names that destination. */
   learnMore: string
+  /** A link to a page on this site, where `learnMore` would mislabel it as docs. */
+  openPage: string
   /** Screen-reader label for the decorative context path in the bento. */
   contextPathLabel: string
   /** First crumb on every sub-page. */
@@ -132,16 +141,21 @@ export interface CommonCopy {
   /** Copy-to-clipboard control on the build commands. */
   copyCommand: string
   copiedCommand: string
+  /**
+   * The band that closes every sub-page that argues for the product: the same
+   * build/source pair the homepage opens and closes with, so no page ends on
+   * the footer with nowhere to go.
+   */
+  pageClose: {
+    eyebrow: string
+    title: string
+    body: string
+  }
 }
 
 /* -------------------------------------------------------------------------- */
 /* Homepage                                                                    */
 /* -------------------------------------------------------------------------- */
-
-export interface TrustRailItem {
-  label: string
-  detail: string
-}
 
 /**
  * Labels for the hero's task ticket.
@@ -164,7 +178,6 @@ export interface HeroCopy {
   eyebrow: string
   title: string
   subtitle: string
-  trustRail: TrustRailItem[]
   ticket: HeroTicketCopy
   stageAlt: string
   stageCaption: string
@@ -207,6 +220,10 @@ export interface SignatureCopy {
   playLabel: string
   pauseLabel: string
   stepOf: string
+  /** Label over the links to the two scenario pages under the demo. */
+  useCasesLabel: string
+  /** Mono label over the stepper, after the film: the reader-paced version. */
+  stepsLabel: string
 }
 
 export interface BentoPanel {
@@ -228,17 +245,26 @@ export interface DesktopCopy {
   subtitle: string
   capabilities: Array<{ label: string; body: string }>
   stageAlt: string
+  /**
+   * The strip that closes the section: the other surfaces that reach the same
+   * workspace, each linking into its block on /surfaces. Names and roles come
+   * from `SurfacesPageCopy.entryPoints.stations`, so the two cannot drift.
+   */
+  otherSurfaces: { label: string; linkLabel: string }
 }
 
 export interface RunStrategy {
   key: string
   name: string
   summary: string
-  /** The four questions §4.5 requires every strategy to answer. */
+  /**
+   * Three of the four questions §4.5 requires every strategy to answer. The
+   * fourth, what needs confirmation, has one answer for every strategy and is
+   * stated once (`RunCopy.approvalShared`) rather than repeated per row.
+   */
   leaves: string
   receives: string
   tools: string
-  approval: string
   docsPath: string
 }
 
@@ -254,7 +280,10 @@ export interface RunCopy {
     approval: string
   }
   strategies: RunStrategy[]
-  note: string
+  /** What needs confirmation, the same under every strategy (`headings.approval`). */
+  approvalShared: string
+  /** The agents a workspace can run or import, beside the model strategies. */
+  agents: AgentInteropCopy
 }
 
 export interface ConnectionItem {
@@ -282,6 +311,15 @@ export interface AgentInterop {
   import: boolean
 }
 
+/** Agent interop strip: every row is backed by an external-agent preset, a session-import adapter, or both. */
+export interface AgentInteropCopy {
+  label: string
+  note: string
+  runLabel: string
+  importLabel: string
+  items: AgentInterop[]
+}
+
 export interface ConnectionsCopy {
   eyebrow: string
   title: string
@@ -293,13 +331,6 @@ export interface ConnectionsCopy {
   }
   items: ConnectionItem[]
   catalogueNote: string
-  agents: {
-    label: string
-    note: string
-    runLabel: string
-    importLabel: string
-    items: AgentInterop[]
-  }
 }
 
 export interface TrustCard {
@@ -312,18 +343,11 @@ export interface TrustCard {
   route?: string
 }
 
-export interface ProvenanceStep {
-  label: string
-  value: string
-}
-
 export interface TrustCopy {
   eyebrow: string
   title: string
   subtitle: string
   cards: TrustCard[]
-  provenanceLabel: string
-  provenance: ProvenanceStep[]
   statsLabel: string
   starsLabel: string
   contributorsLabel: string
@@ -339,7 +363,7 @@ export interface TrustCopy {
  * evidence snapshot or from copy already on the page, so the block states
  * nothing that is not verifiable elsewhere on the site.
  */
-export type FinalCtaRowKey = "license" | "platforms" | "release" | "changes"
+export type FinalCtaRowKey = "platforms" | "release" | "changes"
 
 export interface FinalCtaRow {
   key: FinalCtaRowKey
@@ -353,24 +377,27 @@ export interface FinalCtaCopy {
   indexLabel: string
   rows: FinalCtaRow[]
   changesSuffix: string
+  /**
+   * Label over the copyable build commands. The commands themselves are
+   * `DownloadPageCopy.buildFromSource.steps`, so /download and the close
+   * cannot drift.
+   */
+  buildLabel: string
 }
 
 /**
- * The homepage section ids, in document order. `film` renders only when its
- * render exists (`findVideo`); the page drops it from the rail and the
- * numbering otherwise, so no anchor points at a section that is not there.
+ * The homepage section ids, in document order. The product film is not a
+ * section of its own (since 2026-10-19): it opens `task`, the one section that
+ * tells the signature task, instead of telling it a second time beside it.
  */
 export const HOME_SECTIONS = [
   "hero",
-  "film",
   "task",
   "workbench",
   "desktop",
-  "entries",
   "run",
-  "connections",
-  "system",
   "trust",
+  "faq",
   "start",
 ] as const
 
@@ -446,27 +473,24 @@ export interface PanoramaCopy {
   eyebrow: string
   title: string
   subtitle: string
+  lanes: PanoramaLane[]
+}
+
+/**
+ * Labels for the figures counted from the checkout at build time
+ * (`scripts/build-inventory.mjs`). Shared by the homepage's trust section and
+ * the /product panorama, so a figure reads the same wherever it appears.
+ */
+export interface InventoryCopy {
   figuresLabel: string
   /** One label per build-time figure, keyed by `InventoryKey`. */
   figures: Record<InventoryKey, string>
   figuresNote: string
-  lanes: PanoramaLane[]
 }
 
 /* -------------------------------------------------------------------------- */
 /* Magic UI composition copy                                                   */
 /* -------------------------------------------------------------------------- */
-
-/**
- * The context-trace marquee between Hero and SignatureDemo. Each item
- * represents one context signal the agent consumed during the signature task.
- * Items source from `DEMO_TASK` values — the copy is the *label*, not the value.
- */
-export interface ContextTraceCopy {
-  items: Array<{ key: string; label: string }>
-  /** Screen-reader heading for the marquee region. */
-  srLabel: string
-}
 
 /**
  * Copy for the terminal sequence in the desktop section.
@@ -478,6 +502,8 @@ export interface TerminalCopy {
   pauseLabel: string
   restartLabel: string
   completeLabel: string
+  /** The last line: the push the transcript proposes, held for approval. */
+  awaitingLabel: string
 }
 
 /**
@@ -490,11 +516,15 @@ export interface ConnectionFlowCopy {
   centerNode: string
 }
 
-/** The product film section (ADR-0092, product footage amendment). */
+/**
+ * The product film (ADR-0092, product footage amendment), which opens the
+ * signature task section rather than standing as a section of its own.
+ */
 export interface FilmCopy {
-  eyebrow: string
-  title: string
-  subtitle: string
+  /** Mono label over the film; `{seconds}` is the render's length. */
+  label: string
+  /** What the film shows, beside the player. */
+  lead: string
   /** Accessible name of the player: what the film shows, as alt text would. */
   videoLabel: string
   /** The play affordance over the poster before the first play. */
@@ -517,13 +547,9 @@ export interface HomeCopy {
   signature: SignatureCopy
   workbench: WorkbenchCopy
   desktop: DesktopCopy
-  /** One task moving between the desktop, a phone, chat, a terminal and the browser. */
-  entryPoints: EntryPointsCopy
   run: RunCopy
-  connections: ConnectionsCopy
-  /** The whole instrument: build-time figures and every subsystem by lane. */
-  panorama: PanoramaCopy
   trust: TrustCopy
+  faq: FaqCopy
   finalCta: FinalCtaCopy
   /**
    * Short labels for the reading-position rail, one per section id.
@@ -532,16 +558,30 @@ export interface HomeCopy {
    * renders and this record are one fact rather than three that can drift.
    */
   sectionIndex: Record<HomeSectionId, string>
-  /** The context-trace marquee between hero and signature task. */
-  contextTrace: ContextTraceCopy
   /** Accessible name for the Lens inspection mode. */
   lensLabel: string
   /** Accessible name for the file-tree in the signature demo. */
   fileTreeLabel: string
   /** Copy for the terminal in the desktop section. */
   terminal: TerminalCopy
-  /** Copy for the connection-flow animated beam diagram. */
-  connectionFlow: ConnectionFlowCopy
+}
+
+/**
+ * The questions a reader still has after the argument, answered from facts the
+ * repository or the evidence snapshot can back. An answer may point at a page
+ * or a docs path for the long version.
+ */
+export interface FaqItem {
+  key: string
+  question: string
+  answer: string
+  link?: LinkTarget
+}
+
+export interface FaqCopy {
+  eyebrow: string
+  title: string
+  items: FaqItem[]
 }
 
 /* -------------------------------------------------------------------------- */
@@ -605,7 +645,10 @@ export interface ProductPageCopy {
   header: PageHeader
   /** Anchor ids must match the nav dropdown's targets. */
   sections: CapabilitySection[]
-  showcase: FeatureShowcaseCopy
+  /** Caption under each section's figure, keyed by section id. */
+  figureCaptions: Record<"chat" | "agents" | "knowledge" | "desktop", string>
+  /** The whole instrument: every subsystem placed on one of four lanes. */
+  panorama: PanoramaCopy
 }
 
 export interface WorkflowsPageCopy {
@@ -618,6 +661,9 @@ export interface WorkflowsPageCopy {
 export interface PluginsPageCopy {
   header: PageHeader
   sections: CapabilitySection[]
+  /** What a connection reads, can do and must ask — moved here from the homepage. */
+  connections: ConnectionsCopy
+  connectionFlow: ConnectionFlowCopy
   flow: SystemFlowCopy
   authoring: { title: string; body: string; steps: string[] }
 }
@@ -651,6 +697,20 @@ export interface DownloadPageCopy {
    * already declares `detecting`, which until now nothing rendered.
    */
   platformHint: { label: string; unknown: string }
+}
+
+/**
+ * `/surfaces`: the desktop runs the work, and every other surface reaches the
+ * same thread holding only what it was granted. The station rail is the one
+ * the homepage used to carry; each station then gets its own block.
+ */
+export interface SurfacesPageCopy {
+  header: PageHeader
+  entryPoints: EntryPointsCopy
+  /** One block per station, ids matching `EntryPointKey`. */
+  sections: CapabilitySection[]
+  /** Pair, grant, reach, revoke: the lifecycle every non-desktop surface shares. */
+  flow: SystemFlowCopy
 }
 
 export interface UseCaseStep {
@@ -713,7 +773,36 @@ export interface ReconstructionCopy {
   desktop: DesktopShellCopy
   workflow: WorkflowShellCopy
   plugin: PluginShellCopy
+  agents: AgentRosterShellCopy
+  memory: MemoryShellCopy
   artifacts: TaskArtifactsCopy
+}
+
+/**
+ * The agent team on the signature task, rebuilt for /product#agents. Names and
+ * tools come from `DEMO_TASK`; this is what a reader must be able to read.
+ */
+export interface AgentRosterShellCopy {
+  teamLabel: string
+  leadLabel: string
+  /** Per-member role and current state, in roster order. */
+  members: Array<{ name: string; role: string; state: string }>
+  toolsLabel: string
+  reviewLabel: string
+  reviewBody: string
+}
+
+/**
+ * Long-term memory entries the signature task left behind, rebuilt for
+ * /product#knowledge. Each entry names where it came from.
+ */
+export interface MemoryShellCopy {
+  panelLabel: string
+  searchQuery: string
+  /** In the order of their sources in the component (a test, AGENTS.md, the artifact). */
+  entries: Array<{ text: string; state: string }>
+  sourceLabel: string
+  pendingLabel: string
 }
 
 /**
@@ -896,6 +985,8 @@ export interface SiteCopy {
   plugins: PluginsPageCopy
   trust: TrustPageCopy
   download: DownloadPageCopy
+  surfaces: SurfacesPageCopy
+  inventory: InventoryCopy
   useCases: {
     development: UseCasePageCopy
     research: UseCasePageCopy

@@ -10,7 +10,9 @@ const MARK: Record<DiffLine["kind"], string> = {
 const LINE_CLASS: Record<DiffLine["kind"], string> = {
   context: "text-on-stage-muted",
   add: "bg-success/12 text-on-stage",
-  remove: "bg-destructive/12 text-on-stage-muted line-through decoration-destructive/40",
+  // Full-strength text: muted on the red tint measured 4.26:1 on the paper
+  // remap. The strike and the gutter mark already carry "removed".
+  remove: "bg-destructive/12 text-on-stage line-through decoration-destructive/60",
 }
 
 const MARK_CLASS: Record<DiffLine["kind"], string> = {

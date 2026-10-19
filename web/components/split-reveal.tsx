@@ -1,7 +1,9 @@
 "use client"
 
 import { useInView, useReducedMotion } from "motion/react"
-import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react"
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react"
+import cjkWords from "@web/content/generated/cjk-words.json"
+import { CJK, normalizeTitle } from "@web/lib/cjk-words"
 
 /**
  * One unit of a split headline: a word that rises into place, or the space
@@ -9,8 +11,6 @@ import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react
  */
 export type SplitToken = { kind: "word"; text: string } | { kind: "space" }
 
-/** Han, kana and Hangul: scripts that set without spaces and may break between any two characters. */
-const CJK = /[⺀-⿿぀-ヿ㄀-ㇿ㐀-䶿一-鿿가-힯豈-﫿]/u
 /** Punctuation that must not begin a line: it stays with the character before it. */
 const CLOSING = /[。，、．！？：；）」』》〉】〕”’…·,.!?:;)\]}%]/u
 /** Punctuation that must not end a line: it travels with the character after it. */
@@ -28,7 +28,9 @@ const OPENING = /[（「『《〈【〔“‘([{]/u
  *
  * Deterministic on purpose: `Intl.Segmenter` would give better CJK words but
  * its dictionaries differ between the server's ICU and the browser's, and a
- * split that differs across the two is a hydration mismatch.
+ * split that differs across the two is a hydration mismatch. Words still
+ * decide where a line may break, through `cjkGlue` and the boundaries the build
+ * segmented once.
  */
 export function splitWords(text: string): SplitToken[] {
   const tokens: SplitToken[] = []
@@ -90,6 +92,36 @@ export function splitWords(text: string): SplitToken[] {
   return tokens
 }
 
+/** Word starts for each Chinese copy title, from Node's ICU at build time. */
+const CJK_WORDS: Readonly<Record<string, readonly number[]>> = cjkWords
+
+/**
+ * Which units must stay on one line with the unit after them: `glue[i]` is
+ * true when unit `i` and unit `i + 1` are two characters of one CJK word.
+ *
+ * Per-character units let a line break anywhere, so a Chinese headline could
+ * end a line on 任 and start the next on 何. `starts` are the word starts of
+ * the normalised text (`lib/cjk-words.ts`); a seam between two adjacent units
+ * that is not a word start is glued. Units with a space between them are never
+ * glued (the space is a break the copy chose), and neither is anything outside
+ * CJK. Without `starts` — a title the build has not segmented — nothing is.
+ */
+export function cjkGlue(tokens: SplitToken[], starts: readonly number[] | undefined): boolean[] {
+  const glue = tokens.map(() => false)
+  if (!starts) return glue
+  const boundaries = new Set(starts)
+  let offset = 0
+  for (let i = 0; i < tokens.length - 1; i++) {
+    const current = tokens[i]
+    const next = tokens[i + 1]
+    offset += current.kind === "word" ? current.text.length : 1
+    if (current.kind !== "word" || next.kind !== "word") continue
+    if (!CJK.test(current.text) || !CJK.test(next.text)) continue
+    glue[i] = !boundaries.has(offset)
+  }
+  return glue
+}
+
 /**
  * The delay between two units, in seconds. A long headline's cascade is
  * divided down so the last unit lands within the same budget as a short one's
@@ -134,6 +166,9 @@ interface SplitRevealProps {
  *    announce each masked unit on its own. The split copy is still the heading's
  *    only text — real spaces between words — so search snippets, reader modes
  *    and copy-paste read the title exactly once.
+ *  - A CJK headline breaks between words, not inside one. Each word's
+ *    characters share a `nowrap` group, from boundaries segmented at build
+ *    time (`lib/cjk-words.ts`), so server and browser render the same markup.
  */
 export function SplitReveal({ text, as = "h2", className, trigger = "view" }: SplitRevealProps) {
   const ref = useRef<HTMLHeadingElement>(null)
@@ -154,27 +189,54 @@ export function SplitReveal({ text, as = "h2", className, trigger = "view" }: Sp
   const phase: Phase = trigger === "mount" ? "run" : armed ? (inView ? "run" : "armed") : "static"
 
   const tokens = splitWords(text)
+  const glue = cjkGlue(tokens, CJK_WORDS[normalizeTitle(text)])
   const words = tokens.filter((token) => token.kind === "word").length
   const step = splitStagger(words)
   const lead = trigger === "mount" ? 0.05 : 0
   let wordIndex = 0
 
+  const unit = (text: string, key: number) => {
+    const delayMs = Math.round((lead + wordIndex++ * step) * 1000)
+    return (
+      <span key={key} className="split-mask">
+        <span data-split-word="" style={{ "--split-delay": `${delayMs}ms` } as CSSProperties}>
+          {text}
+        </span>
+      </span>
+    )
+  }
+
+  // A CJK word's characters share a `nowrap` group, the only thing that keeps
+  // two inline-block masks on one line.
+  const nodes: ReactNode[] = []
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]
+    if (token.kind === "space") {
+      nodes.push(<Fragment key={i}> </Fragment>)
+      continue
+    }
+    if (!glue[i]) {
+      nodes.push(unit(token.text, i))
+      continue
+    }
+    const first = i
+    const group: ReactNode[] = []
+    while (glue[i]) {
+      group.push(unit((tokens[i] as { text: string }).text, i))
+      i++
+    }
+    group.push(unit((tokens[i] as { text: string }).text, i))
+    nodes.push(
+      <span key={`w${first}`} data-split-group="" className="whitespace-nowrap">
+        {group}
+      </span>
+    )
+  }
+
   const Tag = as
   return (
     <Tag ref={ref} className={className} data-split={phase} aria-label={text}>
-      <span aria-hidden="true">
-        {tokens.map((token, i) => {
-          if (token.kind === "space") return <Fragment key={i}> </Fragment>
-          const delayMs = Math.round((lead + wordIndex++ * step) * 1000)
-          return (
-            <span key={i} className="split-mask">
-              <span data-split-word="" style={{ "--split-delay": `${delayMs}ms` } as CSSProperties}>
-                {token.text}
-              </span>
-            </span>
-          )
-        })}
-      </span>
+      <span aria-hidden="true">{nodes}</span>
     </Tag>
   )
 }

@@ -1,5 +1,4 @@
 import type { ReactNode } from "react"
-import { Hairline } from "@web/components/hairline"
 import { Icon, type IconName } from "@web/components/icon"
 import { PluginManifestReconstruction } from "@web/components/product/plugin-manifest-reconstruction"
 import { RunLedgerReconstruction } from "@web/components/product/run-ledger-reconstruction"
@@ -19,6 +18,24 @@ interface CapabilitySectionsProps {
    * cells. Omit and sections render their entries alone.
    */
   reconstruction?: ReconstructionCopy
+  /**
+   * Per-section additions, keyed by anchor id. `figure` sets the section's
+   * entries in one column beside a product visual — a capture or a labelled
+   * reconstruction of the surface the section is about. `after` renders under
+   * the entries, for an index that belongs to the section but is not an entry.
+   */
+  extras?: Record<string, SectionExtras>
+  /**
+   * Tone of the first section. A page that opens on its own paper section
+   * before these starts them on `surface`, so two paper blocks never meet
+   * without a boundary.
+   */
+  startTone?: "paper" | "surface"
+}
+
+export interface SectionExtras {
+  figure?: ReactNode
+  after?: ReactNode
 }
 
 /**
@@ -48,6 +65,10 @@ const SECTION_ICON: Record<string, IconName> = {
   agents: "agents",
   knowledge: "knowledge",
   desktop: "system",
+  mobile: "mobile",
+  im: "chat",
+  cli: "terminal",
+  browser: "appWindow",
   build: "workflow",
   run: "play",
   observe: "record",
@@ -88,11 +109,15 @@ export function CapabilitySections({
   locale,
   docsOrigin,
   reconstruction,
+  extras,
+  startTone = "paper",
 }: CapabilitySectionsProps) {
+  const [even, odd] =
+    startTone === "paper" ? (["paper", "surface"] as const) : (["surface", "paper"] as const)
   return (
     <>
       {sections.map((section, index) => {
-        const tone = index % 2 === 0 ? "paper" : "surface"
+        const tone = index % 2 === 0 ? even : odd
         // The first block sets the page's upper bound; after it the rhythm
         // alternates, so no two adjacent sections are the same height.
         // `normal`, not `open`: measured on the shipped pages the opening block
@@ -100,31 +125,16 @@ export function CapabilitySections({
         // page having stalled rather than as an index beginning.
         const density = index === 0 ? "normal" : index % 2 === 1 ? "tight" : "normal"
         const icon = section.id ? SECTION_ICON[section.id] : undefined
+        const extra = section.id ? extras?.[section.id] : undefined
         const aside =
           reconstruction && section.id && SECTION_ASIDE[section.id]
             ? SECTION_ASIDE[section.id](reconstruction)
             : undefined
         return (
-          <Section
-            key={section.title}
-            id={section.id}
-            tone={tone}
-            density={density}
-            // Only on the opening block: the rhythm lines are a structural mark
-            // for where the page begins its index, not a texture to repeat.
-            rule={index === 0}
-          >
+          <Section key={section.title} id={section.id} tone={tone} density={density}>
             <div className="lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-16">
               <div>
-                {/* Derived from position, not authored — a numbered index is
-                 * the site's own idiom and needs no content key. */}
-                <div className="flex items-center gap-3">
-                  <Hairline className="w-10 shrink-0" tone="hairline-strong" />
-                  <span className="font-mono text-xs uppercase tracking-widest text-muted">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                </div>
-                <h2 className="mt-6 flex items-start gap-3 text-balance text-3xl font-medium leading-tight tracking-tight text-ink md:text-4xl lg:text-5xl">
+                <h2 className="flex items-start gap-3 text-balance text-3xl font-medium leading-tight tracking-tight text-ink md:text-4xl lg:text-5xl">
                   {icon ? <Icon name={icon} size={20} className="mt-2 text-muted" /> : null}
                   {section.title}
                 </h2>
@@ -134,16 +144,38 @@ export function CapabilitySections({
               </p>
             </div>
 
-            <div className="mt-12">
-              <CapabilityGrid
-                entries={section.entries}
-                learnMore={learnMore}
-                locale={locale}
-                tone={tone}
-                docsOrigin={docsOrigin}
-                aside={aside}
-              />
-            </div>
+            {extra?.figure ? (
+              // Entries beside the figure from `lg`: the figure takes the wider
+              // track because it is the evidence, and the three entries read as
+              // its legend. Below `lg` the figure comes first, so a phone sees
+              // the surface before the list that describes it.
+              <div
+                data-slot="capability-figure-row"
+                className="mt-12 flex flex-col-reverse gap-10 lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:items-start lg:gap-12"
+              >
+                <CapabilityGrid
+                  entries={section.entries}
+                  learnMore={learnMore}
+                  locale={locale}
+                  tone={tone}
+                  docsOrigin={docsOrigin}
+                  layout="stack"
+                />
+                <div className="min-w-0">{extra.figure}</div>
+              </div>
+            ) : (
+              <div className="mt-12">
+                <CapabilityGrid
+                  entries={section.entries}
+                  learnMore={learnMore}
+                  locale={locale}
+                  tone={tone}
+                  docsOrigin={docsOrigin}
+                  aside={aside}
+                />
+              </div>
+            )}
+            {extra?.after ? <div className="mt-14">{extra.after}</div> : null}
           </Section>
         )
       })}

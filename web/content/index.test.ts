@@ -1,4 +1,4 @@
-import { LOCALES } from "@web/lib/locale"
+import { LOCALES, ROUTES } from "@web/lib/locale"
 import { format, getCopy } from "./index"
 import { HOME_SECTIONS } from "./types"
 
@@ -52,19 +52,21 @@ describe("locale parity beyond the type system", () => {
     expect(b.nav.sectionIndexLabel).not.toBe(a.nav.sectionIndexLabel)
     expect(b.home.finalCta.indexLabel).not.toBe(a.home.finalCta.indexLabel)
     expect(b.home.hero.ticket.label).not.toBe(a.home.hero.ticket.label)
-    for (const key of [
-      "eyebrow",
-      "title",
-      "subtitle",
-      "videoLabel",
-      "playLabel",
-      "captionsLabel",
-    ] as const) {
+    for (const key of ["label", "lead", "videoLabel", "playLabel", "captionsLabel"] as const) {
       expect(b.home.film[key]).not.toBe(a.home.film[key])
     }
     expect(b.footage.captureNote).not.toBe(a.footage.captureNote)
     expect(b.footage.recordingNote).not.toBe(a.footage.recordingNote)
-    expect(b.home.sectionIndex.film).not.toBe(a.home.sectionIndex.film)
+    expect(b.home.signature.stepsLabel).not.toBe(a.home.signature.stepsLabel)
+    expect(b.home.run.approvalShared).not.toBe(a.home.run.approvalShared)
+    expect(b.home.finalCta.buildLabel).not.toBe(a.home.finalCta.buildLabel)
+    for (const key of ["eyebrow", "title", "body"] as const) {
+      expect(b.common.pageClose[key]).not.toBe(a.common.pageClose[key])
+    }
+  })
+
+  it("labels the film with its render's length in both locales", () => {
+    for (const copy of [a, b]) expect(copy.home.film.label).toContain("{seconds}")
   })
 
   it("gives every homepage section an eyebrow in both locales", () => {
@@ -72,13 +74,12 @@ describe("locale parity beyond the type system", () => {
       const home = copy.home
       for (const eyebrow of [
         home.hero.eyebrow,
-        home.film.eyebrow,
         home.signature.eyebrow,
         home.workbench.eyebrow,
         home.desktop.eyebrow,
         home.run.eyebrow,
-        home.connections.eyebrow,
         home.trust.eyebrow,
+        home.faq.eyebrow,
         home.finalCta.eyebrow,
       ]) {
         expect(eyebrow.length).toBeGreaterThan(0)
@@ -106,9 +107,48 @@ describe("locale parity beyond the type system", () => {
   })
 
   it("keeps the four task-level connections aligned", () => {
-    expect(b.home.connections.items.map((i) => i.key)).toEqual(
-      a.home.connections.items.map((i) => i.key)
+    expect(b.plugins.connections.items.map((i) => i.key)).toEqual(
+      a.plugins.connections.items.map((i) => i.key)
     )
+  })
+
+  it("keeps the questions aligned by key, each with an answer and a destination", () => {
+    expect(b.home.faq.items.map((i) => i.key)).toEqual(a.home.faq.items.map((i) => i.key))
+    for (const copy of [a, b]) {
+      for (const item of copy.home.faq.items) {
+        expect(item.answer.length).toBeGreaterThan(0)
+        expect(item.link).toBeDefined()
+      }
+      // The availability answer points at the page that reads the release
+      // state; it must never assert the state itself, which would go stale.
+      const install = copy.home.faq.items.find((i) => i.key === "install")
+      expect(install?.link?.route).toBe("/download")
+    }
+  })
+
+  it("keeps the surfaces page aligned with its station rail", () => {
+    for (const copy of [a, b]) {
+      expect(copy.surfaces.sections.map((s) => s.id)).toEqual(
+        copy.surfaces.entryPoints.stations.map((s) => s.key)
+      )
+      expect(copy.surfaces.flow.steps).toHaveLength(4)
+    }
+    expect(b.surfaces.flow.steps.map((s) => s.docsPath)).toEqual(
+      a.surfaces.flow.steps.map((s) => s.docsPath)
+    )
+    expect(b.surfaces.sections.flatMap((s) => s.entries.map((e) => e.docsPath))).toEqual(
+      a.surfaces.sections.flatMap((s) => s.entries.map((e) => e.docsPath))
+    )
+  })
+
+  it("routes both navigation menus to pages that exist", () => {
+    for (const copy of [a, b]) {
+      expect(copy.nav.useCasesMenu.items.map((i) => i.route)).toEqual([
+        "/use-cases/development",
+        "/use-cases/research",
+      ])
+      expect(copy.nav.productMenu.items.map((i) => i.route)).toContain("/surfaces")
+    }
   })
 
   it("keeps the trust bento at four cards with matching keys", () => {
@@ -146,11 +186,17 @@ describe("locale parity beyond the type system", () => {
   it("gives every nav dropdown anchor a section that actually carries that id", () => {
     // `/product#chat` with no `id="chat"` on the page is a link that silently
     // does nothing — the most common way an anchor menu rots.
+    // A menu entry without an anchor is a whole page, and has to be one the
+    // site publishes.
     for (const copy of [a, b]) {
       const ids = new Set(copy.product.sections.map((s) => s.id).filter(Boolean))
       for (const item of copy.nav.productMenu.items) {
-        const anchor = item.route.split("#")[1]
-        expect(anchor).toBeTruthy()
+        const [path, anchor] = item.route.split("#")
+        if (anchor === undefined) {
+          expect(ROUTES as readonly string[]).toContain(path)
+          continue
+        }
+        expect(path).toBe("/product")
         expect(ids.has(anchor)).toBe(true)
       }
     }
@@ -158,14 +204,19 @@ describe("locale parity beyond the type system", () => {
 
   it("gives every footer product anchor a matching section id", () => {
     for (const copy of [a, b]) {
-      const ids = new Set(copy.product.sections.map((s) => s.id).filter(Boolean))
-      const anchors = copy.footer.columns
+      // Each anchored route must land on an id its page renders: /product's
+      // section ids, or the homepage's section ids (the FAQ link).
+      const idsByPath: Record<string, Set<string>> = {
+        "/product": new Set(copy.product.sections.map((s) => s.id).filter(Boolean) as string[]),
+        "/": new Set<string>(HOME_SECTIONS),
+      }
+      const anchored = copy.footer.columns
         .flatMap((column) => column.links)
         .map((link) => link.route)
         .filter((route): route is string => Boolean(route?.includes("#")))
-        .map((route) => route.split("#")[1])
-      expect(anchors.length).toBeGreaterThan(0)
-      for (const anchor of anchors) expect(ids.has(anchor)).toBe(true)
+        .map((route) => route.split("#") as [string, string])
+      expect(anchored.length).toBeGreaterThan(0)
+      for (const [path, anchor] of anchored) expect(idsByPath[path]?.has(anchor)).toBe(true)
     }
   })
 

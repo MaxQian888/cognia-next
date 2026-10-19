@@ -110,4 +110,20 @@ describe("CapabilityGrid", () => {
   ])("closes the grid mathematically for %i entries", (count, expected) => {
     expect(asideSpan(count)).toBe(expected)
   })
+
+  it("stacks the entries in one column and drops the aside in the stack layout", () => {
+    const { container } = render(
+      <CapabilityGrid
+        entries={en.product.sections[0].entries}
+        learnMore={en.common.learnMore}
+        locale="en"
+        layout="stack"
+        aside={<p>filler</p>}
+      />
+    )
+    const list = container.querySelector("ul") as HTMLElement
+    expect(list.className).not.toContain("md:grid-cols-2")
+    expect(list.className).not.toContain("xl:grid-cols-3")
+    expect(screen.queryByText("filler")).toBeNull()
+  })
 })

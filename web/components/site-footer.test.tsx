@@ -6,7 +6,7 @@ import { SiteFooter } from "./site-footer"
 const DOCS = "https://docs.cognia.example"
 
 describe("SiteFooter", () => {
-  it("renders the three documented columns", () => {
+  it("renders the four documented columns", () => {
     render(<SiteFooter locale="en" copy={en} docsOrigin={DOCS} />)
     for (const column of en.footer.columns) {
       expect(screen.getByText(column.title)).toBeInTheDocument()
@@ -59,5 +59,19 @@ describe("SiteFooter", () => {
   it("carries the colophon, which makes no unverifiable claim", () => {
     render(<SiteFooter locale="en" copy={en} docsOrigin={DOCS} />)
     expect(screen.getByText(en.footer.colophon)).toBeInTheDocument()
+  })
+
+  it("links the scenario pages, /surfaces and the homepage questions", () => {
+    render(<SiteFooter locale="en" copy={en} docsOrigin={DOCS} />)
+    expect(screen.getByRole("link", { name: "Software development" })).toHaveAttribute(
+      "href",
+      "/use-cases/development"
+    )
+    expect(screen.getByRole("link", { name: "Research" })).toHaveAttribute(
+      "href",
+      "/use-cases/research"
+    )
+    expect(screen.getByRole("link", { name: "Surfaces" })).toHaveAttribute("href", "/surfaces")
+    expect(screen.getByRole("link", { name: "Questions" })).toHaveAttribute("href", "/#faq")
   })
 })

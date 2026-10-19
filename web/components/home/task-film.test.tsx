@@ -21,7 +21,7 @@ import { render, screen } from "@testing-library/react"
 import { en } from "@web/content/en"
 import { zh } from "@web/content/zh"
 import type { ProductVideo } from "@web/lib/product-videos"
-import { FilmSection } from "./film-section"
+import { TaskFilm } from "./task-film"
 
 const FILM: ProductVideo = {
   src: "/video/product-film-en.abc.mp4",
@@ -34,35 +34,33 @@ const FILM: ProductVideo = {
   hasAudio: false,
 }
 
-describe("FilmSection", () => {
-  it("is the film anchor, with its heading and index tag", () => {
-    const { container } = render(
-      <FilmSection copy={en.home.film} footage={en.footage} locale="en" video={FILM} index={2} />
-    )
-    expect(container.querySelector("section#film")).toBeInTheDocument()
-    expect(screen.getByRole("heading", { name: en.home.film.title })).toBeInTheDocument()
-    expect(container.querySelector('[data-slot="section-index"]')).toHaveTextContent("02")
+describe("TaskFilm", () => {
+  it("labels the film with the render's own length and says what it shows", () => {
+    render(<TaskFilm copy={en.home.film} footage={en.footage} locale="en" video={FILM} />)
+    expect(screen.getByText("Full recording · 44 s")).toBeInTheDocument()
+    expect(screen.getByText(en.home.film.lead)).toBeInTheDocument()
+    // No heading of its own: it opens the task section, whose heading it shares.
+    expect(screen.queryByRole("heading")).toBeNull()
   })
 
-  it("renders the film player with its label, provenance and play affordance", () => {
+  it("never autoplays: the poster carries a play control and the player is named", () => {
     const { container } = render(
-      <FilmSection copy={en.home.film} footage={en.footage} locale="en" video={FILM} />
+      <TaskFilm copy={en.home.film} footage={en.footage} locale="en" video={FILM} />
     )
-    expect(container.querySelector('[data-video="film"] video')).toHaveAttribute(
-      "aria-label",
-      en.home.film.videoLabel
-    )
-    expect(screen.getByText(en.footage.recordingNote)).toBeInTheDocument()
+    const video = container.querySelector('[data-video="film"] video')
+    expect(video).toHaveAttribute("aria-label", en.home.film.videoLabel)
+    expect(video).not.toHaveAttribute("autoplay")
     expect(screen.getByRole("button", { name: en.home.film.playLabel })).toBeInTheDocument()
+    expect(screen.getByText(en.footage.recordingNote)).toBeInTheDocument()
   })
 
-  it("labels the caption track in the page's language", () => {
+  it("carries the caption track in the page's language", () => {
     const { container } = render(
-      <FilmSection copy={zh.home.film} footage={zh.footage} locale="zh" video={FILM} />
+      <TaskFilm copy={zh.home.film} footage={zh.footage} locale="zh" video={FILM} />
     )
     const track = container.querySelector("track")
     expect(track).toHaveAttribute("srclang", "zh-CN")
     expect(track).toHaveAttribute("label", zh.home.film.captionsLabel)
-    expect(screen.getByRole("button", { name: zh.home.film.playLabel })).toBeInTheDocument()
+    expect(screen.getByText("完整录屏 · 44 秒")).toBeInTheDocument()
   })
 })

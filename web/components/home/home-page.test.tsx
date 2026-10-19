@@ -18,7 +18,7 @@ import { Children, isValidElement } from "react"
 import { evidence } from "@web/components/site-shell"
 import { en } from "@web/content/en"
 import { zh } from "@web/content/zh"
-import { CapabilityPanorama } from "./capability-panorama"
+import { TrustSection } from "./trust-section"
 import { HomePage } from "./home-page"
 
 jest.mock("next-themes", () => ({
@@ -44,23 +44,23 @@ beforeEach(() => {
 
 describe("HomePage", () => {
   it.each(["en", "zh"] as const)(
-    "sends only inventory evidence across the panorama client boundary in %s",
+    "hands the trust section the evidence snapshot and the counted-figure labels in %s",
     (locale) => {
-      // Inspect the server-produced props: a DOM render would hide unused data
-      // that Next still serializes into the client payload.
+      // Inspect the server-produced props: the trust section is a server
+      // component, so the snapshot it reads never crosses into the client.
       const page = HomePage({ locale })
-      const panorama = Children.toArray(page.props.children).find(
-        (child) => isValidElement(child) && child.type === CapabilityPanorama
+      const trust = Children.toArray(page.props.children).find(
+        (child) => isValidElement(child) && child.type === TrustSection
       )
-
-      expect(isValidElement(panorama)).toBe(true)
-      if (!isValidElement(panorama)) throw new Error("Missing capability panorama")
-      expect(panorama.props).not.toHaveProperty("evidence")
-      expect(panorama.props).toHaveProperty("inventory", evidence.inventory)
+      expect(isValidElement(trust)).toBe(true)
+      if (!isValidElement(trust)) throw new Error("Missing trust section")
+      const copy = locale === "en" ? en : zh
+      expect(trust.props).toHaveProperty("evidence", evidence)
+      expect(trust.props).toHaveProperty("inventoryCopy", copy.inventory)
     }
   )
 
-  it("renders all eleven sections in the order the spec fixes", () => {
+  it("renders all eight sections in the order the spec fixes", () => {
     render(<HomePage locale="en" />)
     const headings = screen
       .getAllByRole("heading", { level: 1 })
@@ -69,15 +69,12 @@ describe("HomePage", () => {
 
     const expected = [
       en.home.hero.title,
-      en.home.film.title,
       en.home.signature.title,
       en.home.workbench.title,
       en.home.desktop.title,
-      en.home.entryPoints.title,
       en.home.run.title,
-      en.home.connections.title,
-      en.home.panorama.title,
       en.home.trust.title,
+      en.home.faq.title,
       en.home.finalCta.title,
     ]
     for (const title of expected) {
@@ -88,36 +85,73 @@ describe("HomePage", () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions)
   })
 
-  it("numbers every section from 01 to 11 in document order", () => {
+  it("numbers every section from 01 to 08 in document order", () => {
     const { container } = render(<HomePage locale="en" />)
     const tags = [...container.querySelectorAll('[data-slot="section-index"]')].map(
       (tag) => tag.textContent
     )
-    expect(tags).toEqual(["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11"])
+    expect(tags).toEqual(["01", "02", "03", "04", "05", "06", "07", "08"])
   })
 
-  it("closes the numbering and the rail over the film when it has not been rendered", () => {
+  it("opens the task section on the film, right after the hero, never autoplaying", () => {
+    const { container } = render(<HomePage locale="en" />)
+    expect(container.querySelector("section#film")).toBeNull()
+    const task = container.querySelector("section#task")
+    expect(task?.previousElementSibling).toHaveAttribute("id", "hero")
+    expect(task?.querySelector('[data-slot="task-film"] video')).toHaveAttribute("preload", "none")
+  })
+
+  it("keeps the eight sections and opens the task on its steps when the film is not rendered", () => {
     mockVideos().videos = {}
     const { container } = render(<HomePage locale="en" />)
-    expect(container.querySelector("#film")).toBeNull()
+    expect(container.querySelector('[data-slot="task-film"]')).toBeNull()
+    expect(screen.queryByText(en.home.signature.stepsLabel)).toBeNull()
     const tags = [...container.querySelectorAll('[data-slot="section-index"]')].map(
       (tag) => tag.textContent
     )
-    expect(tags).toEqual(["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"])
-    const rail = screen.getByRole("navigation", { name: en.nav.sectionIndexLabel })
-    expect(within(rail).queryByRole("link", { name: en.home.sectionIndex.film })).toBeNull()
+    expect(tags).toHaveLength(8)
   })
 
-  it("plays the film right after the hero, never autoplaying", () => {
+  it("has no scrolling strip between the hero and the task", () => {
     const { container } = render(<HomePage locale="en" />)
-    const film = container.querySelector("section#film")
-    expect(film?.previousElementSibling).toHaveAttribute("id", "hero")
-    expect(film?.querySelector("video")).toHaveAttribute("preload", "none")
+    expect(container.querySelector("#hero + aside")).toBeNull()
+    expect(container.querySelector('[class*="animate-marquee"]')).toBeNull()
   })
 
   it("advances one signature task, never a second scenario", () => {
     render(<HomePage locale="en" />)
     expect(screen.getByText(en.home.signature.task)).toBeInTheDocument()
+  })
+
+  it("leaves the device handoff, connections and subsystem map to their sub-pages", () => {
+    const { container } = render(<HomePage locale="en" />)
+    for (const id of ["entries", "connections", "system"]) {
+      expect(container.querySelector(`#${id}`)).toBeNull()
+    }
+    // Each still has a way in from the homepage.
+    const strip = container.querySelector('[data-slot="surfaces-strip"]') as HTMLElement
+    expect(
+      within(strip).getByRole("link", { name: en.home.desktop.otherSurfaces.linkLabel })
+    ).toHaveAttribute("href", "/surfaces")
+  })
+
+  it("links the signature task to both scenario pages", () => {
+    const { container } = render(<HomePage locale="en" />)
+    const row = container.querySelector('[data-slot="use-case-links"]') as HTMLElement
+    expect(row.closest("section")).toHaveAttribute("id", "task")
+    for (const item of en.nav.useCasesMenu.items) {
+      expect(within(row).getByRole("link", { name: new RegExp(item.label) })).toHaveAttribute(
+        "href",
+        item.route
+      )
+    }
+  })
+
+  it("answers the open questions before the close", () => {
+    const { container } = render(<HomePage locale="en" />)
+    const faq = container.querySelector("section#faq")
+    expect(faq?.nextElementSibling).toHaveAttribute("id", "start")
+    expect(faq?.querySelectorAll("details")).toHaveLength(en.home.faq.items.length)
   })
 
   it("wraps the page in the shared shell", () => {

@@ -64,7 +64,7 @@ describe("CapabilitySections", () => {
     expect(rhythm[0]).toBe("py-20")
   })
 
-  it("draws the rhythm lines on the opening block only", () => {
+  it("draws no rhythm texture and no index numbers on sub-page sections", () => {
     const { container } = render(
       <CapabilitySections
         sections={en.product.sections}
@@ -73,9 +73,12 @@ describe("CapabilitySections", () => {
         docsOrigin={DOCS}
       />
     )
-    // A structural mark for where the index begins, not a texture to repeat.
-    expect(container.querySelectorAll(".rhythm-lines")).toHaveLength(1)
-    expect(container.querySelector("section")?.querySelector(".rhythm-lines")).toBeInTheDocument()
+    // DESIGN.md: texture only under an instrument, and sub-pages do not number
+    // their sections (the homepage's index tags are its own).
+    expect(container.querySelectorAll(".rhythm-lines")).toHaveLength(0)
+    for (const heading of container.querySelectorAll("section h2")) {
+      expect(heading.previousElementSibling).toBeNull()
+    }
   })
 
   it("links every documented entry to the docs site with the locale prefix", () => {
@@ -169,5 +172,56 @@ describe("CapabilitySections", () => {
       />
     )
     expect(container.querySelector('[data-slot="capability-aside"]')).toBeNull()
+  })
+
+  it("sets a section's entries in one column beside its figure, and renders what follows", () => {
+    const { container } = render(
+      <CapabilitySections
+        sections={en.product.sections}
+        learnMore={en.common.learnMore}
+        locale="en"
+        docsOrigin={DOCS}
+        extras={{
+          chat: { figure: <p>chat figure</p>, after: <p>after chat</p> },
+        }}
+      />
+    )
+    const chat = container.querySelector("section#chat") as HTMLElement
+    const row = chat.querySelector('[data-slot="capability-figure-row"]') as HTMLElement
+    expect(row).toHaveTextContent("chat figure")
+    expect(row.querySelector("ul")?.className).not.toContain("md:grid-cols-2")
+    expect(chat).toHaveTextContent("after chat")
+    // Sections without extras keep the three-column grid.
+    const agents = container.querySelector("section#agents") as HTMLElement
+    expect(agents.querySelector("ul")?.className).toContain("md:grid-cols-2")
+  })
+
+  it("can start the alternation on the surface tone", () => {
+    const { container } = render(
+      <CapabilitySections
+        sections={en.product.sections}
+        learnMore={en.common.learnMore}
+        locale="en"
+        docsOrigin={DOCS}
+        startTone="surface"
+      />
+    )
+    const sections = container.querySelectorAll("section")
+    expect(sections[0]).toHaveClass("bg-surface")
+    expect(sections[1]).toHaveClass("bg-paper")
+  })
+
+  it("marks each surfaces-page block with its own icon", () => {
+    const { container } = render(
+      <CapabilitySections
+        sections={en.surfaces.sections}
+        learnMore={en.common.learnMore}
+        locale="en"
+        docsOrigin={DOCS}
+      />
+    )
+    for (const section of en.surfaces.sections) {
+      expect(container.querySelector(`section#${section.id} h2 svg`)).toBeInTheDocument()
+    }
   })
 })

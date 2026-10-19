@@ -12,6 +12,7 @@ import { docsUrl } from "@web/lib/site"
 import { CapabilityGrid } from "./capability-grid"
 import { FeatureShowcase } from "./feature-showcase"
 import { PageHeader } from "./page-header"
+import { PageClose } from "./page-close"
 
 interface UseCasePageProps {
   locale: Locale
@@ -121,6 +122,7 @@ export function UseCasePage({ locale, variant }: UseCasePageProps) {
           />
         </div>
       </Section>
+      <PageClose locale={locale} docsOrigin={docsOrigin} />
     </SiteShell>
   )
 }

@@ -41,6 +41,7 @@ export const ROUTES = [
   "/download",
   "/use-cases/development",
   "/use-cases/research",
+  "/surfaces",
   "/changelog",
 ] as const
 

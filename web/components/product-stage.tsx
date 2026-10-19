@@ -95,9 +95,9 @@ export function ProductStage({
             />
           ) : null}
         </div>
-        <figcaption className="mt-3 flex flex-col gap-1 font-mono text-xs text-muted">
-          {caption ? <span>{caption}</span> : null}
-          <span>{copy.footage.captureNote}</span>
+        <figcaption className="mt-3 flex flex-col gap-1 text-muted">
+          {caption ? <span className="text-sm">{caption}</span> : null}
+          <span className="font-mono text-xs">{copy.footage.captureNote}</span>
         </figcaption>
       </figure>
     )
@@ -144,9 +144,9 @@ export function ProductStage({
         ) : null}
       </div>
 
-      <figcaption className="mt-3 flex flex-col gap-1 font-mono text-xs text-muted">
-        {caption ? <span>{caption}</span> : null}
-        <span>{reconstruction.note}</span>
+      <figcaption className="mt-3 flex flex-col gap-1 text-muted">
+        {caption ? <span className="text-sm">{caption}</span> : null}
+        <span className="font-mono text-xs">{reconstruction.note}</span>
       </figcaption>
     </figure>
   )

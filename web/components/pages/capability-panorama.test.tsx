@@ -3,8 +3,6 @@ import type { ReactNode } from "react"
 import { GLYPH_NAMES } from "@web/components/glyph"
 import { en } from "@web/content/en"
 import { zh } from "@web/content/zh"
-import type { Inventory } from "@web/lib/evidence"
-import { INVENTORY_KEYS } from "@web/lib/evidence"
 
 let reduced = false
 let inView = true
@@ -29,29 +27,14 @@ import { CapabilityPanorama } from "./capability-panorama"
 
 const DOCS = "https://docs.example.test"
 
-function inventory(overrides: Partial<Inventory> = {}): Inventory {
-  return {
-    plugins: 59,
-    connectors: 11,
-    workflowNodeKinds: 185,
-    crates: 35,
-    packages: 32,
-    adrs: 167,
-    testFiles: 9496,
-    ...overrides,
-  }
-}
-
-function renderPanorama(locale: "en" | "zh" = "en", data: Inventory = inventory()) {
+function renderPanorama(locale: "en" | "zh" = "en") {
   const copy = locale === "en" ? en : zh
   return render(
     <CapabilityPanorama
-      copy={copy.home.panorama}
+      copy={copy.product.panorama}
       common={copy.common}
-      inventory={data}
       locale={locale}
       docsOrigin={DOCS}
-      index={8}
     />
   )
 }
@@ -62,34 +45,15 @@ describe("CapabilityPanorama", () => {
     inView = true
   })
 
-  it("shows one figure per inventory key, labelled, in display order", () => {
+  it("renders its heading without an index tag, as a sub-page section", () => {
     const { container } = renderPanorama()
-    const cells = [...container.querySelectorAll("[data-figure]")].map((cell) =>
-      cell.getAttribute("data-figure")
-    )
-    expect(cells).toEqual([...INVENTORY_KEYS])
-    for (const key of INVENTORY_KEYS) {
-      expect(screen.getByText(en.home.panorama.figures[key])).toBeInTheDocument()
-    }
-    expect(screen.getByText("08")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: en.product.panorama.title })).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="section-index"]')).toBeNull()
   })
 
-  it("shows a dash rather than a zero when a count did not run", () => {
-    const data = inventory({ crates: 0 })
-    const { container } = renderPanorama("en", data)
-    const cell = container.querySelector('[data-figure="crates"]') as HTMLElement
-    expect(within(cell).getByText("—")).toBeInTheDocument()
-  })
-
-  it.each(["en", "zh"] as const)("preserves every formatted count in %s", (locale) => {
-    reduced = true
-    const data = inventory()
-    const { container } = renderPanorama(locale, data)
-    const formatter = new Intl.NumberFormat(locale === "zh" ? "zh-CN" : "en-US")
-    for (const key of INVENTORY_KEYS) {
-      const cell = container.querySelector(`[data-figure="${key}"]`) as HTMLElement
-      expect(within(cell).getByText(formatter.format(data[key]))).toBeInTheDocument()
-    }
+  it("no longer carries the build-time figures, which moved to the trust section", () => {
+    const { container } = renderPanorama()
+    expect(container.querySelector("[data-figure]")).toBeNull()
   })
 
   it("places every subsystem on a lane with its own mark and a next step", () => {
@@ -98,7 +62,7 @@ describe("CapabilityPanorama", () => {
       lane.getAttribute("data-lane")
     )
     expect(lanes).toEqual(["work", "remember", "reach", "control"])
-    for (const lane of en.home.panorama.lanes) {
+    for (const lane of en.product.panorama.lanes) {
       const region = container.querySelector(`[data-lane="${lane.key}"]`) as HTMLElement
       for (const item of lane.items) {
         expect(within(region).getByText(item.name)).toBeInTheDocument()
@@ -109,7 +73,7 @@ describe("CapabilityPanorama", () => {
   })
 
   it("uses each bespoke mark at most once, and only marks that exist", () => {
-    const used = en.home.panorama.lanes.flatMap((lane) => lane.items.map((item) => item.glyph))
+    const used = en.product.panorama.lanes.flatMap((lane) => lane.items.map((item) => item.glyph))
     expect(new Set(used).size).toBe(used.length)
     for (const glyph of used) expect(GLYPH_NAMES).toContain(glyph)
   })
@@ -126,17 +90,20 @@ describe("CapabilityPanorama", () => {
 
   it("links a docs item to the documentation origin and a route item into the site", () => {
     renderPanorama()
-    const links = screen.getAllByRole("link", { name: en.common.learnMore })
-    expect(links.some((link) => link.getAttribute("href")?.startsWith(DOCS))).toBe(true)
-    expect(links.some((link) => link.getAttribute("href") === "/product#chat")).toBe(true)
+    // Each link names its destination: the docs, or a page on this site.
+    const docs = screen.getAllByRole("link", { name: new RegExp(en.common.learnMore) })
+    expect(docs.every((link) => link.getAttribute("href")?.startsWith(DOCS))).toBe(true)
+    const pages = screen.getAllByRole("link", { name: en.common.openPage })
+    expect(pages.some((link) => link.getAttribute("href") === "/product#chat")).toBe(true)
+    expect(pages.every((link) => !link.getAttribute("href")?.startsWith(DOCS))).toBe(true)
   })
 
   it("renders the Chinese copy with the same lanes", () => {
     const { container } = renderPanorama("zh")
-    expect(screen.getByRole("heading", { name: zh.home.panorama.title })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: zh.product.panorama.title })).toBeInTheDocument()
     expect(container.querySelectorAll("[data-lane]")).toHaveLength(4)
-    expect(zh.home.panorama.lanes.map((lane) => lane.items.length)).toEqual(
-      en.home.panorama.lanes.map((lane) => lane.items.length)
+    expect(zh.product.panorama.lanes.map((lane) => lane.items.length)).toEqual(
+      en.product.panorama.lanes.map((lane) => lane.items.length)
     )
   })
 })

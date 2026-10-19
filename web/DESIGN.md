@@ -166,7 +166,7 @@ The pairing should read as editorial prose supported by precise machine evidence
 
 **The Two-Line Hero Rule.** A desktop hero heading must use a wide measure and remain within two lines. Reduce type before narrowing the measure.
 
-**The Operational Mono Rule.** Use mono only for content that behaves like an index, state, command, path, measurement, or provenance marker.
+**The Operational Mono Rule.** Use mono only for content that behaves like an index, state, command, path, measurement, or provenance marker. A caption sentence, a product name or a support line is prose and sets in sans, even beside a mono provenance line.
 
 ## Layout
 
@@ -175,9 +175,11 @@ Use the 1480px shell and its implied twelve-column rhythm. Major sections altern
 The homepage follows an evidence-oriented AIDA sequence:
 
 1. **Attention:** product category, promise, action, and a visible workbench.
-2. **Interest:** one task carried end to end and one gapless workbench map.
-3. **Desire:** desktop depth, model boundaries, connections, and trust evidence.
-4. **Action:** one high-contrast close with download/source routes.
+2. **Interest:** one task carried end to end (closing on the two scenario pages) and one gapless workbench map.
+3. **Desire:** desktop depth (closing on a strip into `/surfaces`), model boundaries with the agent interop index, and trust evidence with the build-time counts.
+4. **Action:** the open questions (FAQ), then one high-contrast close with download/source routes.
+
+**The Sub-page Depth Rule (2026-10-19).** The homepage argues what the workspace is; it does not restate a sub-page at a third of its depth. The device handoff opens `/surfaces`, connection boundaries live on `/plugins`, and the subsystem map closes `/product`. Each keeps a route in from the homepage: a strip, a link row or a FAQ answer. A section that would repeat a sub-page belongs on that sub-page. The same holds inside the homepage: one task is told by one section (the film opens the task section rather than standing beside it), and a claim a later section proves is not also stated as a strip on the first screen. Every sub-page that argues for the product ends on the stage close band (`PageClose`), never on its last list.
 
 Gapless Bento layouts use `grid-flow-dense` and must close mathematically at every explicit breakpoint. A grid whose entries leave cells open fills them with a labelled interface reconstruction of the surface the section is about, never with the bare hairline track. Mobile layouts become one readable primary surface per screen; desktop-only pinning or large visual crops must degrade to ordinary document flow.
 
@@ -185,7 +187,7 @@ Gapless Bento layouts use `grid-flow-dense` and must close mathematically at eve
 
 **Section rhythm.** `tight` 80, `normal` 112, `open` 160 on desktop, alternating. Measured full-page captures of the earlier 96/128/160/224 scale showed 400 to 500px of empty paper between blocks, which read as the page having ended.
 
-**Index tags (2026-09-05).** Every homepage section carries its one-based position as a zero-padded mono tag with a short tick rule ahead of the eyebrow (`SectionHeading index`). The page is ten sections and fourteen thousand pixels, and the side rail only exists past 1760px, so the tag is how a reader on a laptop knows where in the argument they are. Sub-pages do not number their sections.
+**Index tags (2026-09-05).** Every homepage section carries its one-based position as a zero-padded mono tag with a short tick rule ahead of the eyebrow (`SectionHeading index`). The page is eight sections (since 2026-10-19; eleven before) and over ten thousand pixels, and the side rail only exists past 1760px, so the tag is how a reader on a laptop knows where in the argument they are. Sub-pages do not number their sections.
 
 **Texture (2026-09-05).** The paper layer may carry `.paper-grain`, a monochrome noise film at about five percent opacity, and `.dot-field`, a 24px lattice of hairline points masked towards the edges. Both are achromatic and both sit under the content, so they are inside the No AI Gradient Rule. They are stock and ruling, not decoration: use them on sections that hold an instrument (a reconstruction, a figure strip, a lane grid), never on a text-only section.
 
@@ -231,7 +233,7 @@ The recurring silhouette is a bounded work surface: rectangular, cropped, and di
 
 - Footage is recorded from the app running scripted demo data (`web/scripts/record-product.mjs`) and edited offline in HyperFrames (`web/video/`); the site ships only the rendered files and a player, no animation runtime.
 - Every film says what it is: the provenance line ("Recorded from the Cognia app running demo data.") sits under the frame, and the footage carries "Recorded in Cognia · demo data" on screen.
-- The hero loop is ambient: muted, no controls, and it plays only while hydrated, visible and in view. Its poster is the loop's resting frame, the task halted on approval, and under reduced motion the poster is the whole picture.
+- The hero loop is ambient: muted, no controls, and it plays only while hydrated, visible and in view. Its poster is the loop's resting frame, the task halted on approval, and under reduced motion the poster is the whole picture. Its frame crops the app's bottom chrome so the picture fills it, and below `sm` it narrows to 4:3, centre-cropped, so a phone sees the subject larger.
 - A film with a story never autoplays. It starts on the reader's click, hands over to native controls, and carries a caption track in the page's language.
 - Films are silent. The callouts and captions carry every beat; sound is not a channel the page relies on.
 - Each render has a size budget (hero loop 2.5 MB, film 9 MB), a content-hashed name, and immutable caching; a render over budget fails rather than ships.
@@ -250,12 +252,13 @@ The recurring silhouette is a bounded work surface: rectangular, cropped, and di
 
 ### Motion
 
-- Motion demonstrates sequence, state, or provenance; it does not decorate idle chrome.
+- Motion demonstrates sequence, state, or provenance; it does not decorate idle chrome. Nothing on the site moves on a loop while the reader is idle: no marquee, no ambient ticker.
+- Figures render at their value. A count that ticks up can be read or captured halfway, and a halfway figure is a wrong one.
 - Use transform and opacity for entry effects.
 - Keep one pinned narrative section and one canvas provenance surface as the site-wide budget established by ADR-0092.
 - A surface that builds itself up in phases runs through `useScene`: it starts when it reaches the viewport, runs once, and ends on its static picture. Off screen it holds its opening state, never a finished picture that would flash to empty. Under reduced motion it renders the finished picture at once.
 - Respect `prefers-reduced-motion` in JavaScript as well as CSS. Reduced motion renders a complete static state, not an empty start frame.
-- Headlines rise into place word by word behind a mask (`SplitReveal`; CJK per character, punctuation kept with its neighbour). The first screen's headline runs from CSS on first paint; a section heading arms only if it is still off screen after hydration. A heading is never hidden in the server markup, and its text appears exactly once.
+- Headlines rise into place word by word behind a mask (`SplitReveal`; CJK per character, punctuation kept with its neighbour, and each CJK word held on one line by build-time boundaries in `content/generated/cjk-words.json`). The first screen's headline runs from CSS on first paint; a section heading arms only if it is still off screen after hydration. A heading is never hidden in the server markup, and its text appears exactly once.
 - A route change fades the page body through to the next page (`PageTransition`, React's `ViewTransition`); navigation and footer do not move. Browsers without the View Transitions API, and reduced motion, swap instantly.
 
 ## Do's and Don'ts

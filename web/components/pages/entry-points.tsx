@@ -3,7 +3,7 @@
 import { useInView, useReducedMotion } from "motion/react"
 import { useRef, type CSSProperties } from "react"
 
-import { Glyph, type GlyphName } from "@web/components/glyph"
+import { Glyph } from "@web/components/glyph"
 import { Icon } from "@web/components/icon"
 import { Reveal } from "@web/components/reveal"
 import { Section, SectionHeading } from "@web/components/section"
@@ -16,6 +16,7 @@ import type {
 } from "@web/content/types"
 import { useHasMounted } from "@web/hooks/use-has-mounted"
 import { useScriptedPhases } from "@web/hooks/use-scripted-phases"
+import { SURFACE_GLYPH } from "@web/lib/surfaces"
 
 interface EntryPointsProps {
   copy: EntryPointsCopy
@@ -32,18 +33,11 @@ export const CLI_RESUME_COMMAND = "cognia-agent chat --continue"
 /** The extension's capture shortcut, from `browser-extension/wxt.config.ts`. */
 export const CAPTURE_SHORTCUT = "Alt+Shift+C"
 
-const STATION_GLYPH: Record<EntryPointKey, GlyphName> = {
-  desktop: "desktop",
-  mobile: "mobile",
-  im: "connectors",
-  cli: "cli",
-  browser: "browser",
-}
-
 /**
- * "One workspace, many entry points." The homepage's second stage argument:
- * the desktop runs the task, and four other surfaces reach the same thread,
- * each holding only what its device was granted.
+ * "One workspace, many entry points." The opening argument of /surfaces
+ * (moved from the homepage 2026-10-19, which now closes its desktop section on
+ * a strip linking here): the desktop runs the task, and four other surfaces
+ * reach the same thread, each holding only what its device was granted.
  *
  * The five stations sit on one rail. A marker travels the rail once, each
  * station's top rule lights as it arrives, and the station labels follow the
@@ -118,7 +112,7 @@ export function EntryPoints({ copy, reconstruction, index }: EntryPointsProps) {
                       reached ? "text-ink" : "text-muted"
                     }`}
                   >
-                    <Glyph name={STATION_GLYPH[station.key]} size={16} />
+                    <Glyph name={SURFACE_GLYPH[station.key]} size={16} />
                     <span>{station.name}</span>
                     <span
                       aria-hidden
@@ -150,14 +144,16 @@ export function EntryPoints({ copy, reconstruction, index }: EntryPointsProps) {
               </p>
               <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
                 {copy.channels.map((channel) => (
-                  <li key={channel} className="flex items-center gap-2 font-mono text-xs text-ink">
+                  // Product names, not machine output: the reading face, per
+                  // the Operational Mono Rule.
+                  <li key={channel} className="flex items-center gap-2 text-sm text-ink">
                     <span aria-hidden className="size-1 rounded-full bg-hairline-strong" />
                     {channel}
                   </li>
                 ))}
               </ul>
             </div>
-            <p className="max-w-md font-mono text-xs leading-relaxed text-muted">
+            <p className="max-w-md text-sm leading-relaxed text-muted">
               <span className="text-ink">{reconstruction.label}.</span> {copy.note}
             </p>
           </div>

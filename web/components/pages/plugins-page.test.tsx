@@ -50,4 +50,25 @@ describe("PluginsPage", () => {
     render(<PluginsPage locale="zh" />)
     expect(screen.getByRole("heading", { name: zh.plugins.authoring.title })).toBeInTheDocument()
   })
+
+  it("states what each connection reads, can do and must ask", () => {
+    const { container } = render(<PluginsPage locale="en" />)
+    const section = container.querySelector("section#connections") as HTMLElement
+    expect(section).toBeInTheDocument()
+    for (const item of en.plugins.connections.items) {
+      expect(section).toHaveTextContent(item.name)
+    }
+    expect(screen.getByRole("group", { name: en.plugins.connectionFlow.label })).toBeInTheDocument()
+  })
+
+  it("ends on the close band, not on the footer with nowhere to go", () => {
+    const { container } = render(<PluginsPage locale="en" />)
+    const main = container.querySelector("main") ?? container
+    const sections = main.querySelectorAll(":scope > section, :scope > * > section")
+    const last = sections[sections.length - 1]
+    expect(last?.querySelector('[data-slot="page-close"]')).not.toBeNull()
+    expect(
+      screen.getByRole("heading", { level: 2, name: en.common.pageClose.title })
+    ).toBeInTheDocument()
+  })
 })

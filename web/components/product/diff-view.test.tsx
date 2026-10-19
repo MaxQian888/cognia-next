@@ -91,4 +91,11 @@ describe("DiffView", () => {
     const { container } = renderDiff()
     expect(container.querySelector("[data-reveal-line]")).toBeNull()
   })
+
+  it("keeps removed lines at full text strength, struck through rather than faded", () => {
+    const { container } = render(<DiffView path="a.ts" hunk="@@" lines={LINES} label="diff" />)
+    const removed = container.querySelector(".line-through") as HTMLElement
+    expect(removed).toHaveClass("text-on-stage")
+    expect(removed).not.toHaveClass("text-on-stage-muted")
+  })
 })

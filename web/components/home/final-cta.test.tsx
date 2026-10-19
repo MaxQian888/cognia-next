@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { en } from "@web/content/en"
 import { zh } from "@web/content/zh"
 import type { Evidence, ReleaseState } from "@web/lib/evidence"
@@ -93,17 +93,46 @@ describe("FinalCta", () => {
   })
 })
 
-// The evidence pipeline can come back without a license — a rate-limited or
-// failed read leaves `repo.license` null — and the row must still say
-// something true rather than rendering an empty cell.
-describe("FinalCta with incomplete evidence", () => {
-  it("falls back to the footer's license note when the repo read has none", () => {
-    renderCta("en", noRelease, evidence({ repo: { stars: 52, license: null, description: null } }))
-    expect(screen.getByText(en.footer.licenseNote)).toBeInTheDocument()
+describe("FinalCta build commands", () => {
+  it("opens the right column on the commands /download lists, in order", () => {
+    const { container } = renderCta()
+    const block = container.querySelector('[data-slot="build-commands"]') as HTMLElement
+    expect(block).toHaveTextContent(en.home.finalCta.buildLabel)
+    const lines = [...block.querySelectorAll("code > span")].map((line) => line.textContent)
+    expect(lines).toEqual(en.download.buildFromSource.steps.map((step) => `$ ${step.command}`))
+    // The prompt is decoration, kept out of selection and assistive tech.
+    expect(block.querySelector("code > span > span")).toHaveAttribute("aria-hidden")
+    expect(block.querySelector("code > span > span")).toHaveClass("select-none")
   })
 
-  it("still names the license when the read did return one", () => {
+  it("offers one control that copies the commands, one per line", async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    renderCta()
+    fireEvent.click(screen.getByRole("button", { name: en.common.copyCommand }))
+    expect(writeText).toHaveBeenCalledWith(
+      en.download.buildFromSource.steps.map((step) => step.command).join("\n")
+    )
+    expect(await screen.findByText(en.common.copiedCommand)).toBeInTheDocument()
+  })
+})
+
+describe("FinalCta index", () => {
+  it("does not repeat the licence the trust section states", () => {
     renderCta("en", noRelease, evidence())
-    expect(screen.getByText("AGPL-3.0-or-later")).toBeInTheDocument()
+    expect(screen.queryByText("AGPL-3.0-or-later")).toBeNull()
+  })
+
+  it("shows the changeset count at its value, without counting up to it", () => {
+    const { container } = renderCta()
+    expect(screen.getByText(en.home.finalCta.changesSuffix).parentElement).toHaveTextContent(
+      new RegExp(`^${evidence().changesets.length}`)
+    )
+    expect(container.querySelector('[data-slot="count-up"]')).toBeNull()
+  })
+
+  it("sets the support sentence in the reading face", () => {
+    renderCta()
+    expect(screen.getByText(en.home.finalCta.support)).not.toHaveClass("font-mono")
   })
 })

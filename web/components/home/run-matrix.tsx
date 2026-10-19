@@ -1,3 +1,4 @@
+import { AgentInteropStrip } from "@web/components/agent-interop-strip"
 import { Icon, type IconName } from "@web/components/icon"
 import { Reveal } from "@web/components/reveal"
 import { Section, SectionHeading } from "@web/components/section"
@@ -32,18 +33,15 @@ interface RunMatrixProps {
  * name, and the question a reader actually has is what leaves their machine.
  * Every row answers the four questions the spec requires — what leaves, who
  * receives, which tools, what needs confirmation — and links to versioned
- * documentation rather than restating it here.
+ * documentation rather than restating it here. The fourth has one answer for
+ * every strategy, so it is the table's footer row, stated once: repeated in
+ * each row it read as four different rules that happened to match.
  *
  * Rendered as a real table so the row/column relationships survive a screen
  * reader; on narrow viewports the same data becomes stacked definition blocks.
  */
 export function RunMatrix({ copy, learnMore, locale, docsOrigin, index }: RunMatrixProps) {
-  const headings = [
-    copy.headings.leaves,
-    copy.headings.receives,
-    copy.headings.tools,
-    copy.headings.approval,
-  ]
+  const headings = [copy.headings.leaves, copy.headings.receives, copy.headings.tools]
 
   return (
     <Section id="run" tone="paper">
@@ -86,37 +84,57 @@ export function RunMatrix({ copy, learnMore, locale, docsOrigin, index }: RunMat
                 <tr key={strategy.key} className="group align-top">
                   <th
                     scope="row"
-                    className="bg-paper px-5 py-6 font-medium text-ink transition-colors group-hover:bg-surface"
+                    className="w-[30%] bg-paper px-5 py-4 font-medium text-ink transition-colors group-hover:bg-surface"
                   >
-                    <span className="flex items-center gap-2.5">
-                      {STRATEGY_ICON[strategy.key] ? (
-                        <Icon name={STRATEGY_ICON[strategy.key]} size={16} className="text-muted" />
-                      ) : null}
-                      {strategy.name}
+                    {/* Name and docs link share a line, so a row is the
+                     * name and its summary: as tall as the answers beside it,
+                     * not three lines against one. */}
+                    <span className="flex items-baseline justify-between gap-4">
+                      <span className="flex items-center gap-2.5">
+                        {STRATEGY_ICON[strategy.key] ? (
+                          <Icon
+                            name={STRATEGY_ICON[strategy.key]}
+                            size={16}
+                            className="text-muted"
+                          />
+                        ) : null}
+                        {strategy.name}
+                      </span>
+                      <SiteLink
+                        target={{ label: learnMore, docsPath: strategy.docsPath }}
+                        locale={locale}
+                        docsOrigin={docsOrigin}
+                        className="shrink-0 font-mono text-xs font-normal text-ink underline decoration-hairline-strong underline-offset-4"
+                      />
                     </span>
-                    <span className="mt-2 block max-w-56 text-sm font-normal leading-relaxed text-muted">
+                    <span className="mt-1.5 block text-sm font-normal leading-relaxed text-muted">
                       {strategy.summary}
                     </span>
-                    <SiteLink
-                      target={{ label: learnMore, docsPath: strategy.docsPath }}
-                      locale={locale}
-                      docsOrigin={docsOrigin}
-                      className="mt-3 inline-block font-mono text-xs text-ink underline decoration-hairline-strong underline-offset-4"
-                    />
                   </th>
-                  {[strategy.leaves, strategy.receives, strategy.tools, strategy.approval].map(
-                    (answer, index) => (
-                      <td
-                        key={index}
-                        className="bg-paper px-5 py-6 text-sm leading-relaxed text-ink transition-colors group-hover:bg-surface"
-                      >
-                        {answer}
-                      </td>
-                    )
-                  )}
+                  {[strategy.leaves, strategy.receives, strategy.tools].map((answer, index) => (
+                    <td
+                      key={index}
+                      className="bg-paper px-5 py-4 text-sm leading-relaxed text-ink transition-colors group-hover:bg-surface"
+                    >
+                      {answer}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr>
+                <th
+                  scope="row"
+                  className="bg-surface px-5 py-3.5 font-mono text-xs font-normal uppercase tracking-widest text-muted"
+                >
+                  {copy.headings.approval}
+                </th>
+                <td colSpan={3} className="bg-surface px-5 py-3.5 text-sm leading-relaxed text-ink">
+                  {copy.approvalShared}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </Reveal>
@@ -133,7 +151,6 @@ export function RunMatrix({ copy, learnMore, locale, docsOrigin, index }: RunMat
                   [copy.headings.leaves, strategy.leaves],
                   [copy.headings.receives, strategy.receives],
                   [copy.headings.tools, strategy.tools],
-                  [copy.headings.approval, strategy.approval],
                 ].map(([term, value]) => (
                   <div key={term}>
                     <dt className="font-mono text-xs uppercase tracking-widest text-muted">
@@ -151,12 +168,20 @@ export function RunMatrix({ copy, learnMore, locale, docsOrigin, index }: RunMat
               />
             </div>
           ))}
+          <dl data-slot="run-approval-shared" className="bg-surface px-4 py-4">
+            <dt className="font-mono text-xs uppercase tracking-widest text-muted">
+              {copy.headings.approval}
+            </dt>
+            <dd className="mt-1 text-sm leading-relaxed text-ink">{copy.approvalShared}</dd>
+          </dl>
         </div>
       </Reveal>
 
-      <p className="mt-10 max-w-2xl border-l-2 border-hairline-strong pl-4 text-sm leading-relaxed text-muted">
-        {copy.note}
-      </p>
+      {/* The other half of "what runs the work": an agent you already use,
+       * hosted by the workspace instead of a model it calls directly. */}
+      <Reveal className="mt-16">
+        <AgentInteropStrip copy={copy.agents} />
+      </Reveal>
     </Section>
   )
 }

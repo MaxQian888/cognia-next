@@ -6,6 +6,7 @@ import { CapabilitySections } from "./capability-sections"
 import { PageHeader } from "./page-header"
 import { RunnerGuarantees } from "./runner-guarantees"
 import { SystemFlow } from "./system-flow"
+import { PageClose } from "./page-close"
 
 /**
  * `/workflows`.
@@ -41,6 +42,7 @@ export function WorkflowsPage({ locale }: { locale: Locale }) {
         docsOrigin={docsOrigin}
       />
       <RunnerGuarantees copy={copy.workflows.guarantees} />
+      <PageClose locale={locale} docsOrigin={docsOrigin} />
     </SiteShell>
   )
 }

@@ -4,8 +4,10 @@ import { getCopy } from "@web/content"
 import type { Locale } from "@web/lib/locale"
 import { docsUrl } from "@web/lib/site"
 import { CapabilitySections } from "./capability-sections"
+import { Connections } from "./connections"
 import { PageHeader } from "./page-header"
 import { SystemFlow } from "./system-flow"
+import { PageClose } from "./page-close"
 
 /**
  * `/plugins`.
@@ -13,6 +15,11 @@ import { SystemFlow } from "./system-flow"
  * Closes on authoring rather than on a plugin gallery: a gallery is a count
  * that has to be maintained, and the spec forbids hand-written ecosystem
  * numbers. Three ordered steps are what a reader who wants to build one needs.
+ *
+ * Between the capability sections and the boundary path sits what a
+ * connection reads, can do and must ask (moved here from the homepage
+ * 2026-10-19), because a plugin, an MCP server and a chat connector are the
+ * things that connect.
  */
 export function PluginsPage({ locale }: { locale: Locale }) {
   const copy = getCopy(locale)
@@ -33,6 +40,7 @@ export function PluginsPage({ locale }: { locale: Locale }) {
         docsOrigin={docsOrigin}
         reconstruction={copy.reconstruction}
       />
+      <Connections copy={copy.plugins.connections} flowCopy={copy.plugins.connectionFlow} />
       <SystemFlow
         copy={copy.plugins.flow}
         learnMore={copy.common.learnMore}
@@ -58,6 +66,7 @@ export function PluginsPage({ locale }: { locale: Locale }) {
           ))}
         </ol>
       </Section>
+      <PageClose locale={locale} docsOrigin={docsOrigin} />
     </SiteShell>
   )
 }

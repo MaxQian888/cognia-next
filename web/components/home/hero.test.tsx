@@ -77,12 +77,12 @@ describe("Hero", () => {
     expect(screen.getByRole("link", { name: en.common.viewSource })).toBeInTheDocument()
   })
 
-  it("renders the trust rail as four labelled cells with qualifying detail", () => {
-    renderHero()
-    for (const item of en.home.hero.trustRail) {
-      expect(screen.getByText(item.label)).toBeInTheDocument()
-      expect(screen.getByText(item.detail)).toBeInTheDocument()
-    }
+  it("ends the first screen on the task ticket, with no row of promises under it", () => {
+    const { container } = renderHero()
+    // The trust and run sections prove these claims; the hero no longer
+    // states them as a strip of its own.
+    expect(screen.queryByText(en.home.trust.cards[0].label)).toBeNull()
+    expect(container.querySelector("section > div > ul")).toBeNull()
   })
 
   it("puts the live workbench in the first screen with a described visual", () => {
@@ -115,6 +115,10 @@ describe("Hero", () => {
     expect(container.querySelector('[data-placeholder="product-stage"]')).toBeNull()
     expect(screen.getByText(en.footage.recordingNote)).toBeInTheDocument()
     expect(screen.getByText(en.home.hero.stageCaption)).toBeInTheDocument()
+    // The app's bottom chrome is cropped away, so the picture fills its frame.
+    const frame = video?.parentElement as HTMLElement
+    expect(frame.style.getPropertyValue("--frame-wide")).toBe("1600 / 912")
+    expect(frame.style.getPropertyValue("--frame-narrow")).toBe(String(4 / 3))
   })
 
   it("does not borrow the other locale's recording", () => {

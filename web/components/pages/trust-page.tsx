@@ -7,6 +7,7 @@ import { docsUrl } from "@web/lib/site"
 import { CapabilitySections } from "./capability-sections"
 import { PageHeader } from "./page-header"
 import { SystemFlow } from "./system-flow"
+import { PageClose } from "./page-close"
 
 /**
  * `/trust`.
@@ -84,6 +85,7 @@ export function TrustPage({ locale }: { locale: Locale }) {
           </table>
         </div>
       </Section>
+      <PageClose locale={locale} docsOrigin={docsOrigin} />
     </SiteShell>
   )
 }

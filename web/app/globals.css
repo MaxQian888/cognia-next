@@ -142,24 +142,6 @@
 
   /* §7 — desktop content width 1440–1520. */
   --spacing-shell: 1480px;
-  --animate-marquee: marquee var(--duration) infinite linear;
-  --animate-marquee-vertical: marquee-vertical var(--duration) linear infinite;
-  @keyframes marquee {
-    from {
-      transform: translateX(0);
-    }
-    to {
-      transform: translateX(calc(-100% - var(--gap)));
-    }
-  }
-  @keyframes marquee-vertical {
-    from {
-      transform: translateY(0);
-    }
-    to {
-      transform: translateY(calc(-100% - var(--gap)));
-    }
-  }
 }
 
 @layer base {
@@ -348,6 +330,34 @@
     }
   }
 
+  /* Homepage FAQ: a native `<details>` list. The answer slides open where the
+   * engine can animate to `auto` height (`interpolate-size`); elsewhere it
+   * simply appears, which is the same end state. The reduced-motion belt
+   * above collapses the transition. */
+  .faq-item > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .faq-item > summary::marker {
+    content: "";
+  }
+
+  .faq-item {
+    interpolate-size: allow-keywords;
+  }
+
+  .faq-item::details-content {
+    block-size: 0;
+    overflow: clip;
+    transition:
+      block-size 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      content-visibility 260ms allow-discrete;
+  }
+
+  .faq-item[open]::details-content {
+    block-size: auto;
+  }
+
   /* --------------------------------------------------------------------
    * Trace — the card interaction (ADR-0092 §6).
    *
@@ -436,7 +446,10 @@
     inset-inline: 0;
     top: 0;
     height: 1px;
-    background: var(--action);
+    /* A structural rule, so hairline ink rather than cyan: five lit cells read
+     * as five cyan bars across a viewport, past The Five Percent Rule. The
+     * sequence still reads from the sweep; the active station keeps its dot. */
+    background: var(--hairline-strong);
     transform: scaleX(0);
     transform-origin: left;
     animation: station-lit 600ms var(--ease-entrance) forwards;

@@ -1,10 +1,11 @@
-import { CountUp } from "@web/components/count-up"
+import { CopyButton } from "@web/components/copy-button"
 import { DownloadCta } from "@web/components/download-cta"
 import { Hairline } from "@web/components/hairline"
 import { Icon, type IconName } from "@web/components/icon"
 import { RevealGroup, RevealItem } from "@web/components/reveal-group"
 import { Section, formatIndex } from "@web/components/section"
 import { SiteLink } from "@web/components/site-link"
+import { SplitReveal } from "@web/components/split-reveal"
 import type { FinalCtaRowKey, SiteCopy } from "@web/content/types"
 import type { Evidence, ReleaseState } from "@web/lib/evidence"
 import type { Locale } from "@web/lib/locale"
@@ -20,7 +21,6 @@ interface FinalCtaProps {
 }
 
 const ROW_ICON: Record<FinalCtaRowKey, IconName> = {
-  license: "license",
   platforms: "system",
   release: "repository",
   changes: "record",
@@ -35,10 +35,13 @@ const ROW_ICON: Record<FinalCtaRowKey, IconName> = {
  * the page.
  *
  * The right column answers the question the close actually raises — "what do I
- * get if I do this today?" — using only values already on the page: the licence
- * and changeset count from the evidence snapshot, the platform names and the
- * release state from the copy the CTA itself renders. Nothing here is a new
- * claim. A testimonial strip, a logo wall or a table of what a future release
+ * get if I do this today?" It opens on the commands that build the app, the
+ * first thing a reader of an open-source desktop project looks for, taken
+ * from /download's steps so the two never disagree. Under them, values already
+ * on the page: the changeset count from the evidence snapshot, the platform
+ * names and the release state from the copy the CTA itself renders. The
+ * licence is not repeated here; the trust section states it. Nothing here is
+ * a new claim. A testimonial strip, a logo wall or a table of what a future release
  * *will* contain would all fill the same space and are all banned by spec §9;
  * this is the honest version.
  *
@@ -56,9 +59,10 @@ export function FinalCta({
   index,
 }: FinalCtaProps) {
   const { finalCta } = copy.home
+  const steps = copy.download.buildFromSource.steps
+  const numbers = new Intl.NumberFormat(locale === "zh" ? "zh-CN" : "en-US")
 
-  const values: Record<FinalCtaRowKey, { value: string | number; suffix?: string }> = {
-    license: { value: evidence.repo?.license ?? copy.footer.licenseNote },
+  const values: Record<FinalCtaRowKey, { value: string; suffix?: string }> = {
     platforms: {
       value: [
         copy.common.download.platformMacos,
@@ -72,7 +76,10 @@ export function FinalCta({
       value:
         (releaseState.hasRelease ? releaseState.version : null) ?? copy.home.trust.noReleasesYet,
     },
-    changes: { value: evidence.changesets.length, suffix: finalCta.changesSuffix },
+    changes: {
+      value: numbers.format(evidence.changesets.length),
+      suffix: finalCta.changesSuffix,
+    },
   }
 
   return (
@@ -92,9 +99,13 @@ export function FinalCta({
             ) : null}
             <span>{finalCta.eyebrow}</span>
           </p>
-          <h2 className="mt-6 max-w-3xl text-balance text-3xl font-medium leading-tight tracking-tight text-ink md:text-4xl lg:text-5xl">
-            {finalCta.title}
-          </h2>
+          {/* The same headline reveal as every section heading, which also
+           * keeps each Chinese word on one line. */}
+          <SplitReveal
+            as="h2"
+            text={finalCta.title}
+            className="mt-6 max-w-3xl text-balance text-3xl font-medium leading-tight tracking-tight text-ink md:text-4xl lg:text-5xl"
+          />
 
           <div className="mt-10">
             <DownloadCta
@@ -112,12 +123,39 @@ export function FinalCta({
               docsOrigin={docsOrigin}
               className="font-mono text-xs text-ink underline decoration-hairline-strong underline-offset-4"
             />
-            <p className="font-mono text-xs text-muted">{finalCta.support}</p>
+            <p className="text-sm text-muted">{finalCta.support}</p>
           </div>
         </div>
 
         <div className="mt-14 border-hairline lg:mt-0 lg:border-l lg:pl-14">
-          <p className="font-mono text-xs uppercase tracking-widest text-muted">
+          <div data-slot="build-commands">
+            <div className="flex items-center justify-between gap-4">
+              <p className="font-mono text-xs uppercase tracking-widest text-muted">
+                {finalCta.buildLabel}
+              </p>
+              <CopyButton
+                value={steps.map((step) => step.command).join("\n")}
+                copyLabel={copy.common.copyCommand}
+                copiedLabel={copy.common.copiedCommand}
+              />
+            </div>
+            <pre className="mt-3 overflow-x-auto rounded-control border border-hairline px-4 py-3">
+              <code className="font-mono text-sm leading-relaxed text-ink">
+                {steps.map((step) => (
+                  <span key={step.command} className="block whitespace-pre">
+                    {/* The prompt is a marker, not part of the command: a
+                     * reader who selects the block copies only commands. */}
+                    <span aria-hidden className="select-none text-muted">
+                      ${" "}
+                    </span>
+                    {step.command}
+                  </span>
+                ))}
+              </code>
+            </pre>
+          </div>
+
+          <p className="mt-10 font-mono text-xs uppercase tracking-widest text-muted">
             {finalCta.indexLabel}
           </p>
           <RevealGroup as="dl" count={finalCta.rows.length} className="mt-6 flex flex-col gap-px">
@@ -130,7 +168,7 @@ export function FinalCta({
                     {row.label}
                   </dt>
                   <dd className="mt-2 text-sm text-ink">
-                    <CountUp value={entry.value} />
+                    {entry.value}
                     {entry.suffix ? <span className="ml-2 text-muted">{entry.suffix}</span> : null}
                   </dd>
                 </RevealItem>

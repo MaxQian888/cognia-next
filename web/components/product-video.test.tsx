@@ -88,7 +88,36 @@ describe("ProductVideo — ambient (hero loop)", () => {
   it("reserves the film's aspect ratio so the page does not shift", () => {
     const { container } = renderAmbient()
     const frame = video(container).parentElement as HTMLElement
-    expect(frame.style.aspectRatio).toBe("1600 / 1000")
+    expect(frame.style.getPropertyValue("--frame-wide")).toBe("1600 / 1000")
+    // Uncropped, a phone frames it the same way.
+    expect(frame.style.getPropertyValue("--frame-narrow")).toBe("1600 / 1000")
+    expect(video(container).style.height).toBe("100%")
+  })
+
+  it("crops a band off the bottom and frames a phone narrower when asked", () => {
+    const { container } = render(
+      <ProductVideo
+        mode="ambient"
+        video={HERO}
+        label="The workspace running the release task"
+        note="Recorded from the Cognia app running demo data."
+        cropBottom={0.2}
+        narrowAspect={4 / 3}
+      />
+    )
+    const frame = video(container).parentElement as HTMLElement
+    // The frame holds the visible 80%; the video overflows it by the band.
+    expect(frame.style.getPropertyValue("--frame-wide")).toBe("1600 / 800")
+    expect(frame.style.getPropertyValue("--frame-narrow")).toBe(String(4 / 3))
+    expect(video(container).style.height).toBe("125%")
+  })
+
+  it("sets the caption sentence in the reading face and the provenance note in mono", () => {
+    renderAmbient()
+    expect(screen.getByText("The task this page follows.")).not.toHaveClass("font-mono")
+    expect(screen.getByText("Recorded from the Cognia app running demo data.")).toHaveClass(
+      "font-mono"
+    )
   })
 
   it("plays when hydrated, in view and motion is allowed", () => {
