@@ -105,6 +105,7 @@ pub mod paired_turn;
 mod problem_surface;
 pub use cognia_companion_bus::push;
 pub use cognia_companion_bus::push_creds;
+pub use cognia_companion_bus::push_triggers;
 pub use cognia_companion_bus::remote_context;
 pub use cognia_companion_connectivity::reachability_config;
 pub use cognia_companion_security::rate_limit;

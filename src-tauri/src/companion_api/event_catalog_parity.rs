@@ -25,7 +25,7 @@ mod tests {
             ("perf://frame", crate::perf::sampler::FRAME_EVENT),
             (
                 "automation:consent-request",
-                super::super::commands::AUTOMATION_CONSENT_CHANNEL,
+                super::super::push_triggers::AUTOMATION_CONSENT_CHANNEL,
             ),
             (
                 "host-consent://requested",

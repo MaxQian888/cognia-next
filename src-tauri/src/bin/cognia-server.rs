@@ -37,7 +37,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use app_lib::companion_api::{
+use app_lib::headless::brain;
+use cognia_companion::{
     data_plane::install_headless_store,
     deny_list::DenyList,
     desktop_messages_bridge::DesktopMessagesBridge,
@@ -58,11 +59,11 @@ use app_lib::companion_api::{
     sync_registry::SyncTableRegistry,
     tls, CompanionState, SharedState,
 };
-use app_lib::headless::{
-    backup, brain, exec_backend_from_env, generate_master_key, headless_services,
-    init_secret_store, install_headless_services, kill_sidecar, parse_master_key,
-    rotate_master_key, spawn_sidecar, ApiKeyState, HeadlessServices, HeadlessSidecarHost,
-    SpawnPolicy, MASTER_KEY_ENV, SIDECAR_SCRIPT_ENV,
+use cognia_companion_rpc::headless::{
+    backup, exec_backend_from_env, generate_master_key, headless_services, init_secret_store,
+    install_headless_services, kill_sidecar, parse_master_key, rotate_master_key, spawn_sidecar,
+    ApiKeyState, HeadlessServices, HeadlessSidecarHost, SpawnPolicy, MASTER_KEY_ENV,
+    SIDECAR_SCRIPT_ENV,
 };
 use parking_lot::RwLock;
 
@@ -149,7 +150,7 @@ enum CliCommand {
     },
     /// Boot the HTTPS companion server. Binds 0.0.0.0:<port> by default.
     Serve {
-        #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
+        #[arg(long, default_value_t = cognia_companion::server::DEFAULT_PORT)]
         port: u16,
         /// Public base URL advertised in pair payloads/logs. Defaults to
         /// `COGNIA_PUBLIC_URL`, else `https://127.0.0.1:<bound port>`.
@@ -320,7 +321,7 @@ enum TunnelIngressCommand {
     Status,
     /// Bind the listener at the next `serve`.
     Enable {
-        #[arg(long, default_value_t = app_lib::companion_api::tunnel_ingress::DEFAULT_TUNNEL_INGRESS_PORT)]
+        #[arg(long, default_value_t = cognia_companion::tunnel_ingress::DEFAULT_TUNNEL_INGRESS_PORT)]
         port: u16,
     },
     /// Stop binding the listener at the next `serve`. The port is kept.
@@ -357,7 +358,7 @@ enum ServiceCommand {
         /// Defaults to the service account's own `cognia-server` data dir.
         #[arg(long)]
         data_dir: Option<PathBuf>,
-        #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
+        #[arg(long, default_value_t = cognia_companion::server::DEFAULT_PORT)]
         port: u16,
         /// Written as `COGNIA_PUBLIC_URL`. Optional: devices pair over the relay.
         #[arg(long)]
@@ -380,7 +381,7 @@ enum ServiceCommand {
         #[arg(long, value_enum, default_value_t = ServiceScopeArg::System)]
         scope: ServiceScopeArg,
         /// Port the service was installed with.
-        #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
+        #[arg(long, default_value_t = cognia_companion::server::DEFAULT_PORT)]
         port: u16,
         /// Print one JSON object instead of text: the service, its install
         /// home, the master key and readiness. For a remote installer
@@ -423,7 +424,7 @@ enum DevicesCommand {
         /// The plaintext loopback listener the extension will dial — the port
         /// `serve --browser-listener-port` bound. Defaults to the conventional
         /// one, and is verified to be live before anything is minted.
-        #[arg(long, default_value_t = app_lib::companion_api::browser_access::DEFAULT_BROWSER_PORT)]
+        #[arg(long, default_value_t = cognia_companion::browser_access::DEFAULT_BROWSER_PORT)]
         browser_listener_port: u16,
         /// Defaults to the tenant this host is bound to.
         #[arg(long)]
@@ -582,9 +583,9 @@ enum ProfilesCommand {
 /// channels are push-worthy. A lagged receiver skips the missed frames rather
 /// than dying — the bus is bursty under a sync storm and a push is
 /// best-effort by contract.
-fn spawn_headless_push_triggers(shared: app_lib::companion_api::SharedState) {
-    use app_lib::companion_api::commands::{fan_out_push, PUSH_TRIGGER_CHANNELS};
-    use app_lib::companion_api::event_bus::SubscribeResult;
+fn spawn_headless_push_triggers(shared: cognia_companion::SharedState) {
+    use cognia_companion::event_bus::SubscribeResult;
+    use cognia_companion::push_triggers::{fan_out_push, PUSH_TRIGGER_CHANNELS};
 
     let now = chrono::Utc::now().timestamp_millis();
     let SubscribeResult::Ok { mut receiver, .. } = shared.event_bus.subscribe(None, now) else {
@@ -614,7 +615,7 @@ fn spawn_headless_push_triggers(shared: app_lib::companion_api::SharedState) {
             let raw = frame.payload.to_string();
             fan_out_push(
                 Arc::clone(&shared.push_tokens),
-                app_lib::companion_api::push_dispatchers(),
+                cognia_companion::push_dispatchers(),
                 channel,
                 &raw,
             )
@@ -651,7 +652,7 @@ fn mdns_instance_name(fingerprint: &str) -> String {
 /// default port.
 fn resolve_pair_port(flag: Option<u16>, env: Option<&str>) -> u16 {
     flag.or_else(|| env.and_then(|value| value.trim().parse().ok()))
-        .unwrap_or(app_lib::companion_api::server::DEFAULT_PORT)
+        .unwrap_or(cognia_companion::server::DEFAULT_PORT)
 }
 
 fn resolve_advertise_url(flag: Option<String>, port: u16) -> String {
@@ -808,7 +809,10 @@ async fn run_service_command(
                 String::new()
             };
             let key_env = if report.master_key_root_only {
-                format!("{}=/dev/stdin ", app_lib::headless::MASTER_KEY_FILE_ENV)
+                format!(
+                    "{}=/dev/stdin ",
+                    cognia_companion_rpc::headless::MASTER_KEY_FILE_ENV
+                )
             } else {
                 String::new()
             };
@@ -822,7 +826,7 @@ async fn run_service_command(
                 .map(|id| format!("COGNIA_LOCAL_ACCOUNT_ID={id} "))
                 .unwrap_or_default();
             // `pair` asks the running server on its port for a relay invitation.
-            let port_arg = if *port == app_lib::companion_api::server::DEFAULT_PORT {
+            let port_arg = if *port == cognia_companion::server::DEFAULT_PORT {
                 String::new()
             } else {
                 format!(" --port {port}")
@@ -1043,8 +1047,8 @@ fn run_stage(
 fn run_tunnel_ingress(
     data_dir: &std::path::Path,
     command: &TunnelIngressCommand,
-) -> Result<app_lib::companion_api::tunnel_ingress::TunnelIngressConfig, String> {
-    use app_lib::companion_api::tunnel_ingress::{self, TunnelIngressConfig};
+) -> Result<cognia_companion::tunnel_ingress::TunnelIngressConfig, String> {
+    use cognia_companion::tunnel_ingress::{self, TunnelIngressConfig};
     let current = tunnel_ingress::load(data_dir);
     match command {
         TunnelIngressCommand::Status => Ok(current),
@@ -1187,7 +1191,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     rustls::crypto::ring::default_provider()
         .install_default()
         .map_err(|_| "a rustls crypto provider was already installed")?;
-    if !app_lib::init_structured_tracing() {
+    if !cognia_observability::logging::tracing_setup::init() {
         log::warn!("headless structured tracing subscriber was not installed");
     }
     // Headless deployments do not consume desktop Dexie settings. The policy
@@ -1197,7 +1201,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // included) then route through it on purpose, with the loopback set and
     // NO_PROXY bypassed, instead of inheriting ambient variables. A proxy
     // that cannot be dialled fails startup here rather than every request.
-    let proxy_policy = app_lib::apply_proxy_policy_from_environment()?;
+    let proxy_policy = cognia_net::proxy_config::apply_from_environment()?;
     if proxy_policy.is_active() {
         log::info!(
             "outbound proxy from environment: {:?}://{}:{} (bypass: {})",
@@ -1219,23 +1223,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Keep the granted credential in this very process: a one-shot
                 // helper would lose a one-time Keychain Allow when it exited.
                 tokio::task::spawn_blocking(
-                    app_lib::terminal_host_service::authorize_terminal_host_credentials,
+                    cognia_terminal::terminal_host_service::authorize_terminal_host_credentials,
                 )
                 .await
                 .map_err(|error| {
                     format!("terminal credential authorization task failed: {error}")
                 })??;
             }
-            let endpoint = endpoint
-                .clone()
-                .unwrap_or_else(app_lib::terminal_host_service::default_terminal_host_endpoint);
+            let endpoint = endpoint.clone().unwrap_or_else(
+                cognia_terminal::terminal_host_service::default_terminal_host_endpoint,
+            );
             log::info!("terminal host endpoint: {endpoint}");
-            app_lib::terminal_host_service::run_terminal_host(endpoint).await
+            cognia_terminal::terminal_host_service::run_terminal_host(endpoint).await
         }
         .await;
         if let Err(error) = &result {
             if let Some(code) =
-                app_lib::terminal_host_service::terminal_host_startup_exit_code(error)
+                cognia_terminal::terminal_host_service::terminal_host_startup_exit_code(error)
             {
                 // This failure precedes the listener and all PTY sessions. The
                 // client consumes only the exit status, never log contents.
@@ -1373,7 +1377,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|id| !id.trim().is_empty())
         .unwrap_or_else(|| HEADLESS_LOCAL_ACCOUNT_ID.to_string());
     if let Err(error) =
-        app_lib::companion_api::host_identity::bind_local_account_from_operator(&local_account_id)
+        cognia_companion::host_identity::bind_local_account_from_operator(&local_account_id)
     {
         // Fatal: continuing would silently serve a different tenant than the
         // operator named, which is exactly the confusion this replaces.
@@ -1384,7 +1388,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // one made by this binary's `devices revoke-device` while the server was
     // down or beside it (ADR-0224 A6).
     if matches!(&cli.command, CliCommand::Serve { .. }) {
-        let swept = app_lib::companion_api::device_lifecycle::sweep_revoked_host_device_secrets();
+        let swept = cognia_companion::device_lifecycle::sweep_revoked_host_device_secrets();
         if swept > 0 {
             log::info!("removed the host secrets of {swept} revoked device(s)");
         }
@@ -1399,7 +1403,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .then(|| {
             app_lib::headless::tenant_lease::acquire(
                 &dir,
-                &app_lib::companion_api::host_identity::current_tenant_or_unbound(),
+                &cognia_companion::host_identity::current_tenant_or_unbound(),
             )
         })
         .transpose()?;
@@ -1444,9 +1448,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             no_mdns,
         } => {
             if allow_remote_terminal {
-                let mut settings = app_lib::terminal_host_service::load_terminal_host_settings()?;
+                let mut settings =
+                    cognia_terminal::terminal_host_service::load_terminal_host_settings()?;
                 settings.allow_remote_access = true;
-                app_lib::terminal_host_service::save_terminal_host_settings(&settings)?;
+                cognia_terminal::terminal_host_service::save_terminal_host_settings(&settings)?;
             }
             run_serve(
                 &store,
@@ -1463,9 +1468,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let signing_secret = secret::load_or_generate()?;
             // The `account` claim on a companion JWT is a *tenant*, so this
             // must be the bound tenant and not the local account namespace.
-            let (token, exp) = app_lib::companion_api::jwt::issue_service_jwt(
+            let (token, exp) = cognia_companion::jwt::issue_service_jwt(
                 &signing_secret,
-                &app_lib::companion_api::host_identity::current_tenant_or_unbound(),
+                &cognia_companion::host_identity::current_tenant_or_unbound(),
             )?;
             // Token on stdout (script-friendly), metadata on stderr.
             println!("{token}");
@@ -1538,7 +1543,7 @@ fn selected_kinds(
 fn resolve_tenant(requested: Option<String>) -> String {
     requested
         .filter(|tenant| !tenant.trim().is_empty())
-        .unwrap_or_else(app_lib::companion_api::host_identity::current_tenant_or_unbound)
+        .unwrap_or_else(cognia_companion::host_identity::current_tenant_or_unbound)
 }
 
 /// The plaintext loopback origin a browser enrollment advertises.
@@ -1617,7 +1622,7 @@ async fn ensure_browser_plane_is_live(
 }
 
 async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::Error>> {
-    let security = app_lib::companion_api::security_store::security_store()
+    let security = cognia_companion::security_store::security_store()
         .ok_or("security store is not initialized")?;
     match command {
         DevicesCommand::InviteOwner {
@@ -1660,7 +1665,7 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
             let signing_secret = secret::load_or_generate()?;
             ensure_browser_plane_is_live(
                 &base_url,
-                &app_lib::companion_api::healthz::derive_server_id(&signing_secret),
+                &cognia_companion::healthz::derive_server_id(&signing_secret),
             )
             .await?;
             let now = chrono::Utc::now().timestamp();
@@ -1673,7 +1678,7 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
             // The struct the desktop command returns, reused rather than
             // re-declared: two producers of one JSON shape is how the field a
             // consumer reads gets renamed under it.
-            let issue = app_lib::companion_api::commands::BrowserEnrollmentIssue {
+            let issue = cognia_companion_rpc::command_services::BrowserEnrollmentIssue {
                 enrollment,
                 expires_at_ms: now.saturating_add(ttl_seconds) * 1_000,
                 base_url,
@@ -1711,14 +1716,14 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
             )?;
             if let Some(registrations) = signaling::registration_store::installed() {
                 if let Some(key_ref) = registrations.remove_device(&device_id)? {
-                    app_lib::companion_api::signaling::envelope::clear_signaling_key(&key_ref)?;
+                    cognia_companion::signaling::envelope::clear_signaling_key(&key_ref)?;
                 }
             }
             // The secrets it sealed here go with it (ADR-0224 A6). A server
             // running beside this command still holds them in its cache; it
             // drops them at its next sweep (before it lists or loads secrets,
             // and at boot), because the device is revoked in the database.
-            app_lib::companion_api::device_lifecycle::forget_device_secrets(&device_id);
+            cognia_companion::device_lifecycle::forget_device_secrets(&device_id);
             println!("revoked device {device_id} for tenant {tenant_id}");
             Ok(())
         }
@@ -1843,7 +1848,7 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
 
 /// The capability `--browser-drive` grants: the one the device socket checks
 /// before every page action (ADR-0228 §5).
-const BROWSER_DRIVE: &str = app_lib::companion_api::ws_browser_companion::DRIVE_CAPABILITY;
+const BROWSER_DRIVE: &str = cognia_companion::ws_browser_companion::DRIVE_CAPABILITY;
 
 /// Delegates to the shared mapping so this CLI and the desktop paired-devices
 /// toggles cannot grant different capability sets for the same named grant.
@@ -1855,7 +1860,7 @@ fn run_gateway_admin(
     data_dir: &std::path::Path,
     command: GatewayCommand,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let state = app_lib::gateway::GatewayState::new();
+    let state = cognia_gateway::GatewayState::new();
     // Same file `run_serve` hydrates from, so the ticket metadata store this
     // reads is the one the running listener writes.
     state.hydrate_from_disk(data_dir.join(".cognia").join("gateway-config.json"));
@@ -1907,10 +1912,10 @@ fn run_profiles(
     data_dir: &std::path::Path,
     command: ProfilesCommand,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use app_lib::gateway::credentials::SecretStoreResolver;
-    use app_lib::provider_profiles::{
+    use cognia_agent_state::provider_profiles::{
         headless_store_path, ProviderProfileStore, SqliteProfileStore,
     };
+    use cognia_gateway::credentials::SecretStoreResolver;
     let store = SqliteProfileStore::open(headless_store_path(data_dir))?;
     match command {
         ProfilesCommand::Export => {
@@ -1984,14 +1989,17 @@ fn run_rotate_master_key(
     if let Some(path) = &key_file {
         println!("Wrote the new key to {}.", path.display());
     }
-    let configured = [MASTER_KEY_ENV, app_lib::headless::MASTER_KEY_FILE_ENV]
-        .iter()
-        .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));
+    let configured = [
+        MASTER_KEY_ENV,
+        cognia_companion_rpc::headless::MASTER_KEY_FILE_ENV,
+    ]
+    .iter()
+    .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));
     if key_file.is_none() || configured {
         println!(
             "Update {MASTER_KEY_ENV} (or the {0} file) to the new key before the next boot — \
              the old key no longer decrypts the store.",
-            app_lib::headless::MASTER_KEY_FILE_ENV
+            cognia_companion_rpc::headless::MASTER_KEY_FILE_ENV
         );
     }
     Ok(())
@@ -2190,10 +2198,10 @@ async fn run_pair(
     const INVITATION_TTL_SECS: i64 = 5 * 60;
     let now = chrono::Utc::now().timestamp();
     let expires_at_ms = now.saturating_add(INVITATION_TTL_SECS) * 1_000;
-    let security = app_lib::companion_api::security_store::security_store()
+    let security = cognia_companion::security_store::security_store()
         .ok_or("security store is not initialized")?;
-    let mode = app_lib::companion_api::deployment::deployment_mode();
-    let invitation = if mode == app_lib::companion_api::deployment::DeploymentMode::SingleUser {
+    let mode = cognia_companion::deployment::deployment_mode();
+    let invitation = if mode == cognia_companion::deployment::DeploymentMode::SingleUser {
         Some(security.create_owner_invitation(
             tenant_id,
             "local-cli-trust-root",
@@ -2207,7 +2215,7 @@ async fn run_pair(
     let encoded = encode_pair_invitation_payload(
         base_url,
         invitation.as_deref(),
-        &app_lib::companion_api::healthz::derive_server_id(&signing_secret),
+        &cognia_companion::healthz::derive_server_id(&signing_secret),
         tenant_id,
         expires_at_ms,
         env!("CARGO_PKG_VERSION"),
@@ -2270,8 +2278,8 @@ async fn pair_through_running_server(port: u16, advertised_base_url: &str) -> Ru
             return RunningPair::Failed(format!("no service signing secret ({error})"));
         }
     };
-    let tenant = app_lib::companion_api::host_identity::current_tenant_or_unbound();
-    let token = match app_lib::companion_api::jwt::issue_service_jwt(&signing_secret, &tenant) {
+    let tenant = cognia_companion::host_identity::current_tenant_or_unbound();
+    let token = match cognia_companion::jwt::issue_service_jwt(&signing_secret, &tenant) {
         Ok((token, _)) => token,
         Err(error) => {
             return RunningPair::Failed(format!("could not mint a service token ({error})"));
@@ -2279,7 +2287,7 @@ async fn pair_through_running_server(port: u16, advertised_base_url: &str) -> Ru
     };
     // The issuer waits for the relay to accept the pairing room, so allow for
     // its timeout on top of the loopback round trip.
-    let timeout = app_lib::companion_api::commands::PAIRING_ROOM_READY_TIMEOUT
+    let timeout = cognia_companion_rpc::command_services::PAIRING_ROOM_READY_TIMEOUT
         + std::time::Duration::from_secs(5);
     let client = match reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
@@ -2469,8 +2477,8 @@ fn agent_session_store_path(data_dir: &Path) -> PathBuf {
 }
 
 /// How this host is installed, for its updater (ADR-0224 A10).
-fn detect_host_install() -> app_lib::companion_api::host_update::HostInstall {
-    use app_lib::companion_api::host_update;
+fn detect_host_install() -> cognia_companion::host_update::HostInstall {
+    use cognia_companion::host_update;
     let exe = std::env::current_exe().ok();
     let image_target = std::env::var(host_update::HOST_TARGET_ENV).ok();
     let agent_socket = std::env::var_os(host_update::UPDATE_AGENT_SOCKET_ENV)
@@ -2489,9 +2497,9 @@ fn detect_host_install() -> app_lib::companion_api::host_update::HostInstall {
 /// A pending update decides, before anything starts, whether this process is
 /// a new version on trial or a failed one that must hand back to the old.
 fn boot_host_update(
-    install: &app_lib::companion_api::host_update::HostInstall,
+    install: &cognia_companion::host_update::HostInstall,
 ) -> Result<Option<cognia_host_service::install_home::PendingUpdate>, String> {
-    use app_lib::companion_api::host_update::InstallKind;
+    use cognia_companion::host_update::InstallKind;
     use cognia_host_service::install_home::BootDecision;
     let InstallKind::Native(home) = &install.kind else {
         return Ok(None);
@@ -2525,11 +2533,11 @@ fn boot_host_update(
 /// manager starts the swapped-in version.
 fn start_host_updater(
     data_dir: &Path,
-    install: app_lib::companion_api::host_update::HostInstall,
+    install: cognia_companion::host_update::HostInstall,
     trial: Option<cognia_host_service::install_home::PendingUpdate>,
     restart: tokio::sync::watch::Sender<bool>,
 ) {
-    use app_lib::companion_api::host_update::{
+    use cognia_companion::host_update::{
         self, idle::LiveIdleProbe, network::HttpUpdateNetwork, updater, HostUpdater,
         HostUpdaterDeps, InstallKind,
     };
@@ -2595,7 +2603,7 @@ async fn run_serve(
     // command line rather than a half-started server.
     let browser_plane = match browser_listener_port {
         Some(browser_port) => {
-            let policy = app_lib::companion_api::web_origin::WebOriginPolicy::from_env()
+            let policy = cognia_companion::web_origin::WebOriginPolicy::from_env()
                 .allowing_private_network();
             if !policy.allows_any_origin() {
                 return Err(
@@ -2612,13 +2620,11 @@ async fn run_serve(
         // plane, so a decision taken from the Connectivity settings survives
         // a restart exactly as it does on the desktop.
         None => {
-            let saved = app_lib::companion_api::browser_access::load(Some(&store_data_dir()));
+            let saved = cognia_companion::browser_access::load(Some(&store_data_dir()));
             if saved.enabled && !saved.allowed_origins.is_empty() {
                 let policy =
-                    app_lib::companion_api::web_origin::WebOriginPolicy::from_env_and_config(
-                        &saved,
-                    )
-                    .allowing_private_network();
+                    cognia_companion::web_origin::WebOriginPolicy::from_env_and_config(&saved)
+                        .allowing_private_network();
                 if policy.allows_any_origin() {
                     log::info!(
                         "browser listener enabled from the saved browser-access config (port {})",
@@ -2643,16 +2649,16 @@ async fn run_serve(
     // configure command. Failures are logged but don't block startup —
     // a missing file just means no provider is configured yet.
     let data_dir = store_data_dir();
-    app_lib::configure_agent_session_store_path(agent_session_store_path(&data_dir));
-    app_lib::task_workspace::install(data_dir.clone())
+    cognia_agent_state::agent_session_store::configure_path(agent_session_store_path(&data_dir));
+    cognia_task_workspace_host::host_surface::install(data_dir.clone())
         .map_err(|error| format!("task workspace: {error}"))?;
     cognia_task_workspace_host::workspace_env::install_workspace_env_provider()?;
-    app_lib::task_workspace::start_workspace_maintenance();
+    cognia_task_workspace_host::host_surface::start_workspace_maintenance();
     // The headless host serves the same sidecar `host_rpc` protocol as the
     // desktop. Install the shared Rust supervisor before the sidecar can
     // accept its first request, so background commands and durable monitors
     // have identical ownership, persistence, and boot-reconcile semantics.
-    let job_supervisor = app_lib::jobs::install(data_dir.join("cognia"))
+    let job_supervisor = cognia_jobs::host::install(data_dir.join("cognia"))
         .map_err(|error| format!("background-job supervisor: {error}"))?;
     job_supervisor.on_exit(Arc::new(|exit| {
         if let Some(services) = headless_services() {
@@ -2662,7 +2668,7 @@ async fn run_serve(
             );
         }
     }));
-    if let Some(monitors) = app_lib::jobs::monitors() {
+    if let Some(monitors) = cognia_jobs::host::monitors() {
         monitors.on_fired(Arc::new(|monitor| {
             if let Some(services) = headless_services() {
                 services.event_bus.publish(
@@ -2681,7 +2687,7 @@ async fn run_serve(
     // committed with the grants, so a later revocation can never be undone by
     // importing the same legacy file again on restart.
     let legacy = FileDeviceGrantStore::new(&data_dir).load()?;
-    let security = app_lib::companion_api::security_store::security_store()
+    let security = cognia_companion::security_store::security_store()
         .ok_or("security store is not initialized")?;
     let imported = security.migrate_legacy_device_grants(
         &legacy.control.into_iter().collect::<Vec<_>>(),
@@ -2718,7 +2724,7 @@ async fn run_serve(
         secret: RwLock::new(signing_secret),
         deny_list,
         renderer: None,
-        runtime: app_lib::companion_api::wiring::runtime(),
+        runtime: cognia_companion_rpc::companion_runtime::headless(),
         idempotency: Arc::new(idempotency),
         event_bus: EventBus::new(),
         sync_bridge: SyncBridge::new(),
@@ -2737,7 +2743,7 @@ async fn run_serve(
     // ADR-0170: a relay/signaling patch saved over the host-admin plane is
     // reapplied before the hub binds, so the first client task already dials
     // the configured rendezvous with the configured ICE servers.
-    if let Some(patch) = app_lib::companion_api::signaling_config::load(Some(&data_dir)) {
+    if let Some(patch) = cognia_companion::signaling_config::load(Some(&data_dir)) {
         log::info!(
             "signaling config restored from disk ({})",
             patch.signaling_url
@@ -2775,10 +2781,12 @@ async fn run_serve(
     // The deployment id scopes runner ownership to THIS server + data volume.
     // Several deployments can share one daemon or namespace, and without it
     // the orphan sweep below would remove their live runners too.
-    let deployment_id = app_lib::headless::deployment_id::resolve(&data_dir)
+    let deployment_id = cognia_companion_rpc::deployment_id::resolve(&data_dir)
         .map_err(|e| format!("deployment id: {e}"))?;
     log::info!("deployment id: {deployment_id}");
-    if let Err(error) = cognia_companion_rpc::managed_desktops::install(&data_dir, &deployment_id).await {
+    if let Err(error) =
+        cognia_companion_rpc::managed_desktops::install(&data_dir, &deployment_id).await
+    {
         log::warn!("managed desktops unavailable: {}", error.code);
     }
     let exec = exec_backend_from_env(&deployment_id).map_err(|e| format!("exec backend: {e}"))?;
@@ -2797,11 +2805,11 @@ async fn run_serve(
     // opening a store of its own.
     if let Some(services) = pool.services {
         cognia_companion::sandbox_snapshots::install(
-            app_lib::task_workspace::service()?,
+            cognia_task_workspace_host::host_surface::service()?,
             services.clone(),
         )
         .map_err(|error| format!("sandbox snapshots: {error}"))?;
-        app_lib::companion_api::environment_pool::install(services);
+        cognia_companion::environment_pool::install(services);
     }
     log::info!(
         "exec backend: {} (runtime environment sandboxes: {})",
@@ -2826,16 +2834,15 @@ async fn run_serve(
             log::warn!("orphan reap skipped: {error}");
         }
     }
-    app_lib::companion_api::browser_gateway::install_workspace_runtime_control_from_env()
+    cognia_companion::browser_gateway::install_workspace_runtime_control_from_env()
         .map_err(|error| format!("remote browser: {error}"))?;
-    let remote_browser =
-        app_lib::companion_api::browser_gateway::browser_runtime_status(None).await;
+    let remote_browser = cognia_companion::browser_gateway::browser_runtime_status(None).await;
     log::info!(
         "remote browser status: {}",
         serde_json::to_string(&remote_browser)
             .unwrap_or_else(|error| format!("{{\"serializationError\":\"{error}\"}}"))
     );
-    let local_account_id = app_lib::companion_api::host_identity::current()
+    let local_account_id = cognia_companion::host_identity::current()
         .map(|context| context.local_account_namespace)
         .map_err(|error| format!("resolve headless local account: {error}"))?;
     let services = HeadlessServices::new_with_exec(
@@ -2870,7 +2877,7 @@ async fn run_serve(
 
     // Audit trail for the RCE-grade external-agent arms (ADR-0059 R11) —
     // append-only JSONL beside the SQLite store.
-    app_lib::companion_api::audit::install(&data_dir);
+    cognia_companion::audit::install(&data_dir);
     cognia_remote_desktop::audit::install(&data_dir);
     // The external-target Host (ADR-0234 Phase 3): a headless Host bridges
     // its own LAN to its paired devices, with credentials in its secrets.
@@ -2891,11 +2898,10 @@ async fn run_serve(
         // gateway switches back. Every projection below is committed through
         // this handle so a profile change never drops them. Installing switches
         // nothing on: both surfaces stay off until the brain says otherwise.
-        let router_fusion =
-            app_lib::companion_api::gateway_brain::HeadlessRouterFusionGateway::install(
-                Arc::clone(&shared),
-                Arc::clone(&gateway),
-            );
+        let router_fusion = cognia_companion::gateway_brain::HeadlessRouterFusionGateway::install(
+            Arc::clone(&shared),
+            Arc::clone(&gateway),
+        );
 
         let profiles = Arc::clone(&services.profiles);
         let publish = {
@@ -2911,11 +2917,11 @@ async fn run_serve(
                 };
                 let version = profiles.profile_version().unwrap_or(0);
                 let now = chrono::Utc::now().timestamp_millis();
-                let snapshot_json = app_lib::provider_profiles::gateway_snapshot_json(
+                let snapshot_json = cognia_agent_state::provider_profiles::gateway_snapshot_json(
                     &docs,
                     version,
                     now,
-                    &app_lib::provider_profiles::resolve_credential_ref,
+                    &cognia_agent_state::provider_profiles::resolve_credential_ref,
                 );
                 match serde_json::from_value(snapshot_json) {
                     Ok(snapshot) => match router_fusion.project_snapshot(snapshot) {
@@ -2939,8 +2945,8 @@ async fn run_serve(
 
         let env_enabled = std::env::var("COGNIA_GATEWAY").is_ok_and(|v| v == "1" || v == "true");
         if gateway.config().enabled || env_enabled {
-            let host: Arc<dyn app_lib::gateway::host::GatewayHost> =
-                Arc::new(app_lib::headless::gateway_host::HeadlessGatewayHost {
+            let host: Arc<dyn cognia_gateway::host::GatewayHost> =
+                Arc::new(cognia_companion_rpc::gateway_host::HeadlessGatewayHost {
                     event_bus: Arc::clone(&shared.event_bus),
                 });
             match gateway.start(host).await {
@@ -2954,7 +2960,7 @@ async fn run_serve(
     }
 
     // /metrics uptime baseline (D9) — anchor before the server starts.
-    app_lib::companion_api::metrics::init();
+    cognia_companion::metrics::init();
 
     // Production/headless deployments remain LAN-bound by default. Local
     // debugging opts into loopback so its ephemeral credential cannot be
@@ -2970,7 +2976,7 @@ async fn run_serve(
     // probes can confirm the right server (matches the test+production
     // path used by CompanionServerState::start in mod.rs).
     set_advertised_port(handle.bound_port);
-    app_lib::companion_api::set_bind_loopback_only(bind_loopback);
+    cognia_companion::set_bind_loopback_only(bind_loopback);
     let public_url = resolve_advertise_url(advertise_url, handle.bound_port);
     let bind_host = if bind_loopback {
         "127.0.0.1"
@@ -2988,9 +2994,9 @@ async fn run_serve(
     // once its listener is up. Held until shutdown; dropping it unregisters.
     // A failure (no usable interface, multicast refused) costs discovery only,
     // so it is logged and the server keeps serving.
-    let mdns = app_lib::companion_api::mdns::BroadcasterState::new();
+    let mdns = cognia_companion::mdns::BroadcasterState::new();
     if should_advertise_mdns(mdns_requested, bind_loopback) {
-        match mdns.start_auto(app_lib::companion_api::mdns::AutoStartConfig {
+        match mdns.start_auto(cognia_companion::mdns::AutoStartConfig {
             instance_name: mdns_instance_name(&tls_material.fingerprint_sha256),
             port: handle.bound_port,
             app_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -3021,14 +3027,14 @@ async fn run_serve(
                         "browser listener on http://127.0.0.1:{} (plaintext, loopback only)",
                         handle.bound_port
                     );
-                    app_lib::companion_api::set_browser_advertised_port(handle.bound_port);
+                    cognia_companion::set_browser_advertised_port(handle.bound_port);
                     // The listener alone is not browser access: `browser_context_submit`
                     // / `_cancel` are gated on this switch before dispatch, and the
                     // desktop flips it in `CompanionServerState::start`. Without it a
                     // headless plane lets the extension enrol and read but refuses every
                     // submission with `browser_submissions_disabled` — a port that looks
                     // live and is not.
-                    app_lib::companion_api::browser_access::set_submissions_enabled(true);
+                    cognia_companion::browser_access::set_submissions_enabled(true);
                     Some(handle)
                 }
                 Err(error) => {
@@ -3044,7 +3050,7 @@ async fn run_serve(
     // only when the bootstrapper enabled it. Like the browser listener, a bind
     // failure must not take the HTTPS listener down: the relay stays the
     // primary route and every paired client depends on it.
-    let tunnel_ingress = app_lib::companion_api::tunnel_ingress::load(&data_dir);
+    let tunnel_ingress = cognia_companion::tunnel_ingress::load(&data_dir);
     let ingress_handle = if tunnel_ingress.enabled {
         match server::spawn_tunnel_ingress_listener(tunnel_ingress.port, Arc::clone(&shared)).await
         {
@@ -3073,8 +3079,10 @@ async fn run_serve(
         Some(entry) => {
             let brain_local_account_id = local_account_id.clone();
             let account_content_key =
-                app_lib::headless::get_or_create_account_content_key(&brain_local_account_id)
-                    .map_err(|error| format!("account content key: {error}"))?;
+                cognia_companion_rpc::headless::get_or_create_account_content_key(
+                    &brain_local_account_id,
+                )
+                .map_err(|error| format!("account content key: {error}"))?;
             let config = brain::BrainConfig::for_port(
                 entry,
                 handle.bound_port,
@@ -3121,7 +3129,7 @@ async fn run_serve(
     // process mid-drain, orphaning the brain and sidecar children. After an
     // update the service manager starts `current` again.
     let restarting = tokio::select! {
-        () = app_lib::shutdown::wait_for_signal() => false,
+        () = cognia_core::shutdown_signal::wait_for_signal() => false,
         _ = restart_requested.wait_for(|restart| *restart) => true,
     };
     log::info!(
@@ -3139,11 +3147,11 @@ async fn run_serve(
     // hold it for a long time. A second signal force-exits instead of leaving
     // the operator with a process that ignores every further Ctrl-C.
     tokio::spawn(async {
-        app_lib::shutdown::wait_for_signal().await;
+        cognia_core::shutdown_signal::wait_for_signal().await;
         log::warn!("second shutdown signal — forcing exit");
-        std::process::exit(app_lib::shutdown::SIGNAL_EXIT_CODE);
+        std::process::exit(cognia_core::shutdown_signal::SIGNAL_EXIT_CODE);
     });
-    app_lib::companion_api::server::begin_draining();
+    cognia_companion::server::begin_draining();
     if let Some(supervisor) = brain_supervisor {
         supervisor.shutdown();
     }
@@ -3162,7 +3170,7 @@ async fn run_serve(
         let _ = services.gateway.stop();
         kill_sidecar(services.sidecar.clone()).await;
     }
-    if let Some(supervisor) = app_lib::jobs::supervisor() {
+    if let Some(supervisor) = cognia_jobs::host::supervisor() {
         if let Err(error) = supervisor.shutdown().await {
             log::warn!("jobs: headless shutdown failed: {error}");
         }
@@ -3190,8 +3198,8 @@ async fn run_serve(
     if let Some(browser_handle) = browser_handle {
         // Close browser device sockets as "going away" before clearing the
         // flag, which they would otherwise read as access switched off.
-        app_lib::companion_api::ws_browser_companion::close_all_for_host_stop();
-        app_lib::companion_api::browser_access::set_submissions_enabled(false);
+        cognia_companion::ws_browser_companion::close_all_for_host_stop();
+        cognia_companion::browser_access::set_submissions_enabled(false);
         let mut browser_terminated = browser_handle.terminated.clone();
         let _ = browser_handle.shutdown.send(());
         let browser_drained =
@@ -3229,9 +3237,10 @@ mod tests {
     fn remote_desktop_audit_is_installed_beside_companion_audit() {
         let source = include_str!("cognia-server.rs");
         let installation = [
-            "app_lib::companion_api::audit::install(&data_dir);",
+            "cognia_companion::audit::install(&data_dir);",
             "    cognia_remote_desktop::audit::install(&data_dir);",
-        ].join("\n");
+        ]
+        .join("\n");
         assert!(source.contains(&installation));
         assert!(source.contains(
             "cognia_remote_desktop::commands::install(\n        cognia_remote_desktop::commands::RemoteDesktopState::open(&data_dir),"
@@ -3355,7 +3364,7 @@ mod tests {
             .unwrap()
             .join("provider-profiles.sqlite");
         assert_eq!(
-            app_lib::provider_profiles::headless_store_path(data),
+            cognia_agent_state::provider_profiles::headless_store_path(data),
             from_plugin_parent
         );
     }
@@ -3729,7 +3738,7 @@ mod tests {
 
     #[test]
     fn pair_asks_the_port_it_was_given_before_cognia_port() {
-        let default = app_lib::companion_api::server::DEFAULT_PORT;
+        let default = cognia_companion::server::DEFAULT_PORT;
         assert_eq!(super::resolve_pair_port(Some(27990), Some("27991")), 27990);
         assert_eq!(super::resolve_pair_port(None, Some(" 27991 ")), 27991);
         assert_eq!(super::resolve_pair_port(None, Some("not-a-port")), default);
@@ -4018,7 +4027,7 @@ mod tests {
         assert!(!status.enabled, "off until the bootstrapper enables it");
         assert_eq!(
             status.port,
-            app_lib::companion_api::tunnel_ingress::DEFAULT_TUNNEL_INGRESS_PORT
+            cognia_companion::tunnel_ingress::DEFAULT_TUNNEL_INGRESS_PORT
         );
 
         let enabled =
@@ -4030,10 +4039,7 @@ mod tests {
         let disabled = run_tunnel_ingress(dir.path(), &parse(&["disable"])).unwrap();
         assert!(!disabled.enabled);
         assert_eq!(disabled.port, 28123);
-        assert_eq!(
-            app_lib::companion_api::tunnel_ingress::load(dir.path()),
-            disabled
-        );
+        assert_eq!(cognia_companion::tunnel_ingress::load(dir.path()), disabled);
         assert_eq!(
             serde_json::to_value(&disabled).unwrap(),
             serde_json::json!({ "enabled": false, "port": 28123 })
@@ -4043,9 +4049,8 @@ mod tests {
     #[test]
     fn serve_binds_the_tunnel_ingress_listener_only_from_its_saved_config() {
         let source = include_str!("cognia-server.rs");
-        assert!(source.contains(
-            "let tunnel_ingress = app_lib::companion_api::tunnel_ingress::load(&data_dir);"
-        ));
+        assert!(source
+            .contains("let tunnel_ingress = cognia_companion::tunnel_ingress::load(&data_dir);"));
         assert!(source.contains("server::spawn_tunnel_ingress_listener(tunnel_ingress.port"));
     }
 
@@ -4114,7 +4119,7 @@ mod tests {
         // consumer — a rename would surface as a `cgnb1|` code with an
         // `undefined` field inside, which decodes as "invalid" in the
         // extension and says nothing about where it came from.
-        let issue = app_lib::companion_api::commands::BrowserEnrollmentIssue {
+        let issue = cognia_companion_rpc::command_services::BrowserEnrollmentIssue {
             enrollment: "9f1c.aa22".to_string(),
             expires_at_ms: 1_700_000_300_000,
             base_url: "http://127.0.0.1:27891".to_string(),
@@ -4168,7 +4173,15 @@ mod tests {
         );
         assert!(invite_owner.contains("eprintln!(\"[cognia-server] {OWNER_INVITATION_WARNING}\")"));
         let pair = body_of("async fn run_pair(", "\n}\n");
-        let relay = pair.split("return Ok(());").next().unwrap();
+        // The `--json` answers return earlier and carry no warning: nothing
+        // displays them, the installer pairs with the invitation itself.
+        let relay = pair
+            .split("print_pair_invitation(&encoded")
+            .nth(1)
+            .expect("the cgnp4 branch prints its invitation")
+            .split("return Ok(());")
+            .next()
+            .unwrap();
         assert!(
             relay.contains("println!(\"\\n{OWNER_INVITATION_WARNING}\")"),
             "the cgnp4 branch must warn before it returns"
@@ -4201,7 +4214,7 @@ mod tests {
     /// from a bin crate.
     #[tokio::test]
     async fn the_devices_cli_cannot_grant_a_browser_device_anything_outside_its_class() {
-        use app_lib::companion_api::security_store::{
+        use cognia_companion::security_store::{
             install_security_store, SecurityStore, SecurityStoreError,
         };
         let store = SecurityStore::in_memory().expect("in-memory store");

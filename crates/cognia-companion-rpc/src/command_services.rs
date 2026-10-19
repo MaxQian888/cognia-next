@@ -56,6 +56,29 @@ pub struct OwnerInvitationIssue {
     pub relay_unavailable: Option<String>,
 }
 
+/// One-time enrollment for a Cognia browser companion extension.
+///
+/// `base_url` is the **plaintext loopback** listener, not the HTTPS plane every
+/// other enrollment advertises. That is not a downgrade, it is the only door: a
+/// tab validates the Host's self-signed certificate against system roots and
+/// has no escape hatch, so `https://127.0.0.1:27890` is structurally
+/// unreachable from a browser, while `http://127.0.0.1` is "potentially
+/// trustworthy" per Secure Contexts and needs no chain at all.
+///
+/// Which is why both producers (the desktop's
+/// `companion_create_browser_enrollment` and `cognia-server`'s browser
+/// enrollment) refuse to mint a code when that listener is not bound. Handing
+/// back a code that cannot possibly connect would send the user to the
+/// extension to discover a failure whose cause lives in Settings.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserEnrollmentIssue {
+    pub enrollment: String,
+    pub expires_at_ms: i64,
+    pub base_url: String,
+    pub tenant_id: String,
+}
+
 /// How long issuing an invitation waits for its relay room to be accepted.
 /// Covers the signaling client's connect (8 s) and challenge (5 s) timeouts'
 /// usual case; a relay that is down fails well inside it.

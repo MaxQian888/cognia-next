@@ -15,5 +15,7 @@ pub mod installed;
 pub mod node_runtime;
 #[cfg(feature = "rt")]
 pub mod rt;
+#[cfg(feature = "signal")]
+pub mod shutdown_signal;
 pub mod supervision_backoff;
 pub mod workspace_env;

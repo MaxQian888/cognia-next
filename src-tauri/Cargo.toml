@@ -67,7 +67,7 @@ schemars.workspace = true
 # own HMAC/replay logic but reuses these structs to prevent wire-format drift.
 cognia-signaling-core = { path = "../services/signaling-server/core" }
 # ADR-0067 — foundation utilities (fs_atomic). Re-aliased as `crate::fs_atomic`.
-cognia-core = { path = "../crates/cognia-core", features = ["rt"] }
+cognia-core = { path = "../crates/cognia-core", features = ["rt", "signal"] }
 # ADR-0067 Tier B prep — secret_store/keyring_secrets/api_key foundation.
 # Re-aliased as crate::{secret_store,api_key}; keyring_secrets keeps an
 # app-side facade for its command shells. The `test-inmemory` feature is

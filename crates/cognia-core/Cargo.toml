@@ -21,6 +21,9 @@ path = "src/lib.rs"
 rt = ["dep:tokio"]
 # Offload workspace canonicalization and SQLite access at async spawn boundaries.
 workspace-env-async = ["dep:tokio"]
+# `shutdown_signal` — resolve on SIGINT/SIGTERM, for the desktop and the
+# headless server alike.
+signal = ["dep:tokio", "dep:log", "tokio/signal", "tokio/macros"]
 
 [dependencies]
 # ADR-0175. `CommandError` converts into the plane-level `Problem`.
@@ -29,12 +32,13 @@ cognia-problem = { path = "../cognia-problem" }
 serde = { workspace = true, features = ["derive"] }
 wait-timeout.workspace = true
 tokio = { workspace = true, optional = true, features = ["rt", "rt-multi-thread"] }
+log = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time"] }
 serde_json.workspace = true
 tempfile.workspace = true
 

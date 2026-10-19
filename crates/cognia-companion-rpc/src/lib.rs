@@ -1,6 +1,7 @@
 //! Host-neutral companion command execution (ADR-0196 P8).
 pub mod codeserver_host;
 pub mod command_services;
+pub mod companion_runtime;
 pub mod deployment_id;
 pub mod gateway_host;
 pub mod headless;

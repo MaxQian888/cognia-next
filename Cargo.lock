@@ -2328,6 +2328,7 @@ version = "0.1.0"
 dependencies = [
  "cognia-problem",
  "libc",
+ "log",
  "serde",
  "serde_json",
  "tempfile",

@@ -31,6 +31,7 @@ pub mod event_channels;
 pub mod event_leases;
 pub mod push;
 pub mod push_creds;
+pub mod push_triggers;
 pub mod remote_context;
 pub mod store;
 pub mod sync_bridge;
