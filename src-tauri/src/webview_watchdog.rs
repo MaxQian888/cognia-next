@@ -397,6 +397,10 @@ pub struct RendererState {
     /// True from a termination until the replacement renderer commits its
     /// first document; evaluations sent before that have no realm to run in.
     pub awaiting_load: bool,
+    /// Full document loads, including ordinary reloads without process death.
+    pub document_epoch: u64,
+    /// True from PageLoadEvent::Started until PageLoadEvent::Finished.
+    pub document_loading: bool,
 }
 
 /// Whether a terminated renderer should be reloaded or left alone.
@@ -512,20 +516,39 @@ impl RendererLifecycle {
         result
     }
 
-    /// A document started loading in `label`: a live renderer exists again.
+    /// A document started loading in `label`: invalidate pending evaluations
+    /// even when the web content process itself stayed alive.
     pub fn record_page_load(&self, label: &str) {
-        let changed = {
+        {
             let mut records = self.inner.records.lock().unwrap();
-            match records.get_mut(label) {
-                Some(record) if record.state.awaiting_load => {
-                    record.state.awaiting_load = false;
-                    true
-                }
-                _ => false,
-            }
-        };
-        if changed {
-            self.bump();
+            #[cfg(any(test, all(feature = "agent-debug", desktop)))]
+            let record = records.entry(label.to_string()).or_default();
+            // Normal builds retain the original watchdog's tracked windows;
+            // only debug sessions need a document history for every webview.
+            #[cfg(not(any(test, all(feature = "agent-debug", desktop))))]
+            let Some(record) = records.get_mut(label) else { return; };
+            record.state.document_epoch += 1;
+            record.state.document_loading = true;
+            record.state.awaiting_load = false;
+        }
+        self.bump();
+    }
+
+    pub fn record_page_load_finished(&self, label: &str) {
+        {
+            let mut records = self.inner.records.lock().unwrap();
+            let Some(record) = records.get_mut(label) else { return; };
+            record.state.document_loading = false;
+        }
+        self.bump();
+    }
+
+    #[cfg(any(test, all(feature = "agent-debug", desktop)))]
+    pub async fn wait_for_document_change(&self, label: &str, document_epoch: u64) {
+        let mut epoch = self.inner.epoch.subscribe();
+        loop {
+            if self.state(label).document_epoch != document_epoch { return; }
+            if epoch.changed().await.is_err() { std::future::pending::<()>().await; }
         }
     }
 
@@ -553,7 +576,7 @@ impl RendererLifecycle {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
             let state = self.state(label);
-            if !state.awaiting_load {
+            if !state.awaiting_load && !state.document_loading {
                 return state;
             }
             match tokio::time::timeout_at(deadline, epoch.changed()).await {
@@ -926,7 +949,8 @@ mod tests {
             state,
             RendererState {
                 generation: 1,
-                awaiting_load: true
+                awaiting_load: true,
+                ..RendererState::default()
             }
         );
         assert_eq!(decision, TerminationRecovery::Reload);
@@ -936,7 +960,9 @@ mod tests {
             lifecycle.state("main"),
             RendererState {
                 generation: 1,
-                awaiting_load: false
+                awaiting_load: false,
+                document_epoch: 1,
+                document_loading: true,
             }
         );
         // Other webviews are tracked independently.
@@ -944,10 +970,32 @@ mod tests {
     }
 
     #[test]
-    fn page_load_without_termination_is_a_no_op() {
+    fn page_load_without_termination_advances_only_the_document_epoch() {
         let lifecycle = RendererLifecycle::new();
         lifecycle.record_page_load("main");
-        assert!(lifecycle.snapshot().is_empty());
+        let state = lifecycle.state("main");
+        assert_eq!(state.generation, 0);
+        assert_eq!(state.document_epoch, 1);
+        assert!(state.document_loading);
+        lifecycle.record_page_load_finished("main");
+        assert!(!lifecycle.state("main").document_loading);
+        lifecycle.record_page_load("main");
+        assert_eq!(lifecycle.state("main").document_epoch, 2);
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_reload_waiter_wakes_only_for_its_own_window() {
+        let lifecycle = RendererLifecycle::new();
+        let waiting = {
+            let lifecycle = lifecycle.clone();
+            tokio::spawn(async move { lifecycle.wait_for_document_change("main", 0).await })
+        };
+        lifecycle.record_page_load("settings");
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished());
+        lifecycle.record_page_load("main");
+        tokio::time::timeout(Duration::from_secs(1), waiting).await.unwrap().unwrap();
+        assert_eq!(lifecycle.state("main").generation, 0);
     }
 
     #[test]
@@ -983,11 +1031,13 @@ mod tests {
         let json = serde_json::to_value(RendererState {
             generation: 2,
             awaiting_load: true,
+            document_epoch: 4,
+            document_loading: true,
         })
         .unwrap();
         assert_eq!(
             json,
-            serde_json::json!({ "generation": 2, "awaitingLoad": true })
+            serde_json::json!({ "generation": 2, "awaitingLoad": true, "documentEpoch": 4, "documentLoading": true })
         );
     }
 
@@ -1036,6 +1086,7 @@ mod tests {
         };
         tokio::task::yield_now().await;
         lifecycle.record_page_load("main");
+        lifecycle.record_page_load_finished("main");
         let state = tokio::time::timeout(Duration::from_secs(2), waiter)
             .await
             .expect("waiter resolves after page load")
@@ -1044,7 +1095,9 @@ mod tests {
             state,
             RendererState {
                 generation: 1,
-                awaiting_load: false
+                awaiting_load: false,
+                document_epoch: 1,
+                document_loading: false,
             }
         );
     }

@@ -6,6 +6,7 @@ import path from "node:path"
 import process from "node:process"
 import { spawn } from "node:child_process"
 import { fileURLToPath } from "node:url"
+import { randomUUID } from "node:crypto"
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "../..")
@@ -15,14 +16,29 @@ const TOKEN_HEADER = "X-Cognia-Dev-Token"
 export const DEFAULT_LAUNCH_TIMEOUT_MS = 1_200_000
 export const AGENT_DEBUG_TAURI_CONFIG = "src-tauri/tauri.agent-debug.conf.json"
 
-export function tauriDevArgs() {
-  return ["tauri", "dev", "--features", "agent-debug", "--config", AGENT_DEBUG_TAURI_CONFIG]
+export function tauriDevArgs(options = {}) {
+  return [
+    "tauri",
+    "dev",
+    "--features",
+    "agent-debug",
+    "--config",
+    AGENT_DEBUG_TAURI_CONFIG,
+    ...(options["no-watch"] ? ["--no-watch"] : []),
+  ]
 }
 
-export function agentDebugEnvironment(baseEnv = process.env, repoRoot = REPO_ROOT) {
+export function agentDebugEnvironment(baseEnv = process.env, repoRoot = REPO_ROOT, session) {
   return {
     ...baseEnv,
     COGNIA_AGENT_DEBUG: "1",
+    COGNIA_AGENT_DEBUG_WORKSPACE: repoRoot,
+    ...(session
+      ? {
+          COGNIA_AGENT_DEBUG_SESSION_ID: session.sessionId,
+          COGNIA_AGENT_DEBUG_ENDPOINT_FILE: session.endpointFile,
+        }
+      : {}),
     COGNIA_PLUGIN_NODE_PATH: path.join(
       repoRoot,
       "src-tauri/resources/plugin-node/bin",
@@ -122,7 +138,7 @@ export function parseArgs(argv) {
       continue
     }
     const name = token.slice(2)
-    if (["include-text", "foreground"].includes(name)) {
+    if (["include-text", "foreground", "no-watch"].includes(name)) {
       options[name] = true
       continue
     }
@@ -146,8 +162,22 @@ function readJson(file) {
   }
 }
 
-export function loadEndpoint() {
-  const file = endpointFilePath()
+function discoveryFile() {
+  if (process.env.COGNIA_CLI_ENDPOINT_FILE?.trim()) return endpointFilePath()
+  const session = readJson(SESSION_FILE)
+  if (session?.sessionId) {
+    if (
+      session.workspace !== fs.realpathSync(REPO_ROOT) ||
+      typeof session.endpointFile !== "string" ||
+      !path.isAbsolute(session.endpointFile)
+    )
+      throw new Error("the managed discovery record does not belong to this workspace")
+    return session.endpointFile
+  }
+  return endpointFilePath()
+}
+
+export function loadEndpoint(file = discoveryFile()) {
   let raw
   try {
     raw = fs.readFileSync(file, "utf8")
@@ -159,15 +189,94 @@ export function loadEndpoint() {
   return { ...endpoint, file }
 }
 
+/** Validate both discovery and the authenticated process before adopting a rebuilt child. */
+export function reconcileDebugSession(
+  session,
+  health,
+  endpoint,
+  expectedWorkspace = session.workspace
+) {
+  if (health.agentDebug !== true || !Number.isSafeInteger(health.pid) || health.pid <= 1)
+    throw new Error("the endpoint is not an authenticated agent-debug app")
+  if (session.sessionId) {
+    const live = health.debugSession
+    const discovered = endpoint.debugSession
+    if (
+      typeof session.workspace !== "string" ||
+      session.workspace !== expectedWorkspace ||
+      !live ||
+      !discovered ||
+      live.sessionId !== session.sessionId ||
+      live.workspace !== session.workspace ||
+      discovered.sessionId !== session.sessionId ||
+      discovered.workspace !== session.workspace ||
+      typeof live.appInstanceId !== "string" ||
+      !live.appInstanceId ||
+      discovered.appInstanceId !== live.appInstanceId ||
+      live.pid !== health.pid ||
+      discovered.pid !== health.pid
+    )
+      throw Object.assign(new Error("debug session ownership does not match the discovered app"), {
+        code: "debug_session_mismatch",
+      })
+    return { ...session, healthPid: health.pid, appInstanceId: live.appInstanceId }
+  }
+  if (!session.healthPid || health.pid !== session.healthPid)
+    throw new Error("legacy session PID changed; relaunch once to enable managed restart recovery")
+  return session
+}
+
+function saveSession(session, expected) {
+  if (expected) {
+    const current = readJson(SESSION_FILE)
+    if (
+      !current ||
+      current.pid !== expected.pid ||
+      current.startedAt !== expected.startedAt ||
+      current.sessionId !== expected.sessionId
+    )
+      throw new Error("the tracked debug session changed while updating its app instance")
+  }
+  fs.mkdirSync(CACHE_DIR, { recursive: true })
+  const staged = `${SESSION_FILE}.${randomUUID()}.tmp`
+  try {
+    fs.writeFileSync(staged, `${JSON.stringify(session, null, 2)}\n`, { mode: 0o600 })
+    fs.renameSync(staged, SESSION_FILE)
+  } finally {
+    fs.rmSync(staged, { force: true })
+  }
+}
+
+function removeSession(expected) {
+  const current = readJson(SESSION_FILE)
+  if (
+    !current ||
+    current.pid !== expected?.pid ||
+    current.startedAt !== expected?.startedAt ||
+    current.sessionId !== expected?.sessionId
+  )
+    return
+  fs.rmSync(SESSION_FILE, { force: true })
+}
+
 export async function request(
   route,
-  { method = "GET", body, endpoint = loadEndpoint(), fetchImpl = fetch, signal } = {}
+  {
+    method = "GET",
+    body,
+    endpoint = loadEndpoint(),
+    fetchImpl = fetch,
+    signal,
+    timeout = 15_000,
+  } = {}
 ) {
-  const requestSignal = signal
-    ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
-    : AbortSignal.timeout(15_000)
+  if (!Number.isFinite(timeout) || timeout < 0 || timeout > 120_000)
+    throw new TypeError("request timeout must be between 0 and 120000 milliseconds")
+  const deadlineSignal = AbortSignal.timeout(Math.max(1, Math.ceil(timeout)))
+  const requestSignal = signal ? AbortSignal.any([signal, deadlineSignal]) : deadlineSignal
   const response = await fetchImpl(`${endpoint.baseUrl}${route}`, {
     method,
+    redirect: "error",
     headers: {
       [TOKEN_HEADER]: endpoint.devToken,
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
@@ -192,7 +301,10 @@ export async function request(
     if (typeof payload.window === "string") error.window = payload.window
     if (Number.isSafeInteger(payload.rendererGeneration))
       error.rendererGeneration = payload.rendererGeneration
+    if (Number.isSafeInteger(payload.documentEpoch)) error.documentEpoch = payload.documentEpoch
     if (typeof payload.retryable === "boolean") error.retryable = payload.retryable
+    if (["not-dispatched", "dispatched", "unknown"].includes(payload.dispatchState))
+      error.dispatchState = payload.dispatchState
     throw error
   }
   return payload
@@ -214,6 +326,9 @@ export function cliErrorPayload(error) {
     ok: false,
     error: error.message,
     ...(error.code ? { code: error.code } : {}),
+    ...(error.dispatchState ? { dispatchState: error.dispatchState } : {}),
+    ...(typeof error.retryable === "boolean" ? { retryable: error.retryable } : {}),
+    ...(Number.isSafeInteger(error.documentEpoch) ? { documentEpoch: error.documentEpoch } : {}),
     ...(error.window ? { window: error.window } : {}),
     ...(Number.isSafeInteger(error.rendererGeneration)
       ? { rendererGeneration: error.rendererGeneration }
@@ -221,7 +336,7 @@ export function cliErrorPayload(error) {
     ...(isRendererRestartError(error)
       ? {
           rendererRestarted: true,
-          hint: "the webview's web content process was replaced and the page reloaded; element refs are stale — take a new snapshot and re-run the command",
+          hint: "the page reloaded and element refs are stale; persisted or external effects may survive — inspect the outcome before retrying a mutation",
         }
       : {}),
   }
@@ -250,21 +365,26 @@ function terminateProcessTree(pid) {
   }
 }
 
-async function waitForAgent(startedAt, timeoutMs, childPid, logFile) {
+async function waitForAgent(startedAt, timeoutMs, childPid, logFile, session, reusing = false) {
   const deadline = Date.now() + timeoutMs
   let lastError = "endpoint not written"
   while (Date.now() < deadline) {
     const terminalFailure = terminalFailureFromFile(logFile)
-    if (terminalFailure) throw new Error(`Tauri launch failed: ${terminalFailure}`)
+    if (terminalFailure && !reusing) throw new Error(`Tauri launch failed: ${terminalFailure}`)
     if (childPid && !processAlive(childPid)) {
       throw new Error(`Tauri debug process ${childPid} exited before the bridge was ready`)
     }
     try {
-      const file = endpointFilePath()
+      const file = session?.endpointFile || discoveryFile()
       const stat = fs.statSync(file)
       if (stat.mtimeMs + 1_000 < startedAt) throw new Error("stale endpoint file")
-      const endpoint = loadEndpoint()
-      const health = await request("/api/dev/agent/health", { endpoint })
+      const endpoint = loadEndpoint(file)
+      const health = await request("/api/dev/agent/health", {
+        endpoint,
+        timeout: Math.max(1, Math.min(15_000, deadline - Date.now())),
+      })
+      if (session?.sessionId)
+        reconcileDebugSession(session, health, endpoint, fs.realpathSync(REPO_ROOT))
       if (
         health.helper?.version !== 3 ||
         !["interactive", "complete"].includes(health.helper.readyState)
@@ -273,8 +393,11 @@ async function waitForAgent(startedAt, timeoutMs, childPid, logFile) {
       }
       return { endpoint, health }
     } catch (error) {
+      if (error.code === "debug_session_mismatch") throw error
       lastError = error.message
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(0, Math.min(500, deadline - Date.now())))
+      )
     }
   }
   throw new Error(`timed out waiting for agent-debug bridge: ${lastError}`)
@@ -283,20 +406,26 @@ async function waitForAgent(startedAt, timeoutMs, childPid, logFile) {
 async function launch(options) {
   const existing = readJson(SESSION_FILE)
   if (existing?.pid && processAlive(existing.pid)) {
-    try {
-      const health = await request("/api/dev/agent/health")
-      if (!existing.healthPid || health.pid !== existing.healthPid)
-        throw new Error("tracked session ownership does not match the live bridge")
-      if (health.helper?.version !== 3)
-        throw new Error(
-          `agent helper version mismatch: expected 3, received ${health.helper?.version}`
-        )
-      return output({ ok: true, reused: true, session: existing, health })
-    } catch {
+    if (options["no-watch"] && !existing.noWatch)
       throw new Error(
-        `tracked Tauri debug process ${existing.pid} is alive but its agent bridge is unavailable; run stop first`
+        "the existing debug run watches Rust changes; stop and relaunch to select --no-watch"
       )
-    }
+    const ready = await waitForAgent(
+      Date.parse(existing.startedAt),
+      launchTimeout(options.timeout),
+      existing.pid,
+      existing.logFile,
+      existing,
+      true
+    )
+    const updated = reconcileDebugSession(
+      existing,
+      ready.health,
+      ready.endpoint,
+      fs.realpathSync(REPO_ROOT)
+    )
+    saveSession(updated, existing)
+    return output({ ok: true, reused: true, session: updated, health: ready.health })
   }
 
   const startedAt = Date.now()
@@ -306,24 +435,27 @@ async function launch(options) {
   const logFile = path.join(artifactDir, "tauri-dev.log")
   const stdout = fs.openSync(logFile, "a")
   const stderr = fs.openSync(logFile, "a")
-  const child = spawn("pnpm", tauriDevArgs(), {
+  const session = {
+    sessionId: randomUUID(),
+    workspace: fs.realpathSync(REPO_ROOT),
+    endpointFile: path.join(artifactDir, "cli-endpoint.json"),
+    noWatch: options["no-watch"] === true,
+    startedAt: new Date(startedAt).toISOString(),
+    artifactDir,
+    logFile,
+  }
+  const child = spawn("pnpm", tauriDevArgs(options), {
     cwd: REPO_ROOT,
     detached: options.foreground !== true,
-    env: agentDebugEnvironment(),
+    env: agentDebugEnvironment(process.env, session.workspace, session),
     stdio: ["ignore", stdout, stderr],
     windowsHide: false,
   })
   fs.closeSync(stdout)
   fs.closeSync(stderr)
   if (!child.pid) throw new Error("failed to start pnpm tauri dev")
-  const session = {
-    pid: child.pid,
-    startedAt: new Date(startedAt).toISOString(),
-    artifactDir,
-    logFile,
-  }
-  fs.mkdirSync(CACHE_DIR, { recursive: true })
-  fs.writeFileSync(SESSION_FILE, `${JSON.stringify(session, null, 2)}\n`, { mode: 0o600 })
+  session.pid = child.pid
+  saveSession(session)
   if (options.foreground !== true) child.unref()
 
   let rejectOnExit
@@ -342,12 +474,17 @@ async function launch(options) {
   })
   try {
     const ready = await Promise.race([
-      waitForAgent(startedAt, launchTimeout(options.timeout), child.pid, logFile),
+      waitForAgent(startedAt, launchTimeout(options.timeout), child.pid, logFile, session),
       childExit,
     ])
     child.off("exit", rejectOnExit)
-    const readySession = { ...session, healthPid: ready.health.pid }
-    fs.writeFileSync(SESSION_FILE, `${JSON.stringify(readySession, null, 2)}\n`, { mode: 0o600 })
+    const readySession = reconcileDebugSession(
+      session,
+      ready.health,
+      ready.endpoint,
+      fs.realpathSync(REPO_ROOT)
+    )
+    saveSession(readySession, session)
     output({
       ok: true,
       reused: false,
@@ -358,11 +495,7 @@ async function launch(options) {
   } catch (error) {
     child.off("exit", rejectOnExit)
     terminateProcessTree(child.pid)
-    try {
-      fs.unlinkSync(SESSION_FILE)
-    } catch (unlinkError) {
-      if (unlinkError.code !== "ENOENT") throw unlinkError
-    }
+    removeSession(session)
     throw new Error(`${error.message}; Tauri log: ${logFile}`)
   }
 }
@@ -371,27 +504,21 @@ async function stop() {
   const session = readJson(SESSION_FILE)
   if (session?.pid && processAlive(session.pid)) {
     let health
+    let endpoint
     try {
-      health = await request("/api/dev/agent/health")
+      endpoint = loadEndpoint(session.endpointFile || discoveryFile())
+      health = await request("/api/dev/agent/health", { endpoint })
+      reconcileDebugSession(session, health, endpoint, fs.realpathSync(REPO_ROOT))
     } catch (error) {
       throw new Error(
         `cannot validate tracked-session ownership; refusing to stop PID ${session.pid}: ${error.message}; session: ${SESSION_FILE}; log: ${session.logFile || "unknown"}`
       )
     }
-    if (!session.healthPid || health.pid !== session.healthPid) {
-      throw new Error(
-        `tracked-session ownership mismatch; refusing to stop PID ${session.pid}; session: ${SESSION_FILE}`
-      )
-    }
-    await request("/api/dev/agent/shutdown", { method: "POST", body: {} })
+    await request("/api/dev/agent/shutdown", { method: "POST", body: {}, endpoint })
     await new Promise((resolve) => setTimeout(resolve, 750))
     if (processAlive(session.pid)) terminateProcessTree(session.pid)
   }
-  try {
-    fs.unlinkSync(SESSION_FILE)
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error
-  }
+  removeSession(session)
   output({ ok: true, stoppedPid: session?.pid || null })
 }
 
@@ -403,13 +530,17 @@ async function run(parsed) {
     case "stop":
       return stop()
     case "status": {
-      const session = readJson(SESSION_FILE)
-      const paths = { endpoint: endpointFilePath(), session: SESSION_FILE, log: session?.logFile }
+      let session = readJson(SESSION_FILE)
+      const paths = {
+        endpoint: session?.endpointFile || discoveryFile(),
+        session: SESSION_FILE,
+        log: session?.logFile,
+      }
       if (session?.pid && !processAlive(session.pid))
         return output({ ok: false, status: "tracked_process_exited", session, paths })
       let endpoint
       try {
-        endpoint = loadEndpoint()
+        endpoint = loadEndpoint(paths.endpoint)
       } catch (error) {
         return output({
           ok: false,
@@ -428,10 +559,35 @@ async function run(parsed) {
         const health = await request("/api/dev/agent/health", { endpoint })
         if (health.agentDebug !== true)
           return output({ ok: false, status: "normal_non_agent_build", health, session, paths })
-        if (health.helper?.version !== 3)
+        if (session) {
+          try {
+            const updated = reconcileDebugSession(
+              session,
+              health,
+              endpoint,
+              fs.realpathSync(REPO_ROOT)
+            )
+            saveSession(updated, session)
+            session = updated
+          } catch (error) {
+            return output({
+              ok: false,
+              status: "ownership_mismatch",
+              error: error.message,
+              health,
+              session,
+              paths,
+            })
+          }
+        }
+        if (
+          !health.helper ||
+          health.renderers?.main?.documentLoading ||
+          health.renderers?.main?.awaitingLoad
+        )
+          return output({ ok: false, status: "waiting_for_page", health, session, paths })
+        if (health.helper.version !== 3)
           return output({ ok: false, status: "helper_mismatch", health, session, paths })
-        if (session?.healthPid && health.pid !== session.healthPid)
-          return output({ ok: false, status: "ownership_mismatch", health, session, paths })
         const windows = await request("/api/dev/agent/windows", { endpoint })
         return output({
           ok: true,
@@ -447,11 +603,12 @@ async function run(parsed) {
             ? "authentication_failure"
             : error.status === 404
               ? "normal_non_agent_build"
-              : "bridge_unavailable"
-        const message =
-          status === "bridge_unavailable"
-            ? `endpoint exists but the bridge is unreachable: ${endpoint.baseUrl}`
-            : error.message
+              : session?.sessionId && processAlive(session.pid)
+                ? "waiting_for_app"
+                : "bridge_unavailable"
+        const message = ["bridge_unavailable", "waiting_for_app"].includes(status)
+          ? `endpoint exists but the bridge is unreachable: ${endpoint.baseUrl}`
+          : error.message
         return output({ ok: false, status, error: message, session, paths })
       }
     }

@@ -6,6 +6,8 @@ export type ActionOption = TimeoutOption & {
   trial?: boolean
   scroll?: "auto" | "none"
   waitUntil?: "domcontentloaded" | "load" | "networkidle"
+  /** Expected destination for delayed navigation. Strings match the full URL; RegExp supports partial matching. */
+  waitForURL?: TextMatcher
 }
 export type LocatorState = "attached" | "detached" | "visible" | "hidden"
 export type TextMatcher = string | RegExp
@@ -29,6 +31,12 @@ export interface TauriDebugCapabilities {
   nativeScreenshot?: boolean
   consoleCapture?: string
   diagnosticCursors?: boolean
+  diagnosticDocumentIds?: boolean
+  locatorCompositionVersion?: number
+  locatorCollectionQueries?: boolean
+  dispatchEventInit?: boolean
+  locatorActionControl?: number
+  documentScopedRefs?: boolean
   networkCapture?: string
   networkMocking?: string
   dialogs?: boolean
@@ -75,10 +83,12 @@ export class TauriDebugUnsupportedError extends Error {
 export class TauriDebugLocatorError extends Error {
   readonly code: string
   readonly retryable: boolean
-  constructor(code: string, message: string, retryable?: boolean)
+  readonly dispatchState?: "not-dispatched" | "dispatched" | "unknown"
+  constructor(code: string, message: string, retryable?: boolean, dispatchState?: "not-dispatched" | "dispatched" | "unknown")
 }
 
 export class TauriDebugTimeoutError extends Error {
+  readonly dispatchState?: "not-dispatched" | "dispatched" | "unknown"
   constructor(message: string)
 }
 
@@ -89,7 +99,8 @@ export class TauriDebugRendererRestartedError extends Error {
   readonly code: RendererRestartCode
   readonly window: string
   readonly rendererGeneration?: number
-  readonly retryable: true
+  readonly retryable: false
+  readonly dispatchState: "unknown"
   constructor(
     message: string,
     options?: {
@@ -101,18 +112,51 @@ export class TauriDebugRendererRestartedError extends Error {
   )
 }
 
+export class TauriDebugDocumentReplacedError extends Error {
+  readonly code: "webview_document_replaced" | "webview_document_loading"
+  readonly window?: string
+  readonly documentEpoch?: number
+  readonly retryable: false
+  readonly dispatchState: "unknown"
+  constructor(message: string, options?: {
+    code?: "webview_document_replaced" | "webview_document_loading"
+    window?: string
+    documentEpoch?: number
+    cause?: unknown
+  })
+}
+
+export class TauriDebugSessionError extends Error {
+  readonly code: string
+  readonly retryable: false
+  readonly dispatchState: "unknown"
+  constructor(code: string, message: string, cause?: unknown)
+}
+
 /** Native renderer lifecycle of one webview window. */
 export interface RendererState {
   /** Web content process terminations observed for this window. */
   generation: number
   /** True until the replacement renderer commits a document. */
   awaitingLoad: boolean
+  documentEpoch?: number
+  documentLoading?: boolean
 }
 
 export interface DiagnosticRead<T = unknown> {
+  /** Pair this document identity with nextCursor when reading the next batch. */
+  documentId?: string
+  /** The supplied cursor belonged to another document and was reset. */
+  cursorReset?: boolean
   entries: T[]
   nextCursor: number
   dropped: number
+}
+
+export interface DiagnosticReadOptions {
+  after?: number
+  limit?: number
+  documentId?: string
 }
 
 export class TauriLocator {
@@ -222,8 +266,17 @@ export interface TauriMouse {
   wheel(deltaX: number, deltaY: number): Promise<void>
 }
 
+export interface TauriDebugEndpoint {
+  baseUrl: string
+  devToken: string
+  file?: string
+  debugSession?: { sessionId: string | null; workspace: string | null; appInstanceId: string; pid: number }
+}
+
 export interface TauriPageOptions {
-  endpoint?: { baseUrl: string; devToken: string }
+  endpoint?: TauriDebugEndpoint
+  /** Rediscover only the pinned managed session; never replay the interrupted command. */
+  endpointLoader?: () => TauriDebugEndpoint
   window?: string
   fetchImpl?: typeof fetch
   defaultTimeout?: number
@@ -237,8 +290,9 @@ export class TauriPage {
   constructor(options?: TauriPageOptions)
   setDefaultTimeout(timeout: number): void
   capabilities(): Promise<TauriDebugCapabilities>
-  rendererState(): Promise<RendererState>
+  rendererState(options?: TimeoutOption): Promise<RendererState>
   waitForRenderer(options?: TimeoutOption): Promise<RendererState>
+  reconnect(options?: TimeoutOption): Promise<RendererState>
   locator(selector: string): TauriLocator
   getByTestId(testId: string): TauriLocator
   getByPlaceholder(text: TextMatcher, options?: { exact?: boolean }): TauriLocator
@@ -249,7 +303,8 @@ export class TauriPage {
   getByRole(role: string, options?: RoleOptions): TauriLocator
   evaluate<T = unknown, A = unknown>(
     pageFunction: string | ((arg: A) => T | Promise<T>),
-    arg?: A
+    arg?: A,
+    options?: TimeoutOption
   ): Promise<T>
   snapshot(options?: {
     includeText?: boolean
@@ -263,7 +318,7 @@ export class TauriPage {
   reload(options?: TimeoutOption & { waitUntil?: string }): Promise<void>
   goBack(options?: TimeoutOption & { waitUntil?: string }): Promise<void>
   goForward(options?: TimeoutOption & { waitUntil?: string }): Promise<void>
-  waitForURL(pattern: TextMatcher, options?: TimeoutOption): Promise<void>
+  waitForURL(pattern: TextMatcher, options?: TimeoutOption & { waitUntil?: "domcontentloaded" | "load" | "networkidle" }): Promise<void>
   waitForLoadState(
     state?: "domcontentloaded" | "load" | "networkidle",
     options?: TimeoutOption
@@ -360,8 +415,8 @@ export class TauriPage {
   stopRecording(): never
   consoleMessages(): Promise<unknown[]>
   networkEvents(): Promise<unknown[]>
-  readConsole(options?: { after?: number; limit?: number }): Promise<DiagnosticRead>
-  readNetwork(options?: { after?: number; limit?: number }): Promise<DiagnosticRead>
+  readConsole(options?: DiagnosticReadOptions): Promise<DiagnosticRead>
+  readNetwork(options?: DiagnosticReadOptions): Promise<DiagnosticRead>
   nativeLogs(options?: { lines?: number }): Promise<Array<{ source: string; text: string }>>
   window(label: string): TauriPage
   listWindows(): Promise<WindowInfo[]>

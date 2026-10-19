@@ -1,17 +1,19 @@
 ;(() => {
-  if (window.__cogniaAgentDebug?.version === 3) return
+  if (window.__cogniaAgentDebug?.version === 3 && window.__cogniaAgentDebug.revision === 4) return
   const legacyAgentDebug = window.__cogniaAgentDebug || null
 
   const core = window.__cogniaAutomationCore
-  if (!core) throw new Error("Cognia automation core is unavailable")
+  if (!core || core.version < 3) throw new Error("Cognia automation core version 3 is required")
 
   const MAX_EVENTS = 500
   const MAX_NODES = 500
   const MAX_FRAME_DEPTH = 8
+  const newDocumentId = () =>
+    globalThis.crypto?.randomUUID?.() ||
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  let documentActive = true
   const state = {
-    documentId:
-      globalThis.crypto?.randomUUID?.() ||
-      `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+    documentId: newDocumentId(),
     generation: 0,
     refs: new Map(),
     console: [],
@@ -25,7 +27,24 @@
     dialogHandlerInstalled: false,
     mouse: { x: 0, y: 0, buttons: 0 },
     modifiers: new Set(),
+    locatorRequests: new Map(),
   }
+  window.addEventListener("pagehide", () => {
+    documentActive = false
+    state.refs.clear()
+    for (const request of state.locatorRequests.values()) {
+      request.cancelled = true
+      request.abortController?.abort()
+    }
+  })
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted) return
+    state.documentId = newDocumentId()
+    state.generation = 0
+    state.refs.clear()
+    state.locatorRequests.clear()
+    documentActive = true
+  })
 
   const capabilities = Object.freeze({
     apiVersion: 3,
@@ -46,6 +65,12 @@
     nativeScreenshot: true,
     consoleCapture: "buffered",
     diagnosticCursors: true,
+    diagnosticDocumentIds: true,
+    locatorCompositionVersion: 2,
+    locatorCollectionQueries: true,
+    dispatchEventInit: true,
+    locatorActionControl: 1,
+    documentScopedRefs: true,
     networkCapture: "fetch-and-xhr",
     networkMocking: "fetch-only",
     dialogs: true,
@@ -68,12 +93,16 @@
     pushBounded(target, { id: state[sequenceKey], ...entry })
   }
 
-  const readEvents = (target, currentSequence, after = 0, limit = MAX_EVENTS) => {
-    const cursor = Number.isSafeInteger(Number(after)) && Number(after) >= 0 ? Number(after) : 0
+  const readEvents = (target, currentSequence, after = 0, limit = MAX_EVENTS, documentId) => {
+    const cursorReset = documentId !== undefined && documentId !== state.documentId
+    const cursor =
+      !cursorReset && Number.isSafeInteger(Number(after)) && Number(after) >= 0 ? Number(after) : 0
     const boundedLimit = Math.max(1, Math.min(Number(limit) || MAX_EVENTS, MAX_EVENTS))
     const oldestId = target[0]?.id ?? cursor + 1
     const entries = target.filter((entry) => entry.id > cursor).slice(0, boundedLimit)
     return {
+      documentId: state.documentId,
+      cursorReset,
       entries: [...entries],
       nextCursor: entries.at(-1)?.id ?? Math.max(cursor, currentSequence),
       dropped: Math.max(0, oldestId - cursor - 1),
@@ -154,7 +183,11 @@
 
   const syncLegacyDiagnostics = (method, target, sequenceKey) => {
     if (typeof legacyAgentDebug?.[method] !== "function") return
-    for (const entry of legacyAgentDebug[method]() || []) pushDiagnostic(target, sequenceKey, entry)
+    for (const entry of legacyAgentDebug[method]() || []) {
+      const diagnostic = { ...entry }
+      delete diagnostic.id
+      pushDiagnostic(target, sequenceKey, diagnostic)
+    }
   }
 
   const globMatches = (url, pattern) => {
@@ -365,8 +398,14 @@
   }
 
   const resolveQuery = (query, root = document, scope = { limitations: [] }) => {
+    if (query?.kind === "ref") return [refElement(query.ref)]
     if (query?.kind === "filtered")
-      return applyFilters(resolveQuery(query.query, root, scope), query.filters, scope)
+      return indexed(
+        applyFilters(resolveQuery(query.query, root, scope), query.filters, scope),
+        query.index
+      )
+    if (query?.kind === "chain")
+      return applyStep(resolveQuery(query.root, root, scope), query.step, scope)
     if (query?.kind === "and") {
       const right = new Set(resolveQuery(query.right, root, scope))
       return resolveQuery(query.left, root, scope).filter((element) => right.has(element))
@@ -493,7 +532,7 @@
       if (!interactive && !options.includeText && role !== "heading" && !options.query) continue
       if (role === "listitem" && options.includeText && !core.directText(element)) continue
       if (!role && options.includeText && !core.directText(element)) continue
-      const ref = `g${generation}e${nodes.length + 1}`
+      const ref = `d${state.documentId}:g${generation}e${nodes.length + 1}`
       state.refs.set(ref, element)
       nodes.push(nodeFor(element, ref))
     }
@@ -512,7 +551,8 @@
 
   const refElement = (ref) => {
     const element = state.refs.get(ref)
-    if (!element || !element.isConnected) throw new Error(`stale or unknown element ref: ${ref}`)
+    if (!documentActive || !element || !element.isConnected)
+      throw new Error(`stale or unknown element ref: ${ref}`)
     return element
   }
 
@@ -573,7 +613,57 @@
 
   const inspect = (ref, operation, args = {}) => inspectElement(refElement(ref), operation, args)
 
+  const eventClasses = new Map(
+    [
+      [
+        "MouseEvent",
+        "click dblclick auxclick contextmenu mousedown mouseup mouseenter mouseleave mousemove mouseover mouseout",
+      ],
+      ["KeyboardEvent", "keydown keypress keyup"],
+      [
+        "PointerEvent",
+        "pointerover pointerenter pointerdown pointermove pointerup pointercancel pointerout pointerleave gotpointercapture lostpointercapture",
+      ],
+      ["FocusEvent", "focus blur focusin focusout"],
+      ["InputEvent", "beforeinput input"],
+      ["DragEvent", "drag dragstart dragend dragenter dragleave dragover drop"],
+      ["WheelEvent", "wheel"],
+      ["TouchEvent", "touchstart touchmove touchend touchcancel"],
+      ["CompositionEvent", "compositionstart compositionupdate compositionend"],
+      ["ClipboardEvent", "copy cut paste"],
+      ["AnimationEvent", "animationstart animationend animationiteration animationcancel"],
+      ["TransitionEvent", "transitionrun transitionstart transitionend transitioncancel"],
+      ["SubmitEvent", "submit"],
+      ["Event", "change reset load error scroll select"],
+    ].flatMap(([name, types]) => types.split(" ").map((type) => [type, name]))
+  )
+
+  const dispatchDomEvent = (element, type, eventInit = {}) => {
+    if (typeof type !== "string" || !type)
+      throw new TypeError("event type must be a non-empty string")
+    if (!eventInit || typeof eventInit !== "object" || Array.isArray(eventInit))
+      throw new TypeError("eventInit must be a JSON event initialization object")
+    const view = element.ownerDocument.defaultView
+    const name = eventClasses.get(type) || "CustomEvent"
+    const Constructor = view[name]
+    if (typeof Constructor !== "function") {
+      const error = new Error(`${name} is unavailable in the target webview`)
+      error.code = "unsupported_event_class"
+      throw error
+    }
+    element.dispatchEvent(
+      new Constructor(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view,
+        ...eventInit,
+      })
+    )
+  }
+
   const actElement = async (element, action, args = {}) => {
+    const view = element.ownerDocument.defaultView
     if (
       isDisabled(element) &&
       !["focus", "blur", "scrollIntoView", "dispatchEvent"].includes(action)
@@ -588,14 +678,14 @@
         for (const detail of [1, 2]) {
           for (const type of ["mousedown", "mouseup", "click"])
             element.dispatchEvent(
-              new MouseEvent(type, { bubbles: true, cancelable: true, view: window, detail })
+              new view.MouseEvent(type, { bubbles: true, cancelable: true, view, detail })
             )
         }
         element.dispatchEvent(
-          new MouseEvent("dblclick", {
+          new view.MouseEvent("dblclick", {
             bubbles: true,
             cancelable: true,
-            view: window,
+            view,
             detail: 2,
           })
         )
@@ -607,8 +697,8 @@
         element.blur()
         break
       case "hover":
-        element.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false, view: window }))
-        element.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, view: window }))
+        element.dispatchEvent(new view.MouseEvent("mouseenter", { bubbles: false, view }))
+        element.dispatchEvent(new view.MouseEvent("mouseover", { bubbles: true, view }))
         break
       case "fill":
         core.setValue(element, String(args.value ?? ""), false)
@@ -621,10 +711,10 @@
         const chord = core.parseKeyChord(args.key || "Enter")
         element.focus()
         const event = { ...chord, bubbles: true, cancelable: true }
-        element.dispatchEvent(new KeyboardEvent("keydown", event))
+        element.dispatchEvent(new view.KeyboardEvent("keydown", event))
         if (String(chord.key).length === 1 && !chord.ctrlKey && !chord.altKey && !chord.metaKey)
-          element.dispatchEvent(new KeyboardEvent("keypress", event))
-        element.dispatchEvent(new KeyboardEvent("keyup", event))
+          element.dispatchEvent(new view.KeyboardEvent("keypress", event))
+        element.dispatchEvent(new view.KeyboardEvent("keyup", event))
         break
       }
       case "check":
@@ -641,8 +731,8 @@
           : [String(args.value ?? "")]
         for (const option of element.options || [])
           option.selected = requested.includes(option.value) || requested.includes(option.label)
-        element.dispatchEvent(new Event("input", { bubbles: true }))
-        element.dispatchEvent(new Event("change", { bubbles: true }))
+        element.dispatchEvent(new view.Event("input", { bubbles: true }))
+        element.dispatchEvent(new view.Event("change", { bubbles: true }))
         value = Array.from(element.selectedOptions || []).map((option) => option.value)
         if (
           requested.some(
@@ -661,72 +751,160 @@
         element.scrollIntoView({ block: "center", inline: "center" })
         break
       case "dispatchEvent":
-        element.dispatchEvent(
-          new CustomEvent(String(args.type), {
-            bubbles: true,
-            cancelable: true,
-            detail: args.eventInit,
-          })
-        )
+        dispatchDomEvent(element, args.type, args.eventInit)
         break
       case "dragTo": {
-        const target = resolveCandidates({ query: args.targetQuery })[Number(args.targetIndex || 0)]
-        if (!target) throw new Error("dragTo target did not resolve")
-        const transfer = new DataTransfer()
+        const target = args.targetElement
+        if (!target?.isConnected) throw new Error("dragTo target detached before dispatch")
+        const targetView = target.ownerDocument.defaultView
+        const transfer = new view.DataTransfer()
         element.dispatchEvent(
-          new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: transfer })
+          new view.DragEvent("dragstart", {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: transfer,
+          })
         )
-        target.dispatchEvent(
-          new DragEvent("dragenter", { bubbles: true, cancelable: true, dataTransfer: transfer })
-        )
-        target.dispatchEvent(
-          new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: transfer })
-        )
-        target.dispatchEvent(
-          new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer })
-        )
-        element.dispatchEvent(
-          new DragEvent("dragend", { bubbles: true, cancelable: true, dataTransfer: transfer })
-        )
+        try {
+          for (const type of ["dragenter", "dragover", "drop"]) {
+            if (!element.isConnected || !target.isConnected)
+              throw new Error("dragTo endpoint detached after dragstart; drag may have started")
+            target.dispatchEvent(
+              new targetView.DragEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                dataTransfer: transfer,
+              })
+            )
+          }
+        } finally {
+          element.dispatchEvent(
+            new view.DragEvent("dragend", {
+              bubbles: true,
+              cancelable: true,
+              dataTransfer: transfer,
+            })
+          )
+        }
         break
       }
       case "setInputFiles": {
-        if (!(element instanceof HTMLInputElement) || element.type !== "file")
+        if (!(element instanceof view.HTMLInputElement) || element.type !== "file")
           throw new Error("setInputFiles requires an input[type=file]")
-        const transfer = new DataTransfer()
+        const transfer = new view.DataTransfer()
         for (const file of args.files || []) {
           const bytes = Uint8Array.from(atob(file.base64), (character) => character.charCodeAt(0))
           transfer.items.add(
-            new File([bytes], file.name, { type: file.mimeType || "application/octet-stream" })
+            new view.File([bytes], file.name, { type: file.mimeType || "application/octet-stream" })
           )
         }
         element.files = transfer.files
-        element.dispatchEvent(new Event("input", { bubbles: true }))
-        element.dispatchEvent(new Event("change", { bubbles: true }))
+        element.dispatchEvent(new view.Event("input", { bubbles: true }))
+        element.dispatchEvent(new view.Event("change", { bubbles: true }))
         value = element.files.length
         break
       }
       default:
         throw new Error(`unsupported action: ${action}`)
     }
-    if (!["click", "dblclick"].includes(action))
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     return { action, value }
   }
 
-  const act = async (ref, action, args = {}) => ({
-    ...(await actElement(refElement(ref), action, args)),
-    ref,
-  })
+  const act = async (ref, action, args = {}, control) => {
+    const element = refElement(ref)
+    if (action === "dragTo") {
+      const result = await locator(
+        {
+          query: { kind: "ref", ref },
+          operation: "action",
+          name: action,
+          args,
+          requirements: { visible: true, enabled: true, stable: true, receivesEvents: true },
+        },
+        control
+      )
+      if (!result.ok) throw new Error(result.error)
+      return { ...result.value, ref }
+    }
+    return { ...(await actElement(element, action, args)), ref }
+  }
 
-  const locatorError = (code, error, retryable = false) => ({
+  const locatorError = (code, error, retryable = false, dispatchState = "not-dispatched") => ({
     ok: false,
     code,
     error,
     retryable,
+    dispatchState,
   })
 
-  const locator = async (request = {}) => {
+  const locator = async (request = {}, control) => {
+    const now = Date.now()
+    for (const [id, entry] of state.locatorRequests) {
+      if (entry.expiresAt <= now) {
+        entry.cancelled = true
+        entry.abortController?.abort()
+        state.locatorRequests.delete(id)
+      }
+    }
+    if (request.operation === "cancel") {
+      if (!request.requestId)
+        return locatorError("invalid_request_id", "cancellation requires a request ID")
+      const entry = state.locatorRequests.get(request.requestId)
+      if (entry) {
+        entry.cancelled = true
+        entry.abortController?.abort()
+      } else {
+        if (state.locatorRequests.size >= 1_000)
+          return locatorError("request_capacity", "locator cancellation registry is full")
+        // A cancel may overtake its action in the native webview queue.
+        state.locatorRequests.set(request.requestId, { cancelled: true, expiresAt: now + 120_000 })
+      }
+      return { ok: true, value: { dispatchState: entry?.dispatchState || "not-dispatched" } }
+    }
+    let actionControl
+    if (request.operation === "action") {
+      if (request.requestId && state.locatorRequests.has(request.requestId)) {
+        const previous = state.locatorRequests.get(request.requestId)
+        return locatorError(
+          previous.cancelled ? "action_cancelled" : "duplicate_action",
+          "action ID already used; inspect its outcome before submitting another mutation",
+          false,
+          previous.dispatchState || "not-dispatched"
+        )
+      }
+      if (state.locatorRequests.size >= 1_000)
+        return locatorError("request_capacity", "locator action registry is full")
+      const expiresAt = Math.min(
+        request.expiresAt ?? Infinity,
+        now + Math.max(1, request.options?.timeout ?? 10_000)
+      )
+      actionControl = {
+        cancelled: false,
+        expiresAt,
+        deadline: performance.now() + Math.max(0, expiresAt - now),
+        dispatchState: "not-dispatched",
+        abortController: new AbortController(),
+      }
+      if (control) control.abort = () => actionControl.abortController.abort()
+      if (request.requestId) state.locatorRequests.set(request.requestId, actionControl)
+    }
+    const interrupted = () => {
+      if (!documentActive)
+        return locatorError(
+          "webview_document_replaced",
+          "the document left the active webview before dispatch"
+        )
+      if (control?.cancelled || actionControl?.cancelled)
+        return locatorError("action_cancelled", "action cancelled before dispatch")
+      if (
+        Date.now() >= (request.expiresAt ?? Infinity) ||
+        (actionControl && performance.now() >= actionControl.deadline)
+      )
+        return locatorError("action_timeout", "action deadline exceeded before dispatch")
+      return null
+    }
+    const interruption = interrupted()
+    if (interruption) return interruption
     const scope = { limitations: [] }
     let elements = applyFilters(
       resolveQuery(request.query, document, scope),
@@ -742,7 +920,27 @@
     }
     const element = elements[0]
     if (request.operation === "query") {
-      return { ok: true, nodes: elements.slice(0, MAX_NODES).map((entry) => nodeFor(entry)) }
+      const collection = request.args?.collection
+      if (collection === "count")
+        return { ok: true, value: elements.length, documentId: state.documentId }
+      if (["allTextContents", "allInnerTexts"].includes(collection))
+        return {
+          ok: true,
+          value: elements.map((entry) =>
+            collection === "allTextContents"
+              ? entry.textContent || ""
+              : (entry.innerText ?? entry.textContent ?? "")
+          ),
+          documentId: state.documentId,
+        }
+      if (collection !== undefined)
+        return locatorError("unsupported_collection_query", String(collection))
+      return {
+        ok: true,
+        nodes: elements.slice(0, MAX_NODES).map((entry) => nodeFor(entry)),
+        count: elements.length,
+        truncated: elements.length > MAX_NODES,
+      }
     }
     if (!element && scope.limitations.length)
       return locatorError(
@@ -759,7 +957,7 @@
           documentId: state.documentId,
         }
       } catch (error) {
-        return locatorError("inspection_failed", String(error))
+        return locatorError("inspection_failed", String(error), false, "unknown")
       }
     }
 
@@ -768,20 +966,114 @@
       const options = request.options || {}
       const previousDocumentId = state.documentId
       const previousUrl = location.href
+      let dispatched = false
       try {
-        if (options.scroll !== "none")
-          element.scrollIntoView?.({ block: "center", inline: "center" })
-        if (options.force !== true) {
-          if (requirements.visible && !isVisible(element))
-            return locatorError("not_visible", "element is not visible", true)
-          if (requirements.enabled && isDisabled(element))
-            return locatorError("not_enabled", "element is disabled", true)
-          if (requirements.editable && !isEditable(element))
-            return locatorError("not_editable", "element is not editable", true)
-          if (requirements.stable && !(await core.isStable(element)))
-            return locatorError("not_stable", "element position is not stable", true)
-          if (requirements.receivesEvents && !core.receivesEvents(element))
-            return locatorError("not_receives_events", "element does not receive events", true)
+        const targetScope = { limitations: [] }
+        let targetQuery = request.args?.targetQuery
+        if (request.name === "dragTo" && !targetQuery)
+          return locatorError("invalid_drag_target", "dragTo requires a destination query")
+        if (request.name === "dragTo" && request.args?.targetIndex != null) {
+          if (!Number.isSafeInteger(request.args.targetIndex))
+            return locatorError("invalid_drag_target", "targetIndex must be an integer")
+          targetQuery = { kind: "filtered", query: targetQuery, index: request.args.targetIndex }
+        }
+        const targets =
+          request.name === "dragTo" ? resolveQuery(targetQuery, document, targetScope) : []
+        if (targets.length > 1)
+          return locatorError(
+            "strict_mode_violation",
+            `strict drag target resolved to ${targets.length} elements`
+          )
+        if (request.name === "dragTo" && !targets.length) {
+          if (targetScope.limitations.length)
+            return locatorError("unsupported_scope", targetScope.limitations.join(", "))
+          return locatorError("target_not_found", "drag target did not resolve", true)
+        }
+        const target = targets[0]
+        const endpoints = [
+          [element, "", requirements],
+          ...(target
+            ? [
+                [
+                  target,
+                  "target_",
+                  { visible: true, enabled: true, stable: true, receivesEvents: true },
+                ],
+              ]
+            : []),
+        ]
+        const check = (node, prefix, needs) => {
+          if (!node.isConnected)
+            return locatorError(`${prefix}not_attached`, "element is detached", true)
+          if (options.force) return null
+          if (needs.visible && !isVisible(node))
+            return locatorError(`${prefix}not_visible`, "element is not visible", true)
+          if (needs.enabled && isDisabled(node))
+            return locatorError(`${prefix}not_enabled`, "element is disabled", true)
+          if (needs.editable && !isEditable(node))
+            return locatorError(`${prefix}not_editable`, "element is not editable", true)
+          if (needs.receivesEvents && !core.receivesEvents(node))
+            return locatorError(
+              `${prefix}not_receives_events`,
+              "element does not receive events",
+              true
+            )
+          return null
+        }
+        for (const [node] of endpoints) {
+          if (!node.isConnected) return locatorError("not_attached", "element is detached", true)
+          if (options.scroll !== "none")
+            node.scrollIntoView?.({ block: "center", inline: "center" })
+        }
+        for (const [node, prefix, needs] of endpoints) {
+          const failure = interrupted() || check(node, prefix, needs)
+          if (failure) return failure
+        }
+        if (!options.force && endpoints.some(([, , needs]) => needs.stable)) {
+          // Observe both drag endpoints over the same animation-frame interval.
+          const stable = await Promise.all(
+            endpoints.map(([node, , needs]) =>
+              needs.stable
+                ? core.isStable(node, {
+                    signal: actionControl.abortController.signal,
+                    timeout: Math.max(0, actionControl.deadline - performance.now()),
+                  })
+                : true
+            )
+          )
+          const interruption = interrupted()
+          if (interruption) return interruption
+          const unstable = stable.findIndex((value) => !value)
+          if (unstable !== -1)
+            return locatorError(
+              `${endpoints[unstable][1]}not_stable`,
+              "element position is not stable",
+              true
+            )
+        }
+        // No await between the final identity/actionability fence and event dispatch.
+        const current = indexed(
+          applyFilters(resolveQuery(request.query, document, scope), request.filters, scope),
+          request.index
+        )
+        const currentTargets = target ? resolveQuery(targetQuery, document, targetScope) : []
+        if (current.length > 1 || currentTargets.length > 1)
+          return locatorError("strict_mode_violation", "locator became ambiguous before dispatch")
+        if (current[0] !== element)
+          return locatorError(
+            element.isConnected ? "source_changed" : "not_attached",
+            "source changed before dispatch",
+            true
+          )
+        if (target && currentTargets[0] !== target)
+          return locatorError(
+            target.isConnected ? "target_changed" : "target_not_attached",
+            "drag target changed before dispatch",
+            true
+          )
+        for (const [node, prefix, needs] of endpoints) {
+          const failure = interrupted() || check(node, prefix, needs)
+          if (failure) return failure
         }
         if (options.trial)
           return {
@@ -793,7 +1085,12 @@
             url: location.href,
             navigation: false,
           }
-        const result = await actElement(element, request.name, request.args)
+        dispatched = true
+        actionControl.dispatchState = "dispatched"
+        const result = await actElement(element, request.name, {
+          ...request.args,
+          targetElement: target,
+        })
         return {
           ok: true,
           value: result.value ?? result,
@@ -802,9 +1099,18 @@
           previousUrl,
           url: location.href,
           navigation: state.documentId !== previousDocumentId || location.href !== previousUrl,
+          dispatchState: "dispatched",
         }
       } catch (error) {
-        return locatorError("action_failed", String(error))
+        return locatorError(
+          error?.code === "unsupported_event_class" ? error.code : "action_failed",
+          String(error),
+          false,
+          dispatched ? "dispatched" : "not-dispatched"
+        )
+      } finally {
+        actionControl.abortController.abort()
+        if (control) delete control.abort
       }
     }
     return locatorError("unsupported_locator_operation", String(request.operation))
@@ -927,6 +1233,7 @@
   const drain = (target) => target.splice(0, target.length)
   window.__cogniaAgentDebug = Object.freeze({
     version: 3,
+    revision: 4,
     capabilities,
     snapshot,
     locator,
@@ -974,16 +1281,17 @@
     },
     drainConsole: () => drain(state.console),
     drainNetwork: () => drain(state.network),
-    readConsole: (after, limit) => {
+    readConsole: (after, limit, documentId) => {
       syncLegacyDiagnostics("drainConsole", state.console, "consoleSequence")
-      return readEvents(state.console, state.consoleSequence, after, limit)
+      return readEvents(state.console, state.consoleSequence, after, limit, documentId)
     },
-    readNetwork: (after, limit) => {
+    readNetwork: (after, limit, documentId) => {
       syncLegacyDiagnostics("drainNetwork", state.network, "networkSequence")
-      return readEvents(state.network, state.networkSequence, after, limit)
+      return readEvents(state.network, state.networkSequence, after, limit, documentId)
     },
     health: () => ({
       version: 3,
+      revision: 4,
       readyState: document.readyState,
       url: location.href,
       documentId: state.documentId,

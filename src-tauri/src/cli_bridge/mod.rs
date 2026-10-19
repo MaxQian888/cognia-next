@@ -335,17 +335,21 @@ pub fn write_endpoint_file(path: &Path, base_url: &str, dev_token: &str) -> Resu
         "baseUrl": base_url,
         "devToken": dev_token,
     });
+    #[cfg(all(feature = "agent-debug", desktop))]
+    let payload = {
+        let mut payload = payload;
+        payload["debugSession"] = crate::agent_debug::session_identity().clone();
+        payload
+    };
     let pretty = serde_json::to_vec_pretty(&payload)?;
-    std::fs::write(path, &pretty).with_context(|| format!("write {}", path.display()))?;
-    // Best-effort owner-only permissions on unix; on windows the ACL is
-    // already restricted to the user's own profile directory.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(path)?.permissions();
-        perms.set_mode(0o600);
-        let _ = std::fs::set_permissions(path, perms);
-    }
+    // tempfile creates owner-only files on Unix. Atomically replace discovery
+    // so concurrent readers cannot observe half-written JSON or credentials.
+    use std::io::Write;
+    let parent = path.parent().context("endpoint path has no parent")?;
+    let mut staged = tempfile::Builder::new().prefix(".cognia-endpoint-").tempfile_in(parent)?;
+    staged.write_all(&pretty)?;
+    staged.as_file().sync_all()?;
+    staged.persist(path).with_context(|| format!("replace {}", path.display()))?;
     Ok(())
 }
 
@@ -383,6 +387,12 @@ pub async fn init(app_handle: tauri::AppHandle, state: &CliBridgeServerState) ->
                 "cli_bridge ready at {base_url} (token persisted to {})",
                 path.display()
             );
+        }
+    }
+    #[cfg(all(feature = "agent-debug", desktop))]
+    if let Some(path) = crate::agent_debug::managed_endpoint_file() {
+        if let Err(error) = write_endpoint_file(&path, &base_url, &dev_token) {
+            log::warn!("agent-debug managed endpoint write failed: {error:#}");
         }
     }
     {
@@ -716,6 +726,25 @@ mod tests {
             .join("cli-endpoint.json");
         write_endpoint_file(&path, "http://x", "tok").unwrap();
         assert!(path.exists());
+    }
+
+    #[test]
+    #[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
+    fn discovery_replacement_preserves_complete_json_and_private_permissions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("cli-endpoint.json");
+        write_endpoint_file(&path, "http://127.0.0.1:1", "old").unwrap();
+        write_endpoint_file(&path, "http://127.0.0.1:2", "new").unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(payload["devToken"], "new");
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 1);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        #[cfg(all(feature = "agent-debug", desktop))]
+        assert_eq!(payload["debugSession"], *crate::agent_debug::session_identity());
     }
 
     #[test]

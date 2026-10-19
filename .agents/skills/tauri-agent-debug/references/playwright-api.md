@@ -65,6 +65,50 @@ browser-engine features. The current capability object reports:
   `TauriDebugUnsupportedError` instead of silently producing incomplete data.
 - `nativeScreenshot: true`; captures can include top-level window chrome and
   require OS screen-recording permission.
+- API version 3 revision 4 includes `locatorCompositionVersion: 2` for preserving
+  indexed/filtered parent scopes when chaining locators. The client refuses
+  these queries against an older helper before executing an action.
+- `locatorActionControl: 1` is required for locator mutations. Only known
+  failures marked `not-dispatched` are automatically retried. Renderer
+  replacement is `retryable: false`, with outcome `unknown`; recover using
+  `waitForRenderer` and reconcile persisted/external effects before retrying.
+- Locator mutations and their follow-up waits consume one remaining budget.
+  Cancellation fences dispatch and releases animation-frame waits; abort
+  delivery is best effort and cannot undo a dispatched event, forcibly stop
+  arbitrary evaluate code, or run while the renderer thread is blocked.
+- Drag source/destination selection is one strict action, including destination
+  filters and negative indices. Visibility queries and locator state waits
+  reject multiple matches; zero matches remain valid for hidden/detached states.
+- For delayed navigation, pass `click({ waitForURL: /\/settings$/, timeout:
+  20_000 })` or explicitly wait for the URL. Strings match the complete URL;
+  partial matching requires RegExp and glob syntax is unsupported. Readiness
+  and destination waits share the action budget, and never replay its click.
+- `locatorCollectionQueries: true` makes `count`, `allTextContents` and
+  `allInnerTexts` read the full matched collection, subject to the bridge's
+  existing result-byte limit. Text is not normalized or cut to snapshot length.
+  Snapshot/node summaries remain bounded at 500 entries; an incomplete state
+  query fails explicitly. Indexed node queries apply their index before that cap.
+- `dispatchEventInit: true` preserves JSON event initialization fields and uses
+  the target realm's DOM event constructor for standard event families. Unknown
+  custom event names use `CustomEvent`, with explicit `eventInit.detail`.
+  Missing constructors raise `TauriDebugUnsupportedError`. These events remain
+  synthetic; browser default input behavior and `isTrusted` are not supplied.
+- `diagnosticDocumentIds: true` makes cursors document-scoped. `consoleMessages()`
+  and `networkEvents()` carry the document identity automatically. Raw readers
+  must pass both returned values on the next read:
+
+  ```js
+  const batch = await page.readConsole()
+  const next = await page.readConsole({
+    after: batch.nextCursor,
+    documentId: batch.documentId,
+  })
+  ```
+
+  `cursorReset: true` means navigation or helper replacement invalidated the
+  supplied document identity. `dropped` separately reports retained-buffer loss.
+  This does not preserve events from a dead document; host-owned durable
+  recording remains a separate capability.
 
 Use Cognia's Windows CDP E2E lane when a test requires trusted Chromium input,
 Playwright tracing, browser contexts, response-body interception, downloads,
@@ -73,8 +117,9 @@ native command surface, system webview, multiple Tauri windows, or native logs.
 
 ## Structured snapshot refs
 
-`page.snapshot()` returns generation-scoped refs such as `g3e7`. A ref is valid
-only until the next snapshot. Normal locators do not use refs: resolution,
+`page.snapshot()` returns document-and-generation-scoped refs such as
+`d<documentId>:g3e7`. A ref is valid only in that document incarnation and until
+the next snapshot. Normal locators do not use refs: resolution,
 index/strict selection,
 actionability, and inspection/action execute atomically. CLI users must still
 use the newest snapshot ref.
@@ -82,3 +127,19 @@ use the newest snapshot ref.
 Strict locators throw when more than one element matches. Use a semantic name,
 nested locator, `filter`, `first`, or `nth` only when the ambiguity is
 intentional.
+
+## Managed rebuild recovery
+
+Managed launch metadata pins sessionId/workspace; appInstanceId/PID/endpoint/token
+rotate with the native process. The client follows only its pinned discovery file
+and authenticates replacement identity before another operation is sent. The
+interrupted operation is not replayed. `reconnect({ timeout, signal })` and
+`waitForRenderer({ timeout, signal })` wait within one budget. Fixed/manual
+connections without managed identity require a fresh explicit attachment.
+
+`TauriDebugSessionError` reports connection loss, app replacement or ownership
+refusal. `TauriDebugDocumentReplacedError` reports ordinary document replacement
+or a loading deadline. Both leave uncertain mutations non-retryable. Native
+`documentEpoch`/`documentLoading` track normal reloads separately from renderer
+crashes; `documentScopedRefs` prevents cross-document ref reuse. Unsaved UI state
+and page-only evidence are not restored by reconnection.

@@ -38,9 +38,9 @@ this bridge supplies cross-platform real-webview debugging.
 ```bash
 rtk node scripts/tauri/agent-debug.mjs snapshot --include-text
 rtk node scripts/tauri/agent-debug.mjs capabilities
-rtk node scripts/tauri/agent-debug.mjs act g1e4 click
-rtk node scripts/tauri/agent-debug.mjs act g2e7 fill "hello"
-rtk node scripts/tauri/agent-debug.mjs inspect g3e2 getAttribute --args '{"name":"aria-label"}'
+rtk node scripts/tauri/agent-debug.mjs act '<ref-from-latest-snapshot>' click
+rtk node scripts/tauri/agent-debug.mjs act '<ref-from-latest-snapshot>' fill "hello"
+rtk node scripts/tauri/agent-debug.mjs inspect '<ref-from-latest-snapshot>' getAttribute --args '{"name":"aria-label"}'
 rtk node scripts/tauri/agent-debug.mjs console
 rtk node scripts/tauri/agent-debug.mjs network
 rtk node scripts/tauri/agent-debug.mjs logs --lines 300
@@ -84,8 +84,21 @@ trusted input, video, or response interception. Unsupported behavior must raise
   `TauriDebugRendererRestartedError`): the window's web content process died
   and the app reloaded it. Do not relaunch the app. Run
   `await page.waitForRenderer()` (CLI: poll `status`/`health` until
-  `renderers.<window>.awaitingLoad` is false), take a new snapshot, and re-run
-  the command. Its effects did not survive the old renderer.
+  `renderers.<window>.awaitingLoad` and `documentLoading` are false), take a new
+  snapshot, and inspect persisted/external effects before retrying any mutation.
+  Those effects can survive renderer replacement; uncertain writes are never
+  automatically replayed.
+- Rust recompilation/app restart: managed runs retain session/workspace identity
+  while app PID, port, token and appInstanceId change. Subsequent client calls
+  rediscover only the pinned run; `page.reconnect()` or `page.waitForRenderer()`
+  can explicitly wait through replacement. An interrupted command remains an
+  unknown outcome. Refuse foreign session/workspace/instance discovery.
+- Ordinary full-page refresh: native documentEpoch changes without counting a
+  renderer crash. Wait for documentLoading to clear and take a new snapshot;
+  refs have `d<documentId>:g<generation>e<element>` scope and cannot cross documents.
+  Existing legacy launches need one controlled relaunch for managed identity.
+  `launch --no-watch` is an opt-in for stable Rust debugging; frontend reloads
+  remain controlled by the frontend server.
 - Repeated `webview_eval_timeout` with `awaitingLoad: false` and an unchanged
   generation: the renderer is alive but not answering (a JS spin or a
   suspended hidden webview). Sample the WebContent process before killing it;

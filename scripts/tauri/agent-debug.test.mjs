@@ -15,6 +15,7 @@ import {
   parseEndpoint,
   RENDERER_RESTART_CODES,
   request,
+  reconcileDebugSession,
   tauriDevArgs,
 } from "./agent-debug.mjs"
 
@@ -145,7 +146,7 @@ test("CLI failures keep bridge codes and flag renderer restarts", () => {
   assert.equal(payload.window, "main")
   assert.equal(payload.rendererGeneration, 2)
   assert.equal(payload.rendererRestarted, true)
-  assert.match(payload.hint, /snapshot/)
+  assert.match(payload.hint, /inspect the outcome before retrying/)
 
   const timeout = Object.assign(new Error("timed out"), { code: "webview_eval_timeout" })
   assert.deepEqual(cliErrorPayload(timeout), {
@@ -155,4 +156,136 @@ test("CLI failures keep bridge codes and flag renderer restarts", () => {
   })
   assert.deepEqual(cliErrorPayload(new Error("plain")), { ok: false, error: "plain" })
   assert.equal(isRendererRestartError(timeout), false)
+})
+
+test("request uses the supplied remaining budget instead of the fixed transport cap", async () => {
+  const endpoint = { baseUrl: "http://127.0.0.1:4317", devToken: "a".repeat(64) }
+  await assert.rejects(
+    request("/api/dev/agent/health", {
+      endpoint,
+      timeout: 1,
+      fetchImpl: async (_url, init) => {
+        assert.equal(init.redirect, "error")
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        if (init.signal.aborted) throw init.signal.reason
+        return new Response(JSON.stringify({ ok: true }))
+      },
+    }),
+    { name: "TimeoutError" }
+  )
+  assert.deepEqual(
+    await request("/api/dev/agent/health", {
+      endpoint,
+      timeout: 30_000,
+      fetchImpl: async () => new Response(JSON.stringify({ ok: true })),
+    }),
+    { ok: true }
+  )
+})
+
+test("managed launch identity and no-watch mode survive child rebuilds", () => {
+  const session = { sessionId: "managed-run", endpointFile: "/repo/.cache/run/endpoint.json" }
+  const environment = agentDebugEnvironment({}, "/repo", session)
+  assert.equal(environment.COGNIA_AGENT_DEBUG_SESSION_ID, session.sessionId)
+  assert.equal(environment.COGNIA_AGENT_DEBUG_WORKSPACE, "/repo")
+  assert.equal(environment.COGNIA_AGENT_DEBUG_ENDPOINT_FILE, session.endpointFile)
+  assert.equal(tauriDevArgs({ "no-watch": true }).at(-1), "--no-watch")
+  assert.deepEqual(parseArgs(["launch", "--no-watch"]).options, { "no-watch": true })
+})
+
+test("managed ownership accepts a rebuilt app with a new PID and instance", () => {
+  const session = {
+    pid: 100,
+    healthPid: 101,
+    appInstanceId: "old",
+    sessionId: "run-a",
+    workspace: "/repo",
+  }
+  const debugSession = { sessionId: "run-a", workspace: "/repo", pid: 202, appInstanceId: "new" }
+  const updated = reconcileDebugSession(
+    session,
+    { agentDebug: true, pid: 202, debugSession },
+    { debugSession }
+  )
+  assert.equal(updated.healthPid, 202)
+  assert.equal(updated.appInstanceId, "new")
+  assert.equal(updated.pid, 100)
+  assert.equal(session.healthPid, 101)
+})
+
+test("managed ownership rejects foreign runs, workspaces and discovery/process disagreement", () => {
+  const session = { sessionId: "run-a", workspace: "/repo" }
+  const identity = { sessionId: "run-a", workspace: "/repo", pid: 202, appInstanceId: "new" }
+  assert.throws(
+    () =>
+      reconcileDebugSession(
+        session,
+        { agentDebug: true, pid: 202, debugSession: identity },
+        { debugSession: identity },
+        "/other"
+      ),
+    /ownership/
+  )
+  for (const changed of [
+    { sessionId: "run-b" },
+    { workspace: "/other" },
+    { pid: 303 },
+    { appInstanceId: "other" },
+  ]) {
+    assert.throws(
+      () =>
+        reconcileDebugSession(
+          session,
+          { agentDebug: true, pid: 202, debugSession: identity },
+          { debugSession: { ...identity, ...changed } }
+        ),
+      /ownership/
+    )
+    assert.throws(
+      () =>
+        reconcileDebugSession(
+          session,
+          { agentDebug: true, pid: 202, debugSession: { ...identity, ...changed } },
+          { debugSession: identity }
+        ),
+      /ownership/
+    )
+  }
+  assert.throws(
+    () =>
+      reconcileDebugSession(
+        session,
+        { agentDebug: false, pid: 202, debugSession: identity },
+        { debugSession: identity }
+      ),
+    /agent-debug/
+  )
+})
+
+test("legacy sessions retain the exact PID requirement", () => {
+  const session = { healthPid: 101 }
+  assert.equal(reconcileDebugSession(session, { agentDebug: true, pid: 101 }, {}), session)
+  assert.throws(
+    () => reconcileDebugSession(session, { agentDebug: true, pid: 202 }, {}),
+    /relaunch once/
+  )
+})
+
+test("CLI errors preserve document epochs and uncertain non-retryable outcomes", () => {
+  const error = Object.assign(new Error("document replaced"), {
+    code: "webview_document_replaced",
+    window: "main",
+    documentEpoch: 2,
+    retryable: false,
+    dispatchState: "unknown",
+  })
+  assert.deepEqual(cliErrorPayload(error), {
+    ok: false,
+    error: "document replaced",
+    code: "webview_document_replaced",
+    window: "main",
+    documentEpoch: 2,
+    retryable: false,
+    dispatchState: "unknown",
+  })
 })

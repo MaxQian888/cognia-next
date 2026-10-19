@@ -5,6 +5,7 @@ import path from "node:path"
 
 type AgentDebugApi = {
   version: number
+  revision: number
   capabilities: Record<string, unknown>
   snapshot: (options?: {
     includeText?: boolean
@@ -16,8 +17,14 @@ type AgentDebugApi = {
   }
   act: (ref: string, action: string, args?: Record<string, unknown>) => Promise<unknown>
   inspect: (ref: string, operation: string, args?: Record<string, unknown>) => Promise<unknown>
-  locator: (request: Record<string, unknown>) => Promise<{
+  locator: (
+    request: Record<string, unknown>,
+    control?: { cancelled: boolean }
+  ) => Promise<{
     ok: boolean
+    code?: string
+    retryable?: boolean
+    dispatchState?: string
     value?: unknown
     nodes?: Array<{ name: string }>
   }>
@@ -26,8 +33,11 @@ type AgentDebugApi = {
   drainConsole: () => unknown[]
   readConsole: (
     after?: number,
-    limit?: number
+    limit?: number,
+    documentId?: string
   ) => {
+    documentId: string
+    cursorReset: boolean
     entries: Array<{ id: number; level: string; args: unknown[] }>
     nextCursor: number
     dropped: number
@@ -252,6 +262,221 @@ test("diagnostic cursors are independent and reinjection does not stack handlers
   expect(api.readConsole(firstConsumer.nextCursor).entries).toEqual([])
 })
 
+test("a cursor from an earlier document starts at the retained beginning", () => {
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const initial = api.readConsole()
+  const reset = api.readConsole(initial.nextCursor + 100, 500, "previous-document")
+
+  expect(reset.cursorReset).toBe(true)
+  expect(reset.documentId).toBe(initial.documentId)
+  expect(reset.entries).toEqual(initial.entries)
+  expect(api.readConsole(reset.nextCursor, 500, reset.documentId)).toMatchObject({
+    entries: [],
+    cursorReset: false,
+    documentId: reset.documentId,
+  })
+})
+
+test("nested locator queries apply parent filtering and indexing before descendants", async () => {
+  document.body.innerHTML = `
+    <section><h2>Account</h2><button>First</button></section>
+    <section><h2>Account</h2><button>Second</button></section>
+    <section><h2>Other</h2><button>Third</button></section>
+  `
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const query = {
+    kind: "chain",
+    root: {
+      kind: "filtered",
+      query: { steps: [{ kind: "css", selector: "section" }] },
+      filters: [{ kind: "hasText", value: "Account" }],
+      index: 1,
+    },
+    step: { kind: "role", role: "button" },
+  }
+
+  await expect(
+    api.locator({ query, operation: "inspect", name: "textContent" })
+  ).resolves.toMatchObject({ ok: true, value: "Second" })
+  await expect(
+    api.locator({
+      query: { ...query, root: { ...query.root, index: -1 } },
+      operation: "inspect",
+      name: "textContent",
+    })
+  ).resolves.toMatchObject({ ok: true, value: "Second" })
+})
+
+test("fills a same-origin iframe textarea through the locator action", async () => {
+  document.body.innerHTML = "<iframe></iframe>"
+  const frame = document.querySelector("iframe")!
+  frame.contentDocument!.body.innerHTML = '<textarea id="frame-text"></textarea>'
+  const textarea = frame.contentDocument!.querySelector("textarea")!
+  const inputs: Event[] = []
+  textarea.addEventListener("input", (event) => inputs.push(event))
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+
+  await expect(
+    api.locator({
+      query: { steps: [{ kind: "css", selector: "#frame-text" }] },
+      operation: "action",
+      name: "fill",
+      args: { value: "Frame content" },
+      requirements: { editable: true },
+    })
+  ).resolves.toMatchObject({ ok: true })
+  expect(textarea.value).toBe("Frame content")
+  expect(inputs).toHaveLength(1)
+})
+
+test("clicks a shadow-root button after descending the document hit target", async () => {
+  document.body.innerHTML = '<div id="shadow-host"></div>'
+  const host = document.getElementById("shadow-host")!
+  const root = host.attachShadow({ mode: "open" })
+  root.innerHTML = '<button id="shadow-target">Save</button>'
+  const button = root.querySelector("button")!
+  Object.defineProperty(button, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({ left: 0, top: 0, width: 10, height: 10 }),
+  })
+  const previousHitTest = Object.getOwnPropertyDescriptor(document, "elementFromPoint")
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: () => host,
+  })
+  Object.defineProperty(root, "elementFromPoint", {
+    configurable: true,
+    value: () => button,
+  })
+  const onClick = jest.fn()
+  button.addEventListener("click", onClick)
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+
+  try {
+    await expect(
+      api.locator({
+        query: { steps: [{ kind: "css", selector: "#shadow-target" }] },
+        operation: "action",
+        name: "click",
+        requirements: { visible: true, receivesEvents: true },
+      })
+    ).resolves.toMatchObject({ ok: true })
+    expect(onClick).toHaveBeenCalledTimes(1)
+  } finally {
+    if (previousHitTest) Object.defineProperty(document, "elementFromPoint", previousHitTest)
+    else Reflect.deleteProperty(document, "elementFromPoint")
+  }
+})
+
+test("collection queries preserve all matches and full text outside snapshot limits", async () => {
+  document.body.replaceChildren()
+  const fullText = `  ${"x".repeat(600)}\n  original spacing  `
+  for (let index = 0; index < 601; index += 1) {
+    const paragraph = document.createElement("p")
+    paragraph.textContent = index === 0 ? fullText : `Paragraph ${index}`
+    document.body.append(paragraph)
+  }
+  Object.defineProperty(document.querySelector("p")!, "innerText", {
+    configurable: true,
+    value: "Rendered first paragraph",
+  })
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const request = {
+    query: { steps: [{ kind: "css", selector: "p" }] },
+    operation: "query",
+    strict: false,
+  }
+
+  await expect(api.locator({ ...request, args: { collection: "count" } })).resolves.toMatchObject({
+    ok: true,
+    value: 601,
+  })
+  const text = await api.locator({ ...request, args: { collection: "allTextContents" } })
+  expect(text.value).toHaveLength(601)
+  expect((text.value as string[])[0]).toBe(fullText)
+  const innerText = await api.locator({ ...request, args: { collection: "allInnerTexts" } })
+  expect((innerText.value as string[])[0]).toBe("Rendered first paragraph")
+  await expect(api.locator(request)).resolves.toMatchObject({ count: 601, truncated: true })
+  const last = await api.locator({ ...request, index: 600 })
+  expect(last.nodes).toHaveLength(1)
+  expect(last.nodes?.[0].name).toBe("Paragraph 600")
+})
+
+test("dispatchEvent uses DOM initialization and event classes in the target realm", async () => {
+  document.body.innerHTML = "<iframe></iframe>"
+  const frameDocument = document.querySelector("iframe")!.contentDocument!
+  frameDocument.body.innerHTML =
+    '<div id="event-parent"><button id="event-target">Target</button></div>'
+  const target = frameDocument.getElementById("event-target")!
+  const parent = frameDocument.getElementById("event-parent")!
+  const mouseEvents: MouseEvent[] = []
+  const keyEvents: KeyboardEvent[] = []
+  const customEvents: CustomEvent[] = []
+  const bubbled = jest.fn()
+  target.addEventListener("click", (event) => mouseEvents.push(event as MouseEvent))
+  target.addEventListener("keydown", (event) => keyEvents.push(event as KeyboardEvent))
+  target.addEventListener("custom-event", (event) => customEvents.push(event as CustomEvent))
+  parent.addEventListener("click", bubbled)
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const dispatch = (type: string, eventInit: Record<string, unknown>) =>
+    api.locator({
+      query: { steps: [{ kind: "css", selector: "#event-target" }] },
+      operation: "action",
+      name: "dispatchEvent",
+      args: { type, eventInit },
+      options: { scroll: "none" },
+    })
+
+  await expect(
+    dispatch("click", { button: 2, clientX: 42, bubbles: false })
+  ).resolves.toMatchObject({ ok: true })
+  await expect(
+    dispatch("keydown", { key: "Enter", code: "Enter", ctrlKey: true })
+  ).resolves.toMatchObject({ ok: true })
+  await expect(dispatch("custom-event", { detail: { value: "payload" } })).resolves.toMatchObject({
+    ok: true,
+  })
+  expect(Object.getPrototypeOf(mouseEvents[0])).toBe(
+    Object.getPrototypeOf(frameDocument.createEvent("MouseEvent"))
+  )
+  expect(mouseEvents[0]).toMatchObject({ button: 2, clientX: 42, isTrusted: false })
+  expect(bubbled).not.toHaveBeenCalled()
+  expect(Object.getPrototypeOf(keyEvents[0])).toBe(
+    Object.getPrototypeOf(frameDocument.createEvent("KeyboardEvent"))
+  )
+  expect(keyEvents[0]).toMatchObject({ key: "Enter", code: "Enter", ctrlKey: true })
+  expect(customEvents[0].detail).toEqual({ value: "payload" })
+})
+
+test("a target detached while scrolling never receives the pending click", async () => {
+  document.body.innerHTML = '<button id="detaching-target">Target</button>'
+  const target = document.getElementById("detaching-target")!
+  const clicked = jest.fn()
+  target.addEventListener("click", clicked)
+  Object.defineProperty(target, "scrollIntoView", {
+    configurable: true,
+    value: () => target.remove(),
+  })
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+
+  await expect(
+    api.locator({
+      query: { steps: [{ kind: "css", selector: "#detaching-target" }] },
+      operation: "action",
+      name: "click",
+      options: { force: true },
+    })
+  ).resolves.toMatchObject({ ok: false, code: "not_attached", retryable: true })
+  expect(clicked).not.toHaveBeenCalled()
+})
+
 test("actionability blocks obscured targets while trial and force never double-fire", async () => {
   document.body.innerHTML = `<button id="target">Target</button><div id="cover"></div>`
   const target = document.getElementById("target")!
@@ -380,4 +605,355 @@ test("returns an explicit unsupported error for inaccessible frame scope", async
       error: expect.stringContaining("remote-Chromium"),
     })
   )
+})
+
+test.each(["cancel", "native-cleanup", "deadline"])(
+  "%s during a suspended stability check prevents a later click",
+  async (interruption) => {
+    document.body.innerHTML = `<button id="pending">Pending</button>`
+    installAgentDebug()
+    const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+    const core = (
+      window as unknown as {
+        __cogniaAutomationCore: { isStable: (element: Element) => Promise<boolean> }
+      }
+    ).__cogniaAutomationCore
+    const click = jest.fn()
+    document.querySelector("button")!.addEventListener("click", click)
+    let resume!: (stable: boolean) => void
+    const stable = jest.spyOn(core, "isStable").mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resume = resolve
+        })
+    )
+    const startedAt = Date.now()
+    let now = startedAt
+    const clock = jest.spyOn(Date, "now").mockImplementation(() => now)
+    const control = { cancelled: false }
+    try {
+      const requestId = `pending-${interruption}`
+      const pending = api.locator(
+        {
+          query: { steps: [{ kind: "css", selector: "#pending" }] },
+          operation: "action",
+          name: "click",
+          requestId,
+          expiresAt: startedAt + 10_000,
+          options: { scroll: "none", timeout: 10_000 },
+          requirements: { stable: true },
+        },
+        control
+      )
+      expect(resume).toBeDefined()
+      if (interruption === "cancel") await api.locator({ operation: "cancel", requestId })
+      if (interruption === "native-cleanup") control.cancelled = true
+      if (interruption === "deadline") now += 10_001
+      resume(true)
+      await expect(pending).resolves.toMatchObject({
+        ok: false,
+        code: interruption === "deadline" ? "action_timeout" : "action_cancelled",
+        retryable: false,
+        dispatchState: "not-dispatched",
+      })
+      expect(click).not.toHaveBeenCalled()
+    } finally {
+      stable.mockRestore()
+      clock.mockRestore()
+    }
+  }
+)
+
+test("cancellation arriving before its action leaves a tombstone", async () => {
+  document.body.innerHTML = `<button id="cancel-first">Pending</button>`
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const click = jest.fn()
+  document.querySelector("button")!.addEventListener("click", click)
+  await api.locator({ operation: "cancel", requestId: "cancel-before-start" })
+  await expect(
+    api.locator({
+      query: { steps: [{ kind: "css", selector: "#cancel-first" }] },
+      operation: "action",
+      name: "click",
+      requestId: "cancel-before-start",
+    })
+  ).resolves.toMatchObject({ ok: false, code: "action_cancelled", dispatchState: "not-dispatched" })
+  expect(click).not.toHaveBeenCalled()
+})
+
+test("an expired queued action cannot bypass its deadline with force", async () => {
+  document.body.innerHTML = `<button id="expired">Expired</button>`
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const click = jest.fn()
+  document.querySelector("button")!.addEventListener("click", click)
+  await expect(
+    api.locator({
+      query: { steps: [{ kind: "css", selector: "#expired" }] },
+      operation: "action",
+      name: "click",
+      expiresAt: Date.now() - 1,
+      options: { force: true },
+    })
+  ).resolves.toMatchObject({ ok: false, code: "action_timeout", dispatchState: "not-dispatched" })
+  expect(click).not.toHaveBeenCalled()
+})
+
+test("an action ID cannot dispatch twice within its retained deadline", async () => {
+  document.body.innerHTML = `<button id="once">Once</button>`
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const click = jest.fn()
+  document.querySelector("button")!.addEventListener("click", click)
+  const request = {
+    query: { steps: [{ kind: "css", selector: "#once" }] },
+    operation: "action",
+    name: "click",
+    requestId: "dispatch-once",
+  }
+  await expect(api.locator(request)).resolves.toMatchObject({
+    ok: true,
+    dispatchState: "dispatched",
+  })
+  await expect(api.locator(request)).resolves.toMatchObject({
+    ok: false,
+    code: "duplicate_action",
+    dispatchState: "dispatched",
+  })
+  expect(click).toHaveBeenCalledTimes(1)
+})
+
+test.each(["ambiguous", "hidden", "detached", "replaced", "retargeted"] as const)(
+  "a %s drag target cannot receive a drag selected from another DOM state",
+  async (condition) => {
+    document.body.innerHTML = `<button id="source">Drag</button><div class="target">Drop</div>`
+    installAgentDebug()
+    const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+    const core = (
+      window as unknown as {
+        __cogniaAutomationCore: {
+          isStable: (element: Element) => Promise<boolean>
+          receivesEvents: (element: Element) => boolean
+        }
+      }
+    ).__cogniaAutomationCore
+    const source = document.getElementById("source")!
+    const target = document.querySelector(".target") as HTMLElement
+    const dragstart = jest.fn()
+    source.addEventListener("dragstart", dragstart)
+    if (condition === "ambiguous") target.after(target.cloneNode(true))
+    if (condition === "hidden") target.style.display = "none"
+    const hit = jest.spyOn(core, "receivesEvents").mockReturnValue(true)
+    const stable = jest.spyOn(core, "isStable").mockImplementation(async () => {
+      if (condition === "detached") target.remove()
+      if (condition === "replaced") target.replaceWith(target.cloneNode(true))
+      if (condition === "retargeted") {
+        target.before(target.cloneNode(true))
+        target.classList.remove("target")
+      }
+      return true
+    })
+    try {
+      await expect(
+        api.locator({
+          query: { steps: [{ kind: "css", selector: "#source" }] },
+          operation: "action",
+          name: "dragTo",
+          args: { targetQuery: { steps: [{ kind: "css", selector: ".target" }] } },
+          options: { scroll: "none" },
+        })
+      ).resolves.toMatchObject({
+        ok: false,
+        dispatchState: "not-dispatched",
+        code: {
+          ambiguous: "strict_mode_violation",
+          hidden: "target_not_visible",
+          detached: "target_not_attached",
+          replaced: "target_not_attached",
+          retargeted: "target_changed",
+        }[condition],
+      })
+      expect(dragstart).not.toHaveBeenCalled()
+    } finally {
+      hit.mockRestore()
+      stable.mockRestore()
+    }
+  }
+)
+
+test("drag target filters and last select one endpoint inside a trial action", async () => {
+  document.body.innerHTML = `<button id="source">Drag</button><div class="target">Other</div>
+    <div class="target">Drop first</div><div class="target">Drop last</div>`
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const core = (
+    window as unknown as {
+      __cogniaAutomationCore: { receivesEvents: (element: Element) => boolean }
+    }
+  ).__cogniaAutomationCore
+  const checked: string[] = []
+  const hit = jest.spyOn(core, "receivesEvents").mockImplementation((element) => {
+    checked.push(element.textContent || "")
+    return true
+  })
+  try {
+    await expect(
+      api.locator({
+        query: { steps: [{ kind: "css", selector: "#source" }] },
+        operation: "action",
+        name: "dragTo",
+        args: {
+          targetQuery: {
+            kind: "filtered",
+            query: { steps: [{ kind: "css", selector: ".target" }] },
+            filters: [{ kind: "hasText", value: "Drop" }],
+            index: -1,
+          },
+        },
+        options: { scroll: "none", trial: true },
+      })
+    ).resolves.toMatchObject({ ok: true })
+    expect(checked.length).toBeGreaterThan(0)
+    expect(checked.every((text) => text === "Drop last")).toBe(true)
+  } finally {
+    hit.mockRestore()
+  }
+})
+
+test("strict state queries reject multiple matches but permit zero matches", async () => {
+  document.body.innerHTML = `<button>First</button><button>Second</button>`
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  await expect(
+    api.locator({
+      query: { steps: [{ kind: "css", selector: "button" }] },
+      operation: "query",
+      strict: true,
+    })
+  ).resolves.toMatchObject({ ok: false, code: "strict_mode_violation" })
+  await expect(
+    api.locator({
+      query: { steps: [{ kind: "css", selector: "missing" }] },
+      operation: "query",
+      strict: true,
+    })
+  ).resolves.toMatchObject({ ok: true, nodes: [] })
+})
+
+test("the reference action keeps legacy destination indices on the atomic drag path", async () => {
+  document.body.innerHTML = `<button id="source">Drag</button><div class="target">First</div><div class="target">Second</div>`
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const core = (
+    window as unknown as {
+      __cogniaAutomationCore: {
+        isStable: (element: Element) => Promise<boolean>
+        receivesEvents: (element: Element) => boolean
+      }
+    }
+  ).__cogniaAutomationCore
+  const stable = jest.spyOn(core, "isStable").mockResolvedValue(true)
+  const hit = jest.spyOn(core, "receivesEvents").mockReturnValue(true)
+  const previousTransfer = Object.getOwnPropertyDescriptor(window, "DataTransfer")
+  const previousDrag = Object.getOwnPropertyDescriptor(window, "DragEvent")
+  Object.defineProperty(window, "DataTransfer", { configurable: true, value: class {} })
+  Object.defineProperty(window, "DragEvent", {
+    configurable: true,
+    value: class extends MouseEvent {
+      dataTransfer: unknown
+      constructor(type: string, init: MouseEventInit & { dataTransfer?: unknown }) {
+        super(type, init)
+        this.dataTransfer = init.dataTransfer
+      }
+    },
+  })
+  const events: string[] = []
+  for (const element of document.querySelectorAll("button, .target"))
+    for (const type of ["dragstart", "dragenter", "dragover", "drop", "dragend"])
+      element.addEventListener(type, () => events.push(`${element.textContent}:${type}`))
+  try {
+    const source = api.snapshot().nodes.find((node) => node.name === "Drag")!
+    await expect(
+      api.act(source.ref, "dragTo", {
+        targetQuery: { steps: [{ kind: "css", selector: ".target" }] },
+        targetIndex: 1,
+      })
+    ).resolves.toMatchObject({ action: "dragTo", ref: source.ref })
+    expect(events).toEqual([
+      "Drag:dragstart",
+      "Second:dragenter",
+      "Second:dragover",
+      "Second:drop",
+      "Drag:dragend",
+    ])
+    events.length = 0
+    const second = document.querySelectorAll(".target")[1]
+    second.addEventListener("dragenter", () => second.remove(), { once: true })
+    await expect(
+      api.act(source.ref, "dragTo", {
+        targetQuery: { steps: [{ kind: "css", selector: ".target" }] },
+        targetIndex: 1,
+      })
+    ).rejects.toThrow("endpoint detached after dragstart")
+    expect(events).toEqual(["Drag:dragstart", "Second:dragenter", "Drag:dragend"])
+  } finally {
+    stable.mockRestore()
+    hit.mockRestore()
+    if (previousTransfer) Object.defineProperty(window, "DataTransfer", previousTransfer)
+    else Reflect.deleteProperty(window, "DataTransfer")
+    if (previousDrag) Object.defineProperty(window, "DragEvent", previousDrag)
+    else Reflect.deleteProperty(window, "DragEvent")
+  }
+})
+
+test("document departure cancels pending input and restored documents cannot alias old refs", async () => {
+  document.body.innerHTML = `<button id="incarnation">Run</button>`
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const core = (
+    window as unknown as {
+      __cogniaAutomationCore: { isStable: (element: Element) => Promise<boolean> }
+    }
+  ).__cogniaAutomationCore
+  const clicks = jest.fn()
+  document.querySelector("button")!.addEventListener("click", clicks)
+  const restored = new Event("pageshow")
+  Object.defineProperty(restored, "persisted", { value: true })
+  window.dispatchEvent(restored)
+  const oldRef = api.snapshot().nodes[0].ref
+  let resume!: (value: boolean) => void
+  const stable = jest.spyOn(core, "isStable").mockImplementation(
+    () =>
+      new Promise<boolean>((resolve) => {
+        resume = resolve
+      })
+  )
+  try {
+    const pending = api.locator({
+      query: { steps: [{ kind: "css", selector: "#incarnation" }] },
+      operation: "action",
+      name: "click",
+      requestId: "document-departure",
+      options: { scroll: "none" },
+      requirements: { stable: true },
+    })
+    window.dispatchEvent(new Event("pagehide"))
+    resume(true)
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      code: "webview_document_replaced",
+      dispatchState: "not-dispatched",
+    })
+    window.dispatchEvent(restored)
+    const newRef = api.snapshot().nodes[0].ref
+    expect(newRef).toMatch(/^d[\w-]+:g1e1$/)
+    expect(newRef.split(":")[1]).toBe(oldRef.split(":")[1])
+    expect(newRef).not.toBe(oldRef)
+    await expect(api.act(oldRef, "click")).rejects.toThrow("stale or unknown element ref")
+    expect(clicks).not.toHaveBeenCalled()
+  } finally {
+    stable.mockRestore()
+    window.dispatchEvent(restored)
+  }
 })

@@ -508,6 +508,10 @@ pub fn run() {
                 webview
                     .state::<webview_watchdog::RendererLifecycle>()
                     .record_page_load(webview.label());
+            } else if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                webview
+                    .state::<webview_watchdog::RendererLifecycle>()
+                    .record_page_load_finished(webview.label());
             }
             browser::remote_console::close_on_owner_reload(
                 webview,

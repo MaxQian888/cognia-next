@@ -4,7 +4,7 @@
 //! explicitly enabled.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use axum::{
@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, Webview, WebviewWindow};
 
 use crate::cli_bridge::SharedState;
-use crate::webview_watchdog::RendererLifecycle;
+use crate::webview_watchdog::{RendererLifecycle, RendererState};
 
 const INJECTED_SCRIPT: &str = include_str!("agent_debug/injected.js");
 const AUTOMATION_CORE_SCRIPT: &str = include_str!("../../lib/browser/automation-core.injected.js");
@@ -32,6 +32,30 @@ const EVAL_TIMEOUT: Duration = Duration::from_secs(10);
 /// commit a document before failing with `webview_renderer_restarting`.
 const RENDERER_RELOAD_WAIT: Duration = Duration::from_secs(10);
 
+/// The launcher's identity survives `tauri dev` rebuilds; this process identity
+/// does not. Keep credentials separate from this non-secret ownership record.
+pub fn session_identity() -> &'static Value {
+    static IDENTITY: OnceLock<Value> = OnceLock::new();
+    IDENTITY.get_or_init(|| {
+        debug_session_identity(
+            std::env::var("COGNIA_AGENT_DEBUG_SESSION_ID").ok(),
+            std::env::var("COGNIA_AGENT_DEBUG_WORKSPACE").ok(),
+            uuid::Uuid::new_v4().to_string(),
+            std::process::id(),
+        )
+    })
+}
+
+fn debug_session_identity(session_id: Option<String>, workspace: Option<String>, instance: String, pid: u32) -> Value {
+    json!({ "sessionId": session_id, "workspace": workspace, "appInstanceId": instance, "pid": pid })
+}
+
+pub fn managed_endpoint_file() -> Option<PathBuf> {
+    std::env::var_os("COGNIA_AGENT_DEBUG_ENDPOINT_FILE")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+}
+
 /// Why a webview evaluation failed. Renderer lifecycle failures are typed so
 /// the HTTP payload can carry the window and renderer generation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +68,8 @@ enum EvalError {
     RendererRestarted { window: String, generation: u64 },
     /// A terminated renderer's replacement has not committed a document yet.
     RendererRestarting { window: String, generation: u64 },
+    DocumentReplaced { window: String, document_epoch: u64 },
+    DocumentLoading { window: String, document_epoch: u64 },
 }
 
 impl From<String> for EvalError {
@@ -58,11 +84,18 @@ impl std::fmt::Display for EvalError {
             Self::Failed(message) => formatter.write_str(message),
             Self::RendererRestarted { window, generation } => write!(
                 formatter,
-                "webview renderer restarted: the {window} web content process terminated before answering (renderer generation {generation}); the page reloaded, so element refs and in-page state are gone — re-run the command"
+                "webview renderer restarted: the {window} web content process terminated before answering (renderer generation {generation}); inspect persisted and external effects before retrying a mutation"
             ),
             Self::RendererRestarting { window, generation } => write!(
                 formatter,
                 "webview renderer is restarting: the {window} web content process terminated (renderer generation {generation}) and its replacement has not loaded a document yet"
+            ),
+            Self::DocumentReplaced { window, document_epoch } => write!(
+                formatter,
+                "webview document replaced in {window} (document epoch {document_epoch}); inspect persisted and external effects before retrying a mutation"
+            ),
+            Self::DocumentLoading { window, document_epoch } => write!(
+                formatter, "webview document is loading in {window} (document epoch {document_epoch})"
             ),
         }
     }
@@ -86,6 +119,7 @@ struct DiagnosticQuery {
     after: u64,
     #[serde(default = "default_diagnostic_limit")]
     limit: usize,
+    document_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -146,6 +180,8 @@ struct LocatorRequest {
     requirements: Value,
     #[serde(default = "default_true")]
     strict: bool,
+    request_id: Option<String>,
+    expires_at: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,6 +190,7 @@ struct EvaluateRequest {
     #[serde(default = "default_window")]
     window: String,
     expression: String,
+    timeout: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -224,7 +261,8 @@ async fn health(State(state): State<SharedState>) -> ApiResult {
     // Health must stay fast while a renderer is being replaced: report the
     // restart through `renderers` instead of blocking on the reload.
     let helper = match app.get_webview(DEFAULT_WINDOW) {
-        Some(webview) if !lifecycle.state(DEFAULT_WINDOW).awaiting_load => eval_json(
+        Some(webview) if !lifecycle.state(DEFAULT_WINDOW).awaiting_load
+            && !lifecycle.state(DEFAULT_WINDOW).document_loading => eval_json(
             &webview,
             &lifecycle,
             "JSON.stringify(window.__cogniaAgentDebug.health())",
@@ -237,6 +275,7 @@ async fn health(State(state): State<SharedState>) -> ApiResult {
         "ok": true,
         "agentDebug": true,
         "pid": std::process::id(),
+        "debugSession": session_identity(),
         "version": app.package_info().version.to_string(),
         "platform": std::env::consts::OS,
         "helper": helper,
@@ -313,12 +352,17 @@ async fn locator(
     State(state): State<SharedState>,
     Json(request): Json<LocatorRequest>,
 ) -> ApiResult {
-    const OPERATIONS: [&str; 3] = ["query", "inspect", "action"];
+    const OPERATIONS: [&str; 4] = ["query", "inspect", "action", "cancel"];
     if !OPERATIONS.contains(&request.operation.as_str()) {
         return Err(bad_request(
             "unsupported_locator_operation",
             format!("unsupported locator operation: {}", request.operation),
         ));
+    }
+    if request.request_id.as_ref().is_some_and(|id| id.is_empty() || id.len() > 128)
+        || (request.operation == "cancel" && request.request_id.is_none())
+    {
+        return Err(bad_request("invalid_request_id", "request ID must contain 1 to 128 bytes"));
     }
     let webview = resolve_webview(&state.app_handle, &request.window)?;
     let timeout = Duration::from_millis(
@@ -327,8 +371,17 @@ async fn locator(
             .get("timeout")
             .and_then(Value::as_u64)
             .unwrap_or(10_000)
-            .clamp(1, 10_000),
+            .clamp(1, 120_000),
     );
+    // The renderer also needs an expiry for work queued while its event loop is
+    // suspended. Active waiting uses a local monotonic deadline on each side.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(internal_error)?
+        .as_millis() as u64;
+    let expires_at = now + timeout.as_millis() as u64;
+    let expires_at = request.expires_at.map_or(expires_at, |requested| requested.min(expires_at));
+    let timeout = Duration::from_millis(expires_at.saturating_sub(now).max(1));
     let payload = serde_json::to_string(&json!({
         "query": request.query,
         "index": request.index,
@@ -339,10 +392,12 @@ async fn locator(
         "options": request.options,
         "requirements": request.requirements,
         "strict": request.strict,
+        "requestId": request.request_id,
+        "expiresAt": expires_at,
     }))
     .map_err(internal_error)?;
     let script =
-        format!("(async()=>JSON.stringify(await window.__cogniaAgentDebug.locator({payload})))()");
+        format!("(async()=>JSON.stringify(await window.__cogniaAgentDebug.locator({payload},control)))()");
     let lifecycle = renderer_lifecycle(&state.app_handle);
     let value = eval_json_async_with_timeout(&webview, &lifecycle, &script, timeout)
         .await
@@ -362,7 +417,7 @@ async fn act(State(state): State<SharedState>, Json(request): Json<ActRequest>) 
     let action = serde_json::to_string(&request.action).map_err(internal_error)?;
     let args = serde_json::to_string(&request.args).map_err(internal_error)?;
     let script = format!(
-        "(async()=>{{const result=await window.__cogniaAgentDebug.act({reference},{action},{args});const snapshot=window.__cogniaAgentDebug.snapshot({{includeText:false}});return JSON.stringify({{result,snapshot}});}})()"
+        "(async()=>{{const result=await window.__cogniaAgentDebug.act({reference},{action},{args},control);const snapshot=window.__cogniaAgentDebug.snapshot({{includeText:false}});return JSON.stringify({{result,snapshot}});}})()"
     );
     let lifecycle = renderer_lifecycle(&state.app_handle);
     let value = eval_json_async(&webview, &lifecycle, &script)
@@ -395,7 +450,12 @@ async fn evaluate(
         "(async()=>{{const value=await (0,eval)({expression});return JSON.stringify(window.__cogniaAgentDebug.serialize(value));}})()"
     );
     let lifecycle = renderer_lifecycle(&state.app_handle);
-    let value = eval_json_async(&webview, &lifecycle, &script)
+    let value = eval_json_async_with_timeout(
+        &webview,
+        &lifecycle,
+        &script,
+        Duration::from_millis(request.timeout.unwrap_or(10_000).clamp(1, 120_000)),
+    )
         .await
         .map_err(eval_error)?;
     Ok(Json(
@@ -424,11 +484,7 @@ async fn read_diagnostics(
     key: &str,
 ) -> ApiResult {
     let webview = resolve_webview(app, &query.window)?;
-    let limit = query.limit.clamp(1, 500);
-    let script = format!(
-        "JSON.stringify(window.__cogniaAgentDebug.{method}({}, {limit}))",
-        query.after
-    );
+    let script = diagnostic_read_script(query, method);
     let lifecycle = renderer_lifecycle(app);
     let value = eval_json(&webview, &lifecycle, &script)
         .await
@@ -436,6 +492,19 @@ async fn read_diagnostics(
     Ok(Json(
         json!({ "ok": true, "window": query.window, (key): value }),
     ))
+}
+
+fn diagnostic_read_script(query: &DiagnosticQuery, method: &str) -> String {
+    let limit = query.limit.clamp(1, 500);
+    let document_id = query
+        .document_id
+        .as_ref()
+        .map(|value| serde_json::to_string(value).expect("document id is serializable"))
+        .unwrap_or_else(|| "undefined".into());
+    format!(
+        "JSON.stringify(window.__cogniaAgentDebug.{method}({}, {limit}, {document_id}))",
+        query.after
+    )
 }
 
 async fn reload(State(state): State<SharedState>, Json(request): Json<WindowQuery>) -> ApiResult {
@@ -590,8 +659,8 @@ async fn eval_json(
         .map(|(value, _)| value)
 }
 
-/// Evaluate `script` and return its JSON result together with the renderer
-/// generation that produced it.
+/// Evaluate `script` and return its JSON result together with the renderer and
+/// document incarnation that produced it.
 ///
 /// Rebinding after a web content process termination: the evaluation first
 /// waits for the replacement renderer to commit a document, re-injects the
@@ -603,9 +672,26 @@ async fn eval_json_on_renderer(
     webview: &Webview,
     lifecycle: &RendererLifecycle,
     script: &str,
-) -> Result<(Value, u64), EvalError> {
+) -> Result<(Value, RendererState), EvalError> {
+    eval_json_on_renderer_until(
+        webview, lifecycle, script, std::time::Instant::now() + EVAL_TIMEOUT,
+    ).await
+}
+
+async fn eval_json_on_renderer_until(
+    webview: &Webview,
+    lifecycle: &RendererLifecycle,
+    script: &str,
+    deadline: std::time::Instant,
+) -> Result<(Value, RendererState), EvalError> {
     let label = webview.label().to_string();
-    let renderer = bind_renderer(lifecycle, &label, RENDERER_RELOAD_WAIT).await?;
+    let renderer = bind_renderer(
+        lifecycle, &label,
+        deadline.saturating_duration_since(std::time::Instant::now()).min(RENDERER_RELOAD_WAIT),
+    ).await?;
+    if std::time::Instant::now() >= deadline {
+        return Err("webview evaluation timed out".to_string().into());
+    }
 
     // Re-inject the helper on every call: after a renderer restart the new
     // realm starts without it (installation is idempotent otherwise).
@@ -623,7 +709,10 @@ async fn eval_json_on_renderer(
         })
         .map_err(|error| EvalError::Failed(error.to_string()))?;
 
-    let raw = await_eval_answer(rx, lifecycle, &label, renderer.generation, EVAL_TIMEOUT).await?;
+    let raw = await_eval_answer(
+        rx, lifecycle, &label, renderer.generation, renderer.document_epoch,
+        deadline.saturating_duration_since(std::time::Instant::now()),
+    ).await?;
     let unwrapped = unwrap_js_string(raw);
     if unwrapped.len() > MAX_RESULT_BYTES {
         return Err("webview evaluation result exceeds the 2 MiB limit"
@@ -632,7 +721,7 @@ async fn eval_json_on_renderer(
     }
     let value = serde_json::from_str(&unwrapped)
         .map_err(|error| EvalError::Failed(format!("invalid JSON from webview: {error}")))?;
-    Ok((value, renderer.generation))
+    Ok((value, renderer))
 }
 
 /// Resolve the renderer an evaluation will run on. While a terminated
@@ -644,13 +733,16 @@ async fn bind_renderer(
     wait: Duration,
 ) -> Result<crate::webview_watchdog::RendererState, EvalError> {
     let mut renderer = lifecycle.state(label);
-    if renderer.awaiting_load {
+    if renderer.awaiting_load || renderer.document_loading {
         renderer = lifecycle.wait_until_loaded(label, wait).await;
         if renderer.awaiting_load {
             return Err(EvalError::RendererRestarting {
                 window: label.to_string(),
                 generation: renderer.generation,
             });
+        }
+        if renderer.document_loading {
+            return Err(EvalError::DocumentLoading { window: label.to_string(), document_epoch: renderer.document_epoch });
         }
     }
     Ok(renderer)
@@ -670,17 +762,24 @@ async fn await_eval_answer(
     lifecycle: &RendererLifecycle,
     label: &str,
     generation: u64,
+    document_epoch: u64,
     timeout: Duration,
 ) -> Result<String, EvalError> {
     let outcome: EvalAnswer = tokio::select! {
         result = tokio::time::timeout(timeout, answer) => Some(result),
         () = lifecycle.wait_for_termination(label, generation) => None,
+        () = lifecycle.wait_for_document_change(label, document_epoch) => None,
     };
+    let now = lifecycle.state(label);
+    let answered = matches!(&outcome, Some(Ok(Ok(value))) if !value.is_empty());
+    if !answered && now.generation == generation && now.document_epoch != document_epoch {
+        return Err(EvalError::DocumentReplaced { window: label.to_string(), document_epoch: now.document_epoch });
+    }
     classify_eval_answer(
         outcome,
         label,
         generation,
-        lifecycle.state(label).generation,
+        now.generation,
     )
 }
 
@@ -722,14 +821,22 @@ fn check_poll_renderer(label: &str, started_on: u64, polled_on: u64) -> Result<(
     }
 }
 
+fn check_poll_document(label: &str, started_on: RendererState, polled_on: RendererState) -> Result<(), EvalError> {
+    check_poll_renderer(label, started_on.generation, polled_on.generation)?;
+    if started_on.document_epoch != polled_on.document_epoch {
+        return Err(EvalError::DocumentReplaced { window: label.to_string(), document_epoch: polled_on.document_epoch });
+    }
+    Ok(())
+}
+
 fn unwrap_js_string(raw: String) -> String {
     serde_json::from_str::<String>(&raw).unwrap_or(raw)
 }
 
-fn async_eval_start_script(request_id: &str, expression: &str) -> String {
+fn async_eval_start_script(request_id: &str, expression: &str, expires_at: u128) -> String {
     let request_id = serde_json::to_string(request_id).expect("request id is serializable");
     format!(
-        "(()=>{{const id={request_id};const results=window.__cogniaAgentDebugAsyncResults||(window.__cogniaAgentDebugAsyncResults=Object.create(null));const now=Date.now();for(const [key,result] of Object.entries(results)){{if(now-Number(result.startedAt||now)>30000)delete results[key]}}const keys=Object.keys(results).sort((left,right)=>Number(results[left].startedAt||0)-Number(results[right].startedAt||0));while(keys.length>=100)delete results[keys.shift()];results[id]={{status:\"pending\",startedAt:now}};Promise.resolve().then(async()=>{{try{{results[id]={{status:\"fulfilled\",startedAt:now,value:await ({expression})}}}}catch(error){{results[id]={{status:\"rejected\",startedAt:now,error:String((error&&(error.stack||error.message))||error)}}}}}});return JSON.stringify({{status:\"started\"}})}})()"
+        "(()=>{{const id={request_id};const results=window.__cogniaAgentDebugAsyncResults||(window.__cogniaAgentDebugAsyncResults=Object.create(null));const now=Date.now();for(const [key,result] of Object.entries(results)){{if(now-Number(result.startedAt||now)>120000){{result.cancelled=true;result.abort?.();delete results[key]}}}}const keys=Object.keys(results).sort((left,right)=>Number(results[left].startedAt||0)-Number(results[right].startedAt||0));while(keys.length>=100){{const key=keys.shift();results[key].cancelled=true;results[key].abort?.();delete results[key]}}const control={{status:\"pending\",startedAt:now,cancelled:false}};results[id]=control;Promise.resolve().then(async()=>{{if(control.cancelled)return;if(Date.now()>={expires_at}){{Object.assign(control,{{status:\"rejected\",error:\"evaluation deadline exceeded before execution\"}});return}}try{{const value=await ({expression});if(results[id]===control&&!control.cancelled)Object.assign(control,{{status:\"fulfilled\",value}})}}catch(error){{if(results[id]===control&&!control.cancelled)Object.assign(control,{{status:\"rejected\",error:String((error&&(error.stack||error.message))||error)}})}}}});return JSON.stringify({{status:\"started\"}})}})()"
     )
 }
 
@@ -743,12 +850,14 @@ fn async_eval_poll_script(request_id: &str) -> String {
 fn async_eval_cleanup_script(request_id: &str) -> String {
     let request_id = serde_json::to_string(request_id).expect("request id is serializable");
     format!(
-        "(()=>{{const results=window.__cogniaAgentDebugAsyncResults;if(results)delete results[{request_id}];return JSON.stringify({{status:\"cleaned\"}})}})()"
+        "(()=>{{const results=window.__cogniaAgentDebugAsyncResults;const control=results&&results[{request_id}];if(control){{control.cancelled=true;control.abort?.();delete results[{request_id}]}}return JSON.stringify({{status:\"cleaned\"}})}})()"
     )
 }
 
-async fn cleanup_async_eval(webview: &Webview, lifecycle: &RendererLifecycle, request_id: &str) {
-    let _ = eval_json(webview, lifecycle, &async_eval_cleanup_script(request_id)).await;
+fn cleanup_async_eval(webview: &Webview, request_id: &str) {
+    // Queue cleanup without adding another callback timeout to the expired
+    // request. Locator actions consult the retained control before dispatch.
+    let _ = webview.eval(&async_eval_cleanup_script(request_id));
 }
 
 async fn eval_json_async(
@@ -767,41 +876,63 @@ async fn eval_json_async_with_timeout(
 ) -> Result<Value, EvalError> {
     let label = webview.label().to_string();
     let request_id = uuid::Uuid::new_v4().simple().to_string();
-    let (start, started_on) = eval_json_on_renderer(
+    let deadline = std::time::Instant::now() + timeout;
+    let expires_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| EvalError::Failed(error.to_string()))?
+        .as_millis() + timeout.as_millis();
+    let started = eval_json_on_renderer_until(
         webview,
         lifecycle,
-        &async_eval_start_script(&request_id, expression),
+        &async_eval_start_script(&request_id, expression, expires_at),
+        deadline,
     )
-    .await?;
+    .await;
+    let (start, started_on) = match started {
+        Ok(result) => result,
+        Err(error) => {
+            cleanup_async_eval(webview, &request_id);
+            return Err(error);
+        }
+    };
     if start["status"] != "started" {
         return Err("webview async evaluation did not start".to_string().into());
     }
     // The pending promise lives in the realm of generation `started_on`; any
     // later renderer cannot hold its result.
 
-    let deadline = std::time::Instant::now() + timeout;
     loop {
         if std::time::Instant::now() >= deadline {
-            cleanup_async_eval(webview, lifecycle, &request_id).await;
+            cleanup_async_eval(webview, &request_id);
             return Err("webview async evaluation timed out".to_string().into());
         }
         let result =
-            match eval_json_on_renderer(webview, lifecycle, &async_eval_poll_script(&request_id))
+            match eval_json_on_renderer_until(webview, lifecycle, &async_eval_poll_script(&request_id), deadline)
                 .await
             {
-                Ok((result, generation)) => {
-                    check_poll_renderer(&label, started_on, generation)?;
+                Ok((result, polled_on)) => {
+                    if let Err(error) = check_poll_document(&label, started_on, polled_on) {
+                        cleanup_async_eval(webview, &request_id);
+                        return Err(error);
+                    }
                     result
                 }
                 Err(error @ EvalError::RendererRestarted { .. })
-                | Err(error @ EvalError::RendererRestarting { .. }) => return Err(error),
+                | Err(error @ EvalError::RendererRestarting { .. })
+                | Err(error @ EvalError::DocumentReplaced { .. })
+                | Err(error @ EvalError::DocumentLoading { .. }) => {
+                    cleanup_async_eval(webview, &request_id);
+                    return Err(error);
+                }
                 Err(error) => {
-                    cleanup_async_eval(webview, lifecycle, &request_id).await;
+                    cleanup_async_eval(webview, &request_id);
                     return Err(error);
                 }
             };
         match result["status"].as_str() {
-            Some("pending") => tokio::time::sleep(Duration::from_millis(25)).await,
+            Some("pending") => tokio::time::sleep(
+                Duration::from_millis(25).min(deadline.saturating_duration_since(std::time::Instant::now())),
+            ).await,
             Some("fulfilled") => {
                 let raw = result["value"].as_str().ok_or_else(|| {
                     EvalError::Failed(
@@ -823,7 +954,7 @@ async fn eval_json_async_with_timeout(
                 )));
             }
             Some("missing") => {
-                check_poll_renderer(&label, started_on, lifecycle.state(&label).generation)?;
+                check_poll_document(&label, started_on, lifecycle.state(&label))?;
                 return Err("webview async evaluation result disappeared"
                     .to_string()
                     .into());
@@ -838,6 +969,14 @@ async fn eval_json_async_with_timeout(
 }
 
 fn validate_ref(reference: &str) -> Result<(), (StatusCode, Json<Value>)> {
+    let reference = if let Some((document, reference)) = reference.split_once(':') {
+        if !document.starts_with('d') || document.len() < 2 || document.len() > 129
+            || !document[1..].bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            return Err(bad_request("invalid_ref", "invalid document identity in element ref"));
+        }
+        reference
+    } else { reference };
     let Some((generation, element)) = reference
         .strip_prefix('g')
         .and_then(|value| value.split_once('e'))
@@ -986,6 +1125,16 @@ fn internal_error(error: impl std::fmt::Display) -> (StatusCode, Json<Value>) {
 fn eval_error(error: EvalError) -> (StatusCode, Json<Value>) {
     let message = error.to_string();
     let (code, window, generation) = match &error {
+        EvalError::DocumentReplaced { window, document_epoch }
+        | EvalError::DocumentLoading { window, document_epoch } => {
+            let code = if matches!(&error, EvalError::DocumentLoading { .. }) {
+                "webview_document_loading"
+            } else { "webview_document_replaced" };
+            return (StatusCode::CONFLICT, Json(json!({
+                "ok": false, "code": code, "error": message, "window": window,
+                "documentEpoch": document_epoch, "retryable": false, "dispatchState": "unknown",
+            })));
+        }
         EvalError::RendererRestarted { window, generation } => {
             ("webview_renderer_restarted", window, *generation)
         }
@@ -993,11 +1142,14 @@ fn eval_error(error: EvalError) -> (StatusCode, Json<Value>) {
             ("webview_renderer_restarting", window, *generation)
         }
         EvalError::Failed(error) => {
-            return api_error(
+            let (status, Json(mut payload)) = api_error(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 classify_eval_failure(error),
                 message,
-            )
+            );
+            payload["dispatchState"] = json!("unknown");
+            payload["retryable"] = json!(false);
+            return (status, Json(payload));
         }
     };
     (
@@ -1008,7 +1160,8 @@ fn eval_error(error: EvalError) -> (StatusCode, Json<Value>) {
             "error": message,
             "window": window,
             "rendererGeneration": generation,
-            "retryable": true,
+            "retryable": false,
+            "dispatchState": "unknown",
         })),
     )
 }
@@ -1066,6 +1219,29 @@ mod tests {
     ];
 
     #[test]
+    fn diagnostic_cursor_scripts_escape_document_identity_and_bound_the_limit() {
+        let query: DiagnosticQuery = serde_json::from_value(json!({
+            "after": 42,
+            "limit": 900,
+            "documentId": "old\"document\\identity"
+        }))
+        .unwrap();
+        assert_eq!(
+            diagnostic_read_script(&query, "readConsole"),
+            "JSON.stringify(window.__cogniaAgentDebug.readConsole(42, 500, \"old\\\"document\\\\identity\"))"
+        );
+    }
+
+    #[test]
+    fn legacy_diagnostic_reads_do_not_request_a_document_reset() {
+        let query: DiagnosticQuery = serde_json::from_value(json!({ "after": 7 })).unwrap();
+        assert_eq!(
+            diagnostic_read_script(&query, "readNetwork"),
+            "JSON.stringify(window.__cogniaAgentDebug.readNetwork(7, 500, undefined))"
+        );
+    }
+
+    #[test]
     fn route_catalog_matches_feature_router() {
         let source = include_str!("agent_debug.rs");
         let router_source = source.split("#[cfg(test)]").next().unwrap();
@@ -1080,6 +1256,9 @@ mod tests {
         assert!(validate_ref("g1e42").is_ok());
         assert!(validate_ref("e1").is_err());
         assert!(validate_ref("gxe1").is_err());
+        assert!(validate_ref("ddocument-1:g1e42").is_ok());
+        assert!(validate_ref("d:g1e42").is_err());
+        assert!(validate_ref("d../escape:g1e42").is_err());
     }
 
     #[test]
@@ -1162,7 +1341,7 @@ mod tests {
 
     #[test]
     fn async_eval_scripts_start_and_collect_promise_results() {
-        let start = async_eval_start_script("request-1", "work()");
+        let start = async_eval_start_script("request-1", "work()", 12_345);
         assert!(start.contains("Promise.resolve"));
         assert!(start.contains("await (work())"));
         assert!(start.contains("request-1"));
@@ -1176,6 +1355,27 @@ mod tests {
         let cleanup = async_eval_cleanup_script("request-1");
         assert!(cleanup.contains("delete results"));
         assert!(cleanup.contains("request-1"));
+        assert!(cleanup.contains("control.cancelled=true"));
+        assert!(cleanup.contains("control.abort?.()"));
+        assert!(start.contains("results[id]===control&&!control.cancelled"));
+        assert!(start.contains("if(control.cancelled)return"));
+        assert!(start.contains("if(Date.now()>=12345)"));
+    }
+
+    #[test]
+    fn locator_control_and_evaluation_budget_deserialize_additively() {
+        let cancel: LocatorRequest = serde_json::from_value(json!({
+            "query": {}, "operation": "cancel", "requestId": "action-1",
+        })).unwrap();
+        assert_eq!(cancel.request_id.as_deref(), Some("action-1"));
+        assert_eq!(cancel.window, "main");
+        assert!(cancel.expires_at.is_none());
+        let evaluate: EvaluateRequest = serde_json::from_value(json!({
+            "expression": "true", "timeout": 30_000,
+        })).unwrap();
+        assert_eq!(evaluate.timeout, Some(30_000));
+        let legacy: EvaluateRequest = serde_json::from_value(json!({ "expression": "true" })).unwrap();
+        assert!(legacy.timeout.is_none());
     }
 
     #[test]
@@ -1219,7 +1419,8 @@ mod tests {
         assert_eq!(restarted["code"], "webview_renderer_restarted");
         assert_eq!(restarted["window"], "main");
         assert_eq!(restarted["rendererGeneration"], 2);
-        assert_eq!(restarted["retryable"], true);
+        assert_eq!(restarted["retryable"], false);
+        assert_eq!(restarted["dispatchState"], "unknown");
         assert!(restarted["error"]
             .as_str()
             .unwrap()
@@ -1275,7 +1476,7 @@ mod tests {
         let lifecycle = RendererLifecycle::new();
         let (_keep_sender_alive, rx) = tokio::sync::oneshot::channel::<String>();
         let timed_out =
-            await_eval_answer(rx, &lifecycle, "main", 0, Duration::from_millis(20)).await;
+            await_eval_answer(rx, &lifecycle, "main", 0, 0, Duration::from_millis(20)).await;
         assert_eq!(
             timed_out,
             Err(EvalError::Failed("webview evaluation timed out".into()))
@@ -1283,7 +1484,7 @@ mod tests {
 
         let (tx, rx) = tokio::sync::oneshot::channel::<String>();
         drop(tx);
-        let closed = await_eval_answer(rx, &lifecycle, "main", 0, Duration::from_secs(5)).await;
+        let closed = await_eval_answer(rx, &lifecycle, "main", 0, 0, Duration::from_secs(5)).await;
         assert_eq!(
             closed,
             Err(EvalError::Failed(
@@ -1300,7 +1501,7 @@ mod tests {
         let pending = {
             let lifecycle = lifecycle.clone();
             tokio::spawn(async move {
-                await_eval_answer(rx, &lifecycle, "main", 0, Duration::from_secs(30)).await
+                await_eval_answer(rx, &lifecycle, "main", 0, 0, Duration::from_secs(30)).await
             })
         };
         tokio::task::yield_now().await;
@@ -1326,7 +1527,7 @@ mod tests {
         let pending = {
             let lifecycle = lifecycle.clone();
             tokio::spawn(async move {
-                await_eval_answer(rx, &lifecycle, "main", 0, Duration::from_secs(5)).await
+                await_eval_answer(rx, &lifecycle, "main", 0, 0, Duration::from_secs(5)).await
             })
         };
         tokio::task::yield_now().await;
@@ -1347,6 +1548,7 @@ mod tests {
         };
         tokio::task::yield_now().await;
         lifecycle.record_page_load("main");
+        lifecycle.record_page_load_finished("main");
 
         let renderer = binding.await.unwrap().expect("rebinds after reload");
         assert_eq!(renderer.generation, 1);
@@ -1357,7 +1559,7 @@ mod tests {
         let (tx, rx) = tokio::sync::oneshot::channel::<String>();
         tx.send("\"ok\"".into()).unwrap();
         assert_eq!(
-            await_eval_answer(rx, &lifecycle, "main", renderer.generation, EVAL_TIMEOUT).await,
+            await_eval_answer(rx, &lifecycle, "main", renderer.generation, renderer.document_epoch, EVAL_TIMEOUT).await,
             Ok("\"ok\"".to_string())
         );
     }
@@ -1392,6 +1594,65 @@ mod tests {
         let lifecycle = RendererLifecycle::default();
         assert_eq!(lifecycle.state(DEFAULT_WINDOW).generation, 0);
         assert!(!lifecycle.state(DEFAULT_WINDOW).awaiting_load);
+    }
+
+    #[test]
+    fn app_identity_changes_without_changing_the_managed_session() {
+        let first = debug_session_identity(Some("run-a".into()), Some("/repo".into()), "app-1".into(), 101);
+        let second = debug_session_identity(Some("run-a".into()), Some("/repo".into()), "app-2".into(), 202);
+        assert_eq!(first["sessionId"], second["sessionId"]);
+        assert_eq!(first["workspace"], second["workspace"]);
+        assert_ne!(first["appInstanceId"], second["appInstanceId"]);
+        assert_ne!(first["pid"], second["pid"]);
+    }
+
+    #[tokio::test]
+    async fn ordinary_reload_interrupts_a_pending_evaluation_without_a_renderer_crash() {
+        let lifecycle = RendererLifecycle::new();
+        let (_silent_sender, rx) = tokio::sync::oneshot::channel::<String>();
+        let pending = {
+            let lifecycle = lifecycle.clone();
+            tokio::spawn(async move { await_eval_answer(rx, &lifecycle, "main", 0, 0, Duration::from_secs(30)).await })
+        };
+        tokio::task::yield_now().await;
+        lifecycle.record_page_load("main");
+        let result = tokio::time::timeout(Duration::from_secs(2), pending).await.unwrap().unwrap();
+        assert_eq!(result, Err(EvalError::DocumentReplaced { window: "main".into(), document_epoch: 1 }));
+        assert_eq!(lifecycle.state("main").generation, 0);
+    }
+
+    #[tokio::test]
+    async fn another_windows_reload_does_not_interrupt_an_evaluation() {
+        let lifecycle = RendererLifecycle::new();
+        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+        lifecycle.record_page_load("settings");
+        tx.send("1".into()).unwrap();
+        assert_eq!(await_eval_answer(rx, &lifecycle, "main", 0, 0, Duration::from_secs(1)).await, Ok("1".into()));
+    }
+
+    #[test]
+    fn async_polling_cannot_collect_a_result_from_another_document_epoch() {
+        let started = RendererState::default();
+        let replaced = RendererState { document_epoch: 1, ..started };
+        assert_eq!(check_poll_document("main", started, replaced),
+            Err(EvalError::DocumentReplaced { window: "main".into(), document_epoch: 1 }));
+        let (status, Json(payload)) = eval_error(EvalError::DocumentReplaced { window: "main".into(), document_epoch: 1 });
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(payload["code"], "webview_document_replaced");
+        assert_eq!(payload["retryable"], false);
+        assert_eq!(payload["dispatchState"], "unknown");
+    }
+
+    #[tokio::test]
+    async fn binding_waits_for_a_normal_reload_to_finish() {
+        let lifecycle = RendererLifecycle::new();
+        lifecycle.record_page_load("main");
+        assert_eq!(bind_renderer(&lifecycle, "main", Duration::from_millis(1)).await,
+            Err(EvalError::DocumentLoading { window: "main".into(), document_epoch: 1 }));
+        lifecycle.record_page_load_finished("main");
+        let bound = bind_renderer(&lifecycle, "main", Duration::from_secs(1)).await.unwrap();
+        assert_eq!(bound.document_epoch, 1);
+        assert!(!bound.document_loading);
     }
 
     #[test]
