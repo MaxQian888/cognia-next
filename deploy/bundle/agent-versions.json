@@ -256,6 +256,14 @@
     {
       "id": "goose",
       "unavailable": "A system runtime: Cognia ships no distribution of Goose (its catalog entry has none), so the user installs it on the host and the bundle has no pinned copy to carry."
+    },
+    {
+      "id": "grok",
+      "unavailable": "A system runtime: Cognia ships no distribution of the Grok Build CLI (its catalog entry has none), so the user installs it on the host and the bundle has no pinned copy to carry."
+    },
+    {
+      "id": "minimax-code",
+      "unavailable": "A system runtime: Cognia ships no distribution of the MiniMax Code CLI (its catalog entry has none), so the user installs it on the host and the bundle has no pinned copy to carry."
     }
   ]
 }
