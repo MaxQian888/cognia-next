@@ -675,10 +675,12 @@ function GhostHarness({
   history,
   aiComplete,
   agentComplete,
+  onSubmit = jest.fn(),
 }: {
   history: string[]
   aiComplete?: InlineCompleteFn | null
   agentComplete?: InlineCompleteFn | null
+  onSubmit?: (text: string) => void
 }) {
   const [state, dispatch] = useReducer(tuiReducer, undefined, () => createInitialState(config, "s"))
   const seeded = React.useRef(false)
@@ -691,7 +693,7 @@ function GhostHarness({
     <Input
       input={state.input}
       dispatch={dispatch}
-      onSubmit={jest.fn()}
+      onSubmit={onSubmit}
       cwd="/work"
       listDir={listDir}
       mentionProviders={stubProviders(listDir)}
@@ -716,6 +718,30 @@ async function settleGhost(ms = 0): Promise<void> {
 
 describe("Input ghost-text autosuggest", () => {
   beforeEach(() => __resetInk())
+
+  it("retries a failed prediction with Alt+\\ and keeps acceptance editable until Enter", async () => {
+    const onSubmit = jest.fn()
+    const agentComplete = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("network failed"))
+      .mockRejectedValueOnce(new Error("network failed"))
+      .mockResolvedValueOnce("the release notes")
+    const { container } = render(
+      <GhostHarness history={[]} agentComplete={agentComplete} onSubmit={onSubmit} />
+    )
+    type("write ")
+    await settleGhost()
+    key("\\", { meta: true })
+    await settleGhost(750)
+    expect(container.textContent).toContain("prediction failed")
+    key("\\", { meta: true })
+    await settleGhost()
+    key("", { tab: true })
+    expect(onSubmit).not.toHaveBeenCalled()
+    type(" today")
+    key("", { return: true })
+    expect(onSubmit).toHaveBeenCalledWith("write the release notes today")
+  })
 
   it("shows the dim completion of a prior history entry", async () => {
     const { container } = render(<GhostHarness history={["deploy to staging"]} />)

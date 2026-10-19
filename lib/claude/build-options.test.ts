@@ -698,6 +698,46 @@ describe("resolveSendOptions — semantic tool routing exempts flow-control tool
 })
 
 describe("resolveSendOptions — Anthropic native fallbackModel activation", () => {
+  it("uses native next-prompt generation only for an opted-in interactive Claude chat", async () => {
+    const context = {
+      session: makeSession({ id: "prediction-session" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        composerAssistance: { suggestions: { followUps: true, agentFallback: true } },
+      } as unknown as AppSettings,
+      routerFusionSurface: "chat" as const,
+    }
+    const optedIn = await resolveSendOptions(context)
+    expect(optedIn.claudeAgentSdk?.promptSuggestions).toBe(true)
+    expect(
+      (await resolveSendOptions({ ...context, routerFusionSurface: undefined })).claudeAgentSdk
+        ?.promptSuggestions
+    ).not.toBe(true)
+    expect(
+      (
+        await resolveSendOptions({
+          ...context,
+          appSettings: {
+            ...context.appSettings,
+            composerAssistance: { suggestions: { followUps: false, agentFallback: true } },
+          },
+        })
+      ).claudeAgentSdk?.promptSuggestions
+    ).not.toBe(true)
+    expect(
+      (
+        await resolveSendOptions({
+          ...context,
+          appSettings: {
+            ...context.appSettings,
+            composerAssistance: { suggestions: { followUps: true } },
+          },
+        })
+      ).claudeAgentSdk?.promptSuggestions
+    ).not.toBe(true)
+  })
+
   const routingConfig = {
     strategy: "quality",
     allowPerRequestOverride: true,
@@ -3747,6 +3787,32 @@ describe("resolveSendOptions — IM core-tool safeguard", () => {
 })
 
 describe("resolveSendOptions — surface-aware built-in skills", () => {
+  it("reports injected built-ins to a host-owned resource scope in name mode", async () => {
+    const onResolvedSkillLoadScope = jest.fn()
+    await resolveSendOptions({
+      session: makeSession({ id: "s-loop-resource" }),
+      activeLoop: true,
+      skillRenderMode: "name",
+      onResolvedSkillLoadScope,
+    })
+    expect(onResolvedSkillLoadScope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedSkillIds: expect.arrayContaining(["skill_builtin_goal_loop_execution"]),
+      })
+    )
+    onResolvedSkillLoadScope.mockClear()
+    await resolveSendOptions({
+      session: makeSession({ id: "s-loop-resource-disabled" }),
+      activeLoop: true,
+      skillRenderMode: "name",
+      appSettings: { surfaceSkillsEnabled: false } as AppSettings,
+      onResolvedSkillLoadScope,
+    })
+    expect(onResolvedSkillLoadScope.mock.calls[0][0].allowedSkillIds).not.toContain(
+      "skill_builtin_goal_loop_execution"
+    )
+  })
+
   const imSession = () =>
     makeSession({
       id: "s-im",

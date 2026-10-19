@@ -1,5 +1,6 @@
 import React from "react"
-import { render } from "@testing-library/react"
+import { render, waitFor } from "@testing-library/react"
+import { bufferFromText } from "../../input/buffer"
 
 import { hasSpinnerFrame } from "../Spinner"
 
@@ -88,6 +89,24 @@ const wrap = (el: React.ReactElement) =>
   )
 
 describe("BottomRegion", () => {
+  it("passes the visible transcript and resets prediction ownership on session switches", async () => {
+    const aiComplete = jest.fn(async (_args: { prompt: string }) => "the result")
+    const state = baseState({ cells: [{ id: "b1", kind: "assistant", raw: "B final result" }] })
+    state.input = { ...state.input, buffer: bufferFromText("explain ") }
+    const props = baseProps({ state, aiComplete, suggestDebounceMs: 200 })
+    const view = wrap(<BottomRegion {...props} />)
+    await waitFor(() => expect(aiComplete).toHaveBeenCalledTimes(1))
+    expect(aiComplete.mock.calls[0][0].prompt).toContain("B final result")
+    view.rerender(
+      <ThemeProvider palette={BUILTIN_THEMES.ansi}>
+        <RenderPrefsProvider prefs={resolveRenderConfig(undefined)}>
+          <BottomRegion {...props} state={{ ...state, sessionId: "session-b" }} />
+        </RenderPrefsProvider>
+      </ThemeProvider>
+    )
+    await waitFor(() => expect(aiComplete).toHaveBeenCalledTimes(2))
+  })
+
   it("renders the composer when no overlay/find is active", () => {
     const { container } = wrap(<BottomRegion {...baseProps()} />)
     expect(container.firstElementChild).toHaveAttribute("data-flex-shrink", "0")
@@ -117,7 +136,7 @@ describe("BottomRegion", () => {
     const state = baseState({
       cells: [
         { id: "c1", kind: "user", text: "a" },
-        { id: "c2", kind: "assistant", text: "b" },
+        { id: "c2", kind: "assistant", raw: "b" },
         { id: "c3", kind: "user", text: "c" },
       ] as TuiState["cells"],
       editTarget: { index: 0 },

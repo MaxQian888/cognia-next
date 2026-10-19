@@ -395,7 +395,9 @@ async function runWithCliDb<T>(
   if (!interruptedHomes.has(key)) {
     interruptedHomes.add(key)
     await markCliRunningRowsInterrupted()
-    handle.scheduleFlush()
+    // Reconciliation writes already schedule their own table flush through
+    // the database middleware. A read-only resume must not mark every table
+    // dirty or wait for a snapshot before admitting background-task work.
   }
   return operation(handle)
 }

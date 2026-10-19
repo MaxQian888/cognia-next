@@ -5,7 +5,7 @@
  * state + callbacks) so the root render reads as named regions. The handlers are
  * threaded verbatim, so behaviour is unchanged.
  */
-import React from "react"
+import React, { useMemo } from "react"
 import { Box, Text, type DOMElement } from "ink"
 
 import { BottomStatus, type AgentTreeHit } from "../BottomStatus"
@@ -24,6 +24,8 @@ import type { StatusSegmentView } from "../../format/status-bar"
 import type { ListDir } from "../../commands/file-completer"
 import type { MentionProviders } from "../../mention/providers"
 import type { InlineCompleteFn } from "@/lib/chat/completion/inline/ai-provider"
+import type { TuiInlineCompleteFn } from "../../input/ai-complete"
+import { recentSuggestionMessages } from "../../input/inline-suggest"
 import type { TuiState, TuiAction } from "../../state/types"
 import type { Dispatch } from "react"
 import type { TranscriptCursor } from "../../hooks/useTranscriptCursor"
@@ -67,7 +69,7 @@ export interface BottomRegionProps {
   /** Local (history + slash-command) inline completion. */
   localSuggestEnabled: boolean
   /** Model-backed inline completion; null when the tier is off. */
-  aiComplete: InlineCompleteFn | null
+  aiComplete: TuiInlineCompleteFn | null
   agentComplete: InlineCompleteFn | null
   /** Debounce before querying the model tier, ms. */
   suggestDebounceMs?: number
@@ -116,6 +118,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
     footerRowRef,
     footerSegmentsRef,
   } = props
+  const recentMessages = useMemo(() => recentSuggestionMessages(state.cells), [state.cells])
 
   // Auto-expire transient toasts (severity-dependent TTL). The reducer stays
   // pure; the timing lives here with the render that shows them.
@@ -215,6 +218,8 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
             ))}
           <Input
             input={state.input}
+            sessionId={state.sessionId}
+            recentMessages={recentMessages}
             dispatch={dispatch}
             onSubmit={handleSubmit}
             onHistoryPush={handleHistoryPush}

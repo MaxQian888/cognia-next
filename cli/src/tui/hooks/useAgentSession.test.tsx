@@ -13,6 +13,8 @@ import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claud
 import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
 import type { HookRunner } from "../runtime/hook-runner"
 import type { TuiAction } from "../state/types"
+import { createCheckpointCapture, type CheckpointCapture } from "../runtime/checkpoint-capture"
+import { realCheckpointFs } from "../runtime/checkpoint-store"
 import type {
   AgentEventEnvelope,
   ResolvedAgentExecutionSpec,
@@ -85,6 +87,7 @@ function harness(
     createError?: Error
     resolvedSpec?: ResolvedAgentExecutionSpec
     canonicalEnvelopes?: AgentEventEnvelope[]
+    createCheckpoints?: (getSessionId: () => string) => CheckpointCapture
   } = {}
 ) {
   const actions: TuiAction[] = []
@@ -134,11 +137,11 @@ function harness(
     list: jest.fn(() => checkpoints),
     store: { restore },
   }
-  const createCheckpoints = jest.fn(() => capture as never)
+  const createCheckpoints = opts.createCheckpoints ?? jest.fn(() => capture as never)
   // Inject an off-disk MCP-log file sink so the `mcp_log`/`log` capture branch
   // never writes to the real `~/.cognia/logs/mcp.log` in tests.
   const appendMcpLog = jest.fn()
-  const { result: hook } = renderHook(() =>
+  const { result: hook, unmount } = renderHook(() =>
     useAgentSession({
       config,
       dispatch,
@@ -171,6 +174,7 @@ function harness(
     },
     resolveExecution: (spec: ResolvedAgentExecutionSpec) => resolveExecution?.(spec),
     api: () => hook.current,
+    unmount,
   }
 }
 
@@ -1201,6 +1205,41 @@ describe("useAgentSession", () => {
     expect(decision?.decision).toBe("deny")
   })
 
+  it.each(["close", "unmount"])("releases pending compaction on %s", async (operation) => {
+    const h = harness({ isLive: true })
+    await act(async () => {
+      await h.api().send("hello")
+    })
+    jest.useFakeTimers()
+    const setTimer = jest.spyOn(globalThis, "setTimeout")
+    const clearTimer = jest.spyOn(globalThis, "clearTimeout")
+    try {
+      let settled = false
+      const pending = h
+        .api()
+        .compact()
+        .then(() => {
+          settled = true
+        })
+      expect(jest.getTimerCount()).toBe(1)
+      const compactTimer = setTimer.mock.results.find(
+        (_, i) => setTimer.mock.calls[i][1] === 30_000
+      )?.value
+      expect(compactTimer).toBeDefined()
+      await act(async () => {
+        if (operation === "close") await h.api().close()
+        else h.unmount()
+      })
+      expect(settled).toBe(true)
+      expect(clearTimer).toHaveBeenCalledWith(compactTimer)
+      await pending
+    } finally {
+      setTimer.mockRestore()
+      clearTimer.mockRestore()
+      jest.useRealTimers()
+    }
+  })
+
   it("compact notices when there is no live session yet", async () => {
     const h = harness({ isLive: false })
     await act(async () => {
@@ -1328,6 +1367,49 @@ describe("useAgentSession", () => {
     await act(async () => {
       await h.api().close()
     })
+  })
+
+  it("restores the last completed edit after closing without listing checkpoints", async () => {
+    const home = fs.mkdtempSync(path.join(scratchHome, "checkpoint-exit-"))
+    const file = path.join(home, "last.txt")
+    fs.writeFileSync(file, "before the final turn\n")
+    const makeCapture = (getSessionId: () => string) =>
+      createCheckpointCapture({ home, getSessionId, fs: realCheckpointFs, now: Date.now })
+    const h = harness({
+      createCheckpoints: makeCapture,
+      sendImpl: async () => {
+        h.fireSidecar({
+          type: "file_pre_mutation",
+          sessionId: "s",
+          entries: [
+            {
+              path: file,
+              before: "file",
+              contentBase64: Buffer.from("before the final turn\n").toString("base64"),
+            },
+          ],
+        })
+        fs.writeFileSync(file, "after the final turn\n")
+        return result()
+      },
+    })
+    await act(async () => {
+      await h.api().send("edit last.txt")
+    })
+    // Normal exit unmounts before async backend cleanup finishes. The turn
+    // must already be durable, independently of that cleanup.
+    expect(makeCapture(() => "s").list()).toHaveLength(1)
+    await act(async () => {
+      await h.api().close()
+    })
+
+    // A new capture has none of the previous process's pending turn state.
+    const resumed = makeCapture(() => "s")
+    const checkpoints = resumed.list()
+    expect(checkpoints).toHaveLength(1)
+    expect(checkpoints[0].label).toBe("edit last.txt")
+    resumed.store.restore(checkpoints[0], { files: true, conversation: false })
+    expect(fs.readFileSync(file, "utf8")).toBe("before the final turn\n")
   })
 
   it("listCheckpoints maps the capture's checkpoints", () => {

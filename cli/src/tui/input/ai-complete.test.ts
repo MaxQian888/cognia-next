@@ -27,6 +27,38 @@ function deps(over: Partial<Parameters<typeof createTuiInlineComplete>[0]> = {})
 }
 
 describe("createTuiInlineComplete", () => {
+  it("streams client deltas through the same session-bound lazy client", async () => {
+    const stream = jest.fn(async function* () {
+      yield "the "
+      yield "result"
+    })
+    const d = deps({ buildClient: () => ({ complete: jest.fn(), stream }) as never })
+    const complete = createTuiInlineComplete(d)
+    const abortSignal = signal()
+    const deltas: string[] = []
+    for await (const delta of complete.stream!({
+      system: "sys",
+      prompt: "prompt",
+      signal: abortSignal,
+    })!) {
+      deltas.push(delta)
+    }
+    expect(deltas).toEqual(["the ", "result"])
+    expect(d.getSession).toHaveBeenCalledWith("sess-1")
+    expect(stream).toHaveBeenCalledWith(
+      "prompt",
+      expect.objectContaining({ system: "sys", abortSignal })
+    )
+  })
+
+  it("falls back to one-shot completion when the resolved client cannot stream", async () => {
+    const complete = createTuiInlineComplete(deps())
+    const deltas: string[] = []
+    for await (const delta of complete.stream!({ system: "s", prompt: "p", signal: signal() })!) {
+      deltas.push(delta)
+    }
+    expect(deltas).toEqual([" world"])
+  })
   it("resolves a client and returns its completion", async () => {
     const complete = createTuiInlineComplete(deps())
     await expect(complete({ system: "s", prompt: "p", signal: signal() })).resolves.toBe(" world")
@@ -74,7 +106,7 @@ describe("createTuiInlineComplete", () => {
     expect(d.getSession).toHaveBeenCalledTimes(1)
   })
 
-  it("returns null when session lookup throws", async () => {
+  it("preserves session lookup failures for the engine retry state", async () => {
     const complete = createTuiInlineComplete(
       deps({
         getSession: jest.fn(async () => {
@@ -82,10 +114,12 @@ describe("createTuiInlineComplete", () => {
         }),
       })
     )
-    await expect(complete({ system: "s", prompt: "p", signal: signal() })).resolves.toBeNull()
+    await expect(complete({ system: "s", prompt: "p", signal: signal() })).rejects.toThrow(
+      "db unreadable"
+    )
   })
 
-  it("returns null when the db cannot be opened", async () => {
+  it("preserves db failures for the engine retry state", async () => {
     const complete = createTuiInlineComplete(
       deps({
         ensureDb: jest.fn(async () => {
@@ -93,16 +127,18 @@ describe("createTuiInlineComplete", () => {
         }),
       })
     )
-    await expect(complete({ system: "s", prompt: "p", signal: signal() })).resolves.toBeNull()
+    await expect(complete({ system: "s", prompt: "p", signal: signal() })).rejects.toThrow("locked")
   })
 
-  it("degrades to null when built with no injected seams", async () => {
-    // Exercises the real `ensureCliDb` / `getSession` / `toBuildContext` /
-    // `buildRendererLlmClient` defaults. None of them can resolve a client in a
-    // unit-test environment, and the contract is that this is NORMAL — the
-    // composer must fall back to the local tier, never throw into the render.
-    const complete = createTuiInlineComplete({ sessionId: "sess-1", config })
-    await expect(complete({ system: "s", prompt: "p", signal: signal() })).resolves.toBeNull()
+  it("resolves a failed client again on retry", async () => {
+    const ensureDb = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("locked"))
+      .mockResolvedValue(undefined)
+    const complete = createTuiInlineComplete(deps({ ensureDb }))
+    await expect(complete({ system: "s", prompt: "p", signal: signal() })).rejects.toThrow("locked")
+    await expect(complete({ system: "s", prompt: "p", signal: signal() })).resolves.toBe(" world")
+    expect(ensureDb).toHaveBeenCalledTimes(2)
   })
 
   it("skips the model call when the signal aborted during resolution", async () => {
@@ -156,6 +192,7 @@ describe("lockdownCompletionOptions", () => {
     // A completion engine that could reach for Bash would go off and ANSWER the
     // draft instead of finishing the sentence.
     expect(out.allowedTools).toEqual([])
+    expect(out.toolSurface).toBe("none")
     expect(out.mcpServers).toEqual({})
     expect(out.permissionMode).toBe("bypassPermissions")
     expect(out.maxTurns).toBe(1)
@@ -215,12 +252,14 @@ describe("createTuiAgentComplete", () => {
     expect(runTurn).not.toHaveBeenCalled()
   })
 
-  it("treats a failed turn as no suggestion", async () => {
+  it("preserves failed turns so the engine can offer retry", async () => {
     const runTurn = jest.fn(async () => {
       throw new Error("no credentials")
     }) as never
     const complete = createTuiAgentComplete({ config, runTurn })
-    expect(await complete({ system: "SYS", prompt: "deploy", signal: signal() })).toBeNull()
+    await expect(complete({ system: "SYS", prompt: "deploy", signal: signal() })).rejects.toThrow(
+      "no credentials"
+    )
   })
 })
 

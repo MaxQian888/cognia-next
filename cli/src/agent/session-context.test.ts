@@ -79,6 +79,65 @@ function makeAssembler(
 }
 
 describe("createCliContextAssembler — session context", () => {
+  it("carries the resolver's injected resource scope without treating it as a user-selected skill", async () => {
+    const scope = {
+      allowedSkillIds: ["skill_builtin_workflow_authoring"],
+      explicitSkillIds: [],
+      allowDisabledSkillIds: [],
+    }
+    const assembler = makeAssembler({
+      sessionKind: "workflow-editor",
+      resolveOptions: async (ctx) => {
+        ctx.onResolvedSkillLoadScope?.(scope)
+        return { model: "m", provider: "openai" } as SendOptions
+      },
+    })
+    const session = await assembler.resolveSession()
+    expect(session.skillLoadScope).toEqual(scope)
+    expect(session.activeSkillIds).toEqual([])
+  })
+
+  it.each([true, false])(
+    "includes injected workflow resources in the advertised schema with an OCR catalog=%s",
+    async (withCatalog) => {
+      const assembler = makeAssembler({
+        sessionKind: "workflow-editor",
+        resolveSkillIds: () => (withCatalog ? ["skill_builtin_ocr_extraction"] : []),
+        resolveLoadableSkills: async () =>
+          withCatalog ? [{ id: "skill_builtin_ocr_extraction", name: "OCR" }] : [],
+        resolveOptions: async (ctx) => {
+          ctx.onResolvedSkillLoadScope?.({
+            allowedSkillIds: [
+              "skill_builtin_workflow_authoring",
+              ...(withCatalog ? ["skill_builtin_ocr_extraction"] : []),
+            ],
+            explicitSkillIds: [],
+            allowDisabledSkillIds: [],
+          })
+          return { model: "m", provider: "openai" } as SendOptions
+        },
+      })
+      const session = await assembler.resolveSession()
+      const tools = session.sendOptions.pluginTools ?? []
+      const resource = tools.find((tool) => tool.name === LOAD_SKILL_RESOURCE_TOOL_NAME)
+      expect(resource).toBeDefined()
+      const resourceSchema = resource!.jsonSchema as {
+        properties: { skill_id: { enum: string[] } }
+      }
+      expect(resourceSchema.properties.skill_id.enum).toContain("builtin:workflow-authoring")
+      expect(resourceSchema.properties.skill_id.enum).not.toContain("builtin:github-delivery")
+      const body = tools.find((tool) => tool.name === LOAD_SKILL_TOOL_NAME)
+      if (withCatalog) {
+        expect(
+          (body!.jsonSchema as { properties: { skill_id: { enum: string[] } } }).properties.skill_id
+            .enum
+        ).toEqual(["skill_builtin_ocr_extraction"])
+      } else {
+        expect(body).toBeUndefined()
+      }
+    }
+  )
+
   it("rejects failed plugin startup before resolving tools and allows a clean retry", async () => {
     let attempts = 0
     const resolveOptions = jest.fn(async () => ({ model: "claude-x" }) as SendOptions)

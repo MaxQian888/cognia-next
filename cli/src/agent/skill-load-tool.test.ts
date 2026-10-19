@@ -89,6 +89,25 @@ describe("buildLoadSkillSchema / manifest", () => {
     ).toEqual([LOAD_SKILL_TOOL_NAME, LOAD_SKILL_RESOURCE_TOOL_NAME])
   })
 
+  it("allows injected builtin resource identities without adding them to the progressive body catalog", () => {
+    const entries = buildLoadSkillManifestEntries(
+      [{ id: "skill_builtin_ocr_extraction", name: "OCR" }],
+      ["skill_builtin_workflow_authoring"]
+    )
+    const body = entries[0].jsonSchema as { properties: { skill_id: { enum: string[] } } }
+    const resource = entries[1].jsonSchema as { properties: { skill_id: { enum: string[] } } }
+    expect(body.properties.skill_id.enum).toEqual(["skill_builtin_ocr_extraction"])
+    expect(resource.properties.skill_id.enum).toEqual(
+      expect.arrayContaining([
+        "skill_builtin_ocr_extraction",
+        "builtin:ocr-extraction",
+        "skill_builtin_workflow_authoring",
+        "builtin:workflow-authoring",
+      ])
+    )
+    expect(resource.properties.skill_id.enum).not.toContain("builtin:github-delivery")
+  })
+
   it("keeps the resource id schema open when catalog metadata lookup degrades", () => {
     const resource = buildLoadSkillManifestEntries([])[1].jsonSchema as {
       properties: { skill_id: { enum?: string[] } }

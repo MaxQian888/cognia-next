@@ -674,10 +674,15 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         opts.onDatabaseError?.(session.databaseError)
       }
       const turn = await assembler.resolveTurn(prompt, session)
-      const scopedSkillIds = [...session.activeSkillIds, ...(turn.contextualSkillIds ?? [])]
+      const scopedSkillIds = [
+        ...(session.skillLoadScope?.allowedSkillIds ?? session.activeSkillIds),
+        ...(turn.contextualSkillIds ?? []),
+      ]
       if (scopedSkillIds.length > 0) {
         registerCliSkillLoadContext(sessionId, {
           allowedSkillIds: scopedSkillIds,
+          explicitSkillIds: session.skillLoadScope?.explicitSkillIds,
+          allowDisabledSkillIds: session.skillLoadScope?.allowDisabledSkillIds,
           turnId: turnIdentity.turnId,
           attemptId: turnIdentity.attemptId,
         })

@@ -15,6 +15,7 @@
 import type { Skill } from "@cognia/agent-config-types"
 import type { PluginToolManifestEntry } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import type { PluginToolExecRequest, PluginToolExecResponse } from "@/lib/claude/plugin-tool-ipc"
+import { resolveBuiltinSkillIdentity } from "@/lib/skills/built-in-catalog"
 import {
   createSkillLoadContext,
   loadSkillForSession,
@@ -75,9 +76,20 @@ export function buildLoadSkillManifestEntry(available: LoadableSkill[]): PluginT
 
 /** Build the complete read-only progressive loader surface for the CLI. */
 export function buildLoadSkillManifestEntries(
-  available: LoadableSkill[]
+  available: LoadableSkill[],
+  additionalResourceSkillIds: Iterable<string> = []
 ): PluginToolManifestEntry[] {
-  const ids = available.map((skill) => skill.id)
+  // Injected bodies are absent from the progressive catalog but their
+  // references remain readable. Advertise the same builtin aliases accepted
+  // by the scoped runtime loader so canonical ids in injected guidance fit.
+  const ids = [
+    ...new Set(
+      [...available.map((skill) => skill.id), ...additionalResourceSkillIds].flatMap((id) => {
+        const identity = resolveBuiltinSkillIdentity(id)
+        return identity ? [id, identity.storageId, identity.canonicalId] : [id]
+      })
+    ),
+  ]
   const resourceSkillIdSchema: Record<string, unknown> = { type: "string" }
   if (ids.length > 0) resourceSkillIdSchema.enum = ids
   return [

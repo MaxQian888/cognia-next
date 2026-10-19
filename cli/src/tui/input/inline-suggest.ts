@@ -35,7 +35,10 @@ import {
   createAgentCompletionProvider,
   createAiCompletionProvider,
   type InlineCompleteFn,
+  type InlineStreamFn,
 } from "@/lib/chat/completion/inline/ai-provider"
+import type { GhostMessage } from "@/lib/chat/completion/ghost-prompt"
+import type { Cell } from "../state/types"
 import type {
   InlineCommandInfo,
   InlineCompletionProvider,
@@ -45,6 +48,20 @@ import type {
 const MIN_DEBOUNCE = 200
 const MAX_DEBOUNCE = 2000
 const DEFAULT_DEBOUNCE = 500
+
+/** Only visible conversation cells are eligible; never include hidden reasoning or tool payloads. */
+export function recentSuggestionMessages(cells: readonly Cell[]): GhostMessage[] {
+  const messages: GhostMessage[] = []
+  for (let i = cells.length - 1; i >= 0 && messages.length < 6; i--) {
+    const cell = cells[i]
+    if (cell.kind !== "user" && cell.kind !== "assistant") continue
+    messages.unshift({
+      role: cell.kind,
+      text: (cell.kind === "user" ? cell.text : cell.raw).slice(-500),
+    })
+  }
+  return messages
+}
 
 const EMPTY_VIEW: InlineEngineView = {
   ghost: "",
@@ -90,6 +107,7 @@ export interface UseInlineSuggestOptions {
   localEnabled?: boolean
   /** Model completion. Omit or pass null to run local-only. */
   aiComplete?: InlineCompleteFn | null
+  aiStream?: InlineStreamFn
   /**
    * Agent-turn completion, run ONLY from {@link UseInlineSuggestResult.requestManual}.
    * Omit or pass null to leave the tier off.
@@ -98,6 +116,7 @@ export interface UseInlineSuggestOptions {
   /** Debounce before querying the model, ms. Clamped [200, 2000]. */
   debounceMs?: number
   sessionId?: string
+  recentMessages?: readonly GhostMessage[]
   cwd?: string
 }
 
@@ -112,6 +131,10 @@ export interface UseInlineSuggestResult {
   index: number
   /** True while a model query is in flight. */
   pending: boolean
+  querying: boolean
+  streaming: boolean
+  completionError: boolean
+  retry: () => void
   /** True when the agent tier is registered, i.e. its key is worth advertising. */
   manualAvailable: boolean
   /** True while the requested agent turn is running. */
@@ -133,9 +156,11 @@ export function useInlineSuggest(options: UseInlineSuggestOptions): UseInlineSug
     commands,
     localEnabled = true,
     aiComplete,
+    aiStream,
     agentComplete,
     debounceMs,
     sessionId,
+    recentMessages,
     cwd,
   } = options
 
@@ -146,11 +171,13 @@ export function useInlineSuggest(options: UseInlineSuggestOptions): UseInlineSug
   // tearing down the engine (which would drop its cache and in-flight query).
   const historyRef = useRef(history)
   const commandsRef = useRef(commands)
+  const messagesRef = useRef(recentMessages)
   // Synced after commit, never during render. Declared BEFORE the engine
   // effect so it lands first on every pass.
   useEffect(() => {
     historyRef.current = history
     commandsRef.current = commands
+    messagesRef.current = recentMessages
   })
 
   const clampedDebounce = Math.min(
@@ -158,6 +185,7 @@ export function useInlineSuggest(options: UseInlineSuggestOptions): UseInlineSug
     Math.max(MIN_DEBOUNCE, debounceMs ?? DEFAULT_DEBOUNCE)
   )
   const active = localEnabled || !!aiComplete || !!agentComplete
+  const contextKey = JSON.stringify(recentMessages ?? [])
 
   useEffect(() => {
     // Providers are built inside the effect (not a `useMemo`) so no closure
@@ -169,7 +197,8 @@ export function useInlineSuggest(options: UseInlineSuggestOptions): UseInlineSug
       providers.push(createHistoryProvider())
       providers.push(createCommandProvider())
     }
-    if (aiComplete) providers.push(createAiCompletionProvider({ complete: aiComplete }))
+    if (aiComplete)
+      providers.push(createAiCompletionProvider({ complete: aiComplete, stream: aiStream }))
     if (agentComplete) providers.push(createAgentCompletionProvider({ complete: agentComplete }))
     if (providers.length === 0) {
       engineRef.current = null
@@ -187,6 +216,7 @@ export function useInlineSuggest(options: UseInlineSuggestOptions): UseInlineSug
           typeof commandsRef.current === "function" ? commandsRef.current() : commandsRef.current,
         surface: "tui",
         sessionId,
+        recentMessages: messagesRef.current,
         cwd,
       }),
       onChange: () => setView(engineRef.current?.getView() ?? EMPTY_VIEW),
@@ -197,7 +227,16 @@ export function useInlineSuggest(options: UseInlineSuggestOptions): UseInlineSug
       engineRef.current = null
       setView(EMPTY_VIEW)
     }
-  }, [localEnabled, aiComplete, agentComplete, clampedDebounce, sessionId, cwd])
+  }, [
+    localEnabled,
+    aiComplete,
+    aiStream,
+    agentComplete,
+    clampedDebounce,
+    sessionId,
+    cwd,
+    contextKey,
+  ])
 
   // Derived, not stored: with both tiers off there is no engine to clear the
   // view, and resetting it from an effect would be a cascading render.
@@ -207,13 +246,25 @@ export function useInlineSuggest(options: UseInlineSuggestOptions): UseInlineSug
   // only the latest feed is ever queried, so feeding on every render is safe.
   useEffect(() => {
     engineRef.current?.feed(text, { suppress })
-  }, [text, suppress])
+  }, [
+    text,
+    suppress,
+    localEnabled,
+    aiComplete,
+    aiStream,
+    agentComplete,
+    clampedDebounce,
+    sessionId,
+    cwd,
+    contextKey,
+  ])
 
   const accept = useCallback((): string | null => engineRef.current?.accept() ?? null, [])
   const cycleNext = useCallback(() => engineRef.current?.cycleNext(), [])
   const cyclePrev = useCallback(() => engineRef.current?.cyclePrev(), [])
   const dismiss = useCallback(() => engineRef.current?.dismiss(), [])
   const requestManual = useCallback(() => engineRef.current?.requestManual(), [])
+  const retry = useCallback(() => engineRef.current?.retry(), [])
 
   return {
     manualAvailable: view.manualAvailable,
@@ -224,6 +275,10 @@ export function useInlineSuggest(options: UseInlineSuggestOptions): UseInlineSug
     candidates: view.candidates,
     index: view.index,
     pending: view.pending,
+    querying: view.querying,
+    streaming: view.streaming,
+    completionError: view.completionError,
+    retry,
     accept,
     cycleNext,
     cyclePrev,

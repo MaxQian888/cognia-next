@@ -82,6 +82,8 @@ export interface RunManualCompactDeps {
   emit: (event: Extract<CaptureStreamEvent, { type: "compact" }>) => void
   /** Surface a transient status line (start / timeout / error). */
   onNotice: (message: string) => void
+  /** Stop waiting when the owning session is closed or replaced. */
+  signal?: AbortSignal
   /** How long to wait for the boundary before giving up. Default 30s. */
   timeoutMs?: number
   /** Injectable timers (tests pass fakes; defaults to global timers). */
@@ -101,11 +103,13 @@ export function runManualCompact(deps: RunManualCompactDeps): Promise<void> {
     compact,
     emit,
     onNotice,
+    signal,
     timeoutMs = 30_000,
     setTimer = (fn, ms) => setTimeout(fn, ms),
     clearTimer = (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
   } = deps
 
+  if (signal?.aborted) return Promise.resolve()
   onNotice(focus ? `Compacting context (focus: ${focus})…` : "Compacting context…")
 
   return new Promise<void>((resolve) => {
@@ -116,12 +120,15 @@ export function runManualCompact(deps: RunManualCompactDeps): Promise<void> {
     const finish = () => {
       if (settled) return
       settled = true
+      signal?.removeEventListener("abort", finish)
       if (timer !== null) clearTimer(timer)
       if (unsubscribe) unsubscribe()
       resolve()
     }
 
+    signal?.addEventListener("abort", finish, { once: true })
     unsubscribe = subscribe((payload) => {
+      if (settled) return
       const env = payload as SidecarEnvelope | null
       if (!env || env.type !== "event" || env.sessionId !== sessionId) return
       const boundary = compactBoundaryFromInner(env.event)
@@ -138,6 +145,11 @@ export function runManualCompact(deps: RunManualCompactDeps): Promise<void> {
       onNotice(outcome.message)
       finish()
     })
+    // An injected/event-replaying subscriber may settle synchronously.
+    if (settled) {
+      unsubscribe()
+      return
+    }
 
     // Silence means neither a boundary nor an outcome arrived in time — not
     // that one is queued. Only a running turn defers a compaction, and the
@@ -152,6 +164,7 @@ export function runManualCompact(deps: RunManualCompactDeps): Promise<void> {
     // Send the control message synchronously (so callers/tests see the call
     // immediately), but handle both a synchronous throw and an async rejection.
     const onSendError = (err: unknown) => {
+      if (settled) return
       onNotice(`Compaction failed: ${err instanceof Error ? err.message : String(err)}`)
       finish()
     }

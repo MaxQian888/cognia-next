@@ -50,6 +50,7 @@ import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { buildCliSubagentToolManifest } from "./subagent-dispatch"
 import {
   buildLoadSkillManifestEntries,
+  LOAD_SKILL_RESOURCE_TOOL_NAME,
   releaseCliSkillLoadContext,
   type LoadableSkill,
 } from "./skill-load-tool"
@@ -98,6 +99,8 @@ export interface ResolvedCliSessionContext {
   subagentToolEnabled: boolean
   /** Skill ids that resolved into the prompt (empty for plain chat). */
   activeSkillIds: string[]
+  /** Actual shared-resolver delivery, including injected surface built-ins. */
+  skillLoadScope?: Parameters<NonNullable<BuildOptionsContext["onResolvedSkillLoadScope"]>>[0]
   /** Capability-valid contextual built-ins available for per-turn discovery. */
   contextualSkills: Array<LoadableSkill & { intents: string[] }>
   /** Set when the CLI-local db refused to open with an unsafe snapshot. */
@@ -318,6 +321,10 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
       now: now(),
     })
     ctx.onResolvedExecutionSpec = params.onResolvedExecutionSpec
+    let skillLoadScope: ResolvedCliSessionContext["skillLoadScope"]
+    ctx.onResolvedSkillLoadScope = (scope) => {
+      skillLoadScope = scope
+    }
     ctx.compositionSelection = params.compositionSelection
     const sendOptions = withCliDisabledMcpTools(
       withCliAutoApprovedTools(await resolveOptions(ctx), resolveApprovedTools()),
@@ -384,16 +391,23 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
     }
     // Name-only skill loading (progressive disclosure): the prompt carries only
     // the catalog, so the model needs `load_skill` to pull a body on demand.
-    if (skillLoadMode === "name" && (ephemeralSkillIds.length > 0 || contextualSkills.length > 0)) {
-      const explicitLoadable = await resolveLoadableSkills(ephemeralSkillIds).catch(
-        (): LoadableSkill[] => []
-      )
+    const hasProgressiveCatalog =
+      skillLoadMode === "name" && (ephemeralSkillIds.length > 0 || contextualSkills.length > 0)
+    const resourceSkillIds = skillLoadScope?.allowedSkillIds ?? []
+    if (hasProgressiveCatalog || resourceSkillIds.length > 0) {
+      const explicitLoadable = hasProgressiveCatalog
+        ? await resolveLoadableSkills(ephemeralSkillIds).catch((): LoadableSkill[] => [])
+        : []
       const loadable = [...explicitLoadable, ...contextualSkills].filter(
         (skill, index, all) => all.findIndex((candidate) => candidate.id === skill.id) === index
       )
+      const loaders = buildLoadSkillManifestEntries(loadable, resourceSkillIds).filter(
+        (tool) => hasProgressiveCatalog || tool.name === LOAD_SKILL_RESOURCE_TOOL_NAME
+      )
+      const loaderNames = new Set(loaders.map((tool) => tool.name))
       sendOptions.pluginTools = [
-        ...(sendOptions.pluginTools ?? []),
-        ...buildLoadSkillManifestEntries(loadable),
+        ...(sendOptions.pluginTools ?? []).filter((tool) => !loaderNames.has(tool.name)),
+        ...loaders,
       ]
     } else {
       releaseCliSkillLoadContext(sessionId)
@@ -408,6 +422,7 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
       agents,
       subagentToolEnabled,
       activeSkillIds: ephemeralSkillIds,
+      skillLoadScope,
       contextualSkills,
       databaseError,
       contextVersion: hashContextVersion({

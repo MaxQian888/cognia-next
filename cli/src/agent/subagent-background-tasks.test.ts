@@ -12,7 +12,7 @@ jest.mock("@/lib/db/seed", () => ({
 }))
 
 import { __resetDbForTesting, getDb, type BackgroundTaskJournalRow } from "@/lib/db/schema"
-import { __resetCliDbForTesting } from "../db/bootstrap"
+import { __resetCliDbForTesting, ensureCliDb } from "../db/bootstrap"
 import {
   __clearAllCliBackgroundRunsForTesting,
   __disposeCliBackgroundJournalForTesting,
@@ -217,6 +217,12 @@ describe("CLI background subagent tasks", () => {
     await expect(getDb().backgroundTasks.get("stale")).resolves.toMatchObject({
       status: "interrupted",
     })
+    await (await ensureCliDb({ home })).flush()
+    const tables = path.join(home, "db.json.tables")
+    const journal = fs.readdirSync(tables).find((name) => name.endsWith("--backgroundTasks.json"))!
+    expect(JSON.parse(fs.readFileSync(path.join(tables, journal), "utf8"))).toContainEqual(
+      expect.objectContaining({ runId: "stale", status: "interrupted" })
+    )
   })
 
   it("counts interrupted history only for the current chat session", async () => {
@@ -228,6 +234,24 @@ describe("CLI background subagent tasks", () => {
     ])
 
     await expect(countInterruptedCliBackgroundRuns({ home, owner: "session-a" })).resolves.toBe(1)
+  })
+
+  it("does not rewrite unrelated tables when reconciling an empty background journal on resume", async () => {
+    const home = makeHome()
+    const handle = await ensureCliDb({ home })
+    await handle.flush()
+    const tables = path.join(home, "db.json.tables")
+    const file = path.join(
+      tables,
+      fs.readdirSync(tables).find((name) => name.endsWith("--memories.json"))!
+    )
+    fs.utimesSync(file, new Date(1000), new Date(1000))
+
+    await expect(countInterruptedCliBackgroundRuns({ home })).resolves.toBe(0)
+    await handle.flush()
+
+    expect(fs.statSync(file).mtimeMs).toBe(1000)
+    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual([])
   })
 
   it("supports live runs without an explicit CLI home", async () => {

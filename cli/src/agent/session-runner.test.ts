@@ -29,6 +29,7 @@ import { DISPATCH_AGENT_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-too
 import type { AgentSummary } from "./discover-agents"
 import { CliDbSnapshotError } from "../db/bootstrap"
 import { readToolHostStatus } from "./tool-host/status"
+import { loadSkillResourceForSession } from "@/lib/skills/runtime-loader"
 
 const subagent = (id: string): AgentSummary => ({
   id,
@@ -1223,6 +1224,96 @@ describe("createAgentSession", () => {
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
     const sendOptions = capture.mock.calls[0][2] as SendOptions
     expect(sendOptions.pluginTools?.some((t) => t.name === "load_skill")).toBe(true)
+  })
+
+  it("keeps injected workflow resources in the current turn scope and releases them afterwards", async () => {
+    const scope = {
+      sessionId: "workflow:wf_resources",
+      turnId: "workflow:wf_resources:t0",
+      attemptId: "workflow:wf_resources:t0:a0",
+    }
+    const resourceDeps = {
+      listResources: async () => [
+        {
+          id: "resource",
+          skillId: "builtin-workflow-authoring",
+          path: "references/node-types.md",
+          kind: "reference" as const,
+          name: "Node types",
+          content: "node reference",
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+      recordUsage: async () => undefined,
+    }
+    const capture = jest.fn(async () => {
+      await expect(
+        loadSkillResourceForSession(
+          scope,
+          "builtin:workflow-authoring",
+          "references/node-types.md",
+          0,
+          100,
+          resourceDeps
+        )
+      ).resolves.toMatchObject({ ok: true, content: "node reference" })
+      await expect(
+        loadSkillResourceForSession(
+          scope,
+          "builtin:ocr",
+          "references/node-types.md",
+          0,
+          100,
+          resourceDeps
+        )
+      ).resolves.toMatchObject({ ok: false, code: "out_of_scope" })
+      await expect(
+        loadSkillResourceForSession(
+          { ...scope, attemptId: "old" },
+          "builtin:workflow-authoring",
+          "references/node-types.md",
+          0,
+          100,
+          resourceDeps
+        )
+      ).resolves.toMatchObject({ ok: false, code: "stale_context" })
+      return result("ok")
+    })
+    const session = createAgentSession({
+      config: cfg(),
+      sessionId: scope.sessionId,
+      sessionKind: "workflow-editor",
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({ transport: {}, shutdown: jest.fn() }),
+      resolveOptions: async (ctx) => {
+        ctx.onResolvedSkillLoadScope?.({
+          allowedSkillIds: ["builtin:workflow-authoring"],
+          explicitSkillIds: [],
+          allowDisabledSkillIds: [],
+        })
+        return { model: "m", provider: "openai" } as SendOptions
+      },
+      capture,
+      resolveSkillIds: () => [],
+      ensureDb: async () => undefined,
+      resolveAgents: async () => [],
+      loadPluginRuntime: async () => undefined,
+    })
+    await session.send("Read the workflow reference", { gate: createPermissionGate({ yes: true }) })
+    expect(capture).toHaveBeenCalledTimes(1)
+    await expect(
+      loadSkillResourceForSession(
+        scope,
+        "builtin:workflow-authoring",
+        "references/node-types.md",
+        0,
+        100,
+        resourceDeps
+      )
+    ).resolves.toMatchObject({ ok: false, code: "missing_context" })
+    await session.close()
   })
 
   it("does NOT surface load_skill in full mode", async () => {

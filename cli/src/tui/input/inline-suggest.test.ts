@@ -1,7 +1,11 @@
 /** @jest-environment jsdom */
 import { act, renderHook, waitFor } from "@testing-library/react"
 
-import { useInlineSuggest, type UseInlineSuggestOptions } from "./inline-suggest"
+import {
+  recentSuggestionMessages,
+  useInlineSuggest,
+  type UseInlineSuggestOptions,
+} from "./inline-suggest"
 import type { InlineCommandInfo } from "@/lib/chat/completion/inline/types"
 
 /**
@@ -135,6 +139,86 @@ describe("useInlineSuggest — local tier", () => {
 })
 
 describe("useInlineSuggest — model tier", () => {
+  it("renders streaming deltas and reports when the prediction finishes", async () => {
+    let finish!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const aiComplete = jest.fn(async () => "unused")
+    const aiStream = async function* () {
+      yield "the streamed"
+      await blocked
+      yield " result"
+    }
+    const { result } = render({ text: "explain ", aiComplete, aiStream, debounceMs: 200 })
+    await waitFor(() => expect(result.current.ghost).toBe("the streamed"))
+    expect(result.current.streaming).toBe(true)
+    act(() => finish())
+    await waitFor(() => expect(result.current.ghost).toBe("the streamed result"))
+    expect(result.current.streaming).toBe(false)
+    expect(aiComplete).not.toHaveBeenCalled()
+  })
+
+  it("uses the bound session transcript and invalidates the same draft after context changes", async () => {
+    const aiComplete = jest.fn(
+      async (_args: Parameters<NonNullable<UseInlineSuggestOptions["aiComplete"]>>[0]) =>
+        "the scoped result"
+    )
+    const initial = {
+      text: "explain ",
+      suppress: false,
+      history: [],
+      commands: COMMANDS,
+      sessionId: "session-b",
+      recentMessages: [{ role: "assistant" as const, text: "B final result" }],
+      aiComplete,
+      debounceMs: 200,
+    }
+    const { result, rerender } = render(initial)
+    await waitFor(() => expect(result.current.ghost).toBe("the scoped result"))
+    expect(aiComplete.mock.calls[0][0].prompt).toContain("B final result")
+    rerender({ ...initial, recentMessages: [{ role: "assistant", text: "B revised result" }] })
+    await waitFor(() => expect(aiComplete).toHaveBeenCalledTimes(2))
+    expect(aiComplete.mock.calls[1][0].prompt).toContain("B revised result")
+  })
+
+  it("refeeds an unchanged draft when the bound session changes", async () => {
+    const aiComplete = jest.fn(async () => "the scoped result")
+    const initial = {
+      text: "explain ",
+      suppress: false,
+      history: [],
+      commands: COMMANDS,
+      sessionId: "session-a",
+      aiComplete,
+      debounceMs: 200,
+    }
+    const { result, rerender } = render(initial)
+    await waitFor(() => expect(result.current.ghost).toBe("the scoped result"))
+    rerender({ ...initial, sessionId: "session-b" })
+    await waitFor(() => expect(aiComplete).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.ghost).toBe("the scoped result"))
+  })
+
+  it("exposes an agent failure and retries it without losing local completion", async () => {
+    const agentComplete = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("transport failed"))
+      .mockResolvedValueOnce("the recovered result")
+    const { result } = render({
+      text: "explain ",
+      history: ["explain the local result"],
+      agentComplete,
+    })
+    await waitFor(() => expect(result.current.manualAvailable).toBe(true))
+    act(() => result.current.requestManual())
+    await waitFor(() => expect(result.current.completionError).toBe(true))
+    expect(result.current.ghost).toBe("the local result")
+    act(() => result.current.retry())
+    await waitFor(() => expect(result.current.ghost).toBe("the recovered result"))
+    expect(result.current.completionError).toBe(false)
+    expect(agentComplete).toHaveBeenCalledTimes(2)
+  })
   it("adds a model continuation that outranks the history hit", async () => {
     const { result } = render({
       text: "fix ",
@@ -174,6 +258,26 @@ describe("useInlineSuggest — model tier", () => {
     })
     await waitFor(() => expect(result.current.ghost).toBe("it now"))
     expect(result.current.suggestion?.source).toBe("ai")
+  })
+})
+
+describe("recentSuggestionMessages", () => {
+  it("bounds the visible conversation and retains the end of long final replies", () => {
+    const cells = Array.from({ length: 8 }, (_, i) => ({
+      id: `${i}`,
+      kind: "user" as const,
+      text: `turn ${i}`,
+    }))
+    const messages = recentSuggestionMessages([
+      ...cells,
+      { id: "thought", kind: "thinking", text: "private reasoning", collapsed: true },
+      { id: "final", kind: "assistant", raw: `${"x".repeat(600)} final result` },
+    ])
+    expect(messages).toHaveLength(6)
+    expect(messages[0]).toEqual({ role: "user", text: "turn 3" })
+    expect(messages.at(-1)?.text).toHaveLength(500)
+    expect(messages.at(-1)?.text.endsWith(" final result")).toBe(true)
+    expect(JSON.stringify(messages)).not.toContain("private reasoning")
   })
 })
 

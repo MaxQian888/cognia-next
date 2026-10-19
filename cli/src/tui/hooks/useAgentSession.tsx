@@ -266,6 +266,7 @@ export function useAgentSession({
   const runtimeUnsubscribeRef = useRef<(() => void) | undefined>(undefined)
   const autonomousBusyRef = useRef(false)
   const pendingRuntimeEventsRef = useRef<AgentEventEnvelope[]>([])
+  const compactAbortRef = useRef<AbortController | null>(null)
   const dispatchRuntimeEnvelope = useCallback(
     (envelope: AgentEventEnvelope) => {
       for (const action of canonicalEnvelopeToActions(envelope, {
@@ -313,6 +314,7 @@ export function useAgentSession({
   )
   useEffect(
     () => () => {
+      compactAbortRef.current?.abort()
       uiUnsubscribeRef.current?.()
       runtimeUnsubscribeRef.current?.()
     },
@@ -623,6 +625,8 @@ export function useAgentSession({
   }, [attachSessionUi, captureExecutionSpec, createSession, hookRunner])
 
   const dropSession = useCallback(async () => {
+    compactAbortRef.current?.abort()
+    compactAbortRef.current = null
     // Abort any in-flight turn FIRST. /clear, /resume, fork, and model/provider/
     // thinking/agent-mode switches all funnel through here and can fire mid-turn
     // (slash commands bypass the busy gate). Killing the sidecar from under a live
@@ -790,6 +794,17 @@ export function useAgentSession({
           if (handle) void handle.reinitialize().catch(() => undefined)
         },
       })
+      // Commit while this session still owns the capture and all of the turn's
+      // pre-mutation frames have arrived. Exit unmounts the UI before async
+      // session cleanup, so waiting for the next prompt or /rewind loses the
+      // final turn's in-memory metadata.
+      if (
+        !copilotTarget &&
+        sessionRef.current === session &&
+        checkpointAuthorityRef.current?.mode !== "native"
+      ) {
+        checkpoint.list()
+      }
       abortRef.current = null
       if (!ok) {
         onLog(turnLifecycleLog(Date.now(), "interrupted", session.sessionId))
@@ -1137,21 +1152,29 @@ export function useAgentSession({
         dispatch({ type: "NOTICE", message: "Nothing to compact yet — send a message first." })
         return
       }
-      await runManualCompact({
-        sessionId: session.sessionId,
-        focus,
-        subscribe: subscribeSidecar,
-        compact: (sessionId, compactFocus) => {
-          const handle = executionHandleRef.current
-          return handle ? handle.compact(compactFocus) : requestCompact(sessionId, compactFocus)
-        },
-        // Reuse the capture→reducer mapping so the boundary renders exactly like
-        // an in-turn (auto) compaction.
-        emit: (event) => {
-          for (const action of captureEventToActions(event)) dispatch(action)
-        },
-        onNotice: (message) => dispatch({ type: "NOTICE", message }),
-      })
+      compactAbortRef.current?.abort()
+      const controller = new AbortController()
+      compactAbortRef.current = controller
+      try {
+        await runManualCompact({
+          signal: controller.signal,
+          sessionId: session.sessionId,
+          focus,
+          subscribe: subscribeSidecar,
+          compact: (sessionId, compactFocus) => {
+            const handle = executionHandleRef.current
+            return handle ? handle.compact(compactFocus) : requestCompact(sessionId, compactFocus)
+          },
+          // Reuse the capture→reducer mapping so the boundary renders exactly like
+          // an in-turn (auto) compaction.
+          emit: (event) => {
+            for (const action of captureEventToActions(event)) dispatch(action)
+          },
+          onNotice: (message) => dispatch({ type: "NOTICE", message }),
+        })
+      } finally {
+        if (compactAbortRef.current === controller) compactAbortRef.current = null
+      }
     },
     [dispatch, requestCompact, subscribeSidecar]
   )

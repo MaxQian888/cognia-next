@@ -31,7 +31,7 @@ import type { LlmClient } from "@/lib/twin/distill/llm"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
 import { resolveSendOptions, type BuildOptionsContext } from "@/lib/claude/build-options"
 import { getSession } from "@/lib/db/sessions"
-import type { InlineCompleteFn } from "@/lib/chat/completion/inline/ai-provider"
+import type { InlineCompleteFn, InlineStreamFn } from "@/lib/chat/completion/inline/ai-provider"
 
 import { runHeadlessTurn } from "../../agent/run"
 import { createPermissionGate } from "../../agent/permission-gate"
@@ -73,7 +73,9 @@ export interface TuiInlineCompleteDeps {
  * outcome — including a null outcome, so a user without credentials does not
  * re-hit Dexie on every keystroke.
  */
-export function createTuiInlineComplete(deps: TuiInlineCompleteDeps): InlineCompleteFn {
+export type TuiInlineCompleteFn = InlineCompleteFn & { stream?: InlineStreamFn }
+
+export function createTuiInlineComplete(deps: TuiInlineCompleteDeps): TuiInlineCompleteFn {
   const ensureDb = deps.ensureDb ?? (() => ensureCliDb())
   const loadSession = deps.getSession ?? getSession
   const resolveSettings =
@@ -91,21 +93,23 @@ export function createTuiInlineComplete(deps: TuiInlineCompleteDeps): InlineComp
   let clientPromise: Promise<LlmClient | null> | null = null
 
   async function resolveClient(): Promise<LlmClient | null> {
-    try {
-      await ensureDb()
-      const appSettings = resolveSettings(deps.sessionId, deps.config)
-      const session = await loadSession(deps.sessionId)
-      return buildClient(session, appSettings)
-    } catch {
-      // Unreadable db / unresolvable provider — the local tier still works.
-      return null
-    }
+    await ensureDb()
+    const appSettings = resolveSettings(deps.sessionId, deps.config)
+    const session = await loadSession(deps.sessionId)
+    return buildClient(session, appSettings)
   }
 
-  return async ({ system, prompt, signal }) => {
-    // Share one resolution across concurrent keystrokes.
-    clientPromise ??= resolveClient()
-    const client = await clientPromise
+  function getClient(): Promise<LlmClient | null> {
+    // Cache ordinary unavailability, but allow a failed resolution to recover on retry.
+    clientPromise ??= resolveClient().catch((error) => {
+      clientPromise = null
+      throw error
+    })
+    return clientPromise
+  }
+
+  const complete: TuiInlineCompleteFn = async ({ system, prompt, signal }) => {
+    const client = await getClient()
     if (!client || signal.aborted) return null
     return client.complete(prompt, {
       system,
@@ -114,6 +118,21 @@ export function createTuiInlineComplete(deps: TuiInlineCompleteDeps): InlineComp
       abortSignal: signal,
     })
   }
+  complete.stream = async function* ({ system, prompt, signal }) {
+    const client = await getClient()
+    if (!client || signal.aborted) return
+    const options = { system, temperature: 0.2, maxTokens: MAX_GHOST_TOKENS, abortSignal: signal }
+    if (client.stream) {
+      for await (const delta of client.stream(prompt, options)) {
+        if (signal.aborted) return
+        yield delta
+      }
+    } else {
+      const text = await client.complete(prompt, options)
+      if (!signal.aborted) yield text
+    }
+  }
+  return complete
 }
 
 /** Whether the model tier is switched on for this config (absent ⇒ off). */
@@ -140,6 +159,7 @@ export async function lockdownCompletionOptions(
   const opts = await resolve(ctx)
   return {
     ...opts,
+    toolSurface: "none",
     allowedTools: [],
     mcpServers: {},
     permissionMode: "bypassPermissions",
@@ -172,22 +192,17 @@ export function createTuiAgentComplete(deps: TuiAgentCompleteDeps): InlineComple
 
   return async ({ system, prompt, signal }) => {
     if (signal.aborted) return null
-    try {
-      const result = await runTurn({
-        config: deps.config,
-        // `system` fully replaces the agent's prompt: this turn is a completion
-        // engine, not the assistant answering.
-        prompt: `${system}\n\n${prompt}`,
-        gate: createPermissionGate({ yes: false }),
-        resolveOptions: (ctx: BuildOptionsContext) => lockdownCompletionOptions(ctx),
-        timeoutMs: AGENT_TURN_TIMEOUT_MS,
-        signal,
-      })
-      return result.text
-    } catch {
-      // A failed turn is "no suggestion", exactly like a missing client.
-      return null
-    }
+    const result = await runTurn({
+      config: deps.config,
+      // `system` fully replaces the agent's prompt: this turn is a completion
+      // engine, not the assistant answering.
+      prompt: `${system}\n\n${prompt}`,
+      gate: createPermissionGate({ yes: false }),
+      resolveOptions: (ctx: BuildOptionsContext) => lockdownCompletionOptions(ctx),
+      timeoutMs: AGENT_TURN_TIMEOUT_MS,
+      signal,
+    })
+    return result.text
   }
 }
 

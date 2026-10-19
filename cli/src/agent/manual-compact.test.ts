@@ -52,6 +52,68 @@ function harness(over: Partial<RunManualCompactDeps> = {}) {
 }
 
 describe("runManualCompact", () => {
+  it("does not send or subscribe when the owner is already closed", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const subscribe = jest.fn(() => jest.fn())
+    const setTimer = jest.fn()
+    const h = harness({ ...{ signal: controller.signal }, subscribe, setTimer })
+    await runManualCompact(h.deps)
+    expect(h.compact).not.toHaveBeenCalled()
+    expect(subscribe).not.toHaveBeenCalled()
+    expect(setTimer).not.toHaveBeenCalled()
+    expect(h.notices).toEqual([])
+  })
+
+  it("ignores a late control failure after cancellation", async () => {
+    const controller = new AbortController()
+    let rejectSend!: (error: Error) => void
+    const h = harness({
+      ...{ signal: controller.signal },
+      compact: () =>
+        new Promise((_, reject) => {
+          rejectSend = reject
+        }),
+    })
+    const pending = runManualCompact(h.deps)
+    controller.abort()
+    await pending
+    rejectSend(new Error("sidecar closed"))
+    await Promise.resolve()
+    expect(h.notices).toEqual(["Compacting context…"])
+    expect(h.unsub).toHaveBeenCalledTimes(1)
+  })
+
+  it("cancels the waiter and its timer when its owning session closes", async () => {
+    jest.useFakeTimers()
+    try {
+      const controller = new AbortController()
+      const h = harness({
+        ...{ signal: controller.signal },
+        setTimer: (fn, ms) => setTimeout(fn, ms),
+        clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+      })
+      let settled = false
+      const pending = runManualCompact(h.deps).then(() => {
+        settled = true
+      })
+      expect(jest.getTimerCount()).toBe(1)
+      controller.abort()
+      await Promise.resolve()
+      expect(settled).toBe(true)
+      expect(jest.getTimerCount()).toBe(0)
+      expect(h.unsub).toHaveBeenCalledTimes(1)
+      const notices = [...h.notices]
+      h.fire(boundaryEnvelope("manual", 100, 10))
+      jest.runAllTimers()
+      expect(h.emitted).toEqual([])
+      expect(h.notices).toEqual(notices)
+      await pending
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("sends the control message and resolves on the matching boundary, emitting the typed event", async () => {
     const h = harness()
     const p = runManualCompact(h.deps)

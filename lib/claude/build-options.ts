@@ -546,6 +546,12 @@ export interface BuildOptionsContext {
   onResolvedExecutionSpec?: (
     spec: import("@cognia/agent-config-types/agent-execution").ResolvedAgentExecutionSpec
   ) => void
+  /** Reports the exact resolved skill scope to hosts that bind resources per turn. */
+  onResolvedSkillLoadScope?: (scope: {
+    allowedSkillIds: string[]
+    explicitSkillIds: string[]
+    allowDisabledSkillIds: string[]
+  }) => void
   /** Override the resolving character — used by team chat per-member sends. */
   character?: Character | null
   appSettings?: AppSettings | null
@@ -5617,6 +5623,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     ...skillDelivery.explicit,
     ...skillDelivery.requestScoped,
   ]
+  ctx.onResolvedSkillLoadScope?.({
+    allowedSkillIds: [
+      ...skills.map((skill) => skill.id),
+      ...deliveredBuiltIns.map((skill) => skill.storageId),
+    ],
+    explicitSkillIds: [
+      ...explicitSkills.map((skill) => skill.id),
+      ...skillDelivery.explicit.map((skill) => skill.storageId),
+    ],
+    allowDisabledSkillIds: skillDelivery.requestScoped.map((skill) => skill.storageId),
+  })
   // Each row awaits its own body chunk. Only delivered skills are in these
   // lists, so a turn that delivers nothing loads no prose at all.
   const deliveredBuiltInRows = await Promise.all(
@@ -6030,6 +6047,21 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     if (asideBinding) {
       opts.appendSystemPrompt = sessionAsideSystemPrompt(readOnlyAside)
     }
+  }
+
+  // Native prediction reuses this turn's context. Keep chargeable background
+  // generation behind the existing Agent fallback opt-in and out of helpers.
+  if (
+    ctx.routerFusionSurface === "chat" &&
+    turnRuntime === "claude-agent-sdk" &&
+    appSettings?.composerAssistance?.suggestions?.followUps !== false &&
+    appSettings?.composerAssistance?.suggestions?.agentFallback === true &&
+    opts.permissionMode !== "plan" &&
+    opts.toolSurface !== "none" &&
+    !supportAgent &&
+    !readOnlyAside
+  ) {
+    opts.claudeAgentSdk = { version: 1, ...opts.claudeAgentSdk, promptSuggestions: true }
   }
 
   if (opts.claudeAgentSdk) {

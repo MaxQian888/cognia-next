@@ -44,6 +44,8 @@ import { buildMentionView } from "./mention-view"
 import { collapsePaste, PASTE_CHAR_THRESHOLD, type PasteResult } from "@/lib/paste-collapse"
 import { useInlineSuggest } from "../input/inline-suggest"
 import type { InlineCompleteFn } from "@/lib/chat/completion/inline/ai-provider"
+import type { TuiInlineCompleteFn } from "../input/ai-complete"
+import type { GhostMessage } from "@/lib/chat/completion/ghost-prompt"
 import type { InlineCommandInfo } from "@/lib/chat/completion/inline/types"
 import {
   enterNormalFromInsert,
@@ -221,6 +223,8 @@ function InputImpl({
   aiComplete,
   agentComplete,
   suggestDebounceMs,
+  sessionId,
+  recentMessages,
 }: {
   input: InputState
   dispatch: (action: TuiAction) => void
@@ -267,11 +271,13 @@ function InputImpl({
   /** Local (history + slash-command) inline completion. Default on. */
   localSuggestEnabled?: boolean
   /** Model-backed inline completion. Omit/null → local-only autosuggest. */
-  aiComplete?: InlineCompleteFn | null
+  aiComplete?: TuiInlineCompleteFn | null
   /** Agent-turn completion, run only on the alt+\\ request. */
   agentComplete?: InlineCompleteFn | null
   /** Debounce before querying the model tier, ms. Clamped [200, 2000]. */
   suggestDebounceMs?: number
+  sessionId?: string
+  recentMessages?: readonly GhostMessage[]
 }) {
   const t = useCliTranslations("cliUiCommon")
   const theme = useTheme()
@@ -494,9 +500,12 @@ function InputImpl({
     commands: suggestCommands,
     localEnabled: localSuggestEnabled,
     aiComplete: aiComplete ?? null,
+    aiStream: aiComplete?.stream,
     agentComplete: agentComplete ?? null,
     debounceMs: suggestDebounceMs,
     cwd,
+    sessionId,
+    recentMessages,
   })
   const suggestion = inline.ghost.length > 0 ? inline.ghost : null
   // Tell the user WHERE the ghost came from: a history hit is exact and free,
@@ -515,8 +524,12 @@ function InputImpl({
   // is no ghost to hang a badge off. Rendered independently of `suggestion`
   // for exactly that reason.
   const manualBadge = (() => {
-    if (!inline.manualAvailable || !cursorAtEnd || disabled || popupOpen) return null
-    if (inline.manualPending) return "asking the agent…"
+    if (!cursorAtEnd || disabled || popupOpen || text.includes("\n")) return null
+    if (inline.completionError) return t("predictionFailed")
+    if (inline.streaming) return t("predictionStreaming")
+    if (inline.manualPending) return t("predictionAgentPending")
+    if (inline.querying) return t("predictionQuerying")
+    if (!inline.manualAvailable) return null
     // Nothing to say once a suggestion is already showing its own badge, unless
     // the user might want a better one — which is always, so keep it short.
     return text.trim().length > 0 ? "alt+\\ agent" : null
@@ -755,8 +768,15 @@ function InputImpl({
     // exactly when it is wanted. Still gated on `cursorAtEnd` — a completion
     // only means anything at the end of the draft — and on the tier being
     // registered, so the keystroke falls through when it is switched off.
-    if (inline.manualAvailable && cursorAtEnd && !disabled && key.meta && inputCh === "\\") {
-      inline.requestManual()
+    if (
+      (inline.manualAvailable || inline.completionError) &&
+      cursorAtEnd &&
+      !disabled &&
+      key.meta &&
+      inputCh === "\\"
+    ) {
+      if (inline.completionError) inline.retry()
+      else inline.requestManual()
       return
     }
     // Inline ghost-suggestion keys, handled before normal key interpretation.
