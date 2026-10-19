@@ -35,7 +35,6 @@ import type { LiveSteerHandler } from "./bus"
 import { resolveInboxSuppression, type ResolvedBinding } from "./policy-resolve"
 import { matchDispatchRule } from "./dispatch-rules"
 import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
-import { projectImComposition } from "./composition/im-composition-selection"
 import { resolveImEffectiveConfig } from "./effective-config"
 import type {
   SendContent,
@@ -55,7 +54,7 @@ import { createDraft } from "@/lib/db/connector-drafts"
 import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
 import { resolveCharacterById } from "@/lib/db/characters"
 import { getSettings } from "@/lib/db/settings"
-import { resolveSendOptions } from "@/lib/claude/build-options"
+import type { resolveSendOptions } from "@/lib/claude/build-options"
 import { endSpan } from "@cognia/agent-trace/emitter"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { discloseTwinOutboundSegments } from "@/lib/twin/outbound-disclosure"
@@ -75,7 +74,7 @@ import { buildSteerPayload, steerBlocksOf } from "@/lib/claude/steer"
 import { deliveryTargetFromEvent } from "@/types/connectors/event"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { appendAudit } from "./audit"
-import { getBus } from "./bus"
+import type { getBus } from "./bus"
 import {
   createPlatformSession,
   findActiveSessionForConversation,
@@ -83,8 +82,7 @@ import {
   refreshPlatformSessionBinding,
 } from "./session-bindings"
 import { stampSlaDeadline } from "./sla"
-import { startTeamRunFromIM } from "./team-dispatch"
-import { startWorkflowFromIM } from "@/lib/workflow/runtime/start-from-im"
+import type { startWorkflowFromIM } from "@/lib/workflow/runtime/start-from-im"
 import { buildImPermissionCeiling } from "@/lib/connectors/im-permission-ceiling"
 import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 import { evaluateImRate } from "@/lib/connectors/im-rate/registry"
@@ -105,10 +103,6 @@ import type { ConnectorLiveSteerCoordinator } from "./live-steer"
 import { sessionExecutionRootPath } from "@/lib/workspace/session-root"
 import { resolveSessionWorkspace, sessionWorkspaceId } from "@/lib/workspace/session-workspace"
 import { isHeadlessHost } from "@/lib/platform/detect"
-import {
-  ensureSessionScratchWorkspace,
-  isSessionScratchWorkspace,
-} from "@/lib/task-workspace/managed-workspace"
 import { invalidatePersistSnapshot, stampSessionLastMessage } from "@/lib/db/messages"
 import { getAllProjects } from "@/lib/db/projects"
 import { waitForExecutionRunPresentationFreeze } from "./run-presentation/runner"
@@ -343,9 +337,12 @@ function notifyImFailure(
  * turned off). So the notice is enqueued as an ordinary reply, and the center
  * gets its record without a second IM push.
  *
- * The idempotency key is the inbound message's own, so a recovery replay of
- * the same message cannot answer it twice. Should the enqueue itself fail, the
- * proactive channel is still tried.
+ * The idempotency key names the inbound message within its conversation, so a
+ * recovery replay of the same message cannot answer it twice. The conversation
+ * is part of it because platform message ids are only unique per chat
+ * (Telegram's `message_id` restarts in every chat), and the delivery ledger
+ * would otherwise treat a second chat's notice as already sent. Should the
+ * enqueue itself fail, the proactive channel is still tried.
  */
 async function replyImFailure(
   event: NormalizedInboundEvent,
@@ -360,7 +357,9 @@ async function replyImFailure(
         conversationRef: event.conversationRef,
         deliveryTarget: deliveryTargetFromEvent(event),
         segments: [{ type: "text", text: `${notice.title}\n${notice.body}` }],
-        metadata: { idempotencyKey: `im-failure:${event.adapterId}:${event.messageId}` },
+        metadata: {
+          idempotencyKey: `im-failure:${event.adapterId}:${event.conversationKey}:${event.messageId}`,
+        },
       },
       source: "ai-run",
     })
@@ -1093,6 +1092,8 @@ async function resolveInboundSendOptions(params: {
   let scratchWorkspaceRoot: string | undefined
   const headlessConnector = isHeadlessHost() && !!session.platformBinding
   if (headlessConnector) {
+    const { ensureSessionScratchWorkspace, isSessionScratchWorkspace } =
+      await import("@/lib/task-workspace/managed-workspace")
     if (isSessionScratchWorkspace(session) || !sessionWorkspaceId(session)) {
       scratchWorkspaceRoot = await ensureSessionScratchWorkspace(session)
       const persistedSession = await getSession(session.id)
@@ -1185,6 +1186,7 @@ async function resolveInboundSendOptions(params: {
     }
   }
 
+  const { resolveSendOptions } = await import("@/lib/claude/build-options")
   const sendOptions = await resolveSendOptions({
     session,
     ...(activeProject !== undefined ? { activeProject } : {}),
@@ -1461,6 +1463,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           if (routing.teamSource === "rule") {
             await auditRuleDecision({ teamId: effectiveTeamId })
           }
+          const { startTeamRunFromIM } = await import("./team-dispatch")
           const res = await startTeamRunFromIM({
             teamId: effectiveTeamId,
             goal: event.plainText,
@@ -1630,6 +1633,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
 
           let res: Awaited<ReturnType<typeof startWorkflowFromIM>>
           try {
+            const { startWorkflowFromIM } = await import("@/lib/workflow/runtime/start-from-im")
             res = await startWorkflowFromIM({
               workflowId: effectiveWorkflowId,
               runParams,
@@ -1734,6 +1738,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // the shared helper so an ai-run and a draft prepare from identical
         // grounding. `emitTrace: true` mints the connector root span, ended on
         // the capture-error / success branches below.
+        const { projectImComposition } = await import("./composition/im-composition-selection")
         const { sendOptions, appSettings, runTitle, workspaceRoot, mutedScope, twinId } =
           await resolveInboundSendOptions({
             event,
@@ -2159,12 +2164,23 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           // require `recovery_required`. Left alone, the bus would complete
           // the job as soon as this handler returns. A deliberate PII block
           // and a user cancel are final outcomes, not interrupted work.
+          //
+          // If that write itself fails, the turn must not return normally:
+          // the bus would complete the job and the recovery entry would be
+          // lost after all. The cleanup below still runs, and the handler
+          // then rejects, which the bus never completes (it parks the job
+          // itself, and a stuck `running` row falls to lease-expiry recovery).
+          let recoveryMarkFailure: unknown
           if (!isPiiBlocked && !captureSignal.aborted) {
-            await markConnectorInboundJobRecoveryRequired(
-              routeContext.inboundJobId,
-              requireAcceptance ? "draft_prepare_capture_failed" : "ai_run_capture_failed",
-              { error: err instanceof Error ? err.message : String(err) }
-            ).catch(() => undefined)
+            try {
+              await markConnectorInboundJobRecoveryRequired(
+                routeContext.inboundJobId,
+                requireAcceptance ? "draft_prepare_capture_failed" : "ai_run_capture_failed",
+                { error: err instanceof Error ? err.message : String(err) }
+              )
+            } catch (markError) {
+              recoveryMarkFailure = markError
+            }
           }
           // Surface the failure: the user otherwise gets silence on a sidecar
           // error. With the live card on, the card already reports the failed
@@ -2192,6 +2208,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           }
           unregisterRunController()
           unregisterLiveSteer?.()
+          if (recoveryMarkFailure !== undefined) throw err
           break
         } finally {
           approvalController.abort()

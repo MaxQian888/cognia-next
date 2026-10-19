@@ -299,6 +299,26 @@ async function pollForClaims(candidates: string[]): Promise<string[]> {
 }
 
 /**
+ * Abort one turn, but only once no document of this browser claims to drive it.
+ *
+ * For a turn the caller has already proved is its own on the host but never
+ * recorded locally (a begin whose answer was lost), so it cannot go through
+ * {@link reclaimAbandonedBundleTurns}, which only considers recorded turns.
+ * The same poll still guards it: a turn this document or a peer tab drives is
+ * left alone, and being unable to poll aborts nothing.
+ *
+ * Returns whether the turn was aborted.
+ */
+export async function abortBundleTurnIfUndriven(bundleTurnId: string): Promise<boolean> {
+  if (live.has(bundleTurnId)) return false
+  const [unclaimed] = await pollForClaims([bundleTurnId])
+  if (unclaimed !== bundleTurnId) return false
+  await deps.abort(bundleTurnId)
+  forgetOpenBundleTurn(bundleTurnId)
+  return true
+}
+
+/**
  * End this browser's abandoned turns for one conversation.
  *
  * Returns the ids it released, so a caller can decide whether retrying is worth

@@ -1,4 +1,4 @@
-import { releaseOpenBundleTurn, rememberOpenBundleTurn } from "./abandoned-turns"
+import { abortBundleTurnIfUndriven, releaseOpenBundleTurn } from "./abandoned-turns"
 import {
   abortWorkspaceBundleTurn,
   beginWorkspaceBundleTurn,
@@ -12,7 +12,12 @@ import {
   closeApprovalScopeForTurn,
   openWorkspaceApprovalScope,
 } from "./user-action"
-import type { ResourceChange, TaskRun, WorkspaceBundle } from "./types"
+import type {
+  ResourceChange,
+  TaskRun,
+  WorkspaceBundle,
+  WorkspaceBundleTurnLease as HostWorkspaceBundleTurnLease,
+} from "./types"
 
 export interface TaskWorkspaceRunLease {
   run: TaskRun
@@ -59,7 +64,9 @@ export async function openWorkspaceBundleTurnLease(
   } catch (error) {
     // Reconciled while the approval scope is still open: the abort it may
     // issue is an interactive workspace command like the begin itself.
-    await reconcileUnansweredBegin(bundle.bundleId, input, error)
+    await reconcileUnansweredBegin(bundle.bundleId, primaryLogicalRootId, input, error).catch(
+      () => undefined
+    )
     approval?.close()
     throw error
   }
@@ -128,6 +135,27 @@ export async function openWorkspaceBundleTurnLease(
 }
 
 /**
+ * The host's refusal to reuse a turn id for a different request. Definitive:
+ * the turn under that id belongs to someone else and must never be cleaned up.
+ */
+const TURN_IDENTITY_CONFLICT = /bundleTurnId is already owned by another workspace bundle/i
+
+/** Backoff between attempts to read back a turn whose begin answer was lost. */
+const RECONCILE_READ_RETRY_DELAYS_MS = [250, 1000] as const
+
+let waitBeforeReconcileRead = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Test seam, so a suite does not wait out the real backoff. */
+export function __setReconcileReadWaitForTests(next: (ms: number) => Promise<void>): () => void {
+  const previous = waitBeforeReconcileRead
+  waitBeforeReconcileRead = next
+  return () => {
+    waitBeforeReconcileRead = previous
+  }
+}
+
+/**
  * End a turn whose begin may have committed even though its answer was lost.
  *
  * A begin that fails in transport (a dropped companion request, a brain that
@@ -137,32 +165,99 @@ export async function openWorkspaceBundleTurnLease(
  * init recovery only runs when the host restarts. Every later turn in that
  * conversation was refused with `pipeline workspace is already active`.
  *
- * The host keys a bundle turn by the caller's `turnId`, so that id is enough
- * to ask. A turn found open on this bundle is aborted. When even the question
- * cannot be answered, the id is recorded for the reclaim path the next refusal
- * already runs ({@link releaseOpenBundleTurn}), which aborts it once nobody
- * claims it and forgets it if the host never had it.
+ * The host keys a bundle turn by the caller's `turnId`, so that id is enough to
+ * find it, but not to own it: the same id can name another task's live turn,
+ * which is exactly what the host's identity-conflict refusal reports. So a turn
+ * is aborted only when all of these hold:
  *
- * Skipped for a busy refusal, which is the host definitively declining the
- * turn, and for a begin with no caller id, whose host-minted id is unknowable.
+ *   - the begin failed for a reason other than a busy or identity refusal;
+ *   - the host reports the turn open, and it is this request by the host's own
+ *     reuse rule ({@link isThisBeginRequest});
+ *   - no document of this browser claims to drive it.
+ *
+ * A turn that cannot be read back is left alone; the host's restart recovery
+ * remains its backstop. Cleaning up something whose owner cannot be proven is
+ * how a live run gets killed.
  */
 async function reconcileUnansweredBegin(
   bundleId: string,
+  primaryLogicalRootId: string,
   input: BeginTaskWorkspaceTurn,
   error: unknown
 ): Promise<void> {
   const turnId = input.turnId?.trim()
   if (!turnId || isWorkspaceBusyRefusal(error)) return
-  try {
-    const turn = await getWorkspaceBundleTurn(turnId)
-    if (!turn || turn.bundleId !== bundleId || turn.settledAt !== null) return
-    await abortWorkspaceBundleTurn(turnId)
-  } catch {
-    rememberOpenBundleTurn({
-      bundleTurnId: turnId,
-      sessionId: input.sessionId,
-      openedAt: Date.now(),
-    })
-    releaseOpenBundleTurn(turnId)
+  const message = error instanceof Error ? error.message : String(error)
+  if (TURN_IDENTITY_CONFLICT.test(message)) return
+  const turn = await readTurnBack(turnId)
+  if (!turn || turn.settledAt !== null) return
+  if (!(await isThisBeginRequest(turn, bundleId, primaryLogicalRootId, input, turnId))) return
+  await abortBundleTurnIfUndriven(turnId)
+}
+
+async function readTurnBack(turnId: string): Promise<HostWorkspaceBundleTurnLease | null> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await getWorkspaceBundleTurn(turnId)
+    } catch {
+      const delay = RECONCILE_READ_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) return null
+      await waitBeforeReconcileRead(delay)
+    }
   }
+}
+
+/**
+ * Whether the host would answer this begin with `turn` — the rule
+ * `begin_workspace_bundle_turn` uses to return an existing turn instead of
+ * refusing: same bundle, same primary root, and every run's task and run ids
+ * are this request's, scoped to that run's workspace. The fields the host
+ * copies from the request verbatim are compared too.
+ */
+async function isThisBeginRequest(
+  turn: HostWorkspaceBundleTurnLease,
+  bundleId: string,
+  primaryLogicalRootId: string,
+  input: BeginTaskWorkspaceTurn,
+  turnId: string
+): Promise<boolean> {
+  if (turn.bundleTurnId !== turnId || turn.bundleId !== bundleId) return false
+  if (turn.primaryLogicalRootId !== primaryLogicalRootId || turn.runs.length === 0) return false
+  for (const { workspaceId, run } of turn.runs) {
+    const suffix = await workspaceRunSuffix(workspaceId)
+    if (!suffix) return false
+    if (run.taskId !== scopedRunId(input.taskId, suffix)) return false
+    if (run.runId !== scopedRunId(input.runId, suffix)) return false
+    if (run.turnId !== turnId) return false
+    if (run.agentId !== input.agentId || run.agentKind !== input.agentKind) return false
+    if ((run.executionRunId ?? undefined) !== input.executionRunId) return false
+    if ((run.attemptId ?? undefined) !== input.attemptId) return false
+  }
+  return true
+}
+
+/** `storage_key(workspace_id)[..12]`: the first 12 hex digits of its SHA-256. */
+async function workspaceRunSuffix(workspaceId: string): Promise<string | null> {
+  const subtle = globalThis.crypto?.subtle
+  if (!subtle) return null
+  const digest = await subtle.digest("SHA-256", new TextEncoder().encode(workspaceId))
+  return Array.from(new Uint8Array(digest).slice(0, 6), (byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("")
+}
+
+/** Mirrors the host's `scoped_run_id`: the id, byte-capped to fit 128 with `:suffix`. */
+function scopedRunId(base: string, suffix: string): string {
+  const keep = Math.max(0, 128 - 1 - suffix.length)
+  const bytes = new TextEncoder().encode(base)
+  let prefix = base
+  if (bytes.length > keep) {
+    try {
+      prefix = new TextDecoder("utf-8", { fatal: true }).decode(bytes.slice(0, keep))
+    } catch {
+      // The host falls back to the whole id when the cut splits a character.
+      prefix = base
+    }
+  }
+  return `${prefix}:${suffix}`
 }

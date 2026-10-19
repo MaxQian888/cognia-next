@@ -22,7 +22,8 @@
  */
 
 import "fake-indexeddb/auto"
-import { getDb, __resetDbForTesting } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createAdapterInstance, getAdapterInstance } from "@/lib/db/adapter-instances"
 import { enqueueConnectorInboundJob } from "@/lib/db/connector-inbound-jobs"
 import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
@@ -68,6 +69,9 @@ jest.mock("@/lib/platform/detect", () => ({
 jest.mock("@/lib/claude/build-options", () => ({
   __esModule: true,
   ...jest.requireActual("@/lib/claude/build-options"),
+}))
+jest.mock("@/lib/db/connector-inbound-jobs", () => ({
+  ...jest.requireActual("@/lib/db/connector-inbound-jobs"),
 }))
 
 const mockEnsureSessionScratchWorkspace = jest.fn<Promise<string>, [ChatSession]>()
@@ -285,12 +289,15 @@ const DEFAULT_RUN_AND_CAPTURE: RunAndCaptureFn = jest.fn(async () => ({
   messageId: "uuid-asst-1",
 }))
 const mockBindExecutionRun = jest.fn(async () => undefined)
+const dbFixture = createDbTestFixture({ seeded: false })
 
 // ── setup ─────────────────────────────────────────────────────────────────────
 
+beforeAll(() => dbFixture.initialize())
+afterAll(() => dbFixture.dispose())
+
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
+  await dbFixture.restore()
   __resetBusForTesting()
   const bus = getBus()
   mockEvaluateImRate.mockReset()
@@ -1552,6 +1559,35 @@ describe("installRuntime — ai-run (capture failure)", () => {
         lastError: "sidecar died",
       })
     )
+  })
+
+  it("rejects to the bus when the recovery state cannot be written", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const inboundJobs = require("@/lib/db/connector-inbound-jobs")
+    const markSpy = jest
+      .spyOn(inboundJobs, "markConnectorInboundJobRecoveryRequired")
+      .mockRejectedValueOnce(new Error("disk full"))
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockRejectedValueOnce(new Error("sidecar died"))
+    const event = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_capture_mark_fails",
+      messageId: "capture-mark-fails",
+    })
+    const inboundJob = await enqueueConnectorInboundJob(event, "queue")
+
+    try {
+      await expect(callHandler(event, "ai-run", RESOLVED, inboundJob.id)).rejects.toThrow(
+        "sidecar died"
+      )
+    } finally {
+      markSpy.mockRestore()
+    }
+
+    // The cleanup still ran: the run is closed as failed, not left dangling.
+    const run = await getDb().executionRuns.where("kind").equals("agent-turn").first()
+    const types = (await getDb().executionRunEvents.where("runId").equals(run!.id).toArray()).map(
+      (item) => item.type
+    )
+    expect(types).toContain("run.failed")
   })
 
   it("does not offer recovery for a PII block", async () => {
@@ -3583,12 +3619,37 @@ describe("installRuntime — ai-run (dispatch-failure IM notification)", () => {
     const replies = await failureReplies(key)
     expect(replies).toHaveLength(1)
     expect(replies[0].request.metadata?.idempotencyKey).toBe(
-      `im-failure:${event.adapterId}:teamfail-msg`
+      `im-failure:${event.adapterId}:${key}:teamfail-msg`
     )
     expect(replies[0].request.segments[0]).toEqual(
       expect.objectContaining({ type: "text", text: expect.stringContaining("Dispatch failed") })
     )
     expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({ centerOnly: true }))
+  })
+
+  // Telegram message ids restart in every chat, so two chats can each fail on
+  // message 42. Each must get its own notice.
+  it("answers the same message id in two chats separately", async () => {
+    const keys = ["telegram:adapter_1:chat_dup_a", "telegram:adapter_1:chat_dup_b"]
+    await seedAdapter("adapter_1")
+    for (const [index, key] of keys.entries()) {
+      mockStartTeamRunFromIM.mockResolvedValueOnce({
+        started: false,
+        reason: "team_not_found",
+      } as never)
+      await seedSession(key, `s_dup_${index}`)
+      await upsertOverride({ conversationKey: key, sessionId: `s_dup_${index}`, teamId: "ghost" })
+      await callHandler(makeEvent({ conversationKey: key, messageId: "42" }), "ai-run")
+    }
+
+    for (const key of keys) {
+      const replies = await failureReplies(key)
+      expect(replies).toHaveLength(1)
+    }
+    const ids = (await getDb().outboundQueue.toArray())
+      .filter((job) => job.request.metadata?.idempotencyKey?.startsWith("im-failure:"))
+      .map((job) => job.request.metadata?.idempotencyKey)
+    expect(new Set(ids).size).toBe(2)
   })
 
   it("answers the user when the workflow launch throws, and still rethrows for the bus", async () => {
