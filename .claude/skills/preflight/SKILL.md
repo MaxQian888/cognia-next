@@ -14,8 +14,7 @@ Determine what's being shipped:
 
 - Uncommitted work: `rtk git status` + `rtk git diff --name-only HEAD`
 - A branch: `rtk git diff --name-only <merge-base>` (default merge base:
-  `master`, or `dev` if the branch forked from dev — check with
-  `git merge-base`)
+  `dev`; confirm with `git merge-base`)
 
 Record the file list — it decides which auditors run.
 
@@ -26,10 +25,10 @@ the file list. Skip an auditor only when its trigger set is empty:
 
 | Auditor (subagent_type)  | Run when the diff touches…                                  |
 | ------------------------ | ----------------------------------------------------------- |
-| `test-gap-auditor`       | anything under `components/ hooks/ lib/ stores/ src-tauri/` |
-| `i18n-reviewer`          | any `.tsx` or `i18n/messages/*.json`                        |
+| `test-gap-auditor`       | anything under the paths in CLAUDE.md Working Rule 3        |
+| `i18n-reviewer`          | any `.tsx` or anything under `i18n/messages/`               |
 | `static-export-auditor`  | `app/`, `next.config.ts`, `package.json` deps, or new Node-ish imports in bundled code |
-| `tauri-rust-reviewer`    | anything under `src-tauri/`                                  |
+| `tauri-rust-reviewer`    | anything under `src-tauri/` or `crates/`                     |
 | `pii-gate-auditor`       | `lib/claude/ lib/ai/ lib/connectors/ lib/twin/ lib/memory/ lib/vector/ sidecar/` or any new outbound call |
 | `wiring-auditor`         | any NEW module/component/command/plugin/initializer/setting — verifies it is reachable at runtime |
 
@@ -56,7 +55,7 @@ Audits don't replace the real gates. Finish with:
 ```
 rtk tsc && rtk pnpm lint && rtk pnpm lint:i18n && pnpm i18n:sort:check
 rtk pnpm test -- <changed test files>        # narrow first
-pnpm test:coverage                            # full gate when claiming done
+pnpm audit:colocated-tests
 rtk cargo test --manifest-path src-tauri/Cargo.toml   # if src-tauri changed
 ```
 

@@ -85,7 +85,7 @@ pnpm storybook / build-storybook
 Install from repo root only (single `pnpm-lock.yaml`). `sidecar/` is a separate Node project with its own lockfile, not a workspace member.
 
 - `app/` App Router, static-exported. `app/api/` does **not** exist at runtime. Anything needing an HTTP server lives in Tauri Rust (axum).
-- `components/ui/` shadcn (no tests). `components/ai-elements/` vendored (no tests). `TooltipProvider` is mounted in `app/layout.tsx`.
+- `components/ui/` shadcn (no tests). `components/ai-elements/` vendored (no tests). `TooltipProvider` is mounted in `components/runtime/app-runtime.tsx`.
 - `lib/utils/index.ts` (`@/lib/utils`): `cn()` = clsx + tailwind-merge.
 - `i18n/`: next-intl via `withNextIntl("./i18n/request.ts")` in `next.config.ts`. Split sources under `messages/{en,zh-CN}/`, aggregates generated.
 - `plugins/`: in-tree first-party plugins loaded by the plugin manager, not npm packages.
@@ -212,8 +212,8 @@ Husky via the root `prepare` script. `pre-commit` → `lint-staged` (eslint --fi
 
 - **pnpm only**, from repo root.
 - **Never remove `output: "export"`** from `next.config.ts`. Tauri and Capacitor consume `out/`. `docs/next.config.ts` is a separate static export.
-- **Dexie schema is ONE version, not a chain**: `lib/db/schema.ts` declares the whole store set as `CURRENT_SCHEMA` at `CURRENT_SCHEMA_VERSION` (currently **v237**). No `version(N)` chain, no `upgrade()`. To change it: edit `CURRENT_SCHEMA`, **bump the version** (an un-bumped edit is silently ignored on existing databases), add the table to `CORE_TABLE_NAMES` in `lib/data-governance/table-catalog.ts`, run `pnpm db:governance:write`. Drop a table by setting it to `null`, never by deleting the key. A mismatched `storageLayout` marker is refused at boot and routed to an explicit reset. Local data is not migrated.
+- **Dexie schema is ONE version, not a chain**: `lib/db/schema.ts` declares the whole store set as `CURRENT_SCHEMA` at `CURRENT_SCHEMA_VERSION` (read the constant; this file does not track the number). No `version(N)` chain, no `upgrade()`. To change it: edit `CURRENT_SCHEMA`, **bump the version** (an un-bumped edit is silently ignored on existing databases), add the table to `CORE_TABLE_NAMES` in `lib/data-governance/table-catalog.ts`, run `pnpm db:governance:write`. Drop a table by setting it to `null`, never by deleting the key. A mismatched `storageLayout` marker is refused at boot and routed to an explicit reset. Local data is not migrated.
 - **Native vector store**: sqlite-vec at `<app_data>/cognia/vectors.sqlite`. Web mode forces cloud.
-- **Rust toolchain**: 1.95 (`rust-toolchain.toml`).
+- **Rust toolchain**: pinned in `rust-toolchain.toml`.
 - **Sidecar code is strict TypeScript that Node runs unbuilt** (ADR-0197): new sidecar modules go in `sidecar/src/<layer>/` as `.ts` (erasable syntax only, relative imports spell `.ts`, `import type` for types), never as new `.mjs` outside a launcher. `pnpm sidecar:typecheck` and `pnpm audit:sidecar-architecture` must pass. A `link:` package the sidecar imports at runtime needs a `node` export condition pointing at compiled `dist/`: the bundle copies it under `node_modules`, where Node refuses to strip types.
 - **New Rust code goes in a crate, not `src-tauri/src`** (ADR-0196): put logic in the lowest-layer crate under `crates/` that can own it (layers in `scripts/gates/rust-architecture.json`). `src-tauri/src` only assembles the desktop app (`lib.rs`, `startup/`, window/tray/webview code, `AppHandle` adapters); a new top-level module there fails `pnpm audit:rust-architecture`. A library crate's `#[tauri::command]` shells and `AppHandle` adapters sit behind its `tauri-host` feature, which only `src-tauri` enables.

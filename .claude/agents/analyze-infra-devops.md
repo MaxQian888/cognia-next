@@ -31,11 +31,11 @@ You analyze the infrastructure and DevOps setup of cognia-next. Focus on:
 - `.github/workflows/ci.yml` — Main CI
 - `scripts/gates/check-all.mjs` — All-gates runner
 - `next.config.ts` — Next.js config (static export, server-only packages)
-- `jest.config.ts` — Jest coverage thresholds
+- `jest.config.ts` + `scripts/test/coverage-thresholds.json` — Jest config and coverage thresholds
 - `playwright.config.ts` — E2E projects
 - `Dockerfile.cognia-server`
 
 ## Commands
 
-- List workflows: `Get-ChildItem .github/workflows -Filter "*.yml"`
-- List scripts: `Get-ChildItem scripts -Recurse -Filter "*.mjs" | Select -First 30`
+- List workflows: `ls .github/workflows`
+- List scripts: `rg --files scripts -g "*.mjs" | head -30`

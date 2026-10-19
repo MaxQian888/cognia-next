@@ -14,8 +14,8 @@ You analyze the plugin and workflow systems of cognia-next. Focus on:
 - `lib/workflow/` — Workflow engine: graph model, execution runtime, triggers (cron, webhook, connector, chat, /goal)
 - `types/workflow/` — Workflow type definitions (v22 schema)
 - `components/workflow/` — React Flow editor UI
-- `src-tauri/src/workflow/` — Rust workflow runtime
-- `src-tauri/src/plugin_api/` — Rust plugin API bridge (wasmtime + WIT)
+- `crates/cognia-scheduling/src/workflow/` — Rust workflow runtime
+- `crates/cognia-plugin-runtime/` — Rust plugin runtime (wasmtime + WIT)
 
 ## Output Format
 
@@ -30,11 +30,11 @@ You analyze the plugin and workflow systems of cognia-next. Focus on:
 
 - `plugins/builtin-registry-coverage.test.ts` — Plugin registry coverage
 - `lib/plugin/` — Plugin management core
-- `src-tauri/src/plugin_api/` — Rust WASM host
+- `crates/cognia-plugin-runtime/src/wasm/` — Rust WASM host
 - `plugin-sdk/typescript/` — TS SDK
 - `lib/workflow/` — Workflow engine
 
 ## Commands
 
-- List plugins: `Get-ChildItem plugins -Directory | Select -Expand Name`
-- Count workflow files: `Get-ChildItem lib/workflow -Recurse -Filter "*.ts" | Measure-Object`
+- List plugins: `ls -d plugins/*/`
+- Count workflow files: `rg --files lib/workflow -g "*.ts" | wc -l`

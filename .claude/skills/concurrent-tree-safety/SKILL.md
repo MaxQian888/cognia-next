@@ -25,9 +25,7 @@ prevented — or would have prevented — a recorded incident.
      `git reset` (unstage) first — never sweep it into your commit.
 
 3. **Commit in phases, early.** Finish a phase → commit it with pathspecs.
-   Long-lived uncommitted edits are what clobbers destroy. (Incident: an
-   in-progress two-ADR change was clobbered; salvage lives in tag
-   `qc-stash-backup`.)
+   Long-lived uncommitted edits are what clobbers destroy.
 
 4. **No destructive tree ops while shared.** `git reset --hard`,
    `git checkout -- .`, `git stash` (it stashes EVERYONE's edits), branch
@@ -41,11 +39,12 @@ prevented — or would have prevented — a recorded incident.
    to tracked files; when designing a change, prefer new modules over broad
    in-place rewrites if concurrency is active.
 
-6. **i18n messages are a shared hotspot.** `i18n/messages/*.json` is edited
-   by almost every UI task; concurrent commits have swept others' keys.
-   Add your keys, commit them with your feature files promptly, and if your
-   keys vanish, check `git log -p --` on the messages files before
-   re-adding.
+6. **i18n messages are a shared hotspot.** The split sources under
+   `i18n/messages/{en,zh-CN}/` and the generated aggregates are touched by
+   almost every UI task; concurrent commits have swept others' keys. Add your
+   keys to the split sources, regenerate with `pnpm i18n:build`, commit them
+   with your feature files promptly, and if your keys vanish, check
+   `git log -p --` on the messages files before re-adding.
 
 7. **Schema versions are claims, not facts.** Dexie versions and similar
    monotonic counters get taken by concurrent branches (v66, v69 were both

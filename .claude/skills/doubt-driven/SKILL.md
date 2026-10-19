@@ -33,7 +33,7 @@ A decision is non-trivial when at least one holds. In this repo especially:
   detached `tokio` task that hangs `cargo test`, a tuple return that serializes
   as a JSON array, an unregistered command.
 - **A claim the compiler can't check** — "this is thread-safe", "this stays in
-  sync across the three shells", "this matches the ADR", "coverage still ≥90%".
+  sync across the three shells", "this matches the ADR".
 - **Irreversible blast radius** — data migration, keyring layout, public/wire
   protocol, anything shipped to installed desktop clients.
 
@@ -84,8 +84,8 @@ conclusions validated back.
   - `output: "export"` holds — no server-only path in bundled code.
   - Every outbound model call passes `hasNoLeakingPii`.
   - New user-facing strings are i18n-wired in **both** `en` and `zh-CN`.
-  - New source under `components/ hooks/ lib/ stores/ src-tauri/src/` ships a
-    co-located test; coverage ≥90%.
+  - New source under the paths in CLAUDE.md Working Rule 3 ships a co-located
+    test.
   - Dexie bumps use the true native version, never `db.verno + 1`.
   - Rust: no `parking_lot` guard across `.await`; no detached task in tests.
 

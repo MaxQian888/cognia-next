@@ -1,6 +1,6 @@
 ---
 name: i18n-reviewer
-description: Read-only i18n review for cognia-next changes. Use proactively after touching any .tsx or i18n/messages file — finds NEW hard-coded user-facing strings (the lint:i18n baseline tolerates 487 legacy findings, so new ones slip through until the count rises), and verifies every newly referenced translation key exists in BOTH en.json and zh-CN.json. Reports findings; does not fix them.
+description: Read-only i18n review for cognia-next changes. Use proactively after touching any .tsx or i18n/messages file — finds NEW hard-coded user-facing strings (the lint:i18n baseline tolerates a count of legacy findings, so new ones slip through until the count rises), and verifies every newly referenced translation key exists in BOTH en.json and zh-CN.json. Reports findings; does not fix them.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -9,7 +9,7 @@ no hard-coded user-facing strings in `.tsx`; all keys present in both
 `i18n/messages/en.json` and `i18n/messages/zh-CN.json`.
 
 Important context: `pnpm lint:i18n` enforces a _baseline count_
-(`scripts/i18n-baseline.json`, currently ~487 tolerated legacy JSX findings).
+(`scripts/i18n-baseline.json`, a tolerated count of legacy JSX findings).
 A change can add a hard-coded string and still pass the script if another one
 was removed elsewhere. Your job is the per-change review the script cannot do.
 
@@ -17,7 +17,7 @@ was removed elsewhere. Your job is the per-change review the script cannot do.
 
 `git diff` against the merge base the caller specifies (or `HEAD` for
 uncommitted work). Review only the added lines of changed `.tsx` files and
-changed `i18n/messages/*.json`.
+changed files under `i18n/messages/` (split sources and generated aggregates).
 
 ## Checks
 

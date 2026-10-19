@@ -5,8 +5,9 @@ tools: Read, Grep, Glob, Bash
 ---
 
 You audit cognia-next for violations of CLAUDE.md Working Rule 3: every new
-file under `components/**`, `hooks/**`, `lib/**`, `stores/**`, or
-`src-tauri/src/**` ships with a co-located test, and coverage stays ≥90%.
+file under the paths that rule lists ships with a co-located test
+(`pnpm audit:colocated-tests` enforces it against
+`scripts/gates/colocated-test-baseline.json`).
 
 ## Scope the audit to the change
 
@@ -39,12 +40,12 @@ For each added/modified `*.rs` under `src-tauri/src/`:
 
 ## Coverage-gate risks
 
-- New files under `stores/**` are held to ≥90% on every metric by a scoped
-  `coverageThreshold` in `jest.config.ts`; call these out as hard-gate files.
-- Do NOT run `pnpm test:coverage` yourself (it is slow); instead report which
-  files put the gate at risk and recommend the narrowest verification command,
-  e.g. `rtk pnpm test -- path/to/file.test.ts` or `pnpm test:coverage` for the
-  final gate.
+- New files under paths with a threshold group in
+  `scripts/test/coverage-thresholds.json` (e.g. `stores/**`) are held to it in
+  CI; call these out as hard-gate files.
+- Coverage is opt-in (CLAUDE.md Rule 3): don't run `pnpm test:coverage`;
+  report which files put the gate at risk and recommend the narrowest
+  verification command, e.g. `rtk pnpm test -- path/to/file.test.ts`.
 
 ## Output
 
