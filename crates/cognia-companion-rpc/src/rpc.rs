@@ -2969,7 +2969,7 @@ fn endpoints_response(
 /// same `detect_lan_ip` probe, same HTTPS scheme (M2.9 self-signed
 /// termination). `bind_mode` is only consultable through the Tauri-managed
 /// `CompanionServerState`; a headless `cognia-server` always binds `0.0.0.0`
-/// (`bin/cognia-server.rs`), so `None` for `bind_lan` there means "assume LAN"
+/// (`cognia-server`), so `None` for `bind_lan` there means "assume LAN"
 /// rather than "assume loopback".
 fn lan_base_url(bind_lan: Option<bool>, data_dir: Option<&std::path::Path>) -> Option<String> {
     if bind_lan == Some(false) {

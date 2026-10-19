@@ -20,24 +20,23 @@
 //!
 //! # How it serves without an AppHandle
 //!
-//! `companion_api::server::spawn_server` used to require a `SharedState`
+//! `cognia_companion::server::spawn_server` used to require a `SharedState`
 //! carrying a `tauri::AppHandle`, and every mutating RPC round-tripped through
-//! the WebView. That is no longer true, and this docblock claimed it was long
-//! after the milestone it called "next" had shipped.
+//! the WebView. That is no longer true, and since ADR-0196 P9 this binary does
+//! not link Tauri at all: it is its own package, over the companion crates.
 //!
-//! `companion_api::dispatch_host::DispatchHost` is the seam: it is either
-//! `Tauri(AppHandle)` or `Headless(Arc<HeadlessServices>)`, and every arm asks
-//! it for what it needs rather than reaching for `app.state::<T>()`.
-//! `headless::HeadlessServices` is the process-global registry standing in for
-//! Tauri's managed state, and `headless::brain` supervises the Node process
-//! that answers the data plane over `/internal/bridge`. An arm that genuinely
-//! requires one host says so with `tauri_app(name)` or `headless()`, and the
-//! refusal names which host it needed.
+//! `cognia_companion_rpc::rpc_host::RpcHost` is the seam: every arm asks the
+//! host it runs on for what it needs. Here that host is
+//! `cognia_companion_rpc::headless::HeadlessServices`, the process-global
+//! registry standing in for Tauri's managed state, and the state's runtime is
+//! `cognia_companion_rpc::companion_runtime::headless()`. [`brain`] supervises
+//! the Node process that answers the data plane over `/internal/bridge`. An
+//! arm the headless host cannot serve answers `503 headless_unsupported`
+//! naming the command.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use app_lib::headless::brain;
 use cognia_companion::{
     data_plane::install_headless_store,
     deny_list::DenyList,
@@ -65,6 +64,7 @@ use cognia_companion_rpc::headless::{
     ApiKeyState, HeadlessServices, HeadlessSidecarHost, SpawnPolicy, MASTER_KEY_ENV,
     SIDECAR_SCRIPT_ENV,
 };
+use cognia_server::brain;
 use parking_lot::RwLock;
 
 use clap::{Parser, Subcommand};
@@ -1086,7 +1086,7 @@ fn store_data_dir() -> PathBuf {
 /// clock, the level tag and the colour are decided here and nowhere else.
 /// Children emit a bare `[LEVEL] [module] message` (`packages/logging`'s
 /// console transport drops its own clock and icon the moment it sees a piped
-/// stdout) and `headless::brain` re-stamps each line at the level it claimed
+/// stdout) and [`brain`] re-stamps each line at the level it claimed
 /// instead of flattening the lot to INFO.
 struct StderrLogger;
 
@@ -1401,7 +1401,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // state; administrative offline commands remain intentionally lock-free.
     let _tenant_lease = matches!(&cli.command, CliCommand::Serve { .. })
         .then(|| {
-            app_lib::headless::tenant_lease::acquire(
+            cognia_server::tenant_lease::acquire(
                 &dir,
                 &cognia_companion::host_identity::current_tenant_or_unbound(),
             )
@@ -3235,7 +3235,7 @@ async fn run_serve(
 mod tests {
     #[test]
     fn remote_desktop_audit_is_installed_beside_companion_audit() {
-        let source = include_str!("cognia-server.rs");
+        let source = include_str!("main.rs");
         let installation = [
             "cognia_companion::audit::install(&data_dir);",
             "    cognia_remote_desktop::audit::install(&data_dir);",
@@ -4048,7 +4048,7 @@ mod tests {
 
     #[test]
     fn serve_binds_the_tunnel_ingress_listener_only_from_its_saved_config() {
-        let source = include_str!("cognia-server.rs");
+        let source = include_str!("main.rs");
         assert!(source
             .contains("let tunnel_ingress = cognia_companion::tunnel_ingress::load(&data_dir);"));
         assert!(source.contains("server::spawn_tunnel_ingress_listener(tunnel_ingress.port"));
@@ -4159,7 +4159,7 @@ mod tests {
     /// that forgets the warning is exactly the regression this guards.
     #[test]
     fn every_owner_invitation_print_site_carries_the_owner_warning() {
-        let source = include_str!("cognia-server.rs");
+        let source = include_str!("main.rs");
         let body_of = |start: &str, end: &str| -> &str {
             let tail = source
                 .split(start)

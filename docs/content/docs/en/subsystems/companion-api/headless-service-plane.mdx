@@ -81,7 +81,7 @@ only bites when you start `cognia-server` yourself:
 ```bash
 COGNIA_ALLOWED_WEB_ORIGINS="http://localhost:3000,http://127.0.0.1:3000" \
 COGNIA_ALLOW_PRIVATE_NETWORK=true \
-cargo run --bin cognia-server -- serve --port 27890
+cargo run -p cognia-server -- serve --port 27890
 ```
 
 **A browser cannot reach the HTTPS listener at all.** `tls.rs` mints the certificate with rcgen
@@ -96,7 +96,7 @@ server yourself, name the port:
 
 ```bash
 COGNIA_ALLOWED_WEB_ORIGINS="http://localhost:3000,http://127.0.0.1:3000" \
-cargo run --bin cognia-server -- serve --port 27890 --browser-listener-port 27891
+cargo run -p cognia-server -- serve --port 27890 --browser-listener-port 27891
 ```
 
 The flag is hard-bound to `127.0.0.1` — the whole justification for dropping TLS is that the bytes

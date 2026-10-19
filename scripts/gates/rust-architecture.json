@@ -75,7 +75,8 @@
     "cognia-sandbox-runner": "service",
     "cognia-elevated-setup": "service",
 
-    "cognia-next": "app"
+    "cognia-next": "app",
+    "cognia-server": "app"
   },
   "allowedSameLayer": [
     "cognia-core -> cognia-problem",
@@ -121,6 +122,21 @@
       "from": { "crates": ["cognia-sandboxd"] },
       "reach": ["cognia-net", "cognia-environment", "reqwest"],
       "reason": "cognia-sandboxd is a static musl binary inside the sandbox; it must not link a network stack"
+    },
+    {
+      "from": { "crates": ["cognia-server"] },
+      "reach": [
+        "tauri",
+        "tauri-plugin-*",
+        "wry",
+        "webkit2gtk",
+        "webkit2gtk-*",
+        "gtk",
+        "gtk-*",
+        "muda",
+        "tray-icon"
+      ],
+      "reason": "cognia-server is the headless Host (ADR-0196 P9, ADR-0235 P2): it runs on machines with no display server, so it must not link a WebView or a GUI toolkit"
     }
   ],
   "directOnly": [
@@ -139,7 +155,7 @@
   "appShell": {
     "package": "cognia-next",
     "srcDir": "src-tauri/src",
-    "maxLoc": 73163,
+    "maxLoc": 67656,
     "locSlack": 4000,
     "locBlocking": false,
     "modules": [

@@ -191,6 +191,7 @@ pub(crate) fn resolve_workspace_env_for_request(
     })
 }
 
+#[cfg(any(test, feature = "tauri-host"))]
 pub(crate) async fn resolve_workspace_env_for_request_async(
     req: &SpawnRequest,
 ) -> Result<WorkspaceEnvResolution, String> {

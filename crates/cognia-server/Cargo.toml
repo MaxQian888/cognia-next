@@ -1,0 +1,94 @@
+# ADR-0196 P9 / ADR-0235 P2 — the headless Host, `cognia-server`, as its own
+# package. It used to be a second `[[bin]]` of the desktop package, so every
+# build of it linked `app_lib` and with it Tauri, wry and (on Linux) GTK and
+# WebKitGTK. It now depends on the companion crates only, and
+# `rust-architecture.json` keeps it Tauri-free.
+#
+# The same binary ships twice: as the desktop's terminal-host sidecar
+# (`scripts/build/build-terminal-host-sidecar.mjs`) and as the server image and
+# host archive (`Dockerfile.cognia-server`, `package-host-archive.mjs`).
+[package]
+name = "cognia-server"
+# Reports the app version on the wire and to `service status`;
+# `scripts/sync/version-sync.mjs` keeps it the app's.
+version = "0.1.0"
+description = "The headless Cognia Host: companion server, Node brain supervisor and operator CLI."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "cognia_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cognia-server"
+path = "src/main.rs"
+
+[features]
+# The desktop's default OCR engine, so the sidecar and the image keep the
+# OCR the desktop has.
+default = ["ocr-paddle"]
+# Native OTLP trace/metric export (ADR-0073), on in the server image.
+otel-export = ["cognia-observability/otel-export"]
+ocr-tesseract = ["cognia-ocr/ocr-tesseract", "cognia-observability/ocr-tesseract"]
+ocr-windows = ["cognia-ocr/ocr-windows", "cognia-observability/ocr-windows"]
+ocr-ocrs = ["cognia-ocr/ocr-ocrs", "cognia-observability/ocr-ocrs"]
+ocr-paddle = ["cognia-ocr/ocr-paddle", "cognia-observability/ocr-paddle"]
+# ADR-0059 R13 — per-workspace runner containers, and the ADR-0183 Docker
+# sandbox driver over the same daemon.
+container-exec = [
+  "cognia-external-agent/container-exec",
+  "cognia-sandbox-pool/docker",
+]
+# ADR-0059 R13 (T3) — runner Pods, in-cluster only.
+k8s-exec = ["cognia-external-agent/k8s-exec"]
+workspace-runtime-exec = [
+  "cognia-external-agent/workspace-runtime-exec",
+  "cognia-companion/workspace-runtime-exec",
+]
+
+[dependencies]
+cognia-agent-state = { path = "../cognia-agent-state" }
+cognia-companion = { path = "../cognia-companion" }
+cognia-companion-rpc = { path = "../cognia-companion-rpc" }
+cognia-core = { path = "../cognia-core", features = ["signal"] }
+cognia-external-agent = { path = "../cognia-external-agent" }
+cognia-file-share = { path = "../cognia-file-share" }
+cognia-gateway = { path = "../cognia-gateway" }
+cognia-host-service = { path = "../cognia-host-service" }
+cognia-jobs = { path = "../cognia-jobs" }
+cognia-net = { path = "../cognia-net" }
+cognia-observability = { path = "../cognia-observability", features = ["runtime-host"] }
+cognia-ocr = { path = "../cognia-ocr" }
+cognia-plugin-runtime = { path = "../cognia-plugin-runtime" }
+cognia-remote-desktop = { path = "../cognia-remote-desktop" }
+cognia-sandbox-pool = { path = "../cognia-sandbox-pool", features = ["e2b", "kubernetes"] }
+cognia-secrets = { path = "../cognia-secrets" }
+cognia-sidecar = { path = "../cognia-sidecar" }
+cognia-task-workspace-host = { path = "../cognia-task-workspace-host" }
+cognia-terminal = { path = "../cognia-terminal" }
+base64.workspace = true
+chrono.workspace = true
+clap = { workspace = true, features = ["derive"] }
+dirs.workspace = true
+hex.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart", "form"] }
+rustls = { workspace = true, features = ["ring", "std"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "io-util", "sync", "time", "net", "signal"] }
+uuid = { workspace = true, features = ["v4", "v7"] }
+
+[dev-dependencies]
+cognia-companion = { path = "../cognia-companion", features = ["test-support"] }
+cognia-companion-rpc = { path = "../cognia-companion-rpc", features = ["test-support"] }
+cognia-host-service = { path = "../cognia-host-service", features = ["test-support"] }
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

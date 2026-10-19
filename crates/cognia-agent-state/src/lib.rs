@@ -10,7 +10,7 @@
 //!   history (currently OpenCode's SQLite database).
 //!
 //! **This crate deliberately has no `tauri` dependency.**
-//! `bin/cognia-server.rs` links `provider_profiles` and
+//! `cognia-server` links `provider_profiles` and
 //! `agent_session_store` on the headless path, and ADR-0067 Batch 4's
 //! `cognia-agent-protocols` will path-dep this crate for the ACP session
 //! registry. The Tauri-facing shells stay in `app_lib`: the single

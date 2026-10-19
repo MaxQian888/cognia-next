@@ -150,7 +150,7 @@ pub fn verify_in_sidecar_dir(sidecar_dir: &Path) -> PiExtensionVerdict {
 ///
 /// `COGNIA_SIDECAR_SCRIPT` names the host entry, so its parent is the
 /// directory, and the checkout fallback matches `resolve_sidecar_script_path`
-/// in `bin/cognia-server.rs` so a hand-run `serve` finds it too. Kept beside
+/// in `cognia-server` so a hand-run `serve` finds it too. Kept beside
 /// the verifier rather than reaching into the binary, because a library arm
 /// cannot call into a `bin` target.
 pub fn headless_sidecar_dir() -> Option<PathBuf> {

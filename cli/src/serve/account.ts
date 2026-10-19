@@ -3,7 +3,7 @@
  *
  * The brain serves exactly one local account (`COGNIA_LOCAL_ACCOUNT_ID`,
  * default mirrors `HEADLESS_LOCAL_ACCOUNT_ID` in
- * `src-tauri/src/bin/cognia-server.rs`). This module creates it in the
+ * `crates/cognia-server/src/main.rs`). This module creates it in the
  * `LocalAccountRegistry` on first boot, activates its Dexie database, and
  * unlocks it through the guarded host-unlock — required because
  * `desktop-sync-source` rejects pulls unless `unlockedAccountId` matches the
@@ -13,7 +13,7 @@ import { LocalAccountRegistry } from "@/lib/accounts/account-db"
 import type { PasswordVerifierRecord } from "@/lib/accounts/account-types"
 import { unlockAccountForHost, useAccountStore } from "@/stores/account/account-store"
 
-/** Must stay in lockstep with `HEADLESS_LOCAL_ACCOUNT_ID` in cognia-server.rs. */
+/** Must stay in lockstep with `HEADLESS_LOCAL_ACCOUNT_ID` in crates/cognia-server/src/main.rs. */
 export const HEADLESS_LOCAL_ACCOUNT_ID = "local_acct_a"
 
 /**

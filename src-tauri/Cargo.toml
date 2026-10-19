@@ -23,10 +23,8 @@ name = "app_lib"
 # `cdylib` artifacts here only added a multi-gigabyte archive to every rebuild.
 crate-type = ["rlib"]
 
-# Headless cognia-server binary (Phase D / ADR-0014).
-[[bin]]
-name = "cognia-server"
-path = "src/bin/cognia-server.rs"
+# The headless `cognia-server` binary is its own package since ADR-0196 P9:
+# `crates/cognia-server`.
 
 # ADR-0196 P6h — the sandbox and VDD setup binaries now live in
 # `crates/cognia-elevated-setup`; their executable names are unchanged.
@@ -394,12 +392,6 @@ zip = { workspace = true, features = ["deflate", "bzip2"] }
 # `wasmparser` and pins its own version. These declarations outlived the move:
 # no `src-tauri/src` file referenced them, and a stale pin here built a SECOND
 # wasmtime + cranelift-codegen alongside the crate's own.
-
-# CLI argument parsing for the cognia-server binary (Phase D follow-up).
-# `derive` gives us the `#[derive(Parser)]` macro; `std` keeps default
-# features (env / wrap_help / etc.). Pulling clap is cheap compared to
-# maintaining a hand-rolled parser as the subcommand surface grows.
-clap = { workspace = true, features = ["derive"] }
 
 # ADR-0067 Phase 5 — `xcap` (screenshot) + the UIA/a11y crates moved to
 # `crates/cognia-automation`.

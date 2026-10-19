@@ -5,15 +5,10 @@ mod siwc;
 mod agent_debug;
 // ADR-0067 Tier C — extracted to `crates/cognia-agent-state` (zero `crate::`
 // edges, no tauri). Re-aliased so `crate::agent_session_store::…` in
-// `companion_api` and the `configure_path` calls below resolve unchanged.
+// `companion_api` and the desktop's `configure_path` call resolve unchanged;
+// `cognia-server` calls the same `configure_path`, so `sessionStore.*` host
+// RPCs have identical storage on both hosts.
 pub use cognia_agent_state::agent_session_store;
-
-/// Configure the shared Claude Agent SDK session mirror before a host starts
-/// its sidecar. Desktop setup and `cognia-server` deliberately call the same
-/// narrow entry point so `sessionStore.*` host RPCs have identical storage.
-pub fn configure_agent_session_store_path(path: std::path::PathBuf) {
-    agent_session_store::configure_path(path);
-}
 // ADR-0067 Tier C — extracted to `crates/cognia-agents` (it had zero
 // `crate::` edges; it owns the `toml_edit` dependency). Re-aliased so both
 // `agents::commands::…` in generate_handler! and the `crate::agents::paths::…`
@@ -90,17 +85,9 @@ pub mod jobs;
 mod keyring_secrets;
 // ADR-0067 Tier C — extracted alongside `crash`, which dissolves the
 // `logging` <-> `crash` and `logging` <-> `telemetry` cycles. Re-aliased for
-// `logging::tracing_setup::init()`, `logging::commands::…` and the
-// `logging::query::…` reads in `cognia-companion-rpc/src/rpc/diagnostics.rs`.
+// `logging::commands::…` and the `logging::query::…` reads in
+// `cognia-companion-rpc/src/rpc/diagnostics.rs`.
 pub use cognia_observability::logging;
-
-/// Install Cognia's structured tracing subscriber for non-Tauri entrypoints.
-///
-/// The desktop bootstrap owns the full native logging module. Headless binaries
-/// only need this narrow seam so the implementation stays private.
-pub fn init_structured_tracing() -> bool {
-    logging::tracing_setup::init()
-}
 
 // Native local-video pipeline lives in its own subsystem crate; the app crate
 // only re-exports it for generate_handler! command registration.
@@ -134,14 +121,12 @@ mod process_registry;
 /// ADR-0090 Phase 1 — headless Provider Profile Store (SQLite mirror of the
 /// renderer's Dexie v121 tables).
 // ADR-0067 Tier C — extracted to `crates/cognia-agent-state`; re-aliased so
-// `crate::provider_profiles::…` and the `app_lib::provider_profiles::…`
-// paths that `bin/cognia-server.rs` uses resolve unchanged.
+// `crate::provider_profiles::…` resolves unchanged.
 pub use cognia_agent_state::provider_profiles;
 pub use cognia_companion_rpc::project_environment;
 mod proxy_config;
 pub use cognia_net::proxy_config::{
     apply_current as apply_current_proxy_config,
-    apply_from_environment as apply_proxy_policy_from_environment,
     clear_inherited_proxy_environment,
 };
 mod recorder_window;
@@ -181,10 +166,6 @@ pub mod shutdown;
 pub use cognia_skills as skills;
 mod provider_diagnostics;
 mod subscription;
-// ADR-0067 Tier C — extracted to `crates/cognia-core` (pure std, zero deps);
-// re-aliased so `crate::supervision_backoff::CrashBackoff` (claude/sidecar,
-// headless/brain) resolves unchanged.
-pub use cognia_core::supervision_backoff;
 pub mod task_workspace;
 // ADR-0067 Tier C — extracted alongside `logging`; re-aliased so
 // `telemetry::telemetry_*` in generate_handler! and the `set_parent` /
@@ -2114,12 +2095,6 @@ mod tests {
     fn session_history_filesystem_command_remains_registered() {
         let production_source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
         assert!(production_source.contains("session_import::session_import_fs,"));
-    }
-
-    #[test]
-    fn structured_tracing_initializer_is_exposed_to_headless_binaries() {
-        let initializer: fn() -> bool = super::init_structured_tracing;
-        let _ = initializer;
     }
 
     #[test]

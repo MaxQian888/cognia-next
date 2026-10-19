@@ -38,18 +38,18 @@ mod tests {
     /// production constructor to its runtime.
     #[test]
     fn every_production_state_carries_its_runtime() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         for (file, needle) in [
             (
-                "companion_api/commands.rs",
+                "src-tauri/src/companion_api/commands.rs",
                 "runtime: super::wiring::runtime(),",
             ),
             (
-                "bin/cognia-server.rs",
+                "crates/cognia-server/src/main.rs",
                 "runtime: cognia_companion_rpc::companion_runtime::headless(),",
             ),
             (
-                "bin/cognia-webrtc-peer.rs",
+                "src-tauri/src/bin/cognia-webrtc-peer.rs",
                 "runtime: app_lib::companion_api::wiring::runtime(),",
             ),
         ] {

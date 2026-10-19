@@ -348,8 +348,8 @@ async function main() {
   if (!options.skipBuild) {
     run("cargo", [
       "build",
-      "--manifest-path",
-      join(projectRoot, "src-tauri", "Cargo.toml"),
+      "-p",
+      "cognia-server",
       "--release",
       "--bin",
       "cognia-server",

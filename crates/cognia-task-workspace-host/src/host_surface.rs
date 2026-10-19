@@ -15,24 +15,26 @@ use cognia_task_workspace::{
     ChangesetError, ChangesetFilter, ChangesetReview, CodeCheckout, CodeResult, CodeSnapshotLimits,
     CodeSnapshotUpload, CommittedCodeSnapshot, ConfinedFileRead, ConflictResolution,
     CreateCodeSnapshot, CreatedCodeSnapshot, DownloadHandle, EligibilityGap, EnsureProjectSource,
-    EnsureRemoteSource, EnsureSessionScratchWorkspace, ExportCodeCheckout, IntegrationAnalysis,
-    IntegrationError, IntegrationRun, IntegrationState, PatchSelection, PatchSet,
-    PrepareIntegration, ProjectSource, PruneOutcome, ReconcileOutcome, RemoteSourceCheckout,
-    ResourceCaptureChunk, ResourceChange, ResourceEvent, ResourceEventKind, ResourceIndexEntry,
+    EnsureRemoteSource, EnsureSessionScratchWorkspace, ExportCodeCheckout, ExternalPortSubjectKind,
+    IntegrationAnalysis, IntegrationError, IntegrationRun, IntegrationState, PatchSelection,
+    PatchSet, PrepareIntegration, ProjectSource, PruneOutcome, ReconcileOutcome,
+    RemoteSourceCheckout, ResourceChange, ResourceEvent, ResourceEventKind, ResourceIndexEntry,
     ResourceRead, ResourceTrackingPolicy, RevisionApplyOutcome, RevisionPatch, RunState,
     ServiceConfig, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
     TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk,
     UploadHandle, WorkspaceBundle, WorkspaceBundleTurnLease, WorkspaceBundleTurnOutcome,
     WorkspaceEnvironmentSummary, WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent,
-    WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult, WorkspaceRecord, WorkspaceRevision,
-    ExternalPortSubjectKind, WorkspacePortLease, WorkspacePortLeaseList,
-    WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
+    WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult, WorkspacePortLease,
+    WorkspacePortLeaseList, WorkspaceRecord, WorkspaceRevision, WorktreeLifecycleEvent,
+    WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
 use cognia_task_workspace::{
     BestOfNCandidateProgress, BestOfNGroup, BestOfNMutation, StartBestOfN,
 };
 #[cfg(any(feature = "tauri-host", test))]
 use cognia_task_workspace::BestOfNSelect;
+#[cfg(feature = "tauri-host")]
+use cognia_task_workspace::ResourceCaptureChunk;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -59,10 +61,10 @@ fn slot() -> &'static RwLock<Option<Arc<TaskWorkspaceService>>> {
 pub fn install(data_dir: PathBuf) -> Result<Arc<TaskWorkspaceService>, String> {
     // ADR-0176. Point the shared mirror cache at the data directory before any
     // clone can run. Both hosts reach this one function — the desktop shell at
-    // `lib.rs` boot and `cognia-server` at `bin/cognia-server.rs` — so the
-    // cache has one location per process instead of following whatever the
-    // working directory happened to be, which is the bug the process-global
-    // root exists to close. A second call losing is fine and expected in tests:
+    // `lib.rs` boot and `cognia-server` at its `serve` boot — so the cache has
+    // one location per process instead of following whatever the working
+    // directory happened to be, which is the bug the process-global root
+    // exists to close. A second call losing is fine and expected in tests:
     // the root is set once and the first writer wins.
     cognia_git_mirror::set_root(data_dir.join("task-workspaces").join("mirrors"));
     let mut config = ServiceConfig::new(data_dir);

@@ -43,10 +43,11 @@ export const COMPANION_SOURCES = Object.freeze({
   api: `${COMPANION_CORE_DIR}/api.rs`,
   larkEntry: `${COMPANION_CORE_DIR}/lark_entry.rs`,
   /**
-   * The app's routes on the listener (the Pro IDE relay), handed to the core
-   * through `CompanionRuntime` (ADR-0196 P5.4).
+   * The routes the core cannot name itself (the Pro IDE relay), handed to it
+   * through `CompanionRuntime` (ADR-0196 P5.4); shared by the desktop and the
+   * headless runtime since P9.
    */
-  runtimeWiring: `${COMPANION_API_DIR}/wiring.rs`,
+  runtimeWiring: `${COMPANION_RPC_DIR}/companion_runtime.rs`,
   /**
    * The headless server's routes (the MCP OAuth callback, the IDE content
    * broker), handed to the core through `HeadlessRuntime`.

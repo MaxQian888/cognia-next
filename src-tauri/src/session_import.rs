@@ -3,7 +3,7 @@
 //! here, matching the `recovery` / `proxy_config` / `keyring_secrets` pattern.
 //!
 //! Keeping the shell app-side is what lets `cognia-agent-state` stay tauri-free
-//! for `bin/cognia-server.rs` and for the ACP session registry that Batch 4
+//! for `cognia-server` and for the ACP session registry that Batch 4
 //! will path-dep onto it.
 
 use cognia_agent_state::session_import::{SessionHistoryFsOperation, SessionHistoryFsResult};

@@ -15,7 +15,7 @@
 //!   (the server's boot, the tests' stubs) fills it with no extra call. It
 //!   feeds `/healthz`, `/metrics`, the bridge's orchestration replies, the
 //!   Lark admin surface and the headless-only routes;
-//! - [`BRAIN`], set by `headless::brain::install_brain`.
+//! - [`BRAIN`], set by `cognia_server::brain::install_brain`.
 //!
 //! On the desktop both stay empty, which is what "not headless" means here.
 
@@ -266,7 +266,7 @@ mod tests {
     use super::*;
 
     /// `/healthz` serializes this struct as-is, so its field names are wire
-    /// contract. (The slot itself is exercised by `headless::brain`'s tests;
+    /// contract. (The slot itself is exercised by `cognia_server::brain`'s tests;
     /// a second test here would race them over the same global.)
     #[test]
     fn brain_status_keeps_its_healthz_field_names() {

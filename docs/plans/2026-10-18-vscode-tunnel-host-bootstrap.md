@@ -125,6 +125,12 @@ Each spike is an opt-in script in an owned scratch directory, run against a disp
 
   `cognia_git::commands` and the gateway-task deletion helpers now build without `tauri-host`. `cargo tree -p cognia-companion-rpc -i tauri` is empty. ADR-0196 P9 (the `crates/cognia-server` package and the image) is next.
 
+- **Progress (2026-10-19, ADR-0196 P9 package).** The binary is its own package, `crates/cognia-server` (lib: `brain`, `tenant_lease`; bin: `src/main.rs`), over the companion crates. It got there in two steps:
+  - its last app-local helpers moved down: push fan-out to `cognia-companion-bus::push_triggers`, `BrowserEnrollmentIssue` to `command_services`, the shutdown signal to `cognia_core::shutdown_signal`, and the dispatching `CompanionRuntime` (`companion_runtime::headless()`) to `cognia-companion-rpc`;
+  - the package itself. `rust-architecture.json` forbids it reaching `tauri`, `wry`, `webkit2gtk`, `gtk`, `muda` or `tray-icon`. `cargo tree -p cognia-server --target all -i <each>` matches nothing.
+
+  The sidecar, archive and dev scripts build it with `-p cognia-server`. Next is the image: `Dockerfile.cognia-server` still builds with `--bin` alone, which unifies the desktop's `tauri-host` features into the server's graph and keeps WebKitGTK installed. It needs `-p cognia-server` in both the cook and the build, without the GTK/WebKit packages. The `codex/ci-server-build-phase1` branch edits the same lines, so coordinate. Then the `ocr-paddle` glibc decision and the `ldd` check below. On Linux the graph still holds `x11rb` and `wayland-protocols` (pure-Rust clients, through `cognia-automation`); they link no GTK, and `ldd` will confirm.
+
 - **Decide here, with evidence:** whether `ocr-paddle` stays in the Linux build. Choose from the resulting glibc baseline and the headless OCR need, and record the baseline in this plan.
 - **Verification:** `ldd`/`readelf` on the headless binary shows no `libgtk`, `libwebkit2gtk` or `libjavascriptcore`. The existing headless conformance and server smoke tests pass. The server image switches to the headless binary and drops the GTK/WebKit runtime packages.
 

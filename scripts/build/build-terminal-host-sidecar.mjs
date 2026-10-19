@@ -55,14 +55,9 @@ export function prepareTerminalHostSidecar({
     resolvedTarget = parseRustHost(rustc.stdout)
   }
 
-  const buildArgs = [
-    "build",
-    "--manifest-path",
-    join(root, "src-tauri", "Cargo.toml"),
-    "--release",
-    "--bin",
-    "cognia-server",
-  ]
+  // Its own package (ADR-0196 P9): `-p` keeps the desktop's `tauri-host`
+  // features out of the server's feature resolution.
+  const buildArgs = ["build", "-p", "cognia-server", "--release", "--bin", "cognia-server"]
   if (target) buildArgs.push("--target", resolvedTarget)
   const build = run("cargo", buildArgs, {
     cwd: root,

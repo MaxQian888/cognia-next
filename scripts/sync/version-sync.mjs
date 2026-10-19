@@ -11,6 +11,7 @@
  *   - crates/cognia-cli/Cargo.toml   (the `cognia` plugin-author CLI)
  *   - crates/cognia-sandbox-runner/Cargo.toml (bundled with the desktop app)
  *   - crates/cognia-companion/Cargo.toml (reports the app version on the wire)
+ *   - crates/cognia-server/Cargo.toml (the headless Host / terminal-host sidecar)
  *   - cli/package.json               (@cognia/agent-cli — the `cognia-agent` CLI)
  *   - sidecar/package.json           (cognia-claude-sidecar, bundled in resources)
  *   - sidecar/vscode-ext-host/package.json
@@ -57,6 +58,10 @@ export const TARGETS = [
   { path: "crates/cognia-companion/Cargo.toml", kind: "cargo" },
   { path: "crates/cognia-companion-rpc/Cargo.toml", kind: "cargo" },
   { path: "crates/cognia-sidecar/Cargo.toml", kind: "cargo" },
+  // The headless Host and the desktop's terminal-host sidecar report this
+  // crate's `CARGO_PKG_VERSION` to `service status` and the updater
+  // (ADR-0196 P9).
+  { path: "crates/cognia-server/Cargo.toml", kind: "cargo" },
   { path: "cli/package.json", kind: "json" },
   { path: "sidecar/package.json", kind: "json" },
   { path: "sidecar/vscode-ext-host/package.json", kind: "json" },

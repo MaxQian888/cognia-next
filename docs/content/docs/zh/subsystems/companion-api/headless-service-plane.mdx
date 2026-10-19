@@ -62,7 +62,7 @@ pnpm dev:web-headless
 ```bash
 COGNIA_ALLOWED_WEB_ORIGINS="http://localhost:3000,http://127.0.0.1:3000" \
 COGNIA_ALLOW_PRIVATE_NETWORK=true \
-cargo run --bin cognia-server -- serve --port 27890
+cargo run -p cognia-server -- serve --port 27890
 ```
 
 **浏览器根本够不到 HTTPS 监听器。** `tls.rs` 用 rcgen 生成证书、没有 CA，在 `127.0.0.1` 上和在局域网地址上一样。移动端没问题——它在原生层 pin SPKI 哈希，绕开任何信任库；但浏览器只按系统根证书校验，且没有任何 JavaScript 逃生口。所以 `https://127.0.0.1:27890` 不是浏览器的门。
@@ -71,7 +71,7 @@ cargo run --bin cognia-server -- serve --port 27890
 
 ```bash
 COGNIA_ALLOWED_WEB_ORIGINS="http://localhost:3000,http://127.0.0.1:3000" \
-cargo run --bin cognia-server -- serve --port 27890 --browser-listener-port 27891
+cargo run -p cognia-server -- serve --port 27890 --browser-listener-port 27891
 ```
 
 这个开关硬绑在 `127.0.0.1` 上——放弃 TLS 的全部理由就是字节出不了本机——并且在没有 allowlist 时拒绝启动：空清单的监听器会对浏览器发出的每一个请求回 `403 web_origin_forbidden`，而从外面看它和一个正常工作的端口一模一样。它同时为这些 origin 打开 Private Network Access——Chrome 在 `:3000` 上的页面能访问回环之前，会先发这个预检。

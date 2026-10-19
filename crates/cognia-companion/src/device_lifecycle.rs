@@ -422,7 +422,7 @@ pub fn sweep_revoked_device_secrets(tenant_id: &str) -> usize {
 /// Host secrets, and the devices that wrote them, belong to the host, so the
 /// device registry to consult is the bound tenant's whoever triggers the
 /// sweep. A caller's tenant is the account claim of its token, and the brain's
-/// service token carries its local account id (`headless/brain.rs`), not a
+/// service token carries its local account id (`cognia_server::brain`), not a
 /// tenant: a sweep run on that found none of the paired devices and forgot
 /// every secret a live phone had set, its connector credentials included.
 pub fn sweep_revoked_host_device_secrets() -> usize {

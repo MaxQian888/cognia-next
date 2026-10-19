@@ -1,7 +1,7 @@
 //! Shared crash-backoff for supervised child processes (ADR-0059 R6).
 //!
 //! Extracted from `claude/sidecar.rs` so the sidecar supervisor and the
-//! headless brain supervisor (`headless/brain.rs`, R8) escalate identically:
+//! headless brain supervisor (`cognia_server::brain`, R8) escalate identically:
 //! a single transient death respawns immediately; only a genuine crash loop
 //! (the child keeps dying before announcing ready) escalates the delay.
 

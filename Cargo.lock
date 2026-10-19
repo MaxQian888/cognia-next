@@ -2876,7 +2876,6 @@ dependencies = [
  "block2",
  "bytes",
  "chrono",
- "clap",
  "cognia-agent-state",
  "cognia-agents",
  "cognia-automation",
@@ -3359,6 +3358,45 @@ dependencies = [
  "tokio",
  "windows 0.62.2",
  "windows-future 0.3.2",
+]
+
+[[package]]
+name = "cognia-server"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "chrono",
+ "clap",
+ "cognia-agent-state",
+ "cognia-companion",
+ "cognia-companion-rpc",
+ "cognia-core",
+ "cognia-external-agent",
+ "cognia-file-share",
+ "cognia-gateway",
+ "cognia-host-service",
+ "cognia-jobs",
+ "cognia-net",
+ "cognia-observability",
+ "cognia-ocr",
+ "cognia-plugin-runtime",
+ "cognia-remote-desktop",
+ "cognia-sandbox-pool",
+ "cognia-secrets",
+ "cognia-sidecar",
+ "cognia-task-workspace-host",
+ "cognia-terminal",
+ "dirs 7.0.0",
+ "hex",
+ "log",
+ "parking_lot",
+ "reqwest 0.13.5",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

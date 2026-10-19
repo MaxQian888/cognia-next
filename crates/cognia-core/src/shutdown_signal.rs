@@ -60,15 +60,24 @@ pub async fn wait_for_signal() {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::time::Duration;
+
+    /// Both binaries' forced exit reports 130 on every platform, so a
+    /// supervisor reads a second-signal exit the same way from either.
+    #[test]
+    fn the_forced_exit_code_is_the_ctrl_c_convention() {
+        assert_eq!(SIGNAL_EXIT_CODE, 130);
+    }
 
     /// `wait_for_signal` must resolve when the process is interrupted. The
     /// stream is built (installing the tokio handler) before the delayed
     /// self-`SIGINT` fires, so the signal is intercepted here instead of
     /// terminating the test binary.
+    #[cfg(unix)]
     #[tokio::test]
     async fn wait_for_signal_resolves_on_sigint() {
         let raiser = tokio::spawn(async {
@@ -89,6 +98,7 @@ mod tests {
 
     /// A second interrupt is caught too — the force-exit escape hatch reuses
     /// the same helper, so it must not swallow only the first signal.
+    #[cfg(unix)]
     #[tokio::test]
     async fn wait_for_signal_resolves_on_repeated_sigint() {
         for _ in 0..2 {
@@ -110,6 +120,7 @@ mod tests {
     /// `SIGTERM` — what systemd, Docker and `kill <pid>` send — must resolve
     /// the same helper. The headless server relies on this: without the hook
     /// the kernel default hard-kills it mid-drain.
+    #[cfg(unix)]
     #[tokio::test]
     async fn wait_for_signal_resolves_on_sigterm() {
         let raiser = tokio::spawn(async {
@@ -128,6 +139,7 @@ mod tests {
         raiser.await.expect("raiser task panicked");
     }
 
+    #[cfg(unix)]
     #[test]
     fn sigint_exit_code_follows_shell_convention() {
         // 128 + SIGINT(2) — what a Ctrl+C-terminated process reports.

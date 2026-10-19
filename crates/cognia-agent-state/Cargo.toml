@@ -2,7 +2,7 @@
 # extracted from `app_lib`.
 #
 # All three modules had ZERO `crate::` edges and, deliberately, NO tauri
-# dependency: `bin/cognia-server.rs` consumes `provider_profiles` and
+# dependency: `cognia-server` consumes `provider_profiles` and
 # `agent_session_store` directly, and Batch 4's `cognia-agent-protocols` will
 # path-dep this crate for the ACP session registry. The Tauri-facing shells
 # (`session_import`'s one command, and the whole `session_import_watch` event

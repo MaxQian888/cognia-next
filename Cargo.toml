@@ -176,6 +176,8 @@ members = [
   # ADR-0149 §6 — the collaboration plane. Server-authoritative Issues; the
   # client keeps a read-only cache.
   "crates/cognia-collab-server",
+  # ADR-0196 P9 — the headless Host binary as its own Tauri-free package.
+  "crates/cognia-server",
 ]
 exclude = [
   "services/signaling-server",

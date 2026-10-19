@@ -241,7 +241,7 @@ test("the desktop terminal host shares every cargo unit with tauri dev", async (
   const { scripts } = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"))
   assert.equal(
     scripts["terminal-host:prepare:dev"],
-    "cargo build --manifest-path src-tauri/Cargo.toml --bin cognia-server"
+    "cargo build -p cognia-server --bin cognia-server"
   )
   const launch = await readFile(path.join(root, ".vscode/launch.json"), "utf8")
   for (const block of launch.match(/"--bin",\s*"cognia-next",?[^\]]*\]/g) ?? []) {
@@ -251,7 +251,7 @@ test("the desktop terminal host shares every cargo unit with tauri dev", async (
   }
   assert.equal(
     scripts["terminal-host:prepare:headless"],
-    "cargo build --manifest-path src-tauri/Cargo.toml --bin cognia-server --features workspace-runtime-exec"
+    "cargo build -p cognia-server --bin cognia-server --features workspace-runtime-exec"
   )
   for (const name of ["external-agent-launcher:prepare:dev", "bootstrap-agent:prepare:dev"]) {
     assert.match(scripts[name], /^cargo build\b/, name)

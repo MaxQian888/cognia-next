@@ -24,7 +24,7 @@ import { isLarkPrincipalRegistryEnabled } from "../feature-flags"
 
 /**
  * Must stay in lockstep with `HEADLESS_LOCAL_ACCOUNT_ID` in
- * `cli/src/serve/account.ts` and `src-tauri/src/bin/cognia-server.rs` (lib
+ * `cli/src/serve/account.ts` and `crates/cognia-server/src/main.rs` (lib
  * code cannot import from cli/).
  */
 

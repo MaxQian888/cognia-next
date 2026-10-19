@@ -31,7 +31,7 @@ test("sidecarPaths follows Tauri's target-suffixed external binary contract", ()
 test("Windows bundles the Cargo-discovered server once and retains external-only binaries", () => {
   const base = JSON.parse(readFileSync(new URL("../../src-tauri/tauri.conf.json", import.meta.url), "utf8"))
   const windows = JSON.parse(readFileSync(new URL("../../src-tauri/tauri.windows.conf.json", import.meta.url), "utf8"))
-  const manifest = readFileSync(new URL("../../src-tauri/Cargo.toml", import.meta.url), "utf8")
+  const manifest = readFileSync(new URL("../../crates/cognia-server/Cargo.toml", import.meta.url), "utf8")
   assert.match(manifest, /\[\[bin\]\]\s+name = "cognia-server"/)
   assert.ok(base.bundle.externalBin.includes("binaries/cognia-server"))
   assert.deepEqual(

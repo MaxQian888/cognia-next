@@ -229,7 +229,7 @@ mod tests {
                 < desktop.find("name: \"gateway_session\"").unwrap()
         );
         let headless =
-            std::fs::read_to_string(root.join("src-tauri/src/bin/cognia-server.rs")).unwrap();
+            std::fs::read_to_string(root.join("crates/cognia-server/src/main.rs")).unwrap();
         assert!(
             headless.find("cognia_sidecar::SIDECAR.install").unwrap()
                 < headless.find("HeadlessSidecarHost::new").unwrap()

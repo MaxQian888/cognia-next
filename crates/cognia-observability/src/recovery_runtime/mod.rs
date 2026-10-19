@@ -25,7 +25,7 @@ pub use controller::{RecoveryBoot, RecoveryController};
 /// Tauri state would be the obvious home, but the callers that need the child
 /// restart budget cannot reach it: the sidecar supervisor runs on detached
 /// tokio tasks whose only handle is a `SidecarHost` trait object, and the
-/// headless server binary (`bin/cognia-server.rs`) has no `AppHandle` at all.
+/// headless server binary (`cognia-server`) has no `AppHandle` at all.
 /// A supervisor that could only report failures when a webview happened to
 /// exist would enforce the budget in exactly the configurations that need it
 /// least.

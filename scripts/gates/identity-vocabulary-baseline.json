@@ -903,7 +903,7 @@
     "crates/cognia-companion/src/ws.rs": {
       "bareAccountIdRust": 1
     },
-    "src-tauri/src/headless/brain.rs": {
+    "crates/cognia-server/src/brain.rs": {
       "bareAccountIdRust": 6
     },
     "crates/cognia-companion-rpc/src/mcp_oauth/headless_store.rs": {

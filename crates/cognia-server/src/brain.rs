@@ -32,12 +32,12 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{watch, Mutex};
 
-use crate::companion_api::jwt::issue_service_jwt;
-use crate::companion_api::{ws_bridge, SharedState};
-use crate::supervision_backoff::CrashBackoff;
+use cognia_companion::jwt::issue_service_jwt;
+use cognia_companion::{ws_bridge, SharedState};
+use cognia_core::supervision_backoff::CrashBackoff;
 
 /// Env var naming the brain entry script. Set by `Dockerfile.cognia-server`.
-pub use crate::companion_api::runtime::BRAIN_ENTRY_ENV;
+pub use cognia_companion::runtime::BRAIN_ENTRY_ENV;
 
 /// How often the supervisor re-mints and pushes a fresh service token over
 /// the bridge (tokens live 24h; refresh at half-life).
@@ -168,13 +168,13 @@ pub fn build_brain_env(config: &BrainConfig, service_token: &str) -> Vec<(String
 
 /// Snapshot for `/healthz` — see [`brain_status`]. Defined by the companion
 /// core, which reads it through `companion_api::runtime::BRAIN`.
-pub use crate::companion_api::runtime::BrainStatus;
+pub use cognia_companion::runtime::BrainStatus;
 
 /// Publish the supervisor so `/healthz` and `/metrics` can report the brain
 /// without threading through `CompanionState` (same idiom as
 /// `TLS_FINGERPRINT`). `None` clears it.
 pub fn install_brain(supervisor: Option<Arc<BrainSupervisor>>) {
-    use crate::companion_api::runtime::BRAIN;
+    use cognia_companion::runtime::BRAIN;
     match supervisor {
         Some(supervisor) => {
             BRAIN.set(supervisor);
@@ -187,10 +187,10 @@ pub fn install_brain(supervisor: Option<Arc<BrainSupervisor>>) {
 
 /// The installed supervisor's status, if any (`None` on desktop).
 pub fn brain_status() -> Option<BrainStatus> {
-    crate::companion_api::runtime::brain_status()
+    cognia_companion::runtime::brain_status()
 }
 
-impl crate::companion_api::runtime::BrainProbe for BrainSupervisor {
+impl cognia_companion::runtime::BrainProbe for BrainSupervisor {
     fn status(&self) -> BrainStatus {
         BrainSupervisor::status(self)
     }
@@ -613,7 +613,7 @@ impl BrainSupervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::companion_api::{
+    use cognia_companion::{
         deny_list::DenyList, desktop_messages_bridge::DesktopMessagesBridge,
         desktop_writes_bridge::DesktopWritesBridge, event_bus::EventBus,
         idempotency::IdempotencyCache, push::PushTokenRegistry, rate_limit::RateLimiter,
@@ -626,7 +626,7 @@ mod tests {
             secret: RwLock::new(b"test-secret-32-bytes-exactly____".to_vec()),
             deny_list: Arc::new(DenyList::new()),
             renderer: None,
-            runtime: crate::companion_api::runtime::unwired(),
+            runtime: cognia_companion::runtime::unwired(),
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
             sync_bridge: SyncBridge::new(),
@@ -738,14 +738,14 @@ mod tests {
     /// the restart counter climbs. Requires node; skips gracefully without.
     #[tokio::test]
     async fn exiting_child_is_respawned_with_backoff() {
-        if !crate::external_agent::command_resolver::check_command_exists("node") {
+        if !cognia_external_agent::command_resolver::check_command_exists("node") {
             eprintln!("skip: node not on PATH");
             return;
         }
         // Readiness rides the process-global ws_bridge watch — hold the slot
         // lock so concurrent ws_bridge tests can't flip it mid-test.
-        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-        crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
+        let _guard = cognia_companion::ws_bridge::test_support::lock_slot().await;
+        cognia_companion::ws_bridge::test_support::clear_socket_for_testing();
         let tmp = tempfile::tempdir().expect("tempdir");
         let entry = tmp.path().join("exit-now.mjs");
         std::fs::write(&entry, "process.exit(3);\n").expect("write");
@@ -777,14 +777,14 @@ mod tests {
     /// supervisor moves on (restart counter climbs past it). Requires node.
     #[tokio::test]
     async fn never_ready_child_is_killed_by_the_watchdog() {
-        if !crate::external_agent::command_resolver::check_command_exists("node") {
+        if !cognia_external_agent::command_resolver::check_command_exists("node") {
             eprintln!("skip: node not on PATH");
             return;
         }
         // A concurrent ws_bridge test flipping READY would disarm the
         // watchdog under test — hold the slot lock for the duration.
-        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-        crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
+        let _guard = cognia_companion::ws_bridge::test_support::lock_slot().await;
+        cognia_companion::ws_bridge::test_support::clear_socket_for_testing();
         let tmp = tempfile::tempdir().expect("tempdir");
         let entry = tmp.path().join("sleep-forever.mjs");
         std::fs::write(&entry, "setInterval(() => {}, 60_000);\n").expect("write");
@@ -829,13 +829,13 @@ mod tests {
     /// Requires node.
     #[tokio::test]
     async fn a_refused_brain_parks_the_supervisor_until_the_brain_is_replaced() {
-        if !crate::external_agent::command_resolver::check_command_exists("node") {
+        if !cognia_external_agent::command_resolver::check_command_exists("node") {
             eprintln!("skip: node not on PATH");
             return;
         }
-        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-        crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
-        crate::companion_api::ws_bridge::test_support::clear_refusal_for_testing();
+        let _guard = cognia_companion::ws_bridge::test_support::lock_slot().await;
+        cognia_companion::ws_bridge::test_support::clear_socket_for_testing();
+        cognia_companion::ws_bridge::test_support::clear_refusal_for_testing();
         let tmp = tempfile::tempdir().expect("tempdir");
         let entry = tmp.path().join("refused.mjs");
         std::fs::write(
@@ -879,13 +879,13 @@ mod tests {
     /// waiting out the ready watchdog, and parks. Requires node.
     #[tokio::test]
     async fn a_refusal_stops_a_brain_that_would_keep_reconnecting() {
-        if !crate::external_agent::command_resolver::check_command_exists("node") {
+        if !cognia_external_agent::command_resolver::check_command_exists("node") {
             eprintln!("skip: node not on PATH");
             return;
         }
-        let _guard = crate::companion_api::ws_bridge::test_support::lock_slot().await;
-        crate::companion_api::ws_bridge::test_support::clear_socket_for_testing();
-        crate::companion_api::ws_bridge::test_support::clear_refusal_for_testing();
+        let _guard = cognia_companion::ws_bridge::test_support::lock_slot().await;
+        cognia_companion::ws_bridge::test_support::clear_socket_for_testing();
+        cognia_companion::ws_bridge::test_support::clear_refusal_for_testing();
         let tmp = tempfile::tempdir().expect("tempdir");
         let entry = tmp.path().join("reconnects-forever.mjs");
         std::fs::write(&entry, "setInterval(() => {}, 60_000);\n").expect("write");
@@ -895,7 +895,7 @@ mod tests {
         let handle = sup.start();
         wait_for(&sup, "child running", |s| s.running).await;
 
-        crate::companion_api::ws_bridge::test_support::refuse_for_testing("contract_mismatch");
+        cognia_companion::ws_bridge::test_support::refuse_for_testing("contract_mismatch");
         wait_for(&sup, "parked after the refusal", |s| s.parked && !s.running).await;
         let status = sup.status();
         assert_eq!(status.restart_count, 1);
@@ -909,7 +909,7 @@ mod tests {
             .await
             .expect("loop must stop on shutdown")
             .expect("join");
-        crate::companion_api::ws_bridge::test_support::clear_refusal_for_testing();
+        cognia_companion::ws_bridge::test_support::clear_refusal_for_testing();
     }
 
     #[test]
