@@ -6,7 +6,8 @@
 
 import { extractJson, type LlmClient } from "../llm"
 import { hasNoLeakingPii } from "@cognia/redact"
-import { applyTemplate, SYNTHESIZER_PROMPT } from "../prompts"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { SYNTHESIZER_PROMPT } from "../prompts"
 import type { TwinChunk, TwinDraftPayload, TwinProfile } from "@/types/twin"
 
 export interface SynthesizerInput {
@@ -108,10 +109,14 @@ export async function runSynthesizer(
   llm: LlmClient,
   input: SynthesizerInput
 ): Promise<SynthesizerResult> {
-  const prompt = applyTemplate(SYNTHESIZER_PROMPT, {
-    profile: formatProfileForPrompt(input.profile),
-    chunks: formatChunksForPrompt(input.recentChunks),
-  })
+  const prompt = (
+    await resolvePromptAsync(SYNTHESIZER_PROMPT, {
+      values: {
+        profile: formatProfileForPrompt(input.profile),
+        chunks: formatChunksForPrompt(input.recentChunks),
+      },
+    })
+  ).text
 
   if (!hasNoLeakingPii(prompt)) {
     throw new Error("Synthesizer prompt contains unredacted PII")

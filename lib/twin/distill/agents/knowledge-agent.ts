@@ -3,7 +3,8 @@
  */
 
 import { extractJson, type LlmClient } from "../llm"
-import { applyTemplate, KNOWLEDGE_AGENT_PROMPT } from "../prompts"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { KNOWLEDGE_AGENT_PROMPT } from "../prompts"
 import type { DecisionRecord, EntityRole, ProfileEntity, TwinChunk } from "@/types/twin"
 
 export interface KnowledgeAgentInput {
@@ -70,9 +71,13 @@ export async function runKnowledgeAgent(
   const chunks = input.chunks.slice(0, cap)
   if (chunks.length === 0) return { entities: [], decisions: [], perChunk: {} }
 
-  const prompt = applyTemplate(KNOWLEDGE_AGENT_PROMPT, {
-    chunks: formatChunksForPrompt(chunks),
-  })
+  const prompt = (
+    await resolvePromptAsync(KNOWLEDGE_AGENT_PROMPT, {
+      values: {
+        chunks: formatChunksForPrompt(chunks),
+      },
+    })
+  ).text
 
   const response = await llm.complete(prompt, { temperature: 0, maxTokens: 3500 })
   const parsed = extractJson<{

@@ -4983,6 +4983,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.appendSystemPrompt = appendGoalContext({
       appendSystemPrompt: opts.appendSystemPrompt,
       activeGoal: ctx.activeGoal,
+      promptSnapshot,
     })
     // Forward the goal's per-turn USD ceiling as the SDK's hard budget cap so a
     // runaway turn halts (subtype `error_max_budget_usd`) instead of burning
