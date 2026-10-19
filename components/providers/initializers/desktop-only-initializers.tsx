@@ -113,6 +113,10 @@ const BestOfNRecoveryInitializer = dynamic(
   () => import("./best-of-n-recovery-initializer").then((m) => m.BestOfNRecoveryInitializer),
   { ssr: false }
 )
+const HarnessEvolutionInitializer = dynamic(
+  () => import("./harness-evolution-initializer").then((m) => m.HarnessEvolutionInitializer),
+  { ssr: false }
+)
 const PluginDeepLinkRouter = dynamic(
   () => import("@/components/plugins/plugin-deep-link-router").then((m) => m.PluginDeepLinkRouter),
   { ssr: false }
@@ -249,6 +253,7 @@ export function DesktopOnlyInitializers() {
       <WorkerRuntimeInitializer />
       <ExitLeaseReleaseInitializer />
       <BestOfNRecoveryInitializer />
+      <HarnessEvolutionInitializer />
       <PluginDeepLinkRouter />
       <ConsentOverlay />
       <CliBridgeEventsBridge />

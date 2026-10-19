@@ -5,7 +5,9 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getDecisionContext } from "@/lib/db/governance-ledger"
 import {
   harnessAdoptionDecisionId,
+  harnessRestoreDecisionId,
   recordHarnessAdoptionGovernance,
+  recordHarnessRestoreGovernance,
   recordHarnessRollbackGovernance,
 } from "./harness-adoption"
 
@@ -58,4 +60,28 @@ it("records an automatic low-risk adoption and its rollback", async () => {
   })
   const after = await getDecisionContext(id)
   expect(after?.events.map((e) => e.type)).toEqual(["executed", "revoked"])
+})
+
+it("records a person restoring an earlier version", async () => {
+  const id = await recordHarnessRestoreGovernance({
+    restoredSnapshotId: "snap-restored",
+    sourceSnapshotId: "snap-old",
+    characterId: "agent-1",
+    currentContentHash: "now-hash",
+    restoredContentHash: "old-hash",
+    risk: "medium",
+    applyId: "apply-9",
+    decidedAt: 300,
+  })
+  expect(id).toBe(harnessRestoreDecisionId("snap-restored"))
+  const context = await getDecisionContext(id)
+  expect(context?.decision).toMatchObject({
+    kind: "harness-adoption",
+    question: { code: "restore-harness-version" },
+    subjectRef: { type: "agent", id: "agent-1" },
+    decider: { kind: "human" },
+    resolution: { outcome: "adopted", reasonCode: "restored" },
+  })
+  expect(JSON.stringify(context)).not.toMatch(/systemPrompt"\s*:\s*"/)
+  expect(context?.events.map((e) => e.type)).toEqual(["executed"])
 })

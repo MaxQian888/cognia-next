@@ -6,11 +6,16 @@
 import type {
   HarnessEvolutionRun,
   HarnessEvolutionRunConfig,
+  HarnessEvolutionStep,
   HarnessEvolutionTask,
   HarnessExecutionEvidence,
 } from "@/types/harness/evolution"
 import type { HarnessExperience } from "@/types/harness/experience"
-import type { HarnessComponentsV1, HarnessSkillV1 } from "@/types/harness/snapshot"
+import type {
+  HarnessComponentsV1,
+  HarnessSkillV1,
+  HarnessSnapshotV1,
+} from "@/types/harness/snapshot"
 import { DEFAULT_HARNESS_BUDGET, emptyLedger } from "./budget"
 
 export function makeSkill(overrides: Partial<HarnessSkillV1> = {}): HarnessSkillV1 {
@@ -175,6 +180,45 @@ export function makeExperience(overrides: Partial<HarnessExperience> = {}): Harn
     disabled: false,
     createdAt: 1,
     updatedAt: 1,
+    ...overrides,
+  }
+}
+
+/** A step of run `run-1`, labelled `label` (`<runId>:<label>` id). */
+export function makeStep(
+  label: string,
+  overrides: Partial<HarnessEvolutionStep> = {}
+): HarnessEvolutionStep {
+  const runId = overrides.runId ?? "run-1"
+  return {
+    id: `${runId}:${label}`,
+    runId,
+    label,
+    kind: "rollout",
+    status: "succeeded",
+    attempts: 1,
+    inputTokens: 100,
+    outputTokens: 20,
+    modelCalls: 0,
+    updatedAt: 1,
+    ...overrides,
+  }
+}
+
+/** A captured snapshot of agent `agent-1`. */
+export function makeSnapshot(overrides: Partial<HarnessSnapshotV1> = {}): HarnessSnapshotV1 {
+  return {
+    schemaVersion: 1,
+    id: "snap-base",
+    contentHash: "hash-base",
+    characterId: "agent-1",
+    characterName: "Analyst",
+    scope: "task",
+    components: makeComponents(),
+    execution: {},
+    runtimeFingerprint: "hrf1-a",
+    origin: { kind: "captured" },
+    createdAt: 1,
     ...overrides,
   }
 }

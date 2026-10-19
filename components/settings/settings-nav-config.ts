@@ -54,6 +54,7 @@ import {
   CloudIcon,
   CircleUserIcon,
   ClipboardCheckIcon,
+  DnaIcon,
   KeyboardIcon,
   RadarIcon,
   CableIcon,
@@ -96,6 +97,7 @@ export type SettingsSectionId =
   | "agent-runtime"
   | "squads"
   | "eval"
+  | "harness-evolution"
   | "hooks"
   | "fleet"
   | "workspace-trust"
@@ -373,6 +375,18 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "eval",
     group: "agents",
     icon: ClipboardCheckIcon,
+  },
+  {
+    id: "harness-evolution",
+    labelKey: "harnessEvolution",
+    descriptionKey: "harnessEvolution",
+    group: "agents",
+    icon: DnaIcon,
+    // ADR-0237: probes run the agent through the desktop sidecar, and runs,
+    // snapshots and the experience library are device-local tables; the
+    // engine's boot wiring (live tool rules, approvals, recovery) is part of
+    // the desktop-only initializers.
+    profiles: ["desktop"],
   },
   // === Tools & Capabilities ===
   {
@@ -1552,6 +1566,20 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "agent team",
     "团队",
     "多代理",
+  ],
+  "harness-evolution": [
+    "harness",
+    "harness evolution",
+    "self-improving",
+    "evolve",
+    "propose probe compose",
+    "experience library",
+    "agent improvement",
+    "rollback",
+    "演化",
+    "自我改进",
+    "经验库",
+    "智能体优化",
   ],
   eval: [
     "eval",

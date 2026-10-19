@@ -76,6 +76,19 @@ jest.mock("@/components/agent/agent-task-board", () => ({
   },
 }))
 
+let mockEvolutionEnabled = false
+jest.mock("@/hooks/harness/use-harness-data", () => ({
+  useHarnessEvolutionSettings: () => ({ enabled: mockEvolutionEnabled }),
+}))
+
+let evolutionProps: { agent: Character; editable: boolean } | undefined
+jest.mock("@/components/harness/agent-evolution-view", () => ({
+  AgentEvolutionView: (props: { agent: Character; editable: boolean }) => {
+    evolutionProps = props
+    return <div data-testid="evolution-stub" />
+  },
+}))
+
 import { AgentDetailView } from "./agent-detail-view"
 
 function agent(over: Partial<Character> = {}): Character {
@@ -138,6 +151,8 @@ beforeEach(() => {
   editProps = undefined
   profileProps = undefined
   boardProps = undefined
+  evolutionProps = undefined
+  mockEvolutionEnabled = false
 })
 
 describe("AgentDetailView — overview", () => {
@@ -253,6 +268,29 @@ describe("AgentDetailView — tasks", () => {
     expect(screen.queryByTestId("agent-start-chat")).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId("agent-assign-work"))
     expect(assignProps?.open).toBe(true)
+    fireEvent.click(screen.getByTestId("agent-edit-back"))
+    expect(onModeChange).toHaveBeenCalledWith("overview")
+  })
+})
+
+describe("AgentDetailView — evolve", () => {
+  it("offers Evolve only once Harness Evolution is on", () => {
+    renderDetail()
+    expect(screen.queryByTestId("agent-evolve")).not.toBeInTheDocument()
+    mockEvolutionEnabled = true
+    const { onModeChange } = renderDetail()
+    fireEvent.click(screen.getByTestId("agent-evolve"))
+    expect(onModeChange).toHaveBeenCalledWith("evolve")
+  })
+
+  it("draws the evolution page as a sub-page of the profile", () => {
+    mockSource = source({ editable: false })
+    const { onModeChange } = renderDetail("evolve")
+    expect(screen.getByTestId("evolution-stub")).toBeInTheDocument()
+    expect(evolutionProps).toMatchObject({ agent: { id: "char_1" }, editable: false })
+    expect(screen.queryByTestId("profile-stub")).not.toBeInTheDocument()
+    expect(screen.getByTestId("agent-detail-name")).toHaveTextContent("Alpha · Evolution")
+    expect(screen.queryByTestId("agent-start-chat")).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId("agent-edit-back"))
     expect(onModeChange).toHaveBeenCalledWith("overview")
   })

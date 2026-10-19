@@ -132,6 +132,26 @@ export function harnessApplicationDeps(
   }
 }
 
+/** The agent fields that carry `snapshot`'s harness, with its skills resolved to `skillIds`. */
+export function harnessConfiguration(
+  snapshot: Pick<HarnessSnapshotV1, "id" | "components">,
+  skillIds: readonly string[]
+): Record<string, unknown> {
+  const c = snapshot.components
+  return {
+    systemPrompt: c.systemPrompt,
+    harness: {
+      guardrails: c.guardrails,
+      memory: c.memory,
+      toolGuidance: c.toolGuidance,
+      subagents: c.subagents.map((s) => ({ ...s })),
+      toolRules: c.toolRules.map((r) => ({ ...r })),
+      adoptedSnapshotId: snapshot.id,
+    },
+    skillIds: [...skillIds],
+  }
+}
+
 function sameSkill(a: HarnessSkillV1, b: HarnessSkillV1): boolean {
   const strip = (s: HarnessSkillV1) => ({
     key: s.key,
@@ -312,19 +332,7 @@ export async function adoptHarness(
     ...input.carriedSkillIds,
     ...(await resolveSnapshotSkillIds(chosen, base, target.id, deps)),
   ]
-  const c = chosen.components
-  const configuration: Record<string, unknown> = {
-    systemPrompt: c.systemPrompt,
-    harness: {
-      guardrails: c.guardrails,
-      memory: c.memory,
-      toolGuidance: c.toolGuidance,
-      subagents: c.subagents.map((s) => ({ ...s })),
-      toolRules: c.toolRules.map((r) => ({ ...r })),
-      adoptedSnapshotId: chosen.id,
-    },
-    skillIds,
-  }
+  const configuration = harnessConfiguration(chosen, skillIds)
   const applicationDeps = harnessApplicationDeps(deps)
   const targetRef = { targetType: HARNESS_APPLY_TARGET, targetId: target.id } as const
   const { applyEvalRecommendation, previewConfigurationDiff } =

@@ -117,6 +117,8 @@
     "duplicateToEdit": "复制后编辑",
     "edit": "编辑",
     "editing": "编辑 {name}",
+    "evolve": "演化",
+    "evolveTitle": "{name} · 演化",
     "noDescription": "暂无描述。",
     "sourceUser": "由你创建",
     "tasksEmpty": "还没有任务。点击「分配工作」给它一个。",

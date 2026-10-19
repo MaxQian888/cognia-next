@@ -69,5 +69,6 @@
   "workflows": "Visual n8n-style orchestration over characters, teams, skills, twins, and connectors. Trigger via cron, webhook, platform message, or manual run.",
   "workspaceTrust": "Trust folders before agents run commands in them. Untrusted workspaces run in Restricted Mode.",
   "connectivity": "How this device and a Host reach each other: local server, relay and tunnel, pairing, remote hosts, push, and sync.",
-  "mediaGeneration": "Default provider, model and options for videos generated from chat, and whether the agent may start one."
+  "mediaGeneration": "Default provider, model and options for videos generated from chat, and whether the agent may start one.",
+  "harnessEvolution": "Let agents improve their own instructions, skills and tool rules from evidence: probes, budgets, approval and the experience library."
 }

@@ -5,6 +5,8 @@ import {
   makeRun,
   makeRunConfig,
   makeSkill,
+  makeSnapshot,
+  makeStep,
   makeTask,
 } from "./test-fixtures"
 import { validateHarnessCandidate } from "./validate"
@@ -28,6 +30,12 @@ describe("harness test fixtures", () => {
     expect(makeSkill({ key: "other" }).key).toBe("other")
     expect(makeComponents({ skills: [] }).skills).toEqual([])
     expect(makeTask({ domain: "coding" }).domain).toBe("coding")
+    expect(makeStep("inv1", { kind: "propose" })).toMatchObject({
+      id: "run-1:inv1",
+      kind: "propose",
+    })
+    expect(makeStep("base1", { runId: "r9" }).id).toBe("r9:base1")
+    expect(makeSnapshot({ id: "s2" })).toMatchObject({ id: "s2", characterId: "agent-1" })
     expect(makeRunConfig({ k: 3 }).k).toBe(3)
     expect(makeRun({ status: "probing" }).status).toBe("probing")
     expect(makeRun().config.editable).not.toContain("toolRules")

@@ -1,5 +1,6 @@
 "use client"
 
+import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
 import {
   useCallback,
@@ -76,6 +77,7 @@ import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
 import { SessionSummaryStageHost } from "@/components/context-workbench/session-summary-card/session-summary-trigger"
 import { useTitleBarProjectionScope } from "@/components/shell/title-bar-outlets"
 import { toast } from "sonner"
+import { isHarnessFailure } from "@/lib/harness/failure-offer"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { mobileTransition } from "@/lib/ui/motion"
@@ -115,6 +117,13 @@ import {
  */
 /** Curated hero hints (`chat.empty.hints.hN`) that assume a repo to work in. */
 const WORKSPACE_HINT_NUMBERS: ReadonlySet<number> = new Set([1, 2, 3, 4, 5, 6])
+
+// Loaded only when a turn fails in a way the harness could explain; the chip
+// pulls in the run-start dialog, which the common path never needs.
+const HarnessFailureOffer = dynamic(
+  () => import("@/components/harness/harness-failure-offer").then((m) => m.HarnessFailureOffer),
+  { ssr: false }
+)
 
 function attachRef<T>(ref: Ref<T> | undefined, node: T | null): void {
   if (typeof ref === "function") ref(node)
@@ -975,6 +984,20 @@ export function ChatPane({
           </ChatColumn>
         )
       )}
+      {/* ADR-0237 — after a failure of the agent's own conduct, offer to
+          improve its harness on the request that failed (or show the run
+          that already does). Renders nothing for any other failure. */}
+      {boundId && isHarnessFailure(errorDiagnostic) ? (
+        <ChatColumn className="mt-2">
+          <HarnessFailureOffer
+            sessionId={boundId}
+            agent={activeCharacter}
+            diagnostic={errorDiagnostic}
+            {...(activeSession?.projectId ? { projectId: activeSession.projectId } : {})}
+            workingDirectory={projectRoot}
+          />
+        </ChatColumn>
+      ) : null}
       <ChatColumn>
         <PluginExtensionSlot
           point="chat.footer"

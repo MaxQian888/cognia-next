@@ -11,13 +11,22 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { ArrowLeftIcon, CopyIcon, ListPlusIcon, MessageSquareIcon, PencilIcon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  CopyIcon,
+  DnaIcon,
+  ListPlusIcon,
+  MessageSquareIcon,
+  PencilIcon,
+} from "lucide-react"
 import type { Character } from "@cognia/agent-config-types"
 import { AgentTaskBoard } from "@/components/agent/agent-task-board"
+import { AgentEvolutionView } from "@/components/harness/agent-evolution-view"
 import { Button } from "@/components/ui/button"
 import { usePluginMetadata } from "@/hooks/plugins/use-plugin-metadata"
 import { useAgentActivity } from "@/hooks/agents/use-agent-activity"
 import { useAgentActions } from "@/hooks/agents/use-agent-actions"
+import { useHarnessEvolutionSettings } from "@/hooks/harness/use-harness-data"
 import type { AgentCatalogs } from "@/hooks/agents/use-agent-catalogs"
 import { describeAgentSource } from "@/lib/agents/agent-source"
 import type { AgentDetailMode } from "@/lib/agents/routes"
@@ -85,9 +94,14 @@ export function AgentDetailView({
     void actions.duplicate(agent).then((copy) => copy && onOpenAgent(copy.id, "edit"))
   const editing = mode === "edit"
   const boardOpen = mode === "tasks"
-  // Edit and the board are sub-pages of the profile: a way back, and a title
-  // that says where you are.
-  const subPage = editing || boardOpen
+  const evolving = mode === "evolve"
+  // Harness Evolution is off by default (ADR-0237); its entry appears only
+  // once it is turned on in Settings. A link straight to `mode=evolve` still
+  // opens the page, which then says it is off.
+  const evolutionEnabled = useHarnessEvolutionSettings().enabled
+  // Edit, the board and evolution are sub-pages of the profile: a way back,
+  // and a title that says where you are.
+  const subPage = editing || boardOpen || evolving
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="agent-detail" data-mode={mode}>
@@ -122,7 +136,9 @@ export function AgentDetailView({
                     ? t("editing", { name: agent.name })
                     : boardOpen
                       ? t("tasksTitle", { name: agent.name })
-                      : agent.name}
+                      : evolving
+                        ? t("evolveTitle", { name: agent.name })
+                        : agent.name}
                 </h2>
                 {activity && activity.status !== "idle" ? (
                   <AgentStatusLabel status={activity.status} />
@@ -134,7 +150,7 @@ export function AgentDetailView({
               </p>
             </div>
           </div>
-          {editing ? null : boardOpen ? (
+          {editing || evolving ? null : boardOpen ? (
             <Button
               size="sm"
               variant="outline"
@@ -165,6 +181,17 @@ export function AgentDetailView({
                 <ListPlusIcon className="size-3.5" aria-hidden />
                 {t("assignWork")}
               </Button>
+              {evolutionEnabled ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onModeChange("evolve")}
+                  data-testid="agent-evolve"
+                >
+                  <DnaIcon className="size-3.5" aria-hidden />
+                  {t("evolve")}
+                </Button>
+              ) : null}
               {source.editable ? (
                 <Button
                   size="sm"
@@ -214,6 +241,8 @@ export function AgentDetailView({
             className="flex-1"
             emptyState={<AgentSectionEmpty>{t("tasksEmpty")}</AgentSectionEmpty>}
           />
+        ) : evolving ? (
+          <AgentEvolutionView agent={agent} editable={source.editable} />
         ) : editing ? (
           <AgentEditView
             agent={agent}

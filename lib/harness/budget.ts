@@ -33,7 +33,10 @@ export const DEFAULT_HARNESS_BUDGET: HarnessEvolutionBudget = {
   maxTurnsPerRollout: 40,
 }
 
-const LIMITS: Record<keyof HarnessEvolutionBudget, [number, number]> = {
+/** Allowed range of each budget field; settings inputs clamp to the same. */
+export const BUDGET_LIMITS: Readonly<
+  Record<keyof HarnessEvolutionBudget, readonly [number, number]>
+> = {
   maxIterations: [1, K_MAX],
   maxCandidates: [2, 2 * K_MAX],
   maxParallelRuns: [1, 8],
@@ -49,10 +52,10 @@ export function normalizeBudget(
   input: Partial<HarnessEvolutionBudget> | undefined
 ): HarnessEvolutionBudget {
   const out = { ...DEFAULT_HARNESS_BUDGET }
-  for (const key of Object.keys(LIMITS) as (keyof HarnessEvolutionBudget)[]) {
+  for (const key of Object.keys(BUDGET_LIMITS) as (keyof HarnessEvolutionBudget)[]) {
     const value = input?.[key]
     if (typeof value !== "number" || !Number.isFinite(value)) continue
-    const [min, max] = LIMITS[key]
+    const [min, max] = BUDGET_LIMITS[key]
     const clamped = Math.min(max, Math.max(min, value))
     out[key] = key === "maxCostUsd" ? clamped : Math.round(clamped)
   }

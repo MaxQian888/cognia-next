@@ -175,6 +175,21 @@ export async function pickDirectory(title?: string): Promise<string | null> {
   return Array.isArray(picked) ? (picked[0] ?? null) : picked
 }
 
+/**
+ * Pick host files and return their absolute paths without reading them
+ * (Tauri only; `[]` on cancel or off-desktop). Each pick registers the
+ * file's folder for raw reads, as every dialog pick does, for callers that
+ * read the bytes later (a task's input files copied into each rollout).
+ */
+export async function pickFilePaths(opts: PickFilesOptions = {}): Promise<string[]> {
+  if (!isTauri()) return []
+  const picked = await open({ multiple: !!opts.multiple, directory: false, filters: opts.filters })
+  if (!picked) return []
+  const paths = Array.isArray(picked) ? picked : [picked]
+  for (const path of paths) await registerDialogPathInRust(path)
+  return paths
+}
+
 export interface PickedBinaryFile {
   /** Filename only (basename), for fallback name derivation. */
   name: string

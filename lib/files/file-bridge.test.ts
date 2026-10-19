@@ -76,6 +76,7 @@ import {
   saveFileAs,
   saveBinaryFileAs,
   pickDirectory,
+  pickFilePaths,
   saveFilesToDir,
 } from "./file-bridge"
 
@@ -726,5 +727,32 @@ describe("streaming backup file transport", () => {
       break
     }
     expect(close).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("pickFilePaths", () => {
+  it("returns nothing off-desktop or on cancel", async () => {
+    mockedIsTauri.mockReturnValue(false)
+    expect(await pickFilePaths()).toEqual([])
+    mockedIsTauri.mockReturnValue(true)
+    mockOpen.mockResolvedValue(null)
+    expect(await pickFilePaths()).toEqual([])
+    expect(mockedRegisterDialogPath).not.toHaveBeenCalled()
+  })
+
+  it("returns the picked paths unread and lets their folders in", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockOpen.mockResolvedValue(["/data/a.csv", "/data/b.csv"])
+    expect(await pickFilePaths({ multiple: true })).toEqual(["/data/a.csv", "/data/b.csv"])
+    expect(mockOpen).toHaveBeenCalledWith(
+      expect.objectContaining({ multiple: true, directory: false })
+    )
+    expect(mockedRegisterDialogPath.mock.calls.map((c) => c[0])).toEqual([
+      "/data/a.csv",
+      "/data/b.csv",
+    ])
+    expect(mockedRead).not.toHaveBeenCalled()
+    mockOpen.mockResolvedValue("/one.txt")
+    expect(await pickFilePaths()).toEqual(["/one.txt"])
   })
 })

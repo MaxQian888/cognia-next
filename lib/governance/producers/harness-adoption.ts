@@ -169,3 +169,118 @@ export async function recordHarnessRollbackGovernance(input: {
     correlation: { runId: input.runId },
   })
 }
+
+export interface HarnessRestoreGovernanceInput {
+  /** The new `restored` snapshot. */
+  restoredSnapshotId: string
+  /** The version a person chose to bring back. */
+  sourceSnapshotId: string
+  characterId: string
+  currentContentHash: string
+  restoredContentHash: string
+  risk: string
+  applyId?: string
+  decidedAt: number
+}
+
+export function harnessRestoreDecisionId(restoredSnapshotId: string): string {
+  return `harness-restore:${restoredSnapshotId}`
+}
+
+/**
+ * Record that a person brought an earlier harness version back. Like an
+ * adoption it is a controlled change of the agent, decided by a person, with
+ * the two hashes as evidence and never the harness text.
+ */
+export async function recordHarnessRestoreGovernance(
+  input: HarnessRestoreGovernanceInput
+): Promise<string> {
+  const decisionId = harnessRestoreDecisionId(input.restoredSnapshotId)
+  const evidenceId = `${decisionId}:evidence`
+  const policyRef = {
+    namespace: "harness-evolution",
+    id: "restore",
+    version: "1",
+    digest: await sha256Hex("harness-restore-policy-v1:person"),
+  }
+  await recordEvidenceRef({
+    contractVersion: GOVERNANCE_CONTRACT_VERSION,
+    id: evidenceId,
+    kind: "policy-evaluation",
+    sourceRef: ref("harness-snapshot", input.sourceSnapshotId),
+    digest: {
+      algorithm: "sha256",
+      value: await sha256Hex(
+        `${input.sourceSnapshotId}:${input.currentContentHash}:${input.restoredContentHash}:${input.risk}`
+      ),
+      canonicalization: "harness-restore-metadata-v1",
+    },
+    observedAt: input.decidedAt,
+    review: { status: "verified" },
+    contamination: "unknown",
+    privacy,
+  })
+  await recordDecision({
+    contractVersion: GOVERNANCE_CONTRACT_VERSION,
+    id: decisionId,
+    mode: "control",
+    kind: "harness-adoption",
+    subjectRef: ref("agent", input.characterId),
+    question: {
+      code: "restore-harness-version",
+      candidateRefs: [ref("harness-snapshot", input.sourceSnapshotId)],
+    },
+    proposer: { kind: "human", ref: ref("local-user", "current") },
+    decider: { kind: "human", ref: ref("local-user", "current") },
+    executor: { kind: "system", ref: ref("harness-evolution", "restore") },
+    basis: { evidenceRefs: [evidenceId], policyRefs: [policyRef], parentDecisionRefs: [] },
+    resolution: {
+      outcome: "adopted",
+      selectedRefs: [ref("harness-snapshot", input.restoredSnapshotId)],
+      reasonCode: "restored",
+      rationale: `Restored harness version ${input.sourceSnapshotId}.`,
+      rationaleOrigin: "human",
+    },
+    lifecycle: {
+      state: "executed",
+      decidedAt: input.decidedAt,
+      effectiveAt: input.decidedAt,
+      executedAt: input.decidedAt,
+      recordedAt: input.decidedAt,
+    },
+    correlation: {},
+    privacy,
+  })
+  await appendDecisionEvent({
+    id: `${decisionId}:executed`,
+    decisionId,
+    type: "executed",
+    at: input.decidedAt,
+    outcome: "adopted",
+    reasonCode: "restored",
+    effectRef: ref("agent", input.characterId),
+    correlation: {},
+  })
+  await recordProvenanceEnvelope({
+    contractVersion: GOVERNANCE_CONTRACT_VERSION,
+    eventId: `${decisionId}:provenance:restored`,
+    eventType: "harness.restore.executed",
+    source: "cognia://harness-evolution",
+    subjectRef: ref("agent", input.characterId),
+    occurredAt: input.decidedAt,
+    recordedAt: input.decidedAt,
+    correlation: {},
+    actorRefs: [ref("local-user", "current")],
+    decisionRefs: [decisionId],
+    evidenceRefs: [evidenceId],
+    inputRefs: [ref("harness-snapshot", input.sourceSnapshotId)],
+    outputRefs: [
+      ref("harness-snapshot", input.restoredSnapshotId),
+      ...(input.applyId ? [ref("configuration-apply", input.applyId)] : []),
+    ],
+    policyRefs: [policyRef],
+    privacy,
+    data: { risk: input.risk },
+  })
+  return decisionId
+}

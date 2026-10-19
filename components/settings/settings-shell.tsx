@@ -254,6 +254,11 @@ const EvalSettingsSection = dynamic(
   () => import("./eval/eval-settings-section").then((m) => m.EvalSettingsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const HarnessEvolutionSection = dynamic(
+  () =>
+    import("./harness-evolution/harness-evolution-section").then((m) => m.HarnessEvolutionSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const PetSection = dynamic(() => import("./pet/pet-section").then((m) => m.PetSection), {
   ssr: false,
   loading: () => <SectionLoading />,
@@ -635,6 +640,8 @@ function SectionContent({
       return <SquadsSection />
     case "eval":
       return <EvalSettingsSection />
+    case "harness-evolution":
+      return <HarnessEvolutionSection />
     case "hooks":
       return <HooksSection />
     case "fleet":
