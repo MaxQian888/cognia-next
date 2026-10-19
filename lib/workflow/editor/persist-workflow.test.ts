@@ -59,6 +59,14 @@ describe("persistEditorWorkflow", () => {
     expect(result).toEqual({ issueCount: 0, publicationInvalidated: false })
   })
 
+  it("reports version-specific params errors from the persisted snapshot", async () => {
+    const workflow = buildWorkflow("flow.branch")
+    workflow.nodes[0].typeVersion = 2
+    workflow.nodes[0].data.params = { condition: "true" }
+    const result = await persistEditorWorkflow(createEditorStore(workflow))
+    expect(result.issueCount).toBe(1)
+  })
+
   it("reports the validation issue count for an invalid node", async () => {
     // ai.prompt with empty params is missing its required prompt → 1 issue.
     const store = createEditorStore(buildWorkflow("ai.prompt"))
@@ -85,8 +93,9 @@ describe("persistEditorWorkflow", () => {
     )
   })
 
-  it("counts an issue the validation cache has not seen yet", async () => {
+  it("counts an issue even when the validation cache was explicitly cleared", async () => {
     const store = createEditorStore(buildWorkflow("ai.prompt"))
+    store.getState().clearValidation()
     expect(store.getState().validationByStepId).toEqual({})
 
     const result = await persistEditorWorkflow(store)

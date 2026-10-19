@@ -759,7 +759,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         dirty: false,
         savedAt: initial.updatedAt > 0 ? initial.updatedAt : null,
         runStatusByStepId: {},
-        validationByStepId: {},
+        validationByStepId: validateAllNodes(converted.nodes),
         diagnostics: EMPTY_DIAGNOSTICS,
         lastRunByStepId: {},
         referencedNodeIds: {},
@@ -1349,6 +1349,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             baseWorkflow: wf,
             nodes: c.nodes,
             edges: c.edges,
+            validationByStepId: validateAllNodes(c.nodes),
             viewport: c.viewport,
             selectedNodeIds: [],
             selectedEdgeIds: [],
@@ -1369,6 +1370,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             baseWorkflow: nextWorkflow,
             nodes: convertedWorkflow.nodes,
             edges: convertedWorkflow.edges,
+            validationByStepId: validateAllNodes(convertedWorkflow.nodes),
             selectedNodeIds: [],
             selectedEdgeIds: [],
             dirty: true,
@@ -1607,7 +1609,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             }
             const result = validateNodeParams(
               node.data.kind as WorkflowNodeKind,
-              (node.data.params as Record<string, unknown> | undefined) ?? {}
+              (node.data.params as Record<string, unknown> | undefined) ?? {},
+              node.data.typeVersion
             )
             if (result.hasErrors) nextValidation[id] = result
             else delete nextValidation[id]
@@ -1777,7 +1780,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           if (!node) return { fields: {}, summary: [], hasErrors: false }
           const result = validateNodeParams(
             node.data.kind as WorkflowNodeKind,
-            (node.data.params as Record<string, unknown> | undefined) ?? {}
+            (node.data.params as Record<string, unknown> | undefined) ?? {},
+            node.data.typeVersion
           )
           const current = get().validationByStepId
           if (!result.hasErrors) {
@@ -1827,6 +1831,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               id: n.id,
               data: {
                 kind: n.data.kind as string,
+                typeVersion: n.data.typeVersion,
                 params: (n.data.params as Record<string, unknown> | undefined) ?? {},
               },
             }))

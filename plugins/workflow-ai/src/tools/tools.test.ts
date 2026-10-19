@@ -12,6 +12,7 @@ import { createWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
 import type { VisualWorkflow } from "@cognia/plugin-sdk"
 import type { PluginToolRegistration, PluginToolContext } from "@cognia/plugin-sdk"
 import { buildReadTools } from "./read-tools"
+import { buildDiagnosticTools } from "./diagnostic-tools"
 import { buildMutateTools } from "./mutate-tools"
 import { buildLayoutTools } from "./layout-tools"
 import * as autoLayoutModule from "@/lib/workflow/editor/auto-layout"
@@ -50,6 +51,42 @@ beforeEach(() => {
 })
 
 describe("read tools", () => {
+  it("validates freshly opened and replaced graphs without mounting an inspector", async () => {
+    const invalid = workflow("wf_fresh")
+    invalid.nodes = [
+      {
+        id: "branch",
+        type: "flow.branch",
+        typeVersion: 2,
+        position: { x: 0, y: 0 },
+        data: { label: "Branch", params: { condition: "true" } },
+      },
+    ]
+    const store = createEditorStore(invalid)
+    registerEditorStore("wf_fresh", store)
+    const validation = findTool(buildReadTools(), "wf_get_validation_errors")
+    const explain = findTool(buildDiagnosticTools(), "wf_explain_validation")
+    const expectInvalid = async () => {
+      expect(await validation.execute({}, EMPTY_CTX)).toMatchObject({
+        ok: true,
+        failing: [{ nodeId: "branch", fieldKeys: ["conditions"] }],
+      })
+      expect(await explain.execute({}, EMPTY_CTX)).toMatchObject({
+        ok: true,
+        issues: [expect.objectContaining({ nodeId: "branch", blocking: true })],
+      })
+    }
+    await expectInvalid()
+    store.getState().loadWorkflow(workflow("wf_fresh"))
+    expect(await validation.execute({}, EMPTY_CTX)).toMatchObject({ ok: true, failing: [] })
+    store.getState().loadWorkflow(invalid)
+    await expectInvalid()
+    expect(store.getState().applyWorkflowTransaction(workflow("wf_fresh"))).toBe(true)
+    expect(await validation.execute({}, EMPTY_CTX)).toMatchObject({ ok: true, failing: [] })
+    expect(store.getState().applyWorkflowTransaction(invalid)).toBe(true)
+    await expectInvalid()
+  })
+
   it("wf_read_graph returns nodes / edges / envelope for the registered store", async () => {
     const store = createEditorStore(workflow("wf_a"))
     store.getState().addNode("ai.prompt", { x: 10, y: 20 }, { label: "Greet" })

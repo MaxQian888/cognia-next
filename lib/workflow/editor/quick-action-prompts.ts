@@ -70,7 +70,7 @@ export function buildSelectionReferencePrompt(state: EditorState): string | null
 function buildValidatePrompt(state: EditorState): string {
   const nodesForValidator = state.nodes.map((n) => ({
     id: n.id,
-    data: { kind: n.data.kind as string, params: n.data.params },
+    data: { kind: n.data.kind as string, typeVersion: n.data.typeVersion, params: n.data.params },
   }))
   const byStep = validateAllNodes(nodesForValidator)
   const summary = flattenSummary(byStep)

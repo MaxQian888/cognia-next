@@ -36,6 +36,7 @@ import { runWorkflow, type RunWorkflowResult } from "./orchestrator"
 import { getRunStepOutputs } from "./run-from-step"
 import { isWorkflowDeploymentControlPlaneEnabled } from "./feature-flags"
 import { resolveTeamWorkflowKnowledgeBaseIds } from "../nodes/teams/team-runtime-port"
+import { assertWorkflowRunCapacity, WorkflowRunCapacityError } from "./run-admission"
 
 export class WorkflowAdmissionError extends Error {
   constructor(
@@ -397,6 +398,10 @@ export async function executeDeployedWorkflow(
         // The admission ledger and its externally visible pending run are one
         // durability unit. A process crash can no longer leave an invocation
         // that points at a run id absent from status/events APIs.
+        await assertWorkflowRunCapacity(
+          resolved.workflow.id,
+          resolved.workflow.settings.concurrency
+        )
         await Promise.all([db.workflowInvocations.add(invocation), db.workflowRuns.add(pendingRun)])
       })
     )
@@ -408,6 +413,12 @@ export async function executeDeployedWorkflow(
     // that durable row rather than starting a second run.
     const existing = input.idempotencyKey ? await getDb().workflowInvocations.get(id) : undefined
     if (!existing) {
+      if (error instanceof WorkflowRunCapacityError) {
+        throw new WorkflowAdmissionError("workflow-concurrency-limit", error.message, {
+          workflowId: error.workflowId,
+          limit: error.limit,
+        })
+      }
       const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
       throw new Error(`Workflow admission transaction failed: ${detail}`, { cause: error })
     }

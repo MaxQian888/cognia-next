@@ -192,7 +192,7 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
   // may resolve to a boolean, number, object, or array that intentionally no
   // longer matches the editor field's source type. Plugin JSON Schemas, by
   // contrast, are execution contracts and therefore validate resolved input.
-  const paramErrors = validateNodeParams(node.type, node.data.params).summary
+  const paramErrors = validateNodeParams(node.type, node.data.params, node.typeVersion).summary
   const pluginParamsSchema = nodeCatalogEntry(node.type).paramsSchema
   if (pluginParamsSchema) {
     const pluginValidation = validateAgainstJsonSchema(pluginParamsSchema, resolvedParamRecord)

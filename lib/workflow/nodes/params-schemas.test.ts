@@ -4,6 +4,7 @@ import {
   PLAN_STATUS_VALUES,
   PLAN_TRIGGER_KINDS,
   paramsSchemaFor,
+  paramsJsonSchemaFor,
 } from "./params-schemas"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
 import type { PlanEventKind, PlanStatus } from "@/types/agent/plan"
@@ -1237,5 +1238,41 @@ describe("flow.wait event-mode schema", () => {
 
   it("rejects a negative timeout", () => {
     expect(s.safeParse({ mode: "event", timeoutMs: -1 }).success).toBe(false)
+  })
+})
+
+describe("version-specific params schemas", () => {
+  it("keeps incompatible flow generations separate when the version is known", () => {
+    for (const [kind, legacy, modern] of [
+      ["flow.branch", { condition: "true" }, { conditions: { combinator: "all", conditions: [] } }],
+      [
+        "flow.switch",
+        { subject: "x", cases: [{ value: "a", label: "A" }] },
+        { cases: [{ id: "a", when: { combinator: "all", conditions: [] } }] },
+      ],
+      [
+        "flow.loop",
+        { inputExpression: "[]", bodyExpression: "$item" },
+        { mode: "times", times: 2 },
+      ],
+    ] as const) {
+      expect(paramsSchemaFor(kind, 1).safeParse(legacy).success).toBe(true)
+      expect(paramsSchemaFor(kind, 1).safeParse(modern).success).toBe(false)
+      expect(paramsSchemaFor(kind, 2).safeParse(legacy).success).toBe(false)
+      expect(paramsSchemaFor(kind, 2).safeParse(modern).success).toBe(true)
+      expect(paramsSchemaFor(kind, 3).safeParse(modern).success).toBe(false)
+    }
+  })
+
+  it("exports JSON input schemas for all builtins without losing branch version shape", () => {
+    for (const kind of KNOWN_KINDS) expect(paramsJsonSchemaFor(kind, 1)).toEqual(expect.any(Object))
+    expect(paramsJsonSchemaFor("flow.branch", 2)).toMatchObject({
+      required: ["conditions"],
+      properties: { conditions: { type: "object" } },
+    })
+    expect(paramsJsonSchemaFor("flow.branch", 1)).toMatchObject({
+      required: ["condition"],
+      properties: { condition: { type: "string" } },
+    })
   })
 })

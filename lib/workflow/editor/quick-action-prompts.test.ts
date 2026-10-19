@@ -36,6 +36,14 @@ describe("buildQuickActionPrompt", () => {
       expect(out).toContain("no validation errors")
     })
 
+    it("includes version-specific branch errors in the validate prompt", () => {
+      const node = makeNode("branch", "flow.branch", "Branch", { condition: "true" })
+      node.data.typeVersion = 2
+      const prompt = buildQuickActionPrompt("validate", makeState({ nodes: [node] }))
+      expect(prompt).toContain("conditions")
+      expect(prompt).not.toContain("no validation errors")
+    })
+
     it("includes the issue summary when nodes have invalid params", () => {
       // A cron-trigger node with an empty cron expression — params schema
       // requires `cron`, so `validateAllNodes` surfaces an issue under n_a.

@@ -4,7 +4,8 @@
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { resolveStepRetryPolicy, runStep, type RunStepInput } from "./step-executor"
-import { registerNodeExecutor } from "@/lib/workflow/nodes/registry"
+import "@/lib/workflow/nodes/data/flow"
+import { getExecutor, registerNodeExecutor } from "@/lib/workflow/nodes/registry"
 import { IdempotencyCache } from "./idempotency"
 import { createRunLogger, listRunEvents } from "./event-log"
 import { NoopSecretResolver } from "./secret-resolver"
@@ -18,6 +19,8 @@ import {
   type VisualWorkflow,
   type WorkflowNode,
 } from "@/types/workflow/visual"
+
+const branchExecutors = [1, 2].map((version) => getExecutor("flow.branch", version)!)
 
 const execSpy = jest.fn(async (_ctx: StepExecutionContext) => ({ output: { real: true } }))
 
@@ -595,5 +598,60 @@ describe("credential refs reach the executor", () => {
   it("leaves the field absent when the node binds nothing", async () => {
     await runStep(await buildInput({}))
     expect(execSpy.mock.calls[0]![0].credentialRefs).toBeUndefined()
+  })
+})
+
+describe("version-specific node params", () => {
+  it.each([
+    [1, 0, "false"],
+    [1, 17, "true"],
+    [2, 3, "false"],
+    [2, 10, "true"],
+    [2, 17, "true"],
+  ] as const)(
+    "executes the real branch v%s for value %s as %s",
+    async (version, value, decision) => {
+      registerNodeExecutor(branchExecutors[version - 1])
+      const input = await buildInput({})
+      input.trigger = { ...trigger, payload: { value } }
+      input.node = {
+        ...node,
+        type: "flow.branch",
+        typeVersion: version,
+        data: {
+          label: "Branch",
+          params:
+            version === 1
+              ? { condition: "{{ $trigger.payload.value }}" }
+              : {
+                  conditions: {
+                    combinator: "all",
+                    conditions: [
+                      { left: "{{ $trigger.payload.value }}", operator: "gte", right: "10" },
+                    ],
+                  },
+                },
+        },
+      }
+      input.workflow = { ...input.workflow, nodes: [input.node] }
+      const result = await runStep(input)
+      expect(result.decision).toBe(decision)
+      expect(result.output).toMatchObject({ decision })
+    }
+  )
+
+  it("rejects legacy params before executing a version-2 branch", async () => {
+    const execute = jest.fn(async () => ({ output: { decision: "false" } }))
+    registerNodeExecutor({ kind: "flow.branch", typeVersion: 2, execute })
+    const input = await buildInput({})
+    input.node = {
+      ...node,
+      type: "flow.branch",
+      typeVersion: 2,
+      data: { label: "Branch", params: { condition: "true" } },
+    }
+    input.workflow = { ...input.workflow, nodes: [input.node] }
+    await expect(runStep(input)).rejects.toThrow(/Invalid params.*conditions/i)
+    expect(execute).not.toHaveBeenCalled()
   })
 })

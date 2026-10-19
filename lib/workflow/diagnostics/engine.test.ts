@@ -34,6 +34,18 @@ function wf(nodes: WorkflowNode[], edges: WorkflowEdge[] = []): VisualWorkflow {
 const codesOf = (r: ReturnType<typeof runDiagnostics>) => r.diagnostics.map((d) => d.code)
 
 describe("runDiagnostics", () => {
+  it("diagnoses a version-2 branch carrying only legacy condition params", () => {
+    const workflow = wf([
+      node("branch", "flow.branch", {
+        typeVersion: 2,
+        data: { label: "Branch", params: { condition: "true" } },
+      }),
+    ])
+    expect(runDiagnostics({ workflow, isWeb: false }).byNodeId.branch).toContainEqual(
+      expect.objectContaining({ code: "nodeParam", field: "conditions" })
+    )
+  })
+
   it("returns a clean result for a well-formed workflow", () => {
     const w = wf(
       [node("a", "trigger.manual"), node("b", "ai.prompt")],

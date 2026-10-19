@@ -22,6 +22,44 @@ afterEach(__resetTeamWorkflowNodesForTesting)
 afterAll(dbFixture.dispose)
 
 describe("ExecutionAuthority", () => {
+  it("rejects a published admission when another active run owns the workflow capacity", async () => {
+    const workflow = await createWorkflow({
+      name: "Capacity guarded",
+      nodes: [],
+      edges: [],
+    })
+    await updateWorkflow(workflow.id, { settings: { ...workflow.settings, concurrency: 1 } })
+    await publishWorkflow(workflow.id, 10)
+    await getDb().workflowRuns.put({
+      id: "active",
+      workflowId: workflow.id,
+      status: "waiting",
+      triggerKind: "trigger.manual",
+      startedAt: 1,
+    })
+    await expect(
+      executeDeployedWorkflow({
+        workflowId: workflow.id,
+        entrypoint: "trigger",
+        caller: "test",
+        triggerKind: "trigger.manual",
+        payload: {},
+      })
+    ).rejects.toMatchObject({ code: "workflow-concurrency-limit" })
+    expect(await getDb().workflowInvocations.count()).toBe(0)
+    expect(await getDb().workflowRuns.count()).toBe(1)
+    await getDb().workflowRuns.update("active", { status: "cancelled" })
+    await expect(
+      executeDeployedWorkflow({
+        workflowId: workflow.id,
+        entrypoint: "trigger",
+        caller: "test",
+        triggerKind: "trigger.manual",
+        payload: {},
+      })
+    ).resolves.toMatchObject({ result: { status: "succeeded" } })
+  })
+
   it("runs admission policy inside the durability transaction and persists nothing when denied", async () => {
     const workflow = await createWorkflow({ name: "Quota guarded", nodes: [], edges: [] })
     await publishWorkflow(workflow.id, 10)

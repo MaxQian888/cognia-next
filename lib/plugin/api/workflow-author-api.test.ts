@@ -138,6 +138,16 @@ beforeEach(() => {
 })
 
 describe("createWorkflowAuthorAPI", () => {
+  it("exposes versioned builtin schemas without rewriting plugin contracts", () => {
+    const branch = { kind: "flow.branch", category: "flow", label: "Branch" }
+    jest.mocked(nodeCatalogEntry).mockReturnValue(branch as never)
+    const api = createWorkflowAuthorAPI()
+    expect(api.getNodeCatalogEntry("flow.branch")).toMatchObject({
+      typeVersion: 2,
+      paramsSchema: { required: ["conditions"] },
+    })
+  })
+
   it("resolves only an unambiguous editor and returns a detached snapshot", () => {
     const api = createWorkflowAuthorAPI()
     expect(api.resolveEditor("missing")).toEqual({

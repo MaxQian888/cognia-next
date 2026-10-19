@@ -1628,9 +1628,8 @@ const BranchParamsV2 = z.object({
   conditions: conditionGroupSchema,
 })
 
-// The schema map is keyed by kind only (no typeVersion), so accept both
-// authoring generations. The inspector renders per-version forms; the
-// validator just needs either shape to pass.
+// Kind-only consumers retain compatibility with both generations. Nodes with
+// a declared version use the matching schema in paramsSchemaFor below.
 const BranchParams = z.union([BranchParamsV2, BranchParamsV1])
 
 const SwitchParamsV1 = z.object({
@@ -2818,11 +2817,37 @@ export type ParamsSchemas = typeof PARAMS_SCHEMAS
 /** Test-only export so the matrix test can iterate every kind. */
 export const KNOWN_KINDS: readonly WorkflowNodeKind[] = WORKFLOW_NODE_KINDS
 
+const VERSIONED_PARAMS_SCHEMAS: Partial<Record<WorkflowNodeKind, Record<number, z.ZodTypeAny>>> = {
+  "flow.branch": { 1: BranchParamsV1, 2: BranchParamsV2 },
+  "flow.switch": { 1: SwitchParamsV1, 2: SwitchParamsV2 },
+  "flow.loop": { 1: LoopParamsV1, 2: LoopParamsV2 },
+}
+
 /**
- * Fetch the schema for a kind. Plugin / unknown kinds get a permissive
- * record so the validator returns no errors but the Schema Form (M4)
- * can drive its own JSON Schema validation.
+ * Validate against a declared version when present. Kind-only consumers keep
+ * legacy compatibility; plugin / unknown kinds delegate to their JSON Schema.
  */
-export function paramsSchemaFor(kind: WorkflowNodeKind): z.ZodTypeAny {
+export function paramsSchemaFor(kind: WorkflowNodeKind, typeVersion?: number): z.ZodTypeAny {
+  const versions = VERSIONED_PARAMS_SCHEMAS[kind]
+  if (versions && typeVersion !== undefined) return versions[typeVersion] ?? z.never()
   return PARAMS_SCHEMAS[kind] ?? z.record(z.string(), z.unknown())
+}
+
+const jsonParamsSchemas = new Map<string, Record<string, unknown>>()
+
+/** The authoring contract, derived from the same input schema used by validation. */
+export function paramsJsonSchemaFor(
+  kind: WorkflowNodeKind,
+  typeVersion: number
+): Record<string, unknown> {
+  const key = `${kind}@${typeVersion}`
+  let schema = jsonParamsSchemas.get(key)
+  if (!schema) {
+    schema = z.toJSONSchema(paramsSchemaFor(kind, typeVersion), {
+      io: "input",
+      unrepresentable: "any",
+    })
+    jsonParamsSchemas.set(key, schema)
+  }
+  return schema
 }

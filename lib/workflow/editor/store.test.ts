@@ -70,6 +70,37 @@ function nodeGroupDefinition(): WorkflowNodeGroupDefinition {
 }
 
 describe("editor store — graph mutations", () => {
+  it("initializes and replaces the validation cache together with the graph", () => {
+    const invalid = emptyWorkflow()
+    invalid.nodes = [
+      {
+        id: "branch",
+        type: "flow.branch",
+        typeVersion: 2,
+        position: { x: 0, y: 0 },
+        data: { label: "Branch", params: { condition: "true" } },
+      },
+    ]
+    const store = createEditorStore(invalid)
+    expect(store.getState().validationByStepId.branch.fields).toHaveProperty("conditions")
+    store.getState().loadWorkflow(emptyWorkflow())
+    expect(store.getState().validationByStepId).toEqual({})
+    store.getState().loadWorkflow(invalid)
+    expect(store.getState().validationByStepId.branch.fields).toHaveProperty("conditions")
+    store.getState().applyWorkflowTransaction(emptyWorkflow())
+    expect(store.getState().validationByStepId).toEqual({})
+    store.getState().applyWorkflowTransaction(invalid)
+    expect(store.getState().validationByStepId.branch.fields).toHaveProperty("conditions")
+  })
+
+  it("flags legacy branch params during single-node and whole-graph revalidation", () => {
+    const store = createEditorStore(emptyWorkflow())
+    const id = store.getState().addNode("flow.branch", { x: 0, y: 0 })
+    store.getState().updateNodeData(id, { params: { condition: "true" } })
+    expect(store.getState().revalidateNode(id).fields).toHaveProperty("conditions")
+    expect(store.getState().revalidateAll()[id].fields).toHaveProperty("conditions")
+  })
+
   it("adds, connects, updates, and removes nodes", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const aId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
@@ -1099,6 +1130,30 @@ describe("editor store — validation", () => {
 })
 
 describe("editor store — applyProposalOps", () => {
+  it("validates proposal params against each node version before presenting run readiness", () => {
+    const store = createEditorStore(emptyWorkflow())
+    const result = store.getState().applyProposalOps([
+      {
+        type: "add_node",
+        nodeId: "modern",
+        kind: "flow.branch",
+        position: { x: 0, y: 0 },
+        data: { params: { condition: "true" } },
+      },
+      {
+        type: "add_node",
+        nodeId: "legacy",
+        kind: "flow.branch",
+        typeVersion: 1,
+        position: { x: 0, y: 200 },
+        data: { params: { condition: "true" } },
+      },
+    ])
+    expect(result.applied).toBe(2)
+    expect(store.getState().validationByStepId.modern.fields).toHaveProperty("conditions")
+    expect(store.getState().validationByStepId.legacy).toBeUndefined()
+  })
+
   it("rejects a proposal whose expected semantic revision is stale", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const expectedRevision = workflowEditorRevision(useStore.getState())

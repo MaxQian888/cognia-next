@@ -38,6 +38,8 @@ import {
   getPluginCatalogSnapshot,
   nodeCatalogEntry,
 } from "@/lib/workflow/nodes/catalog"
+import { defaultTypeVersionFor } from "@/lib/workflow/editor/node-handles"
+import { KNOWN_KINDS, paramsJsonSchemaFor } from "@/lib/workflow/nodes/params-schemas"
 import { refreshAllWorkflowTemplateWarnings } from "@/lib/plugin/registries/workflow-template-registry"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
 import { executeRunWorkflowTyped } from "@/lib/workflow/publish/run-workflow-typed-tool"
@@ -312,8 +314,12 @@ export function createWorkflowAuthorAPI(): PluginWorkflowAuthorAPI {
 
     listCopilotTemplates,
     materializeCopilotTemplate,
-    listNodeCatalog: () => [...NODE_CATALOG, ...getPluginCatalogSnapshot()],
-    getNodeCatalogEntry: (kind) => nodeCatalogEntry(kind as WorkflowNodeKind),
+    listNodeCatalog: () => [
+      ...NODE_CATALOG.map(authoringCatalogEntry),
+      ...getPluginCatalogSnapshot(),
+    ],
+    getNodeCatalogEntry: (kind) =>
+      authoringCatalogEntry(nodeCatalogEntry(kind as WorkflowNodeKind)),
     refreshTemplateWarnings: refreshAllWorkflowTemplateWarnings,
     runWorkflow,
     executeRunWorkflowTyped,
@@ -332,4 +338,11 @@ export function createWorkflowAuthorAPI(): PluginWorkflowAuthorAPI {
     buildApprovalSurface,
     emitWaitEvent: (input) => emitWorkflowWaitEvent(createWorkflowWaitEvent(input)),
   }
+}
+
+/** Keep inspector presentation schemas separate from the versioned authoring contract. */
+function authoringCatalogEntry(entry: NodeCatalogEntry): NodeCatalogEntry {
+  if (entry.pluginId || !KNOWN_KINDS.includes(entry.kind)) return entry
+  const typeVersion = defaultTypeVersionFor(entry.kind)
+  return { ...entry, typeVersion, paramsSchema: paramsJsonSchemaFor(entry.kind, typeVersion) }
 }

@@ -499,6 +499,7 @@ describe("workflow HTTP API service", () => {
       deploymentId: deployment.id,
       caller: "oidc:user-1",
       scopes: ["workflow:run"],
+      idempotencyKey: "bridge-create-1",
       input: {},
     })
     await getDb().workflowRuns.update(started.runId, { status: "waiting" })

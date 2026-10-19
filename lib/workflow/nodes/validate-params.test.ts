@@ -2,6 +2,34 @@ import { flattenSummary, validateAllNodes, validateNodeParams } from "./validate
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
 
 describe("validateNodeParams", () => {
+  it("validates branch params against the node's declared version", () => {
+    const legacy = { condition: "{{ $trigger.payload.value >= 10 }}" }
+    const structured = {
+      conditions: {
+        combinator: "all",
+        conditions: [{ left: "{{ $trigger.payload.value }}", operator: "gte", right: "10" }],
+      },
+    }
+    expect(validateNodeParams("flow.branch", legacy, 2).fields).toHaveProperty("conditions")
+    expect(validateNodeParams("flow.branch", structured, 2).hasErrors).toBe(false)
+    expect(validateNodeParams("flow.branch", legacy, 1).hasErrors).toBe(false)
+    expect(validateNodeParams("flow.branch", structured, 1).hasErrors).toBe(true)
+  })
+
+  it("preserves declared versions when validating the whole editor graph", () => {
+    const result = validateAllNodes([
+      {
+        id: "modern",
+        data: { kind: "flow.branch", typeVersion: 2, params: { condition: "true" } },
+      },
+      {
+        id: "legacy",
+        data: { kind: "flow.branch", typeVersion: 1, params: { condition: "true" } },
+      },
+    ])
+    expect(Object.keys(result)).toEqual(["modern"])
+  })
+
   it("returns no errors for a happy params object", () => {
     const r = validateNodeParams("trigger.cron", { cron: "0 9 * * 1-5" })
     expect(r.hasErrors).toBe(false)

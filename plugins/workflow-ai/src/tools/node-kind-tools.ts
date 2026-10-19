@@ -89,7 +89,7 @@ export function buildNodeKindTools(): PluginToolRegistration[] {
       definition: {
         name: "wf_describe_node_kind",
         description:
-          "Describe one node kind: returns { kind, category, label, description, iconName, keywords, pluginId?, desktopOnly?, paramsSchema? }. Call BEFORE configuring a node so the params shape is grounded in the actual schema.",
+          "Describe one node kind: returns { kind, typeVersion, category, label, description, iconName, keywords, pluginId?, desktopOnly?, paramsSchema? }. Call BEFORE configuring a node so the params shape is grounded in the actual schema.",
         category: "workflow",
         requiresApproval: false,
         parametersSchema: {
@@ -129,6 +129,7 @@ export function buildNodeKindTools(): PluginToolRegistration[] {
             ok: true,
             entry: {
               kind: entry.kind,
+              typeVersion: entry.typeVersion,
               category: entry.category,
               label: entry.label,
               description: entry.description,

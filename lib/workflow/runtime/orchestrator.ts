@@ -25,6 +25,7 @@
  */
 
 import { nanoid } from "nanoid"
+import Dexie from "dexie"
 import { generateTraceId } from "@cognia/logging"
 import { getDb } from "@/lib/db/schema"
 import { resolveScopeProjectId } from "@/lib/db/project-scope"
@@ -73,6 +74,7 @@ import {
 import { type ConcurrencyController, createConcurrencyController } from "./concurrency-controller"
 import { recordWorkflowBranchGovernance } from "@/lib/governance/producers/workflow"
 import { reportGovernanceProjectionFailure } from "@/lib/db/governance-ledger"
+import { assertWorkflowRunCapacity, WorkflowRunCapacityError } from "./run-admission"
 
 /**
  * Release run-scoped resources, then drop the cancel-registry entry.
@@ -316,8 +318,33 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     // whole table. "ui" is the default origin for non-IM/non-API runs.
     triggeredBySource: input.triggeredBy?.source ?? "ui",
   }
-  // If we're resuming, the row may already exist — Dexie's `put` handles both.
-  await getDb().workflowRuns.put(runRow)
+  // Admission and insertion share one write transaction so parallel editor
+  // tools cannot all observe the same free slot. Existing pending/resumed rows
+  // already own capacity and must not count themselves as new admissions.
+  try {
+    const db = getDb()
+    await Dexie.ignoreTransaction(() =>
+      db.transaction("rw", db.workflowRuns, async () => {
+        const current = await db.workflowRuns.get(runId)
+        if (!current) await assertWorkflowRunCapacity(workflow.id, validated.settings.concurrency)
+        await db.workflowRuns.put(runRow)
+      })
+    )
+  } catch (error) {
+    if (!(error instanceof WorkflowRunCapacityError)) throw error
+    const detail = { code: error.code, message: error.message }
+    await getDb().workflowRuns.put({
+      ...runRow,
+      status: "failed",
+      completedAt: Date.now(),
+      error: detail,
+    })
+    await logger.runStarted({ trigger })
+    await logger.runFailed(detail)
+    getPluginEventHooks().dispatchWorkflowError(workflow.id, error)
+    getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
+    return { runId, status: "failed", error: detail }
+  }
   input.onPersisted?.(runId)
 
   // 2a′. Claim the execution lease (ADR 0061 P4). The transaction serialises

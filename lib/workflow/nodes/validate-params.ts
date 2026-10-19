@@ -100,9 +100,10 @@ function extractIssueParams(issue: ZodIssue): Record<string, string | number> | 
  */
 export function validateNodeParams(
   kind: WorkflowNodeKind,
-  params: Record<string, unknown> | undefined
+  params: Record<string, unknown> | undefined,
+  typeVersion?: number
 ): NodeValidationResult {
-  const schema = paramsSchemaFor(kind)
+  const schema = paramsSchemaFor(kind, typeVersion)
   const parsed = schema.safeParse(params ?? {})
   if (parsed.success) {
     return { fields: {}, summary: [], hasErrors: false }
@@ -136,12 +137,16 @@ function zodErrorToResult(err: ZodError): NodeValidationResult {
 export function validateAllNodes(
   nodes: ReadonlyArray<{
     id: string
-    data: { kind: string; params?: Record<string, unknown> }
+    data: { kind: string; typeVersion?: number; params?: Record<string, unknown> }
   }>
 ): Record<string, NodeValidationResult> {
   const out: Record<string, NodeValidationResult> = {}
   for (const node of nodes) {
-    const result = validateNodeParams(node.data.kind as WorkflowNodeKind, node.data.params)
+    const result = validateNodeParams(
+      node.data.kind as WorkflowNodeKind,
+      node.data.params,
+      node.data.typeVersion
+    )
     if (result.hasErrors) out[node.id] = result
   }
   return out

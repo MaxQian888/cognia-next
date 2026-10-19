@@ -23,7 +23,11 @@ import type { Diagnostic, DiagnosticCode, DiagnosticsInput, DiagnosticsResult } 
 function adaptNodeParams(wf: VisualWorkflow): Diagnostic[] {
   const out: Diagnostic[] = []
   for (const node of wf.nodes) {
-    const result = validateNodeParams(node.type as WorkflowNodeKind, node.data?.params)
+    const result = validateNodeParams(
+      node.type as WorkflowNodeKind,
+      node.data?.params,
+      node.typeVersion
+    )
     if (!result.hasErrors) continue
     for (const [field, fieldError] of Object.entries(result.fields)) {
       out.push({

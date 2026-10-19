@@ -37,6 +37,7 @@ export async function persistEditorWorkflow(
       id: node.id,
       data: {
         kind: node.type,
+        typeVersion: node.typeVersion,
         params: (node.data?.params as Record<string, unknown> | undefined) ?? {},
       },
     }))

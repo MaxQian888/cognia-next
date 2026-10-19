@@ -1052,6 +1052,75 @@ import { registerNodeExecutor } from "@/lib/workflow/nodes/registry"
 import { createConcurrencyController } from "./concurrency-controller"
 
 describe("runWorkflow — concurrent scheduling", () => {
+  it("atomically rejects excess runs of one workflow without blocking other workflows", async () => {
+    let active = 0
+    let peak = 0
+    let release!: () => void
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let started!: () => void
+    const entered = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    registerNodeExecutor({
+      kind: "test.run-admission" as never,
+      typeVersion: 1,
+      execute: async () => {
+        active += 1
+        peak = Math.max(peak, active)
+        started()
+        await barrier
+        active -= 1
+        return { output: "done" }
+      },
+    })
+    const workflow = buildWorkflow([
+      {
+        id: "hold",
+        type: "test.run-admission" as never,
+        typeVersion: 1,
+        position: { x: 0, y: 0 },
+        data: { label: "hold", params: {} },
+      },
+    ])
+    const first = runWorkflow({ workflow, trigger })
+    const second = runWorkflow({ workflow, trigger })
+    const third = runWorkflow({ workflow, trigger })
+    await entered
+    try {
+      const other = await runWorkflow({
+        workflow: { ...workflow, id: "wf_other", nodes: [] },
+        trigger,
+      })
+      expect(other.status).toBe("succeeded")
+      // Rejections must settle while the first run still owns its slot.
+      const rejected = await Promise.race([
+        Promise.all([second, third]),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("capacity was not enforced")), 300)
+        ),
+      ])
+      expect(rejected.map((run) => run.status)).toEqual(["failed", "failed"])
+      expect(rejected.map((run) => run.error?.code)).toEqual([
+        "workflow_concurrency_limit",
+        "workflow_concurrency_limit",
+      ])
+      expect(peak).toBe(1)
+      for (const run of rejected) {
+        expect(await getDb().workflowRuns.get(run.runId)).toMatchObject({
+          status: "failed",
+          error: { code: "workflow_concurrency_limit" },
+        })
+      }
+    } finally {
+      release()
+      await first
+    }
+    // A terminal row frees capacity for the next run.
+    expect((await runWorkflow({ workflow, trigger })).status).toBe("succeeded")
+  })
+
   // `registerNodeExecutor` is idempotent (it overwrites by key); we re-register
   // a fresh handler per test from within the test body, so no afterEach reset
   // is needed. Avoiding the reset keeps built-in registrations alive for the

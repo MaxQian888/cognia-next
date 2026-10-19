@@ -83,6 +83,22 @@ describe("wf_list_node_kinds", () => {
 })
 
 describe("wf_describe_node_kind", () => {
+  it("describes the current branch version and its executable params schema", async () => {
+    const tool = findTool(buildNodeKindTools(), "wf_describe_node_kind")
+    const result = (await tool.execute({ kind: "flow.branch" }, EMPTY_CTX)) as {
+      ok: boolean
+      entry: {
+        typeVersion: number
+        paramsSchema: { required: string[]; properties: Record<string, unknown> }
+      }
+    }
+    expect(result.ok).toBe(true)
+    expect(result.entry.typeVersion).toBe(2)
+    expect(result.entry.paramsSchema.required).toContain("conditions")
+    expect(result.entry.paramsSchema.properties).toHaveProperty("conditions")
+    expect(result.entry.paramsSchema.properties).not.toHaveProperty("condition")
+  })
+
   it("returns full entry for a known built-in kind", async () => {
     const tool = findTool(buildNodeKindTools(), "wf_describe_node_kind")
     const result = (await tool.execute({ kind: "trigger.cron" }, EMPTY_CTX)) as {
