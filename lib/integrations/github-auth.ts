@@ -9,8 +9,16 @@ import {
 
 const APP_PROVIDER_ID = "github-app"
 const PAT_PROVIDER_ID = "github-pat"
+/**
+ * A token from Cognia's own OAuth App, obtained through the device flow in
+ * `./github-device-flow.ts` (ADR-0235). github.com only. No integration lists
+ * it in its `authStrategies` yet, so no account picker offers it; the Host
+ * bootstrap over a VS Code tunnel is its first consumer.
+ */
+export const OAUTH_PROVIDER_ID = "github-oauth"
 const APP_PREFIX = "app:"
 const PAT_PREFIX = "pat:"
+const OAUTH_PREFIX = "oauth:"
 const TOKEN_REFRESH_SKEW_MS = 60_000
 
 type GithubAppRequest = <T>(
@@ -118,6 +126,15 @@ interface GithubPatMetadata {
   scopes: string[]
   /** See {@link GithubAppMetadata.hostUrl}. */
   hostUrl?: string
+}
+
+interface GithubOAuthMetadata {
+  token: string
+  /** GitHub's numeric account id, read from `/user` with the token. */
+  accountId: number
+  accountLabel: string
+  /** What GitHub granted, which can be less than what was asked for. */
+  scopes: string[]
 }
 
 /**
@@ -324,6 +341,7 @@ export function registerGithubIntegrationAuthProviders(
   const listAccountSessionIds = dependencies.listAccountSessionIds ?? defaultListAccountSessionIds
   const knownAppSessions = new Set<string>()
   const knownPatSessions = new Set<string>()
+  const knownOAuthSessions = new Set<string>()
   const tokenCache = new Map<string, CachedInstallationToken>()
 
   async function appMetadata(sessionId: string): Promise<GithubAppMetadata> {
@@ -336,6 +354,12 @@ export function registerGithubIntegrationAuthProviders(
     const raw = await store.load(`${PAT_PREFIX}${sessionId}`)
     if (!raw) throw new Error(`GitHub PAT session "${sessionId}" is unavailable`)
     return JSON.parse(raw) as GithubPatMetadata
+  }
+
+  async function oauthMetadata(sessionId: string): Promise<GithubOAuthMetadata> {
+    const raw = await store.load(`${OAUTH_PREFIX}${sessionId}`)
+    if (!raw) throw new Error(`GitHub OAuth session "${sessionId}" is unavailable`)
+    return JSON.parse(raw) as GithubOAuthMetadata
   }
 
   async function registeredAppRequest<T>(
@@ -524,6 +548,51 @@ export function registerGithubIntegrationAuthProviders(
     },
   })
 
+  const disposeOAuth = registerAuthenticationProvider({
+    id: OAUTH_PROVIDER_ID,
+    label: "GitHub (Cognia sign-in)",
+    pluginId: null,
+    async getSessions() {
+      const ids = new Set([
+        ...knownOAuthSessions,
+        ...(await listAccountSessionIds(OAUTH_PROVIDER_ID)),
+      ])
+      return Promise.all(
+        [...ids].map(async (id) => {
+          const metadata = await oauthMetadata(id)
+          return session(id, String(metadata.accountId), metadata.accountLabel, metadata.scopes)
+        })
+      )
+    },
+    // The host-owned device-flow form collects these: the token GitHub
+    // issued and the identity `/user` returned for it. Nothing here starts a
+    // flow; a provider cannot render the code the user has to type.
+    async createSession(_scopes, options) {
+      const values = configuration(options)
+      const granted = values.grantedScopes
+      const metadata: GithubOAuthMetadata = {
+        token: requiredString(values, "token"),
+        accountId: requiredPositiveInteger(values, "accountId"),
+        accountLabel: requiredString(values, "accountLabel"),
+        scopes: Array.isArray(granted)
+          ? [...new Set(granted.filter((scope): scope is string => typeof scope === "string"))]
+          : [],
+      }
+      const id = crypto.randomUUID()
+      await store.save(`${OAUTH_PREFIX}${id}`, JSON.stringify(metadata))
+      knownOAuthSessions.add(id)
+      return session(id, String(metadata.accountId), metadata.accountLabel, metadata.scopes)
+    },
+    async removeSession(sessionId) {
+      knownOAuthSessions.delete(sessionId)
+      await store.delete(`${OAUTH_PREFIX}${sessionId}`)
+    },
+    async resolveRequestCredential(sessionId) {
+      const metadata = await oauthMetadata(sessionId)
+      return { accessToken: metadata.token }
+    },
+  })
+
   const registeredHostLookup: GithubHostLookup = async (sessionId) => {
     // Either provider may own the session id, and neither knows about the
     // other's. A missing session is `undefined` rather than github.com so a
@@ -535,7 +604,13 @@ export function registerGithubIntegrationAuthProviders(
         continue
       }
     }
-    return undefined
+    try {
+      // The OAuth App is github.com's: its tokens go nowhere else.
+      await oauthMetadata(sessionId)
+      return GITHUB_DOT_COM
+    } catch {
+      return undefined
+    }
   }
   githubHostLookup = registeredHostLookup
 
@@ -565,6 +640,7 @@ export function registerGithubIntegrationAuthProviders(
     if (githubHostLookup === registeredHostLookup) githubHostLookup = undefined
     if (githubHostsList === registeredHostsList) githubHostsList = undefined
     tokenCache.clear()
+    disposeOAuth()
     disposePat()
     disposeApp()
   }

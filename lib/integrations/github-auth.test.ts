@@ -224,6 +224,55 @@ describe("host-owned GitHub Integration authentication", () => {
     }
   })
 
+  it("stores a device-flow token as a github.com-only OAuth session keyed by account id", async () => {
+    const store = memoryStore()
+    const dispose = registerGithubIntegrationAuthProviders({
+      store,
+      listAccountSessionIds: async () => [],
+    })
+    try {
+      const session = await getSession("github-oauth", ["read:user"], {
+        createIfNone: true,
+        configuration: {
+          token: "gho_device-flow-secret",
+          accountId: 583231,
+          accountLabel: "octocat",
+          grantedScopes: ["read:user", "read:user", 7],
+        },
+      })
+      expect(session).toMatchObject({
+        accessToken: "host-resolved",
+        account: { id: "583231", label: "octocat" },
+        scopes: ["read:user"],
+      })
+      const provider = (await import("@/lib/plugin/auth/auth-provider-registry")).getProvider(
+        "github-oauth"
+      )!
+      await expect(
+        provider.resolveRequestCredential!(session!.id, {
+          connectorAccountId: "account-1",
+          origin: "https://api.github.com",
+        })
+      ).resolves.toEqual({ accessToken: "gho_device-flow-secret" })
+      await expect(githubHostForSession(session!.id)).resolves.toMatchObject({ id: "github.com" })
+
+      // An account without GitHub's numeric id is refused, not stored.
+      await expect(
+        getSession("github-oauth", [], {
+          createIfNone: true,
+          forceNewSession: true,
+          configuration: { token: "gho_x", accountId: "octocat", accountLabel: "octocat" },
+        })
+      ).rejects.toThrow()
+
+      await provider.removeSession(session!.id)
+      await expect(store.load(`oauth:${session!.id}`)).resolves.toBeNull()
+      await expect(githubHostForSession(session!.id)).resolves.toBeUndefined()
+    } finally {
+      dispose()
+    }
+  })
+
   it("uses an App JWT for host-only webhook delivery APIs", async () => {
     const fetch = jest.fn(
       async () =>
