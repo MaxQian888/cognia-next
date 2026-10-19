@@ -121,6 +121,10 @@ export function WebSearchToggle({
       : on
         ? t("tooltipOn", { provider: SEARCH_PROVIDERS[activeProvider]?.name ?? activeProvider })
         : t("tooltipOff")
+  const routingSummary = t("operationRoutes", {
+    search: t(`route.${webAccess.search}`),
+    fetch: t(`route.${webAccess.fetch}`),
+  })
 
   const row = (props: React.ButtonHTMLAttributes<HTMLButtonElement> = {}) => (
     <CapabilityRow
@@ -132,12 +136,18 @@ export function WebSearchToggle({
       active={setupTab === null && on}
       chevron={setupTab !== null}
       aria-label={tComposer("ariaToggleWebSearch")}
+      aria-description={routingSummary}
       disabled={disabled}
       // No hover on touch — the mobile sheet reads the reason off the row.
-      hint={setupTab !== null ? t(setupKey) : undefined}
+      hint={setupTab !== null ? `${t(setupKey)} ${routingSummary}` : routingSummary}
       // In setup state the PopoverTrigger (or the sheet's drill-in) owns the click.
       onClick={setupTab === null ? () => setOn(!on, composerSessionId) : undefined}
-      tooltip={tooltip}
+      tooltip={
+        <>
+          <p>{tooltip}</p>
+          <p>{routingSummary}</p>
+        </>
+      }
       {...props}
     />
   )
@@ -159,6 +169,7 @@ export function WebSearchToggle({
         <ComposerMenuPanel id={WEB_SEARCH_SETUP_MENU_PANEL_ID}>
           <div className="px-2 py-2" data-testid="web-search-setup-panel">
             <p className="text-sm text-muted-foreground">{t(setupKey)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{routingSummary}</p>
             <Button type="button" className="touch-target mt-3 w-full" onClick={goToSettings}>
               {t("goToSettings")}
             </Button>
@@ -177,6 +188,7 @@ export function WebSearchToggle({
         data-testid="web-search-setup-flyout"
       >
         <p className="text-sm text-muted-foreground">{t(setupKey)}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{routingSummary}</p>
         <Button type="button" size="sm" className="mt-2 w-full" onClick={goToSettings}>
           {t("goToSettings")}
         </Button>

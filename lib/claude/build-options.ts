@@ -3842,22 +3842,40 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // undeclared agent keeps getting Cognia's pair: the safe direction to be
   // wrong in. Best-effort by construction — off the desktop, or before the
   // manager has a profile, this is simply `false`.
-  const externalNativeWebSearch = await (async () => {
+  let externalWebRuntime = false
+  const externalNativeWeb = await (async () => {
     try {
       const { useAgentRuntimeStore } = await import("@/stores/agent/agent-runtime-store")
       const runtimeState = useAgentRuntimeStore.getState()
-      if (runtimeState.runtime !== "external" || !runtimeState.externalAgentId) return false
+      externalWebRuntime = runtimeState.runtime === "external"
+      if (!externalWebRuntime || !runtimeState.externalAgentId) {
+        return { search: false, fetch: false }
+      }
       const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-      return externalAgentNativeWebSearch(
-        getExternalAgentManager().getAgentCapabilityProfile(runtimeState.externalAgentId)
+      const { isCapabilityUsable } =
+        await import("@cognia/agent-config-types/external-agent-capability")
+      const profile = getExternalAgentManager().getAgentCapabilityProfile(
+        runtimeState.externalAgentId
       )
+      const search = externalAgentNativeWebSearch(profile)
+      // Older capability profiles only have web.search. Respect an explicit
+      // fetch row when supplied by a newer runtime without widening the wire
+      // vocabulary owned by the external-agent contract here.
+      const fetchCell = (
+        profile?.effective as
+          | Record<string, { level: Parameters<typeof isCapabilityUsable>[0] } | undefined>
+          | undefined
+      )?.["web.fetch"]
+      return {
+        search,
+        fetch: fetchCell ? isCapabilityUsable(fetchCell.level) : search,
+      }
     } catch {
-      return false
+      return { search: false, fetch: false }
     }
   })()
-  // The legacy explicit opt-in. Its documented behaviour — pre-approve the two
-  // natives into `allowedTools` and clear them from `disallowedTools` — is kept
-  // verbatim for anyone who set it, and ONLY for them.
+  // The legacy explicit opt-in pre-approves the operations that still use the
+  // native route, clearing their entries from `disallowedTools`.
   const explicitNativeOptIn = appSettings?.webTools?.nativeOnAnthropic === true
   // Has anything already narrowed this turn's tool surface — a character's
   // allow-list, a skill's, the session's tool filter?
@@ -3869,15 +3887,15 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // no web at all, where today it still has the host-routed pair. Route those
   // turns through Cognia and both problems disappear.
   const surfaceNarrowed = (opts.allowedTools?.length ?? 0) > 0
+  const sdkNativeWeb =
+    !externalWebRuntime && anthropicNativeWebSearch(providerId, isStandaloneChatMode())
+  const sdkNativeAvailable = sdkNativeWeb && (explicitNativeOptIn || !surfaceNarrowed)
   const webAccess = resolveWebAccess({
     ...(appSettings?.webTools ? { webTools: appSettings.webTools } : {}),
-    nativeAvailable:
-      (anthropicNativeWebSearch(providerId, isStandaloneChatMode()) &&
-        (explicitNativeOptIn || !surfaceNarrowed)) ||
-      // An external agent's own search is not governed by `allowedTools` — that
-      // list filters the SDK's tools, and this runtime is not the SDK — so the
-      // narrowing carve-out above does not apply to it.
-      externalNativeWebSearch,
+    // External natives are not governed by the SDK's allowedTools filter.
+    nativeAvailable: sdkNativeAvailable || externalNativeWeb.search,
+    nativeSearchAvailable: sdkNativeAvailable || externalNativeWeb.search,
+    nativeFetchAvailable: sdkNativeAvailable || externalNativeWeb.fetch,
     ...(appSettings?.searchProviders ? { searchProviders: appSettings.searchProviders } : {}),
     ...(appSettings?.defaultSearchProvider
       ? { defaultSearchProvider: appSettings.defaultSearchProvider }
@@ -3889,24 +3907,56 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (webAccess.search === "cognia" || webAccess.fetch === "cognia") {
     try {
       const { buildWebBuiltinManifestEntries } = await import("@/lib/claude/web-builtin-tools")
+      let disclosure: import("@/lib/claude/web-builtin-tools").WebFetchHostDisclosure | undefined
+      if (webAccess.fetch === "cognia" && appSettings && !isCliHost() && !isHeadlessHost()) {
+        try {
+          const [
+            { readerPolicyFromSettings },
+            { buildUtilityLlmClient },
+            { isTauri, isCapacitor },
+          ] = await Promise.all([
+            import("@/lib/web/reader/reader-settings"),
+            import("@/lib/ai/generation/utility-client"),
+            import("@/lib/platform/detect"),
+          ])
+          const policy = readerPolicyFromSettings(appSettings)
+          const nativeTransport = isTauri() || isCapacitor()
+          disclosure = {
+            summarizer: Boolean(
+              buildUtilityLlmClient({
+                session: null,
+                appSettings,
+                featureId: "web_fetch_extract",
+              })
+            ),
+            distillation: policy.distillation,
+            readers: [...policy.enabled].filter(
+              (id) => nativeTransport || !["jina", "fxtwitter", "platform"].includes(id)
+            ),
+          }
+        } catch {
+          // Hosts without the renderer utility stack omit the disclosure.
+        }
+      }
       opts.pluginTools = [
         ...(opts.pluginTools ?? []),
-        ...buildWebBuiltinManifestEntries({
-          search: webAccess.search === "cognia",
-          fetch: webAccess.fetch === "cognia",
-        }),
+        ...buildWebBuiltinManifestEntries(
+          { search: webAccess.search === "cognia", fetch: webAccess.fetch === "cognia" },
+          disclosure
+        ),
       ]
     } catch (err) {
       loggers.app.warn("failed to append web built-in tools", { error: String(err) })
     }
   }
   if (
-    webAccess.reason === "disabled" &&
-    anthropicNativeWebSearch(providerId, isStandaloneChatMode())
+    sdkNativeWeb &&
+    ((sdkNativeAvailable && (webAccess.search === "cognia" || webAccess.fetch === "cognia")) ||
+      webAccess.reason === "disabled")
   ) {
     const denied = new Set(opts.disallowedTools ?? [])
-    denied.add("WebSearch")
-    denied.add("WebFetch")
+    if (webAccess.search === "cognia" || webAccess.reason === "disabled") denied.add("WebSearch")
+    if (webAccess.fetch === "cognia" || webAccess.reason === "disabled") denied.add("WebFetch")
     opts.disallowedTools = [...denied]
   }
   // Reaching native BY DEFAULT writes nothing: on an unnarrowed turn the SDK
@@ -3923,17 +3973,21 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // EXTERNAL agent brings its own search would name two tools that runtime has
   // never heard of — and, on an otherwise unfiltered turn, narrow it to them.
   if (
-    webAccess.mode === "native" &&
+    (webAccess.search === "native" || webAccess.fetch === "native") &&
     explicitNativeOptIn &&
-    anthropicNativeWebSearch(providerId, isStandaloneChatMode())
+    sdkNativeWeb
   ) {
     const allow = new Set(opts.allowedTools ?? [])
-    allow.add("WebSearch")
-    allow.add("WebFetch")
+    if (webAccess.search === "native") allow.add("WebSearch")
+    else allow.delete("WebSearch")
+    if (webAccess.fetch === "native") allow.add("WebFetch")
+    else allow.delete("WebFetch")
     opts.allowedTools = [...allow]
     if (opts.disallowedTools?.length) {
       opts.disallowedTools = opts.disallowedTools.filter(
-        (name) => name !== "WebSearch" && name !== "WebFetch"
+        (name) =>
+          !(name === "WebSearch" && webAccess.search === "native") &&
+          !(name === "WebFetch" && webAccess.fetch === "native")
       )
     }
   }

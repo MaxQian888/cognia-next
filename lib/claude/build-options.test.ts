@@ -80,6 +80,14 @@ jest.mock("@/stores/agent/agent-runtime-store", () => ({
   compositionForSession: jest.fn(() => ({ presetId: "standard" })),
 }))
 
+jest.mock("@/lib/ai/agent/external/manager", () => ({
+  getExternalAgentManager: jest.fn(() => ({ getAgentCapabilityProfile: jest.fn() })),
+}))
+
+jest.mock("@/lib/ai/generation/utility-client", () => ({
+  buildUtilityLlmClient: jest.fn(() => null),
+}))
+
 jest.mock("@/stores/agent/custom-mode-store", () => ({
   useCustomModeStore: { getState: jest.fn() },
 }))
@@ -296,6 +304,7 @@ import { getTeam } from "@/lib/db/teams"
 import { BUILT_IN_SKILL_CATALOG, builtinSkillId } from "@/lib/skills/built-in-catalog"
 import { buildPluginToolsManifest } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import { loggers } from "@cognia/logging"
+import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
 import * as standaloneMode from "@/lib/runtime/standalone-mode"
 import { ProviderRoutingEngine, RoutingNoCandidatesError } from "@cognia/provider-routing"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
@@ -321,13 +330,14 @@ import {
   externalAgentProviderId,
 } from "@/lib/ai/agent/external/session/session-models"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
-import type {
-  AppSettings,
-  Character,
-  ChatSession,
-  Skill,
-  Team,
-  TeamMember,
+import {
+  DEFAULT_BUILTIN_TOOLS,
+  type AppSettings,
+  type Character,
+  type ChatSession,
+  type Skill,
+  type Team,
+  type TeamMember,
 } from "@cognia/agent-config-types"
 import { RESOLVED_SPEC_VERSION } from "@cognia/agent-config-types/agent-execution"
 import type { Project } from "@/types"
@@ -1924,7 +1934,7 @@ describe("resolveSendOptions — opencode vault auto-fallback", () => {
       protocol: "openai",
     })
     // Model backfilled from the built-in catalog default.
-    expect(opts.model).toBe("kimi-k2.6")
+    expect(opts.model).toBe(getBuiltInProviderDefaultModel("opencode-go"))
   })
 
   it("does NOT fall back when the provider is explicitly disabled", async () => {
@@ -2027,7 +2037,7 @@ describe("resolveSendOptions — codex vault auto-fallback", () => {
       headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
     })
     // Model backfilled from the built-in catalog default.
-    expect(opts.model).toBe("gpt-5.6-sol")
+    expect(opts.model).toBe(getBuiltInProviderDefaultModel("codex"))
   })
 
   it("uses the session/default resolver's selected Codex account", async () => {
@@ -6454,6 +6464,11 @@ describe("web access resolution (lib/chat/web-access.ts)", () => {
   const webNames = (opts: Awaited<ReturnType<typeof resolveSendOptions>>): string[] =>
     (opts.pluginTools ?? []).map((t) => t.name)
 
+  afterEach(() => {
+    const { useAgentRuntimeStore } = jest.requireMock("@/stores/agent/agent-runtime-store")
+    useAgentRuntimeStore.getState.mockReturnValue({})
+  })
+
   // Native-first. The SDK already exposes WebSearch/WebFetch on an unnarrowed
   // turn, so taking that path means appending NOTHING — not the host-routed
   // pair (which would shadow it) and not the two names into `allowedTools`
@@ -6511,6 +6526,133 @@ describe("web access resolution (lib/chat/web-access.ts)", () => {
       appSettings: COGNIA_WEB_SETTINGS,
     })
     expect(webNames(opts)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]))
+    expect(opts.disallowedTools).toEqual(expect.arrayContaining(["WebSearch", "WebFetch"]))
+  })
+
+  it.each([false, true])(
+    "keeps native search and routes only fetch to Cognia (legacy native opt-in: %s)",
+    async (nativeOnAnthropic) => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        appSettings: {
+          webTools: { enabled: true, nativeOnAnthropic, preferCogniaFetch: true },
+        } as AppSettings,
+      })
+      expect(webNames(opts)).not.toContain("web_search")
+      expect(webNames(opts)).toContain("web_fetch")
+      expect(opts.disallowedTools).toContain("WebFetch")
+      expect(opts.disallowedTools).not.toContain("WebSearch")
+      if (nativeOnAnthropic) {
+        expect(opts.allowedTools).toContain("WebSearch")
+        expect(opts.allowedTools).not.toContain("WebFetch")
+      }
+    }
+  )
+
+  it("keeps native fetch and routes only search to Cognia", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        ...COGNIA_WEB_SETTINGS,
+        webTools: { enabled: true, nativeOnAnthropic: true, preferCogniaSearch: true },
+      } as AppSettings,
+    })
+    expect(webNames(opts)).toContain("web_search")
+    expect(webNames(opts)).not.toContain("web_fetch")
+    expect(opts.disallowedTools).toContain("WebSearch")
+    expect(opts.disallowedTools).not.toContain("WebFetch")
+    expect(opts.allowedTools).toContain("WebFetch")
+    expect(opts.allowedTools).not.toContain("WebSearch")
+  })
+
+  it.each([
+    [undefined, false],
+    [{ level: "unsupported" }, true],
+    [{ level: "native" }, false],
+    [{ level: "unknown" }, true],
+  ])(
+    "respects an external fetch capability row %j with search compatibility",
+    async (fetch, cogniaFetch) => {
+      const { useAgentRuntimeStore } = jest.requireMock("@/stores/agent/agent-runtime-store")
+      const { getExternalAgentManager } = jest.requireMock("@/lib/ai/agent/external/manager")
+      useAgentRuntimeStore.getState.mockReturnValue({
+        runtime: "external",
+        externalAgentId: "agent",
+      })
+      getExternalAgentManager.mockReturnValue({
+        getAgentCapabilityProfile: () => ({
+          effective: {
+            "web.search": { level: "native" },
+            ...(fetch ? { "web.fetch": fetch } : {}),
+          },
+        }),
+      })
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      })
+      expect(webNames(opts)).not.toContain("web_search")
+      expect(webNames(opts).includes("web_fetch")).toBe(cogniaFetch)
+      expect(opts.allowedTools ?? []).not.toContain("WebSearch")
+    }
+  )
+
+  it("discloses required distillation and only browser-reachable readers", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        webTools: { enabled: true, preferCogniaFetch: true },
+        webReader: {
+          version: 1,
+          defaultReader: "auto",
+          readers: {
+            direct: { enabled: true, priority: 0 },
+            platform: { enabled: true, priority: 1 },
+            jina: { enabled: true, priority: 2 },
+            tavily: { enabled: true, priority: 3 },
+          },
+          externalFallback: "configured",
+          distillation: "required",
+        },
+      } as AppSettings,
+    })
+    const fetch = opts.pluginTools?.find((tool) => tool.name === "web_fetch")
+    expect(fetch?.description).toContain("no utility model is available")
+    expect(fetch?.description).toContain("Enabled readers: direct, tavily.")
+    expect(fetch?.description).not.toContain("Enabled readers: direct, platform")
+  })
+
+  it("keeps external native fetch when that runtime cannot search", async () => {
+    const { useAgentRuntimeStore } = jest.requireMock("@/stores/agent/agent-runtime-store")
+    const { getExternalAgentManager } = jest.requireMock("@/lib/ai/agent/external/manager")
+    useAgentRuntimeStore.getState.mockReturnValue({ runtime: "external", externalAgentId: "agent" })
+    getExternalAgentManager.mockReturnValue({
+      getAgentCapabilityProfile: () => ({
+        effective: { "web.search": { level: "unsupported" }, "web.fetch": { level: "native" } },
+      }),
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        searchProviders: COGNIA_WEB_SETTINGS.searchProviders,
+      } as AppSettings,
+    })
+    expect(webNames(opts)).toContain("web_search")
+    expect(webNames(opts)).not.toContain("web_fetch")
+  })
+
+  it("uses the external fetch capability even when the selected provider is Anthropic", async () => {
+    const { useAgentRuntimeStore } = jest.requireMock("@/stores/agent/agent-runtime-store")
+    const { getExternalAgentManager } = jest.requireMock("@/lib/ai/agent/external/manager")
+    useAgentRuntimeStore.getState.mockReturnValue({ runtime: "external", externalAgentId: "agent" })
+    getExternalAgentManager.mockReturnValue({
+      getAgentCapabilityProfile: () => ({
+        effective: { "web.search": { level: "native" }, "web.fetch": { level: "unsupported" } },
+      }),
+    })
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(webNames(opts)).not.toContain("web_search")
+    expect(webNames(opts)).toContain("web_fetch")
+    expect(opts.disallowedTools ?? []).not.toContain("WebFetch")
   })
 
   it("surfaces no web tools at all when the capability is off", async () => {
@@ -8150,7 +8292,12 @@ describe("portable runtime feature projection", () => {
   it("forwards explicit subagent context mode and conversation extension refs", async () => {
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1", providerId: "anthropic" }),
-      appSettings: { id: "singleton" as const, subagentRuntime: { contextMode: "fork" } },
+      appSettings: {
+        id: "singleton",
+        alwaysAllowTools: [],
+        builtinTools: DEFAULT_BUILTIN_TOOLS,
+        subagentRuntime: { contextMode: "fork" },
+      },
       session: makeSession({
         id: "s1",
         runtimeExtensions: [{ kind: "directory", path: "/workspace/plugin", discoverMcp: false }],
@@ -8165,7 +8312,12 @@ describe("portable runtime feature projection", () => {
     await expect(
       resolveSendOptions({
         character: makeChar({ id: "c1", providerId: "openai" }),
-        appSettings: { id: "singleton" as const, subagentRuntime: { contextMode: "fork" } },
+        appSettings: {
+          id: "singleton",
+          alwaysAllowTools: [],
+          builtinTools: DEFAULT_BUILTIN_TOOLS,
+          subagentRuntime: { contextMode: "fork" },
+        },
       })
     ).rejects.toMatchObject({ capability: "subagents.context-fork" })
   })

@@ -1,0 +1,59 @@
+{
+  "description": "Configure page reading independently from Search. Enabling Search never enables a Reader.",
+  "hostLimitations": "In a plain browser, Jina, FxTwitter and platform reading are unavailable because of CORS. On mobile, cancellation stops waiting; an already-sent native request may still complete.",
+  "defaultReader": "Default reader",
+  "auto": "Auto",
+  "externalFallback": "External fallback",
+  "fallback": {
+    "off": "Off",
+    "configured": "Configured readers only"
+  },
+  "fallbackDescription": "Auto may try enabled remote readers in priority order after eligible direct-read failures. Only configured recipients are used.",
+  "distillation": "Distillation",
+  "modes": {
+    "off": "Off",
+    "best-effort": "Best effort",
+    "required": "Required"
+  },
+  "consequences": {
+    "off": "Off: return extracted text; an explicit question may request best-effort distillation.",
+    "best-effort": "Best effort: try the utility model; return extracted text if it fails.",
+    "required": "Required: fail closed without a utility model or distilled output; raw and non-GET reads are disabled."
+  },
+  "priorityOrder": "Reader priority order",
+  "readers": {
+    "direct": "Direct",
+    "platform": "Platform (WeChat / YouTube)",
+    "fxtwitter": "FxTwitter",
+    "jina": "Jina",
+    "tavily": "Tavily",
+    "exa": "Exa",
+    "deepseek": "DeepSeek",
+    "tinyfish": "TinyFish"
+  },
+  "directDisclosure": "Fetched directly by Cognia",
+  "platformDisclosure": "Read from the original site",
+  "remoteDisclosure": "Pages you read are sent to {vendor}",
+  "usesSearchKey": "Uses your {vendor} search key",
+  "missingSearchKey": "Unavailable: add a {vendor} key in Search providers",
+  "configureSearchKey": "Add a {vendor} key in Search providers",
+  "vendorCost": "Reader requests bill your vendor account, independently of Search requests.",
+  "moveUp": "Move {reader} up",
+  "moveDown": "Move {reader} down",
+  "testReader": "Test reader",
+  "testReaderNamed": "Test reader: {reader}",
+  "testing": "Testing…",
+  "testOk": "Reader test passed",
+  "testFailed": "Reader test failed",
+  "testReason": "Reason: {reason}",
+  "httpStatus": "HTTP status: {status}",
+  "testedAt": "Tested at {date}",
+  "testEvidence": "Tests run only when clicked. A dated result is evidence of that attempt, not a guarantee of future availability.",
+  "unsupportedVersion": "This Reader record is from a newer version and is inactive. Compatibility settings are shown. Saving any Reader change will replace the newer record after confirmation.",
+  "replaceTitle": "Replace newer Reader settings?",
+  "replaceDescription": "The stored Reader record comes from a newer version. This change replaces it with the supported settings shown here.",
+  "replace": "Replace settings",
+  "cancel": "Cancel",
+  "saveFailed": "Reader settings could not be saved. Try again.",
+  "priorityDescription": "Auto tries a matching platform or FxTwitter reader, then Direct. Priority controls order the other remote readers for external fallback."
+}

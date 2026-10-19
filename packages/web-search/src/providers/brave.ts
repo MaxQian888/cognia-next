@@ -224,6 +224,7 @@ export async function searchWithBrave(
   try {
     const response = await braveFetch(`${BRAVE_SEARCH_URL}?${params.toString()}`, {
       method: "GET",
+      signal: options.signal,
       headers: {
         Accept: "application/json",
         "Accept-Encoding": "gzip",
@@ -308,6 +309,7 @@ export async function searchNewsWithBrave(
   try {
     const response = await braveFetch(`${BRAVE_NEWS_URL}?${params.toString()}`, {
       method: "GET",
+      signal: options.signal,
       headers: {
         Accept: "application/json",
         "X-Subscription-Token": apiKey,
@@ -373,6 +375,7 @@ export async function searchImagesWithBrave(
   try {
     const response = await braveFetch(`${BRAVE_IMAGES_URL}?${params.toString()}`, {
       method: "GET",
+      signal: options.signal,
       headers: {
         Accept: "application/json",
         "X-Subscription-Token": apiKey,
@@ -437,6 +440,7 @@ export async function searchVideosWithBrave(
   try {
     const response = await braveFetch(`${BRAVE_VIDEOS_URL}?${params.toString()}`, {
       method: "GET",
+      signal: options.signal,
       headers: {
         Accept: "application/json",
         "X-Subscription-Token": apiKey,

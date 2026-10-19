@@ -1,43 +1,50 @@
 /** CLI adapter for the promoted web_search / web_fetch executor. */
-import type { AppSettings } from "@cognia/agent-config-types"
+import { WEB_READER_IDS } from "@cognia/agent-config-types"
 
 import type { WebToolRunDeps } from "@/lib/claude/web-builtin-tools"
+import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { configuredSearchProviders } from "@/lib/chat/web-access"
 import { searchWithSettings } from "@/lib/search/configured-search-core"
+import { getFetchCache } from "@/lib/web/fetch-cache"
+import { readerPolicyFromSettings } from "@/lib/web/reader/reader-settings"
+import { buildFetchExtractor } from "@/lib/web/web-tools-core"
 
 import type { ResolvedConfig } from "./schema"
-import { buildSearchAppSettings } from "./to-build-context"
+import { toBuildContext } from "./to-build-context"
 
-/**
- * Resolve web-tool dependencies entirely from CLI files/env. The explicit
- * settings snapshot uses the store-independent executor, preserving the
- * canonical PII/cache/provider policy without importing renderer state.
- */
+/** Resolve host policy entirely from the CLI's files/env, without renderer state. */
 export function buildCliWebToolDeps(config: ResolvedConfig): WebToolRunDeps {
-  const settings = {
-    webTools: { enabled: config.webTools !== false },
-    ...buildSearchAppSettings(config),
-  } as AppSettings
+  // ResolvedConfig exposes the CLI home (profile identity), not a session id.
+  const scope = config.cliHome ? `cli:${config.cliHome}` : "cli"
+  const { appSettings: settings, session } = toBuildContext({ sessionId: scope, config })
+  const client = buildUtilityLlmClient({
+    session,
+    appSettings: settings,
+    featureId: "web_fetch_extract",
+  })
 
   return {
     enabled: config.webTools !== false,
-    searchMaxResults: settings.searchMaxResults,
-    // No `searchOptions` projection. Type, depth, recency, country, language,
-    // include/exclude domains, answer, raw content and safe-search are all
-    // derived from this same `settings` snapshot by `defaultSearchOptions`
-    // inside the executor. Re-deriving them here only to hand them back as
-    // request-level OVERRIDES is the layer that silently replaced the
-    // renderer's selected domain filter with the legacy `defaultIncludeDomains`
-    // (see the comment in `lib/claude/plugin-tool-ipc.ts`). One derivation, in
-    // the executor that owns the policy.
-    ...(configuredSearchProviders(settings.searchProviders, settings.defaultSearchProvider).length >
-    0
+    readerPolicy: readerPolicyFromSettings(settings),
+    credentialFor: (id) => settings?.searchProviders?.[id]?.apiKey?.trim() || undefined,
+    cache: getFetchCache(),
+    scope,
+    activeScope: () => scope,
+    hostReachable: Object.fromEntries(WEB_READER_IDS.map((id) => [id, true])),
+    transportCancels: true,
+    ...(client ? { summarize: buildFetchExtractor(client) } : {}),
+    // Defaults remain in the snapshot, below explicit caller options (R05).
+    ...(configuredSearchProviders(settings?.searchProviders, settings?.defaultSearchProvider)
+      .length > 0
       ? {
           searchExecutor: ((query, options) =>
             searchWithSettings(query, {
-              settings,
+              settings: settings ?? undefined,
               options,
-              useCache: settings.searchCacheEnabled !== false,
+              signal: options.signal,
+              scope,
+              activeScope: () => scope,
+              useCache: settings?.searchCacheEnabled !== false,
             })) satisfies NonNullable<WebToolRunDeps["searchExecutor"]>,
         }
       : {}),

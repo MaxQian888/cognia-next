@@ -46,6 +46,7 @@ const SEARCH_PROVIDER_IDS = Object.keys(SEARCH_PROVIDERS) as SearchProviderType[
 
 export default function MobileWebSearchPage() {
   const t = useTranslations("mobile.webSearch")
+  const tProvider = useTranslations("mobile.me.searchProviders")
 
   const settings = useSettingsStore((s) => s.settings)
   const update = useSettingsPatch()
@@ -85,9 +86,12 @@ export default function MobileWebSearchPage() {
               <ItemDescription className="text-[11px]">{t("providerHelp")}</ItemDescription>
               <Select
                 value={defaultSearchProvider}
-                onValueChange={(v) =>
-                  void update({ defaultSearchProvider: v as SearchProviderType })
-                }
+                onValueChange={(v) => {
+                  const id = v as SearchProviderType
+                  if (SEARCH_PROVIDERS[id]?.lifecycle.status !== "retired") {
+                    void update({ defaultSearchProvider: id })
+                  }
+                }}
                 disabled={!searchEnabled}
               >
                 <SelectTrigger
@@ -98,11 +102,20 @@ export default function MobileWebSearchPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {SEARCH_PROVIDER_IDS.map((id) => (
-                    <SelectItem key={id} value={id}>
-                      {SEARCH_PROVIDERS[id].name}
-                    </SelectItem>
-                  ))}
+                  {SEARCH_PROVIDER_IDS.map((id) => {
+                    const provider = SEARCH_PROVIDERS[id]
+                    return (
+                      <SelectItem
+                        key={id}
+                        value={id}
+                        disabled={provider.lifecycle.status === "retired"}
+                      >
+                        {provider.name}
+                        {provider.lifecycle.status === "retired" &&
+                          ` · ${tProvider("retired", { date: provider.lifecycle.retiredOn })}`}
+                      </SelectItem>
+                    )
+                  })}
                 </SelectContent>
               </Select>
             </ItemContent>

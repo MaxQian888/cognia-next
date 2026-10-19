@@ -104,6 +104,7 @@ export async function searchWithPerplexity(
   try {
     const response = await perplexityFetch(PERPLEXITY_API_URL, {
       method: "POST",
+      signal: options.signal,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",

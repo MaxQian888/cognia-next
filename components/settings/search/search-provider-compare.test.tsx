@@ -45,8 +45,18 @@ jest.mock("@/components/ui/select", () => ({
   ),
   SelectTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SelectItem: ({ value, children }: { value: string; children: React.ReactNode }) => (
-    <option value={value}>{children}</option>
+  SelectItem: ({
+    value,
+    children,
+    disabled,
+  }: {
+    value: string
+    children: React.ReactNode
+    disabled?: boolean
+  }) => (
+    <option value={value} disabled={disabled}>
+      {children}
+    </option>
   ),
   SelectValue: () => null,
 }))
@@ -66,6 +76,19 @@ beforeEach(() => {
 })
 
 describe("SearchProviderCompare", () => {
+  it("keeps a disabled provider unavailable even when its key is stored", () => {
+    settings.searchProviders!.brave = {
+      providerId: "brave",
+      apiKey: "stored-key",
+      enabled: false,
+      priority: 2,
+    }
+    render(<SearchProviderCompare />)
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "query" } })
+    expect(screen.getByText("compare")).toBeDisabled()
+    fireEvent.click(screen.getByText("compare"))
+    expect(searchWithAppSettingsMock).not.toHaveBeenCalled()
+  })
   it("renders the query label", () => {
     render(<SearchProviderCompare />)
     expect(screen.getByText("query")).toBeInTheDocument()
@@ -168,4 +191,13 @@ describe("SearchProviderCompare", () => {
       expect.objectContaining({ providerA: "tavily", providerB: "brave" })
     )
   })
+})
+
+it("lists all catalogue providers while preventing retired/unconfigured comparisons", () => {
+  render(<SearchProviderCompare />)
+  const selects = screen.getAllByRole("combobox")
+  expect(selects[0].querySelectorAll("option")).toHaveLength(13)
+  expect(selects[0].querySelector('option[value="bing"]')).toBeDisabled()
+  expect(selects[0].querySelector('option[value="searxng"]')).toBeDisabled()
+  expect(selects[0].querySelector('option[value="tavily"]')).not.toBeDisabled()
 })

@@ -3,10 +3,16 @@
 // patches, and the alwaysAllow tool list helpers.
 
 import "fake-indexeddb/auto"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { DEFAULT_UPDATE_SETTINGS } from "@cognia/agent-config-types"
 import { DEFAULTS, addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "./settings"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import {
+  freshInstallWebReader,
+  legacyCompatibilityWebReader,
+} from "@/lib/web/reader/reader-settings"
+import { exportSettingsProfile, importSettingsProfile } from "@/lib/settings/profile-transfer"
 
 beforeEach(async () => {
   await getDb().delete()
@@ -17,6 +23,105 @@ beforeEach(async () => {
 })
 
 describe("getSettings", () => {
+  it("does not create a reader choice when a legacy host imports unrelated preferences", async () => {
+    const { webReader: _reader, ...legacy } = DEFAULTS
+    await getDb().settings.put(legacy)
+    const imported = importSettingsProfile({
+      schema: "cognia-settings",
+      version: 1,
+      settings: { theme: "dark" },
+    })
+    if (!imported.ok) throw new Error("Expected valid profile")
+    await saveSettings(imported.patch)
+    expect(Object.hasOwn((await getDb().settings.get("singleton"))!, "webReader")).toBe(false)
+    expect((await getSettings()).webReader).toEqual(legacyCompatibilityWebReader(legacy.webTools))
+  })
+  it("applies portable search preferences without losing local credentials or endpoint grants", async () => {
+    await saveSettings({
+      searchProviders: {
+        ...DEFAULTS.searchProviders!,
+        searxng: {
+          providerId: "searxng",
+          enabled: false,
+          priority: 8,
+          apiKey: "local",
+          apiKeys: ["rotated"],
+          cx: "local-cx",
+          baseUrl: "https://local.example",
+          allowPrivateEndpoint: true,
+        },
+      },
+    })
+    const incoming = exportSettingsProfile(
+      {
+        ...DEFAULTS,
+        searchProviders: {
+          ...DEFAULTS.searchProviders!,
+          searxng: {
+            providerId: "searxng",
+            enabled: true,
+            priority: 1,
+            apiKey: "remote",
+            baseUrl: "https://remote.example",
+            allowPrivateEndpoint: false,
+          },
+        },
+      },
+      "2026-10-19T00:00:00.000Z"
+    )
+    const imported = importSettingsProfile(incoming)
+    expect(imported.ok).toBe(true)
+    if (!imported.ok) throw new Error("Expected valid profile")
+    const settings = await saveSettings(imported.patch)
+    expect(settings.searchProviders?.searxng).toMatchObject({
+      enabled: true,
+      priority: 1,
+      apiKey: "local",
+      apiKeys: ["rotated"],
+      cx: "local-cx",
+      baseUrl: "https://local.example",
+      allowPrivateEndpoint: true,
+    })
+  })
+  it("distinguishes fresh, legacy, explicit and future reader profiles without writing", async () => {
+    const put = jest.spyOn(getDb().settings, "put")
+    expect((await getSettings()).webReader).toEqual(freshInstallWebReader())
+    expect(put).not.toHaveBeenCalled()
+    put.mockRestore()
+
+    const { webReader: _reader, ...legacy } = DEFAULTS
+    await getDb().settings.put({ ...legacy, webTools: { enabled: true, alwaysDistill: true } })
+    expect((await getSettings()).webReader).toEqual(
+      legacyCompatibilityWebReader({ enabled: true, alwaysDistill: true })
+    )
+    expect((await getDb().settings.get("singleton"))?.webReader).toBeUndefined()
+
+    const explicit = { ...freshInstallWebReader(), distillation: "best-effort" as const }
+    await getDb().settings.put({ ...legacy, webReader: explicit })
+    expect((await getSettings()).webReader).toEqual(explicit)
+    const future = { version: 9, futureReader: { enabled: true }, opaque: "retain" }
+    await getDb().settings.put({ ...legacy, webReader: future })
+    expect((await getSettings()).webReader).toEqual(future)
+    expect((await getDb().settings.get("singleton"))?.webReader).toEqual(future)
+  })
+
+  it("merges provider defaults per provider for older settings rows", async () => {
+    await getDb().settings.put({
+      ...DEFAULTS,
+      searchProviders: {
+        tavily: { apiKey: "stored", enabled: true },
+      } as AppSettings["searchProviders"],
+    })
+    const providers = (await getSettings()).searchProviders!
+    expect(providers.tavily).toMatchObject({
+      providerId: "tavily",
+      apiKey: "stored",
+      enabled: true,
+    })
+    for (const id of ["deepseek", "tinyfish", "searxng"] as const) {
+      expect(providers[id]).toMatchObject({ providerId: id, enabled: false })
+    }
+  })
   it("defaults new and existing settings to anime icons and persists both styles", async () => {
     expect((await getSettings()).settingsIconStyle).toBe("anime")
     await getDb().settings.put({

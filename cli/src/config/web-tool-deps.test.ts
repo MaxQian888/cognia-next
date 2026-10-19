@@ -1,6 +1,10 @@
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "./schema"
 
 const mockSearchWithSettings = jest.fn()
+const mockUtilityClient = jest.fn()
+jest.mock("@/lib/ai/generation/utility-client", () => ({
+  buildUtilityLlmClient: (...args: unknown[]) => mockUtilityClient(...args),
+}))
 jest.mock("@/lib/search/configured-search-core", () => ({
   searchWithSettings: (...args: unknown[]) => mockSearchWithSettings(...args),
 }))
@@ -12,7 +16,10 @@ function config(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
 }
 
 describe("buildCliWebToolDeps", () => {
-  beforeEach(() => mockSearchWithSettings.mockReset())
+  beforeEach(() => {
+    mockSearchWithSettings.mockReset()
+    mockUtilityClient.mockReset()
+  })
 
   it("builds explicit search deps without reading renderer state", async () => {
     mockSearchWithSettings.mockResolvedValue({
@@ -42,14 +49,16 @@ describe("buildCliWebToolDeps", () => {
     // a legacy default silently replace the policy the executor computed.
     expect(deps).toMatchObject({
       enabled: true,
-      searchMaxResults: 6,
     })
-    expect(deps.searchOptions).toBeUndefined()
+    expect(deps).not.toHaveProperty("searchOptions")
     expect(deps.searchExecutor).toEqual(expect.any(Function))
     await deps.searchExecutor?.("q", { maxResults: 2 })
     expect(mockSearchWithSettings).toHaveBeenCalledWith("q", {
       settings: expect.objectContaining({ defaultSearchProvider: "tavily" }),
       options: { maxResults: 2 },
+      signal: undefined,
+      scope: "cli",
+      activeScope: expect.any(Function),
       useCache: true,
     })
   })
@@ -71,7 +80,7 @@ describe("buildCliWebToolDeps", () => {
       })
     )
 
-    expect(deps.searchOptions).toBeUndefined()
+    expect(deps).not.toHaveProperty("searchOptions")
     await deps.searchExecutor?.("q", {})
     // The configured values still reach the search — through the snapshot the
     // executor derives them from, which is the single derivation.
@@ -96,4 +105,48 @@ describe("buildCliWebToolDeps", () => {
   it("propagates the web-tools master switch", () => {
     expect(buildCliWebToolDeps(config({ webTools: false })).enabled).toBe(false)
   })
+})
+
+it("passes fresh Reader policy, trimmed vendor keys, cancellation and CLI profile scope", async () => {
+  const deps = buildCliWebToolDeps(
+    config({
+      cliHome: "/profiles/one",
+      search: {
+        providers: { tavily: { apiKey: " key ", enabled: true }, deepseek: { apiKey: " " } },
+      },
+    })
+  )
+  expect(deps.readerPolicy?.externalFallback).toBe(false)
+  expect(deps.readerPolicy?.enabled.has("jina")).toBe(false)
+  expect(deps.credentialFor?.("tavily")).toBe("key")
+  expect(deps.credentialFor?.("deepseek")).toBeUndefined()
+  expect(deps.cache).toBeDefined()
+  expect(deps.hostReachable).toMatchObject({
+    direct: true,
+    jina: true,
+    fxtwitter: true,
+    deepseek: true,
+  })
+  expect(deps.transportCancels).toBe(true)
+  expect(deps.activeScope?.()).toBe("cli:/profiles/one")
+  const signal = new AbortController().signal
+  await deps.searchExecutor?.("query", { signal })
+  expect(mockSearchWithSettings).toHaveBeenCalledWith(
+    "query",
+    expect.objectContaining({ signal, scope: deps.scope, activeScope: expect.any(Function) })
+  )
+  expect(deps).not.toHaveProperty("searchMaxResults")
+})
+
+it("builds query-focused extraction only with an available utility model", async () => {
+  expect(buildCliWebToolDeps(config()).summarize).toBeUndefined()
+  const complete = jest.fn().mockResolvedValue("focused")
+  mockUtilityClient.mockReturnValue({ complete })
+  const deps = buildCliWebToolDeps(config())
+  const signal = new AbortController().signal
+  await expect(deps.summarize?.("page content", "question", signal)).resolves.toBe("focused")
+  expect(complete).toHaveBeenCalledWith(
+    expect.stringContaining("page content"),
+    expect.objectContaining({ abortSignal: signal })
+  )
 })

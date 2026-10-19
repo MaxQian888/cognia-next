@@ -37,6 +37,7 @@ export const NON_TRANSFERABLE_KEYS = [
 
 /** Nested object keys whose name marks them as a secret — scrubbed recursively. */
 const SECRET_KEY_RE = /(token|apikey|secret|password|passphrase|privatekey|credential)/i
+const SEARCH_LOCAL_FIELDS = new Set(["apiKey", "apiKeys", "cx", "baseUrl", "allowPrivateEndpoint"])
 
 export interface SettingsProfile {
   schema: typeof SETTINGS_PROFILE_SCHEMA
@@ -69,13 +70,38 @@ export function deepStripSecrets(value: unknown): unknown {
   if (isPlainObject(value)) {
     const out: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(value)) {
-      const normalized = k.replace(/[^a-z0-9]/gi, "")
-      if (SECRET_KEY_RE.test(normalized) && isSecretValue(v)) continue
+      const normalized = k.replace(/[^a-z0-9]/gi, "").toLowerCase()
+      if (
+        normalized !== "apikeyrotationstrategy" &&
+        SECRET_KEY_RE.test(normalized) &&
+        isSecretValue(v)
+      )
+        continue
       out[k] = deepStripSecrets(v)
     }
     return out
   }
   return value
+}
+
+/** Search credentials and self-hosted endpoint authority cannot travel hosts. */
+function portableSearchProviders(value: unknown): unknown {
+  if (!isPlainObject(value)) return undefined
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([id, provider]) => {
+      if (!isPlainObject(provider)) return []
+      return [
+        [
+          id,
+          deepStripSecrets(
+            Object.fromEntries(
+              Object.entries(provider).filter(([key]) => !SEARCH_LOCAL_FIELDS.has(key))
+            )
+          ),
+        ],
+      ]
+    })
+  )
 }
 
 /** Keys excluded from any export: explicit secrets + identity/instance fields. */
@@ -92,7 +118,7 @@ export function exportSettingsProfile(settings: AppSettings, now: string): Setti
   const sanitized: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(settings)) {
     if (excluded.has(k)) continue
-    sanitized[k] = deepStripSecrets(v)
+    sanitized[k] = k === "searchProviders" ? portableSearchProviders(v) : deepStripSecrets(v)
   }
   return {
     schema: SETTINGS_PROFILE_SCHEMA,
@@ -137,7 +163,7 @@ export function importSettingsProfile(raw: unknown): ImportResult {
   for (const [k, v] of Object.entries(parsed.settings)) {
     if (excluded.has(k)) continue
     if (!allowed.has(k)) continue // drop unknown keys
-    patch[k] = deepStripSecrets(v)
+    patch[k] = k === "searchProviders" ? portableSearchProviders(v) : deepStripSecrets(v)
   }
   if (Object.keys(patch).length === 0) return { ok: false, errorKey: "emptyProfile" }
   return { ok: true, patch: patch as Partial<AppSettings> }

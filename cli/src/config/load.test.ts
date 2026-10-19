@@ -287,9 +287,9 @@ describe("credentials overlay", () => {
     })
   })
 
-  it("ignores an env id the shared search engine cannot execute", () => {
+  it("maps Google AI search credentials", () => {
     const cfg = run({}, { env: { COGNIA_SEARCH_GOOGLE_AI_API_KEY: "google-ai-key" } })
-    expect(cfg.search?.providers?.["google-ai" as never]).toBeUndefined()
+    expect(cfg.search?.providers?.["google-ai"]?.apiKey).toBe("google-ai-key")
   })
 })
 
@@ -711,4 +711,50 @@ it("only honors bypass confirmation consent from user configuration", () => {
   const loaded = run({ [userConfigPath(HOME)]: JSON.stringify({ bypassConfirmation: "never" }) })
   expect(loaded.bypassConfirmation).toBe("never")
   expect(loaded.permissionMode).not.toBe("bypassPermissions")
+})
+
+describe("Reader and new search-provider layering", () => {
+  it("resolves standard and prefixed env credentials without enabling new providers", () => {
+    const cfg = run(
+      {},
+      {
+        env: {
+          DEEPSEEK_API_KEY: " deepseek ",
+          TINYFISH_API_KEY: " tinyfish ",
+          SEARXNG_BASE_URL: " https://search.example.com ",
+          COGNIA_SEARCH_DEEPSEEK_API_KEY: "override",
+        },
+      }
+    )
+    expect(cfg.search?.providers).toMatchObject({
+      deepseek: { apiKey: "override" },
+      tinyfish: { apiKey: "tinyfish" },
+      searxng: { baseUrl: "https://search.example.com" },
+    })
+    expect(cfg.search?.providers?.deepseek.enabled).toBeUndefined()
+    expect(() =>
+      run({}, { env: { SEARXNG_BASE_URL: "https://bad.example?token=secret" } })
+    ).toThrow("invalid search endpoint")
+  })
+
+  it("applies explicit Reader profiles atomically and reports unknown fields", () => {
+    const webReader = {
+      version: 1,
+      defaultReader: "jina",
+      readers: { jina: { enabled: true, priority: 1 } },
+      externalFallback: "configured",
+      distillation: "required",
+    }
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({ webReader, preferCogniaFetch: true }),
+    })
+    expect(cfg.webReader).toEqual(webReader)
+    expect(cfg.preferCogniaFetch).toBe(true)
+    expect(() =>
+      run({
+        [userConfigPath(HOME)]: JSON.stringify({ webReader: { ...webReader, unsupported: true } }),
+      })
+    ).toThrow()
+    expect(run({}).webReader).toBeUndefined()
+  })
 })

@@ -19,6 +19,9 @@ export type SearchProviderType =
   | "google"
   | "google-ai"
   | "brave"
+  | "deepseek"
+  | "tinyfish"
+  | "searxng"
 
 /**
  * Search depth/quality level
@@ -42,7 +45,17 @@ export interface SearchResult {
   title: string
   url: string
   content: string
+  /**
+   * Rank-derived ordering score. Provider-specific scale; never factual
+   * confidence and never a credibility verdict.
+   */
   score: number
+  /**
+   * Full or long-form page text a provider returned because the caller asked
+   * for it (`includeRawContent`). Absent when it was not requested; consumers
+   * bound it themselves (see `SEARCH_EXCERPT_MAX_CHARS`).
+   */
+  rawContent?: string
   publishedDate?: string
   source?: string
   favicon?: string
@@ -63,8 +76,27 @@ export interface SearchOptions {
   recency?: SearchRecency
   country?: string
   language?: string
-  /** Provider-neutral safe-search level. Unsupported providers ignore it. */
+  /**
+   * Provider-neutral safe-search level. `strict` is mandatory: a provider that
+   * cannot enforce it at the wire is ineligible before any request. `off` and
+   * `moderate` are advisory unless {@link safeSearchRequired} is set; a
+   * provider that cannot honour an advisory level reports it in
+   * `SearchResponse.diagnostics.degradedControls`.
+   */
   safeSearch?: SafeSearchLevel
+  /** Make a `moderate` safe-search level mandatory instead of advisory. */
+  safeSearchRequired?: boolean
+  /**
+   * Provider-scoped SERP engine (e.g. `google` / `bing` / `baidu` on SearchAPI,
+   * or a SearXNG engine name). Omitted ⇒ the provider's own default. An engine
+   * the serving provider does not list fails validation before any request.
+   */
+  engine?: string
+  /**
+   * Runtime-only cancellation signal threaded to every adapter request. Never
+   * persisted; providers forward it to their transport.
+   */
+  signal?: AbortSignal
   /**
    * Generation seam for a provider whose search is itself a model generation
    * (`google-ai`: one Gemini `:generateContent` per search). Runtime-only —
@@ -86,6 +118,34 @@ export interface SearchResponse {
   responseTime: number
   totalResults?: number
   images?: SearchImage[]
+  /** The search type the serving adapter actually executed. */
+  searchType?: SearchType
+  /** The SERP engine the serving adapter actually used, when it has engines. */
+  engine?: string
+  /** What the executor changed or could not honour; absent when nothing to report. */
+  diagnostics?: SearchDiagnostics
+}
+
+/**
+ * Bounded, content-free notes about how a response was produced. Never holds
+ * the query, URLs or result text.
+ */
+export interface SearchDiagnostics {
+  /** Advisory controls the serving provider could not honour at the wire. */
+  degradedControls?: Array<
+    "safeSearch" | "recency" | "country" | "language" | "domains" | "searchType"
+  >
+  /**
+   * Why the provider's synthesized `answer` was removed: the grounding set it
+   * was written from lost at least one source to policy filtering.
+   */
+  answerCleared?: "policy-filtered"
+  /** Results / images removed by hard domain or source-verification policy. */
+  removedByPolicy?: { results: number; images: number }
+  /** Providers attempted, in order (registered ids only). */
+  attemptedProviders?: SearchProviderType[]
+  /** True when the response came from the in-memory cache. */
+  cacheHit?: boolean
 }
 
 /**
@@ -100,16 +160,73 @@ export interface SearchImage {
 }
 
 /**
+ * How Cognia reaches a provider. Four different integration classes, kept
+ * apart so a generating search is never mistaken for raw SERP output:
+ * - `api`: an ordinary vendor search API returning ranked documents
+ * - `serp`: a SERP scraper/aggregator API fronting one or more engines
+ * - `self-hosted`: a user-run endpoint (SearXNG); no vendor key
+ * - `grounding`: a model generation grounded in search (`google-ai`); its
+ *   results are cited sources of a generated answer, and every call is a
+ *   billed model generation
+ */
+export type SearchIntegrationKind = "api" | "serp" | "self-hosted" | "grounding"
+
+/**
+ * Lifecycle of a registered provider. Ids are never deleted: a retired entry
+ * keeps the user's stored record but is excluded from every execution,
+ * connection-test and fallback path.
+ */
+export type SearchProviderLifecycle =
+  | { status: "active" }
+  /** Usable by existing accounts until `endDate` (ISO date); closed to new customers. */
+  | { status: "legacy"; endDate: string }
+  /** Vendor shut the API down on `retiredOn` (ISO date). */
+  | { status: "retired"; retiredOn: string }
+
+/**
+ * What a provider's configuration must contain before it is eligible.
+ * - `api-key`: a nonempty key
+ * - `api-key+cx`: a key plus a Programmable Search Engine id (`google`)
+ * - `endpoint`: a validated `baseUrl`, no key (`searxng`)
+ */
+export type SearchProviderAuth = "api-key" | "api-key+cx" | "endpoint"
+
+/** One SERP engine a provider can serve and Cognia can normalize. */
+export interface SearchEngineDescriptor {
+  id: string
+  label: string
+}
+
+/**
  * Search provider configuration
  */
 export interface SearchProviderConfig {
   id: SearchProviderType
   name: string
   description: string
+  integration: SearchIntegrationKind
+  lifecycle: SearchProviderLifecycle
+  auth: SearchProviderAuth
+  /**
+   * The operations this vendor offers through an integrated adapter. `read`
+   * means a vendor Reader adapter exists (`lib/web/reader/vendor-readers`);
+   * enabling Search never enables it.
+   */
+  operations: { search: boolean; read: boolean }
+  /** Engines selectable for `general` search; absent ⇒ the provider has one fixed engine. */
+  engines?: readonly SearchEngineDescriptor[]
+  /** Engine used when none is configured. */
+  defaultEngine?: string
   apiKeyRequired: boolean
   apiKeyPlaceholder: string
   apiKeyPrefix?: string
   docsUrl: string
+  /**
+   * Advertised capabilities. Must agree with the adapter mapping in
+   * `search-type-router` (`getEffectiveSearchCapabilities`); a test pins the
+   * two together so a badge can never claim a specialization the adapter does
+   * not implement.
+   */
   features: SearchProviderFeatures
   pricing?: {
     freeCredits?: number
@@ -161,10 +278,34 @@ export interface SearchProviderSettings {
   apiKeyRotationStrategy?: SearchApiKeyRotationStrategy
   /** Google Programmable Search Engine ID (required for providerId === 'google') */
   cx?: string
+  /**
+   * Provider-scoped default SERP engine. Must be one of the provider's
+   * `SEARCH_PROVIDERS[id].engines`; absent ⇒ `defaultEngine`.
+   */
+  engine?: string
+  /**
+   * Self-hosted endpoint base URL. Accepted only for `endpoint`-auth providers
+   * (SearXNG) and validated by `validateSearchEndpoint`: absolute http(s), no
+   * embedded credentials, query or fragment; the adapter appends `/search`.
+   */
+  baseUrl?: string
+  /**
+   * Explicit endpoint grant for a private/loopback `baseUrl` (or plain HTTP,
+   * which is only accepted for private hosts). Scoped to this provider's
+   * search endpoint: it never widens what `web_fetch` may reach. Host-local —
+   * excluded from portable profiles, so an imported profile has to be granted
+   * again on the receiving host.
+   */
+  allowPrivateEndpoint?: boolean
+  /**
+   * Generation model for a `grounding` provider (`google-ai`). Absent ⇒
+   * `GOOGLE_AI_DEFAULT_MODEL`. Must pass `supportsGoogleSearchGrounding`.
+   */
+  model?: string
   enabled: boolean
   priority: number
   /** Persisted per-provider defaults. The runtime-only `generate` seam is never one of them. */
-  defaultOptions?: Partial<Omit<SearchOptions, "generate">>
+  defaultOptions?: Partial<Omit<SearchOptions, "generate" | "signal">>
 }
 
 /**
@@ -180,6 +321,8 @@ export interface SearchSettings {
   cacheDuration: number
 }
 
+const ACTIVE: SearchProviderLifecycle = { status: "active" }
+
 /**
  * Search provider definitions
  */
@@ -188,6 +331,10 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
     id: "tavily",
     name: "Tavily",
     description: "AI-optimized search engine with answer generation",
+    integration: "api",
+    lifecycle: ACTIVE,
+    auth: "api-key",
+    operations: { search: true, read: true },
     apiKeyRequired: true,
     apiKeyPlaceholder: "tvly-xxxxxxxxxxxxx",
     apiKeyPrefix: "tvly-",
@@ -196,10 +343,10 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
       aiAnswer: true,
       newsSearch: true,
       academicSearch: false,
-      imageSearch: true,
+      imageSearch: false,
       videoSearch: false,
       domainFilter: true,
-      recencyFilter: false,
+      recencyFilter: true,
       countryFilter: false,
       contentExtraction: true,
       streaming: false,
@@ -213,13 +360,17 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
     id: "perplexity",
     name: "Perplexity",
     description: "High-quality search with recency and geo filters",
+    integration: "api",
+    lifecycle: ACTIVE,
+    auth: "api-key",
+    operations: { search: true, read: false },
     apiKeyRequired: true,
     apiKeyPlaceholder: "pplx-xxxxxxxxxxxxx",
     apiKeyPrefix: "pplx-",
     docsUrl: "https://docs.perplexity.ai",
     features: {
       aiAnswer: false,
-      newsSearch: true,
+      newsSearch: false,
       academicSearch: false,
       imageSearch: false,
       videoSearch: false,
@@ -237,11 +388,15 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
     id: "exa",
     name: "Exa",
     description: "Neural search engine with semantic understanding",
+    integration: "api",
+    lifecycle: ACTIVE,
+    auth: "api-key",
+    operations: { search: true, read: true },
     apiKeyRequired: true,
     apiKeyPlaceholder: "exa-xxxxxxxxxxxxx",
     docsUrl: "https://docs.exa.ai",
     features: {
-      aiAnswer: true,
+      aiAnswer: false,
       newsSearch: true,
       academicSearch: true,
       imageSearch: false,
@@ -261,6 +416,18 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
     id: "searchapi",
     name: "SearchAPI",
     description: "Multi-engine aggregator (Google, Bing, Baidu)",
+    integration: "serp",
+    lifecycle: ACTIVE,
+    auth: "api-key",
+    operations: { search: true, read: false },
+    engines: [
+      { id: "google", label: "Google" },
+      { id: "bing", label: "Bing" },
+      { id: "baidu", label: "Baidu" },
+      { id: "yandex", label: "Yandex" },
+      { id: "duckduckgo", label: "DuckDuckGo" },
+    ],
+    defaultEngine: "google",
     apiKeyRequired: true,
     apiKeyPlaceholder: "xxxxxxxxxxxxx",
     docsUrl: "https://www.searchapi.io/docs",
@@ -269,8 +436,8 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
       newsSearch: true,
       academicSearch: true,
       imageSearch: true,
-      videoSearch: true,
-      domainFilter: true,
+      videoSearch: false,
+      domainFilter: false,
       recencyFilter: true,
       countryFilter: true,
       contentExtraction: false,
@@ -285,11 +452,15 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
     id: "serper",
     name: "Serper",
     description: "Google search results API via serper.dev",
+    integration: "serp",
+    lifecycle: ACTIVE,
+    auth: "api-key",
+    operations: { search: true, read: false },
     apiKeyRequired: true,
     apiKeyPlaceholder: "xxxxxxxxxxxxx",
     docsUrl: "https://serper.dev",
     features: {
-      aiAnswer: false,
+      aiAnswer: true,
       newsSearch: true,
       academicSearch: true,
       imageSearch: true,
@@ -309,15 +480,28 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
     id: "serpapi",
     name: "SerpAPI",
     description: "Google search results API with rich features",
+    integration: "serp",
+    lifecycle: ACTIVE,
+    auth: "api-key",
+    operations: { search: true, read: false },
+    engines: [
+      { id: "google", label: "Google" },
+      { id: "bing", label: "Bing" },
+      { id: "baidu", label: "Baidu" },
+      { id: "yahoo", label: "Yahoo" },
+      { id: "yandex", label: "Yandex" },
+      { id: "duckduckgo", label: "DuckDuckGo" },
+    ],
+    defaultEngine: "google",
     apiKeyRequired: true,
     apiKeyPlaceholder: "xxxxxxxxxxxxx",
     docsUrl: "https://serpapi.com/search-api",
     features: {
-      aiAnswer: false,
+      aiAnswer: true,
       newsSearch: true,
-      academicSearch: true,
+      academicSearch: false,
       imageSearch: true,
-      videoSearch: true,
+      videoSearch: false,
       domainFilter: false,
       recencyFilter: true,
       countryFilter: true,
@@ -332,16 +516,21 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
   bing: {
     id: "bing",
     name: "Bing Search",
-    description: "Microsoft Bing Web Search API",
+    description: "Microsoft Bing Web Search API (retired by Microsoft on 2025-08-11)",
+    integration: "api",
+    // https://learn.microsoft.com/en-us/lifecycle/announcements/bing-search-api-retirement
+    lifecycle: { status: "retired", retiredOn: "2025-08-11" },
+    auth: "api-key",
+    operations: { search: true, read: false },
     apiKeyRequired: true,
     apiKeyPlaceholder: "xxxxxxxxxxxxx",
-    docsUrl: "https://learn.microsoft.com/en-us/bing/search-apis/",
+    docsUrl: "https://learn.microsoft.com/en-us/lifecycle/announcements/bing-search-api-retirement",
     features: {
       aiAnswer: false,
       newsSearch: true,
       academicSearch: false,
       imageSearch: true,
-      videoSearch: true,
+      videoSearch: false,
       domainFilter: false,
       recencyFilter: true,
       countryFilter: true,
@@ -356,7 +545,12 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
   google: {
     id: "google",
     name: "Google Custom Search",
-    description: "Google Programmable Search Engine API",
+    description: "Google Programmable Search Engine API (closed to new customers)",
+    integration: "api",
+    // https://developers.google.com/custom-search/v1/overview
+    lifecycle: { status: "legacy", endDate: "2027-01-01" },
+    auth: "api-key+cx",
+    operations: { search: true, read: false },
     apiKeyRequired: true,
     apiKeyPlaceholder: "AIzaXXXXXXXXXXXX",
     apiKeyPrefix: "AIza",
@@ -367,7 +561,7 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
       academicSearch: false,
       imageSearch: true,
       videoSearch: false,
-      domainFilter: true,
+      domainFilter: false,
       recencyFilter: true,
       countryFilter: true,
       contentExtraction: false,
@@ -382,12 +576,16 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
     id: "brave",
     name: "Brave Search",
     description: "Privacy-focused search engine API",
+    integration: "api",
+    lifecycle: ACTIVE,
+    auth: "api-key",
+    operations: { search: true, read: false },
     apiKeyRequired: true,
     apiKeyPlaceholder: "BSAxxxxxxxxxxxxx",
     apiKeyPrefix: "BSA",
     docsUrl: "https://brave.com/search/api/",
     features: {
-      aiAnswer: true,
+      aiAnswer: false,
       newsSearch: true,
       academicSearch: false,
       imageSearch: true,
@@ -406,25 +604,102 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
   "google-ai": {
     id: "google-ai",
     name: "Google AI Search",
-    description: "Gemini grounding with Google Search for real-time web data",
+    description: "Gemini generation grounded in Google Search; every search is a billed model call",
+    integration: "grounding",
+    lifecycle: ACTIVE,
+    auth: "api-key",
+    operations: { search: true, read: false },
     apiKeyRequired: true,
     apiKeyPlaceholder: "AIzaXXXXXXXXXXXX",
     apiKeyPrefix: "AIza",
     docsUrl: "https://ai.google.dev/gemini-api/docs/google-search",
     features: {
       aiAnswer: true,
-      newsSearch: true,
+      newsSearch: false,
       academicSearch: false,
       imageSearch: false,
       videoSearch: false,
       domainFilter: false,
-      recencyFilter: true,
+      recencyFilter: false,
       countryFilter: false,
       contentExtraction: false,
-      streaming: true,
+      streaming: false,
     },
     pricing: {
       pricePerSearch: 0.0035,
+    },
+  },
+  deepseek: {
+    id: "deepseek",
+    name: "DeepSeek Search",
+    description: "DeepSeek web Search and Fetch APIs; Search and Reader are enabled separately",
+    integration: "api",
+    lifecycle: ACTIVE,
+    auth: "api-key",
+    operations: { search: true, read: true },
+    apiKeyRequired: true,
+    apiKeyPlaceholder: "sk-xxxxxxxxxxxxx",
+    apiKeyPrefix: "sk-",
+    docsUrl: "https://api-docs.deepseek.com/zh-cn/guides/search/",
+    features: {
+      aiAnswer: false,
+      newsSearch: false,
+      academicSearch: false,
+      imageSearch: false,
+      videoSearch: false,
+      domainFilter: true,
+      recencyFilter: true,
+      countryFilter: false,
+      contentExtraction: true,
+      streaming: false,
+    },
+  },
+  tinyfish: {
+    id: "tinyfish",
+    name: "TinyFish",
+    description: "TinyFish Search and Fetch APIs; Search and Reader are enabled separately",
+    integration: "api",
+    lifecycle: ACTIVE,
+    auth: "api-key",
+    operations: { search: true, read: true },
+    apiKeyRequired: true,
+    apiKeyPlaceholder: "xxxxxxxxxxxxx",
+    docsUrl: "https://docs.tinyfish.ai/search-api/reference",
+    features: {
+      aiAnswer: false,
+      newsSearch: true,
+      academicSearch: true,
+      imageSearch: false,
+      videoSearch: false,
+      domainFilter: true,
+      recencyFilter: true,
+      countryFilter: false,
+      contentExtraction: false,
+      streaming: false,
+    },
+  },
+  searxng: {
+    id: "searxng",
+    name: "SearXNG",
+    description: "Your own SearXNG instance (JSON output must be enabled); no vendor key",
+    integration: "self-hosted",
+    lifecycle: ACTIVE,
+    auth: "endpoint",
+    operations: { search: true, read: false },
+    apiKeyRequired: false,
+    apiKeyPlaceholder: "",
+    docsUrl: "https://docs.searxng.org/dev/search_api.html",
+    features: {
+      aiAnswer: false,
+      newsSearch: true,
+      academicSearch: true,
+      imageSearch: true,
+      videoSearch: true,
+      domainFilter: false,
+      recencyFilter: true,
+      countryFilter: false,
+      contentExtraction: false,
+      streaming: false,
     },
   },
 }
@@ -434,89 +709,180 @@ export const SEARCH_PROVIDERS: Record<SearchProviderType, SearchProviderConfig> 
  */
 export const DEFAULT_SEARCH_PROVIDER_SETTINGS: Record<SearchProviderType, SearchProviderSettings> =
   {
-    tavily: {
-      providerId: "tavily",
-      apiKey: "",
-      enabled: false,
-      priority: 1,
-    },
-    perplexity: {
-      providerId: "perplexity",
-      apiKey: "",
-      enabled: false,
-      priority: 2,
-    },
-    exa: {
-      providerId: "exa",
-      apiKey: "",
-      enabled: false,
-      priority: 3,
-    },
-    searchapi: {
-      providerId: "searchapi",
-      apiKey: "",
-      enabled: false,
-      priority: 4,
-    },
-    serper: {
-      providerId: "serper",
-      apiKey: "",
-      enabled: false,
-      priority: 5,
-    },
-    serpapi: {
-      providerId: "serpapi",
-      apiKey: "",
-      enabled: false,
-      priority: 6,
-    },
-    bing: {
-      providerId: "bing",
-      apiKey: "",
-      enabled: false,
-      priority: 7,
-    },
-    google: {
-      providerId: "google",
-      apiKey: "",
-      enabled: false,
-      priority: 8,
-    },
-    brave: {
-      providerId: "brave",
-      apiKey: "",
-      enabled: false,
-      priority: 9,
-    },
-    "google-ai": {
-      providerId: "google-ai",
-      apiKey: "",
-      enabled: false,
-      priority: 10,
-    },
+    tavily: { providerId: "tavily", apiKey: "", enabled: false, priority: 1 },
+    perplexity: { providerId: "perplexity", apiKey: "", enabled: false, priority: 2 },
+    exa: { providerId: "exa", apiKey: "", enabled: false, priority: 3 },
+    searchapi: { providerId: "searchapi", apiKey: "", enabled: false, priority: 4 },
+    serper: { providerId: "serper", apiKey: "", enabled: false, priority: 5 },
+    serpapi: { providerId: "serpapi", apiKey: "", enabled: false, priority: 6 },
+    bing: { providerId: "bing", apiKey: "", enabled: false, priority: 7 },
+    google: { providerId: "google", apiKey: "", enabled: false, priority: 8 },
+    brave: { providerId: "brave", apiKey: "", enabled: false, priority: 9 },
+    "google-ai": { providerId: "google-ai", apiKey: "", enabled: false, priority: 10 },
+    deepseek: { providerId: "deepseek", apiKey: "", enabled: false, priority: 11 },
+    tinyfish: { providerId: "tinyfish", apiKey: "", enabled: false, priority: 12 },
+    searxng: { providerId: "searxng", apiKey: "", enabled: false, priority: 13 },
   }
 
+/** True when the vendor shut the provider's API down; such a provider never runs. */
+export function isProviderRetired(providerId: SearchProviderType): boolean {
+  return SEARCH_PROVIDERS[providerId]?.lifecycle.status === "retired"
+}
+
+/** Why an endpoint is not acceptable for a self-hosted provider. */
+export type SearchEndpointIssue =
+  | "missing"
+  | "invalid-url"
+  | "unsupported-scheme"
+  | "embedded-credentials"
+  | "query-or-fragment"
+  | "insecure-public-endpoint"
+
+export interface SearchEndpointValidation {
+  ok: boolean
+  issue?: SearchEndpointIssue
+  /** Normalized base (no trailing slash) when `ok`. */
+  baseUrl?: string
+  /** True when the host is loopback/private/link-local (needs an explicit endpoint grant). */
+  isPrivate?: boolean
+}
+
+function isPrivateEndpointHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "")
+  if (host === "localhost" || host.endsWith(".localhost")) return true
+  if (host === "local" || host.endsWith(".local")) return true
+  if (host.includes(":")) {
+    // IPv6: loopback, unique-local fc00::/7, link-local fe80::/10.
+    return host === "::1" || /^f[cd][0-9a-f]{0,2}:/.test(host) || /^fe[89ab][0-9a-f]?:/.test(host)
+  }
+  const parts = host.split(".")
+  if (parts.length !== 4 || !parts.every((p) => /^\d{1,3}$/.test(p))) return false
+  const [a, b] = parts.map(Number)
+  return (
+    a === 10 ||
+    a === 127 ||
+    a === 0 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127)
+  )
+}
+
 /**
- * Get enabled providers sorted by priority
+ * Validate a self-hosted search endpoint. Accepts an absolute http(s) URL with
+ * an optional deployment path prefix; rejects credentials, query and fragment.
+ * A public host must use HTTPS; plain HTTP is only acceptable for a private
+ * host, and a private host additionally needs an explicit endpoint grant on a
+ * host that can enforce it (checked by the caller, not here).
  */
+export function validateSearchEndpoint(raw: string | undefined): SearchEndpointValidation {
+  const value = raw?.trim()
+  if (!value) return { ok: false, issue: "missing" }
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return { ok: false, issue: "invalid-url" }
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return { ok: false, issue: "unsupported-scheme" }
+  }
+  if (url.username || url.password) return { ok: false, issue: "embedded-credentials" }
+  if (url.search || url.hash || value.includes("?") || value.includes("#")) {
+    return { ok: false, issue: "query-or-fragment" }
+  }
+  const isPrivate = isPrivateEndpointHost(url.hostname)
+  if (url.protocol === "http:" && !isPrivate) {
+    return { ok: false, issue: "insecure-public-endpoint" }
+  }
+  const path = url.pathname.replace(/\/+$/, "").replace(/\/search$/, "")
+  return { ok: true, baseUrl: `${url.origin}${path}`, isPrivate }
+}
+
+/** Why a provider is not eligible to run, in display priority order. */
+export type SearchProviderConfigIssue =
+  | "retired"
+  | "missing-key"
+  | "missing-cx"
+  | "missing-endpoint"
+  | "invalid-endpoint"
+  | "endpoint-not-granted"
+  | "unsupported-engine"
+  | "unsupported-model"
+
+/**
+ * Descriptor-driven configuration check. Replaces the old "nonempty key"
+ * rule: an endpoint-only provider needs no fake key, a retired provider is
+ * never configured, and a stored engine must belong to the provider.
+ */
+export function getProviderConfigIssues(
+  providerId: SearchProviderType,
+  settings?: Partial<SearchProviderSettings>
+): SearchProviderConfigIssue[] {
+  const config = SEARCH_PROVIDERS[providerId]
+  if (!config) return ["retired"]
+  const issues: SearchProviderConfigIssue[] = []
+  if (config.lifecycle.status === "retired") issues.push("retired")
+  if (config.auth === "endpoint") {
+    if (!settings?.baseUrl?.trim()) issues.push("missing-endpoint")
+    else {
+      const endpoint = validateSearchEndpoint(settings.baseUrl)
+      if (!endpoint.ok) issues.push("invalid-endpoint")
+      else if (endpoint.isPrivate && settings.allowPrivateEndpoint !== true) {
+        issues.push("endpoint-not-granted")
+      }
+    }
+  } else {
+    if (!settings?.apiKey || settings.apiKey.trim() === "") issues.push("missing-key")
+    if (config.auth === "api-key+cx" && (!settings?.cx || settings.cx.trim() === "")) {
+      issues.push("missing-cx")
+    }
+  }
+  const engine = settings?.engine?.trim()
+  if (engine && config.integration !== "self-hosted") {
+    if (!config.engines?.some((e) => e.id === engine)) issues.push("unsupported-engine")
+  }
+  return issues
+}
+
+/** Is the provider's stored configuration complete enough to run? (never "online") */
 export function isProviderConfigured(
   providerId: SearchProviderType,
   settings?: Partial<SearchProviderSettings>
 ): boolean {
-  if (!settings?.apiKey || settings.apiKey.trim() === "") return false
-
-  if (providerId === "google") {
-    return !!settings.cx && settings.cx.trim() !== ""
-  }
-
-  return true
+  return getProviderConfigIssues(providerId, settings).length === 0
 }
 
+/**
+ * Display state of one provider. `configured` is a statement about stored
+ * configuration only; a successful connection test is separate, dated
+ * evidence and never implies the provider is online now.
+ */
+export type SearchProviderState =
+  "retired" | "disabled" | "missing-key" | "missing-config" | "configured"
+
+export function getProviderState(
+  providerId: SearchProviderType,
+  settings?: Partial<SearchProviderSettings>
+): SearchProviderState {
+  const issues = getProviderConfigIssues(providerId, settings)
+  if (issues.includes("retired")) return "retired"
+  if (!settings?.enabled) return "disabled"
+  if (issues.includes("missing-key")) return "missing-key"
+  if (issues.length > 0) return "missing-config"
+  return "configured"
+}
+
+/**
+ * Get enabled providers sorted by priority. Retired and incompletely
+ * configured providers are never returned, whatever their stored flags say.
+ */
 export function getEnabledProviders(
   settings: Partial<Record<SearchProviderType, SearchProviderSettings>>
 ): SearchProviderSettings[] {
   return Object.values(settings)
-    .filter((p): p is SearchProviderSettings => !!p)
+    .filter((p): p is SearchProviderSettings => !!p && p.providerId in SEARCH_PROVIDERS)
     .filter((p) => p.enabled && isProviderConfigured(p.providerId, p))
     .sort((a, b) => a.priority - b.priority)
 }

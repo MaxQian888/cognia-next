@@ -65,6 +65,7 @@ export * from "./host-state"
 export * from "./onboarding"
 export * from "./updates"
 export * from "./unattended-permission"
+export * from "./web-reader"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 
@@ -4127,6 +4128,19 @@ export interface AppSettings {
      */
     preferCognia?: boolean
     /**
+     * Per-operation form of {@link preferCognia} for `web_search`: use Cognia's
+     * provider-backed search even where the runtime brings a native one.
+     * Absent ⇒ inherits `preferCognia`. Honoured only when a search provider
+     * is configured.
+     */
+    preferCogniaSearch?: boolean
+    /**
+     * Per-operation form of {@link preferCognia} for `web_fetch`: read pages
+     * through Cognia's Reader (and its policy) even where the runtime brings
+     * a native fetch. Absent ⇒ inherits `preferCognia`. Needs no search key.
+     */
+    preferCogniaFetch?: boolean
+    /**
      * Opt-in (default false): allow `web_fetch` to reach private / loopback /
      * link-local hosts (localhost, 10./192.168., 169.254.x cloud metadata, …).
      * Off by default — the SSRF guard blocks them so a model-supplied URL can't
@@ -4137,11 +4151,23 @@ export interface AppSettings {
      * Opt-in (default false): always run fetched page text through the cheap
      * utility model before returning it, even when the model didn't pass a
      * `prompt`. Narrows the prompt-injection surface (Claude-Code-style: the
-     * main agent never sees raw page text). No-op on hosts without a usable
-     * utility model.
+     * main agent never sees raw page text).
+     *
+     * Legacy compatibility field: when no `webReader` record exists, `true`
+     * maps to `webReader.distillation: "required"` (fail closed without a
+     * utility model) — see `lib/web/reader/reader-settings.ts`.
      */
     alwaysDistill?: boolean
   }
+  /**
+   * Reader policy for `web_fetch`: which readers may serve a page, in which
+   * order, whether external readers may be used as fallback, and the
+   * distillation mode. Absent on a pre-existing settings row ⇒ the legacy
+   * compatibility profile; absent on a fresh install ⇒ direct-first with
+   * every remote reader off. Desktop-only; never synced or exported with
+   * credentials.
+   */
+  webReader?: import("./web-reader").StoredWebReaderSettings
   /**
    * Agent self-invocation tools (Claude Code parity). Opt-in (default off):
    * let the model call the `Skill` tool to load a skill's instructions, and/or

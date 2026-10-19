@@ -99,6 +99,8 @@ export interface PluginHostToolFailure {
   error: string
   /** Stable machine-readable classification. */
   code?: PluginHostToolErrorCode
+  /** Operation-specific machine-readable reason. */
+  reason?: string
 }
 
 /** Narrow an author-callable host tool result to its failure half. */
@@ -110,6 +112,18 @@ export function isPluginHostToolFailure(value: unknown): value is PluginHostTool
 
 // ── web_search ───────────────────────────────────────────────────────────────
 
+export type PluginWebSearchType = "general" | "news" | "academic" | "images" | "videos"
+export type PluginWebSearchDegradedControl =
+  "safeSearch" | "recency" | "country" | "language" | "domains"
+
+export interface PluginWebSearchImage {
+  url: string
+  thumbnailUrl?: string
+  title?: string
+  width?: number
+  height?: number
+}
+
 export interface PluginWebSearchInput {
   /** The search query. Required; an empty query is `invalid-arguments`. */
   query: string
@@ -117,6 +131,11 @@ export interface PluginWebSearchInput {
   provider?: string
   /** Cap on returned results. Defaults to the user's Settings → Search value. */
   maxResults?: number
+  searchType?: PluginWebSearchType
+  engine?: string
+  allowFallback?: boolean
+  /** Bounded per-result page excerpt, in characters (at most 2000). */
+  excerptChars?: number
 }
 
 export interface PluginWebSearchHit {
@@ -128,6 +147,9 @@ export interface PluginWebSearchHit {
   publishedDate?: string
   /** Present only when the user enabled source-verification badges. */
   credibility?: string
+  truncated?: boolean
+  excerpt?: string
+  excerptTruncated?: boolean
 }
 
 export interface PluginWebSearchSuccess {
@@ -143,6 +165,13 @@ export interface PluginWebSearchSuccess {
   /** Provider-generated answer when the user enabled it, else `null`. */
   answer: string | null
   results: PluginWebSearchHit[]
+  images?: PluginWebSearchImage[]
+  imagesTruncated?: boolean
+  searchType?: PluginWebSearchType
+  engine?: string
+  answerCleared?: "policy-filtered"
+  degradedControls?: PluginWebSearchDegradedControl[]
+  credibilityBasis?: "domain-heuristic"
 }
 
 export type PluginWebSearchResult = PluginWebSearchSuccess | PluginHostToolFailure
@@ -162,12 +191,22 @@ export function isPluginWebSearchSuccess(value: unknown): value is PluginWebSear
  */
 export type PluginWebFetchFormat = "auto" | "text" | "raw"
 
+export type PluginWebReaderId =
+  "direct" | "platform" | "fxtwitter" | "jina" | "tavily" | "exa" | "deepseek" | "tinyfish"
+
+export interface PluginWebFetchReadWindow {
+  /** Start and cap are CHARACTER counts, not bytes. */
+  offset: number
+  cap: number
+  unit: "characters"
+}
+
 export interface PluginWebFetchInput {
   url: string
   method?: string
   headers?: Record<string, string>
   body?: string
-  /** Cap on returned characters. */
+  /** Cap on returned CHARACTER counts, despite the historical name. */
   maxBytes?: number
   format?: PluginWebFetchFormat
   /**
@@ -175,8 +214,11 @@ export interface PluginWebFetchInput {
    * content relevant to this question before being returned.
    */
   prompt?: string
-  /** Read-window start for paging a long page; pair with `nextOffset`. */
+  /** Read-window start in CHARACTERS; pair with `nextOffset`. */
   offset?: number
+  /** Explicit reader override; omission uses the host Reader policy. */
+  reader?: PluginWebReaderId
+  allowFallback?: boolean
 }
 
 export interface PluginWebFetchSuccess {
@@ -210,6 +252,15 @@ export interface PluginWebFetchSuccess {
   totalLength?: number
   /** Pass back as `offset` to read the next segment of a truncated page. */
   nextOffset?: number
+  reader?: PluginWebReaderId
+  statusSource?: "origin" | "reader-service"
+  originStatus?: number
+  distilled?: boolean
+  extraction?: string
+  warnings?: string[]
+  readWindow?: PluginWebFetchReadWindow
+  cacheHit?: boolean
+  attemptedReaders?: PluginWebReaderId[]
 }
 
 export type PluginWebFetchResult = PluginWebFetchSuccess | PluginHostToolFailure

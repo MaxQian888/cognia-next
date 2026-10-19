@@ -4,6 +4,8 @@ import type { SearchProviderSettings, SearchResponse } from "./types"
 const routeSearchMock = jest.fn()
 
 jest.mock("./search-type-router", () => ({
+  // Real eligibility / capability checks; only the adapter dispatch is stubbed.
+  ...jest.requireActual("./search-type-router"),
   routeSearch: (...args: unknown[]) => routeSearchMock(...args),
 }))
 
@@ -17,6 +19,9 @@ const bingTest = jest.fn()
 const googleTest = jest.fn()
 const googleAITest = jest.fn()
 const braveTest = jest.fn()
+const deepseekTest = jest.fn()
+const tinyfishTest = jest.fn()
+const searxngTest = jest.fn()
 
 jest.mock("./providers/tavily", () => ({
   testTavilyConnection: (...a: unknown[]) => tavilyTest(...a),
@@ -52,6 +57,16 @@ jest.mock("./providers/google-ai", () => ({
 }))
 jest.mock("./providers/brave", () => ({
   testBraveConnection: (...a: unknown[]) => braveTest(...a),
+}))
+jest.mock("./providers/deepseek", () => ({
+  testDeepSeekConnection: (...a: unknown[]) => deepseekTest(...a),
+}))
+jest.mock("./providers/tinyfish", () => ({
+  testTinyFishConnection: (...a: unknown[]) => tinyfishTest(...a),
+}))
+jest.mock("./providers/searxng", () => ({
+  ...jest.requireActual("./providers/searxng"),
+  testSearXNGConnection: (...a: unknown[]) => searxngTest(...a),
 }))
 
 // Usage stats flow through the host-injected reporter seam (ADR-0068 E2);
@@ -131,7 +146,7 @@ describe("search()", () => {
       provider: "tavily",
       providerSettings: settings,
     })
-    expect(r).toBe(resp)
+    expect(r).toEqual({ ...resp, diagnostics: { attemptedProviders: ["tavily"] } })
     await Promise.resolve()
     expect(incrementSearchUsageMock).toHaveBeenCalledWith("tavily", expect.any(Number), true)
   })
@@ -323,13 +338,13 @@ describe("search() option precedence", () => {
           defaultOptions: { searchType: "news", maxResults: 3 },
         }),
       },
-      baseOptions: { searchType: "general", maxResults: 5, searchDepth: "advanced" },
+      baseOptions: { searchType: "news", maxResults: 5, searchDepth: "advanced" },
       // Call-time fields win over both lower rungs — but only where defined.
-      searchType: "images",
+      searchType: "general",
     })
     const options = routeSearchMock.mock.calls[0][3] as Record<string, unknown>
     expect(options).toMatchObject({
-      searchType: "images", // call-time beats provider default + base
+      searchType: "general", // call-time beats provider default + base
       maxResults: 3, // provider defaultOptions beats base
       searchDepth: "advanced", // untouched by upper rungs → base survives
     })
@@ -480,10 +495,177 @@ describe("search() retry + key rotation", () => {
       .mockRejectedValueOnce(new Error("API error: 500 - x"))
       .mockRejectedValueOnce(new Error("API error: 500 - x"))
       .mockResolvedValueOnce(ok("perplexity"))
-    const r = await search("q", { providerSettings: settings, retryBackoffMs: 0 })
+    const r = await search("q", { providerSettings: settings, retryBackoffMs: 0, maxAttempts: 4 })
     expect(r.provider).toBe("perplexity")
     // tavily: 1 + 2 retries = 3 attempts (default maxRetries=2), then perplexity
     expect(routeSearchMock).toHaveBeenCalledTimes(4)
+  })
+
+  it("caps retries and fallback together at the operation's attempt budget", async () => {
+    const settings = {
+      tavily: makeSettings("tavily", { priority: 1 }),
+      perplexity: makeSettings("perplexity", { priority: 2 }),
+    }
+    routeSearchMock.mockRejectedValue(new Error("API error: 500 - x"))
+    await expect(search("q", { providerSettings: settings, retryBackoffMs: 0 })).rejects.toThrow(
+      /500/
+    )
+    // Default budget is 3 adapter attempts for the whole logical search.
+    expect(routeSearchMock).toHaveBeenCalledTimes(3)
+    routeSearchMock.mockReset()
+  })
+
+  it("does not re-send a rejected single key on 401", async () => {
+    const settings = {
+      tavily: makeSettings("tavily", { priority: 1 }),
+      perplexity: makeSettings("perplexity", { priority: 2 }),
+    }
+    routeSearchMock
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Tavily API error: 401 - bad key"), { status: 401 })
+      )
+      .mockResolvedValueOnce(ok("perplexity"))
+    const r = await search("q", { providerSettings: settings, retryBackoffMs: 0 })
+    expect(r.provider).toBe("perplexity")
+    expect(routeSearchMock.mock.calls.map((c) => c[1])).toEqual(["tavily", "perplexity"])
+  })
+})
+
+describe("search() eligibility and policy", () => {
+  const ok = (provider: SearchProviderSettings["providerId"]): SearchResponse => ({
+    provider,
+    query: "q",
+    results: [{ title: "t", url: "https://example.com/", content: "", score: 1 }],
+    responseTime: 1,
+  })
+
+  beforeEach(() => {
+    routeSearchMock.mockReset()
+    resetProviderHealth()
+  })
+
+  it("fails before any I/O when no enabled provider supports the explicit type", async () => {
+    const settings = { perplexity: makeSettings("perplexity") }
+    await expect(
+      search("q", { providerSettings: settings, searchType: "images" })
+    ).rejects.toMatchObject({ name: "SearchCapabilityError", reason: "unsupported-type" })
+    expect(routeSearchMock).not.toHaveBeenCalled()
+  })
+
+  it("skips a provider that cannot serve the type instead of downgrading it to general", async () => {
+    const settings = {
+      perplexity: makeSettings("perplexity", { priority: 1 }),
+      serper: makeSettings("serper", { priority: 2 }),
+    }
+    routeSearchMock.mockResolvedValueOnce(ok("serper"))
+    const r = await search("q", { providerSettings: settings, searchType: "images" })
+    expect(r.provider).toBe("serper")
+    expect(routeSearchMock.mock.calls.map((c) => c[1])).toEqual(["serper"])
+  })
+
+  it("degrades a host-default type a provider lacks, with disclosure, instead of failing", async () => {
+    const settings = { perplexity: makeSettings("perplexity") }
+    routeSearchMock.mockResolvedValueOnce(ok("perplexity"))
+    const r = await search("q", { providerSettings: settings, baseOptions: { searchType: "news" } })
+    expect(routeSearchMock.mock.calls[0][3]).toMatchObject({ searchType: "general" })
+    expect(r.diagnostics?.degradedControls).toContain("searchType")
+  })
+
+  it("a strict pin whose provider is ineligible never becomes another provider", async () => {
+    const settings = {
+      perplexity: makeSettings("perplexity", { priority: 1 }),
+      serper: makeSettings("serper", { priority: 2 }),
+    }
+    await expect(
+      search("q", {
+        provider: "perplexity",
+        allowFallback: false,
+        providerSettings: settings,
+        searchType: "images",
+      })
+    ).rejects.toMatchObject({ reason: "unsupported-type" })
+    expect(routeSearchMock).not.toHaveBeenCalled()
+  })
+
+  it("makes providers that cannot enforce strict safe search ineligible", async () => {
+    const settings = {
+      exa: makeSettings("exa", { priority: 1 }),
+      brave: makeSettings("brave", { priority: 2 }),
+    }
+    routeSearchMock.mockResolvedValueOnce(ok("brave"))
+    const r = await search("q", { providerSettings: settings, safeSearch: "strict" })
+    expect(r.provider).toBe("brave")
+    expect(routeSearchMock.mock.calls.map((c) => c[1])).toEqual(["brave"])
+  })
+
+  it("never runs a retired provider even when it is enabled and pinned", async () => {
+    const settings = { bing: makeSettings("bing"), brave: makeSettings("brave") }
+    await expect(
+      search("q", { provider: "bing", providerSettings: settings })
+    ).rejects.toMatchObject({
+      reason: "retired",
+    })
+    routeSearchMock.mockResolvedValueOnce(ok("brave"))
+    const r = await search("q", { providerSettings: settings })
+    expect(r.provider).toBe("brave")
+    expect(routeSearchMock.mock.calls.map((c) => c[1])).toEqual(["brave"])
+  })
+
+  it("filters excluded domains host-side from results and images and clears the answer", async () => {
+    const settings = { serper: makeSettings("serper") }
+    routeSearchMock.mockResolvedValueOnce({
+      provider: "serper",
+      query: "q",
+      answer: "synthesized",
+      results: [
+        { title: "a", url: "https://good.example/a", content: "", score: 1 },
+        { title: "b", url: "https://bad.example/b", content: "", score: 0.5 },
+      ],
+      images: [{ url: "https://cdn.bad.example/i.png" }, { url: "https://good.example/i.png" }],
+      responseTime: 1,
+    })
+    const r = await search("q", { providerSettings: settings, excludeDomains: ["bad.example"] })
+    expect(r.results.map((x) => x.url)).toEqual(["https://good.example/a"])
+    expect(r.images?.map((x) => x.url)).toEqual(["https://good.example/i.png"])
+    expect(r.answer).toBeUndefined()
+    expect(r.diagnostics).toMatchObject({
+      answerCleared: "policy-filtered",
+      removedByPolicy: { results: 1, images: 1 },
+    })
+  })
+
+  it("threads one cancellation signal into the adapter and stops fallback on abort", async () => {
+    const settings = {
+      tavily: makeSettings("tavily", { priority: 1 }),
+      perplexity: makeSettings("perplexity", { priority: 2 }),
+    }
+    const controller = new AbortController()
+    routeSearchMock.mockImplementationOnce(
+      async (_q, _p, _s, options: { signal?: AbortSignal }) => {
+        expect(options.signal).toBeDefined()
+        controller.abort()
+        throw new DOMException("Aborted", "AbortError")
+      }
+    )
+    await expect(
+      search("q", { providerSettings: settings, abortSignal: controller.signal })
+    ).rejects.toThrow(/Abort/)
+    expect(routeSearchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("times out the whole search on its own budget", async () => {
+    const settings = { tavily: makeSettings("tavily") }
+    routeSearchMock.mockImplementationOnce(
+      (_q, _p, _s, options: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          options.signal.addEventListener("abort", () => reject(options.signal.reason), {
+            once: true,
+          })
+        })
+    )
+    await expect(search("q", { providerSettings: settings, budgetMs: 20 })).rejects.toThrow(
+      /budget/
+    )
   })
 })
 
@@ -515,8 +697,20 @@ describe("testProviderConnection", () => {
     expect(await testProviderConnection("serper", "k")).toBe(true)
     serpapiTest.mockResolvedValueOnce(true)
     expect(await testProviderConnection("serpapi", "k")).toBe(true)
-    bingTest.mockResolvedValueOnce(true)
-    expect(await testProviderConnection("bing", "k")).toBe(true)
+    // Retired: never sends a request.
+    expect(await testProviderConnection("bing", "k")).toBe(false)
+    expect(bingTest).not.toHaveBeenCalled()
+    deepseekTest.mockResolvedValueOnce(true)
+    expect(await testProviderConnection("deepseek", "k")).toBe(true)
+    tinyfishTest.mockResolvedValueOnce(true)
+    expect(await testProviderConnection("tinyfish", "k")).toBe(true)
+    searxngTest.mockResolvedValueOnce(true)
+    expect(await testProviderConnection("searxng", "", { baseUrl: "https://search.example" })).toBe(
+      true
+    )
+    expect(searxngTest).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: "https://search.example" })
+    )
     googleAITest.mockResolvedValueOnce(true)
     expect(await testProviderConnection("google-ai", "k")).toBe(true)
     braveTest.mockResolvedValueOnce(true)

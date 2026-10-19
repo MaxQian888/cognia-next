@@ -8,6 +8,10 @@ import {
 } from "@cognia/web-search/types"
 import { getProviderHealth, resetProviderHealth } from "@cognia/web-search/provider-health"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
+import {
+  freshInstallWebReader,
+  legacyCompatibilityWebReader,
+} from "@/lib/web/reader/reader-settings"
 
 // ---- Mocks ----
 
@@ -387,6 +391,7 @@ describe("load", () => {
     expect(s.settings).toEqual({
       id: "singleton",
       settingsIconStyle: "anime",
+      webReader: freshInstallWebReader(),
       language: "en",
       languageMode: "system",
       permissionMode: "default",
@@ -934,6 +939,114 @@ describe("setWebToolsNativeOnAnthropic", () => {
       webTools: { enabled: true, nativeOnAnthropic: true },
     })
     expect(useSettingsStore.getState().settings?.webTools?.nativeOnAnthropic).toBe(true)
+  })
+
+  it("preserves every sibling routing and reader flag", async () => {
+    const webTools = {
+      enabled: false,
+      preferCognia: true,
+      preferCogniaSearch: false,
+      preferCogniaFetch: true,
+      allowPrivateHosts: true,
+      alwaysDistill: true,
+    }
+    useSettingsStore.setState({ settings: baseSettings({ webTools }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+    await useSettingsStore.getState().setWebToolsNativeOnAnthropic(true)
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      webTools: { ...webTools, nativeOnAnthropic: true },
+    })
+  })
+})
+
+describe("independent reader policy actions", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        webTools: { enabled: true, alwaysDistill: true },
+        searchProviders: DEFAULT_SEARCH_PROVIDER_SETTINGS,
+      }),
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ ...useSettingsStore.getState().settings, ...patch })
+    )
+  })
+
+  it("materializes the effective legacy profile without writing provider credentials", async () => {
+    await useSettingsStore.getState().setWebReaderEntry("tavily", { enabled: true })
+    const expected = legacyCompatibilityWebReader({ enabled: true, alwaysDistill: true })
+    expected.readers.tavily!.enabled = true
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ webReader: expected })
+    expect(useSettingsStore.getState().settings?.searchProviders).toBe(
+      DEFAULT_SEARCH_PROVIDER_SETTINGS
+    )
+  })
+
+  it("starts from the inactive future profile's effective compatibility policy", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        webReader: { version: 8, future: "opaque" },
+        webTools: { enabled: true, alwaysDistill: true },
+      }),
+    })
+    await useSettingsStore.getState().setWebReaderDefault("jina")
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      webReader: {
+        ...legacyCompatibilityWebReader({ enabled: true, alwaysDistill: true }),
+        defaultReader: "jina",
+      },
+    })
+  })
+
+  it("persists full profiles and individual settings while preserving reader entries", async () => {
+    await useSettingsStore.getState().setWebReader(freshInstallWebReader())
+    await useSettingsStore.getState().setWebReaderDistillation("required")
+    await useSettingsStore.getState().setWebReaderExternalFallback("configured")
+    await useSettingsStore.getState().setWebReaderDefault("direct")
+    expect(useSettingsStore.getState().settings?.webReader).toEqual({
+      ...freshInstallWebReader(),
+      distillation: "required",
+      externalFallback: "configured",
+      defaultReader: "direct",
+    })
+    for (const [patch] of dbSettings.saveSettings.mock.calls)
+      expect(Object.keys(patch)).toEqual(["webReader"])
+  })
+
+  it("loads the persisted profile if the store has not loaded", async () => {
+    useSettingsStore.setState({ settings: null })
+    dbSettings.getSettings.mockResolvedValue(baseSettings({ webReader: freshInstallWebReader() }))
+    await useSettingsStore.getState().setWebReaderDistillation("best-effort")
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      webReader: { ...freshInstallWebReader(), distillation: "best-effort" },
+    })
+  })
+
+  it("updates per-operation Cognia preferences independently", async () => {
+    await useSettingsStore.getState().setWebToolsPreferCogniaSearch(true)
+    await useSettingsStore.getState().setWebToolsPreferCogniaFetch(false)
+    expect(useSettingsStore.getState().settings?.webTools).toEqual({
+      enabled: true,
+      alwaysDistill: true,
+      preferCogniaSearch: true,
+      preferCogniaFetch: false,
+    })
+  })
+
+  it("reuses the generic provider updater for engine, endpoint, grant and model", async () => {
+    const patch = {
+      engine: "google",
+      baseUrl: "https://search.example",
+      allowPrivateEndpoint: true,
+      model: "chosen-model",
+    }
+    await useSettingsStore.getState().setSearchProviderSettings("searxng", patch)
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      searchProviders: {
+        ...DEFAULT_SEARCH_PROVIDER_SETTINGS,
+        searxng: { ...DEFAULT_SEARCH_PROVIDER_SETTINGS.searxng, ...patch },
+      },
+    })
   })
 })
 

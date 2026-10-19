@@ -31,8 +31,31 @@ const WEB_SEARCH_SCHEMA = {
   type: "object",
   properties: {
     query: { type: "string", description: "The search query." },
-    provider: { type: "string", description: "Force a specific configured provider (optional)." },
+    provider: {
+      type: "string",
+      description:
+        "Preferred configured provider (optional). Another eligible provider may answer under the user's fallback setting; set allowFallback:false to require this one.",
+    },
     maxResults: { type: "number", description: "Maximum number of results (optional)." },
+    searchType: {
+      type: "string",
+      enum: ["general", "news", "academic", "images", "videos"],
+      description:
+        "Specialized search (optional). Only providers that implement it run; it is never silently downgraded to general search.",
+    },
+    engine: {
+      type: "string",
+      description: "Provider-scoped SERP engine, e.g. bing or baidu on SearchAPI (optional).",
+    },
+    allowFallback: {
+      type: "boolean",
+      description: "false = the named provider must serve the request or the call fails.",
+    },
+    excerptChars: {
+      type: "number",
+      description:
+        "Optional per-result page excerpt length (max 2000 characters) from providers that return page content. Omit for snippets only.",
+    },
   },
   required: ["query"],
 } as const
@@ -41,15 +64,22 @@ const WEB_FETCH_SCHEMA = {
   type: "object",
   properties: {
     url: { type: "string", description: "The URL to fetch." },
-    method: { type: "string", description: "HTTP method (default GET)." },
-    headers: { type: "object", description: "Optional request headers." },
-    body: { type: "string", description: "Optional request body." },
-    maxBytes: { type: "number", description: "Cap on returned characters (default 64 KB)." },
+    method: { type: "string", description: "HTTP method (default GET). Non-GET is direct-only." },
+    headers: {
+      type: "object",
+      description: "Optional request headers. Any header makes the request direct-only.",
+    },
+    body: { type: "string", description: "Optional request body (direct-only)." },
+    maxBytes: {
+      type: "number",
+      description:
+        "Cap on returned CHARACTERS for this read window (default 40,000 extracted / 64,000 raw).",
+    },
     format: {
       type: "string",
       enum: ["auto", "text", "raw"],
       description:
-        "auto extracts readable text for HTML; text forces it; raw returns the raw body.",
+        "auto extracts readable text for HTML; text forces it; raw returns the raw body from the direct reader only.",
     },
     prompt: {
       type: "string",
@@ -59,7 +89,17 @@ const WEB_FETCH_SCHEMA = {
     offset: {
       type: "number",
       description:
-        "Optional read-window start (char offset) for paging through a long page. When a result is `truncated`, it returns a `nextOffset` — pass it back here to read the next segment instead of re-fetching.",
+        "Optional read-window start (character offset) for paging through a long page. When a result is `truncated`, it returns a `nextOffset` — pass it back here to read the next segment instead of re-fetching.",
+    },
+    reader: {
+      type: "string",
+      enum: ["direct", "platform", "fxtwitter", "jina", "tavily", "exa", "deepseek", "tinyfish"],
+      description:
+        "Optional. Use one specific reader the user enabled. Strict: it serves the request or returns a structured failure unless allowFallback is true.",
+    },
+    allowFallback: {
+      type: "boolean",
+      description: "With `reader`: true lets other enabled readers try after it fails.",
     },
   },
   required: ["url"],
@@ -73,6 +113,19 @@ export interface WebBuiltinManifestEntry {
 }
 
 /**
+ * What the executing host can actually do, so the manifest never promises an
+ * extraction or reader this host cannot deliver (R08).
+ */
+export interface WebFetchHostDisclosure {
+  /** A utility model is available for `prompt` extraction / distillation. */
+  summarizer: boolean
+  /** The Reader's distillation mode. */
+  distillation: "off" | "best-effort" | "required"
+  /** Readers enabled AND reachable on this host. */
+  readers: string[]
+}
+
+/**
  * Manifest entries for the promoted web tools. Appended to `opts.pluginTools`
  * by `build-options` for whichever of the two the turn's resolved web access
  * routes through Cognia (`lib/chat/web-access.ts`).
@@ -83,7 +136,8 @@ export interface WebBuiltinManifestEntry {
  * what put a tool in the model's hands that could only fail.
  */
 export function buildWebBuiltinManifestEntries(
-  include: { search?: boolean; fetch?: boolean } = {}
+  include: { search?: boolean; fetch?: boolean } = {},
+  host?: WebFetchHostDisclosure
 ): WebBuiltinManifestEntry[] {
   const { search = true, fetch = true } = include
   const entries: WebBuiltinManifestEntry[] = []
@@ -91,19 +145,44 @@ export function buildWebBuiltinManifestEntries(
     entries.push({
       name: WEB_SEARCH_TOOL_NAME,
       description:
-        "Search the web via the user's configured provider (Tavily/Brave/Exa/Google/…) and return ranked results with an optional AI answer.",
+        "Search the web via the user's configured provider (Tavily/Brave/Exa/SearchAPI/…) and return ranked results with an optional provider answer.",
       jsonSchema: WEB_SEARCH_SCHEMA as unknown as Record<string, unknown>,
       pluginId: WEB_BUILTIN_PLUGIN_ID,
     })
   if (fetch)
     entries.push({
       name: WEB_FETCH_TOOL_NAME,
-      description:
-        "Fetch a URL. For HTML pages it returns clean extracted `text` (+ `title`), not the raw markup. Pass `prompt` to get back only the content relevant to your question instead of the whole page.",
+      description: describeFetch(host),
       jsonSchema: WEB_FETCH_SCHEMA as unknown as Record<string, unknown>,
       pluginId: WEB_BUILTIN_PLUGIN_ID,
     })
   return entries
+}
+
+function describeFetch(host: WebFetchHostDisclosure | undefined): string {
+  const base =
+    "Fetch a URL. For HTML pages it returns clean extracted `text` (+ `title`), not the raw markup."
+  if (!host) {
+    return `${base} Pass \`prompt\` to get back only the content relevant to your question instead of the whole page.`
+  }
+  const parts = [base]
+  if (host.distillation === "required") {
+    parts.push(
+      host.summarizer
+        ? "Every page is distilled by a utility model before you see it; raw, non-GET, header and body requests are unavailable."
+        : "Pages must be distilled but no utility model is available on this host, so reads will fail until one is configured."
+    )
+  } else if (host.summarizer) {
+    parts.push(
+      "Pass `prompt` to get back only the content relevant to your question instead of the whole page."
+    )
+  } else {
+    parts.push(
+      "No utility model is available here, so `prompt` cannot narrow the page; the full (windowed) text is returned."
+    )
+  }
+  if (host.readers.length > 0) parts.push(`Enabled readers: ${host.readers.join(", ")}.`)
+  return parts.join(" ")
 }
 
 /** Is this tool name one of the promoted web built-ins? */
@@ -149,23 +228,13 @@ export async function runWebBuiltinTool(
   }
 
   if (name === WEB_FETCH_TOOL_NAME) {
-    return webFetch(args as unknown as WebFetchArgs, {
-      userAgent: deps.userAgent,
-      fetchImpl: deps.fetchImpl,
-      summarize: deps.summarize,
-      signal: deps.signal,
-      cache: deps.cache,
-      jinaFallback: deps.jinaFallback,
-      allowPrivateHosts: deps.allowPrivateHosts,
-      alwaysDistill: deps.alwaysDistill,
-    })
+    return webFetch(args as unknown as WebFetchArgs, deps)
   }
   if (name === WEB_SEARCH_TOOL_NAME) {
     return webSearch(args as unknown as WebSearchArgs, {
       searchExecutor: deps.searchExecutor,
-      searchMaxResults: deps.searchMaxResults,
-      searchOptions: deps.searchOptions,
       sourceVerification: deps.sourceVerification,
+      signal: deps.signal,
     })
   }
   return {

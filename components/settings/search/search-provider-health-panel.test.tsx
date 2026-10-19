@@ -40,9 +40,9 @@ function configuredProviders() {
     searchProviders: {
       tavily: { providerId: "tavily", apiKey: "tvly-key", enabled: true, priority: 1 },
       exa: { providerId: "exa", apiKey: "exa-key", enabled: true, priority: 2 },
-      // Enabled but missing its key → not "configured", excluded from rows.
+      // Enabled but missing its key → missing-key badge.
       brave: { providerId: "brave", apiKey: "", enabled: true, priority: 3 },
-      // Configured but disabled → excluded until it has traffic.
+      // Configured but disabled → disabled badge.
       serper: { providerId: "serper", apiKey: "serper-key", enabled: false, priority: 4 },
     },
   }
@@ -60,17 +60,19 @@ describe("SearchProviderHealthPanel", () => {
     settings = {}
     render(<SearchProviderHealthPanel />)
     expect(screen.getByText("empty")).toBeInTheDocument()
+    expect(screen.getByText("SearXNG")).toBeInTheDocument()
+    expect(screen.getByText("states.retired")).toBeInTheDocument()
   })
 
   it("lists enabled+configured providers with an unknown status before traffic", () => {
     render(<SearchProviderHealthPanel />)
     expect(screen.getByText("Tavily")).toBeInTheDocument()
     expect(screen.getByText("Exa")).toBeInTheDocument()
-    // brave lacks a key; serper is disabled → neither renders.
-    expect(screen.queryByText("Brave Search")).not.toBeInTheDocument()
-    expect(screen.queryByText("Serper")).not.toBeInTheDocument()
-    expect(screen.getAllByText("status.unknown")).toHaveLength(2)
-    expect(screen.getAllByText("circuitClosed")).toHaveLength(2)
+    // Catalogue rows remain visible even without an eligible configuration.
+    expect(screen.getByText("Brave Search")).toBeInTheDocument()
+    expect(screen.getByText("Serper")).toBeInTheDocument()
+    expect(screen.getAllByText("status.unknown")).toHaveLength(13)
+    expect(screen.getAllByText("circuitClosed")).toHaveLength(13)
   })
 
   it("renders counters, success rate, and avg latency from the breaker", () => {
@@ -104,7 +106,7 @@ describe("SearchProviderHealthPanel", () => {
   it("reshapes rows when settings change without waiting for a poll", () => {
     const { rerender } = render(<SearchProviderHealthPanel />)
     expect(screen.getByText("Tavily")).toBeInTheDocument()
-    expect(screen.queryByText("Serper")).not.toBeInTheDocument()
+    expect(screen.getByText("Serper")).toBeInTheDocument()
     // Disable tavily, enable serper — no timer advance needed.
     settings = {
       searchProviders: {
@@ -114,7 +116,7 @@ describe("SearchProviderHealthPanel", () => {
       },
     }
     rerender(<SearchProviderHealthPanel />)
-    expect(screen.queryByText("Tavily")).not.toBeInTheDocument()
+    expect(screen.getByText("Tavily")).toBeInTheDocument()
     expect(screen.getByText("Serper")).toBeInTheDocument()
   })
 

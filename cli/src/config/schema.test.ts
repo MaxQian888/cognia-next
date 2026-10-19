@@ -1,3 +1,5 @@
+import { SEARCH_PROVIDERS } from "@cognia/web-search/types"
+import { freshInstallWebReader } from "@/lib/web/reader/reader-settings"
 import {
   CLI_LOGGING_DEFAULTS,
   cliConfigFileSchema,
@@ -19,6 +21,9 @@ import {
   resolveRenderConfig,
   renderConfigSchema,
   searchConfigSchema,
+  CLI_SEARCH_PROVIDER_IDS,
+  credentialsFileSchema,
+  webReaderConfigSchema,
 } from "./schema"
 
 describe("renderConfigSchema + resolveRenderConfig", () => {
@@ -545,5 +550,56 @@ describe("searchConfigSchema", () => {
         providers: { tavily: { defaultOptions: { bogus: 1 } } },
       }).success
     ).toBe(false)
+  })
+})
+
+describe("independent CLI Reader and provider configuration", () => {
+  it("keeps every catalog id parseable, including retired Bing", () => {
+    expect([...CLI_SEARCH_PROVIDER_IDS].sort()).toEqual(Object.keys(SEARCH_PROVIDERS).sort())
+    for (const id of CLI_SEARCH_PROVIDER_IDS) {
+      expect(
+        searchConfigSchema.safeParse({ providers: { [id]: { engine: "google", model: "custom" } } })
+          .success
+      ).toBe(true)
+      expect(
+        credentialsFileSchema.safeParse({ searchProviders: { [id]: { apiKey: "key" } } }).success
+      ).toBe(true)
+    }
+  })
+
+  it("validates endpoint addresses without granting private endpoints implicitly", () => {
+    expect(
+      searchConfigSchema.parse({
+        providers: {
+          searxng: { baseUrl: "http://localhost:8080/search", allowPrivateEndpoint: false },
+        },
+      }).providers?.searxng.allowPrivateEndpoint
+    ).toBe(false)
+    for (const baseUrl of [
+      "http://example.com",
+      "https://user:secret@example.com",
+      "https://example.com?q=x",
+      "file:///tmp/search",
+    ]) {
+      expect(searchConfigSchema.safeParse({ providers: { searxng: { baseUrl } } }).success).toBe(
+        false
+      )
+    }
+  })
+
+  it("accepts a complete Reader profile and rejects unknown or unsupported fields", () => {
+    const webReader = freshInstallWebReader()
+    expect(
+      cliConfigFileSchema.parse({ webReader, preferCogniaSearch: true, preferCogniaFetch: false })
+        .webReader
+    ).toEqual(webReader)
+    for (const invalid of [
+      { ...webReader, version: 2 },
+      { ...webReader, secret: "key" },
+      { ...webReader, readers: { other: { enabled: true, priority: 1 } } },
+      { ...webReader, readers: { direct: { enabled: true, priority: 1, apiKey: "secret" } } },
+      { ...webReader, timeoutMs: 1 },
+    ])
+      expect(webReaderConfigSchema.safeParse(invalid).success).toBe(false)
   })
 })

@@ -47,7 +47,7 @@ jest.mock("@/components/ui/accordion", () => ({
 }))
 
 jest.mock("./search-sections", () => {
-  const ids = ["basics", "providers", "behavior", "safety", "performance", "diagnostics"]
+  const ids = ["basics", "providers", "reading", "behavior", "safety", "performance", "diagnostics"]
   return {
     SEARCH_SECTION_PARAM: "searchSection",
     isSearchSection: (v: string | null | undefined) => !!v && ids.includes(v),
@@ -127,4 +127,23 @@ describe("SearchSettings (two-pane shell)", () => {
     fireEvent.click(screen.getByText("acc-collapse"))
     expect(mockReplace).not.toHaveBeenCalled()
   })
+})
+
+it("mounts the Reader anchor panel for finder focus", () => {
+  mockSearch = "focus=web-reader"
+  render(<SearchSettings />)
+  expect(screen.getByTestId("sec-reading")).toBeInTheDocument()
+})
+
+it("keeps Reading mounted after the finder consumes focus", () => {
+  mockSearch = "focus=web-reader"
+  const { rerender } = render(<SearchSettings />)
+  expect(screen.getByTestId("sec-reading")).toBeInTheDocument()
+  mockSearch = ""
+  rerender(<SearchSettings />)
+  expect(screen.getByTestId("sec-reading")).toBeInTheDocument()
+  fireEvent.click(screen.getByText("go-providers"))
+  mockSearch = "searchSection=providers"
+  rerender(<SearchSettings />)
+  expect(screen.getByTestId("sec-providers")).toBeInTheDocument()
 })

@@ -12,7 +12,11 @@
  * mirror `cli/src/config/schema.ts`.
  */
 
-import type { AppSettings, BuiltinToolsConfig } from "@cognia/agent-config-types"
+import type {
+  AppSettings,
+  BuiltinToolsConfig,
+  WebReaderSettingsV1,
+} from "@cognia/agent-config-types"
 import { readTextFile } from "@/lib/claude/ipc"
 import { BUILTIN_TOOL_CONFIG_KEYS } from "@/lib/settings/builtin-tools"
 
@@ -51,6 +55,9 @@ export interface CliConfigSubset {
   allowedTools?: string[]
   builtinTools?: Partial<BuiltinToolsConfig>
   webTools?: boolean
+  webReader?: WebReaderSettingsV1
+  preferCogniaSearch?: boolean
+  preferCogniaFetch?: boolean
   skillTool?: boolean
   slashCommandTool?: boolean
   outputStyle?: (typeof OUTPUT_STYLES)[number]
@@ -66,6 +73,7 @@ export type ConfigSettingsSlice = Partial<
     | "alwaysAllowTools"
     | "builtinTools"
     | "webTools"
+    | "webReader"
     | "selfInvokeTools"
     | "outputStyle"
   >
@@ -103,7 +111,45 @@ export function projectAppConfigToCli(settings: ConfigSettingsSlice): CliConfigS
     }
     if (Object.keys(bt).length > 0) out.builtinTools = bt
   }
-  if (settings.webTools) out.webTools = settings.webTools.enabled !== false
+  if (settings.webTools) {
+    out.webTools = settings.webTools.enabled !== false
+    if (settings.webTools.preferCogniaSearch !== undefined) {
+      out.preferCogniaSearch = settings.webTools.preferCogniaSearch
+    }
+    if (settings.webTools.preferCogniaFetch !== undefined) {
+      out.preferCogniaFetch = settings.webTools.preferCogniaFetch
+    }
+  }
+  // A record from a newer app version is preserved (inactive) on the desktop;
+  // it is not projected, so the CLI keeps its own Reader policy and the rest of
+  // the push still lands.
+  if (settings.webReader && settings.webReader.version === 1) {
+    // Project known non-secret fields only; never copy provider credentials.
+    const reader = settings.webReader as WebReaderSettingsV1
+    out.webReader = {
+      version: 1,
+      defaultReader: reader.defaultReader,
+      readers: Object.fromEntries(
+        Object.entries(reader.readers).flatMap(([id, entry]) =>
+          entry
+            ? [
+                [
+                  id,
+                  {
+                    enabled: entry.enabled,
+                    priority: entry.priority,
+                  },
+                ],
+              ]
+            : []
+        )
+      ),
+      externalFallback: reader.externalFallback,
+      distillation: reader.distillation,
+      ...(reader.timeoutMs !== undefined ? { timeoutMs: reader.timeoutMs } : {}),
+      ...(reader.maxAttempts !== undefined ? { maxAttempts: reader.maxAttempts } : {}),
+    }
+  }
   if (settings.selfInvokeTools?.skill !== undefined) {
     out.skillTool = Boolean(settings.selfInvokeTools.skill)
   }

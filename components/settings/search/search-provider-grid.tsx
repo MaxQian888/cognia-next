@@ -18,6 +18,7 @@ import {
   SEARCH_PROVIDERS,
   isProviderConfigured,
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
+  isProviderRetired,
 } from "@cognia/web-search/types"
 import { testProviderKeyPool } from "@cognia/web-search/provider-test"
 import { SearchProviderCard, type ProviderTestState } from "./search-provider-card"
@@ -123,8 +124,7 @@ export function SearchProviderGrid() {
 
   const handleTestConnection = useCallback(
     async (providerId: SearchProviderType) => {
-      const apiKey = searchProviders[providerId]?.apiKey
-      if (!apiKey) return
+      if (!isProviderConfigured(providerId, searchProviders[providerId])) return
       setTestStates((prev) => ({
         ...prev,
         [providerId]: { testing: true, result: null },
@@ -151,13 +151,14 @@ export function SearchProviderGrid() {
             testing: false,
             result: primaryOk ? "success" : "error",
             keyResults,
+            testedAt: new Date().toISOString(),
           },
         }))
       } catch (err) {
         log.error("provider_test_failed", err, { providerId })
         setTestStates((prev) => ({
           ...prev,
-          [providerId]: { testing: false, result: "error" },
+          [providerId]: { testing: false, result: "error", testedAt: new Date().toISOString() },
         }))
       }
     },
@@ -176,12 +177,14 @@ export function SearchProviderGrid() {
   }
 
   const disableAll = () => {
-    filteredProviders.forEach((id) => void setSearchProviderEnabled(id, false))
+    filteredProviders
+      .filter((id) => !isProviderRetired(id))
+      .forEach((id) => void setSearchProviderEnabled(id, false))
     log.info("provider_disable_all", { count: filteredProviders.length })
   }
 
   const resetToDefaults = () => {
-    ALL_PROVIDER_IDS.forEach((id) => {
+    ALL_PROVIDER_IDS.filter((id) => !isProviderRetired(id)).forEach((id) => {
       void setSearchProviderEnabled(id, false)
     })
     setSearchQuery("")

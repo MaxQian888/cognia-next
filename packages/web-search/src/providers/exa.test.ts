@@ -1,7 +1,14 @@
-import { searchWithExa, findSimilarWithExa, getContentsWithExa, testExaConnection } from "./exa"
+import {
+  searchWithExa,
+  findSimilarWithExa,
+  getContentsWithExa,
+  readWithExa,
+  testExaConnection,
+} from "./exa"
 
 const exaFetchMock = jest.fn()
 jest.mock("../proxy-search-fetch", () => ({
+  ...jest.requireActual("../proxy-search-fetch"),
   exaFetch: (...a: unknown[]) => exaFetchMock(...a),
 }))
 
@@ -185,5 +192,60 @@ describe("testExaConnection", () => {
   it("returns false on error", async () => {
     exaFetchMock.mockRejectedValueOnce(new Error("network"))
     expect(await testExaConnection("k")).toBe(false)
+  })
+})
+
+describe("readWithExa", () => {
+  it("maps a per-URL status error under HTTP 200 to a failure", async () => {
+    exaFetchMock.mockResolvedValueOnce(
+      fakeResp({
+        json: {
+          results: [],
+          statuses: [
+            { id: "u", status: "error", error: { tag: "CRAWL_NOT_FOUND", httpStatusCode: 404 } },
+          ],
+        },
+      })
+    )
+    expect(await readWithExa("u", "k")).toEqual({
+      ok: false,
+      tag: "CRAWL_NOT_FOUND",
+      httpStatusCode: 404,
+    })
+  })
+
+  it("returns the page text on success and forwards the signal", async () => {
+    exaFetchMock.mockResolvedValueOnce(
+      fakeResp({
+        json: {
+          results: [{ url: "u", title: "T", text: "body" }],
+          statuses: [{ id: "u", status: "success" }],
+        },
+      })
+    )
+    const c = new AbortController()
+    expect(await readWithExa("u", "k", { signal: c.signal, livecrawlTimeoutMs: 20_000 })).toEqual({
+      ok: true,
+      text: "body",
+      title: "T",
+    })
+    const init = exaFetchMock.mock.calls[0][1]
+    expect(init.signal).toBe(c.signal)
+    expect(JSON.parse(init.body)).toEqual({ urls: ["u"], text: true, livecrawlTimeout: 20_000 })
+  })
+
+  it("throws a typed error for a request-level failure", async () => {
+    exaFetchMock.mockResolvedValueOnce(
+      fakeResp({ ok: false, status: 402, text: '{"error":"no credits"}' })
+    )
+    await expect(readWithExa("u", "k")).rejects.toMatchObject({ status: 402 })
+  })
+})
+
+describe("searchWithExa category", () => {
+  it("forwards a category for specialized search", async () => {
+    exaFetchMock.mockResolvedValueOnce(fakeResp({ json: { results: [] } }))
+    await searchWithExa("q", "k", { category: "news" })
+    expect(JSON.parse(exaFetchMock.mock.calls[0][1].body).category).toBe("news")
   })
 })

@@ -75,8 +75,10 @@ export const SETTINGS_SYNC = {
   // trees, so the toggle is meaningless there and must not cross the wire.
   sessionImportWatch: { category: "desktop-only" },
   subagentNesting: { category: "desktop-only" },
+  subagentRuntime: { category: "desktop-only" },
   backgroundTasks: { category: "desktop-only" },
   webTools: { category: "desktop-only" },
+  webReader: { category: "desktop-only" },
   selfInvokeTools: { category: "desktop-only" },
   knowledgeReading: {
     category: "device-local",

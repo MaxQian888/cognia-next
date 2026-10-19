@@ -6,6 +6,10 @@ import {
   SEARCH_PROVIDER_HEALTH_LIMITS,
   isProviderConfigured,
   getEnabledProviders,
+  getProviderConfigIssues,
+  getProviderState,
+  isProviderRetired,
+  validateSearchEndpoint,
   normalizeSearchProviderHealthSettings,
   validateApiKey,
   createDefaultSearchUsageEntry,
@@ -17,7 +21,7 @@ import {
 } from "./types"
 
 describe("SEARCH_PROVIDERS", () => {
-  it("contains all 10 providers", () => {
+  it("contains all 13 providers", () => {
     expect(Object.keys(SEARCH_PROVIDERS)).toEqual(
       expect.arrayContaining([
         "tavily",
@@ -30,9 +34,12 @@ describe("SEARCH_PROVIDERS", () => {
         "google",
         "google-ai",
         "brave",
+        "deepseek",
+        "tinyfish",
+        "searxng",
       ])
     )
-    expect(Object.keys(SEARCH_PROVIDERS)).toHaveLength(10)
+    expect(Object.keys(SEARCH_PROVIDERS)).toHaveLength(13)
   })
 
   it("each provider has the required config fields", () => {
@@ -57,6 +64,100 @@ describe("SEARCH_PROVIDERS", () => {
         })
       )
     }
+  })
+})
+
+describe("provider descriptors", () => {
+  it("separates lifecycle, integration kind and auth", () => {
+    expect(SEARCH_PROVIDERS.bing.lifecycle).toEqual({ status: "retired", retiredOn: "2025-08-11" })
+    expect(SEARCH_PROVIDERS.google.lifecycle).toEqual({ status: "legacy", endDate: "2027-01-01" })
+    expect(SEARCH_PROVIDERS["google-ai"].integration).toBe("grounding")
+    expect(SEARCH_PROVIDERS.searxng).toMatchObject({ integration: "self-hosted", auth: "endpoint" })
+    expect(SEARCH_PROVIDERS.google.auth).toBe("api-key+cx")
+    expect(isProviderRetired("bing")).toBe(true)
+    expect(isProviderRetired("brave")).toBe(false)
+  })
+
+  it("offers a vendor reader only where an integrated adapter exists", () => {
+    const readers = (Object.keys(SEARCH_PROVIDERS) as SearchProviderType[]).filter(
+      (id) => SEARCH_PROVIDERS[id].operations.read
+    )
+    expect(readers.sort()).toEqual(["deepseek", "exa", "tavily", "tinyfish"])
+  })
+
+  it("keeps every new provider disabled by default", () => {
+    for (const id of ["deepseek", "tinyfish", "searxng"] as const) {
+      expect(DEFAULT_SEARCH_PROVIDER_SETTINGS[id].enabled).toBe(false)
+    }
+  })
+})
+
+describe("descriptor-driven configuration", () => {
+  it("needs no key for an endpoint-only provider", () => {
+    expect(getProviderConfigIssues("searxng", { baseUrl: "https://search.example" })).toEqual([])
+    expect(getProviderConfigIssues("searxng", {})).toEqual(["missing-endpoint"])
+  })
+
+  it("requires an explicit grant for a private or plain-HTTP endpoint", () => {
+    expect(getProviderConfigIssues("searxng", { baseUrl: "http://127.0.0.1:8888" })).toEqual([
+      "endpoint-not-granted",
+    ])
+    expect(
+      getProviderConfigIssues("searxng", {
+        baseUrl: "http://127.0.0.1:8888",
+        allowPrivateEndpoint: true,
+      })
+    ).toEqual([])
+    expect(getProviderConfigIssues("searxng", { baseUrl: "http://search.example" })).toEqual([
+      "invalid-endpoint",
+    ])
+  })
+
+  it("never treats a retired provider as configured", () => {
+    expect(isProviderConfigured("bing", { apiKey: "k" })).toBe(false)
+    expect(getProviderState("bing", { apiKey: "k", enabled: true })).toBe("retired")
+  })
+
+  it("rejects a stored engine the provider does not list", () => {
+    expect(getProviderConfigIssues("searchapi", { apiKey: "k", engine: "altavista" })).toEqual([
+      "unsupported-engine",
+    ])
+    expect(getProviderConfigIssues("searchapi", { apiKey: "k", engine: "baidu" })).toEqual([])
+  })
+
+  it("reports distinct display states", () => {
+    expect(getProviderState("tavily", { apiKey: "k", enabled: false })).toBe("disabled")
+    expect(getProviderState("tavily", { apiKey: "", enabled: true })).toBe("missing-key")
+    expect(getProviderState("google", { apiKey: "k", enabled: true })).toBe("missing-config")
+    expect(getProviderState("tavily", { apiKey: "k", enabled: true })).toBe("configured")
+  })
+})
+
+describe("validateSearchEndpoint", () => {
+  it("normalizes a deployment path prefix and strips a trailing /search", () => {
+    expect(validateSearchEndpoint("https://example.com/searx/search/")).toEqual({
+      ok: true,
+      baseUrl: "https://example.com/searx",
+      isPrivate: false,
+    })
+  })
+
+  it("rejects credentials, query, fragment and non-http schemes", () => {
+    expect(validateSearchEndpoint("https://u:p@example.com").issue).toBe("embedded-credentials")
+    expect(validateSearchEndpoint("https://example.com/?q=1").issue).toBe("query-or-fragment")
+    expect(validateSearchEndpoint("https://example.com/#x").issue).toBe("query-or-fragment")
+    expect(validateSearchEndpoint("ftp://example.com").issue).toBe("unsupported-scheme")
+    expect(validateSearchEndpoint("not a url").issue).toBe("invalid-url")
+    expect(validateSearchEndpoint("").issue).toBe("missing")
+  })
+
+  it("accepts plain HTTP only for private hosts", () => {
+    expect(validateSearchEndpoint("http://192.168.1.5:8080")).toMatchObject({
+      ok: true,
+      isPrivate: true,
+    })
+    expect(validateSearchEndpoint("http://[::1]:8080")).toMatchObject({ ok: true, isPrivate: true })
+    expect(validateSearchEndpoint("http://example.com").issue).toBe("insecure-public-endpoint")
   })
 })
 

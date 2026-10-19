@@ -6,6 +6,10 @@ import {
   isPluginWebSearchSuccess,
   pluginWebFetchText,
   type PluginWebFetchSuccess,
+  type PluginWebFetchInput,
+  type PluginWebSearchInput,
+  type PluginWebSearchSuccess,
+  type PluginHostToolFailure,
 } from "./plugin-host-tools"
 
 describe("author-callable host tool allowlist", () => {
@@ -96,4 +100,81 @@ describe("pluginWebFetchText", () => {
   it("returns an empty string for a binary response", () => {
     expect(pluginWebFetchText({ ...base, binary: true, note: "PDF" })).toBe("")
   })
+})
+
+it("keeps existing guards and text extraction compatible with additive Reader metadata", () => {
+  const input: PluginWebFetchInput = {
+    url: "https://example.com",
+    reader: "exa",
+    allowFallback: false,
+    maxBytes: 100,
+    offset: 50,
+  }
+  const result: PluginWebFetchSuccess = {
+    ok: true,
+    status: 200,
+    url: input.url,
+    contentType: "text/markdown",
+    text: "readable",
+    reader: "exa",
+    statusSource: "reader-service",
+    originStatus: 403,
+    distilled: true,
+    extraction: "markdown+distilled",
+    warnings: ["origin refused"],
+    readWindow: { offset: 50, cap: 100, unit: "characters" },
+    cacheHit: true,
+    attemptedReaders: ["direct", "exa"],
+  }
+  expect(isPluginWebFetchSuccess(result)).toBe(true)
+  expect(isPluginHostToolFailure(result)).toBe(false)
+  expect(pluginWebFetchText(result)).toBe("readable")
+  const failure: PluginHostToolFailure = {
+    ok: false,
+    error: "reader unavailable",
+    code: "execution-failed",
+    reason: "distillation-unavailable",
+  }
+  expect(isPluginHostToolFailure(failure)).toBe(true)
+})
+
+it("keeps search result guards compatible with images, excerpts and policy diagnostics", () => {
+  const input: PluginWebSearchInput = {
+    query: "images",
+    searchType: "images",
+    engine: "google",
+    allowFallback: false,
+    excerptChars: 100,
+  }
+  const result: PluginWebSearchSuccess = {
+    ok: true,
+    query: input.query,
+    provider: "searchapi",
+    answer: null,
+    results: [
+      {
+        title: "title",
+        url: "https://example.com",
+        truncated: true,
+        excerpt: "excerpt",
+        excerptTruncated: true,
+      },
+    ],
+    images: [
+      {
+        url: "https://example.com/image",
+        thumbnailUrl: "https://example.com/thumb",
+        title: "image",
+        width: 100,
+        height: 50,
+      },
+    ],
+    imagesTruncated: true,
+    searchType: "images",
+    engine: "google",
+    answerCleared: "policy-filtered",
+    degradedControls: ["safeSearch"],
+    credibilityBasis: "domain-heuristic",
+  }
+  expect(isPluginWebSearchSuccess(result)).toBe(true)
 })

@@ -42,6 +42,7 @@ import type {
   SessionKind,
 } from "@cognia/agent-config-types"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
+import { freshInstallWebReader } from "@/lib/web/reader/reader-settings"
 import { normalizeSearchProviderHealthSettings } from "@cognia/web-search/types"
 
 import { resolveBuiltinProcessSandbox } from "../runtime/sandbox/builtin-process-sandbox"
@@ -208,9 +209,17 @@ export function buildSearchAppSettings(config: ResolvedConfig): Partial<AppSetti
       {
         providerId: id,
         apiKey: provider.apiKey ?? "",
-        enabled: provider.enabled ?? Boolean(provider.apiKey),
+        enabled:
+          provider.enabled ??
+          (!["deepseek", "tinyfish", "searxng"].includes(id) && Boolean(provider.apiKey)),
         priority: provider.priority ?? index + 1,
         ...(provider.cx ? { cx: provider.cx } : {}),
+        ...(provider.engine ? { engine: provider.engine } : {}),
+        ...(provider.baseUrl ? { baseUrl: provider.baseUrl } : {}),
+        ...(provider.allowPrivateEndpoint !== undefined
+          ? { allowPrivateEndpoint: provider.allowPrivateEndpoint }
+          : {}),
+        ...(provider.model ? { model: provider.model } : {}),
         ...(provider.defaultOptions ? { defaultOptions: provider.defaultOptions } : {}),
       },
     ])
@@ -357,7 +366,16 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     builtinTools: config.builtinTools,
     providerSettings: buildProviderSettings(config),
     customProviders: buildCustomProviders(config),
-    webTools: { enabled: config.webTools !== false },
+    webTools: {
+      enabled: config.webTools !== false,
+      ...(config.preferCogniaSearch !== undefined
+        ? { preferCogniaSearch: config.preferCogniaSearch }
+        : {}),
+      ...(config.preferCogniaFetch !== undefined
+        ? { preferCogniaFetch: config.preferCogniaFetch }
+        : {}),
+    },
+    webReader: config.webReader ?? freshInstallWebReader(),
     // The same three rungs the desktop reads off AppSettings. Feeding them here
     // rather than inventing a CLI-specific gate means `resolveSendOptions`
     // applies one ladder: the session and character rungs above still win, the

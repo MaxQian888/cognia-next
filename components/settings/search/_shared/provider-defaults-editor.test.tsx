@@ -69,8 +69,8 @@ describe("ProviderDefaultsEditor", () => {
   })
 
   it("hides recency for providers without a recency filter", () => {
-    // Tavily has no recencyFilter feature; Serper does.
-    renderEditor(undefined, "tavily")
+    // Grounded Google AI does not carry a recency filter to its adapter.
+    renderEditor(undefined, "google-ai")
     expect(screen.queryByText("recency")).not.toBeInTheDocument()
   })
 
@@ -82,8 +82,8 @@ describe("ProviderDefaultsEditor", () => {
   it("shows the three-state includeAnswer only for AI-answer providers", () => {
     renderEditor(undefined, "tavily")
     expect(screen.getByText("includeAnswer")).toBeInTheDocument()
-    renderEditor(undefined, "serper")
-    // Serper has no aiAnswer feature → only tavily's copy above rendered;
+    renderEditor(undefined, "brave")
+    // Brave has no generated answer → only tavily's copy above rendered;
     // this second render must not add another.
     expect(screen.getAllByText("includeAnswer")).toHaveLength(1)
   })
@@ -151,4 +151,15 @@ describe("ProviderDefaultsEditor", () => {
     pick("includeAnswer", "__inherit__")
     expect(onChange).toHaveBeenLastCalledWith(undefined)
   })
+})
+
+it("uses effective capabilities for newly registered providers", () => {
+  renderEditor(undefined, "deepseek")
+  expect(screen.getByText("recency")).toBeInTheDocument()
+  expect(screen.queryByText("includeAnswer")).not.toBeInTheDocument()
+  const options = screen.getByText("searchType").parentElement!.querySelectorAll('[role="option"]')
+  expect(Array.from(options).map((option) => option.getAttribute("data-value"))).toEqual([
+    "__inherit__",
+    "general",
+  ])
 })

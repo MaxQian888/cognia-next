@@ -18,6 +18,20 @@ function isHost(host: string, base: string): boolean {
 }
 
 /**
+ * Which Reader a URL's platform scraper belongs to: `platform` for scrapers
+ * that read the origin site itself (WeChat, YouTube), `fxtwitter` for X posts,
+ * which go to the third-party FxTwitter API. `null` when no scraper applies.
+ */
+export function platformReaderFor(url: string): "platform" | "fxtwitter" | null {
+  const host = safeHostname(url)
+  if (!host) return null
+  if (isHost(host, "mp.weixin.qq.com")) return "platform"
+  if (isHost(host, "youtube.com") || isHost(host, "youtu.be")) return "platform"
+  if (isHost(host, "x.com") || isHost(host, "twitter.com")) return "fxtwitter"
+  return null
+}
+
+/**
  * Route a URL to its platform scraper, or return `null` when no scraper
  * applies. Never throws — individual scrapers swallow their own failures.
  */

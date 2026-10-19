@@ -13,16 +13,18 @@ import { SourceVerificationSettings } from "./source-verification-settings"
 import { SearchProviderGrid } from "./search-provider-grid"
 import { SearchProviderCompare } from "./search-provider-compare"
 import { SearchUsagePanel } from "./search-usage-panel"
+import { WebReaderSettings } from "./web-reader-settings"
 
 /** URL query param that selects the active search settings section (deep-linkable). */
 export const SEARCH_SECTION_PARAM = "searchSection"
 
 export type SearchSectionId =
-  "basics" | "providers" | "behavior" | "safety" | "performance" | "diagnostics"
+  "basics" | "providers" | "reading" | "behavior" | "safety" | "performance" | "diagnostics"
 
 const SECTION_IDS: SearchSectionId[] = [
   "basics",
   "providers",
+  "reading",
   "behavior",
   "safety",
   "performance",
@@ -37,13 +39,15 @@ export function isSearchSection(value: string | null | undefined): value is Sear
 // Lets section content (e.g. the basics empty-state) jump to another section
 // without threading callbacks through the config array.
 
-const SearchSectionNavContext = createContext<(id: SearchSectionId) => void>(() => {})
+const SearchSectionNavContext = createContext<(id: SearchSectionId, focus?: string) => void>(
+  () => {}
+)
 
 export function SearchSectionNavProvider({
   navigate,
   children,
 }: {
-  navigate: (id: SearchSectionId) => void
+  navigate: (id: SearchSectionId, focus?: string) => void
   children: ReactNode
 }) {
   return (
@@ -118,6 +122,13 @@ export const SEARCH_SECTIONS: SearchSectionDef[] = [
     descKey: "nav.providersDesc",
     icon: <Globe className="h-4 w-4" />,
     Component: SearchProviderGrid,
+  },
+  {
+    id: "reading",
+    labelKey: "nav.reading",
+    descKey: "nav.readingDesc",
+    icon: <Globe className="h-4 w-4" />,
+    Component: WebReaderSettings,
   },
   {
     id: "behavior",

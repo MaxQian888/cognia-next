@@ -116,6 +116,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   ],
   data: ["telemetryEnabled", "behaviorTelemetry", "storageRetention", "sessionImportWatch"],
   appearance: [
+    "settingsIconStyle",
     "lockScreen",
     "theme",
     "colorTheme",
@@ -215,6 +216,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   ],
   "media-generation": ["videoGeneration"],
   search: [
+    "webReader",
     "searchEnabled",
     "searchMaxResults",
     "searchMaxRetries",

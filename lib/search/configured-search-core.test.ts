@@ -32,6 +32,7 @@ jest.mock("@cognia/web-search/search-service", () => ({
 }))
 
 jest.mock("@cognia/web-search/search-cache", () => ({
+  opaqueDigest: jest.requireActual("@cognia/web-search/search-cache").opaqueDigest,
   getSearchCache: () => ({
     get: cacheGetMock,
     set: cacheSetMock,
@@ -123,7 +124,10 @@ describe("searchWithSettings", () => {
   it("configures and reuses the shared search cache", async () => {
     cacheGetMock.mockReturnValue(response)
 
-    await expect(searchWithSettings("cached", { settings: settings() })).resolves.toBe(response)
+    await expect(searchWithSettings("cached", { settings: settings() })).resolves.toEqual({
+      ...response,
+      diagnostics: { cacheHit: true },
+    })
 
     expect(cacheSetConfigMock).toHaveBeenCalledWith({ defaultTTL: 12_000, maxSize: 42 })
     expect(searchMock).not.toHaveBeenCalled()
@@ -185,15 +189,27 @@ describe("searchWithSettings", () => {
     expect(searchMock).not.toHaveBeenCalled()
   })
 
-  it("lets explicit request options override stored defaults", async () => {
+  it("lets explicit request options override stored defaults, but never relax strict safe search", async () => {
     await searchWithSettings("override", {
       settings: settings(),
       options: { maxResults: 2, searchType: "academic", safeSearch: "off" },
     })
 
+    // Host strict safe search is a mandatory constraint a caller may not lower.
     expect(searchMock).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ maxResults: 2, searchType: "academic", safeSearch: "off" })
+      expect.objectContaining({ maxResults: 2, searchType: "academic", safeSearch: "strict" })
+    )
+  })
+
+  it("lets a caller relax an advisory (moderate) safe-search default", async () => {
+    await searchWithSettings("override", {
+      settings: settings({ searchSafeSearchLevel: "moderate" }),
+      options: { safeSearch: "off" },
+    })
+    expect(searchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ safeSearch: "off" })
     )
   })
 
@@ -321,9 +337,9 @@ describe("searchWithSettings — provider defaultOptions + breaker config", () =
     routeSearchMock.mockClear()
     await searchWithSettings("q", {
       settings: withProviderDefaults,
-      options: { searchType: "images" },
+      options: { searchType: "general" },
     })
-    expect(routeSearchMock.mock.calls[0][3]).toMatchObject({ searchType: "images" })
+    expect(routeSearchMock.mock.calls[0][3]).toMatchObject({ searchType: "general" })
   })
 })
 
@@ -342,6 +358,9 @@ describe("searchWithSettings — the generating search provider's ledger seam", 
       defaultSearchProvider: "google-ai",
       searchCacheEnabled: false,
       routerFusion: { enabled: true, surfaces: { utilityLedger: true } },
+      // Grounded generation cannot enforce strict safe search, so a strict
+      // host policy makes Google AI ineligible; this suite exercises the seam.
+      searchSafeSearchLevel: "moderate",
     } as Partial<AppSettings>)
 
   beforeEach(() => {
@@ -425,7 +444,7 @@ describe("searchWithSettings — the generating search provider's ledger seam", 
       expect.objectContaining({
         featureId: "web-search:web-search.google-ai",
         providerId: "google",
-        modelId: "gemini-2.0-flash",
+        modelId: "gemini-3.8-flash",
         workspaceId: null,
       }),
     ])
@@ -433,5 +452,106 @@ describe("searchWithSettings — the generating search provider's ledger seam", 
       (googleAIFetchMock.mock.calls[0][1] as { body: string }).body
     ) as Record<string, unknown>
     expect(body).toMatchObject({ generationConfig: { maxOutputTokens: 700 } })
+  })
+})
+
+describe("searchWithSettings — result policy (R03) and scope", () => {
+  beforeEach(() => {
+    searchMock.mockReset()
+    cacheGetMock.mockReset()
+    cacheSetMock.mockReset()
+    piiGateMock.mockReset().mockReturnValue(true)
+  })
+
+  const policySettings = (): AppSettings =>
+    settings({
+      searchSafeSearchLevel: "moderate",
+      sourceVerificationSettings: {
+        enabled: true,
+        mode: "auto",
+        minimumCredibilityScore: 0,
+        autoFilterLowCredibility: false,
+        showVerificationBadges: false,
+        trustedDomains: [],
+        blockedDomains: ["blocked.example"],
+        enableCrossValidation: false,
+      },
+    })
+
+  const withBlocked: SearchResponse = {
+    provider: "tavily",
+    query: "q",
+    answer: "cites a blocked page",
+    results: [
+      { title: "ok", url: "https://fine.example/a", content: "", score: 1 },
+      { title: "bad", url: "https://blocked.example/b", content: "", score: 0.9 },
+    ],
+    images: [{ url: "https://img.blocked.example/i.png" }, { url: "https://fine.example/i.png" }],
+    responseTime: 1,
+  }
+
+  it("clears the answer and filters images when policy removes a grounding source", async () => {
+    searchMock.mockResolvedValueOnce(withBlocked)
+    const r = await searchWithSettings("q", { settings: policySettings() })
+    expect(r.results.map((x) => x.url)).toEqual(["https://fine.example/a"])
+    expect(r.images?.map((x) => x.url)).toEqual(["https://fine.example/i.png"])
+    expect(r.answer).toBeUndefined()
+    expect(r.totalResults).toBe(1)
+    expect(r.diagnostics?.answerCleared).toBe("policy-filtered")
+  })
+
+  it("applies the same policy to a cache hit", async () => {
+    cacheGetMock.mockReturnValueOnce(withBlocked)
+    const r = await searchWithSettings("q", { settings: policySettings() })
+    expect(searchMock).not.toHaveBeenCalled()
+    expect(r.answer).toBeUndefined()
+    expect(r.results).toHaveLength(1)
+    expect(r.diagnostics?.cacheHit).toBe(true)
+  })
+
+  it("keys the cache by scope and an opaque credential revision", async () => {
+    searchMock.mockResolvedValue({ ...withBlocked, answer: undefined })
+    await searchWithSettings("q", { settings: policySettings(), scope: "acct-a" })
+    const keyA = cacheGetMock.mock.calls[0][2]
+    expect(keyA.scope).toBe("acct-a")
+    expect(keyA.policyRevision).toMatch(/^v\d+\|tavily:/)
+    expect(keyA.policyRevision).not.toContain("key")
+  })
+
+  it("narrows caller include domains to the host's selected sources", async () => {
+    searchMock.mockResolvedValueOnce({ ...withBlocked, results: [] })
+    await searchWithSettings("q", {
+      settings: settings({
+        searchSafeSearchLevel: "moderate",
+        defaultSearchSources: ["wikipedia"],
+      } as Partial<AppSettings>),
+      options: { includeDomains: ["evil.example", "en.wikipedia.org"] },
+    })
+    expect(searchMock.mock.calls[0][1].includeDomains).toEqual(["en.wikipedia.org"])
+  })
+
+  it("discards a result whose scope changed in flight and never caches it", async () => {
+    searchMock.mockResolvedValueOnce({ ...withBlocked })
+    let scope = "acct-a"
+    const pending = searchWithSettings("q", {
+      settings: policySettings(),
+      scope: "acct-a",
+      activeScope: () => scope,
+    })
+    scope = "acct-b"
+    await expect(pending).rejects.toThrow(/account or runtime changed/)
+    expect(cacheSetMock).not.toHaveBeenCalled()
+  })
+
+  it("publishes nothing and caches nothing after cancellation", async () => {
+    const controller = new AbortController()
+    searchMock.mockImplementationOnce(async () => {
+      controller.abort()
+      return withBlocked
+    })
+    await expect(
+      searchWithSettings("q", { settings: policySettings(), signal: controller.signal })
+    ).rejects.toThrow(/Abort/)
+    expect(cacheSetMock).not.toHaveBeenCalled()
   })
 })

@@ -1,0 +1,59 @@
+{
+  "description": "独立于搜索配置网页阅读。启用搜索不会启用阅读器。",
+  "hostLimitations": "普通浏览器受 CORS 限制，无法使用 Jina、FxTwitter 和平台阅读。在移动端，取消会停止等待，但已发出的原生请求仍可能完成。",
+  "defaultReader": "默认阅读器",
+  "auto": "自动",
+  "externalFallback": "外部回退",
+  "fallback": {
+    "off": "关闭",
+    "configured": "仅已配置的阅读器"
+  },
+  "fallbackDescription": "自动模式在符合条件的直接阅读失败后，可按优先级尝试已启用的远程阅读器，仅使用已配置的接收方。",
+  "distillation": "蒸馏",
+  "modes": {
+    "off": "关闭",
+    "best-effort": "尽力而为",
+    "required": "必须"
+  },
+  "consequences": {
+    "off": "关闭：返回提取的文本；明确的问题仍可请求尽力蒸馏。",
+    "best-effort": "尽力而为：尝试辅助模型；失败时返回提取的文本。",
+    "required": "必须：没有辅助模型或蒸馏结果时拒绝返回；禁用原始内容和非 GET 阅读。"
+  },
+  "priorityOrder": "阅读器优先级顺序",
+  "readers": {
+    "direct": "直接阅读",
+    "platform": "平台（微信 / YouTube）",
+    "fxtwitter": "FxTwitter",
+    "jina": "Jina",
+    "tavily": "Tavily",
+    "exa": "Exa",
+    "deepseek": "DeepSeek",
+    "tinyfish": "TinyFish"
+  },
+  "directDisclosure": "由 Cognia 直接获取",
+  "platformDisclosure": "从原始网站读取",
+  "remoteDisclosure": "您阅读的页面会发送至 {vendor}",
+  "usesSearchKey": "使用您的 {vendor} 搜索密钥",
+  "missingSearchKey": "不可用：请在搜索服务商中添加 {vendor} 密钥",
+  "configureSearchKey": "在搜索服务商中添加 {vendor} 密钥",
+  "vendorCost": "阅读请求独立于搜索请求，由您的服务商账户付费。",
+  "moveUp": "上移 {reader}",
+  "moveDown": "下移 {reader}",
+  "testReader": "测试阅读器",
+  "testReaderNamed": "测试阅读器：{reader}",
+  "testing": "测试中…",
+  "testOk": "阅读器测试成功",
+  "testFailed": "阅读器测试失败",
+  "testReason": "原因：{reason}",
+  "httpStatus": "HTTP 状态码：{status}",
+  "testedAt": "测试时间：{date}",
+  "testEvidence": "仅在点击时运行测试。带日期的结果仅证明该次尝试，不保证将来可用。",
+  "unsupportedVersion": "此阅读器记录来自较新版本，当前未启用。这里显示兼容配置。保存任何阅读器更改将在确认后替换较新记录。",
+  "replaceTitle": "替换较新的阅读器配置？",
+  "replaceDescription": "保存的阅读器记录来自较新版本。此次更改将以这里显示的受支持配置替换它。",
+  "replace": "替换配置",
+  "cancel": "取消",
+  "saveFailed": "无法保存阅读器配置，请重试。",
+  "priorityDescription": "自动模式先尝试匹配的平台或 FxTwitter 阅读器，再直接阅读。优先级按钮调整其余远程阅读器的外部回退顺序。"
+}

@@ -85,6 +85,60 @@ describe("resolveWebAccess", () => {
     expect(unserved.mode).toBe("native")
   })
 
+  // AC12: each operation resolves on its own availability and preference.
+  describe("operation-specific resolution", () => {
+    it("keeps native search and reads through Cognia without any search key", () => {
+      const r = resolveWebAccess({
+        webTools: { enabled: true, preferCogniaFetch: true },
+        nativeAvailable: true,
+      })
+      expect(r.search).toBe("native")
+      expect(r.fetch).toBe("cognia")
+      expect(r.mode).toBe("native")
+    })
+
+    it("routes fetch through Cognia when only native search exists", () => {
+      const r = resolveWebAccess({
+        nativeAvailable: true,
+        nativeFetchAvailable: false,
+        searchProviders: tavily,
+      })
+      expect(r.search).toBe("native")
+      expect(r.fetch).toBe("cognia")
+    })
+
+    it("routes search through Cognia while keeping native fetch", () => {
+      const r = resolveWebAccess({
+        webTools: { enabled: true, preferCogniaSearch: true, preferCogniaFetch: false },
+        nativeAvailable: true,
+        searchProviders: tavily,
+      })
+      expect(r.search).toBe("cognia")
+      expect(r.fetch).toBe("native")
+      expect(r.mode).toBe("cognia")
+    })
+
+    it("inherits the legacy preferCognia for both operations when the split fields are absent", () => {
+      const r = resolveWebAccess({
+        webTools: { enabled: true, preferCognia: true },
+        nativeAvailable: true,
+        searchProviders: tavily,
+      })
+      expect(r.search).toBe("cognia")
+      expect(r.fetch).toBe("cognia")
+    })
+
+    it("still honours off over any per-operation preference", () => {
+      const r = resolveWebAccess({
+        webTools: { enabled: true, preferCogniaFetch: true },
+        nativeAvailable: true,
+        turnIntent: "off",
+      })
+      expect(r.search).toBe("none")
+      expect(r.fetch).toBe("none")
+    })
+  })
+
   it("offers pre-search only with both the master switch and a provider", () => {
     expect(resolveWebAccess({ nativeAvailable: true, searchProviders: tavily }).preSearch).toBe(
       false

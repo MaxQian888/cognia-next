@@ -60,5 +60,52 @@ export const exaFetch = createSearchProviderFetch("Exa")
 export const tavilyFetch = createSearchProviderFetch("Tavily")
 export const perplexityFetch = createSearchProviderFetch("Perplexity")
 export const serperFetch = createSearchProviderFetch("Serper")
+export const deepseekFetch = createSearchProviderFetch("DeepSeek")
+export const tinyfishFetch = createSearchProviderFetch("TinyFish")
+export const searxngFetch = createSearchProviderFetch("SearXNG")
+
+/**
+ * An HTTP failure from a vendor API, carrying the status so the retry
+ * classifier and the Reader's failure mapping read it from the field instead
+ * of parsing the message. The message keeps the `<Vendor> API error: <status>`
+ * shape every adapter already used.
+ */
+export class ProviderHttpError extends Error {
+  readonly status: number
+  readonly vendorCode?: string
+  constructor(vendor: string, status: number, detail: string, vendorCode?: string) {
+    super(`${vendor} API error: ${status}${detail ? ` - ${detail}` : ""}`)
+    this.name = "ProviderHttpError"
+    this.status = status
+    this.vendorCode = vendorCode
+  }
+}
+
+/** Read a bounded, single-line error detail from a failed response. */
+export async function readErrorDetail(
+  response: Response
+): Promise<{ detail: string; code?: string }> {
+  const text = await response.text().catch(() => "")
+  let detail = text
+  let code: string | undefined
+  try {
+    const parsed = JSON.parse(text) as {
+      error?: string | { message?: string; code?: string | number; type?: string }
+      message?: string
+      tag?: string
+      detail?: string
+    }
+    if (typeof parsed.error === "string") detail = parsed.error
+    else if (parsed.error && typeof parsed.error === "object") {
+      detail = parsed.error.message ?? detail
+      if (parsed.error.code != null) code = String(parsed.error.code)
+    } else if (parsed.message) detail = parsed.message
+    else if (parsed.detail) detail = parsed.detail
+    if (!code && parsed.tag) code = parsed.tag
+  } catch {
+    // Not JSON — keep the raw text.
+  }
+  return { detail: detail.replace(/\s+/g, " ").trim().slice(0, 300), code }
+}
 
 export default searchFetch

@@ -15,14 +15,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { providerSupportsType } from "@cognia/web-search/search-type-router"
+import { getEffectiveSearchCapabilities } from "@cognia/web-search/search-type-router"
 import {
-  SEARCH_PROVIDERS,
   type SearchDepth,
   type SearchProviderSettings,
   type SearchProviderType,
   type SearchRecency,
-  type SearchType,
 } from "@cognia/web-search/types"
 
 /**
@@ -38,13 +36,6 @@ type ProviderDefaultOptions = NonNullable<SearchProviderSettings["defaultOptions
 
 // `satisfies` pins these lists to the `SearchOptions` unions — a new variant
 // there fails typecheck here instead of silently missing a choice.
-const SEARCH_TYPES = [
-  "general",
-  "news",
-  "academic",
-  "images",
-  "videos",
-] as const satisfies readonly SearchType[]
 const SEARCH_DEPTHS = ["basic", "advanced", "deep"] as const satisfies readonly SearchDepth[]
 const RECENCIES = [
   "any",
@@ -72,8 +63,8 @@ export function ProviderDefaultsEditor({
   const td = useTranslations("searchDefaults")
   const [open, setOpen] = useState(false)
 
-  const features = SEARCH_PROVIDERS[providerId].features
-  const supportedTypes = SEARCH_TYPES.filter((type) => providerSupportsType(providerId, type))
+  const capabilities = getEffectiveSearchCapabilities(providerId)
+  const supportedTypes = capabilities?.types ?? []
   const overrideCount = Object.values(value ?? {}).filter((v) => v !== undefined).length
 
   const update = (patch: Partial<ProviderDefaultOptions>) => {
@@ -180,7 +171,7 @@ export function ProviderDefaultsEditor({
             </div>
 
             {/* recency — only providers with a recency filter */}
-            {features.recencyFilter && (
+            {capabilities?.controls.recency && (
               <div className="space-y-1">
                 <Label htmlFor={`${idPrefix}-recency`} className="text-xs">
                   {td("recency")}
@@ -211,7 +202,7 @@ export function ProviderDefaultsEditor({
             )}
 
             {/* includeAnswer — only providers that can synthesize one */}
-            {features.aiAnswer && (
+            {capabilities?.answer && (
               <div className="space-y-1">
                 <Label htmlFor={`${idPrefix}-include-answer`} className="text-xs">
                   {td("includeAnswer")}

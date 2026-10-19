@@ -41,6 +41,7 @@ describe("webFetch", () => {
     expect(await webFetch({ url: "" })).toEqual({
       ok: false,
       code: "invalid-arguments",
+      reason: "invalid-url",
       error: "url is required",
     })
   })
@@ -54,6 +55,7 @@ describe("webFetch", () => {
     expect(out).toEqual({
       ok: false,
       code: "blocked",
+      reason: "sensitive-data",
       error: "web_fetch blocked: outbound request contains sensitive data",
     })
     expect(fetchImpl).not.toHaveBeenCalled()
@@ -68,6 +70,7 @@ describe("webFetch", () => {
     expect(out).toEqual({
       ok: false,
       code: "blocked",
+      reason: "sensitive-data",
       error: "web_fetch blocked: outbound request contains sensitive data",
     })
     expect(fetchImpl).not.toHaveBeenCalled()
@@ -239,7 +242,7 @@ describe("webFetch", () => {
     )) as Record<string, unknown>
     expect(out.text).toBe("FOCUSED ANSWER")
     expect(out.untrustedNotice).toContain("Untrusted web content")
-    expect(summarize).toHaveBeenCalledWith("readable text", "what is x?", undefined)
+    expect(summarize).toHaveBeenCalledWith("readable text", "what is x?", expect.any(AbortSignal))
   })
 
   it("forwards the abort signal to the summarizer", async () => {
@@ -301,7 +304,7 @@ describe("webFetch", () => {
     expect(summarize).toHaveBeenCalledWith(
       "readable text",
       expect.stringMatching(/key facts/i),
-      undefined
+      expect.any(AbortSignal)
     )
   })
 
@@ -315,7 +318,7 @@ describe("webFetch", () => {
     const first = await webFetch({ url: "https://x.test/c" }, { fetchImpl, cache })
     const second = await webFetch({ url: "https://x.test/c" }, { fetchImpl, cache })
     expect(fetchImpl).toHaveBeenCalledTimes(1)
-    expect(second).toEqual(first)
+    expect(second).toEqual({ ...(first as object), cacheHit: true })
   })
 
   it("does not cache non-GET requests", async () => {
@@ -349,7 +352,8 @@ describe("webFetch", () => {
     expect(await webFetch({ url: "https://x.test" }, { fetchImpl })).toEqual({
       ok: false,
       code: "execution-failed",
-      error: "network down",
+      reason: "all-readers-failed",
+      error: "No reader produced content (last: direct: network down)",
     })
   })
 
@@ -559,6 +563,8 @@ describe("webSearch", () => {
     expect(searchExecutor).toHaveBeenCalledWith("please tell me about TypeScript", {
       provider: "tavily",
       maxResults: 3,
+      // Snippet-only results never request paid full-content extraction.
+      includeRawContent: false,
     })
     expect(out).toMatchObject({ ok: true, provider: "tavily" })
   })
@@ -580,7 +586,7 @@ describe("webSearch", () => {
     // The duplicate markdown re-serialization is gone.
     expect(out.formatted).toBeUndefined()
     expect((out.results as unknown[]).length).toBe(1)
-    expect(searchExecutor).toHaveBeenCalledWith("hi", { maxResults: 3 })
+    expect(searchExecutor).toHaveBeenCalledWith("hi", { maxResults: 3, includeRawContent: false })
   })
 
   it("truncates long per-result snippets", async () => {
@@ -600,7 +606,7 @@ describe("webSearch", () => {
     expect(first.content.endsWith("…")).toBe(true)
   })
 
-  it("honors a forced provider + deps.searchMaxResults and keeps publishedDate", async () => {
+  it("forwards only explicit caller fields; host defaults stay inside the executor (R05)", async () => {
     const searchExecutor = executor({
       provider: "exa",
       query: "hi",
@@ -613,30 +619,74 @@ describe("webSearch", () => {
     })
     const out = (await webSearch(
       { query: "hi", provider: "exa" as never },
-      { searchExecutor, searchMaxResults: 7 }
+      { searchExecutor }
     )) as Record<string, unknown>
-    expect(searchExecutor).toHaveBeenCalledWith("hi", { provider: "exa", maxResults: 7 })
+    expect(searchExecutor).toHaveBeenCalledWith("hi", { provider: "exa", includeRawContent: false })
     const rows = out.results as { publishedDate?: string; content: unknown }[]
     expect(rows[0].publishedDate).toBe("2026-01-01")
     expect(unwrapUntrustedContent(String(rows[1].content))).toBe("")
     expect(out.answer).toBeNull()
   })
 
-  it("forwards the user's default search options to the canonical executor", async () => {
+  it("forwards specialized type, engine, strict pin, excerpts and the signal", async () => {
     const searchExecutor = executor({
-      provider: "tavily" as const,
+      provider: "searchapi" as const,
       query: "hi",
-      answer: undefined,
-      results: [],
+      results: [{ title: "T", url: "u", content: "c", score: 1, rawContent: "r".repeat(3000) }],
       responseTime: 1,
+      searchType: "news",
+      engine: "bing",
     })
-    await webSearch(
-      { query: "hi" },
-      { searchExecutor, searchOptions: { searchType: "news", includeAnswer: true } as never }
-    )
+    const controller = new AbortController()
+    const out = (await webSearch(
+      { query: "hi", searchType: "news", engine: "bing", allowFallback: false, excerptChars: 9999 },
+      { searchExecutor, signal: controller.signal }
+    )) as Record<string, unknown>
     expect(searchExecutor).toHaveBeenCalledWith("hi", {
       searchType: "news",
-      includeAnswer: true,
+      engine: "bing",
+      allowFallback: false,
+      includeRawContent: "text",
+      signal: controller.signal,
+    })
+    const row = (out.results as Record<string, unknown>[])[0]
+    expect(String(row.excerpt)).toHaveLength(2001)
+    expect(row.excerptTruncated).toBe(true)
+    expect(out).toMatchObject({ searchType: "news", engine: "bing" })
+  })
+
+  it("returns bounded images and discloses degraded controls (R04)", async () => {
+    const searchExecutor = executor({
+      provider: "brave" as const,
+      query: "hi",
+      results: [],
+      images: Array.from({ length: 12 }, (_, i) => ({
+        url: `https://img.test/${i}.png`,
+        width: 10,
+      })),
+      responseTime: 1,
+      diagnostics: { degradedControls: ["country"] },
+    })
+    const out = (await webSearch({ query: "hi" }, { searchExecutor })) as Record<string, unknown>
+    expect((out.images as unknown[]).length).toBe(10)
+    expect(out.imagesTruncated).toBe(true)
+    expect(out.degradedControls).toEqual(["country"])
+  })
+
+  it("reports an unsupported explicit request as invalid arguments with its reason", async () => {
+    const { SearchCapabilityError } = jest.requireActual("@cognia/web-search/search-type-router")
+    const searchExecutor = jest.fn(async () => {
+      throw new SearchCapabilityError(
+        "exa",
+        "unsupported-type",
+        "Exa does not support images search"
+      )
+    })
+    expect(await webSearch({ query: "hi", searchType: "images" }, { searchExecutor })).toEqual({
+      ok: false,
+      code: "invalid-arguments",
+      reason: "unsupported-type",
+      error: "Exa does not support images search",
     })
   })
 

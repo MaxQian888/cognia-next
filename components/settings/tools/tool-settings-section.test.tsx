@@ -7,6 +7,8 @@ const setBuiltinToolEnabled = jest.fn()
 const setWebToolsEnabled = jest.fn()
 const setWebToolsNativeOnAnthropic = jest.fn()
 const setWebToolsPreferCognia = jest.fn()
+const setWebToolsPreferCogniaSearch = jest.fn()
+const setWebToolsPreferCogniaFetch = jest.fn()
 const setWebToolsAllowPrivateHosts = jest.fn()
 const setWebToolsAlwaysDistill = jest.fn()
 const setSkillToolEnabled = jest.fn()
@@ -48,12 +50,16 @@ const settingsState = {
       enabled: boolean
       nativeOnAnthropic?: boolean
       preferCognia?: boolean
+      preferCogniaSearch?: boolean
+      preferCogniaFetch?: boolean
     },
   },
   setBuiltinToolEnabled,
   setWebToolsEnabled,
   setWebToolsNativeOnAnthropic,
   setWebToolsPreferCognia,
+  setWebToolsPreferCogniaSearch,
+  setWebToolsPreferCogniaFetch,
   setWebToolsAllowPrivateHosts,
   setWebToolsAlwaysDistill,
   setSkillToolEnabled,
@@ -77,6 +83,8 @@ describe("ToolSettingsSection", () => {
     setWebToolsEnabled.mockClear()
     setWebToolsNativeOnAnthropic.mockClear()
     setWebToolsPreferCognia.mockClear()
+    setWebToolsPreferCogniaSearch.mockClear()
+    setWebToolsPreferCogniaFetch.mockClear()
     setWebToolsAllowPrivateHosts.mockClear()
     setWebToolsAlwaysDistill.mockClear()
     setSkillToolEnabled.mockClear()
@@ -184,20 +192,53 @@ describe("ToolSettingsSection", () => {
     expect(screen.getByLabelText("toggleAriaLabel:vectorToolTitle")).not.toBeDisabled()
   })
 
-  // The sub-toggle used to be "use the SDK's natives on Anthropic", off by
-  // default. Native is the default resolution now (`lib/chat/web-access.ts`),
-  // so the remaining choice is its inverse.
-  it("calls setWebToolsPreferCognia when the web sub-toggle is flipped", () => {
+  it("saves independent operation preferences without rewriting legacy settings", () => {
+    settingsState.settings.webTools = { enabled: true, nativeOnAnthropic: true }
     render(<ToolSettingsSection />)
-    const switches = screen.getAllByRole("switch")
-    fireEvent.click(switches[1])
-    expect(setWebToolsPreferCognia).toHaveBeenCalledWith(true)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:webPreferCogniaSearchTitle"))
+    expect(setWebToolsPreferCogniaSearch).toHaveBeenCalledWith(true)
+    expect(setWebToolsPreferCogniaFetch).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:webPreferCogniaFetchTitle"))
+    expect(setWebToolsPreferCogniaFetch).toHaveBeenCalledWith(true)
+    expect(setWebToolsPreferCognia).not.toHaveBeenCalled()
+    expect(setWebToolsNativeOnAnthropic).not.toHaveBeenCalled()
   })
 
-  it("reflects the web sub-toggle's checked state", () => {
+  it("shows inherited legacy preference for both operations", () => {
     settingsState.settings.webTools = { enabled: true, preferCognia: true }
     render(<ToolSettingsSection />)
-    expect(screen.getAllByRole("switch")[1]).toBeChecked()
+    expect(screen.getByLabelText("toggleAriaLabel:webPreferCogniaSearchTitle")).toBeChecked()
+    expect(screen.getByLabelText("toggleAriaLabel:webPreferCogniaFetchTitle")).toBeChecked()
+    expect(screen.getAllByText("webPreferenceInheritedOn")).toHaveLength(2)
+  })
+
+  it("shows the native-first inherited default and independent overrides", () => {
+    settingsState.settings.webTools = { enabled: true, preferCogniaSearch: true }
+    render(<ToolSettingsSection />)
+    expect(screen.getByLabelText("toggleAriaLabel:webPreferCogniaSearchTitle")).toBeChecked()
+    expect(screen.getByLabelText("toggleAriaLabel:webPreferCogniaFetchTitle")).not.toBeChecked()
+    expect(screen.getAllByText("webPreferenceInheritedOff")).toHaveLength(1)
+    expect(screen.queryByText("webPreferenceInheritedOn")).not.toBeInTheDocument()
+  })
+
+  it("honors explicit false over a true shared preference", () => {
+    settingsState.settings.webTools = {
+      enabled: true,
+      preferCognia: true,
+      preferCogniaSearch: false,
+      preferCogniaFetch: true,
+    }
+    render(<ToolSettingsSection />)
+    expect(screen.getByLabelText("toggleAriaLabel:webPreferCogniaSearchTitle")).not.toBeChecked()
+    expect(screen.getByLabelText("toggleAriaLabel:webPreferCogniaFetchTitle")).toBeChecked()
+    expect(screen.queryByText("webPreferenceInheritedOn")).not.toBeInTheDocument()
+  })
+
+  it("keeps operation preferences available in the browser", () => {
+    isTauriMock.mockReturnValue(false)
+    render(<ToolSettingsSection />)
+    expect(screen.getByLabelText("toggleAriaLabel:webPreferCogniaSearchTitle")).not.toBeDisabled()
+    expect(screen.getByLabelText("toggleAriaLabel:webPreferCogniaFetchTitle")).not.toBeDisabled()
   })
 
   it("hides the native sub-toggle in web mode", () => {
@@ -210,6 +251,8 @@ describe("ToolSettingsSection", () => {
     settingsState.settings.webTools = { enabled: false }
     render(<ToolSettingsSection />)
     expect(screen.queryByText("webNativeAnthropicTitle")).not.toBeInTheDocument()
+    expect(screen.queryByText("webPreferCogniaSearchTitle")).not.toBeInTheDocument()
+    expect(screen.queryByText("webPreferCogniaFetchTitle")).not.toBeInTheDocument()
   })
 
   it("calls setWebToolsEnabled when the Web card switch is toggled", () => {

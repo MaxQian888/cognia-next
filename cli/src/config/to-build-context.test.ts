@@ -1,6 +1,7 @@
 /**
  * @jest-environment node
  */
+import { freshInstallWebReader } from "@/lib/web/reader/reader-settings"
 import { toBuildContext } from "./to-build-context"
 import { resolveConfig } from "./load"
 import { resolveAgentMode } from "./agent-mode"
@@ -553,7 +554,7 @@ describe("toBuildContext — provider credentials", () => {
     expect(ctx.appSettings?.providerSettings?.["opencode-go"]).toEqual({
       enabled: true,
       apiKey: "sk-go",
-      baseURL: "https://opencode.ai/zen/go/v1",
+      baseURL: "https://opencode.ai/inference/go/openai/v1",
     })
   })
 
@@ -826,4 +827,38 @@ it("forwards the OS process sandbox contract and preserves explicit disable", ()
     toBuildContext({ sessionId: "sandbox", config: cfg({ sandbox: { enabled: false } }) })
       .builtinProcessSandbox
   ).toBeUndefined()
+})
+
+it("projects independent Reader policy and operation preferences without enabling opt-in search", () => {
+  const webReader = { ...freshInstallWebReader(), distillation: "required" as const }
+  const context = toBuildContext({
+    sessionId: "reader",
+    now: NOW,
+    config: cfg({
+      webReader,
+      preferCogniaSearch: false,
+      preferCogniaFetch: true,
+      search: {
+        providers: {
+          deepseek: { apiKey: "ds" },
+          tinyfish: { apiKey: "tf", model: "model", engine: "engine" },
+          searxng: { enabled: true, baseUrl: "http://localhost:8080", allowPrivateEndpoint: true },
+        },
+      },
+    }),
+  })
+  expect(context.appSettings?.webReader).toEqual(webReader)
+  expect(context.appSettings?.webTools).toMatchObject({
+    enabled: true,
+    preferCogniaSearch: false,
+    preferCogniaFetch: true,
+  })
+  expect(context.appSettings?.searchProviders).toMatchObject({
+    deepseek: { enabled: false, apiKey: "ds" },
+    tinyfish: { enabled: false, model: "model", engine: "engine" },
+    searxng: { enabled: true, baseUrl: "http://localhost:8080", allowPrivateEndpoint: true },
+  })
+  expect(toBuildContext({ sessionId: "fresh", config: cfg() }).appSettings?.webReader).toEqual(
+    freshInstallWebReader()
+  )
 })

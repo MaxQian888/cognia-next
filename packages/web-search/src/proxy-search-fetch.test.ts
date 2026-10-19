@@ -11,6 +11,8 @@ import {
   tavilyFetch,
   perplexityFetch,
   serperFetch,
+  ProviderHttpError,
+  readErrorDetail,
 } from "./proxy-search-fetch"
 import {
   resetWebSearchRuntimeAdaptersForTesting,
@@ -126,5 +128,36 @@ describe("proxy-search-fetch", () => {
       })
       expect(fetchMock).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe("ProviderHttpError", () => {
+  it("carries the status and keeps the legacy message shape", () => {
+    const err = new ProviderHttpError("DeepSeek", 402, "Insufficient Balance", "insufficient")
+    expect(err.status).toBe(402)
+    expect(err.vendorCode).toBe("insufficient")
+    expect(err.message).toBe("DeepSeek API error: 402 - Insufficient Balance")
+  })
+})
+
+describe("readErrorDetail", () => {
+  const res = (body: string) => ({ text: () => Promise.resolve(body) }) as unknown as Response
+
+  it("reads the common vendor error envelopes", async () => {
+    expect(await readErrorDetail(res('{"error":{"message":"bad","code":"E1"}}'))).toEqual({
+      detail: "bad",
+      code: "E1",
+    })
+    expect(await readErrorDetail(res('{"error":"nope","tag":"T"}'))).toEqual({
+      detail: "nope",
+      code: "T",
+    })
+    expect(await readErrorDetail(res('{"message":"m"}'))).toEqual({ detail: "m" })
+  })
+
+  it("bounds raw text to one line", async () => {
+    const { detail } = await readErrorDetail(res("line1\nline2 " + "x".repeat(500)))
+    expect(detail.startsWith("line1 line2")).toBe(true)
+    expect(detail.length).toBe(300)
   })
 })

@@ -20,6 +20,8 @@ import {
   SEARCH_PROVIDERS,
   createDefaultSearchUsageStats,
   normalizeSearchProviderHealthSettings,
+  type SearchProviderSettings,
+  type SearchProviderType,
 } from "@cognia/web-search/types"
 import { normalizeCustomSearchSource, SEARCH_SOURCES } from "@cognia/web-search/search-constants"
 import { DEFAULT_APPEARANCE_SLICE, DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
@@ -35,6 +37,11 @@ import { DEFAULT_PROVIDER_DIAGNOSTICS_PREFERENCES } from "@cognia/provider-types
 import type { DifficultyRoutingSettings } from "@/types/routing/tool-route"
 import { getDb, withDbReopenRetry } from "./schema"
 import { resolveLocalePreference } from "@/lib/i18n/locale-preference"
+import {
+  freshInstallWebReader,
+  legacyCompatibilityWebReader,
+  normalizeWebReaderSettings,
+} from "@/lib/web/reader/reader-settings"
 
 const SINGLETON_ID = "singleton" as const
 
@@ -89,6 +96,8 @@ export const DEFAULTS: AppSettings = {
   browserDefaultBackend: "auto",
   cliBridge: { autoSync: false },
   webTools: { enabled: true },
+  // An explicit reset uses fresh-install consent, never the upgrade profile.
+  webReader: freshInstallWebReader(),
   // Legacy dismissal stamp — read once by `lib/onboarding/migrate-legacy.ts`,
   // never written. Fresh installs have no progress at all, which is what makes
   // `OnboardingGate` route them into the flow.
@@ -317,7 +326,16 @@ export async function getSettings(scope?: {
   scope?.assertActive()
   // Forward-compat: merge defaults under the persisted row so older installs
   // pick up new fields (e.g., searchProviders) without a schema migration.
-  if (!row) return { ...DEFAULTS, ...resolveLocalePreference() }
+  if (!row) return { ...DEFAULTS, webReader: freshInstallWebReader(), ...resolveLocalePreference() }
+  const reader = normalizeWebReaderSettings(row.webReader, {
+    rowExists: true,
+    webTools: row.webTools,
+  })
+  const webReader = !Object.prototype.hasOwnProperty.call(row, "webReader")
+    ? legacyCompatibilityWebReader(row.webTools)
+    : reader.source === "unsupported-version"
+      ? (reader.preserved ?? reader.effective)
+      : reader.effective
   const autoRouting = mergeAutoRouting(row.autoRouting, row.difficultyRouting)
   const routingConfig = {
     ...DEFAULT_ROUTING_CONFIG,
@@ -340,6 +358,8 @@ export async function getSettings(scope?: {
   return {
     ...DEFAULTS,
     ...row,
+    webReader,
+    searchProviders: mergeSearchProviders(row.searchProviders),
     ...resolveLocalePreference(row),
     customSearchSources: customSearchSources as AppSettings["customSearchSources"],
     defaultSearchSources: (row.defaultSearchSources ?? []).filter((id) =>
@@ -512,6 +532,17 @@ function mergeOcrSettings(stored: UserOcrSettings | undefined): UserOcrSettings 
   return merged
 }
 
+function mergeSearchProviders(
+  patch: AppSettings["searchProviders"],
+  current?: AppSettings["searchProviders"]
+): Record<SearchProviderType, SearchProviderSettings> {
+  const merged = { ...DEFAULT_SEARCH_PROVIDER_SETTINGS, ...current }
+  for (const id of Object.keys(merged) as SearchProviderType[]) {
+    merged[id] = { ...DEFAULT_SEARCH_PROVIDER_SETTINGS[id], ...current?.[id], ...patch?.[id] }
+  }
+  return merged
+}
+
 function mergeBuiltinTools(stored: BuiltinToolsConfig | undefined): BuiltinToolsConfig {
   return { ...DEFAULT_BUILTIN_TOOLS, ...(stored ?? {}) }
 }
@@ -553,6 +584,12 @@ export async function saveSettings(
       options.scope?.assertActive()
       const current = await getSettings(options.scope)
       options.scope?.assertActive()
+      // Normalized reads must not turn an unrelated preference import/save
+      // into an explicit Reader choice on an existing legacy installation.
+      const rawReaderRow = !Object.prototype.hasOwnProperty.call(patch, "webReader")
+        ? await (options.scope?.db ?? getDb()).settings.get(SINGLETON_ID)
+        : undefined
+      options.scope?.assertActive()
       const migratedCurrent: AppSettings = {
         ...current,
         defaultAccountIds: current.defaultAccountIds ? { ...current.defaultAccountIds } : undefined,
@@ -564,6 +601,14 @@ export async function saveSettings(
       const merged: AppSettings = {
         ...migratedCurrent,
         ...patch,
+        // Portable profile imports contain preferences only. Merge each
+        // provider so omitted local credentials/endpoints remain on this host;
+        // explicit local writes (including clearing a key) still take effect.
+        ...(patch.searchProviders !== undefined
+          ? {
+              searchProviders: mergeSearchProviders(patch.searchProviders, current.searchProviders),
+            }
+          : {}),
         ...resolveLocalePreference({
           ...migratedCurrent,
           ...patch,
@@ -574,6 +619,9 @@ export async function saveSettings(
         }),
         id: SINGLETON_ID,
         updatedAt: Date.now(),
+      }
+      if (rawReaderRow && !Object.prototype.hasOwnProperty.call(rawReaderRow, "webReader")) {
+        delete merged.webReader
       }
       migrateLegacyDefaultAccount(merged)
       await (options.scope?.db ?? getDb()).settings.put(merged)

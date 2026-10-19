@@ -152,6 +152,7 @@ export async function searchWithSerpAPI(
   try {
     const response = await serpApiFetch(`${SERPAPI_URL}?${params.toString()}`, {
       method: "GET",
+      signal: options.signal,
     })
 
     if (!response.ok) {

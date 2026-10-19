@@ -70,6 +70,17 @@ export interface WebAccessInput {
    * is an input rather than something derived here from a provider id.
    */
   nativeAvailable: boolean
+  /**
+   * Does the runtime bring its own web SEARCH? Overrides
+   * {@link nativeAvailable} for the search operation only.
+   */
+  nativeSearchAvailable?: boolean
+  /**
+   * Does the runtime bring its own web FETCH? Overrides
+   * {@link nativeAvailable} for the fetch operation only. A runtime can have
+   * native search without native fetch, or vice versa.
+   */
+  nativeFetchAvailable?: boolean
   /** `AppSettings.searchProviders`. */
   searchProviders?: AppSettings["searchProviders"]
   /** `AppSettings.defaultSearchProvider`. */
@@ -198,39 +209,33 @@ export function resolveWebAccess(input: WebAccessInput): WebAccessResolution {
   }
 
   const forced = intent === "force"
-  // The escape hatch for someone who wants Cognia's multi-provider search even
-  // where a native exists (a provider with better recency/domain filters, or a
-  // native they simply do not want billed). Honoured only when it can actually
-  // be served — preferring an unconfigured path would be a third way to end up
-  // with no web at all.
-  const preferCognia = input.webTools?.preferCognia === true && byoProviderId !== undefined
+  // Each operation resolves on its own availability and preference. Search
+  // and fetch fail apart (fetch needs no key), so a single shared signal made
+  // "keep native search, read through Cognia's Reader" impossible without a
+  // search key that would never be used.
+  const nativeSearch = input.nativeSearchAvailable ?? input.nativeAvailable
+  const nativeFetch = input.nativeFetchAvailable ?? input.nativeAvailable
+  const legacyPrefer = input.webTools?.preferCognia === true
+  // Search: the escape hatch is honoured only when it can actually be served —
+  // preferring an unconfigured search would be a third way to end up with none.
+  const preferCogniaSearch =
+    (input.webTools?.preferCogniaSearch ?? legacyPrefer) === true && byoProviderId !== undefined
+  // Fetch: Cognia's Reader needs no key, so the preference always holds.
+  const preferCogniaFetch = (input.webTools?.preferCogniaFetch ?? legacyPrefer) === true
 
-  if (input.nativeAvailable && !preferCognia) {
-    return {
-      mode: "native",
-      search: "native",
-      fetch: "native",
-      forced,
-      preSearch,
-      ...(byoProviderId ? { searchProviderId: byoProviderId } : {}),
-    }
-  }
-  if (byoProviderId) {
-    return {
-      mode: "cognia",
-      search: "cognia",
-      fetch: "cognia",
-      searchProviderId: byoProviderId,
-      forced,
-      preSearch,
-    }
-  }
+  const search: WebToolRoute =
+    nativeSearch && !preferCogniaSearch ? "native" : byoProviderId ? "cognia" : "none"
+  const fetch: WebToolRoute = nativeFetch && !preferCogniaFetch ? "native" : "cognia"
+
+  const mode: WebAccessMode =
+    search === "native" ? "native" : search === "cognia" ? "cognia" : "search-unavailable"
   return {
-    mode: "search-unavailable",
-    search: "none",
-    fetch: "cognia",
-    reason: "no-native-no-provider",
+    mode,
+    search,
+    fetch,
     forced,
     preSearch,
+    ...(mode === "search-unavailable" ? { reason: "no-native-no-provider" as const } : {}),
+    ...(byoProviderId ? { searchProviderId: byoProviderId } : {}),
   }
 }

@@ -86,7 +86,8 @@ export function ToolSettingsSection() {
   const setBuiltinToolEnabled = useSettingsStore((s) => s.setBuiltinToolEnabled)
 
   const setWebToolsEnabled = useSettingsStore((s) => s.setWebToolsEnabled)
-  const setWebToolsPreferCognia = useSettingsStore((s) => s.setWebToolsPreferCognia)
+  const setWebToolsPreferCogniaSearch = useSettingsStore((s) => s.setWebToolsPreferCogniaSearch)
+  const setWebToolsPreferCogniaFetch = useSettingsStore((s) => s.setWebToolsPreferCogniaFetch)
   const setWebToolsAllowPrivateHosts = useSettingsStore((s) => s.setWebToolsAllowPrivateHosts)
   const setWebToolsAlwaysDistill = useSettingsStore((s) => s.setWebToolsAlwaysDistill)
   const setSkillToolEnabled = useSettingsStore((s) => s.setSkillToolEnabled)
@@ -100,11 +101,9 @@ export function ToolSettingsSection() {
 
   const builtinTools = settings?.builtinTools ?? DEFAULT_BUILTIN_TOOLS
   const webToolsEnabled = settings?.webTools?.enabled ?? true
-  // The switch used to be "use the SDK's natives on Anthropic", defaulting off.
-  // Native is the default resolution now (`lib/chat/web-access.ts`), so the
-  // remaining choice is the opposite one: take Cognia's multi-provider search
-  // even where a native exists.
-  const webPreferCognia = settings?.webTools?.preferCognia ?? false
+  const legacyWebPreferCognia = settings?.webTools?.preferCognia ?? false
+  const webPreferCogniaSearch = settings?.webTools?.preferCogniaSearch ?? legacyWebPreferCognia
+  const webPreferCogniaFetch = settings?.webTools?.preferCogniaFetch ?? legacyWebPreferCognia
   const webAllowPrivateHosts = settings?.webTools?.allowPrivateHosts ?? false
   const webAlwaysDistill = settings?.webTools?.alwaysDistill ?? false
   const skillToolEnabled = settings?.selfInvokeTools?.skill ?? false
@@ -159,18 +158,51 @@ export function ToolSettingsSection() {
           <CardDescription className="text-[11px] leading-snug pt-1">
             {t("webCardDesc")}
           </CardDescription>
-          {webToolsEnabled && desktop && (
+          {webToolsEnabled && (
             <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
               <div className="min-w-0">
-                <p className="text-[12px] font-medium">{t("webPreferCogniaTitle")}</p>
+                <p className="text-[12px] font-medium">{t("webPreferCogniaSearchTitle")}</p>
                 <p className="text-[11px] leading-snug text-muted-foreground">
-                  {t("webPreferCogniaDesc")}
+                  {t("webPreferCogniaSearchDesc")}
                 </p>
+                {settings?.webTools?.preferCogniaSearch === undefined && (
+                  <p className="text-[11px] text-muted-foreground">
+                    {t(
+                      webPreferCogniaSearch
+                        ? "webPreferenceInheritedOn"
+                        : "webPreferenceInheritedOff"
+                    )}
+                  </p>
+                )}
               </div>
               <Switch
-                checked={webPreferCognia}
-                onCheckedChange={(next) => setWebToolsPreferCognia(next)}
-                aria-label={t("toggleAriaLabel", { name: t("webPreferCogniaTitle") })}
+                checked={webPreferCogniaSearch}
+                onCheckedChange={(next) => setWebToolsPreferCogniaSearch(next)}
+                aria-label={t("toggleAriaLabel", { name: t("webPreferCogniaSearchTitle") })}
+              />
+            </div>
+          )}
+          {webToolsEnabled && (
+            <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-[12px] font-medium">{t("webPreferCogniaFetchTitle")}</p>
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  {t("webPreferCogniaFetchDesc")}
+                </p>
+                {settings?.webTools?.preferCogniaFetch === undefined && (
+                  <p className="text-[11px] text-muted-foreground">
+                    {t(
+                      webPreferCogniaFetch
+                        ? "webPreferenceInheritedOn"
+                        : "webPreferenceInheritedOff"
+                    )}
+                  </p>
+                )}
+              </div>
+              <Switch
+                checked={webPreferCogniaFetch}
+                onCheckedChange={(next) => setWebToolsPreferCogniaFetch(next)}
+                aria-label={t("toggleAriaLabel", { name: t("webPreferCogniaFetchTitle") })}
               />
             </div>
           )}

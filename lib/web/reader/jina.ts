@@ -37,6 +37,36 @@ export async function fetchViaJina(
   }
 }
 
+export type JinaReadOutcome =
+  { ok: true; result: ReaderResult; status: number } | { ok: false; status?: number; error: string }
+
+/**
+ * Status-preserving form of {@link fetchViaJina} for the configured Reader:
+ * reports the Jina service status (a reader-service status, never the
+ * origin's) and lets an abort propagate instead of collapsing it to `null`.
+ */
+export async function readViaJina(
+  url: string,
+  fetchImpl: ReaderFetch,
+  signal?: AbortSignal
+): Promise<JinaReadOutcome> {
+  let res: Response
+  try {
+    res = await fetchImpl(`${JINA_ENDPOINT}${url}`, {
+      method: "GET",
+      headers: { "X-Return-Format": "markdown", Accept: "text/plain" },
+      ...(signal ? { signal } : {}),
+    })
+  } catch (error) {
+    if (signal?.aborted) throw error
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+  if (!res.ok) return { ok: false, status: res.status, error: `Jina Reader returned ${res.status}` }
+  const body = (await res.text()).trim()
+  if (!body) return { ok: false, status: res.status, error: "empty_content" }
+  return { ok: true, result: parseJinaBody(body, url), status: res.status }
+}
+
 /**
  * Jina prefixes its Markdown with a small header:
  *
