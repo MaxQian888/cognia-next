@@ -78,7 +78,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { MOBILE_SPRING, mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { steerMetaOf } from "@/lib/claude/steer"
-import { discardPendingSteer, editPendingSteer } from "@/hooks/chat/steer-runtime"
+import { commitPendingSteerEdit, discardPendingSteer } from "@/hooks/chat/steer-runtime"
 import { resolveDragEnd } from "@/lib/chat/attachments/reorder"
 import { cn } from "@/lib/utils"
 import {
@@ -249,10 +249,8 @@ function SteerQueueSection({
 
   const commitEdit = () => {
     if (!editing) return
-    const next = editing.text.trim()
     setEditing(null)
-    if (!next) discardPendingSteer(sessionId, editing.id)
-    else editPendingSteer(sessionId, editing.id, next)
+    commitPendingSteerEdit(sessionId, editing.id, editing.text)
   }
 
   const onDragEnd = (event: DragEndEvent) => {

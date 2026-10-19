@@ -1025,6 +1025,8 @@ export async function recordFailure(opts: {
    * one may be re-based (see `offerHostStateRow`).
    */
   forgetOffer?: boolean
+  /** Retry even when the error's own verdict says not to (see `decideNextAttempt`). */
+  forceRetryable?: boolean
 }): Promise<MobileOutboundStatus> {
   const db = getDb()
   return db.transaction("rw", db.mobileOutboundQueue, async () => {
@@ -1035,6 +1037,7 @@ export async function recordFailure(opts: {
       error: opts.error,
       nowMs: opts.nowMs,
       random: opts.random,
+      ...(opts.forceRetryable ? { forceRetryable: true } : {}),
     })
     const next: MobileOutboundJobRow = {
       ...row,
@@ -1146,9 +1149,16 @@ export async function vacuumSent(keepMs: number = 24 * 60 * 60 * 1000): Promise<
 /**
  * Reset a terminal row back to pending so the user can retry manually.
  *
- * The retry keeps its `actionId` — and therefore its idempotency key — so a
- * dispatch that actually reached the Host before the client gave up is
- * recognised as a duplicate instead of applied twice.
+ * The retry keeps its `actionId`, so a dispatch that actually reached the Host
+ * before the client gave up is recognised by the Host's ledger as a duplicate
+ * instead of applied twice. A HostState row gets a fresh transport
+ * idempotency key, though: the retry may be re-based onto the Host's current
+ * generation (below), which changes the request body, and the Host's RPC layer
+ * refuses a changed body under a key it has already answered — the retry
+ * failed as an idempotency conflict for as long as the old receipt lived. The
+ * domain identity (`actionId`) is what deduplicates the intent; the transport
+ * key only deduplicates one wire attempt. Other rows keep their key: their
+ * Host arms deduplicate on it.
  *
  * Its `clientSeq`, though, is re-stamped to the tail of its channel. It has to
  * be: the row stopped blocking the channel the moment it went terminal, so
@@ -1177,6 +1187,7 @@ export async function retryDeadletter(id: string, nowMs: number = Date.now()): P
       rejectionCode: undefined,
       currentRevision: undefined,
       ...(clientSeq === undefined ? {} : { clientSeq }),
+      ...(row.protocol === "host-state" ? { idempotencyKey: crypto.randomUUID() } : {}),
     }
     // A retry is the user re-sending on purpose. Forgetting the earlier offer
     // lets it be re-based onto the Host's current generation; without that a

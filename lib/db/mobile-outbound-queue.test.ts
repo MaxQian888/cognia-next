@@ -1178,8 +1178,12 @@ describe("per-channel dispatch order", () => {
       nextAttemptAt: 7_000,
       clientSeq: 3,
       actionId: "dead",
-      idempotencyKey: "dead",
     })
+    // A fresh wire key: the retry may be re-based (a changed body), and the
+    // Host's RPC refuses a changed body under a key it already answered. The
+    // action id is what keeps the intent deduplicated.
+    expect(row?.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
+    expect(row?.idempotencyKey).not.toBe("dead")
     // `later` is now the channel head; the retry waits its turn behind it.
     await expect(claimNext(7_000, scope)).resolves.toMatchObject({ id: "later" })
   })
@@ -1192,6 +1196,23 @@ describe("per-channel dispatch order", () => {
 
     expect((await getDb().mobileOutboundQueue.get("dead"))?.clientSeq).toBe(2)
     await expect(claimNext(7_000, scope)).resolves.toMatchObject({ id: "dead" })
+  })
+
+  it("keeps the idempotency key of a retried row whose Host arm deduplicates on it", async () => {
+    await getDb().mobileOutboundQueue.put({
+      id: "relay",
+      accountId: scope.accountId,
+      targetId: scope.targetId,
+      command: "connector_send",
+      payload: {},
+      status: "deadlettered",
+      attempts: 5,
+      createdAt: 1,
+      nextAttemptAt: 0,
+      idempotencyKey: "relay-key",
+    })
+    await retryDeadletter("relay", 7_000)
+    expect((await getDb().mobileOutboundQueue.get("relay"))?.idempotencyKey).toBe("relay-key")
   })
 
   it("clears the previous refusal when a rejected row is retried", async () => {

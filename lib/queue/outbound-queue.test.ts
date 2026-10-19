@@ -813,6 +813,91 @@ describe("createOutboundRunner", () => {
     await runner.stop()
   })
 
+  it("holds a HostState row the Host answers with a still-running operation", async () => {
+    let clock = 1_000
+    const call = jest
+      .fn()
+      .mockResolvedValueOnce({
+        id: "op-1",
+        done: false,
+        status: "running",
+        metadata: { createdAt: 1, updatedAt: 1 },
+      })
+      .mockResolvedValueOnce({
+        id: "op-1",
+        done: true,
+        status: "succeeded",
+        metadata: { createdAt: 1, updatedAt: 2 },
+        result: {
+          results: [{ actionId: "a", outcome: "applied", hostGeneration: 1, hostSeq: 1 }],
+        },
+      })
+    const runner = createOutboundRunner({
+      dispatcher: { call },
+      enforceMobile: false,
+      scope,
+      now: () => clock,
+      hostStateOperationPollMs: 500,
+    })
+    const row = await enqueue({
+      command: "host_state_submit",
+      payload: {},
+      protocol: "host-state",
+      actionId: "a",
+      nowMs: clock,
+    })
+    await runner.kick()
+    // Not a malformed response, and no attempt spent: the first try under
+    // this key is still in the Host's ledger.
+    expect(await getDb().mobileOutboundQueue.get(row.id)).toMatchObject({
+      status: "pending",
+      attempts: 0,
+    })
+    expect(call).toHaveBeenCalledTimes(1)
+    clock += 500
+    await runner.kick()
+    expect(call).toHaveBeenCalledTimes(2)
+    expect((await getDb().mobileOutboundQueue.get(row.id))?.status).toBe("sent")
+    await runner.stop()
+  })
+
+  it("settles a HostState row from a finished operation's problem", async () => {
+    const runner = createOutboundRunner({
+      dispatcher: {
+        call: async () => ({
+          id: "op-1",
+          done: true,
+          status: "failed",
+          metadata: { createdAt: 1, updatedAt: 2 },
+          error: {
+            type: "https://cognia.dev/problems/upgrade_required",
+            title: "Upgrade required",
+            status: 426,
+            code: "upgrade_required",
+            detail: "",
+            requestId: "req-1",
+            retryable: false,
+            details: {},
+          },
+        }),
+      },
+      enforceMobile: false,
+      scope,
+    })
+    const row = await enqueue({
+      command: "host_state_submit",
+      payload: {},
+      protocol: "host-state",
+      actionId: "a",
+    })
+    await runner.kick()
+    expect(await getDb().mobileOutboundQueue.get(row.id)).toMatchObject({
+      status: "rejected",
+      rejectionCode: "upgrade_required",
+    })
+    await runner.stop()
+  })
+
   it("accepts exact HostState success and coded terminal errors", async () => {
     const call = jest
       .fn()

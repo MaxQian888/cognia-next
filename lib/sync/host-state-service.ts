@@ -13,6 +13,7 @@ import {
   hostStateIntentCapability,
   type HostStateActionReceipt,
   type HostStateAction,
+  type HostStateIntentKind,
   type HostStateAttachmentRef,
   type HostStateAppliedAction,
   type HostStateChannelState,
@@ -72,10 +73,79 @@ export const MAX_HOST_STATE_SNAPSHOT_BYTES = 512 * 1024
 export const MAX_HOST_STATE_ACTION_BATCH = 50
 /** Backlog ceiling while a client is not `ready`. See `bufferEvent`. */
 export const MAX_BUFFERED_HOST_STATE_EVENTS = 2_000
+/** Turn statuses a steer or follow-up can still reach. */
+const LIVE_TURN_STATUSES: ReadonlySet<string> = new Set(["queued", "running", "awaiting-decision"])
+
+/** Failed dispatches of one action before the Host abandons it. */
+export const HOST_STATE_DISPATCH_MAX_ATTEMPTS = 6
+export const HOST_STATE_DISPATCH_BASE_BACKOFF_MS = 5_000
+export const HOST_STATE_DISPATCH_MAX_BACKOFF_MS = 5 * 60_000
+/**
+ * How long a `pending` row (or a pending broadcast) may sit before the
+ * periodic sweep treats it as stranded. A submit commits the row and processes
+ * it moments later in the same call; the sweep must not race that.
+ */
+export const HOST_STATE_REDRIVE_GRACE_MS = 30_000
+
+/** Delay before retry `attempts + 1` of a failed dispatch. */
+export function hostStateDispatchBackoffMs(attempts: number): number {
+  const exponent = Math.max(0, attempts - 1)
+  return Math.min(
+    HOST_STATE_DISPATCH_BASE_BACKOFF_MS * 2 ** exponent,
+    HOST_STATE_DISPATCH_MAX_BACKOFF_MS
+  )
+}
+
+/**
+ * When a failed dispatch of `kind` may be attempted again.
+ *
+ * A queued message is the user's next turn whenever it runs, so it is retried
+ * across a restart. An answer to a permission or question prompt names a
+ * request only the runtime that asked can take, so it is retried while that
+ * runtime (this Host generation) lives. A steer, follow-up or stop names the
+ * turn running when it was sent; delivered late it would act on whatever runs
+ * then, so it is never retried at all.
+ */
+function dispatchRetryScope(kind: HostStateIntentKind): "always" | "generation" | "never" {
+  switch (kind) {
+    case "message.enqueue":
+      return "always"
+    case "approval.respond":
+    case "elicitation.respond":
+      return "generation"
+    default:
+      return "never"
+  }
+}
 
 export interface HostStateRuntimeDispatchResult {
   correlationId?: string
 }
+
+/**
+ * A dispatch the Host must never attempt again: a replay that may already have
+ * had effects, or a failure no retry can change. `code` is what clients see.
+ */
+export class HostStateDispatchAbandonedError extends Error {
+  constructor(readonly code: string) {
+    super(code)
+    this.name = "HostStateDispatchAbandonedError"
+  }
+}
+
+/**
+ * Dispatch failures that describe the action or the Host, not the moment: a
+ * retry would fail the same way, so the action is abandoned on the first one.
+ */
+const TERMINAL_DISPATCH_ERRORS: readonly string[] = [
+  "host_state_session_id_required",
+  "host_state_session_not_found",
+  "host_state_runtime_not_builtin",
+  "host_state_attachment_unavailable",
+  "host_state_attachment_processing_failed",
+  "host_state_elicitation_not_pending",
+  "host_state_runtime_action_not_required",
+]
 
 export type HostStateRuntimeDispatcher = (
   action: HostStateAction
@@ -207,6 +277,12 @@ export function createAgentRpcHostStateDispatcher(
             action.actionId
           )
           if (claim === "owned_elsewhere") return
+          if (claim === "recovery_required") {
+            // An earlier attempt may have run tools. The submission is parked
+            // for an explicit resume; sending it again here is the double
+            // side effect the recovery plan exists to prevent.
+            throw new HostStateDispatchAbandonedError("host_state_recovery_required")
+          }
           if (claim === "claimed") {
             const { startWorkSubmissionLeaseHeartbeat } =
               await import("@/lib/work-submission/lease-heartbeat")
@@ -436,6 +512,12 @@ export interface HostStateService {
   ): Promise<HostStateSubmitResponse>
   status(): Promise<HostStateStatus>
   recover(): Promise<{ dispatched: number; broadcast: number }>
+  /**
+   * Retry what has come due: failed dispatches past their `nextDispatchAt`,
+   * and rows stranded past {@link HOST_STATE_REDRIVE_GRACE_MS}. The lease
+   * heartbeat calls this once recovery has finished.
+   */
+  sweep(): Promise<void>
   projectRuntimeEnvelope(envelope: AgentEventEnvelope): Promise<HostStateAppliedAction | null>
 }
 
@@ -939,6 +1021,9 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
   let generation: number | null = null
   let heartbeat: ReturnType<typeof setInterval> | null = null
   let recovery: HostStateRecoveryStatus = "recovering"
+  /** Actions whose dispatch is running now, so a sweep never sends one twice. */
+  const inFlight = new Set<string>()
+  let sweeping: Promise<void> | null = null
 
   const assertRequestScope = (accountId: string, runtimeTargetId: string): void => {
     if (accountId !== options.accountId || runtimeTargetId !== options.runtimeTargetId) {
@@ -951,16 +1036,18 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
      * Bring the Host back up, in an order that never reports state it has not
      * yet checked.
      *
-     * 1. Take the lease — winning it is what proves the previous owner is gone.
-     * 2. Redrive the ledger: actions left mid-dispatch or mid-broadcast by that
-     *    owner. This is the step production never took. `recover()` existed and
-     *    was exercised only by tests, so after a restart a half-dispatched send
-     *    simply sat in the ledger forever, and the client that submitted it
-     *    waited on a receipt that was never coming.
-     * 3. Settle turns the previous owner left in flight. Nothing is running any
+     * 1. Take the lease — winning it is what proves the previous owner is gone
+     *    — and start renewing it, so a long recovery cannot outlive it.
+     * 2. Settle turns the previous owner left in flight. Nothing is running any
      *    more — the runtime went with it — so a channel still reading `running`
-     *    is lying to every replica that reads it.
-     * 4. Only then start the heartbeat and report `ready`.
+     *    is lying to every replica that reads it. Queued messages survive this.
+     * 3. Redrive the ledger: actions left mid-dispatch or mid-broadcast by that
+     *    owner, each through its own failure. This is the step production never
+     *    took. `recover()` existed and was exercised only by tests, so after a
+     *    restart a half-dispatched send simply sat in the ledger forever, and
+     *    the client that submitted it waited on a receipt that was never coming.
+     * 4. Only then report `ready`. From here the heartbeat also sweeps the
+     *    ledger for retries that come due.
      *
      * A failure in 2 or 3 lands on `degraded` rather than throwing: the Host is
      * still the only writer and refusing to start would strand every client,
@@ -976,11 +1063,33 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
       generation = acquired.hostGeneration
       recovery = "recovering"
 
+      // Before recovery, not after it: redriving a backlog can take longer than
+      // the lease lives, and a lease that lapses mid-recovery hands the Host to
+      // another owner while this one is still dispatching.
+      if (startOptions.heartbeat !== false && !heartbeat) {
+        heartbeat = setInterval(() => {
+          if (generation === null) return
+          void renewHostStateLease({
+            ownerId: options.ownerId,
+            hostGeneration: generation,
+            now: now(),
+          })
+            .then(() => {
+              if (recovery !== "recovering") void sweepDue()
+            })
+            .catch(() => undefined)
+        }, HOST_STATE_LEASE_HEARTBEAT_MS)
+      }
+
       if (startOptions.recover !== false) {
         try {
-          await service.recover()
-          await settleOrphanedTurns()
-          recovery = "ready"
+          // Settle first, then redrive. Settling expires what the dead runtime
+          // held open but keeps queued messages and their operations; redriving
+          // first meant a queued message restarted here could be read back as
+          // the dead owner's turn and marked lost the moment it started.
+          const unsettled = await settleOrphanedTurns()
+          const redriven = await redrive(await listPendingHostStateActions(), { startup: true })
+          recovery = unsettled + redriven.failedRows > 0 ? "degraded" : "ready"
         } catch (error) {
           recovery = "degraded"
           loggers.sync.error("[host-state] recovery failed; serving degraded", {
@@ -991,17 +1100,6 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
         }
       } else {
         recovery = "ready"
-      }
-
-      if (startOptions.heartbeat !== false && !heartbeat) {
-        heartbeat = setInterval(() => {
-          if (generation === null) return
-          void renewHostStateLease({
-            ownerId: options.ownerId,
-            hostGeneration: generation,
-            now: now(),
-          }).catch(() => undefined)
-        }, HOST_STATE_LEASE_HEARTBEAT_MS)
       }
       return service.status()
     },
@@ -1116,7 +1214,21 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
         }
         const row = await getHostStateAction(action.hostGeneration, action.actionId)
         if (!row) throw new Error("host_state_ledger_missing")
-        await processRow(row)
+        // The action is committed: the receipt is the answer whatever happens
+        // next. A dispatch failure is recorded on the row and published as the
+        // operation's `failed`; failing the submit instead made the transport
+        // cache that error as the answer to this idempotency key, so the
+        // client's retry replayed it while the Host held a durable action
+        // nothing would send. A broadcast or summary failure leaves the row
+        // pending for the sweep.
+        try {
+          await processRow(row)
+        } catch (error) {
+          loggers.sync.warn("[host-state] committed action left for the sweep", {
+            actionId: action.actionId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
         results.push(receiptFromEvent(committed.event, committed.duplicate))
       }
       return { results }
@@ -1140,17 +1252,12 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
     },
 
     async recover() {
-      const pending = await listPendingHostStateActions()
-      let dispatched = 0
-      let broadcast = 0
-      for (const row of pending) {
-        const beforeDispatch = row.dispatchState
-        const beforeBroadcast = row.broadcastState
-        await processRow(row)
-        if (beforeDispatch === "pending" || beforeDispatch === "failed") dispatched += 1
-        if (beforeBroadcast === "pending") broadcast += 1
-      }
-      return { dispatched, broadcast }
+      const result = await redrive(await listPendingHostStateActions(), { startup: false })
+      return { dispatched: result.dispatched, broadcast: result.broadcast }
+    },
+
+    sweep() {
+      return sweepDue()
     },
 
     async projectRuntimeEnvelope(envelope) {
@@ -1291,41 +1398,76 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
     }
   }
 
-  async function processRow(row: HostStateActionRow): Promise<void> {
-    if (row.dispatchState === "pending" || row.dispatchState === "failed") {
-      if (!row.action) throw new Error("host_state_recovery_payload_missing")
-      if (!options.dispatchRuntime) throw new Error("host_state_runtime_dispatch_unavailable")
+  /**
+   * Work every row through its own failure. One poisoned action (a payload a
+   * dispatch always throws on, a publish that keeps failing) used to end the
+   * whole pass, stranding every unrelated action queued behind it.
+   */
+  async function redrive(
+    rows: readonly HostStateActionRow[],
+    context: { startup: boolean }
+  ): Promise<{ dispatched: number; broadcast: number; failedRows: number }> {
+    let dispatched = 0
+    let broadcast = 0
+    let failedRows = 0
+    for (const row of rows) {
+      const beforeDispatch = row.dispatchState
+      const beforeBroadcast = row.broadcastState
       try {
-        const result = await options.dispatchRuntime(row.action)
-        await markHostStateDispatch(row.hostGeneration, row.actionId, {
-          state: "completed",
-          runtimeCorrelation: result?.correlationId,
-        })
-        row.dispatchState = "completed"
-        // Only an enqueue gets a second word from the runtime — its
-        // `queue`/`accepted` event, keyed by the submitting action id — so only
-        // an enqueue waits on `dispatching`. Everything else (an abort, a
-        // steer, a decision answer) is confirmed by the dispatch call itself
-        // returning; parking those on `dispatching` meant they could only ever
-        // end up `expired` when the turn settled, so a stop that was honoured
-        // was indistinguishable from one that was lost.
-        await commitOperationStatus(row, {
-          status: row.action.action.kind === "message.enqueue" ? "dispatching" : "acknowledged",
-          ...(result?.correlationId ? { correlationId: result.correlationId } : {}),
-        })
+        await processRow(row, context)
+        if (beforeDispatch === "pending" || beforeDispatch === "failed") dispatched += 1
+        if (beforeBroadcast === "pending") broadcast += 1
       } catch (error) {
-        const errorCode = error instanceof Error ? error.name : "runtime_dispatch_failed"
-        await markHostStateDispatch(row.hostGeneration, row.actionId, {
-          state: "failed",
-          errorCode,
+        failedRows += 1
+        loggers.sync.error("[host-state] redrive of one action failed", {
+          actionId: row.actionId,
+          hostGeneration: row.hostGeneration,
+          error: error instanceof Error ? error.message : String(error),
         })
-        // Publish the failure before rethrowing. Without this the client is
-        // left with an operation stuck on `accepted` — and, for an abort or a
-        // decision answer, with the asking-state it took still held. The
-        // reducer gives both back when it sees `failed`.
-        await commitOperationStatus(row, { status: "failed", errorCode }).catch(() => undefined)
-        throw error
       }
+    }
+    return { dispatched, broadcast, failedRows }
+  }
+
+  /**
+   * The periodic half of recovery. Startup redrive alone left a failed
+   * dispatch, or a broadcast that threw, waiting for the next Host restart; the
+   * sweep retries what is due (`nextDispatchAt`, or stranded past the grace
+   * window) on the lease heartbeat, one pass at a time.
+   */
+  function sweepDue(): Promise<void> {
+    if (sweeping) return sweeping
+    sweeping = (async () => {
+      try {
+        const at = now()
+        const due = (await listPendingHostStateActions()).filter((row) => {
+          if (inFlight.has(actionKey(row))) return false
+          if (row.dispatchState === "failed") return (row.nextDispatchAt ?? 0) <= at
+          return row.updatedAt + HOST_STATE_REDRIVE_GRACE_MS <= at
+        })
+        if (due.length > 0) await redrive(due, { startup: false })
+      } catch (error) {
+        loggers.sync.warn("[host-state] sweep failed", {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      } finally {
+        sweeping = null
+      }
+    })()
+    return sweeping
+  }
+
+  function actionKey(row: Pick<HostStateActionRow, "hostGeneration" | "actionId">): string {
+    return `${row.hostGeneration}\u0000${row.actionId}`
+  }
+
+  async function processRow(
+    row: HostStateActionRow,
+    context: { startup?: boolean } = {}
+  ): Promise<void> {
+    if (row.dispatchState === "pending" || row.dispatchState === "failed") {
+      // Another call is dispatching this very row; it owns the rest of it too.
+      if ((await dispatchRow(row, context)) === "busy") return
     }
     if (row.broadcastState === "pending") {
       if (!options.publish) throw new Error("host_state_event_publisher_unavailable")
@@ -1338,6 +1480,125 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
       await markHostStateSummary(row.hostGeneration, row.actionId)
       row.summaryState = "completed"
     }
+  }
+
+  async function dispatchRow(
+    row: HostStateActionRow,
+    context: { startup?: boolean }
+  ): Promise<"busy" | "settled"> {
+    const key = actionKey(row)
+    if (inFlight.has(key)) return "busy"
+    if (!row.action) {
+      await abandonDispatch(row, "host_state_recovery_payload_missing")
+      return "settled"
+    }
+    const scope = dispatchRetryScope(row.action.action.kind)
+    // A previous generation's runtime is gone. Its live controls and prompt
+    // answers have nothing left to act on — or, worse, would act on a turn
+    // that started since — so a restart abandons them instead of replaying.
+    if (context.startup && scope !== "always" && generation !== null) {
+      if (row.hostGeneration < generation) {
+        await abandonDispatch(row, "host_state_host_restarted")
+        return "settled"
+      }
+    }
+    if (row.dispatchState === "failed" && scope === "never") {
+      await abandonDispatch(row, row.lastErrorCode ?? "runtime_dispatch_failed")
+      return "settled"
+    }
+    if (!options.dispatchRuntime) throw new Error("host_state_runtime_dispatch_unavailable")
+    inFlight.add(key)
+    try {
+      let result: HostStateRuntimeDispatchResult | void
+      try {
+        result = await options.dispatchRuntime(row.action)
+      } catch (error) {
+        await recordDispatchFailure(row, error, scope)
+        return "settled"
+      }
+      await markHostStateDispatch(row.hostGeneration, row.actionId, {
+        state: "completed",
+        runtimeCorrelation: result?.correlationId,
+      })
+      row.dispatchState = "completed"
+      // Only an enqueue gets a second word from the runtime — its
+      // `queue`/`accepted` event, keyed by the submitting action id — so only
+      // an enqueue waits on `dispatching`. Everything else (an abort, a
+      // steer, a decision answer) is confirmed by the dispatch call itself
+      // returning; parking those on `dispatching` meant they could only ever
+      // end up `expired` when the turn settled, so a stop that was honoured
+      // was indistinguishable from one that was lost.
+      await commitOperationStatus(row, {
+        status: row.action.action.kind === "message.enqueue" ? "dispatching" : "acknowledged",
+        ...(result?.correlationId ? { correlationId: result.correlationId } : {}),
+      })
+      return "settled"
+    } finally {
+      inFlight.delete(key)
+    }
+  }
+
+  /**
+   * Record a failed dispatch: retried later with backoff when its intent may
+   * be, abandoned when it may not or when the failure cannot improve. Either
+   * way the operation is published `failed` — without that a client is left on
+   * `accepted` and, for an abort or a decision answer, with the asking-state it
+   * took still held. The reducer gives both back when it sees `failed`, and
+   * lets a later successful retry move the operation on again.
+   */
+  async function recordDispatchFailure(
+    row: HostStateActionRow,
+    error: unknown,
+    scope: "always" | "generation" | "never"
+  ): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error)
+    const errorCode =
+      error instanceof HostStateDispatchAbandonedError
+        ? error.code
+        : (TERMINAL_DISPATCH_ERRORS.find((code) => message.includes(code)) ??
+          (error instanceof Error ? error.name : "runtime_dispatch_failed"))
+    const attempts = (row.dispatchAttempts ?? 0) + 1
+    const terminal =
+      error instanceof HostStateDispatchAbandonedError ||
+      TERMINAL_DISPATCH_ERRORS.includes(errorCode) ||
+      scope === "never" ||
+      attempts >= HOST_STATE_DISPATCH_MAX_ATTEMPTS
+    loggers.sync.warn("[host-state] runtime dispatch failed", {
+      actionId: row.actionId,
+      kind: row.action?.action.kind,
+      attempts,
+      terminal,
+      error: message,
+    })
+    if (terminal) {
+      await abandonDispatch(row, errorCode, attempts)
+      return
+    }
+    await markHostStateDispatch(row.hostGeneration, row.actionId, {
+      state: "failed",
+      errorCode,
+      attempts,
+      nextDispatchAt: now() + hostStateDispatchBackoffMs(attempts),
+    })
+    row.dispatchState = "failed"
+    row.dispatchAttempts = attempts
+    row.lastErrorCode = errorCode
+    await commitOperationStatus(row, { status: "failed", errorCode }).catch(() => undefined)
+  }
+
+  async function abandonDispatch(
+    row: HostStateActionRow,
+    errorCode: string,
+    attempts = row.dispatchAttempts
+  ): Promise<void> {
+    await markHostStateDispatch(row.hostGeneration, row.actionId, {
+      state: "abandoned",
+      errorCode,
+      ...(attempts === undefined ? {} : { attempts }),
+    })
+    row.dispatchState = "abandoned"
+    row.lastErrorCode = errorCode
+    await commitOperationStatus(row, { status: "failed", errorCode }).catch(() => undefined)
   }
 
   /**
@@ -1390,39 +1651,54 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
    * and lands the turn on `retryable-error` — resumable, because the
    * conversation itself survived.
    */
-  async function settleOrphanedTurns(): Promise<void> {
+  async function settleOrphanedTurns(): Promise<number> {
     if (generation === null) throw new Error("host_state_lease_missing")
     const channels = await listHostStateSessionChannels()
+    let failed = 0
     for (const channel of channels) {
-      const snapshot = await getHostStateSnapshot(channel)
-      if (snapshot.state.kind !== "session") continue
-      const { turn } = snapshot.state
-      if (
-        turn !== "queued" &&
-        turn !== "running" &&
-        turn !== "awaiting-decision" &&
-        turn !== "stopping"
-      ) {
-        continue
+      try {
+        await settleOrphanedTurn(channel)
+      } catch (error) {
+        failed += 1
+        loggers.sync.error("[host-state] settling an orphaned turn failed", {
+          channel,
+          error: error instanceof Error ? error.message : String(error),
+        })
       }
-      const envelopeId = `recovery:${generation}:${channel}`
-      await commitHostStateRuntimeProjection({
-        hostId: options.hostId,
-        hostGeneration: generation,
-        ownerId: options.ownerId,
-        channel,
-        envelopeId,
-        envelopeDigest: hostStateDigest({ recovery: generation, channel }),
-        mutation: (state) => ({
-          kind: "runtime.changed",
-          runtime: "unavailable",
-          revision: state.revision + 1,
-        }),
-        now: now(),
-      })
-      const row = await getHostStateAction(generation, `runtime:${envelopeId}`)
-      if (row) await processRow(row)
     }
+    return failed
+  }
+
+  async function settleOrphanedTurn(channel: string): Promise<void> {
+    if (generation === null) throw new Error("host_state_lease_missing")
+    const snapshot = await getHostStateSnapshot(channel)
+    if (snapshot.state.kind !== "session") return
+    const { turn } = snapshot.state
+    if (
+      turn !== "queued" &&
+      turn !== "running" &&
+      turn !== "awaiting-decision" &&
+      turn !== "stopping"
+    ) {
+      return
+    }
+    const envelopeId = `recovery:${generation}:${channel}`
+    await commitHostStateRuntimeProjection({
+      hostId: options.hostId,
+      hostGeneration: generation,
+      ownerId: options.ownerId,
+      channel,
+      envelopeId,
+      envelopeDigest: hostStateDigest({ recovery: generation, channel }),
+      mutation: (state) => ({
+        kind: "runtime.changed",
+        runtime: "unavailable",
+        revision: state.revision + 1,
+      }),
+      now: now(),
+    })
+    const row = await getHostStateAction(generation, `runtime:${envelopeId}`)
+    if (row) await processRow(row)
   }
 
   async function projectSessionSummary(source: HostStateActionRow): Promise<void> {
@@ -1901,6 +2177,21 @@ function mutationForAction(
       }
     case "turn.steer":
     case "turn.followup":
+      // A steer names the turn running when it was typed. Delivered after that
+      // turn ended — a send that waited in an outbox, a retry after a
+      // reconnect — it would otherwise reach the runtime with nothing running
+      // and ride into whatever turn starts next. Refused, so the client can
+      // send the words as a message of their own instead.
+      if (!LIVE_TURN_STATUSES.has(state.turn)) {
+        return {
+          rejection: {
+            code: "host_state_turn_not_running",
+            message: "No turn is running to steer.",
+            currentRevision: state.revision,
+          },
+        }
+      }
+      return { mutation: { kind: "operation.accepted", operation: operation(), revision } }
     case "turn.abort":
       // No status change of its own. A steer that fails to dispatch used to
       // leave the session reading "queued" forever; an abort that failed used

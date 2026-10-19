@@ -525,6 +525,62 @@ describe("session attachment uploads", () => {
     expect(await getDb().sessionAttachmentUploads.get(init.uploadId)).toBeUndefined()
   })
 
+  it("keeps the bytes of a message the Host accepted but has not dispatched yet", async () => {
+    const { init, committed } = await uploadWhole({
+      sessionId: "ses-1",
+      deviceId: "dev-a",
+      bytes: pngBytes(64),
+    })
+    const actionRow = (dispatchState: "pending" | "failed" | "completed") => ({
+      hostGeneration: 1,
+      actionId: `action-${dispatchState}`,
+      channel: "cognia://target/t/sessions/ses-1",
+      hostSeq: 1,
+      outcome: "applied" as const,
+      payloadDigest: "digest",
+      action: {
+        channel: "cognia://target/t/sessions/ses-1",
+        accountId: "acct",
+        runtimeTargetId: "t",
+        hostId: "host",
+        hostGeneration: 1,
+        sessionId: "ses-1",
+        clientId: "client",
+        clientSeq: 1,
+        actionId: `action-${dispatchState}`,
+        createdAt: 1,
+        action: {
+          kind: "message.enqueue" as const,
+          messageId: "m1",
+          text: "look",
+          attachments: [{ ref: committed.ref, name: "shot.png", mediaType: "image/png", size: 64 }],
+        },
+      },
+      event: {
+        channel: "cognia://target/t/sessions/ses-1",
+        hostId: "host",
+        hostGeneration: 1,
+        hostSeq: 1,
+        outcome: "applied" as const,
+      },
+      dispatchState,
+      broadcastState: "completed" as const,
+      summaryState: "not-required" as const,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    // A dispatch due for retry still reads the file through its ref.
+    await getDb().hostStateActions.put(actionRow("failed"))
+    await sweepAttachmentUploads(Date.now() + ATTACHMENT_OBJECT_TTL_MS + 1)
+    expect(await getDb().sessionAttachmentUploads.get(init.uploadId)).toBeDefined()
+
+    // Once that message no longer needs it, the object TTL applies again.
+    await getDb().hostStateActions.clear()
+    await getDb().hostStateActions.put(actionRow("completed"))
+    await sweepAttachmentUploads(Date.now() + ATTACHMENT_OBJECT_TTL_MS + 1)
+    expect(await getDb().sessionAttachmentUploads.get(init.uploadId)).toBeUndefined()
+  })
+
   it("drops everything a revoked device staged, and nothing anyone else did", async () => {
     const mine = await uploadWhole({ sessionId: "ses-1", deviceId: "dev-a", bytes: pngBytes(32) })
     const theirs = await uploadWhole({ sessionId: "ses-1", deviceId: "dev-b", bytes: pngBytes(33) })

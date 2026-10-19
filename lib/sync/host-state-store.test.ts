@@ -26,6 +26,9 @@ import {
   commitHostStateRuntimeProjection,
   getHostStateAction,
   getHostStateSnapshot,
+  markHostStateBroadcast,
+  markHostStateDispatch,
+  markHostStateSummary,
   ownedSessionSeed,
   renewHostStateLease,
   validateHostStateBusinessAction,
@@ -266,6 +269,55 @@ describe("HostState durable store", () => {
       state: { revision: 1, draft: { text: "hello", revision: 1 } },
     })
     await expect(getDb().hostStateActions.count()).resolves.toBe(1)
+  })
+
+  it("refuses a different payload redelivered under a known action id", async () => {
+    await acquireWritableLease()
+    await commitHostStateAction({
+      action: draftAction(),
+      mutation: {
+        kind: "draft.replaced",
+        text: "hello",
+        attachments: [],
+        draftRevision: 1,
+        revision: 1,
+      },
+      now: 101,
+    })
+    await expect(
+      commitHostStateAction({
+        action: draftAction({
+          action: { kind: "draft.replace", text: "something else", attachments: [] },
+        }),
+        now: 102,
+      })
+    ).rejects.toMatchObject({ code: "host_state_action_conflict" })
+    await expect(getDb().hostStateActions.count()).resolves.toBe(1)
+  })
+
+  it("drops a row's retained intent once nothing is left to do, keeping the receipt", async () => {
+    await acquireWritableLease()
+    await commitHostStateAction({
+      action: draftAction({ action: { kind: "turn.abort" } }),
+      runtimeDispatchRequired: true,
+      now: 101,
+    })
+    await markHostStateDispatch(1, "action-1", { state: "completed" }, 102)
+    // Still owes a broadcast and a summary: the intent stays for recovery.
+    await expect(getHostStateAction(1, "action-1")).resolves.toHaveProperty("action")
+    await markHostStateBroadcast(1, "action-1", 103)
+    await markHostStateSummary(1, "action-1", 104)
+    const settled = await getHostStateAction(1, "action-1")
+    expect(settled).not.toHaveProperty("action")
+    expect(settled).toMatchObject({ dispatchState: "completed", outcome: "applied" })
+    // A redelivery is still answered from the receipt.
+    await expect(
+      commitHostStateAction({
+        action: draftAction({ action: { kind: "turn.abort" } }),
+        runtimeDispatchRequired: true,
+        now: 105,
+      })
+    ).resolves.toMatchObject({ duplicate: true })
   })
 
   it("persists a visible conflict without changing confirmed state", async () => {

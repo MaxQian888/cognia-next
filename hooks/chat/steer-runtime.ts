@@ -270,8 +270,12 @@ function withText(message: UIMessage, text: string): UIMessage {
  * sent and the bubble is what the user reads, so both move together or the
  * transcript starts lying about what was requested.
  */
-export function editPendingSteer(sessionId: string, entryId: string, text: string): void {
+export function editPendingSteer(sessionId: string, entryId: string, text: string): boolean {
   const store = useChatStore.getState()
+  // An editor opened while the entry was queued can commit after a drain has
+  // already sent it. Rewriting the bubble then would show words the model was
+  // never given, so a stale edit changes nothing.
+  if (!pendingSteerEntry(sessionId, entryId)) return false
   const messages = store.sessions[sessionId]?.messages
   // The edit draft is the typed text alone (the bubble strips the composer's
   // context envelope), so the envelope is put back in front of the edit here.
@@ -281,7 +285,7 @@ export function editPendingSteer(sessionId: string, entryId: string, text: strin
   const preamble = original ? promptPreambleOfParts(original.parts) : null
   const full = preamble ? `${preamble}\n\n${text}` : text
   store.updateSteerEntry(sessionId, entryId, full)
-  if (!messages) return
+  if (!messages) return true
   const next = messages.map((message) =>
     steerMetaOf(message.metadata)?.entryId === entryId ? withText(message, full) : message
   )
@@ -289,6 +293,39 @@ export function editPendingSteer(sessionId: string, entryId: string, text: strin
   void persistMessages(sessionId, next).catch((err) =>
     console.error("steer edit persist failed", err)
   )
+  return true
+}
+
+function pendingSteerEntry(sessionId: string, entryId: string): SteerEntry | undefined {
+  return useChatStore
+    .getState()
+    .sessions[sessionId]?.steerQueue.find((entry) => entry.id === entryId)
+}
+
+export type PendingSteerEditOutcome = "edited" | "discarded" | "stale"
+
+/**
+ * Commit an inline edit of a queued follow-up — the one entry point both the
+ * bubble and the Run Panel editors share.
+ *
+ * Clearing the words drops the follow-up only when nothing else is left of it.
+ * An entry carrying a screenshot or a file is still a message without its
+ * caption, the same way the composer sends one; discarding it took the files
+ * with it. An entry a drain already took is left alone (`stale`).
+ */
+export function commitPendingSteerEdit(
+  sessionId: string,
+  entryId: string,
+  text: string
+): PendingSteerEditOutcome {
+  const entry = pendingSteerEntry(sessionId, entryId)
+  if (!entry) return "stale"
+  const next = text.trim()
+  if (!next && !entry.blocks?.length && !entry.attachmentManifest?.length) {
+    discardPendingSteer(sessionId, entryId)
+    return "discarded"
+  }
+  return editPendingSteer(sessionId, entryId, next) ? "edited" : "stale"
 }
 
 /**
@@ -520,5 +557,21 @@ export function maybeDrainSteer(
       (accepted) => settle(accepted === true),
       () => settle(false)
     )
+    return
   }
+  // Flipped early above, but the queue is already gone: a replay the send path
+  // refuses (a budget, a cap, a missing provider) would otherwise leave every
+  // drained follow-up reading delivered with nothing left to deliver it. A
+  // refusal turns them back into failed bubbles, which keep their Put back.
+  if (outcome === undefined) return
+  void Promise.resolve(outcome).then(
+    (accepted) => {
+      if (accepted === false) markDrainedFailed(sessionId, drained)
+    },
+    () => markDrainedFailed(sessionId, drained)
+  )
+}
+
+function markDrainedFailed(sessionId: string, drained: ReadonlySet<string>): void {
+  patchSteerMessages(sessionId, (meta) => drained.has(meta.entryId), { state: "failed" })
 }

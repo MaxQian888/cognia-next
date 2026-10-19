@@ -20,7 +20,7 @@ Microsoft Agent Host Protocol 中 channel、snapshot cut、ordered action、opti
 - `cognia://target/{targetId}/sessions` 保存有界 session 摘要；
 - `cognia://target/{targetId}/sessions/{sessionId}` 保存共享 draft、queue、active turn、decision 状态和 transcript revision；
 - 客户端 action 必须先写入持久化 outbox，才允许 optimistic projection；
-- Host 在同一 Dexie 事务中写入物化 projection、现有业务 repository 和语义 receipt，再以同一 action id dispatch Agent RPC；未 dispatch/未 broadcast ledger 可恢复；
+- Host 在同一 Dexie 事务中写入物化 projection、现有业务 repository 和语义 receipt，再以同一 action id dispatch Agent RPC；未 dispatch/未 broadcast ledger 可恢复。已提交的 action 总以其 receipt 回复 submit；dispatch 失败发布为 operation 的 `failed`，由 heartbeat sweep 按退避重试（排队消息可跨重启重试，决策回复仅在同一 Host generation 内重试）。steer、follow-up 与 stop 从不重试；没有进行中 turn 时 steer/follow-up 会被拒绝；重启后上一 generation 的实时控制会被放弃。消息重投与 work outbox 使用同一套重放安全判断（ADR-0125）。已结清的行保留 receipt 并丢弃 intent 原文；
 - 10 秒 heartbeat、30 秒 lease 对旧 Host generation 进行 fencing；
 - 客户端先订阅现有 `host-state://action` EventBus topic，再获取 snapshot。EventBus carrier sequence 仍是 transport replay cursor，`{hostGeneration, hostSeq}` 负责状态顺序验证。
 

@@ -210,23 +210,30 @@ export function sliceMessages(sessionId: string): UIMessage[] {
   return useChatStore.getState().sessions[sessionId]?.messages ?? []
 }
 
-/** Drain a session's queued steer through this hook's send (direct replay). */
+/**
+ * Drain a session's queued steer through this hook's send (direct replay).
+ *
+ * `throwOnError` turns the send path's admission refusals into a rejection, so
+ * the drain can tell a refused replay from an accepted one: the entries have
+ * already left the queue, and only their bubbles can still carry them back.
+ */
 export function drainSteerVia(sessionId: string, sendRef: React.MutableRefObject<SendFn | null>) {
-  maybeDrainSteer(
-    sessionId,
-    (payload, webSearchContext, replyTo, references) =>
-      void sendRef.current?.(payload, undefined, {
-        sessionId,
-        steerDrain: true,
-        webSearchContext,
-        ...(replyTo ? { replyTo } : {}),
-        ...(references?.attachmentManifest
-          ? { attachmentManifest: references.attachmentManifest }
-          : {}),
-        ...(references?.citations ? { citations: references.citations } : {}),
-        ...(references?.promptPreamble ? { promptPreamble: references.promptPreamble } : {}),
-      })
-  )
+  maybeDrainSteer(sessionId, (payload, webSearchContext, replyTo, references) => {
+    const send = sendRef.current
+    if (!send) return Promise.resolve(false)
+    return send(payload, undefined, {
+      sessionId,
+      steerDrain: true,
+      throwOnError: true,
+      webSearchContext,
+      ...(replyTo ? { replyTo } : {}),
+      ...(references?.attachmentManifest
+        ? { attachmentManifest: references.attachmentManifest }
+        : {}),
+      ...(references?.citations ? { citations: references.citations } : {}),
+      ...(references?.promptPreamble ? { promptPreamble: references.promptPreamble } : {}),
+    }).then(() => true)
+  })
 }
 
 /**

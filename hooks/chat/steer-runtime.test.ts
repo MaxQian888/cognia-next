@@ -67,6 +67,7 @@ jest.mock("@/lib/db/messages", () => ({
 
 import {
   appendSteerMessage,
+  commitPendingSteerEdit,
   discardPendingSteer,
   editPendingSteer,
   isHeldInBackgroundOnly,
@@ -415,6 +416,57 @@ describe("editPendingSteer", () => {
   })
 })
 
+describe("commitPendingSteerEdit", () => {
+  it("leaves a follow-up a drain already took untouched", () => {
+    // The editor opened while it was queued; the drain won the race.
+    state.sessions["s1"] = { steerQueue: [], messages: [steerMessage("a", "applied", "sent")] }
+    expect(commitPendingSteerEdit("s1", "a", "rewritten")).toBe("stale")
+    expect(editPendingSteer("s1", "a", "rewritten")).toBe(false)
+    expect(commitPendingSteerEdit("s1", "a", "")).toBe("stale")
+    expect(textOf(state.sessions["s1"].messages?.[0])).toBe("sent")
+    expect(state.replaceSessionMessages).not.toHaveBeenCalled()
+    expect(state.removeSteerEntry).not.toHaveBeenCalled()
+  })
+
+  it("keeps an attachment-only follow-up when its words are cleared", () => {
+    state.sessions["s1"] = {
+      steerQueue: [
+        {
+          id: "a",
+          text: "caption",
+          blocks: [
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "" } },
+          ],
+        },
+      ],
+      messages: [steerMessage("a", "queued", "caption")],
+    }
+    expect(commitPendingSteerEdit("s1", "a", "   ")).toBe("edited")
+    expect(state.sessions["s1"].steerQueue).toHaveLength(1)
+    expect(state.sessions["s1"].steerQueue[0].text).toBe("")
+    expect(state.sessions["s1"].messages).toHaveLength(1)
+  })
+
+  it("drops a text-only follow-up when its words are cleared", () => {
+    state.sessions["s1"] = {
+      steerQueue: [{ id: "a", text: "words" }],
+      messages: [steerMessage("a", "queued", "words")],
+    }
+    expect(commitPendingSteerEdit("s1", "a", "")).toBe("discarded")
+    expect(state.sessions["s1"].steerQueue).toEqual([])
+    expect(state.sessions["s1"].messages).toEqual([])
+  })
+
+  it("trims and applies an ordinary edit", () => {
+    state.sessions["s1"] = {
+      steerQueue: [{ id: "a", text: "old" }],
+      messages: [steerMessage("a", "queued", "old")],
+    }
+    expect(commitPendingSteerEdit("s1", "a", "  new  ")).toBe("edited")
+    expect(state.sessions["s1"].steerQueue[0].text).toBe("new")
+  })
+})
+
 describe("discardPendingSteer", () => {
   it("drops the queue entry and its bubble", () => {
     state.sessions["s1"] = {
@@ -590,6 +642,35 @@ it.each([false, true])("settles a room steer only after admission (%s)", async (
   resolve(accepted)
   await Promise.resolve()
   expect(statesOf("s1")).toEqual([accepted ? "applied" : "failed"])
+})
+
+it.each([
+  ["rejects", () => Promise.reject(new Error("concurrent_stream_cap_reached"))],
+  ["declines", () => Promise.resolve(false)],
+])("turns a direct replay the send path %s back into failed bubbles", async (_label, replay) => {
+  state.sessions["s1"] = {
+    steerQueue: [{ id: "a", text: "follow-up" }],
+    messages: [steerMessage("a", "queued")],
+  }
+  maybeDrainSteer("s1", replay)
+  // Flipped before dispatch so the replay's transcript write sees it...
+  expect(statesOf("s1")).toEqual(["applied"])
+  await Promise.resolve()
+  await Promise.resolve()
+  // ...and given back once the replay is refused: the queue is gone, so the
+  // bubble's Put back is the only way left to deliver it.
+  expect(statesOf("s1")).toEqual(["failed"])
+})
+
+it("keeps a direct replay the send path accepted applied", async () => {
+  state.sessions["s1"] = {
+    steerQueue: [{ id: "a", text: "follow-up" }],
+    messages: [steerMessage("a", "queued")],
+  }
+  maybeDrainSteer("s1", () => Promise.resolve(true))
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(statesOf("s1")).toEqual(["applied"])
 })
 
 it("keeps a rejected room steer recoverable without an unhandled rejection", async () => {

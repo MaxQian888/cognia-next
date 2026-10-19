@@ -69,15 +69,29 @@ export interface HostStateActionRow {
   hostSeq: number
   outcome: HostStateActionOutcome
   payloadDigest: string
-  /** Retained while dispatch/broadcast recovery is pending; compactable once settled. */
+  /**
+   * Retained while dispatch/broadcast recovery is pending, and dropped once
+   * every obligation settles ({@link compactSettledAction}): the receipt and
+   * `payloadDigest` are all a duplicate needs, and keeping the full intent kept
+   * every message the Host was ever sent, verbatim, for good.
+   */
   action?: HostStateAction
   event: HostStateAppliedAction
-  dispatchState: "not-required" | "pending" | "completed" | "failed"
+  /**
+   * `failed` is retried (`nextDispatchAt`); `abandoned` is a dispatch the Host
+   * will never attempt again — a live control that missed its turn, or a
+   * failure that cannot improve — and was reported to clients as failed.
+   */
+  dispatchState: "not-required" | "pending" | "completed" | "failed" | "abandoned"
   broadcastState: "pending" | "completed"
   /** Session-channel mutations must also be durably reflected into the session index. */
   summaryState: "not-required" | "pending" | "completed"
   runtimeCorrelation?: string
   lastErrorCode?: string
+  /** Failed dispatch attempts so far; absent before the first failure. */
+  dispatchAttempts?: number
+  /** When a `failed` dispatch is next due. Absent means due now. */
+  nextDispatchAt?: number
   createdAt: number
   updatedAt: number
 }
@@ -103,6 +117,7 @@ export type HostStateStoreErrorCode =
   | "host_state_message_not_found"
   | "host_state_folder_not_found"
   | "host_state_session_move_refused"
+  | "host_state_action_conflict"
   | "stale_host_generation"
 
 export class HostStateStoreError extends Error {
@@ -440,6 +455,12 @@ export async function commitHostStateAction(
         input.action.actionId,
       ])
       if (existing) {
+        // An action id names one intent. A different payload under a known id
+        // is a client bug or a replay of something else, and answering it with
+        // the original receipt would tell that client its new intent landed.
+        if (existing.payloadDigest !== hostStateDigest(input.action)) {
+          throw new HostStateStoreError("host_state_action_conflict")
+        }
         const snapshot = await snapshotInTransaction(input.action.channel, meta, db, now)
         return { event: existing.event, snapshot, duplicate: true }
       }
@@ -613,15 +634,7 @@ export async function getHostStateMeta(): Promise<HostStateMetaRow> {
 }
 
 export async function listPendingHostStateActions(): Promise<HostStateActionRow[]> {
-  return getDb()
-    .hostStateActions.filter(
-      (row) =>
-        row.dispatchState === "pending" ||
-        row.dispatchState === "failed" ||
-        row.broadcastState === "pending" ||
-        row.summaryState === "pending"
-    )
-    .sortBy("hostSeq")
+  return getDb().hostStateActions.filter(hostStateActionHasPendingWork).sortBy("hostSeq")
 }
 
 export async function getHostStateAction(
@@ -820,13 +833,22 @@ function sessionWriteOperationFor(
 export async function markHostStateDispatch(
   hostGeneration: number,
   actionId: string,
-  result: { state: "completed" | "failed"; runtimeCorrelation?: string; errorCode?: string },
+  result: {
+    state: "completed" | "failed" | "abandoned"
+    runtimeCorrelation?: string
+    errorCode?: string
+    /** Only with `failed`: the attempt count so far and when the next is due. */
+    attempts?: number
+    nextDispatchAt?: number
+  },
   now = Date.now()
 ): Promise<void> {
-  await getDb().hostStateActions.update([hostGeneration, actionId], {
+  await patchHostStateAction(hostGeneration, actionId, {
     dispatchState: result.state,
     runtimeCorrelation: result.runtimeCorrelation,
     lastErrorCode: result.errorCode,
+    dispatchAttempts: result.attempts,
+    nextDispatchAt: result.state === "failed" ? result.nextDispatchAt : undefined,
     updatedAt: now,
   })
 }
@@ -836,7 +858,7 @@ export async function markHostStateBroadcast(
   actionId: string,
   now = Date.now()
 ): Promise<void> {
-  await getDb().hostStateActions.update([hostGeneration, actionId], {
+  await patchHostStateAction(hostGeneration, actionId, {
     broadcastState: "completed",
     updatedAt: now,
   })
@@ -847,9 +869,51 @@ export async function markHostStateSummary(
   actionId: string,
   now = Date.now()
 ): Promise<void> {
-  await getDb().hostStateActions.update([hostGeneration, actionId], {
+  await patchHostStateAction(hostGeneration, actionId, {
     summaryState: "completed",
     updatedAt: now,
+  })
+}
+
+/** Whether a row still owes the Host any work. */
+export function hostStateActionHasPendingWork(
+  row: Pick<HostStateActionRow, "dispatchState" | "broadcastState" | "summaryState">
+): boolean {
+  return (
+    row.dispatchState === "pending" ||
+    row.dispatchState === "failed" ||
+    row.broadcastState === "pending" ||
+    row.summaryState === "pending"
+  )
+}
+
+/**
+ * Drop the retained intent of a row with nothing left to do. Only the
+ * receipt (`event`) and `payloadDigest` answer a redelivery; the intent itself
+ * is recovery input, and a settled row needs none.
+ */
+function compactSettledAction(row: HostStateActionRow): HostStateActionRow {
+  if (row.action === undefined || hostStateActionHasPendingWork(row)) return row
+  const { action: _action, ...rest } = row
+  return rest
+}
+
+async function patchHostStateAction(
+  hostGeneration: number,
+  actionId: string,
+  patch: Partial<HostStateActionRow>
+): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.hostStateActions, async () => {
+    const row = await db.hostStateActions.get([hostGeneration, actionId])
+    if (!row) return
+    const next: Record<string, unknown> = { ...row }
+    for (const [key, value] of Object.entries(patch)) {
+      // `undefined` clears, the way the `update` this replaced did.
+      if (value === undefined) delete next[key]
+      else next[key] = value
+    }
+    await db.hostStateActions.put(compactSettledAction(next as unknown as HostStateActionRow))
   })
 }
 

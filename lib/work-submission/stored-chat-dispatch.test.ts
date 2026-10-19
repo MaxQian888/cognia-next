@@ -8,6 +8,7 @@ import { getWorkSubmission } from "@/lib/db/work-submissions"
 import { acceptWorkSubmission, bindWorkExecutionContext } from "./service"
 import { TranscriptRuntimeRecoveryError } from "@/lib/claude/ipc"
 import { createStoredChatDispatch } from "./stored-chat-dispatch"
+import { HOST_STATE_ATTACHMENT_REFS_DETAIL } from "./host-adapter"
 
 const mockSendPrompt = jest.fn(async (..._args: unknown[]) => undefined)
 
@@ -33,7 +34,8 @@ const KEY = new Uint8Array(32).fill(19)
 const loadKey = async () => KEY
 
 async function seedReplayableSubmission(
-  sendOptions: Record<string, unknown> = { cwd: "/original/workspace", model: "claude-sonnet-4-5" }
+  sendOptions: Record<string, unknown> = { cwd: "/original/workspace", model: "claude-sonnet-4-5" },
+  detail?: Record<string, unknown>
 ) {
   await acceptWorkSubmission(
     {
@@ -66,6 +68,7 @@ async function seedReplayableSubmission(
         cwd: "/original/workspace",
         projectId: "project-1",
         sendOptions,
+        ...(detail ? { detail } : {}),
       },
       now: NOW,
     },
@@ -99,6 +102,17 @@ describe("stored chat dispatch", () => {
       { cwd: "/original/workspace", model: "claude-sonnet-4-5" },
       { commandId: "submission-1", transcriptRuntime: "frozen" }
     )
+  }, 30_000)
+
+  it("parks a HostState turn whose files the frozen input cannot carry", async () => {
+    const row = await seedReplayableSubmission(undefined, {
+      [HOST_STATE_ATTACHMENT_REFS_DETAIL]: 2,
+    })
+    await expect(createStoredChatDispatch({ loadKey })(row)).resolves.toEqual({
+      status: "recovery_required",
+      errorCode: "frozen_input_attachments_unavailable",
+    })
+    expect(mockSendPrompt).not.toHaveBeenCalled()
   }, 30_000)
 
   describe("a turn accepted under Router + Fusion (ADR-0188)", () => {

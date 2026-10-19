@@ -8,13 +8,19 @@ import {
 } from "@cognia/agent-config-types/host-state"
 
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
-import { getWorkSubmission } from "@/lib/db/work-submissions"
+import {
+  getWorkSubmission,
+  getWorkSubmissionBundle,
+  WORK_SUBMISSION_LEASE_TTL_MS,
+} from "@/lib/db/work-submissions"
 
 import { chatIdempotencyKey } from "./chat-adapter"
+import { openWorkSubmissionPayload } from "./crypto"
 import {
   acceptHostStateChatTurn,
   bindHostStateChatTurnContext,
   claimHostStateChatTurnForDispatch,
+  HOST_STATE_ATTACHMENT_REFS_DETAIL,
   hostStateRunId,
   hostStateSubmissionId,
   markHostStateChatTurnStarted,
@@ -206,5 +212,119 @@ describe("HostState live handoff", () => {
   it("marks the successful HostState handoff dispatched", async () => {
     expect(await markHostStateChatTurnStarted("action-1", NOW + 1, deps())).toBe(true)
     expect((await getWorkSubmission("work:hoststate:action-1"))?.dispatchState).toBe("dispatched")
+  }, 30_000)
+
+  it("records that the turn carried attachment refs its frozen input cannot replay", async () => {
+    const withFiles = action({
+      kind: "message.enqueue",
+      messageId: "message-1",
+      text: "look",
+      attachments: [{ ref: "upload:u1", name: "shot.png", mediaType: "image/png", size: 3 }],
+    })
+    expect(await bindHostStateChatTurnContext(withFiles, { model: "m" }, deps())).toBe(true)
+    const bundle = await getWorkSubmissionBundle("work:hoststate:action-1")
+    const context = JSON.parse(
+      await openWorkSubmissionPayload(
+        bundle!.contextBundle!.envelope,
+        {
+          accountId: "account-1",
+          submissionId: "work:hoststate:action-1",
+          kind: "context-bundle",
+        },
+        deps()
+      )
+    )
+    expect(context.detail).toEqual({ [HOST_STATE_ATTACHMENT_REFS_DETAIL]: 1 })
+  }, 30_000)
+})
+
+describe("HostState redrive of an earlier attempt", () => {
+  const LATER = NOW + WORK_SUBMISSION_LEASE_TTL_MS + 1
+
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    await acceptHostStateChatTurn(action(), deps())
+    // A previous Host claimed and handed the turn off, then died.
+    expect(await claimHostStateChatTurnForDispatch("action-1", NOW, deps())).toBe("claimed")
+    expect(await markHostStateChatTurnStarted("action-1", NOW, deps())).toBe(true)
+  }, 30_000)
+
+  it("leaves a turn whose lease is still live to its owner", async () => {
+    const listRunEvents = jest.fn(async () => [])
+    expect(
+      await claimHostStateChatTurnForDispatch("action-1", NOW + 1, deps({ listRunEvents }))
+    ).toBe("owned_elsewhere")
+    expect(listRunEvents).not.toHaveBeenCalled()
+    expect((await getWorkSubmission("work:hoststate:action-1"))?.dispatchState).toBe("dispatched")
+  }, 30_000)
+
+  it("parks a turn that already reached a tool instead of sending it again", async () => {
+    const abortPrevious = jest.fn(async () => undefined)
+    const listRunEvents = jest.fn(async () => [{ type: "tool.started" }] as never)
+    expect(
+      await claimHostStateChatTurnForDispatch(
+        "action-1",
+        LATER,
+        deps({ listRunEvents, abortPrevious })
+      )
+    ).toBe("recovery_required")
+    expect(abortPrevious).not.toHaveBeenCalled()
+    expect(await getWorkSubmission("work:hoststate:action-1")).toMatchObject({
+      dispatchState: "settled",
+      terminalOutcome: "recovery_required",
+      errorCode: "observed-tool-activity",
+    })
+  }, 30_000)
+
+  it("stops the previous runtime before taking over a turn with no observed effects", async () => {
+    const abortPrevious = jest.fn(async () => undefined)
+    expect(
+      await claimHostStateChatTurnForDispatch(
+        "action-1",
+        LATER,
+        deps({
+          listRunEvents: async () => [],
+          readEnvelopes: async () => [],
+          abortPrevious,
+        })
+      )
+    ).toBe("claimed")
+    expect(abortPrevious).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "work:hoststate:action-1", sessionId: "session-1" })
+    )
+  }, 30_000)
+
+  it("parks the turn when the previous runtime cannot be stopped", async () => {
+    const onError = jest.fn()
+    expect(
+      await claimHostStateChatTurnForDispatch(
+        "action-1",
+        LATER,
+        deps({
+          listRunEvents: async () => [],
+          readEnvelopes: async () => [],
+          abortPrevious: async () => {
+            throw new Error("sidecar unreachable")
+          },
+          onError,
+        })
+      )
+    ).toBe("recovery_required")
+    expect(onError).toHaveBeenCalled()
+    expect(await getWorkSubmission("work:hoststate:action-1")).toMatchObject({
+      dispatchState: "settled",
+      errorCode: "takeover_abort_failed",
+    })
+  }, 30_000)
+
+  it("does not touch a settled turn", async () => {
+    const listRunEvents = jest.fn(async () => [{ type: "tool.started" }] as never)
+    await claimHostStateChatTurnForDispatch("action-1", LATER, deps({ listRunEvents }))
+    listRunEvents.mockClear()
+    expect(
+      await claimHostStateChatTurnForDispatch("action-1", LATER + 1, deps({ listRunEvents }))
+    ).toBe("owned_elsewhere")
+    expect(listRunEvents).not.toHaveBeenCalled()
   }, 30_000)
 })

@@ -452,6 +452,41 @@ describe("Claude chat event seam", () => {
     )
     useChatStore.getState().clearSteerQueue("s7")
   })
+
+  it("asks the send path to report a refused replay instead of swallowing it", async () => {
+    useChatStore.setState({
+      sessions: {
+        s8: {
+          ...(useChatStore.getState().sessions.s8 ?? {}),
+          messages: [
+            {
+              id: "m-q1",
+              role: "user",
+              parts: [{ type: "text", text: "next" }],
+              metadata: { steer: { entryId: "q1", state: "queued" } },
+            },
+          ],
+          status: "idle",
+          pendingApprovals: [],
+          steerQueue: [{ id: "q1", text: "next" }],
+        },
+      },
+    } as never)
+    const sendRef = {
+      current: jest.fn(async () => {
+        throw new Error("concurrent_stream_cap_reached")
+      }),
+    }
+    drainSteerVia("s8", sendRef)
+    expect(sendRef.current).toHaveBeenCalledWith(
+      expect.anything(),
+      undefined,
+      expect.objectContaining({ steerDrain: true, throwOnError: true })
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const bubble = useChatStore.getState().sessions.s8?.messages[0]
+    expect((bubble?.metadata as { steer?: { state?: string } })?.steer?.state).toBe("failed")
+  })
 })
 
 describe("artifact turn-complete policy", () => {

@@ -585,10 +585,37 @@ export async function consumeAttachmentRefs(
 export async function sweepAttachmentUploads(now = Date.now()): Promise<number> {
   const db = getDb()
   const expired = await db.sessionAttachmentUploads.where("expiresAt").below(now).toArray()
-  const collectable = expired.filter((row) => row.consumedAt === undefined)
+  const unconsumed = expired.filter((row) => row.consumedAt === undefined)
+  if (unconsumed.length === 0) return 0
+  const pinned = await uploadsHeldByUndispatchedMessages()
+  const collectable = unconsumed.filter((row) => !pinned.has(row.uploadId))
   if (collectable.length === 0) return 0
   await db.sessionAttachmentUploads.bulkDelete(collectable.map((row) => row.uploadId))
   return collectable.length
+}
+
+/**
+ * Uploads a message the Host accepted still needs: its `message.enqueue` sits
+ * in the HostState ledger with a dispatch pending or due for retry, and the
+ * dispatch reads the bytes through the ref. The object TTL is about bytes
+ * nobody claimed; a queued message has claimed them, and collecting them
+ * under it turned a delayed send into a refused one.
+ */
+async function uploadsHeldByUndispatchedMessages(): Promise<Set<string>> {
+  const rows = await getDb()
+    .hostStateActions.where("dispatchState")
+    .anyOf("pending", "failed")
+    .toArray()
+  const held = new Set<string>()
+  for (const row of rows) {
+    const intent = row.action?.action
+    if (intent?.kind !== "message.enqueue") continue
+    for (const attachment of intent.attachments) {
+      const uploadId = parseUploadRef(attachment.ref)
+      if (uploadId) held.add(uploadId)
+    }
+  }
+  return held
 }
 
 /** Drop every staged upload a device holds. Used on revoke / unpair. */

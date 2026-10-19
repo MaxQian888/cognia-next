@@ -47,6 +47,8 @@ import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
 import type { RuntimeTargetScope } from "@/lib/runtime/runtime-target-context"
 import { transportCommandTimeoutMs } from "@/lib/tauri/transport-types"
 import { sha256Hex } from "@/lib/share/hash"
+import { isOperation } from "@/lib/tauri/companion-paging"
+import { companionErrorInitFromProblem, parseProblem } from "@/lib/tauri/companion-problem"
 
 /**
  * Headroom past a command's own transport deadline before the runner stops
@@ -77,6 +79,12 @@ export const PREFLIGHT_DEADLINE_MS = 45_000
  * the answer (an approval, a new Host manifest).
  */
 export const FROZEN_RECHECK_MS = 15_000
+
+/**
+ * How soon a HostState submit the Host answered with a still-running operation
+ * is asked about again (see `settledHostStateResult`).
+ */
+export const HOST_STATE_OPERATION_POLL_MS = 3_000
 
 /** Floor for a scheduled wake-up, so a clock at the boundary cannot spin. */
 const MIN_WAKE_DELAY_MS = 250
@@ -154,6 +162,8 @@ export interface RunnerOptions {
   frozenRecheckMs?: number
   /** Test seam — defaults to `CLAIM_RENEW_INTERVAL_MS`. */
   claimRenewIntervalMs?: number
+  /** Test seam — defaults to {@link HOST_STATE_OPERATION_POLL_MS}. */
+  hostStateOperationPollMs?: number
 }
 
 export interface OutboundKickOptions {
@@ -187,6 +197,7 @@ const DEFAULT_OPTS: Pick<
   | "preflightDeadlineMs"
   | "frozenRecheckMs"
   | "claimRenewIntervalMs"
+  | "hostStateOperationPollMs"
 > = {
   now: () => Date.now(),
   random: Math.random,
@@ -196,6 +207,7 @@ const DEFAULT_OPTS: Pick<
   preflightDeadlineMs: PREFLIGHT_DEADLINE_MS,
   frozenRecheckMs: FROZEN_RECHECK_MS,
   claimRenewIntervalMs: CLAIM_RENEW_INTERVAL_MS,
+  hostStateOperationPollMs: HOST_STATE_OPERATION_POLL_MS,
 }
 
 /**
@@ -216,6 +228,7 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
     preflightDeadlineMs,
     frozenRecheckMs,
     claimRenewIntervalMs,
+    hostStateOperationPollMs,
   } = {
     ...DEFAULT_OPTS,
     ...opts,
@@ -396,7 +409,19 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
         deadlineFor(row.command)
       )
       if (row.protocol === "host-state") {
-        const receipt = hostStateReceipt(result, row.actionId)
+        const settled = settledHostStateResult(result)
+        if (settled.kind === "running") {
+          // A retry reached the Host while the first attempt under this key
+          // was still in its ledger, and the Host answered with that
+          // operation. The submission is not lost and not refused: hold the
+          // row at the head of its channel, without spending an attempt, and
+          // ask again shortly — the same key then answers the outcome.
+          await releaseClaim(row.id)
+          frozenUntil.set(row.id, now() + hostStateOperationPollMs)
+          return
+        }
+        if (settled.kind === "error") throw settled.error
+        const receipt = hostStateReceipt(settled.value, row.actionId)
         if (!receipt) throw new Error("host_state_malformed_response")
         await markHostStateResult(row.id, receipt)
         await settleRefusedHostStateRow(row, receipt.outcome, receipt.rejection?.code)
@@ -447,6 +472,7 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
             nowMs: now(),
             random,
             forgetOffer: true,
+            forceRetryable: true,
           })
           await resyncHostState()
           return
@@ -558,6 +584,27 @@ async function resyncHostState(): Promise<void> {
   await remoteEventResyncCoordinator.resolve(["host-state"]).catch(() => undefined)
 }
 
+/**
+ * Unwrap a long-running operation document (ADR-0175 B3) a HostState submit
+ * can be answered with: the Host replies 202 with the operation when the same
+ * idempotency key is already executing. A finished operation carries the
+ * submit response or the Host's problem; an unfinished one carries neither.
+ */
+function settledHostStateResult(
+  value: unknown
+): { kind: "value"; value: unknown } | { kind: "running" } | { kind: "error"; error: Error } {
+  if (!isOperation(value)) return { kind: "value", value }
+  if (!value.done) return { kind: "running" }
+  if (value.error) {
+    const problem = parseProblem(value.error)
+    const init = problem
+      ? companionErrorInitFromProblem(problem)
+      : { code: "host_state_operation_failed", message: "host_state_operation_failed" }
+    return { kind: "error", error: Object.assign(new Error(init.message), init) }
+  }
+  return { kind: "value", value: value.result }
+}
+
 function terminalHostStateErrorCode(error: unknown): string | null {
   const record = error && typeof error === "object" ? (error as Record<string, unknown>) : null
   const candidate =
@@ -571,6 +618,8 @@ function terminalHostStateErrorCode(error: unknown): string | null {
       "host_state_scope_mismatch",
       "host_state_not_authoritative",
       "host_state_action_too_large",
+      // The Host already holds a different intent under this action id.
+      "host_state_action_conflict",
       // A Host that predates an intent kind refuses the whole submit. Retrying
       // cannot change that answer, and holding the row would block its channel.
       "host_state_invalid_submit_request",

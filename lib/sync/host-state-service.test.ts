@@ -23,6 +23,9 @@ import { activateAccountDatabase, __resetDbForTesting, getDb } from "@/lib/db/sc
 import {
   createAgentRpcHostStateDispatcher,
   createHostStateService,
+  HOST_STATE_DISPATCH_MAX_ATTEMPTS,
+  HOST_STATE_DISPATCH_MAX_BACKOFF_MS,
+  hostStateDispatchBackoffMs,
   installHostStateSync,
   installHostStateSyncForTarget,
 } from "./host-state-service"
@@ -40,6 +43,7 @@ import {
 import {
   HOST_STATE_LEASE_TTL_MS,
   commitHostStateAction,
+  getHostStateAction,
   listPendingHostStateActions,
   markHostStateBroadcast,
 } from "./host-state-store"
@@ -243,10 +247,18 @@ describe("HostStateService", () => {
       attachments: [],
     })
 
-    await expect(service.submit({ ...scope, actions: [queued] }, owner)).rejects.toThrow(
-      "runtime offline"
-    )
-    await expect(service.recover()).resolves.toEqual({ dispatched: 1, broadcast: 1 })
+    // The action is committed before its dispatch fails, so the receipt is
+    // the answer. Failing the submit instead let the transport cache that
+    // error under the idempotency key, and the client's retry replayed it.
+    await expect(service.submit({ ...scope, actions: [queued] }, owner)).resolves.toMatchObject({
+      results: [{ outcome: "applied", hostSeq: 1 }],
+    })
+    await expect(getHostStateAction(1, "action-1")).resolves.toMatchObject({
+      dispatchState: "failed",
+      dispatchAttempts: 1,
+      broadcastState: "completed",
+    })
+    await expect(service.recover()).resolves.toEqual({ dispatched: 1, broadcast: 0 })
     await expect(service.submit({ ...scope, actions: [queued] }, owner)).resolves.toMatchObject({
       results: [{ outcome: "duplicate", hostSeq: 1 }],
     })
@@ -257,7 +269,7 @@ describe("HostStateService", () => {
 
     // Dispatch outcome is itself confirmed state, so the client can tell a
     // send that is on its way from one that never left. The failure is
-    // published before the throw, and the recovery supersedes it.
+    // published when it happens, and the recovery supersedes it.
     const snapshot = await service.snapshot({ ...scope, channel })
     const operations = (snapshot.state as { operations: { status: string }[] }).operations
     expect(operations).toEqual([
@@ -300,7 +312,7 @@ describe("HostStateService", () => {
         },
         owner
       )
-    ).rejects.toThrow("runtime offline")
+    ).resolves.toMatchObject({ results: [{ outcome: "applied" }] })
     await first.stop()
 
     // A new owner takes over with work still pending.
@@ -371,8 +383,11 @@ describe("HostStateService", () => {
   })
 
   it("reports degraded rather than presenting stale state as fresh", async () => {
-    const publish = jest.fn(async () => undefined)
-    const dispatchRuntime = jest.fn().mockRejectedValue(new Error("runtime offline"))
+    // A broadcast that keeps failing is state replicas never received.
+    const publish = jest.fn(async () => {
+      throw new Error("carrier offline")
+    })
+    const dispatchRuntime = jest.fn(async () => ({ correlationId: "turn-1" }))
     const first = createHostStateService({
       ...scope,
       hostId,
@@ -392,7 +407,7 @@ describe("HostStateService", () => {
         },
         owner
       )
-    ).rejects.toThrow("runtime offline")
+    ).resolves.toMatchObject({ results: [{ outcome: "applied" }] })
     await first.stop()
 
     const second = createHostStateService({
@@ -406,6 +421,237 @@ describe("HostStateService", () => {
     // Recovery fails again — the Host still serves, and says so.
     const status = await second.start({ now: HOST_STATE_LEASE_TTL_MS + 1, heartbeat: false })
     expect(status.recovery).toBe("degraded")
+    await second.stop()
+  })
+
+  it("keeps recovering past an action whose redrive throws", async () => {
+    let failBroadcastFor: string | null = "m1"
+    const publish = jest.fn(async (_topic: string, event: HostStateAppliedAction) => {
+      const queued = event.mutation?.kind === "message.queued" ? event.mutation.message : null
+      if (queued && queued.messageId === failBroadcastFor) throw new Error("carrier offline")
+    })
+    const dispatchRuntime = jest
+      .fn()
+      .mockResolvedValueOnce({ correlationId: "turn-1" })
+      .mockRejectedValueOnce(new Error("runtime offline"))
+      .mockResolvedValue({ correlationId: "turn-2" })
+    const first = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => 100,
+      dispatchRuntime,
+      publish,
+    })
+    await first.start({ now: 0, heartbeat: false })
+    await first.submit(
+      {
+        ...scope,
+        actions: [
+          action({ kind: "message.enqueue", messageId: "m1", text: "one", attachments: [] }),
+          action(
+            { kind: "message.enqueue", messageId: "m2", text: "two", attachments: [] },
+            { actionId: "action-2", clientSeq: 2 }
+          ),
+        ],
+      },
+      owner
+    )
+    await first.stop()
+
+    // The first row still cannot broadcast; the second must redrive anyway.
+    const second = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-b",
+      now: () => 200,
+      dispatchRuntime,
+      publish,
+    })
+    const status = await second.start({ now: HOST_STATE_LEASE_TTL_MS + 1, heartbeat: false })
+    expect(status.recovery).toBe("degraded")
+    await expect(getHostStateAction(1, "action-2")).resolves.toMatchObject({
+      dispatchState: "completed",
+    })
+    failBroadcastFor = null
+    await expect(second.recover()).resolves.toMatchObject({ broadcast: 1 })
+    await expect(listPendingHostStateActions()).resolves.toEqual([])
+    await second.stop()
+  })
+
+  it("abandons a failed steer instead of delivering it to a later turn", async () => {
+    const publish = jest.fn(async () => undefined)
+    const dispatchRuntime = jest.fn(async () => ({ correlationId: "ok" }))
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => 100,
+      dispatchRuntime,
+      publish,
+    })
+    await service.start({ now: 0, heartbeat: false })
+    await service.projectRuntimeEnvelope(
+      runtimeEnvelope({ kind: "lifecycle", phase: "started" }, "evt-start")
+    )
+    dispatchRuntime.mockRejectedValueOnce(new Error("runtime offline"))
+    await expect(
+      service.submit({ ...scope, actions: [action({ kind: "turn.steer", text: "also" })] }, owner)
+    ).resolves.toMatchObject({ results: [{ outcome: "applied" }] })
+
+    await expect(getHostStateAction(1, "action-1")).resolves.toMatchObject({
+      dispatchState: "abandoned",
+    })
+    // Never retried, and its payload is no longer retained.
+    await service.recover()
+    expect(dispatchRuntime).toHaveBeenCalledTimes(1)
+    await expect(getHostStateAction(1, "action-1")).resolves.not.toHaveProperty("action")
+    const snapshot = await service.snapshot({ ...scope, channel })
+    const operations = (snapshot.state as { operations: { actionId: string; status: string }[] })
+      .operations
+    expect(operations.find((item) => item.actionId === "action-1")?.status).toBe("failed")
+  })
+
+  it("refuses a steer when no turn is running", async () => {
+    const dispatchRuntime = jest.fn(async () => ({ correlationId: "ok" }))
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => 100,
+      dispatchRuntime,
+      publish: jest.fn(async () => undefined),
+    })
+    await service.start({ now: 0, heartbeat: false })
+    const response = await service.submit(
+      { ...scope, actions: [action({ kind: "turn.followup", text: "late" })] },
+      owner
+    )
+    expect(response.results[0]).toMatchObject({
+      outcome: "rejected",
+      rejection: { code: "host_state_turn_not_running" },
+    })
+    expect(dispatchRuntime).not.toHaveBeenCalled()
+  })
+
+  it("retries a failed message dispatch on the sweep once it is due", async () => {
+    let clock = 1_000
+    const dispatchRuntime = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("runtime offline"))
+      .mockResolvedValue({ correlationId: "turn-1" })
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => clock,
+      dispatchRuntime,
+      publish: jest.fn(async () => undefined),
+    })
+    await service.start({ now: clock, heartbeat: false })
+    await service.submit(
+      {
+        ...scope,
+        actions: [
+          action({ kind: "message.enqueue", messageId: "m1", text: "hi", attachments: [] }),
+        ],
+      },
+      owner
+    )
+    expect(dispatchRuntime).toHaveBeenCalledTimes(1)
+    const failed = await getHostStateAction(1, "action-1")
+    expect(failed?.nextDispatchAt).toBe(clock + hostStateDispatchBackoffMs(1))
+
+    // Not due yet.
+    clock += hostStateDispatchBackoffMs(1) - 1
+    await service.sweep()
+    expect(dispatchRuntime).toHaveBeenCalledTimes(1)
+
+    // Due: retried, and the operation moves past its earlier failure.
+    clock += 1
+    await service.sweep()
+    expect(dispatchRuntime).toHaveBeenCalledTimes(2)
+    await expect(getHostStateAction(1, "action-1")).resolves.toMatchObject({
+      dispatchState: "completed",
+    })
+    const snapshot = await service.snapshot({ ...scope, channel })
+    const operations = (snapshot.state as { operations: { status: string }[] }).operations
+    expect(operations).toEqual([expect.objectContaining({ status: "dispatching" })])
+    await service.stop()
+  })
+
+  it("abandons a message dispatch after its retry budget", async () => {
+    let clock = 1_000
+    const dispatchRuntime = jest.fn().mockRejectedValue(new Error("runtime offline"))
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => clock,
+      dispatchRuntime,
+      publish: jest.fn(async () => undefined),
+    })
+    await service.start({ now: clock, heartbeat: false })
+    await service.submit(
+      {
+        ...scope,
+        actions: [
+          action({ kind: "message.enqueue", messageId: "m1", text: "hi", attachments: [] }),
+        ],
+      },
+      owner
+    )
+    for (let attempt = 1; attempt < HOST_STATE_DISPATCH_MAX_ATTEMPTS; attempt += 1) {
+      clock += hostStateDispatchBackoffMs(attempt)
+      await service.sweep()
+    }
+    expect(dispatchRuntime).toHaveBeenCalledTimes(HOST_STATE_DISPATCH_MAX_ATTEMPTS)
+    await expect(getHostStateAction(1, "action-1")).resolves.toMatchObject({
+      dispatchState: "abandoned",
+      dispatchAttempts: HOST_STATE_DISPATCH_MAX_ATTEMPTS,
+    })
+    clock += HOST_STATE_DISPATCH_MAX_BACKOFF_MS
+    await service.sweep()
+    expect(dispatchRuntime).toHaveBeenCalledTimes(HOST_STATE_DISPATCH_MAX_ATTEMPTS)
+    await service.stop()
+  })
+
+  it("abandons a previous generation's live controls on restart instead of replaying them", async () => {
+    const dispatchRuntime = jest.fn(async () => ({ correlationId: "ok" }))
+    const first = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => 100,
+      publish: jest.fn(async () => undefined),
+    })
+    await first.start({ now: 0, heartbeat: false })
+    await first.projectRuntimeEnvelope(
+      runtimeEnvelope({ kind: "lifecycle", phase: "started" }, "evt-start")
+    )
+    // Committed, then the Host died before dispatching it.
+    await commitHostStateAction({
+      action: action({ kind: "turn.abort" }),
+      mutation: undefined,
+      runtimeDispatchRequired: true,
+      now: 100,
+    })
+    await first.stop()
+
+    const second = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-b",
+      now: () => 200,
+      dispatchRuntime,
+      publish: jest.fn(async () => undefined),
+    })
+    await second.start({ now: HOST_STATE_LEASE_TTL_MS + 1, heartbeat: false })
+    expect(dispatchRuntime).not.toHaveBeenCalled()
+    await expect(getHostStateAction(1, "action-1")).resolves.toMatchObject({
+      dispatchState: "abandoned",
+      lastErrorCode: "host_state_host_restarted",
+    })
     await second.stop()
   })
 
@@ -696,6 +942,9 @@ describe("HostStateService", () => {
 
     it("still accepts a safe intent from a second device while the first is driving", async () => {
       const service = await serviceWithLease()
+      await service.projectRuntimeEnvelope(
+        runtimeEnvelope({ kind: "lifecycle", phase: "started" }, "evt-start")
+      )
       attachController("device-first", "esl-first", now)
       const response = await service.submit(
         { ...scope, actions: [action({ kind: "turn.followup", text: "queue this" })] },
@@ -711,14 +960,21 @@ describe("HostStateService", () => {
      */
     it("accepts safe intents with no attachment at all", async () => {
       const service = await serviceWithLease()
+      await service.projectRuntimeEnvelope(
+        runtimeEnvelope({ kind: "lifecycle", phase: "started" }, "evt-start")
+      )
+      const { revision } = await service.snapshot({ ...scope, channel })
       const response = await service.submit(
         {
           ...scope,
           actions: [
-            action({ kind: "draft.replace", text: "later", attachments: [] }),
+            action(
+              { kind: "draft.replace", text: "later", attachments: [] },
+              { baseRevision: revision }
+            ),
             action(
               { kind: "turn.followup", text: "and then this" },
-              { actionId: "action-2", clientSeq: 2, baseRevision: 1 }
+              { actionId: "action-2", clientSeq: 2, baseRevision: revision + 1 }
             ),
           ],
         },

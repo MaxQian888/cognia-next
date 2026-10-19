@@ -33,8 +33,8 @@ import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { HOVER_REVEAL_CONTROL_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { resolveSteerDisplayState, steerMetaOf, stripSteerPrefix } from "@/lib/claude/steer"
 import {
+  commitPendingSteerEdit,
   discardPendingSteer,
-  editPendingSteer,
   putBackPendingSteers,
 } from "@/hooks/chat/steer-runtime"
 import { useSessionStatus, useSessionSteerQueue } from "@/stores/chat"
@@ -75,10 +75,9 @@ export function SteerStatusBadge({
   const pending = state === "queued"
 
   const commitEdit = () => {
-    const next = (draft ?? "").trim()
+    const next = draft ?? ""
     setDraft(null)
-    if (!next) discardPendingSteer(sessionId, meta.entryId)
-    else editPendingSteer(sessionId, meta.entryId, next)
+    commitPendingSteerEdit(sessionId, meta.entryId, next)
   }
 
   if (draft !== null) {

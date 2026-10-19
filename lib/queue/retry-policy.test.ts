@@ -157,3 +157,42 @@ describe("decideNextAttempt", () => {
     expect(decideNextAttempt(base)).toEqual(decideNextAttempt({ ...base, policy: {} }))
   })
 })
+
+describe("structured retry verdicts", () => {
+  it("lets an error's own retryable verdict win over its wording", () => {
+    const refused = Object.assign(new Error("device grant revoked"), { retryable: false })
+    expect(isRetryable(refused)).toBe(false)
+    expect(decideNextAttempt({ attempts: 0, error: refused, nowMs: 0 }).status).toBe("deadlettered")
+    const transient = Object.assign(new Error("HTTP 400 from a proxy"), { retryable: true })
+    expect(isRetryable(transient)).toBe(true)
+  })
+
+  it("falls back to the wording when the error carries no verdict", () => {
+    expect(isRetryable(new Error("HTTP 503"))).toBe(true)
+    expect(isRetryable(new Error("HTTP 403"))).toBe(false)
+  })
+
+  it("never schedules a retry sooner than the Host's Retry-After", () => {
+    const limited = Object.assign(new Error("rate limited"), {
+      retryable: true,
+      retryAfterMs: 90_000,
+    })
+    const decision = decideNextAttempt({ attempts: 0, error: limited, nowMs: 0, random: () => 0 })
+    expect(decision).toMatchObject({ status: "pending", nextAttemptAt: 90_000 })
+  })
+
+  it("retries a refusal the caller has made recoverable, within the budget", () => {
+    const stale = Object.assign(new Error("stale_host_generation"), { retryable: false })
+    expect(
+      decideNextAttempt({ attempts: 0, error: stale, nowMs: 0, forceRetryable: true }).status
+    ).toBe("pending")
+    expect(
+      decideNextAttempt({
+        attempts: MAX_ATTEMPTS - 1,
+        error: stale,
+        nowMs: 0,
+        forceRetryable: true,
+      }).status
+    ).toBe("deadlettered")
+  })
+})

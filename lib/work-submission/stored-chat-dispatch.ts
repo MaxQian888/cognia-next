@@ -7,6 +7,7 @@ import { enforceCostBudget, isCostBudgetConfigured } from "@/lib/usage/cost-budg
 import { useSettingsStore } from "@/stores/settings"
 
 import { openWorkSubmissionPayload, type WorkSubmissionCryptoDeps } from "./crypto"
+import { HOST_STATE_ATTACHMENT_REFS_DETAIL } from "./host-adapter"
 import type { WorkDispatchOutcome } from "./outbox-runner"
 import {
   executionContextDigest,
@@ -91,6 +92,13 @@ export function createStoredChatDispatch(
     }
     if (executionContextDigest(context) !== bundle.contextBundle.digest) {
       return recoveryRequired("frozen_context_digest_mismatch")
+    }
+    // A HostState turn's frozen input is its text; the files it carried were
+    // refs resolved at dispatch, which the ledger cannot replay. Sending the
+    // words alone would deliver "look at this screenshot" without it.
+    const attachmentRefs = context.detail?.[HOST_STATE_ATTACHMENT_REFS_DETAIL]
+    if (typeof attachmentRefs === "number" && attachmentRefs > 0) {
+      return recoveryRequired("frozen_input_attachments_unavailable")
     }
 
     // Router + Fusion (ADR-0188): the frozen stamp names a run that ended with

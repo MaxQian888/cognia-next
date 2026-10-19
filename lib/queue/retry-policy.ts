@@ -59,7 +59,38 @@ export const NON_RETRYABLE_PATTERNS: readonly RegExp[] = [
   /\bschema\b/i,
 ]
 
+/**
+ * What the failure itself says about retrying, when it says anything: the
+ * transport's `CompanionError` (and a Host problem document) carry a
+ * `retryable` verdict and the Host's `Retry-After`. Read structurally, so this
+ * module stays free of the transport.
+ */
+export function structuredRetryHint(error: unknown): {
+  retryable?: boolean
+  retryAfterMs?: number
+} {
+  if (!error || typeof error !== "object") return {}
+  const record = error as { retryable?: unknown; retryAfterMs?: unknown }
+  return {
+    ...(typeof record.retryable === "boolean" ? { retryable: record.retryable } : {}),
+    ...(typeof record.retryAfterMs === "number" &&
+    Number.isFinite(record.retryAfterMs) &&
+    record.retryAfterMs > 0
+      ? { retryAfterMs: record.retryAfterMs }
+      : {}),
+  }
+}
+
+/**
+ * Whether another attempt could succeed. A structured verdict wins: the
+ * inner transport already decided, and a refusal whose wording happens to miss
+ * every pattern below (a revoked grant, an unsupported command) used to burn
+ * the whole retry budget on an answer that could not change. The patterns
+ * remain for plain errors that carry no verdict.
+ */
 export function isRetryable(error: unknown): boolean {
+  const hint = structuredRetryHint(error)
+  if (hint.retryable !== undefined) return hint.retryable
   const msg = error instanceof Error ? error.message : String(error)
   return !NON_RETRYABLE_PATTERNS.some((re) => re.test(msg))
 }
@@ -82,13 +113,19 @@ export function decideNextAttempt(opts: {
   random?: () => number
   /** Declared narrowing; absent means the host defaults, unchanged. */
   policy?: RetryPolicyOverride
+  /**
+   * The caller knows this failure is worth retrying whatever the error itself
+   * says — a refusal it has just made recoverable (a stale stamp it is about
+   * to re-base). The budget still applies.
+   */
+  forceRetryable?: boolean
 }): NextAttemptDecision {
   const { attempts, error, nowMs = Date.now(), random, policy } = opts
   const msg = error instanceof Error ? error.message : String(error)
   const nextAttempts = attempts + 1
   // A declared budget can only shrink the host's, and never below one shot.
   const maxAttempts = Math.max(1, Math.min(MAX_ATTEMPTS, policy?.maxAttempts ?? MAX_ATTEMPTS))
-  if (!isRetryable(error) || nextAttempts >= maxAttempts) {
+  if ((!opts.forceRetryable && !isRetryable(error)) || nextAttempts >= maxAttempts) {
     return {
       status: "deadlettered",
       nextAttemptAt: nowMs,
@@ -96,9 +133,13 @@ export function decideNextAttempt(opts: {
       lastError: msg,
     }
   }
+  // Never sooner than the Host asked. Retrying inside its `Retry-After` keeps
+  // the rate limit pinned for every other command behind it.
+  const backoff = backoffDelayMs(nextAttempts, random, policy)
+  const retryAfterMs = structuredRetryHint(error).retryAfterMs ?? 0
   return {
     status: "pending",
-    nextAttemptAt: nowMs + backoffDelayMs(nextAttempts, random, policy),
+    nextAttemptAt: nowMs + Math.max(backoff, retryAfterMs),
     attempts: nextAttempts,
     lastError: msg,
   }

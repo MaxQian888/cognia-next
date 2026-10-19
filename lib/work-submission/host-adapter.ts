@@ -27,20 +27,39 @@ import type { HostStateAction } from "@cognia/agent-config-types/host-state"
 import type { WorkReceiptV1 } from "@cognia/agent-config-types/work-submission"
 import type { SendOptions } from "@cognia/agent-config-types"
 
-import { claimWorkSubmission, getWorkSubmission } from "@/lib/db/work-submissions"
+import {
+  claimWorkSubmission,
+  getWorkSubmission,
+  type WorkSubmissionRow,
+} from "@/lib/db/work-submissions"
 
 import { chatIdempotencyKey } from "./chat-adapter"
+import { planWorkSubmissionRecovery, type WorkRecoveryDeps } from "./recovery"
 import {
   acceptWorkSubmission,
   bindWorkExecutionContext,
   markWorkSubmissionStarted,
+  settleWorkSubmissionWithoutTranscript,
   WorkSubmissionRejectedError,
   type WorkSubmissionServiceDeps,
 } from "./service"
 
-export interface HostAdapterDeps extends WorkSubmissionServiceDeps {
+export interface HostAdapterDeps extends WorkSubmissionServiceDeps, WorkRecoveryDeps {
   onError?: (error: unknown) => void
+  /**
+   * Stop the runtime a previous owner handed this turn to, before a takeover
+   * dispatches it again. Defaults to interrupting the submission's session.
+   */
+  abortPrevious?: (submission: WorkSubmissionRow) => Promise<void>
 }
+
+/**
+ * `detail` key of a frozen HostState context whose turn carried attachment
+ * refs. The frozen input holds the message text alone (a ref is not a content
+ * address), so a replay from the ledger would send the words without the
+ * files; the stored-chat replay refuses such a turn instead.
+ */
+export const HOST_STATE_ATTACHMENT_REFS_DETAIL = "hostStateAttachmentRefs"
 
 /** Deterministic per action, so a redelivered action maps to the same run. */
 export function hostStateRunId(actionId: string): string {
@@ -114,6 +133,9 @@ export async function bindHostStateChatTurnContext(
   if (action.action.kind !== "message.enqueue" || !action.sessionId) return false
   try {
     const runId = hostStateRunId(action.actionId)
+    const attachmentRefs = action.action.attachments.filter(
+      (attachment) => typeof attachment.ref === "string" && attachment.ref.length > 0
+    ).length
     const result = await bindWorkExecutionContext(
       {
         submissionId: hostStateSubmissionId(action.actionId),
@@ -122,6 +144,9 @@ export async function bindHostStateChatTurnContext(
         context: {
           ...(sendOptions.cwd ? { cwd: sendOptions.cwd } : {}),
           sendOptions,
+          ...(attachmentRefs > 0
+            ? { detail: { [HOST_STATE_ATTACHMENT_REFS_DETAIL]: attachmentRefs } }
+            : {}),
         },
       },
       deps
@@ -148,21 +173,88 @@ export async function markHostStateChatTurnStarted(
   }
 }
 
-export type HostStateTurnDispatchClaim = "legacy" | "claimed" | "owned_elsewhere"
+/**
+ * `legacy` — no submission exists, so the Host dispatches as it always has.
+ * `claimed` — this Host owns the attempt and may send.
+ * `owned_elsewhere` — another owner holds it, or it already settled.
+ * `recovery_required` — an earlier attempt may have had effects; the
+ * submission was settled for an explicit resume and must not be re-sent.
+ */
+export type HostStateTurnDispatchClaim =
+  "legacy" | "claimed" | "owned_elsewhere" | "recovery_required"
 
-/** Fence HostState assembly before resolving provider options or transport. */
+/**
+ * Fence HostState assembly before resolving provider options or transport.
+ *
+ * A HostState redrive (startup recovery, a periodic retry) reaches this with a
+ * submission an earlier attempt may already have handed to the runtime. That
+ * attempt is ambiguous in exactly the way the work outbox's is, so it gets the
+ * same decision: the replay-safety plan runs before the claim, and a takeover
+ * of a dispatched turn stops the previous runtime before anything is re-sent.
+ * Two recovery paths with two policies is how a turn that already ran a tool
+ * ends up running it again.
+ */
 export async function claimHostStateChatTurnForDispatch(
   actionId: string,
   now = Date.now(),
   deps: HostAdapterDeps = {}
 ): Promise<HostStateTurnDispatchClaim> {
   const submissionId = hostStateSubmissionId(actionId)
+  let row: WorkSubmissionRow | undefined
   try {
-    const claimed = await claimWorkSubmission(submissionId, "host-state", now)
-    if (claimed) return "claimed"
-    return (await getWorkSubmission(submissionId)) ? "owned_elsewhere" : "legacy"
+    row = await getWorkSubmission(submissionId)
   } catch (error) {
     deps.onError?.(error)
     return "legacy"
   }
+  if (!row) return "legacy"
+  // From here the submission is known to exist, so a failure must not fall
+  // back to an unfenced send: the work outbox owns the row and will decide.
+  try {
+    if (row.dispatchState === "settled") return "owned_elsewhere"
+    // A live lease is a live owner. Planning against its row could settle a
+    // turn that owner is handing off right now.
+    if (
+      (row.dispatchState === "claimed" || row.dispatchState === "dispatched") &&
+      (row.leaseExpiresAt ?? 0) > now
+    ) {
+      return "owned_elsewhere"
+    }
+    const plan = await planWorkSubmissionRecovery(row, deps)
+    if (plan.action === "recovery_required") {
+      await settleWorkSubmissionWithoutTranscript(
+        submissionId,
+        "recovery_required",
+        now,
+        plan.reason
+      )
+      return "recovery_required"
+    }
+    const claimed = await claimWorkSubmission(submissionId, "host-state", now)
+    if (!claimed) return "owned_elsewhere"
+    if (claimed.takeoverRequired) {
+      try {
+        await (deps.abortPrevious ?? abortSubmissionSession)(claimed)
+      } catch (error) {
+        deps.onError?.(error)
+        await settleWorkSubmissionWithoutTranscript(
+          submissionId,
+          "recovery_required",
+          now,
+          "takeover_abort_failed"
+        )
+        return "recovery_required"
+      }
+    }
+    return "claimed"
+  } catch (error) {
+    deps.onError?.(error)
+    return "owned_elsewhere"
+  }
+}
+
+async function abortSubmissionSession(submission: WorkSubmissionRow): Promise<void> {
+  if (!submission.sessionId) return
+  const { interruptSession } = await import("@/lib/claude/ipc")
+  await interruptSession(submission.sessionId)
 }

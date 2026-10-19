@@ -36,7 +36,14 @@ The active Desktop/headless Host is the sole authority for each live session.
 - The Host commits the materialized projection, existing business repository,
   and semantic receipt in one Dexie transaction. Runtime work is dispatched
   afterward with the same action id; pending dispatch and broadcast rows are
-  recoverable.
+  recoverable. A committed action always answers its submit with its receipt;
+  a dispatch failure is published as the operation's `failed` and retried by
+  the heartbeat sweep with backoff (queued messages across restarts, decision
+  answers within one Host generation). Steers, follow-ups and stops are never
+  retried, a steer or follow-up reaching a session with no live turn is
+  refused, and a restart abandons the previous generation's live controls. A
+  message redrive runs the same replay-safety plan as the work outbox
+  (ADR-0125). A settled row keeps its receipt and drops the retained intent.
 - A 10-second heartbeat and 30-second lease fence stale Host generations.
 - Clients subscribe to the existing `host-state://action` EventBus topic before
   requesting snapshots. The EventBus carrier sequence remains the transport
