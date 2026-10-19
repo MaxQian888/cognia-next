@@ -3,7 +3,9 @@
 //! Auth tier: loopback-source + `X-Cognia-Fleet-Token` (shared token from
 //! `~/.cognia/agent-monitor.json`). Loopback means a direct one: cloudflared
 //! reaches this listener from loopback too, so the source is read through
-//! [`cognia_companion_security::request_origin`], never from the peer alone — deliberately NOT the device-JWT tier
+//! [`cognia_companion_security::request_origin`], never from the peer alone,
+//! and a request on the tunnel ingress listener is never loopback (ADR-0235).
+//! Deliberately NOT the device-JWT tier
 //! (a hook ping must not require mobile pairing) and NOT the pre-auth rate
 //! limiter (hook events fire on every tool call; the token gates them).
 //! Mounted AFTER `with_state` in `companion_api::server::build_router`, so
@@ -11,7 +13,7 @@
 //! [`super::FleetRuntime`].
 
 use axum::{
-    extract::ConnectInfo,
+    extract::{ConnectInfo, Extension},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::post,
@@ -19,7 +21,7 @@ use axum::{
 };
 use std::net::SocketAddr;
 
-use cognia_companion_security::request_origin::is_direct_loopback;
+use cognia_companion_security::request_origin::{is_direct_loopback, ListenerKind};
 
 use super::registry::{FleetAgent, FleetEvent, RegistryEffect};
 use super::{PermissionBehavior, QuestionResponse};
@@ -62,10 +64,11 @@ struct CommandPollBody {
 /// + fleet-token gate as the hook endpoint.
 async fn opencode_commands_handler(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    listener: Option<Extension<ListenerKind>>,
     headers: HeaderMap,
     Json(body): Json<CommandPollBody>,
 ) -> Response {
-    if !is_direct_loopback(Some(addr.ip()), &headers) {
+    if !is_direct_loopback(listener_kind(listener), Some(addr.ip()), &headers) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let runtime = super::runtime();
@@ -103,8 +106,18 @@ struct CommandNackBody {
     error: String,
 }
 
-fn authorize_command_route(addr: SocketAddr, headers: &HeaderMap) -> Result<(), StatusCode> {
-    if !is_direct_loopback(Some(addr.ip()), headers) {
+/// The listener a request arrived on. Untagged routers (the unit tests) are
+/// local, as every listener before the tunnel ingress was.
+fn listener_kind(listener: Option<Extension<ListenerKind>>) -> ListenerKind {
+    listener.map(|Extension(kind)| kind).unwrap_or_default()
+}
+
+fn authorize_command_route(
+    addr: SocketAddr,
+    listener: Option<Extension<ListenerKind>>,
+    headers: &HeaderMap,
+) -> Result<(), StatusCode> {
+    if !is_direct_loopback(listener_kind(listener), Some(addr.ip()), headers) {
         return Err(StatusCode::FORBIDDEN);
     }
     let presented = headers
@@ -119,10 +132,11 @@ fn authorize_command_route(addr: SocketAddr, headers: &HeaderMap) -> Result<(), 
 
 async fn opencode_command_ack_handler(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    listener: Option<Extension<ListenerKind>>,
     headers: HeaderMap,
     Json(body): Json<CommandAckBody>,
 ) -> Response {
-    if let Err(status) = authorize_command_route(addr, &headers) {
+    if let Err(status) = authorize_command_route(addr, listener, &headers) {
         return status.into_response();
     }
     match super::runtime()
@@ -137,10 +151,11 @@ async fn opencode_command_ack_handler(
 
 async fn opencode_command_nack_handler(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    listener: Option<Extension<ListenerKind>>,
     headers: HeaderMap,
     Json(body): Json<CommandNackBody>,
 ) -> Response {
-    if let Err(status) = authorize_command_route(addr, &headers) {
+    if let Err(status) = authorize_command_route(addr, listener, &headers) {
         return status.into_response();
     }
     match super::runtime()
@@ -161,10 +176,11 @@ async fn opencode_command_nack_handler(
 /// nothing and Claude falls back to its own terminal prompt — fail-open).
 async fn hook_handler(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    listener: Option<Extension<ListenerKind>>,
     headers: HeaderMap,
     Json(event): Json<FleetEvent>,
 ) -> Response {
-    if !is_direct_loopback(Some(addr.ip()), &headers) {
+    if !is_direct_loopback(listener_kind(listener), Some(addr.ip()), &headers) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let runtime = super::runtime();
@@ -354,6 +370,52 @@ mod tests {
             let resp = router().oneshot(request).await.unwrap();
             assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{uri}");
         }
+    }
+
+    #[tokio::test]
+    async fn rejects_every_request_on_the_tunnel_ingress_listener() {
+        let _guard = crate::TEST_RUNTIME_LOCK.lock().await;
+        let token = arm("routes-test-token-ingress");
+        // A dev-tunnel forward connects from loopback and sets no Cloudflare
+        // header. Only the listener's own tag tells the two apart.
+        let mut hook = hook_request(
+            loopback_peer(),
+            Some(&token),
+            envelope("SessionStart", "route-ingress"),
+        );
+        hook.extensions_mut().insert(ListenerKind::TunnelIngress);
+        let resp = router().oneshot(hook).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+        for uri in [
+            "/api/fleet/opencode/commands",
+            "/api/fleet/opencode/commands/ack",
+            "/api/fleet/opencode/commands/nack",
+        ] {
+            let request = axum::http::Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("content-type", "application/json")
+                .header(FLEET_TOKEN_HEADER, &token)
+                .extension(loopback_peer())
+                .extension(ListenerKind::TunnelIngress)
+                .body(axum::body::Body::from(
+                    r#"{"session_ids":["x"],"id":"c1","result":null,"error":"e"}"#,
+                ))
+                .unwrap();
+            let resp = router().oneshot(request).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{uri}");
+        }
+
+        // The same request tagged as a local listener still passes the gate.
+        let mut local = hook_request(
+            loopback_peer(),
+            Some(&token),
+            envelope("SessionStart", "route-ingress-local"),
+        );
+        local.extensions_mut().insert(ListenerKind::Local);
+        let resp = router().oneshot(local).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     }
 
     #[tokio::test]

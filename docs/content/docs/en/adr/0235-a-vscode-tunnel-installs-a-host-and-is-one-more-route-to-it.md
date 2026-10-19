@@ -5,7 +5,7 @@ description: "An existing VS Code tunnel is used to install, pair, repair and un
 
 # ADR 0235 — A VS Code tunnel installs a Host and is one more route to it
 
-**Status:** Accepted. The user confirmed every decision on 2026-10-18 in a design review and a follow-up reuse audit. Implementation has not started. The P0 spikes in the plan gate every later phase. If spike S1 fails, decision 4 returns to review before Phase 1.  
+**Status:** Accepted. The user confirmed every decision on 2026-10-18 in a design review and a follow-up reuse audit. Implementation started on 2026-10-19 with the Phase 1 ingress listener and listener-aware origin classification. These do not depend on the spikes. The P0 spikes gate every other later phase, starting with route publishing. If spike S1 fails, decision 4 returns to review before Phase 1.  
 **Date:** 2026-10-18  
 **Scope:** User-owned Linux and macOS machines that already run `code tunnel`. The desktop installs a Cognia Host there, pairs it, keeps it reachable and removes it.  
 **Out of scope:** Windows machines, Microsoft-account tunnels (until spike S4 passes), editing through the raw tunnel and Agent execution through the raw tunnel.  

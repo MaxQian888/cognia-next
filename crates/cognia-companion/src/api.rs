@@ -469,7 +469,11 @@ fn same_origin_signaling_url(headers: &HeaderMap, plane: super::server::Transpor
         })
         .unwrap_or(match plane {
             super::server::TransportPlane::Plaintext => "ws",
-            super::server::TransportPlane::Tls => "wss",
+            // A tunnel terminates TLS at its public edge, so its visitors
+            // always reached this Host over HTTPS.
+            super::server::TransportPlane::Tls | super::server::TransportPlane::TunnelIngress => {
+                "wss"
+            }
         });
     let host = headers
         .get("x-forwarded-host")
@@ -536,6 +540,7 @@ fn authenticate_owner_request(
     if deployment_mode() == DeploymentMode::SingleUser
         && request.uri().path() == "/api/invitations"
         && !cognia_companion_security::request_origin::is_direct_loopback(
+            super::middleware::listener_kind(request),
             request
                 .extensions()
                 .get::<ConnectInfo<SocketAddr>>()
@@ -1072,6 +1077,24 @@ fn validate_policy_request(request: &CreatePolicyRequest, now: i64) -> Result<()
     Ok(())
 }
 
+/// The execution plane an RPC arriving on `plane` runs under.
+///
+/// The browser listener binds `127.0.0.1` and nothing else, so arriving on it
+/// is proof of same-machine. Every other plane is not: a TLS request whose
+/// Host header says localhost, and the tunnel ingress listener, which binds
+/// `127.0.0.1` too but carries bytes from the public internet (ADR-0235). No
+/// listener behind the router (the oneshot tests) is the conservative plane.
+fn execution_plane(
+    plane: Option<super::server::TransportPlane>,
+) -> super::remote_execution::ExecutionPlane {
+    use super::remote_execution::ExecutionPlane;
+    use super::server::TransportPlane;
+    match plane {
+        Some(TransportPlane::Plaintext) => ExecutionPlane::LoopbackPlaintext,
+        Some(TransportPlane::Tls | TransportPlane::TunnelIngress) | None => ExecutionPlane::Network,
+    }
+}
+
 pub async fn rpc_handler(
     Path(name): Path<String>,
     Extension(context): Extension<DeviceContext>,
@@ -1102,15 +1125,7 @@ pub async fn rpc_handler(
         super::remote_execution::ExecutionTransport::Http,
         idempotency_key,
     )
-    // The plaintext listener binds `127.0.0.1` and nothing else, so arriving on
-    // it is proof of same-machine. Every other plane, including a TLS request
-    // whose Host header says localhost, is not.
-    .with_plane(match plane {
-        Some(Extension(super::server::TransportPlane::Plaintext)) => {
-            super::remote_execution::ExecutionPlane::LoopbackPlaintext
-        }
-        _ => super::remote_execution::ExecutionPlane::Network,
-    })
+    .with_plane(execution_plane(plane.map(|Extension(plane)| plane)))
     .with_traceparent(
         headers
             .get("traceparent")
@@ -2734,6 +2749,15 @@ mod tests {
                 "{peer:?} tunnel={tunnel}"
             );
         }
+        // A dev-tunnel forward also connects from loopback and sets no
+        // Cloudflare header; the ingress listener's tag alone refuses it.
+        let mut ingress = invitation_request([127, 0, 0, 1], false);
+        ingress
+            .extensions_mut()
+            .insert(cognia_companion_security::request_origin::ListenerKind::TunnelIngress);
+        let refused = authenticate_owner_request(&test_state(), &ingress)
+            .expect_err("a tunnel ingress caller is never loopback");
+        assert_eq!(refused.code, "loopback_required");
         // A direct loopback caller passes the origin rule and fails later, on
         // its (invalid) token.
         let direct =
@@ -3087,6 +3111,34 @@ mod tests {
         assert_eq!(
             same_origin_signaling_url(&headers, TransportPlane::Tls),
             "wss://brain.example/signaling"
+        );
+    }
+
+    #[test]
+    fn only_the_browser_listener_executes_as_loopback_plaintext() {
+        use crate::remote_execution::ExecutionPlane;
+        assert_eq!(
+            execution_plane(Some(TransportPlane::Plaintext)),
+            ExecutionPlane::LoopbackPlaintext
+        );
+        for plane in [
+            Some(TransportPlane::Tls),
+            Some(TransportPlane::TunnelIngress),
+            None,
+        ] {
+            assert_eq!(execution_plane(plane), ExecutionPlane::Network, "{plane:?}");
+        }
+    }
+
+    #[test]
+    fn tunnel_ingress_signaling_is_secure_because_the_tunnel_edge_is_https() {
+        // The ingress listener itself is plaintext on loopback, but its
+        // visitors reached the tunnel's public HTTPS edge.
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "abc-27893.usw2.devtunnels.ms".parse().unwrap());
+        assert_eq!(
+            same_origin_signaling_url(&headers, TransportPlane::TunnelIngress),
+            "wss://abc-27893.usw2.devtunnels.ms/signaling"
         );
     }
 

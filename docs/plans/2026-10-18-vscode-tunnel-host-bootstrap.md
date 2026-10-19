@@ -103,6 +103,13 @@ Each spike is an opt-in script in an owned scratch directory, run against a disp
 
 **Exit and rollback.** Ingress and route are off unless configured. Changeset: `minor`. The fix for named Cloudflared trust gets its own `patch` line.
 
+**Progress (2026-10-19).** The ingress half has landed. The route half waits for spike S1.
+
+- **Listener kind.** `ListenerKind { Local, TunnelIngress }` lives in `crates/cognia-companion-security/src/request_origin.rs`, and `request_origin` / `is_direct_loopback` take it as their first argument. Every call site passes it: fleet routes, the operator, service-token, local-debug and rate-limit middleware, and the Owner invitation. An untagged router reads as `Local`.
+- **Visitor buckets.** On ingress, every visitor shares the forward peer's rate-limit bucket. No relayed header can pick a bucket until S1 names the tunnel's forwarding header.
+- **Listener.** `TransportPlane::TunnelIngress` maps to `ExecutionPlane::Network` and `wss` signaling. `server::spawn_tunnel_ingress_listener` shares one loopback-plaintext spawn with the browser listener. `tag_listener` inserts both extensions as the outermost layer of every listener.
+- **Config and CLI.** The config is `crates/cognia-companion/src/tunnel_ingress.rs`: `<data_dir>/cognia/tunnel-ingress.json`, mode 0600, off by default, port 27896. The bootstrapper switches it with `cognia-server tunnel-ingress status|enable [--port]|disable`, which prints the saved config as JSON. `serve` binds the listener from the saved config, and a bind failure leaves the HTTPS listener up.
+
 ## P2 — No-tauri headless `cognia-server`
 
 **Goal.** Deliver the ADR-0059 follow-up: a `cognia-server` that links no Tauri, GTK or WebKit.
@@ -269,6 +276,6 @@ Only the account types that passed S4. They become a provider in the same TS acc
 
 ## Open items owned by phases
 
-- P1: the ingress flag/config name and the route command names.
+- P1: the route command names. The ingress config name is decided: `tunnel-ingress.json` and `cognia-server tunnel-ingress`.
 - P2: the `ocr-paddle` decision and the recorded glibc baseline.
 - P4: the upload strategy, if S2 shows a single `fs_write` stream is too slow or fragile.

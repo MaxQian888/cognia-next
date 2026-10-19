@@ -53,7 +53,18 @@ use super::{
     rate_limit::RateLimitDecision,
     SharedState,
 };
-use cognia_companion_security::request_origin::request_origin;
+use cognia_companion_security::request_origin::{request_origin, ListenerKind};
+
+/// The listener that accepted this request. Every listener tags its requests;
+/// an untagged router (the oneshot tests) is local, as every listener before
+/// the tunnel ingress (ADR-0235) was.
+pub(crate) fn listener_kind(request: &Request) -> ListenerKind {
+    request
+        .extensions()
+        .get::<ListenerKind>()
+        .copied()
+        .unwrap_or_default()
+}
 
 const LOCAL_DEBUG_TOKEN_ENV: &str = "COGNIA_LOCAL_DEBUG_TOKEN";
 
@@ -156,7 +167,7 @@ pub async fn require_loopback_operator(request: Request, next: Next) -> Response
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|peer| peer.0.ip());
-    let origin = request_origin(peer, request.headers());
+    let origin = request_origin(listener_kind(&request), peer, request.headers());
     let operator_bearer = request
         .headers()
         .get(axum::http::header::AUTHORIZATION)
@@ -244,7 +255,8 @@ async fn authenticate_request(
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|ci| ci.0.ip());
-    let peer_is_loopback = request_origin(peer, request.headers()).direct_loopback;
+    let peer_is_loopback =
+        request_origin(listener_kind(&request), peer, request.headers()).direct_loopback;
     // ── 1. Extract token ────────────────────────────────────────────────────
     let header_token = request
         .headers()
@@ -518,7 +530,7 @@ pub async fn pre_auth_rate_limit(
     request: Request,
     next: Next,
 ) -> Response {
-    let origin = request_origin(Some(addr.ip()), request.headers());
+    let origin = request_origin(listener_kind(&request), Some(addr.ip()), request.headers());
     if origin.direct_loopback {
         return next.run(request).await;
     }
@@ -1192,6 +1204,105 @@ mod tests {
             let response = router.oneshot(request).await.unwrap();
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
             assert_eq!(body_json(response).await["code"], "service_token_remote");
+        }
+    }
+
+    /// A dev-tunnel forward connects from loopback and sets no Cloudflare
+    /// header (ADR-0235). The ingress listener's tag alone must refuse every
+    /// loopback privilege the Cloudflare tests above refuse by header.
+    fn on_tunnel_ingress(mut request: Request<Body>) -> Request<Body> {
+        request.extensions_mut().insert(ListenerKind::TunnelIngress);
+        request
+    }
+
+    #[tokio::test]
+    async fn tunnel_ingress_cannot_use_loopback_service_or_debug_tokens() {
+        for router in [
+            build_router(test_state()),
+            build_service_router(test_state()),
+        ] {
+            let response = router
+                .oneshot(on_tunnel_ingress(service_request_from(Some("127.0.0.1"))))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(body_json(response).await["code"], "service_token_remote");
+        }
+        let router =
+            build_local_debug_router(test_state(), "local-debug-token-with-at-least-32-bytes");
+        let response = router
+            .oneshot(on_tunnel_ingress(local_debug_request(
+                "/internal/test",
+                "127.0.0.1",
+            )))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            body_json(response).await["code"],
+            "local_debug_token_remote"
+        );
+    }
+
+    #[tokio::test]
+    async fn tunnel_ingress_cannot_use_loopback_operator_routes() {
+        let router = Router::new()
+            .route("/metrics", get(|| async { StatusCode::OK }))
+            .layer(from_fn(require_loopback_operator));
+        let request = Request::builder()
+            .uri("/metrics")
+            .extension(ConnectInfo(
+                "127.0.0.1:54321".parse::<SocketAddr>().unwrap(),
+            ))
+            .body(Body::empty())
+            .unwrap();
+        let response = router
+            .clone()
+            .oneshot(on_tunnel_ingress(request))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            body_json(response).await["code"],
+            "operator_identity_required"
+        );
+        // An explicitly local tag is the untagged behaviour.
+        let request = Request::builder()
+            .uri("/metrics")
+            .extension(ConnectInfo(
+                "127.0.0.1:54321".parse::<SocketAddr>().unwrap(),
+            ))
+            .extension(ListenerKind::Local)
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            router.oneshot(request).await.unwrap().status(),
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test]
+    async fn tunnel_ingress_is_metered_and_cannot_rotate_buckets() {
+        let router = build_metered_router();
+        // A peer of its own so the process-global buckets of other tests do
+        // not interfere. Rotating `cf-connecting-ip` must not buy a fresh
+        // bucket: every visitor shares the forward's.
+        for index in 0..6 {
+            let mut request = on_tunnel_ingress(metered_request("127.0.0.31"));
+            request.headers_mut().insert(
+                "cf-connecting-ip",
+                format!("198.51.100.{}", 40 + index).parse().unwrap(),
+            );
+            let response = router.clone().oneshot(request).await.unwrap();
+            assert_eq!(
+                response.status(),
+                if index < 5 {
+                    StatusCode::OK
+                } else {
+                    StatusCode::TOO_MANY_REQUESTS
+                },
+                "ingress request {index}"
+            );
         }
     }
 

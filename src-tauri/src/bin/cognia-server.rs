@@ -266,6 +266,29 @@ enum CliCommand {
         #[command(subcommand)]
         command: ServiceCommand,
     },
+    /// The loopback listener a dev-tunnel forward targets (ADR-0235 §4).
+    ///
+    /// Off by default. A forward must target this listener and never the
+    /// HTTPS or browser listener: its requests reach no loopback privilege.
+    /// Changes take effect at the next `serve`. Every subcommand prints the
+    /// saved config as JSON, for the bootstrapper that runs it remotely.
+    TunnelIngress {
+        #[command(subcommand)]
+        command: TunnelIngressCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum TunnelIngressCommand {
+    /// Print the saved config.
+    Status,
+    /// Bind the listener at the next `serve`.
+    Enable {
+        #[arg(long, default_value_t = app_lib::companion_api::tunnel_ingress::DEFAULT_TUNNEL_INGRESS_PORT)]
+        port: u16,
+    },
+    /// Stop binding the listener at the next `serve`. The port is kept.
+    Disable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -894,6 +917,32 @@ fn data_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Apply one `tunnel-ingress` subcommand to the saved config and return it.
+fn run_tunnel_ingress(
+    data_dir: &std::path::Path,
+    command: &TunnelIngressCommand,
+) -> Result<app_lib::companion_api::tunnel_ingress::TunnelIngressConfig, String> {
+    use app_lib::companion_api::tunnel_ingress::{self, TunnelIngressConfig};
+    let current = tunnel_ingress::load(data_dir);
+    match command {
+        TunnelIngressCommand::Status => Ok(current),
+        TunnelIngressCommand::Enable { port } => tunnel_ingress::save(
+            data_dir,
+            TunnelIngressConfig {
+                enabled: true,
+                port: *port,
+            },
+        ),
+        TunnelIngressCommand::Disable => tunnel_ingress::save(
+            data_dir,
+            TunnelIngressConfig {
+                enabled: false,
+                ..current
+            },
+        ),
+    }
+}
+
 /// Re-evaluate the data dir for callers inside `run_serve` (which don't
 /// have it threaded as a parameter). Cheap — same env-var read + dirs
 /// lookup as the top-level boot, so the location stays consistent.
@@ -1089,6 +1138,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let CliCommand::Init { keychain } = &cli.command {
         return run_init(&data_dir(), *keychain).map_err(Into::into);
     }
+    if let CliCommand::TunnelIngress { command } = &cli.command {
+        // A config file only: no store, key or listener is touched, so the
+        // bootstrapper can run it before the service is first installed.
+        let config = run_tunnel_ingress(&data_dir(), command)?;
+        println!("{}", serde_json::to_string(&config)?);
+        return Ok(());
+    }
 
     let dir = data_dir();
     std::fs::create_dir_all(&dir)?;
@@ -1269,7 +1325,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         CliCommand::Profiles { command } => run_profiles(&dir, command),
         CliCommand::Gateway { command } => run_gateway_admin(&dir, command),
         CliCommand::Devices { command } => run_devices_admin(command).await,
-        CliCommand::DesktopHost { .. } | CliCommand::Service { .. } | CliCommand::Init { .. } => {
+        CliCommand::DesktopHost { .. }
+        | CliCommand::Service { .. }
+        | CliCommand::Init { .. }
+        | CliCommand::TunnelIngress { .. } => {
             unreachable!("handled before headless initialization")
         }
         CliCommand::RotateMasterKey { .. }
@@ -2774,6 +2833,30 @@ async fn run_serve(
         None => None,
     };
 
+    // Tunnel ingress (ADR-0235 §4): the listener a dev-tunnel forward targets,
+    // only when the bootstrapper enabled it. Like the browser listener, a bind
+    // failure must not take the HTTPS listener down: the relay stays the
+    // primary route and every paired client depends on it.
+    let tunnel_ingress = app_lib::companion_api::tunnel_ingress::load(&data_dir);
+    let ingress_handle = if tunnel_ingress.enabled {
+        match server::spawn_tunnel_ingress_listener(tunnel_ingress.port, Arc::clone(&shared)).await
+        {
+            Ok(handle) => {
+                log::info!(
+                    "tunnel ingress listener on http://127.0.0.1:{} (loopback; forward target only)",
+                    handle.bound_port
+                );
+                Some(handle)
+            }
+            Err(error) => {
+                log::warn!("tunnel ingress listener could not start: {error}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Brain supervisor (R8): spawn `node $COGNIA_BRAIN_ENTRY serve` against
     // the bound port and keep it alive. Without an entry the server still
     // runs — the degraded store serves reads and /healthz reports
@@ -2880,6 +2963,22 @@ async fn run_serve(
     // Ends every live WebDAV/SFTP session and the file-share tunnel.
     if let Some(file_share) = cognia_file_share::service::get() {
         file_share.shutdown().await;
+    }
+    if let Some(ingress_handle) = ingress_handle {
+        let mut ingress_terminated = ingress_handle.terminated.clone();
+        let _ = ingress_handle.shutdown.send(());
+        let ingress_drained =
+            tokio::time::timeout(std::time::Duration::from_secs(30), async move {
+                while !*ingress_terminated.borrow() {
+                    if ingress_terminated.changed().await.is_err() {
+                        break;
+                    }
+                }
+            })
+            .await;
+        if ingress_drained.is_err() {
+            log::warn!("tunnel ingress listener drain exceeded 30 seconds; forcing shutdown");
+        }
     }
     if let Some(browser_handle) = browser_handle {
         // Close browser device sockets as "going away" before clearing the
@@ -3527,6 +3626,58 @@ mod tests {
                 command: ProfilesCommand::CredentialList
             }
         ));
+    }
+
+    #[test]
+    fn tunnel_ingress_subcommands_round_trip_the_saved_config() {
+        use super::{run_tunnel_ingress, Cli, CliCommand, TunnelIngressCommand};
+        use clap::Parser as _;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let parse = |args: &[&str]| -> TunnelIngressCommand {
+            let mut argv = vec!["cognia-server", "tunnel-ingress"];
+            argv.extend_from_slice(args);
+            match Cli::try_parse_from(argv)
+                .expect("tunnel-ingress arguments")
+                .command
+            {
+                CliCommand::TunnelIngress { command } => command,
+                other => panic!("parsed as {other:?}"),
+            }
+        };
+
+        let status = run_tunnel_ingress(dir.path(), &parse(&["status"])).unwrap();
+        assert!(!status.enabled, "off until the bootstrapper enables it");
+        assert_eq!(
+            status.port,
+            app_lib::companion_api::tunnel_ingress::DEFAULT_TUNNEL_INGRESS_PORT
+        );
+
+        let enabled =
+            run_tunnel_ingress(dir.path(), &parse(&["enable", "--port", "28123"])).unwrap();
+        assert!(enabled.enabled);
+        assert_eq!(enabled.port, 28123);
+
+        // Disabling keeps the port, so a later enable without one is explicit.
+        let disabled = run_tunnel_ingress(dir.path(), &parse(&["disable"])).unwrap();
+        assert!(!disabled.enabled);
+        assert_eq!(disabled.port, 28123);
+        assert_eq!(
+            app_lib::companion_api::tunnel_ingress::load(dir.path()),
+            disabled
+        );
+        assert_eq!(
+            serde_json::to_value(&disabled).unwrap(),
+            serde_json::json!({ "enabled": false, "port": 28123 })
+        );
+    }
+
+    #[test]
+    fn serve_binds_the_tunnel_ingress_listener_only_from_its_saved_config() {
+        let source = include_str!("cognia-server.rs");
+        assert!(source.contains(
+            "let tunnel_ingress = app_lib::companion_api::tunnel_ingress::load(&data_dir);"
+        ));
+        assert!(source.contains("server::spawn_tunnel_ingress_listener(tunnel_ingress.port"));
     }
 
     #[test]

@@ -280,7 +280,7 @@ pub async fn spawn_server(
         .await
         .map_err(|e| CompanionServerError::Tls(e.to_string()))?;
 
-    let app = build_router(state).layer(Extension(TransportPlane::Tls));
+    let app = tag_listener(build_router(state), TransportPlane::Tls);
 
     let server_handle = axum_server::Handle::new();
     let (tx, mut rx) = watch::channel(());
@@ -373,6 +373,60 @@ pub async fn spawn_browser_listener(
     state: SharedState,
     origin_policy: super::web_origin::WebOriginPolicy,
 ) -> Result<ServerHandle, CompanionServerError> {
+    let app = tag_listener(
+        build_router_with_origin_policy(state, origin_policy),
+        TransportPlane::Plaintext,
+    );
+    let handle = spawn_loopback_plaintext(port, app, "browser listener").await?;
+    log::info!(
+        "companion browser listener bound on http://127.0.0.1:{}",
+        handle.bound_port
+    );
+    Ok(handle)
+}
+
+/// Spawn the **tunnel ingress** listener a dev-tunnel forward targets
+/// (ADR-0235 §4, [`super::tunnel_ingress`]).
+///
+/// Plaintext and hard-bound to `127.0.0.1` like the browser listener: the
+/// forward runs on this machine and the tunnel terminates TLS at its public
+/// edge. It serves the HTTPS listener's router and origin policy, because
+/// its callers are the same remote clients. Unlike both other listeners, it
+/// tags every request as tunnel ingress, so no loopback privilege and no
+/// `LoopbackPlaintext` execution is reachable through it, whatever the
+/// forward's peer address or the headers it relays.
+pub async fn spawn_tunnel_ingress_listener(
+    port: u16,
+    state: SharedState,
+) -> Result<ServerHandle, CompanionServerError> {
+    let app = tag_listener(build_router(state), TransportPlane::TunnelIngress);
+    let handle = spawn_loopback_plaintext(port, app, "tunnel ingress listener").await?;
+    log::info!(
+        "companion tunnel ingress listener bound on http://127.0.0.1:{}",
+        handle.bound_port
+    );
+    Ok(handle)
+}
+
+/// Tag every request on a listener with the plane it serves and the listener
+/// kind the loopback gates read. The outermost layer, so a request reaches no
+/// route untagged; a client cannot set a request extension.
+fn tag_listener(router: Router, plane: TransportPlane) -> Router {
+    router
+        .layer(Extension(plane.listener_kind()))
+        .layer(Extension(plane))
+}
+
+/// Bind `127.0.0.1:<port>` and serve `app` over plaintext until shutdown.
+///
+/// Shared by the browser and tunnel ingress listeners. Neither may ever bind
+/// another interface: the browser plane drops TLS because its bytes cannot
+/// leave the machine, and the ingress plane exists only for a local forward.
+async fn spawn_loopback_plaintext(
+    port: u16,
+    app: Router,
+    label: &'static str,
+) -> Result<ServerHandle, CompanionServerError> {
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
     let std_listener = std::net::TcpListener::bind(addr)
         .map_err(|source| CompanionServerError::Bind { addr, source })?;
@@ -384,8 +438,6 @@ pub async fn spawn_browser_listener(
         .map_err(|source| CompanionServerError::Bind { addr, source })?
         .port();
 
-    let app = build_router_with_origin_policy(state, origin_policy)
-        .layer(Extension(TransportPlane::Plaintext));
     let server_handle = axum_server::Handle::new();
     let (tx, mut rx) = watch::channel(());
     let (terminated_tx, terminated_rx) = watch::channel(false);
@@ -404,7 +456,7 @@ pub async fn spawn_browser_listener(
         let server = match axum_server::from_tcp(std_listener) {
             Ok(server) => server,
             Err(e) => {
-                log::warn!("companion browser listener failed to build acceptor: {e}");
+                log::warn!("companion {label} failed to build acceptor: {e}");
                 let _ = terminated_tx.send(true);
                 return;
             }
@@ -414,12 +466,11 @@ pub async fn spawn_browser_listener(
             .serve(app.into_make_service_with_connect_info::<SocketAddr>())
             .await;
         if let Err(e) = result {
-            log::warn!("companion browser listener exited with error: {e}");
+            log::warn!("companion {label} exited with error: {e}");
         }
         let _ = terminated_tx.send(true);
     });
 
-    log::info!("companion browser listener bound on http://127.0.0.1:{bound_port}");
     Ok(ServerHandle {
         bound_port,
         shutdown: tx,
@@ -469,6 +520,21 @@ pub enum TransportPlane {
     Tls,
     /// The plaintext, loopback-only browser listener.
     Plaintext,
+    /// The plaintext, loopback-bound listener a dev-tunnel forward targets
+    /// (ADR-0235 §4). Loopback by address only: its requests come from the
+    /// public internet, so it never maps to a loopback privilege.
+    TunnelIngress,
+}
+
+impl TransportPlane {
+    /// The listener kind `request_origin` classifies this plane's requests by.
+    pub fn listener_kind(self) -> cognia_companion_security::request_origin::ListenerKind {
+        use cognia_companion_security::request_origin::ListenerKind;
+        match self {
+            Self::Tls | Self::Plaintext => ListenerKind::Local,
+            Self::TunnelIngress => ListenerKind::TunnelIngress,
+        }
+    }
 }
 
 pub fn build_router(state: SharedState) -> Router {
@@ -1386,6 +1452,97 @@ mod tests {
         );
 
         shutdown_and_wait(handle).await;
+    }
+
+    /// ADR-0235 §4: a dev-tunnel forward reaches the ingress listener from
+    /// `127.0.0.1` with no Cloudflare header. Over a real socket, every
+    /// loopback privilege must still be refused, while the same requests on
+    /// a local listener keep them.
+    #[tokio::test]
+    async fn tunnel_ingress_listener_grants_no_loopback_privilege() {
+        let _lifecycle_guard = SERVER_LIFECYCLE_TEST_LOCK.lock().await;
+        let _topology_guard = crate::ws_bridge::test_support::lock_slot().await;
+        crate::runtime::test_support::clear_headless();
+        // No TLS listener runs here, so nothing installed the provider the
+        // client's builder resolves.
+        crate::ensure_crypto_provider();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("reqwest client");
+
+        let ingress = spawn_tunnel_ingress_listener(0, test_state())
+            .await
+            .expect("spawn ingress on an ephemeral port");
+        let base = format!("http://127.0.0.1:{}", ingress.bound_port);
+
+        let metrics = client
+            .get(format!("{base}/metrics"))
+            .send()
+            .await
+            .expect("GET /metrics");
+        assert_eq!(metrics.status(), StatusCode::FORBIDDEN);
+
+        let (service_jwt, _) =
+            crate::jwt::issue_service_jwt(SECRET, ACCOUNT_ID).expect("service token");
+        let internal = client
+            .post(format!("{base}/internal/_rpc/claude_sidecar_status"))
+            .bearer_auth(&service_jwt)
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .expect("POST /internal/_rpc");
+        assert_eq!(internal.status(), StatusCode::UNAUTHORIZED);
+        let body: serde_json::Value = internal.json().await.expect("problem body");
+        assert_eq!(body["code"], "service_token_remote");
+
+        // The pre-auth limiter has no loopback exemption here.
+        let mut saw_429 = false;
+        for _ in 0..10 {
+            let response = client
+                .post(format!("{base}/api/auth/device/challenge"))
+                .json(&serde_json::json!({ "accountId": ACCOUNT_ID }))
+                .send()
+                .await
+                .expect("POST /api/auth/device/challenge");
+            if response.status() == StatusCode::TOO_MANY_REQUESTS {
+                saw_429 = true;
+                break;
+            }
+        }
+        assert!(saw_429, "tunnel ingress must be rate-limited");
+        shutdown_and_wait(ingress).await;
+
+        // The browser listener is plaintext on loopback too, and keeps the
+        // operator route: the difference is the listener's tag alone.
+        let browser = spawn_browser_listener(
+            0,
+            test_state(),
+            crate::web_origin::WebOriginPolicy::from_env(),
+        )
+        .await
+        .expect("spawn browser listener");
+        let local_metrics = client
+            .get(format!("http://127.0.0.1:{}/metrics", browser.bound_port))
+            .send()
+            .await
+            .expect("GET /metrics on the browser listener");
+        assert_eq!(local_metrics.status(), StatusCode::OK);
+        shutdown_and_wait(browser).await;
+    }
+
+    #[test]
+    fn only_the_tunnel_ingress_plane_is_classified_as_tunnel_ingress() {
+        use cognia_companion_security::request_origin::ListenerKind;
+        assert_eq!(TransportPlane::Tls.listener_kind(), ListenerKind::Local);
+        assert_eq!(
+            TransportPlane::Plaintext.listener_kind(),
+            ListenerKind::Local
+        );
+        assert_eq!(
+            TransportPlane::TunnelIngress.listener_kind(),
+            ListenerKind::TunnelIngress
+        );
     }
 
     #[tokio::test]

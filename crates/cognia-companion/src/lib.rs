@@ -126,6 +126,8 @@ pub use cognia_companion_connectivity::signaling_config;
 pub use cognia_companion_connectivity::tls;
 pub use cognia_companion_connectivity::tunnel;
 pub use cognia_companion_connectivity::tunnel_config;
+/// The loopback listener a dev-tunnel forward targets (ADR-0235 §4).
+pub mod tunnel_ingress;
 pub mod web_origin;
 pub mod workflow_api;
 pub mod workflow_app_api;
