@@ -2,7 +2,50 @@
  * Tests for A2UI Prompts
  */
 
-import { A2UI_SYSTEM_PROMPT } from "./prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests, resolvePrompt } from "@/lib/prompts/resolve"
+import { A2UI_PROTOCOL_PROMPT, A2UI_SYSTEM_PROMPT } from "./prompts"
+
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
+
+describe("A2UI_PROTOCOL_PROMPT", () => {
+  it("is the one source of the guidance build-options appends", () => {
+    expect(A2UI_SYSTEM_PROMPT).toBe(A2UI_PROTOCOL_PROMPT.defaultBody)
+    expect(resolvePrompt(A2UI_PROTOCOL_PROMPT).text).toBe(A2UI_SYSTEM_PROMPT)
+  })
+
+  // The parser reads back what this text teaches, so it is inspect-only: a
+  // stored override is never applied.
+  it("is inspect-only and ignores a stored override", () => {
+    expect(A2UI_PROTOCOL_PROMPT).toMatchObject({ operation: "inspect-only", scopes: [] })
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: A2UI_PROTOCOL_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-a2ui-protocol",
+          body: "Never use A2UI.",
+          contractVersion: A2UI_PROTOCOL_PROMPT.contractVersion,
+        },
+      ])
+    )
+    expect(resolvePrompt(A2UI_PROTOCOL_PROMPT).text).toBe(A2UI_SYSTEM_PROMPT)
+  })
+
+  it("keeps the fragments the parser depends on", () => {
+    for (const fragment of A2UI_PROTOCOL_PROMPT.requiredFragments) {
+      expect(A2UI_SYSTEM_PROMPT).toContain(fragment)
+    }
+  })
+})
 
 describe("A2UI_SYSTEM_PROMPT", () => {
   it("should be a non-empty string", () => {

@@ -1020,6 +1020,36 @@ describe("Media Registry", () => {
       expect(enhanceRequest.body.get("prompt")).toContain("restore")
     })
 
+    it("sends the account's Prompt Center override for background removal", async () => {
+      const { __setPromptOverrideSnapshotForTests, buildPromptOverrideSnapshot } =
+        await import("@/lib/prompts/snapshot")
+      const { __resetPromptVerdictsForTests } = await import("@/lib/prompts/resolve")
+      const { REMOVE_BACKGROUND_PROMPT } = await import("@/lib/chat/image-edit/prompts")
+      __setPromptOverrideSnapshotForTests(
+        buildPromptOverrideSnapshot("test-db", [
+          {
+            bindingId: "pob",
+            promptId: REMOVE_BACKGROUND_PROMPT.id,
+            scope: "account",
+            targetId: "",
+            revisionId: "por-remove-background-media-api",
+            body: "Isolate the subject on transparency.",
+            contractVersion: REMOVE_BACKGROUND_PROMPT.contractVersion,
+          },
+        ])
+      )
+      try {
+        mockImageEditResponse()
+        const api = createMediaAPI(testPluginId, {} as never)
+        await api.ai.removeBackground(createTestImageData())
+        const removeRequest = (proxyFetch as jest.Mock).mock.calls[0][1] as { body: FormData }
+        expect(removeRequest.body.get("prompt")).toBe("Isolate the subject on transparency.")
+      } finally {
+        __setPromptOverrideSnapshotForTests(null)
+        __resetPromptVerdictsForTests()
+      }
+    })
+
     it("routes variation and inpaint requests with prompt and mask payloads", async () => {
       mockImageEditResponse()
       const api = createMediaAPI(testPluginId, {} as never)

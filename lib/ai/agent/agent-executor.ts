@@ -43,6 +43,8 @@ import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { DispatchContext } from "@/lib/claude/agents/dispatch-context-registry"
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/policy/permission-cascade"
 import { buildJsonInstruction, parseStructured } from "@/lib/workflow/nodes/ai/structured"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { RoutingAttemptController } from "@cognia/provider-routing"
@@ -379,18 +381,42 @@ function toolResultReviewResponderFor(
 }
 
 /**
+ * The identity a persona-less tool-enabled run gets when its caller supplied
+ * no system prompt of its own (ADR-0236). A caller's `systemPrompt` always
+ * wins; this only fills the gap.
+ */
+export const EXECUTOR_FALLBACK_PROMPT = definePrompt({
+  id: "agent.executor.fallback",
+  contractVersion: 1,
+  kind: "role",
+  group: "agents",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app"],
+  maxChars: 8_000,
+  outputContract:
+    "The system prompt of the synthesized agent for an `executeAgent` run with tools, no agent and no caller-supplied system prompt.",
+  consumers: ["lib/ai/agent/agent-executor.ts"],
+  defaultBody: "You are a focused, helpful agent.",
+})
+
+/**
  * Build a minimal in-memory `Character` from a config that has no
  * `characterId`. Mirrors `lib/ai/agent/team/teammate/teammate-character.ts` — the
  * synthesised character is never persisted, it is handed straight to
- * `resolveSendOptions` as `BuildOptionsContext.character`.
+ * `resolveSendOptions` as `BuildOptionsContext.character`. `fallbackSystemPrompt`
+ * is the resolved {@link EXECUTOR_FALLBACK_PROMPT}, used only when the config
+ * carries no system prompt.
  */
-function synthesizeCharacter(config: ExecuteAgentConfig): Character {
+function synthesizeCharacter(config: ExecuteAgentConfig, fallbackSystemPrompt: string): Character {
   const ts = Date.now()
   return {
     id: "__plugin-agent__",
     name: "Plugin Agent",
     avatarColor: "oklch(0.6 0 0)",
-    systemPrompt: config.systemPrompt?.trim() || "You are a focused, helpful agent.",
+    systemPrompt: config.systemPrompt?.trim() || fallbackSystemPrompt,
     createdAt: ts,
     updatedAt: ts,
     ...(config.model ? { model: config.model } : {}),
@@ -526,7 +552,10 @@ async function runToolEnabledStandalone(
     }
     character = resolved
   } else {
-    character = synthesizeCharacter(config)
+    const fallback = config.systemPrompt?.trim()
+      ? ""
+      : (await resolvePromptAsync(EXECUTOR_FALLBACK_PROMPT)).text
+    character = synthesizeCharacter(config, fallback)
   }
 
   const session =

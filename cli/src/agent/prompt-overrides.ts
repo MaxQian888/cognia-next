@@ -11,6 +11,7 @@
  * rule the CLI's skill scoping uses.
  */
 
+import type { PromptResolutionContext } from "@/lib/prompts/types"
 import { cliStoreMayHoldRows, ensureCliDb } from "../db/bootstrap"
 
 export interface PrimeCliPromptOverridesDeps {
@@ -55,4 +56,24 @@ export async function primeCliPromptOverrides(
   } catch {
     return {}
   }
+}
+
+/**
+ * The resolution context for a CLI-hosted prompt a command builds outside a
+ * turn's option build (`/commit`, `/review`, the handoff preamble, …).
+ *
+ * Such a command can run before any turn of the session primed the snapshot,
+ * so it primes first, and the workspace the primed result names is the one a
+ * workspace-scoped override targets. Without a config home nothing is primed
+ * (a builder driven by a unit test must not probe the real `~/.cognia`) and
+ * the slot resolves against whatever snapshot is already loaded.
+ */
+export async function primeCliPromptContext(
+  cwd: string,
+  home: string | undefined,
+  prime: typeof primeCliPromptOverrides = primeCliPromptOverrides
+): Promise<PromptResolutionContext> {
+  if (!home) return {}
+  const primed = await prime(cwd, { home })
+  return primed.workspaceId ? { workspaceId: primed.workspaceId } : {}
 }

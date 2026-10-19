@@ -3,6 +3,12 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import { SELECTION_EXPLAIN_PROMPT } from "@/lib/chat/selection/run-selection-action"
 import { useSelectionActionRun, type SelectionRunRequest } from "./use-selection-action-run"
 
 const mockBuildClient = jest.fn()
@@ -36,6 +42,11 @@ const request = (over: Partial<SelectionRunRequest> = {}): SelectionRunRequest =
 function client(complete: LlmClient["complete"]): LlmClient {
   return { complete: jest.fn(complete) }
 }
+
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -236,5 +247,41 @@ describe("useSelectionActionRun", () => {
       await pending
     })
     expect(result.current.state).toEqual({ status: "idle" })
+  })
+
+  // The prompt resolves in the selection's conversation and its workspace, so
+  // a workspace's customized explanation reaches its chats and no others.
+  it("resolves the explain prompt in the conversation's workspace", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: SELECTION_EXPLAIN_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por-selection-hook-workspace",
+          body: "Workspace explanation rules.",
+          contractVersion: SELECTION_EXPLAIN_PROMPT.contractVersion,
+        },
+      ])
+    )
+    mockGetSession.mockResolvedValue({ id: "s1", model: "opus", projectId: "ws-1" })
+    const llm = client(async () => "ok")
+    mockBuildClient.mockResolvedValue(llm)
+    const { result } = renderHook(() => useSelectionActionRun())
+    await act(async () => {
+      await result.current.run(request())
+    })
+    expect((llm.complete as jest.Mock).mock.calls[0]![1]).toMatchObject({
+      system: "Workspace explanation rules.",
+    })
+
+    mockGetSession.mockResolvedValue({ id: "s1", model: "opus" })
+    await act(async () => {
+      await result.current.run(request())
+    })
+    expect((llm.complete as jest.Mock).mock.calls[1]![1]).toMatchObject({
+      system: SELECTION_EXPLAIN_PROMPT.defaultBody,
+    })
   })
 })

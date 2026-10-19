@@ -1,6 +1,7 @@
 import type { Memory } from "../types/memory"
 import type { MemoryCandidate } from "../extract/extractor"
 import {
+  CONSOLIDATE_DECIDE_SYSTEM_PROMPT,
   consolidate,
   consolidationAuditAction,
   consolidationCorroboratedId,
@@ -696,5 +697,28 @@ describe("NOOP corroboration", () => {
     const op: ConsolidationOp = { op: "NOOP", targetId: "t1" }
     expect(consolidationOpMemoryId(op)).toBeUndefined()
     expect(consolidationAuditAction(op)).toBeUndefined()
+  })
+})
+
+describe("consolidate judge system prompt", () => {
+  it("sends the shipped prompt by default and a host-supplied one when given", async () => {
+    const complete = jest.fn(async () => JSON.stringify({ op: "NOOP" }))
+    const similar = async () => [existing("The user uses pnpm", { id: "t1" })]
+    await consolidate(
+      { ...baseInput, candidates: [cand("uses pnpm")] },
+      makeDeps({ findSimilar: similar, client: { complete } })
+    )
+    await consolidate(
+      { ...baseInput, candidates: [cand("uses pnpm")] },
+      makeDeps({
+        findSimilar: similar,
+        client: { complete },
+        decideSystemPrompt: "Custom judge. STRICT JSON.",
+      })
+    )
+    expect(complete.mock.calls.map((call) => (call as unknown[])[1])).toEqual([
+      expect.objectContaining({ system: CONSOLIDATE_DECIDE_SYSTEM_PROMPT }),
+      expect.objectContaining({ system: "Custom judge. STRICT JSON." }),
+    ])
   })
 })

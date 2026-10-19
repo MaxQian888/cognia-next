@@ -34,9 +34,16 @@ export interface ExtractMemoriesInput {
   newPair: { userText: string; assistantText: string }
   /** Types the extractor may emit (provenance-gated by the caller). */
   allowTypes: MemoryType[]
+  /**
+   * The system prompt to send; defaults to {@link MEMORY_EXTRACT_SYSTEM_PROMPT}.
+   * A host that lets the user customize the wording resolves it and passes it
+   * here; the JSON shape the parser reads is asked for in the user prompt.
+   */
+  systemPrompt?: string
 }
 
-const SYSTEM_PROMPT =
+/** The extractor's shipped system prompt. */
+export const MEMORY_EXTRACT_SYSTEM_PROMPT =
   "You extract durable, reusable facts about the USER from a conversation. " +
   "Only capture things the user asserted about themselves: their identity, " +
   "preferences, decisions, environment, and working style. Ignore transient " +
@@ -77,7 +84,7 @@ export async function extractMemories(
   if (!input.newPair.userText.trim()) return []
   try {
     const raw = await client.complete(buildUserPrompt(input), {
-      system: SYSTEM_PROMPT,
+      system: input.systemPrompt ?? MEMORY_EXTRACT_SYSTEM_PROMPT,
       temperature: 0,
       maxTokens: 512,
     })

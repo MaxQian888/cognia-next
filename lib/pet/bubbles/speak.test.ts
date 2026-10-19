@@ -1,6 +1,12 @@
 import { speakAsPet, chatAsPet, sanitizeReply, sanitizeChatReply } from "./speak"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { PetBones, PetSoul } from "@/types/pet"
+import { PET_PROMPTS } from "@/lib/pet/llm/persona"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 const soul: PetSoul = { name: "Boba", personality: "smug and sleepy", hatchDate: "" }
 const bones = { species: "cat", rarity: "rare" } as PetBones
@@ -124,5 +130,45 @@ describe("chatAsPet", () => {
     expect(await chatAsPet(client("   "), { soul, bones, userText: "hi" })).toBeNull()
     const boom = { complete: jest.fn().mockRejectedValue(new Error("x")) } as unknown as LlmClient
     expect(await chatAsPet(boom, { soul, bones, userText: "hi" })).toBeNull()
+  })
+})
+
+describe("pet persona overrides (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("speaks and chats with the published persona wording", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-bubble",
+          promptId: PET_PROMPTS.bubble.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-speak-bubble",
+          body: "{{name}} the {{species}} replies in a meow.",
+          contractVersion: PET_PROMPTS.bubble.contractVersion,
+        },
+        {
+          bindingId: "pob-chat",
+          promptId: PET_PROMPTS.conversation.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-speak-chat",
+          body: "{{name}} chats warmly.",
+          contractVersion: PET_PROMPTS.conversation.contractVersion,
+        },
+      ])
+    )
+    const speak = client("meow")
+    await speakAsPet(speak, { soul, bones, userText: "hello" })
+    expect((speak.complete as jest.Mock).mock.calls[0][1].system).toBe(
+      "Boba the cat replies in a meow."
+    )
+    const chat = client("hi there")
+    await chatAsPet(chat, { soul, bones, userText: "hello" })
+    expect((chat.complete as jest.Mock).mock.calls[0][1].system).toBe("Boba chats warmly.")
   })
 })

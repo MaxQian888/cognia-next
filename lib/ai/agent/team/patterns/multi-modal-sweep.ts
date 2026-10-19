@@ -21,8 +21,12 @@ import {
   mapSettled,
   nonRetryable,
 } from "./_shared"
-
-const FINDINGS_HINT = '{ "findings": [{ "title", "detail", "location"?, "severity"? }] }'
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import {
+  FINDINGS_SCHEMA_HINT_PROMPT,
+  freezePatternPromptScope,
+  SWEEP_FINDER_PROMPT,
+} from "./pattern-prompts"
 
 export const MULTI_MODAL_SWEEP_KIND = "pattern.multi-modal-sweep" as const
 
@@ -37,6 +41,10 @@ async function execute(ctx: StepExecutionContext): Promise<StepExecutionResult> 
   }
 
   ctx.log("info", `multi-modal sweep: ${modalities.length} parallel finders`)
+  // One snapshot for the whole step (ADR-0236), so every finder reads the same text.
+  const promptScope = await freezePatternPromptScope(teamCtx)
+  ctx.signal?.throwIfAborted()
+  const findingsHint = resolvePrompt(FINDINGS_SCHEMA_HINT_PROMPT).text
 
   const results = await mapSettled(
     modalities,
@@ -46,14 +54,14 @@ async function execute(ctx: StepExecutionContext): Promise<StepExecutionResult> 
         teamCtx,
         {
           taskId: `${ctx.stepId}:sweep:${i}`,
-          prompt:
-            `Objective: ${objective}\n\nSearch approach: ${modality}\n\n` +
-            "Find concrete, specific findings using ONLY this approach. " +
-            "Each finding needs a title, a detailed explanation, and — when you can pin it — a file:line or area location.",
+          prompt: resolvePrompt(SWEEP_FINDER_PROMPT, {
+            ...promptScope,
+            values: { objective, modality },
+          }).text,
           signal: ctx.signal,
         },
         findingsResultSchema,
-        { schemaHint: FINDINGS_HINT }
+        { schemaHint: findingsHint }
       )
       ctx.log("info", `sweep finder ${i} (${modality}) → ${r.value.findings.length} findings`)
       return r.value.findings

@@ -26,6 +26,8 @@ import {
   type ReplanDecision,
 } from "../gates/replan-schema"
 import { awaitReplanApproval, type ReplanGateOutcome } from "../gates/replan-gate"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { REPLAN_LEAD_PROMPT, teamPromptContext } from "../team-prompts"
 
 const DEFAULT_MAX_INJECTED = 5
 
@@ -56,11 +58,12 @@ export interface ReplanCheckpointOutcome {
   decision: ReplanDecision
 }
 
-function buildPrompt(
+/** The lead's re-plan request, resolved once for this checkpoint (ADR-0236). */
+async function buildPrompt(
   teamCtx: TeamRunContext,
   justRanTaskIds: string[],
   remaining: AgentTeamTask[]
-) {
+): Promise<string> {
   const results = readDependencyResults(teamCtx.teamId, justRanTaskIds)
   const resultLines =
     results.length > 0
@@ -74,39 +77,32 @@ function buildPrompt(
   // are digital employees (twins) to bring in.
   const canRecruit =
     Boolean(teamCtx.storeWriter.addTeammate) && (teamCtx.availableTwins?.length ?? 0) > 0
-  const recruitLines = canRecruit
+  const recruitRoster = canRecruit
     ? [
+        "",
         "",
         "Digital employees you may recruit as new members (set newMembers with their twinId):",
         (teamCtx.availableTwins ?? [])
           .map((t) => `- [${t.id}] ${t.name}${t.expertise ? `: ${t.expertise}` : ""}`)
           .join("\n"),
-      ]
-    : []
-  return [
-    `You are the lead of the agent team "${teamCtx.team.name}".`,
-    `Objective: ${teamCtx.team.task ?? teamCtx.team.description ?? "(unspecified)"}`,
-    "",
-    "Results from the wave that just completed:",
-    resultLines,
-    "",
-    "Remaining planned tasks:",
-    remainingLines,
-    ...recruitLines,
-    "",
-    "Decide how to proceed. Choose exactly one action:",
-    '- "continue": keep the remaining plan as-is.',
-    '- "inject": add new follow-up tasks (set newTasks).',
-    '- "cancel": skip some remaining tasks that are now unnecessary (set cancelTaskIds).',
-    '- "reorder": change the order of the remaining tasks (set reorderTaskIds to a permutation of their ids).',
-    '- "finish": the objective is met; stop early.',
-    ...(canRecruit
-      ? [
-          '- "recruit": bring in a digital employee whose expertise fits the remaining work (set newMembers). You may also set newTasks to assign them work.',
-        ]
-      : []),
-    "Be conservative — prefer continue unless the results clearly justify a change.",
-  ].join("\n")
+      ].join("\n")
+    : ""
+  const recruitAction = canRecruit
+    ? '\n- "recruit": bring in a digital employee whose expertise fits the remaining work (set newMembers). You may also set newTasks to assign them work.'
+    : ""
+  return (
+    await resolvePromptAsync(REPLAN_LEAD_PROMPT, {
+      context: teamPromptContext(teamCtx.team),
+      values: {
+        teamName: teamCtx.team.name,
+        objective: teamCtx.team.task ?? teamCtx.team.description ?? "(unspecified)",
+        results: resultLines,
+        remaining: remainingLines,
+        recruitRoster,
+        recruitAction,
+      },
+    })
+  ).text
 }
 
 /** Resolve a new-task `dependsOn` entry to a real task id, or null to drop it. */
@@ -143,9 +139,11 @@ export async function runReplanCheckpoint(
 
   let decision: ReplanDecision
   try {
+    const prompt = await buildPrompt(teamCtx, justRanTaskIds, remaining)
+    signal?.throwIfAborted()
     decision = await dispatch({
       teamCtx,
-      prompt: buildPrompt(teamCtx, justRanTaskIds, remaining),
+      prompt,
       ...(signal ? { signal } : {}),
     })
   } catch {

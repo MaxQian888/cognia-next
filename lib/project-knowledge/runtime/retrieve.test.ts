@@ -28,6 +28,8 @@ jest.mock("@/lib/ai/retrieval/corrective-filter", () => ({
   filterByGrade: jest.fn(async (_q: string, chunks: unknown[]) => chunks),
 }))
 jest.mock("@cognia/rag/query-expansion", () => ({
+  // The templates the Prompt Center slots ship (lib/ai/retrieval/expansion-prompts).
+  ...jest.requireActual("@cognia/rag/query-expansion"),
   generateHypotheticalAnswer: jest.fn(async () => "hypothetical expanded answer"),
   generateStepBackQuery: jest.fn(async () => "step back query"),
 }))

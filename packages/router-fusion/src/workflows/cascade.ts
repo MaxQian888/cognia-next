@@ -26,6 +26,7 @@
 
 import type { Message, RunResult, TaskKind, VerificationReport } from "../contracts/schemas"
 import type { VerifierProfile } from "../config/types"
+import type { RolePromptProfile } from "../prompts/roles"
 import { acceptanceClaimFor } from "../verify/profiles"
 import type { TextBasicRules } from "../verify/text-verifiers"
 import { sha256Hex } from "../util/sha256"
@@ -62,6 +63,8 @@ export interface CascadeRunInput {
   jsonSchema?: Record<string, unknown>
   textRules?: TextBasicRules
   fixtureExpectations?: Record<string, unknown>
+  /** The role text the run pinned, for the reviewer; the shipped roles-1 when absent. */
+  rolePrompts?: RolePromptProfile
   signal: AbortSignal
 }
 
@@ -163,6 +166,7 @@ export async function runCascade(
       reserveMicrousd: input.reserveMicrousd.reviewer,
       transportAttempts: input.transportAttempts,
       deadlineAt: input.deadlineAt,
+      ...(input.rolePrompts ? { rolePrompts: input.rolePrompts } : {}),
       signal: input.signal,
     })
     await ports.events.emit({

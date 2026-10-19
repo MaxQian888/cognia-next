@@ -226,18 +226,6 @@ UI 用 `parseSummary` 渲染左侧的目录/分页器；导出到 vector 时按 
 
 Twin ingest 不直接调 `processDocument` 生成 chunks —— 它有自己的 `prepareChunks` 流程（按 markdown / code / chat 三种 chunker）；但底层 parser 完全复用 `lib/document/`。详见 [员工数字孪生](../subsystems/employee-twin)。
 
-## Knowledge-RAG 占位
-
-`lib/document/knowledge-rag.ts` 是 Cognia 原项目的 Project 知识库 RAG 接口，cognia-next 暂未实现，留下 stub 让调用 `retrieveKnowledge / searchKnowledgeBaseAdvanced` 的代码（Cognia 的原有 build-options 测试）能编译。
-
-```ts title="lib/document/knowledge-rag.ts"
-export async function retrieveKnowledge(_options): Promise<KnowledgeChunk[]> {
-  return [] // 等真正 RAG 层接入
-}
-```
-
-实际生效的 RAG 路径是 Twin runtime（见 [员工数字孪生](../subsystems/employee-twin)）。
-
 ## 文件验证
 
 `validateFile()`（在 `document-processor.ts`）支持：

@@ -61,6 +61,8 @@ import {
   FetchTargetBlockedError,
 } from "@/lib/web/fetch-guard"
 import { fetchCacheKey, representationSize, type FetchCacheLike } from "@/lib/web/fetch-cache"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 import { platformReaderFor, scrapePlatform } from "./dispatch"
 import { readViaJina } from "./jina"
 import { readWithVendor } from "./vendor-readers"
@@ -96,7 +98,18 @@ export interface ReadRequest {
 }
 
 /** Distill page text down to just the content relevant to `prompt`. */
-export type FetchSummarize = (text: string, prompt: string, signal?: AbortSignal) => Promise<string>
+export type FetchSummarize = ((
+  text: string,
+  prompt: string,
+  signal?: AbortSignal
+) => Promise<string>) & {
+  /**
+   * The extractor's current instructions (its resolved system prompt). Part of
+   * a distilled read's cache identity, so a customized extraction prompt
+   * (ADR-0236) is never answered from a distillation made under the old one.
+   */
+  instructions?: () => string
+}
 
 export interface ReaderHostDeps {
   policy: ReaderPolicy
@@ -159,8 +172,28 @@ export interface ReaderFailureResult {
   reason: ReaderFailureReason
 }
 
-const GENERIC_DISTILL_PROMPT =
-  "Summarize the key facts, figures, names, dates, quotes, and conclusions on this page."
+/**
+ * The question a distilled read asks when the caller supplied none
+ * (ADR-0236). Resolved synchronously from the loaded snapshot, like the
+ * extractor's own instructions.
+ */
+export const READER_DISTILL_PROMPT = definePrompt({
+  id: "knowledge.web.reader-distill",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "knowledge",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app", "cli"],
+  maxChars: 2_000,
+  outputContract:
+    "The extraction question for a best-effort or required distillation that names no prompt of its own; it is part of the read's cache key.",
+  consumers: ["lib/web/reader/configured-reader.ts"],
+  defaultBody:
+    "Summarize the key facts, figures, names, dates, quotes, and conclusions on this page.",
+})
 
 /** Below this many characters, local extraction is "thin" (a JS-rendered page). */
 const MIN_LOCAL_EXTRACT = 200
@@ -282,7 +315,7 @@ function distillQuestion(
   mode: WebReaderDistillation
 ): string | undefined {
   if (prompt?.trim()) return prompt
-  return mode === "off" ? undefined : GENERIC_DISTILL_PROMPT
+  return mode === "off" ? undefined : resolvePrompt(READER_DISTILL_PROMPT).text
 }
 
 /**
@@ -540,7 +573,13 @@ async function runRead(
         url: resolved.url,
         readerRevision: `${policy.revision}|${request.reader ?? ""}|${String(request.allowFallback ?? "")}`,
         format: resolved.format,
-        prompt: request.prompt,
+        // The effective question and the extractor's instructions, both of
+        // which may be customized (ADR-0236), so neither change is served a
+        // distillation made under the other wording.
+        prompt:
+          question === undefined
+            ? request.prompt
+            : [question, deps.summarize?.instructions?.() ?? ""].join("\u0000"),
         distillation: policy.distillation,
       })
     : ""

@@ -20545,7 +20545,7 @@
       "modelHint": "判定目标是否完成的模型。除非想用更便宜/更快的判定，否则保持聊天模型即可。",
       "noModels": "暂无可用模型，请先配置提供商。",
       "promptOverride": "判定提示覆盖",
-      "promptOverrideHint": "替换内置判定指令。仍须要求返回一行 JSON 判定结果。",
+      "promptOverrideHint": "会复制到每个新目标中，并替换该目标的判定指令。若要为所有未自带指令的目标修改判定，请在「设置 → 提示词」中编辑。仍须要求返回一行 JSON 判定结果。",
       "searchPlaceholder": "搜索模型…",
       "temperature": "判定温度",
       "temperatureHint": "0 为确定性（推荐）。越高判定越宽松。",
@@ -39948,6 +39948,7 @@
           "MODE_NOT_EDITABLE": "此模式暂不可用。",
           "PANEL_C_REQUIRED": "三人评审团需要设置评审团成员 C 角色。",
           "PROFILE_NOT_ALLOWED": "此模式不支持该检查方式。",
+          "PROMPT_VERSION_NOT_ALLOWED": "请选择内置角色提示词或提示词中心的角色提示词。",
           "ROLE_MISSING": "{role} 角色需要一个模型别名。",
           "ROLE_UNKNOWN": "{role} 不是此模式的角色。"
         },
@@ -39972,6 +39973,15 @@
           "schema_fixture": "结构校验",
           "text_basic": "格式检查",
           "text_review": "模型复核"
+        },
+        "promptVersion": "角色提示词",
+        "promptVersionDesc": {
+          "custom": "使用「设置 → 创作与自定义 → 提示词」中的 Router Fusion 角色提示词。每次运行使用开始时已发布的文本，每次发布修改都会让此动作的运行获得新的标识。",
+          "shipped": "使用 Cognia 内置的角色提示词。内置动作始终使用这一版本。"
+        },
+        "promptVersionValue": {
+          "custom": "提示词中心",
+          "shipped": "内置（roles-1）"
         },
         "reset": "恢复内置设置",
         "resetCustom": "清除修改",
@@ -49965,6 +49975,7 @@
       "presets": "可复用的会话配置 — 系统提示词加上模型、工具、MCP 与技能覆盖。",
       "proIde": "内嵌 VS Code 的安装与磁盘占用",
       "profile": "本地显示名称、头像与简介 — 同步到伴侣设备并包含在备份中。",
+      "prompts": "Cognia 发送的所有提示词：用分范围覆盖、历史和重置编辑内置提示词，并通过各自的所有者编辑 Agent、预设、Skill、模式和指令文件的提示词。",
       "providers": "AI 提供商的 API 密钥、模型与连接设置。",
       "remoteControl": "桌面端本地 HTTP 入站监听器，搭配出站 webhook 的 HMAC 签名与自定义请求头。",
       "remoteHosts": "从这台桌面驱动一台远程 Cognia 主机——它的终端、文件与 git。",
@@ -53031,6 +53042,1470 @@
       "timezoneLabel": "时区",
       "title": "个人资料"
     },
+    "promptCenter": {
+      "actions": {
+        "cancel": "取消",
+        "discardDraft": "丢弃草稿",
+        "followBase": "重新跟随基础提示词",
+        "loadLatest": "放弃我的修改并载入最新版本",
+        "makeDefault": "设为默认",
+        "publish": "发布",
+        "reset": "重置为继承",
+        "retry": "重试",
+        "revertEdits": "撤销我的修改",
+        "save": "保存",
+        "saveCustom": "另存为我的版本",
+        "saveDraft": "保存草稿",
+        "updateVariant": "更新我的变体",
+        "useShipped": "从内置文本开始"
+      },
+      "activation": {
+        "new-session-required": "对新会话生效；正在运行的外部 Agent 会保留启动时的指令。",
+        "next-operation": "下一次使用时生效，无需重启。",
+        "reload-required": "在其所有者重新加载后生效。",
+        "unsupported": "此宿主无法应用。"
+      },
+      "baseSource": {
+        "app-default": "默认系统提示词",
+        "character": "Agent 提示词",
+        "none": "无基础提示词",
+        "session": "本会话的提示词",
+        "team-member": "团队成员覆盖"
+      },
+      "compare": {
+        "against": "对比对象",
+        "diffLabel": "两个版本之间的差异",
+        "identical": "没有差异。",
+        "published": "此范围已发布的版本",
+        "shipped": "内置文本"
+      },
+      "conflict": {
+        "body": "文件在打开后已在磁盘上被修改。你的文本已保留，下方显示磁盘上的改动，请选择保留哪一份。",
+        "diffLabel": "磁盘上的文件与你的文本之间的差异",
+        "keepMine": "用我的文本覆盖保存",
+        "takeDisk": "放弃我的文本并载入文件",
+        "title": "文件已在磁盘上被修改"
+      },
+      "detail": {
+        "missing": "此提示词已不可用。"
+      },
+      "editor": {
+        "insertVariable": "插入 {name}",
+        "length": "{length} / {max}",
+        "shippedLabel": "内置文本",
+        "variableOptional": "可选；截断至 {max} 个字符",
+        "variableRequired": "必填；截断至 {max} 个字符",
+        "variables": "变量"
+      },
+      "facts": {
+        "activation": "修改何时生效",
+        "consumers": "使用方",
+        "hosts": "运行于",
+        "lastUsed": "本窗口内最近一次使用",
+        "outputContract": "输出约定",
+        "overrides": "已覆盖的范围",
+        "requiredFragments": "回复解析依赖的文本",
+        "risk": "编辑风险"
+      },
+      "fallback": {
+        "contract-incompatible": "覆盖内容基于旧版约定编写",
+        "invalid-body": "覆盖内容未通过校验",
+        "pii-blocked": "覆盖内容包含个人信息",
+        "snapshot-unavailable": "无法读取覆盖内容"
+      },
+      "group": {
+        "agents": "Agent 与模式",
+        "chat": "对话",
+        "completion": "补全",
+        "developer": "开发者工具",
+        "generation": "生成",
+        "goals": "目标",
+        "knowledge": "知识与记忆",
+        "permissions": "权限",
+        "routing": "路由",
+        "team": "Agent 团队",
+        "twin": "数字分身"
+      },
+      "history": {
+        "active": "生效中",
+        "compareHint": "从此修订版本到编辑器中文本的改动。",
+        "currentDraft": "草稿",
+        "diffLabel": "从修订版本到编辑器的改动",
+        "empty": "此范围尚未保存任何内容。",
+        "kind": {
+          "draft": "草稿",
+          "published": "已发布",
+          "reset": "重置为继承"
+        },
+        "loadDraft": "载入编辑器",
+        "origin": {
+          "cli": "来自 CLI",
+          "editor": "来自编辑器",
+          "import": "导入",
+          "restore": "恢复"
+        },
+        "restore": "恢复为新修订版本",
+        "restoreInheritance": "恢复继承",
+        "title": "修订历史"
+      },
+      "host": {
+        "app": "应用",
+        "bootstrap": "引导 Agent",
+        "cli": "CLI"
+      },
+      "inspectOnly": {
+        "body": "此文本由解析器或宿主约定读取，仅供查看，不能覆盖。",
+        "title": "只读的协议文本"
+      },
+      "instructionSource": {
+        "extra": "额外指令路径",
+        "global": "全局指令文件",
+        "import": "由其他指令文件导入",
+        "instructions-dir": "项目指令目录",
+        "project": "项目指令文件"
+      },
+      "issues": {
+        "empty": "文本为空。",
+        "malformedPlaceholder": "占位符格式错误；请使用 '{{'name'}}'。",
+        "missingFragment": "必须保留“{fragment}”：回复解析依赖它。",
+        "missingVariable": "必须使用变量 {name}。",
+        "notEditable": "此提示词不可编辑。",
+        "pii": "文本中似乎包含个人信息，提示词不能携带个人信息。",
+        "tooLong": "共 {length} 个字符，上限为 {limit}。",
+        "unknownVariable": "{name} 不是此提示词的变量。"
+      },
+      "kind": {
+        "composer-template": "输入框模板",
+        "feature-template": "功能模板",
+        "procedure": "流程",
+        "project-rule": "项目规则",
+        "protocol": "协议",
+        "role": "角色",
+        "runtime-baseline": "运行时基线"
+      },
+      "lastUsed": {
+        "default": "{time} 使用了内置文本",
+        "fallback": "{time} 使用了内置文本，原因：{reason}",
+        "never": "本窗口打开后尚未使用",
+        "override": "{time} 使用了{scope}范围的覆盖"
+      },
+      "omission": {
+        "bare-mode": "已跳过：精简模式不读取指令文件",
+        "empty": "未设置",
+        "load-failed": "无法读取文件；对话会在没有它们的情况下继续",
+        "no-filesystem": "此宿主没有可读取的项目文件"
+      },
+      "operation": {
+        "activate-procedure": "按需启用",
+        "append-rules": "追加规则",
+        "inspect-only": "只读",
+        "legacy-replace": "替换基础提示词",
+        "narrow-only": "只能收紧",
+        "replace-template": "替换模板"
+      },
+      "owner": {
+        "builtIn": "内置",
+        "customCopyName": "{name}（我的版本）",
+        "customHint": {
+          "character": "保存后会创建此 Agent 的变体，该变体只拥有自己的提示词，其余设置继续跟随原 Agent。",
+          "custom-mode": "保存后会创建你自己的模式副本。",
+          "preset": "保存后会创建你自己的预设副本；在副本上选择“设为默认”即可将其设为默认。",
+          "skill": "保存后会创建你自己的 Skill 副本，并带上其资源。",
+          "subagent-template": "保存后会基于此模板创建你自己的子代理，并保留其设置。",
+          "team-template": "保存后会复制整个模板，仅修改这位队员的提示词。"
+        },
+        "defaultSystemPrompt": "默认系统提示词",
+        "loading": "加载中…",
+        "missing": "此资源已不存在。",
+        "openCustom": "打开我的版本",
+        "openIn": {
+          "agent-modes": "在 Agent 模式中打开",
+          "agent-runtime": "在 Agent 运行时中打开",
+          "characters": "在 Agent 中打开",
+          "chatTemplates": "在会话模板中打开",
+          "presets": "在预设中打开",
+          "skills": "在 Skills 中打开",
+          "squads": "在小队中打开",
+          "subagents": "在子代理中打开"
+        },
+        "ownerOnly": {
+          "composer-template": "会话模板会作为你自己的消息插入，而不是系统指令。请在会话模板中编辑，以保持其参数和修订一致。"
+        },
+        "readFailed": "无法读取此资源",
+        "readOnly": {
+          "built-in": "Cognia 内置",
+          "host-unsupported": "此设备上不可编辑",
+          "immutable": "此 Agent 不能修改",
+          "plugin": "由插件拥有"
+        }
+      },
+      "ownerActivation": {
+        "app-setting": "用于 Agent 和会话都未设置提示词的对话，从下一轮开始生效。",
+        "character": "从与此 Agent 的每个对话的下一轮开始使用。",
+        "composer-template": "在你选择它时插入输入框。",
+        "custom-mode": "从此模式下对话的下一轮开始使用。",
+        "instruction-file": "从磁盘读取；从此工作区的下一轮开始使用。",
+        "preset": "在下次将预设应用到对话时生效；已使用它的对话保留现有配置。",
+        "skill": "由 Skill 运行时在下次加载该 Skill 时提供。",
+        "subagent-template": "下次委派给此子代理时使用。",
+        "team-template": "此后用此模板创建的团队会复制这段提示词；已有团队保留各自的副本。",
+        "workspace-instructions": "从此工作区中对话的下一轮开始使用。"
+      },
+      "preview": {
+        "agent": "Agent",
+        "description": "新对话起始使用的系统提示词，按对话拼接的顺序展示。只能由对话实时生成的部分列在下方。",
+        "failed": "无法生成预览：{message}",
+        "loading": "正在生成预览…",
+        "mode": "模式",
+        "noAgent": "不选 Agent",
+        "noMode": "不选模式",
+        "omittedTitle": "未包含",
+        "railHint": "新对话从这里开始",
+        "refresh": "刷新",
+        "segments": "按发送顺序排列的部分",
+        "sendTimeBody": "这些内容由每一轮根据实时状态（回忆、目标、计划、工具）添加，因此不在此预览。",
+        "sendTimeTitle": "发送时拼接",
+        "size": "{chars} 个字符 · 约 {tokens} 个 token",
+        "skillsCount": "{count} 个 Skill",
+        "skillsNote": "Skill 运行时会在自身预算内提供这些 Skill；具体加载哪些取决于每一轮。",
+        "title": "生效的对话提示词",
+        "total": "{chars} 个字符 · 约 {tokens} 个 token（不含发送时拼接的部分）"
+      },
+      "profile": {
+        "applied": "{count, plural, =0 {没有发布任何内容。} other {已发布 # 个覆盖。}}",
+        "appliedWithConflicts": "已发布 {applied} 个；{conflicted} 个在预览后被修改，已保持不变。",
+        "applyAction": "{count, plural, =0 {发布} other {发布 # 个覆盖}}",
+        "chooseFile": "选择配置文件",
+        "description": "以一个 JSON 文件在不同机器和安装之间迁移已发布的覆盖。",
+        "exportAction": "导出",
+        "exportHint": "所选范围内所有已发布的覆盖。草稿和历史保留在本机。",
+        "exportTab": "导出",
+        "exported": "已导出 {count} 个覆盖。",
+        "importTab": "导入",
+        "invalidFile": "这不是提示词配置文件：{reason}",
+        "mapHint": "这些覆盖属于来源机器上的工作区、Agent 或会话。请选择它们在本机应用的位置，或跳过。",
+        "mapTarget": "{id} 在本机的目标",
+        "mapTitle": "目标",
+        "nothingToExport": "所选范围内没有已发布的内容。",
+        "previewTitle": "{count} 个条目",
+        "skipTarget": "跳过",
+        "status": {
+          "contract-mismatch": "基于其他版本编写",
+          "invalid": "未通过校验",
+          "needs-target": "需要选择目标",
+          "new": "新增",
+          "replace": "替换现有覆盖",
+          "scope-unsupported": "不支持该范围",
+          "unchanged": "已发布相同内容",
+          "unknown-prompt": "未知提示词"
+        },
+        "title": "提示词配置",
+        "upstreamChanged": "内置文本已更新"
+      },
+      "rail": {
+        "allGroups": "全部分组",
+        "allSources": "全部来源",
+        "choose": "选择提示词",
+        "count": "共 {total} 个提示词 · 已修改 {modified} 个",
+        "failed": "无法读取：{sources}",
+        "groupFilter": "分组",
+        "loadFailed": "无法加载提示词：{message}",
+        "loading": "正在加载提示词…",
+        "modified": "已修改",
+        "modifiedOnly": "仅显示已修改",
+        "noMatches": "没有匹配的提示词。",
+        "noWorkspace": "不选工作区",
+        "profiles": "配置",
+        "readOnly": "只读",
+        "search": "搜索提示词",
+        "sourceFilter": "来源",
+        "unavailable": "不可用",
+        "workspace": "指令文件所属的工作区"
+      },
+      "resetDialog": {
+        "bodyAccount": "将移除账户级覆盖，下方的内置文本重新生效。历史会保留，可以恢复。",
+        "bodyScoped": "将移除此覆盖。移除后该位置会回退到下方文本（账户级覆盖或内置文本）；具体对话中仍可能遇到更具体的工作区或 Agent 覆盖。历史会保留。",
+        "title": "重置此覆盖？"
+      },
+      "risk": {
+        "approval-sensitive": "涉及审批",
+        "ordinary": "普通",
+        "protocol": "协议"
+      },
+      "riskNote": {
+        "approval-sensitive": "参与审批决策；自定义版本只能让结果更保守。",
+        "ordinary": "仅影响措辞；不佳的修改只会降低输出质量。",
+        "protocol": "其回复会被解析；必须保留规定的文本。"
+      },
+      "scope": {
+        "account": "账户",
+        "agent": "Agent",
+        "session": "对话",
+        "workspace": "工作区"
+      },
+      "segment": {
+        "base": "基础提示词",
+        "harness": "常驻规则",
+        "instructions": "指令文件",
+        "mode": "模式",
+        "persona": "人设",
+        "skills": "Skills",
+        "workspace": "工作区指令"
+      },
+      "sendTime": {
+        "brief-mode": "简洁模式",
+        "compaction-recovery": "压缩恢复",
+        "goal": "当前目标",
+        "knowledge": "知识",
+        "memory": "记忆回忆",
+        "output-style": "输出风格",
+        "plan": "当前计划",
+        "project-continuity": "项目连续性",
+        "sandbox": "沙箱提示",
+        "team-protocol": "团队协议",
+        "visual-output": "可视化输出"
+      },
+      "source": {
+        "app-setting": "应用设置",
+        "character": "Agent",
+        "code": "内置",
+        "composer-template": "会话模板",
+        "custom-mode": "模式",
+        "instruction-file": "指令文件",
+        "preset": "预设",
+        "skill": "Skill",
+        "subagent-template": "子代理",
+        "team-template": "团队模板",
+        "workspace-instructions": "工作区"
+      },
+      "sourceGroup": {
+        "app-setting": "默认提示词",
+        "character": "Agent",
+        "code": "内置提示词",
+        "composer-template": "会话模板",
+        "custom-mode": "自定义与插件模式",
+        "instruction-file": "指令文件",
+        "preset": "预设",
+        "skill": "Skills",
+        "subagent-template": "子代理模板",
+        "team-template": "Agent Team 模板",
+        "workspace-instructions": "工作区指令"
+      },
+      "status": {
+        "hasDraft": "有未发布的草稿。",
+        "inherits": "此范围未覆盖，使用继承的文本。",
+        "published": "已于 {time} 在此范围发布。"
+      },
+      "tabs": {
+        "compare": "对比",
+        "compareBase": "与基础版本对比",
+        "compareSaved": "与已保存版本对比",
+        "edit": "编辑",
+        "history": "历史（{count}）"
+      },
+      "target": {
+        "choose": {
+          "agent": "选择 Agent",
+          "session": "选择对话",
+          "workspace": "选择工作区"
+        },
+        "none": {
+          "agent": "还没有 Agent。",
+          "session": "还没有对话。",
+          "workspace": "还没有工作区。"
+        },
+        "scope": "范围",
+        "target": "目标"
+      },
+      "toast": {
+        "conflict": "此提示词已在别处被修改。你的文本已保留，请载入最新版本后继续。",
+        "customSaved": "已另存为你自己的版本。",
+        "draftDiscarded": "草稿已丢弃。",
+        "draftSaved": "草稿已保存，发布前不会被使用。",
+        "failed": "失败：{message}",
+        "followsBase": "现在重新跟随基础提示词。",
+        "madeDefault": "{name} 已设为默认。",
+        "published": "已发布，下一次调用即会使用。",
+        "reset": "已重置，继承的文本重新生效。",
+        "restored": "已恢复为新的修订版本。",
+        "saved": "已保存。",
+        "scope": "此提示词不能在该范围覆盖。"
+      },
+      "unavailable": {
+        "confirmBody": "此作用域下的已发布文本、草稿和历史将被永久删除。如需保留副本，请先导出配置。",
+        "confirmTitle": "移除此覆盖？",
+        "hasDraft": "有草稿",
+        "noActive": "没有已发布的文本，只有草稿或重置记录。",
+        "plugin": "此提示词属于插件 {plugin}，该插件未启用。你的文本会保留并包含在导出中，插件以兼容版本重新启用后会再次生效。",
+        "remove": "移除",
+        "removed": "已移除覆盖。",
+        "retired": "当前版本的 Cognia 已不再使用此提示词。你的文本会保留并包含在导出中。",
+        "slots": "已保存的覆盖",
+        "title": "当前不可用"
+      },
+      "warnings": {
+        "contractBody": "此版本中提示词的输入或输出约定已变化。覆盖内容会保留但不会被使用；请按新约定修改后重新发布。",
+        "contractTitle": "覆盖未生效",
+        "staleBody": "在你编辑期间，有人发布或重置了此位置。你的文本已保留。",
+        "staleTitle": "编辑期间已被修改",
+        "upstreamBody": "Cognia 在此覆盖编写后更新了内置文本。可与内置文本对比查看改动。",
+        "upstreamTitle": "内置文本已更新"
+      }
+    },
+    "promptEntries": {
+      "agent__browser-companion__context": {
+        "description": "由宿主读取的协议文本：把浏览器扩展抓取的单个网页标为不可信数据。",
+        "title": "单页抓取上下文"
+      },
+      "agent__browser-companion__context-multi": {
+        "description": "由宿主读取的协议文本：把浏览器扩展抓取的多个网页标为不可信数据。",
+        "title": "多页抓取上下文"
+      },
+      "agent__browser-companion__grant": {
+        "description": "在从浏览器扩展发起的对话中，告诉 Agent 它可以操作你已登录的真实标签页。",
+        "title": "Browser Companion 权限"
+      },
+      "agent__builtin__Explore__identity": {
+        "description": "Explore 子 Agent 的身份设定：以只读方式快速找到相关代码并简要汇报。",
+        "title": "Explore 子 Agent"
+      },
+      "agent__builtin__Plan__identity": {
+        "description": "Plan 子 Agent 的身份设定：不做任何改动，只设计有序的实施计划。",
+        "title": "Plan 子 Agent"
+      },
+      "agent__builtin__code-reviewer__identity": {
+        "description": "代码审查子 Agent 的身份设定：只读审阅改动并报告缺陷，不做修改。",
+        "title": "代码审查子 Agent"
+      },
+      "agent__builtin__general-purpose__identity": {
+        "description": "通用子 Agent 的身份设定：拿到委派的任务后，用完整的工具从头做到尾。",
+        "title": "通用子 Agent"
+      },
+      "agent__builtin__workflow-debugger__identity": {
+        "description": "排查工作流运行失败原因并说明可能修复方式的子 Agent 身份设定。",
+        "title": "工作流调试子 Agent"
+      },
+      "agent__builtin__workflow-designer__identity": {
+        "description": "在工作流编辑器中替你搭建和修改可视化工作流的子 Agent 身份设定。",
+        "title": "工作流设计子 Agent"
+      },
+      "agent__builtin__workflow-doc-writer__identity": {
+        "description": "在工作流的各组节点旁添加说明注释的子 Agent 身份设定。",
+        "title": "工作流文档子 Agent"
+      },
+      "agent__builtin__workflow-refactorer__identity": {
+        "description": "在不改变行为的前提下重构所选工作流片段的子 Agent 身份设定。",
+        "title": "工作流重构子 Agent"
+      },
+      "agent__cli__plan-refine": {
+        "description": "在 CLI 中要求调整计划时发送，让 Agent 只给出更新后的计划，不做改动。",
+        "title": "CLI 计划调整"
+      },
+      "agent__executor__fallback": {
+        "description": "Agent 运行带有工具却没有指定 Agent 或系统提示词时使用的最简提示词。",
+        "title": "兜底 Agent 身份"
+      },
+      "agent__loop__iteration": {
+        "description": "由宿主读取的协议文本：执行一轮 /loop，并要求用一行 JSON 决定下次间隔。",
+        "title": "循环迭代"
+      },
+      "agent__mode__academic": {
+        "description": "学术模式下，让 Agent 用自带工具检索学术数据库并分析论文。",
+        "title": "模式：学术研究"
+      },
+      "agent__mode__code-gen": {
+        "description": "代码生成模式下，让 Agent 编写整洁、有注释并带错误处理的代码。",
+        "title": "模式：代码生成"
+      },
+      "agent__mode__data-analysis": {
+        "description": "数据分析模式下，让 Agent 帮你清洗数据、做统计分析并提炼洞察。",
+        "title": "模式：数据分析"
+      },
+      "agent__mode__plan": {
+        "description": "规划模式下，让 Agent 先调查再提出分步计划，不做任何改动。",
+        "title": "模式：规划"
+      },
+      "agent__mode__ppt-generation": {
+        "description": "演示文稿模式下，让 Agent 规划结构、设计幻灯片，必要时附上演讲备注。",
+        "title": "模式：演示文稿"
+      },
+      "agent__mode__research": {
+        "description": "研究模式下，让 Agent 查找、甄别并总结资料，尽量给出引用。",
+        "title": "模式：研究"
+      },
+      "agent__mode__web-design": {
+        "description": "网页设计模式下，让 Agent 用 React 和 Tailwind 编写可直接预览的页面。",
+        "title": "模式：网页设计"
+      },
+      "agent__mode__workflow": {
+        "description": "工作流模式下，让 Agent 拆解任务、执行多步操作并汇报进度。",
+        "title": "模式：工作流"
+      },
+      "agent__mode__writing": {
+        "description": "写作模式下，让 Agent 帮你起草、修改文字并调整语气。",
+        "title": "模式：写作"
+      },
+      "agent__plan-mode": {
+        "description": "规划模式下让 Agent 保持只读：先调研、委派探索，再提交计划等待批准。",
+        "title": "规划模式规则"
+      },
+      "agent__plan-mode__structured-steps": {
+        "description": "由计划解析器读取的协议文本：要求计划以一份平铺编号的步骤列表结尾，供步骤编辑器使用。",
+        "title": "规划模式步骤格式"
+      },
+      "agent__plan__approved": {
+        "description": "你批准计划后发送，让 Agent 按计划逐步实施。",
+        "title": "计划已批准消息"
+      },
+      "agent__plan__approved-edited": {
+        "description": "你批准修改过的计划后发送，告诉 Agent 以你的版本为准，替换它原先的方案。",
+        "title": "修改后计划已批准消息"
+      },
+      "agent__plan__decompose": {
+        "description": "创建可执行计划时，把你的目标拆成 2 到 16 个有序步骤并以 JSON 返回。",
+        "title": "计划拆解"
+      },
+      "agent__plan__decompose-request": {
+        "description": "由解析器读取的协议文本：把你的目标交给计划拆解的请求。",
+        "title": "计划拆解请求"
+      },
+      "agent__plan__refine": {
+        "description": "按照你的调整要求或失败的步骤，修订计划步骤并以 JSON 返回。",
+        "title": "计划调整"
+      },
+      "agent__plan__refine-request": {
+        "description": "由解析器读取的协议文本：携带当前步骤和你的调整要求的请求。",
+        "title": "计划调整请求"
+      },
+      "agent__plan__step-message": {
+        "description": "由宿主读取的协议文本：把一个计划步骤交给 Agent 执行并汇报的消息。",
+        "title": "计划步骤消息"
+      },
+      "agent__plan__system-section": {
+        "description": "在系统提示词中展示正在执行的计划和进度，让 Agent 专注当前步骤。",
+        "title": "执行中计划段落"
+      },
+      "agent__run-retrospective": {
+        "description": "复盘一次已结束的运行并提出改进建议，在你批准前不会做任何更改。",
+        "title": "运行复盘"
+      },
+      "agent__run-retrospective__reply-format": {
+        "description": "由解析器读取的协议文本：运行复盘必须返回的 JSON 结构。",
+        "title": "运行复盘 JSON 格式"
+      },
+      "agent__subagent-frame__contract": {
+        "description": "由宿主读取的协议文本：告诉每个被派出的子 Agent，只有它最后一条完整汇报会被看到。",
+        "title": "子 Agent 汇报约定"
+      },
+      "agent__verifier__request": {
+        "description": "由解析器读取的协议文本：发给独立核验者的请求、回复和改动内容。",
+        "title": "独立核验请求"
+      },
+      "agent__verifier__system": {
+        "description": "让一个独立的 Agent 对照你的请求检查另一个 Agent 的回复，并以 JSON 给出结论。",
+        "title": "独立核验"
+      },
+      "chat__a2ui__protocol": {
+        "description": "由 A2UI 解析器读取的协议文本：教模型在聊天回复中生成可交互的界面块。",
+        "title": "A2UI 协议"
+      },
+      "chat__brief-mode": {
+        "description": "开启简洁模式时，要求聊天模型直接作答，省去开场白和冗余内容。",
+        "title": "简洁模式"
+      },
+      "chat__cli__handoff": {
+        "description": "接续 CLI 会话时的第一条消息，在你的新提示词前附上之前的对话记录。",
+        "title": "CLI 会话接续"
+      },
+      "chat__cli__output-style__concise": {
+        "description": "启用简洁风格时，让 CLI Agent 用尽量少的字作答。",
+        "title": "CLI 输出风格：简洁"
+      },
+      "chat__cli__output-style__explanatory": {
+        "description": "启用讲解风格时，让 CLI Agent 说明思路和取舍。",
+        "title": "CLI 输出风格：讲解"
+      },
+      "chat__cli__output-style__learning": {
+        "description": "启用学习风格时，让 CLI Agent 像导师一样讲解，并留一小部分给你动手。",
+        "title": "CLI 输出风格：学习"
+      },
+      "chat__compaction__handoff": {
+        "description": "提醒 Agent 对话随时可能被压缩，在长时间调用工具前先复述关键事实。",
+        "title": "压缩前交接"
+      },
+      "chat__compaction__recovery": {
+        "description": "对话压缩后，要求 Agent 以摘要为准继续工作，不让你重复之前说过的内容。",
+        "title": "压缩后恢复"
+      },
+      "chat__connector-capability__fallback": {
+        "description": "列出在该平台会降级为纯文本的 A2UI 类型，提醒模型尽量避免。",
+        "title": "IM 渠道：降级为文本"
+      },
+      "chat__connector-capability__header": {
+        "description": "告诉模型当前对话经由哪个消息平台送达，以及该平台只支持部分 A2UI。",
+        "title": "IM 渠道：能力说明开头"
+      },
+      "chat__connector-capability__native": {
+        "description": "列出该消息平台能原生渲染的 A2UI 类型。",
+        "title": "IM 渠道：原生支持"
+      },
+      "chat__connector-capability__simulated": {
+        "description": "列出该平台需要通过多步交互实现、无法在当轮直接回复的 A2UI 类型。",
+        "title": "IM 渠道：多步交互"
+      },
+      "chat__connector-capability__skills": {
+        "description": "列出该渠道可用的内置 Skills，并说明写入类操作默认要经过确认卡片。",
+        "title": "IM 渠道：可用 Skills"
+      },
+      "chat__connector-capability__unsupported": {
+        "description": "列出该平台完全不支持的 A2UI 类型，要求模型不要输出。",
+        "title": "IM 渠道：不支持"
+      },
+      "chat__peer-delivery__frame": {
+        "description": "由宿主读取的协议文本：把其他会话发来的消息标为不可信内容，不当作你的授权。",
+        "title": "来自其他会话的消息"
+      },
+      "chat__pet__history": {
+        "description": "提醒桌面宠物你们最近说过的话，让回应前后连贯。",
+        "title": "宠物近期对话"
+      },
+      "chat__pet__language": {
+        "description": "要求桌面宠物用你的界面语言回复。",
+        "title": "宠物回复语言"
+      },
+      "chat__pet__name-soul": {
+        "description": "孵化新的桌面宠物时，让模型充当命名助手，并且只输出 JSON。",
+        "title": "宠物命名：系统提示词"
+      },
+      "chat__pet__name-soul__request": {
+        "description": "孵化宠物时发送的请求，要求以 JSON 返回一个可爱的名字和一句性格描述。",
+        "title": "宠物命名：请求"
+      },
+      "chat__pet__persona": {
+        "description": "让桌面宠物按自己的性格，在气泡里用一句简短俏皮的话回应。",
+        "title": "宠物气泡人设"
+      },
+      "chat__pet__persona__bound-character": {
+        "description": "绑定了 Agent 时，告诉桌面宠物你当前使用的人设。",
+        "title": "宠物：绑定的 Agent 人设"
+      },
+      "chat__pet__persona__conversation": {
+        "description": "让桌面宠物在聊天面板里按自己的性格，用几句话和你聊天。",
+        "title": "宠物聊天人设"
+      },
+      "chat__pet__state": {
+        "description": "把桌面宠物当前的心情、精力、亲密度和等级告诉它，让回复随之变化。",
+        "title": "宠物当前状态"
+      },
+      "chat__reply-copilot__draft": {
+        "description": "让回复副驾为 IM 对话起草三条候选回复，由你审阅后再发送。",
+        "title": "回复副驾：起草"
+      },
+      "chat__reply-copilot__draft__request": {
+        "description": "由解析器读取的协议文本：起草请求的最后一行，要求以 JSON 返回三条回复。",
+        "title": "回复副驾：起草请求"
+      },
+      "chat__reply-copilot__draft__unattributed-note": {
+        "description": "提醒回复副驾不要猜测标为 Unknown 的消息是谁发的。",
+        "title": "回复副驾：未知发送者提示"
+      },
+      "chat__reply-copilot__question__best-action": {
+        "description": "回复副驾向决策模型询问：下一步最适合哪类行动，例如先翻看历史记录。",
+        "title": "副驾问题：最佳行动"
+      },
+      "chat__reply-copilot__question__best-action__compact": {
+        "description": "“最佳行动”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：最佳行动（精简）"
+      },
+      "chat__reply-copilot__question__best-reply": {
+        "description": "回复副驾向决策模型询问：哪条候选回复最适合作为下一条消息。",
+        "title": "副驾问题：最佳候选"
+      },
+      "chat__reply-copilot__question__best-reply__compact": {
+        "description": "“最佳候选”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：最佳候选（精简）"
+      },
+      "chat__reply-copilot__question__danger-level": {
+        "description": "回复副驾向决策模型询问：对话离争吵或伤害感情还有多远。",
+        "title": "副驾问题：冲突程度"
+      },
+      "chat__reply-copilot__question__danger-level__compact": {
+        "description": "“冲突程度”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：冲突程度（精简）"
+      },
+      "chat__reply-copilot__question__literal-question": {
+        "description": "回复副驾向决策模型询问：对方最新的消息是否只是字面意思、没有弦外之音。",
+        "title": "副驾问题：是否字面意思"
+      },
+      "chat__reply-copilot__question__literal-question__compact": {
+        "description": "“是否字面意思”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：是否字面意思（精简）"
+      },
+      "chat__reply-copilot__question__she-needs": {
+        "description": "回复副驾向决策模型询问：根据最新消息，对方此刻需要你做什么。",
+        "title": "副驾问题：对方需要什么"
+      },
+      "chat__reply-copilot__question__she-needs__compact": {
+        "description": "“对方需要什么”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：对方需要什么（精简）"
+      },
+      "chat__reply-copilot__question__should-reply-now": {
+        "description": "回复副驾向决策模型询问：你的下一条消息是否应包含事实、计划或认错等实质内容。",
+        "title": "副驾问题：是否实质回复"
+      },
+      "chat__reply-copilot__question__should-reply-now__compact": {
+        "description": "“是否实质回复”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：是否实质回复（精简）"
+      },
+      "chat__reply-copilot__question__tension-resolved": {
+        "description": "回复副驾向决策模型询问：对话里的紧张关系是否已经真正化解。",
+        "title": "副驾问题：矛盾是否化解"
+      },
+      "chat__reply-copilot__question__tension-resolved__compact": {
+        "description": "“矛盾是否化解”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：矛盾是否化解（精简）"
+      },
+      "chat__reply-copilot__question__true-intent": {
+        "description": "回复副驾向决策模型询问：结合语气和上下文，对方最新消息的真实意图是什么。",
+        "title": "副驾问题：真实意图"
+      },
+      "chat__reply-copilot__question__true-intent__compact": {
+        "description": "“真实意图”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：真实意图（精简）"
+      },
+      "chat__selection__explain": {
+        "description": "在选区面板中解释你在对话里选中的段落，说明术语、拆解代码。",
+        "title": "解释选中内容"
+      },
+      "chat__selection__translate": {
+        "description": "把你在对话中选中的段落译成目标语言，保留代码和格式。",
+        "title": "翻译选中内容"
+      },
+      "chat__side-chat__contract": {
+        "description": "让侧聊只回答旁支问题，把主对话仅当作参考，不接着执行主任务。",
+        "title": "侧聊约定"
+      },
+      "chat__side-chat__read-only": {
+        "description": "要求只读侧聊只描述建议的改动而不动手，并告诉你如何开启编辑。",
+        "title": "只读侧聊"
+      },
+      "chat__visual-output__dock": {
+        "description": "在工具可用时，引导模型把图表做成产物、把文档做成 Canvas，放进停靠面板。",
+        "title": "可视化输出：停靠面板"
+      },
+      "chat__visual-output__fenced": {
+        "description": "要求模型把图表写成 JSON 代码块，由应用识别后放进停靠面板。",
+        "title": "可视化输出：代码块载荷"
+      },
+      "chat__visual-output__frame": {
+        "description": "指导聊天模型根据当前渠道的渲染能力，选择用示意图、图表还是文档来展示内容。",
+        "title": "可视化输出路由"
+      },
+      "chat__visual-output__inline-chart": {
+        "description": "允许模型用图表代码块，在回复中直接画出简单图表。",
+        "title": "可视化输出：内联图表"
+      },
+      "chat__visual-output__interactive": {
+        "description": "当你需要选择、确认、筛选或提交时，要求模型使用 A2UI 界面。",
+        "title": "可视化输出：交互界面"
+      },
+      "chat__visual-output__no-canvas": {
+        "description": "无法创建文档时，要求模型直接在回复中作答，不输出 Canvas。",
+        "title": "可视化输出：无 Canvas"
+      },
+      "chat__visual-output__no-dock-a2ui-chart": {
+        "description": "没有停靠面板时，要求模型用 A2UI 图表或 Markdown 表格展示数据。",
+        "title": "可视化输出：A2UI 图表兜底"
+      },
+      "chat__visual-output__no-dock-table": {
+        "description": "无法绘制图表时，要求模型用简洁的 Markdown 表格展示数据。",
+        "title": "可视化输出：表格兜底"
+      },
+      "cli__base__identity": {
+        "description": "CLI 编码 Agent 的基础系统提示词，规定它在项目中的角色、语气和工作方式。",
+        "title": "CLI 编码 Agent 身份"
+      },
+      "completion__enhance__style__concise": {
+        "description": "让提示词润色把草稿压缩到核心诉求的风格说明。",
+        "title": "润色风格：精简"
+      },
+      "completion__enhance__style__detailed": {
+        "description": "让提示词润色为草稿补充细节、约束和背景的风格说明。",
+        "title": "润色风格：详细"
+      },
+      "completion__enhance__style__improve": {
+        "description": "让提示词润色把草稿写得更清楚，并明确说出目标的风格说明。",
+        "title": "润色风格：优化"
+      },
+      "completion__enhance__style__simpler": {
+        "description": "让提示词润色用通俗易懂的语言改写草稿的风格说明。",
+        "title": "润色风格：通俗"
+      },
+      "completion__enhance__style__technical": {
+        "description": "让提示词润色在草稿中使用准确的专业术语的风格说明。",
+        "title": "润色风格：专业"
+      },
+      "completion__enhance__system": {
+        "description": "按所选风格改写你在输入框中的草稿，只改写不作答。",
+        "title": "提示词润色"
+      },
+      "completion__ghost-text": {
+        "description": "预测你接下来要输入的内容，以浅色文字显示在输入框光标之后。",
+        "title": "输入框补全提示"
+      },
+      "completion__suggestions__follow-up": {
+        "description": "根据上一条回复，推荐几条你接下来可能发送的简短追问。",
+        "title": "追问建议"
+      },
+      "completion__suggestions__starter": {
+        "description": "为新对话推荐几条可以直接发送的开场消息。",
+        "title": "开场建议"
+      },
+      "completion__terminal": {
+        "description": "在集成终端中预测你正在输入的完整命令。",
+        "title": "终端命令补全"
+      },
+      "developer__bootstrap__bash": {
+        "description": "Bash 初始化智能体的系统消息，在工作区环境检查运行前准备环境。",
+        "title": "环境初始化智能体（Bash）"
+      },
+      "developer__bootstrap__native": {
+        "description": "原生初始化智能体的系统消息，在工作区环境检查运行前准备环境。",
+        "title": "环境初始化智能体（原生）"
+      },
+      "developer__bootstrap__powershell": {
+        "description": "PowerShell 初始化智能体的系统消息，在工作区环境检查运行前准备环境。",
+        "title": "环境初始化智能体（PowerShell）"
+      },
+      "developer__cli__bash-analysis": {
+        "description": "由 /analyze 发送，诊断上一条失败的 Shell 命令并给出修复建议。",
+        "title": "CLI 失败命令分析"
+      },
+      "developer__cli__commit-message": {
+        "description": "在 CLI 中根据暂存的改动撰写约定式提交信息，由你确认。",
+        "title": "CLI 提交信息"
+      },
+      "developer__cli__fix-tests": {
+        "description": "每轮 /fix 时附上失败的测试输出发送，要求做最小的修复。",
+        "title": "CLI /fix 轮次"
+      },
+      "developer__cli__init-rewrite": {
+        "description": "根据现有内容和项目信息改写项目的 AGENTS.md，由你确认。",
+        "title": "CLI AGENTS.md 改写"
+      },
+      "developer__cli__pr-summary": {
+        "description": "在 CLI 中把分支总结成 Pull Request 的标题和正文。",
+        "title": "CLI Pull Request 摘要"
+      },
+      "developer__cli__review": {
+        "description": "由 /review 发送，让 Agent 自行获取改动，并按严重程度汇报问题。",
+        "title": "CLI /review"
+      },
+      "developer__commit__agent-clause": {
+        "description": "让 Agent 在撰写提交信息时可以阅读仓库，但不做任何更改。",
+        "title": "提交信息：Agent 模式"
+      },
+      "developer__commit__conventional-format": {
+        "description": "开启 Conventional Commits 设置时，提交信息遵循的格式规则。",
+        "title": "提交格式：约定式"
+      },
+      "developer__commit__freeform-format": {
+        "description": "关闭 Conventional Commits 设置时，提交信息遵循的格式规则。",
+        "title": "提交格式：自由"
+      },
+      "developer__commit__system": {
+        "description": "在源代码管理中根据暂存的改动撰写提交信息。",
+        "title": "提交信息"
+      },
+      "developer__creator__plan": {
+        "description": "规划新插件、Skill 或 Hook 脚手架的文件和所需能力，并逐项说明理由。",
+        "title": "创建器：脚手架规划"
+      },
+      "developer__creator__review": {
+        "description": "对照需求审查创建器生成的内容，有错误或不安全时予以拦截。",
+        "title": "创建器：结果审查"
+      },
+      "developer__creator__survey": {
+        "description": "在编写新的插件、Skill 或 Hook 前，先查找仓库中是否已有相同功能。",
+        "title": "创建器：现有代码调研"
+      },
+      "developer__diff-explain": {
+        "description": "在源代码管理中用通俗语言说明一段改动做了什么、为什么。",
+        "title": "差异说明"
+      },
+      "developer__diff-review": {
+        "description": "在源代码管理中逐块审查单个文件的改动，标出真正的问题。",
+        "title": "差异审查"
+      },
+      "developer__issues__draft": {
+        "description": "在事项追踪中根据标题写出完整的事项正文。",
+        "title": "事项正文起草"
+      },
+      "developer__issues__improve": {
+        "description": "把事项草稿改写得更清晰、有条理，不编造任何信息。",
+        "title": "事项正文改写"
+      },
+      "developer__issues__metadata": {
+        "description": "从现有选项中为事项建议优先级、标签和估算点数。",
+        "title": "事项优先级与标签"
+      },
+      "developer__issues__relations": {
+        "description": "从已有事项中为当前事项建议父事项、前置阻塞项和重复项。",
+        "title": "事项关联"
+      },
+      "developer__issues__title": {
+        "description": "根据事项正文写一行简洁的标题。",
+        "title": "事项标题"
+      },
+      "developer__issues__wakeup__children-done": {
+        "description": "所有子事项结束后发给 Agent，让它继续推进父事项。",
+        "title": "事项：子事项全部完成"
+      },
+      "developer__skills__authoring": {
+        "description": "在 Skill 编辑器中改写 SKILL.md 正文，作为供你审阅的建议。",
+        "title": "Skill 编辑器改写"
+      },
+      "developer__skills__authoring__expand": {
+        "description": "你要求 Skill 编辑器为 Skill 补充示例和边界情况时使用的指令。",
+        "title": "Skill 改写：扩写"
+      },
+      "developer__skills__authoring__fix-errors": {
+        "description": "你要求 Skill 编辑器解决 Skill 的校验问题时使用的指令。",
+        "title": "Skill 改写：修复错误"
+      },
+      "developer__skills__authoring__optimize": {
+        "description": "你要求 Skill 编辑器精简 Skill 的措辞时使用的指令。",
+        "title": "Skill 改写：精炼"
+      },
+      "developer__skills__authoring__request": {
+        "description": "把 Skill 名称、你的指令和当前正文交给改写模型的请求。",
+        "title": "Skill 改写请求"
+      },
+      "developer__skills__authoring__simplify": {
+        "description": "你要求 Skill 编辑器为新手读者改写 Skill时使用的指令。",
+        "title": "Skill 改写：通俗化"
+      },
+      "developer__skills__recording": {
+        "description": "把录制的桌面操作流程转成可复用的 Skill 草稿，保存前由你审阅。",
+        "title": "录制生成 Skill"
+      },
+      "developer__workflow__classify__system": {
+        "description": "让工作流分类节点只回答其中一个标签。",
+        "title": "分类节点"
+      },
+      "developer__workflow__copilot": {
+        "description": "工作流编辑器聊天中 Copilot 的角色：先读懂，再提建议，从不直接修改。",
+        "title": "工作流 Copilot"
+      },
+      "developer__workflow__ensemble__synthesizer": {
+        "description": "把集成工作流节点的多次尝试合并成一个最佳答案。",
+        "title": "集成节点综合"
+      },
+      "developer__workflow__ensemble__synthesizer__request": {
+        "description": "把每次尝试结果交给集成节点综合模型的请求。",
+        "title": "集成节点请求"
+      },
+      "developer__workflow__extract__system": {
+        "description": "让工作流提取节点以 JSON 对象返回所需字段。",
+        "title": "提取节点"
+      },
+      "developer__workflow__json-output": {
+        "description": "由解析器读取的协议文本：要求 JSON 模式的工作流节点和运行只回复 JSON。",
+        "title": "仅输出 JSON"
+      },
+      "developer__workflow__json-output__shape": {
+        "description": "由解析器读取的协议文本：JSON 模式节点的回复必须符合的结构。",
+        "title": "JSON 输出结构"
+      },
+      "developer__workflow__quick-action__explain": {
+        "description": "请 Copilot 讲解所选工作流节点的 /explain 消息。",
+        "title": "Copilot：讲解选中节点"
+      },
+      "developer__workflow__quick-action__explain-empty": {
+        "description": "未选中任何节点时的 /explain 消息，提示你先选择节点。",
+        "title": "Copilot：讲解但未选中"
+      },
+      "developer__workflow__quick-action__selection-reference": {
+        "description": "当你把 Copilot 对话限定在所选工作流节点上时发送。",
+        "title": "Copilot：处理选中节点"
+      },
+      "developer__workflow__quick-action__suggest": {
+        "description": "请 Copilot 在所选节点之后建议添加一个节点的 /suggest-next 消息。",
+        "title": "Copilot：建议下一个节点"
+      },
+      "developer__workflow__quick-action__suggest-unselected": {
+        "description": "未选中任何节点时，请 Copilot 建议添加一个节点的 /suggest-next 消息。",
+        "title": "Copilot：未选中时建议节点"
+      },
+      "developer__workflow__quick-action__validate-clean": {
+        "description": "校验未发现问题时发送的 /validate 消息，请 Copilot 做设计层面的审查。",
+        "title": "Copilot：校验无错误"
+      },
+      "developer__workflow__quick-action__validate-issues": {
+        "description": "列出校验问题的 /validate 消息，请 Copilot 逐一给出修复。",
+        "title": "Copilot：校验有问题"
+      },
+      "developer__workflow__schema-repair": {
+        "description": "由解析器读取的协议文本：回复不符合输出结构时，要求返回修正后的 JSON。",
+        "title": "结构修复重试"
+      },
+      "developer__workflow__slash__debug": {
+        "description": "把失败的工作流交给调试子 Agent 排查且不做改动的 /debug 消息。",
+        "title": "工作流 /debug"
+      },
+      "developer__workflow__slash__delegate": {
+        "description": "把任务交给指定子 Agent 并总结其回复的 /delegate 消息。",
+        "title": "工作流 /delegate"
+      },
+      "developer__workflow__slash__refactor": {
+        "description": "把你描述的改动交给重构子 Agent 的 /refactor 消息。",
+        "title": "工作流 /refactor"
+      },
+      "developer__workflow__slash__run": {
+        "description": "请 Copilot 先校验、经你批准后运行整个工作流的 /run 消息。",
+        "title": "工作流 /run"
+      },
+      "developer__workflow__slash__run-from-step": {
+        "description": "请 Copilot 经你批准后从指定步骤开始运行工作流的 /run 消息。",
+        "title": "工作流 /run 指定步骤"
+      },
+      "generation__a2ui__create-app": {
+        "description": "在 A2UI 编辑器中，根据你的需求生成一个新的可交互 A2UI 小应用。",
+        "title": "A2UI 应用生成"
+      },
+      "generation__a2ui__edit-app": {
+        "description": "把你要求的改动应用到现有 A2UI 小应用，只更新变化的部分。",
+        "title": "A2UI 应用修改"
+      },
+      "generation__a2ui__enhance-execution": {
+        "description": "为工作流运行或对话写出简短摘要和要点，显示在其交互页面上。",
+        "title": "运行摘要卡片"
+      },
+      "generation__canvas-suggestions__assist": {
+        "description": "在光标附近提出几处小修改，加入 Canvas 的建议面板。",
+        "title": "Canvas 就地建议"
+      },
+      "generation__canvas-suggestions__review": {
+        "description": "审阅整份 Canvas 文档，逐条给出发现，由你逐一接受或拒绝。",
+        "title": "Canvas 审阅发现"
+      },
+      "generation__canvas__custom": {
+        "description": "按你的指令修改 Canvas 文档或选中内容，只返回修改后的文本。",
+        "title": "Canvas：自定义指令"
+      },
+      "generation__canvas__expand": {
+        "description": "为 Canvas 内容补充细节和示例，并直接替换原文。",
+        "title": "Canvas：扩写"
+      },
+      "generation__canvas__explain": {
+        "description": "逐步讲解 Canvas 内容的作用，结果显示在文档旁。",
+        "title": "Canvas：讲解"
+      },
+      "generation__canvas__fix": {
+        "description": "修复 Canvas 内容中的错误、语法问题和错别字，并直接替换原文。",
+        "title": "Canvas：修复"
+      },
+      "generation__canvas__format": {
+        "description": "整理 Canvas 内容的缩进、间距和结构，并直接替换原文。",
+        "title": "Canvas：格式化"
+      },
+      "generation__canvas__improve": {
+        "description": "提升 Canvas 内容的可读性和结构，并直接替换原文。",
+        "title": "Canvas：优化"
+      },
+      "generation__canvas__review": {
+        "description": "审阅 Canvas 内容中的问题和可改进之处，结果显示在文档旁。",
+        "title": "Canvas：审阅"
+      },
+      "generation__canvas__run": {
+        "description": "描述 Canvas 中的代码运行后会得到什么结果，但不真正执行。",
+        "title": "Canvas：模拟运行"
+      },
+      "generation__canvas__simplify": {
+        "description": "在保留原意的前提下简化 Canvas 内容，并直接替换原文。",
+        "title": "Canvas：简化"
+      },
+      "generation__canvas__translate": {
+        "description": "把 Canvas 内容译成所选语言，保留原有格式。",
+        "title": "Canvas：翻译"
+      },
+      "generation__council__synthesis": {
+        "description": "把议会各成员的回答合并成一份回复，并评估他们的一致程度。",
+        "title": "议会综合"
+      },
+      "generation__image-edit__remove-background": {
+        "description": "在聊天图片工作台和插件媒体工具中，让图像模型去掉背景、保留主体。",
+        "title": "移除图片背景"
+      },
+      "generation__pet__hatch-sprite": {
+        "description": "起草一个新对话，让 Agent 制作可导入的桌面宠物动画形象。",
+        "title": "宠物形象孵化草稿"
+      },
+      "generation__summary__conversation": {
+        "description": "总结对话内容，用于开启新分支，或在压缩后替代较早的轮次。",
+        "title": "对话摘要"
+      },
+      "generation__summary__selection": {
+        "description": "总结你在对话中选中的内容，用于展示或作为交接的起点。",
+        "title": "选中内容摘要"
+      },
+      "generation__template-assist__generate": {
+        "description": "在模板编辑器中，根据你的描述写出一份带可填参数的新消息模板。",
+        "title": "模板起草"
+      },
+      "generation__template-assist__improve": {
+        "description": "把消息模板改写得更清晰，同时保留所有参数位置不变。",
+        "title": "模板改写"
+      },
+      "generation__template-assist__suggest-params": {
+        "description": "为消息模板的每个参数建议名称和简短填写提示。",
+        "title": "模板参数提示"
+      },
+      "generation__title__chat": {
+        "description": "根据第一轮对话为会话起标题。",
+        "title": "对话标题"
+      },
+      "generation__title__work": {
+        "description": "用几个词为自动化任务或工作流运行起标题。",
+        "title": "任务或运行标题"
+      },
+      "generation__turn-label": {
+        "description": "用不超过五个词为单轮对话打标签，显示在对话时间线上。",
+        "title": "轮次标签"
+      },
+      "goal__continuation": {
+        "description": "由宿主读取的协议文本：让 Agent 朝目标再推进一步的消息。",
+        "title": "目标续跑轮次"
+      },
+      "goal__judge": {
+        "description": "根据 Agent 的最新回复判断目标是否已彻底完成，以 JSON 作答。",
+        "title": "目标完成评判"
+      },
+      "goal__objective-updated": {
+        "description": "由宿主读取的协议文本：告诉 Agent 你修改了目标，旧目标不再适用。",
+        "title": "目标内容更新"
+      },
+      "goal__promise-verification": {
+        "description": "由宿主读取的协议文本：在关闭目标前，要求 Agent 用指定标记确认已完成。",
+        "title": "目标完成确认"
+      },
+      "goal__subgoals": {
+        "description": "把目标拆成 3 到 8 个有序子步骤，作为目标的检查清单。",
+        "title": "目标清单"
+      },
+      "goal__system-section": {
+        "description": "/goal 运行期间，每轮都在系统提示词中展示当前目标和进度。",
+        "title": "进行中目标段落"
+      },
+      "knowledge__memory__consolidate": {
+        "description": "判断新记忆与已有相似记忆的关系：新增、更新、删除还是冲突。",
+        "title": "记忆整合"
+      },
+      "knowledge__memory__episodic-distill": {
+        "description": "对话空闲后，从中挑出值得在以后会话里回想的决定和事件。",
+        "title": "情景记忆提炼"
+      },
+      "knowledge__memory__episodic-distill__request": {
+        "description": "携带对话内容的请求，并规定情景记忆提炼必须返回的 JSON 结构。",
+        "title": "情景记忆请求"
+      },
+      "knowledge__memory__extract": {
+        "description": "从每轮对话中提取关于你的长期事实，例如偏好和使用环境。",
+        "title": "用户记忆提取"
+      },
+      "knowledge__memory__project-extract": {
+        "description": "从软件项目自身的开发对话中提取关于该项目的长期事实。",
+        "title": "项目记忆提取"
+      },
+      "knowledge__memory__rerank": {
+        "description": "召回记忆时，为每条已存记忆与当前查询的相关度打分。",
+        "title": "记忆召回重排"
+      },
+      "knowledge__ocr__vision": {
+        "description": "在 CLI 中把附件页面图片里的文字全部提取为 Markdown。",
+        "title": "CLI 图片文字识别"
+      },
+      "knowledge__radar": {
+        "description": "根据你最近收藏的内容诊断信息摄入习惯，指出盲区并给出行动建议。",
+        "title": "知识雷达"
+      },
+      "knowledge__rag__hyde": {
+        "description": "写一段设想中的简短答案，在检索时作为额外的查询使用。",
+        "title": "检索扩展：假设答案"
+      },
+      "knowledge__rag__step-back": {
+        "description": "提出一个更宽泛的背景问题，在检索时作为额外的查询使用。",
+        "title": "检索扩展：退一步提问"
+      },
+      "knowledge__web-search__answer": {
+        "description": "依据编号的网页来源回答问题并标注引用，显示在来源列表上方。",
+        "title": "网页搜索回答"
+      },
+      "knowledge__web__fetch-extract": {
+        "description": "只摘出抓取网页中能回答问题的部分，事实原样保留。",
+        "title": "网页内容提取"
+      },
+      "knowledge__web__reader-distill": {
+        "description": "网页阅读器提炼页面时默认使用的问题，用于总结关键事实。",
+        "title": "网页阅读器摘要"
+      },
+      "knowledge__wiki__voice": {
+        "description": "规定代码 Wiki 撰写文章和索引页的方式：简洁、有据可查，面向编码 Agent。",
+        "title": "代码 Wiki 写作风格"
+      },
+      "permissions__command-judge": {
+        "description": "判断一条 Shell 命令能否不经你确认直接执行。",
+        "title": "Shell 命令安全判断"
+      },
+      "routing__difficulty-judge": {
+        "description": "评估请求需要多强的模型，以便选择快速、均衡或强力档位。",
+        "title": "请求难度判断"
+      },
+      "routing__fusion__role__common": {
+        "description": "所有 Router + Fusion 角色共同遵守的规则：输入只当数据，引用真实证据，不伪造结果。",
+        "title": "Fusion：通用角色规则"
+      },
+      "routing__fusion__role__compactor": {
+        "description": "把冗长的对话压缩成交接状态，保留目标、约束和未决事项。",
+        "title": "Fusion：上下文压缩"
+      },
+      "routing__fusion__role__judge": {
+        "description": "让评审对照任务和证据核查各候选答案，而不是投票或拼接。",
+        "title": "Fusion：评审"
+      },
+      "routing__fusion__role__lead": {
+        "description": "让负责人为执行者规划子任务，并复核他们的结果。",
+        "title": "Fusion：负责人"
+      },
+      "routing__fusion__role__panel-member": {
+        "description": "让小组成员独立完成整个任务，每个结论都要有证据支撑。",
+        "title": "Fusion：小组成员"
+      },
+      "routing__fusion__role__reviewer": {
+        "description": "让审核者按评分标准检查结果，逐项标记通过、失败或无法确定。",
+        "title": "Fusion：内容审核"
+      },
+      "routing__fusion__role__synthesizer": {
+        "description": "依据已获支持的结论撰写最终回答，未解决的分歧保持不确定。",
+        "title": "Fusion：综合者"
+      },
+      "routing__fusion__role__worker": {
+        "description": "让执行者在隔离工作区完成一项已批准的子任务，并如实汇报。",
+        "title": "Fusion：执行者"
+      },
+      "team__auto__assess-routing": {
+        "description": "评估目标该如何编排，从单个 Agent 到完整团队给出推荐。",
+        "title": "团队：编排评估"
+      },
+      "team__auto__clarify": {
+        "description": "判断 Agent 团队的目标在规划前是否需要先问几个澄清问题。",
+        "title": "团队：澄清问题"
+      },
+      "team__auto__compose-roster": {
+        "description": "为目标提议一支小型专家团队，第一位为负责人。",
+        "title": "团队：成员组建"
+      },
+      "team__auto__decompose-tasks": {
+        "description": "把目标拆成最多 16 个有序任务，并指定负责人和依赖关系。",
+        "title": "团队：任务拆解"
+      },
+      "team__lead-review": {
+        "description": "让团队负责人审查队员完成的工作，决定通过还是要求修改。",
+        "title": "团队：负责人审查"
+      },
+      "team__lead__planning": {
+        "description": "要求团队负责人给出 3 到 6 步、分配给各队员的计划。",
+        "title": "团队：负责人规划请求"
+      },
+      "team__lead__planning-system": {
+        "description": "团队负责人做规划时默认的系统提示词，要求只输出一个 JSON 计划块。",
+        "title": "团队：负责人规划系统提示词"
+      },
+      "team__ledger__judge": {
+        "description": "分析 Agent 团队停滞不前的原因，并推荐一个下一步动作。",
+        "title": "团队：停滞判断"
+      },
+      "team__ledger__schema-hint": {
+        "description": "由解析器读取的协议文本：停滞判断必须返回的 JSON 结构。",
+        "title": "团队：停滞结论结构"
+      },
+      "team__pattern__adversarial-verify__lens-correctness": {
+        "description": "要求质疑者检查该发现是否是真实的逻辑或行为缺陷。",
+        "title": "质疑视角：正确性"
+      },
+      "team__pattern__adversarial-verify__lens-perf": {
+        "description": "要求质疑者判断该性能影响在真实规模下是否成立。",
+        "title": "质疑视角：性能"
+      },
+      "team__pattern__adversarial-verify__lens-repro": {
+        "description": "要求质疑者先实际复现该发现，再决定是否认可。",
+        "title": "质疑视角：复现"
+      },
+      "team__pattern__adversarial-verify__lens-security": {
+        "description": "要求质疑者判断该发现是否是攻击者可利用的安全问题。",
+        "title": "质疑视角：安全"
+      },
+      "team__pattern__adversarial-verify__skeptic": {
+        "description": "在对抗式核验中，让质疑者尝试推翻一条发现。",
+        "title": "模式：质疑者"
+      },
+      "team__pattern__adversarial-verify__verdict-schema": {
+        "description": "由解析器读取的协议文本：单个质疑者结论必须返回的 JSON 结构。",
+        "title": "模式：质疑结论结构"
+      },
+      "team__pattern__completeness-critic__critic": {
+        "description": "指出目前工作遗漏了什么，供下一轮搜索和最终报告使用。",
+        "title": "模式：完整性评审"
+      },
+      "team__pattern__completeness-critic__gaps-schema": {
+        "description": "由解析器读取的协议文本：完整性评审必须返回的 JSON 结构。",
+        "title": "模式：遗漏项结构"
+      },
+      "team__pattern__judge-panel__attempt": {
+        "description": "让 Agent 从指定角度完成目标，交给评审团打分。",
+        "title": "模式：评审团作答"
+      },
+      "team__pattern__judge-panel__attempt-schema": {
+        "description": "由解析器读取的协议文本：评审团单次作答必须返回的 JSON 结构。",
+        "title": "模式：作答结构"
+      },
+      "team__pattern__judge-panel__judge": {
+        "description": "让评审对照目标为一次作答打 0 到 10 分。",
+        "title": "模式：评审团打分"
+      },
+      "team__pattern__judge-panel__score-schema": {
+        "description": "由解析器读取的协议文本：单个评审打分必须返回的 JSON 结构。",
+        "title": "模式：评分结构"
+      },
+      "team__pattern__loop-until-dry__finder": {
+        "description": "每轮只要求查找者给出新发现，直到连续几轮再无新结果。",
+        "title": "模式：循环查找"
+      },
+      "team__pattern__multi-modal-sweep__finder": {
+        "description": "在多角度扫描中，让每个查找者只用分配给它的方法搜索。",
+        "title": "模式：多角度扫描查找"
+      },
+      "team__pattern__shared__findings-schema": {
+        "description": "由解析器读取的协议文本：扫描和循环模式中查找者必须返回的 JSON 结构。",
+        "title": "模式：发现结果结构"
+      },
+      "team__pattern__synthesize__report": {
+        "description": "根据已核验的发现撰写本次运行的最终报告，并注明尚未覆盖的部分。",
+        "title": "模式：最终报告"
+      },
+      "team__pattern__synthesize__report-schema": {
+        "description": "由解析器读取的协议文本：最终报告必须返回的 JSON 结构。",
+        "title": "模式：最终报告结构"
+      },
+      "team__pr-feedback__reviewer": {
+        "description": "Agent 团队内部审查者的角色设定：只审查该 Pull Request 的改动。",
+        "title": "团队：PR 审查者"
+      },
+      "team__pr-feedback__reviewer-task": {
+        "description": "指明要审查的 Pull Request，并要求内部审查者给出 JSON 结论。",
+        "title": "团队：PR 审查请求"
+      },
+      "team__rate-limit__nudge": {
+        "description": "限流冷却结束后发到团队，提醒成员从中断处继续。",
+        "title": "团队：限流后恢复"
+      },
+      "team__replan__lead": {
+        "description": "每一波任务结束后，让负责人决定继续、追加、取消还是调整任务。",
+        "title": "团队：重新规划检查点"
+      },
+      "team__review__revision-request": {
+        "description": "附上负责人反馈、要求队员返工的请求。",
+        "title": "团队：返工请求"
+      },
+      "team__structured__json-instruction": {
+        "description": "由解析器读取的协议文本：要求队员只回复一个符合结构的 JSON 代码块。",
+        "title": "团队：JSON 回复规则"
+      },
+      "team__structured__retry-note": {
+        "description": "由解析器读取的协议文本：回复无效时要求队员返回修正后的 JSON。",
+        "title": "团队：JSON 重试说明"
+      },
+      "team__teammate__default-identity": {
+        "description": "未设置其他提示词时，队员使用的默认系统提示词。",
+        "title": "团队：默认队员身份"
+      },
+      "team__teammate__task": {
+        "description": "把分配的任务、角色和团队目标交给队员。",
+        "title": "团队：队员任务"
+      },
+      "team__teammate__upstream-results": {
+        "description": "在队员任务之前引出其依赖任务的结果。",
+        "title": "团队：上游结果"
+      },
+      "team__ultracode__plan-hint": {
+        "description": "由解析器读取的协议文本：Ultracode 规划必须返回的 JSON 结构。",
+        "title": "Ultracode 计划结构"
+      },
+      "team__ultracode__planner": {
+        "description": "决定一次 Ultracode 运行要组合哪些质量模式、按什么顺序执行。",
+        "title": "Ultracode 规划"
+      },
+      "twin__distill__entity-merge": {
+        "description": "把构建分身时发现的同一团队、人员或项目的不同叫法归并到一起。",
+        "title": "分身提炼：实体合并"
+      },
+      "twin__distill__evaluator": {
+        "description": "以新人视角为数字分身的 Agent 和 Skill 草稿打分，并给出改进建议。",
+        "title": "分身提炼：评审"
+      },
+      "twin__distill__knowledge": {
+        "description": "从你的资料中提取人员、团队、项目和决策，供数字分身使用。",
+        "title": "分身提炼：实体与决策"
+      },
+      "twin__distill__playbook": {
+        "description": "从文档和聊天中找出你反复使用的做事方式，整理成数字分身的套路。",
+        "title": "分身提炼：做事套路"
+      },
+      "twin__distill__style": {
+        "description": "挑选你有代表性的写作样本，让数字分身学会你的语气。",
+        "title": "分身提炼：写作风格"
+      },
+      "twin__distill__synthesizer": {
+        "description": "把提炼出的画像整理成一个 Agent 草稿和若干 Skill 草稿。",
+        "title": "分身提炼：汇总生成"
+      },
+      "twin__runtime__rerank": {
+        "description": "数字分身检索资料时，为每篇结果与问题的相关度打分。",
+        "title": "分身检索重排"
+      },
+      "twin__runtime__rerank-request": {
+        "description": "由解析器读取的协议文本：把查询和文档交给分身重排的请求。",
+        "title": "分身重排请求"
+      },
+      "twin__runtime__system-template__decisions": {
+        "description": "把此人做过的决策加入数字分身的系统提示词。",
+        "title": "分身提示词：过往决策"
+      },
+      "twin__runtime__system-template__entities": {
+        "description": "加入分身熟悉的人员、团队和项目，仅作背景，不主动罗列。",
+        "title": "分身提示词：熟悉的人和事"
+      },
+      "twin__runtime__system-template__identity": {
+        "description": "数字分身系统提示词的开头，告诉它以谁的名义说话。",
+        "title": "分身提示词：身份"
+      },
+      "twin__runtime__system-template__playbooks": {
+        "description": "把此人通常如何处理各种情况加入数字分身的系统提示词。",
+        "title": "分身提示词：做事套路"
+      },
+      "twin__runtime__system-template__retrieved": {
+        "description": "加入本轮检索到的资料片段，要求分身引用来源，答不上来就如实说明。",
+        "title": "分身提示词：检索资料"
+      },
+      "twin__runtime__system-template__style": {
+        "description": "加入此人的写作样本，让分身模仿语气结构但不照抄。",
+        "title": "分身提示词：风格示例"
+      },
+      "twin__runtime__system-template__voice": {
+        "description": "把此人的说话风格和语气概述加入数字分身的系统提示词。",
+        "title": "分身提示词：语气"
+      }
+    },
     "relatedSections": {
       "agentRuntime": "Agent 运行时",
       "ariaLabel": "Claude Code 相关设置入口",
@@ -54551,6 +56026,7 @@
       "presets": "预设",
       "proIde": "Pro IDE",
       "profile": "个人资料",
+      "prompts": "提示词",
       "providers": "提供商",
       "remoteControl": "远程控制",
       "remoteHosts": "远程主机",

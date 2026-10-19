@@ -42,6 +42,8 @@ import {
 } from "@/lib/web/reader/configured-reader"
 import type { ReaderPolicy } from "@/lib/web/reader/reader-settings"
 import { UNTRUSTED_CONTENT_NOTICE } from "./untrusted-content"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 import type { PluginHostToolErrorCode } from "@/types/plugin/plugin-host-tools"
 
 export type { FetchFormat, FetchSummarize } from "@/lib/web/reader/configured-reader"
@@ -164,12 +166,39 @@ export interface FetchExtractorClient {
   ): Promise<string>
 }
 
-/** System prompt for query-focused page extraction. */
+/** Shipped system prompt for query-focused page extraction. */
 export const FETCH_EXTRACT_SYSTEM_PROMPT =
   "You extract only the parts of a web page that answer the user's question. " +
   "Return the relevant facts, quotes, numbers, names, dates and URLs concisely, " +
   "preserving them verbatim. If the page does not address the question, say so " +
   "in one line. Do not add a preamble like 'Here is'. Write in the question's language."
+
+/**
+ * The extractor's instructions as a Prompt Center definition (ADR-0236).
+ * Resolved synchronously from the loaded snapshot: the app loads it at
+ * startup and the CLI primes it before a turn, and a web fetch runs inside a
+ * turn, so the extractor never opens the account store itself.
+ */
+export const FETCH_EXTRACT_PROMPT = definePrompt({
+  id: "knowledge.web.fetch-extract",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "knowledge",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app", "cli"],
+  maxChars: 4_000,
+  outputContract:
+    "The trimmed reply becomes the distilled text of a web_fetch read (it is cached with the read for five minutes, keyed by these instructions); the redacted question and page text are sent as the user message.",
+  consumers: ["lib/web/web-tools-core.ts"],
+  defaultBody: FETCH_EXTRACT_SYSTEM_PROMPT,
+})
+
+function fetchExtractInstructions(): string {
+  return resolvePrompt(FETCH_EXTRACT_PROMPT).text
+}
 
 /** Hard ceiling on page characters fed to the extractor (keeps the cheap call bounded). */
 const FETCH_EXTRACT_INPUT_MAX = EXTRACTOR_INPUT_MAX_CHARS
@@ -180,28 +209,31 @@ const FETCH_EXTRACT_INPUT_MAX = EXTRACTOR_INPUT_MAX_CHARS
  * passes the result as `deps.summarize`.
  */
 export function buildFetchExtractor(client: FetchExtractorClient): FetchSummarize {
-  return async (text, prompt, signal) => {
+  const extract: FetchSummarize = async (text, prompt, signal) => {
     const bounded =
       text.length > FETCH_EXTRACT_INPUT_MAX ? text.slice(0, FETCH_EXTRACT_INPUT_MAX) : text
     const safePrompt = redactText(prompt).redacted
     const safeText = redactText(bounded).redacted
     const extractionPrompt = `Question:\n${safePrompt}\n\nPage content:\n${safeText}`
+    const system = fetchExtractInstructions()
     if (
       !hasNoLeakingPiiDeep({
         prompt: extractionPrompt,
-        system: FETCH_EXTRACT_SYSTEM_PROMPT,
+        system,
       })
     ) {
       throw new Error("Web extraction blocked: sensitive data remains after redaction")
     }
     const out = await client.complete(extractionPrompt, {
-      system: FETCH_EXTRACT_SYSTEM_PROMPT,
+      system,
       temperature: 0.2,
       maxTokens: EXTRACTOR_OUTPUT_MAX_TOKENS,
       abortSignal: signal,
     })
     return (out ?? "").trim()
   }
+  extract.instructions = fetchExtractInstructions
+  return extract
 }
 
 /**

@@ -27,7 +27,7 @@ import type {
 } from "../types"
 import { runDeepSearch } from "./deepsearch"
 import { engineText, reportEngineProgress } from "./progress"
-import { coherenceMessages, outlineMessages } from "./prompts"
+import { coherenceMessages, outlineMessages, systemPromptFor } from "./prompts"
 
 const SCOUT_RESULTS = 8
 const SECTION_CONCURRENCY = 3
@@ -197,7 +197,7 @@ async function architect(
   try {
     const res = await completeJson<{ title?: unknown; sections?: unknown }>(
       deps.ai,
-      outlineMessages(topic, landscape, locale),
+      outlineMessages(topic, landscape, locale, await systemPromptFor("outline", deps.prompt)),
       (t) => extractJson(t),
       { temperature: 0.3, maxTokens: 900 }
     )
@@ -246,7 +246,13 @@ async function weave(
     try {
       const res = await completeText(
         deps.ai,
-        coherenceMessages(topic, outline.title, blocks, locale),
+        coherenceMessages(
+          topic,
+          outline.title,
+          blocks,
+          locale,
+          await systemPromptFor("coherence", deps.prompt)
+        ),
         {
           temperature: 0.4,
           maxTokens: 4_000,

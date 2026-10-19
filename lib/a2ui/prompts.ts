@@ -3,9 +3,30 @@
  *
  * It is protocol text: the component names, payload fields and the string
  * `action` shape it teaches are what `lib/a2ui/` parses back, so it is
- * inspect-only in the Prompt Center rather than an editable template.
+ * inspect-only in the Prompt Center (ADR-0236) rather than an editable
+ * template. The definition is the one source; {@link A2UI_SYSTEM_PROMPT} is
+ * read from it.
  */
-export const A2UI_SYSTEM_PROMPT = `You have the ability to generate interactive UI components using the A2UI protocol. When appropriate, you can create rich, interactive interfaces that users can interact with directly in the chat.
+
+import { definePrompt } from "@/lib/prompts/types"
+
+export const A2UI_PROTOCOL_PROMPT = definePrompt({
+  id: "chat.a2ui.protocol",
+  contractVersion: 1,
+  kind: "protocol",
+  group: "chat",
+  operation: "inspect-only",
+  scopes: [],
+  activation: "next-operation",
+  risk: "protocol",
+  hosts: ["app"],
+  requiredFragments: ["```a2ui", '"surface"', '"components"', '"dataModel"'],
+  outputContract:
+    "Appended to the system prompt of a turn whose surface renders A2UI; the reply's ```a2ui blocks are parsed into surfaces by lib/a2ui/.",
+  // build-options appends it (with the agent's catalog section); this module
+  // renders it from the definition.
+  consumers: ["lib/a2ui/prompts.ts"],
+  defaultBody: `You have the ability to generate interactive UI components using the A2UI protocol. When appropriate, you can create rich, interactive interfaces that users can interact with directly in the chat.
 
 ## A2UI Capabilities
 
@@ -179,4 +200,13 @@ useful if the visualization can't render. Example (a trend chart):
 }
 \`\`\`
 
-Remember: Only use A2UI when it genuinely improves the user experience. For simple text responses, regular markdown is preferred.`
+Remember: Only use A2UI when it genuinely improves the user experience. For simple text responses, regular markdown is preferred.`,
+})
+
+/**
+ * The guidance text build-options appends. An inspect-only entry with no
+ * placeholders renders to its body, so this is exactly what the Prompt Center
+ * shows; it is a module constant because build-options reads it as one, and
+ * no override can change it.
+ */
+export const A2UI_SYSTEM_PROMPT: string = A2UI_PROTOCOL_PROMPT.defaultBody

@@ -24,10 +24,19 @@ jest.mock("@/lib/ai/agent/execution/agent-execution-service", () => ({
   ...jest.requireActual("@/lib/ai/agent/execution/agent-execution-service"),
   executeAgentTurnFromRenderer: (...a: unknown[]) => mockRendererTurn(...(a as [])),
 }))
-jest.mock("@/lib/plugin/registries/subagent-registry", () => ({
-  __esModule: true,
-  getSubagent: jest.fn(),
-}))
+jest.mock("@/lib/plugin/registries/subagent-registry", () => {
+  const getSubagent = jest.fn()
+  return {
+    __esModule: true,
+    getSubagent,
+    // Dispatch by id reads the entry (for its plugin id); it serves what
+    // `getSubagent` is primed with, untagged.
+    getSubagentEntry: (id: string) => {
+      const entry = getSubagent(id)
+      return entry ? { entry } : undefined
+    },
+  }
+})
 // The System-B hook bridge. cognia-dispatched subagents run as their own
 // top-level session, so the SDK never emits SubagentStart/Stop for them —
 // dispatch synthesizes both, and these tests pin that.

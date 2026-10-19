@@ -160,6 +160,7 @@ import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
 import { loadPluginStyles, removePluginStyles } from "@/lib/plugin/styles/plugin-stylesheet"
 import { unregisterUriHandlersByPlugin } from "@/lib/plugin/uri/uri-handler-registry"
 import { unregisterRemoteDesktopProvidersOf } from "@/lib/remote-desktop/provider-registry"
+import { unregisterPluginPrompts } from "@/lib/prompts/plugin-prompts"
 import {
   evaluatePluginCompatibility,
   type CompatibilityDiagnostic,
@@ -6495,6 +6496,9 @@ export class PluginManager {
     // Drop its remote desktop providers (ADR-0234); open sessions keep the
     // Host bridge, but no new one can pick a provider that is gone.
     unregisterRemoteDesktopProvidersOf(pluginId)
+    // Drop the prompt slots it declared through `ctx.prompts.register`
+    // (ADR-0236). The user's overrides stay and are listed as unavailable.
+    unregisterPluginPrompts(pluginId)
     // Async module-bridge capabilities — drop every contribution. Includes
     // message renderers, which the standalone `purgeMessagePartRenderersForPlugin`
     // call previously handled (the bridge unregister calls the same

@@ -30,10 +30,18 @@ jest.mock("@/lib/ai/generation/utility-client", () => ({
   buildUtilityLlmClient: (...args: unknown[]) => mockBuildUtilityLlmClient(...args),
 }))
 jest.mock("@cognia/memory/retrieve/llm-rerank", () => ({
+  ...jest.requireActual("@cognia/memory/retrieve/llm-rerank"),
   createMemoryLlmReranker: (...args: unknown[]) => mockCreateMemoryLlmReranker(...args),
 }))
 
 import { listHistoricalForReader } from "@/lib/db/memories"
+import { MEMORY_RERANK_SYSTEM_PROMPT } from "@cognia/memory/retrieve/llm-rerank"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { MEMORY_RERANK_PROMPT } from "./rerank-prompt"
 import {
   tryBuildMemoryDeps,
   tryBuildMemoryVectorReader,
@@ -374,8 +382,51 @@ describe("tryBuildMemoryDeps defaults / historical / rerank", () => {
       appSettings: { theme: "dark" },
       featureId: "memory-rerank",
     })
-    expect(mockCreateMemoryLlmReranker).toHaveBeenCalledWith(client)
+    expect(mockCreateMemoryLlmReranker).toHaveBeenCalledWith(client, {
+      systemPrompt: expect.any(Function),
+    })
     expect(deps!.rerank).toBe(reranker)
+  })
+
+  describe("reranker system prompt (Prompt Center)", () => {
+    afterEach(() => {
+      __setPromptOverrideSnapshotForTests(null)
+      __resetPromptVerdictsForTests()
+    })
+
+    async function resolvedSystemPrompt(): Promise<string> {
+      mockBuildUtilityLlmClient.mockReturnValue({ complete: jest.fn() })
+      mockCreateMemoryLlmReranker.mockReturnValue(jest.fn())
+      await tryBuildMemoryDeps(cfg({ llmRerank: true }))
+      const options = mockCreateMemoryLlmReranker.mock.calls[0][1] as {
+        systemPrompt: () => Promise<string>
+      }
+      return options.systemPrompt()
+    }
+
+    it("resolves the shipped prompt with no override", async () => {
+      __setPromptOverrideSnapshotForTests(buildPromptOverrideSnapshot("test-db", []))
+      await expect(resolvedSystemPrompt()).resolves.toBe(MEMORY_RERANK_SYSTEM_PROMPT)
+    })
+
+    it("resolves a published override at each recall", async () => {
+      __setPromptOverrideSnapshotForTests(
+        buildPromptOverrideSnapshot("test-db", [
+          {
+            bindingId: "pob-rerank",
+            promptId: MEMORY_RERANK_PROMPT.id,
+            scope: "account",
+            targetId: "",
+            revisionId: "por-mem-rerank-1",
+            body: "Score memories against the query. Return STRICT JSON only.",
+            contractVersion: MEMORY_RERANK_PROMPT.contractVersion,
+          },
+        ])
+      )
+      await expect(resolvedSystemPrompt()).resolves.toBe(
+        "Score memories against the query. Return STRICT JSON only."
+      )
+    })
   })
 
   it("leaves rerank unset when no utility model is configured", async () => {

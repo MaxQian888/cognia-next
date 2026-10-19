@@ -59,6 +59,7 @@ import {
   RadarIcon,
   CableIcon,
   DownloadCloudIcon,
+  TextQuoteIcon,
 } from "lucide-react"
 
 import {
@@ -117,6 +118,7 @@ export type SettingsSectionId =
   | "teams"
   | "presets"
   | "chatTemplates"
+  | "prompts"
   | "artifacts"
   | "canvas"
   | "shortcuts"
@@ -478,6 +480,17 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "chatTemplates",
     group: "authoring",
     icon: FileCode2Icon,
+  },
+  {
+    id: "prompts",
+    labelKey: "prompts",
+    descriptionKey: "prompts",
+    group: "authoring",
+    icon: TextQuoteIcon,
+    // ADR-0236 R2: prompts are managed where their store lives. A paired
+    // client mirrors the host read-only and has no prompt write channel; the
+    // CLI and headless hosts use `cognia-agent prompts` and profiles.
+    profiles: ["desktop", "web-standalone"],
   },
   {
     id: "hooks",
@@ -1298,6 +1311,27 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
   characters: ["persona", "agent"],
   skills: ["skill", "instruction", "prompt", "kit"],
   teams: ["multi-agent", "round-robin", "supervisor"],
+  prompts: [
+    "prompt",
+    "prompts",
+    "prompt center",
+    "system prompt",
+    "built-in prompt",
+    "override",
+    "template",
+    "instructions",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "persona",
+    "judge",
+    "profile",
+    "提示词",
+    "系统提示词",
+    "内置提示词",
+    "覆盖",
+    "模板",
+    "指令",
+  ],
   chatTemplates: [
     "chat template",
     "chat templates",

@@ -1,4 +1,16 @@
-import { webFetch, webSearch, buildFetchExtractor, type WebSearchDeps } from "./web-tools-core"
+import {
+  FETCH_EXTRACT_PROMPT,
+  FETCH_EXTRACT_SYSTEM_PROMPT,
+  webFetch,
+  webSearch,
+  buildFetchExtractor,
+  type WebSearchDeps,
+} from "./web-tools-core"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 import { unwrapUntrustedContent } from "./untrusted-content"
 import type { SearchResponse } from "@cognia/web-search/types"
 
@@ -517,6 +529,49 @@ describe("buildFetchExtractor", () => {
     const complete = jest.fn(async () => undefined as unknown as string)
     const extract = buildFetchExtractor({ complete })
     expect(await extract("text", "q")).toBe("")
+  })
+
+  describe("Prompt Center override (ADR-0236)", () => {
+    afterEach(() => {
+      __setPromptOverrideSnapshotForTests(null)
+      __resetPromptVerdictsForTests()
+    })
+
+    it("sends the shipped instructions by default and exposes them for cache keying", async () => {
+      piiDeepMock.mockReturnValue(true)
+      const complete = jest.fn(async (_prompt: string, _options?: { system?: string }) => "ok")
+      const extract = buildFetchExtractor({ complete })
+      await extract("page", "q")
+      expect(complete.mock.calls[0][1]?.system).toBe(FETCH_EXTRACT_SYSTEM_PROMPT)
+      expect(extract.instructions?.()).toBe(FETCH_EXTRACT_SYSTEM_PROMPT)
+    })
+
+    it("sends and PII-checks a published override", async () => {
+      piiDeepMock.mockReturnValue(true)
+      __setPromptOverrideSnapshotForTests(
+        buildPromptOverrideSnapshot("test-db", [
+          {
+            bindingId: "pob-extract",
+            promptId: FETCH_EXTRACT_PROMPT.id,
+            scope: "account",
+            targetId: "",
+            revisionId: "por-fetch-extract",
+            body: "Quote only the sentences that answer the question.",
+            contractVersion: FETCH_EXTRACT_PROMPT.contractVersion,
+          },
+        ])
+      )
+      const complete = jest.fn(async (_prompt: string, _options?: { system?: string }) => "ok")
+      const extract = buildFetchExtractor({ complete })
+      await extract("page", "q")
+      expect(complete.mock.calls[0][1]?.system).toBe(
+        "Quote only the sentences that answer the question."
+      )
+      expect(piiDeepMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ system: "Quote only the sentences that answer the question." })
+      )
+      expect(extract.instructions?.()).toBe("Quote only the sentences that answer the question.")
+    })
   })
 })
 

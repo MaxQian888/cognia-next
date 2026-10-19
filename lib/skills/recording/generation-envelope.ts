@@ -25,6 +25,8 @@
  */
 
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 
 import { applyVariableMapping, inputsForSkillBody, type InputVariable } from "./input-variables"
 import { includedSteps, type RecordedStepView } from "./step-model"
@@ -102,17 +104,47 @@ function describeStep(
   }
 }
 
-export function buildSystemPrompt(options: EnvelopeOptions, categoryIds: string): string {
-  const tools =
-    options.toolCatalog.length > 0
-      ? `Only these tool names exist: ${options.toolCatalog.join(", ")}.`
-      : "No tool catalog is available; return an empty allowedTools array."
-  return [
+/**
+ * The generation instructions (ADR-0236). The locale, category list and tool
+ * guidance are values; `{{placeholderSyntax}}` renders the literal `{{name}}`
+ * the recorded inputs use, which a body cannot spell itself because `{{…}}`
+ * is the template syntax.
+ */
+export const SKILL_RECORDING_PROMPT = definePrompt({
+  id: "developer.skills.recording",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  // The reply is parsed as one JSON object with these keys.
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 8_000,
+  variables: [
+    { name: "locale", required: true, maxChars: 1_000 },
+    { name: "categories", required: true, maxChars: 10_000 },
+    { name: "toolGuidance", required: true, maxChars: 200_000 },
+    { name: "placeholderSyntax", required: false, maxChars: 16 },
+  ],
+  requiredFragments: [
+    '"name"',
+    '"description"',
+    '"content"',
+    '"tags"',
+    '"category"',
+    '"allowedTools"',
+  ],
+  outputContract:
+    "Parsed as one JSON object; the draft skill is shown for review before it is saved. {{toolGuidance}} names the registered tools (or asks for an empty allowedTools array), {{categories}} lists the category ids. The preview shows exactly this rendered text.",
+  consumers: ["lib/skills/recording/generation-envelope.ts"],
+  defaultBody: [
     "You are an expert at turning a recorded desktop workflow into a reusable SKILL.md procedure.",
     "You are given a transcript of what a user did, already reviewed and edited by them.",
     "Write a skill an AI agent could follow to reproduce the workflow with different inputs, using its own tools (it will NOT replay exact coordinates).",
     "",
-    `Write the skill in ${options.locale}.`,
+    "Write the skill in {{locale}}.",
     "",
     "Output ONLY a JSON object (no markdown fences, no preamble) with these keys:",
     '- "name": a short imperative title (<= 60 chars, letters/numbers/spaces/hyphens only).',
@@ -123,12 +155,31 @@ export function buildSystemPrompt(options: EnvelopeOptions, categoryIds: string)
     "    ## Steps    (numbered, imperative; describe intent, not pixel coordinates)",
     "    ## Verify   (how to confirm the workflow succeeded)",
     '- "tags": an array of 2-5 short lowercase tags.',
-    `- "category": one of ${categoryIds}.`,
-    `- "allowedTools": an array of tool names the skill needs, or []. ${tools} Never invent tool names.`,
+    '- "category": one of {{categories}}.',
+    '- "allowedTools": an array of tool names the skill needs, or []. {{toolGuidance}} Never invent tool names.',
     "",
-    "Placeholders written as {{name}} are caller-supplied inputs — keep them as placeholders.",
+    "Placeholders written as {{placeholderSyntax}} are caller-supplied inputs — keep them as placeholders.",
     "Do not fabricate steps that are not implied by the transcript.",
-  ].join("\n")
+  ].join("\n"),
+})
+
+/**
+ * Synchronous on purpose: the envelope is built once and the preview renders
+ * the same object, so it reads the loaded override snapshot.
+ */
+export function buildSystemPrompt(options: EnvelopeOptions, categoryIds: string): string {
+  const toolGuidance =
+    options.toolCatalog.length > 0
+      ? `Only these tool names exist: ${options.toolCatalog.join(", ")}.`
+      : "No tool catalog is available; return an empty allowedTools array."
+  return resolvePrompt(SKILL_RECORDING_PROMPT, {
+    values: {
+      locale: options.locale,
+      categories: categoryIds,
+      toolGuidance,
+      placeholderSyntax: "{{name}}",
+    },
+  }).text
 }
 
 /**

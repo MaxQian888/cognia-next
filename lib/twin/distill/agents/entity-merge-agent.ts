@@ -19,6 +19,8 @@
  */
 
 import { extractJson, type LlmClient } from "../llm"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { ENTITY_MERGE_AGENT_PROMPT } from "../prompts"
 import type { EntityRole, ProfileEntity } from "@/types/twin"
 
 const MERGE_MIN_BUCKET = 6
@@ -53,35 +55,18 @@ function bucketByRole(entities: ProfileEntity[]): Record<EntityRole, ProfileEnti
   return out
 }
 
-function buildClusterPrompt(role: EntityRole, entities: ProfileEntity[]): string {
+async function buildClusterPrompt(role: EntityRole, entities: ProfileEntity[]): Promise<string> {
   const lines = entities.map(
     (e, i) =>
       `[${i}] name="${e.name}" aliases=[${e.aliases.join(", ")}]${
         e.relation ? ` relation="${e.relation}"` : ""
       }`
   )
-  return `You are normalising an entity registry of role "${role}" extracted from
-chunked employee documents and chats. Group entries that refer to the
-SAME real-world entity — e.g. "Engineering Infra Team" + "infra-team" +
-"Eng-Infra" all map to one team.
-
-Only merge when you have high confidence the names share a referent. Do
-not merge near-misses (e.g. "Platform Team" vs "Infrastructure Platform")
-unless context strongly suggests they're the same.
-
-Output JSON of the form:
-{
-  "clusters": [
-    { "canonical": "Engineering Infra Team", "aliases": ["infra-team", "Eng-Infra"] },
-    ...
-  ]
-}
-
-Entries with no merge group can be omitted. Names that share a cluster
-must NOT also appear in another cluster.
-
-Entries:
-${lines.join("\n")}`
+  return (
+    await resolvePromptAsync(ENTITY_MERGE_AGENT_PROMPT, {
+      values: { role, entries: lines.join("\n") },
+    })
+  ).text
 }
 
 interface MergeClusters {
@@ -188,7 +173,7 @@ export async function runEntityMergeAgent(
       continue
     }
     try {
-      const response = await llm.complete(buildClusterPrompt(role, bucket), {
+      const response = await llm.complete(await buildClusterPrompt(role, bucket), {
         temperature: 0,
         maxTokens: MAX_TOKENS,
       })

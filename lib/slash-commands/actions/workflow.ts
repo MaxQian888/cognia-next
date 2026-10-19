@@ -29,6 +29,8 @@
  */
 
 import type { SlashCommand, SlashContext } from "../builtin"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt, type PromptDefinitionV1 } from "@/lib/prompts/types"
 
 export const WORKFLOW_COPILOT_DISPATCH_EVENT = "workflow-copilot:dispatch-action"
 
@@ -212,10 +214,106 @@ export function parseDelegateArgs(
   return { ok: true, alias, task }
 }
 
+/** Step ids, descriptions and tasks are what the user typed; this only guards. */
+const SLASH_VALUE_MAX = 100_000
+
+function workflowSlashPrompt(input: {
+  slug: string
+  variables?: readonly string[]
+  outputContract: string
+  defaultBody: string
+}): PromptDefinitionV1 {
+  return definePrompt({
+    id: `developer.workflow.slash.${input.slug}`,
+    contractVersion: 1,
+    // Sent as the user's own message in the editor's Copilot chat.
+    kind: "composer-template",
+    group: "developer",
+    operation: "replace-template",
+    scopes: ["account"],
+    activation: "next-operation",
+    risk: "ordinary",
+    hosts: ["app"],
+    maxChars: 8_000,
+    variables: (input.variables ?? []).map((name) => ({
+      name,
+      required: true,
+      maxChars: SLASH_VALUE_MAX,
+    })),
+    outputContract: input.outputContract,
+    consumers: ["lib/slash-commands/actions/workflow.ts"],
+    defaultBody: input.defaultBody,
+  })
+}
+
+/**
+ * The messages the workflow slash commands send (ADR-0236). The tools they
+ * name still require approval in code (`wf_run_*`), whatever the wording.
+ */
+export const WORKFLOW_SLASH_PROMPTS = {
+  run: workflowSlashPrompt({
+    slug: "run",
+    outputContract: "Sent as the Copilot turn for `/run` without a step.",
+    defaultBody: [
+      "/run",
+      "",
+      "Please execute the entire workflow now via `wf_run_workflow`. Before calling the tool, run `wf_get_validation_errors` to confirm the graph parses — if anything fails, list the issues and stop. The run requires user approval; surface a clear approval prompt with the workflow name and entry summary.",
+    ].join("\n"),
+  }),
+  runFromStep: workflowSlashPrompt({
+    slug: "run-from-step",
+    variables: ["stepId"],
+    outputContract: "Sent as the Copilot turn for `/run <stepId>`.",
+    defaultBody: [
+      "/run `{{stepId}}`",
+      "",
+      "Please execute this workflow starting from step `{{stepId}}` via `wf_run_from_step`. The run requires user approval — surface a clear approval prompt with the workflow name and entry summary.",
+    ].join("\n"),
+  }),
+  debug: workflowSlashPrompt({
+    slug: "debug",
+    outputContract: "Sent as the Copilot turn for `/debug`.",
+    defaultBody: [
+      "/debug",
+      "",
+      "Please delegate to the `workflow-debugger` subagent. It should read the graph, validation errors, and last-run summary, then explain the root cause and suggested fix in prose. Do NOT mutate the graph.",
+    ].join("\n"),
+  }),
+  refactor: workflowSlashPrompt({
+    slug: "refactor",
+    variables: ["description"],
+    outputContract:
+      "Sent as the Copilot turn for `/refactor <description>`; {{description}} is what the user typed.",
+    defaultBody: [
+      "/refactor {{description}}",
+      "",
+      "Please delegate to the `workflow-refactorer` subagent to: {{description}}.",
+      "",
+      "The refactor MUST preserve observable behavior. Use `wf_propose_batch` for any multi-op change so the user can review the diff before commit.",
+    ].join("\n"),
+  }),
+  delegate: workflowSlashPrompt({
+    slug: "delegate",
+    variables: ["alias", "subagent", "task"],
+    outputContract:
+      "Sent as the Copilot turn for `/delegate <agent> <task>`; {{subagent}} is the resolved subagent name and {{task}} what the user typed.",
+    defaultBody: [
+      "/delegate {{alias}} {{task}}",
+      "",
+      "Please delegate to the `{{subagent}}` subagent via the `Task` tool. The user's task is:",
+      "",
+      "{{task}}",
+      "",
+      "Summarize the subagent's reply in your own voice once it completes. Don't repeat the specialist's tool output verbatim.",
+    ].join("\n"),
+  }),
+} as const
+
 /**
  * Build the user-prompt the chat-tab listener dispatches to the agent
  * once it receives a workflow slash action. Pure / synchronous so tests
- * can exercise the wording without DOM. Validate / explain / suggest are
+ * can exercise the wording without DOM; it reads the loaded override
+ * snapshot. Validate / explain / suggest are
  * built elsewhere (lib/workflow/editor/quick-action-prompts.ts) because
  * they need editor-store access; this file covers the prompts that are
  * independent of editor state.
@@ -224,43 +322,25 @@ export function buildWorkflowSlashPrompt(action: WorkflowSlashAction): string | 
   switch (action.kind) {
     case "run":
       if (action.stepId) {
-        return [
-          `/run \`${action.stepId}\``,
-          "",
-          `Please execute this workflow starting from step \`${action.stepId}\` via \`wf_run_from_step\`. The run requires user approval — surface a clear approval prompt with the workflow name and entry summary.`,
-        ].join("\n")
+        return resolvePrompt(WORKFLOW_SLASH_PROMPTS.runFromStep, {
+          values: { stepId: action.stepId },
+        }).text
       }
-      return [
-        "/run",
-        "",
-        "Please execute the entire workflow now via `wf_run_workflow`. Before calling the tool, run `wf_get_validation_errors` to confirm the graph parses — if anything fails, list the issues and stop. The run requires user approval; surface a clear approval prompt with the workflow name and entry summary.",
-      ].join("\n")
+      return resolvePrompt(WORKFLOW_SLASH_PROMPTS.run).text
     case "debug":
-      return [
-        "/debug",
-        "",
-        "Please delegate to the `workflow-debugger` subagent. It should read the graph, validation errors, and last-run summary, then explain the root cause and suggested fix in prose. Do NOT mutate the graph.",
-      ].join("\n")
+      return resolvePrompt(WORKFLOW_SLASH_PROMPTS.debug).text
     case "refactor":
-      return [
-        `/refactor ${action.description}`,
-        "",
-        `Please delegate to the \`workflow-refactorer\` subagent to: ${action.description}.`,
-        "",
-        "The refactor MUST preserve observable behavior. Use `wf_propose_batch` for any multi-op change so the user can review the diff before commit.",
-      ].join("\n")
-    case "delegate": {
-      const subagentName = WORKFLOW_SUBAGENT_ALIAS_TO_NAME[action.alias]
-      return [
-        `/delegate ${action.alias} ${action.task}`,
-        "",
-        `Please delegate to the \`${subagentName}\` subagent via the \`Task\` tool. The user's task is:`,
-        "",
-        action.task,
-        "",
-        "Summarize the subagent's reply in your own voice once it completes. Don't repeat the specialist's tool output verbatim.",
-      ].join("\n")
-    }
+      return resolvePrompt(WORKFLOW_SLASH_PROMPTS.refactor, {
+        values: { description: action.description },
+      }).text
+    case "delegate":
+      return resolvePrompt(WORKFLOW_SLASH_PROMPTS.delegate, {
+        values: {
+          alias: action.alias,
+          subagent: WORKFLOW_SUBAGENT_ALIAS_TO_NAME[action.alias],
+          task: action.task,
+        },
+      }).text
     default:
       return null
   }

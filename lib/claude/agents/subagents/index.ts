@@ -25,6 +25,7 @@ import {
   builtinAgentsForSurface,
 } from "@/lib/agent/builtin-catalog/catalog"
 import { listSubagentEntries } from "@/lib/plugin/registries/subagent-registry"
+import { resolvePluginSubagentPrompt } from "@/lib/prompts/plugin-subagent-prompts"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubAgentTemplate } from "@/types/agent/sub-agent"
@@ -65,7 +66,8 @@ function projectPluginSubagent(entry: {
 }): { id: string; def: AgentDefinition } {
   const def: AgentDefinition = {
     description: entry.entry.description,
-    prompt: entry.entry.prompt,
+    // An account override from the Prompt Center, else the plugin's own text.
+    prompt: resolvePluginSubagentPrompt(entry.pluginId, entry.entry),
   }
   if (entry.entry.tools) def.tools = entry.entry.tools
   if (entry.entry.disallowedTools) def.disallowedTools = entry.entry.disallowedTools
@@ -267,7 +269,10 @@ export function resolveDispatchableSubagents(): Array<{ id: string; def: PluginS
   for (const entry of listSubagentEntries()) {
     if (entry.entry.disabled) continue
     const id = entry.pluginId ? `${entry.pluginId}:${entry.id}` : entry.id
-    out.push({ id, def: { ...entry.entry, id } })
+    out.push({
+      id,
+      def: { ...entry.entry, id, prompt: resolvePluginSubagentPrompt(entry.pluginId, entry.entry) },
+    })
   }
   for (const tpl of Object.values(useSubagentRuntimeStore.getState().templates)) {
     if (tpl.isBuiltIn || tpl.disabled) continue

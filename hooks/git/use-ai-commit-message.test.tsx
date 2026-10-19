@@ -1,6 +1,12 @@
 import { act, renderHook } from "@testing-library/react"
 import { toast } from "sonner"
 import { gitTargetFromRemote } from "@/lib/git/target"
+import { COMMIT_AGENT_CLAUSE_PROMPT, COMMIT_SYSTEM_PROMPT } from "@/lib/git/ai-commit"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 import { useAiCommitMessage } from "./use-ai-commit-message"
 
 let mockSettings: { gitSettings?: unknown }
@@ -20,6 +26,10 @@ const mockComplete = jest.fn().mockResolvedValue("feat: add thing")
 const mockBuildClient = jest.fn((_arg?: unknown) => mockClient)
 const mockRedactText = jest.fn((t: string) => ({ redacted: `REDACTED(${t})`, map: {} }))
 
+const mockFindWorkspaceIdForPath = jest.fn<Promise<string | null>, [string]>()
+jest.mock("@/lib/db/projects", () => ({
+  findWorkspaceIdForPath: (path: string) => mockFindWorkspaceIdForPath(path),
+}))
 jest.mock("@/lib/git/commands", () => ({
   gitDiffStagedAll: (rp: string) => mockGitDiffStagedAll(rp),
 }))
@@ -85,8 +95,31 @@ function agentResult(finalResponse: string, success = true) {
   }
 }
 
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
+
+/** A workspace override of the base commit instructions, for workspace `ws-1`. */
+function overrideCommitSystemForWorkspace(revisionId: string, body: string) {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: "pob",
+        promptId: COMMIT_SYSTEM_PROMPT.id,
+        scope: "workspace",
+        targetId: "ws-1",
+        revisionId,
+        body,
+        contractVersion: COMMIT_SYSTEM_PROMPT.contractVersion,
+      },
+    ])
+  )
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
+  mockFindWorkspaceIdForPath.mockResolvedValue(null)
   mockSettings = {
     gitSettings: { commitMessageAI: { enabled: true, conventionalCommits: true } },
   }
@@ -234,6 +267,25 @@ describe("useAiCommitMessage", () => {
     expect(result.current.generating).toBe(false)
   })
 
+  it("resolves the instructions in the workspace that mounts the repository", async () => {
+    overrideCommitSystemForWorkspace("por-commit-hook-model", "Team rules.\n{{formatRules}}")
+    mockFindWorkspaceIdForPath.mockResolvedValue("ws-1")
+    const { result } = renderHook(() => useAiCommitMessage("/repo"))
+    await act(async () => {
+      await result.current.generate()
+    })
+    expect(mockFindWorkspaceIdForPath).toHaveBeenCalledWith("/repo")
+    const system = mockComplete.mock.calls[0][1].system as string
+    expect(system.startsWith("Team rules.\nFollow the Conventional Commits format")).toBe(true)
+
+    // A repository no workspace mounts keeps the shipped text.
+    mockFindWorkspaceIdForPath.mockResolvedValue(null)
+    await act(async () => {
+      await result.current.generate()
+    })
+    expect(mockComplete.mock.calls[1][1].system).toMatch(/^You write Git commit messages/)
+  })
+
   it("reports no agent name on the built-in lane", () => {
     const { result } = renderHook(() => useAiCommitMessage("/repo"))
     expect(result.current.agentName).toBeNull()
@@ -269,6 +321,22 @@ describe("useAiCommitMessage", () => {
         permissionMode: "plan",
         workingDirectory: "/repo",
       })
+    })
+
+    it("sends the workspace's resolved instructions and agent clause to the agent", async () => {
+      overrideCommitSystemForWorkspace(
+        "por-commit-hook-agent",
+        "Agent team rules.\n{{formatRules}}"
+      )
+      mockFindWorkspaceIdForPath.mockResolvedValue("ws-1")
+      const { result } = renderHook(() => useAiCommitMessage("/repo"))
+      await act(async () => {
+        await result.current.generate()
+      })
+      const [prompt, options] = mockExecuteExternal.mock.calls[0]
+      expect(prompt.startsWith("Agent team rules.\nFollow the Conventional Commits")).toBe(true)
+      expect(prompt).toContain(COMMIT_AGENT_CLAUSE_PROMPT.defaultBody)
+      expect(String(options.systemPrompt).startsWith("Agent team rules.")).toBe(true)
     })
 
     it("does not hand a paired host's repository path to a local agent", async () => {

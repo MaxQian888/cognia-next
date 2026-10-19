@@ -15,6 +15,7 @@
     "lifecycle-hooks",
     "interceptors",
     "decision-providers",
+    "prompts",
     "devtools",
     "packaging"
   ]

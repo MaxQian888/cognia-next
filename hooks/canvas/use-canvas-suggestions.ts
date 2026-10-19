@@ -32,6 +32,9 @@ import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 import { resolveStandaloneProvider } from "@/lib/ai/chat/resolve-standalone-provider"
 import { browserDirectHeaders, getStreamingFetch } from "@/lib/runtime/streaming-fetch"
 import { buildScopeBlock } from "@/lib/canvas/ai/context-analyzer"
+import { CANVAS_REVIEW_PROMPT, CANVAS_SUGGESTIONS_PROMPT } from "@/lib/canvas/ai/suggestion-prompts"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import type { PromptResolutionContext } from "@/lib/prompts/types"
 import { loggers } from "@cognia/logging"
 import { hasNoLeakingPii } from "@cognia/redact"
 import type { CanvasSuggestion, ArtifactLanguage } from "@/types"
@@ -56,30 +59,12 @@ export interface GenerateSuggestionsOptions {
    */
   mode?: CanvasSuggestionMode
   abortSignal?: AbortSignal
+  /**
+   * Where the system prompt resolves (ADR-0236): the canvas document's session
+   * and workspace, as `CanvasPanel` passes them to canvas actions.
+   */
+  promptContext?: PromptResolutionContext
 }
-
-const SYSTEM_PROMPT = `You are an expert code/text editing assistant. Given a document and the user's
-current cursor / selection context, propose AT MOST {{N}} concise, mechanical suggestions
-that improve correctness, readability, or style.
-
-Quote \`originalText\` verbatim from the document and give the 1-based line range it
-covers. \`confidence\` is how sure you are the change is correct and wanted.
-If no useful suggestion exists, return an empty list.`
-
-/**
- * A review pass rather than a caret-local one: the whole document is in scope,
- * and the interesting output is problems, not polish. `review` used to produce
- * a wall of prose that nothing rendered, so it is anchored suggestions now.
- */
-const REVIEW_SYSTEM_PROMPT = `You are a meticulous reviewer. Read the whole document and report AT MOST {{N}}
-specific, actionable findings: bugs, incorrect logic, unhandled edge cases, factual
-errors, and clear violations of the conventions the document itself establishes.
-
-Each finding must be anchored: quote \`originalText\` verbatim from the document, give
-the 1-based line range it covers, and put the corrected text in \`suggestedText\`. When a
-finding is a warning with no mechanical fix, repeat the original text as the suggestion
-and use type "comment". \`confidence\` is how sure you are the finding is real.
-If the document has no findings worth reporting, return an empty list.`
 
 /**
  * The contract the model answers against. Line numbers are 1-based and inclusive,
@@ -209,10 +194,14 @@ export function useCanvasSuggestions() {
       setError(null)
       try {
         const windowed = sliceContextWindow(ctx.content, ctx.cursorLine, contextLines)
-        const system = (mode === "review" ? REVIEW_SYSTEM_PROMPT : SYSTEM_PROMPT).replace(
-          "{{N}}",
-          String(max)
-        )
+        // Editable in the Prompt Center; `{{N}}` is the suggestion cap.
+        const system = (
+          await resolvePromptAsync(
+            mode === "review" ? CANVAS_REVIEW_PROMPT : CANVAS_SUGGESTIONS_PROMPT,
+            { context: opts.promptContext ?? {}, values: { N: String(max) } }
+          )
+        ).text
+        opts.abortSignal?.throwIfAborted()
         // The window above is a slice around the caret, so it drops exactly the
         // things a good suggestion needs: which function/class the caret sits in,
         // and what the file exports and depends on. Those are cheap to derive

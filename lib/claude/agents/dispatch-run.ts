@@ -291,8 +291,15 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
   // not resolvable by the registry's `getSubagent`); fall back to the raw id.
   let resolved = getDispatchableSubagentDef(p.subagentId)
   if (!resolved && p.background) {
-    const { getSubagent } = await import("@/lib/plugin/registries/subagent-registry")
-    resolved = getSubagent(p.subagentId)
+    const [{ getSubagentEntry }, { resolvePluginSubagentPrompt }] = await Promise.all([
+      import("@/lib/plugin/registries/subagent-registry"),
+      import("@/lib/prompts/plugin-subagent-prompts"),
+    ])
+    const registered = getSubagentEntry(p.subagentId)
+    resolved = registered && {
+      ...registered.entry,
+      prompt: resolvePluginSubagentPrompt(registered.pluginId, registered.entry),
+    }
   }
   let target = resolved
     ? structuredClone(p.model ? { ...resolved, model: p.model } : resolved)

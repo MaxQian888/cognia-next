@@ -231,6 +231,7 @@
     "0233-a-managed-desktop-accepts-a-delivered-commit",
     "0234-a-remote-desktop-is-a-provider-binding-brokered-by-the-host",
     "0235-a-vscode-tunnel-installs-a-host-and-is-one-more-route-to-it",
+    "0236-built-in-prompts-are-owned-slots-behind-one-prompt-center",
     "0237-an-agents-harness-evolves-through-probed-approved-versions"
   ]
 }

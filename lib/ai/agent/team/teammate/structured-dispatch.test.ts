@@ -1,6 +1,12 @@
 import { z } from "zod"
 import { dispatchStructured } from "./structured-dispatch"
 import type { TeamRunContext } from "../team-run-context"
+import { STRUCTURED_JSON_INSTRUCTION_PROMPT } from "../team-prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 const dispatchTeammateMock = jest.fn()
 jest.mock("./dispatch-teammate", () => ({
@@ -132,5 +138,48 @@ describe("dispatchStructured", () => {
     await expect(
       dispatchStructured(ctx, { taskId: "t1", prompt: "v" }, schema, { acceptOnExhaustion: true })
     ).rejects.toThrow(/no valid structured output/)
+  })
+})
+
+describe("dispatchStructured — protocol text (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("renders the JSON instruction and retry note from their inspect-only definitions", async () => {
+    // Inspect-only entries ignore a published override: the parser depends on them.
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: STRUCTURED_JSON_INSTRUCTION_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-structured-json",
+          body: "Reply however you like.",
+          contractVersion: STRUCTURED_JSON_INSTRUCTION_PROMPT.contractVersion,
+        },
+      ])
+    )
+    dispatchTeammateMock
+      .mockResolvedValueOnce({ text: "not json", teammateId: "tm1" })
+      .mockResolvedValueOnce({
+        text: '```json\n{ "real": true, "reasoning": "ok" }\n```',
+        teammateId: "tm1",
+      })
+
+    await dispatchStructured(ctx, { taskId: "t1", prompt: "base" }, schema)
+
+    const first = (dispatchTeammateMock.mock.calls[0][1] as { prompt: string }).prompt
+    expect(first).toBe(`base\n\n${STRUCTURED_JSON_INSTRUCTION_PROMPT.defaultBody}`)
+    const second = (dispatchTeammateMock.mock.calls[1][1] as { prompt: string }).prompt
+    expect(
+      second.startsWith(
+        `${first}\n\nYour previous response was invalid: response was not valid JSON`
+      )
+    ).toBe(true)
+    expect(second.endsWith("\nReturn corrected JSON only — no other text.")).toBe(true)
+    expect(second).not.toContain("Reply however you like.")
   })
 })

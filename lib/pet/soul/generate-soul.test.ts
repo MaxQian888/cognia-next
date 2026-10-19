@@ -1,4 +1,15 @@
-import { generatePetSoul, parseSoulResponse, fallbackSoul } from "./generate-soul"
+import {
+  PET_SOUL_REQUEST_PROMPT,
+  PET_SOUL_SYSTEM_PROMPT,
+  generatePetSoul,
+  parseSoulResponse,
+  fallbackSoul,
+} from "./generate-soul"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { PetBones } from "@/types/pet"
 
@@ -85,5 +96,58 @@ describe("generatePetSoul", () => {
   it("falls back when the LLM returns junk", async () => {
     const soul = await generatePetSoul(mockClient("totally not json"), makeBones(), { now: 5000 })
     expect(soul.name).toBeTruthy()
+  })
+})
+
+describe("generatePetSoul prompts (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("sends the shipped naming request and system prompt", async () => {
+    const client = mockClient('{"name":"Boba","personality":"Sleepy."}')
+    await generatePetSoul(client, makeBones(), { now: 0 })
+    const [prompt, options] = (client.complete as jest.Mock).mock.calls[0]
+    expect(prompt).toBe(
+      `Name and characterize a tiny virtual desktop pet. ` +
+        `It is a rare cat. ` +
+        `Return ONLY minified JSON of the form {"name": string, "personality": string}. ` +
+        `name: 1–2 words, cute, no quotes. ` +
+        `personality: one short whimsical sentence describing the pet's vibe in third person. ` +
+        `Do not reference the user or any personal data.`
+    )
+    expect(options.system).toBe("You are a playful pet-naming assistant. Output only JSON.")
+  })
+
+  it("sends published overrides", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-soul-system",
+          promptId: PET_SOUL_SYSTEM_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-soul-system",
+          body: "You name pets in Japanese. Output only JSON.",
+          contractVersion: PET_SOUL_SYSTEM_PROMPT.contractVersion,
+        },
+        {
+          bindingId: "pob-soul-request",
+          promptId: PET_SOUL_REQUEST_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-soul-request",
+          body: 'Name a {{species}}. Reply {"name": string, "personality": string}.',
+          contractVersion: PET_SOUL_REQUEST_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const client = mockClient('{"name":"Mochi","personality":"Calm."}')
+    const soul = await generatePetSoul(client, makeBones(), { now: 0 })
+    const [prompt, options] = (client.complete as jest.Mock).mock.calls[0]
+    expect(prompt).toBe('Name a cat. Reply {"name": string, "personality": string}.')
+    expect(options.system).toBe("You name pets in Japanese. Output only JSON.")
+    expect(soul.name).toBe("Mochi")
   })
 })

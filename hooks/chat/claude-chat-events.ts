@@ -278,6 +278,7 @@ export async function tryAutoModeDecision(
         // mid-turn steer bumps it, so a verdict reached under the instruction
         // the user just redirected away from is never reused.
         contextKey: evt.sessionId,
+        promptContext: { sessionId: evt.sessionId },
       }),
       new Promise<null>((resolve) => {
         setTimeout(() => resolve(null), AUTO_MODE_DECISION_TIMEOUT_MS)

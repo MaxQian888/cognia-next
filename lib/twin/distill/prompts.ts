@@ -223,3 +223,37 @@ Schema:
 Drafts:
 {{drafts}}`,
 })
+
+/**
+ * The cross-batch entity merge (M3). It does not share the preamble: it sees
+ * only entity names, aliases and relations, never chunk text. `{{role}}` is
+ * one of the five entity roles and `{{entries}}` the numbered registry rows.
+ */
+export const ENTITY_MERGE_AGENT_PROMPT = twinDistillPrompt({
+  stage: "entity-merge",
+  consumer: "lib/twin/distill/agents/entity-merge-agent.ts",
+  variables: ["role", "entries"],
+  requiredFragments: ['"clusters"', '"canonical"', '"aliases"'],
+  defaultBody: `You are normalising an entity registry of role "{{role}}" extracted from
+chunked employee documents and chats. Group entries that refer to the
+SAME real-world entity — e.g. "Engineering Infra Team" + "infra-team" +
+"Eng-Infra" all map to one team.
+
+Only merge when you have high confidence the names share a referent. Do
+not merge near-misses (e.g. "Platform Team" vs "Infrastructure Platform")
+unless context strongly suggests they're the same.
+
+Output JSON of the form:
+{
+  "clusters": [
+    { "canonical": "Engineering Infra Team", "aliases": ["infra-team", "Eng-Infra"] },
+    ...
+  ]
+}
+
+Entries with no merge group can be omitted. Names that share a cluster
+must NOT also appear in another cluster.
+
+Entries:
+{{entries}}`,
+})

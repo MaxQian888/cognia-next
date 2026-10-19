@@ -8,6 +8,7 @@
  */
 
 import type { AgentPlan } from "@/types/agent/plan"
+import type { PromptOverrideSnapshot } from "@/lib/prompts/snapshot"
 import { renderPlanSystemSection } from "./prompts"
 import { findPlanPiiLeak } from "./pii-gate"
 import { hasNoLeakingPii } from "@cognia/redact"
@@ -22,6 +23,8 @@ import { loggers } from "@cognia/logging"
 export function appendPlanContext(opts: {
   appendSystemPrompt?: string
   activePlan?: AgentPlan | null
+  /** The turn's frozen Prompt Center snapshot (ADR-0236). */
+  promptSnapshot?: PromptOverrideSnapshot | null
 }): string | undefined {
   const plan = opts.activePlan
   if (!plan || plan.status !== "executing") return opts.appendSystemPrompt
@@ -39,7 +42,10 @@ export function appendPlanContext(opts: {
     loggers.agent.warn(`Plan context carries PII at ${leak}; skipping system-prompt injection`)
     return opts.appendSystemPrompt
   }
-  const section = renderPlanSystemSection(plan)
+  const section = renderPlanSystemSection(
+    plan,
+    opts.promptSnapshot !== undefined ? { snapshot: opts.promptSnapshot } : {}
+  )
   if (!hasNoLeakingPii(section)) {
     loggers.agent.warn("Plan context carries PII; skipping system-prompt injection")
     return opts.appendSystemPrompt

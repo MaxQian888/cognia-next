@@ -33,6 +33,7 @@ Contract `1.3.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.contextPanels` | 10 | `extension:ui` | frontend, hybrid, python | internal |
 | `ctx.db` | 6 | `database:write`, `database:read` | frontend, hybrid | internal |
 | `ctx.decisions` | 5 | `decisions:run`, `decisions:provide` | frontend, hybrid, python | sensitive |
+| `ctx.prompts` | 2 | None | frontend, hybrid, python | internal |
 | `ctx.dexie` | 2 | None | frontend, hybrid | internal |
 | `ctx.editor` | 9 | `editor:read`, `editor:write` | frontend, hybrid, python | internal |
 | `ctx.eval` | 5 | `tests:run`, `database:read`, `ai:chat`, `database:write` | frontend, hybrid | sensitive |
@@ -493,6 +494,13 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `decisions.listProviders` | None | low | Yes | frontend, hybrid, python |
 | `decisions.listRegistered` | None | low | Yes | frontend, hybrid, python |
 | `decisions.registerProvider` | `decisions:provide` | medium | No | frontend, hybrid, python |
+
+## `ctx.prompts`
+
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `prompts.register` | None | low | Yes | frontend, hybrid, python |
+| `prompts.resolve` | None | low | Yes | frontend, hybrid, python |
 
 ## `ctx.dexie`
 

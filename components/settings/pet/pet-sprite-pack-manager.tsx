@@ -39,26 +39,13 @@ import {
   type SpriteV2ImportErrorCode,
 } from "@/lib/pet/sprite-v2/import"
 import { seedMainChat } from "@/lib/pet/chat/seed-main-chat"
+import { buildHatchPetPrompt } from "@/lib/pet/hatch-prompt"
 import { isTauri } from "@/lib/platform/detect"
 import type { PetSettings } from "@/types/pet"
 
 export interface PetSpritePackManagerProps {
   settings: PetSettings
   onPatch: (patch: Partial<PetSettings>) => void
-}
-
-export interface HatchPetPromptCopy {
-  defaultConcept: string
-  instruction: string
-  concept: (brief: string) => string
-  qa: string
-  outputFiles: string
-  scope: string
-}
-
-export function buildHatchPetPrompt(concept: string, copy: HatchPetPromptCopy): string {
-  const brief = concept.trim() || copy.defaultConcept
-  return [copy.instruction, copy.concept(brief), copy.qa, copy.outputFiles, copy.scope].join("\n")
 }
 
 async function readImageDimensions(image: Blob): Promise<{ width: number; height: number }> {
@@ -138,7 +125,7 @@ export function PetSpritePackManager({ settings, onPatch }: PetSpritePackManager
     setBusy(true)
     try {
       await seedMainChat(
-        buildHatchPetPrompt(concept, {
+        await buildHatchPetPrompt(concept, {
           defaultConcept: t("agentPrompt.defaultConcept"),
           instruction: t("agentPrompt.instruction"),
           concept: (brief) => t("agentPrompt.concept", { concept: brief }),

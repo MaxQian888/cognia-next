@@ -10,6 +10,71 @@ import { validateAgainstJsonSchema } from "./schema-validate"
 import { coerceToType, nonRetryable, resolveNodeApiKey } from "../shared/executor-support"
 import { ledgerUtilityCalls } from "@/lib/router-fusion/gate/utility-ledger"
 import { runAiPromptFusionAction } from "./fusion-action"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt, type PromptResolutionContext } from "@/lib/prompts/types"
+
+// ── Shipped node instructions (ADR-0236) ──────────────────────────────────
+// `ai.classify` and `ai.extract` build their system prompt from the node's
+// labels / schema and its own `hint`; the wording around them is editable.
+// The node's configuration stays the node's: it is rendered as values, and
+// the hint is appended after the shipped text exactly as before.
+
+/** Labels, schemas and hints are node configuration; this only guards. */
+const NODE_VALUE_MAX = 200_000
+
+export const CLASSIFY_NODE_PROMPT = definePrompt({
+  id: "developer.workflow.classify.system",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  // The reply is matched against the labels to pick the branch that runs.
+  risk: "protocol",
+  hosts: ["app", "cli"],
+  maxChars: 4_000,
+  variables: [
+    { name: "labels", required: true, maxChars: NODE_VALUE_MAX },
+    { name: "guidance", required: false, maxChars: NODE_VALUE_MAX },
+  ],
+  outputContract:
+    'The first label whose lowercase form appears in the reply becomes the node\'s decision (the first label when none does). {{labels}} is one "- label" line per label; {{guidance}} is the node\'s hint after a blank line and "Guidance:", or empty.',
+  consumers: ["lib/workflow/nodes/ai/executors.ts"],
+  defaultBody:
+    `You are a strict text classifier. ` +
+    `Return EXACTLY ONE of the following labels with no extra text:\n{{labels}}{{guidance}}`,
+})
+
+export const EXTRACT_NODE_PROMPT = definePrompt({
+  id: "developer.workflow.extract.system",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  // The reply is parsed as a JSON object and coerced to the schema's hints.
+  risk: "protocol",
+  hosts: ["app", "cli"],
+  maxChars: 4_000,
+  variables: [
+    { name: "fields", required: true, maxChars: NODE_VALUE_MAX },
+    { name: "guidance", required: false, maxChars: NODE_VALUE_MAX },
+  ],
+  requiredFragments: ["JSON"],
+  outputContract:
+    'Parsed as one JSON object; fields are coerced to their type hints and required fields decide `valid`. {{fields}} is one `"key": hint` line per schema field; {{guidance}} is the node\'s hint after a blank line and "Guidance:", or empty.',
+  consumers: ["lib/workflow/nodes/ai/executors.ts"],
+  defaultBody:
+    `Extract data from the user message. Reply with ONLY a JSON object ` +
+    `matching this shape:\n{\n{{fields}}\n}{{guidance}}`,
+})
+
+/** A run's workspace, so its customized node wording applies. */
+function nodePromptContext(ctx: { projectId?: string }): PromptResolutionContext {
+  return ctx.projectId ? { workspaceId: ctx.projectId } : {}
+}
 
 // ── ai.prompt ─────────────────────────────────────────────────────────────
 // Real LLM call via `createLlmClient` when provider + apiKey are present in
@@ -280,10 +345,16 @@ registerNodeExecutor({
     const input = params.input ?? ""
     if (!input) throw nonRetryable("ai.classify requires non-empty 'input'")
     const labelList = labels.map((l) => `- ${l}`).join("\n")
-    const systemPrompt =
-      `You are a strict text classifier. ` +
-      `Return EXACTLY ONE of the following labels with no extra text:\n${labelList}` +
-      (params.hint ? `\n\nGuidance: ${params.hint}` : "")
+    const systemPrompt = (
+      await resolvePromptAsync(CLASSIFY_NODE_PROMPT, {
+        context: nodePromptContext(ctx),
+        values: {
+          labels: labelList,
+          guidance: params.hint ? `\n\nGuidance: ${params.hint}` : "",
+        },
+      })
+    ).text
+    ctx.signal?.throwIfAborted()
     // Delegate to ai.prompt v2 — explicit mode is wire-compatible with v1
     // (same provider handling + stub fallback) and inherits routed mode +
     // the PII gate when those params are set on the classify node.
@@ -358,10 +429,16 @@ registerNodeExecutor({
     const fieldList = Object.entries(schema)
       .map(([k, v]) => `  "${k}": ${v}`)
       .join(",\n")
-    const systemPrompt =
-      `Extract data from the user message. Reply with ONLY a JSON object ` +
-      `matching this shape:\n{\n${fieldList}\n}` +
-      (params.hint ? `\n\nGuidance: ${params.hint}` : "")
+    const systemPrompt = (
+      await resolvePromptAsync(EXTRACT_NODE_PROMPT, {
+        context: nodePromptContext(ctx),
+        values: {
+          fields: fieldList,
+          guidance: params.hint ? `\n\nGuidance: ${params.hint}` : "",
+        },
+      })
+    ).text
+    ctx.signal?.throwIfAborted()
     // Lift the REQUIRED field names into a presence-only JSON object schema so
     // the inner v2 turn validates the completion and auto-fixes ONCE when a
     // required field is missing (D3). Deliberately presence-only: this node

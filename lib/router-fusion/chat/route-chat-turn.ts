@@ -84,6 +84,7 @@ import {
   type DeploymentFacts,
   type DeploymentRef,
 } from "./fusion-config"
+import { runRolePromptsFor } from "../prompts/role-prompts"
 
 export const CHAT_CLASSIFIER_TOKEN_CAP = CLASSIFIER_INPUT_TOKEN_CAP
 /** The action a pinned model (manual or alias pick) runs under: its caps and limits apply. */
@@ -514,7 +515,9 @@ export async function selectChatDeployment(
         lane: laneOfProvider(ref.providerId),
       }),
   })
-  const { config, omittedActions } = buildFusionConfig(host.settings, registry, host.environment)
+  const { config, omittedActions } = buildFusionConfig(host.settings, registry, host.environment, {
+    rolePrompts: await runRolePromptsFor(host.settings),
+  })
   const directIds = new Set(
     listFusionActions(host.settings)
       .filter((action) => action.mode === "direct")

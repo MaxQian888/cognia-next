@@ -37,6 +37,9 @@ import { runAndCaptureAssistantReply, type CaptureStreamEvent } from "@/lib/clau
 import { generateAppFromDescription } from "@/lib/a2ui/app-generator"
 import { useA2UIStore } from "@/stores/a2ui"
 import { useSettingsStore } from "@/stores/settings"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import type { PromptResolutionContext } from "@/lib/prompts/types"
+import { A2UI_CREATE_APP_PROMPT, A2UI_EDIT_APP_PROMPT } from "@/lib/a2ui/generate-prompts"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { A2UIComponent, A2UIServerMessage, A2UIDispatchMessage } from "@/types/a2ui/schema"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
@@ -214,31 +217,33 @@ export function segmentToMessages(
   ]
 }
 
-function buildPrompt(opts: A2UIGenerateOptions, surfaceId: string, language: "zh" | "en"): string {
-  const langHint =
-    language === "zh"
-      ? "All user-facing labels, titles and copy MUST be in Chinese."
-      : "All user-facing labels, titles and copy MUST be in English."
-
-  if (opts.mode === "edit") {
-    return [
-      `You are editing an existing A2UI mini-app (surfaceId "${surfaceId}").`,
-      `Apply the requested change using the a2ui-bridge tools: call a2ui_update_components (and a2ui_data_model_update if data changes) on surfaceId "${surfaceId}". Do NOT call a2ui_create_surface — the surface already exists. Emit only the components that change; leave the rest intact.`,
-      opts.currentComponents && opts.currentComponents.length > 0
-        ? `Current components (JSON):\n${JSON.stringify(opts.currentComponents)}`
-        : "",
-      `Change request: ${opts.instruction}`,
-      langHint,
-    ]
-      .filter(Boolean)
-      .join("\n\n")
+async function buildPrompt(
+  opts: A2UIGenerateOptions,
+  surfaceId: string,
+  language: "zh" | "en"
+): Promise<string> {
+  // The agent the generation runs as, when the hub composer picked one.
+  const context: PromptResolutionContext = opts.characterId ? { agentId: opts.characterId } : {}
+  const values = {
+    instruction: opts.instruction,
+    surfaceId,
+    language: language === "zh" ? "Chinese" : "English",
   }
 
-  return [
-    `Build a complete, self-contained, interactive A2UI mini-app for this request: ${opts.instruction}`,
-    `Use the a2ui-bridge tools in this order: a2ui_create_surface with surfaceId "${surfaceId}" and surfaceType "inline"; then a2ui_update_components with the full component tree; then a2ui_data_model_update with the initial data model. Wire buttons and inputs so the app is usable.`,
-    langHint,
-  ].join("\n\n")
+  if (opts.mode === "edit") {
+    const currentComponents =
+      opts.currentComponents && opts.currentComponents.length > 0
+        ? `\n\nCurrent components (JSON):\n${JSON.stringify(opts.currentComponents)}`
+        : ""
+    return (
+      await resolvePromptAsync(A2UI_EDIT_APP_PROMPT, {
+        context,
+        values: { ...values, currentComponents },
+      })
+    ).text
+  }
+
+  return (await resolvePromptAsync(A2UI_CREATE_APP_PROMPT, { context, values })).text
 }
 
 /** Run the model turn and return the first captured surface, or null. */
@@ -247,7 +252,12 @@ async function runAiTurn(
   surfaceId: string,
   language: "zh" | "en"
 ): Promise<A2UISegmentContent | null> {
-  const prompt = buildPrompt(opts, surfaceId, language)
+  const prompt = await buildPrompt(opts, surfaceId, language)
+  if (opts.signal?.aborted) {
+    throw opts.signal.reason instanceof Error
+      ? opts.signal.reason
+      : new DOMException("Aborted", "AbortError")
+  }
 
   // PII red-line: the prompt embeds the instruction AND (edit mode) the current
   // component tree. A leak means we never send.

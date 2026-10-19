@@ -22,8 +22,12 @@ import {
   mapSettled,
   nonRetryable,
 } from "./_shared"
-
-const FINDINGS_HINT = '{ "findings": [{ "title", "detail", "location"?, "severity"? }] }'
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import {
+  FINDINGS_SCHEMA_HINT_PROMPT,
+  freezePatternPromptScope,
+  LOOP_FINDER_PROMPT,
+} from "./pattern-prompts"
 
 export const LOOP_UNTIL_DRY_KIND = "pattern.loop-until-dry" as const
 
@@ -38,6 +42,11 @@ async function execute(ctx: StepExecutionContext): Promise<StepExecutionResult> 
   const dryRoundsToStop = Math.max(1, Math.floor(params.dryRoundsToStop ?? 2))
   const maxRounds = Math.max(1, Math.floor(params.maxRounds ?? 4))
   const findersPerRound = Math.max(1, Math.floor(params.findersPerRound ?? 1))
+
+  // One snapshot for the whole step (ADR-0236), so every round reads the same text.
+  const promptScope = await freezePatternPromptScope(teamCtx)
+  ctx.signal?.throwIfAborted()
+  const findingsHint = resolvePrompt(FINDINGS_SCHEMA_HINT_PROMPT).text
 
   const seen = new Set<string>()
   const all: Finding[] = []
@@ -59,13 +68,14 @@ async function execute(ctx: StepExecutionContext): Promise<StepExecutionResult> 
           teamCtx,
           {
             taskId: `${ctx.stepId}:round${round}:finder${k}`,
-            prompt:
-              `Objective: ${objective}\n\n${finderPrompt}\n\n${knownSummary}\n\n` +
-              "Return ONLY findings not already listed above. If you find nothing new, return an empty findings array.",
+            prompt: resolvePrompt(LOOP_FINDER_PROMPT, {
+              ...promptScope,
+              values: { objective, finderPrompt, knownSummary },
+            }).text,
             signal: ctx.signal,
           },
           findingsResultSchema,
-          { schemaHint: FINDINGS_HINT }
+          { schemaHint: findingsHint }
         )
         return r.value.findings
       },

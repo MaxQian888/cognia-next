@@ -16,6 +16,7 @@ import type {
   RateCard,
 } from "../contracts/schemas"
 import type { Microusd } from "../money/microusd"
+import type { RolePromptProfile } from "../prompts/roles"
 import type { PerCallPrices } from "../usage/normalize"
 
 export type DeploymentHealth = "healthy" | "degraded" | "unavailable"
@@ -161,6 +162,13 @@ export interface FusionConfigInput {
   registry: FusionRegistry
   extensions: Record<string, ActionExtension>
   environment: RuntimeEnvironment
+  /**
+   * The user's edited role texts, materialized (`roles-1-custom@<digest>`) and
+   * frozen for this snapshot. Required when an action selects
+   * `roles-1-custom`; the compiler rewrites that selector to this version, so
+   * the action hash covers the exact text.
+   */
+  rolePrompts?: RolePromptProfile
 }
 
 export interface CompiledAction {
@@ -177,6 +185,12 @@ export interface CompiledFusionConfig {
   deploymentsById: Record<string, FusionDeployment>
   rateCardsById: Record<string, RateCard>
   environment: RuntimeEnvironment
+  /**
+   * The custom role texts an action of this snapshot runs, present only when
+   * one does. A run reads them from the snapshot it pinned, never from the
+   * Prompt Center at execution time.
+   */
+  rolePrompts?: RolePromptProfile
   /** sha256 of the whole compiled snapshot; a run pins it for its lifetime. */
   digest: string
 }

@@ -133,6 +133,10 @@ export function useSelectionActionRun() {
           ),
           locale,
           client,
+          promptContext: {
+            sessionId: request.sessionId,
+            ...(session?.projectId ? { workspaceId: session.projectId } : {}),
+          },
           signal: controller.signal,
           onProgress: (progress) => {
             if (!current()) return

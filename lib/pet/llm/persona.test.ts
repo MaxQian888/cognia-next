@@ -1,4 +1,9 @@
-import { buildPetSystemPrompt } from "./persona"
+import { PET_PROMPTS, buildPetSystemPrompt } from "./persona"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 import type { PetBones, PetSoul } from "@/types/pet"
 import { MEMORY_RECALL_PREAMBLE } from "@cognia/memory/runtime/recall-framing"
 
@@ -70,5 +75,73 @@ describe("buildPetSystemPrompt", () => {
     expect(
       out.startsWith(`You are ${soul.name}, a ${bones.rarity} ${bones.species} desktop pet.`)
     ).toBe(true)
+  })
+
+  it("renders the full layered prompt byte-identically to the legacy assembly", () => {
+    const out = buildPetSystemPrompt({
+      soul,
+      bones,
+      persona: "a night-owl dev",
+      state: { mood: "happy", energy: 72, bond: 44, level: 5 },
+      historyText: "User: hi\nYou: hey!",
+      locale: "zh-CN",
+    })
+    expect(out).toBe(
+      [
+        legacyPrompt("a night-owl dev"),
+        "Your current state — mood: happy, energy: 72/100, bond: 44/100, level: 5. " +
+          "Let your reply quietly reflect this state.",
+        "Recent things you said together:\nUser: hi\nYou: hey!",
+        "Reply in the user's language (zh-CN).",
+      ].join("\n\n")
+    )
+  })
+
+  describe("Prompt Center overrides", () => {
+    afterEach(() => {
+      __setPromptOverrideSnapshotForTests(null)
+      __resetPromptVerdictsForTests()
+    })
+
+    function override(promptId: string, revisionId: string, body: string) {
+      return {
+        bindingId: `pob-${revisionId}`,
+        promptId,
+        scope: "account" as const,
+        targetId: "",
+        revisionId,
+        body,
+        contractVersion: 1,
+      }
+    }
+
+    it("edits the scaffolding while the pet's identity stays data", () => {
+      __setPromptOverrideSnapshotForTests(
+        buildPromptOverrideSnapshot("test-db", [
+          override(
+            PET_PROMPTS.bubble.id,
+            "por-pet-bubble",
+            "I am {{name}} the {{species}}.{{personaLine}} Answer in one word."
+          ),
+          override(PET_PROMPTS.boundPersona.id, "por-pet-bound", " Owner: {{persona}}."),
+          override(PET_PROMPTS.language.id, "por-pet-language", "Language: {{locale}}."),
+        ])
+      )
+      const out = buildPetSystemPrompt({ soul, bones, persona: "a night-owl dev", locale: "en" })
+      expect(out).toBe(
+        "I am Boba the axolotl. Owner: a night-owl dev. Answer in one word.\n\nLanguage: en."
+      )
+    })
+
+    it("reads an explicitly passed snapshot", () => {
+      const snapshot = buildPromptOverrideSnapshot("test-db", [
+        override(PET_PROMPTS.state.id, "por-pet-state", "Mood {{mood}}, level {{level}}."),
+      ])
+      const out = buildPetSystemPrompt(
+        { soul, bones, state: { mood: "tired", energy: 1, bond: 2, level: 3 } },
+        { snapshot }
+      )
+      expect(out).toBe(`${legacyPrompt()}\n\nMood tired, level 3.`)
+    })
   })
 })

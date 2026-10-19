@@ -7,6 +7,7 @@ import { generateText } from "ai"
 import { search as moduleSearch } from "./search-service"
 
 import {
+  STANDALONE_ANSWER_SYSTEM_PROMPT,
   buildAnswerPrompt,
   runStandaloneSearchAnswer,
   StandaloneSearchError,
@@ -419,5 +420,23 @@ describe("standalone answer generation seam", () => {
       )
     ).rejects.toMatchObject({ code: "answer-failed" })
     expect(generateTextImpl).not.toHaveBeenCalled()
+  })
+})
+
+describe("answer system prompt", () => {
+  it("sends the shipped prompt by default and a host-supplied one when given", async () => {
+    const searchImpl = jest.fn().mockResolvedValue(searchResponse)
+    const generateTextImpl = jest.fn().mockResolvedValue({ text: "answer" })
+    const params = {
+      query: "hi",
+      searchImpl: searchImpl as never,
+      generateTextImpl: generateTextImpl as never,
+    }
+    await runStandaloneSearchAnswer(params, deps)
+    await runStandaloneSearchAnswer(params, { ...deps, systemPrompt: "Cite [n] for each claim." })
+    expect(generateTextImpl.mock.calls.map((call) => call[0].system)).toEqual([
+      STANDALONE_ANSWER_SYSTEM_PROMPT,
+      "Cite [n] for each claim.",
+    ])
   })
 })

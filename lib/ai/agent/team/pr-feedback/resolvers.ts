@@ -23,9 +23,10 @@ import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import type { GitDefaultBranch, GitRemote } from "@/types/git"
 import { getTeamRunContext } from "@/lib/ai/agent/team/team-run-context"
 import { dispatchStructured } from "@/lib/ai/agent/team/teammate/structured-dispatch"
+import { teamPromptContext } from "@/lib/ai/agent/team/team-prompts"
 import {
   buildReviewerPrompt,
-  REVIEWER_SYSTEM_PROMPT,
+  resolveReviewerSystemPrompt,
   reviewerVerdictSchema,
   type RunReview,
 } from "./reviewer"
@@ -227,14 +228,17 @@ export function createRunPrReview(
       // auto-published PRs it is the task description). Redact before it reaches
       // the model, mirroring the `PrReactionEngine.sendOnce` invariant so no
       // locally-derived PR text leaks to the LLM ungated.
-      const prompt = buildReviewerPrompt(obs)
+      // Both prompts resolve per review pass (ADR-0236), in the team's project.
+      const promptContext = teamPromptContext(ctx.team)
+      const prompt = await buildReviewerPrompt(obs, promptContext)
       const safePrompt = hasNoLeakingPii(prompt) ? prompt : redactText(prompt).redacted
+      const systemPrompt = await resolveReviewerSystemPrompt(promptContext)
       const res = await deps.dispatch(
         ctx,
         {
           taskId: `pr-review:${binding.taskId}`,
           prompt: safePrompt,
-          systemPrompt: REVIEWER_SYSTEM_PROMPT,
+          systemPrompt,
         },
         reviewerVerdictSchema,
         { maxAttempts: 2 }

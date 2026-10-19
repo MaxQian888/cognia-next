@@ -21,10 +21,48 @@
  * Pure and shell-agnostic. Every environment fact is passed in and omitted
  * when unknown, so the renderer (no `process.platform`) and the CLI produce
  * the same shape.
+ *
+ * The contract is host-owned framing, so it is an inspect-only entry in the
+ * Prompt Center (ADR-0236), rendered from its definition: the editor shows
+ * exactly what a child receives, and no override can weaken the frame. The
+ * two conditional rules (working directory, delegation) are chosen here from
+ * facts the host knows and slotted into it.
  */
+
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 
 /** Element the host contract is wrapped in. Output only; never parsed back. */
 export const SUBAGENT_CONTRACT_TAG = "subagent_contract"
+
+/** The contract a dispatched child works under, as a tagged block. */
+export const SUBAGENT_CONTRACT_PROMPT = definePrompt({
+  id: "agent.subagent-frame.contract",
+  contractVersion: 1,
+  kind: "protocol",
+  group: "agents",
+  operation: "inspect-only",
+  scopes: [],
+  activation: "next-operation",
+  risk: "protocol",
+  hosts: ["app", "cli"],
+  variables: [
+    { name: "pathsRule", required: false, maxChars: 1_000 },
+    { name: "delegationRule", required: true, maxChars: 1_000 },
+  ],
+  outputContract:
+    "Appended after the child's identity and environment block in every dispatched subagent's system prompt. The dispatcher reads only the child's final message.",
+  consumers: ["lib/agent/prompts/subagent-frame.ts"],
+  defaultBody: [
+    `<${SUBAGENT_CONTRACT_TAG}>`,
+    "You are running as a subagent dispatched by another agent to complete one delegated task.",
+    "- The dispatcher reads ONLY your final message. Your intermediate steps, tool calls, and partial text are invisible to it. End with a complete, self-contained report: what you did, what you found (with concrete file paths, identifiers, and line numbers where relevant), and what remains uncertain.",
+    "- There is no follow-up turn and you cannot ask the dispatcher questions. When the task is ambiguous, state the assumption you chose and proceed with the most reasonable interpretation instead of stopping.",
+    "- Stay within the task you were given. Do not widen its scope or make changes it did not ask for.{{pathsRule}}",
+    "{{delegationRule}}",
+    `</${SUBAGENT_CONTRACT_TAG}>`,
+  ].join("\n"),
+})
 
 export interface SubagentPromptFrameInput {
   /** Absolute working directory the child operates in, when known. */
@@ -61,18 +99,11 @@ export function buildSubagentContract(input: SubagentPromptFrameInput): string {
     ? "- You may hand a clearly separable sub-task to a subagent with `dispatch_agent`, but do the work yourself whenever that is faster. Never delegate the whole task back out."
     : "- You cannot dispatch subagents of your own. Do the work yourself with the tools you have."
   const paths = input.cwd
-    ? "- Work inside the working directory above and resolve every relative path against it. Do not write files elsewhere."
-    : undefined
-  return [
-    `<${SUBAGENT_CONTRACT_TAG}>`,
-    "You are running as a subagent dispatched by another agent to complete one delegated task.",
-    "- The dispatcher reads ONLY your final message. Your intermediate steps, tool calls, and partial text are invisible to it. End with a complete, self-contained report: what you did, what you found (with concrete file paths, identifiers, and line numbers where relevant), and what remains uncertain.",
-    "- There is no follow-up turn and you cannot ask the dispatcher questions. When the task is ambiguous, state the assumption you chose and proceed with the most reasonable interpretation instead of stopping.",
-    "- Stay within the task you were given. Do not widen its scope or make changes it did not ask for.",
-    ...(paths ? [paths] : []),
-    delegation,
-    `</${SUBAGENT_CONTRACT_TAG}>`,
-  ].join("\n")
+    ? "\n- Work inside the working directory above and resolve every relative path against it. Do not write files elsewhere."
+    : ""
+  return resolvePrompt(SUBAGENT_CONTRACT_PROMPT, {
+    values: { pathsRule: paths, delegationRule: delegation },
+  }).text
 }
 
 /**

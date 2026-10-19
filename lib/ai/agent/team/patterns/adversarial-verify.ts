@@ -27,19 +27,13 @@ import {
   mapSettled,
   renderFinding,
 } from "./_shared"
-
-const VERDICT_HINT =
-  '{ "real": boolean, "reasoning": "…", "lens"?: "correctness|security|perf|repro" }'
-
-const LENS_GUIDANCE: Record<VerifierLens, string> = {
-  correctness:
-    "Does the finding describe a real logic / behavior defect? Check the claim against how the code actually executes.",
-  security:
-    "Is this an exploitable security issue? Consider the threat model and whether an attacker can actually trigger it.",
-  perf: "Is the performance impact real and material at realistic scale? Estimate the cost; dismiss micro-claims.",
-  repro:
-    "Try to actually reproduce it — read the cited code / run the relevant check. If you cannot reproduce it, it is not real.",
-}
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import {
+  freezePatternPromptScope,
+  VERIFY_LENS_PROMPTS,
+  VERIFY_SKEPTIC_PROMPT,
+  VERIFY_VERDICT_SCHEMA_HINT_PROMPT,
+} from "./pattern-prompts"
 
 export const ADVERSARIAL_VERIFY_KIND = "pattern.adversarial-verify" as const
 
@@ -73,6 +67,11 @@ async function execute(ctx: StepExecutionContext): Promise<StepExecutionResult> 
     `adversarial-verify: ${findings.length} findings × ${skeptics} skeptics${lenses?.length ? ` (lenses: ${lenses.join(", ")})` : ""}`
   )
 
+  // One snapshot for the whole step (ADR-0236), so every skeptic reads the same text.
+  const promptScope = await freezePatternPromptScope(teamCtx)
+  ctx.signal?.throwIfAborted()
+  const verdictHint = resolvePrompt(VERIFY_VERDICT_SCHEMA_HINT_PROMPT).text
+
   // Flatten to (finding, skepticIndex) jobs so the whole panel runs under one
   // concurrency bound rather than serializing per finding.
   const jobs = findings.flatMap((finding, fi) =>
@@ -84,19 +83,25 @@ async function execute(ctx: StepExecutionContext): Promise<StepExecutionResult> 
     fanoutLimit(teamCtx),
     async (job, _idx) => {
       const lens = lenses && lenses.length > 0 ? lenses[job.si % lenses.length] : undefined
-      const lensNote = lens ? `\n\nVerification lens — ${lens}: ${LENS_GUIDANCE[lens]}` : ""
+      const lensNote = lens
+        ? `\n\nVerification lens — ${lens}: ${resolvePrompt(VERIFY_LENS_PROMPTS[lens], promptScope).text}`
+        : ""
       const r = await dispatchStructured(
         teamCtx,
         {
           taskId: `${ctx.stepId}:verify:${job.fi}:${job.si}`,
-          prompt:
-            `${objective ? `Objective: ${objective}\n\n` : ""}` +
-            `Try to REFUTE this finding. Default to real=false if you are not convinced.\n\n` +
-            `Finding:\n${renderFinding(job.finding)}${lensNote}`,
+          prompt: resolvePrompt(VERIFY_SKEPTIC_PROMPT, {
+            ...promptScope,
+            values: {
+              objectiveBlock: objective ? `Objective: ${objective}\n\n` : "",
+              finding: renderFinding(job.finding),
+              lensNote,
+            },
+          }).text,
           signal: ctx.signal,
         },
         verdictSchema,
-        { schemaHint: VERDICT_HINT }
+        { schemaHint: verdictHint }
       )
       return { fi: job.fi, verdict: { ...r.value, ...(lens ? { lens } : {}) } }
     },

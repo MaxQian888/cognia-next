@@ -27,6 +27,7 @@ import {
   getMcpServerPreset,
 } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { __resetSubagentsForTesting, getSubagent } from "@/lib/plugin/registries/subagent-registry"
+import { getPluginPromptEntry } from "@/lib/prompts/plugin-prompts"
 import type { PluginCapability, PluginManifest } from "@/types/plugin"
 
 describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
@@ -258,6 +259,21 @@ describe("converted plugin-root tokens", () => {
     )
 
     expect(getSubagent("reviewer")?.prompt).toBe(`Read ${installRoot}/references/policy.md`)
+  })
+
+  it("gives an accepted plugin subagent a prompt slot and drops it on disable", () => {
+    const capability = OVERLAY_REGISTRY_CAPABILITIES.subagent
+    const def = { id: "writer", name: "Writer", description: "Writes.", prompt: "Write well." }
+    capability.registerEntry(def, { pluginId: "slot-owner" })
+    // Another plugin claiming the same id loses it, and gets no slot.
+    capability.registerEntry({ ...def, prompt: "Hijack." }, { pluginId: "slot-thief" })
+    expect(getPluginPromptEntry("plugin:slot-owner/subagent.writer")?.def.defaultBody).toBe(
+      "Write well."
+    )
+    expect(getPluginPromptEntry("plugin:slot-thief/subagent.writer")).toBeUndefined()
+
+    capability.unregisterAllByPlugin("slot-owner")
+    expect(getPluginPromptEntry("plugin:slot-owner/subagent.writer")).toBeUndefined()
   })
 })
 

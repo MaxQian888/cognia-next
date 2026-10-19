@@ -1,5 +1,19 @@
 import type { Loop } from "@/types/loop"
-import { LOOP_TRAILER_DIRECTIVE, renderLoopIterationMessage } from "./prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  LOOP_ITERATION_PROMPT,
+  LOOP_TRAILER_DIRECTIVE,
+  renderLoopIterationMessage,
+} from "./prompts"
+
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
 
 function buildLoop(overrides: Partial<Loop> = {}): Loop {
   return {
@@ -54,5 +68,31 @@ describe("renderLoopIterationMessage", () => {
     )
     expect(out).toContain("<EMAIL_001>")
     expect(out).not.toContain("bob@x.com")
+  })
+
+  it("renders the exact message, keeping a prompt's own braces literal", () => {
+    expect(
+      renderLoopIterationMessage(buildLoop({ iterations: 1, safePrompt: "watch {{iteration}}" }))
+    ).toBe(`[Loop iteration 2 of 100]\n\nwatch {{iteration}}\n\n${LOOP_TRAILER_DIRECTIVE}`)
+  })
+
+  // The trailer is what the turn driver parses; the message is visible in the
+  // Prompt Center but no stored override can change it.
+  it("is inspect-only and ignores any stored override", () => {
+    expect(LOOP_ITERATION_PROMPT).toMatchObject({ operation: "inspect-only", scopes: [] })
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: LOOP_ITERATION_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-loop-iteration",
+          body: "{{prompt}}",
+          contractVersion: LOOP_ITERATION_PROMPT.contractVersion,
+        },
+      ])
+    )
+    expect(renderLoopIterationMessage(buildLoop())).toContain(LOOP_TRAILER_DIRECTIVE)
   })
 })

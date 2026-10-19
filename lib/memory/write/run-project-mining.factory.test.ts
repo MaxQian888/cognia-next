@@ -45,6 +45,12 @@ jest.mock("@/lib/memory/consolidate/consolidator", () => ({
 }))
 
 import { buildProjectMiningDeps } from "./run-project-mining"
+import { MEMORY_CONSOLIDATE_PROMPT } from "./run-memory-extraction"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 function cfg(over: Partial<MemoryConfig> = {}): MemoryConfig {
   return { ...DEFAULT_MEMORY_CONFIG, ...over }
@@ -307,5 +313,44 @@ describe("buildProjectMiningDeps", () => {
     mockBuildAgentBacked.mockResolvedValue({ complete: jest.fn() })
     const withoutIdentity = await buildProjectMiningDeps(params, cfg())
     expect(withoutIdentity!.extractorIdentity).toBeUndefined()
+  })
+})
+
+describe("buildProjectMiningDeps — Prompt Center system prompts", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("passes the window's resolved extractor prompt through to the package", async () => {
+    mockExtractProjectClaims.mockResolvedValue([])
+    const deps = await buildProjectMiningDeps(params, cfg())
+    await deps!.extract({ messages: [] }, "Mine facts. Return STRICT JSON only.")
+    expect(mockExtractProjectClaims.mock.calls[0][2]).toEqual({
+      propagateErrors: true,
+      systemPrompt: "Mine facts. Return STRICT JSON only.",
+    })
+  })
+
+  it("judges with a published consolidation override", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-project-consolidate",
+          promptId: MEMORY_CONSOLIDATE_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-project-consolidate-1",
+          body: "Choose one op for the claim. Return STRICT JSON only.",
+          contractVersion: MEMORY_CONSOLIDATE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    mockConsolidate.mockResolvedValue({ applied: [] })
+    const deps = await buildProjectMiningDeps(params, cfg())
+    await deps!.consolidate({ candidates: [], scope: "workspace", provenance: "user" })
+    expect(mockConsolidate.mock.calls[0][1].decideSystemPrompt).toBe(
+      "Choose one op for the claim. Return STRICT JSON only."
+    )
   })
 })

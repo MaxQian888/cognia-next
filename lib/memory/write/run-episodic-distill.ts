@@ -13,26 +13,73 @@ import type { MemoryConfig, MemoryProvenance, MemoryScope } from "@/types/memory
 import type { ConsolidateInput, ConsolidationOp } from "@/lib/memory/consolidate/consolidator"
 import type { MemoryCandidate } from "@/lib/memory/extract/extractor"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 
-const DISTILL_SYSTEM =
-  "You distill a finished conversation into a few EPISODIC memories — discrete " +
-  "decisions, outcomes, or events worth recalling in a later session " +
-  "(e.g. 'Decided to use X for Y', 'Fixed the Z bug by …'). Return STRICT JSON only."
+/**
+ * The distiller's identity (ADR-0236). Account scope only: the distill step
+ * receives the redacted transcript and nothing that names its workspace.
+ */
+export const EPISODIC_DISTILL_SYSTEM_PROMPT = definePrompt({
+  id: "knowledge.memory.episodic-distill",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "knowledge",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  // The reply is parsed as JSON; a reply that is not JSON yields no memories.
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 4_000,
+  requiredFragments: ["JSON"],
+  outputContract:
+    "Sent as the system prompt of the idle-time episodic distill; the reply is parsed as JSON and a parse failure distills nothing.",
+  consumers: ["lib/memory/write/run-episodic-distill.ts"],
+  defaultBody:
+    "You distill a finished conversation into a few EPISODIC memories — discrete " +
+    "decisions, outcomes, or events worth recalling in a later session " +
+    "(e.g. 'Decided to use X for Y', 'Fixed the Z bug by …'). Return STRICT JSON only.",
+})
 
-interface RawEpisodes {
-  episodes?: Array<{ text?: unknown; importance?: unknown }>
-}
-
-function buildPrompt(transcript: { role: string; text: string }[]): string {
-  const body = transcript.map((m) => `${m.role}: ${m.text}`).join("\n")
-  return [
-    `Conversation:\n${body}`,
+/**
+ * The distill request around the transcript. `{{conversation}}` is the
+ * already-redacted transcript, one `role: text` line per message.
+ */
+export const EPISODIC_DISTILL_REQUEST_PROMPT = definePrompt({
+  id: "knowledge.memory.episodic-distill.request",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "knowledge",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 4_000,
+  variables: [{ name: "conversation", required: true, maxChars: 1_000_000 }],
+  requiredFragments: ['"episodes"', '"text"', '"importance"'],
+  outputContract:
+    'One JSON object {"episodes": [{"text", "importance"}]}; empty texts are dropped, importance is rounded and clamped to 1–10 (default 5), and every text passes the PII gate before consolidation.',
+  consumers: ["lib/memory/write/run-episodic-distill.ts"],
+  defaultBody: [
+    `Conversation:\n{{conversation}}`,
     ``,
     `Distill 0–3 episodic memories. Skip anything trivial; return {"episodes":[]}`,
     `if nothing notable. Each: a single self-contained sentence in the user's`,
     `language, importance 1–10.`,
     `Return JSON: {"episodes":[{"text","importance"}]}.`,
-  ].join("\n")
+  ].join("\n"),
+})
+
+interface RawEpisodes {
+  episodes?: Array<{ text?: unknown; importance?: unknown }>
+}
+
+async function buildPrompt(transcript: { role: string; text: string }[]): Promise<string> {
+  const conversation = transcript.map((m) => `${m.role}: ${m.text}`).join("\n")
+  return (await resolvePromptAsync(EPISODIC_DISTILL_REQUEST_PROMPT, { values: { conversation } }))
+    .text
 }
 
 /** Pure LLM step: transcript → episodic candidates. Returns [] on failure. */
@@ -42,8 +89,10 @@ export async function distillEpisodes(
 ): Promise<MemoryCandidate[]> {
   if (transcript.length === 0) return []
   try {
-    const raw = await client.complete(buildPrompt(transcript), {
-      system: DISTILL_SYSTEM,
+    const prompt = await buildPrompt(transcript)
+    const system = (await resolvePromptAsync(EPISODIC_DISTILL_SYSTEM_PROMPT)).text
+    const raw = await client.complete(prompt, {
+      system,
       temperature: 0,
       maxTokens: 512,
     })

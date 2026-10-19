@@ -609,7 +609,10 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
             cursorColumn: position?.column,
             selectionText,
           },
-          { mode: "review" }
+          {
+            mode: "review",
+            promptContext: { sessionId: activeDoc.sessionId, workspaceId: activeDoc.projectId },
+          }
         )
         settleHistory({ status: findings.length > 0 ? "pending-review" : "completed" })
         return
@@ -699,13 +702,16 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     if (!activeDoc) return
     const editor = editorRef.current
     const pos = editor?.getPosition() ?? null
-    void suggestions.generate({
-      documentId: activeDoc.id,
-      language: activeDoc.language,
-      content: activeDoc.content,
-      cursorLine: pos?.lineNumber,
-      cursorColumn: pos?.column,
-    })
+    void suggestions.generate(
+      {
+        documentId: activeDoc.id,
+        language: activeDoc.language,
+        content: activeDoc.content,
+        cursorLine: pos?.lineNumber,
+        cursorColumn: pos?.column,
+      },
+      { promptContext: { sessionId: activeDoc.sessionId, workspaceId: activeDoc.projectId } }
+    )
   }, [activeDoc, suggestions])
 
   useEffect(() => {

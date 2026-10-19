@@ -24,8 +24,12 @@ import {
   nonRetryable,
   renderFinding,
 } from "./_shared"
-
-const REPORT_HINT = '{ "report": "markdown…", "citations"?: ["file:line", …] }'
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import {
+  freezePatternPromptScope,
+  SYNTHESIZE_REPORT_PROMPT,
+  SYNTHESIZE_REPORT_SCHEMA_HINT_PROMPT,
+} from "./pattern-prompts"
 
 export const SYNTHESIZE_KIND = "pattern.synthesize" as const
 
@@ -56,19 +60,21 @@ async function execute(ctx: StepExecutionContext): Promise<StepExecutionResult> 
     `synthesize: folding ${findings.length} findings${winner ? " + judge winner" : ""}${gaps.length ? ` + ${gaps.length} gaps` : ""}`
   )
 
+  // Resolved once for this step (ADR-0236).
+  const promptScope = await freezePatternPromptScope(teamCtx)
+  ctx.signal?.throwIfAborted()
   const r = await dispatchStructured(
     teamCtx,
     {
       taskId: `${ctx.stepId}:synthesize`,
-      prompt:
-        `Objective: ${objective}\n\n${findingsBlock}${winnerBlock}${gapsBlock}\n\n` +
-        "Write the final report for the objective. Ground every claim in the verified findings / winning " +
-        "approach above; cite locations (file:line or area) where available; and explicitly note the open " +
-        "gaps as limitations. Be concrete and well-structured.",
+      prompt: resolvePrompt(SYNTHESIZE_REPORT_PROMPT, {
+        ...promptScope,
+        values: { objective, findingsBlock, winnerBlock, gapsBlock },
+      }).text,
       signal: ctx.signal,
     },
     synthesisReportSchema,
-    { schemaHint: REPORT_HINT }
+    { schemaHint: resolvePrompt(SYNTHESIZE_REPORT_SCHEMA_HINT_PROMPT).text }
   )
 
   // Surface the report in the team chat.

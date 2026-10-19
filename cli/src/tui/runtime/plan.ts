@@ -6,6 +6,9 @@
  * name its on-disk copy, derive a human title, and supply the approval choices —
  * all without I/O so they unit-test trivially.
  */
+import { CLI_PLAN_REFINE_PROMPT } from "@/lib/agent/prompts/cli-prompts"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import type { PromptResolutionContext } from "@/lib/prompts/types"
 import type { SelectItem } from "../state/types"
 
 /** The synthetic user turn injected after a plan is approved — tells the agent
@@ -18,10 +21,27 @@ export function planApprovedPrompt(raw: string): string {
   return `${PLAN_APPROVED_PROMPT}\n\nUse this reviewed version of the plan; it supersedes earlier drafts:\n\n${raw}`
 }
 
-/** The synthetic user turn injected by `/plan refine` — re-enters plan mode and
- * asks the agent to revise its latest plan without making changes yet. */
-export const PLAN_REFINE_PROMPT =
-  "Let's refine the plan. Reconsider the approach from the plan above and propose an updated plan — research only, do not make any changes yet."
+/**
+ * The synthetic user turn injected by `/plan refine` — re-enters plan mode and
+ * asks the agent to revise its latest plan without making changes yet. The
+ * instruction is the Prompt Center slot `agent.cli.plan-refine` (ADR-0236);
+ * the reviewed plan and the requested revisions follow it verbatim.
+ */
+export function planRefinePrompt(
+  input: {
+    /** The latest reviewed plan's markdown, when there is one. */
+    plan?: string
+    /** Requested revisions; an empty string adds nothing. */
+    feedback?: string
+  },
+  context: PromptResolutionContext = {}
+): string {
+  return [
+    resolvePrompt(CLI_PLAN_REFINE_PROMPT, { context }).text,
+    ...(input.plan !== undefined ? ["", "Current reviewed plan:", input.plan] : []),
+    ...(input.feedback ? ["", "Requested revisions:", input.feedback] : []),
+  ].join("\n")
+}
 
 /** The default build permission mode plan-approval switches into so edits are
  * applied without a per-edit prompt (the "auto-edits" approval). */

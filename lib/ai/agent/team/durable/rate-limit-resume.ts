@@ -18,16 +18,41 @@ import {
   computeNextRetryAt,
   type NudgeRecord,
 } from "@/lib/ai/agent/team/gates/nudge-guard"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt, type PromptResolutionContext } from "@/lib/prompts/types"
 
 /**
  * Model-facing "continue" prompt posted into the team mailbox when a cooldown
- * elapses. English constant (the runtime is non-React, like the compaction
- * snippets) — not a UI string.
+ * elapses. English (the runtime is non-React, like the compaction snippets) —
+ * not a UI string. Editable in the Prompt Center (ADR-0236).
  */
-export const NUDGE_CONTINUE_PROMPT =
-  "A provider rate limit paused your last turn and its cooldown has now passed. " +
-  "Resume where you left off — re-check the task board, pick up your assigned " +
-  "task or pending review, and continue without waiting for further input."
+export const NUDGE_CONTINUE_PROMPT = definePrompt({
+  id: "team.rate-limit.nudge",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "team",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app", "cli"],
+  maxChars: 4_000,
+  outputContract:
+    "Posted into the team mailbox (to the lead, else the member) as a system message once a rate-limit cooldown elapses.",
+  consumers: ["lib/ai/agent/team/durable/rate-limit-resume.ts"],
+  defaultBody:
+    "A provider rate limit paused your last turn and its cooldown has now passed. " +
+    "Resume where you left off — re-check the task board, pick up your assigned " +
+    "task or pending review, and continue without waiting for further input.",
+})
+
+/**
+ * The nudge text for one delivery. Synchronous: delivery runs from a timer
+ * callback, and the override snapshot is kept loaded app-wide.
+ */
+export function renderNudgeContinuePrompt(context: PromptResolutionContext = {}): string {
+  return resolvePrompt(NUDGE_CONTINUE_PROMPT, { context }).text
+}
 
 /** What the runtime needs to deliver one resume nudge. */
 export interface ResumeDelivery {

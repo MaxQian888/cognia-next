@@ -19,7 +19,18 @@ jest.mock("@/lib/workflow/runtime/execution-authority", () => ({
   executeDeployedWorkflow: (...a: unknown[]) => mockExecuteDeployedWorkflow(...(a as [])),
 }))
 
-import { executeAiEnsemble, defaultAiEnsembleDeps, type AiEnsembleDeps } from "./ai-ensemble"
+import {
+  ENSEMBLE_SYNTHESIZER_PROMPT,
+  ENSEMBLE_SYNTHESIZER_REQUEST_PROMPT,
+  executeAiEnsemble,
+  defaultAiEnsembleDeps,
+  type AiEnsembleDeps,
+} from "./ai-ensemble"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 import type { StepExecutionContext } from "@/types/workflow/visual"
 
 function makeCtx(params: Record<string, unknown>): StepExecutionContext {
@@ -175,6 +186,83 @@ describe("executeAiEnsemble", () => {
     )
     expect(runPrompt).toHaveBeenCalledWith(expect.objectContaining({ modelAlias: "quality" }))
     expect((result.output as { result: unknown }).result).toBe("the merged answer")
+  })
+
+  it("sends the shipped synthesizer prompt followed by the node's own guidance", async () => {
+    const runPrompt = jest.fn(async (_input: { systemPrompt?: string; userPrompt?: string }) => ({
+      completion: "m",
+    }))
+    await executeAiEnsemble(
+      makeCtx({
+        prompt: "x",
+        n: 2,
+        synthesizerAlias: "quality",
+        aggregation: { kind: "synthesize-by-final-agent", instructions: "Prefer brevity." },
+      }),
+      async () => makeDeps({ runAgent: jest.fn(async () => ({ text: "draft" })), runPrompt })
+    )
+    expect(runPrompt.mock.calls[0][0].systemPrompt).toBe(
+      "You are an ensemble synthesizer. The same task was attempted several times " +
+        "(each attempt is labeled). Merge them into one best answer: integrate the strongest points, resolve " +
+        "disagreements with explicit reasoning, and give a single clear final answer." +
+        "\n\nAdditional guidance:\nPrefer brevity."
+    )
+    expect(runPrompt.mock.calls[0][0].userPrompt).toBe(
+      "Merge the following attempts into one best answer.\n\n### Attempt 1\ndraft\n\n### Attempt 2\ndraft"
+    )
+  })
+
+  describe("synthesizer Prompt Center override (ADR-0236)", () => {
+    afterEach(() => {
+      __setPromptOverrideSnapshotForTests(null)
+      __resetPromptVerdictsForTests()
+    })
+
+    it("uses the run's workspace override as the base and keeps the node guidance", async () => {
+      __setPromptOverrideSnapshotForTests(
+        buildPromptOverrideSnapshot("test-db", [
+          {
+            bindingId: "pob-synth",
+            promptId: ENSEMBLE_SYNTHESIZER_PROMPT.id,
+            scope: "workspace",
+            targetId: "ws-1",
+            revisionId: "por-ensemble-synth",
+            body: "Merge the attempts; cite which attempt each point came from.",
+            contractVersion: ENSEMBLE_SYNTHESIZER_PROMPT.contractVersion,
+          },
+          {
+            bindingId: "pob-synth-request",
+            promptId: ENSEMBLE_SYNTHESIZER_REQUEST_PROMPT.id,
+            scope: "account",
+            targetId: "",
+            revisionId: "por-ensemble-synth-request",
+            body: "Attempts:\n{{attempts}}",
+            contractVersion: ENSEMBLE_SYNTHESIZER_REQUEST_PROMPT.contractVersion,
+          },
+        ])
+      )
+      const runPrompt = jest.fn(async (_input: { systemPrompt?: string; userPrompt?: string }) => ({
+        completion: "m",
+      }))
+      await executeAiEnsemble(
+        {
+          ...makeCtx({
+            prompt: "x",
+            n: 2,
+            synthesizerAlias: "quality",
+            aggregation: { kind: "synthesize-by-final-agent", instructions: "Prefer brevity." },
+          }),
+          projectId: "ws-1",
+        },
+        async () => makeDeps({ runAgent: jest.fn(async () => ({ text: "draft" })), runPrompt })
+      )
+      expect(runPrompt.mock.calls[0][0].systemPrompt).toBe(
+        "Merge the attempts; cite which attempt each point came from.\n\nAdditional guidance:\nPrefer brevity."
+      )
+      expect(runPrompt.mock.calls[0][0].userPrompt).toBe(
+        "Attempts:\n### Attempt 1\ndraft\n\n### Attempt 2\ndraft"
+      )
+    })
   })
 
   it("redacts the prompt and flags piiRedacted", async () => {

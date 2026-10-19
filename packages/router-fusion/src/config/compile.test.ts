@@ -3,7 +3,8 @@ import { join } from "node:path"
 
 import { parse } from "yaml"
 
-import { PolicyConfigSchema, type PolicyConfig } from "../contracts/schemas"
+import { PolicyConfigSchema, type ActionConfig, type PolicyConfig } from "../contracts/schemas"
+import { ROLE_PROMPTS, materializeCustomRoleProfile } from "../prompts/roles"
 import { SPEC_MOCK_REGISTRY, fakeTierRegistry } from "../fake/mock-registry"
 import {
   BUILTIN_ACTIONS,
@@ -428,5 +429,96 @@ describe("spec example mirrors", () => {
         environment: "production",
       })
     ).toThrow(ConfigCompileError)
+  })
+})
+
+describe("custom role prompts (Prompt Center, A13)", () => {
+  const mine: ActionConfig = {
+    id: "my_panel",
+    mode: "panel",
+    roles: { panel_a: "fast", panel_b: "balanced", judge: "powerful", synthesizer: "powerful" },
+    prompt_version: "roles-1-custom",
+    verifier_profile: "evidence_review",
+    enabled: true,
+  }
+  const profile = (judge: string) =>
+    materializeCustomRoleProfile({ ...ROLE_PROMPTS, judge: `${judge} JudgeReport` })
+  const withMine = (rolePrompts?: ReturnType<typeof profile>) =>
+    input({
+      policy: builtinPolicy([...BUILTIN_ACTIONS, mine]),
+      extensions: { ...builtinExtensions(), my_panel: defaultExtension("panel") },
+      ...(rolePrompts ? { rolePrompts } : {}),
+    })
+
+  it("binds the selector to the materialized version and freezes the text into the snapshot", () => {
+    const rolePrompts = profile("edit one")
+    const config = compileFusionConfig(withMine(rolePrompts))
+    expect(config.actions.my_panel.config.prompt_version).toBe(rolePrompts.version)
+    expect(config.policy.actions.find((a) => a.id === "my_panel")?.prompt_version).toBe(
+      rolePrompts.version
+    )
+    expect(config.rolePrompts).toEqual(rolePrompts)
+    // Built-in actions keep roles-1 whatever the user edited.
+    expect(config.actions.panel_review.config.prompt_version).toBe("roles-1")
+  })
+
+  it("gives the custom action a new identity for every edit and leaves the built-ins alone", () => {
+    const one = compileFusionConfig(withMine(profile("edit one")))
+    const two = compileFusionConfig(withMine(profile("edit two")))
+    const again = compileFusionConfig(withMine(profile("edit one")))
+    expect(two.actions.my_panel.actionHash).not.toBe(one.actions.my_panel.actionHash)
+    expect(again.actions.my_panel.actionHash).toBe(one.actions.my_panel.actionHash)
+    expect(two.digest).not.toBe(one.digest)
+    expect(two.actions.panel_review.actionHash).toBe(one.actions.panel_review.actionHash)
+    expect(one.actions.panel_review.actionHash).toBe(
+      compileFusionConfig(input()).actions.panel_review.actionHash
+    )
+  })
+
+  it("refuses the selector without the text it selects", () => {
+    expect(compileIssues(withMine())).toEqual([
+      {
+        pointer: `/policy/actions/${BUILTIN_ACTIONS.length}/prompt_version`,
+        message: "roles-1-custom needs the custom role prompts this snapshot runs",
+      },
+    ])
+  })
+
+  it("refuses a profile whose version does not hash its own text", () => {
+    const rolePrompts = { ...profile("edit one"), version: profile("edit two").version }
+    expect(compileIssues(withMine(rolePrompts))).toEqual([
+      {
+        pointer: "/rolePrompts/version",
+        message: "the version does not match the custom role prompts it names",
+      },
+    ])
+    const { judge: _judge, ...partial } = profile("edit one").prompts
+    expect(
+      compileIssues(
+        withMine({
+          version: profile("edit one").version,
+          prompts: partial as typeof ROLE_PROMPTS,
+        })
+      ).map((issue) => issue.pointer)
+    ).toEqual(["/rolePrompts/prompts"])
+  })
+
+  it("refuses an action naming custom text the snapshot does not carry", () => {
+    const pinned = { ...mine, prompt_version: profile("edit one").version }
+    const value = input({
+      policy: builtinPolicy([...BUILTIN_ACTIONS, pinned]),
+      extensions: { ...builtinExtensions(), my_panel: defaultExtension("panel") },
+      rolePrompts: profile("edit two"),
+    })
+    expect(compileIssues(value).map((issue) => issue.pointer)).toEqual([
+      `/policy/actions/${BUILTIN_ACTIONS.length}/prompt_version`,
+    ])
+  })
+
+  it("keeps the digest roles-1 alone gives when no action runs the custom text", () => {
+    const plain = compileFusionConfig(input())
+    const unused = compileFusionConfig(input({ rolePrompts: profile("edit one") }))
+    expect(unused.digest).toBe(plain.digest)
+    expect(unused.rolePrompts).toBeUndefined()
   })
 })

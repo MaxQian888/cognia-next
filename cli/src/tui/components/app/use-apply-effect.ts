@@ -8,11 +8,13 @@ import { createForm } from "../../state/form"
 import { createCliLifecycleFirer } from "../../runtime/lifecycle-firer"
 import { computeAddDir } from "../../runtime/add-dir"
 import { buildBashAnalysisPrompt } from "../../commands/bash-shellout"
+import { buildReviewPrompt } from "../../commands/review-command"
 import { detectEditor, editorInfo, type openInEditor } from "../../runtime/editor"
 import { loadGitDiff } from "../../runtime/git-diff"
 import { applyMouseMode, type ScreenStream } from "../../screen"
 import { runRuntimeRequest } from "../../runtime"
 import { CliDbSnapshotError } from "../../../db/bootstrap"
+import { primeCliPromptContext } from "../../../agent/prompt-overrides"
 import { VERSION } from "../../../version"
 import {
   setConfigValue,
@@ -23,7 +25,7 @@ import {
   setKeybindings,
   setBooleanFlag,
 } from "../../../config/mutate"
-import { PLAN_REFINE_PROMPT } from "../../runtime/plan"
+import { planRefinePrompt } from "../../runtime/plan"
 import type { McpProbeCache } from "../../runtime/mcp-cache"
 import { clipboardFailureMessage, type CopyResult } from "../../clipboard"
 import type { runGoalStreaming } from "../../runtime/goal-run"
@@ -745,9 +747,18 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             dispatch({ type: "NOTICE", message: "No failed command to analyze." })
             break
           }
-          void agent.send(buildBashAnalysisPrompt(failure))
+          void primeCliPromptContext(state.config.cwd, home).then((promptContext) =>
+            agent.send(buildBashAnalysisPrompt(failure, promptContext))
+          )
           break
         }
+        case "review":
+          // Prime first: `/review` can be the session's first turn, before the
+          // option build loaded the Prompt Center overrides its wording uses.
+          void primeCliPromptContext(state.config.cwd, home).then((promptContext) =>
+            agent.send(buildReviewPrompt(effect.base, promptContext))
+          )
+          break
         case "statusBar":
           // Live-apply the footer change, then persist it to config.json so it
           // survives the next launch. A read-only home only loses persistence.
@@ -1149,6 +1160,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             send: agent.send,
             dispatch,
             cwd: state.config.cwd,
+            home,
             signal: controller.signal,
             testCommand: effect.testCommand,
             maxRounds: effect.maxRounds,
@@ -1247,12 +1259,15 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             try {
               await agent.switchMode("plan")
               persist("permissionMode", "plan")
+              const promptContext = await primeCliPromptContext(state.config.cwd, home)
               await agent.send(
-                [
-                  PLAN_REFINE_PROMPT,
-                  ...(state.lastPlan ? ["", "Current reviewed plan:", state.lastPlan.raw] : []),
-                  ...(effect.feedback ? ["", "Requested revisions:", effect.feedback] : []),
-                ].join("\n")
+                planRefinePrompt(
+                  {
+                    ...(state.lastPlan ? { plan: state.lastPlan.raw } : {}),
+                    ...(effect.feedback ? { feedback: effect.feedback } : {}),
+                  },
+                  promptContext
+                )
               )
             } catch (error) {
               dispatch({

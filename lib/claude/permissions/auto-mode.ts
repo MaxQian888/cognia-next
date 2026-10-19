@@ -23,6 +23,7 @@ import type { LlmClient } from "@/lib/twin/distill/llm"
 import { classifyCommand, type CommandVerdict } from "./command-safety"
 import { judgeCommandSafety, type RiskLevel } from "./command-judge"
 import { resolveBashPermission, type Ruleset } from "./ruleset"
+import type { PromptResolutionContext } from "@/lib/prompts/types"
 
 export interface AutoModeConfig {
   /** Master switch for command Auto-mode. */
@@ -64,6 +65,8 @@ export interface EvaluateAutoArgs {
    * so verdicts reached under the superseded instruction are not reused.
    */
   contextKey?: string
+  /** Where the model judge's customized guidance is looked up. */
+  promptContext?: PromptResolutionContext
 }
 
 const ASK_DEFAULT: AutoDecision = {
@@ -84,6 +87,7 @@ export async function evaluateAutoDecision({
   cwd,
   locale,
   contextKey,
+  promptContext,
 }: EvaluateAutoArgs): Promise<AutoDecision> {
   if (!config.enabled) return ASK_DEFAULT
 
@@ -107,7 +111,12 @@ export async function evaluateAutoDecision({
 
   // 3. Uncertain (classifier said "ask"). Optionally consult the small model.
   if (config.mode === "rules+model" && client) {
-    const judged = await judgeCommandSafety(client, command, { cwd, locale, contextKey })
+    const judged = await judgeCommandSafety(client, command, {
+      cwd,
+      locale,
+      contextKey,
+      promptContext,
+    })
     if (judged) {
       if (judged.risk === "high") {
         return config.denyOnHighRisk

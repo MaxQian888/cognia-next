@@ -342,7 +342,8 @@ export function buildCliSession(
           // refusal is not something Cognia can widen or the model can retry.
           ...(config.agentBackend ? { externalBackend: config.agentBackend } : {}),
         }),
-      config.outputStyle
+      config.outputStyle,
+      promptWorkspaceId ? { workspaceId: promptWorkspaceId } : {}
     ),
     workingDir: config.cwd,
     permissionMode,
@@ -369,7 +370,8 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
           ...(params.promptWorkspaceId ? { workspaceId: params.promptWorkspaceId } : {}),
           ...(config.agentBackend ? { externalBackend: config.agentBackend } : {}),
         }),
-      config.outputStyle
+      config.outputStyle,
+      params.promptWorkspaceId ? { workspaceId: params.promptWorkspaceId } : {}
     ),
     permissionMode: config.permissionMode,
     builtinTools: config.builtinTools,

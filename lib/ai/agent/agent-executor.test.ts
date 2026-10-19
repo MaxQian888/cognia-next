@@ -23,7 +23,17 @@ import {
   simulateWebviewRuntime,
   truncatedStreamModel,
 } from "@/lib/ai/webview-stream-fixtures"
-import { buildAgentBoundContext, executeAgent, runCompletionRail } from "./agent-executor"
+import {
+  buildAgentBoundContext,
+  EXECUTOR_FALLBACK_PROMPT,
+  executeAgent,
+  runCompletionRail,
+} from "./agent-executor"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 const mockPlanRoute = jest.fn()
 const mockApplyCircuitBreakerSettings = jest.fn()
@@ -117,6 +127,8 @@ jest.mock("@/lib/claude/provider-attempt-options", () => ({
 }))
 jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: (value: unknown) => mockHasNoLeakingPiiDeep(value),
+  // Read by the Prompt Center when it validates a published override.
+  hasNoLeakingPii: () => true,
 }))
 
 const mockStreamText = streamText as jest.MockedFunction<typeof streamText>
@@ -1018,6 +1030,34 @@ describe("executeAgent", () => {
       await executeAgent("x", { toolsEnabled: true })
       const ctx = mockResolveSendOptions.mock.calls[0][0]
       expect(ctx.character?.systemPrompt).toMatch(/helpful agent/i)
+      expect(ctx.character?.systemPrompt).toBe(EXECUTOR_FALLBACK_PROMPT.defaultBody)
+    })
+
+    it("uses the published fallback, and a caller's own prompt still wins over it", async () => {
+      __setPromptOverrideSnapshotForTests(
+        buildPromptOverrideSnapshot("test-db", [
+          {
+            bindingId: "pob",
+            promptId: EXECUTOR_FALLBACK_PROMPT.id,
+            scope: "account",
+            targetId: "",
+            revisionId: "por-executor-fallback",
+            body: "You are a terse automation agent.",
+            contractVersion: EXECUTOR_FALLBACK_PROMPT.contractVersion,
+          },
+        ])
+      )
+      try {
+        await executeAgent("x", { toolsEnabled: true })
+        expect(mockResolveSendOptions.mock.calls[0][0].character?.systemPrompt).toBe(
+          "You are a terse automation agent."
+        )
+        await executeAgent("x", { toolsEnabled: true, systemPrompt: "scoped" })
+        expect(mockResolveSendOptions.mock.calls[1][0].character?.systemPrompt).toBe("scoped")
+      } finally {
+        __setPromptOverrideSnapshotForTests(null)
+        __resetPromptVerdictsForTests()
+      }
     })
 
     it("resolves an existing character by id", async () => {

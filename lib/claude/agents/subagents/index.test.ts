@@ -4,6 +4,12 @@ import {
   registerSubagent,
   unregisterSubagentsByPlugin,
 } from "@/lib/plugin/registries/subagent-registry"
+import { getPluginPromptEntry } from "@/lib/prompts/plugin-prompts"
+import { registerPluginSubagentPrompt } from "@/lib/prompts/plugin-subagent-prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 describe("portable subagent context policy projections", () => {
   it("preserves portable context policy for native and dispatch projections", () => {
@@ -67,6 +73,51 @@ describe("portable subagent context policy projections", () => {
       expect(() => resolveAllSubagents({ context: "direct" })).toThrow(/positive safe integer/)
     } finally {
       useSubagentRuntimeStore.getState().deleteTemplate("invalid-context-policy")
+    }
+  })
+})
+
+describe("plugin subagent prompt overrides", () => {
+  it("sends an account override on both rails and keeps every other field", () => {
+    const def = {
+      id: "researcher",
+      name: "Researcher",
+      description: "Finds sources",
+      prompt: "Research the question.",
+      effort: "high" as const,
+      disallowedTools: ["Bash"],
+    }
+    registerSubagent("researcher", def, { pluginId: "override-test" })
+    const dispose = registerPluginSubagentPrompt("override-test", def)
+    const slot = getPluginPromptEntry("plugin:override-test/subagent.researcher")!.def
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-1",
+          promptId: slot.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-1",
+          body: "Research with primary sources only.",
+          contractVersion: slot.contractVersion,
+        },
+      ])
+    )
+    try {
+      expect(resolveAllSubagents({ context: "team" })["override-test:researcher"]).toMatchObject({
+        prompt: "Research with primary sources only.",
+        effort: "high",
+        disallowedTools: ["Bash"],
+      })
+      expect(getDispatchableSubagentDef("override-test:researcher")).toMatchObject({
+        prompt: "Research with primary sources only.",
+        effort: "high",
+        disallowedTools: ["Bash"],
+      })
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+      dispose()
+      unregisterSubagentsByPlugin("override-test")
     }
   })
 })

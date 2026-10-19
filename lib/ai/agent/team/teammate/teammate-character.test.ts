@@ -1,10 +1,16 @@
 import type { Character } from "@cognia/agent-config-types"
 import {
+  DEFAULT_TEAMMATE_IDENTITY_PROMPT,
   teammateBaseAgentId,
   teammateCharacterId,
   teammateSystemPrompt,
   teammateToCharacter,
 } from "./teammate-character"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 import {
   EMPTY_RESOLVED_CAPABILITIES,
   type AgentTeam,
@@ -326,5 +332,61 @@ describe("teammateToCharacter — inert A2UI template ids", () => {
       createdAt: 0,
       updatedAt: 0,
     })
+  })
+})
+
+describe("teammateSystemPrompt — Prompt Center default identity (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  const publish = (scope: "account" | "workspace", targetId: string, revisionId: string) =>
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: DEFAULT_TEAMMATE_IDENTITY_PROMPT.id,
+          scope,
+          targetId,
+          revisionId,
+          body: "You are a terse specialist.",
+          contractVersion: DEFAULT_TEAMMATE_IDENTITY_PROMPT.contractVersion,
+        },
+      ])
+    )
+
+  it("uses a published override when nothing more specific names a prompt", () => {
+    publish("account", "", "por-teammate-identity-account")
+    const c = teammateToCharacter({
+      team: makeTeam({ defaultSystemPrompt: undefined }),
+      teammate: makeTeammate(),
+      resolvedCaps: EMPTY_RESOLVED_CAPABILITIES,
+    })
+    expect(c.systemPrompt).toBe("You are a terse specialist.")
+  })
+
+  it("applies a workspace override only to that project's teams", () => {
+    publish("workspace", "ws-1", "por-teammate-identity-ws")
+    const input = { teammate: makeTeammate() }
+    expect(
+      teammateSystemPrompt({
+        ...input,
+        team: { ...makeTeam({ defaultSystemPrompt: undefined }), projectId: "ws-1" },
+      })
+    ).toBe("You are a terse specialist.")
+    expect(
+      teammateSystemPrompt({
+        ...input,
+        team: { ...makeTeam({ defaultSystemPrompt: undefined }), projectId: "ws-2" },
+      })
+    ).toContain("focused, helpful agent teammate")
+  })
+
+  it("never replaces a configured prompt", () => {
+    publish("account", "", "por-teammate-identity-configured")
+    expect(teammateSystemPrompt({ team: makeTeam(), teammate: makeTeammate() })).toBe(
+      "Team default prompt."
+    )
   })
 })

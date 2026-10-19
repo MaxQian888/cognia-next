@@ -3291,6 +3291,9 @@ describe("python host-call parity (ADR-0145)", () => {
         "logger",
         "nodeRuntime",
         "notifications",
+        // ADR-0236: a python plugin declares its model-facing wording as Prompt
+        // Center slots and resolves the user's edit of it, as plain data.
+        "prompts",
         "secrets",
         "storage",
         "templates",

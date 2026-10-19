@@ -74,6 +74,7 @@ import {
   type WorkerResult,
 } from "../contracts/schemas"
 import { DELEGATE_LIMIT_CEILINGS, SUBTASK_MAX_STEPS, type ActionLimits } from "../config/types"
+import type { RolePromptProfile } from "../prompts/roles"
 import { estimateTokens } from "../routing/features"
 import {
   judgeRuntimeAcceptance,
@@ -214,6 +215,8 @@ export interface DelegateRunInput {
   allowDegraded: boolean
   /** `patch_only` unless the caller asked for the approval-gated apply. */
   delivery: DelegateDelivery
+  /** The role text the run pinned (`rolePromptProfileFor`); the shipped roles-1 when absent. */
+  rolePrompts?: RolePromptProfile
   deadlineAt: number
   signal: AbortSignal
 }
@@ -860,6 +863,7 @@ export async function runDelegateWorkflow(
       ].join("\n") || "(the workspace is empty)"
     : `(the workspace listing is unavailable: ${listing.code})`
   const planMessages = roleMessages("lead", {
+    profile: input.rolePrompts,
     contract,
     material: [
       untrustedBlock("the workspace snapshot", snapshot),
@@ -1102,6 +1106,7 @@ export async function runDelegateWorkflow(
       }
 
       let transcript: Message[] = roleMessages("worker", {
+        profile: input.rolePrompts,
         contract,
         material: [
           `The subtask the runtime issued (authoritative):\n${JSON.stringify(target.contract, null, 2)}`,
@@ -1131,6 +1136,7 @@ export async function runDelegateWorkflow(
             const summaryTokens = Math.min(out, COMPACTION_SUMMARY_TOKENS)
             transcript = (
               await compactTranscript(ports, {
+                rolePrompts: input.rolePrompts,
                 runId: input.runId,
                 logicalStepId: sessionStep,
                 deploymentId: deployment.deploymentId,
@@ -1653,6 +1659,7 @@ export async function runDelegateWorkflow(
         sections.push(section)
       }
       const messages = roleMessages("reviewer", {
+        profile: input.rolePrompts,
         contract,
         material: [
           untrustedBlock(

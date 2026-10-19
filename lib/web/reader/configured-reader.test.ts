@@ -6,7 +6,18 @@ jest.mock("./vendor-readers", () => ({
 import type { WebReaderId } from "@cognia/agent-config-types"
 import { OperationAdmission } from "@cognia/web-search/operation-policy"
 import { FetchCache } from "@/lib/web/fetch-cache"
-import { planReaders, readWithPolicy, type ReaderHostDeps } from "./configured-reader"
+import {
+  READER_DISTILL_PROMPT,
+  planReaders,
+  readWithPolicy,
+  type FetchSummarize,
+  type ReaderHostDeps,
+} from "./configured-reader"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 import type { ReaderPolicy } from "./reader-settings"
 
 const LONG_TEXT = "Readable paragraph about the topic. ".repeat(20)
@@ -787,5 +798,89 @@ describe("adversarial review regressions", () => {
     expect(fetchImpl.mock.calls.some((c) => String(c[0]).startsWith("https://r.jina.ai/"))).toBe(
       false
     )
+  })
+})
+
+describe("generic distillation prompt (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  function distillOverride(revisionId: string, body: string) {
+    return buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: "pob-reader",
+        promptId: READER_DISTILL_PROMPT.id,
+        scope: "account",
+        targetId: "",
+        revisionId,
+        body,
+        contractVersion: READER_DISTILL_PROMPT.contractVersion,
+      },
+    ])
+  }
+
+  it("asks the shipped question when the caller names none", async () => {
+    const summarize = jest.fn(async () => "summary")
+    const { deps } = host(() => res(ARTICLE), {
+      policy: policy({ distillation: "best-effort" }),
+      summarize,
+    })
+    await readWithPolicy({ url: "https://site.example/a" }, deps)
+    expect(summarize).toHaveBeenCalledWith(
+      expect.any(String),
+      "Summarize the key facts, figures, names, dates, quotes, and conclusions on this page.",
+      expect.any(Object)
+    )
+  })
+
+  it("asks the published question and never serves a distillation made under the old one", async () => {
+    const cache = new FetchCache()
+    const summarize = jest.fn(async () => "summary")
+    const first = host(() => res(ARTICLE), {
+      cache,
+      policy: policy({ distillation: "best-effort" }),
+      summarize,
+    })
+    await readWithPolicy({ url: "https://site.example/a" }, first.deps)
+    __setPromptOverrideSnapshotForTests(
+      distillOverride("por-reader-question", "List only the dates on this page.")
+    )
+    const second = host(() => res(ARTICLE), {
+      cache,
+      policy: policy({ distillation: "best-effort" }),
+      summarize,
+    })
+    const r = await readWithPolicy({ url: "https://site.example/a" }, second.deps)
+    expect(second.fetchImpl).toHaveBeenCalledTimes(1)
+    expect(r).not.toHaveProperty("cacheHit", true)
+    expect(summarize).toHaveBeenLastCalledWith(
+      expect.any(String),
+      "List only the dates on this page.",
+      expect.any(Object)
+    )
+  })
+
+  it("keys a distilled read by the extractor's current instructions", async () => {
+    const cache = new FetchCache()
+    let instructions = "extract v1"
+    const summarize = Object.assign(
+      jest.fn(async () => "summary"),
+      { instructions: () => instructions }
+    ) as unknown as FetchSummarize & jest.Mock
+    const make = () =>
+      host(() => res(ARTICLE), {
+        cache,
+        policy: policy({ distillation: "best-effort" }),
+        summarize,
+      })
+    await readWithPolicy({ url: "https://site.example/a", prompt: "who?" }, make().deps)
+    const hit = await readWithPolicy({ url: "https://site.example/a", prompt: "who?" }, make().deps)
+    expect(hit).toMatchObject({ cacheHit: true })
+    instructions = "extract v2"
+    const miss = make()
+    await readWithPolicy({ url: "https://site.example/a", prompt: "who?" }, miss.deps)
+    expect(miss.fetchImpl).toHaveBeenCalledTimes(1)
   })
 })

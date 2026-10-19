@@ -15,9 +15,17 @@ import {
   planDiffText,
   planFileName,
   planIdFromFile,
+  planRefinePrompt,
   planStats,
   planTitle,
 } from "./plan"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { PromptDefinitionV1, PromptScope } from "@/lib/prompts/types"
+import { CLI_PLAN_REFINE_PROMPT } from "@/lib/agent/prompts/cli-prompts"
 
 describe("looksLikePlan", () => {
   it("keeps a project analysis with headings and technical lists as a normal answer", () => {
@@ -289,5 +297,56 @@ describe("PLAN_EXECUTE_PROMPT", () => {
     const out = PLAN_EXECUTE_PROMPT(PLAN)
     // The first line carries the plan title (drives listSessions' titleFrom).
     expect(out.split("\n")[0]).toContain(planTitle(PLAN))
+  })
+})
+
+function publishOverride(
+  def: PromptDefinitionV1,
+  body: string,
+  revisionId: string,
+  scope: PromptScope = "account",
+  targetId = ""
+): void {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: `pob-${revisionId}`,
+        promptId: def.id,
+        scope,
+        targetId,
+        revisionId,
+        body,
+        contractVersion: def.contractVersion,
+      },
+    ])
+  )
+}
+
+describe("planRefinePrompt", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("appends the reviewed plan and the requested revisions under the instruction", () => {
+    expect(planRefinePrompt({ plan: "# Plan", feedback: "add tests" })).toBe(
+      [
+        CLI_PLAN_REFINE_PROMPT.defaultBody,
+        "",
+        "Current reviewed plan:",
+        "# Plan",
+        "",
+        "Requested revisions:",
+        "add tests",
+      ].join("\n")
+    )
+    expect(planRefinePrompt({})).toBe(CLI_PLAN_REFINE_PROMPT.defaultBody)
+  })
+
+  it("sends a published override as the instruction", () => {
+    publishOverride(CLI_PLAN_REFINE_PROMPT, "Rework the plan, smaller steps.", "por-plan-1")
+    expect(planRefinePrompt({ plan: "# Plan" })).toBe(
+      "Rework the plan, smaller steps.\n\nCurrent reviewed plan:\n# Plan"
+    )
   })
 })

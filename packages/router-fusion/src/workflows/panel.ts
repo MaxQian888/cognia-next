@@ -50,6 +50,7 @@ import type {
 } from "../contracts/schemas"
 import { CONTRACT_SCHEMA_VERSION } from "../contracts/schemas"
 import type { VerifierProfile } from "../config/types"
+import type { RolePromptProfile } from "../prompts/roles"
 import { estimateTokens } from "../routing/features"
 import { checkEvidenceRefs } from "../verify/evidence"
 import { acceptanceClaimFor } from "../verify/profiles"
@@ -148,6 +149,8 @@ export interface PanelRunInput {
   verificationToolPolicyId: string | null
   /** The caller's schema for the final answer, when it asked for structured output. */
   jsonSchema?: Record<string, unknown>
+  /** The role text the run pinned (`rolePromptProfileFor`); the shipped roles-1 when absent. */
+  rolePrompts?: RolePromptProfile
   deadlineAt: number
   signal: AbortSignal
 }
@@ -623,6 +626,7 @@ export async function runPanel(
     const candidateId = uuidFromName(`${input.runId}\u0000candidate\u0000${member.role}`)
     const firstStep = `panel:member:${member.role}:1`
     const messages = roleMessages("panel_member", {
+      profile: input.rolePrompts,
       contract,
       material: evidenceMaterial,
       runtimeNote: [
@@ -699,6 +703,7 @@ export async function runPanel(
           const summaryTokens = Math.min(memberOut, 2_048)
           transcript = (
             await compactTranscript(ports, {
+              rolePrompts: input.rolePrompts,
               runId: input.runId,
               logicalStepId: `panel:member:${member.role}`,
               deploymentId: member.deploymentId,
@@ -895,6 +900,7 @@ export async function runPanel(
     "Refer to claims by their `id`. Every claim id above is already namespaced by its candidate.",
   ]
   const judgeMessages = roleMessages("judge", {
+    profile: input.rolePrompts,
     contract,
     material: judgeMaterial,
     ...(input.profile === "evidence_review"
@@ -1058,6 +1064,7 @@ export async function runPanel(
     .filter((claim) => !supportedSet.has(claim.globalId))
     .map((claim) => ({ id: claim.globalId, text: claim.text }))
   const synthesisMessages = roleMessages("synthesizer", {
+    profile: input.rolePrompts,
     contract,
     material: [
       untrustedBlock("the approved claims", JSON.stringify(approved, null, 2)),
@@ -1189,6 +1196,7 @@ export async function runPanel(
       input.judge.deploymentId,
       "panel:final_check",
       roleMessages("judge", {
+        profile: input.rolePrompts,
         contract,
         material: [
           untrustedBlock("the approved claims", JSON.stringify(approved, null, 2)),

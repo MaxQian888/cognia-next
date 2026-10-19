@@ -38,7 +38,10 @@ import {
   buildCommitAgentSystemPrompt,
   extractCommitMessage,
   generateCommitMessage,
+  resolveCommitPromptTexts,
 } from "@/lib/git/ai-commit"
+import { findWorkspaceIdForPath } from "@/lib/db/projects"
+import type { PromptResolutionContext } from "@/lib/prompts/types"
 import {
   CommitAgentAbortedError,
   commitMessageTarget,
@@ -159,6 +162,14 @@ export function useAiCommitMessage(rootDir: string): UseAiCommitMessageResult {
         draftHint: draft.text,
       }
 
+      // The instructions resolve in the workspace that mounts this repository
+      // (ADR-0236), so a workspace's commit conventions reach only its repos.
+      // A repository on a paired host is not mounted by a local workspace.
+      const local = parseGitTarget(rootDir)
+      const workspaceId =
+        local.kind === "local" ? await findWorkspaceIdForPath(local.repoPath) : null
+      const promptContext: PromptResolutionContext = workspaceId ? { workspaceId } : {}
+
       let message: string
       if (target.kind === "model") {
         // Resolve the model via the shared utility-client path (honors the
@@ -176,14 +187,16 @@ export function useAiCommitMessage(rootDir: string): UseAiCommitMessageResult {
         message = await generateCommitMessage(input, client, {
           onText: setPreview,
           abortSignal: controller.signal,
+          promptContext,
         })
       } else {
-        const local = parseGitTarget(rootDir)
+        const texts = await resolveCommitPromptTexts(config, promptContext)
+        if (controller.signal.aborted) return null
         const raw = await runCommitMessageAgent(
           target,
           {
-            prompt: buildCommitAgentPrompt(input),
-            systemPrompt: buildCommitAgentSystemPrompt(config),
+            prompt: buildCommitAgentPrompt(input, texts),
+            systemPrompt: buildCommitAgentSystemPrompt(config, texts),
             // A repository on a paired host is not a directory this machine's
             // agent can open; the diff in the prompt is all it gets.
             ...(local.kind === "local" ? { workingDirectory: local.repoPath } : {}),

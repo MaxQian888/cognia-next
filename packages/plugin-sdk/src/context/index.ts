@@ -137,6 +137,13 @@ export type {
 // =============================================================================
 export type { PluginOcrAPI } from "@/lib/plugin/api/ocr-api"
 export type { PluginDecisionsAPI } from "@/lib/plugin/api/decisions-api"
+export type {
+  PluginPromptDeclaration,
+  PluginPromptRegistration,
+  PluginPromptResolveOptions,
+  PluginPromptsAPI,
+  PluginResolvedPrompt,
+} from "@/lib/plugin/api/prompts-api"
 export type { PluginWorkspaceAPI } from "@/lib/plugin/api/workspace-api"
 export type { PluginModalAPI } from "@/lib/plugin/api/modal-api"
 export type { CreateWebviewInput, PluginWebviewAPI } from "@/lib/plugin/api/webview-api"

@@ -167,7 +167,7 @@ export function syncSkills(transport: Transport, cursor: SyncCursor): Promise<Sy
 还有另外两个触点以同一份数据为给养：
 
 - **备份域**——传输清单暴露单个 `skills` 域，它**仅导出用户技能 + 其资源**，在内存中过滤掉内置项（`lib/data/domain/index.ts:128-137`）。详见[数据模型](./data-model)。
-- **外部智能体**——外部 CLI 指令栈经由 `buildProgressiveSkillsPrompt`（`lib/ai/instructions/external-agent-instruction-stack.ts:122-124`）为 Codex / Claude Code / Gemini 构建一份渐进式技能提示词，而 Codex 磁盘镜像会同步到 `~/.agents/skills`。见[加载与注入](./loading-and-injection)与[原生同步与安全](./native-sync-and-security)。
+- **外部智能体**——外部运行时与内置回合走同一条 `resolveSendOptions` 组装路径获得技能，而 Codex 磁盘镜像会同步到 `~/.agents/skills`。见[加载与注入](./loading-and-injection)与[原生同步与安全](./native-sync-and-security)。
 
 ## ADR 交叉引用
 

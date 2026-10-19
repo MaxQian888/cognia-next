@@ -64,9 +64,15 @@ jest.mock("@/lib/workspace/session-cwd", () => ({
   __esModule: true,
   resolveSessionCwd: jest.fn(async () => undefined),
 }))
-jest.mock("@/lib/plugin/registries/subagent-registry", () => ({
-  getSubagent: (id: string) => ({ id, name: id, description: "Test agent", prompt: "Test prompt" }),
-}))
+jest.mock("@/lib/plugin/registries/subagent-registry", () => {
+  const getSubagent = (id: string) => ({
+    id,
+    name: id,
+    description: "Test agent",
+    prompt: "Test prompt",
+  })
+  return { getSubagent, getSubagentEntry: (id: string) => ({ entry: getSubagent(id) }) }
+})
 jest.mock("@/lib/background-tasks/redispatch", () => ({
   captureBackgroundDispatchRecovery: jest.fn(async (input) => ({
     version: 1,

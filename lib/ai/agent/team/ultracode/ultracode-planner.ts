@@ -4,27 +4,19 @@
  * task and how wide to fan each one — the "decide to orchestrate" brain that
  * mirrors Claude Code's effort-driven workflow authoring. The plan is validated
  * structured output (`ultracodePlanSchema`) and then handed to
- * `synthesizeUltracodeWorkflow`.
+ * `synthesizeUltracodeWorkflow`. The planner wording is editable in the Prompt
+ * Center; the plan schema hint is inspect-only (both in `../team-prompts`).
  */
 
 import { ultracodePlanSchema, type UltracodePlan } from "@/types/agent/ultracode"
 import { dispatchStructured } from "../teammate/structured-dispatch"
 import type { TeamRunContext } from "../team-run-context"
-
-const PLAN_HINT =
-  '{ "summary": "…", "stages": [{ "pattern": "multi-modal-sweep|loop-until-dry|adversarial-verify|judge-panel|completeness-critic|synthesize", "instruction": "…", "count"?: 1-16, "variants"?: ["…"] }] }'
-
-const PLANNER_GUIDANCE = `You are the lead planner for an ultracode multi-agent run. Design the most effective composition of quality patterns for the objective.
-
-Available patterns (compose in a sensible order; the run is a forward pipeline):
-- multi-modal-sweep: parallel finders, each a DIFFERENT search angle. \`variants\` = the distinct angles.
-- loop-until-dry: keep finding until rounds go dry. \`instruction\` = what to find. \`count\` = finders per round.
-- adversarial-verify: N skeptics REFUTE each finding; majority-refute kills it. \`count\` = skeptics; \`variants\` = lenses (correctness/security/perf/repro) for perspective-diverse verification.
-- judge-panel: produce attempts from different angles and score them. \`variants\` = angles; \`count\` = judges per attempt.
-- completeness-critic: ask "what's missing?" so gaps feed forward.
-- synthesize: fold survivors + winner + gaps into the final cited report. ALWAYS end with this.
-
-Guidance: for audit / bug-hunt / research tasks, use a finder (sweep or loop) → adversarial-verify → completeness-critic → synthesize. For design / solution tasks, use judge-panel → synthesize. Keep counts proportional to task importance; do not exceed 16.`
+import { resolvePrompt, resolvePromptAsync } from "@/lib/prompts/resolve"
+import {
+  teamPromptContext,
+  ULTRACODE_PLAN_HINT_PROMPT,
+  ULTRACODE_PLANNER_PROMPT,
+} from "../team-prompts"
 
 export interface PlanUltracodeOptions {
   signal?: AbortSignal
@@ -46,17 +38,26 @@ export async function planUltracodeWorkflow(
     .filter(Boolean)
     .join("; ")
 
+  // Resolved once for this planning step (ADR-0236).
+  const prompt = (
+    await resolvePromptAsync(ULTRACODE_PLANNER_PROMPT, {
+      context: teamPromptContext(teamCtx.team),
+      values: { objective, knobs: knobs ? `\n\nTeam knobs — ${knobs}.` : "" },
+    })
+  ).text
+  opts.signal?.throwIfAborted()
+
   const { value } = await dispatchStructured(
     teamCtx,
     {
       taskId: "ultracode-plan",
-      prompt: `${PLANNER_GUIDANCE}\n\nObjective:\n${objective}${knobs ? `\n\nTeam knobs — ${knobs}.` : ""}`,
+      prompt,
       signal: opts.signal,
       // Planning is pure reasoning — no repo tools needed.
       preferToolEnabled: false,
     },
     ultracodePlanSchema,
-    { schemaHint: PLAN_HINT }
+    { schemaHint: resolvePrompt(ULTRACODE_PLAN_HINT_PROMPT).text }
   )
   return value
 }

@@ -71,11 +71,6 @@
       "entries": ["llm-client:createLlmClient"],
       "note": "buildRendererLlmClient wraps every client with ledgerUtilityCalls (utilityLedger by default): titles, timeline labels, the /goal judge, utility and agent-role clients, AI commit messages, the room primary router."
     },
-    "lib/ai/vision/caption.ts": {
-      "reason": "unwrapped",
-      "entries": ["ai:generateText"],
-      "note": "Vision caption for multimodal embeddings: a generateText call (D27 applies even though it feeds an embedder), no ledger."
-    },
     "lib/plugin/runtime/renderer-host-runtime.ts": {
       "reason": "unwrapped",
       "entries": ["ai:streamText"],

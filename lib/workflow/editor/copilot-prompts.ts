@@ -19,7 +19,8 @@
  * registered by the plugin for non-copilot (scripting / import) use.
  */
 
-import type { AgentDefinition } from "@/lib/claude/agents/subagents/types"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 
 /**
  * Tools the Workflow Copilot may invoke. Anything not in this list is
@@ -108,26 +109,26 @@ export const WORKFLOW_COPILOT_DISALLOWED_TOOLS: readonly string[] = [
   "mcp__cognia-plugin-tools__perform_action",
 ] as const
 
+const SECTION_SEPARATOR = "\n\n---\n\n"
+
 /**
  * The Workflow Copilot system prompt. Appends the per-workflow snapshot
  * block (built in build-options.ts) at the end so the agent always has
  * grounding for the currently-open workflow. Note: this REPLACES the
  * character system prompt entirely — character personas, twins, agent
  * modes, and skills do not participate in this mode.
+ *
+ * The identity and tool guidance are the editable Prompt Center entry
+ * {@link WORKFLOW_COPILOT_PROMPT} (ADR-0236); the snapshot is the open
+ * workflow's data and is appended after it. Synchronous: build-options has
+ * loaded the turn's override snapshot before it calls this.
  */
 export function buildWorkflowCopilotPrompt(snapshotBlock: string | null | undefined): string {
-  const sections: string[] = [
-    IDENTITY,
-    OPERATING_RULES,
-    SLASH_COMMANDS,
-    MENTION_SYNTAX,
-    SUBAGENT_ROUTING,
-    EXAMPLES,
-  ]
+  const identity = resolvePrompt(WORKFLOW_COPILOT_PROMPT).text
   if (snapshotBlock && snapshotBlock.trim().length > 0) {
-    sections.push(snapshotBlock.trim())
+    return `${identity}${SECTION_SEPARATOR}${snapshotBlock.trim()}`
   }
-  return sections.join("\n\n---\n\n")
+  return identity
 }
 
 const IDENTITY = `# You are the Workflow Copilot
@@ -210,6 +211,37 @@ You:
 5. Reply with the summary and the resource ids you used.`
 
 /**
+ * The Copilot's identity, operating rules, slash commands, mention syntax,
+ * subagent routing and examples, in that order. Wording only: the tool
+ * whitelist, the disallow list and the proposal-only contract are enforced
+ * by `WORKFLOW_COPILOT_ALLOWED_TOOLS` / `WORKFLOW_COPILOT_DISALLOWED_TOOLS`,
+ * never by this text.
+ */
+export const WORKFLOW_COPILOT_PROMPT = definePrompt({
+  id: "developer.workflow.copilot",
+  contractVersion: 1,
+  kind: "role",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app", "cli"],
+  maxChars: 64_000,
+  outputContract:
+    "Replaces the system prompt of a workflow-editor chat session; the open workflow's snapshot block is appended after a --- separator. Tools stay limited to the wf_* whitelist whatever this text says.",
+  consumers: ["lib/workflow/editor/copilot-prompts.ts"],
+  defaultBody: [
+    IDENTITY,
+    OPERATING_RULES,
+    SLASH_COMMANDS,
+    MENTION_SYNTAX,
+    SUBAGENT_ROUTING,
+    EXAMPLES,
+  ].join(SECTION_SEPARATOR),
+})
+
+/**
  * Optional: when the build-options branch chooses to also register the
  * specialist subagents (current behavior — they're attached via
  * `opts.agents`), this list can be passed to `Task` as `agentName`s. Kept
@@ -221,15 +253,3 @@ export const WORKFLOW_COPILOT_SUBAGENT_NAMES = [
   "workflow-refactorer",
   "workflow-doc-writer",
 ] as const
-
-/** A minimal AgentDefinition shape exported for callers that want to
- *  spawn the Copilot as a Task-tool target (e.g., from outside the
- *  workflow-editor branch). Not used in the default flow — the Copilot
- *  IS the main agent in workflow-editor sessions, not a subagent. */
-export const workflowCopilotAgent: AgentDefinition = {
-  description:
-    "Workflow Copilot — the specialized assistant embedded in the visual workflow editor. Replaces the character system prompt when session.kind === 'workflow-editor'.",
-  prompt: buildWorkflowCopilotPrompt(null),
-  tools: [...WORKFLOW_COPILOT_ALLOWED_TOOLS],
-  maxTurns: 30,
-}

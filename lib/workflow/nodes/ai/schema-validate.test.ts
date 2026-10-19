@@ -5,6 +5,7 @@ import {
   validateAgainstJsonSchema,
   formatZodIssues,
   summarizeZodError,
+  SCHEMA_REPAIR_PROMPT,
 } from "./schema-validate"
 import { z } from "zod"
 
@@ -137,5 +138,14 @@ describe("formatZodIssues / summarizeZodError", () => {
 
   it("returns an empty string when there are no errors", () => {
     expect(summarizeZodError([])).toBe("")
+  })
+
+  it("renders the inspect-only repair turn byte-for-byte (ADR-0236)", () => {
+    expect(SCHEMA_REPAIR_PROMPT.operation).toBe("inspect-only")
+    expect(summarizeZodError(["age: Required", "name: Expected string"])).toBe(
+      "Your previous reply did not satisfy the required output schema:\n" +
+        "  - age: Required\n  - name: Expected string\n" +
+        "Return ONLY corrected JSON that satisfies the schema."
+    )
   })
 })

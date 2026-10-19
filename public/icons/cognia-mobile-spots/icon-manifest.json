@@ -601,6 +601,7 @@
       "slash-commands": "slash-commands",
       "presets": "presets",
       "chatTemplates": "chat-templates",
+      "prompts": "instructions",
       "hooks": "hooks",
       "conversation": "chat",
       "artifacts": "artifacts",

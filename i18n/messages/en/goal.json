@@ -346,7 +346,7 @@
     "modelHint": "Model that decides whether the goal is done. Leave on the chat model unless you want a cheaper/faster judge.",
     "noModels": "No models available. Configure a provider first.",
     "promptOverride": "Judge prompt override",
-    "promptOverrideHint": "Replaces the built-in judge instructions. Must still ask for a one-line JSON verdict.",
+    "promptOverrideHint": "Copied into each new goal and replaces the judge instructions for that goal. To change the judge for every goal without its own instructions, edit it in Settings → Prompts. Must still ask for a one-line JSON verdict.",
     "searchPlaceholder": "Search models…",
     "temperature": "Judge temperature",
     "temperatureHint": "0 is deterministic (recommended). Higher loosens the verdict.",

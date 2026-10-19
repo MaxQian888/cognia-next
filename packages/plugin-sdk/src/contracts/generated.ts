@@ -979,6 +979,13 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     kind: "returned-handle",
     disposeMethod: "unregister",
   },
+  "ctx.prompts.register": {
+    kind: "returned-handle",
+    disposeMethod: "unregister",
+  },
+  "ctx.prompts.resolve": {
+    kind: "none",
+  },
   "ctx.dexie.rawDb": {
     kind: "none",
   },

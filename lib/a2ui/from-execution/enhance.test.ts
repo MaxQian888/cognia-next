@@ -1,7 +1,18 @@
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 
-import { enhanceExecutionPage, parseEnhancementResponse, sanitizeDigest } from "./enhance"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { ChatSession } from "@cognia/agent-config-types"
+import {
+  EXECUTION_ENHANCE_PROMPT,
+  enhanceExecutionPage,
+  parseEnhancementResponse,
+  sanitizeDigest,
+} from "./enhance"
 
 jest.mock("@/lib/ai/generation/utility-client", () => ({ buildUtilityLlmClient: jest.fn() }))
 jest.mock("@cognia/redact", () => ({
@@ -16,6 +27,11 @@ const mockRedact = redactText as jest.MockedFunction<typeof redactText>
 function fakeClient(complete: jest.Mock) {
   return { complete } as unknown as ReturnType<typeof buildUtilityLlmClient>
 }
+
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -109,5 +125,46 @@ describe("enhanceExecutionPage", () => {
   it("returns null for an empty digest", async () => {
     expect(await enhanceExecutionPage({ ...baseArgs, digest: "  " })).toBeNull()
     expect(mockBuild).not.toHaveBeenCalled()
+  })
+
+  it("sends the shipped analyst instructions", async () => {
+    const complete = jest.fn().mockResolvedValue('{"summary":"ok"}')
+    mockBuild.mockReturnValue(fakeClient(complete))
+    await enhanceExecutionPage(baseArgs)
+    expect(complete.mock.calls[0][1].system).toBe(EXECUTION_ENHANCE_PROMPT.defaultBody)
+  })
+
+  it("sends the source chat's published override", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: EXECUTION_ENHANCE_PROMPT.id,
+          scope: "session",
+          targetId: "s-1",
+          revisionId: "por-enhance-session",
+          body: 'Terse JSON {"title", "summary", "insights"} only.',
+          contractVersion: EXECUTION_ENHANCE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const complete = jest.fn().mockResolvedValue('{"summary":"ok"}')
+    mockBuild.mockReturnValue(fakeClient(complete))
+    const session = { id: "s-1", title: "t", createdAt: 1, updatedAt: 1 } as ChatSession
+    await enhanceExecutionPage({ ...baseArgs, session })
+    expect(complete.mock.calls[0][1].system).toBe(
+      'Terse JSON {"title", "summary", "insights"} only.'
+    )
+    await enhanceExecutionPage(baseArgs)
+    expect(complete.mock.calls[1][1].system).toBe(EXECUTION_ENHANCE_PROMPT.defaultBody)
+  })
+
+  it("returns null without a call when aborted while the prompt resolves", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const complete = jest.fn()
+    mockBuild.mockReturnValue(fakeClient(complete))
+    expect(await enhanceExecutionPage({ ...baseArgs, abortSignal: controller.signal })).toBeNull()
+    expect(complete).not.toHaveBeenCalled()
   })
 })

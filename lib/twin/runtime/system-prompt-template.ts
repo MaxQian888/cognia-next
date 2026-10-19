@@ -13,8 +13,20 @@
  * The runtime also returns metadata describing what was injected so the
  * UI's citation panel can show the user "your twin pulled from these
  * sources for this answer".
+ *
+ * The scaffolding — the identity line and each section's heading and
+ * guidance — is editable in the Prompt Center (ADR-0236), one definition per
+ * section because a section with no data is skipped and the template syntax
+ * has no conditionals. Profile data (voice, entities, playbooks, decisions,
+ * chunks, samples) only ever arrives as a placeholder value: it is inserted
+ * once, never re-scanned, and never part of a definition body, so a private
+ * profile cannot leak into a stored override or its preview. The character's
+ * own system prompt stays with the character record; it is not a definition.
  */
 
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import type { PromptOverrideSnapshot } from "@/lib/prompts/snapshot"
+import { definePrompt, type PromptResolutionContext } from "@/lib/prompts/types"
 import type {
   DecisionRecord,
   Playbook,
@@ -53,7 +65,105 @@ export interface ApplyTemplateInput {
   maxPlaybooksShown?: number
   /** Maximum decisions to inject. Defaults to 5. */
   maxDecisionsShown?: number
+  /**
+   * Where the scaffolding resolves (ADR-0236): the twin's character id as the
+   * agent scope. Omitted, only account overrides apply.
+   */
+  promptContext?: PromptResolutionContext
+  /** Override snapshot to read; omitted, the loaded one is used. */
+  promptSnapshot?: PromptOverrideSnapshot | null
 }
+
+/** Names, profile and retrieval data are bounded by the formatters' own caps; this only guards. */
+const PROFILE_DATA_MAX = 1_000_000
+
+type TwinTemplateSection =
+  "identity" | "voice" | "entities" | "playbooks" | "decisions" | "retrieved" | "style"
+
+function twinTemplatePrompt(input: {
+  section: TwinTemplateSection
+  variable: string
+  outputContract: string
+  defaultBody: string
+}) {
+  return definePrompt({
+    id: `twin.runtime.system-template.${input.section}`,
+    contractVersion: 1,
+    kind: "feature-template",
+    group: "twin",
+    operation: "replace-template",
+    scopes: ["account", "agent"],
+    activation: "next-operation",
+    risk: "ordinary",
+    hosts: ["app"],
+    maxChars: 4_000,
+    variables: [{ name: input.variable, required: true, maxChars: PROFILE_DATA_MAX }],
+    outputContract: input.outputContract,
+    consumers: ["lib/twin/runtime/system-prompt-template.ts"],
+    defaultBody: input.defaultBody,
+  })
+}
+
+/**
+ * The scaffolding of a twin's system prompt, one entry per section. Each body
+ * is rendered only when its section has data, and sections are joined with
+ * the `---` separator in code, so an override changes wording, never which
+ * sections exist or where the cache boundary sits.
+ */
+export const TWIN_SYSTEM_TEMPLATE_PROMPTS = {
+  identity: twinTemplatePrompt({
+    section: "identity",
+    variable: "twinName",
+    outputContract:
+      "Opens the twin identity block; the voice and entity sections follow it in the same block when the profile has them.",
+    defaultBody: "You are {{twinName}}.",
+  }),
+  voice: twinTemplatePrompt({
+    section: "voice",
+    variable: "voiceSummary",
+    outputContract:
+      "Added to the identity block when the profile has a voice summary (truncated to 200 characters).",
+    defaultBody: "Voice and tone:\n{{voiceSummary}}",
+  }),
+  entities: twinTemplatePrompt({
+    section: "entities",
+    variable: "entities",
+    outputContract:
+      "Added to the identity block when the profile has entities; {{entities}} is one bullet per entity, at most 20.",
+    defaultBody:
+      "People, teams, and projects you know (do not enumerate proactively — use as context):\n{{entities}}",
+  }),
+  playbooks: twinTemplatePrompt({
+    section: "playbooks",
+    variable: "playbooks",
+    outputContract:
+      "A stable section, present when unpromoted playbooks exist; {{playbooks}} is one bullet per playbook.",
+    defaultBody: "## How you typically handle situations\n{{playbooks}}",
+  }),
+  decisions: twinTemplatePrompt({
+    section: "decisions",
+    variable: "decisions",
+    outputContract:
+      "A stable section, present when the profile has decisions; {{decisions}} is one bullet per decision.",
+    defaultBody: "## Decisions you have made\n{{decisions}}",
+  }),
+  retrieved: twinTemplatePrompt({
+    section: "retrieved",
+    variable: "chunks",
+    outputContract:
+      "A per-turn section, present when retrieval returned chunks; {{chunks}} holds numbered chunk blocks the model may cite.",
+    defaultBody:
+      "## Relevant historical material\nUse these excerpts when they answer the user's question. Cite sources by their chunk number when you do. If they don't answer the question, say so honestly rather than guessing.\n\n{{chunks}}",
+  }),
+  style: twinTemplatePrompt({
+    section: "style",
+    variable: "samples",
+    outputContract:
+      "A per-turn section, present when style samples were selected; {{samples}} holds numbered sample blocks.",
+    defaultBody:
+      "## Style examples\nExamples of the user's prior writing in similar contexts. Match the tone and structure; do not copy verbatim.\n\n{{samples}}",
+  }),
+} as const
 
 export interface AppliedTemplate {
   /** Final assembled system prompt. */
@@ -193,28 +303,34 @@ export function applySystemPromptTemplate(input: ApplyTemplateInput): AppliedTem
   const maxPlaybooks = input.maxPlaybooksShown ?? 5
   const maxDecisions = input.maxDecisionsShown ?? 5
 
+  // Each section's data is its definition's one variable.
+  const section = (key: TwinTemplateSection, value: string): string => {
+    const def = TWIN_SYSTEM_TEMPLATE_PROMPTS[key]
+    return resolvePrompt(def, {
+      context: input.promptContext ?? {},
+      ...(input.promptSnapshot !== undefined ? { snapshot: input.promptSnapshot } : {}),
+      values: { [def.variables[0].name]: value },
+    }).text
+  }
+
   // 1. Original character prompt
   const base = input.baseSystemPrompt?.trim()
   if (base) sections.push(base)
 
   // 2. Twin identity (stable)
-  const identityLines: string[] = [`You are ${input.twinName}.`]
+  const identityParts: string[] = [section("identity", input.twinName)]
   if (input.voiceSummary) {
     const truncated =
       input.voiceSummary.length > maxVoice
         ? `${input.voiceSummary.slice(0, maxVoice).trimEnd()}…`
         : input.voiceSummary
-    identityLines.push("", "Voice and tone:", truncated)
+    identityParts.push(section("voice", truncated))
   }
   const dictionary = formatEntityDictionary(input.entities, maxEntities)
   if (dictionary) {
-    identityLines.push(
-      "",
-      "People, teams, and projects you know (do not enumerate proactively — use as context):",
-      dictionary
-    )
+    identityParts.push(section("entities", dictionary))
   }
-  sections.push(identityLines.join("\n"))
+  sections.push(identityParts.join("\n\n"))
 
   // 2b. Behavioural playbooks (stable per-profile) — how the user typically
   // handles recurring situations. Distilled, not-yet-promoted entries only;
@@ -222,38 +338,24 @@ export function applySystemPromptTemplate(input: ApplyTemplateInput): AppliedTem
   // sits inside the cached prefix.
   const playbooksSection = formatPlaybooks(input.playbooks ?? [], maxPlaybooks)
   if (playbooksSection) {
-    sections.push(["## How you typically handle situations", playbooksSection].join("\n"))
+    sections.push(section("playbooks", playbooksSection))
   }
 
   const decisionsSection = formatDecisions(input.decisions ?? [], maxDecisions)
   if (decisionsSection) {
-    sections.push(["## Decisions you have made", decisionsSection].join("\n"))
+    sections.push(section("decisions", decisionsSection))
   }
 
   // 3. Retrieved knowledge (per-turn)
   const retrieved = formatRetrievedChunks(input.retrievedChunks)
   if (retrieved) {
-    dynamicSections.push(
-      [
-        "## Relevant historical material",
-        "Use these excerpts when they answer the user's question. Cite sources by their chunk number when you do. If they don't answer the question, say so honestly rather than guessing.",
-        "",
-        retrieved,
-      ].join("\n")
-    )
+    dynamicSections.push(section("retrieved", retrieved))
   }
 
   // 4. Style few-shot
   const styleSection = formatStyleSamples(input.styleSamples)
   if (styleSection) {
-    dynamicSections.push(
-      [
-        "## Style examples",
-        "Examples of the user's prior writing in similar contexts. Match the tone and structure; do not copy verbatim.",
-        "",
-        styleSection,
-      ].join("\n")
-    )
+    dynamicSections.push(section("style", styleSection))
   }
 
   const SEP = "\n\n---\n\n"

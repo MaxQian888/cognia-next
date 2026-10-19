@@ -5,11 +5,36 @@ import {
   buildCommitUserPrompt,
   clampDiff,
   DEFAULT_DIFF_CHAR_BUDGET,
+  COMMIT_AGENT_CLAUSE_PROMPT,
+  COMMIT_CONVENTIONAL_FORMAT_PROMPT,
+  COMMIT_FREEFORM_FORMAT_PROMPT,
+  COMMIT_SYSTEM_PROMPT,
   extractCommitMessage,
   generateCommitMessage,
+  resolveCommitPromptTexts,
   stripFences,
 } from "./ai-commit"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+  type ActivePromptOverride,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 import type { GitFileChange } from "@/types/git"
+
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
+
+function publish(...rows: Omit<ActivePromptOverride, "bindingId" | "contractVersion">[]) {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot(
+      "test-db",
+      rows.map((row) => ({ ...row, bindingId: `pob-${row.revisionId}`, contractVersion: 1 }))
+    )
+  )
+}
 
 const files: Pick<GitFileChange, "path" | "status">[] = [
   { path: "src/a.ts", status: "modified" },
@@ -190,5 +215,103 @@ describe("extractCommitMessage", () => {
 
   it("returns an empty string for an empty answer", () => {
     expect(extractCommitMessage("<commit-message>  </commit-message>")).toBe("")
+  })
+})
+
+describe("Prompt Center overrides", () => {
+  it("resolves the shipped texts byte-identically when nothing is published", async () => {
+    for (const conventionalCommits of [true, false]) {
+      const texts = await resolveCommitPromptTexts({ conventionalCommits })
+      expect(texts.system).toBe(buildCommitSystemPrompt({ conventionalCommits }))
+      expect(texts.agentClause).toBe(COMMIT_AGENT_CLAUSE_PROMPT.defaultBody)
+    }
+  })
+
+  it("renders the selected format override into the base instructions", async () => {
+    publish(
+      {
+        promptId: COMMIT_FREEFORM_FORMAT_PROMPT.id,
+        scope: "account",
+        targetId: "",
+        revisionId: "por-commit-freeform",
+        body: "One short line, lowercase.",
+      },
+      {
+        promptId: COMMIT_CONVENTIONAL_FORMAT_PROMPT.id,
+        scope: "account",
+        targetId: "",
+        revisionId: "por-commit-conventional",
+        body: "Gitmoji, please.",
+      }
+    )
+    const complete = jest.fn().mockResolvedValue("chore: x")
+    await generateCommitMessage(
+      { diffText: "diff", files, config: { conventionalCommits: false } },
+      { complete }
+    )
+    expect(complete.mock.calls[0][1].system).toBe(
+      [
+        "You write Git commit messages from a staged diff.",
+        "Output ONLY the raw commit message — no markdown fences, no preamble, no quotes.",
+        "One short line, lowercase.",
+        "Never invent changes that are not present in the diff.",
+      ].join("\n")
+    )
+  })
+
+  it("applies a workspace override only to that workspace's repositories", async () => {
+    publish({
+      promptId: COMMIT_SYSTEM_PROMPT.id,
+      scope: "workspace",
+      targetId: "ws-1",
+      revisionId: "por-commit-system-ws",
+      body: "House style.\n{{formatRules}}",
+    })
+    const complete = jest.fn().mockResolvedValue("chore: x")
+    const input = {
+      diffText: "diff",
+      files,
+      config: { conventionalCommits: true, customInstructions: "Mention the ticket" },
+    }
+    await generateCommitMessage(input, { complete }, { promptContext: { workspaceId: "ws-1" } })
+    expect(complete.mock.calls[0][1].system).toBe(
+      `House style.\n${COMMIT_CONVENTIONAL_FORMAT_PROMPT.defaultBody}\nAdditional instructions: Mention the ticket`
+    )
+    await generateCommitMessage(input, { complete }, { promptContext: { workspaceId: "ws-2" } })
+    expect(complete.mock.calls[1][1].system).toBe(buildCommitSystemPrompt(input.config))
+  })
+
+  it("puts a resolved agent clause into the agent prompts", async () => {
+    publish({
+      promptId: COMMIT_AGENT_CLAUSE_PROMPT.id,
+      scope: "account",
+      targetId: "",
+      revisionId: "por-commit-agent-clause",
+      body: "Stay read-only. Answer in <commit-message></commit-message>.",
+    })
+    const texts = await resolveCommitPromptTexts({ conventionalCommits: true })
+    const system = buildCommitAgentSystemPrompt({ conventionalCommits: true }, texts)
+    expect(system).toBe(
+      `${buildCommitSystemPrompt({ conventionalCommits: true })}\nStay read-only. Answer in <commit-message></commit-message>.`
+    )
+    const prompt = buildCommitAgentPrompt(
+      { diffText: "d", files, config: { conventionalCommits: true } },
+      texts
+    )
+    expect(prompt.startsWith(`${system}\n\n`)).toBe(true)
+  })
+
+  it("stops before calling the model when aborted while resolving", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const complete = jest.fn()
+    await expect(
+      generateCommitMessage(
+        { diffText: "diff", files, config: { conventionalCommits: true } },
+        { complete },
+        { abortSignal: controller.signal }
+      )
+    ).rejects.toBeDefined()
+    expect(complete).not.toHaveBeenCalled()
   })
 })

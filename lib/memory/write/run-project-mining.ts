@@ -34,6 +34,7 @@ import { projectMiningExcerpt } from "@cognia/memory/extract/project-excerpt"
 import { normalizeProjectPaths } from "@cognia/memory/extract/project-path-normalize"
 import {
   extractProjectClaims,
+  PROJECT_CLAIM_EXTRACT_SYSTEM_PROMPT,
   PROJECT_PROMPT_VERSION,
   type ExtractProjectClaimsInput,
   type ProjectClaimCandidate,
@@ -48,6 +49,9 @@ import {
   type ConsolidationOp,
 } from "@/lib/memory/consolidate/consolidator"
 import { hashContent } from "@/lib/project-knowledge/ingest/ingest-file"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
+import { resolveConsolidateSystemPrompt } from "./run-memory-extraction"
 import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
 import {
   isToolPart,
@@ -64,6 +68,54 @@ import {
   DEFAULT_WINDOW_MAX_TOKENS,
 } from "@cognia/memory/extract/project-windows"
 import { BM25Index } from "@cognia/rag/hybrid-search"
+
+/**
+ * The project-claim extractor's system prompt (ADR-0236). Account scope only:
+ * the extract step receives the normalized, redacted window, and a project
+ * hint rather than the workspace id. The JSON shape and citation rules the
+ * parser enforces are asked for in the user prompt, which stays code-owned.
+ */
+export const MEMORY_PROJECT_EXTRACT_PROMPT = definePrompt({
+  id: "knowledge.memory.project-extract",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "knowledge",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  // The reply is parsed as JSON claims; a reply that is not JSON mines nothing.
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 8_000,
+  requiredFragments: ["JSON"],
+  outputContract:
+    "Sent as the system prompt of each project-mining extraction; the reply is parsed as JSON `claims`, each kept only when its anchor and evidence cite the supplied window.",
+  consumers: ["lib/memory/write/run-project-mining.ts"],
+  defaultBody: PROJECT_CLAIM_EXTRACT_SYSTEM_PROMPT,
+})
+
+/** The extractor's system prompt for one window, and the version its rows carry. */
+export interface ProjectExtractPrompt {
+  systemPrompt: string
+  /** Stamped as `Memory.extractor.promptVersion`. */
+  promptVersion: string
+}
+
+/**
+ * Resolve the extractor prompt for one mining window. A customized prompt
+ * stamps its revision onto the version, so its rows can be found and
+ * re-mined apart from the shipped prompt's, which is what the stamp is for.
+ */
+export async function resolveProjectExtractPrompt(): Promise<ProjectExtractPrompt> {
+  const resolved = await resolvePromptAsync(MEMORY_PROJECT_EXTRACT_PROMPT)
+  return {
+    systemPrompt: resolved.text,
+    promptVersion:
+      resolved.source.kind === "override"
+        ? `${PROJECT_PROMPT_VERSION}+override:${resolved.source.revisionId}`
+        : PROJECT_PROMPT_VERSION,
+  }
+}
 
 /** Why a window produced nothing. Surfaced as the job's `resultCode`. */
 export type ProjectMiningSkipReason =
@@ -102,8 +154,14 @@ export interface RunProjectMiningInput {
 export interface RunProjectMiningDeps {
   /** Background jobs must preserve transport/storage failures for retry. */
   propagateErrors?: boolean
-  extract: (input: ExtractProjectClaimsInput) => Promise<ProjectClaimCandidate[]>
+  /** `systemPrompt` is the resolved extractor prompt for this window. */
+  extract: (
+    input: ExtractProjectClaimsInput,
+    systemPrompt?: string
+  ) => Promise<ProjectClaimCandidate[]>
   consolidate: (input: ConsolidateInput) => Promise<{ applied: ConsolidationOp[] }>
+  /** Resolve the extractor prompt; defaults to {@link resolveProjectExtractPrompt}. */
+  resolveExtractPrompt?: () => Promise<ProjectExtractPrompt>
   /** Per-claim PII gate; defaults to `hasNoLeakingPii`. */
   isPiiSafe?: (text: string) => boolean
   /** Fail-closed gate over the whole redacted payload sent to the utility LLM. */
@@ -266,8 +324,11 @@ export async function runProjectMining(
     const isPayloadPiiSafe = deps.isPayloadPiiSafe ?? hasNoLeakingPiiDeep
     if (!isPayloadPiiSafe(extractionInput)) return skipped("payload_pii_blocked")
 
+    // One resolution per window: both extract calls and the rows they produce
+    // agree on which prompt was used.
+    const extractPrompt = await (deps.resolveExtractPrompt ?? resolveProjectExtractPrompt)()
     const claims = prepared.some((message) => message.text.trim())
-      ? await deps.extract(extractionInput)
+      ? await deps.extract(extractionInput, extractPrompt.systemPrompt)
       : []
     let attachmentCoverage: RunProjectMiningResult["attachmentCoverage"]
     if (attachmentExcerpts.length) {
@@ -324,7 +385,7 @@ export async function runProjectMining(
           attachments: selected,
         }
         if (!isPayloadPiiSafe(attachmentInput)) return skipped("payload_pii_blocked")
-        const extracted = await deps.extract(attachmentInput)
+        const extracted = await deps.extract(attachmentInput, extractPrompt.systemPrompt)
         const selectedIds = new Set(selected.map((item) => item.sourceId))
         claims.push(
           ...extracted.filter((claim) =>
@@ -396,7 +457,7 @@ export async function runProjectMining(
                 extractor: {
                   provider: deps.extractorIdentity.provider,
                   model: deps.extractorIdentity.model,
-                  promptVersion: PROJECT_PROMPT_VERSION,
+                  promptVersion: extractPrompt.promptVersion,
                 },
               }
             : {}),
@@ -577,12 +638,20 @@ export async function buildProjectMiningDeps(
 
   return {
     propagateErrors: true,
-    extract: (eInput) => extractProjectClaims(eInput, client, { propagateErrors: true }),
+    extract: (eInput, systemPrompt) =>
+      extractProjectClaims(eInput, client, {
+        propagateErrors: true,
+        ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+      }),
     consolidate: async (cInput) => {
+      const judgedDeps: ConsolidateDeps = {
+        ...consolidateDeps,
+        decideSystemPrompt: await resolveConsolidateSystemPrompt(),
+      }
       const attachmentDerived = cInput.candidates.some((candidate) =>
         candidate.projectClaim?.evidence?.some((reference) => reference.kind === "file")
       )
-      if (!attachmentDerived) return consolidate(cInput, consolidateDeps)
+      if (!attachmentDerived) return consolidate(cInput, judgedDeps)
       const replayed: ConsolidationOp[] = []
       let candidates = cInput.candidates
       if (attachmentDerived) {
@@ -620,7 +689,7 @@ export async function buildProjectMiningDeps(
         { ...cInput, candidates },
         attachmentDerived
           ? {
-              ...consolidateDeps,
+              ...judgedDeps,
               // External source instructions must never overwrite trusted workspace
               // facts. Keep new attachment findings as explicit review drafts.
               findSimilar: async () => [],
@@ -631,7 +700,7 @@ export async function buildProjectMiningDeps(
                   reviewStatus: "unreviewed",
                 }),
             }
-          : consolidateDeps
+          : judgedDeps
       )
       return { applied: [...replayed, ...result.applied] }
     },

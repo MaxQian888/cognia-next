@@ -6,6 +6,17 @@ import {
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { PromptDefinitionV1 } from "@/lib/prompts/types"
+import {
+  LEAD_PLANNING_PROMPT,
+  LEAD_PLANNING_SYSTEM_PROMPT,
+  TEAMMATE_TASK_PROMPT,
+} from "./team-prompts"
 
 function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
   return {
@@ -102,6 +113,32 @@ beforeEach(() => {
   useAgentTeamStore.getState().reset()
 })
 
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
+
+/** Publish one override of `def` (ADR-0236) at the given scope. */
+function publishOverride(
+  def: PromptDefinitionV1,
+  body: string,
+  revisionId: string,
+  target: { scope: "account" | "workspace"; targetId: string } = { scope: "account", targetId: "" }
+): void {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: "pob",
+        promptId: def.id,
+        ...target,
+        revisionId,
+        body,
+        contractVersion: def.contractVersion,
+      },
+    ])
+  )
+}
+
 describe("buildTeammatePrompt", () => {
   it("includes team task, teammate role, and task title/description/expectedOutput", () => {
     const prompt = buildTeammatePrompt(makeTeam(), makeTeammate(), makeTask())
@@ -123,11 +160,51 @@ describe("buildTeammatePrompt", () => {
     const prompt = buildTeammatePrompt(makeTeam(), teammate, makeTask())
     expect(prompt).toContain("Your role: research")
   })
+
+  it("sends the team project's customized task prompt (ADR-0236)", () => {
+    publishOverride(
+      TEAMMATE_TASK_PROMPT,
+      "Do {{taskTitle}}: {{taskDescription}}",
+      "por-teammate-task",
+      { scope: "workspace", targetId: "ws-team" }
+    )
+    const scoped = buildTeammatePrompt(
+      makeTeam({ projectId: "ws-team" }),
+      makeTeammate(),
+      makeTask()
+    )
+    expect(scoped).toBe("Do Gather sources: Find 3 reputable sources on the topic.")
+    // Another project keeps the shipped wording.
+    const other = buildTeammatePrompt(
+      makeTeam({ projectId: "ws-other" }),
+      makeTeammate(),
+      makeTask()
+    )
+    expect(other).toContain("Produce the deliverable directly.")
+  })
+
+  it("reads the snapshot its step froze", () => {
+    const frozen = buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: "pob",
+        promptId: TEAMMATE_TASK_PROMPT.id,
+        scope: "account",
+        targetId: "",
+        revisionId: "por-teammate-frozen",
+        body: "Frozen: {{taskTitle}} / {{taskDescription}}",
+        contractVersion: TEAMMATE_TASK_PROMPT.contractVersion,
+      },
+    ])
+    const prompt = buildTeammatePrompt(makeTeam(), makeTeammate(), makeTask(), {
+      snapshot: frozen,
+    })
+    expect(prompt).toBe("Frozen: Gather sources / Find 3 reputable sources on the topic.")
+  })
 })
 
 describe("buildLeadPlanningPrompt", () => {
-  it("lists workers and asks for a JSON-fenced plan", () => {
-    const prompt = buildLeadPlanningPrompt(
+  it("lists workers and asks for a JSON-fenced plan", async () => {
+    const prompt = await buildLeadPlanningPrompt(
       makeTeam(),
       [
         makeTeammate({ id: "tm-1", name: "Researcher", description: "research" }),
@@ -141,16 +218,20 @@ describe("buildLeadPlanningPrompt", () => {
     expect(prompt).toContain("Investigate the topic.")
   })
 
-  it("includes feedback when revising", () => {
-    const prompt = buildLeadPlanningPrompt(makeTeam(), [makeTeammate()], "Add a verification step.")
+  it("includes feedback when revising", async () => {
+    const prompt = await buildLeadPlanningPrompt(
+      makeTeam(),
+      [makeTeammate()],
+      "Add a verification step."
+    )
     expect(prompt).toContain("Add a verification step.")
     expect(prompt).toContain("Revise the plan accordingly.")
   })
 
-  it("never leaks raw credentials or endpoints into the coordinator prompt (ADR-0090)", () => {
+  it("never leaks raw credentials or endpoints into the coordinator prompt (ADR-0090)", async () => {
     // Legacy rows may still carry raw apiKey/baseURL (deprecated-readable);
     // the coordinator sees candidate names/roles + refs ONLY.
-    const prompt = buildLeadPlanningPrompt(
+    const prompt = await buildLeadPlanningPrompt(
       makeTeam(),
       [
         makeTeammate({
@@ -171,6 +252,23 @@ describe("buildLeadPlanningPrompt", () => {
     expect(prompt).not.toContain("sk-raw-legacy-key-123456")
     expect(prompt).not.toContain("open.bigmodel.cn")
     expect(prompt).not.toMatch(/api[_-]?key/i)
+  })
+
+  it("sends a published planning prompt override (ADR-0236)", async () => {
+    publishOverride(
+      LEAD_PLANNING_PROMPT,
+      [
+        "Plan for {{teamGoal}} with:",
+        "{{roster}}",
+        "{{reviewerFeedback}}",
+        'Reply in ```json {"summary", "steps": [{"title", "assignTo"}]}',
+      ].join("\n"),
+      "por-lead-planning"
+    )
+    const prompt = await buildLeadPlanningPrompt(makeTeam(), [makeTeammate()], undefined)
+    expect(prompt).toBe(
+      'Plan for Investigate the topic. with:\n- Researcher: Gathers facts and primary sources\n\nReply in ```json {"summary", "steps": [{"title", "assignTo"}]}'
+    )
   })
 })
 
@@ -364,6 +462,36 @@ describe("runLeadPlanning", () => {
       expect.objectContaining({
         systemPrompt: expect.stringContaining("IM entry persona (Sage):\nUse a calm voice."),
       })
+    )
+  })
+
+  it("plans with the project's customized planning persona only when none is configured (ADR-0236)", async () => {
+    publishOverride(
+      LEAD_PLANNING_SYSTEM_PROMPT,
+      "Plan tersely. Reply with one ```json block.",
+      "por-lead-planning-system",
+      { scope: "workspace", targetId: "ws-team" }
+    )
+    const team = makeTeam({ projectId: "ws-team" })
+    const lead = makeLead()
+    seedStore(team, [lead, makeTeammate()])
+    const executeAgent = jest.fn(async () => ({
+      text: "```json\n{}\n```",
+      channel: "text" as const,
+      toolsAvailable: false,
+    }))
+    const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+    await runLeadPlanning!({ team, lead, signal: new AbortController().signal })
+    expect((executeAgent as jest.Mock).mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ systemPrompt: "Plan tersely. Reply with one ```json block." })
+    )
+
+    // A lead persona still wins over the catalog default.
+    const configured = makeLead({ config: { systemPrompt: "Lead persona." } })
+    await runLeadPlanning!({ team, lead: configured, signal: new AbortController().signal })
+    expect((executeAgent as jest.Mock).mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ systemPrompt: "Lead persona." })
     )
   })
 

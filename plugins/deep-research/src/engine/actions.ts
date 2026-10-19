@@ -10,7 +10,7 @@ import { extractJson } from "../lib/json"
 import { classifyResearchError } from "../errors"
 import type { ResearchAction } from "../types"
 import { canAnswer } from "./budget"
-import { decideActionMessages } from "./prompts"
+import { decideActionMessages, systemPromptFor, type SystemPromptResolver } from "./prompts"
 import { renderWorkspace, type ResearchState } from "./workspace"
 
 export interface ActionDecision {
@@ -32,10 +32,16 @@ interface RawDecision {
 export async function decideNextAction(
   state: ResearchState,
   ai: AiBridge,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  prompt?: SystemPromptResolver
 ): Promise<{ decision: ActionDecision; tokens: number }> {
   const allowAnswer = canAnswer(state)
-  const messages = decideActionMessages(renderWorkspace(state), allowAnswer, state.config.locale)
+  const messages = decideActionMessages(
+    renderWorkspace(state),
+    allowAnswer,
+    state.config.locale,
+    await systemPromptFor("decide-action", prompt)
+  )
 
   try {
     const res = await completeJson<RawDecision>(ai, messages, (t) => extractJson<RawDecision>(t), {

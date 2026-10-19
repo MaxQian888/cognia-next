@@ -117,6 +117,14 @@ export interface ConsolidateDeps {
   invalidate: (id: string, supersededById?: string) => Promise<void>
   /** Mark both sides of an unresolved contradiction for explicit review. */
   markConflict?: (targetId: string, conflictId: string) => Promise<void>
+  /**
+   * The judge's system prompt; defaults to
+   * {@link CONSOLIDATE_DECIDE_SYSTEM_PROMPT}. A host that lets the user
+   * customize the wording resolves it per consolidation and passes it here;
+   * the operation names and JSON keys the parser reads are asked for in the
+   * user prompt.
+   */
+  decideSystemPrompt?: string
 }
 
 export type ConsolidationOp =
@@ -238,7 +246,8 @@ export function sameMemoryNamespace(
   )
 }
 
-const DECIDE_SYSTEM =
+/** The consolidation judge's shipped system prompt. */
+export const CONSOLIDATE_DECIDE_SYSTEM_PROMPT =
   "You maintain a long-term memory store. Given a NEW candidate fact and the " +
   "most similar EXISTING memories, choose ONE operation. Return STRICT JSON only."
 
@@ -400,7 +409,7 @@ export async function consolidate(
     let decision: RawDecision
     try {
       const raw = await deps.client.complete(buildDecidePrompt(candidate, similar), {
-        system: DECIDE_SYSTEM,
+        system: deps.decideSystemPrompt ?? CONSOLIDATE_DECIDE_SYSTEM_PROMPT,
         temperature: 0,
         maxTokens: 256,
       })

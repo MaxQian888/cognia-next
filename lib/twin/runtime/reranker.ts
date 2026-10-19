@@ -17,13 +17,16 @@
  * When neither is supplied (or `model === "identity"`) the **identity
  * reranker** returns the candidates in their original cosine order.
  *
- * Pure module — no I/O, no React, no IndexedDB, no provider SDK imports. The
- * LLM reranker takes an injected `complete()` callback so this file stays pure;
- * `build-deps` supplies a real `createLlmClient` client. The Twin Settings UI
- * decides whether to call it; this file is only the algorithm.
+ * No React and no provider SDK imports. The LLM reranker takes an injected
+ * `complete()` callback; `build-deps` supplies a real `createLlmClient` client.
+ * Its only I/O is resolving its Prompt Center definitions (ADR-0236), which
+ * may load the account's override snapshot. The Twin Settings UI decides
+ * whether to call it; this file is only the algorithm.
  */
 
 import { hasNoLeakingPii } from "@cognia/redact"
+import { resolvePrompt, resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 
 export interface RerankCandidate {
   /** Stable id from the vector store. */
@@ -228,11 +231,63 @@ export interface RerankLlmClient {
 /** Max candidate content characters embedded in the rerank prompt (bounds cost). */
 const LLM_RERANK_SNIPPET_CHARS = 500
 
-const LLM_RERANK_SYSTEM =
-  "You are a search result reranker. Given a query and a numbered list of " +
-  "documents, rate how well each document answers the query on a scale from " +
-  "0.0 (irrelevant) to 1.0 (directly answers it). Respond with ONLY a JSON " +
-  "array of numbers — one score per document, in the same order. No prose."
+const RERANK_CONSUMER = "lib/twin/runtime/reranker.ts"
+
+/**
+ * The reranker's system prompt (ADR-0236). Editable, but the reply is parsed
+ * as a bare JSON array of scores, so an override must keep asking for one.
+ */
+export const LLM_RERANK_SYSTEM_PROMPT = definePrompt({
+  id: "twin.runtime.rerank",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "twin",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  // The reply is parsed as a JSON array of one score per document.
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 4_000,
+  requiredFragments: ["JSON array"],
+  outputContract:
+    "Parsed as the first JSON array in the reply; it must hold exactly one finite score per document (clamped to 0–1), otherwise the pool keeps its cosine order.",
+  consumers: [RERANK_CONSUMER],
+  defaultBody:
+    "You are a search result reranker. Given a query and a numbered list of " +
+    "documents, rate how well each document answers the query on a scale from " +
+    "0.0 (irrelevant) to 1.0 (directly answers it). Respond with ONLY a JSON " +
+    "array of numbers — one score per document, in the same order. No prose.",
+})
+
+/**
+ * The per-call request: the query, the numbered documents and the exact score
+ * count the parser checks. Inspect-only, because the count line is the
+ * length contract the reply is validated against.
+ */
+export const LLM_RERANK_REQUEST_PROMPT = definePrompt({
+  id: "twin.runtime.rerank-request",
+  contractVersion: 1,
+  kind: "protocol",
+  group: "twin",
+  operation: "inspect-only",
+  scopes: [],
+  activation: "next-operation",
+  risk: "protocol",
+  hosts: ["app"],
+  variables: [
+    // The query is the user's message (uncapped); documents are 500 chars each.
+    { name: "query", required: true, maxChars: 1_000_000 },
+    { name: "documents", required: true, maxChars: 1_000_000 },
+    { name: "count", required: true, maxChars: 16 },
+  ],
+  consumers: [RERANK_CONSUMER],
+  defaultBody:
+    "Query: {{query}}\n\n" +
+    "Documents:\n{{documents}}\n\n" +
+    "Return a JSON array of exactly {{count}} relevance scores " +
+    "(0.0–1.0), one per document index, in order.",
+})
 
 function buildLlmRerankPrompt(query: string, candidates: readonly RerankCandidate[]): string {
   const docs = candidates
@@ -241,12 +296,9 @@ function buildLlmRerankPrompt(query: string, candidates: readonly RerankCandidat
       return `[${i}] ${snippet}`
     })
     .join("\n")
-  return (
-    `Query: ${query}\n\n` +
-    `Documents:\n${docs}\n\n` +
-    `Return a JSON array of exactly ${candidates.length} relevance scores ` +
-    `(0.0–1.0), one per document index, in order.`
-  )
+  return resolvePrompt(LLM_RERANK_REQUEST_PROMPT, {
+    values: { query, documents: docs, count: String(candidates.length) },
+  }).text
 }
 
 /**
@@ -271,8 +323,12 @@ export function createLlmRerankScorer(
     ) {
       throw new Error("llm rerank: PII gate rejected query or candidate content")
     }
+    const system = (await resolvePromptAsync(LLM_RERANK_SYSTEM_PROMPT)).text
+    // The snapshot load can outlive the retrieval budget; never dispatch a
+    // call the caller already abandoned.
+    opts?.signal?.throwIfAborted()
     const raw = await client.complete(buildLlmRerankPrompt(query, candidates), {
-      system: LLM_RERANK_SYSTEM,
+      system,
       temperature: 0,
       ...(opts?.signal ? { abortSignal: opts.signal } : {}),
     })

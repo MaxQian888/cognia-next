@@ -88,6 +88,12 @@ export interface StandaloneAnswerDeps {
   sanitizeText?: (text: string) => string
   /** Host framing for third-party source text (for example, prompt-injection warnings). */
   wrapUntrustedContent?: (text: string) => string
+  /**
+   * The answer model's system prompt; defaults to
+   * {@link STANDALONE_ANSWER_SYSTEM_PROMPT}. A host that lets the user
+   * customize the wording resolves it per call and passes it here.
+   */
+  systemPrompt?: string
 }
 
 export interface StandaloneAnswerPromptGuards {
@@ -100,7 +106,8 @@ const DEFAULT_MAX_RESULTS = 8
 /** Cap the per-source content fed to the model so the prompt stays bounded. */
 const SOURCE_CONTENT_MAX = 1500
 
-const ANSWER_SYSTEM_PROMPT =
+/** The answer model's shipped system prompt. */
+export const STANDALONE_ANSWER_SYSTEM_PROMPT =
   "You are a precise research assistant. Answer the user's question using ONLY the " +
   "numbered web sources provided. Cite every claim with bracketed source numbers like " +
   "[1] or [2][3]. If the sources do not contain the answer, say so plainly. Be concise " +
@@ -185,6 +192,7 @@ export async function runStandaloneSearchAnswer(
   // With sources but a configured model, synthesize a grounded, cited answer.
   try {
     const generate = params.generateTextImpl ?? generateText
+    const system = deps.systemPrompt ?? STANDALONE_ANSWER_SYSTEM_PROMPT
     const prompt = buildAnswerPrompt(query, sources, {
       sanitizeText: deps.sanitizeText,
       wrapUntrustedContent: deps.wrapUntrustedContent,
@@ -195,13 +203,13 @@ export async function runStandaloneSearchAnswer(
         stage: "web-search.standalone-answer",
         modelId: modelIdOf(model),
         prompt,
-        system: ANSWER_SYSTEM_PROMPT,
+        system,
         ...(params.signal ? { abortSignal: params.signal } : {}),
       },
       (overrides) =>
         generate({
           model,
-          system: ANSWER_SYSTEM_PROMPT,
+          system,
           prompt,
           abortSignal: params.signal,
           ...overrides,

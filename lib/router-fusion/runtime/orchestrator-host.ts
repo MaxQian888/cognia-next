@@ -33,6 +33,7 @@ import {
   delegatePatchSha256,
   estimateTokens,
   reserveForCall,
+  rolePromptProfileFor,
   runCascade,
   runDelegateWorkflow,
   runDirect,
@@ -526,6 +527,10 @@ export async function executeFusionRun(
     const reserve = (deploymentId: string, inputTokens: number, outputTokens: number) =>
       roleReserve(config, deploymentId, inputTokens, outputTokens, unknownPriceReserve)
     const jsonSchema = runInput.jsonSchema ?? undefined
+    // The role text the run pinned: roles-1, or the custom profile frozen into
+    // its config snapshot when it was routed — never re-read from the Prompt
+    // Center, so a resumed run sends what its first worker sent.
+    const rolePrompts = rolePromptProfileFor(config, action)
 
     let result: RunResult
     switch (run.mode) {
@@ -550,6 +555,7 @@ export async function executeFusionRun(
           ...(jsonSchema ? { jsonSchema } : {}),
           toolPolicyId: null,
           stream: input.stream === true,
+          rolePrompts,
           signal: controller.signal,
           ...(input.onDelta ? { onDelta: input.onDelta } : {}),
         })
@@ -587,6 +593,7 @@ export async function executeFusionRun(
           deliversChange: false,
           allowDegraded: runInput.allowDegraded,
           ...(jsonSchema ? { jsonSchema } : {}),
+          rolePrompts,
           signal: controller.signal,
         })
         result = outcome.result
@@ -661,6 +668,7 @@ export async function executeFusionRun(
             memberToolPolicyId: tools.memberPolicyId,
             verificationToolPolicyId: tools.runtime ? tools.verificationPolicyId : null,
             ...(jsonSchema ? { jsonSchema } : {}),
+            rolePrompts,
             deadlineAt: run.deadlineAt,
             signal: controller.signal,
           }
@@ -733,6 +741,7 @@ export async function executeFusionRun(
             // only ever reached through an approval the DELIVER step asks for.
             // No surface sets it yet (see `FusionRunRow.delegateDelivery`).
             delivery: run.delegateDelivery ?? "patch_only",
+            rolePrompts,
             deadlineAt: run.deadlineAt,
             signal: controller.signal,
           }

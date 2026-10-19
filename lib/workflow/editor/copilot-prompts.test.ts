@@ -15,10 +15,15 @@
 import {
   WORKFLOW_COPILOT_ALLOWED_TOOLS,
   WORKFLOW_COPILOT_DISALLOWED_TOOLS,
+  WORKFLOW_COPILOT_PROMPT,
   WORKFLOW_COPILOT_SUBAGENT_NAMES,
   buildWorkflowCopilotPrompt,
-  workflowCopilotAgent,
 } from "./copilot-prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 const DIRECT_MUTATION_TOOLS = [
   "wf_add_node",
@@ -181,10 +186,35 @@ describe("buildWorkflowCopilotPrompt", () => {
   })
 })
 
-describe("workflowCopilotAgent definition", () => {
-  it("is a valid AgentDefinition shape for Task-tool spawning", () => {
-    expect(workflowCopilotAgent.description.length).toBeGreaterThan(20)
-    expect(workflowCopilotAgent.prompt.length).toBeGreaterThan(200)
-    expect((workflowCopilotAgent.tools ?? []).length).toBe(WORKFLOW_COPILOT_ALLOWED_TOOLS.length)
+describe("Workflow Copilot Prompt Center entry (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("ships the identity sections as the default body", () => {
+    expect(buildWorkflowCopilotPrompt(null)).toBe(WORKFLOW_COPILOT_PROMPT.defaultBody)
+    expect(buildWorkflowCopilotPrompt("snap")).toBe(
+      `${WORKFLOW_COPILOT_PROMPT.defaultBody}\n\n---\n\nsnap`
+    )
+  })
+
+  it("replaces the identity with a published override and still appends the snapshot", () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-copilot",
+          promptId: WORKFLOW_COPILOT_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-workflow-copilot",
+          body: "You are a terse workflow assistant. Propose via wf_propose_batch.",
+          contractVersion: WORKFLOW_COPILOT_PROMPT.contractVersion,
+        },
+      ])
+    )
+    expect(buildWorkflowCopilotPrompt("  # Currently-open workflow  ")).toBe(
+      "You are a terse workflow assistant. Propose via wf_propose_batch.\n\n---\n\n# Currently-open workflow"
+    )
   })
 })

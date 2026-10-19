@@ -7,6 +7,12 @@ import type { DecisionRequest, DecisionResult } from "@/types/decisions"
 import type { CopilotTranscript } from "./build-state"
 import type { CopilotKnowledge } from "./knowledge"
 import { UNSPECIFIED_RELATIONSHIP, runCopilot, type CopilotRunDeps } from "./run-copilot"
+import { COPILOT_QUESTION_PROMPTS } from "./questions"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 const transcript: CopilotTranscript = {
   turns: [
@@ -224,5 +230,46 @@ it("does not claim ranking when a provider omits choice probabilities", async ()
     kind: "ok",
     ranked: false,
     candidates: [{ probability: null }, { probability: null }, { probability: null }],
+  })
+})
+
+describe("runCopilot question overrides (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("asks the judge and the ranking with the published instructions", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-intent",
+          promptId: COPILOT_QUESTION_PROMPTS.compact.true_intent.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-run-intent",
+          body: "What is the sender after?",
+          contractVersion: 1,
+        },
+        {
+          bindingId: "pob-rank",
+          promptId: COPILOT_QUESTION_PROMPTS.compact.best_reply.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-run-rank",
+          body: "Which reply fits best?",
+          contractVersion: 1,
+        },
+      ])
+    )
+    const { d, decide } = deps()
+    await runCopilot({ transcript, knowledge, instructions: "", client }, d)
+    const judgeRequest = decide.mock.calls[0][0]
+    const rankRequest = decide.mock.calls[1][0]
+    expect(judgeRequest.questions.true_intent.instructions).toBe("What is the sender after?")
+    expect(judgeRequest.questions.danger_level.instructions).toBe(
+      COPILOT_QUESTION_PROMPTS.compact.danger_level.defaultBody
+    )
+    expect(rankRequest.questions.best_reply.instructions).toBe("Which reply fits best?")
   })
 })

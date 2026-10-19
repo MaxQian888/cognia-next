@@ -128,10 +128,19 @@ export async function dispatchSubagent(
   let def: PluginSubagentDef | undefined
   let thisId: string
   if (typeof idOrDef === "string") {
-    const { getSubagent } = await import("@/lib/plugin/registries/subagent-registry")
-    def = getSubagent(idOrDef)
-    if (!def) {
+    const [{ getSubagentEntry }, { resolvePluginSubagentPrompt }] = await Promise.all([
+      import("@/lib/plugin/registries/subagent-registry"),
+      import("@/lib/prompts/plugin-subagent-prompts"),
+    ])
+    const registered = getSubagentEntry(idOrDef)
+    if (!registered) {
       throw new Error(`dispatchSubagent: subagent "${idOrDef}" is not registered`)
+    }
+    // The registry holds the plugin's own text; a Prompt Center override of it
+    // applies on this rail as on the projected ones.
+    def = {
+      ...registered.entry,
+      prompt: resolvePluginSubagentPrompt(registered.pluginId, registered.entry),
     }
     thisId = idOrDef
   } else {

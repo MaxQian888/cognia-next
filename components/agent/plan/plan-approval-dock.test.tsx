@@ -4,13 +4,18 @@
 
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { PlanApprovalDock } from "./plan-approval-dock"
+import { PLAN_APPROVED_PROMPT as PLAN_APPROVED_DEFINITION } from "@/lib/agent/plan/approval-prompts"
 import {
-  PlanApprovalDock,
-  PLAN_APPROVED_PROMPT,
-  buildPlanApprovedPrompt,
-} from "./plan-approval-dock"
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 import type { AgentPlan, PlanStep } from "@/types/agent/plan"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
+
+/** The shipped implementing turn; no override is published in these tests. */
+const PLAN_APPROVED_PROMPT = PLAN_APPROVED_DEFINITION.defaultBody
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -609,31 +614,7 @@ describe("PlanApprovalDock", () => {
   })
 })
 
-describe("buildPlanApprovedPrompt", () => {
-  it("returns the base prompt for an unedited plan", () => {
-    expect(buildPlanApprovedPrompt(plan())).toBe(PLAN_APPROVED_PROMPT)
-    expect(buildPlanApprovedPrompt(plan({ metadata: { planText: "- x" } }))).toBe(
-      PLAN_APPROVED_PROMPT
-    )
-  })
-
-  it("embeds the edited markdown body when present", () => {
-    const p = plan({ metadata: { userEdited: true, planText: "## Plan\n- do it" } })
-    const prompt = buildPlanApprovedPrompt(p)
-    expect(prompt).toContain("supersedes")
-    expect(prompt).toContain("## Plan\n- do it")
-  })
-
-  it("falls back to a numbered step list when there is no markdown body", () => {
-    const p = plan({
-      steps: [step("b", "second", 1), step("a", "first", 0)],
-      metadata: { userEdited: true },
-    })
-    const prompt = buildPlanApprovedPrompt(p)
-    // Ordered by `order`, not array position.
-    expect(prompt).toContain("1. first\n2. second")
-  })
-
+describe("PlanApprovalDock failure handling", () => {
   it("keepPlanning failure resets busy instead of wedging the card", async () => {
     mockPlan.mockReturnValue(plan())
     keepPlanning.mockRejectedValueOnce(new Error("boom"))
@@ -729,5 +710,38 @@ describe("buildPlanApprovedPrompt", () => {
     const onResume = jest.fn()
     render(<PlanApprovalDock sessionId="ses" onResume={onResume} />)
     expect(onResume).not.toHaveBeenCalled()
+  })
+})
+
+describe("PlanApprovalDock Prompt Center wording", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("resumes with this chat's published approval turn", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: PLAN_APPROVED_DEFINITION.id,
+          scope: "session",
+          targetId: "ses",
+          revisionId: "por-plan-approved-dock",
+          body: "Approved. Go, and run the tests after each step.",
+          contractVersion: PLAN_APPROVED_DEFINITION.contractVersion,
+        },
+      ])
+    )
+    mockPlan.mockReturnValue(plan())
+    const onResume = jest.fn()
+    render(<PlanApprovalDock sessionId="ses" onResume={onResume} />)
+    await userEvent.click(screen.getByTestId("plan-approval-approve-auto"))
+    await waitFor(() =>
+      expect(onResume).toHaveBeenCalledWith(
+        "Approved. Go, and run the tests after each step.",
+        "acceptEdits"
+      )
+    )
   })
 })

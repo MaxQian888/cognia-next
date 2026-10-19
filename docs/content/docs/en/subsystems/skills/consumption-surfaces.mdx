@@ -224,9 +224,8 @@ Two more touchpoints feed off the same data:
 - **Backup domain** — the transfer manifest exposes a single `skills` domain that exports **user skills +
   their resources only**, filtering built-ins in memory (`lib/data/domain/index.ts:128-137`). Details in
   [Data model](./data-model).
-- **External agents** — the external-CLI instruction stack builds a progressive skills prompt via
-  `buildProgressiveSkillsPrompt` (`lib/ai/instructions/external-agent-instruction-stack.ts:122-124`) for
-  Codex / Claude Code / Gemini, and the Codex disk mirror syncs to `~/.agents/skills`. See
+- **External agents** — external runtimes receive skills through the same `resolveSendOptions` assembly
+  as built-in turns, and the Codex disk mirror syncs to `~/.agents/skills`. See
   [Loading & injection](./loading-and-injection) and [Native sync & security](./native-sync-and-security).
 
 ## ADR cross-references

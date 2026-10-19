@@ -1,0 +1,410 @@
+{
+  "actions": {
+    "cancel": "Cancel",
+    "discardDraft": "Discard draft",
+    "followBase": "Follow the base prompt again",
+    "loadLatest": "Discard my edits and load the latest",
+    "makeDefault": "Use by default",
+    "publish": "Publish",
+    "reset": "Reset to inherited",
+    "retry": "Retry",
+    "revertEdits": "Revert my edits",
+    "save": "Save",
+    "saveCustom": "Save as my version",
+    "saveDraft": "Save draft",
+    "updateVariant": "Update my variant",
+    "useShipped": "Start from the shipped text"
+  },
+  "activation": {
+    "new-session-required": "Applies to new sessions; a running external agent keeps the instructions it started with.",
+    "next-operation": "Applies to the next call that uses it; nothing needs restarting.",
+    "reload-required": "Applies after its owner reloads.",
+    "unsupported": "This host cannot apply it."
+  },
+  "baseSource": {
+    "app-default": "Default system prompt",
+    "character": "Agent prompt",
+    "none": "No base prompt",
+    "session": "This chat's prompt",
+    "team-member": "Team member override"
+  },
+  "compare": {
+    "against": "Compare with",
+    "diffLabel": "Changes between the two versions",
+    "identical": "No differences.",
+    "published": "Published at this scope",
+    "shipped": "Shipped text"
+  },
+  "conflict": {
+    "body": "The file changed on disk after it was opened. Your text is kept below the changes made on disk; choose which one to keep.",
+    "diffLabel": "Differences between the file on disk and your text",
+    "keepMine": "Save my text over it",
+    "takeDisk": "Discard my text and load the file",
+    "title": "The file changed on disk"
+  },
+  "detail": {
+    "missing": "This prompt is no longer available."
+  },
+  "editor": {
+    "insertVariable": "Insert {name}",
+    "length": "{length} / {max}",
+    "shippedLabel": "Shipped text",
+    "variableOptional": "Optional; clipped to {max} characters",
+    "variableRequired": "Required; clipped to {max} characters",
+    "variables": "Variables"
+  },
+  "facts": {
+    "activation": "When a change applies",
+    "consumers": "Used by",
+    "hosts": "Runs in",
+    "lastUsed": "Last use in this window",
+    "outputContract": "Output contract",
+    "overrides": "Overridden at",
+    "requiredFragments": "Text the reply parser depends on",
+    "risk": "Edit risk"
+  },
+  "fallback": {
+    "contract-incompatible": "the override was written for an older contract",
+    "invalid-body": "the override failed validation",
+    "pii-blocked": "the override contains personal data",
+    "snapshot-unavailable": "the overrides could not be read"
+  },
+  "group": {
+    "agents": "Agents and modes",
+    "chat": "Chat",
+    "completion": "Completion",
+    "developer": "Developer tools",
+    "generation": "Generation",
+    "goals": "Goals",
+    "knowledge": "Knowledge and memory",
+    "permissions": "Permissions",
+    "routing": "Routing",
+    "team": "Agent Team",
+    "twin": "Digital twin"
+  },
+  "history": {
+    "active": "Active",
+    "compareHint": "Changes from this revision to the text in the editor.",
+    "currentDraft": "Draft",
+    "diffLabel": "Changes from the revision to the editor",
+    "empty": "Nothing has been saved at this scope yet.",
+    "kind": {
+      "draft": "Draft",
+      "published": "Published",
+      "reset": "Reset to inherited"
+    },
+    "loadDraft": "Load into the editor",
+    "origin": {
+      "cli": "from the CLI",
+      "editor": "from the editor",
+      "import": "imported",
+      "restore": "restored"
+    },
+    "restore": "Restore as a new revision",
+    "restoreInheritance": "Restore inheritance",
+    "title": "Revisions"
+  },
+  "host": {
+    "app": "App",
+    "bootstrap": "Bootstrap agent",
+    "cli": "CLI"
+  },
+  "inspectOnly": {
+    "body": "A parser or a host contract reads this text, so it is shown for reference and cannot be overridden.",
+    "title": "Read-only protocol text"
+  },
+  "instructionSource": {
+    "extra": "Extra instruction path",
+    "global": "Global instruction file",
+    "import": "Imported by another instruction file",
+    "instructions-dir": "Project instructions folder",
+    "project": "Project instruction file"
+  },
+  "issues": {
+    "empty": "The text is empty.",
+    "malformedPlaceholder": "A placeholder is malformed; use '{{'name'}}'.",
+    "missingFragment": "Must keep \"{fragment}\": the reply parser depends on it.",
+    "missingVariable": "Must use the variable {name}.",
+    "notEditable": "This prompt cannot be edited.",
+    "pii": "The text looks like it contains personal data, which prompts must not carry.",
+    "tooLong": "{length} characters; the limit is {limit}.",
+    "unknownVariable": "{name} is not a variable of this prompt."
+  },
+  "kind": {
+    "composer-template": "Composer template",
+    "feature-template": "Feature template",
+    "procedure": "Procedure",
+    "project-rule": "Project rule",
+    "protocol": "Protocol",
+    "role": "Role",
+    "runtime-baseline": "Runtime baseline"
+  },
+  "lastUsed": {
+    "default": "Shipped text, at {time}",
+    "fallback": "Shipped text at {time}, because {reason}",
+    "never": "Not used since this window opened",
+    "override": "Override at the {scope} scope, at {time}"
+  },
+  "omission": {
+    "bare-mode": "skipped: bare mode does not read instruction files",
+    "empty": "nothing set",
+    "load-failed": "the files could not be read; a turn would continue without them",
+    "no-filesystem": "this host has no project files to read"
+  },
+  "operation": {
+    "activate-procedure": "Activates on demand",
+    "append-rules": "Adds rules",
+    "inspect-only": "Read only",
+    "legacy-replace": "Replaces the base",
+    "narrow-only": "Can only narrow",
+    "replace-template": "Replaces the template"
+  },
+  "owner": {
+    "builtIn": "Built in",
+    "customCopyName": "{name} (my version)",
+    "customHint": {
+      "character": "Saving creates a variant of this agent that owns only its prompt and follows the agent for everything else.",
+      "custom-mode": "Saving creates your own copy of this mode.",
+      "preset": "Saving creates your own copy of this preset; choose \"Use by default\" on the copy to make it the default.",
+      "skill": "Saving creates your own copy of this Skill with its resources.",
+      "subagent-template": "Saving creates your own subagent from this template, with its settings.",
+      "team-template": "Saving creates your own copy of the whole template, with only this teammate's prompt changed."
+    },
+    "defaultSystemPrompt": "Default system prompt",
+    "loading": "Loading…",
+    "missing": "This resource no longer exists.",
+    "openCustom": "Open my version",
+    "openIn": {
+      "agent-modes": "Open in Agent modes",
+      "agent-runtime": "Open in Agent runtime",
+      "characters": "Open in Agents",
+      "chatTemplates": "Open in Chat templates",
+      "presets": "Open in Presets",
+      "skills": "Open in Skills",
+      "squads": "Open in Squads",
+      "subagents": "Open in Subagents"
+    },
+    "ownerOnly": {
+      "composer-template": "A chat template is inserted as your own message, not as a system instruction. Edit it in Chat templates, which keeps its parameters and revisions consistent."
+    },
+    "readFailed": "Could not read this resource",
+    "readOnly": {
+      "built-in": "Shipped with Cognia",
+      "host-unsupported": "Not editable on this device",
+      "immutable": "This agent cannot be changed",
+      "plugin": "Owned by a plugin"
+    }
+  },
+  "ownerActivation": {
+    "app-setting": "Used by chats whose agent and session set no prompt of their own, from their next turn.",
+    "character": "Used from the next turn of every chat with this agent.",
+    "composer-template": "Inserted into the composer when you choose it.",
+    "custom-mode": "Used from the next turn of chats in this mode.",
+    "instruction-file": "Read from disk; used from the next turn in this workspace.",
+    "preset": "Applied when the preset is next applied to a chat; chats already using it keep their configuration.",
+    "skill": "Delivered by the Skill runtime the next time the Skill loads.",
+    "workspace-instructions": "Used from the next turn of chats in this workspace.",
+    "subagent-template": "Used the next time this subagent is delegated to.",
+    "team-template": "Copied into teams created from this template from now on; existing teams keep their own copy."
+  },
+  "preview": {
+    "agent": "Agent",
+    "description": "The system prompt a new chat starts from, in the order a turn joins it. Sections only a turn can build are listed below it.",
+    "failed": "Could not build the preview: {message}",
+    "loading": "Building the preview…",
+    "mode": "Mode",
+    "noAgent": "No agent",
+    "noMode": "No mode",
+    "omittedTitle": "Not included",
+    "railHint": "What a new chat starts from",
+    "refresh": "Refresh",
+    "segments": "Sections in send order",
+    "sendTimeBody": "Added by each turn from live state (recall, goals, plans, tools), so they are not previewed here.",
+    "sendTimeTitle": "Assembled at send time",
+    "size": "{chars, plural, one {# character} other {# characters}} · ~{tokens} tokens",
+    "skillsCount": "{count, plural, one {# Skill} other {# Skills}}",
+    "skillsNote": "The Skill runtime delivers these within its own budget; which ones load depends on the turn.",
+    "title": "Effective chat prompt",
+    "total": "{chars, plural, one {# character} other {# characters}} · about {tokens} tokens before send-time sections"
+  },
+  "profile": {
+    "applied": "{count, plural, =0 {Nothing was published.} one {Published # override.} other {Published # overrides.}}",
+    "appliedWithConflicts": "Published {applied}; {conflicted} changed since the preview and were left alone.",
+    "applyAction": "{count, plural, =0 {Publish} one {Publish # override} other {Publish # overrides}}",
+    "chooseFile": "Choose a profile file",
+    "description": "Move published overrides between machines and installations as one JSON file.",
+    "exportAction": "Export",
+    "exportHint": "Every published override in the chosen scopes. Drafts and history stay here.",
+    "exportTab": "Export",
+    "exported": "{count, plural, one {Exported # override.} other {Exported # overrides.}}",
+    "importTab": "Import",
+    "invalidFile": "This is not a prompt profile: {reason}",
+    "mapHint": "These overrides belong to workspaces, agents or chats of the machine they came from. Choose where each applies here, or skip it.",
+    "mapTarget": "Local target for {id}",
+    "mapTitle": "Targets",
+    "nothingToExport": "Nothing is published in the chosen scopes.",
+    "previewTitle": "{count, plural, one {# entry} other {# entries}}",
+    "skipTarget": "Skip",
+    "status": {
+      "contract-mismatch": "Written for another version",
+      "invalid": "Fails validation",
+      "needs-target": "Needs a target",
+      "new": "New",
+      "replace": "Replaces an override",
+      "scope-unsupported": "Scope not supported",
+      "unchanged": "Already published",
+      "unknown-prompt": "Unknown prompt"
+    },
+    "title": "Prompt profiles",
+    "upstreamChanged": "Shipped text changed since"
+  },
+  "rail": {
+    "allGroups": "All groups",
+    "allSources": "All sources",
+    "choose": "Choose a prompt",
+    "count": "{total, plural, one {# prompt} other {# prompts}} · {modified} modified",
+    "failed": "Could not read: {sources}",
+    "groupFilter": "Group",
+    "loadFailed": "Could not load prompts: {message}",
+    "loading": "Loading prompts…",
+    "modified": "Modified",
+    "modifiedOnly": "Modified only",
+    "noMatches": "No prompts match.",
+    "noWorkspace": "No workspace",
+    "profiles": "Profiles",
+    "readOnly": "Read only",
+    "search": "Search prompts",
+    "sourceFilter": "Source",
+    "workspace": "Workspace for instruction files",
+    "unavailable": "Unavailable"
+  },
+  "resetDialog": {
+    "bodyAccount": "The account override is removed and the shipped text below applies again. History is kept and can be restored.",
+    "bodyScoped": "This override is removed. Without it the slot falls back to the text below (an account override, or the shipped text); a conversation may still meet a narrower workspace or agent override. History is kept.",
+    "title": "Reset this override?"
+  },
+  "risk": {
+    "approval-sensitive": "Approval-sensitive",
+    "ordinary": "Ordinary",
+    "protocol": "Protocol"
+  },
+  "riskNote": {
+    "approval-sensitive": "Takes part in an approval decision; a customized version can only make the outcome more conservative.",
+    "ordinary": "Wording only; a weak edit lowers output quality.",
+    "protocol": "Its reply is parsed; the required text must stay."
+  },
+  "scope": {
+    "account": "Account",
+    "agent": "Agent",
+    "session": "Chat",
+    "workspace": "Workspace"
+  },
+  "segment": {
+    "base": "Base prompt",
+    "harness": "Standing rules",
+    "instructions": "Instruction files",
+    "mode": "Mode",
+    "persona": "Persona",
+    "skills": "Skills",
+    "workspace": "Workspace instructions"
+  },
+  "sendTime": {
+    "brief-mode": "Brief mode",
+    "compaction-recovery": "Compaction recovery",
+    "goal": "Active goal",
+    "knowledge": "Knowledge",
+    "memory": "Memory recall",
+    "output-style": "Output style",
+    "plan": "Active plan",
+    "project-continuity": "Project continuity",
+    "sandbox": "Sandbox hints",
+    "team-protocol": "Team protocol",
+    "visual-output": "Visual output"
+  },
+  "source": {
+    "app-setting": "App setting",
+    "character": "Agent",
+    "code": "Built in",
+    "composer-template": "Chat template",
+    "custom-mode": "Mode",
+    "instruction-file": "Instruction file",
+    "preset": "Preset",
+    "skill": "Skill",
+    "workspace-instructions": "Workspace",
+    "subagent-template": "Subagent",
+    "team-template": "Team template"
+  },
+  "sourceGroup": {
+    "app-setting": "Default prompt",
+    "character": "Agents",
+    "code": "Built-in prompts",
+    "composer-template": "Chat templates",
+    "custom-mode": "Custom and plugin modes",
+    "instruction-file": "Instruction files",
+    "preset": "Presets",
+    "skill": "Skills",
+    "workspace-instructions": "Workspace instructions",
+    "subagent-template": "Subagent templates",
+    "team-template": "Agent Team templates"
+  },
+  "status": {
+    "hasDraft": "There is an unpublished draft.",
+    "inherits": "Not overridden at this scope; it inherits.",
+    "published": "Published at this scope on {time}."
+  },
+  "tabs": {
+    "compare": "Compare",
+    "compareBase": "Compare with base",
+    "compareSaved": "Compare with saved",
+    "edit": "Edit",
+    "history": "History ({count})"
+  },
+  "target": {
+    "choose": {
+      "agent": "Choose an agent",
+      "session": "Choose a chat",
+      "workspace": "Choose a workspace"
+    },
+    "none": {
+      "agent": "No agents yet.",
+      "session": "No chats yet.",
+      "workspace": "No workspaces yet."
+    },
+    "scope": "Scope",
+    "target": "Target"
+  },
+  "toast": {
+    "conflict": "This prompt changed elsewhere. Your text is kept; load the latest to continue.",
+    "customSaved": "Saved as your own version.",
+    "draftDiscarded": "Draft discarded.",
+    "draftSaved": "Draft saved. It is not used until you publish it.",
+    "failed": "Failed: {message}",
+    "followsBase": "Now follows the base prompt again.",
+    "madeDefault": "{name} is now the default.",
+    "published": "Published. The next call uses it.",
+    "reset": "Reset. The inherited text applies again.",
+    "restored": "Restored as a new revision.",
+    "saved": "Saved.",
+    "scope": "This prompt cannot be overridden at that scope."
+  },
+  "unavailable": {
+    "title": "Not available right now",
+    "plugin": "This prompt belongs to the plugin {plugin}, which is not enabled. Your text is kept and included in exports, and applies again when the plugin is enabled with a compatible version.",
+    "retired": "This version of Cognia no longer uses this prompt. Your text is kept and included in exports.",
+    "slots": "Saved overrides",
+    "hasDraft": "Has a draft",
+    "noActive": "No published text, only a draft or a reset.",
+    "remove": "Remove",
+    "confirmTitle": "Remove this override?",
+    "confirmBody": "Its published text, draft and history at this scope are deleted for good. Export a profile first to keep a copy.",
+    "removed": "Override removed."
+  },
+  "warnings": {
+    "contractBody": "The prompt's inputs or output contract changed in this version. The override is kept but not used; edit it against the new contract and publish again.",
+    "contractTitle": "Override not in use",
+    "staleBody": "Someone published or reset this slot while you were editing. Your text is kept.",
+    "staleTitle": "Changed since you started editing",
+    "upstreamBody": "Cognia updated the shipped text after this override was written. Compare with the shipped text to see what changed.",
+    "upstreamTitle": "Shipped text changed"
+  }
+}

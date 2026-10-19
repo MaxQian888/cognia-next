@@ -23,10 +23,8 @@ import type { z } from "zod"
 import { dispatchTeammate, type DispatchTeammateArgs } from "./dispatch-teammate"
 import { parseProposedPlan } from "../plan-parse"
 import type { TeamRunContext } from "../team-run-context"
-
-const JSON_INSTRUCTION =
-  "\n\nWhen you are done, respond with ONLY a single fenced JSON code block " +
-  "(```json … ```) that matches the required schema. Put no prose before or after the block."
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { STRUCTURED_JSON_INSTRUCTION_PROMPT, STRUCTURED_RETRY_NOTE_PROMPT } from "../team-prompts"
 
 /** Default retry budget — kept at 2 so existing strict callers are unchanged. */
 const DEFAULT_MAX_ATTEMPTS = 2
@@ -71,6 +69,9 @@ export async function dispatchStructured<T>(
   schema: z.ZodType<T>,
   opts: DispatchStructuredOptions = {}
 ): Promise<DispatchStructuredResult<T>> {
+  // Protocol text (ADR-0236): inspect-only, rendered from its definition so
+  // the Prompt Center shows exactly what is appended.
+  const jsonInstruction = `\n\n${resolvePrompt(STRUCTURED_JSON_INSTRUCTION_PROMPT).text}`
   const schemaHint = opts.schemaHint ? `\n\nSchema:\n${opts.schemaHint}` : ""
   const maxAttempts = Math.max(1, opts.maxAttempts ?? DEFAULT_MAX_ATTEMPTS)
   let lastError = "unknown error"
@@ -82,8 +83,8 @@ export async function dispatchStructured<T>(
     const retryNote =
       attempt === 0
         ? ""
-        : `\n\nYour previous response was invalid: ${lastError}\nReturn corrected JSON only — no other text.`
-    const prompt = `${args.prompt}${JSON_INSTRUCTION}${schemaHint}${retryNote}`
+        : `\n\n${resolvePrompt(STRUCTURED_RETRY_NOTE_PROMPT, { values: { error: lastError } }).text}`
+    const prompt = `${args.prompt}${jsonInstruction}${schemaHint}${retryNote}`
 
     const result = await dispatchTeammate(teamCtx, {
       ...args,

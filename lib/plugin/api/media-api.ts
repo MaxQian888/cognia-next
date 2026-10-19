@@ -51,6 +51,7 @@ import {
   type PixelBuffer,
 } from "@/lib/images"
 import { REMOVE_BACKGROUND_PROMPT } from "@/lib/chat/image-edit/prompts"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { useSettingsStore } from "@/stores"
 import { isTauri } from "@/lib/utils"
@@ -1581,11 +1582,16 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
       },
 
       removeBackground: async (imageData: ImageData): Promise<ImageData> => {
-        return runImageAi(pluginId, "ai.removeBackground", () =>
-          // Imported rather than duplicated. The chat workbench's own
-          // background-removal button used to carry a byte-identical copy of
-          // this sentence, which agreed with this one only by coincidence.
-          executeProviderImageEdit(REMOVE_BACKGROUND_PROMPT, imageData)
+        return runImageAi(pluginId, "ai.removeBackground", async () =>
+          // Resolved from the one shared definition rather than duplicated. The
+          // chat workbench's own background-removal button used to carry a
+          // byte-identical copy of this sentence, which agreed with this one
+          // only by coincidence. An account-wide Prompt Center edit (ADR-0236)
+          // reaches both.
+          executeProviderImageEdit(
+            (await resolvePromptAsync(REMOVE_BACKGROUND_PROMPT)).text,
+            imageData
+          )
         )
       },
 

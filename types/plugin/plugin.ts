@@ -2602,6 +2602,9 @@ export interface PluginBaseContext {
   /** System-1 decisions + decision provider registration (ADR-0194). */
   decisions?: import("@/lib/plugin/api/decisions-api").PluginDecisionsAPI
 
+  /** The plugin's prompts as Prompt Center slots, and the text to send for them (ADR-0236). */
+  prompts?: import("@/lib/plugin/api/prompts-api").PluginPromptsAPI
+
   /** Workspace backend registration (ADR-0026 §2 §D). */
   workspace?: import("@/lib/plugin/api/workspace-api").PluginWorkspaceAPI
 
@@ -2694,6 +2697,7 @@ export interface PluginHostContextAPI {
   services: PluginServicesAPI
   ocr: import("@/lib/plugin/api/ocr-api").PluginOcrAPI
   decisions: import("@/lib/plugin/api/decisions-api").PluginDecisionsAPI
+  prompts: import("@/lib/plugin/api/prompts-api").PluginPromptsAPI
   workspace: import("@/lib/plugin/api/workspace-api").PluginWorkspaceAPI
   modal: import("@/lib/plugin/api/modal-api").PluginModalAPI
   webview: import("@/lib/plugin/api/webview-api").PluginWebviewAPI

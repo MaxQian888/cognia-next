@@ -70,5 +70,6 @@
   "workspaceTrust": "Trust folders before agents run commands in them. Untrusted workspaces run in Restricted Mode.",
   "connectivity": "How this device and a Host reach each other: local server, relay and tunnel, pairing, remote hosts, push, and sync.",
   "mediaGeneration": "Default provider, model and options for videos generated from chat, and whether the agent may start one.",
+  "prompts": "Every prompt Cognia sends: edit built-in prompts with scoped overrides, history and reset, and reach agent, preset, Skill, mode and instruction-file prompts through their owners.",
   "harnessEvolution": "Let agents improve their own instructions, skills and tool rules from evidence: probes, budgets, approval and the experience library."
 }
