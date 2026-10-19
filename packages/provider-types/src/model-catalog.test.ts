@@ -1,4 +1,81 @@
-import { CATALOG_SCHEMA_VERSION, parseCatalogSnapshot, type CatalogSnapshot } from "./model-catalog"
+import {
+  CATALOG_SCHEMA_VERSION,
+  isModelLifecycleAllowed,
+  parseCatalogSnapshot,
+  resolveModelLifecycle,
+  type CatalogSnapshot,
+} from "./model-catalog"
+
+describe("model lifecycle governance", () => {
+  it("keeps official retirements authoritative over stale active metadata", () => {
+    expect(resolveModelLifecycle("deepseek", "deepseek-chat", "active")).toMatchObject({
+      lifecycle: "retired",
+      replacementModelId: "deepseek-flash",
+      retiredAt: "2026-07-24",
+    })
+  })
+
+  it("keeps first-party shutdown notices authoritative when a baseline still lists them", () => {
+    expect(resolveModelLifecycle("xai", "grok-3", "active")).toMatchObject({
+      lifecycle: "retired",
+      retiredAt: "2026-05-15",
+      replacementModelId: "grok-4.7",
+    })
+    expect(
+      resolveModelLifecycle("google", "gemini-3.1-flash-image-preview", "active")
+    ).toMatchObject({
+      lifecycle: "retired",
+      retiredAt: "2026-06-25",
+      replacementModelId: "gemini-nano-banana-2.1",
+    })
+    expect(
+      resolveModelLifecycle("siliconflow", "Qwen/Qwen3-Coder-480B-A35B-Instruct", "active")
+        .lifecycle
+    ).toBe("retired")
+    expect(resolveModelLifecycle("openrouter", "x-ai/grok-3").lifecycle).toBe("active")
+  })
+
+  it("does not retire upcoming migrations or infer retirement from an absent id", () => {
+    expect(resolveModelLifecycle("google", "veo-3.1-generate-preview").lifecycle).toBe("active")
+    expect(resolveModelLifecycle("zhipu", "glm-5-turbo").lifecycle).toBe("active")
+    expect(resolveModelLifecycle("perplexity", "sonar-pro")).toMatchObject({
+      lifecycle: "deprecated",
+      replacementModelId: "preset/fast",
+    })
+    expect(
+      isModelLifecycleAllowed(resolveModelLifecycle("perplexity", "sonar-pro").lifecycle, "pinned")
+    ).toBe(true)
+  })
+
+  it("scopes retirement to the serving provider rather than the model's brand", () => {
+    expect(resolveModelLifecycle("openrouter", "deepseek/deepseek-chat").lifecycle).toBe("active")
+    expect(resolveModelLifecycle("my-relay", "deepseek-chat").lifecycle).toBe("active")
+  })
+
+  it("preserves a stronger upstream retirement and normalizes lifecycle synonyms", () => {
+    expect(resolveModelLifecycle("custom", "model", "active", "retired").lifecycle).toBe("retired")
+    expect(resolveModelLifecycle("anthropic", "claude-sonnet-4-5", "retired").lifecycle).toBe(
+      "retired"
+    )
+    expect(resolveModelLifecycle("custom", "model", "beta").lifecycle).toBe("preview")
+    expect(resolveModelLifecycle("custom", "model", "legacy").lifecycle).toBe("deprecated")
+  })
+
+  it.each([
+    ["active", true, true, true, true],
+    ["preview", true, false, true, true],
+    ["deprecated", false, false, true, true],
+    ["retired", false, false, false, true],
+  ] as const)(
+    "uses one eligibility policy for %s",
+    (lifecycle, fresh, auto, pinned, historical) => {
+      expect(isModelLifecycleAllowed(lifecycle, "new")).toBe(fresh)
+      expect(isModelLifecycleAllowed(lifecycle, "auto")).toBe(auto)
+      expect(isModelLifecycleAllowed(lifecycle, "pinned")).toBe(pinned)
+      expect(isModelLifecycleAllowed(lifecycle, "historical")).toBe(historical)
+    }
+  )
+})
 
 function createSnapshot(): CatalogSnapshot {
   return {

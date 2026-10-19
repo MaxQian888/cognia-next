@@ -14,6 +14,7 @@
  */
 
 import { generateText } from "ai"
+import { hasNoLeakingPii } from "@cognia/redact"
 import { getProviderModel } from "@cognia/provider-core/core/client"
 import type { ApiFlavor } from "@cognia/provider-types/provider"
 
@@ -47,7 +48,7 @@ export interface ImageCaptionOptions {
 const DEFAULT_MODELS: Record<"openai" | "anthropic" | "google", string> = {
   openai: "gpt-4o-mini",
   anthropic: "claude-haiku-4-5",
-  google: "gemini-2.5-flash",
+  google: "gemini-3.5-flash-lite",
 }
 
 const DEFAULT_PROMPT =
@@ -73,6 +74,10 @@ export async function generateImageCaption(
   }
   const provider = options.provider ?? "openai"
   const model = options.model ?? DEFAULT_MODELS[provider]
+  const prompt = options.prompt ?? DEFAULT_PROMPT
+  if (!hasNoLeakingPii(prompt)) {
+    throw new Error("generateImageCaption: prompt failed the outbound PII gate")
+  }
   const modelInstance = getProviderModel({
     provider,
     model,
@@ -86,10 +91,15 @@ export async function generateImageCaption(
   const result = await generateText({
     model: modelInstance,
     maxOutputTokens: options.maxTokens ?? 200,
+    // Flash-Lite's minimum supported effort suits this short extraction task.
+    // Explicit model pins retain their provider defaults.
+    ...(provider === "google" && !options.model
+      ? { providerOptions: { google: { thinkingConfig: { thinkingLevel: "minimal" } } } }
+      : {}),
     messages: [
       {
         role: "user",
-        content: [{ type: "text", text: options.prompt ?? DEFAULT_PROMPT }, imagePart],
+        content: [{ type: "text", text: prompt }, imagePart],
       },
     ],
   })

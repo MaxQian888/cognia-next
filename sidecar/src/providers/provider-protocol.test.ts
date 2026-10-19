@@ -66,7 +66,7 @@ test("isBuiltInProtocol recognizes the first-party families incl. the gemini ali
 
 test("PROVIDER_PROTOCOL is the de-drifted union of every prior copy", () => {
   // Aggregators that were ONLY in the resolver's BUILTIN_PROTOCOLS copy.
-  for (const id of ["xai", "togetherai", "fireworks", "deepinfra"]) {
+  for (const id of ["xai", "togetherai", "fireworks", "deepinfra", "perplexity"]) {
     assert.equal(PROVIDER_PROTOCOL[id], "openai", id)
   }
   // Gateways/subscriptions that were ONLY in the renderer's compatible set.

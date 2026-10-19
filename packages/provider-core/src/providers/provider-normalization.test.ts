@@ -17,12 +17,18 @@ describe("normalizeBuiltInProviderConfig", () => {
       source: "built-in",
       adapterId: "openai-compatible",
       apiKey: " second ",
-      defaultModel: "gpt-5.6",
+      defaultModel: "gpt-6.1-sol",
       enabled: true,
       requiresCredential: true,
       requiresBaseUrl: false,
       isLocal: false,
     })
+  })
+
+  it("preserves a configured older model instead of migrating the user's pin", () => {
+    const settings = { enabled: true, defaultModel: "gpt-5.6" }
+    expect(normalizeBuiltInProviderConfig("openai", settings).defaultModel).toBe("gpt-5.6")
+    expect(settings.defaultModel).toBe("gpt-5.6")
   })
 })
 

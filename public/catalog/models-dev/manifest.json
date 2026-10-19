@@ -1,232 +1,328 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-31T03:52:24.109Z",
+  "generatedAt": "2026-10-19T07:05:06.493Z",
   "source": "https://models.dev/api.json",
-  "upstreamRevision": "486b3bf3deeb693cf4e2d26e522f2c7195996ede",
+  "upstreamRevision": "sha256:18db5390f959fdfb55d183e7c21ddfcd5c4f1e1b176ceaeb31ded0bf54d2d3de",
   "providers": [
     {
       "id": "302ai",
       "path": "providers/302ai.json",
-      "models": 97,
-      "bytes": 51189,
-      "gzipBytes": 4991,
-      "checksum": "sha256:564f0e3bb72546d9532443f4ddf8ad55287fdcb6644c693e4a2580beb8102fa8"
+      "models": 125,
+      "bytes": 72517,
+      "gzipBytes": 7924,
+      "checksum": "sha256:2d3fdf4bcc46b39c4cae2dd37c771694ff761372bca80637e3f1c72f2d2a8687"
     },
     {
       "id": "abacus",
       "path": "providers/abacus.json",
-      "models": 95,
-      "bytes": 49590,
-      "gzipBytes": 6279,
-      "checksum": "sha256:98b96d53776eb0ff08a62a3b191b4da8de5beb961367214954cc0c6789075a69"
+      "models": 108,
+      "bytes": 60235,
+      "gzipBytes": 7603,
+      "checksum": "sha256:1d9129be510ac0f95f7db8e8aa74e2fccd767c0c5c228e5c6bbda5207faafc14"
     },
     {
       "id": "abliteration-ai",
       "path": "providers/abliteration-ai.json",
-      "models": 2,
-      "bytes": 1414,
-      "gzipBytes": 559,
-      "checksum": "sha256:94f3ad2d2aa3975f0bf8fb9d70dd024c56cecef5f43557958763fd5d759631bd"
+      "models": 3,
+      "bytes": 2051,
+      "gzipBytes": 625,
+      "checksum": "sha256:b85eaf974c09754f1b0d5d1482f0ae06bbcefd9e2e23335a68bc997aa010dc47"
+    },
+    {
+      "id": "above",
+      "path": "providers/above.json",
+      "models": 10,
+      "bytes": 6893,
+      "gzipBytes": 1284,
+      "checksum": "sha256:6b3e9f69cabac7f6990f3f9a9facc5ef4b96dba30660650fb3f88e22fc9afafb"
+    },
+    {
+      "id": "agentrouter",
+      "path": "providers/agentrouter.json",
+      "models": 5,
+      "bytes": 3339,
+      "gzipBytes": 887,
+      "checksum": "sha256:5266bee4357a2d988938cc438062189a75375e5488f6b7568eb25516f30d1d57"
+    },
+    {
+      "id": "agnes",
+      "path": "providers/agnes.json",
+      "models": 4,
+      "bytes": 2566,
+      "gzipBytes": 712,
+      "checksum": "sha256:fe14b4724c48c7555b65728e4d22cc6328680486986111cacc8e888114d5a4cf"
     },
     {
       "id": "ai-router",
       "path": "providers/ai-router.json",
       "models": 5,
-      "bytes": 3385,
-      "gzipBytes": 800,
-      "checksum": "sha256:f89f9e6485a9881915186ec64810ba555fa0d6596593e4d91c22839e1611b59c"
+      "bytes": 3589,
+      "gzipBytes": 838,
+      "checksum": "sha256:251e66d77969060fa1940efdaf0e75d6f6a4f51eaba894b4103202e4d77a81eb"
+    },
+    {
+      "id": "ai21",
+      "path": "providers/ai21.json",
+      "models": 2,
+      "bytes": 1286,
+      "gzipBytes": 527,
+      "checksum": "sha256:ab5ab98f009a6ce416118b9bb009c279a19e221d185117b7d5f26dd7b85704f9"
     },
     {
       "id": "aiand",
       "path": "providers/aiand.json",
-      "models": 8,
-      "bytes": 4993,
-      "gzipBytes": 1156,
-      "checksum": "sha256:ceb1ad72af64f39a3a3a9bd521a4c7a99e0ff99a152032942978d3fb3c2a30f9"
+      "models": 13,
+      "bytes": 9159,
+      "gzipBytes": 1658,
+      "checksum": "sha256:5b7555b28761b372f95969f400bc88c88b61e2eb9873fba4ff22b2c9652edc42"
     },
     {
       "id": "aihubmix",
       "path": "providers/aihubmix.json",
-      "models": 67,
-      "bytes": 47237,
-      "gzipBytes": 5099,
-      "checksum": "sha256:16e7f11afd04a1c45e54ac9cf064885b44fd2ad5519b11298084a6e95f66eb4a"
+      "models": 153,
+      "bytes": 108884,
+      "gzipBytes": 12316,
+      "checksum": "sha256:772bd65e965572b2c1b663f0200e0c8988a164bce98b1fa6ba90c5ba8b3833e7"
+    },
+    {
+      "id": "aimlapi",
+      "path": "providers/aimlapi.json",
+      "models": 177,
+      "bytes": 112589,
+      "gzipBytes": 13416,
+      "checksum": "sha256:54b62fa79fc31b20c75479a59bd392b53020bd20a182191c20f0a6413c926cc3"
+    },
+    {
+      "id": "ainetcafe",
+      "path": "providers/ainetcafe.json",
+      "models": 1,
+      "bytes": 863,
+      "gzipBytes": 518,
+      "checksum": "sha256:4dd907b75d91382f6d30b5f884891352b7d69e0bea90c1a74a44dc78a0acefd9"
+    },
+    {
+      "id": "aixy",
+      "path": "providers/aixy.json",
+      "models": 11,
+      "bytes": 10430,
+      "gzipBytes": 1484,
+      "checksum": "sha256:e9cc50d9c5edbe6c796dc4712f393a702afaf9a0f8ad70cdee68ae0bb4195036"
     },
     {
       "id": "aki-io",
       "path": "providers/aki-io.json",
-      "models": 6,
-      "bytes": 3376,
-      "gzipBytes": 974,
-      "checksum": "sha256:182b69c386afd19417a04ebe11e849ba4436c223fbea2fd50c2647e49bcc4502"
+      "models": 7,
+      "bytes": 4427,
+      "gzipBytes": 1125,
+      "checksum": "sha256:b21c55513d5b11b9c8d08fc24283cabf9024c9437564d9e23fdcce0c76807e3b"
     },
     {
       "id": "alibaba",
       "path": "providers/alibaba.json",
-      "models": 51,
-      "bytes": 27188,
-      "gzipBytes": 3105,
-      "checksum": "sha256:165beb891b7375ef9270a0b80c63a09aae791a0a579eb68614331249138cece5"
+      "models": 59,
+      "bytes": 33486,
+      "gzipBytes": 4047,
+      "checksum": "sha256:c1bf97eeac535f7c0d5ef4e2b3d2733906b5497650e48734ccd5be1d24711f32"
     },
     {
       "id": "alibaba-cn",
       "path": "providers/alibaba-cn.json",
-      "models": 84,
-      "bytes": 44432,
-      "gzipBytes": 4601,
-      "checksum": "sha256:6d46d005b6e610ed9e9010653114fc73801f6334fb15d278a65b30a5cac66188"
+      "models": 91,
+      "bytes": 51569,
+      "gzipBytes": 5522,
+      "checksum": "sha256:5f24eb2b9ded609aa443db9f432d638ff4318e971f59742cbaf855a830651d0a"
     },
     {
       "id": "alibaba-coding-plan",
       "path": "providers/alibaba-coding-plan.json",
-      "models": 12,
-      "bytes": 6730,
-      "gzipBytes": 1221,
-      "checksum": "sha256:96aeba803bcbe548e7de3ecc76b5de4413a1675464a3b11f54204c514c9d38d9"
+      "models": 10,
+      "bytes": 5694,
+      "gzipBytes": 1109,
+      "checksum": "sha256:2c27e4bdffb834023076095218f356cd9c0b57fbcc8a396061f0b18eadb2b413"
     },
     {
       "id": "alibaba-coding-plan-cn",
       "path": "providers/alibaba-coding-plan-cn.json",
-      "models": 12,
-      "bytes": 6698,
-      "gzipBytes": 1224,
-      "checksum": "sha256:3507c66859f7f3db3a89c2f08cb27bee085f4cc8c04549b8e8292c71e6ea412a"
+      "models": 10,
+      "bytes": 5662,
+      "gzipBytes": 1112,
+      "checksum": "sha256:32179ea82fb2c3fdfeffd3111d5ed7ed1b045895f8e667b8b6b12b91fb8871b6"
     },
     {
       "id": "alibaba-token-plan",
       "path": "providers/alibaba-token-plan.json",
-      "models": 22,
-      "bytes": 12706,
-      "gzipBytes": 1976,
-      "checksum": "sha256:def963103a34f8fd2a68697cf53369c9910892b249c070b5fd13db6039fd2844"
+      "models": 28,
+      "bytes": 17708,
+      "gzipBytes": 2484,
+      "checksum": "sha256:42c96b46e5c68cc3b0de1a24905f7cca2df08ca5082799f6f503073cf5007c5d"
     },
     {
       "id": "alibaba-token-plan-cn",
       "path": "providers/alibaba-token-plan-cn.json",
-      "models": 22,
-      "bytes": 12582,
-      "gzipBytes": 1986,
-      "checksum": "sha256:adf009edb4647c77d72c8934c6e8eceb81a8905055bbc021165ab1548d2e57e6"
+      "models": 29,
+      "bytes": 18464,
+      "gzipBytes": 2565,
+      "checksum": "sha256:05653cb18a02f94140083f1970fd215d01b50c509b9791906dca5e1bd6f05ef7"
     },
     {
       "id": "amazon-bedrock",
       "path": "providers/amazon-bedrock.json",
-      "models": 116,
-      "bytes": 71439,
-      "gzipBytes": 6306,
-      "checksum": "sha256:918dd061d4bc925e2f4e96ccf70e46c831619d645fd1fbb40fd49ab74e184fd8"
+      "models": 199,
+      "bytes": 142794,
+      "gzipBytes": 12702,
+      "checksum": "sha256:f10257e294466101463ef81ddf7b92dcdbe11cb664ebb4e7292b6ab307915351"
     },
     {
       "id": "ambient",
       "path": "providers/ambient.json",
-      "models": 9,
-      "bytes": 5514,
-      "gzipBytes": 1212,
-      "checksum": "sha256:a263298c330ac911e124d1ec99952553e2573ec06527ae039f0da4f95f2ef4d4"
+      "models": 17,
+      "bytes": 10615,
+      "gzipBytes": 1842,
+      "checksum": "sha256:3c54b69ce9f8d3f925a7e14a6374c0e1dee36f0b18371c8b07bc6c1a93fc6729"
+    },
+    {
+      "id": "amd",
+      "path": "providers/amd.json",
+      "models": 6,
+      "bytes": 4305,
+      "gzipBytes": 1111,
+      "checksum": "sha256:91e68a13e71c2c2c4da9433c175fc865d8c0305a334513f06eb783343dc7c0ad"
     },
     {
       "id": "anthropic",
       "path": "providers/anthropic.json",
-      "models": 15,
-      "bytes": 10671,
-      "gzipBytes": 1442,
-      "checksum": "sha256:14fd0d9ba521a2ed4e53d34cc04205557226178f56609bda544bd9b3d2c78dd8"
+      "models": 17,
+      "bytes": 12270,
+      "gzipBytes": 1648,
+      "checksum": "sha256:5984596162261b06c589afd7e1abae031aec1724f660573bd2830cf04b7a3b8b"
     },
     {
       "id": "anyapi",
       "path": "providers/anyapi.json",
       "models": 30,
-      "bytes": 16857,
-      "gzipBytes": 2712,
-      "checksum": "sha256:1cf83fa7040ad997133bce32242089140e256dbe433a02bc3bcdd3eee0977c2c"
+      "bytes": 18209,
+      "gzipBytes": 2858,
+      "checksum": "sha256:420959da636fef57ececd26adce8f1ad04b344accb6a14ef7eff3e29094850f9"
+    },
+    {
+      "id": "arcee",
+      "path": "providers/arcee.json",
+      "models": 7,
+      "bytes": 5073,
+      "gzipBytes": 1191,
+      "checksum": "sha256:76d76e6b56473c2042e35c739e63d129960016091038aa4add0735f3735a1cb9"
     },
     {
       "id": "atomic-chat",
       "path": "providers/atomic-chat.json",
       "models": 5,
       "bytes": 2571,
-      "gzipBytes": 676,
-      "checksum": "sha256:7116eb7d7703ec1e78e750b2998deda83728d36db0ff14709a124ce4291d5d6b"
+      "gzipBytes": 681,
+      "checksum": "sha256:1adf1bd8b01cd200bd44a782d81cafd6dce598d02d7407d43be46cdbb3e5d603"
     },
     {
       "id": "auriko",
       "path": "providers/auriko.json",
       "models": 15,
-      "bytes": 10203,
-      "gzipBytes": 1961,
-      "checksum": "sha256:1df4fc5244950891b276c633c40096573186fc5c4c308a8d901fc5e82ff3865b"
+      "bytes": 10900,
+      "gzipBytes": 2110,
+      "checksum": "sha256:68820f7170a2153e328a9200453cd44b60513a43833439551fe56339ca53ad87"
     },
     {
       "id": "azure",
       "path": "providers/azure.json",
-      "models": 81,
-      "bytes": 47708,
-      "gzipBytes": 5803,
-      "checksum": "sha256:e7934d10be5157badc660f2f2057d2c4cbacdddfd4dc232d3310a4c8f681669a"
+      "models": 97,
+      "bytes": 62427,
+      "gzipBytes": 7196,
+      "checksum": "sha256:6bf4b345779739073d1e0958b579a0bb82a64dd8f8ae3c53831f35efcbd206a1"
     },
     {
       "id": "azure-cognitive-services",
       "path": "providers/azure-cognitive-services.json",
-      "models": 68,
-      "bytes": 40121,
-      "gzipBytes": 4872,
-      "checksum": "sha256:184918b01d49b72188052074de39fea6b022e3fddf3b38885fcb6dccab8a5b3f"
+      "models": 87,
+      "bytes": 56593,
+      "gzipBytes": 6303,
+      "checksum": "sha256:eabdbf16a4f58b2ed7274f019030fd06d739ddb67c29101d3c8b129137195501"
     },
     {
       "id": "bailing",
       "path": "providers/bailing.json",
       "models": 2,
-      "bytes": 1159,
-      "gzipBytes": 510,
-      "checksum": "sha256:cc099f0550727a43a881d93395e101ea1b6d5d6450fdc8c27ec139e43ab1c5ac"
+      "bytes": 1142,
+      "gzipBytes": 499,
+      "checksum": "sha256:879929ab590df9e51e3b42571c4b2589cc459e4a5cef7e75388b0ced5de0da97"
     },
     {
       "id": "baseten",
       "path": "providers/baseten.json",
-      "models": 16,
-      "bytes": 9683,
-      "gzipBytes": 1677,
-      "checksum": "sha256:4a69f73134c0af005cfa0a026132306a60cbfb3b8150d6753d80e83bc0be1cf6"
+      "models": 26,
+      "bytes": 17495,
+      "gzipBytes": 2310,
+      "checksum": "sha256:f83a50af67810eefeaee4367c9e97b5ed80326fad2da19f51150140988e30b12"
+    },
+    {
+      "id": "bee",
+      "path": "providers/bee.json",
+      "models": 6,
+      "bytes": 4114,
+      "gzipBytes": 1168,
+      "checksum": "sha256:45372fbbba960906ab17b8f527a31b99048feffb3d0e41f85ee3a8adf3ee8e5d"
     },
     {
       "id": "berget",
       "path": "providers/berget.json",
-      "models": 9,
-      "bytes": 5410,
-      "gzipBytes": 1311,
-      "checksum": "sha256:6865e1806a45be6b5931d1ed1dffa196437a3a59b4785e0c2c415fe45728e9ec"
+      "models": 6,
+      "bytes": 3932,
+      "gzipBytes": 1139,
+      "checksum": "sha256:a1115cef8dce054f678751c3f01b76374d80d6447ec4359753b483894f04dff1"
     },
     {
       "id": "blueclaw",
       "path": "providers/blueclaw.json",
-      "models": 2,
-      "bytes": 1168,
-      "gzipBytes": 500,
-      "checksum": "sha256:03eab22004edea63656202a485afb866fc51d39dbbda9e4e46001b63abd40bf1"
+      "models": 1,
+      "bytes": 793,
+      "gzipBytes": 475,
+      "checksum": "sha256:9f557f5b643b15ecf78316563477a30b6c52cb889a5c8107c24e6199fdfb941d"
+    },
+    {
+      "id": "bothub",
+      "path": "providers/bothub.json",
+      "models": 8,
+      "bytes": 5561,
+      "gzipBytes": 1408,
+      "checksum": "sha256:b38674acc9f8e4587aaec515e0ffab25fc9d70904a1fd0b082c8de9378077de3"
+    },
+    {
+      "id": "boundless",
+      "path": "providers/boundless.json",
+      "models": 20,
+      "bytes": 12501,
+      "gzipBytes": 2173,
+      "checksum": "sha256:917ecc30d388bf18fea6b842dddf2cd19417536a3b98f9d6483e39d96ba53efe"
     },
     {
       "id": "cerebras",
       "path": "providers/cerebras.json",
-      "models": 3,
-      "bytes": 1842,
-      "gzipBytes": 666,
-      "checksum": "sha256:d7fd1268e41396d772abee2e02485f0458e9dbbee241539d602589bd98d76502"
+      "models": 2,
+      "bytes": 1389,
+      "gzipBytes": 606,
+      "checksum": "sha256:7d88ef8843543fd2bafa700821a76ce55a6a4543c88432f374df7dcf4912c70b"
     },
     {
       "id": "chutes",
       "path": "providers/chutes.json",
-      "models": 15,
-      "bytes": 8777,
-      "gzipBytes": 1711,
-      "checksum": "sha256:3bb46a4c4b07300654f390f2ea562161f7549f6a59b1dcc0de7c92b8efbb3f60"
+      "models": 14,
+      "bytes": 9123,
+      "gzipBytes": 1823,
+      "checksum": "sha256:841e148dba2e5df5ac882758be6095ef33103285dc2c693d0443a6d8c1318a3d"
     },
     {
       "id": "clarifai",
       "path": "providers/clarifai.json",
       "models": 12,
-      "bytes": 7054,
-      "gzipBytes": 1526,
-      "checksum": "sha256:8eff158d1e295db1467d6025e481d6a1ea9a755991044f0f1935b7a965969d57"
+      "bytes": 7162,
+      "gzipBytes": 1541,
+      "checksum": "sha256:9e6e936176649b39a5d60f7d7db5ab6109cfa8b26b57884669fcf8a4b46f38f7"
     },
     {
       "id": "claudinio",
@@ -239,378 +335,490 @@
     {
       "id": "cline-pass",
       "path": "providers/cline-pass.json",
-      "models": 11,
-      "bytes": 7200,
-      "gzipBytes": 1441,
-      "checksum": "sha256:46a7eced62b5a07f3c780e575aa6f7a0fe54367a81c3f570dd15c5e01c9a8e42"
+      "models": 18,
+      "bytes": 12086,
+      "gzipBytes": 2145,
+      "checksum": "sha256:e11cce00df0b8eb8e38db75bec9cdc41cea2a16f267fea3ed28b4adabf398712"
     },
     {
       "id": "cloudferro-sherlock",
       "path": "providers/cloudferro-sherlock.json",
       "models": 5,
-      "bytes": 2972,
-      "gzipBytes": 840,
-      "checksum": "sha256:95a4a8d0c6d1fc51beb0f0abbeb7a966f478f672da1d4bba707fcb9567e47bd3"
+      "bytes": 3050,
+      "gzipBytes": 954,
+      "checksum": "sha256:a5384f7ad49a5d006fe7e3eff031000f07f7eb06eb7ba8e471360e276d7cf342"
     },
     {
       "id": "cloudflare-ai-gateway",
       "path": "providers/cloudflare-ai-gateway.json",
-      "models": 84,
-      "bytes": 48436,
-      "gzipBytes": 5102,
-      "checksum": "sha256:46d0abe2c96904a21831e60315ff402c58ba58e9bde56e578da401cfb5edc225"
+      "models": 61,
+      "bytes": 44062,
+      "gzipBytes": 5557,
+      "checksum": "sha256:1973a37bbe6d08614bf5845b2d49c864b051d8e31d64ba6a88d38fd372226486"
     },
     {
       "id": "cloudflare-workers-ai",
       "path": "providers/cloudflare-workers-ai.json",
-      "models": 22,
-      "bytes": 12786,
-      "gzipBytes": 2332,
-      "checksum": "sha256:04baf51df344e84c80b51842eff4b8fb3066cb892a1e0c2d50b4dfbe9cf930f9"
+      "models": 27,
+      "bytes": 17253,
+      "gzipBytes": 2963,
+      "checksum": "sha256:2d31aba79165d3b81e367b76bdec2ae7b6e42403c6f0093f01e17dddd39a65f3"
     },
     {
       "id": "cohere",
       "path": "providers/cohere.json",
-      "models": 14,
-      "bytes": 7167,
-      "gzipBytes": 1332,
-      "checksum": "sha256:43aa5f916751a6d3829770f0f1328c6446add23c304d49c97001c18783314027"
+      "models": 17,
+      "bytes": 9262,
+      "gzipBytes": 1635,
+      "checksum": "sha256:d02b17ba7645464450ad0eae8963536e915798e26161b2b3fab3caf1fb38e4ea"
+    },
+    {
+      "id": "commandcode",
+      "path": "providers/commandcode.json",
+      "models": 71,
+      "bytes": 49969,
+      "gzipBytes": 6074,
+      "checksum": "sha256:bc45938b85a2e4297b5825927585269037534a4838d6c99e92e4e26406431b70"
+    },
+    {
+      "id": "coralbricks",
+      "path": "providers/coralbricks.json",
+      "models": 1,
+      "bytes": 915,
+      "gzipBytes": 502,
+      "checksum": "sha256:736373ddbc2b48800d44e8f1526fe3aee5f0a9f9425a634c59d2c249c0b883eb"
     },
     {
       "id": "cortecs",
       "path": "providers/cortecs.json",
-      "models": 58,
-      "bytes": 30903,
-      "gzipBytes": 4421,
-      "checksum": "sha256:c387fb4f5a0b35079d51c08bac99ae3005e8a5a8b041e5a4dd543c1e80a4b811"
+      "models": 105,
+      "bytes": 66693,
+      "gzipBytes": 9803,
+      "checksum": "sha256:580bafa7208afb17064d725dc74100ac9404e75b35a2ebc896d1f5fee8dea2a4"
     },
     {
       "id": "crof",
       "path": "providers/crof.json",
-      "models": 25,
-      "bytes": 15608,
-      "gzipBytes": 2326,
-      "checksum": "sha256:df83541a4c1b87cc32fa93a8f3ed80fa6cc627c08dc2615f8e83841bf3c4bc65"
+      "models": 24,
+      "bytes": 16283,
+      "gzipBytes": 2421,
+      "checksum": "sha256:cd2ea7865bc1c044bee12f3558849a6e3a8597c36ff728b2367c73b97a9cf362"
     },
     {
       "id": "crossmodel",
       "path": "providers/crossmodel.json",
-      "models": 46,
-      "bytes": 31624,
-      "gzipBytes": 4346,
-      "checksum": "sha256:048a22b26520e2da69e369f134a917bd483f23bff1f672d5911c180ba2a65931"
+      "models": 70,
+      "bytes": 52232,
+      "gzipBytes": 6160,
+      "checksum": "sha256:b06b754bfd9a1d0006f935cfbd5cd645364facd64bc53fd4884cd34347ae4260"
+    },
+    {
+      "id": "crusoe",
+      "path": "providers/crusoe.json",
+      "models": 11,
+      "bytes": 6955,
+      "gzipBytes": 1653,
+      "checksum": "sha256:7acc24a98981e1d79988e0cc339f838dde115c967cc6619af1b20c7ceead0d7a"
     },
     {
       "id": "daoxe",
       "path": "providers/daoxe.json",
       "models": 9,
-      "bytes": 5556,
-      "gzipBytes": 1231,
-      "checksum": "sha256:227c108295973e71e6bf4053b8990d5ec77b58df3cd6e3f0f1b3a083b348d192"
+      "bytes": 5958,
+      "gzipBytes": 1305,
+      "checksum": "sha256:f5b34e4acdcf4e39c0f78ef9af29a3d4829e7669edbd0623ca43f196d286d664"
     },
     {
       "id": "databricks",
       "path": "providers/databricks.json",
-      "models": 30,
-      "bytes": 21046,
-      "gzipBytes": 2975,
-      "checksum": "sha256:88b70e61ede59b32b10a739c38e3deae7d2e2462836ed440bc0273b6419d7353"
+      "models": 31,
+      "bytes": 23055,
+      "gzipBytes": 3232,
+      "checksum": "sha256:4591747335966a5081ceae975307ee1ed92ddaa4a7cba068df935ceae24da721"
     },
     {
       "id": "deepinfra",
       "path": "providers/deepinfra.json",
-      "models": 41,
-      "bytes": 23903,
-      "gzipBytes": 3255,
-      "checksum": "sha256:6aa744893073ec89b4e54b85ede07824fdb21e31d097df13ed8a403c382a0269"
+      "models": 76,
+      "bytes": 47561,
+      "gzipBytes": 6076,
+      "checksum": "sha256:a98aed951c39c646ac4a466c8e687306188a577d0f919f1de1d0cf89d6bd3385"
     },
     {
       "id": "deepseek",
       "path": "providers/deepseek.json",
       "models": 4,
-      "bytes": 2605,
-      "gzipBytes": 719,
-      "checksum": "sha256:9332c08f6bfee0cfd0141da7c8f2645f561433e3bc07eb28c8a16eadba9cfbc4"
+      "bytes": 3382,
+      "gzipBytes": 755,
+      "checksum": "sha256:b5dcb2f79dff72907f35f73d8d04456898e4cd9c225f75908a412c859d2804b0"
     },
     {
       "id": "digitalocean",
       "path": "providers/digitalocean.json",
-      "models": 82,
-      "bytes": 45846,
-      "gzipBytes": 5547,
-      "checksum": "sha256:81901f9810006cf6b1440a88f20fc02aacd6aeb4d31dd5badcb2603bda402d6a"
+      "models": 103,
+      "bytes": 62613,
+      "gzipBytes": 7621,
+      "checksum": "sha256:7083888a0a4031aa572d5b0462b78b94fcad2105dfd33968890599d09809f665"
     },
     {
       "id": "dinference",
       "path": "providers/dinference.json",
       "models": 6,
-      "bytes": 3166,
-      "gzipBytes": 854,
-      "checksum": "sha256:cb5c28cd7b039fd116abdca4a69eeff73acad9752787e70bf19c1273ec40082e"
+      "bytes": 3364,
+      "gzipBytes": 898,
+      "checksum": "sha256:1b0acd0c99c7c2b0acad42d5d179ac8278e1fb7d3276cacca21b233fc21049cc"
     },
     {
       "id": "drun",
       "path": "providers/drun.json",
       "models": 3,
       "bytes": 1708,
-      "gzipBytes": 625,
-      "checksum": "sha256:62b87c7ca8996db8a5f6383dc4363824c67960415e87c16b0074ebb478cb0706"
+      "gzipBytes": 628,
+      "checksum": "sha256:a17826fab72afde366c660ca98fecd42d25131653a966bfc86ff07bb79c42584"
     },
     {
       "id": "ebcloud",
       "path": "providers/ebcloud.json",
       "models": 4,
-      "bytes": 2471,
-      "gzipBytes": 753,
-      "checksum": "sha256:0d8998dd29eca35d375f9c0059ad40b8f23204d30688770f0b62d198802961bd"
+      "bytes": 2652,
+      "gzipBytes": 803,
+      "checksum": "sha256:029d3341fbdb84656e9dcaf482b93876465fde1cf17d44d8671236fcc1ce695c"
+    },
+    {
+      "id": "echo",
+      "path": "providers/echo.json",
+      "models": 1,
+      "bytes": 738,
+      "gzipBytes": 435,
+      "checksum": "sha256:8d359b7d0a8ff1849330b8301169ed4c6123b9532e12b78aa3ac07afab9f9551"
+    },
+    {
+      "id": "edenai",
+      "path": "providers/edenai.json",
+      "models": 336,
+      "bytes": 229898,
+      "gzipBytes": 21885,
+      "checksum": "sha256:5de3bccb7bed396c904670134aaff7abb28d9c23a2b5901676b8af541e0cd7ae"
     },
     {
       "id": "empiriolabs",
       "path": "providers/empiriolabs.json",
-      "models": 37,
-      "bytes": 24140,
-      "gzipBytes": 3408,
-      "checksum": "sha256:a0779daeb6956603f9fbc09ef896d27d37aa761db2c43c95e494dd32fed91b5f"
+      "models": 64,
+      "bytes": 44523,
+      "gzipBytes": 5740,
+      "checksum": "sha256:10c3e98fb6ea5416adc440df1697651c6ad55f9b8d0c152f3f96f7b8041292f8"
+    },
+    {
+      "id": "engy",
+      "path": "providers/engy.json",
+      "models": 9,
+      "bytes": 6397,
+      "gzipBytes": 1305,
+      "checksum": "sha256:93d66294829e6367d61419158a89b31a4cb48ea277cceeb0eabad4d8171ed462"
     },
     {
       "id": "evroc",
       "path": "providers/evroc.json",
       "models": 16,
-      "bytes": 8530,
-      "gzipBytes": 1881,
-      "checksum": "sha256:d6304439ba64dc40a54117e4d351a2b6dcc2127cd01ad9599c8d0248a3b6ca56"
+      "bytes": 9050,
+      "gzipBytes": 2008,
+      "checksum": "sha256:d153697020d6f9efa99cee7b586f8a5fd4ce38bb31a4476162e8d3b14b5fdfc7"
     },
     {
       "id": "fastrouter",
       "path": "providers/fastrouter.json",
       "models": 47,
-      "bytes": 25048,
-      "gzipBytes": 3665,
-      "checksum": "sha256:65993d3c59fd72396d335a99ce649cc88156296d7d6259991456a5c0f5c191a5"
+      "bytes": 26178,
+      "gzipBytes": 3803,
+      "checksum": "sha256:035d12863cf6474c51150af6cfb7be617a98c91a27d238d1f45912d08c1d9414"
     },
     {
       "id": "fireworks-ai",
       "path": "providers/fireworks-ai.json",
-      "models": 16,
-      "bytes": 10531,
-      "gzipBytes": 1588,
-      "checksum": "sha256:94125af4f58065222e55c8ad4a625c337c1f400140ba473163a4b07b59e83964"
+      "models": 24,
+      "bytes": 19614,
+      "gzipBytes": 2523,
+      "checksum": "sha256:09f810505e4a65f5ba5eb0cf8f7abdaa0e9a7fc9c571b9ad8fd9fedcf312f50e"
     },
     {
       "id": "freemodel",
       "path": "providers/freemodel.json",
       "models": 10,
-      "bytes": 6851,
-      "gzipBytes": 1309,
-      "checksum": "sha256:13c2b0352b034081d19eb0a7c9d64f39c8904eb26b35aae2c53407ceabe4fadd"
+      "bytes": 7316,
+      "gzipBytes": 1400,
+      "checksum": "sha256:88e3bb841d144be6aca684e4eb6db8a6b615d08d0b93c9b3d1c26feea3fde665"
     },
     {
       "id": "friendli",
       "path": "providers/friendli.json",
-      "models": 6,
-      "bytes": 3667,
-      "gzipBytes": 1029,
-      "checksum": "sha256:e2195aec6c56e0fb9a53288c7bed18f50e7573822c6f023973ef63230ce4c6e5"
+      "models": 7,
+      "bytes": 4955,
+      "gzipBytes": 1182,
+      "checksum": "sha256:45a20e5ad97bcc15498b444b156fe76ada5164e21da95cde167a335f9f17649d"
     },
     {
       "id": "frogbot",
       "path": "providers/frogbot.json",
       "models": 26,
       "bytes": 14601,
-      "gzipBytes": 2248,
-      "checksum": "sha256:cd21d9336503091705e0f64ca16b166063c9ad8a14c93f0fcffcb39e5cf9016a"
+      "gzipBytes": 2269,
+      "checksum": "sha256:cfd7dec5cceb014743a7e918d4a688717d42886f50191ace29ad624b143d679e"
     },
     {
       "id": "github-copilot",
       "path": "providers/github-copilot.json",
-      "models": 29,
-      "bytes": 19942,
-      "gzipBytes": 2985,
-      "checksum": "sha256:55abf652c8b78746206c2578864b76d7656b33273f4b25b05ce03e5a54a10f69"
-    },
-    {
-      "id": "github-models",
-      "path": "providers/github-models.json",
-      "models": 55,
-      "bytes": 28659,
-      "gzipBytes": 2648,
-      "checksum": "sha256:8b187854603fd2bee4c8baed1bd3181f079a3fc35f649a233c12edf95d0c0756"
+      "models": 36,
+      "bytes": 28567,
+      "gzipBytes": 3733,
+      "checksum": "sha256:6b022e8039b870676773bec997c6d1f41140e96f6d3da20d5f34ab1d64cb9ec6"
     },
     {
       "id": "gitlab",
       "path": "providers/gitlab.json",
-      "models": 23,
-      "bytes": 13581,
-      "gzipBytes": 1517,
-      "checksum": "sha256:b9f7f0aebdf62e8c9a4f14bf930ef44e0f0cb8a11ad176c8eda1d4e116cf19fb"
+      "models": 30,
+      "bytes": 19029,
+      "gzipBytes": 1964,
+      "checksum": "sha256:9324797f9b60f3cff1fff80dc244300bf528c935b69607991c4964230c979a2e"
     },
     {
       "id": "gmicloud",
       "path": "providers/gmicloud.json",
-      "models": 13,
-      "bytes": 8188,
-      "gzipBytes": 1783,
-      "checksum": "sha256:b39193e19506f15dd2a8082f7b903059b10ff33e2c49b1cf410459f47ec9a4ba"
+      "models": 17,
+      "bytes": 11322,
+      "gzipBytes": 2301,
+      "checksum": "sha256:779111191cc2c4944c986a2e9345a2f8abcbcc704b8369cc36e0f774f59db253"
     },
     {
       "id": "google",
       "path": "providers/google.json",
-      "models": 41,
-      "bytes": 25534,
-      "gzipBytes": 3414,
-      "checksum": "sha256:bc7d037057abea8bdf9649b1c2f0f0cc23178bd0790a8dc1b7c639adb1bc250f"
+      "models": 40,
+      "bytes": 26265,
+      "gzipBytes": 3557,
+      "checksum": "sha256:573e6675125eb923c629168feb1200a057babc0381411f7898e23549b49fde84"
     },
     {
       "id": "google-vertex",
       "path": "providers/google-vertex.json",
-      "models": 41,
-      "bytes": 28606,
-      "gzipBytes": 3604,
-      "checksum": "sha256:ef7a60f782f46f72796a86413734b4aad7d049ced4320ed092e306b1c99f7ffa"
+      "models": 61,
+      "bytes": 46557,
+      "gzipBytes": 5384,
+      "checksum": "sha256:26a5607d34cbe93b8e2e667012b75b00d83aa72f61fca5940006890c857b6a6e"
     },
     {
       "id": "google-vertex-anthropic",
       "path": "providers/google-vertex-anthropic.json",
-      "models": 12,
-      "bytes": 8723,
-      "gzipBytes": 1382,
-      "checksum": "sha256:20cf7e29e996fdd16196bb183b899e0cacc34802d144370cb3992e7acc68497d"
+      "models": 17,
+      "bytes": 13003,
+      "gzipBytes": 1778,
+      "checksum": "sha256:d0168754d8affd0383051db65d0974b3d9d8fc23369d6e2030d7fc33c7694239"
     },
     {
       "id": "greenpt",
       "path": "providers/greenpt.json",
-      "models": 26,
-      "bytes": 13299,
-      "gzipBytes": 2373,
-      "checksum": "sha256:154a2ca3163ab5d1d0ff8f657eae321dd4c5bcf911b0a78a58d87e72c3e77213"
+      "models": 40,
+      "bytes": 25407,
+      "gzipBytes": 3538,
+      "checksum": "sha256:f98e5eeddf0e3e7c4f687e1978cffbe0cc02b81052c4ab703c362a3845c323ad"
     },
     {
       "id": "groq",
       "path": "providers/groq.json",
-      "models": 15,
-      "bytes": 7655,
-      "gzipBytes": 1487,
-      "checksum": "sha256:9ff7a2ab39597f3340d1a5e1b81df9f98b6805fd8de7d44d95ded8b2e040af84"
+      "models": 16,
+      "bytes": 8250,
+      "gzipBytes": 1583,
+      "checksum": "sha256:23db2758fc29038883efa382e97ce0047110fbd27e8f03e94aedc6b9d9abc158"
     },
     {
       "id": "helicone",
       "path": "providers/helicone.json",
       "models": 90,
-      "bytes": 47754,
-      "gzipBytes": 5161,
-      "checksum": "sha256:b239cffbd3244fa1b86aca6c737f67c2c018f3e812efa49370c8d070eaca29f1"
+      "bytes": 47804,
+      "gzipBytes": 5261,
+      "checksum": "sha256:d45b9e462f2eda67674d3634bac470a00f5f6159d497a0959f3d92f52335e906"
     },
     {
       "id": "hetzner",
       "path": "providers/hetzner.json",
-      "models": 1,
-      "bytes": 772,
-      "gzipBytes": 456,
-      "checksum": "sha256:542582df6852ece970e03c4f643094c4ec0e94e9b374d0e1b0647dc82f8fa202"
+      "models": 2,
+      "bytes": 1398,
+      "gzipBytes": 568,
+      "checksum": "sha256:86879cf05189c82906a64f11054b2c17584f1251d61d8303bd72917440d480e0"
     },
     {
       "id": "hpc-ai",
       "path": "providers/hpc-ai.json",
       "models": 9,
-      "bytes": 5767,
-      "gzipBytes": 1380,
-      "checksum": "sha256:1c4cb54217bd3c9bb889033ba6585be69583b6066710c14bbd15ea27094baf99"
+      "bytes": 6128,
+      "gzipBytes": 1416,
+      "checksum": "sha256:27c3aae2b769f5783fabfb881823b03134ff5236fa70219ea1f75ec03d946efc"
     },
     {
       "id": "huggingface",
       "path": "providers/huggingface.json",
-      "models": 55,
-      "bytes": 29464,
-      "gzipBytes": 3688,
-      "checksum": "sha256:80603568890907a2ac3121d8d37fd86498dbbdd404519c7f8e2c6c8cdee01b23"
+      "models": 81,
+      "bytes": 46376,
+      "gzipBytes": 5247,
+      "checksum": "sha256:0fb219d0a367e559388d19eba864a81d26a989fe1fc8b136866aca226d6afc10"
     },
     {
       "id": "hyper",
       "path": "providers/hyper.json",
-      "models": 23,
-      "bytes": 12265,
-      "gzipBytes": 2287,
-      "checksum": "sha256:9d80eff2f80b0448367423d47e7253175125724631035b63c4ac1d5874791d29"
+      "models": 22,
+      "bytes": 13668,
+      "gzipBytes": 2527,
+      "checksum": "sha256:ca3efbd1555a5e2f3d365a7e1d299b9452eb6deb6e9144cd449a525dd1654eae"
     },
     {
       "id": "iflowcn",
       "path": "providers/iflowcn.json",
       "models": 14,
       "bytes": 6745,
-      "gzipBytes": 1047,
-      "checksum": "sha256:f35627d1291356a1945d7c4f2b2386bdbc589eaa8528f974bce3d0998e2ebae7"
+      "gzipBytes": 1041,
+      "checksum": "sha256:a6d62e38332c87016bb5f885241cc64cc4ce549fd0313ff6082db3f80dfe7538"
+    },
+    {
+      "id": "impossibl",
+      "path": "providers/impossibl.json",
+      "models": 76,
+      "bytes": 50287,
+      "gzipBytes": 5850,
+      "checksum": "sha256:c2bdd709d2a32eb20c2945ba623571f8176ca67432bc9822755aaa8ed61c54ab"
     },
     {
       "id": "inception",
       "path": "providers/inception.json",
-      "models": 2,
-      "bytes": 1281,
-      "gzipBytes": 523,
-      "checksum": "sha256:fe2c5e37dedf203a2505d7af50a9246bd9e233bf21893755910f01f3c0765841"
+      "models": 3,
+      "bytes": 1901,
+      "gzipBytes": 684,
+      "checksum": "sha256:ca3cdc3edc6b20e5959d786099b90d1119ed94ac1bd02ba9755718dd8def91bf"
     },
     {
       "id": "inceptron",
       "path": "providers/inceptron.json",
-      "models": 6,
-      "bytes": 3929,
-      "gzipBytes": 962,
-      "checksum": "sha256:71911d08e16c4d4735074c0e20c0860dc6adb343bf7696583230feebe0955b80"
+      "models": 4,
+      "bytes": 2988,
+      "gzipBytes": 900,
+      "checksum": "sha256:54ae3c2574f49a55acebdb4201f23837c2c181891c9ab0047afd15e477758f0c"
+    },
+    {
+      "id": "inco",
+      "path": "providers/inco.json",
+      "models": 7,
+      "bytes": 4428,
+      "gzipBytes": 938,
+      "checksum": "sha256:f392a1715dc94dfaf11f85e63e7c5827c680f683cc5f856065e2f4f000a84622"
+    },
+    {
+      "id": "infer",
+      "path": "providers/infer.json",
+      "models": 2,
+      "bytes": 1753,
+      "gzipBytes": 679,
+      "checksum": "sha256:580df8e199b625fdb15d923a8298003ccec255f327123c07b01c68f0e3643e88"
     },
     {
       "id": "inference",
       "path": "providers/inference.json",
       "models": 9,
       "bytes": 4775,
-      "gzipBytes": 929,
-      "checksum": "sha256:ab91fae4e3925818ada22927200e61fb2eae51f08c7fc8d9247980d066ffea33"
+      "gzipBytes": 936,
+      "checksum": "sha256:803055e7a04f6fb4d4c878e60a4ced9f5a174b100a7203ba904aae847f8f5fd6"
     },
     {
       "id": "inferx",
       "path": "providers/inferx.json",
-      "models": 6,
-      "bytes": 3439,
-      "gzipBytes": 800,
-      "checksum": "sha256:31ef5f7765249a4f556623f6f4e6057fa82b4fca27f8e13f686a4063cb483463"
+      "models": 12,
+      "bytes": 6730,
+      "gzipBytes": 1405,
+      "checksum": "sha256:4f3267a7d1905a114075294a32060bc2b5a39f28d9173fbba2218158ba2003a1"
+    },
+    {
+      "id": "infomaniak",
+      "path": "providers/infomaniak.json",
+      "models": 10,
+      "bytes": 6190,
+      "gzipBytes": 1495,
+      "checksum": "sha256:9ea044bde2515acc11924b5e1d2dfb5c23a2f56292714dc036bba148c86cbf4f"
     },
     {
       "id": "io-net",
       "path": "providers/io-net.json",
       "models": 17,
       "bytes": 9677,
-      "gzipBytes": 1807,
-      "checksum": "sha256:411cb5dac1b959e66a3fdbc8a54a2f197240f0df0c9554e3253b73c4190893ff"
+      "gzipBytes": 1796,
+      "checksum": "sha256:e40b6c20794a2a17ee1913f36638ada85ec3a5b624b39cdd9283bd7e9b8bbf8a"
+    },
+    {
+      "id": "iteracompute",
+      "path": "providers/iteracompute.json",
+      "models": 10,
+      "bytes": 6715,
+      "gzipBytes": 1403,
+      "checksum": "sha256:a15cc59c38a75ce4a3eda0a69e6b25230821c335031d9a98705b9eb628237110"
+    },
+    {
+      "id": "jalapeno",
+      "path": "providers/jalapeno.json",
+      "models": 17,
+      "bytes": 10784,
+      "gzipBytes": 1786,
+      "checksum": "sha256:db6248473e338fc54d0447d592fa25361be71703aa40c5c1ab5640fce5bf822e"
     },
     {
       "id": "jiekou",
       "path": "providers/jiekou.json",
       "models": 61,
-      "bytes": 31713,
-      "gzipBytes": 3215,
-      "checksum": "sha256:f1ed8f2323eb3da5a8617a5534b874b1ff87864b3b99604971a7930981025d02"
+      "bytes": 31719,
+      "gzipBytes": 3250,
+      "checksum": "sha256:2dffd1c1fc02fb70924a5253222f8dadc7532b349f6995c272b3de7e792b7e4c"
     },
     {
       "id": "kenari",
       "path": "providers/kenari.json",
-      "models": 38,
-      "bytes": 20889,
-      "gzipBytes": 2936,
-      "checksum": "sha256:bfc7ad105e9c7a94847d993a848d8b0c83f9b954deba44236253572294f63bc3"
+      "models": 64,
+      "bytes": 38100,
+      "gzipBytes": 4781,
+      "checksum": "sha256:f42b94da5ab9386da4592244dd1bd4fdcb195bd2f4aa4a959581dc346083067c"
     },
     {
       "id": "kilo",
       "path": "providers/kilo.json",
-      "models": 346,
-      "bytes": 177379,
-      "gzipBytes": 16523,
-      "checksum": "sha256:33810c9b04e79b78ad9905dcaf4c8d0394ceecb271b610004dbfe1b533583f1f"
+      "models": 398,
+      "bytes": 265186,
+      "gzipBytes": 30456,
+      "checksum": "sha256:da40c4206460ea6f506236a7f0781e5f0763d03fffbc281007a396549e6e09cf"
     },
     {
-      "id": "kimi-for-coding",
-      "path": "providers/kimi-for-coding.json",
+      "id": "kimi-code-plan-cn",
+      "path": "providers/kimi-code-plan-cn.json",
       "models": 4,
-      "bytes": 2606,
-      "gzipBytes": 764,
-      "checksum": "sha256:484ec8cd8da78d4c4e4acf7dbc867ae29606e8fc29a8d4c43ebaec8f4bdf398e"
+      "bytes": 2990,
+      "gzipBytes": 860,
+      "checksum": "sha256:6c4081c776b455d41396463f697665dd0ff13170508a225c9ca73992b89f0ab6"
+    },
+    {
+      "id": "kimi-code-plan-global",
+      "path": "providers/kimi-code-plan-global.json",
+      "models": 4,
+      "bytes": 2995,
+      "gzipBytes": 861,
+      "checksum": "sha256:3541757bf2d2fd1def463b56a14e24458b1446c80169b9d8c53dddda18b31f1b"
+    },
+    {
+      "id": "klokintegration",
+      "path": "providers/klokintegration.json",
+      "models": 3,
+      "bytes": 2264,
+      "gzipBytes": 716,
+      "checksum": "sha256:4512c0aa67da15b8f892dd113f8c2916e4c209ff78fb6e33adc3e81528ad8c40"
+    },
+    {
+      "id": "kosmik",
+      "path": "providers/kosmik.json",
+      "models": 1,
+      "bytes": 872,
+      "gzipBytes": 508,
+      "checksum": "sha256:362cb875016818aa311c69e01c696267ddbfecfe241d56215ea55fdaf0fba07a"
     },
     {
       "id": "kuae-cloud-coding-plan",
@@ -624,49 +832,73 @@
       "id": "lilac",
       "path": "providers/lilac.json",
       "models": 4,
-      "bytes": 2600,
-      "gzipBytes": 830,
-      "checksum": "sha256:1145f0ae90cddde693f2c63bce358e2ce01ad7d421acc3cf1be97b33006b76ac"
+      "bytes": 2770,
+      "gzipBytes": 865,
+      "checksum": "sha256:b7cc1a5cc2fbd18e38a0956adc4529193bdc2d716cf776e5bb3e8e97494dbd25"
     },
     {
       "id": "llama",
       "path": "providers/llama.json",
       "models": 7,
       "bytes": 3858,
-      "gzipBytes": 659,
-      "checksum": "sha256:2ebd86ee74b3fbe766d11fac23c592205814c7cceb2a9415065be5f53f951ddf"
+      "gzipBytes": 674,
+      "checksum": "sha256:075c28685f30d7cfa257b1015ba043086c4c180df375c34dff5f0a799050bc17"
     },
     {
       "id": "llmgateway",
       "path": "providers/llmgateway.json",
-      "models": 186,
-      "bytes": 104836,
-      "gzipBytes": 12594,
-      "checksum": "sha256:95711ba5d12bae3a618d481a52f63817158fde8e8a2f07271545fa8e0b3894ce"
+      "models": 213,
+      "bytes": 131625,
+      "gzipBytes": 16167,
+      "checksum": "sha256:969f3a0f8582500c3cf8287efe93c2ddfb28edb8e10bfed059bb48952c9ecf21"
+    },
+    {
+      "id": "llmgateway-providers",
+      "path": "providers/llmgateway-providers.json",
+      "models": 433,
+      "bytes": 291888,
+      "gzipBytes": 27346,
+      "checksum": "sha256:92d1cecfb25eb1a86dc009ba9d98ab243495699057df74d56527a3a4914beabb"
+    },
+    {
+      "id": "llmtech",
+      "path": "providers/llmtech.json",
+      "models": 1,
+      "bytes": 864,
+      "gzipBytes": 506,
+      "checksum": "sha256:867c42af168d4e8cfcad89ef83bb77d359c09bdaedb343f6bf9cc867d086f3f8"
     },
     {
       "id": "llmtr",
       "path": "providers/llmtr.json",
-      "models": 6,
-      "bytes": 2778,
-      "gzipBytes": 794,
-      "checksum": "sha256:19dd6436faafc7af8e0db8d57da078dead1a135e64b246a646ffaeab3f06d098"
+      "models": 32,
+      "bytes": 19001,
+      "gzipBytes": 3307,
+      "checksum": "sha256:f13463c7d9eb6fa05150325517205c10ef9679b4424a2b22ab8c0a5ef3a07c17"
     },
     {
       "id": "lmstudio",
       "path": "providers/lmstudio.json",
       "models": 3,
       "bytes": 1682,
-      "gzipBytes": 634,
-      "checksum": "sha256:ee19dac7226b17e907ddd9fd19f6c8a9d3eb4174661816c7f31686bfb1c42180"
+      "gzipBytes": 636,
+      "checksum": "sha256:08b9f8bab6539ddb7afa83c43d2c83a77dfcd0685ed14e0d6960303dfa25d526"
     },
     {
       "id": "longcat",
       "path": "providers/longcat.json",
       "models": 1,
-      "bytes": 761,
-      "gzipBytes": 435,
-      "checksum": "sha256:409ed50ccfdb1dc512196d7e69be623b543d9122b07645285598918bd212f50f"
+      "bytes": 804,
+      "gzipBytes": 456,
+      "checksum": "sha256:3e618331e4c4dc674fc0b2f228744387673a7ab16d56c48dee89c72ee3cca5df"
+    },
+    {
+      "id": "lowrouter",
+      "path": "providers/lowrouter.json",
+      "models": 31,
+      "bytes": 21989,
+      "gzipBytes": 3071,
+      "checksum": "sha256:5578e5c7e2718ce564592a8f02ba0a398517068df08af46995e79d4878d034ea"
     },
     {
       "id": "lucidquery",
@@ -674,7 +906,7 @@
       "models": 4,
       "bytes": 2272,
       "gzipBytes": 665,
-      "checksum": "sha256:df66b8a7157dfd496067d6ce5d3ffd2740c20176279883e8694fb2117358fe8b"
+      "checksum": "sha256:772f1ad211c3ceade6010f76be66956cdcc26632c2d0561aaffaed1d1237a7ab"
     },
     {
       "id": "lynkr",
@@ -689,96 +921,112 @@
       "path": "providers/meganova.json",
       "models": 19,
       "bytes": 10151,
-      "gzipBytes": 1701,
-      "checksum": "sha256:7e1853dd5807b9e76923f54accf1275f587e4cb7c167d3a6d563fa45dc680f1f"
+      "gzipBytes": 1693,
+      "checksum": "sha256:1a4f5f092057e6491590f21f6108663a3b29e6081e56b4b5392d725c85ca557d"
+    },
+    {
+      "id": "melious",
+      "path": "providers/melious.json",
+      "models": 12,
+      "bytes": 8204,
+      "gzipBytes": 1658,
+      "checksum": "sha256:eeb8d07a50c14a7ad0b4e4f30ab6678681f0b856f9fb262c460133a56cfbaba8"
     },
     {
       "id": "merge-gateway",
       "path": "providers/merge-gateway.json",
-      "models": 145,
-      "bytes": 86168,
-      "gzipBytes": 9661,
-      "checksum": "sha256:3214a5ce14c9b0ab80adc7db567c1846c527c6907d9398311bf8a9c48ac144fd"
+      "models": 205,
+      "bytes": 132060,
+      "gzipBytes": 14478,
+      "checksum": "sha256:3dee8c21dfe93b88b20b1317b73e4583d6d321dae774f76ca96c33bb8ce03650"
     },
     {
       "id": "meta",
       "path": "providers/meta.json",
-      "models": 1,
-      "bytes": 829,
-      "gzipBytes": 493,
-      "checksum": "sha256:0055f179471e709d21827f310041a035d2901e8c01d44e5a056c4b18e7bbca49"
+      "models": 6,
+      "bytes": 4981,
+      "gzipBytes": 1023,
+      "checksum": "sha256:31d60a418b411a087cfa04dfd0bb8ec0f132895269cf679d9ae552a6a8f6b404"
     },
     {
       "id": "minimax",
       "path": "providers/minimax.json",
       "models": 7,
-      "bytes": 3911,
-      "gzipBytes": 903,
-      "checksum": "sha256:06bab833ae2394a95fb1a0032e77ea25391a7df475b6c54d1cc1093f8a32a71e"
+      "bytes": 3949,
+      "gzipBytes": 877,
+      "checksum": "sha256:306740fcfc972c16744f989bc0dfd00b43e13784f5b3c6ec178741ce999f8d23"
     },
     {
       "id": "minimax-cn",
       "path": "providers/minimax-cn.json",
       "models": 7,
-      "bytes": 3855,
-      "gzipBytes": 749,
-      "checksum": "sha256:5d10c1530dbce5e443f59cc1fc6cb5c2b4ce7b15d75bc1ccf93faf8dbfa2c6e6"
+      "bytes": 3889,
+      "gzipBytes": 735,
+      "checksum": "sha256:113b3ecd24ddc13ffc3e94d8ce68ba85df3e74f8e0ee13896407f457433d1226"
     },
     {
       "id": "minimax-cn-coding-plan",
       "path": "providers/minimax-cn-coding-plan.json",
-      "models": 7,
-      "bytes": 3686,
-      "gzipBytes": 679,
-      "checksum": "sha256:dd5c9c35c31e952a2158f6ccf0fc1fc3136576750a3a98a0f07c377274e178ea"
+      "models": 8,
+      "bytes": 4396,
+      "gzipBytes": 818,
+      "checksum": "sha256:87185d7e3d5202db2729ad5eaee8e5b75f14cab8d11d893ca816a1a2979c7ee0"
     },
     {
       "id": "minimax-coding-plan",
       "path": "providers/minimax-coding-plan.json",
-      "models": 7,
-      "bytes": 3674,
-      "gzipBytes": 675,
-      "checksum": "sha256:b196fc7b812f08cacc734f36469f2ab47a152ddb96238948d8199c9dbc42f0aa"
+      "models": 8,
+      "bytes": 4388,
+      "gzipBytes": 811,
+      "checksum": "sha256:4a825b9e9260de7fbc41aeb37d7373035e8d061e09bd30e12ada527a63146ea0"
     },
     {
       "id": "mistral",
       "path": "providers/mistral.json",
-      "models": 30,
-      "bytes": 15286,
-      "gzipBytes": 1965,
-      "checksum": "sha256:f1cd26a39699bdd28a769b52e68654b6cf4098f30c6613fd5a77b58a0d6fd3ff"
+      "models": 42,
+      "bytes": 22545,
+      "gzipBytes": 2935,
+      "checksum": "sha256:bd90733fe9e8039abd814fc8d7f9dfede6e5144baa23e47a11fa09f5db203ed2"
     },
     {
       "id": "mixlayer",
       "path": "providers/mixlayer.json",
       "models": 5,
       "bytes": 2654,
-      "gzipBytes": 514,
-      "checksum": "sha256:525dd8153ac26830402eb5cbd755e7e0f5ac15af0fc6f773195db63f24458522"
+      "gzipBytes": 515,
+      "checksum": "sha256:494b16ef96a6afb9eab3bdfec2c64544591b978339a6f7ce88214d16f7eea57e"
     },
     {
       "id": "moark",
       "path": "providers/moark.json",
-      "models": 2,
-      "bytes": 1187,
-      "gzipBytes": 527,
-      "checksum": "sha256:6839cd2058d797134c338990cc78d1ee9555efbaf8f8e37eba0409b3d1208d95"
+      "models": 10,
+      "bytes": 5733,
+      "gzipBytes": 1333,
+      "checksum": "sha256:f124da112717abb04b1738b7c46b090d43f1eb66c67428082589553046cc003e"
     },
     {
       "id": "modal",
       "path": "providers/modal.json",
-      "models": 1,
-      "bytes": 815,
-      "gzipBytes": 490,
-      "checksum": "sha256:f3cee0dde6caa2feda6097c89f0e449596ca67a374711057920490c8e29fe9df"
+      "models": 4,
+      "bytes": 2939,
+      "gzipBytes": 981,
+      "checksum": "sha256:349357ead20b124ff601117f6b01198e3ddfcd50bffa1071d3f85e73f1cdcf34"
     },
     {
       "id": "model-oracle-ai",
       "path": "providers/model-oracle-ai.json",
       "models": 15,
-      "bytes": 8343,
-      "gzipBytes": 1599,
-      "checksum": "sha256:bd401a7f29a85e9b257a4188c43a474f5ff0671cb992c32e39e048e72b67dbac"
+      "bytes": 8940,
+      "gzipBytes": 1702,
+      "checksum": "sha256:099d475497d3a58cfc1cf515727bb3bc4cdbc769bdd2f2fad9e65c79b2db1e76"
+    },
+    {
+      "id": "modelis",
+      "path": "providers/modelis.json",
+      "models": 9,
+      "bytes": 5962,
+      "gzipBytes": 1311,
+      "checksum": "sha256:3a631e2bafba9ed679772d5aa8c4f3d5ca9fa9bf95be8a489937144fd7a8d6bf"
     },
     {
       "id": "modelscope",
@@ -786,271 +1034,367 @@
       "models": 7,
       "bytes": 3849,
       "gzipBytes": 782,
-      "checksum": "sha256:85b15d3195af8f4f6340df9a749b86f560f34427754ec81472c0baf1594dac07"
+      "checksum": "sha256:b95d091b6f66cf89193201a106e702b17a6046ce1bff24c332181ff7816fefc3"
     },
     {
       "id": "moonshotai",
       "path": "providers/moonshotai.json",
-      "models": 10,
-      "bytes": 5932,
-      "gzipBytes": 1124,
-      "checksum": "sha256:47c158cc3d8cfdcaef3acee786640269737ab58f17ecf896bd97ce64468fa0bb"
+      "models": 4,
+      "bytes": 2838,
+      "gzipBytes": 773,
+      "checksum": "sha256:c1ebcfb4e378d1ecae3b71d7b84a6763e7869a89494bea8882161cb4619a7399"
     },
     {
       "id": "moonshotai-cn",
       "path": "providers/moonshotai-cn.json",
-      "models": 10,
-      "bytes": 5946,
-      "gzipBytes": 1133,
-      "checksum": "sha256:25d5e2b70c5bd66ded688064158bf8e67b34804569a637f44fa4c57a039247f4"
+      "models": 4,
+      "bytes": 2852,
+      "gzipBytes": 784,
+      "checksum": "sha256:17332cbe2d929712fe74fc5399c1ddd897ed08f8938004657ffc2f1002a15218"
     },
     {
       "id": "morph",
       "path": "providers/morph.json",
       "models": 3,
       "bytes": 1533,
-      "gzipBytes": 551,
-      "checksum": "sha256:64d2bab25f3a5c0bf1291f34f489d73a6de01e421f817246f3514bce183086e6"
+      "gzipBytes": 546,
+      "checksum": "sha256:24b85546cfc144d93aba42c7a3eb588490fedb9d4a094a2715fe84357996b498"
+    },
+    {
+      "id": "nan",
+      "path": "providers/nan.json",
+      "models": 8,
+      "bytes": 4700,
+      "gzipBytes": 1162,
+      "checksum": "sha256:5224d6117abe17f50a3fbcc5841372752bfec3313f08091eb28a2e61ac14f38d"
     },
     {
       "id": "nano-gpt",
       "path": "providers/nano-gpt.json",
-      "models": 617,
-      "bytes": 318859,
-      "gzipBytes": 26718,
-      "checksum": "sha256:4cd646fd8254375af36ca2358ce92351c4af12294929c0ad01ef98531bfb922c"
+      "models": 619,
+      "bytes": 386025,
+      "gzipBytes": 40835,
+      "checksum": "sha256:922073f0f483c75b5c2210eb0ce54d803b259ba1cd4947c4db4c218170a70f12"
     },
     {
       "id": "nearai",
       "path": "providers/nearai.json",
-      "models": 37,
-      "bytes": 22108,
-      "gzipBytes": 3422,
-      "checksum": "sha256:3a11fc6d1eb2fc534170d3896944b64523b4fd96c1846e634b349f4de063d620"
+      "models": 55,
+      "bytes": 35667,
+      "gzipBytes": 4898,
+      "checksum": "sha256:6ed42039e38d7b66cb329f3267e18d99e601d35b66910c3aa138a9a65a8dc333"
     },
     {
       "id": "nebius",
       "path": "providers/nebius.json",
-      "models": 33,
-      "bytes": 20103,
-      "gzipBytes": 2687,
-      "checksum": "sha256:87ce39eae553b99c49470bf5373bcb543d0ac87c614f1867aadf13c3adb582be"
+      "models": 24,
+      "bytes": 16013,
+      "gzipBytes": 2753,
+      "checksum": "sha256:6a7bafe6a3c2587c8b6c44ffedfa7a286484c3cc6b17ac0483dae1d87c053c65"
     },
     {
       "id": "neon",
       "path": "providers/neon.json",
-      "models": 36,
-      "bytes": 24099,
-      "gzipBytes": 3252,
-      "checksum": "sha256:c91d5da32a5a3387e205dfd120f583eea704377a0243f8aedbd2dde90302b725"
+      "models": 57,
+      "bytes": 42150,
+      "gzipBytes": 5203,
+      "checksum": "sha256:57a3e90038c5ade0009b19c0ced41982bb0da7c1d4cae05c48e44e7511a00abd"
+    },
+    {
+      "id": "neosmith",
+      "path": "providers/neosmith.json",
+      "models": 4,
+      "bytes": 2503,
+      "gzipBytes": 759,
+      "checksum": "sha256:afd571ab302a79316d44029947657289f3772f2e113fe83006f435399829bc91"
     },
     {
       "id": "neuralwatt",
       "path": "providers/neuralwatt.json",
-      "models": 20,
-      "bytes": 11144,
-      "gzipBytes": 1573,
-      "checksum": "sha256:223322736710777c26fd14935c7d39e90c2c775ad1e51ae9cee015278a0872c6"
+      "models": 31,
+      "bytes": 20808,
+      "gzipBytes": 2426,
+      "checksum": "sha256:405bc3ee065a14d84d9b5d686060a22d00aef1eeb59d229f241ca812f3de6b8a"
     },
     {
       "id": "nova",
       "path": "providers/nova.json",
       "models": 2,
       "bytes": 1258,
-      "gzipBytes": 485,
-      "checksum": "sha256:a7af8b696b741d1b3c0e1cd324ab1cd33bc7e20b4ae21de282e478078e8f79b1"
+      "gzipBytes": 483,
+      "checksum": "sha256:a6a3af6e37435356ca0d49e427e674c71495fd89bbf037b7babb2dec2317b33b"
     },
     {
       "id": "novita-ai",
       "path": "providers/novita-ai.json",
-      "models": 107,
-      "bytes": 56897,
-      "gzipBytes": 6146,
-      "checksum": "sha256:c0a1dd3e200dd941c87d2fea3b24deab12b2a4d64e7b8e365c573ed9d7dca6bc"
+      "models": 86,
+      "bytes": 54814,
+      "gzipBytes": 7397,
+      "checksum": "sha256:0d45ef4ec7a02bede2f4ecd83ce1774ffbc3d94ea193f02ef4046353eac786fb"
     },
     {
       "id": "nvidia",
       "path": "providers/nvidia.json",
-      "models": 98,
-      "bytes": 49852,
-      "gzipBytes": 6022,
-      "checksum": "sha256:c31aed2919bd248969d8fc37895ed6ea34071f276408b716c51ef01d588a43fc"
+      "models": 107,
+      "bytes": 59002,
+      "gzipBytes": 6936,
+      "checksum": "sha256:3dffb3ec29f5061b5386cb0b301c8864ae2dfb16ee03153b069e50a6d1303fe0"
+    },
+    {
+      "id": "oci",
+      "path": "providers/oci.json",
+      "models": 9,
+      "bytes": 6369,
+      "gzipBytes": 1353,
+      "checksum": "sha256:2e101f7b0efb7a6338f7a961801c5815fe1d6a69978d6e27d94c34a00a52cd92"
     },
     {
       "id": "ofox",
       "path": "providers/ofox.json",
-      "models": 13,
-      "bytes": 8783,
-      "gzipBytes": 1669,
-      "checksum": "sha256:8c98a7ef68b60750f08408bf1dca9624f2edb5442736151db961d03daa2d5025"
+      "models": 154,
+      "bytes": 102899,
+      "gzipBytes": 10480,
+      "checksum": "sha256:1ffaf9f58be51492ad9e189f70ded752e543f6636365e72c2b213ca9d9f6c910"
     },
     {
       "id": "ollama-cloud",
       "path": "providers/ollama-cloud.json",
-      "models": 19,
-      "bytes": 9172,
-      "gzipBytes": 1635,
-      "checksum": "sha256:80d7c83c2ac5dae35360fe8de19afd1593673db6acd6ba7dd866b401b08ceb99"
+      "models": 27,
+      "bytes": 15892,
+      "gzipBytes": 2621,
+      "checksum": "sha256:4fa1d7024abf0456a097c86fbacb014fa98272bd93cb8b90b0d1dd88cfbbc07b"
     },
     {
       "id": "openai",
       "path": "providers/openai.json",
-      "models": 47,
-      "bytes": 29220,
-      "gzipBytes": 3563,
-      "checksum": "sha256:0fbe80269eb1bb190cdeb060b517d5e70bc0c2a484a00b591a4d38159f673a15"
+      "models": 53,
+      "bytes": 38657,
+      "gzipBytes": 4521,
+      "checksum": "sha256:2c69c26c3e91ec542902ca3b4217a4992c355bb15fd777f46be66853c8f3400c"
     },
     {
       "id": "opencode",
       "path": "providers/opencode.json",
-      "models": 85,
-      "bytes": 53886,
-      "gzipBytes": 5595,
-      "checksum": "sha256:d51975f28d5ba991c87186a1806530d38a69ff5183a939a6c7be42f30f014022"
+      "models": 127,
+      "bytes": 92658,
+      "gzipBytes": 9331,
+      "checksum": "sha256:d28c67b7d58ae04e04b0f1017b83db6d5bf2b67529e16054d7fb40997983f9e5"
     },
     {
       "id": "opencode-go",
       "path": "providers/opencode-go.json",
-      "models": 22,
-      "bytes": 13831,
-      "gzipBytes": 2208,
-      "checksum": "sha256:7e8e1e0d83838b40efd2f93103e9e7f5db56371fcbfdd4219e1016a7a1f0350a"
+      "models": 32,
+      "bytes": 24430,
+      "gzipBytes": 3637,
+      "checksum": "sha256:463744ddc05cedd1dc22d17ae3c66a491a184aceeca99f11091ca060fc5b5447"
+    },
+    {
+      "id": "openreason",
+      "path": "providers/openreason.json",
+      "models": 3,
+      "bytes": 2325,
+      "gzipBytes": 843,
+      "checksum": "sha256:f84115c97d407c6fd2892da8a3d0015ff64cb105d0064fef27e768a16ffaf750"
     },
     {
       "id": "openrouter",
       "path": "providers/openrouter.json",
-      "models": 335,
-      "bytes": 193231,
-      "gzipBytes": 19447,
-      "checksum": "sha256:9e719b5a5d0cc897a894844505604726eb253e9ca9ca40740010e12dbbb8b7b9"
+      "models": 390,
+      "bytes": 245957,
+      "gzipBytes": 24351,
+      "checksum": "sha256:4c950f2affc38244e8c0f1f5fd1ea23a2022e20ace2aeeb98d85892f954ac13a"
+    },
+    {
+      "id": "opper",
+      "path": "providers/opper.json",
+      "models": 57,
+      "bytes": 39352,
+      "gzipBytes": 5510,
+      "checksum": "sha256:030906315541ea0ea3c47717bfef9ac07e96c43006d3423adfe3089431b82d79"
     },
     {
       "id": "orcarouter",
       "path": "providers/orcarouter.json",
-      "models": 81,
-      "bytes": 48831,
-      "gzipBytes": 5653,
-      "checksum": "sha256:cec34870ce4e03003a894b4d05bc7658ff0aa68809fd6bfb720b4781f3ddb3fe"
+      "models": 117,
+      "bytes": 78645,
+      "gzipBytes": 8948,
+      "checksum": "sha256:bab75ee681d86ce8713e3bc867e3f09b3122225175c03407c8d35e4af6ef15de"
     },
     {
       "id": "ovhcloud",
       "path": "providers/ovhcloud.json",
-      "models": 14,
-      "bytes": 7246,
-      "gzipBytes": 1340,
-      "checksum": "sha256:ac3d038a675288d490cadff111e2c017354bbcc0266e9dbf311b66050d3d62c2"
+      "models": 12,
+      "bytes": 6421,
+      "gzipBytes": 1209,
+      "checksum": "sha256:7e1e7bdb00c9816c45cd7f31e86d02a4948fc011a0ca371c4d2c757bdd138591"
+    },
+    {
+      "id": "pareto",
+      "path": "providers/pareto.json",
+      "models": 1,
+      "bytes": 890,
+      "gzipBytes": 510,
+      "checksum": "sha256:a8d30059692b8b2a9f0ad74e99d9aea0c919df5280818f4060713199eb37f774"
+    },
+    {
+      "id": "pendra",
+      "path": "providers/pendra.json",
+      "models": 6,
+      "bytes": 3530,
+      "gzipBytes": 1045,
+      "checksum": "sha256:9601bdec7aee8dd36c2116238e9f9da5e67e23c31c8afcfccb5872fa64c61f21"
     },
     {
       "id": "perplexity",
       "path": "providers/perplexity.json",
       "models": 4,
       "bytes": 2234,
-      "gzipBytes": 660,
-      "checksum": "sha256:79d9394de7a1ab1c257c4823da1653782fca096bf171bc201481ba2fd258bc5b"
+      "gzipBytes": 661,
+      "checksum": "sha256:3b6b806040dbbfa6103275ccb3b9dc4dfde3ed3cfe38e9c3c0e90718d69c45ea"
     },
     {
       "id": "perplexity-agent",
       "path": "providers/perplexity-agent.json",
-      "models": 20,
-      "bytes": 12897,
-      "gzipBytes": 1979,
-      "checksum": "sha256:7dac33b80d23a0e7aa997c877391d2b8d05d7bfc2052e30d0d3a373814c5517f"
+      "models": 22,
+      "bytes": 14564,
+      "gzipBytes": 2296,
+      "checksum": "sha256:506894e7be2a50d02ebd4acca22ae3b78962899f3fdf0f0c49d6630a4d945041"
     },
     {
       "id": "pioneer",
       "path": "providers/pioneer.json",
-      "models": 76,
-      "bytes": 48775,
-      "gzipBytes": 5727,
-      "checksum": "sha256:95578b116cf5af4d561d5fbb34e08c2767dabf38e675caed85e325c9274b9f90"
+      "models": 117,
+      "bytes": 78105,
+      "gzipBytes": 9146,
+      "checksum": "sha256:ef343c7d56ad597a7c317047b798f1ec99a60a2ad3ba536c25cbe5e78b23a788"
     },
     {
       "id": "poe",
       "path": "providers/poe.json",
-      "models": 137,
-      "bytes": 67848,
-      "gzipBytes": 6442,
-      "checksum": "sha256:afe58b9b783977de513b0eb18dd76352923cc5ae849c42f099a534d22e64a927"
+      "models": 142,
+      "bytes": 71927,
+      "gzipBytes": 6978,
+      "checksum": "sha256:7b4655be70eabfa00584464f77694e01f5fefe372a04bb9176059ead7ed7f619"
     },
     {
       "id": "poolside",
       "path": "providers/poolside.json",
       "models": 3,
-      "bytes": 1987,
-      "gzipBytes": 558,
-      "checksum": "sha256:a0af315f7d66cbe83c6a29e34acd4a561ddaeb5d8b49cc28a23928f3a4c73c8e"
+      "bytes": 2121,
+      "gzipBytes": 579,
+      "checksum": "sha256:96d6ad0babe449d73c0137705ebf7369702e459fafd804b0d8a00065fed83a80"
+    },
+    {
+      "id": "prime",
+      "path": "providers/prime.json",
+      "models": 68,
+      "bytes": 43760,
+      "gzipBytes": 5413,
+      "checksum": "sha256:6086404f538e2d2dde0873c39c2533775a65e2f9bd73e382c8c0eab230fe8a9b"
     },
     {
       "id": "privatemode-ai",
       "path": "providers/privatemode-ai.json",
-      "models": 5,
-      "bytes": 2820,
-      "gzipBytes": 898,
-      "checksum": "sha256:4eaaa8fa9a5a8689ed33989b250eccde2773af5df4ba35039214053457b81cb3"
+      "models": 11,
+      "bytes": 6644,
+      "gzipBytes": 1440,
+      "checksum": "sha256:16f3dd0fd6793d79ae958ae53ea52e713ac357ba463156930c660bc3637a832a"
     },
     {
       "id": "qihang-ai",
       "path": "providers/qihang-ai.json",
       "models": 9,
       "bytes": 5317,
-      "gzipBytes": 1160,
-      "checksum": "sha256:e48a5ee1d7acc31c5be0f991c867e839d23457ef7a19fe9f52dd86d533c60d46"
+      "gzipBytes": 1168,
+      "checksum": "sha256:78abe9c0ee60456d2029f3ce75d119dab77aa99497c8684daac14fab9b7446eb"
     },
     {
       "id": "qiniu-ai",
       "path": "providers/qiniu-ai.json",
       "models": 91,
-      "bytes": 42592,
-      "gzipBytes": 4051,
-      "checksum": "sha256:d31f4c4a94c96ad3e8640fe363c3113ae463183f5497b81877afd9c4c21e48aa"
+      "bytes": 42680,
+      "gzipBytes": 4075,
+      "checksum": "sha256:1c669649280d85798cb265d1a3fc1cb6519fc78d41cff3a06ddd62b307dc10aa"
     },
     {
       "id": "qvac",
       "path": "providers/qvac.json",
       "models": 9,
-      "bytes": 4402,
-      "gzipBytes": 823,
-      "checksum": "sha256:91bbfa45eb239c55c09ff1cfeace7bf1e34bbad1ff5f12ece40d392c0a3310fc"
+      "bytes": 4679,
+      "gzipBytes": 892,
+      "checksum": "sha256:d46559d4e6aecb91e4631e2dd7ffb6bcd4d1c7fd0e56f428b93df7893c142260"
+    },
+    {
+      "id": "reflection",
+      "path": "providers/reflection.json",
+      "models": 1,
+      "bytes": 953,
+      "gzipBytes": 550,
+      "checksum": "sha256:f8cdca796464dc0b57836c0d259324518c646c93267223b52bf21507b4e11600"
     },
     {
       "id": "regolo-ai",
       "path": "providers/regolo-ai.json",
-      "models": 13,
-      "bytes": 6408,
-      "gzipBytes": 1274,
-      "checksum": "sha256:509c1baddea0209308da2b9e849ab8c26e626bf18ffaaf3db9d637060e569a52"
+      "models": 18,
+      "bytes": 9230,
+      "gzipBytes": 2053,
+      "checksum": "sha256:6034762beb74064450b302824de66dd1f550c30886417718e9b9b0f146b7b7b2"
     },
     {
       "id": "requesty",
       "path": "providers/requesty.json",
-      "models": 38,
-      "bytes": 24951,
-      "gzipBytes": 2657,
-      "checksum": "sha256:222d2597a29464217b5c9e465fcc3f2ff85f27ef0fb1678dc8ef690ecd43ef3d"
+      "models": 179,
+      "bytes": 127189,
+      "gzipBytes": 16070,
+      "checksum": "sha256:31c2ef02ac4ab4f7d2c25c5b26722a95f835d85d2eb9073c3eda52d2749bde4c"
     },
     {
       "id": "routing-run",
       "path": "providers/routing-run.json",
       "models": 15,
-      "bytes": 8759,
-      "gzipBytes": 1476,
-      "checksum": "sha256:3a2d73f9b5b564aad1dee152404dc56d469d3f7ebea19ac7550a6fb1bca44f5a"
+      "bytes": 9464,
+      "gzipBytes": 1593,
+      "checksum": "sha256:75c0162ab92834438b9ee63e4368b0c5ebbdc60b87c91b3b95e2bfbf851ba7b5"
+    },
+    {
+      "id": "runinfra",
+      "path": "providers/runinfra.json",
+      "models": 7,
+      "bytes": 4985,
+      "gzipBytes": 1310,
+      "checksum": "sha256:81d32dfededabcab01ebe6d1bfa0fb54692bce9b9abcd3cb6d21c5750351c7e1"
     },
     {
       "id": "sakana",
       "path": "providers/sakana.json",
-      "models": 3,
-      "bytes": 2201,
-      "gzipBytes": 587,
-      "checksum": "sha256:ed5412e3cb655e7c7fa52ac803ac14f280f2da0925a7e1c60965f4ab27c7cc05"
+      "models": 4,
+      "bytes": 2956,
+      "gzipBytes": 770,
+      "checksum": "sha256:df95708d4a3d7c4c7140d1063deed7fbb309ed2fb26c7fa5cebea672dc23187e"
+    },
+    {
+      "id": "salad-cloud",
+      "path": "providers/salad-cloud.json",
+      "models": 1,
+      "bytes": 819,
+      "gzipBytes": 487,
+      "checksum": "sha256:c680b4cb0adae145250d626cb67709890a1b31efc2d4bceb588f846438825960"
+    },
+    {
+      "id": "sambanova",
+      "path": "providers/sambanova.json",
+      "models": 6,
+      "bytes": 3627,
+      "gzipBytes": 1009,
+      "checksum": "sha256:1a8319b85640f8ec7a3346866b79f948dc4069651517d2192e9a442a6ed7966a"
     },
     {
       "id": "sap-ai-core",
       "path": "providers/sap-ai-core.json",
-      "models": 43,
-      "bytes": 25067,
-      "gzipBytes": 3055,
-      "checksum": "sha256:9f45720b21907f967a9aa93c5dcee93a7eb39ec73d2c61c90320feec11b06a43"
+      "models": 55,
+      "bytes": 34630,
+      "gzipBytes": 4217,
+      "checksum": "sha256:b055926a4686371f17a482ba4c6ac9e0307a63744ba6489d56b7cb4ff9468a96"
     },
     {
       "id": "sarvam",
@@ -1063,355 +1407,459 @@
     {
       "id": "scaleway",
       "path": "providers/scaleway.json",
-      "models": 14,
-      "bytes": 7661,
-      "gzipBytes": 1667,
-      "checksum": "sha256:e7e8157d48d3cd867f094c6f8827bf90dcb81471ccfd31cd9015ed7e25f8a9fd"
+      "models": 18,
+      "bytes": 10840,
+      "gzipBytes": 2192,
+      "checksum": "sha256:2fd455835c3a57fba08d173248fa28ff3d14bddb1552f9ba0965abd6697dfc34"
+    },
+    {
+      "id": "scnet-token-plan",
+      "path": "providers/scnet-token-plan.json",
+      "models": 19,
+      "bytes": 12150,
+      "gzipBytes": 1863,
+      "checksum": "sha256:f7c1906e345cba02bf235410c65797a385f4201f0c471a750d027148c8f8ab05"
+    },
+    {
+      "id": "scx-ai",
+      "path": "providers/scx-ai.json",
+      "models": 4,
+      "bytes": 2834,
+      "gzipBytes": 905,
+      "checksum": "sha256:a5c2f33c607987c58e04707921ac5b5e68458118fcaf3f13da8498b71c009e94"
+    },
+    {
+      "id": "sensenova",
+      "path": "providers/sensenova.json",
+      "models": 6,
+      "bytes": 4297,
+      "gzipBytes": 1068,
+      "checksum": "sha256:ec6460b509f75a99a304b3a57ef00c87bef7345674bd0e2a4365d26409b0e49b"
     },
     {
       "id": "siliconflow",
       "path": "providers/siliconflow.json",
-      "models": 49,
-      "bytes": 26988,
-      "gzipBytes": 2902,
-      "checksum": "sha256:8d06d520929c0b2163e2f169520a48daee63291913a7d9d67d1df83c5d002d15"
+      "models": 57,
+      "bytes": 33706,
+      "gzipBytes": 3978,
+      "checksum": "sha256:82deb638f6379b653ab312fa63aff807e89839abd1ff722a508c78ab29335e7b"
     },
     {
       "id": "siliconflow-cn",
       "path": "providers/siliconflow-cn.json",
-      "models": 47,
-      "bytes": 25797,
-      "gzipBytes": 2727,
-      "checksum": "sha256:4e1ef2822141945fefacb37a33095c4b89951b75432b15334c8dad39baceea4d"
+      "models": 44,
+      "bytes": 24327,
+      "gzipBytes": 2682,
+      "checksum": "sha256:dbce7c18c2ae90dbaedba6a939e0fbf3f96d187b01e41302ec433745c06a112d"
     },
     {
       "id": "snowflake-cortex",
       "path": "providers/snowflake-cortex.json",
-      "models": 21,
-      "bytes": 12015,
-      "gzipBytes": 2190,
-      "checksum": "sha256:f9b8aa16a96a7aab695a77175360d996eb29eef0540c603a9d901eff25de2a2a"
+      "models": 25,
+      "bytes": 15123,
+      "gzipBytes": 2507,
+      "checksum": "sha256:2709dbe2f2b4a7531719aebdeeb8ca016bc8630df87c5154c5d3a790ba579864"
     },
     {
       "id": "stackit",
       "path": "providers/stackit.json",
       "models": 8,
-      "bytes": 4421,
-      "gzipBytes": 1047,
-      "checksum": "sha256:562efa219ffb9e9556d48bff44bfa1d06150e74632fcc4314400cecd728fc5f9"
+      "bytes": 4549,
+      "gzipBytes": 1079,
+      "checksum": "sha256:4ff0c3a82c86f9adfcd67a9dce733959f69cec916780135acd2da157adacbc8c"
+    },
+    {
+      "id": "standardcompute",
+      "path": "providers/standardcompute.json",
+      "models": 40,
+      "bytes": 33242,
+      "gzipBytes": 4253,
+      "checksum": "sha256:f8df74e442df6c55205836ca5dae666b378a43830d96c1126cf0c825022c99bf"
     },
     {
       "id": "stepfun",
       "path": "providers/stepfun.json",
-      "models": 8,
-      "bytes": 4248,
-      "gzipBytes": 983,
-      "checksum": "sha256:0eef9e519c79b1d78cd7448ddfd1eaaa5d21742ae3deb86a8fc493b1bd5bb7fa"
+      "models": 9,
+      "bytes": 5034,
+      "gzipBytes": 1179,
+      "checksum": "sha256:ceb3b577eab0aba5dbdd28789cecb370195f4db0b35afd98cf345c924e5b8347"
     },
     {
       "id": "stepfun-ai",
       "path": "providers/stepfun-ai.json",
-      "models": 8,
-      "bytes": 4253,
-      "gzipBytes": 989,
-      "checksum": "sha256:464b409a2f9e0d46148b9204779b31f3300eb971305d2b2fddd46fb26c2bfcef"
+      "models": 9,
+      "bytes": 5032,
+      "gzipBytes": 1171,
+      "checksum": "sha256:29dbe0a7f9df775cd272b16a8786ac2e228a5e7aecc8777f627436c341a7b9f8"
     },
     {
       "id": "stepfun-ai-step-plan",
       "path": "providers/stepfun-ai-step-plan.json",
-      "models": 3,
-      "bytes": 1955,
-      "gzipBytes": 616,
-      "checksum": "sha256:faf0e039ff33ebe81457594c58f7ba0fd93c2903d854c9926903f6f0150b3d89"
+      "models": 4,
+      "bytes": 2781,
+      "gzipBytes": 803,
+      "checksum": "sha256:36331cfd97b916354c009b26dfed115a0abb2b33b223a6dd7dcec09b1276b9d6"
     },
     {
       "id": "stepfun-step-plan",
       "path": "providers/stepfun-step-plan.json",
-      "models": 4,
-      "bytes": 2389,
-      "gzipBytes": 693,
-      "checksum": "sha256:d3ef62932dcf9f26ab32af228222287d7a069a9a2ea65290903fed5fd9600c33"
+      "models": 5,
+      "bytes": 3215,
+      "gzipBytes": 876,
+      "checksum": "sha256:1952ff985c8b7ec920be432caba948d6db24a3ba9bec1fbdbeb3b8eb4dda3244"
     },
     {
       "id": "subconscious",
       "path": "providers/subconscious.json",
       "models": 2,
-      "bytes": 1355,
-      "gzipBytes": 580,
-      "checksum": "sha256:d78dee3c2ae32eb73aba4364b2fa55181be5572ad4131405c28083329d95cce5"
+      "bytes": 1588,
+      "gzipBytes": 628,
+      "checksum": "sha256:377c05c7827710299ff1489eaa84b873db4f434acaf65f95f4376a8cd478d9bb"
     },
     {
       "id": "submodel",
       "path": "providers/submodel.json",
       "models": 9,
       "bytes": 4628,
-      "gzipBytes": 959,
-      "checksum": "sha256:b3548de0092c468d601a7175f3557d1136aa9999e00189d6dac0b2f9a8dd96b3"
+      "gzipBytes": 968,
+      "checksum": "sha256:686fcac3e5497a296f77a42a0bf142c8e998058e3f7966269de546e9e2e427ce"
     },
     {
       "id": "synthetic",
       "path": "providers/synthetic.json",
-      "models": 8,
-      "bytes": 5225,
-      "gzipBytes": 1259,
-      "checksum": "sha256:e3903ca946f4ade1ac73b819120a446f910cf79f40cefaa2794fb09ddae6e6fc"
+      "models": 11,
+      "bytes": 7583,
+      "gzipBytes": 1573,
+      "checksum": "sha256:c808a4a3904ff944a88fa6c17aa810fae247425510a254cede84bde87af7773c"
+    },
+    {
+      "id": "tempr",
+      "path": "providers/tempr.json",
+      "models": 82,
+      "bytes": 54231,
+      "gzipBytes": 6008,
+      "checksum": "sha256:e25be6584716c1e1b643e2c79581cbbb8505f585f0ab47d6f79104f1fdd2d358"
     },
     {
       "id": "tencent-coding-plan",
       "path": "providers/tencent-coding-plan.json",
       "models": 8,
       "bytes": 4475,
-      "gzipBytes": 933,
-      "checksum": "sha256:876615bae6b20ec5be1ed9bdf94cb2f2b58bb8ba0d2e68b7b5b36307d5203055"
+      "gzipBytes": 935,
+      "checksum": "sha256:0d6e2b3e1121171c8b24bb4d28a0af9aae274f60968066c41b286e30dfa40abf"
     },
     {
       "id": "tencent-token-plan",
       "path": "providers/tencent-token-plan.json",
-      "models": 1,
-      "bytes": 808,
-      "gzipBytes": 478,
-      "checksum": "sha256:8057be87c8ae5160be5f3fc5ed6745d130b90c0dde9bb852757d4683be9f39b9"
+      "models": 2,
+      "bytes": 1473,
+      "gzipBytes": 631,
+      "checksum": "sha256:0ca84544e9d70b8a72fbddf40faed8840036cabc6a6cc19db6bd87cf275605b7"
     },
     {
       "id": "tencent-tokenhub",
       "path": "providers/tencent-tokenhub.json",
-      "models": 2,
-      "bytes": 1348,
-      "gzipBytes": 509,
-      "checksum": "sha256:f35313aae22ad7c37b52f7d8add92d7c2ed294c37b8e492f4dc31c376beba42a"
+      "models": 3,
+      "bytes": 2056,
+      "gzipBytes": 664,
+      "checksum": "sha256:4ed85f3221d05d1c49e918526daa65b038b1f262a8b55a8ae2b29d422acec4ff"
+    },
+    {
+      "id": "tensorx",
+      "path": "providers/tensorx.json",
+      "models": 25,
+      "bytes": 16482,
+      "gzipBytes": 2629,
+      "checksum": "sha256:9cccf2f7da9ca58efefa94b9ca98e20edbe75df4b8de4a93bf1ec6ff7d94c335"
     },
     {
       "id": "the-grid-ai",
       "path": "providers/the-grid-ai.json",
-      "models": 9,
-      "bytes": 6067,
-      "gzipBytes": 1052,
-      "checksum": "sha256:e4363eb7f20f21f76ed898576aa00e8bda4d23cf71954fa0965befab2cc2e210"
+      "models": 16,
+      "bytes": 10316,
+      "gzipBytes": 1403,
+      "checksum": "sha256:28a5c0befe5f6a8e5aaf44211c36a7e71916e53f1edb5dd0092d4fa576246f64"
     },
     {
       "id": "thinkingmachines",
       "path": "providers/thinkingmachines.json",
       "models": 2,
-      "bytes": 1531,
-      "gzipBytes": 553,
-      "checksum": "sha256:37d3d013d30339fa82ebb671294bc0ccfe64e110d5df040a1c6db01bad0d2ba3"
+      "bytes": 1627,
+      "gzipBytes": 572,
+      "checksum": "sha256:867f95f0d2174a0d4549f6cb04323abbafc5090d548133e2549c0076a912308a"
     },
     {
       "id": "tinfoil",
       "path": "providers/tinfoil.json",
-      "models": 7,
-      "bytes": 4051,
-      "gzipBytes": 1099,
-      "checksum": "sha256:2d9f7bae45bb344dff3474f06d98a71ba2d75d5e279055c7647722edfa0e96c3"
+      "models": 8,
+      "bytes": 4900,
+      "gzipBytes": 1315,
+      "checksum": "sha256:4116cbd2970a89dd73da4ca31c699b71b5c6a5be90a40ae413811bce728a7114"
     },
     {
       "id": "togetherai",
       "path": "providers/togetherai.json",
-      "models": 34,
-      "bytes": 18554,
-      "gzipBytes": 2922,
-      "checksum": "sha256:3fab5a7e7163ed00933a4327874012e2f84fdbda10ef6d15bcace66af390ff2d"
+      "models": 32,
+      "bytes": 19377,
+      "gzipBytes": 3153,
+      "checksum": "sha256:bac0f5c1f47b70c3063c15941572249807067632328c9f8912324af281c7c799"
+    },
+    {
+      "id": "tokengo",
+      "path": "providers/tokengo.json",
+      "models": 13,
+      "bytes": 8140,
+      "gzipBytes": 1565,
+      "checksum": "sha256:24eed3d1939c3342f29cd9ad81741632df23014128731b2c91f10e8b2b746fc6"
+    },
+    {
+      "id": "tokenrouter",
+      "path": "providers/tokenrouter.json",
+      "models": 1,
+      "bytes": 873,
+      "gzipBytes": 513,
+      "checksum": "sha256:42dc6100da773aad1a364649a0e7a92bdd82b4ff7804f8280b43ad5103e6260d"
     },
     {
       "id": "trustedrouter",
       "path": "providers/trustedrouter.json",
       "models": 7,
-      "bytes": 3815,
-      "gzipBytes": 727,
-      "checksum": "sha256:9555b2db155cb1ec4195891ca414be9da9d62adbffd5c8d1ab72ccb816f6fa79"
+      "bytes": 4011,
+      "gzipBytes": 735,
+      "checksum": "sha256:22838d3150c84d7c5d7edaeaa5471e1da0e10868f77738ad41aec5d199e94d90"
     },
     {
       "id": "umans-ai",
       "path": "providers/umans-ai.json",
-      "models": 5,
-      "bytes": 3231,
-      "gzipBytes": 865,
-      "checksum": "sha256:ab34ff2b00a916e261b44341eaaafc66e0bcb6d6dfe5005f3e77471e801ea7e8"
+      "models": 7,
+      "bytes": 5066,
+      "gzipBytes": 1113,
+      "checksum": "sha256:d82271f7c48832c1871275a01a3a087fccb67e6a38fe256d9f7cd39bfbe8d883"
     },
     {
       "id": "umans-ai-coding-plan",
       "path": "providers/umans-ai-coding-plan.json",
-      "models": 6,
-      "bytes": 3983,
-      "gzipBytes": 895,
-      "checksum": "sha256:b4333ae55decbc9e815c86411f13e1ef18be351c8b5a0942c0ebf6f2c8e86ffb"
+      "models": 8,
+      "bytes": 5876,
+      "gzipBytes": 1113,
+      "checksum": "sha256:a35a122347e8512b751562309928d205c3716179a7a2ec9690a1fd2492e0d28d"
     },
     {
       "id": "unorouter",
       "path": "providers/unorouter.json",
       "models": 23,
-      "bytes": 12218,
-      "gzipBytes": 2005,
-      "checksum": "sha256:ca0d7b8cf5f2fa293c6fc5394940e845010ec44058b346d03043514e46b1a312"
+      "bytes": 13257,
+      "gzipBytes": 2147,
+      "checksum": "sha256:9ae42b1d2f3eaba0f1425fdc5595fe505c37e2784a28444bcd0c139504dd66f0"
     },
     {
       "id": "upstage",
       "path": "providers/upstage.json",
-      "models": 3,
-      "bytes": 1744,
-      "gzipBytes": 599,
-      "checksum": "sha256:66fa71e86e57b3192df8f11c079623a718db3b63dbcfabf0bf262be887e00fc8"
+      "models": 5,
+      "bytes": 2930,
+      "gzipBytes": 776,
+      "checksum": "sha256:dbb36aebc42921d1113c179b5215c79be840658431a4ea2a795e480ff83dcdb0"
     },
     {
-      "id": "v0",
-      "path": "providers/v0.json",
-      "models": 3,
-      "bytes": 1510,
-      "gzipBytes": 424,
-      "checksum": "sha256:915d01bd3365f9848d6609fb0873ad69a23153c1aaba97a7a9b5044b04efa6b6"
+      "id": "vancine",
+      "path": "providers/vancine.json",
+      "models": 8,
+      "bytes": 5425,
+      "gzipBytes": 1296,
+      "checksum": "sha256:47c5c9bb08f1e85d5484eee7c02d0f6cdb44b9b25f5804fbd526d976663500fb"
     },
     {
       "id": "venice",
       "path": "providers/venice.json",
-      "models": 89,
-      "bytes": 52782,
-      "gzipBytes": 6346,
-      "checksum": "sha256:08b377339b7302174884f64922463e512bc3e6a0d12a8500e69a34376274b988"
+      "models": 124,
+      "bytes": 82106,
+      "gzipBytes": 9301,
+      "checksum": "sha256:f652f90d8da64c1dd93cb0ba75c5da3603bfde25a6bc695ded99148b5dbdcb9b"
     },
     {
       "id": "vercel",
       "path": "providers/vercel.json",
-      "models": 308,
-      "bytes": 161418,
-      "gzipBytes": 16278,
-      "checksum": "sha256:fec141fb6167f1c66a7083bca293acd0b733e06607f0b314213fb39e7d025477"
+      "models": 414,
+      "bytes": 239864,
+      "gzipBytes": 22728,
+      "checksum": "sha256:683553a733eaa4f1a41ce4c0c79283da478cd8368cd1edf747b74610f48fb399"
+    },
+    {
+      "id": "vispark",
+      "path": "providers/vispark.json",
+      "models": 3,
+      "bytes": 1974,
+      "gzipBytes": 635,
+      "checksum": "sha256:c9fc3c92792319eaa4d7d37336cc054b85452abd0a707ea75005f768c2b32385"
     },
     {
       "id": "vivgrid",
       "path": "providers/vivgrid.json",
-      "models": 17,
-      "bytes": 11231,
-      "gzipBytes": 1686,
-      "checksum": "sha256:d21a2af10106228665f049f726dbf42b6fad0f2f862ebeac5c4ba2fee18dc5dc"
+      "models": 37,
+      "bytes": 26387,
+      "gzipBytes": 3386,
+      "checksum": "sha256:838ed8877319deaa52efe1b00c7eba31fc9bceb69a683c80e122e9a87764e86b"
+    },
+    {
+      "id": "volcengine",
+      "path": "providers/volcengine.json",
+      "models": 16,
+      "bytes": 13810,
+      "gzipBytes": 2103,
+      "checksum": "sha256:f66410e352679e2de6439402dd6e730da6d083cbba34513bd4feba4d7cf55dc7"
+    },
+    {
+      "id": "volcengine-coding-plan",
+      "path": "providers/volcengine-coding-plan.json",
+      "models": 10,
+      "bytes": 6912,
+      "gzipBytes": 1399,
+      "checksum": "sha256:235b90a08092b627067073e4e7dbfefb79e2e415f5de82ea930a2a23eaf4f5f3"
     },
     {
       "id": "vultr",
       "path": "providers/vultr.json",
-      "models": 10,
-      "bytes": 5573,
-      "gzipBytes": 1287,
-      "checksum": "sha256:6fe7db343dcde90cec71267ef6c1bf29d17011f31054e7edec5d583c026aae98"
+      "models": 15,
+      "bytes": 9419,
+      "gzipBytes": 1922,
+      "checksum": "sha256:b3a38bb80acdc1bd7127f2c01c0417eb3d3ed379078966e52a1e4b7b1dba14ba"
     },
     {
       "id": "wafer.ai",
       "path": "providers/wafer.ai.json",
       "models": 5,
-      "bytes": 3518,
-      "gzipBytes": 1066,
-      "checksum": "sha256:55f9f8d47fa1efd72ea90105128303d669e92ceb64749049f41349f3e1876183"
+      "bytes": 3682,
+      "gzipBytes": 1115,
+      "checksum": "sha256:2995e308a0581902aa1474a4b017631d88154ccc07b230bc2c82101a73f300eb"
+    },
+    {
+      "id": "wallaby",
+      "path": "providers/wallaby.json",
+      "models": 1,
+      "bytes": 898,
+      "gzipBytes": 519,
+      "checksum": "sha256:00c241d21322c4ec820cfc8cd14c0429b718f8222d207902ee1cee421913ac17"
     },
     {
       "id": "wandb",
       "path": "providers/wandb.json",
-      "models": 31,
-      "bytes": 18558,
-      "gzipBytes": 3007,
-      "checksum": "sha256:a565165413e7c36586a130ea91edcb41a7543b503e718ad10c4a2ad6adcea3f9"
+      "models": 23,
+      "bytes": 15029,
+      "gzipBytes": 2626,
+      "checksum": "sha256:20f274826a9975d982f455eed99105512230015a8bd71295928c8e19c49f4146"
+    },
+    {
+      "id": "watsonx",
+      "path": "providers/watsonx.json",
+      "models": 5,
+      "bytes": 3295,
+      "gzipBytes": 1040,
+      "checksum": "sha256:b2bd81b9eb78719b4da55ac80a0e1810010db0f12a36371b5407df7a09539e0b"
     },
     {
       "id": "xai",
       "path": "providers/xai.json",
-      "models": 10,
-      "bytes": 6204,
-      "gzipBytes": 1051,
-      "checksum": "sha256:0e4b769de341dea0896120f217d0c7ed4b9927fbc5b531cf96136e490d36a685"
+      "models": 13,
+      "bytes": 8519,
+      "gzipBytes": 1294,
+      "checksum": "sha256:dfe5ee1ef2fc4e3be8765f2e3566a271da68ab5a4ac7171ae0d59371b313112a"
     },
     {
       "id": "xiaomi",
       "path": "providers/xiaomi.json",
-      "models": 6,
-      "bytes": 3752,
-      "gzipBytes": 829,
-      "checksum": "sha256:59fbbf9dc409cae6d2464a64dc3a40c6a1032aa8d479e96b3012e42fc376e85c"
+      "models": 9,
+      "bytes": 5550,
+      "gzipBytes": 906,
+      "checksum": "sha256:d978849cd5ac1246e5b5c5c5c543ec7826cf7a27d32712efbd2c818085597b6d"
     },
     {
       "id": "xiaomi-token-plan-ams",
       "path": "providers/xiaomi-token-plan-ams.json",
-      "models": 7,
-      "bytes": 3723,
-      "gzipBytes": 782,
-      "checksum": "sha256:b2bdfe09e309cfdd560df8a3a376d745c278c8fcaba091e8be8b0f384fc481e3"
+      "models": 9,
+      "bytes": 5114,
+      "gzipBytes": 863,
+      "checksum": "sha256:555f9b30831c891d675d929f511b6b8d452cc37e986d1f26426c0a1f35da507d"
     },
     {
       "id": "xiaomi-token-plan-cn",
       "path": "providers/xiaomi-token-plan-cn.json",
-      "models": 7,
-      "bytes": 3719,
-      "gzipBytes": 781,
-      "checksum": "sha256:62c27e2cf9a9158f97a2d917f7c4ecbc13f3e2b7c5ff546fdba6e5eb9d50d36e"
+      "models": 9,
+      "bytes": 5110,
+      "gzipBytes": 877,
+      "checksum": "sha256:433ba4c475bfd0809665fea5d5bfc0a840bcc032b82afa30f930f90171613993"
     },
     {
       "id": "xiaomi-token-plan-sgp",
       "path": "providers/xiaomi-token-plan-sgp.json",
-      "models": 7,
-      "bytes": 3726,
-      "gzipBytes": 785,
-      "checksum": "sha256:096b2ab90c65df3966c04ed65fa1c72ef0446f4482995ad5cf131cf637c50819"
+      "models": 9,
+      "bytes": 5117,
+      "gzipBytes": 866,
+      "checksum": "sha256:209a5f847ee94c2f26be06b5d750f73c1874d94e7f657678c85d6c72b8ed3d1d"
     },
     {
       "id": "xpersona",
       "path": "providers/xpersona.json",
       "models": 13,
-      "bytes": 8784,
-      "gzipBytes": 1463,
-      "checksum": "sha256:91fb81c38dae150b91f6a0521f689b449478b20ee7f240cfbe5e675f5bfdd1d4"
+      "bytes": 9312,
+      "gzipBytes": 1545,
+      "checksum": "sha256:0756f3c7d56569b89e8b3309123eaa54ed9fe5d30e25106a6ac9a91f36235f49"
     },
     {
       "id": "zai",
       "path": "providers/zai.json",
-      "models": 14,
-      "bytes": 7787,
-      "gzipBytes": 1347,
-      "checksum": "sha256:32b86b782e0fa111081e424228cb296cdc2d8602fe14fe9e37f7ab1618b916ad"
+      "models": 18,
+      "bytes": 10554,
+      "gzipBytes": 1617,
+      "checksum": "sha256:22ec9f285e0dbfa21f4ed72a308ab772e25281baabeb57221b8106f18d76e258"
     },
     {
       "id": "zai-coding-plan",
       "path": "providers/zai-coding-plan.json",
-      "models": 6,
-      "bytes": 3598,
-      "gzipBytes": 827,
-      "checksum": "sha256:9cfce57213e20dfaf0b5ac366cd0fafb84263ea590b345151a0edc7d4d9a09a0"
+      "models": 7,
+      "bytes": 4629,
+      "gzipBytes": 877,
+      "checksum": "sha256:b4fd7af98a31b8e00d2125bb46bc0374b3c83afa84b76a9028a7fd1166208f05"
     },
     {
       "id": "zeldoc",
       "path": "providers/zeldoc.json",
       "models": 1,
-      "bytes": 746,
-      "gzipBytes": 443,
-      "checksum": "sha256:8fbdbf2508d41febcf507ca92bab201e9def36854db54e71d1b207087acdefa5"
+      "bytes": 731,
+      "gzipBytes": 437,
+      "checksum": "sha256:884f4ca7d01120415f636f178c6fee4e054641b980b0db6505b6ab809fd364a1"
     },
     {
       "id": "zenifra",
       "path": "providers/zenifra.json",
       "models": 1,
-      "bytes": 733,
-      "gzipBytes": 438,
-      "checksum": "sha256:42c5f0c0cc35edfe78b649310214b5d02654d9f3f0b41ac3746cea0c6b29354e"
+      "bytes": 780,
+      "gzipBytes": 451,
+      "checksum": "sha256:f3fa665bf9705b31b9ba1338f9ede5121b6b3325cf51b1292b66cd585744b0bf"
     },
     {
       "id": "zenmux",
       "path": "providers/zenmux.json",
-      "models": 120,
-      "bytes": 71763,
-      "gzipBytes": 6978,
-      "checksum": "sha256:3ab0c4716db6ac91e3e3dc9ac1a63be31c2ff0c3c5c24c50ef8958e078ec0c70"
+      "models": 129,
+      "bytes": 83806,
+      "gzipBytes": 9072,
+      "checksum": "sha256:635a786151363b82daa829d98699a9c8d0befdf944ce5481f3bdecca0bfc5232"
     },
     {
       "id": "zhipuai",
       "path": "providers/zhipuai.json",
-      "models": 13,
-      "bytes": 7243,
-      "gzipBytes": 1298,
-      "checksum": "sha256:ca584f686bd70fd8141724e9d0c54b8adb84a915efacc8b43b27e49b2f504d6f"
+      "models": 17,
+      "bytes": 9895,
+      "gzipBytes": 1564,
+      "checksum": "sha256:8c898a0d1dc684d87efcc23f79fa0964f002afe7a1c9a9d3f4731372dff7ab48"
     },
     {
       "id": "zhipuai-coding-plan",
       "path": "providers/zhipuai-coding-plan.json",
-      "models": 7,
-      "bytes": 4128,
-      "gzipBytes": 867,
-      "checksum": "sha256:b205eb81d8e1b0b8e45d8044834add0336a4f7f9fb20959367fbb7a3c8bb127a"
+      "models": 4,
+      "bytes": 2769,
+      "gzipBytes": 756,
+      "checksum": "sha256:32277df56bb05c12709a78f28b75396dbfa814c66a63cbe6059b9283430ea8ca"
     }
   ],
-  "stats": { "providers": 176, "models": 5907, "searchIndexGzipBytes": 62444 }
+  "stats": { "providers": 232, "models": 9056, "searchIndexGzipBytes": 91790 }
 }

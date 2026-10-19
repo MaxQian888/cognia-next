@@ -30,15 +30,19 @@ import type {
   CatalogSource,
   ModelDataModality,
   ModelDefinition,
-  ModelLifecycle,
   ProviderDefinition,
   ProviderOffering,
 } from "@cognia/provider-types/model-catalog"
-import { CATALOG_SCHEMA_VERSION } from "@cognia/provider-types/model-catalog"
+import {
+  CATALOG_SCHEMA_VERSION,
+  knownModelLifecycleIds,
+  resolveModelLifecycle,
+} from "@cognia/provider-types/model-catalog"
 import type { ModelPricing, ProviderModelDiscoveryEntry } from "@cognia/provider-types/provider"
 import { builtInProvidersWithModelsDevEntry, resolveModelsDevProviderId } from "./models-dev-id-map"
 import { reasoningTiersFor } from "./reasoning-tiers"
 import { proxyFetch } from "./runtime-adapters"
+import { getBuiltInProviderCatalog } from "@cognia/provider-types/built-in-provider-catalog"
 
 export const MODELS_DEV_API_URL = "https://models.dev/api.json"
 
@@ -408,21 +412,6 @@ function canonicalModelId(providerRef: string, upstreamId: string): string {
   return `${providerRef}:${upstreamId}`
 }
 
-function modelLifecycle(status: string | undefined): ModelLifecycle {
-  switch (status?.toLocaleLowerCase()) {
-    case "retired":
-      return "retired"
-    case "deprecated":
-      return "deprecated"
-    case "preview":
-    case "beta":
-    case "alpha":
-      return "preview"
-    default:
-      return "active"
-  }
-}
-
 function dataModalities(
   raw: readonly string[] | undefined,
   fallback: readonly ModelDataModality[]
@@ -455,8 +444,10 @@ function catalogModalities(
 
 function endpointType(
   protocol: BuiltInProviderCatalogEntry["protocol"] | undefined,
-  model: ModelsDevCatalogModel
+  model: ModelsDevCatalogModel,
+  providerId?: string
 ): ProviderOffering["endpointType"] {
+  if (providerId === "perplexity" && model.id.startsWith("preset/")) return "responses"
   if (model.supportsEmbedding) return "embedding"
   if (/rerank/i.test(model.id)) return "rerank"
   if (model.supportsImageGeneration) return "images"
@@ -485,6 +476,7 @@ function catalogModel(
   mapped: ModelsDevCatalogModel,
   fallback: BuiltInProviderModelEntry | undefined
 ): ModelDefinition {
+  const lifecycle = resolveModelLifecycle(providerRef, mapped.id, mapped.status)
   const canonicalId = canonicalModelId(providerRef, mapped.id)
   const creator = canonicalId.slice(0, canonicalId.indexOf(":"))
   const manual = Boolean(fallback)
@@ -528,7 +520,7 @@ function catalogModel(
       structuredOutput: mapped.supportsStructuredOutput,
       reasoning: fallback?.supportsReasoning ?? mapped.supportsReasoning,
       attachments: mapped.supportsAttachment,
-      temperature: mapped.supportsTemperature,
+      temperature: fallback?.supportsTemperature ?? mapped.supportsTemperature,
       openWeights: mapped.openWeights,
       embeddings: fallback?.supportsEmbedding ?? mapped.supportsEmbedding,
       rerank: /rerank/i.test(mapped.id) || undefined,
@@ -543,13 +535,14 @@ function catalogModel(
             output: outputLimit,
           }
         : undefined,
-    lifecycle: modelLifecycle(mapped.status),
+    lifecycle: lifecycle.lifecycle,
+    retiredAt: lifecycle.retiredAt,
     releasedAt: mapped.releaseDate,
     provenance: {
       name: source,
       capabilities: source,
       limits: manual ? MANUAL_SOURCE : MODELS_DEV_SOURCE,
-      lifecycle: mapped.status ? MODELS_DEV_SOURCE : BUNDLED_SOURCE,
+      lifecycle: lifecycle.source ?? (mapped.status ? MODELS_DEV_SOURCE : BUNDLED_SOURCE),
     },
   }
 }
@@ -566,6 +559,7 @@ function fallbackMappedModel(model: BuiltInProviderModelEntry): ModelsDevCatalog
     supportsVideo: model.supportsVideo,
     supportsStreaming: model.supportsStreaming,
     supportsReasoning: model.supportsReasoning,
+    supportsTemperature: model.supportsTemperature,
     supportsImageGeneration: model.supportsImageGeneration,
     supportsEmbedding: model.supportsEmbedding,
     pricing: model.pricing,
@@ -645,6 +639,7 @@ export function buildCatalogSnapshotFromModelsDev(
       ...mappedById.keys(),
       ...staticById.keys(),
       ...(entry.defaultModel ? [entry.defaultModel] : []),
+      ...knownModelLifecycleIds(entry.id),
     ])
     const providerModels: ModelsDevCatalogModel[] = []
     for (const modelId of modelIds) {
@@ -669,14 +664,23 @@ export function buildCatalogSnapshotFromModelsDev(
         deploymentRef: entry.id,
         modelRef: definition.id,
         upstreamId: modelId,
-        endpointType: endpointType(entry.protocol, mapped),
+        endpointType: endpointType(entry.protocol, mapped, entry.id),
         lifecycle,
-        available: true,
+        available: lifecycle !== "retired",
         capabilities: definition.capabilities,
         limits: definition.limits,
         pricing: offeringPricing(fallback?.pricing ?? mapped.pricing),
         source: fallback ? MANUAL_SOURCE : upstream ? MODELS_DEV_SOURCE : BUNDLED_SOURCE,
       })
+      const replacement = resolveModelLifecycle(entry.id, modelId, mapped.status).replacementModelId
+      if (replacement && modelIds.has(replacement)) {
+        aliases.set(`legacy:${entry.id}:${modelId}`, {
+          id: `legacy:${entry.id}:${modelId}`,
+          kind: "legacy",
+          target: { type: "offering", ref: offeringId },
+          replacementRef: `${entry.id}:${replacement}`,
+        })
+      }
     }
 
     const providerEntry = builtInById.get(providerRef) ?? entry
@@ -737,7 +741,7 @@ export function buildCatalogSnapshotFromModelsDev(
         deploymentRef: providerId,
         modelRef: definition.id,
         upstreamId: mapped.id,
-        endpointType: endpointType(undefined, mapped),
+        endpointType: endpointType(undefined, mapped, modelsDevId),
         lifecycle: definition.lifecycle,
         available: true,
         capabilities: definition.capabilities,
@@ -761,6 +765,89 @@ export function buildCatalogSnapshotFromModelsDev(
     models: [...models.values()].sort((left, right) => left.id.localeCompare(right.id)),
     offerings: [...offerings.values()].sort((left, right) => left.id.localeCompare(right.id)),
     aliases: [...aliases.values()].sort((left, right) => left.id.localeCompare(right.id)),
+  }
+}
+
+/**
+ * Current bundled policy is an in-memory overlay on persisted revisions, like
+ * installed-plugin contributions. Keep the original revision and user pins
+ * untouched while fixing defaults immediately, including before a refresh.
+ */
+export function withBundledCatalogGovernance(snapshot: CatalogSnapshot): CatalogSnapshot {
+  const generatedByCognia = snapshot.revision.sources.some(
+    (source) => source.id === MANUAL_SOURCE.id
+  )
+  if (!generatedByCognia) return snapshot
+  const providerIds = new Set(snapshot.providers.map((provider) => provider.id))
+  const baseline = buildCatalogSnapshotFromModelsDev(
+    {},
+    {
+      revisionId: snapshot.revision.id,
+      generatedAt: snapshot.revision.generatedAt,
+      checksum: snapshot.revision.checksum,
+      builtInCatalog: getBuiltInProviderCatalog().filter((entry) =>
+        providerIds.has(entry.relayOf ?? entry.id)
+      ),
+      certifiedProviderIds: new Set(
+        snapshot.providers
+          .filter((provider) => provider.tier === "certified")
+          .map((provider) => provider.id)
+      ),
+      includeExperimentalProviders: false,
+    }
+  )
+  const models = new Map(baseline.models.map((model) => [model.id, model]))
+  for (const model of snapshot.models) models.set(model.id, model)
+  const offerings = new Map(baseline.offerings.map((offering) => [offering.id, offering]))
+  for (const offering of snapshot.offerings) offerings.set(offering.id, offering)
+  const aliases = new Map(snapshot.aliases.map((alias) => [alias.id, alias]))
+  for (const alias of baseline.aliases) aliases.set(alias.id, alias)
+  const governedOfferings = [...offerings.values()].map((offering) => {
+    const info = resolveModelLifecycle(
+      offering.providerRef,
+      offering.upstreamId,
+      offering.lifecycle
+    )
+    return {
+      ...offering,
+      lifecycle: info.lifecycle,
+      available: offering.available && info.lifecycle !== "retired",
+    }
+  })
+  const byModel = new Map<string, ProviderOffering[]>()
+  for (const offering of governedOfferings) {
+    const list = byModel.get(offering.modelRef) ?? []
+    list.push(offering)
+    byModel.set(offering.modelRef, list)
+  }
+  return {
+    ...snapshot,
+    models: [...models.values()].map((model) => {
+      const modelOfferings = byModel.get(model.id) ?? []
+      // Provider lifetimes differ: a retired direct API must not retire an
+      // independently available aggregator offering of the same model.
+      const lifecycle =
+        (["active", "preview", "deprecated", "retired"] as const).find((status) =>
+          modelOfferings.some((offering) => offering.lifecycle === status)
+        ) ?? model.lifecycle
+      const notice = modelOfferings
+        .map((offering) =>
+          resolveModelLifecycle(offering.providerRef, offering.upstreamId, offering.lifecycle)
+        )
+        .find((info) => info.lifecycle === lifecycle && info.source)
+      return {
+        ...model,
+        lifecycle,
+        ...(notice
+          ? {
+              retiredAt: notice.retiredAt,
+              provenance: { ...model.provenance, lifecycle: notice.source! },
+            }
+          : {}),
+      }
+    }),
+    offerings: governedOfferings,
+    aliases: [...aliases.values()],
   }
 }
 

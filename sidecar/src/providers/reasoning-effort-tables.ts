@@ -34,13 +34,80 @@ export const EFFORT_TO_BUDGET = Object.freeze({
 })
 
 /**
- * Values OpenAI's `reasoningEffort` accepts. The app's union additionally
- * carries `max`, which OpenAI rejects (400) and which
- * `normalizeOpenAiEffort` folds down to `xhigh`.
+ * Legacy OpenAI effort values. GPT-6 uses the model-aware set below; older
+ * models keep the existing `max` → `xhigh` compatibility behavior.
  */
 export const OPENAI_EFFORT_VALUES: ReadonlySet<string> = Object.freeze(
   new Set(["none", "minimal", "low", "medium", "high", "xhigh"])
 )
+
+/** GPT-6 API model pages, verified 2026-10-19. Sol/Astra require reasoning;
+ * Luna additionally permits `none`. All accept `max` and reject `minimal`. */
+const GPT6_EFFORT_VALUES: ReadonlySet<string> = new Set(["low", "medium", "high", "xhigh", "max"])
+const GPT6_LUNA_EFFORT_VALUES: ReadonlySet<string> = new Set(["none", ...GPT6_EFFORT_VALUES])
+
+export function openAiEffortValuesForModel(modelId?: string): ReadonlySet<string> {
+  const id = modelId?.toLowerCase() ?? ""
+  if (!/\bgpt-6(?:[.-]|$)/.test(id)) return OPENAI_EFFORT_VALUES
+  return /\bgpt-6-luna(?:[-@:/]|$)/.test(id) ? GPT6_LUNA_EFFORT_VALUES : GPT6_EFFORT_VALUES
+}
+
+/** New Claude 5.5 models use effort instead of token budgets and reject sampling. */
+const CLAUDE55_CAPABILITIES = Object.freeze({
+  supportsSampling: false,
+  effortValues: Object.freeze(["low", "medium", "high", "xhigh", "max"]),
+})
+
+export function claude55CapabilitiesForModel(modelId?: string) {
+  return /\bclaude-(?:opus|sonnet|haiku)-5[-.]5(?:$|[-@:/])/.test(modelId?.toLowerCase() ?? "")
+    ? CLAUDE55_CAPABILITIES
+    : undefined
+}
+
+/** Gemini 3.8 Flash / 4 Argon require levels, without an xhigh/max budget tier. */
+const GEMINI_THINKING_LEVELS = ["low", "medium", "high"] as const
+
+export function geminiThinkingLevelsForModel(modelId?: string): readonly string[] | undefined {
+  return /\bgemini-(?:3\.8-flash|4-argon)(?:$|[-@:/])/.test(modelId?.toLowerCase() ?? "")
+    ? GEMINI_THINKING_LEVELS
+    : undefined
+}
+
+/** First-party model documentation, verified 2026-10-19:
+ * https://docs.x.ai/developers/model-capabilities/text/reasoning
+ * https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions/
+ * https://docs.z.ai/guides/llm/glm-5.3
+ * https://github.com/MoonshotAI/Kimi-K3
+ * An empty ladder means thinking exists but has no effort control. Keep this
+ * distinct from undefined, which preserves legacy handling for unknown models.
+ */
+export function compatibleEffortValuesForModel(modelId?: string): readonly string[] | undefined {
+  const id = modelId?.toLowerCase() ?? ""
+  if (/\bgrok-4\.7(?:$|[-@:/])/.test(id)) return ["low", "medium", "high", "xhigh"]
+  if (/\bqwen3\.8-max(?:$|[-@:/])/.test(id)) return ["low", "medium", "xhigh"]
+  if (/\b(?:glm-5\.3|kimi-k3)(?:$|[-@:/])/.test(id)) return ["low", "high", "max"]
+  if (/\b(?:minimax-m3|kimi-k2\.7)(?:$|[-@:/])/.test(id)) return []
+  return undefined
+}
+
+/** Fold unsupported saved values only at execution, never rewrite preferences. */
+export function normalizeCompatibleEffort(
+  modelId: string | undefined,
+  effort: string
+): string | undefined {
+  const accepted = compatibleEffortValuesForModel(modelId)
+  if (!accepted?.length) return undefined
+  if (accepted.includes(effort)) return effort
+  if (effort === "none" || effort === "minimal") return "low"
+  const order = ["low", "medium", "high", "xhigh", "max"]
+  const requested = order.indexOf(effort)
+  if (requested < 0) return accepted.includes("high") ? "high" : accepted[accepted.length - 1]
+  // Missing intermediate tiers round up; requests beyond the model's ceiling
+  // clamp down (Qwen high → xhigh, GLM medium → high, Grok max → xhigh).
+  return (
+    accepted.find((value) => order.indexOf(value) >= requested) ?? accepted[accepted.length - 1]
+  )
+}
 
 /**
  * Conservative app-effort → wire value map for generic openai-compatible

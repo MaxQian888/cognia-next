@@ -15,6 +15,8 @@
 
 import { getCachedOpenRouterCatalogModels } from "@cognia/provider-core/providers/openrouter-catalog-sync"
 import { getAllProviders } from "@cognia/provider-types/provider"
+import { isModelLifecycleAllowed } from "@cognia/provider-types/model-catalog"
+import { resolveProviderModelLifecycle } from "@cognia/provider-core/providers/models-dev-sync"
 import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
 
 export interface ModelOption {
@@ -37,8 +39,23 @@ export function catalogModelIds(providerId: string, catalog = getAllProviders())
   const cfg = catalog[providerId]
   if (!cfg) return []
   const ids = new Set<string>()
-  if (cfg.defaultModel) ids.add(cfg.defaultModel)
-  for (const m of cfg.models ?? []) ids.add(m.id)
+  if (
+    cfg.defaultModel &&
+    isModelLifecycleAllowed(
+      resolveProviderModelLifecycle(providerId, cfg.defaultModel).lifecycle,
+      "new"
+    )
+  )
+    ids.add(cfg.defaultModel)
+  for (const m of cfg.models ?? []) {
+    if (
+      isModelLifecycleAllowed(
+        resolveProviderModelLifecycle(providerId, m.id, m.status).lifecycle,
+        "new"
+      )
+    )
+      ids.add(m.id)
+  }
   return [...ids]
 }
 
@@ -100,12 +117,32 @@ export function collectOptions(
     // Nothing configured at all → curated built-in catalog, never an empty group.
     const modelIds = allowed.size > 0 ? [...allowed] : catalogModelIds(providerId, catalog)
     for (const modelId of modelIds) {
+      const status = settings.discoveredModels?.find((model) => model.id === modelId)?.status
+      const liveStatus =
+        providerId === "openrouter"
+          ? getCachedOpenRouterCatalogModels().find((model) => model.id === modelId)?.status
+          : undefined
+      if (
+        !isModelLifecycleAllowed(
+          resolveProviderModelLifecycle(providerId, modelId, status, liveStatus).lifecycle,
+          "new"
+        )
+      )
+        continue
       out.push({ providerId, providerName: providerId, modelId })
     }
   }
   for (const cp of customProviders ?? []) {
     if (cp.enabled === false) continue
     for (const modelId of customProviderModelIds(cp)) {
+      const status = cp.discoveredModels?.find((model) => model.id === modelId)?.status
+      if (
+        !isModelLifecycleAllowed(
+          resolveProviderModelLifecycle(cp.id, modelId, status).lifecycle,
+          "new"
+        )
+      )
+        continue
       out.push({ providerId: cp.id, providerName: cp.name ?? cp.id, modelId })
     }
   }

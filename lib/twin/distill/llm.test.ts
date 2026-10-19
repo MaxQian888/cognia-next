@@ -225,6 +225,40 @@ describe("createLlmClient", () => {
   })
 
   describe("OpenAI endpoint-family dispatch", () => {
+    it.each([
+      ["preset/fast", "openai.responses", "https://api.perplexity.ai/v1"],
+      ["sonar-pro", "openai.chat", "https://api.perplexity.ai"],
+    ])(
+      "routes Perplexity %s without rewriting its model choice",
+      async (model, family, baseURL) => {
+        const built = await createTwinLanguageModel({
+          provider: "perplexity",
+          model,
+          apiKey: "test-key",
+        })
+        expect(built).toMatchObject({ __provider: family, id: model, settings: { baseURL } })
+      }
+    )
+    it.each([
+      [undefined, "https://api.perplexity.ai/v1"],
+      ["https://relay.example/custom/v1", "https://relay.example/custom/v1"],
+    ])(
+      "honors Perplexity's Responses override on its own host or relay %s",
+      async (baseURL, expected) => {
+        const built = await createTwinLanguageModel({
+          provider: "perplexity",
+          model: "sonar-pro",
+          apiKey: "test-key",
+          apiFlavor: "responses",
+          baseURL,
+        })
+        expect(built).toMatchObject({
+          __provider: "openai.responses",
+          id: "sonar-pro",
+          settings: { baseURL: expected, fetch: expect.any(Function) },
+        })
+      }
+    )
     beforeEach(() => {
       ;(generateText as jest.Mock).mockClear()
       ;(createOpenAI as jest.Mock).mockClear()

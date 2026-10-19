@@ -68,6 +68,23 @@ test("buildModel throws on unsupported protocols", async () => {
   await assert.rejects(() => buildModel({ protocol: "smoke-signal", model: "m" }), /unsupported/)
 })
 
+test("Perplexity uses Agent Responses for presets and retains Sonar Chat pins", async () => {
+  for (const [model, expected] of [
+    ["preset/fast", "openai.responses"],
+    ["sonar-pro", "openai.chat"],
+  ] as const) {
+    const built = await buildModel({
+      protocol: "openai",
+      providerId: "perplexity",
+      model,
+      apiKey: "test-key",
+      baseURL: "https://api.perplexity.ai/v1",
+    })
+    assert.equal(built.provider, expected)
+    assert.equal(built.modelId, model)
+  }
+})
+
 test("isGenuineOpenAiEndpoint distinguishes api.openai.com from compatible gateways", () => {
   // Genuine OpenAI (or no base URL = the default OpenAI endpoint) → Responses API.
   assert.equal(isGenuineOpenAiEndpoint(undefined), true)
@@ -531,6 +548,103 @@ test("buildReasoningProviderOptions(anthropic): a thinking budget enables extend
   )
 })
 
+test("Claude 5.5 uses adaptive thinking with explicit effort and valid fallbacks", () => {
+  for (const modelId of ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"]) {
+    for (const [requested, expected] of [
+      ["low", "low"],
+      ["high", "high"],
+      ["max", "max"],
+      ["minimal", "low"],
+      ["none", "low"],
+    ]) {
+      assert.deepEqual(
+        buildReasoningProviderOptions("anthropic", undefined, { effort: requested }, { modelId }),
+        { anthropic: { thinking: { type: "adaptive" }, effort: expected } }
+      )
+    }
+    assert.deepEqual(
+      buildReasoningProviderOptions(
+        "anthropic",
+        undefined,
+        { maxThinkingTokens: 8000 },
+        { modelId }
+      ),
+      { anthropic: { thinking: { type: "adaptive" }, effort: "medium" } }
+    )
+  }
+})
+
+test("Claude 5.5 low and high remain distinct in installed SDK request serialization", async (t) => {
+  const bodies: Record<string, unknown>[] = []
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>
+    bodies.push(body)
+    return new Response(
+      JSON.stringify({
+        id: "msg_test",
+        type: "message",
+        role: "assistant",
+        model: body.model,
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+      { headers: { "content-type": "application/json" } }
+    )
+  })
+  for (const modelId of ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"]) {
+    const model = await buildModel({ protocol: "anthropic", model: modelId, apiKey: "test-key" })
+    for (const effort of ["low", "high"]) {
+      await model.doGenerate({
+        prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+        maxOutputTokens: 128,
+        providerOptions: buildReasoningProviderOptions(
+          "anthropic",
+          undefined,
+          { effort },
+          { modelId }
+        ) as {
+          anthropic: { thinking: { type: string }; effort: string }
+        },
+      })
+      assert.deepEqual(getPath(bodies.at(-1), "thinking"), { type: "adaptive" })
+      assert.equal(getPath(bodies.at(-1), "output_config.effort"), effort)
+    }
+  }
+})
+
+test("adapter strips unsupported sampling only for Claude 5.5 at its boundary", async () => {
+  for (const model of [
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
+    "claude-haiku-5-5",
+    "claude-haiku-4-5",
+  ]) {
+    let captured: StreamArgs | undefined
+    const params = { temperature: 0.4, topP: 0.8, topK: 40, maxOutputTokens: 128 }
+    await makeAiSdkAdapter("anthropic").start({
+      model,
+      providerId: "anthropic",
+      messages: [],
+      credentials: { apiKey: "test-key" },
+      modelParams: params,
+      streamTextFn(args) {
+        captured = args as StreamArgs
+        return { stream: (async function* () {})() }
+      },
+    })
+    for (const param of ["temperature", "topP", "topK"]) {
+      assert.equal(
+        captured![param],
+        model === "claude-haiku-4-5" ? params[param as keyof typeof params] : undefined
+      )
+    }
+    assert.equal(captured!.maxOutputTokens, 128)
+    assert.deepEqual(params, { temperature: 0.4, topP: 0.8, topK: 40, maxOutputTokens: 128 })
+  }
+})
+
 test("buildReasoningProviderOptions(anthropic): effort-only falls back to a budget tier", () => {
   const out = buildReasoningProviderOptions("anthropic", undefined, { effort: "high" })
   assert.equal(getPath(out, "anthropic.thinking.type"), "enabled")
@@ -547,6 +661,131 @@ test("buildReasoningProviderOptions(google): maps budget to thinkingConfig with 
       google: { thinkingConfig: { thinkingBudget: 5000, includeThoughts: true } },
     }
   )
+})
+
+test("buildReasoningProviderOptions(google): modern Gemini uses valid levels instead of budgets", () => {
+  assert.deepEqual(
+    buildReasoningProviderOptions("google", undefined, undefined, { modelId: "gemini-4-argon" }),
+    { google: { thinkingConfig: { thinkingLevel: "medium", includeThoughts: true } } }
+  )
+  for (const modelId of ["gemini-3.8-flash", "gemini-4-argon"]) {
+    for (const [effort, thinkingLevel] of [
+      ["minimal", "low"],
+      ["low", "low"],
+      ["medium", "medium"],
+      ["high", "high"],
+      ["xhigh", "high"],
+      ["max", "high"],
+    ]) {
+      assert.deepEqual(
+        buildReasoningProviderOptions("google", undefined, { effort }, { modelId }),
+        { google: { thinkingConfig: { thinkingLevel, includeThoughts: true } } }
+      )
+    }
+  }
+  assert.deepEqual(
+    buildReasoningProviderOptions(
+      "google",
+      undefined,
+      { maxThinkingTokens: 8000 },
+      { modelId: "gemini-3.8-flash" }
+    ),
+    { google: { thinkingConfig: { thinkingLevel: "medium", includeThoughts: true } } }
+  )
+  assert.deepEqual(
+    buildReasoningProviderOptions(
+      "google",
+      undefined,
+      { maxThinkingTokens: 8000 },
+      { modelId: "gemini-2.5-pro" }
+    ),
+    { google: { thinkingConfig: { thinkingBudget: 8000, includeThoughts: true } } }
+  )
+})
+
+test("modern Gemini thinking levels survive the installed Google SDK request serialization", async (t) => {
+  let body: Record<string, unknown> | undefined
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init: RequestInit) => {
+    body = JSON.parse(String(init.body))
+    return new Response(
+      JSON.stringify({
+        candidates: [{ content: { role: "model", parts: [{ text: "ok" }] }, finishReason: "STOP" }],
+        usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+      }),
+      { headers: { "content-type": "application/json" } }
+    )
+  })
+  for (const modelId of ["gemini-3.8-flash", "gemini-4-argon"]) {
+    const model = await buildModel({
+      protocol: "google",
+      model: modelId,
+      apiKey: "test-key",
+    })
+    await model.doGenerate({
+      prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+      providerOptions: buildReasoningProviderOptions(
+        "google",
+        undefined,
+        { effort: "low" },
+        { modelId }
+      ) as { google: { thinkingConfig: { thinkingLevel: string; includeThoughts: boolean } } },
+    })
+    assert.deepEqual(getPath(body, "generationConfig.thinkingConfig"), {
+      thinkingLevel: "low",
+      includeThoughts: true,
+    })
+  }
+})
+
+test("native-compatible models serialize supported effort without OpenAI summaries or input mutation", async (t) => {
+  let body: Record<string, unknown> | undefined
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init: RequestInit) => {
+    body = JSON.parse(String(init.body))
+    return new Response(
+      JSON.stringify({
+        id: "chat_test",
+        object: "chat.completion",
+        created: 0,
+        model: body!.model,
+        choices: [
+          { index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }),
+      { headers: { "content-type": "application/json" } }
+    )
+  })
+  for (const [providerId, modelId, effort, expected] of [
+    ["xai", "grok-4.7", "max", "xhigh"],
+    ["qwen", "qwen3.8-max", "high", "xhigh"],
+    ["zai", "glm-5.3", "medium", "high"],
+    ["moonshot", "kimi-k3", "xhigh", "max"],
+    ["minimax", "MiniMax-M3", "max", undefined],
+    ["moonshot", "kimi-k2.7", "high", undefined],
+  ] as const) {
+    const reasoning = { effort }
+    const providerOptions = buildReasoningProviderOptions(
+      "openai",
+      "https://vendor.test/v1",
+      reasoning,
+      { providerId, modelId }
+    )
+    assert.equal(getPath(providerOptions, "openai.reasoningSummary"), undefined)
+    const model = await buildModel({
+      protocol: "openai",
+      model: modelId,
+      providerId,
+      apiKey: "test-key",
+      baseURL: "https://vendor.test/v1",
+    })
+    await model.doGenerate({
+      prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+      ...(providerOptions ? { providerOptions } : {}),
+    })
+    assert.equal(body!.reasoning_effort, expected, modelId)
+    assert.equal(body!.reasoning, undefined, modelId)
+    assert.deepEqual(reasoning, { effort })
+  }
 })
 
 test("buildReasoningProviderOptions(openai): reasoningEffort + reasoningSummary only for a genuine OpenAI endpoint", () => {
@@ -588,6 +827,63 @@ test("buildReasoningProviderOptions: top effort tiers (xhigh/max) still enable t
     numberAt(max, "anthropic.thinking.budgetTokens") >
       numberAt(high, "anthropic.thinking.budgetTokens")
   )
+})
+
+test("buildReasoningProviderOptions(openai): GPT-6 retains max and normalizes stale minimal", () => {
+  for (const modelId of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna"]) {
+    for (const [requested, expected] of [
+      ["max", "max"],
+      ["minimal", "low"],
+    ]) {
+      const options = buildReasoningProviderOptions(
+        "openai",
+        "https://api.openai.com/v1",
+        { effort: requested },
+        { modelId }
+      )
+      assert.equal(getPath(options, "openai.reasoningEffort"), expected)
+    }
+  }
+  assert.equal(
+    getPath(
+      buildReasoningProviderOptions(
+        "openai",
+        undefined,
+        { effort: "none" },
+        { modelId: "gpt-6.1-sol" }
+      ),
+      "openai.reasoningEffort"
+    ),
+    "low"
+  )
+  assert.equal(
+    getPath(
+      buildReasoningProviderOptions(
+        "openai",
+        undefined,
+        { effort: "none" },
+        { modelId: "gpt-6-luna" }
+      ),
+      "openai.reasoningEffort"
+    ),
+    "none"
+  )
+})
+
+test("start supplies the GPT-6 model id when normalizing reasoning effort", async () => {
+  let captured: StreamArgs | undefined
+  await makeAiSdkAdapter("openai").start({
+    providerId: "openai",
+    model: "gpt-6.1-sol",
+    messages: [],
+    credentials: { apiKey: "test-key" },
+    reasoning: { effort: "max" },
+    streamTextFn: (args: Record<string, unknown>) => {
+      captured = args as StreamArgs
+      return { stream: (async function* () {})(), usage: Promise.resolve({}) }
+    },
+  })
+  assert.equal(getPath(captured, "providerOptions.openai.reasoningEffort"), "max")
 })
 
 test("buildReasoningProviderOptions(openai): 'max' is folded to OpenAI's valid 'xhigh'", () => {

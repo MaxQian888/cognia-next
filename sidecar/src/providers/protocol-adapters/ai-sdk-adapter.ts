@@ -18,6 +18,7 @@ import {
   resolveProviderProtocol,
 } from "../provider-protocol.ts"
 import { buildBedrockProviderOptions } from "../bedrock.ts"
+import { resolvePerplexityEndpoint, withPerplexityAgentFetch } from "../perplexity-agent.ts"
 import { withSiwcStreamingGeneration } from "../siwc-language-model.ts"
 import {
   createSiwcFetch,
@@ -29,7 +30,15 @@ import {
 } from "../siwc-fetch.ts"
 import { partitionPrompt } from "../prompt-partition.ts"
 import { aiSdkTelemetry, withTraceparent } from "../../platform/telemetry/index.ts"
-import { EFFORT_TO_BUDGET, OPENAI_EFFORT_VALUES } from "../reasoning-effort-tables.ts"
+import {
+  EFFORT_TO_BUDGET,
+  OPENAI_EFFORT_VALUES,
+  openAiEffortValuesForModel,
+  geminiThinkingLevelsForModel,
+  claude55CapabilitiesForModel,
+  compatibleEffortValuesForModel,
+  normalizeCompatibleEffort,
+} from "../reasoning-effort-tables.ts"
 import type { LanguageModelMiddleware, ProviderMetadata } from "ai"
 import type {
   AdapterResult,
@@ -84,14 +93,13 @@ function effortToBudget(effort: string | null): number | null {
   return (EFFORT_TO_BUDGET as Readonly<Record<string, number>>)[effort] ?? EFFORT_TO_BUDGET.high
 }
 
-/**
- * Normalize the app's effort level to a value OpenAI's `reasoningEffort`
- * accepts: fold "max" down to the nearest valid ceiling "xhigh", and clamp
- * anything unexpected to "high" so an out-of-range level never 400s the call.
- */
-function normalizeOpenAiEffort(effort: string): string {
+/** Normalize saved effort values against the target model's accepted ladder. */
+function normalizeOpenAiEffort(effort: string, modelId?: string): string {
+  const accepted = openAiEffortValuesForModel(modelId)
+  if (accepted.has(effort)) return effort
   if (effort === "max") return "xhigh"
-  return OPENAI_EFFORT_VALUES.has(effort) ? effort : "high"
+  if (effort === "minimal" || effort === "none") return "low"
+  return "high"
 }
 
 /**
@@ -107,28 +115,78 @@ export function buildReasoningProviderOptions(
   protocol: string | null,
   baseURL: string | undefined,
   reasoning: ReasoningControls | null | undefined,
-  opts: { providerId?: string | undefined } = {}
+  opts: { providerId?: string | undefined; modelId?: string | undefined } = {}
 ): ProviderOptionsMap | null {
-  if (!reasoning) return null
+  // Gemini 4 requires an explicit level even when the user leaves effort at
+  // the model default. Keep this request-local; saved preferences stay unset.
+  const defaultThinkingLevel =
+    protocol === "google" && /\bgemini-4-argon(?:$|[-@:/])/.test(opts.modelId?.toLowerCase() ?? "")
+      ? { google: { thinkingConfig: { thinkingLevel: "medium", includeThoughts: true } } }
+      : null
+  if (!reasoning) return defaultThinkingLevel
   const effort = typeof reasoning.effort === "string" && reasoning.effort ? reasoning.effort : null
   const budget =
     typeof reasoning.maxThinkingTokens === "number" && reasoning.maxThinkingTokens > 0
       ? reasoning.maxThinkingTokens
       : null
-  if (!effort && !budget) return null
+  if (!effort && !budget) return defaultThinkingLevel
 
   switch (protocol) {
     case "anthropic": {
+      const capabilities = claude55CapabilitiesForModel(opts.modelId)
+      if (capabilities) {
+        // Explicit effort takes precedence; approximate a saved legacy budget
+        // only when no effort was supplied because 5.5 no longer accepts it.
+        const budgetEffort = budget
+          ? (Object.entries(EFFORT_TO_BUDGET).find(([, tokens]) => budget <= tokens)?.[0] ?? "max")
+          : "high"
+        const normalizedEffort = effort
+          ? capabilities.effortValues.includes(effort)
+            ? effort
+            : effort === "minimal" || effort === "none"
+              ? "low"
+              : "high"
+          : budgetEffort
+        return { anthropic: { thinking: { type: "adaptive" }, effort: normalizedEffort } }
+      }
       const budgetTokens = budget ?? effortToBudget(effort)
       if (!budgetTokens) return null
       return { anthropic: { thinking: { type: "enabled", budgetTokens } } }
     }
     case "google": {
+      const levels = geminiThinkingLevelsForModel(opts.modelId)
+      if (levels) {
+        // Modern Gemini exposes levels, so approximate a persisted token budget
+        // with the nearest supported tier rather than sending thinkingBudget.
+        const budgetLevel = budget
+          ? budget <= EFFORT_TO_BUDGET.low
+            ? "low"
+            : budget <= EFFORT_TO_BUDGET.medium
+              ? "medium"
+              : "high"
+          : null
+        const thinkingLevel =
+          budgetLevel ??
+          (effort === "minimal" || effort === "none"
+            ? "low"
+            : levels.includes(effort ?? "")
+              ? effort
+              : "high")
+        return { google: { thinkingConfig: { thinkingLevel, includeThoughts: true } } }
+      }
       const thinkingBudget = budget ?? effortToBudget(effort)
       if (!thinkingBudget) return null
       return { google: { thinkingConfig: { thinkingBudget, includeThoughts: true } } }
     }
     case "openai": {
+      const compatibleLevels = compatibleEffortValuesForModel(opts.modelId)
+      if (compatibleLevels) {
+        const normalized = effort ? normalizeCompatibleEffort(opts.modelId, effort) : undefined
+        // Native-compatible vendor APIs accept the Chat reasoning field but
+        // reject OpenAI's proprietary Responses summary option. Toggle-only
+        // models keep their own default thinking without an invented effort.
+        return normalized ? { openai: { reasoningEffort: normalized } } : null
+      }
       // `reasoning_effort` is an OpenAI Responses/Chat field. Emit it ONLY for an
       // OpenAI-native surface — OpenAI-compatible gateways (DeepSeek, Groq,
       // Ollama, …) implement their own reasoning and may 400 on an unknown
@@ -143,7 +201,10 @@ export function buildReasoningProviderOptions(
       // OpenAI o-series / gpt-5 emit NO reasoning parts in the stream without it,
       // so the user would pay for reasoning tokens and see nothing.
       return {
-        openai: { reasoningEffort: normalizeOpenAiEffort(effort), reasoningSummary: "auto" },
+        openai: {
+          reasoningEffort: normalizeOpenAiEffort(effort, opts.modelId),
+          reasoningSummary: "auto",
+        },
       }
     }
     default:
@@ -359,6 +420,17 @@ async function buildRawModel({
       // reasoning_content stream and prompt-cache usage fields. Preserve an
       // explicit Responses override for compatible relays: the DeepSeek
       // provider itself only exposes Chat Completions.
+      if (providerId === "perplexity") {
+        const endpoint = resolvePerplexityEndpoint({ model, baseURL, apiFlavor })
+        const { createOpenAI } = await import("@ai-sdk/openai")
+        const client = createOpenAI({
+          apiKey,
+          baseURL: endpoint.baseURL,
+          headers,
+          ...(endpoint.flavor === "responses" ? { fetch: withPerplexityAgentFetch() } : {}),
+        })
+        return endpoint.flavor === "responses" ? client.responses(model) : client.chat(model)
+      }
       if (providerId === "deepseek" && apiFlavor !== "responses") {
         const { createDeepSeek } = await import("@ai-sdk/deepseek")
         return createDeepSeek({ apiKey, baseURL, headers }).chat(model)
@@ -503,6 +575,13 @@ export function makeAiSdkAdapter(protocol: string, nativeCall?: SiwcNativeCall):
         ...partitionPrompt(req.messages),
         ...(req.modelParams ?? {}),
       }
+      if (
+        modelProtocol === "anthropic" &&
+        claude55CapabilitiesForModel(req.model)?.supportsSampling === false
+      ) {
+        // Enforce the model contract even for callers that bypass app settings.
+        for (const field of ["temperature", "topP", "topK"]) delete streamArgs[field]
+      }
       if (protocol === SIWC_PROTOCOL) {
         streamArgs.providerOptions = { openai: { store: false } }
       }
@@ -549,7 +628,7 @@ export function makeAiSdkAdapter(protocol: string, nativeCall?: SiwcNativeCall):
         modelProtocol === SIWC_PROTOCOL ? "openai" : modelProtocol,
         modelProtocol === SIWC_PROTOCOL ? undefined : creds.baseURL,
         req.reasoning,
-        { providerId: modelProtocol === SIWC_PROTOCOL ? "openai" : providerId }
+        { providerId: modelProtocol === SIWC_PROTOCOL ? "openai" : providerId, modelId: req.model }
       )
       // Codex's own Responses-API fields (store:false + encrypted reasoning).
       // Merged after the reasoning block so both land under the `openai` key.

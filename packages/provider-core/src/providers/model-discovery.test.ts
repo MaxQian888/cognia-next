@@ -18,6 +18,25 @@ function byId(snapshot: ProviderModelDiscoverySnapshot, id: string) {
 }
 
 describe("buildProviderModelDiscoverySnapshot — layered authority", () => {
+  it("retains lifecycle metadata through discovery merging and round-trip projection", () => {
+    const snapshot = buildProviderModelDiscoverySnapshot({
+      providerId: "custom",
+      modelsDevModels: [
+        { id: "old", status: "retired", replacementModelId: "new", retiredAt: "2026-07-24" },
+      ],
+      remoteModels: [{ id: "old" }],
+    })
+    const model = byId(snapshot, "old")!
+    expect(model).toMatchObject({
+      status: "retired",
+      replacementModelId: "new",
+      retiredAt: "2026-07-24",
+    })
+    expect(modelConfigToProviderModelCandidate(model)).toMatchObject({
+      status: "retired",
+      replacementModelId: "new",
+    })
+  })
   it("models.dev overwrites static model-level fields", () => {
     const catalogModels: ProviderModelCandidate[] = [
       { id: "m1", name: "M1 (static)", contextLength: 8000, supportsVision: false },

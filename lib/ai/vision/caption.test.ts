@@ -80,12 +80,12 @@ describe("generateImageCaption", () => {
     )
   })
 
-  it("uses gemini-2.5-flash default for google", async () => {
+  it("uses the current cost-aware Google caption fallback", async () => {
     getProviderModel.mockReturnValue({})
     generateText.mockResolvedValue({ text: "x" })
     await generateImageCaption("data:image/png;base64,xyz", { apiKey: "k", provider: "google" })
     expect(getProviderModel).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: "google", model: "gemini-2.5-flash" })
+      expect.objectContaining({ provider: "google", model: "gemini-3.5-flash-lite" })
     )
   })
 
@@ -173,4 +173,61 @@ describe("generateImageCaption", () => {
       generateImageCaption("data:image/png;base64,xyz", { apiKey: "k" })
     ).rejects.toThrow(/vision quota exceeded/)
   })
+})
+
+it("preserves an explicit Google 2.5 caption model", async () => {
+  getProviderModel.mockReturnValue({})
+  generateText.mockResolvedValue({ text: "a cat" })
+  await generateImageCaption("data:image/png;base64,AQ==", {
+    apiKey: "k",
+    provider: "google",
+    model: "gemini-2.5-flash",
+  })
+  expect(getProviderModel).toHaveBeenLastCalledWith(
+    expect.objectContaining({ model: "gemini-2.5-flash" })
+  )
+  expect(generateText.mock.calls.at(-1)[0].providerOptions).toBeUndefined()
+})
+
+it("serializes the default Google caption with minimum supported thinking through the installed SDK", async () => {
+  const transport = jest.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        candidates: [
+          { content: { role: "model", parts: [{ text: "a glass fox" }] }, finishReason: "STOP" },
+        ],
+        usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 4, totalTokenCount: 16 },
+      }),
+      { headers: { "Content-Type": "application/json" } }
+    )
+  )
+  const google = jest.requireActual("@ai-sdk/google") as typeof import("@ai-sdk/google")
+  const ai = jest.requireActual("ai") as typeof import("ai")
+  getProviderModel.mockImplementationOnce(({ model }) =>
+    google.createGoogle({ apiKey: "test-key", fetch: transport })(model)
+  )
+  generateText.mockImplementationOnce(ai.generateText)
+
+  await expect(
+    generateImageCaption("data:image/png;base64,AQ==", { apiKey: "test-key", provider: "google" })
+  ).resolves.toBe("a glass fox")
+  expect(transport.mock.calls[0][0]).toContain("/models/gemini-3.5-flash-lite:generateContent")
+  const body = JSON.parse(transport.mock.calls[0][1].body)
+  expect(body.generationConfig).toMatchObject({
+    maxOutputTokens: 200,
+    thinkingConfig: { thinkingLevel: "minimal" },
+  })
+  expect(body.generationConfig.thinkingConfig.thinkingBudget).toBeUndefined()
+})
+it("blocks PII in a custom caption prompt before provider construction", async () => {
+  getProviderModel.mockReset()
+  generateText.mockReset()
+  await expect(
+    generateImageCaption("data:image/png;base64,AQ==", {
+      apiKey: "k",
+      prompt: "Contact alice@example.com",
+    })
+  ).rejects.toThrow(/PII gate/)
+  expect(getProviderModel).not.toHaveBeenCalled()
+  expect(generateText).not.toHaveBeenCalled()
 })

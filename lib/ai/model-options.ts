@@ -12,7 +12,19 @@ import type {
 } from "@cognia/provider-types/provider"
 import { getModelDisplayName } from "@/lib/ai/icons"
 import { getCachedOpenRouterCatalogModels } from "@cognia/provider-core/providers/openrouter-catalog-sync"
-import { customProviderModelIds } from "@cognia/provider-routing/model-option-source"
+import {
+  getCatalogModelMetadata,
+  resolveProviderModelLifecycle,
+} from "@cognia/provider-core/providers/models-dev-sync"
+import {
+  isModelLifecycleAllowed,
+  type ModelLifecycle,
+  type ModelLifecycleInfo,
+} from "@cognia/provider-types/model-catalog"
+import {
+  customProviderModelIds,
+  catalogModelIds as sharedCatalogModelIds,
+} from "@cognia/provider-routing/model-option-source"
 import { isBuiltInProviderId } from "@cognia/provider-types/built-in-provider-catalog"
 import {
   remoteHostKeyedProviders,
@@ -39,6 +51,9 @@ function openRouterCatalogEntry(modelId: string): ProviderModelDiscoveryEntry | 
 type ModelMetadata = Omit<ProviderModelDiscoveryEntry, "id" | "name" | "provider" | "knownFields">
 
 export interface ModelOption extends ModelMetadata {
+  lifecycle?: ModelLifecycle
+  disabled?: boolean
+  replacementModelId?: string
   providerId: string
   /** Human-readable provider name (e.g. "Anthropic"), not the raw id. */
   providerName: string
@@ -55,14 +70,29 @@ export interface ModelOption extends ModelMetadata {
   supportsReasoning?: boolean
 }
 
+/** Synchronous lifecycle authority shared by the GUI and CLI model lists. */
+export function resolveModelLifecycle(
+  providerId: string,
+  modelId: string,
+  status?: string
+): ModelLifecycleInfo {
+  const staticModel = getAllProviders()[providerId]?.models.find((model) => model.id === modelId)
+  return resolveProviderModelLifecycle(
+    providerId,
+    modelId,
+    status,
+    staticModel?.status,
+    providerId === "openrouter" ? openRouterCatalogEntry(modelId)?.status : undefined
+  )
+}
+
 /**
  * Resolve the synchronously-available display metadata for a model — context
  * window + capability flags — from the most authoritative source first: the
  * user's custom-provider metadata, then live `/v1/models` discovery, then the
- * built-in `PROVIDERS` catalog. Returns an empty object when nothing is known
- * (so the picker simply omits the metadata line for that row). models.dev is a
- * Dexie-backed async catalog and intentionally NOT consulted here — the picker
- * renders synchronously off the settings store.
+ * reviewed built-in `PROVIDERS` catalog, then the primed models.dev cache. Returns an empty
+ * object when nothing is known. Reading the cache is synchronous and never
+ * starts a network or database request during render.
  */
 export function resolveModelMeta(
   providerId: string | undefined,
@@ -83,6 +113,7 @@ export function resolveModelMeta(
           (m) => m.id === modelId
         )
   const builtin = catalog[providerId]?.models?.find((m) => m.id === modelId)
+  const baseline = getCatalogModelMetadata(providerId, modelId)
   const curated = cpm
     ? {
         ...cpm,
@@ -93,9 +124,10 @@ export function resolveModelMeta(
     : undefined
   // User overrides win for ordinary custom providers; subscription declarations
   // are fallback metadata, so account-specific discovery takes precedence.
+  // Reviewed bundled values beat an older persisted catalog revision.
   const sources = custom?.subscription
-    ? [builtin, curated, discovered]
-    : [builtin, discovered, curated]
+    ? [baseline, builtin, curated, discovered]
+    : [baseline, builtin, discovered, curated]
   const fields = [
     "contextLength",
     "maxInputTokens",
@@ -106,6 +138,7 @@ export function resolveModelMeta(
     "supportsVideo",
     "supportsStreaming",
     "supportsReasoning",
+    "supportsTemperature",
     "supportsImageGeneration",
     "supportsEmbedding",
     "supportsStructuredOutput",
@@ -246,12 +279,7 @@ export function resolveModelMaxOutputTokens(
  * comment inside {@link collectModelOptions} for why the latter is unsuitable.
  */
 export function catalogModelIds(providerId: string, catalog = getAllProviders()): string[] {
-  const cfg = catalog[providerId]
-  if (!cfg) return []
-  const ids = new Set<string>()
-  if (cfg.defaultModel) ids.add(cfg.defaultModel)
-  for (const m of cfg.models ?? []) ids.add(m.id)
-  return [...ids]
+  return sharedCatalogModelIds(providerId, catalog)
 }
 
 /**
@@ -318,7 +346,7 @@ export function resolveDefaultModelForProvider(
   }
   const configured = providerSettings?.[providerId]?.defaultModel
   if (configured) return configured
-  const catalogDefault = getAllProviders()[providerId]?.defaultModel
+  const catalogDefault = catalogModelIds(providerId)[0]
   if (catalogDefault) return catalogDefault
   const first = servable.values().next()
   return first.done ? undefined : first.value
@@ -359,7 +387,9 @@ export function collectModelOptions(
     // registry, NOT a per-account availability source — surfacing it here would
     // list hundreds of models the user's key/tier can't serve, which 4xx at
     // send time. models.dev still enriches pricing/caps in the settings views.
-    const allowed = new Set<string>(settings.enabledModels ?? [])
+    const pins = new Set<string>(settings.enabledModels ?? [])
+    if (settings.defaultModel) pins.add(settings.defaultModel)
+    const allowed = new Set<string>(pins)
     if (settings.defaultModel) allowed.add(settings.defaultModel)
     for (const m of settings.discoveredModels ?? []) {
       if (m?.id) allowed.add(m.id)
@@ -375,8 +405,36 @@ export function collectModelOptions(
     // Nothing configured at all → fall back to the curated built-in catalog
     // so an enabled provider never renders as an empty group.
     const providerName = catalog[providerId]?.name ?? providerId
-    const modelIds = allowed.size > 0 ? [...allowed] : catalogModelIds(providerId, catalog)
+    const candidates = allowed.size > 0 ? [...allowed] : catalogModelIds(providerId, catalog)
+    const modelIds = candidates.filter((modelId) => {
+      const discovered =
+        providerId === "openrouter"
+          ? openRouterCatalogEntry(modelId)
+          : settings.discoveredModels?.find((model) => model.id === modelId)
+      return (
+        pins.has(modelId) ||
+        isModelLifecycleAllowed(
+          resolveModelLifecycle(providerId, modelId, discovered?.status).lifecycle,
+          "new"
+        )
+      )
+    })
+    // A retired saved pin remains explainable, with a current alternative to
+    // choose. Never rewrite the user's settings or historical session rows.
+    if (
+      !modelIds.some((modelId) =>
+        isModelLifecycleAllowed(resolveModelLifecycle(providerId, modelId).lifecycle, "new")
+      )
+    ) {
+      const recommended = catalogModelIds(providerId, catalog)[0]
+      if (recommended && !modelIds.includes(recommended)) modelIds.push(recommended)
+    }
     for (const modelId of modelIds) {
+      const discovered =
+        providerId === "openrouter"
+          ? openRouterCatalogEntry(modelId)
+          : settings.discoveredModels?.find((model) => model.id === modelId)
+      const lifecycle = resolveModelLifecycle(providerId, modelId, discovered?.status)
       out.push({
         providerId,
         providerName,
@@ -389,6 +447,9 @@ export function collectModelOptions(
           catalog
         ),
         ...resolveModelMeta(providerId, modelId, providerSettings, customProviders, catalog),
+        lifecycle: lifecycle.lifecycle,
+        disabled: !isModelLifecycleAllowed(lifecycle.lifecycle, "new"),
+        replacementModelId: lifecycle.replacementModelId,
       })
     }
   }
@@ -398,6 +459,12 @@ export function collectModelOptions(
     // `{id}` objects here (which is what this loop used to do) silently
     // dropped every custom-provider model, because the field is `string[]`.
     for (const modelId of customProviderModelIds(cp)) {
+      const metadata = resolveModelMeta(cp.id, modelId, providerSettings, customProviders, catalog)
+      const lifecycle = resolveProviderModelLifecycle(
+        cp.id,
+        modelId,
+        cp.discoveredModels?.find((model) => model.id === modelId)?.status
+      )
       out.push({
         providerId: cp.id,
         providerName: cp.name ?? cp.id,
@@ -409,7 +476,10 @@ export function collectModelOptions(
           customProviders,
           catalog
         ),
-        ...resolveModelMeta(cp.id, modelId, providerSettings, customProviders, catalog),
+        ...metadata,
+        lifecycle: lifecycle.lifecycle,
+        disabled: !isModelLifecycleAllowed(lifecycle.lifecycle, "new"),
+        replacementModelId: lifecycle.replacementModelId,
       })
     }
   }

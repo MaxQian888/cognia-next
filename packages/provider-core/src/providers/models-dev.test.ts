@@ -16,6 +16,39 @@ import {
   resetProviderCoreRuntimeAdaptersForTesting,
   setProviderCoreRuntimeAdapters,
 } from "./runtime-adapters"
+import { getBuiltInProviderCatalog } from "@cognia/provider-types/built-in-provider-catalog"
+
+describe("catalog lifecycle governance", () => {
+  it("retains retired tombstones and replacement links when upstream removes the model", () => {
+    const snapshot = buildCatalogSnapshotFromModelsDev(
+      {},
+      {
+        revisionId: "governance-test",
+        generatedAt: "2026-10-19T00:00:00.000Z",
+        checksum: "test",
+        builtInCatalog: getBuiltInProviderCatalog(),
+        certifiedProviderIds: new Set(["deepseek"]),
+      }
+    )
+    expect(snapshot.models.find((model) => model.id === "deepseek:deepseek-chat")).toMatchObject({
+      lifecycle: "retired",
+      retiredAt: "2026-07-24",
+      provenance: { lifecycle: { kind: "official" } },
+    })
+    expect(
+      snapshot.offerings.find((offering) => offering.id === "deepseek:deepseek-chat")
+    ).toMatchObject({
+      lifecycle: "retired",
+      available: false,
+    })
+    expect(
+      snapshot.aliases.find((alias) => alias.id === "legacy:deepseek:deepseek-chat")
+    ).toMatchObject({
+      target: { type: "offering", ref: "deepseek:deepseek-chat" },
+      replacementRef: "deepseek:deepseek-flash",
+    })
+  })
+})
 
 const anthropicProvider: ModelsDevProvider = {
   id: "anthropic",
@@ -310,6 +343,27 @@ describe("normalizeModelsDevApi", () => {
 })
 
 describe("buildCatalogSnapshotFromModelsDev", () => {
+  it("keeps Perplexity Agent presets on Responses and legacy Sonar on Chat Completions", () => {
+    const snapshot = buildCatalogSnapshotFromModelsDev(
+      {},
+      {
+        revisionId: "perplexity-endpoints",
+        generatedAt: "2026-10-19T00:00:00.000Z",
+        checksum: "test",
+        builtInCatalog: getBuiltInProviderCatalog().filter(
+          (provider) => provider.id === "perplexity"
+        ),
+        certifiedProviderIds: new Set(),
+      }
+    )
+    expect(
+      snapshot.offerings.find((offering) => offering.upstreamId === "preset/fast")?.endpointType
+    ).toBe("responses")
+    expect(
+      snapshot.offerings.find((offering) => offering.upstreamId === "sonar-pro")?.endpointType
+    ).toBe("chat-completions")
+  })
+
   it("applies manual provider wiring over models.dev and keeps long-tail providers experimental", () => {
     const snapshot = buildCatalogSnapshotFromModelsDev(
       {
@@ -361,7 +415,7 @@ describe("buildCatalogSnapshotFromModelsDev", () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: "anthropic:claude-sonnet-4-5",
-          lifecycle: "active",
+          lifecycle: "deprecated",
         }),
         expect.objectContaining({
           id: "tail:image-1",

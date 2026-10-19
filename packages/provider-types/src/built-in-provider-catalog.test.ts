@@ -56,22 +56,22 @@ describe("built-in provider catalog", () => {
   })
 
   it("uses current production model fallbacks for flagship providers", () => {
-    expect(getBuiltInProviderDefaultModel("openai")).toBe("gpt-5.6")
-    expect(getBuiltInProviderDefaultModel("anthropic")).toBe("claude-sonnet-5")
-    expect(getBuiltInProviderDefaultModel("google")).toBe("gemini-3.6-flash")
-    expect(getBuiltInProviderDefaultModel("xai")).toBe("grok-4.5")
+    expect(getBuiltInProviderDefaultModel("openai")).toBe("gpt-6.1-sol")
+    expect(getBuiltInProviderDefaultModel("anthropic")).toBe("claude-sonnet-5-5")
+    expect(getBuiltInProviderDefaultModel("google")).toBe("gemini-3.8-flash")
+    expect(getBuiltInProviderDefaultModel("xai")).toBe("grok-4.7")
 
     expect(
       getBuiltInProviderCatalogEntry("google")?.models?.find(
-        (model) => model.id === "gemini-3.6-flash"
+        (model) => model.id === "gemini-3.8-flash"
       )
     ).toMatchObject({
-      contextLength: 1_000_000,
+      contextLength: 1_048_576,
       maxOutputTokens: 65_536,
       supportsVision: true,
     })
     expect(
-      getBuiltInProviderCatalogEntry("xai")?.models?.find((model) => model.id === "grok-4.5")
+      getBuiltInProviderCatalogEntry("xai")?.models?.find((model) => model.id === "grok-4.7")
     ).toMatchObject({
       contextLength: 500_000,
       maxOutputTokens: 500_000,
@@ -80,9 +80,114 @@ describe("built-in provider catalog", () => {
     })
   })
 
+  it.each([
+    ["xai", "grok-4.7", "grok-4.5"],
+    ["qwen", "qwen3.8-max", "qwen-max"],
+    ["minimax", "MiniMax-M3", "MiniMax-M2.7"],
+    ["bedrock", "us.anthropic.claude-sonnet-5-5", "us.anthropic.claude-sonnet-5"],
+    ["volcengine", "doubao-seed-2-1-pro-260628", "doubao-pro-256k"],
+    ["opencode", "kimi-k2.7-code", "claude-sonnet-4-6"],
+  ])("updates %s recommendations without deleting earlier choices", (providerId, current, old) => {
+    const provider = getBuiltInProviderCatalogEntry(providerId)
+    expect(provider?.defaultModel).toBe(current)
+    expect(provider?.models?.map((model) => model.id)).toEqual(
+      expect.arrayContaining([current, old])
+    )
+    expect(provider?.models?.find((model) => model.id === current)?.recommendedFor).toContain(
+      "coding"
+    )
+  })
+
+  it("keeps economical defaults alongside current flagship options", () => {
+    expect(getBuiltInProviderDefaultModel("moonshot")).toBe("kimi-k2.7-code")
+    expect(getBuiltInProviderDefaultModel("google")).toBe("gemini-3.8-flash")
+    expect(getBuiltInProviderDefaultModel("zhipu")).toBe("glm-4.7-flash")
+    expect(
+      getBuiltInProviderCatalogEntry("moonshot")?.models?.find((model) => model.id === "kimi-k3")
+    ).toMatchObject({ contextLength: 1048576, supportsVision: true, supportsTemperature: false })
+    expect(
+      getBuiltInProviderCatalogEntry("google")?.models?.find(
+        (model) => model.id === "gemini-4-argon"
+      )
+    ).toMatchObject({ maxOutputTokens: 65536, supportsReasoning: true })
+    expect(getBuiltInProviderCatalogEntry("zhipu")?.codingPackage?.defaultModel).toBe("glm-5.3")
+  })
+
+  it("corrects baseline capabilities without repurposing legacy ids", () => {
+    const model = (providerId: string, id: string) =>
+      getBuiltInProviderCatalogEntry(providerId)?.models?.find((item) => item.id === id)
+    expect(model("deepseek", "deepseek-flash")?.maxOutputTokens).toBe(393216)
+    expect(model("mistral", "mistral-medium-latest")?.contextLength).toBe(262144)
+    expect(model("siliconflow", "deepseek-ai/DeepSeek-V3.2")).toMatchObject({
+      contextLength: 164000,
+      maxOutputTokens: 164000,
+    })
+    expect(model("moonshot", "kimi-k2.7-code")).toMatchObject({
+      contextLength: 262144,
+      supportsVision: true,
+      supportsTemperature: false,
+    })
+    expect(model("perplexity", "sonar-pro")).toMatchObject({
+      supportsVision: true,
+      supportsTools: false,
+      maxOutputTokens: 8192,
+    })
+    expect(model("qwen", "qwen-max")?.supportsVision).toBe(false)
+    expect(model("huggingface", "Qwen/Qwen3-Coder-480B-A35B-Instruct")).toMatchObject({
+      contextLength: 262144,
+      maxOutputTokens: 66536,
+    })
+    expect(model("zhipu", "glm-4.7-flash")?.maxOutputTokens).toBe(131072)
+    expect(model("bedrock", "us.anthropic.claude-sonnet-5-5")?.supportsTemperature).toBe(false)
+  })
+
+  it("omits unsupported sampling for the current GPT-6 family on both built-in providers", () => {
+    for (const providerId of ["openai", "codex"]) {
+      for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna"]) {
+        expect(
+          getBuiltInProviderCatalogEntry(providerId)?.models?.find((model) => model.id === id)
+            ?.supportsTemperature
+        ).toBe(false)
+      }
+    }
+  })
+
+  it("stops endorsing unavailable coding recommendations without declaring them retired", () => {
+    for (const [providerId, id] of [
+      ["togetherai", "Qwen/Qwen3-Coder-480B-A35B-Instruct"],
+      ["siliconflow", "Pro/Qwen/Qwen3-Coder-480B-A35B-Instruct"],
+      ["zhipu", "glm-5-turbo"],
+      ["minimax", "MiniMax-M2.1-highspeed"],
+      ["opencode-go", "kimi-k2.6"],
+      ["opencode-go", "glm-5.1"],
+    ]) {
+      const model = getBuiltInProviderCatalogEntry(providerId)?.models?.find(
+        (item) => item.id === id
+      )
+      expect(model).toBeDefined()
+      expect(model?.recommendedFor ?? []).not.toContain("coding")
+    }
+  })
+
+  it("uses wire-compatible OpenCode and Perplexity defaults", () => {
+    expect(getBuiltInProviderCatalogEntry("opencode")).toMatchObject({
+      defaultModel: "kimi-k2.7-code",
+      defaultBaseURL: "https://opencode.ai/inference/openai/v1",
+      protocol: "openai",
+    })
+    expect(getBuiltInProviderCatalogEntry("perplexity")).toMatchObject({
+      defaultModel: "preset/fast",
+      defaultBaseURL: "https://api.perplexity.ai/v1",
+    })
+    expect(getBuiltInProviderDefaultModel("ai21")).toBe("jamba-large")
+  })
+
   it("ships complete first-party OpenAI and Anthropic model choices", () => {
     const openai = getBuiltInProviderCatalogEntry("openai")
     expect(openai?.models?.map((model) => model.id)).toEqual([
+      "gpt-6.1-sol",
+      "gpt-6-astra",
+      "gpt-6-luna",
       "gpt-5.6",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
@@ -93,11 +198,14 @@ describe("built-in provider catalog", () => {
       supportsTools: true,
       supportsVision: true,
       supportsReasoning: true,
-      pricing: { promptPer1M: 5, completionPer1M: 30, cachedInputPer1M: 0.5 },
+      pricing: { promptPer1M: 2, completionPer1M: 10, cachedInputPer1M: 0.1 },
     })
 
     const anthropic = getBuiltInProviderCatalogEntry("anthropic")
     expect(anthropic?.models?.map((model) => model.id)).toEqual([
+      "claude-opus-5-5",
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5",
       "claude-fable-5",
       "claude-opus-4-8",
       // `claude-opus-5` was blessed by both effort gates but existed in no
@@ -114,6 +222,111 @@ describe("built-in provider catalog", () => {
       supportsVision: true,
       supportsReasoning: true,
       pricing: { promptPer1M: 3, completionPer1M: 15 },
+    })
+  })
+
+  it("refreshes invalid or superseded defaults while retaining historical model ids", () => {
+    expect(getBuiltInProviderDefaultModel("codex")).toBe("gpt-6.1-sol")
+    expect(getBuiltInProviderDefaultModel("deepseek")).toBe("deepseek-flash")
+    expect(getBuiltInProviderDefaultModel("openrouter")).toBe("anthropic/claude-sonnet-5.5")
+
+    for (const [providerId, historicalId] of [
+      ["openai", "gpt-5.6"],
+      ["codex", "gpt-5.6-sol"],
+      ["anthropic", "claude-sonnet-5"],
+      ["google", "gemini-3.6-flash"],
+      ["deepseek", "deepseek-v4-flash"],
+    ]) {
+      const provider = getBuiltInProviderCatalogEntry(providerId)
+      expect(provider?.models?.some((model) => model.id === historicalId)).toBe(true)
+      expect(provider?.models?.some((model) => model.id === provider.defaultModel)).toBe(true)
+    }
+    expect(getBuiltInProviderCatalogEntry("openrouter")?.models?.[0]).toMatchObject({
+      id: "anthropic/claude-sonnet-5.5",
+      contextLength: 1_000_000,
+      maxOutputTokens: 128_000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsReasoning: true,
+      pricing: { promptPer1M: 2, completionPer1M: 10, cachedInputPer1M: 0.1 },
+    })
+  })
+
+  it("keeps current capability and pricing facts on the recommended model rows", () => {
+    expect(
+      getBuiltInProviderCatalogEntry("anthropic")?.models?.find(
+        (model) => model.id === "claude-sonnet-5-5"
+      )
+    ).toMatchObject({
+      contextLength: 1_000_000,
+      maxOutputTokens: 128_000,
+      supportsTools: true,
+      supportsVision: true,
+      supportsReasoning: true,
+      pricing: { promptPer1M: 2, completionPer1M: 10 },
+    })
+    expect(
+      getBuiltInProviderCatalogEntry("deepseek")?.models?.find(
+        (model) => model.id === "deepseek-flash"
+      )
+    ).toMatchObject({
+      contextLength: 1_000_000,
+      maxOutputTokens: 393_216,
+      supportsTools: true,
+      supportsVision: true,
+      supportsReasoning: true,
+      pricing: { promptPer1M: 0.3, completionPer1M: 1.2, cachedInputPer1M: 0.006 },
+    })
+    expect(
+      getBuiltInProviderCatalogEntry("google")?.models?.find(
+        (model) => model.id === "gemini-3.8-flash"
+      )
+    ).toMatchObject({
+      supportsAudio: true,
+      supportsVideo: true,
+      pricing: { promptPer1M: 1.5, completionPer1M: 7.5, cachedInputPer1M: 0.15 },
+    })
+  })
+
+  it.each([
+    [
+      "fireworks",
+      "accounts/fireworks/models/deepseek-v4p1-flash-1017",
+      "accounts/fireworks/models/deepseek-v4-pro",
+    ],
+    ["nvidia", "nvidia/nemotron-3.5-super-vl-120b-a12b", "nvidia/nemotron-3-super-120b-a12b"],
+    ["opencode-go", "kimi-k2.7-code", "kimi-k2.6"],
+  ])(
+    "refreshes %s recommendations without losing its historical model",
+    (providerId, recommendedId, historicalId) => {
+      const provider = getBuiltInProviderCatalogEntry(providerId)
+      expect(provider?.defaultModel).toBe(recommendedId)
+      expect(provider?.models?.map((model) => model.id)).toEqual(
+        expect.arrayContaining([recommendedId, historicalId])
+      )
+      expect(provider?.models?.find((model) => model.id === recommendedId)).toMatchObject({
+        supportsTools: true,
+        supportsVision: true,
+        supportsReasoning: true,
+      })
+    }
+  )
+
+  it("uses the documented current OpenCode Go endpoint for its recommendation", () => {
+    expect(getBuiltInProviderCatalogEntry("opencode-go")).toMatchObject({
+      defaultBaseURL: "https://opencode.ai/inference/go/openai/v1",
+      docsUrl: "https://opencode.ai/v2/docs/console/go/",
+    })
+    expect(
+      getBuiltInProviderCatalogEntry("opencode-go")?.models?.find(
+        (model) => model.id === "kimi-k2.7-code"
+      )
+    ).toMatchObject({
+      id: "kimi-k2.7-code",
+      contextLength: 262_144,
+      maxOutputTokens: 262_144,
+      supportsTemperature: false,
+      pricing: { promptPer1M: 0.95, completionPer1M: 4, cachedInputPer1M: 0.19 },
     })
   })
 
@@ -222,9 +435,10 @@ describe("effort-gate parity", () => {
     /opus-4-(?:5|6|7|8|9)/,
     /sonnet-4-6/,
     /(?:opus|sonnet|fable)-5/,
+    /haiku-5[-.]5(?:$|[-@:/])/,
   ]
 
-  // Haiku reasons but still rejects the `effort` parameter — documented in
+  // Haiku 4.5 reasons but still rejects the `effort` parameter — documented in
   // `reasoning-capability.ts` and the one deliberate exclusion.
   const NO_EFFORT_ALLOWLIST = new Set(["claude-haiku-4-5-20251001"])
 

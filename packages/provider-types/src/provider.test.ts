@@ -35,7 +35,7 @@ describe("catalog → PROVIDERS merge", () => {
     // and must now surface in the settings provider list.
     expect(PROVIDERS.moonshot).toBeDefined()
     expect(PROVIDERS.moonshot?.defaultBaseURL).toBe("https://api.moonshot.cn/v1")
-    expect(PROVIDERS.perplexity?.defaultBaseURL).toBe("https://api.perplexity.ai")
+    expect(PROVIDERS.perplexity?.defaultBaseURL).toBe("https://api.perplexity.ai/v1")
     expect(PROVIDERS.siliconflow?.defaultBaseURL).toBe("https://api.siliconflow.cn/v1")
     // Enterprise provider without a fixed endpoint is still listed.
     expect(PROVIDERS.azure).toBeDefined()
@@ -50,9 +50,9 @@ describe("catalog → PROVIDERS merge", () => {
 
   it("merges current catalog defaults and models into richer inline entries", () => {
     expect(getProviderConfig("openai")).toBe(PROVIDERS.openai)
-    expect(PROVIDERS.openai?.defaultModel).toBe("gpt-5.6")
+    expect(PROVIDERS.openai?.defaultModel).toBe("gpt-6.1-sol")
     expect(PROVIDERS.openai?.models.map((model) => model.id)).toEqual(
-      expect.arrayContaining(["gpt-5.6", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-4.1"])
+      expect.arrayContaining(["gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna", "gpt-5.6", "gpt-4.1"])
     )
   })
 
@@ -80,6 +80,9 @@ describe("catalog → PROVIDERS merge", () => {
   it("offers the current Codex model line-up, not the retired 5.1/5.2-codex one", () => {
     const ids = PROVIDERS.codex?.models.map((m) => m.id) ?? []
     expect(ids).toEqual([
+      "gpt-6.1-sol",
+      "gpt-6-astra",
+      "gpt-6-luna",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
@@ -89,7 +92,7 @@ describe("catalog → PROVIDERS merge", () => {
     ])
     // The default must be a model the provider actually lists, or the picker
     // opens on an id the backend will reject.
-    expect(PROVIDERS.codex?.defaultModel).toBe("gpt-5.6-sol")
+    expect(PROVIDERS.codex?.defaultModel).toBe("gpt-6.1-sol")
     expect(ids).toContain(PROVIDERS.codex?.defaultModel)
     // `gpt-5.2` and `gpt-5.3-codex` are deprecated in Codex under a ChatGPT
     // login; the 5.1/5.2-codex generation is gone from the picker entirely.

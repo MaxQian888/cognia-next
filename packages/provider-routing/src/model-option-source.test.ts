@@ -8,11 +8,25 @@ import {
   groupByProvider,
 } from "./model-option-source"
 import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
+import {
+  primeOpenRouterCatalogCache,
+  __resetOpenRouterCatalogCacheForTesting,
+} from "@cognia/provider-core/providers/openrouter-catalog-sync"
+
+afterEach(() => __resetOpenRouterCatalogCacheForTesting())
 
 const ps = (over: Partial<UserProviderSettings> = {}): UserProviderSettings =>
   ({ providerId: "openai", enabled: true, defaultModel: "", ...over }) as UserProviderSettings
 
 describe("catalogModelIds", () => {
+  it("shares lifecycle eligibility with the chat and CLI catalogs", () => {
+    expect(catalogModelIds("deepseek")).not.toContain("deepseek-chat")
+    const settings = { deepseek: ps({ providerId: "deepseek", defaultModel: "deepseek-chat" }) }
+    expect(
+      collectOptions(settings, undefined).some((option) => option.modelId === "deepseek-chat")
+    ).toBe(false)
+    expect(settings.deepseek.defaultModel).toBe("deepseek-chat")
+  })
   it("returns the curated catalog for a known provider", () => {
     const ids = catalogModelIds("openai")
     expect(ids.length).toBeGreaterThan(0)
@@ -24,6 +38,25 @@ describe("catalogModelIds", () => {
 })
 
 describe("collectOptions", () => {
+  it("does not let saved discovery revive a retired OpenRouter offering", () => {
+    const modelId = "account/retired-model"
+    primeOpenRouterCatalogCache({
+      id: "singleton",
+      fetchedAt: 1,
+      source: "remote",
+      models: [{ id: modelId, status: "retired" }],
+    })
+    const settings = {
+      openrouter: ps({
+        providerId: "openrouter",
+        defaultModel: modelId,
+        discoveredModels: [{ id: modelId, status: "active" }],
+      }),
+    }
+    expect(collectOptions(settings, []).some((option) => option.modelId === modelId)).toBe(false)
+    expect(settings.openrouter.defaultModel).toBe(modelId)
+  })
+
   it("always includes anthropic even without a providerSettings entry", () => {
     const out = collectOptions({}, undefined)
     expect(out.some((o) => o.providerId === "anthropic")).toBe(true)

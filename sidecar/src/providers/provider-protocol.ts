@@ -83,6 +83,7 @@ export const PROVIDER_PROTOCOL: Readonly<Record<string, string>> = Object.freeze
   togetherai: "openai",
   fireworks: "openai",
   deepinfra: "openai",
+  perplexity: "openai",
   // Local inference engines (OpenAI-compatible /v1 over a localhost port).
   ollama: "openai",
   lmstudio: "openai",

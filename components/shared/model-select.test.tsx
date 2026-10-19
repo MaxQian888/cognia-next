@@ -10,6 +10,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { ModelOption } from "@/lib/ai/model-options"
 import enMessages from "@/i18n/messages/en.json"
+import { primeModelsDevCatalogCache } from "@/lib/ai/providers/models-dev-sync"
 
 // Radix Popover + cmdk Command need these pointer/scroll primitives in jsdom.
 beforeAll(() => {
@@ -27,6 +28,8 @@ jest.mock("@/hooks/ui/use-mobile", () => ({
 beforeEach(() => {
   useIsMobileMock.mockReset().mockReturnValue(false)
 })
+
+afterEach(() => act(() => primeModelsDevCatalogCache(null)))
 
 const ANTHROPIC_MODEL = PROVIDERS.anthropic.defaultModel
 const ANTHROPIC_NAME = PROVIDERS.anthropic.models.find((m) => m.id === ANTHROPIC_MODEL)?.name
@@ -91,6 +94,17 @@ describe("groupByProvider", () => {
     const groups = groupByProvider([opt({ modelId: "m1" }), opt({ modelId: "m1" })])
     expect(groups[0].models).toHaveLength(1)
   })
+
+  it("carries lifecycle restrictions and their explanation into grouped rows", () => {
+    const disabledReason = jest.fn(() => "Retired · Suggested replacement: m2")
+    const option = opt({ disabled: true, lifecycle: "retired", replacementModelId: "m2" })
+    const groups = groupByProvider([option], disabledReason)
+    expect(groups[0].models[0]).toMatchObject({
+      disabled: true,
+      disabledReason: "Retired · Suggested replacement: m2",
+    })
+    expect(disabledReason).toHaveBeenCalledWith(option)
+  })
 })
 
 describe("resolveOptionModelName", () => {
@@ -118,6 +132,60 @@ describe("ModelSelect", () => {
   it("labels the trigger with the catalog display name", () => {
     renderSelect()
     expect(screen.getByRole("button").textContent).toContain(ANTHROPIC_NAME)
+  })
+
+  it("keeps a retired configured pin visible with a translated explanation, without selecting it", () => {
+    const retired = "claude-3-haiku-20240307"
+    useSettingsStore.setState({
+      settings: {
+        providerSettings: { anthropic: { enabled: true, defaultModel: retired } },
+        customProviders: [],
+      },
+    } as never)
+    const onSelect = jest.fn()
+    renderSelect({ model: retired, onSelect })
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    const row = screen.getAllByRole("option").find((item) => item.textContent?.includes(retired))
+    expect(row).toHaveAttribute("data-disabled", "true")
+    expect(row).toHaveTextContent(enMessages.modelCatalog.lifecycles.retired)
+    fireEvent.click(row!)
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(useSettingsStore.getState().settings?.providerSettings?.anthropic?.defaultModel).toBe(
+      retired
+    )
+  })
+
+  it("refreshes an open picker when catalog sync retires a discovered model", () => {
+    const modelId = "account-discovered-model"
+    const catalogRow = (status: string) => ({
+      id: "singleton",
+      fetchedAt: 1,
+      source: "remote" as const,
+      providers: {
+        anthropic: {
+          modelsDevId: "anthropic",
+          name: "Anthropic",
+          models: [{ id: modelId, name: "Discovered model", status }],
+        },
+      },
+    })
+    primeModelsDevCatalogCache(catalogRow("active"))
+    useSettingsStore.setState({
+      settings: {
+        providerSettings: {
+          anthropic: {
+            enabled: true,
+            discoveredModels: [{ id: modelId, name: "Discovered model" }],
+          },
+        },
+        customProviders: [],
+      },
+    } as never)
+    renderSelect()
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    expect(screen.getByRole("option", { name: /Discovered model/ })).toBeInTheDocument()
+    act(() => primeModelsDevCatalogCache(catalogRow("retired")))
+    expect(screen.queryByRole("option", { name: /Discovered model/ })).not.toBeInTheDocument()
   })
 
   it("reports the provider alongside the model on selection", () => {

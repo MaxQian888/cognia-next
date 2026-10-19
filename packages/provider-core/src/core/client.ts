@@ -27,6 +27,10 @@ import {
   resolveProviderProtocol,
   decideOpenAiEndpointFlavor,
 } from "../../../../sidecar/src/providers/provider-protocol.ts"
+import {
+  resolvePerplexityEndpoint,
+  withPerplexityAgentFetch,
+} from "../../../../sidecar/src/providers/perplexity-agent.ts"
 
 export type { ProviderName } from "@cognia/provider-types"
 // Re-exported for back-compat with importers that pulled it from here.
@@ -72,6 +76,23 @@ export function getProviderModel(opts: ProviderModelOptions): LanguageModel {
   // branch below. Native `@ai-sdk/*` clients must keep their own built-in
   // defaults unless the caller passed an explicit override.
   const baseURL = opts.baseURL
+
+  if (provider === "perplexity") {
+    const endpoint = resolvePerplexityEndpoint({
+      model: opts.model,
+      baseURL,
+      apiFlavor: opts.apiFlavor,
+    })
+    const client = createOpenAI({
+      apiKey,
+      baseURL: endpoint.baseURL,
+      headers: opts.headers,
+      ...(endpoint.flavor === "responses" ? { fetch: withPerplexityAgentFetch() } : {}),
+    })
+    return (
+      endpoint.flavor === "responses" ? client.responses(opts.model) : client.chat(opts.model)
+    ) as LanguageModel
+  }
 
   if (provider === "commandcode" && resolveProviderProtocol(provider, opts.model) === "anthropic") {
     return createAnthropic({

@@ -9,10 +9,15 @@ import type {
   ProviderProfile,
   TransportProfile,
 } from "@cognia/provider-types"
+import {
+  isModelLifecycleAllowed,
+  resolveModelLifecycle,
+  type ModelSelectionPurpose,
+} from "@cognia/provider-types/model-catalog"
 
 import type { CatalogRepository } from "./catalog-repository"
 
-export type CatalogResolutionPurpose = "new" | "historical" | "auto"
+export type CatalogResolutionPurpose = ModelSelectionPurpose
 
 export type CatalogResolutionErrorCode =
   | "deployment_not_owned"
@@ -272,12 +277,14 @@ export function resolveCatalogRuntimeTarget(
       `offering "${offering.id}" references a missing model`
     )
   }
+  const offeringLifecycle = resolveModelLifecycle(
+    offering.providerRef,
+    offering.upstreamId,
+    offering.lifecycle
+  )
   if (
-    input.purpose !== "historical" &&
-    (model.lifecycle === "deprecated" ||
-      model.lifecycle === "retired" ||
-      offering.lifecycle === "deprecated" ||
-      offering.lifecycle === "retired")
+    !isModelLifecycleAllowed(model.lifecycle, input.purpose) ||
+    !isModelLifecycleAllowed(offeringLifecycle.lifecycle, input.purpose)
   ) {
     throw new CatalogResolutionError(
       "lifecycle_not_allowed",

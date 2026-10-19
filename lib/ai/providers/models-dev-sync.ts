@@ -51,4 +51,5 @@ export {
   refreshModelsDevCatalogIfStale,
   resolveProviderAdapter,
   syncModelsDevCatalog,
+  subscribeModelsDevCatalog,
 } from "@cognia/provider-core/providers/models-dev-sync"

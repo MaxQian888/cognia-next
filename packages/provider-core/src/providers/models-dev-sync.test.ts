@@ -20,6 +20,7 @@ import {
   setProviderCatalogRepository,
   primeModelsDevCatalogCache,
   __resetModelsDevCatalogCacheForTesting,
+  subscribeModelsDevCatalog,
 } from "./models-dev-sync"
 import { InMemoryCatalogRepository } from "./catalog-repository"
 import type { ModelsDevApi } from "./models-dev"
@@ -108,6 +109,23 @@ afterEach(() => {
 })
 
 describe("syncModelsDevCatalog", () => {
+  it("notifies synchronous selectors after priming and stops after unsubscribe", () => {
+    const listener = jest.fn()
+    const unsubscribe = subscribeModelsDevCatalog(listener)
+    const row: ModelsDevCatalogRow = {
+      id: "singleton",
+      fetchedAt: 1,
+      source: "remote",
+      providers: {},
+    }
+    primeModelsDevCatalogCache(row)
+    expect(listener).toHaveBeenCalledTimes(1)
+    primeModelsDevCatalogCache(row)
+    expect(listener).toHaveBeenCalledTimes(1)
+    unsubscribe()
+    primeModelsDevCatalogCache({ ...row, fetchedAt: 2 })
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
   it("fetches, normalizes, persists, and primes the cache", async () => {
     mockOk(liveApi)
     const row = await syncModelsDevCatalog(5000)

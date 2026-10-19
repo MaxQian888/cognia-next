@@ -72,6 +72,33 @@ const mockAzure = createAzure as unknown as jest.Mock
 const mockBedrock = createAmazonBedrock as unknown as jest.Mock
 
 describe("getProviderModel", () => {
+  it.each([
+    ["preset/fast", "openai.responses", "https://api.perplexity.ai/v1"],
+    ["sonar-pro", "openai.chat", "https://api.perplexity.ai"],
+  ])("routes Perplexity %s while preserving legacy models", (model, family, baseURL) => {
+    const built = getProviderModel({
+      provider: "perplexity",
+      model,
+      apiKey: "test-key",
+    }) as ResolvedModel
+    expect(built).toMatchObject({ provider: family, modelId: model, factoryOpts: { baseURL } })
+  })
+  it.each([
+    [undefined, "https://api.perplexity.ai/v1"],
+    ["https://relay.example/custom/v1", "https://relay.example/custom/v1"],
+  ])("keeps Perplexity Responses routing on its own host or relay %s", (baseURL, expected) => {
+    const built = getProviderModel({
+      provider: "perplexity",
+      model: "sonar-pro",
+      apiFlavor: "responses",
+      baseURL,
+    }) as ResolvedModel
+    expect(built).toMatchObject({
+      provider: "openai.responses",
+      modelId: "sonar-pro",
+      factoryOpts: { baseURL: expected, fetch: expect.any(Function) },
+    })
+  })
   beforeEach(() => {
     mockAnthropic.mockClear()
     mockOpenAI.mockClear()

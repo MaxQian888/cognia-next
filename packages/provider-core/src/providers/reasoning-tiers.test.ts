@@ -21,6 +21,20 @@ describe("reasoningSurfaceFor", () => {
     }
   })
 
+  it("offers native effort for Haiku 5.5, including gateway spellings", () => {
+    for (const modelId of ["claude-haiku-5-5", "anthropic/claude-haiku-5.5"]) {
+      expect(reasoningSurfaceFor({ providerId: "anthropic", modelId })).toBe("anthropic-effort")
+      expect(reasoningTiersFor({ providerId: "anthropic", modelId })).toEqual([
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+      ])
+    }
+    expect(reasoningTiersFor({ providerId: "anthropic", modelId: "claude-haiku-4-5" })).toEqual([])
+  })
+
   it("gives older Anthropic models no depth control — they 400 on the parameter", () => {
     for (const model of ["claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-1"]) {
       expect(reasoningSurfaceFor({ providerId: "anthropic", modelId: model })).toBe("none")
@@ -36,6 +50,22 @@ describe("reasoningSurfaceFor", () => {
   it("puts Google on the budget surface", () => {
     expect(reasoningSurfaceFor({ providerId: "google", modelId: "gemini-2.5-pro" })).toBe("budget")
     expect(reasoningSurfaceFor({ providerId: "gemini", modelId: "gemini-2.5-pro" })).toBe("budget")
+  })
+
+  it("offers only the Gemini 3.8 thinking levels while preserving older budgets", () => {
+    for (const providerId of ["google", "gemini"]) {
+      const input = { providerId, modelId: "gemini-3.8-flash" }
+      expect(reasoningSurfaceFor(input)).toBe("google-level")
+      expect(reasoningTiersFor(input)).toEqual(["low", "medium", "high"])
+      expect(surfaceKeepsXhigh(reasoningSurfaceFor(input))).toBe(false)
+    }
+    expect(reasoningTiersFor({ providerId: "google", modelId: "gemini-2.5-pro" })).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ])
   })
 
   it("separates OpenAI-native from an OpenAI-dialect gateway", () => {
@@ -127,6 +157,41 @@ describe("surfaceKeepsXhigh", () => {
 })
 
 describe("reasoningTiersFor", () => {
+  it("uses model-specific effort ladders for current compatible models", () => {
+    for (const [providerId, modelId, expected] of [
+      ["xai", "grok-4.7", ["low", "medium", "high", "xhigh"]],
+      ["qwen", "qwen3.8-max", ["low", "medium", "xhigh"]],
+      ["zai", "glm-5.3", ["low", "high", "max"]],
+      ["moonshot", "kimi-k3", ["low", "high", "max"]],
+      ["openrouter", "moonshotai/kimi-k3", ["low", "high", "max"]],
+      ["minimax", "MiniMax-M3", []],
+      ["moonshot", "kimi-k2.7", []],
+      ["opencode-go", "kimi-k2.7-code", []],
+    ] as const) {
+      expect(reasoningTiersFor({ providerId, modelId })).toEqual(expected)
+    }
+    expect(reasoningTiersFor({ providerId: "google", modelId: "gemini-4-argon" })).toEqual([
+      "low",
+      "medium",
+      "high",
+    ])
+  })
+
+  it("offers the valid GPT-6 ladder without minimal and preserves max", () => {
+    for (const modelId of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna"]) {
+      expect(reasoningTiersFor({ providerId: "openai", modelId })).toEqual([
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+      ])
+      expect(
+        reasoningTiersFor({ providerId: "codex", protocol: "openai", openAiNative: true, modelId })
+      ).toEqual(["low", "medium", "high", "xhigh", "max"])
+    }
+  })
+
   it("composes the surface lookup with its tier list", () => {
     expect(reasoningTiersFor({ providerId: "anthropic", modelId: "claude-opus-4-8" })).toEqual([
       "low",

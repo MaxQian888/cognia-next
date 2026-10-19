@@ -11,6 +11,7 @@ import {
   type ProviderDefinition,
   type ProviderOffering,
 } from "@cognia/provider-types/model-catalog"
+import { withBundledCatalogGovernance } from "./models-dev"
 
 export interface CatalogProviderFilter {
   tiers?: readonly CatalogTier[]
@@ -68,6 +69,7 @@ interface CatalogIndex {
 }
 
 function buildIndex(snapshot: CatalogSnapshot): CatalogIndex {
+  snapshot = withBundledCatalogGovernance(snapshot)
   const providersById = new Map(snapshot.providers.map((provider) => [provider.id, provider]))
   const modelsById = new Map(snapshot.models.map((model) => [model.id, model]))
   const offeringsById = new Map(snapshot.offerings.map((offering) => [offering.id, offering]))
@@ -234,7 +236,7 @@ export class InMemoryCatalogRepository implements CatalogRepository {
     const results: CatalogSearchResult[] = []
     for (const model of this.active.snapshot.models) {
       const offerings = (this.active.offeringsByModel.get(model.id) ?? []).filter(
-        (offering) => offering.available
+        (offering) => offering.available || query.lifecycle?.includes(offering.lifecycle)
       )
       const eligibleOfferings = offerings.filter((offering) => {
         const provider = this.active?.providersById.get(offering.providerRef)
@@ -242,9 +244,7 @@ export class InMemoryCatalogRepository implements CatalogRepository {
           provider !== undefined &&
           (!query.providerIds || query.providerIds.includes(provider.id)) &&
           (!query.tiers || query.tiers.includes(provider.tier)) &&
-          (!query.lifecycle ||
-            (query.lifecycle.includes(model.lifecycle) &&
-              query.lifecycle.includes(offering.lifecycle)))
+          (!query.lifecycle || query.lifecycle.includes(offering.lifecycle))
         )
       })
       if (eligibleOfferings.length === 0) continue

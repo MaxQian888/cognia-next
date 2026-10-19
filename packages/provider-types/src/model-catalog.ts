@@ -30,6 +30,287 @@ export type CatalogTier = z.infer<typeof catalogTierSchema>
 export const modelLifecycleSchema = z.enum(["preview", "active", "deprecated", "retired"])
 export type ModelLifecycle = z.infer<typeof modelLifecycleSchema>
 
+export type ModelSelectionPurpose = "new" | "auto" | "pinned" | "historical"
+
+export interface ModelLifecycleInfo {
+  lifecycle: ModelLifecycle
+  replacementModelId?: string
+  retiredAt?: string
+  source?: CatalogSource
+}
+
+/** One eligibility rule for pickers, routing and runtime catalog resolution. */
+export function isModelLifecycleAllowed(
+  lifecycle: ModelLifecycle,
+  purpose: ModelSelectionPurpose
+): boolean {
+  if (purpose === "historical") return true
+  if (purpose === "auto") return lifecycle === "active"
+  if (purpose === "pinned") return lifecycle !== "retired"
+  return lifecycle === "active" || lifecycle === "preview"
+}
+
+function normalizeLifecycle(status: string | undefined): ModelLifecycle {
+  switch (status?.toLowerCase()) {
+    case "retired":
+      return "retired"
+    case "deprecated":
+    case "legacy":
+    case "sunset":
+      return "deprecated"
+    case "preview":
+    case "beta":
+    case "alpha":
+    case "experimental":
+      return "preview"
+    default:
+      return "active"
+  }
+}
+
+/**
+ * Provider-scoped official notices, checked 2026-10-19. Retain tombstones even
+ * after upstream catalogs remove the IDs: absence must not reactivate an old
+ * saved choice. An aggregator or user relay has its own availability policy.
+ */
+const LIFECYCLE_NOTICES: Readonly<
+  Record<string, Readonly<Record<string, Omit<ModelLifecycleInfo, "source">>>>
+> = {
+  anthropic: {
+    "claude-sonnet-4-20250514": {
+      lifecycle: "retired",
+      retiredAt: "2026-06-15",
+      replacementModelId: "claude-sonnet-5-5",
+    },
+    "claude-sonnet-4": {
+      lifecycle: "retired",
+      retiredAt: "2026-06-15",
+      replacementModelId: "claude-sonnet-5-5",
+    },
+    "claude-opus-4-20250514": {
+      lifecycle: "retired",
+      retiredAt: "2026-06-15",
+      replacementModelId: "claude-opus-5-5",
+    },
+    "claude-opus-4": {
+      lifecycle: "retired",
+      retiredAt: "2026-06-15",
+      replacementModelId: "claude-opus-5-5",
+    },
+    "claude-opus-4-1-20250805": {
+      lifecycle: "retired",
+      retiredAt: "2026-08-05",
+      replacementModelId: "claude-opus-5-5",
+    },
+    "claude-3-haiku-20240307": {
+      lifecycle: "retired",
+      retiredAt: "2026-04-20",
+      replacementModelId: "claude-haiku-5-5",
+    },
+    "claude-3-5-haiku-20241022": {
+      lifecycle: "retired",
+      retiredAt: "2026-02-19",
+      replacementModelId: "claude-haiku-5-5",
+    },
+    "claude-3-7-sonnet-20250219": {
+      lifecycle: "retired",
+      retiredAt: "2026-02-19",
+      replacementModelId: "claude-sonnet-5-5",
+    },
+    "claude-sonnet-4-5": {
+      lifecycle: "deprecated",
+      retiredAt: "2026-11-30",
+      replacementModelId: "claude-sonnet-5-5",
+    },
+    "claude-sonnet-4-5-20250929": {
+      lifecycle: "deprecated",
+      retiredAt: "2026-11-30",
+      replacementModelId: "claude-sonnet-5-5",
+    },
+  },
+  google: {
+    "gemini-3.1-flash-image-preview": {
+      lifecycle: "retired",
+      retiredAt: "2026-06-25",
+      replacementModelId: "gemini-nano-banana-2.1",
+    },
+    "gemini-3-pro-image-preview": {
+      lifecycle: "retired",
+      retiredAt: "2026-06-25",
+      replacementModelId: "gemini-3-pro-image",
+    },
+    "imagen-4.0-generate-001": {
+      lifecycle: "retired",
+      retiredAt: "2026-08-17",
+      replacementModelId: "gemini-nano-banana-2.1",
+    },
+    "imagen-4.0-ultra-generate-001": {
+      lifecycle: "retired",
+      retiredAt: "2026-08-17",
+      replacementModelId: "gemini-nano-banana-2.1",
+    },
+    "imagen-4.0-fast-generate-001": {
+      lifecycle: "retired",
+      retiredAt: "2026-08-17",
+      replacementModelId: "gemini-nano-banana-2.1",
+    },
+    "veo-3.0-generate-001": {
+      lifecycle: "retired",
+      retiredAt: "2026-06-30",
+      replacementModelId: "veo-3.1-generate-preview",
+    },
+    "veo-3.0-fast-generate-001": {
+      lifecycle: "retired",
+      retiredAt: "2026-06-30",
+      replacementModelId: "veo-3.1-fast-generate-preview",
+    },
+    "veo-2.0-generate-001": {
+      lifecycle: "retired",
+      retiredAt: "2026-06-30",
+      replacementModelId: "veo-3.1-generate-preview",
+    },
+    "gemini-2.0-flash": {
+      lifecycle: "retired",
+      retiredAt: "2026-06-01",
+      replacementModelId: "gemini-3.8-flash",
+    },
+    "gemini-2.0-flash-001": {
+      lifecycle: "retired",
+      retiredAt: "2026-06-01",
+      replacementModelId: "gemini-3.8-flash",
+    },
+    "gemini-2.0-flash-lite": {
+      lifecycle: "retired",
+      retiredAt: "2026-06-01",
+      replacementModelId: "gemini-3.5-flash-lite",
+    },
+    "gemini-2.0-flash-lite-001": {
+      lifecycle: "retired",
+      retiredAt: "2026-06-01",
+      replacementModelId: "gemini-3.5-flash-lite",
+    },
+    "gemini-3.1-flash-lite-preview": {
+      lifecycle: "retired",
+      retiredAt: "2026-05-25",
+      replacementModelId: "gemini-3.5-flash-lite",
+    },
+  },
+  xai: {
+    "grok-4-1-fast-reasoning": {
+      lifecycle: "retired",
+      retiredAt: "2026-05-15",
+      replacementModelId: "grok-4.7",
+    },
+    "grok-4-1-fast-non-reasoning": {
+      lifecycle: "retired",
+      retiredAt: "2026-05-15",
+      replacementModelId: "grok-4.7",
+    },
+    "grok-4-fast-reasoning": {
+      lifecycle: "retired",
+      retiredAt: "2026-05-15",
+      replacementModelId: "grok-4.7",
+    },
+    "grok-4-fast-non-reasoning": {
+      lifecycle: "retired",
+      retiredAt: "2026-05-15",
+      replacementModelId: "grok-4.7",
+    },
+    "grok-4-0709": {
+      lifecycle: "retired",
+      retiredAt: "2026-05-15",
+      replacementModelId: "grok-4.7",
+    },
+    "grok-code-fast-1": {
+      lifecycle: "retired",
+      retiredAt: "2026-05-15",
+      replacementModelId: "grok-build-0.1",
+    },
+    "grok-3": { lifecycle: "retired", retiredAt: "2026-05-15", replacementModelId: "grok-4.7" },
+    "grok-imagine-image-pro": {
+      lifecycle: "retired",
+      retiredAt: "2026-05-15",
+      replacementModelId: "grok-imagine-image-2.0",
+    },
+  },
+  siliconflow: {
+    "Qwen/Qwen3-Coder-480B-A35B-Instruct": {
+      lifecycle: "retired",
+      retiredAt: "2026-04-22",
+      replacementModelId: "zai-org/GLM-5.3",
+    },
+  },
+  perplexity: {
+    sonar: { lifecycle: "deprecated", replacementModelId: "preset/fast" },
+    "sonar-pro": { lifecycle: "deprecated", replacementModelId: "preset/fast" },
+    "sonar-reasoning": { lifecycle: "deprecated", replacementModelId: "preset/fast" },
+    "sonar-reasoning-pro": { lifecycle: "deprecated", replacementModelId: "preset/fast" },
+    "sonar-deep-research": { lifecycle: "deprecated", replacementModelId: "preset/fast" },
+  },
+  deepseek: {
+    "deepseek-chat": {
+      lifecycle: "retired",
+      retiredAt: "2026-07-24",
+      replacementModelId: "deepseek-flash",
+    },
+    "deepseek-reasoner": {
+      lifecycle: "retired",
+      retiredAt: "2026-07-24",
+      replacementModelId: "deepseek-flash",
+    },
+  },
+  openrouter: {
+    "anthropic/claude-sonnet-4": {
+      lifecycle: "retired",
+      replacementModelId: "anthropic/claude-sonnet-5.5",
+    },
+    "google/gemini-2.0-flash-exp:free": {
+      lifecycle: "retired",
+      replacementModelId: "google/gemini-3.8-flash",
+    },
+  },
+}
+
+const LIFECYCLE_NOTICE_URLS: Readonly<Record<string, string>> = {
+  anthropic: "https://platform.claude.com/docs/en/about-claude/model-deprecations",
+  google: "https://ai.google.dev/gemini-api/docs/deprecations",
+  deepseek: "https://api-docs.deepseek.com/updates/",
+  openrouter: "https://openrouter.ai/api/v1/models",
+  xai: "https://docs.x.ai/developers/migration/may-15-retirement",
+  siliconflow: "https://docs.siliconflow.cn/docs/release-notes/overview",
+  perplexity: "https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/overview",
+}
+
+/** IDs retained as tombstones even when a live catalog no longer lists them. */
+export function knownModelLifecycleIds(providerId: string): string[] {
+  return Object.keys(LIFECYCLE_NOTICES[providerId] ?? {})
+}
+
+/** A stale upstream `active` record cannot override an official retirement. */
+export function resolveModelLifecycle(
+  providerId: string,
+  modelId: string,
+  status?: string,
+  ...otherStatuses: (string | undefined)[]
+): ModelLifecycleInfo {
+  const states = [status, ...otherStatuses].map(normalizeLifecycle)
+  const lifecycle = (["retired", "deprecated", "preview", "active"] as const).find((candidate) =>
+    states.includes(candidate)
+  )!
+  const notice = LIFECYCLE_NOTICES[providerId]?.[modelId]
+  if (!notice) return { lifecycle }
+  return {
+    ...notice,
+    lifecycle: lifecycle === "retired" ? lifecycle : notice.lifecycle,
+    source: {
+      kind: "official",
+      id: `${providerId}:lifecycle:2026-10-19`,
+      url: LIFECYCLE_NOTICE_URLS[providerId],
+      observedAt: "2026-10-19T00:00:00.000Z",
+    },
+  }
+}
+
 export const catalogModalitySchema = z.enum([
   "language",
   "embedding",

@@ -13,13 +13,16 @@ describe("models-dev-id-map", () => {
       expect(resolveModelsDevProviderId("glm4")).toBe("zhipuai")
       expect(resolveModelsDevProviderId("qwen")).toBe("alibaba")
       expect(resolveModelsDevProviderId("bedrock")).toBe("amazon-bedrock")
-      expect(resolveModelsDevProviderId("github")).toBe("github-models")
     })
 
     it("returns identity for providers that match models.dev verbatim", () => {
       expect(resolveModelsDevProviderId("openai")).toBe("openai")
       expect(resolveModelsDevProviderId("anthropic")).toBe("anthropic")
       expect(resolveModelsDevProviderId("lmstudio")).toBe("lmstudio")
+      for (const id of ["ai21", "sambanova", "volcengine", "commandcode"]) {
+        expect(resolveModelsDevProviderId(id)).toBe(id)
+        expect(resolveOurProviderId(id)).toBe(id)
+      }
     })
 
     it("is case-insensitive", () => {
@@ -29,7 +32,9 @@ describe("models-dev-id-map", () => {
 
     it("returns undefined for providers models.dev does not track", () => {
       expect(resolveModelsDevProviderId("ollama")).toBeUndefined()
-      expect(resolveModelsDevProviderId("sambanova")).toBeUndefined()
+      // GitHub Models disappeared from the reviewed upstream catalog. Copilot
+      // is a different product and must never be substituted as its identity.
+      expect(resolveModelsDevProviderId("github")).toBeUndefined()
       expect(resolveModelsDevProviderId("vllm")).toBeUndefined()
       expect(resolveModelsDevProviderId("totally-unknown")).toBeUndefined()
     })
@@ -59,7 +64,10 @@ describe("models-dev-id-map", () => {
       expect(list).toContain("fireworks")
       expect(list).toContain("zhipu")
       expect(list).not.toContain("ollama")
-      expect(list).not.toContain("sambanova")
+      expect(list).toEqual(
+        expect.arrayContaining(["ai21", "sambanova", "volcengine", "commandcode"])
+      )
+      expect(list).not.toContain("github")
     })
   })
 

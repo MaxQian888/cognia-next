@@ -39,6 +39,11 @@ import {
   type ModelsDevCatalogModel,
 } from "./models-dev"
 import type { CatalogRepository } from "./catalog-repository"
+import type { ModelDefinition, ProviderOffering } from "@cognia/provider-types/model-catalog"
+import {
+  resolveModelLifecycle,
+  type ModelLifecycleInfo,
+} from "@cognia/provider-types/model-catalog"
 import { BUNDLED_CERTIFIED_PROVIDER_IDS } from "./catalog-baseline"
 import { resolveModelsDevProviderId } from "./models-dev-id-map"
 
@@ -49,13 +54,23 @@ import { resolveModelsDevProviderId } from "./models-dev-id-map"
 let cachedCatalog: ModelsDevCatalogRow | null = null
 let catalogRepository: CatalogRepository | null = null
 let includeExperimentalProviders = true
+const catalogListeners = new Set<() => void>()
+
+export function subscribeModelsDevCatalog(listener: () => void): () => void {
+  catalogListeners.add(listener)
+  return () => {
+    catalogListeners.delete(listener)
+  }
+}
 
 /**
  * Wire the single catalog repository used by the host runtime. Optional for
  * headless package consumers that only need the legacy normalized projection.
  */
 export function setProviderCatalogRepository(repository: CatalogRepository | null): void {
+  if (catalogRepository === repository) return
   catalogRepository = repository
+  if (cachedCatalog) primeModelsDevCatalogCache({ ...cachedCatalog })
 }
 
 export function setProviderCatalogRollout(options: {
@@ -66,7 +81,10 @@ export function setProviderCatalogRollout(options: {
 
 /** Prime the synchronous in-memory cache (called by the liveQuery hook). */
 export function primeModelsDevCatalogCache(row: ModelsDevCatalogRow | null | undefined): void {
-  cachedCatalog = row ?? null
+  const next = row ?? null
+  if (cachedCatalog === next) return
+  cachedCatalog = next
+  for (const listener of catalogListeners) listener()
 }
 
 export function getCachedModelsDevCatalog(): ModelsDevCatalogRow | null {
@@ -148,6 +166,7 @@ async function publishUnifiedCatalog(api: ModelsDevApi, now: number): Promise<vo
   })
   await catalogRepository.stageRevision(snapshot)
   await catalogRepository.activateRevision(revisionId)
+  if (cachedCatalog) primeModelsDevCatalogCache({ ...cachedCatalog })
 }
 
 /** Seed Catalog v2 from the bundled shard when no active revision is loaded. */
@@ -168,7 +187,7 @@ export async function syncModelsDevCatalog(now: number = Date.now()): Promise<Mo
     validateRefreshCandidate(providers, previous)
     const row = await saveModelsDevCatalog({ providers, fetchedAt: now, source: "remote" })
     await publishUnifiedCatalog(api, now)
-    cachedCatalog = row
+    primeModelsDevCatalogCache(row)
     return row
   })()
   try {
@@ -187,14 +206,14 @@ export async function ensureModelsDevCatalog(
 ): Promise<ModelsDevCatalogRow> {
   const existing = await getModelsDevCatalog()
   if (existing) {
-    cachedCatalog = existing
+    primeModelsDevCatalogCache(existing)
     return existing
   }
   const api = await loadBundledSnapshot()
   const providers = normalizeModelsDevApi(api)
   const row = await saveModelsDevCatalog({ providers, fetchedAt: now, source: "bundled" })
   await publishUnifiedCatalog(api, now)
-  cachedCatalog = row
+  primeModelsDevCatalogCache(row)
   return row
 }
 
@@ -231,6 +250,48 @@ async function loadBundledSnapshot(): Promise<ModelsDevApi> {
 // Synchronous reads (UI render paths)
 // =============================================================================
 
+function projectCatalogModel(
+  providerId: string,
+  offering: ProviderOffering,
+  model: ModelDefinition
+): ModelsDevCatalogModel {
+  return {
+    id: offering.upstreamId,
+    name: model.name,
+    provider: providerId,
+    family: model.family,
+    releaseDate: model.releasedAt,
+    status: offering.lifecycle,
+    contextLength: offering.limits?.context ?? model.limits?.context,
+    maxOutputTokens: offering.limits?.output ?? model.limits?.output,
+    supportsTools: offering.capabilities?.tools ?? model.capabilities.tools,
+    supportsVision: model.modalities.input.includes("image"),
+    supportsAudio:
+      model.modalities.input.includes("audio") || model.modalities.output.includes("audio"),
+    supportsVideo:
+      model.modalities.input.includes("video") || model.modalities.output.includes("video"),
+    supportsStreaming: offering.capabilities?.streaming ?? model.capabilities.streaming,
+    supportsReasoning: offering.capabilities?.reasoning ?? model.capabilities.reasoning,
+    supportsImageGeneration:
+      offering.capabilities?.imageGeneration ?? model.capabilities.imageGeneration,
+    supportsEmbedding: offering.capabilities?.embeddings ?? model.capabilities.embeddings,
+    supportsStructuredOutput:
+      offering.capabilities?.structuredOutput ?? model.capabilities.structuredOutput,
+    supportsAttachment: offering.capabilities?.attachments ?? model.capabilities.attachments,
+    openWeights: offering.capabilities?.openWeights ?? model.capabilities.openWeights,
+    supportsTemperature: offering.capabilities?.temperature ?? model.capabilities.temperature,
+    pricing: offering.pricing
+      ? {
+          promptPer1M: offering.pricing.inputPer1M,
+          completionPer1M: offering.pricing.outputPer1M,
+          cachedInputPer1M: offering.pricing.cachedInputPer1M,
+          cacheCreationPer1M: offering.pricing.cacheWritePer1M,
+          currency: offering.pricing.currency,
+        }
+      : undefined,
+  }
+}
+
 /** models.dev models for a provider, from the in-memory cache. */
 export function getCatalogModelsForProvider(providerId: string): ModelsDevCatalogModel[] {
   if (catalogRepository) {
@@ -244,41 +305,7 @@ export function getCatalogModelsForProvider(providerId: string): ModelsDevCatalo
       const model = catalogRepository.getModel(offering.modelRef)
       if (!model) continue
       seen.add(offering.upstreamId)
-      projected.push({
-        id: offering.upstreamId,
-        name: model.name,
-        provider: providerId,
-        family: model.family,
-        releaseDate: model.releasedAt,
-        status: model.lifecycle,
-        contextLength: offering.limits?.context ?? model.limits?.context,
-        maxOutputTokens: offering.limits?.output ?? model.limits?.output,
-        supportsTools: offering.capabilities?.tools ?? model.capabilities.tools,
-        supportsVision: model.modalities.input.includes("image"),
-        supportsAudio:
-          model.modalities.input.includes("audio") || model.modalities.output.includes("audio"),
-        supportsVideo:
-          model.modalities.input.includes("video") || model.modalities.output.includes("video"),
-        supportsStreaming: offering.capabilities?.streaming ?? model.capabilities.streaming,
-        supportsReasoning: offering.capabilities?.reasoning ?? model.capabilities.reasoning,
-        supportsImageGeneration:
-          offering.capabilities?.imageGeneration ?? model.capabilities.imageGeneration,
-        supportsEmbedding: offering.capabilities?.embeddings ?? model.capabilities.embeddings,
-        supportsStructuredOutput:
-          offering.capabilities?.structuredOutput ?? model.capabilities.structuredOutput,
-        supportsAttachment: offering.capabilities?.attachments ?? model.capabilities.attachments,
-        openWeights: offering.capabilities?.openWeights ?? model.capabilities.openWeights,
-        supportsTemperature: offering.capabilities?.temperature ?? model.capabilities.temperature,
-        pricing: offering.pricing
-          ? {
-              promptPer1M: offering.pricing.inputPer1M,
-              completionPer1M: offering.pricing.outputPer1M,
-              cachedInputPer1M: offering.pricing.cachedInputPer1M,
-              cacheCreationPer1M: offering.pricing.cacheWritePer1M,
-              currency: offering.pricing.currency,
-            }
-          : undefined,
-      })
+      projected.push(projectCatalogModel(providerId, offering, model))
     }
     if (projected.length > 0) return projected
   }
@@ -290,7 +317,32 @@ export function getCatalogModelMetadata(
   providerId: string,
   modelId: string
 ): ModelsDevCatalogModel | undefined {
-  return getCatalogModelsForProvider(providerId).find((m) => m.id === modelId)
+  const offering = catalogRepository?.resolveOffering(providerId, modelId)
+  const model = offering && catalogRepository?.getModel(offering.modelRef)
+  if (offering && model) return projectCatalogModel(providerId, offering, model)
+  return cachedCatalog?.providers[providerId]?.models.find((candidate) => candidate.id === modelId)
+}
+
+/** Current metadata and persisted discovery may restrict, but never revive, an ID. */
+export function resolveProviderModelLifecycle(
+  providerId: string,
+  modelId: string,
+  status?: string,
+  ...otherStatuses: (string | undefined)[]
+): ModelLifecycleInfo {
+  const metadata = getCatalogModelMetadata(providerId, modelId)
+  const info = resolveModelLifecycle(
+    providerId,
+    modelId,
+    metadata?.status,
+    status,
+    ...otherStatuses
+  )
+  return {
+    ...info,
+    replacementModelId: info.replacementModelId ?? metadata?.replacementModelId,
+    retiredAt: info.retiredAt ?? metadata?.retiredAt,
+  }
 }
 
 /**

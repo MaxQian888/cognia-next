@@ -59,6 +59,10 @@ import { protectRawAnalysis } from "@/lib/ai/raw-analysis"
 import { createNativeSiwcFetch } from "@/lib/subscription/siwc/native-fetch"
 import { withSiwcStreamingGeneration } from "../../sidecar/src/providers/siwc-language-model"
 import {
+  resolvePerplexityEndpoint,
+  withPerplexityAgentFetch,
+} from "../../sidecar/src/providers/perplexity-agent"
+import {
   decodeSiwcReference,
   SIWC_PROTOCOL,
   SIWC_RESPONSES_BASE_URL,
@@ -663,6 +667,10 @@ export function createFeatureProviderClient(config: FeatureClientConfig) {
   if (baseFetch) settings.fetch = withProviderTimeouts(baseFetch)
   if (headers) settings.headers = headers
 
+  if (providerId === "perplexity" && protocol === "openai" && apiFlavor === "responses") {
+    settings.fetch = withPerplexityAgentFetch(settings.fetch)
+  }
+
   // DeepSeek has a first-party AI SDK adapter that understands its native
   // reasoning_content stream and cache-usage metadata. Keep an explicit
   // Responses override on the OpenAI adapter because DeepSeek's provider only
@@ -733,6 +741,14 @@ export function createFeatureProviderModel(
   resolved: ResolvedProvider,
   transport?: { fetch?: typeof globalThis.fetch; headers?: Record<string, string> }
 ) {
+  if (resolved.providerId === "perplexity" && resolved.protocol === "openai") {
+    const endpoint = resolvePerplexityEndpoint({
+      model: resolved.model ?? catalogDefaultModel("openai", "perplexity"),
+      baseURL: resolved.baseURL,
+      apiFlavor: resolved.apiFlavor,
+    })
+    resolved = { ...resolved, baseURL: endpoint.baseURL, apiFlavor: endpoint.flavor }
+  }
   if (resolved.providerId === "commandcode") {
     resolved = {
       ...resolved,

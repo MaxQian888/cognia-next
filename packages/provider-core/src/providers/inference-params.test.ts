@@ -2,6 +2,19 @@ import { buildModelInferenceParams } from "./inference-params"
 import { getSchemaForProvider } from "./provider-parameter-schemas"
 
 describe("buildModelInferenceParams", () => {
+  it("omits unsupported sampling parameters without changing saved provider preferences", () => {
+    const source = {
+      inferenceDefaults: { temperature: 0.7, topP: 0.9, maxTokens: 800 },
+      advancedParams: { topK: 40 },
+    }
+    const before = JSON.stringify(source)
+    expect(
+      buildModelInferenceParams(source, {
+        modelConfig: { id: "claude-sonnet-5-5", supportsTemperature: false } as never,
+      })
+    ).toEqual({ maxOutputTokens: 800 })
+    expect(JSON.stringify(source)).toBe(before)
+  })
   it("returns undefined when nothing is configured", () => {
     expect(buildModelInferenceParams(undefined)).toBeUndefined()
     expect(buildModelInferenceParams({})).toBeUndefined()

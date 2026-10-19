@@ -72,6 +72,9 @@ export interface ModelPricing {
 export interface ModelConfig {
   id: string
   name: string
+  status?: string
+  replacementModelId?: string
+  retiredAt?: string
   contextLength: number
   maxInputTokens?: number
   knownFields?: string[]
@@ -82,6 +85,7 @@ export interface ModelConfig {
   supportsVideo: boolean
   supportsStreaming: boolean
   supportsReasoning?: boolean
+  supportsTemperature?: boolean
   supportsStructuredOutput?: boolean
   supportsImageGeneration?: boolean
   supportsEmbedding?: boolean
@@ -91,6 +95,9 @@ export interface ModelConfig {
 export interface ProviderModelDiscoveryEntry {
   id: string
   name?: string
+  status?: string
+  replacementModelId?: string
+  retiredAt?: string
   provider?: string
   contextLength?: number
   maxInputTokens?: number
@@ -103,6 +110,7 @@ export interface ProviderModelDiscoveryEntry {
   supportsVideo?: boolean
   supportsStreaming?: boolean
   supportsReasoning?: boolean
+  supportsTemperature?: boolean
   supportsImageGeneration?: boolean
   supportsEmbedding?: boolean
   supportsStructuredOutput?: boolean
@@ -2312,6 +2320,7 @@ function catalogModelToModelConfig(model: BuiltInProviderModelEntry): ModelConfi
     supportsVideo: model.supportsVideo,
     supportsStreaming: model.supportsStreaming,
     supportsReasoning: model.supportsReasoning,
+    supportsTemperature: model.supportsTemperature,
     supportsImageGeneration: model.supportsImageGeneration,
     supportsEmbedding: model.supportsEmbedding,
     pricing: model.pricing,

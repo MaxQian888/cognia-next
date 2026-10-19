@@ -34,7 +34,7 @@
 // surface tier, so a style pack's elevation ceiling reaches it like it reaches
 // every other container. The list below is untouched cmdk either way.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import {
   BrainIcon,
@@ -48,6 +48,10 @@ import {
 import { subscribeSubscriptionProviders } from "@/lib/subscription/core/provider-registry"
 import { useSettingsStore } from "@/stores/settings"
 import { collectModelOptions, compactModelLabel, type ModelOption } from "@/lib/ai/model-options"
+import {
+  getCachedModelsDevCatalog,
+  subscribeModelsDevCatalog,
+} from "@/lib/ai/providers/models-dev-sync"
 import { useRemoteHostKeyedProviders } from "@/hooks/remote-host/use-remote-host-keyed-providers"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -239,7 +243,10 @@ export function formatContextWindow(tokens: number): string {
  * carries both its id (the value persisted on the session) and its display
  * name (what the user reads).
  */
-export function groupByProvider(options: ModelOption[]): ModelProviderGroup[] {
+export function groupByProvider(
+  options: ModelOption[],
+  disabledReason?: (option: ModelOption) => string | undefined
+): ModelProviderGroup[] {
   const groups = new Map<string, { providerName: string; models: GroupedModel[] }>()
   const toGrouped = (opt: ModelOption): GroupedModel => ({
     id: opt.modelId,
@@ -248,6 +255,8 @@ export function groupByProvider(options: ModelOption[]): ModelProviderGroup[] {
     supportsTools: opt.supportsTools,
     supportsVision: opt.supportsVision,
     supportsReasoning: opt.supportsReasoning,
+    disabled: opt.disabled,
+    disabledReason: opt.disabled ? disabledReason?.(opt) : undefined,
   })
   for (const opt of options) {
     const existing = groups.get(opt.providerId)
@@ -274,10 +283,16 @@ export function groupByProvider(options: ModelOption[]): ModelProviderGroup[] {
  * selector and by callers that need the same list to resolve a display name.
  */
 export function useModelOptions(): { options: ModelOption[]; groups: ModelProviderGroup[] } {
+  const tCatalog = useTranslations("modelCatalog")
   const providerSettings = useSettingsStore((s) => s.settings?.providerSettings)
   const customProviders = useSettingsStore((s) => s.settings?.customProviders)
   // Providers the driven Host keys for this device (ADR-0224 A6).
   const hostKeyed = useRemoteHostKeyedProviders()
+  const catalogSnapshot = useSyncExternalStore(
+    subscribeModelsDevCatalog,
+    getCachedModelsDevCatalog,
+    getCachedModelsDevCatalog
+  )
   const [registryRevision, setRegistryRevision] = useState(0)
   useEffect(
     () => subscribeSubscriptionProviders(() => setRegistryRevision((value) => value + 1)),
@@ -285,11 +300,21 @@ export function useModelOptions(): { options: ModelOption[]; groups: ModelProvid
   )
   const options = useMemo(
     () => collectModelOptions(providerSettings, customProviders, hostKeyed),
-    // The registry is external mutable state, independent of settings.
+    // Registry and catalog changes are external to the settings store.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [providerSettings, customProviders, hostKeyed, registryRevision]
+    [providerSettings, customProviders, hostKeyed, registryRevision, catalogSnapshot]
   )
-  const groups = useMemo(() => groupByProvider(options), [options])
+  const groups = useMemo(
+    () =>
+      groupByProvider(options, (option) => {
+        if (!option.lifecycle) return undefined
+        const lifecycle = tCatalog(`lifecycles.${option.lifecycle}`)
+        return option.replacementModelId
+          ? `${lifecycle} · ${tCatalog("replacement")}: ${option.replacementModelId}`
+          : lifecycle
+      }),
+    [options, tCatalog]
+  )
   return { options, groups }
 }
 

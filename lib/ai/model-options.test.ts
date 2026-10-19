@@ -7,6 +7,7 @@ import {
   resolveModelMeta,
   resolveModelMaxOutputTokens,
   resolveDefaultModelForProvider,
+  resolveModelLifecycle,
 } from "./model-options"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
@@ -14,10 +15,39 @@ import {
   primeOpenRouterCatalogCache,
   __resetOpenRouterCatalogCacheForTesting,
 } from "@cognia/provider-core/providers/openrouter-catalog-sync"
+import {
+  primeModelsDevCatalogCache,
+  __resetModelsDevCatalogCacheForTesting,
+} from "@cognia/provider-core/providers/models-dev-sync"
 
 afterEach(() => __resetOpenRouterCatalogCacheForTesting())
+afterEach(() => __resetModelsDevCatalogCacheForTesting())
 
 describe("catalogModelIds", () => {
+  it("excludes retired choices while retaining their historical metadata", () => {
+    expect(catalogModelIds("anthropic")).not.toContain("claude-sonnet-4-20250514")
+    expect(catalogModelIds("google")).not.toContain("gemini-3.1-flash-lite-preview")
+    expect(catalogModelIds("deepseek")).not.toContain("deepseek-chat")
+    expect(resolveModelDisplayName("anthropic", "claude-sonnet-4-20250514")).toBe("Claude Sonnet 4")
+  })
+
+  it("reports provider-scoped lifecycle and replacement information", () => {
+    expect(resolveModelLifecycle("deepseek", "deepseek-chat")).toMatchObject({
+      lifecycle: "retired",
+      replacementModelId: "deepseek-flash",
+    })
+    expect(resolveModelLifecycle("openrouter", "deepseek/deepseek-chat").lifecycle).toBe("active")
+  })
+  it("combines saved status with current OpenRouter lifecycle when resolving a pin", () => {
+    const modelId = "account/retired-model"
+    primeOpenRouterCatalogCache({
+      id: "singleton",
+      fetchedAt: 1,
+      source: "remote",
+      models: [{ id: modelId, status: "retired" }],
+    })
+    expect(resolveModelLifecycle("openrouter", modelId, "active").lifecycle).toBe("retired")
+  })
   it("returns an empty list for an unknown provider", () => {
     expect(catalogModelIds("not-a-provider")).toEqual([])
   })
@@ -77,6 +107,30 @@ describe("resolveDefaultModelForProvider", () => {
 })
 
 describe("collectModelOptions", () => {
+  it("does not let stale active account discovery reactivate a newly retired catalog model", () => {
+    primeModelsDevCatalogCache({
+      id: "singleton",
+      source: "remote",
+      fetchedAt: 1,
+      providers: {
+        deepseek: {
+          modelsDevId: "deepseek",
+          name: "DeepSeek",
+          models: [{ id: "recent-model", status: "retired" }],
+        },
+      },
+    })
+    const out = collectModelOptions(
+      {
+        deepseek: {
+          providerId: "deepseek",
+          discoveredModels: [{ id: "recent-model", status: "active" }],
+        } as never,
+      },
+      undefined
+    )
+    expect(out.some((option) => option.modelId === "recent-model")).toBe(false)
+  })
   it("always includes anthropic with its curated catalog when unconfigured", () => {
     const out = collectModelOptions(undefined, undefined)
     expect(out.some((o) => o.providerId === "anthropic")).toBe(true)
@@ -140,12 +194,47 @@ describe("collectModelOptions", () => {
       {
         deepseek: {
           providerId: "deepseek",
-          discoveredModels: [{ id: "deepseek-reasoner" }],
+          discoveredModels: [{ id: "account-model" }],
         } as never,
       },
       undefined
     )
-    expect(out).toContainEqual(expect.objectContaining({ modelId: "deepseek-reasoner" }))
+    expect(out).toContainEqual(expect.objectContaining({ modelId: "account-model" }))
+  })
+
+  it("does not turn stale discovery of retired IDs into fresh selectable choices", () => {
+    const out = collectModelOptions(
+      {
+        deepseek: {
+          providerId: "deepseek",
+          discoveredModels: [{ id: "deepseek-chat" }, { id: "deepseek-flash" }],
+        } as never,
+      },
+      undefined
+    )
+    expect(out.some((option) => option.modelId === "deepseek-chat")).toBe(false)
+    expect(out.some((option) => option.modelId === "deepseek-flash")).toBe(true)
+  })
+
+  it("keeps an explicitly pinned retired model visible but disabled without rewriting settings", () => {
+    const settings = {
+      deepseek: { providerId: "deepseek", defaultModel: "deepseek-chat", enabled: true },
+    } as unknown as Record<string, UserProviderSettings>
+    const before = JSON.stringify(settings)
+    const out = collectModelOptions(settings, undefined)
+    expect(out).toContainEqual(
+      expect.objectContaining({
+        providerId: "deepseek",
+        modelId: "deepseek-chat",
+        lifecycle: "retired",
+        disabled: true,
+        replacementModelId: "deepseek-flash",
+      })
+    )
+    expect(out).toContainEqual(
+      expect.objectContaining({ modelId: "deepseek-flash", disabled: false })
+    )
+    expect(JSON.stringify(settings)).toBe(before)
   })
 
   it("folds the synced OpenRouter catalog into the openrouter model list", () => {
@@ -290,6 +379,66 @@ describe("resolveModelContextLength", () => {
 })
 
 describe("resolveModelMeta", () => {
+  it("uses primed baseline capabilities and limits without overriding account or custom metadata", () => {
+    primeModelsDevCatalogCache({
+      id: "singleton",
+      source: "remote",
+      fetchedAt: 1,
+      providers: {
+        "baseline-provider": {
+          modelsDevId: "baseline-provider",
+          name: "Baseline",
+          models: [
+            {
+              id: "model",
+              contextLength: 262144,
+              supportsVision: true,
+              supportsTemperature: false,
+            },
+          ],
+        },
+      },
+    })
+    expect(resolveModelMeta("baseline-provider", "model")).toMatchObject({
+      contextLength: 262144,
+      supportsVision: true,
+      supportsTemperature: false,
+    })
+    const reviewedCatalog = {
+      "baseline-provider": {
+        models: [{ id: "model", contextLength: 524288, supportsVision: false }],
+      },
+    } as never
+    expect(
+      resolveModelMeta("baseline-provider", "model", undefined, undefined, reviewedCatalog)
+    ).toMatchObject({
+      contextLength: 524288,
+      supportsVision: false,
+      supportsTemperature: false,
+    })
+    const settings = {
+      "baseline-provider": {
+        providerId: "baseline-provider",
+        discoveredModels: [{ id: "model", contextLength: 131072, supportsVision: false }],
+      },
+    } as Record<string, UserProviderSettings>
+    expect(resolveModelMeta("baseline-provider", "model", settings)).toMatchObject({
+      contextLength: 131072,
+      supportsVision: false,
+      supportsTemperature: false,
+    })
+    const custom = [
+      {
+        id: "baseline-provider",
+        customModelMetadata: { model: { id: "model", contextLength: 32768 } },
+      },
+    ] as unknown as CustomProviderSettings[]
+    expect(resolveModelMeta("baseline-provider", "model", settings, custom).contextLength).toBe(
+      32768
+    )
+    expect(settings["baseline-provider"].discoveredModels?.[0].contextLength).toBe(131072)
+  })
+
   it("carries all known execution limits and capabilities without inventing unknown values", () => {
     const settings = {
       "plugin:code": {

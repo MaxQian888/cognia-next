@@ -21,6 +21,18 @@ const base = (over: Partial<ResolvedConfig>): ResolvedConfig => ({
 })
 
 describe("collectModelOptions", () => {
+  it("checks current OpenRouter status before adding a remembered pin", () => {
+    const modelId = "account/retired-model"
+    primeOpenRouterCatalogCache({
+      id: "singleton",
+      fetchedAt: 1,
+      source: "remote",
+      models: [{ id: modelId, status: "retired" }],
+    })
+    const cfg = base({ provider: "openrouter", providers: { openrouter: { model: modelId } } })
+    expect(collectModelOptions(cfg)).not.toContain(modelId)
+    expect(cfg.providers.openrouter.model).toBe(modelId)
+  })
   it("leads with the active provider's remembered model, then its catalog", () => {
     const cfg = base({ provider: "anthropic", providers: { anthropic: { model: "pinned-a" } } })
     const list = collectModelOptions(cfg)
@@ -92,6 +104,30 @@ describe("collectModelOptions", () => {
     const list = collectModelOptions(base({ provider: "openrouter", providers: {} }))
     expect(list).toContain("anthropic/claude-sonnet-4.5")
     expect(list).toContain("openai/gpt-5")
+  })
+
+  it("does not offer a retired remembered pin as a fresh selection or mutate it", () => {
+    const cfg = base({
+      provider: "anthropic",
+      providers: { anthropic: { model: "claude-3-haiku-20240307" } },
+    })
+    expect(collectModelOptions(cfg)).not.toContain("claude-3-haiku-20240307")
+    expect(cfg.providers.anthropic.model).toBe("claude-3-haiku-20240307")
+  })
+
+  it("does not reintroduce retired OpenRouter models from a cached discovery list", () => {
+    primeOpenRouterCatalogCache({
+      id: "singleton",
+      fetchedAt: 1,
+      source: "remote",
+      models: [
+        { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4" },
+        { id: "account/new-model", name: "Account model" },
+      ],
+    })
+    const list = collectModelOptions(base({ provider: "openrouter", providers: {} }))
+    expect(list).not.toContain("anthropic/claude-sonnet-4")
+    expect(list).toContain("account/new-model")
   })
 
   it("does not leak the OpenRouter catalog into a non-openrouter provider", () => {

@@ -815,6 +815,43 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
     expect(createOpenAI).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ["preset/fast", "openai.responses", "https://api.perplexity.ai/v1"],
+    ["sonar-pro", "openai.chat", "https://api.perplexity.ai"],
+  ])(
+    "routes Perplexity %s without overwriting a historical Sonar selection",
+    (model, family, baseURL) => {
+      const built = createFeatureProviderModel({
+        ...base,
+        providerId: "perplexity",
+        protocol: "openai",
+        model,
+        apiKey: "test-key",
+        baseURL: "https://api.perplexity.ai/v1",
+      }) as unknown as { __provider: string; id: string }
+      expect(built.__provider).toBe(family)
+      expect(createOpenAI).toHaveBeenCalledWith(expect.objectContaining({ baseURL }))
+    }
+  )
+
+  it.each([
+    [undefined, "https://api.perplexity.ai/v1"],
+    ["https://relay.example/custom/v1", "https://relay.example/custom/v1"],
+  ])("honors Perplexity's Responses override on its own host or relay %s", (baseURL, expected) => {
+    const built = createFeatureProviderModel({
+      ...base,
+      providerId: "perplexity",
+      protocol: "openai",
+      model: "sonar-pro",
+      apiFlavor: "responses",
+      baseURL,
+    }) as unknown as { __provider: string; id: string }
+    expect(built).toMatchObject({ __provider: "openai.responses", id: "sonar-pro" })
+    expect(createOpenAI).toHaveBeenCalledWith(
+      expect.objectContaining({ baseURL: expected, fetch: expect.any(Function) })
+    )
+  })
+
   it("keeps an explicit DeepSeek Responses endpoint on the OpenAI adapter", () => {
     createFeatureProviderClient({
       ...base,

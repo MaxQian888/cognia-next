@@ -23,6 +23,10 @@ import {
   resolveProviderProtocol,
   decideOpenAiEndpointFlavor,
 } from "../../../sidecar/src/providers/provider-protocol.ts"
+import {
+  resolvePerplexityEndpoint,
+  withPerplexityAgentFetch,
+} from "../../../sidecar/src/providers/perplexity-agent.ts"
 import { webviewSafeTelemetry } from "../../ai/webview-safe-telemetry"
 
 export interface LlmClientCallOptions {
@@ -248,6 +252,21 @@ async function buildLanguageModel(config: LlmConfig): Promise<LanguageModel> {
     }
     case "openai": {
       const { createOpenAI } = await import("@ai-sdk/openai")
+      if (providerId === "perplexity") {
+        const endpoint = resolvePerplexityEndpoint({
+          model: config.model,
+          baseURL: config.baseURL,
+          apiFlavor: config.apiFlavor,
+        })
+        const client = createOpenAI({
+          ...buildProviderSettings(config),
+          baseURL: endpoint.baseURL,
+          ...(endpoint.flavor === "responses" ? { fetch: withPerplexityAgentFetch() } : {}),
+        })
+        return endpoint.flavor === "responses"
+          ? client.responses(config.model)
+          : client.chat(config.model)
+      }
       const client = createOpenAI(buildProviderSettings(config, { catalogBaseURLFallback: true }))
       return selectOpenAiFamilyModel(client, config, providerId)
     }

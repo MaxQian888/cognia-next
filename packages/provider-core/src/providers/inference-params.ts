@@ -77,16 +77,17 @@ export function buildModelInferenceParams(
 
   const { inferenceDefaults, connectionParams, advancedParams } = source
   const params: ModelInferenceParams = {}
+  const supportsSampling = options.modelConfig?.supportsTemperature !== false
 
   const temperature = finiteNumber(inferenceDefaults?.temperature)
-  if (temperature !== undefined) params.temperature = temperature
+  if (supportsSampling && temperature !== undefined) params.temperature = temperature
 
   // v5+ renamed `maxTokens` → `maxOutputTokens`.
   const maxOutputTokens = finiteNumber(inferenceDefaults?.maxTokens)
   if (maxOutputTokens !== undefined) params.maxOutputTokens = maxOutputTokens
 
   const topP = finiteNumber(inferenceDefaults?.topP)
-  if (topP !== undefined) params.topP = topP
+  if (supportsSampling && topP !== undefined) params.topP = topP
 
   const frequencyPenalty = finiteNumber(inferenceDefaults?.frequencyPenalty)
   if (frequencyPenalty !== undefined) params.frequencyPenalty = frequencyPenalty
@@ -107,7 +108,7 @@ export function buildModelInferenceParams(
   // have no dedicated field on our provider config, so they ride in the
   // free-form `advancedParams` map (bare or schema-namespaced key).
   const topK = finiteNumber(readParam(advancedParams, "topK"))
-  if (topK !== undefined) params.topK = topK
+  if (supportsSampling && topK !== undefined) params.topK = topK
 
   const seed = finiteNumber(readParam(advancedParams, "seed", "openai.seed"))
   if (seed !== undefined) params.seed = seed

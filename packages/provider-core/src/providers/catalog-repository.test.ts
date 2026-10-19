@@ -1,5 +1,7 @@
 import { CATALOG_SCHEMA_VERSION, type CatalogSnapshot } from "@cognia/provider-types/model-catalog"
 import { InMemoryCatalogRepository } from "./catalog-repository"
+import { getBuiltInProviderCatalog } from "@cognia/provider-types/built-in-provider-catalog"
+import { buildCatalogSnapshotFromModelsDev } from "./models-dev"
 
 function revision(
   id: string,
@@ -67,6 +69,106 @@ function revision(
 }
 
 describe("InMemoryCatalogRepository", () => {
+  it("applies provider-scoped retirement notices without retiring an active aggregator offering", () => {
+    const snapshot = buildCatalogSnapshotFromModelsDev(
+      {
+        openrouter: {
+          id: "openrouter",
+          models: {
+            "deepseek/deepseek-chat": {
+              id: "deepseek/deepseek-chat",
+              name: "DeepSeek Chat",
+              status: "active",
+            },
+          },
+        },
+      },
+      {
+        revisionId: "mixed-governance",
+        generatedAt: "2026-10-19T00:00:00.000Z",
+        checksum: "test",
+        builtInCatalog: getBuiltInProviderCatalog(),
+        certifiedProviderIds: new Set(["deepseek", "openrouter"]),
+      }
+    )
+    const repository = new InMemoryCatalogRepository(snapshot)
+    expect(repository.getModel("deepseek:deepseek-chat")?.lifecycle).toBe("active")
+    expect(repository.resolveOffering("deepseek", "deepseek-chat")).toMatchObject({
+      lifecycle: "retired",
+      available: false,
+    })
+    expect(repository.resolveOffering("openrouter", "deepseek/deepseek-chat")).toMatchObject({
+      lifecycle: "active",
+      available: true,
+    })
+    expect(
+      repository
+        .searchModels({ providerIds: ["deepseek"], lifecycle: ["retired"] })
+        .some((result) =>
+          result.offerings.some((offering) => offering.upstreamId === "deepseek-chat")
+        )
+    ).toBe(true)
+  })
+  it("finds a retired direct offering even while its shared canonical model remains active elsewhere", () => {
+    const snapshot = revision("mixed")
+    snapshot.providers.push({ ...snapshot.providers[0], id: "relay" })
+    snapshot.offerings[0].lifecycle = "retired"
+    snapshot.offerings[0].available = false
+    snapshot.offerings.push({
+      ...snapshot.offerings[0],
+      id: "relay:gpt-test",
+      providerRef: "relay",
+      lifecycle: "active",
+      available: true,
+    })
+    const repository = new InMemoryCatalogRepository(snapshot)
+    expect(
+      repository.searchModels({ providerIds: ["openai"], lifecycle: ["retired"] })
+    ).toHaveLength(1)
+    expect(
+      repository.searchModels({ providerIds: ["openai"], lifecycle: ["active"] })
+    ).toHaveLength(0)
+    expect(repository.searchModels({ providerIds: ["relay"], lifecycle: ["active"] })).toHaveLength(
+      1
+    )
+  })
+  it("applies current bundled defaults to a cached catalog without mutating its historical snapshot", () => {
+    const snapshot = buildCatalogSnapshotFromModelsDev(
+      {},
+      {
+        revisionId: "cached-old-default",
+        generatedAt: "2026-07-31T00:00:00.000Z",
+        checksum: "test",
+        builtInCatalog: getBuiltInProviderCatalog(),
+        certifiedProviderIds: new Set(["deepseek"]),
+      }
+    )
+    snapshot.models = snapshot.models.filter((model) => model.id !== "deepseek:deepseek-flash")
+    snapshot.offerings = snapshot.offerings.filter(
+      (offering) => offering.id !== "deepseek:deepseek-flash"
+    )
+    snapshot.aliases = snapshot.aliases.filter(
+      (alias) => alias.replacementRef !== "deepseek:deepseek-flash"
+    )
+    const role = snapshot.aliases.find((alias) => alias.id === "role:deepseek:default")!
+    role.target = { type: "offering", ref: "deepseek:deepseek-chat" }
+    const original = JSON.stringify(snapshot)
+    const repository = new InMemoryCatalogRepository(snapshot)
+    expect(repository.resolveAlias("role:deepseek:default")?.offering.upstreamId).toBe(
+      "deepseek-flash"
+    )
+    expect(
+      repository
+        .searchModels({ providerIds: ["deepseek"], lifecycle: ["retired"] })
+        .some((result) =>
+          result.offerings.some((offering) => offering.upstreamId === "deepseek-chat")
+        )
+    ).toBe(true)
+    expect(repository.resolveOffering("deepseek", "deepseek-chat")?.upstreamId).toBe(
+      "deepseek-chat"
+    )
+    expect(JSON.stringify(snapshot)).toBe(original)
+  })
   it("stages, activates, and resolves offerings and aliases through one repository", async () => {
     const repository = new InMemoryCatalogRepository()
     await repository.stageRevision(revision("r1"))

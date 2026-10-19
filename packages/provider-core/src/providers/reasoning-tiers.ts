@@ -7,8 +7,8 @@
  * pick?" — so the composer offered the same six tiers everywhere and three of
  * them were lies on most providers:
  *
- *   - OpenAI-native rejects `max` (folded to `xhigh` by `normalizeOpenAiEffort`)
- *     but does support a `minimal` tier below `low`.
+ *   - Older OpenAI-native models fold `max` to `xhigh` and offer `minimal`;
+ *     GPT-6 accepts `max` and rejects `minimal`.
  *   - Generic OpenAI-compatible channels fold `xhigh` AND `max` down to `high`,
  *     so offering all three is three controls with one effect.
  *   - Anthropic-native only accepts `effort` at all on the GA families; the
@@ -32,6 +32,9 @@ import {
   EFFORT_TO_BUDGET,
   GENERIC_REASONING_EFFORT,
   OPENAI_EFFORT_VALUES,
+  openAiEffortValuesForModel,
+  geminiThinkingLevelsForModel,
+  compatibleEffortValuesForModel,
 } from "../../../../sidecar/src/providers/reasoning-effort-tables.ts"
 
 /**
@@ -57,13 +60,14 @@ export const REASONING_TIER_ORDER: readonly ReasoningTier[] = [
  * same protocol get the same answer.
  *
  *  - `anthropic-effort`  native Anthropic `output_config.effort` (GA families).
- *  - `budget`            anthropic/google via the AI SDK: effort → token budget.
+ *  - `budget`            anthropic/older Google via the AI SDK: effort → token budget.
+ *  - `google-level`      Gemini 3.8 Flash low/medium/high thinking levels.
  *  - `openai-effort`     OpenAI-native `reasoning_effort`.
  *  - `generic-effort`    OpenAI-compatible gateway with a coarse effort field.
  *  - `none`              no reasoning-depth control on this surface.
  */
 export type ReasoningSurface =
-  "anthropic-effort" | "budget" | "openai-effort" | "generic-effort" | "none"
+  "anthropic-effort" | "budget" | "google-level" | "openai-effort" | "generic-effort" | "none"
 
 /**
  * Anthropic model ids that accept native `effort`. Mirrors
@@ -77,6 +81,7 @@ const ANTHROPIC_EFFORT_FAMILIES = [
   /sonnet-4-6/,
   // Narrowed with the mirrored list: `mythos-5` has no catalog entry.
   /(?:opus|sonnet|fable)-5/,
+  /haiku-5[-.]5(?:$|[-@:/])/,
 ]
 
 /** Tiers the OpenAI-native surface accepts, in canonical order. `none` is not a
@@ -157,12 +162,16 @@ export function reasoningSurfaceFor(input: ReasoningSurfaceInput): ReasoningSurf
   const protocol = (input.protocol ?? providerId ?? "anthropic").toLowerCase()
   const id = modelId.toLowerCase()
 
+  if (compatibleEffortValuesForModel(modelId)?.length === 0) return "none"
+
   if (protocol === "anthropic") {
     // Native Anthropic dispatch accepts `effort` only on the GA families; older
     // models 400 on the parameter, so they present no depth control at all.
     return ANTHROPIC_EFFORT_FAMILIES.some((re) => re.test(id)) ? "anthropic-effort" : "none"
   }
-  if (protocol === "google" || protocol === "gemini") return "budget"
+  if (protocol === "google" || protocol === "gemini") {
+    return geminiThinkingLevelsForModel(modelId) ? "google-level" : "budget"
+  }
   if (protocol === "openai") {
     const native = input.openAiNative ?? providerId === "openai"
     return native ? "openai-effort" : "generic-effort"
@@ -178,6 +187,8 @@ export function tiersForSurface(surface: ReasoningSurface): readonly ReasoningTi
       return ANTHROPIC_TIERS
     case "budget":
       return BUDGET_TIERS
+    case "google-level":
+      return ["low", "medium", "high"]
     case "openai-effort":
       return OPENAI_TIERS
     case "generic-effort":
@@ -193,7 +204,16 @@ export function tiersForSurface(surface: ReasoningSurface): readonly ReasoningTi
  * than a dead widget.
  */
 export function reasoningTiersFor(input: ReasoningSurfaceInput): readonly ReasoningTier[] {
-  return tiersForSurface(reasoningSurfaceFor(input))
+  const surface = reasoningSurfaceFor(input)
+  if (surface === "generic-effort") {
+    const accepted = compatibleEffortValuesForModel(input.modelId)
+    if (accepted) return REASONING_TIER_ORDER.filter((tier) => accepted.includes(tier))
+  }
+  if (surface === "openai-effort") {
+    const accepted = openAiEffortValuesForModel(input.modelId)
+    return REASONING_TIER_ORDER.filter((tier) => accepted.has(tier))
+  }
+  return tiersForSurface(surface)
 }
 
 /**

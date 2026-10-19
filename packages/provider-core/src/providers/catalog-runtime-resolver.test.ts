@@ -95,6 +95,67 @@ async function repository(
 }
 
 describe("resolveCatalogRuntimeTarget", () => {
+  it("keeps a retired direct API historical while an independent aggregator remains usable", () => {
+    const catalog = snapshot()
+    catalog.providers.push({ ...catalog.providers[0], id: "relay" })
+    catalog.offerings.push({
+      ...catalog.offerings[0],
+      id: "offering:relay:gpt-test",
+      providerRef: "relay",
+    })
+    catalog.offerings[0].lifecycle = "retired"
+    catalog.offerings[0].available = false
+    const repository = new InMemoryCatalogRepository(catalog)
+    const input = { providerProfile, deployment, transport, modelId: "gpt-test", repository }
+    expect(() => resolveCatalogRuntimeTarget({ ...input, purpose: "new" })).toThrow()
+    expect(resolveCatalogRuntimeTarget({ ...input, purpose: "historical" }).upstreamId).toBe(
+      "gpt-test"
+    )
+    const relayDeployment = {
+      ...deployment,
+      id: "deployment:relay",
+      providerRef: "relay",
+      models: [{ ...deployment.models[0], offeringRef: "offering:relay:gpt-test" }],
+    }
+    expect(
+      resolveCatalogRuntimeTarget({
+        ...input,
+        deployment: relayDeployment,
+        providerProfile: { ...providerProfile, deploymentRefs: [relayDeployment.id] },
+        purpose: "auto",
+      }).upstreamId
+    ).toBe("gpt-test")
+  })
+  it("excludes preview models from automatic routing but permits a deliberate new selection", async () => {
+    const catalog = snapshot()
+    catalog.models[0].lifecycle = "preview"
+    catalog.offerings[0].lifecycle = "preview"
+    const repository = new InMemoryCatalogRepository(catalog)
+    const input = { providerProfile, deployment, transport, modelId: "gpt-test", repository }
+    expect(() => resolveCatalogRuntimeTarget({ ...input, purpose: "auto" })).toThrow("not eligible")
+    expect(resolveCatalogRuntimeTarget({ ...input, purpose: "new" }).upstreamId).toBe("gpt-test")
+  })
+
+  it("preserves an explicit deprecated pin and historical ID without offering it as a new choice", () => {
+    const catalog = snapshot()
+    catalog.models[0].lifecycle = "deprecated"
+    catalog.offerings[0].lifecycle = "deprecated"
+    const repository = new InMemoryCatalogRepository(catalog)
+    const input = { providerProfile, deployment, transport, modelId: "gpt-test", repository }
+    expect(resolveCatalogRuntimeTarget({ ...input, purpose: "pinned" }).upstreamId).toBe("gpt-test")
+    expect(() => resolveCatalogRuntimeTarget({ ...input, purpose: "new" })).toThrow("not eligible")
+    catalog.models[0].lifecycle = "retired"
+    catalog.offerings[0].lifecycle = "retired"
+    catalog.offerings[0].available = false
+    const historical = new InMemoryCatalogRepository(catalog)
+    expect(
+      resolveCatalogRuntimeTarget({ ...input, repository: historical, purpose: "historical" })
+        .upstreamId
+    ).toBe("gpt-test")
+    expect(() =>
+      resolveCatalogRuntimeTarget({ ...input, repository: historical, purpose: "pinned" })
+    ).toThrow()
+  })
   it("resolves the frozen routed id and adapter without network access", async () => {
     const resolved = resolveCatalogRuntimeTarget({
       providerProfile,

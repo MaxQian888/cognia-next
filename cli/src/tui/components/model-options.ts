@@ -7,7 +7,13 @@
  * (e.g. a Claude id pinned under Anthropic) never bleeds into, say, DeepSeek's
  * picker. Pure.
  */
-import { catalogModelIds, resolveModelDisplayName, resolveModelMeta } from "@/lib/ai/model-options"
+import {
+  catalogModelIds,
+  resolveModelDisplayName,
+  resolveModelLifecycle,
+  resolveModelMeta,
+} from "@/lib/ai/model-options"
+import { isModelLifecycleAllowed } from "@cognia/provider-types/model-catalog"
 import { getCachedOpenRouterCatalogModels } from "@cognia/provider-core/providers/openrouter-catalog-sync"
 
 import type { ResolvedConfig } from "../../config/schema"
@@ -59,17 +65,23 @@ export function modelInfoHint(modelId: string, providerId: string): string | und
 export function collectModelOptions(config: ResolvedConfig): string[] {
   const seen = new Set<string>()
   const out: string[] = []
-  const add = (m: string | undefined) => {
-    if (m && !seen.has(m)) {
+  const add = (m: string | undefined, status?: string) => {
+    if (
+      m &&
+      !seen.has(m) &&
+      isModelLifecycleAllowed(resolveModelLifecycle(config.provider, m, status).lifecycle, "new")
+    ) {
       seen.add(m)
       out.push(m)
     }
   }
   // Scope strictly to the active provider, mirroring `resolveActiveModel`:
-  //   1. the active provider's own remembered model (what `/model` persists)
+  //   1. the active provider's own remembered model, if still offered for new choices
   //   2. that provider's curated catalog
   // This is what makes a `/provider` switch surface the correct model list and
   // stops a stale top-level pin (or another provider's model) from leaking in.
+  // A retired/deprecated pin stays in config and can still label a historical
+  // session, but this list only offers models that can be newly selected.
   add(config.providers[config.provider]?.model)
   for (const id of catalogModelIds(config.provider)) add(id)
   // OpenRouter's full real-time list lives in the synced catalog (Dexie v93,
@@ -77,7 +89,7 @@ export function collectModelOptions(config: ResolvedConfig): string[] {
   // subset — fold every catalogued id in so `/model` reflects the live `/models`
   // list. Empty until the first sync, so it degrades to the curated subset above.
   if (config.provider === "openrouter") {
-    for (const m of getCachedOpenRouterCatalogModels()) add(m.id)
+    for (const m of getCachedOpenRouterCatalogModels()) add(m.id, m.status)
   }
   // Uncatalogued provider with no per-provider memory: the legacy top-level
   // model is all we know — surface it so an enabled provider never renders an

@@ -1,6 +1,18 @@
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
 
 describe("modelSupportsEffort", () => {
+  it("does not confuse toggle-only thinking with configurable effort", () => {
+    for (const [provider, model] of [
+      ["minimax", "MiniMax-M3"],
+      ["moonshot", "kimi-k2.7"],
+      ["opencode-go", "kimi-k2.7-code"],
+      ["openrouter", "moonshotai/kimi-k2.7"],
+    ]) {
+      expect(modelSupportsEffort(provider, model)).toBe(false)
+    }
+    expect(modelSupportsEffort("moonshot", "kimi-k3")).toBe(true)
+  })
+
   it("returns false when no model is resolved", () => {
     expect(modelSupportsEffort("anthropic", undefined)).toBe(false)
     expect(modelSupportsEffort("anthropic", "")).toBe(false)
@@ -31,6 +43,17 @@ describe("modelSupportsEffort", () => {
       for (const id of ["claude-opus-5", "claude-sonnet-5", "claude-fable-5"]) {
         expect(modelSupportsEffort("anthropic", id)).toBe(true)
       }
+    })
+
+    it("accepts effort on Haiku 5.5 while retaining the Haiku 4.5 rejection", () => {
+      for (const id of [
+        "claude-haiku-5-5",
+        "anthropic/claude-haiku-5.5",
+        "us.anthropic.claude-haiku-5-5",
+      ]) {
+        expect(modelSupportsEffort("anthropic", id)).toBe(true)
+      }
+      expect(modelSupportsEffort("anthropic", "claude-haiku-4-5-20251001")).toBe(false)
     })
 
     // Bedrock/Vertex/gateway spellings carry a prefix or a suffix around the
@@ -86,13 +109,40 @@ describe("modelSupportsEffort", () => {
         ["openai", "o1"],
         ["openai", "o3-mini"],
         ["openai", "gpt-5.2"],
-        ["openai", "deepseek-reasoner"],
+        ["openai", "deepseek-reasoner-unlisted"],
         ["google", "gemini-2.5-flash-thinking"],
         ["openai", "qwen-qwq-32b-thinking"],
         ["openai", "deepseek-r1"],
         ["openai", "some-reasoning-model"],
       ] as const) {
         expect(modelSupportsEffort(provider, id)).toBe(true)
+      }
+    })
+
+    it("keeps an explicit snapshot false ahead of the reasoning-id heuristic", () => {
+      // The reviewed nano-gpt offering disables reasoning on this legacy id.
+      expect(modelSupportsEffort("nano-gpt", "deepseek-reasoner")).toBe(false)
+    })
+
+    it("recognizes current GPT-6 reasoning models when the bundled snapshot is older", () => {
+      for (const [provider, model] of [
+        ["openai", "gpt-6.1-sol"],
+        ["openai", "gpt-6-astra"],
+        ["openai", "gpt-6-luna"],
+        ["codex", "gpt-6.1-sol"],
+        ["openrouter", "openai/gpt-6.1-sol"],
+      ]) {
+        expect(modelSupportsEffort(provider, model)).toBe(true)
+      }
+    })
+
+    it("uses the current built-in catalog when newer defaults are absent from the snapshot", () => {
+      for (const [provider, model] of [
+        ["deepseek", "deepseek-flash"],
+        ["google", "gemini-3.8-flash"],
+        ["openrouter", "anthropic/claude-sonnet-5.5"],
+      ]) {
+        expect(modelSupportsEffort(provider, model)).toBe(true)
       }
     })
 

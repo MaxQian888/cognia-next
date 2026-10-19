@@ -5,7 +5,7 @@
  * Most of our built-in provider ids match models.dev verbatim; this table only
  * records the *differences* (verified against the bundled snapshot). Providers
  * with no models.dev entry (e.g. local-only `ollama`, `vllm`, or vendors
- * models.dev doesn't track like `sambanova`, `baichuan`) simply resolve to
+ * models.dev doesn't track like `baichuan`) simply resolve to
  * `undefined` from {@link resolveModelsDevProviderId} — the catalog layer then
  * yields no remote models for them, which is the correct degradation.
  *
@@ -28,7 +28,6 @@ export const MODELS_DEV_PROVIDER_ID_MAP: Record<string, string> = {
   qwen: "alibaba",
   bedrock: "amazon-bedrock",
   cloudflare: "cloudflare-workers-ai",
-  github: "github-models",
 }
 
 /** Built-in provider ids that have a known models.dev catalog entry (identity). */
@@ -56,6 +55,10 @@ const MODELS_DEV_IDENTITY_PROVIDERS = new Set<string>([
   "modelscope",
   "opencode",
   "opencode-go",
+  "ai21",
+  "sambanova",
+  "volcengine",
+  "commandcode",
 ])
 
 /**
