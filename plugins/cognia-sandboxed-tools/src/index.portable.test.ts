@@ -51,6 +51,201 @@ function payloadAt(execute: jest.Mock, index: number): MicrovmExecPayload {
 
 const CALL: PluginToolContext = { sessionId: "s1", sandboxRuntimeRef: "ref-1", config: {} }
 
+describe("concurrent file mutations", () => {
+  it("preserves all disjoint edits in a parallel batch, including text_editor calls", async () => {
+    let content = Array.from({ length: 8 }, (_, i) => `MARKER_${i}_OLD`).join("\n")
+    const { sandbox, execute } = createSandbox()
+    execute.mockImplementation(async (_ref, payload) => {
+      const snapshot = content
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      if (payload.command.argv[0] === "cat") return { ...OK, stdout: snapshot }
+      content = payload.command.stdin as string
+      return OK
+    })
+    const tools = toolsFor(sandbox)
+    await Promise.all(
+      Array.from({ length: 8 }, (_, i) =>
+        i % 2 === 0
+          ? tools
+              .get("sandbox_edit")!
+              .execute(
+                { path: "/w/race.txt", oldString: `MARKER_${i}_OLD`, newString: `MARKER_${i}_NEW` },
+                CALL
+              )
+          : tools.get("sandbox_text_editor")!.execute(
+              {
+                command: "str_replace",
+                path: "/w/race.txt",
+                oldStr: `MARKER_${i}_OLD`,
+                newStr: `MARKER_${i}_NEW`,
+              },
+              CALL
+            )
+      )
+    )
+    expect(content).toBe(Array.from({ length: 8 }, (_, i) => `MARKER_${i}_NEW`).join("\n"))
+  })
+
+  it("coordinates separate registrations and placements using normalized paths", async () => {
+    let content = "first old\nsecond old"
+    const { sandbox, execute } = createSandbox()
+    execute.mockImplementation(async (_ref, payload) => {
+      const snapshot = content
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      if (payload.command.argv[0] === "cat") return { ...OK, stdout: snapshot }
+      content = payload.command.stdin as string
+      return OK
+    })
+    const otherSandbox = { ...sandbox }
+    await Promise.all([
+      toolsFor(sandbox)
+        .get("sandbox_edit")!
+        .execute(
+          { path: "/w//nested/../race.txt", oldString: "first old", newString: "first new" },
+          CALL
+        ),
+      toolsFor(otherSandbox)
+        .get("sandbox_edit")!
+        .execute(
+          { path: "/w/./race.txt", oldString: "second old", newString: "second new" },
+          { ...CALL, sessionId: "s2", sandboxRuntimeRef: "ref-2" }
+        ),
+    ])
+    expect(content).toBe("first new\nsecond new")
+  })
+
+  it("orders full writes, creates and inserts together with edits", async () => {
+    let content = "a"
+    const reads: string[] = []
+    const writes: string[] = []
+    const { sandbox, execute } = createSandbox()
+    execute.mockImplementation(async (_ref, payload) => {
+      const snapshot = content
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      if (payload.command.argv[0] === "cat") {
+        reads.push(snapshot)
+        return { ...OK, stdout: snapshot }
+      }
+      content = payload.command.stdin as string
+      writes.push(content)
+      return OK
+    })
+    const tools = toolsFor(sandbox)
+    await Promise.all([
+      tools
+        .get("sandbox_edit")!
+        .execute({ path: "/w/mixed", oldString: "a", newString: "A" }, CALL),
+      tools.get("sandbox_write")!.execute({ path: "/w/mixed", content: "b" }, CALL),
+      tools
+        .get("sandbox_text_editor")!
+        .execute({ command: "insert", path: "/w/mixed", insertLine: 1, insertText: "B" }, CALL),
+      tools
+        .get("sandbox_text_editor")!
+        .execute({ command: "create", path: "/w/mixed", fileText: "C" }, CALL),
+      tools
+        .get("sandbox_edit")!
+        .execute({ path: "/w/mixed", oldString: "C", newString: "D" }, CALL),
+    ])
+    expect(reads).toEqual(["a", "b", "C"])
+    expect(writes).toEqual(["A", "b", "b\nB", "C", "D"])
+    expect(content).toBe("D")
+  })
+
+  it("cancels a queued call promptly without letting its successor overtake the active edit", async () => {
+    let releaseRead!: () => void
+    const reading = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    let content = "a"
+    const { sandbox, execute } = createSandbox()
+    execute.mockImplementation(async (_ref, payload) => {
+      if (payload.command.argv[0] === "cat") {
+        await reading
+        return { ...OK, stdout: content }
+      }
+      content = payload.command.stdin as string
+      return OK
+    })
+    const tools = toolsFor(sandbox)
+    const first = tools
+      .get("sandbox_edit")!
+      .execute({ path: "/w/cancel", oldString: "a", newString: "A" }, CALL)
+    const controller = new AbortController()
+    const cancelled = tools
+      .get("sandbox_write")!
+      .execute({ path: "/w/cancel", content: "discarded" }, { ...CALL, signal: controller.signal })
+    const last = tools
+      .get("sandbox_edit")!
+      .execute({ path: "/w/cancel", oldString: "A", newString: "Z" }, CALL)
+    controller.abort()
+    try {
+      await expect(cancelled).rejects.toThrow(/cancelled/)
+      expect(execute).toHaveBeenCalledTimes(1)
+    } finally {
+      releaseRead()
+    }
+    await Promise.all([first, last])
+    expect(content).toBe("Z")
+    expect(execute).toHaveBeenCalledTimes(4)
+  })
+
+  it("keeps unrelated paths parallel", async () => {
+    let releaseReads!: () => void
+    const reading = new Promise<void>((resolve) => {
+      releaseReads = resolve
+    })
+    const { sandbox, execute } = createSandbox()
+    execute.mockImplementation(async (_ref, payload) => {
+      if (payload.command.argv[0] === "cat") {
+        await reading
+        return { ...OK, stdout: "old" }
+      }
+      return OK
+    })
+    const edit = toolsFor(sandbox).get("sandbox_edit")!
+    const edits = ["/w/one", "/w/two"].map((path) =>
+      edit.execute({ path, oldString: "old", newString: "new" }, CALL)
+    )
+    try {
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(execute).toHaveBeenCalledTimes(2)
+    } finally {
+      releaseReads()
+    }
+    await Promise.all(edits)
+  })
+
+  it.each(["read", "replace", "write"])("releases the queue after a %s failure", async (stage) => {
+    const { sandbox, execute } = createSandbox()
+    execute.mockImplementation(async (_ref, payload) => {
+      if (payload.command.argv[0] === "cat") {
+        return stage === "read"
+          ? { ...OK, exit_code: 1, stderr: "read failed" }
+          : { ...OK, stdout: "old" }
+      }
+      return payload.command.stdin === "new" && stage === "write"
+        ? { ...OK, exit_code: 1, stderr: "write failed" }
+        : OK
+    })
+    const tools = toolsFor(sandbox)
+    const failed = tools.get("sandbox_edit")!.execute(
+      {
+        path: "/w/failure",
+        oldString: stage === "replace" ? "missing" : "old",
+        newString: "new",
+      },
+      CALL
+    )
+    const next = tools
+      .get("sandbox_write")!
+      .execute({ path: "/w/failure", content: "recovered" }, CALL)
+    await expect(failed).rejects.toThrow()
+    await expect(next).resolves.toMatchObject({ exit_code: 0 })
+    expect(payloadAt(execute, execute.mock.calls.length - 1).command.stdin).toBe("recovered")
+  })
+})
+
 describe("manifest", () => {
   it("is plugin.json itself, not a hand-written subset", () => {
     expect(manifest).toEqual(manifestJson)
@@ -202,6 +397,38 @@ describe("sandbox_bash", () => {
 })
 
 describe("file tools", () => {
+  it.each([
+    ["sandbox_edit", { path: "/w/large", oldString: "old", newString: "new" }],
+    [
+      "sandbox_text_editor",
+      { command: "str_replace", path: "/w/large", oldStr: "old", newStr: "new" },
+    ],
+    [
+      "sandbox_text_editor",
+      { command: "insert", path: "/w/large", insertLine: 1, insertText: "new" },
+    ],
+    ["sandbox_text_editor", { command: "view", path: "/w/large" }],
+  ])("%s rejects truncated reads without writing (%j)", async (name, args) => {
+    const { sandbox, execute } = createSandbox([{ ...OK, stdout: "old", stdout_truncated: true }])
+    await expect(
+      toolsFor(sandbox)
+        .get(name as string)!
+        .execute(args as Record<string, unknown>, CALL)
+    ).rejects.toThrow(/truncated/)
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(payloadAt(execute, 0).command.argv[0]).toBe("cat")
+  })
+
+  it("rejects a timed-out read even if the backend reports exit zero", async () => {
+    const { sandbox, execute } = createSandbox([{ ...OK, stdout: "old", timed_out: true }])
+    await expect(
+      toolsFor(sandbox)
+        .get("sandbox_edit")!
+        .execute({ path: "/w/timeout", oldString: "old", newString: "new" }, CALL)
+    ).rejects.toThrow(/timed out/)
+    expect(execute).toHaveBeenCalledTimes(1)
+  })
+
   it("sandbox_edit reads then writes the replaced content", async () => {
     const { sandbox, execute } = createSandbox([{ ...OK, stdout: "const x = 1" }, OK])
     await toolsFor(sandbox)

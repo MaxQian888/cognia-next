@@ -427,6 +427,69 @@ function throwIfAborted(callCtx: PluginToolContext): void {
   }
 }
 
+// Shared across registrations and session placements: OS-tier sessions can edit
+// the same file. Lock the entire read/modify/write, not just the final exec.
+// Different targets remain parallel; a full write/create participates too, so
+// an edit cannot later overwrite a newer full-file write with its stale read.
+const fileMutationTails = new Map<string, Promise<void>>()
+
+function fileMutationKey(path: string): string {
+  const windows = /^[a-z]:[\\/]/i.test(path) || path.startsWith("\\\\")
+  const normalized = windows ? path.replace(/\\/g, "/").toLowerCase() : path
+  const parts: string[] = []
+  for (const part of normalized.split("/")) {
+    if (!part || part === ".") continue
+    if (part === ".." && parts.length > 0 && parts.at(-1) !== "..") parts.pop()
+    else if (part !== ".." || !normalized.startsWith("/")) parts.push(part)
+  }
+  return `${normalized.startsWith("/") ? "/" : ""}${parts.join("/")}`
+}
+
+function waitForFileMutation(previous: Promise<void>, callCtx: PluginToolContext): Promise<void> {
+  const signal = callCtx.signal
+  if (!signal) return previous
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      signal.removeEventListener("abort", abort)
+      reject(new Error("The sandboxed call was cancelled before it ran."))
+    }
+    signal.addEventListener("abort", abort, { once: true })
+    if (signal.aborted) abort()
+    void previous.then(() => {
+      signal.removeEventListener("abort", abort)
+      resolve()
+    })
+  })
+}
+
+async function withFileMutation<T>(
+  path: string,
+  callCtx: PluginToolContext,
+  mutate: () => Promise<T>
+): Promise<T> {
+  throwIfAborted(callCtx)
+  const key = fileMutationKey(path)
+  const previous = fileMutationTails.get(key) ?? Promise.resolve()
+  let release!: () => void
+  const current = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  // Even a cancelled waiter must remain behind its predecessor: releasing its
+  // own gate early must not let the next call overtake the active mutation.
+  const tail = previous.then(() => current)
+  fileMutationTails.set(key, tail)
+  void tail.then(() => {
+    if (fileMutationTails.get(key) === tail) fileMutationTails.delete(key)
+  })
+  try {
+    await waitForFileMutation(previous, callCtx)
+    throwIfAborted(callCtx)
+    return await mutate()
+  } finally {
+    release()
+  }
+}
+
 /**
  * Dispatch a `sandbox_exec` payload through the placement bound to this call.
  * The host resolves the tier (OS sandbox or E2B microVM) from the runtime
@@ -598,6 +661,18 @@ async function sandboxReadFile(
   if (res.exit_code !== 0) {
     throw new Error(res.stderr.trim() || `failed to read ${path} (exit ${res.exit_code})`)
   }
+  // stdout is the whole-file input to edits, not a preview. Backends cap
+  // captured output; writing that capped prefix back would destroy the tail.
+  if (res.timed_out) {
+    throw new Error(
+      `failed to read ${path}: the sandbox read timed out; incomplete content was refused`
+    )
+  }
+  if (res.stdout_truncated) {
+    throw new Error(
+      `failed to read ${path}: file content was truncated by the sandbox output limit; incomplete content was refused`
+    )
+  }
   return res.stdout
 }
 
@@ -654,7 +729,9 @@ async function execWrite(
   callCtx: PluginToolContext
 ): Promise<SandboxResultShape> {
   assertPathUnderCeiling(sandbox, args.path, callCtx)
-  return sandboxWriteFile(sandbox, TOOL_SANDBOX_WRITE, args, args.content, callCtx)
+  return withFileMutation(args.path, callCtx, () =>
+    sandboxWriteFile(sandbox, TOOL_SANDBOX_WRITE, args, args.content, callCtx)
+  )
 }
 
 async function execEdit(
@@ -663,9 +740,11 @@ async function execEdit(
   callCtx: PluginToolContext
 ): Promise<SandboxResultShape> {
   assertPathUnderCeiling(sandbox, args.path, callCtx)
-  const current = await sandboxReadFile(sandbox, TOOL_SANDBOX_EDIT, args, callCtx)
-  const next = applyStrReplace(current, args.oldString, args.newString, args.replaceAll)
-  return sandboxWriteFile(sandbox, TOOL_SANDBOX_EDIT, args, next, callCtx)
+  return withFileMutation(args.path, callCtx, async () => {
+    const current = await sandboxReadFile(sandbox, TOOL_SANDBOX_EDIT, args, callCtx)
+    const next = applyStrReplace(current, args.oldString, args.newString, args.replaceAll)
+    return sandboxWriteFile(sandbox, TOOL_SANDBOX_EDIT, args, next, callCtx)
+  })
 }
 
 async function execTextEditor(
@@ -685,16 +764,22 @@ async function execTextEditor(
       return { exit_code: 0, stdout: text, stderr: "", duration: 0, timed_out: false }
     }
     case "create":
-      return sandboxWriteFile(sandbox, tool, args, args.fileText, callCtx)
+      return withFileMutation(args.path, callCtx, () =>
+        sandboxWriteFile(sandbox, tool, args, args.fileText, callCtx)
+      )
     case "str_replace": {
-      const current = await sandboxReadFile(sandbox, tool, args, callCtx)
-      const next = applyStrReplace(current, args.oldStr, args.newStr)
-      return sandboxWriteFile(sandbox, tool, args, next, callCtx)
+      return withFileMutation(args.path, callCtx, async () => {
+        const current = await sandboxReadFile(sandbox, tool, args, callCtx)
+        const next = applyStrReplace(current, args.oldStr, args.newStr)
+        return sandboxWriteFile(sandbox, tool, args, next, callCtx)
+      })
     }
     case "insert": {
-      const current = await sandboxReadFile(sandbox, tool, args, callCtx)
-      const next = applyInsert(current, args.insertLine, args.insertText)
-      return sandboxWriteFile(sandbox, tool, args, next, callCtx)
+      return withFileMutation(args.path, callCtx, async () => {
+        const current = await sandboxReadFile(sandbox, tool, args, callCtx)
+        const next = applyInsert(current, args.insertLine, args.insertText)
+        return sandboxWriteFile(sandbox, tool, args, next, callCtx)
+      })
     }
   }
 }
