@@ -46,6 +46,9 @@ pub mod replay;
 pub mod serial;
 pub mod session;
 pub mod sftp;
+/// An in-memory SFTP server for tests here and in the host installer.
+#[cfg(any(test, feature = "test-support"))]
+pub mod sftp_memory;
 pub mod sftp_service;
 pub mod ssh;
 pub mod ssh_forward;

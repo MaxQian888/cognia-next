@@ -5,6 +5,7 @@
 //! land in an in-memory file table that `stat` and the digest check read.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -264,4 +265,191 @@ mod tests {
         shell.mkdirp("/x/y").await;
         assert!(shell.machine.lock().dirs.contains("/x"));
     }
+}
+
+/// An update service answering one signed catalog and one archive.
+pub struct FakeNetwork {
+    pub bundle: Option<serde_json::Value>,
+    pub archive: Vec<u8>,
+}
+
+#[async_trait]
+impl cognia_update_catalog::client::UpdateNetwork for FakeNetwork {
+    async fn catalog(&self, _channel: &str) -> Result<Option<serde_json::Value>, String> {
+        Ok(self.bundle.clone())
+    }
+    async fn rollout(
+        &self,
+        _query: &cognia_update_catalog::client::RolloutQuery,
+    ) -> Result<Option<cognia_update_catalog::client::RolloutAnswer>, String> {
+        panic!("a fresh install never asks the rollout question");
+    }
+    async fn download(
+        &self,
+        _url: &str,
+        destination: &std::path::Path,
+        max: u64,
+    ) -> Result<(), String> {
+        if self.archive.len() as u64 > max {
+            return Err("larger than the catalog says".into());
+        }
+        tokio::fs::write(destination, &self.archive)
+            .await
+            .map_err(|error| error.to_string())
+    }
+}
+
+/// The clock the signed test catalogs are valid at.
+pub const NOW_MS: i64 = 1_792_000_000_000;
+
+/// A catalog signed by the test root, listing release 1.4.0 on `stable` for
+/// `target` with this archive digest.
+pub fn release_bundle(target: &str, sha256: &str) -> serde_json::Value {
+    use cognia_update_catalog::test_support::{host_release_entries, sign_bundle};
+    let now = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(NOW_MS).unwrap();
+    sign_bundle(
+        host_release_entries(
+            "1.4.0",
+            "stable",
+            target,
+            serde_json::json!({ "url": "https://update.cognia.cn/a.tar.gz", "sha256": sha256 }),
+        ),
+        3,
+        now,
+    )
+}
+
+pub const HOME: &str = "/home/ubuntu";
+pub const DATA: &str = "/home/ubuntu/.local/share/cognia-server";
+pub const INSTALLED: &str =
+    "/home/ubuntu/.local/share/cognia-server/install/current/bin/cognia-server";
+
+pub fn status_json(installed: bool, version: Option<&str>, ready: bool, key: bool) -> String {
+    serde_json::json!({
+        "scope": "user",
+        "definitionPath": format!("{HOME}/.config/systemd/user/cognia-server.service"),
+        "installed": installed,
+        "running": installed,
+        "dataDir": DATA,
+        "masterKeyPath": format!("{DATA}/master.key"),
+        "masterKeyPresent": key,
+        "currentVersion": version,
+        "installedVersions": version.map(|v| vec![v]).unwrap_or_default(),
+        "pendingUpdate": null,
+        "readiness": {
+            "answered": installed,
+            "ready": ready,
+            "failing": if ready { vec![] } else { vec!["brain"] },
+            "brainRefusal": null,
+            "error": null,
+        },
+    })
+    .to_string()
+}
+
+/// A Linux box whose `cognia-server` behaves like the real one.
+pub fn linux_host() -> Arc<FakeShell> {
+    let shell = Arc::new(FakeShell::linux_ubuntu_2204());
+    shell.handle(|request, machine: &mut FakeMachine| {
+        let argv: Vec<&str> = request.argv.iter().map(String::as_str).collect();
+        match argv.as_slice() {
+            ["sha256sum", path] => Some(match machine.files.get(*path) {
+                Some(bytes) => output(0, &format!("{}  {path}\n", hex_sha256(bytes))),
+                None => output(1, ""),
+            }),
+            ["tar", "-xzf", archive, "-C", into, member] => {
+                if !machine.files.contains_key(*archive) {
+                    return Some(output(2, ""));
+                }
+                machine
+                    .files
+                    .insert(format!("{into}/{member}"), b"server".to_vec());
+                Some(output(0, ""))
+            }
+            [binary, "stage", rest @ ..]
+                if binary.ends_with("/extract/cognia-host-1.4.0-linux-x64/bin/cognia-server") =>
+            {
+                let flag = |name: &str| {
+                    rest.iter()
+                        .position(|part| *part == name)
+                        .map(|index| rest[index + 1])
+                };
+                let archive = flag("--archive")?;
+                let digest = machine.files.get(archive).map(|bytes| hex_sha256(bytes));
+                if digest.as_deref() != flag("--sha256") {
+                    return Some(RemoteOutcome::Completed(ExecOutput {
+                        exit_code: Some(1),
+                        stdout: String::new(),
+                        stderr: "the archive does not match the catalog's sha256".into(),
+                        truncated: false,
+                    }));
+                }
+                let directory = format!("{}/versions/{}", flag("--home")?, flag("--version")?);
+                machine
+                    .files
+                    .insert(format!("{directory}/bin/cognia-server"), b"server".to_vec());
+                Some(output(
+                    0,
+                    &serde_json::json!({
+                        "version": flag("--version")?,
+                        "target": flag("--target")?,
+                        "directory": directory,
+                    })
+                    .to_string(),
+                ))
+            }
+            [binary, "tunnel-ingress", "enable", "--port", port]
+                if binary.contains("/home/versions/") =>
+            {
+                machine.state.insert("ingress".into(), (*port).to_owned());
+                Some(output(0, r#"{"enabled":true}"#))
+            }
+            [binary, "service", "install", ..] if binary.contains("/home/versions/") => {
+                machine.state.insert("installed".into(), "1.4.0".into());
+                machine
+                    .state
+                    .entry("key".into())
+                    .or_insert_with(|| "created".into());
+                machine.files.insert(INSTALLED.into(), b"server".to_vec());
+                Some(output(0, "Installed"))
+            }
+            [INSTALLED, "service", "status", ..] => {
+                let polls: u32 = machine
+                    .state
+                    .get("polls")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                machine
+                    .state
+                    .insert("polls".into(), (polls + 1).to_string());
+                let installed = machine.state.get("installed").cloned();
+                let ready = !machine.state.contains_key("never-ready") && polls >= 1;
+                Some(output(
+                    0,
+                    &status_json(
+                        installed.is_some(),
+                        installed.as_deref(),
+                        ready,
+                        machine.state.contains_key("key"),
+                    ),
+                ))
+            }
+            [INSTALLED, "service", "uninstall", "--scope", "user"] => {
+                machine.state.remove("installed");
+                Some(output(0, "Removed"))
+            }
+            ["rm", "-rf", "--", path] => {
+                let prefix = format!("{path}/");
+                machine
+                    .files
+                    .retain(|file, _| file != path && !file.starts_with(&prefix));
+                machine
+                    .state
+                    .insert(format!("removed:{path}"), String::new());
+                Some(output(0, ""))
+            }
+            _ => None,
+        }
+    });
+    shell
 }

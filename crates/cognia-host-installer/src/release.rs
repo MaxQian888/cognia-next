@@ -169,54 +169,11 @@ pub async fn download_verified(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
-    use cognia_update_catalog::client::{RolloutAnswer, RolloutQuery};
-    use cognia_update_catalog::test_support::{host_release_entries, root, sign_bundle};
-    use serde_json::{json, Value};
-
-    struct FakeNetwork {
-        bundle: Option<Value>,
-        archive: Vec<u8>,
-    }
-
-    #[async_trait]
-    impl UpdateNetwork for FakeNetwork {
-        async fn catalog(&self, _channel: &str) -> Result<Option<Value>, String> {
-            Ok(self.bundle.clone())
-        }
-        async fn rollout(&self, _query: &RolloutQuery) -> Result<Option<RolloutAnswer>, String> {
-            panic!("a fresh install never asks the rollout question");
-        }
-        async fn download(&self, _url: &str, destination: &Path, max: u64) -> Result<(), String> {
-            if self.archive.len() as u64 > max {
-                return Err("larger than the catalog says".into());
-            }
-            tokio::fs::write(destination, &self.archive)
-                .await
-                .map_err(|error| error.to_string())
-        }
-    }
-
-    const NOW_MS: i64 = 1_792_000_000_000;
-
-    fn bundle(target: &str, sha256: &str) -> Value {
-        let now = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(NOW_MS).unwrap();
-        sign_bundle(
-            host_release_entries(
-                "1.4.0",
-                "stable",
-                target,
-                json!({ "url": "https://update.cognia.cn/a.tar.gz", "sha256": sha256 }),
-            ),
-            3,
-            now,
-        )
-    }
-
-    fn digest(bytes: &[u8]) -> String {
-        use sha2::Digest as _;
-        hex::encode(sha2::Sha256::digest(bytes))
-    }
+    use crate::test_support::{
+        hex_sha256 as digest, release_bundle as bundle, FakeNetwork, NOW_MS,
+    };
+    use cognia_update_catalog::test_support::root;
+    use serde_json::json;
 
     #[tokio::test]
     async fn a_fresh_install_takes_the_signed_release_for_its_target() {

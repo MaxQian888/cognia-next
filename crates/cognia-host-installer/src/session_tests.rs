@@ -9,11 +9,11 @@ use parking_lot::Mutex;
 use super::*;
 use crate::release::{LocalArchive, VerifiedRelease};
 use crate::shell::{RemoteOutcome, ShellError};
-use crate::test_support::{hex_sha256, output, FakeMachine, FakeShell};
+use crate::test_support::{
+    hex_sha256, linux_host, output, release_bundle, FakeNetwork, FakeShell, DATA, HOME, INSTALLED,
+    NOW_MS,
+};
 
-const HOME: &str = "/home/ubuntu";
-const DATA: &str = "/home/ubuntu/.local/share/cognia-server";
-const INSTALLED: &str = "/home/ubuntu/.local/share/cognia-server/install/current/bin/cognia-server";
 const SECRET: &str = "cgnp4|owner-invitation-SECRET";
 
 #[derive(Default)]
@@ -41,136 +41,6 @@ fn fast() -> Deadlines {
         ready_poll: Duration::from_millis(5),
         ..Deadlines::default()
     }
-}
-
-fn status_json(installed: bool, version: Option<&str>, ready: bool, key: bool) -> String {
-    serde_json::json!({
-        "scope": "user",
-        "definitionPath": format!("{HOME}/.config/systemd/user/cognia-server.service"),
-        "installed": installed,
-        "running": installed,
-        "dataDir": DATA,
-        "masterKeyPath": format!("{DATA}/master.key"),
-        "masterKeyPresent": key,
-        "currentVersion": version,
-        "installedVersions": version.map(|v| vec![v]).unwrap_or_default(),
-        "pendingUpdate": null,
-        "readiness": {
-            "answered": installed,
-            "ready": ready,
-            "failing": if ready { vec![] } else { vec!["brain"] },
-            "brainRefusal": null,
-            "error": null,
-        },
-    })
-    .to_string()
-}
-
-/// A Linux box whose `cognia-server` behaves like the real one.
-fn linux_host() -> Arc<FakeShell> {
-    let shell = Arc::new(FakeShell::linux_ubuntu_2204());
-    shell.handle(|request, machine: &mut FakeMachine| {
-        let argv: Vec<&str> = request.argv.iter().map(String::as_str).collect();
-        match argv.as_slice() {
-            ["sha256sum", path] => Some(match machine.files.get(*path) {
-                Some(bytes) => output(0, &format!("{}  {path}\n", hex_sha256(bytes))),
-                None => output(1, ""),
-            }),
-            ["tar", "-xzf", archive, "-C", into, member] => {
-                if !machine.files.contains_key(*archive) {
-                    return Some(output(2, ""));
-                }
-                machine
-                    .files
-                    .insert(format!("{into}/{member}"), b"server".to_vec());
-                Some(output(0, ""))
-            }
-            [binary, "stage", rest @ ..]
-                if binary.ends_with("/extract/cognia-host-1.4.0-linux-x64/bin/cognia-server") =>
-            {
-                let flag = |name: &str| {
-                    rest.iter()
-                        .position(|part| *part == name)
-                        .map(|index| rest[index + 1])
-                };
-                let archive = flag("--archive")?;
-                let digest = machine.files.get(archive).map(|bytes| hex_sha256(bytes));
-                if digest.as_deref() != flag("--sha256") {
-                    return Some(RemoteOutcome::Completed(crate::shell::ExecOutput {
-                        exit_code: Some(1),
-                        stdout: String::new(),
-                        stderr: "the archive does not match the catalog's sha256".into(),
-                        truncated: false,
-                    }));
-                }
-                let directory = format!("{}/versions/{}", flag("--home")?, flag("--version")?);
-                machine
-                    .files
-                    .insert(format!("{directory}/bin/cognia-server"), b"server".to_vec());
-                Some(output(
-                    0,
-                    &serde_json::json!({
-                        "version": flag("--version")?,
-                        "target": flag("--target")?,
-                        "directory": directory,
-                    })
-                    .to_string(),
-                ))
-            }
-            [binary, "tunnel-ingress", "enable", "--port", port]
-                if binary.contains("/home/versions/") =>
-            {
-                machine.state.insert("ingress".into(), (*port).to_owned());
-                Some(output(0, r#"{"enabled":true}"#))
-            }
-            [binary, "service", "install", ..] if binary.contains("/home/versions/") => {
-                machine.state.insert("installed".into(), "1.4.0".into());
-                machine
-                    .state
-                    .entry("key".into())
-                    .or_insert_with(|| "created".into());
-                machine.files.insert(INSTALLED.into(), b"server".to_vec());
-                Some(output(0, "Installed"))
-            }
-            [INSTALLED, "service", "status", ..] => {
-                let polls: u32 = machine
-                    .state
-                    .get("polls")
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(0);
-                machine
-                    .state
-                    .insert("polls".into(), (polls + 1).to_string());
-                let installed = machine.state.get("installed").cloned();
-                let ready = !machine.state.contains_key("never-ready") && polls >= 1;
-                Some(output(
-                    0,
-                    &status_json(
-                        installed.is_some(),
-                        installed.as_deref(),
-                        ready,
-                        machine.state.contains_key("key"),
-                    ),
-                ))
-            }
-            [INSTALLED, "service", "uninstall", "--scope", "user"] => {
-                machine.state.remove("installed");
-                Some(output(0, "Removed"))
-            }
-            ["rm", "-rf", "--", path] => {
-                let prefix = format!("{path}/");
-                machine
-                    .files
-                    .retain(|file, _| file != path && !file.starts_with(&prefix));
-                machine
-                    .state
-                    .insert(format!("removed:{path}"), String::new());
-                Some(output(0, ""))
-            }
-            _ => None,
-        }
-    });
-    shell
 }
 
 fn local_archive(dir: &std::path::Path) -> LocalArchive {
@@ -748,4 +618,76 @@ async fn an_unsupported_machine_is_refused_at_probe_time() {
         events.outcomes().last().copied(),
         Some((StageName::Probe, Some(StageOutcome::Unsupported)))
     );
+}
+
+#[tokio::test]
+async fn fetch_takes_the_signed_release_for_the_machine_and_reports_the_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let shell = linux_host();
+    let events = Events::default();
+    let session = Session::new(shell.as_ref(), &events).with_deadlines(fast());
+    let inspection = session.inspect().await.expect("inspect");
+    let consent = Consent::grant(&inspection, PlanKind::Fresh).unwrap();
+
+    let bytes = b"the linux-x64 archive".to_vec();
+    let network = FakeNetwork {
+        bundle: Some(release_bundle("linux-x64", &hex_sha256(&bytes))),
+        archive: bytes.clone(),
+    };
+    let trust = cognia_update_catalog::client::TrustFile::new(dir.path().join("trust.json"));
+    let root = cognia_update_catalog::test_support::root();
+    let downloads = dir.path().join("downloads");
+    let source = ReleaseSource {
+        network: &network,
+        root: Some(&root),
+        trust: &trust,
+        channel: "stable",
+        download_dir: &downloads,
+        now_ms: NOW_MS,
+    };
+    let archive = session
+        .fetch(&inspection, &consent, &source)
+        .await
+        .expect("fetch");
+    assert_eq!(archive.release.target, "linux-x64");
+    assert_eq!(std::fs::read(&archive.path).unwrap(), bytes);
+    assert_eq!(
+        events.outcomes()[4..],
+        [
+            (StageName::Fetch, None),
+            (StageName::Fetch, Some(StageOutcome::Ok)),
+        ]
+    );
+
+    // No release for this target: a typed failure, and nothing downloaded.
+    let elsewhere = FakeNetwork {
+        bundle: Some(release_bundle("darwin-arm64", &hex_sha256(&bytes))),
+        archive: bytes,
+    };
+    let error = session
+        .fetch(
+            &inspection,
+            &consent,
+            &ReleaseSource {
+                network: &elsewhere,
+                ..source
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        InstallError::Release(ReleaseError::NoRelease { .. })
+    ));
+
+    // Re-pairing never downloads anything.
+    let installed = Inspection {
+        offers: vec![PlanKind::RePair],
+        ..inspection.clone()
+    };
+    let re_pair = Consent::grant(&installed, PlanKind::RePair).unwrap();
+    assert!(matches!(
+        session.fetch(&installed, &re_pair, &source).await,
+        Err(InstallError::Denied(_))
+    ));
 }

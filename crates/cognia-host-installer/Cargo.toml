@@ -17,6 +17,13 @@ publish.workspace = true
 name = "cognia_host_installer"
 path = "src/lib.rs"
 
+[features]
+default = []
+# ADR-0196 — the Tauri command shells the Devices UI drives
+# (`commands`). Off by default so the crate builds and tests Tauri-free; only
+# `src-tauri` enables it.
+tauri-host = ["dep:tauri"]
+
 [dependencies]
 async-trait.workspace = true
 # The catalog verifier takes a `DateTime<Utc>`.
@@ -26,9 +33,18 @@ chrono = { workspace = true, features = ["std"] }
 cognia-host-service = { path = "../cognia-host-service" }
 # Release selection and the verified download, exactly as self-update does it.
 cognia-update-catalog = { path = "../cognia-update-catalog", features = ["client"] }
+# The SSH adapter (ADR-0235 P6) rides the terminal's SSH client: its dial,
+# jump chain, TOFU known_hosts and keyring credentials, and SFTP.
+cognia-terminal = { path = "../cognia-terminal" }
+hex.workspace = true
+parking_lot.workspace = true
 rand.workspace = true
+russh-sftp = "3.0"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+# The upload hashes what it streams against the declared digest.
+sha2.workspace = true
+tauri = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "rt", "time"] }
 # The pair invitation is an owner credential: wiped when dropped.
@@ -36,10 +52,8 @@ zeroize = "1"
 
 [dev-dependencies]
 cognia-host-service = { path = "../cognia-host-service", features = ["test-support"] }
+cognia-terminal = { path = "../cognia-terminal", features = ["test-support"] }
 cognia-update-catalog = { path = "../cognia-update-catalog", features = ["client", "test-support"] }
-hex.workspace = true
-parking_lot.workspace = true
-sha2.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt-multi-thread", "time"] }
 

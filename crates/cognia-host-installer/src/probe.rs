@@ -201,7 +201,8 @@ pub enum Unsupported {
 
 /// Something true about the install that the user must be told before
 /// consenting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Notice {
     /// systemd lingering is off: the Host stops at logout and does not start
     /// after a reboot until the user logs in again.

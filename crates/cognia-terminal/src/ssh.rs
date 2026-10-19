@@ -1917,6 +1917,46 @@ impl HostedSftp {
     }
 }
 
+/// A saved profile dialled and authenticated with no forwards, and the
+/// target's host-key verdict drained from the handler.
+///
+/// Shared by the SFTP and exec entry points: credentials leave the keyring
+/// here, natively, exactly as `spawn_hosted_ssh` resolves them, and a caller
+/// can supply neither a destination nor a secret of its own.
+async fn dial_profile(
+    req: &SshSpawnRequest,
+    known_hosts_path: &Path,
+) -> Result<(DialedSsh, HostKeyStatus, String), String> {
+    req.validate()?;
+    let credential_request = req.clone();
+    let credentials =
+        tokio::task::spawn_blocking(move || load_all_credentials(&credential_request))
+            .await
+            .map_err(|error| format!("SSH credential task failed: {error}"))??;
+    let dialed = dial_authenticated(
+        req,
+        &credentials,
+        known_hosts_path,
+        None,
+        LinkPolicy::STANDARD,
+    )
+    .await?;
+    let observed = {
+        let mut guard = dialed
+            .observation
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::mem::take(&mut *guard)
+    };
+    let status = observed
+        .status
+        .ok_or_else(|| "SSH server did not present a host key".to_string())?;
+    let fingerprint = observed
+        .fingerprint
+        .ok_or_else(|| "SSH host-key fingerprint is unavailable".to_string())?;
+    Ok((dialed, status, fingerprint))
+}
+
 /// Open SFTP against a saved profile.
 ///
 /// Credentials are resolved here, natively, exactly as `spawn_hosted_ssh`
@@ -1931,26 +1971,28 @@ pub async fn open_hosted_sftp(
     req: SshSpawnRequest,
     known_hosts_path: PathBuf,
 ) -> Result<HostedSftp, String> {
-    req.validate()?;
-    let credential_request = req.clone();
-    let credentials =
-        tokio::task::spawn_blocking(move || load_all_credentials(&credential_request))
-            .await
-            .map_err(|error| format!("SSH credential task failed: {error}"))??;
-
-    let DialedSsh {
+    let (
+        DialedSsh {
+            handle,
+            jump_handles,
+            ..
+        },
+        host_key_status,
+        host_key_fingerprint,
+    ) = dial_profile(&req, &known_hosts_path).await?;
+    let session = open_sftp_subsystem(&handle).await?;
+    Ok(HostedSftp {
+        session,
+        host_key_status,
+        host_key_fingerprint,
         handle,
         jump_handles,
-        observation,
-    } = dial_authenticated(
-        &req,
-        &credentials,
-        &known_hosts_path,
-        None,
-        LinkPolicy::STANDARD,
-    )
-    .await?;
+    })
+}
 
+async fn open_sftp_subsystem(
+    handle: &client::Handle<ClientHandler>,
+) -> Result<russh_sftp::client::SftpSession, String> {
     let channel = handle
         .channel_open_session()
         .await
@@ -1959,30 +2001,214 @@ pub async fn open_hosted_sftp(
         .request_subsystem(true, "sftp")
         .await
         .map_err(|error| format!("SFTP subsystem request failed: {error}"))?;
-    let session = russh_sftp::client::SftpSession::new(channel.into_stream())
+    russh_sftp::client::SftpSession::new(channel.into_stream())
         .await
-        .map_err(|error| format!("SFTP handshake failed: {error}"))?;
+        .map_err(|error| format!("SFTP handshake failed: {error}"))
+}
 
-    let observed = {
-        let mut guard = observation
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        std::mem::take(&mut *guard)
-    };
-    let host_key_status = observed
-        .status
-        .ok_or_else(|| "SSH server did not present a host key".to_string())?;
-    let host_key_fingerprint = observed
-        .fingerprint
-        .ok_or_else(|| "SSH host-key fingerprint is unavailable".to_string())?;
+/// What one exec channel produced.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SshExecOutput {
+    /// `None` when the remote process ended on a signal.
+    pub exit_code: Option<i32>,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    /// Output past the caller's bound was dropped.
+    pub truncated: bool,
+}
 
-    Ok(HostedSftp {
-        session,
+/// Output can hold a credential (a pair invitation); only sizes are shown.
+impl std::fmt::Debug for SshExecOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SshExecOutput")
+            .field("exit_code", &self.exit_code)
+            .field("stdout_bytes", &self.stdout.len())
+            .field("stderr_bytes", &self.stderr.len())
+            .field("truncated", &self.truncated)
+            .finish()
+    }
+}
+
+/// Why an exec did not complete, split by whether the command may have run.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SshExecError {
+    /// The command never reached the server: no channel, or the request
+    /// could not be sent.
+    #[error("the command was not sent: {0}")]
+    NotSent(String),
+    /// The server declined to run it.
+    #[error("the server refused the command: {0}")]
+    Rejected(String),
+    /// The command was sent and the channel ended or timed out before it
+    /// reported an exit. It may or may not have run.
+    #[error("the command's outcome is unknown: {0}")]
+    Interrupted(String),
+}
+
+/// A saved profile's connection for one-shot commands and SFTP (ADR-0235
+/// P6), the host-bootstrap counterpart of [`HostedSftp`].
+///
+/// One connection carries both, so a bootstrap authenticates once. Like the
+/// SFTP session it never forwards anything, and it grants exactly what a
+/// shell on that machine grants.
+pub struct HostedSshExec {
+    pub host_key_status: HostKeyStatus,
+    pub host_key_fingerprint: String,
+    handle: Arc<client::Handle<ClientHandler>>,
+    jump_handles: Vec<Arc<client::Handle<ClientHandler>>>,
+}
+
+/// Dial a saved profile for commands and SFTP.
+pub async fn open_hosted_exec(
+    req: SshSpawnRequest,
+    known_hosts_path: PathBuf,
+) -> Result<HostedSshExec, String> {
+    let (
+        DialedSsh {
+            handle,
+            jump_handles,
+            ..
+        },
+        host_key_status,
+        host_key_fingerprint,
+    ) = dial_profile(&req, &known_hosts_path).await?;
+    Ok(HostedSshExec {
         host_key_status,
         host_key_fingerprint,
         handle,
         jump_handles,
     })
+}
+
+impl HostedSshExec {
+    /// Whether the SSH connection underneath is still up.
+    pub fn is_connected(&self) -> bool {
+        !self.handle.is_closed() && self.jump_handles.iter().all(|hop| !hop.is_closed())
+    }
+
+    /// Run `command` through the remote login shell, as `ssh host command`
+    /// does, feed it `stdin` and then end of file, and collect its output up
+    /// to `max_output_bytes` per stream.
+    ///
+    /// The caller owns quoting: the server hands `command` to the user's
+    /// shell verbatim. Past `wait` the channel is closed and the outcome is
+    /// [`SshExecError::Interrupted`].
+    pub async fn exec(
+        &self,
+        command: &str,
+        stdin: &[u8],
+        wait: Duration,
+        max_output_bytes: usize,
+    ) -> Result<SshExecOutput, SshExecError> {
+        let mut channel = self
+            .handle
+            .channel_open_session()
+            .await
+            .map_err(|error| SshExecError::NotSent(error.to_string()))?;
+        channel
+            .exec(true, command)
+            .await
+            .map_err(|error| SshExecError::NotSent(error.to_string()))?;
+        let collected = tokio::time::timeout(wait, async {
+            // The command may already be running: a failed write is an
+            // unknown outcome, not a refusal.
+            if !stdin.is_empty() {
+                channel
+                    .data(stdin)
+                    .await
+                    .map_err(|error| SshExecError::Interrupted(error.to_string()))?;
+            }
+            channel
+                .eof()
+                .await
+                .map_err(|error| SshExecError::Interrupted(error.to_string()))?;
+            collect_exec(&mut channel, max_output_bytes).await
+        })
+        .await;
+        match collected {
+            Ok(result) => result,
+            Err(_) => {
+                let _ = channel.close().await;
+                Err(SshExecError::Interrupted(format!(
+                    "no exit within {}s",
+                    wait.as_secs()
+                )))
+            }
+        }
+    }
+
+    /// A new SFTP session on this connection.
+    pub async fn sftp(&self) -> Result<russh_sftp::client::SftpSession, String> {
+        open_sftp_subsystem(&self.handle).await
+    }
+}
+
+fn append_bounded(buffer: &mut Vec<u8>, data: &[u8], max: usize, truncated: &mut bool) {
+    let room = max.saturating_sub(buffer.len());
+    if data.len() > room {
+        *truncated = true;
+    }
+    buffer.extend_from_slice(&data[..data.len().min(room)]);
+}
+
+/// Read one exec channel to its close.
+async fn collect_exec(
+    channel: &mut Channel<ClientMsg>,
+    max_output_bytes: usize,
+) -> Result<SshExecOutput, SshExecError> {
+    let mut output = SshExecOutput {
+        exit_code: None,
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+        truncated: false,
+    };
+    let mut exited = false;
+    let mut accepted = false;
+    while let Some(message) = channel.wait().await {
+        match message {
+            ChannelMsg::Success => accepted = true,
+            // Only the reply to `exec` can fail here: nothing else was asked
+            // of this channel, so the command never started.
+            ChannelMsg::Failure if !accepted => {
+                return Err(SshExecError::Rejected(
+                    "the server would not start the command".into(),
+                ));
+            }
+            ChannelMsg::Data { data } => {
+                append_bounded(
+                    &mut output.stdout,
+                    &data,
+                    max_output_bytes,
+                    &mut output.truncated,
+                );
+            }
+            ChannelMsg::ExtendedData { data, ext: 1 } => {
+                append_bounded(
+                    &mut output.stderr,
+                    &data,
+                    max_output_bytes,
+                    &mut output.truncated,
+                );
+            }
+            ChannelMsg::ExitStatus { exit_status } => {
+                output.exit_code = Some(i32::try_from(exit_status).unwrap_or(i32::MAX));
+                exited = true;
+            }
+            ChannelMsg::ExitSignal { .. } => {
+                output.exit_code = None;
+                exited = true;
+            }
+            ChannelMsg::Close => break,
+            _ => {}
+        }
+    }
+    if exited {
+        Ok(output)
+    } else {
+        Err(SshExecError::Interrupted(
+            "the channel closed before the command reported an exit".into(),
+        ))
+    }
 }
 
 /// A minimal in-process SSH server, enough of RFC 4254 to exercise the client
@@ -2043,6 +2269,8 @@ EkUgg9byMeDuVd92H8WqAAAAEmNvZ25pYS10ZXN0LWNsaWVudAECAw==
         /// channel back to the client, which is how a real server announces a
         /// connection arriving on the forwarded port.
         pub knock_on_forward: bool,
+        /// Exec channels running `cat`: input is echoed until end of file.
+        pub cat_channels: std::collections::HashSet<ChannelId>,
     }
 
     impl server::Server for TestServerHandler {
@@ -2103,6 +2331,77 @@ EkUgg9byMeDuVd92H8WqAAAAEmNvZ25pYS10ZXN0LWNsaWVudAECAw==
                     .data(channel, b"cognia-test-shell\r\n".to_vec())
                     .await;
             });
+            Ok(())
+        }
+
+        /// A scripted command runner, enough to drive the exec client:
+        /// `refuse` is declined, `hang` is accepted and never answered, `big`
+        /// prints 10 000 bytes, `signal` ends without a status, `cat` echoes
+        /// its input and exits 0 at end of file, and anything else echoes the
+        /// command line, writes `to-stderr` and exits 7.
+        async fn exec_request(
+            &mut self,
+            channel: ChannelId,
+            data: &[u8],
+            session: &mut Session,
+        ) -> Result<(), Self::Error> {
+            let command = data.to_vec();
+            if command == b"refuse" {
+                session.channel_failure(channel)?;
+                return Ok(());
+            }
+            session.channel_success(channel)?;
+            if command == b"hang" {
+                return Ok(());
+            }
+            if command == b"cat" {
+                self.cat_channels.insert(channel);
+                return Ok(());
+            }
+            let handle = session.handle();
+            tokio::spawn(async move {
+                match command.as_slice() {
+                    b"big" => {
+                        let _ = handle.data(channel, vec![b'x'; 10_000]).await;
+                        let _ = handle.exit_status_request(channel, 0).await;
+                    }
+                    b"signal" => {}
+                    _ => {
+                        let _ = handle.data(channel, command).await;
+                        let _ = handle
+                            .extended_data(channel, 1, b"to-stderr".to_vec())
+                            .await;
+                        let _ = handle.exit_status_request(channel, 7).await;
+                    }
+                }
+                let _ = handle.eof(channel).await;
+                let _ = handle.close(channel).await;
+            });
+            Ok(())
+        }
+
+        async fn data(
+            &mut self,
+            channel: ChannelId,
+            data: &[u8],
+            session: &mut Session,
+        ) -> Result<(), Self::Error> {
+            if self.cat_channels.contains(&channel) {
+                session.data(channel, data.to_vec())?;
+            }
+            Ok(())
+        }
+
+        async fn channel_eof(
+            &mut self,
+            channel: ChannelId,
+            session: &mut Session,
+        ) -> Result<(), Self::Error> {
+            if self.cat_channels.remove(&channel) {
+                session.exit_status_request(channel, 0)?;
+                session.eof(channel)?;
+                session.close(channel)?;
+            }
             Ok(())
         }
 
@@ -2194,7 +2493,10 @@ EkUgg9byMeDuVd92H8WqAAAAEmNvZ25pYS10ZXN0LWNsaWVudAECAw==
                 let Ok((socket, _)) = listener.accept().await else {
                     return;
                 };
-                let handler = TestServerHandler { knock_on_forward };
+                let handler = TestServerHandler {
+                    knock_on_forward,
+                    ..Default::default()
+                };
                 let config = Arc::clone(&config);
                 tokio::spawn(async move {
                     let _ = server::run_stream(config, socket, handler).await;
@@ -2306,10 +2608,11 @@ mod tests {
 
     use super::{
         classify_remote_shell, forget_host_key, learn_known_hosts_path, load_stored_credential,
-        parse_stored_credential, spawn_hosted_ssh, ssh_integration_command,
-        verify_or_learn_host_key, Arc, ForwardStatus, HostKeyChange, HostKeyVerdict,
-        HostedSshSpawn, HostedTerminalProcess, LocalForward, PathBuf, ShellKind, SshAuthMethod,
-        SshJumpHop, SshSpawnRequest, SshTerminalSession, HOST_KEY_CHANGED_CODE, MAX_JUMP_DEPTH,
+        open_hosted_exec, parse_stored_credential, spawn_hosted_ssh, ssh_integration_command,
+        verify_or_learn_host_key, Arc, ForwardStatus, HostKeyChange, HostKeyStatus, HostKeyVerdict,
+        HostedSshExec, HostedSshSpawn, HostedTerminalProcess, LocalForward, PathBuf, ShellKind,
+        SshAuthMethod, SshExecError, SshJumpHop, SshSpawnRequest, SshTerminalSession,
+        HOST_KEY_CHANGED_CODE, MAX_JUMP_DEPTH,
     };
 
     const KEY_A: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ";
@@ -2775,6 +3078,87 @@ mod tests {
         // Reconnecting to the same server now verifies against what was learned.
         let spawned = expect_session(connect_request(&client, server.port), &client).await;
         assert_eq!(spawned.host_key_status, "verified");
+    }
+
+    async fn exec_connection(client: &TestClient, port: u16) -> HostedSshExec {
+        match open_hosted_exec(connect_request(client, port), client.known_hosts.clone()).await {
+            Ok(connection) => connection,
+            Err(error) => panic!("exec connection should have opened: {error}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_exec_returns_the_command_output_streams_and_exit_code() {
+        let server = test_server::start(test_server::HOST_KEY_A, false).await;
+        let client = test_client();
+        let connection = exec_connection(&client, server.port).await;
+        assert_eq!(connection.host_key_status, HostKeyStatus::Learned);
+        assert!(connection.host_key_fingerprint.starts_with("SHA256:"));
+        assert!(connection.is_connected());
+
+        let output = connection
+            .exec("sh -c 'exec uname'", b"", StdDuration::from_secs(5), 1024)
+            .await
+            .expect("exec");
+        assert_eq!(output.stdout, b"sh -c 'exec uname'");
+        assert_eq!(output.stderr, b"to-stderr");
+        assert_eq!(output.exit_code, Some(7));
+        assert!(!output.truncated);
+        // The output may hold a credential: its Debug shows sizes only.
+        assert!(!format!("{output:?}").contains("uname"));
+
+        // Input reaches the command, then end of file ends it.
+        let echoed = connection
+            .exec("cat", b"exec 'uname' -s\n", StdDuration::from_secs(5), 1024)
+            .await
+            .expect("cat");
+        assert_eq!(echoed.stdout, b"exec 'uname' -s\n");
+        assert_eq!(echoed.exit_code, Some(0));
+
+        // The same connection serves more commands; a reconnect verifies.
+        assert!(connection
+            .exec("again", b"", StdDuration::from_secs(5), 1024)
+            .await
+            .is_ok());
+        let again = exec_connection(&client, server.port).await;
+        assert_eq!(again.host_key_status, HostKeyStatus::Verified);
+    }
+
+    #[tokio::test]
+    async fn an_exec_bounds_output_and_tells_refused_from_unknown() {
+        let server = test_server::start(test_server::HOST_KEY_A, false).await;
+        let client = test_client();
+        let connection = exec_connection(&client, server.port).await;
+
+        let big = connection
+            .exec("big", b"", StdDuration::from_secs(5), 4096)
+            .await
+            .expect("big");
+        assert_eq!(big.stdout.len(), 4096);
+        assert!(big.truncated);
+        assert_eq!(big.exit_code, Some(0));
+
+        assert!(matches!(
+            connection
+                .exec("refuse", b"", StdDuration::from_secs(5), 64)
+                .await,
+            Err(SshExecError::Rejected(_))
+        ));
+        // Sent, and never answered: whether it ran is unknown.
+        assert!(matches!(
+            connection
+                .exec("hang", b"", StdDuration::from_millis(300), 64)
+                .await,
+            Err(SshExecError::Interrupted(_))
+        ));
+        // Closed without an exit report: also unknown.
+        assert!(matches!(
+            connection
+                .exec("signal", b"", StdDuration::from_secs(5), 64)
+                .await,
+            Err(SshExecError::Interrupted(_))
+        ));
+        assert!(connection.is_connected());
     }
 
     #[tokio::test]

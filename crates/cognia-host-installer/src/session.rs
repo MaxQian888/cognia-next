@@ -6,6 +6,8 @@
 //!    │
 //! consent ── bound to this inspection and one offered plan
 //!    │
+//! fetch ──── the signed release for the machine's target, downloaded and
+//!            checked here
 //! install ── room → upload (skipped when the remote copy already verifies)
 //!            → remote digest → extract cognia-server → stage → ingress
 //!            → service install → readiness
@@ -33,7 +35,7 @@ use serde::Deserialize;
 use zeroize::Zeroizing;
 
 use crate::probe::{has_room_for, resolve_target, HostTarget, Notice, Unsupported};
-use crate::release::{LocalArchive, ReleaseError};
+use crate::release::{download_verified, select_install_release, LocalArchive, ReleaseError};
 use crate::shell::{
     ExecOutput, ExecRequest, RemoteOutcome, RemoteProbe, RemoteShell, ShellError, UploadSource,
 };
@@ -148,7 +150,7 @@ impl InstallError {
 }
 
 /// What the user may choose for a machine.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlanKind {
     /// Nothing is installed: install and pair.
@@ -290,6 +292,18 @@ pub struct InstallOptions {
     pub ingress_port: Option<u16>,
     /// The local account the Host serves (`COGNIA_LOCAL_ACCOUNT_ID`).
     pub local_account_id: Option<String>,
+}
+
+/// Where [`Session::fetch`] takes a release from: the update service, the
+/// trust root this build ships and the trust state it advances.
+pub struct ReleaseSource<'a> {
+    pub network: &'a dyn cognia_update_catalog::client::UpdateNetwork,
+    pub root: Option<&'a cognia_update_catalog::verify::RootPayload>,
+    pub trust: &'a cognia_update_catalog::client::TrustFile,
+    pub channel: &'a str,
+    /// Where the verified archive is kept on this machine.
+    pub download_dir: &'a std::path::Path,
+    pub now_ms: i64,
 }
 
 /// Wait budgets, per step.
@@ -527,6 +541,33 @@ impl<'a> Session<'a> {
                 stage: StageName::Plan,
                 detail: format!("the installed Host's status could not be read: {error}"),
             })
+    }
+
+    /// The signed release for this machine's target, downloaded and checked
+    /// against the catalog's sha256 before anything is uploaded.
+    pub async fn fetch(
+        &self,
+        inspection: &Inspection,
+        consent: &Consent,
+        source: &ReleaseSource<'_>,
+    ) -> Result<LocalArchive, InstallError> {
+        consent.check(inspection, &[PlanKind::Fresh, PlanKind::Repair])?;
+        self.stage(StageName::Fetch, async {
+            let release = select_install_release(
+                source.network,
+                source.root,
+                source.trust,
+                source.channel,
+                &inspection.target.target,
+                source.now_ms,
+            )
+            .await?;
+            tokio::fs::create_dir_all(source.download_dir)
+                .await
+                .map_err(|error| ReleaseError::Io(error.to_string()))?;
+            Ok(download_verified(source.network, &release, source.download_dir).await?)
+        })
+        .await
     }
 
     /// Install or repair the Host from a verified local archive.

@@ -293,6 +293,13 @@ Still waiting:
 - **Not included:** route publishing, because SSH has no public route.
 - **Tests:** mirror P4 with a fake SSH peer, plus an opt-in real host.
 
+**Progress (2026-10-19).** The owner moved P6 ahead of P5, so the Devices UI has a working backend while the tunnel spikes stay deferred.
+
+- **Terminal.** `cognia_terminal::ssh::open_hosted_exec` dials a saved profile through the same `dial_profile` path `open_hosted_sftp` now shares. `HostedSshExec::exec` runs one command with stdin, an output bound and a deadline, and tells a refusal (`NotSent`, `Rejected`) from an unknown outcome (`Interrupted`). `sftp()` opens SFTP on the same connection. The in-process test server answers exec requests, and the in-memory SFTP server is now `sftp_memory`, behind a `test-support` feature.
+- **Adapter.** `cognia_host_installer::ssh::SshShell`. The command line is always `sh -s`, and the request travels on stdin as a POSIX script, so the remote login shell (bash, zsh, fish, csh) never parses the quoting. `stat` and `upload` use SFTP, and the upload hashes what it streams against the declared digest. `mkdirp` is `mkdir -p`.
+- **Caller.** `Session::fetch` reports the `fetch` stage. `desktop::InstallerSessions` is the desktop's registry: one entry per open shell, steps bound to the latest inspection and an offered plan, never overlapping, and failures typed for the UI (`InstallerFailure`). Its Tauri shells live in `commands` (feature `tauri-host`), registered in `src-tauri` with `InstallerSessions` managed. Stage transitions are emitted on `host-installer://stage`. The TS client is `lib/host-installer/client.ts`.
+- **Open:** the opt-in real-host test, which runs with P5's desktop smoke.
+
 ## P7 — Microsoft accounts
 
 Only the account types that passed S4. They become a provider in the same TS account layer, with an account picker and tests. If S4 passes nothing, the plan records that and P7 closes without code.

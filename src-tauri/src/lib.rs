@@ -635,6 +635,8 @@ pub fn run() {
         // shell lines with no visible dock tab, so dock listing never sees
         // them.
         .manage(terminal::headless::HeadlessTerminalState::new())
+        // ADR-0235 — open host bootstrap sessions (install a Host over SSH).
+        .manage(cognia_host_installer::desktop::InstallerSessions::new())
         // Source Control panel (ADR-0038) — the watcher map per active repo.
         // Stateless commands aside, this is the subsystem's only managed state.
         .manage(git::GitWatcherState::new())
@@ -991,6 +993,12 @@ pub fn run() {
             cognia_file_share::commands::file_share_sftpgo_set,
             cognia_file_share::commands::file_collab_host_set,
             cognia_file_share::commands::file_collab_host_status,
+            cognia_host_installer::commands::host_installer_ssh_open,
+            cognia_host_installer::commands::host_installer_inspect,
+            cognia_host_installer::commands::host_installer_install,
+            cognia_host_installer::commands::host_installer_pair,
+            cognia_host_installer::commands::host_installer_uninstall,
+            cognia_host_installer::commands::host_installer_close,
             files::scan_claude_skills,
             files::read_claude_user_config,
             files::default_export_dir,

@@ -26,6 +26,9 @@ path = "src/lib.rs"
 # enables it.
 default = []
 tauri-host = ["dep:tauri"]
+# `sftp_memory`, the in-memory SFTP server other crates' tests drive their
+# SFTP code against (the host installer's SSH adapter, ADR-0235 P6).
+test-support = []
 
 [dependencies]
 cognia-core = { path = "../cognia-core", features = ["workspace-env-async"] }
