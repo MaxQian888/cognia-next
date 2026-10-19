@@ -9,12 +9,16 @@
  *  - Any caller that needs a sane default model when the user hasn't pinned
  *    one explicitly via their `ImageProcessingOptions`.
  *
- * Default model ids are kept current with the provider catalog snapshot
- * (the sharded models.dev bundle), which is the authority for
- * which models actually exist upstream. When in doubt the matchers below let a
+ * Default model ids are reviewed against provider documentation as well as the
+ * sharded models.dev bundle, which does not cover every media API. Matchers let a
  * user-configured (newer) model id pass through untouched, so the defaults are
  * only ever the *last* fallback.
  */
+
+import {
+  isModelLifecycleAllowed,
+  resolveModelLifecycle,
+} from "@cognia/provider-types/model-catalog"
 
 export type ImageEditProviderId = "openai" | "xai" | "togetherai" | "fireworks" | "deepinfra"
 
@@ -156,9 +160,11 @@ export const IMAGE_PROVIDERS: Record<ImageProviderId, ImageProviderDefinition> =
   google: {
     id: "google",
     // "Nano Banana" — Gemini-native image generation/editing.
-    defaultModel: "gemini-3.1-flash-image-preview",
+    defaultModel: "gemini-nano-banana-2.1",
     models: [
-      "gemini-3.1-flash-image-preview",
+      "gemini-nano-banana-2.1",
+      "gemini-3.1-flash-image",
+      "gemini-3.1-flash-lite-image",
       "gemini-3-pro-image",
       "gemini-2.5-flash-image",
       "imagen-4.0-ultra-generate-001",
@@ -257,6 +263,14 @@ export const IMAGE_PROVIDERS: Record<ImageProviderId, ImageProviderDefinition> =
     supportsMaskEdit: false,
     modelMatchers: DIFFUSION_MATCHERS,
   },
+}
+
+// Keep the broad family matchers for saved pins/history, while fresh choices
+// obey the same official lifecycle notices as chat and Catalog v2.
+for (const provider of Object.values(IMAGE_PROVIDERS)) {
+  provider.models = provider.models.filter((model) =>
+    isModelLifecycleAllowed(resolveModelLifecycle(provider.id, model).lifecycle, "new")
+  )
 }
 
 /**

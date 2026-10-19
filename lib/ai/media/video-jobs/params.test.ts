@@ -60,3 +60,24 @@ describe("checkVideoJobParams", () => {
     expect(checkVideoJobParams("qwen", "wan2.6-i2v", {}, true)).toEqual({ ok: true })
   })
 })
+
+it("validates Omni controls independently from saved Veo controls", () => {
+  expect(checkVideoJobParams("google", "gemini-omni-1.1-flash", { seed: 0 }, false)).toMatchObject({
+    ok: false,
+    field: "seed",
+  })
+  expect(
+    checkVideoJobParams("google", "gemini-omni-1.1-flash", { aspectRatio: "1:1" }, false)
+  ).toMatchObject({ ok: false, field: "aspectRatio" })
+  expect(
+    checkVideoJobParams("google", "gemini-omni-1.1-flash", { resolution: "1024x1024" }, false)
+  ).toMatchObject({ ok: false, field: "resolution" })
+  expect(
+    checkVideoJobParams(
+      "google",
+      "gemini-omni-1.1-flash",
+      { aspectRatio: "9:16", resolution: "1920x1080", durationSec: 8 },
+      true
+    )
+  ).toEqual({ ok: true })
+})

@@ -516,3 +516,19 @@ describe("waitForVideoJob", () => {
     })
   })
 })
+
+it("retains a retired Google pin but refuses starting a new job with it", async () => {
+  const t = setup()
+  const settings: ProviderSettingsSnapshot = {
+    defaultProvider: "google",
+    providers: { google: { enabled: true, apiKey: "g", defaultModel: "veo-2.0-generate-001" } },
+    customProviders: [],
+  }
+  t.setSettings(settings)
+  await expect(t.engine.start({ prompt: "A paper boat", origin })).resolves.toMatchObject({
+    ok: false,
+    error: { code: "unsupported_input", message: expect.stringContaining("retired") },
+  })
+  expect(settings.providers.google.defaultModel).toBe("veo-2.0-generate-001")
+  expect(t.startVideo).not.toHaveBeenCalled()
+})

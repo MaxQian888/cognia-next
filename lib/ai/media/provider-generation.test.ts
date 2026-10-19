@@ -38,6 +38,7 @@ jest.mock("@ai-sdk/google", () => ({
   createGoogle: jest.fn(() => ({
     image: jest.fn(() => "google-image-model"),
     video: jest.fn(() => "google-video-model"),
+    interactions: jest.fn(() => ({ doGenerate: jest.fn() })),
   })),
 }))
 jest.mock("@ai-sdk/xai", () => ({
@@ -139,7 +140,6 @@ describe("provider media generation", () => {
     ["openai", createOpenAI, "gpt-image-2"],
     ["azure", createAzure, "gpt-image-1"],
     ["bedrock", createAmazonBedrock, "amazon.nova-canvas-v1:0"],
-    ["google", createGoogle, "gemini-3.1-flash-image-preview"],
     ["togetherai", createTogetherAI, "black-forest-labs/FLUX.2-dev"],
     ["fireworks", createFireworks, "accounts/fireworks/models/flux-1-schnell-fp8"],
     ["deepinfra", createDeepInfra, "black-forest-labs/FLUX-2-klein-9b"],
@@ -152,6 +152,7 @@ describe("provider media generation", () => {
           apiKey: `${providerId}-key`,
           baseURL:
             providerId === "azure" ? "https://example.openai.azure.com/openai/v1" : undefined,
+          ...(providerId === "azure" ? { apiProtocol: "azure" as const } : {}),
           defaultModel: "chat-model",
         },
       })
@@ -214,7 +215,7 @@ describe("provider media generation", () => {
     }
   )
 
-  it("uses Google Veo for video generation", () => {
+  it("keeps explicitly selected Google Veo on its native adapter", () => {
     const settings = snapshot("google", {
       google: {
         enabled: true,
@@ -223,7 +224,7 @@ describe("provider media generation", () => {
       },
     })
 
-    expect(videoModel(settings)).toBe("google-video-model")
+    expect(videoModel(settings, undefined, "veo-3.1-generate-preview")).toBe("google-video-model")
 
     const googleClient = (createGoogle as jest.Mock).mock.results[0].value
     expect(googleClient.video).toHaveBeenCalledWith("veo-3.1-generate-preview")
@@ -387,6 +388,25 @@ describe("provider media generation", () => {
     expect(() => assertSafeMediaPrompt("A paper boat")).not.toThrow()
   })
 
+  it.each([
+    { systemInstruction: "Contact alice@example.com" },
+    { responseFormat: [{ type: "image", description: "Contact alice@example.com" }] },
+    { "alice@example.com": "clean value" },
+  ])(
+    "blocks PII in Google image provider options before constructing a client: %j",
+    async (google) => {
+      await expect(
+        generateProviderImage({
+          snapshot: snapshot("google", { google: { enabled: true, apiKey: "google-key" } }),
+          prompt: "A glass fox",
+          providerOptions: { google },
+        })
+      ).rejects.toMatchObject({ code: "PII_BLOCKED" })
+      expect(createGoogle).not.toHaveBeenCalled()
+      expect(generateImage).not.toHaveBeenCalled()
+    }
+  )
+
   it("rejects unsupported explicit providers and missing configurations", async () => {
     await expect(
       generateProviderImage({
@@ -435,4 +455,195 @@ describe("provider media generation", () => {
     })
     expect(generateImage).not.toHaveBeenCalled()
   })
+})
+
+describe("Google Interactions media request contracts", () => {
+  const settings = () =>
+    snapshot("google", {
+      google: { enabled: true, apiKey: "google-key", defaultModel: "gemini-3.8-flash" },
+    })
+  const videoOptions = {
+    prompt: "A kite rises",
+    n: 1,
+    aspectRatio: "9:16" as const,
+    resolution: "1920x1080" as const,
+    duration: 8,
+    fps: undefined,
+    seed: undefined,
+    image: undefined,
+    frameImages: undefined,
+    inputReferences: undefined,
+    generateAudio: undefined,
+    providerOptions: {},
+  }
+  const json = (value: unknown, status = 200) =>
+    new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } })
+
+  it("routes Nano Banana through installed SDK Interactions with an explicit image format", async () => {
+    jest.clearAllMocks()
+    const transport = jest.fn().mockResolvedValue(
+      json({
+        status: "completed",
+        steps: [
+          {
+            type: "model_output",
+            content: [{ type: "image", mime_type: "image/png", data: "AQ==" }],
+          },
+        ],
+      })
+    )
+    const actual = jest.requireActual("@ai-sdk/google") as typeof import("@ai-sdk/google")
+    ;(createGoogle as jest.Mock).mockImplementationOnce((config) =>
+      actual.createGoogle({ ...config, fetch: transport })
+    )
+    ;(generateImage as jest.Mock).mockImplementationOnce(async ({ model, prompt, aspectRatio }) =>
+      model.doGenerate({
+        prompt,
+        aspectRatio,
+        n: 1,
+        size: undefined,
+        seed: undefined,
+        files: undefined,
+        mask: undefined,
+        providerOptions: {},
+      })
+    )
+    const result = await generateProviderImage({
+      snapshot: settings(),
+      prompt: "A glass fox",
+      aspectRatio: "16:9",
+    })
+    expect(result.images).toEqual(["AQ=="])
+    expect(transport.mock.calls[0][0]).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/interactions"
+    )
+    expect(JSON.parse(transport.mock.calls[0][1].body)).toMatchObject({
+      model: "gemini-nano-banana-2.1",
+      store: false,
+      background: false,
+      response_format: [{ type: "image", mime_type: "image/png", aspect_ratio: "16:9" }],
+    })
+  })
+
+  it("starts a restartable Omni interaction and polls inline video results", async () => {
+    const controller = new AbortController()
+    const transport = jest
+      .fn()
+      .mockResolvedValueOnce(json({ id: "v1_resume", status: "in_progress" }))
+      .mockResolvedValueOnce(json({ id: "v1_resume", status: "in_progress" }))
+      .mockResolvedValueOnce(
+        json({
+          id: "v1_resume",
+          status: "completed",
+          steps: [
+            {
+              type: "model_output",
+              content: [{ type: "video", mime_type: "video/mp4", data: "AQ==" }],
+            },
+          ],
+        })
+      )
+    const model = createProviderVideoModel(resolveVideoProvider(settings()), undefined, {
+      fetch: transport,
+    })
+    const started = await model.doStart!({
+      ...videoOptions,
+      image: { type: "file", data: new Uint8Array([1]), mediaType: "image/png" },
+      abortSignal: controller.signal,
+    })
+    expect(started.operation).toEqual({ interactionId: "v1_resume" })
+    const [url, init] = transport.mock.calls[0]
+    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/interactions")
+    expect(new Headers(init.headers).get("x-goog-api-key")).toBe("google-key")
+    expect(JSON.parse(init.body)).toMatchObject({
+      model: "gemini-omni-1.1-flash",
+      background: true,
+      store: true,
+      input: [
+        { type: "image", data: "AQ==", mime_type: "image/png" },
+        { type: "text", text: "<FIRST_FRAME> A kite rises" },
+      ],
+      response_format: { type: "video", aspect_ratio: "9:16", resolution: "1080p", duration: "8s" },
+    })
+    const resumed = createProviderVideoModel(
+      resolveVideoProvider(settings()),
+      "gemini-omni-1.1-flash",
+      { fetch: transport }
+    )
+    expect(
+      await resumed.doStatus!({ operation: JSON.parse(JSON.stringify(started.operation)) })
+    ).toMatchObject({ status: "pending" })
+    expect(await resumed.doStatus!({ operation: started.operation })).toMatchObject({
+      status: "completed",
+      videos: [{ type: "base64", mediaType: "video/mp4", data: "AQ==" }],
+    })
+    expect(transport.mock.calls[1][0]).toBe(
+      "https://generativelanguage.googleapis.com/v1beta/interactions/v1_resume"
+    )
+  })
+
+  it("reports failed and empty Omni results without silently succeeding", async () => {
+    const transport = jest
+      .fn()
+      .mockResolvedValueOnce(json({ status: "failed", error: { message: "quota" } }))
+      .mockResolvedValueOnce(json({ status: "completed", steps: [] }))
+    const model = createProviderVideoModel(resolveVideoProvider(settings()), undefined, {
+      fetch: transport,
+    })
+    expect(await model.doStatus!({ operation: { interactionId: "v1" } })).toMatchObject({
+      status: "error",
+      error: "quota",
+    })
+    expect(await model.doStatus!({ operation: { interactionId: "v1" } })).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("no video"),
+    })
+  })
+
+  it("refuses unsupported controls and PII before sending the Omni payload", async () => {
+    const transport = jest.fn()
+    const model = createProviderVideoModel(resolveVideoProvider(settings()), undefined, {
+      fetch: transport,
+    })
+    await expect(model.doStart!({ ...videoOptions, seed: 0 })).rejects.toThrow(/seed/)
+    await expect(
+      model.doStart!({ ...videoOptions, providerOptions: { google: { negativePrompt: "blur" } } })
+    ).rejects.toThrow(/Veo provider options/)
+    await expect(
+      model.doStart!({ ...videoOptions, prompt: "Email alice@example.com" })
+    ).rejects.toMatchObject({ code: "PII_BLOCKED" })
+    expect(transport).not.toHaveBeenCalled()
+  })
+
+  it("preserves cancellation and transport failures", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const transport = jest.fn().mockRejectedValue(new DOMException("Aborted", "AbortError"))
+    const model = createProviderVideoModel(resolveVideoProvider(settings()), undefined, {
+      fetch: transport,
+    })
+    await expect(
+      model.doStart!({ ...videoOptions, abortSignal: controller.signal })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(transport.mock.calls[0][1].signal.aborted).toBe(true)
+    const failed = createProviderVideoModel(resolveVideoProvider(settings()), undefined, {
+      fetch: jest.fn().mockResolvedValue(json({}, 429)),
+    })
+    await expect(failed.doStart!(videoOptions)).rejects.toThrow(/HTTP 429/)
+  })
+})
+
+it("retains a retired image pin but refuses new inference instead of rewriting it", async () => {
+  jest.clearAllMocks()
+  const settings = snapshot("google", {
+    google: { enabled: true, apiKey: "k", defaultModel: "gemini-3.1-flash-image-preview" },
+  })
+  await expect(
+    generateProviderImage({ snapshot: settings, prompt: "A kite" })
+  ).rejects.toMatchObject({
+    code: "PROVIDER_CONFIGURATION",
+    message: expect.stringContaining("retired"),
+  })
+  expect(settings.providers.google.defaultModel).toBe("gemini-3.1-flash-image-preview")
+  expect(generateImage).not.toHaveBeenCalled()
 })

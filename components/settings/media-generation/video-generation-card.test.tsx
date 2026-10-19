@@ -17,8 +17,15 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
-    values ? `${key}:${JSON.stringify(values)}` : key,
+  useTranslations: (namespace: string) => (key: string, values?: Record<string, unknown>) => {
+    if (namespace === "modelCatalog") {
+      const messages = jest.requireActual("@/i18n/messages/en/modelCatalog.json")
+      const translated = key.split(".").reduce((value, part) => value?.[part], messages)
+      if (typeof translated !== "string") throw new Error(`Missing modelCatalog key: ${key}`)
+      return translated
+    }
+    return values ? `${key}:${JSON.stringify(values)}` : key
+  },
 }))
 
 jest.mock("@/lib/network/platform-fetch", () => ({
@@ -206,4 +213,43 @@ describe("VideoGenerationCard", () => {
     fireEvent.click(screen.getByRole("switch", { name: "agentTool" }))
     expect(saved()).toEqual({ agentTool: false })
   })
+})
+
+it("offers Omni as the Google default and retains an explicitly saved Veo model", () => {
+  withProviders(
+    { providerId: "google" },
+    { google: { enabled: true, apiKey: "g", defaultModel: "gemini-3.8-flash" } }
+  )
+  const { unmount } = render(<VideoGenerationCard />)
+  let model = screen.getByRole("combobox", { name: "model" }) as HTMLSelectElement
+  expect(Array.from(model.options).some((option) => option.value === "gemini-omni-1.1-flash")).toBe(
+    true
+  )
+  expect(Array.from(model.options).some((option) => option.value === "veo-2.0-generate-001")).toBe(
+    false
+  )
+  unmount()
+  withProviders(
+    { providerId: "google", model: "veo-3.1-generate-preview" },
+    { google: { enabled: true, apiKey: "g" } }
+  )
+  render(<VideoGenerationCard />)
+  model = screen.getByRole("combobox", { name: "model" }) as HTMLSelectElement
+  expect(model.value).toBe("veo-3.1-generate-preview")
+  expect(saveMock).not.toHaveBeenCalled()
+})
+
+it("keeps a retired saved Google model visible and disabled without rewriting it", () => {
+  withProviders(
+    { providerId: "google", model: "veo-2.0-generate-001" },
+    { google: { enabled: true, apiKey: "g" } }
+  )
+  render(<VideoGenerationCard />)
+  const model = screen.getByRole("combobox", { name: "model" }) as HTMLSelectElement
+  expect(model.value).toBe("veo-2.0-generate-001")
+  expect(
+    Array.from(model.options).find((option) => option.value === "veo-2.0-generate-001")?.disabled
+  ).toBe(true)
+  expect(screen.getByRole("option", { name: "veo-2.0-generate-001 · Retired" })).toBeDisabled()
+  expect(saveMock).not.toHaveBeenCalled()
 })

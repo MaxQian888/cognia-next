@@ -3,6 +3,7 @@ import {
   VIDEO_ASPECT_RATIOS,
   VIDEO_DURATIONS_SEC,
   VIDEO_PROVIDER_OPTIONS,
+  getVideoModelOptionSupport,
   VIDEO_RESOLUTIONS,
   isVideoProviderReachable,
   VIDEO_PROVIDERS,
@@ -90,4 +91,12 @@ describe("video-generation-sdk registry", () => {
     for (const size of VIDEO_RESOLUTIONS) expect(size).toMatch(/^\d+x\d+$/)
     for (const seconds of VIDEO_DURATIONS_SEC) expect(Number.isInteger(seconds)).toBe(true)
   })
+})
+
+it("defaults new Google video jobs to Omni while retaining explicit Veo pins", () => {
+  expect(resolveVideoModel("google")).toBe("gemini-omni-1.1-flash")
+  expect(resolveVideoModel("google", "veo-3.1-generate-preview")).toBe("veo-3.1-generate-preview")
+  expect(getVideoModelOptionSupport("google", "gemini-omni-1.1-flash").seed).toBe(false)
+  expect(getVideoModelOptionSupport("google", "veo-3.1-generate-preview").seed).toBe(true)
+  expect(VIDEO_PROVIDERS.google.models).not.toContain("veo-2.0-generate-001")
 })

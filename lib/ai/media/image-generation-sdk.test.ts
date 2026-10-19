@@ -36,7 +36,7 @@ describe("image-generation-sdk registry", () => {
       expect(IMAGE_PROVIDERS.xai.defaultModel).toBe("grok-imagine-image-quality")
       expect(IMAGE_PROVIDERS.togetherai.defaultModel).toBe("black-forest-labs/FLUX.2-dev")
       expect(IMAGE_PROVIDERS.deepinfra.defaultModel).toBe("black-forest-labs/FLUX-2-klein-9b")
-      expect(IMAGE_PROVIDERS.google.defaultModel).toBe("gemini-3.1-flash-image-preview")
+      expect(IMAGE_PROVIDERS.google.defaultModel).toBe("gemini-nano-banana-2.1")
       expect(IMAGE_PROVIDERS.doubao.defaultModel).toBe("seedream-5-0-260128")
     })
   })
@@ -131,6 +131,13 @@ describe("image-generation-sdk registry", () => {
   })
 
   describe("resolveImageModel", () => {
+    it("keeps explicit older Google pins without offering retired models anew", () => {
+      expect(resolveImageModel("google", "gemini-3.1-flash-image-preview")).toBe(
+        "gemini-3.1-flash-image-preview"
+      )
+      expect(IMAGE_PROVIDERS.google.models).not.toContain("gemini-3.1-flash-image-preview")
+      expect(IMAGE_PROVIDERS.google.models).not.toContain("imagen-4.0-generate-001")
+    })
     it("passes through a configured image-capable model", () => {
       expect(resolveImageModel("xai", "grok-2-image")).toBe("grok-2-image")
     })

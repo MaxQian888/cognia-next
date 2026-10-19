@@ -15,13 +15,15 @@ import {
   type JSONValue,
 } from "ai"
 import { computeBackoffDelay } from "@cognia/primitives"
-import { hasNoLeakingPii, hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
+import { resolveModelLifecycle } from "@cognia/provider-types/model-catalog"
 
 import type { ProviderSettingsSnapshot, ResolvedProvider } from "@/lib/ai/provider-consumption"
 import { credentialAffinityOf } from "@/lib/ai/operations/credential-affinity"
 import {
   MediaGenerationError,
   assertSafeMediaPrompt,
+  hasSafeMediaProviderOptions,
   createProviderVideoModel,
   resolveVideoProvider,
 } from "../provider-generation"
@@ -242,6 +244,16 @@ export function createVideoJobEngine(deps: VideoJobEngineDeps) {
     if (blocked) return { ok: false, error: blocked }
 
     const modelId = resolveVideoModel(providerId, input.model ?? resolved.model)
+    const lifecycle = resolveModelLifecycle(providerId, modelId)
+    if (lifecycle.lifecycle === "retired") {
+      return {
+        ok: false,
+        error: failure(
+          "unsupported_input",
+          `Model "${modelId}" is retired.${lifecycle.replacementModelId ? ` Suggested replacement: ${lifecycle.replacementModelId}.` : ""}`
+        ),
+      }
+    }
     // The model id goes out in the request path or body. A model name only has
     // to contain a known fragment to be accepted, so hold it to an id's shape
     // and to the PII gate like the prompt.
@@ -643,23 +655,12 @@ const PROMPT_OVERRIDE_KEYS = new Set(["prompt", "text", "image", "image_url", "i
 /** Provider model ids: letters, digits and `. _ : / -`, as every listed provider uses. */
 const MODEL_ID = /^[\w.:/-]{1,128}$/
 
-/** `hasNoLeakingPiiDeep` reads values only; option keys go out verbatim too. */
-function keysAreClean(value: unknown, seen: WeakSet<object> = new WeakSet()): boolean {
-  if (!value || typeof value !== "object") return true
-  if (seen.has(value)) return true
-  seen.add(value)
-  if (Array.isArray(value)) return value.every((item) => keysAreClean(item, seen))
-  return Object.entries(value).every(
-    ([key, child]) => hasNoLeakingPii(key) && keysAreClean(child, seen)
-  )
-}
-
 /** Vendor options go out verbatim: gate every string in them, and refuse prompt overrides. */
 function checkProviderOptions(
   providerOptions: StartVideoJobInput["providerOptions"]
 ): VideoJobError | null {
   if (!providerOptions) return null
-  if (!hasNoLeakingPiiDeep(providerOptions) || !keysAreClean(providerOptions)) {
+  if (!hasSafeMediaProviderOptions(providerOptions)) {
     return failure("pii_blocked", "Video provider options failed the outbound PII gate.")
   }
   for (const [provider, options] of Object.entries(providerOptions)) {

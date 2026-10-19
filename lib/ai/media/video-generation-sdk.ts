@@ -1,3 +1,8 @@
+import {
+  isModelLifecycleAllowed,
+  resolveModelLifecycle,
+} from "@cognia/provider-types/model-catalog"
+
 export type VideoProviderId =
   "google" | "xai" | "fal" | "replicate" | "doubao" | "volcengine" | "qwen"
 
@@ -11,8 +16,9 @@ export interface VideoProviderDefinition {
 export const VIDEO_PROVIDERS: Record<VideoProviderId, VideoProviderDefinition> = {
   google: {
     id: "google",
-    defaultModel: "veo-3.1-generate-preview",
+    defaultModel: "gemini-omni-1.1-flash",
     models: [
+      "gemini-omni-1.1-flash",
       "veo-3.1-generate-preview",
       "veo-3.1-fast-generate-preview",
       "veo-3.1-generate",
@@ -20,7 +26,7 @@ export const VIDEO_PROVIDERS: Record<VideoProviderId, VideoProviderDefinition> =
       "veo-3.0-fast-generate-001",
       "veo-2.0-generate-001",
     ],
-    modelMatchers: ["veo"],
+    modelMatchers: ["veo", "gemini-omni"],
   },
   xai: {
     id: "xai",
@@ -93,6 +99,12 @@ export const VIDEO_PROVIDERS: Record<VideoProviderId, VideoProviderDefinition> =
   },
 }
 
+for (const provider of Object.values(VIDEO_PROVIDERS)) {
+  provider.models = provider.models.filter((model) =>
+    isModelLifecycleAllowed(resolveModelLifecycle(provider.id, model).lifecycle, "new")
+  )
+}
+
 export const VIDEO_GENERATION_PROVIDER_IDS = Object.keys(VIDEO_PROVIDERS) as VideoProviderId[]
 
 export function isSupportedVideoProvider(value: string): value is VideoProviderId {
@@ -140,6 +152,16 @@ export const VIDEO_PROVIDER_OPTIONS: Record<VideoProviderId, VideoProviderOption
   volcengine: { aspectRatio: true, resolution: true, duration: true, seed: true, fps: false },
   // DashScope Wan warns on aspectRatio and fps; size comes from resolution.
   qwen: { aspectRatio: false, resolution: true, duration: true, seed: true, fps: false },
+}
+
+/** Omni's Interactions endpoint has different controls from the legacy Veo API. */
+export function getVideoModelOptionSupport(
+  providerId: VideoProviderId,
+  modelId?: string
+): VideoProviderOptionSupport {
+  return providerId === "google" && modelId?.startsWith("gemini-omni-")
+    ? { aspectRatio: true, resolution: true, duration: true, seed: false, fps: false }
+    : VIDEO_PROVIDER_OPTIONS[providerId]
 }
 
 /**

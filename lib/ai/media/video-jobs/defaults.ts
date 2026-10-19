@@ -14,7 +14,7 @@ import type { ProviderSettingsSnapshot } from "@/lib/ai/provider-consumption"
 import { resolveVideoProvider } from "../provider-generation"
 import {
   VIDEO_GENERATION_PROVIDER_IDS,
-  VIDEO_PROVIDER_OPTIONS,
+  getVideoModelOptionSupport,
   isVideoProviderReachable,
   resolveVideoModel,
   type VideoProviderId,
@@ -93,7 +93,10 @@ export function applyVideoDefaults(
   const savedUsable = saved !== undefined && configured.includes(saved)
   const providerId = overrides.providerId ?? (savedUsable ? saved : undefined)
   const defaultsApply = savedUsable && providerId === saved
-  const support = defaultsApply ? VIDEO_PROVIDER_OPTIONS[saved] : undefined
+  const model = overrides.model ?? (defaultsApply ? settings?.model : undefined)
+  const support = defaultsApply
+    ? getVideoModelOptionSupport(saved, resolveVideoModel(saved, model))
+    : undefined
 
   const params: VideoJobParams = {}
   const durationSec =
@@ -106,7 +109,6 @@ export function applyVideoDefaults(
   if (aspectRatio !== undefined) params.aspectRatio = aspectRatio
   if (resolution !== undefined) params.resolution = resolution
 
-  const model = overrides.model ?? (defaultsApply ? settings?.model : undefined)
   return {
     ...(providerId !== undefined ? { providerId } : {}),
     ...(model !== undefined ? { model } : {}),

@@ -6,7 +6,7 @@
  */
 
 import {
-  VIDEO_PROVIDER_OPTIONS,
+  getVideoModelOptionSupport,
   videoStartFrameMode,
   type VideoProviderId,
 } from "../video-generation-sdk"
@@ -37,7 +37,22 @@ export function checkVideoJobParams(
   params: VideoJobParams,
   hasStartFrame: boolean
 ): VideoParamsCheck {
-  const support = VIDEO_PROVIDER_OPTIONS[providerId]
+  const support = getVideoModelOptionSupport(providerId, modelId)
+  if (providerId === "google" && modelId.startsWith("gemini-omni-")) {
+    if (params.aspectRatio && !["16:9", "9:16"].includes(params.aspectRatio)) {
+      return { ok: false, field: "aspectRatio", message: `${modelId} takes 16:9 or 9:16.` }
+    }
+    if (
+      params.resolution &&
+      !["640x360", "1280x720", "1920x1080", "3840x2160"].includes(params.resolution)
+    ) {
+      return {
+        ok: false,
+        field: "resolution",
+        message: `${modelId} takes 360p, 720p, 1080p or 4k.`,
+      }
+    }
+  }
   if (params.aspectRatio !== undefined) {
     if (!ASPECT_RATIO.test(params.aspectRatio)) {
       return {

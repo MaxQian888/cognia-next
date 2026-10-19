@@ -104,3 +104,18 @@ describe("applyVideoDefaults", () => {
     expect(applyVideoDefaults({ agentTool: true }, {}, ["google"])).toEqual({ params: {} })
   })
 })
+
+it("uses Omni for an unpinned Google provider and preserves configured Veo", () => {
+  const settings = snapshot({
+    google: { enabled: true, apiKey: "g", defaultModel: "gemini-3.8-flash" },
+  })
+  expect(listConfiguredVideoProviders(settings, true)[0].defaultModel).toBe("gemini-omni-1.1-flash")
+  expect(
+    listConfiguredVideoProviders(
+      snapshot({
+        google: { enabled: true, apiKey: "g", defaultModel: "veo-3.1-generate-preview" },
+      }),
+      true
+    )[0].defaultModel
+  ).toBe("veo-3.1-generate-preview")
+})

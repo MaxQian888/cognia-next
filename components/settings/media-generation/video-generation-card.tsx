@@ -30,13 +30,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { resolveModelLifecycle } from "@cognia/provider-types/model-catalog"
 import { getProviderDisplayName } from "@/lib/ai/icons"
 import { createProviderSettingsSnapshot } from "@/lib/ai/provider-consumption"
 import {
   VIDEO_ASPECT_RATIOS,
   VIDEO_DURATIONS_SEC,
   VIDEO_PROVIDERS,
-  VIDEO_PROVIDER_OPTIONS,
+  getVideoModelOptionSupport,
   VIDEO_RESOLUTIONS,
   videoStartFrameMode,
   type VideoProviderId,
@@ -53,6 +54,7 @@ type OptionKey = "durationSec" | "aspectRatio" | "resolution"
 
 export function VideoGenerationCard() {
   const t = useTranslations("settings.mediaGeneration.video")
+  const tCatalog = useTranslations("modelCatalog")
   const settings = useSettingsStore((store) => store.settings)
   const save = useSettingsStore((store) => store.save)
 
@@ -76,8 +78,8 @@ export function VideoGenerationCard() {
 
   const selected = configured.find((provider) => provider.providerId === video.providerId)
   const savedButGone = video.providerId !== undefined && !selected
-  const support = selected ? VIDEO_PROVIDER_OPTIONS[selected.providerId] : undefined
   const model = video.model ?? selected?.defaultModel
+  const support = selected ? getVideoModelOptionSupport(selected.providerId, model) : undefined
   const frameMode = model ? videoStartFrameMode(model) : "optional"
   // A saved model the list does not carry (typed via `/video --model`, or
   // dropped from a later release) stays selectable instead of blanking the field.
@@ -216,11 +218,15 @@ export function VideoGenerationCard() {
                       <SelectItem value={AUTO}>
                         {t("modelDefault", { model: selected.defaultModel })}
                       </SelectItem>
-                      {modelChoices.map((id) => (
-                        <SelectItem key={id} value={id}>
-                          {id}
-                        </SelectItem>
-                      ))}
+                      {modelChoices.map((id) => {
+                        const retired =
+                          resolveModelLifecycle(selected.providerId, id).lifecycle === "retired"
+                        return (
+                          <SelectItem key={id} value={id} disabled={retired}>
+                            {retired ? `${id} · ${tCatalog("lifecycles.retired")}` : id}
+                          </SelectItem>
+                        )
+                      })}
                     </SelectContent>
                   </Select>
                   {frameMode !== "optional" && (
@@ -235,7 +241,15 @@ export function VideoGenerationCard() {
             {support && (support.duration || support.aspectRatio || support.resolution) && (
               <div className="grid gap-4 sm:grid-cols-3">
                 {support.duration && optionSelect("durationSec", VIDEO_DURATIONS_SEC)}
-                {support.aspectRatio && optionSelect("aspectRatio", VIDEO_ASPECT_RATIOS)}
+                {support.aspectRatio &&
+                  optionSelect(
+                    "aspectRatio",
+                    model?.startsWith("gemini-omni-")
+                      ? VIDEO_ASPECT_RATIOS.filter(
+                          (ratio) => ratio !== "1:1" || video.aspectRatio === ratio
+                        )
+                      : VIDEO_ASPECT_RATIOS
+                  )}
                 {support.resolution && optionSelect("resolution", VIDEO_RESOLUTIONS)}
               </div>
             )}
