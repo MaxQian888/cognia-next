@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::install_home::InstallHome;
 use crate::{RestartPolicy, ServicePlatform, ServiceScope, ServiceSpec};
@@ -606,10 +606,11 @@ pub fn install_server_service(
 /// installer plans a fresh install, a repair, a re-pair or an uninstall from
 /// (ADR-0235). Readiness is probed over the network by the binary and added
 /// beside this.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerStatusReport {
-    pub scope: &'static str,
+    /// `user` or `system`.
+    pub scope: String,
     pub definition_path: PathBuf,
     pub installed: bool,
     /// The service manager has it loaded (launchd) or active (systemd).
@@ -625,6 +626,40 @@ pub struct ServerStatusReport {
     pub installed_versions: Vec<String>,
     /// A self-update between switching `current` and committing.
     pub pending_update: Option<crate::install_home::PendingUpdate>,
+    /// The server's `/readyz` on its loopback port. Filled by the binary,
+    /// which owns the HTTP client; [`status_report`] leaves it unset.
+    #[serde(default)]
+    pub readiness: Option<Readiness>,
+}
+
+/// A loopback `/readyz` answer, as data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Readiness {
+    /// The server answered at all.
+    pub answered: bool,
+    pub ready: bool,
+    /// Checks holding readiness back, sorted.
+    #[serde(default)]
+    pub failing: Vec<String>,
+    /// Why the server refused the brain, when it did.
+    #[serde(default)]
+    pub brain_refusal: Option<String>,
+    /// Why there was no answer.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl Readiness {
+    pub fn unanswered(error: String) -> Self {
+        Self {
+            answered: false,
+            ready: false,
+            failing: Vec::new(),
+            brain_refusal: None,
+            error: Some(error),
+        }
+    }
 }
 
 /// The data dir `install` uses for a scope when none is passed. A system
@@ -649,7 +684,7 @@ pub fn status_report(
     let home = InstallHome::in_data_dir(data_dir);
     let master_key = MasterKeyPlacement::default_for(platform, scope, data_dir);
     ServerStatusReport {
-        scope: scope.as_str(),
+        scope: scope.as_str().to_owned(),
         definition_path: service.definition_path,
         installed: service.installed,
         running: service.running,
@@ -659,6 +694,7 @@ pub fn status_report(
         current_version: home.current_version(),
         installed_versions: home.installed_versions(),
         pending_update: home.pending(),
+        readiness: None,
     }
 }
 
@@ -1024,6 +1060,12 @@ mod tests {
         assert_eq!(json["masterKeyPresent"], true);
         assert_eq!(json["currentVersion"], "1.4.0");
         assert!(json["pendingUpdate"].is_null());
+        // The installer reads the binary's output back into the same type.
+        let mut with_readiness = installed.clone();
+        with_readiness.readiness = Some(Readiness::unanswered("no answer".into()));
+        let round_trip: ServerStatusReport =
+            serde_json::from_value(serde_json::to_value(&with_readiness).unwrap()).unwrap();
+        assert_eq!(round_trip, with_readiness);
     }
 
     #[test]

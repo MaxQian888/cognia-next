@@ -138,6 +138,14 @@ enum CliCommand {
         /// Print only the invitation string, without the terminal QR code.
         #[arg(long, default_value_t = false)]
         no_qr: bool,
+        /// Print one JSON object for a program (ADR-0235's installer):
+        /// `{"status":"issued","invitation","hasRelay","expiresAtMs"}`, or
+        /// `{"status":"refused","cause","message"}` with `cause` one of
+        /// `relay_unavailable`, `not_running` or `failed`. A refusal exits 0:
+        /// it is an answer, not a fault. The invitation is an owner
+        /// credential: the caller must not log or store it.
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     /// Boot the HTTPS companion server. Binds 0.0.0.0:<port> by default.
     Serve {
@@ -850,12 +858,13 @@ async fn run_service_command(
             let data_dir = data_dir
                 .clone()
                 .unwrap_or_else(|| server::default_status_data_dir(platform, &ctx));
-            let report =
+            let mut report =
                 server::status_report((*scope).into(), platform, &ctx, &SystemIo, &data_dir);
-            let readiness = probe_readiness(*port).await;
-            let mut value = serde_json::to_value(&report).map_err(|e| e.to_string())?;
-            value["readiness"] = serde_json::to_value(&readiness).map_err(|e| e.to_string())?;
-            println!("{value}");
+            report.readiness = Some(probe_readiness(*port).await);
+            println!(
+                "{}",
+                serde_json::to_string(&report).map_err(|e| e.to_string())?
+            );
             Ok(())
         }
         ServiceCommand::Status { scope, port, .. } => {
@@ -886,33 +895,7 @@ async fn run_service_command(
     }
 }
 
-/// `/readyz` on the loopback port, as data: what `service status` prints and
-/// what `--json` reports.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Readiness {
-    /// The server answered at all.
-    answered: bool,
-    ready: bool,
-    /// Checks holding readiness back, sorted.
-    failing: Vec<String>,
-    /// Why the server refused the brain, when it did.
-    brain_refusal: Option<String>,
-    /// Why there was no answer.
-    error: Option<String>,
-}
-
-impl Readiness {
-    fn unanswered(error: String) -> Self {
-        Self {
-            answered: false,
-            ready: false,
-            failing: Vec::new(),
-            brain_refusal: None,
-            error: Some(error),
-        }
-    }
-}
+use cognia_host_service::server::Readiness;
 
 /// `GET /readyz` on the loopback port. The host's certificate is self-signed,
 /// so the probe skips verification; it only ever talks to 127.0.0.1.
@@ -1431,6 +1414,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tenant_id,
             direct,
             no_qr,
+            json,
         } => {
             let port = resolve_pair_port(port, std::env::var("COGNIA_PORT").ok().as_deref());
             let base_url = resolve_advertise_url(advertise_url, port);
@@ -1438,7 +1422,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let options = PairOptions {
                 port,
                 direct,
-                qr: !no_qr,
+                qr: !no_qr && !json,
+                json,
             };
             run_pair(
                 &store,
@@ -2033,6 +2018,34 @@ struct PairOptions {
     direct: bool,
     /// Draw a terminal QR code next to the string.
     qr: bool,
+    /// Answer with one JSON object instead of text.
+    json: bool,
+}
+
+/// `pair --json`'s answer.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum PairJson {
+    #[serde(rename_all = "camelCase")]
+    Issued {
+        invitation: String,
+        has_relay: bool,
+        expires_at_ms: i64,
+    },
+    Refused {
+        cause: &'static str,
+        message: String,
+    },
+}
+
+/// Why a running server's answer was refused, for a program to branch on: a
+/// running server without a relay room is not one that is down.
+fn pair_refusal_cause(running: &RunningPair) -> &'static str {
+    match running {
+        RunningPair::Issued { .. } => "relay_unavailable",
+        RunningPair::NotRunning(_) => "not_running",
+        RunningPair::Failed(_) => "failed",
+    }
 }
 
 /// Print an invitation: the string, its QR code and when it expires.
@@ -2129,8 +2142,18 @@ async fn run_pair(
     // operator asked for a direct one; the standalone cgnp3 below is only
     // issued under `--direct` when nothing is listening.
     let running = pair_through_running_server(options.port, base_url).await;
-    let standalone_reason =
-        pair_decision(&running, options.direct, base_url).map_err(OperatorError)?;
+    let standalone_reason = match pair_decision(&running, options.direct, base_url) {
+        Ok(reason) => reason,
+        Err(message) if options.json => {
+            let answer = PairJson::Refused {
+                cause: pair_refusal_cause(&running),
+                message,
+            };
+            println!("{}", serde_json::to_string(&answer)?);
+            return Ok(());
+        }
+        Err(message) => return Err(OperatorError(message).into()),
+    };
     if let RunningPair::Issued {
         encoded,
         has_relay,
@@ -2138,6 +2161,15 @@ async fn run_pair(
         ..
     } = running
     {
+        if options.json {
+            let answer = PairJson::Issued {
+                invitation: encoded,
+                has_relay,
+                expires_at_ms,
+            };
+            println!("{}", serde_json::to_string(&answer)?);
+            return Ok(());
+        }
         if has_relay {
             println!("\nPair invitation for device \"{device_name}\" (with relay):\n");
         } else {
@@ -2187,6 +2219,15 @@ async fn run_pair(
         },
     );
 
+    if options.json {
+        let answer = PairJson::Issued {
+            invitation: encoded,
+            has_relay: false,
+            expires_at_ms,
+        };
+        println!("{}", serde_json::to_string(&answer)?);
+        return Ok(());
+    }
     println!("\nDirect pair invitation for device \"{device_name}\" (no relay):\n");
     print_pair_invitation(&encoded, expires_at_ms, options.qr);
     println!("Scan or paste it on the app's pair screen once the host is serving.");
@@ -3637,6 +3678,53 @@ mod tests {
             format!("{:?}", super::OperatorError(refusal.clone())),
             refusal
         );
+    }
+
+    #[test]
+    fn pair_json_names_why_it_refused_and_never_logs_the_invitation_shape() {
+        let relay_less = super::RunningPair::Issued {
+            encoded: "cgnp3|x".into(),
+            has_relay: false,
+            relay_unavailable: Some("the relay is switched off".into()),
+            expires_at_ms: 1,
+        };
+        assert_eq!(super::pair_refusal_cause(&relay_less), "relay_unavailable");
+        assert_eq!(
+            super::pair_refusal_cause(&super::RunningPair::NotRunning("down".into())),
+            "not_running"
+        );
+        assert_eq!(
+            super::pair_refusal_cause(&super::RunningPair::Failed("500".into())),
+            "failed"
+        );
+        assert_eq!(
+            serde_json::to_value(super::PairJson::Refused {
+                cause: "relay_unavailable",
+                message: "no relay invitation".into(),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "status": "refused",
+                "cause": "relay_unavailable",
+                "message": "no relay invitation",
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(super::PairJson::Issued {
+                invitation: "cgnp4|x".into(),
+                has_relay: true,
+                expires_at_ms: 7,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "status": "issued",
+                "invitation": "cgnp4|x",
+                "hasRelay": true,
+                "expiresAtMs": 7,
+            })
+        );
+        let cli = Cli::try_parse_from(["cognia-server", "pair", "--json"]).expect("pair --json");
+        assert!(matches!(cli.command, CliCommand::Pair { json: true, .. }));
     }
 
     #[test]
