@@ -259,6 +259,10 @@ COPY --from=builder /work/target/release/cognia-external-agent-launcher /work/ta
 # dist/ first, then installs it with --install-links as a physical copy (the
 # shape the lockfile records and the bundle layout needs).
 RUN node scripts/build/build-webclone-sidecar.mjs
+# The sidecar's `link:` workspace packages (@cognia/agent-contracts and the
+# other ADR-0217 packages) export compiled `dist/`. A checkout builds it in the
+# root postinstall, which ran above before sidecar/ existed and skipped it.
+RUN node scripts/build/build-sidecar-linked-packages.mjs
 RUN npm --prefix sidecar/vscode-ext-host ci --no-audit --no-fund \
     && npm --prefix sidecar/vscode-ext-host run build
 RUN pnpm sidecar:codeserver-agent:build
