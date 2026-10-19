@@ -114,8 +114,9 @@ Each spike is an opt-in script in an owned scratch directory, run against a disp
 
 **Goal.** Deliver the ADR-0059 follow-up: a `cognia-server` that links no Tauri, GTK or WebKit.
 
-- **Reuse:** the existing `tauri-host` feature boundary (ADR-0196) and `scripts/gates/rust-architecture.json` forbidden-edge rules. `app_lib`'s feature set (`src-tauri/Cargo.toml`) gains a headless configuration that compiles out the Tauri shells. `cognia-server` builds with it.
-- **New:** the feature wiring and any `cfg` splits in `src-tauri/src` that still assume the desktop stack. The audit for those splits is the first task in this phase.
+- **Approach (revised 2026-10-19).** This phase executes ADR-0196 P8 and P9. The RPC families (`src-tauri/src/companion_api/rpc*`, `commands.rs`, `dispatch_host.rs`, about 27k lines) move into `cognia-companion-rpc` behind the `RpcHost` trait. `cognia-server` then moves to `crates/cognia-server`, with no `tauri` in `cargo tree -p cognia-server -i tauri`. An `app_lib` feature cannot work: on Linux, `tauri` depends on `gtk` unconditionally, and `muda` needs gtk3.
+- **Audit (2026-10-19).** Besides re-exports of Tauri-free crates, the binary still needs from `app_lib`: `companion_api::{commands, wiring, push_dispatchers}`, `headless::{brain, deployment_id, gateway_host, tenant_lease}`, `shutdown`, `jobs` and `init_structured_tracing`. The dispatcher reaches these local desktop modules: `browser`, `claude`, `cli_bridge`, `codeserver`, `codex_app_dispatch`, `fleet`, `github`, `keyring_secrets`, `perf`, `pi_extension`, `process_registry`, `recovery`, `session_import_watch`, `sftp_service` and `terminal_host_bridge`.
+- **Scheduling.** `rpc.rs` takes several commits a day from other sessions, so the move runs in a separate worktree in family-sized batches, each rebased and committed on its own. P4 proceeds first against macOS archives.
 - **Decide here, with evidence:** whether `ocr-paddle` stays in the Linux build. Choose from the resulting glibc baseline and the headless OCR need, and record the baseline in this plan.
 - **Verification:** `ldd`/`readelf` on the headless binary shows no `libgtk`, `libwebkit2gtk` or `libjavascriptcore`. The existing headless conformance and server smoke tests pass. The server image switches to the headless binary and drops the GTK/WebKit runtime packages.
 

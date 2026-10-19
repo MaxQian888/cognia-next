@@ -119,7 +119,7 @@ The TypeScript Dev Tunnels SDK (MIT, `@microsoft/dev-tunnels-*`) runs in a Node 
 ## 3. The installed Host is headless, user-scoped, verified and never overwritten
 
 - **Supported machines.** Linux x64 and arm64, and macOS arm64 and x64. Windows is refused with an explanation.
-- **Headless build first.** The Linux archive ships only after the no-tauri headless build of `cognia-server` exists: a cargo feature on `app_lib` that leaves the Tauri stack out, per ADR-0059's follow-up and ADR-0196's boundary. This build also slims the server image. Whether `ocr-paddle` is left out of the Linux archive is decided in that phase from its effect on the glibc baseline. The probe refuses a machine below the recorded baseline.
+- **Headless build first.** The Linux archive ships only after the no-tauri headless build of `cognia-server` exists: `cognia-server` becomes its own Tauri-free package. This is ADR-0196 phases P8 (the RPC families move into `cognia-companion-rpc` behind `RpcHost`) and P9, which is ADR-0059's follow-up. A cargo feature on `app_lib` cannot do it: on Linux, `tauri` links GTK unconditionally, because `muda` needs gtk3. This build also slims the server image. Whether `ocr-paddle` is left out of the Linux archive is decided in that phase from its effect on the glibc baseline. The probe refuses a machine below the recorded baseline.
 - **Archive packaging.** `scripts/build/package-host-archive.mjs` and `scripts/release/update-catalog.mjs` gain `linux-x64` and `linux-arm64`, reusing the existing manifest, Node pins and archive layout. Integrity on Linux is the signed catalog digest plus the per-file manifest hashes; codesign stays macOS-only.
 - **CI.** The first CI job that builds host archives for all four targets reuses the `publish-agent-hosts` matrix shape and the existing `ubuntu-24.04-arm` runner. Self-update then covers Linux as it covers macOS.
 - **Scope.** User scope only, no sudo. The probe checks systemd lingering and states plainly when the Host will stop at logout or after a reboot until the user logs in. A machine without systemd or launchd is refused.
@@ -193,7 +193,7 @@ The plan specifies each phase with files, tests and exit criteria.
    - S3: which GitHub token kinds the tunnel service accepts.
    - S4: Microsoft accounts, in parallel and non-blocking.
 1. **Host ingress and the tunnel route.** The ingress listener, listener-aware origin classification, route persistence, host-admin commands, `tunnelBaseUrl` precedence and client trust.
-2. **Headless build.** The no-tauri `cognia-server` build.
+2. **Headless build.** The Tauri-free `cognia-server` package (ADR-0196 P8/P9). It runs in its own worktree, in batches, because the RPC files are edited concurrently. The Phase 4 installer does not wait for it: it is verified against macOS archives first.
 3. **Linux host archives.** Packaging, catalog, the CI job, self-update and documentation.
 4. **Installer.** The installer crate, the `cognia-server` stage and `--json` entry points, the tunnel helper and GitHub device flow.
 5. **Devices UI.** Install through a VS Code tunnel, repair, route repair, uninstall and forget, in both locales.

@@ -119,7 +119,7 @@ TypeScript Dev Tunnels SDK（MIT，`@microsoft/dev-tunnels-*`）运行在 `servi
 ## 3. 安装的 Host 是无头的、用户态的、经过校验且从不被覆盖
 
 - **支持的机器。** Linux x64 和 arm64，以及 macOS arm64 和 x64。Windows 直接拒绝并说明原因。
-- **先做无头构建。** 只有在 `cognia-server` 的 no-tauri 无头构建就绪后，才发布 Linux 归档。它是 `app_lib` 上一个不链接 Tauri 栈的 cargo feature，对应 ADR-0059 的后续事项和 ADR-0196 的边界，也顺带让服务端镜像瘦身。Linux 归档是否去掉 `ocr-paddle`，在该阶段根据它对 glibc 基线的影响决定；低于记录基线的机器会在探测时被拒绝。
+- **先做无头构建。** 只有在 `cognia-server` 的 no-tauri 无头构建就绪后，才发布 Linux 归档。即 `cognia-server` 成为独立、不依赖 Tauri 的包：ADR-0196 的 P8（RPC families 经 `RpcHost` 迁入 `cognia-companion-rpc`）与 P9，也就是 ADR-0059 的后续事项，同时让服务端镜像瘦身。在 `app_lib` 上加 cargo feature 做不到：Linux 上 `tauri` 无条件链接 GTK（`muda` 依赖 gtk3）。Linux 归档是否去掉 `ocr-paddle`，在该阶段根据它对 glibc 基线的影响决定；低于记录基线的机器会在探测时被拒绝。
 - **归档打包。** `scripts/build/package-host-archive.mjs` 与 `scripts/release/update-catalog.mjs` 增加 `linux-x64` 和 `linux-arm64`，复用现有的清单、Node pin 和归档布局。Linux 的完整性由签名目录摘要加清单中的逐文件哈希保证；codesign 仍只用于 macOS。
 - **CI。** 第一个为四个目标构建 host 归档的 CI 作业，复用 `publish-agent-hosts` 的矩阵形态和现有的 `ubuntu-24.04-arm` runner。此后自更新像覆盖 macOS 一样覆盖 Linux。
 - **范围。** 只用用户态，不用 sudo。探测会检查 systemd linger；若未开启，会明确告知 Host 会在用户登出时停止，重启后要等用户登录才会运行。没有 systemd 或 launchd 的机器直接拒绝。
@@ -193,7 +193,7 @@ UI 复用现有组件：
    - S3：隧道服务接受哪些 GitHub 令牌。
    - S4：微软账号，并行进行，不阻塞。
 1. **Host 入口与隧道路线：** 入口 listener、感知 listener 的来源分类、路线持久化、host-admin 命令、`tunnelBaseUrl` 优先级与客户端信任。
-2. **无头构建：** no-tauri 的 `cognia-server` 构建。
+2. **无头构建：** 不依赖 Tauri 的 `cognia-server` 包（ADR-0196 P8/P9）。RPC 文件有并发修改，因此在独立 worktree 中分批迁移；第 4 阶段的安装器不等它，先用 macOS 归档验证。
 3. **Linux host 归档：** 打包、目录、CI 作业、自更新与文档。
 4. **安装器：** 安装器 crate、`cognia-server` 的暂存子命令与 `--json` 入口、隧道 helper 与 GitHub device flow。
 5. **Devices UI：** 经 VS Code 隧道安装、修复、修复路线、卸载与忘记，两种语言齐全。
