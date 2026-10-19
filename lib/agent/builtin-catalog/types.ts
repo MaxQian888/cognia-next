@@ -12,6 +12,8 @@
  * were two different agents wearing one name.
  */
 
+import type { PromptDefinitionV1 } from "@/lib/prompts/types"
+
 /** Where a built-in is offered. An entry can appear on more than one. */
 export type BuiltinAgentSurface =
   /** Injected into `SendOptions.agents` for a workflow-editor session. */
@@ -44,8 +46,14 @@ export interface BuiltinAgentEntry {
   name: string
   /** What the dispatching model reads when it decides whether to use this. */
   description: string
-  /** The system prompt the agent runs under. */
-  prompt: string
+  /**
+   * The agent's identity and working method, editable in the Prompt Center
+   * (ADR-0236). Read through `resolveBuiltinAgentPrompt`, never its
+   * `defaultBody`, so a customization reaches every shell. The host frame
+   * (environment, dispatched-subagent contract) is added around it at
+   * dispatch and is not part of this text.
+   */
+  identity: PromptDefinitionV1
   surfaces: readonly BuiltinAgentSurface[]
   toolPolicy: BuiltinToolPolicy
   /** Round-trip ceiling. Omitted means the runtime's own default. */

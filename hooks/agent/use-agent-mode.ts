@@ -47,7 +47,6 @@ export interface UseAgentModeResult {
   isPluginMode: (id: string) => boolean
 
   // Mode configuration helpers
-  getModeSystemPrompt: (id: string) => string
   getModeTools: (id: string) => string[]
   getModeOutputFormat: (id: string) => "text" | "code" | "html" | "react" | "markdown"
 }
@@ -171,15 +170,6 @@ export function useAgentMode(options: UseAgentModeOptions = {}): UseAgentModeRes
     [customModesMap, recordModeUsage]
   )
 
-  // Get mode system prompt
-  const getModeSystemPrompt = useCallback(
-    (id: string): string => {
-      const mode = getModeById(id)
-      return mode?.systemPrompt || ""
-    },
-    [getModeById]
-  )
-
   // Get mode tools
   const getModeTools = useCallback(
     (id: string): string[] => {
@@ -213,7 +203,6 @@ export function useAgentMode(options: UseAgentModeOptions = {}): UseAgentModeRes
     isCustomMode,
     isBuiltInMode,
     isPluginMode,
-    getModeSystemPrompt,
     getModeTools,
     getModeOutputFormat,
   }

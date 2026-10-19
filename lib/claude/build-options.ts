@@ -144,6 +144,7 @@ import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import type { ConnectorMode } from "@/types/connectors/policy"
 import { type AgentModeConfig } from "@/types/agent/agent-mode"
 import { buildAgentModeSessionUpdate } from "@/lib/agent/mode-session-update"
+import { MODE_PROMPT_PASSTHROUGH_VALUES, shippedModePrompt } from "@/lib/agent/modes/built-ins"
 import { resolveTurnAgentMode } from "./turn-agent-mode"
 import {
   resolveAgentEnvironment,
@@ -1537,8 +1538,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     agentId: character?.id,
   }
   const promptSnapshot = await loadPromptOverrideSnapshot().catch(() => null)
-  const resolveTurnPrompt = (def: PromptDefinitionV1): string =>
-    resolvePrompt(def, { context: promptContext, snapshot: promptSnapshot }).text
+  const resolveTurnPrompt = (
+    def: PromptDefinitionV1,
+    values?: Readonly<Record<string, string>>
+  ): string => resolvePrompt(def, { context: promptContext, snapshot: promptSnapshot, values }).text
   const agentExecutionPolicy = resolveAgentExecutionPolicy(
     character?.executionPolicy,
     session?.executionPolicy
@@ -2807,7 +2810,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // `systemPrompt`/`tools` onto `systemPromptDelta`/`defaultToolSet` 1:1, so
   // this is identical for every mode-backed preset — and it is the only way
   // Minimal / Code / Creator, which have no mode record, contribute at all.
-  const rawModeSection = activePreset?.systemPromptDelta?.trim() || ""
+  // A built-in mode still carrying its shipped text resolves through its
+  // Prompt Center entry; placeholders pass through to the substitution below.
+  const shippedModeDef =
+    activePreset?.source === "builtin"
+      ? shippedModePrompt(activePreset.legacyModeId, activePreset.systemPromptDelta)
+      : undefined
+  const rawModeSection =
+    (shippedModeDef
+      ? resolveTurnPrompt(shippedModeDef, MODE_PROMPT_PASSTHROUGH_VALUES)
+      : activePreset?.systemPromptDelta
+    )?.trim() || ""
   const modeSection = rawModeSection
     ? processPromptTemplateVariables(rawModeSection, {
         modeName: activePreset?.name,

@@ -253,6 +253,34 @@ describe("runLeadReview", () => {
     expect(prompt).toContain("I added validation")
   })
 
+  it("reviews with the workspace's customized lead-review prompt (ADR-0236)", async () => {
+    const { __setPromptOverrideSnapshotForTests, buildPromptOverrideSnapshot } =
+      await import("@/lib/prompts/snapshot")
+    const { LEAD_REVIEW_PROMPT } = await import("./squad/lead-review")
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: LEAD_REVIEW_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-team",
+          revisionId: "por",
+          body: "Insist on tests. Reply in a ```json block.",
+          contractVersion: LEAD_REVIEW_PROMPT.contractVersion,
+        },
+      ])
+    )
+    try {
+      const executeAgent = verdictExecutor('```json\n{"verdict":"approved","feedback":"ok"}\n```')
+      const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+      await runLeadReview!(reviewArgs({ team: { ...makeTeam(), projectId: "ws-team" } }))
+      const opts = (executeAgent as jest.Mock).mock.calls[0]?.[1] as Record<string, unknown>
+      expect(JSON.stringify(opts)).toContain("Insist on tests.")
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+    }
+  })
+
   it("throws on an unparseable verdict rather than reading it as approval", async () => {
     const executeAgent = verdictExecutor("I think it looks fine, ship it!")
     const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })

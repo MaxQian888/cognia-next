@@ -4577,6 +4577,40 @@ describe("resolveSendOptions — brief mode", () => {
     }
   })
 
+  it("resolves a built-in mode's prompt through its Prompt Center entry (ADR-0236)", async () => {
+    const { __setPromptOverrideSnapshotForTests, buildPromptOverrideSnapshot } =
+      await import("@/lib/prompts/snapshot")
+    const { BUILT_IN_MODE_PROMPTS, getAgentMode } = await import("@/lib/agent/modes/built-ins")
+    const research = getAgentMode("research")!
+    const def = BUILT_IN_MODE_PROMPTS.get("research")!
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: def.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por",
+          body: "Edited {{mode_name}} brief.",
+          contractVersion: def.contractVersion,
+        },
+      ])
+    )
+    try {
+      const shipped = await resolveSendOptions({ agentMode: research })
+      expect(shipped.systemPrompt).toContain(`Edited ${research.name} brief.`)
+      expect(shipped.systemPrompt).not.toContain(research.systemPrompt!.slice(0, 40))
+      // A custom mode reusing the id owns its own text.
+      const custom = await resolveSendOptions({
+        agentMode: { ...research, systemPrompt: "My own research rules." },
+      })
+      expect(custom.systemPrompt).toContain("My own research rules.")
+      expect(custom.systemPrompt).not.toContain("Edited")
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+    }
+  })
+
   it("merges with an existing appendSystemPrompt (e.g., A2UI block) under a blank line", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", briefMode: true, a2uiEnabled: true } as ChatSession & {

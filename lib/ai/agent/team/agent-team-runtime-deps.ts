@@ -24,7 +24,7 @@ import { parseProposedPlan } from "./plan-parse"
 import {
   buildLeadReviewPrompt,
   leadReviewVerdictSchema,
-  LEAD_REVIEW_SYSTEM_PROMPT,
+  LEAD_REVIEW_PROMPT,
   type LeadReviewVerdict,
 } from "./squad/lead-review"
 import type { LeadPlanResult, RunTeamLifecycleDeps } from "./agent-team-runtime"
@@ -36,6 +36,7 @@ import {
 } from "./pr-feedback/resolvers"
 import { buildLeadExecutionConfig, readAppSettings } from "./squad/lead-execution"
 import type { AppSettings } from "@cognia/agent-config-types"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
 
 /** Build the prompt sent to a teammate for a specific task. */
 export function buildTeammatePrompt(
@@ -296,7 +297,12 @@ export function buildAgentTeamRuntimeDeps(
       }),
       // The reviewer's role overrides any persona the lead carries: a lead whose
       // systemPrompt says "you build features" must still review as a reviewer.
-      systemPrompt: LEAD_REVIEW_SYSTEM_PROMPT,
+      // Resolved per review step (ADR-0236): the step is the adoption point.
+      systemPrompt: (
+        await resolvePromptAsync(LEAD_REVIEW_PROMPT, {
+          context: team.projectId ? { workspaceId: team.projectId } : {},
+        })
+      ).text,
       phase: "review",
       signal,
     })

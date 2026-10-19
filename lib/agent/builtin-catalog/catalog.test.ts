@@ -12,6 +12,10 @@ import {
 } from "./catalog"
 import { isNamedAgentColor, normalizeAgentColor } from "@/lib/claude/agents/agent-color"
 import { SUBAGENT_CONTRACT_TAG } from "@/lib/agent/prompts/subagent-frame"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 describe("the built-in catalog", () => {
   it("ships one entry per id, with no duplicates", () => {
@@ -22,7 +26,7 @@ describe("the built-in catalog", () => {
   it("gives every entry a description and a prompt the dispatcher can read", () => {
     for (const entry of builtinAgents()) {
       expect(entry.description.length).toBeGreaterThan(20)
-      expect(entry.prompt.length).toBeGreaterThan(20)
+      expect(entry.identity.defaultBody.length).toBeGreaterThan(20)
       expect(entry.surfaces.length).toBeGreaterThan(0)
     }
   })
@@ -114,7 +118,7 @@ describe("code-reviewer", () => {
   })
 
   it("asks for severity-ordered, confirmed findings and refuses praise", () => {
-    const prompt = builtinAgentById(CODE_REVIEWER_AGENT_ID)!.prompt
+    const prompt = builtinAgentById(CODE_REVIEWER_AGENT_ID)!.identity.defaultBody
     for (const phrase of ["severity", "file:line", "smallest fix", "No praise", "read-only"]) {
       expect(prompt).toContain(phrase)
     }
@@ -127,10 +131,10 @@ describe("prompt hygiene", () => {
   // nesting-enabled child).
   it("never restates the dispatched-subagent contract", () => {
     for (const entry of builtinAgents()) {
-      expect(entry.prompt).not.toContain(`<${SUBAGENT_CONTRACT_TAG}>`)
-      expect(entry.prompt).not.toMatch(/cannot dispatch (further )?subagents/i)
-      expect(entry.prompt).not.toMatch(/final message is the ONLY/i)
-      expect(entry.prompt).not.toMatch(/follow-up questions/i)
+      expect(entry.identity.defaultBody).not.toContain(`<${SUBAGENT_CONTRACT_TAG}>`)
+      expect(entry.identity.defaultBody).not.toMatch(/cannot dispatch (further )?subagents/i)
+      expect(entry.identity.defaultBody).not.toMatch(/final message is the ONLY/i)
+      expect(entry.identity.defaultBody).not.toMatch(/follow-up questions/i)
     }
   })
 
@@ -155,5 +159,38 @@ describe("prompt hygiene", () => {
       CODE_REVIEWER_AGENT_ID,
     ].map((id) => builtinAgentById(id)!.color)
     expect(new Set(colours).size).toBe(colours.length)
+  })
+})
+
+describe("customized built-in identities (ADR-0236)", () => {
+  afterEach(() => __setPromptOverrideSnapshotForTests(null))
+
+  it("gives every built-in its own editable identity slot", () => {
+    const ids = builtinAgents().map((entry) => entry.identity.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const entry of builtinAgents()) {
+      expect(entry.identity.id).toBe(`agent.builtin.${entry.id}.identity`)
+      expect(entry.identity.kind).toBe("role")
+    }
+  })
+
+  it("projects the customized identity and keeps the entry's tool policy", () => {
+    const explore = builtinAgentById(EXPLORE_AGENT_ID)!
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: explore.identity.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por",
+          body: "You are a terse scout. Report paths only.",
+          contractVersion: explore.identity.contractVersion,
+        },
+      ])
+    )
+    const def = builtinAgentDefinition(explore)
+    expect(def.prompt).toBe("You are a terse scout. Report paths only.")
+    expect(def.tools).toEqual(resolveBuiltinToolPolicy(explore.toolPolicy))
   })
 })

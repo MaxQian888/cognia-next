@@ -11,9 +11,16 @@
  * a send path: consumers import their own definition directly.
  */
 
+import { builtinAgents } from "@/lib/agent/builtin-catalog/catalog"
+import { BUILT_IN_MODE_PROMPTS } from "@/lib/agent/modes/built-ins"
 import { BRIEF_MODE_PROMPT } from "@/lib/agent/prompts/brief-mode"
 import { CLI_BASE_IDENTITY_PROMPT } from "@/lib/agent/prompts/cli-base"
 import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_PROMPT } from "@/lib/agent/prompts/plan-mode"
+import { ASSESS_ROUTING_PROMPT } from "@/lib/ai/agent/team/auto/assess-routing"
+import { CLARIFY_OBJECTIVE_PROMPT } from "@/lib/ai/agent/team/auto/clarify-objective"
+import { COMPOSE_ROSTER_PROMPT } from "@/lib/ai/agent/team/auto/compose-roster"
+import { DECOMPOSE_TASKS_PROMPT } from "@/lib/ai/agent/team/auto/decompose-tasks"
+import { LEAD_REVIEW_PROMPT } from "@/lib/ai/agent/team/squad/lead-review"
 import { CANVAS_ACTION_PROMPTS } from "@/lib/ai/generation/canvas-actions"
 import { SELECTION_SUMMARY_PROMPT } from "@/lib/ai/generation/summarize-material"
 import { CONVERSATION_SUMMARY_PROMPT } from "@/lib/ai/generation/summarizer"
@@ -63,6 +70,8 @@ export const PROMPT_DEFINITIONS: readonly PromptDefinitionV1[] = [
   POST_COMPACTION_RECOVERY_PROMPT,
   CLI_BASE_IDENTITY_PROMPT,
   // agents
+  ...builtinAgents().map((entry) => entry.identity),
+  ...BUILT_IN_MODE_PROMPTS.values(),
   PLAN_MODE_PROMPT,
   PLAN_MODE_STRUCTURED_STEPS_PROMPT,
   // generation
@@ -101,6 +110,12 @@ export const PROMPT_DEFINITIONS: readonly PromptDefinitionV1[] = [
   ISSUE_METADATA_PROMPT,
   ISSUE_TITLE_PROMPT,
   ISSUE_RELATIONS_PROMPT,
+  // team
+  CLARIFY_OBJECTIVE_PROMPT,
+  ASSESS_ROUTING_PROMPT,
+  COMPOSE_ROSTER_PROMPT,
+  DECOMPOSE_TASKS_PROMPT,
+  LEAD_REVIEW_PROMPT,
 ]
 
 const BY_ID = new Map<string, PromptDefinitionV1>()

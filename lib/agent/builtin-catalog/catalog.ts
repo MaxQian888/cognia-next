@@ -16,7 +16,37 @@ import { workflowDesignerAgent } from "@/lib/claude/agents/subagents/workflow-de
 import { workflowDebuggerAgent } from "@/lib/claude/agents/subagents/workflow-debugger"
 import { workflowRefactorerAgent } from "@/lib/claude/agents/subagents/workflow-refactorer"
 import { workflowDocWriterAgent } from "@/lib/claude/agents/subagents/workflow-doc-writer"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt, type PromptDefinitionV1, type PromptHost } from "@/lib/prompts/types"
 import type { BuiltinAgentEntry, BuiltinAgentSurface, BuiltinToolPolicy } from "./types"
+
+/**
+ * The editable identity of one built-in (ADR-0236). Tools, turn budget and
+ * surfaces stay on the entry: editing the text cannot widen what the agent
+ * may reach.
+ */
+function builtinIdentity(
+  id: string,
+  hosts: readonly PromptHost[],
+  defaultBody: string
+): PromptDefinitionV1 {
+  return definePrompt({
+    id: `agent.builtin.${id}.identity`,
+    contractVersion: 1,
+    kind: "role",
+    group: "agents",
+    operation: "replace-template",
+    scopes: ["account"],
+    activation: "next-operation",
+    risk: "ordinary",
+    hosts,
+    maxChars: 16_000,
+    outputContract:
+      "Runs as the dispatched agent's identity. The host adds the environment block and the dispatched-subagent contract around it.",
+    consumers: ["lib/agent/builtin-catalog/catalog.ts"],
+    defaultBody,
+  })
+}
 
 /** Canonical id of the always-available general-purpose agent. */
 export const GENERAL_PURPOSE_AGENT_ID = "general-purpose"
@@ -142,7 +172,7 @@ function workflowEntry(id: string, name: string, def: AgentDefinition): BuiltinA
     id,
     name,
     description: def.description,
-    prompt: def.prompt,
+    identity: builtinIdentity(id, ["app"], def.prompt),
     surfaces: ["workflow-editor", "team", "dispatch"],
     toolPolicy: def.tools ? { kind: "allowlist", tools: def.tools } : { kind: "inherit" },
     ...(def.maxTurns !== undefined ? { maxTurns: def.maxTurns } : {}),
@@ -155,7 +185,7 @@ const ENTRIES: readonly BuiltinAgentEntry[] = [
     name: "General Purpose",
     description:
       "General-purpose agent for researching complex questions, searching across the codebase, and executing multi-step tasks autonomously. Use when a task is open-ended or needs several rounds of searching, reading, and editing, and you are not confident the first attempt will land it.",
-    prompt: GENERAL_PURPOSE_PROMPT,
+    identity: builtinIdentity(GENERAL_PURPOSE_AGENT_ID, ["app", "cli"], GENERAL_PURPOSE_PROMPT),
     surfaces: ["team", "cli"],
     toolPolicy: { kind: "inherit" },
     color: "blue",
@@ -165,7 +195,7 @@ const ENTRIES: readonly BuiltinAgentEntry[] = [
     name: "Explore",
     description:
       "Read-only search scout for broad codebase exploration. It locates where code lives and how it connects across many files and naming conventions, and reports a digest with `file:line` citations. Dispatch it (in parallel for independent areas) during plan-mode research before proposing changes. It reads and searches only, and never edits or reviews.",
-    prompt: EXPLORE_PROMPT,
+    identity: builtinIdentity(EXPLORE_AGENT_ID, ["app", "cli"], EXPLORE_PROMPT),
     surfaces: ["dispatch", "cli"],
     toolPolicy: { kind: "read-only" },
     maxTurns: 20,
@@ -176,7 +206,7 @@ const ENTRIES: readonly BuiltinAgentEntry[] = [
     name: "Plan",
     description:
       "Read-only architect that turns a task (plus exploration findings) into a concrete, step-by-step implementation plan grounded in real files. It names the critical files, reuses existing patterns, and lists the verification for each step. Dispatch it during plan-mode research after exploring. It proposes only, and never edits.",
-    prompt: PLAN_PROMPT,
+    identity: builtinIdentity(PLAN_AGENT_ID, ["app", "cli"], PLAN_PROMPT),
     surfaces: ["dispatch", "cli"],
     toolPolicy: { kind: "read-only" },
     maxTurns: 20,
@@ -187,7 +217,7 @@ const ENTRIES: readonly BuiltinAgentEntry[] = [
     name: "Code Reviewer",
     description:
       "Read-only reviewer that hunts for defects in a diff, branch, or set of files: correctness, security, missing tests, and re-implemented utilities. It confirms every finding by reading the surrounding code and returns findings ordered by severity with `file:line` and the smallest fix. Dispatch it after implementing a change and before claiming it done. It never edits.",
-    prompt: CODE_REVIEWER_PROMPT,
+    identity: builtinIdentity(CODE_REVIEWER_AGENT_ID, ["app", "cli"], CODE_REVIEWER_PROMPT),
     surfaces: ["dispatch", "cli"],
     toolPolicy: { kind: "read-only" },
     maxTurns: 30,
@@ -241,11 +271,16 @@ export function resolveBuiltinToolPolicy(policy: BuiltinToolPolicy): string[] | 
  * Project one entry into the SDK `AgentDefinition` shape that rides
  * `SendOptions.agents` and the renderer's own dispatch path.
  */
+/** The identity text a built-in runs under: the account's customization, else shipped. */
+export function resolveBuiltinAgentPrompt(entry: BuiltinAgentEntry): string {
+  return resolvePrompt(entry.identity).text
+}
+
 export function builtinAgentDefinition(entry: BuiltinAgentEntry): AgentDefinition {
   const tools = resolveBuiltinToolPolicy(entry.toolPolicy)
   return {
     description: entry.description,
-    prompt: entry.prompt,
+    prompt: resolveBuiltinAgentPrompt(entry),
     ...(tools ? { tools } : {}),
     ...(entry.maxTurns !== undefined ? { maxTurns: entry.maxTurns } : {}),
     ...(entry.color ? { color: entry.color } : {}),

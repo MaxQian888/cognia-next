@@ -6,6 +6,7 @@
  * `types/agent/agent-mode.ts`.
  */
 
+import { definePrompt, type PromptDefinitionV1 } from "@/lib/prompts/types"
 import type { AgentModeConfig, AgentModeType } from "@/types/agent/agent-mode"
 
 export const BUILT_IN_AGENT_MODES: AgentModeConfig[] = [
@@ -243,4 +244,77 @@ export function getAgentMode(id: string): AgentModeConfig | undefined {
 // Get agent mode by type
 export function getAgentModeByType(type: AgentModeType): AgentModeConfig | undefined {
   return BUILT_IN_AGENT_MODES.find((mode) => mode.type === type)
+}
+
+/**
+ * Placeholders the send path's mode-section pass substitutes
+ * (`processPromptTemplateVariables`). An override of a built-in mode prompt
+ * may use them exactly as a custom mode can.
+ */
+export const MODE_PROMPT_TEMPLATE_VARIABLES = [
+  "date",
+  "time",
+  "datetime",
+  "weekday",
+  "timezone",
+  "language",
+  "tools_list",
+  "mode_name",
+  "mode_description",
+] as const
+
+/**
+ * Values that render each placeholder back as itself, so resolving the
+ * definition leaves `{{date}}` & co. for the one substitution pass that runs
+ * for every mode, built-in or custom.
+ */
+export const MODE_PROMPT_PASSTHROUGH_VALUES: Readonly<Record<string, string>> = Object.fromEntries(
+  MODE_PROMPT_TEMPLATE_VARIABLES.map((name) => [name, `{{${name}}}`])
+)
+
+/** The editable prompt of every built-in mode that ships one (ADR-0236), keyed by mode id. */
+export const BUILT_IN_MODE_PROMPTS: ReadonlyMap<string, PromptDefinitionV1> = new Map(
+  BUILT_IN_AGENT_MODES.flatMap((mode) =>
+    mode.systemPrompt
+      ? [
+          [
+            mode.id,
+            definePrompt({
+              id: `agent.mode.${mode.id}`,
+              contractVersion: 1,
+              kind: "role",
+              group: "agents",
+              operation: "replace-template",
+              scopes: ["account", "workspace", "session"],
+              activation: "next-operation",
+              risk: "ordinary",
+              hosts: ["app", "cli"],
+              variables: MODE_PROMPT_TEMPLATE_VARIABLES.map((name) => ({
+                name,
+                required: false,
+                maxChars: 64,
+              })),
+              outputContract:
+                "Appended as the mode section of the system prompt. The mode's tools, permission and output format stay on the mode record.",
+              consumers: ["lib/claude/build-options.ts"],
+              defaultBody: mode.systemPrompt,
+            }),
+          ] as const,
+        ]
+      : []
+  )
+)
+
+/**
+ * The definition behind a mode prompt, but only while the text is the one
+ * Cognia ships under that id. A custom or plugin mode reusing a built-in id,
+ * or a record carrying edited text, owns its prompt and is never replaced.
+ */
+export function shippedModePrompt(
+  modeId: string | undefined,
+  text: string | undefined
+): PromptDefinitionV1 | undefined {
+  if (!modeId || text === undefined) return undefined
+  const def = BUILT_IN_MODE_PROMPTS.get(modeId)
+  return def && def.defaultBody === text ? def : undefined
 }

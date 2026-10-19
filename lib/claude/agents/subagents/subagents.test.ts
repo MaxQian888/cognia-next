@@ -180,7 +180,7 @@ describe("resolveDispatchableSubagents — built-in dispatch targets", () => {
       const entry = builtinAgentById(id)
       const def = getDispatchableSubagentDef(id)
       expect(entry).toBeDefined()
-      expect(def?.prompt).toBe(entry!.prompt)
+      expect(def?.prompt).toBe(entry!.identity.defaultBody)
       expect(def?.description).toBe(entry!.description)
       // Read-only by construction, so the prompt slipping cannot let them edit.
       expect(def?.tools?.length).toBeGreaterThan(0)

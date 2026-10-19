@@ -170,11 +170,16 @@ export function resolvePrompt(
   return { text, body, source }
 }
 
-/** Resolve after making sure the active account's snapshot is loaded. */
+/**
+ * Resolve after making sure the active account's snapshot is loaded. A
+ * caller that froze a snapshot for a multi-step operation (a team planning
+ * run, a turn) passes it, and every step reads that same revision set.
+ */
 export async function resolvePromptAsync(
   def: PromptDefinitionV1,
-  options: Omit<ResolvePromptOptions, "snapshot"> = {}
+  options: ResolvePromptOptions = {}
 ): Promise<ResolvedPrompt> {
+  if (options.snapshot !== undefined) return resolvePrompt(def, options)
   let snapshot: PromptOverrideSnapshot | null = peekPromptOverrideSnapshot()
   if (!snapshot) snapshot = await loadPromptOverrideSnapshot().catch(() => null)
   return resolvePrompt(def, { ...options, snapshot })

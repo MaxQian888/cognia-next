@@ -82,7 +82,7 @@ describe("exploreAgent / planAgent", () => {
     ] as const) {
       const entry = builtinAgentById(id)
       expect(entry).toBeDefined()
-      expect(make().def.prompt).toBe(entry!.prompt)
+      expect(make().def.prompt).toBe(entry!.identity.defaultBody)
       expect(make().description).toBe(entry!.description)
     }
   })

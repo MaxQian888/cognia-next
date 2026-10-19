@@ -148,4 +148,12 @@ describe("resolvePromptAsync", () => {
     __setPromptOverrideSnapshotForTests(snapshotOf(override("account", "", "Async body")))
     expect((await resolvePromptAsync(def)).text).toBe("Async body")
   })
+
+  it("reads a caller's frozen snapshot instead of the current one", async () => {
+    const frozen = snapshotOf(override("account", "", "Frozen body"))
+    __setPromptOverrideSnapshotForTests(snapshotOf(override("account", "", "Published later")))
+    expect((await resolvePromptAsync(def, { snapshot: frozen })).text).toBe("Frozen body")
+    // An explicit null means "no overrides are known": the shipped body.
+    expect((await resolvePromptAsync(def, { snapshot: null })).body).toBe(def.defaultBody)
+  })
 })
