@@ -26,7 +26,8 @@ describe("prompt catalog", () => {
   })
 
   // Acceptance A16: an entry nothing resolves would be an editor control with
-  // no effect. Every declared consumer must exist and reference the export.
+  // no effect. Every declared consumer must exist and resolve through the
+  // resolver; reading `.defaultBody` would silently ignore every override.
   it("names consumers that exist and actually resolve the definition", () => {
     for (const def of defs) {
       expect(def.consumers.length).toBeGreaterThan(0)
@@ -39,8 +40,7 @@ describe("prompt catalog", () => {
         })
         const source = readFileSync(file, "utf8")
         const resolves =
-          def.operation === "inspect-only" ||
-          /resolvePrompt(Async)?\(|resolvePromptText\(|\.defaultBody\b/.test(source)
+          def.operation === "inspect-only" || /\bresolve(Turn)?Prompt(Async)?\(/.test(source)
         expect({ id: def.id, consumer, resolves }).toEqual({ id: def.id, consumer, resolves: true })
       }
     }

@@ -1,10 +1,10 @@
-import { CONVERSATION_SUMMARY_SYSTEM_PROMPT } from "@/lib/ai/generation/summarizer"
+import { CONVERSATION_SUMMARY_PROMPT } from "@/lib/ai/generation/summarizer"
 import { AUTO_COMPACT_FRACTION } from "@/lib/claude/usage"
 import {
-  COMPACT_HANDOFF_SNIPPET,
+  COMPACT_HANDOFF_PROMPT,
   DEFAULT_KEEP_RECENT,
   DEFAULT_MAX_SUMMARY_TOKENS,
-  POST_COMPACTION_RECOVERY_SNIPPET,
+  POST_COMPACTION_RECOVERY_PROMPT,
   buildCompactionSummaryPrompt,
   buildPostCompactionRecovery,
   resolveCompactInstructions,
@@ -15,13 +15,13 @@ import { DEFAULT_COMPRESSION_SETTINGS } from "@/types/system/compression"
 describe("compact-instructions", () => {
   describe("buildCompactionSummaryPrompt", () => {
     it("returns the canonical prompt unchanged with no focus", () => {
-      expect(buildCompactionSummaryPrompt()).toBe(CONVERSATION_SUMMARY_SYSTEM_PROMPT)
-      expect(buildCompactionSummaryPrompt("   ")).toBe(CONVERSATION_SUMMARY_SYSTEM_PROMPT)
+      expect(buildCompactionSummaryPrompt()).toBe(CONVERSATION_SUMMARY_PROMPT.defaultBody)
+      expect(buildCompactionSummaryPrompt("   ")).toBe(CONVERSATION_SUMMARY_PROMPT.defaultBody)
     })
 
     it("appends the focus when provided", () => {
       const out = buildCompactionSummaryPrompt("the API changes")
-      expect(out.startsWith(CONVERSATION_SUMMARY_SYSTEM_PROMPT)).toBe(true)
+      expect(out.startsWith(CONVERSATION_SUMMARY_PROMPT.defaultBody)).toBe(true)
       expect(out).toContain("Focus especially on: the API changes")
     })
 
@@ -34,39 +34,39 @@ describe("compact-instructions", () => {
 
   describe("resolveCompactInstructions", () => {
     it("returns the handoff snippet with no focus", () => {
-      expect(resolveCompactInstructions()).toBe(COMPACT_HANDOFF_SNIPPET)
-      expect(resolveCompactInstructions("")).toBe(COMPACT_HANDOFF_SNIPPET)
+      expect(resolveCompactInstructions()).toBe(COMPACT_HANDOFF_PROMPT.defaultBody)
+      expect(resolveCompactInstructions("")).toBe(COMPACT_HANDOFF_PROMPT.defaultBody)
     })
 
     it("appends the focus when provided", () => {
       const out = resolveCompactInstructions("decisions and file paths")
-      expect(out.startsWith(COMPACT_HANDOFF_SNIPPET)).toBe(true)
+      expect(out.startsWith(COMPACT_HANDOFF_PROMPT.defaultBody)).toBe(true)
       expect(out).toContain("When compacting, focus on: decisions and file paths")
     })
   })
 
   it("snippet mentions interruption awareness", () => {
-    expect(COMPACT_HANDOFF_SNIPPET.toLowerCase()).toContain("assume")
-    expect(COMPACT_HANDOFF_SNIPPET.toLowerCase()).toContain("compaction")
+    expect(COMPACT_HANDOFF_PROMPT.defaultBody.toLowerCase()).toContain("assume")
+    expect(COMPACT_HANDOFF_PROMPT.defaultBody.toLowerCase()).toContain("compaction")
   })
 
   describe("buildPostCompactionRecovery", () => {
     it("returns the recovery snippet with no durable instructions", () => {
-      expect(buildPostCompactionRecovery()).toBe(POST_COMPACTION_RECOVERY_SNIPPET)
+      expect(buildPostCompactionRecovery()).toBe(POST_COMPACTION_RECOVERY_PROMPT.defaultBody)
       expect(buildPostCompactionRecovery({ durableInstructions: "  " })).toBe(
-        POST_COMPACTION_RECOVERY_SNIPPET
+        POST_COMPACTION_RECOVERY_PROMPT.defaultBody
       )
     })
 
     it("appends durable instructions when provided", () => {
       const out = buildPostCompactionRecovery({ durableInstructions: "Keep the kanban in sync" })
-      expect(out.startsWith(POST_COMPACTION_RECOVERY_SNIPPET)).toBe(true)
+      expect(out.startsWith(POST_COMPACTION_RECOVERY_PROMPT.defaultBody)).toBe(true)
       expect(out).toContain("Instructions still in effect:\nKeep the kanban in sync")
     })
 
     it("re-asserts summary authority", () => {
-      expect(POST_COMPACTION_RECOVERY_SNIPPET.toLowerCase()).toContain("authoritative")
-      expect(POST_COMPACTION_RECOVERY_SNIPPET.toLowerCase()).toContain("compaction")
+      expect(POST_COMPACTION_RECOVERY_PROMPT.defaultBody.toLowerCase()).toContain("authoritative")
+      expect(POST_COMPACTION_RECOVERY_PROMPT.defaultBody.toLowerCase()).toContain("compaction")
     })
   })
 
@@ -77,7 +77,7 @@ describe("compact-instructions", () => {
       expect(r.fraction).toBe(AUTO_COMPACT_FRACTION)
       expect(r.keepRecent).toBe(DEFAULT_KEEP_RECENT)
       expect(r.focus).toBeUndefined()
-      expect(r.summaryPrompt).toBe(CONVERSATION_SUMMARY_SYSTEM_PROMPT)
+      expect(r.summaryPrompt).toBe(CONVERSATION_SUMMARY_PROMPT.defaultBody)
     })
 
     it("converts the app token-threshold percentage to a fraction", () => {

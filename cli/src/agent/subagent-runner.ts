@@ -46,6 +46,7 @@ import { hasAnyHookGroup, resolveCliHooksConfig } from "../hooks/resolve-hooks-c
 import { type PermissionResponder } from "./permission-gate"
 import { approvalKey } from "./command-approval"
 import { withCliAutoApprovedTools, withCliDisabledMcpTools } from "./tool-suppression"
+import { primeCliPromptOverrides, type PrimedCliPromptOverrides } from "./prompt-overrides"
 
 /**
  * Nesting seam handed down by the dispatch handler when the child is allowed to
@@ -67,7 +68,7 @@ export interface CliSubagentNesting {
 export interface RunCliSubagentDeps {
   /** The parent session's resolved CLI config (provider, credentials, cwd, …). */
   config: ResolvedConfig
-  /** Config home (`~/.cognia`) — currently only forwarded for parity/tests. */
+  /** Config home (`~/.cognia`): hooks config and the Prompt Center override probe. */
   home: string
   /** Working directory the subagent run is scoped to. */
   cwd: string
@@ -95,6 +96,8 @@ export interface RunCliSubagentDeps {
   /** The merged lifecycle-hook config to hand the child turn. */
   resolveHooks?: () => SendOptions["hooks"]
   resolveOptions?: (ctx: BuildOptionsContext) => Promise<SendOptions>
+  /** Load Prompt Center overrides for the child's cwd (see `primeCliPromptOverrides`). */
+  primePromptOverrides?: (cwd: string) => Promise<PrimedCliPromptOverrides>
   capture?: typeof defaultCapture
   closeSession?: (sessionId: string) => Promise<void>
   now?: () => number
@@ -214,10 +217,16 @@ export async function runCliSubagent(
     ].join("\n\n"),
   }
 
+  const primedPrompts = await (
+    deps.primePromptOverrides ??
+    ((cwd: string) => primeCliPromptOverrides(cwd, { home: deps.home }))
+  )(deps.cwd)
+  deps.signal?.throwIfAborted()
   const ctx = toBuildContext({
     sessionId: childSessionId,
     config: childConfig,
     mcpServers: deps.mcpServers,
+    ...(primedPrompts.workspaceId ? { promptWorkspaceId: primedPrompts.workspaceId } : {}),
     now: turnNow,
   })
   let sendOptions = await resolveOptions(ctx)

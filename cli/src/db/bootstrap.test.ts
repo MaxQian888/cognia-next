@@ -10,6 +10,7 @@ import { getRecentErrorLogs } from "@/packages/logging/src/recent-errors"
 
 import {
   __resetCliDbForTesting,
+  cliStoreMayHoldRows,
   ensureCliDb,
   flushOpenCliDb,
   hasSnapshotStore,
@@ -1932,4 +1933,38 @@ it("rebuilds the session list after table-store restore and excludes derived sta
     await database.delete()
     fs.rmSync(home, { recursive: true, force: true })
   }
+})
+
+describe("cliStoreMayHoldRows", () => {
+  it("answers from the table files without opening the database", () => {
+    __resetCliDbForTesting()
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-may-hold-"))
+    try {
+      expect(cliStoreMayHoldRows("promptOverrides", { home })).toBe(false)
+      const tables = path.join(home, "db.json.tables")
+      fs.mkdirSync(tables)
+      fs.writeFileSync(path.join(tables, "manifest.json"), "{}")
+      fs.writeFileSync(path.join(tables, "cognia-claude--promptOverrides.json"), "[]")
+      expect(cliStoreMayHoldRows("promptOverrides", { home })).toBe(false)
+      fs.writeFileSync(path.join(tables, "cognia-claude--promptOverrides.json"), '[{"id":"pob"}]')
+      expect(cliStoreMayHoldRows("promptOverrides", { home })).toBe(true)
+      // A different table's rows do not count.
+      expect(cliStoreMayHoldRows("promptOverrideRevisions", { home })).toBe(false)
+      fs.writeFileSync(path.join(tables, "cognia-claude--promptOverrideRevisions.json"), "{oops")
+      expect(cliStoreMayHoldRows("promptOverrideRevisions", { home })).toBe(true)
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("cannot probe a legacy single-file store and says so", () => {
+    __resetCliDbForTesting()
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-may-hold-legacy-"))
+    try {
+      fs.writeFileSync(path.join(home, "db.json"), "{}")
+      expect(cliStoreMayHoldRows("promptOverrides", { home })).toBe(true)
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
 })

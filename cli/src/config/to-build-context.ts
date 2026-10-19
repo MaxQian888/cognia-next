@@ -102,6 +102,12 @@ export interface ToBuildContextParams {
    * start (bound to one dispatcher), so it leaves this off.
    */
   routingPromptText?: string
+  /**
+   * The workspace mounting the cwd, resolved by the caller when Prompt Center
+   * overrides are loaded (`primeCliPromptOverrides`), so a workspace-scoped
+   * override applies to the base prompt and the build-options prompt slots.
+   */
+  promptWorkspaceId?: string
   /** Injected clock for deterministic tests; defaults to `Date.now()`. */
   now?: number
 }
@@ -292,7 +298,8 @@ export function buildCliSession(
   config: ResolvedConfig,
   now: number,
   sessionKind: SessionKind = "direct",
-  agentMode?: AgentModeConfig | null
+  agentMode?: AgentModeConfig | null,
+  promptWorkspaceId?: string
 ): ChatSession {
   const model = resolveActiveModel(config)
   // Forward the thinking level as `effort` only when the resolved model
@@ -329,6 +336,7 @@ export function buildCliSession(
           cwd: config.cwd,
           now,
           permissionMode,
+          ...(promptWorkspaceId ? { workspaceId: promptWorkspaceId } : {}),
           // Named so the shell section can say WHOSE sandbox is refusing a
           // command: with an external backend the shell is that agent's, and a
           // refusal is not something Cognia can widen or the model can retry.
@@ -358,6 +366,7 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
           cwd: config.cwd,
           now,
           permissionMode: config.permissionMode,
+          ...(params.promptWorkspaceId ? { workspaceId: params.promptWorkspaceId } : {}),
           ...(config.agentBackend ? { externalBackend: config.agentBackend } : {}),
         }),
       config.outputStyle
@@ -421,7 +430,14 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
       : {}),
   } as unknown as AppSettings
 
-  const session = buildCliSession(sessionId, config, now, params.sessionKind, params.agentMode)
+  const session = buildCliSession(
+    sessionId,
+    config,
+    now,
+    params.sessionKind,
+    params.agentMode,
+    params.promptWorkspaceId
+  )
 
   // A character shim carries the allowed-tools whitelist through the same
   // union logic the desktop uses. systemPrompt still comes from the session
@@ -453,6 +469,7 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     },
     character,
     appSettings,
+    ...(params.promptWorkspaceId ? { promptWorkspaceId: params.promptWorkspaceId } : {}),
     agentMode: params.agentMode ?? null,
     preloadedMcpServers: params.mcpServers ?? [],
     ...(params.ephemeralSkillIds?.length ? { ephemeralSkillIds: params.ephemeralSkillIds } : {}),

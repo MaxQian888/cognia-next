@@ -112,6 +112,8 @@ import {
 } from "@/lib/connectors/permission-resolve"
 import { resolveOutputStyleSnippet } from "@/lib/claude/output-styles"
 import {
+  COMPACT_HANDOFF_PROMPT,
+  POST_COMPACTION_RECOVERY_PROMPT,
   buildPostCompactionRecovery,
   resolveCompaction,
   resolveCompactInstructions,
@@ -198,7 +200,8 @@ import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 import { DEFAULT_SKILL_CATALOG_TOKEN_BUDGET } from "@/lib/skills/prompt-budget"
 import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
-import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "@/lib/agent/prompts/plan-mode"
+import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_PROMPT } from "@/lib/agent/prompts/plan-mode"
+import { BRIEF_MODE_PROMPT } from "@/lib/agent/prompts/brief-mode"
 import { resolveProviderAttemptOptions } from "./provider-attempt-options"
 import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
 import {
@@ -211,6 +214,10 @@ import {
 import { browserCompanionGrant } from "@/lib/browser-companion/agent-grant"
 import { extensionBindingFor } from "@/lib/browser/extension-engine"
 import { resolveTurnCompositionSafely } from "./resolve-turn-composition-safely"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { loadPromptOverrideSnapshot } from "@/lib/prompts/snapshot"
+import type { PromptDefinitionV1, PromptResolutionContext } from "@/lib/prompts/types"
+import { CONVERSATION_SUMMARY_PROMPT } from "@/lib/ai/generation/summarizer"
 import {
   applySupportAgentSafety,
   buildSupportAgentContext,
@@ -262,23 +269,6 @@ const ASIDE_READ_ONLY_PROMPT = `This side chat is read-only. Do not attempt edit
 export function sessionAsideSystemPrompt(readOnly: boolean): string {
   return [ASIDE_SYSTEM_PROMPT, ...(readOnly ? [ASIDE_READ_ONLY_PROMPT] : [])].join("\n\n")
 }
-
-/**
- * Snippet appended to `appendSystemPrompt` when brief mode is on. Exported so
- * the ACP route can reuse it when threading `briefMode` into a `session/new`
- * payload — keeping a single source of truth for the wording.
- */
-export const BRIEF_OUTPUT_SNIPPET =
-  "Respond concisely. Skip preamble, headers, and bullet-list filler. Direct answers only — match length to the question."
-
-/**
- * Snippet appended to `appendSystemPrompt` when the session is in plan mode
- * (`permissionMode === "plan"`). Re-exported from the shared single source
- * (`lib/agent/prompts/plan-mode.ts`) that the CLI's `PLAN_MODE_PROMPT_SECTION` also
- * re-exports — the two surfaces must not drift. The export name is kept for
- * the ACP route and tests.
- */
-export const PLAN_MODE_SNIPPET = PLAN_MODE_PROMPT
 
 type SummaryCredentials = NonNullable<
   NonNullable<NonNullable<SendOptions["compaction"]>["summary"]>["credentials"]
@@ -519,6 +509,12 @@ function buildWorkflowSnapshotBlock(
 }
 
 export interface BuildOptionsContext {
+  /**
+   * The workspace code-owned prompt slots (ADR-0236) resolve against when the
+   * session carries no `projectId`. The CLI sets it to the workspace mounting
+   * its cwd; the app's sessions name their workspace themselves.
+   */
+  promptWorkspaceId?: string
   /** Captured trusted execution identity for source ACL and frozen revisions. */
   knowledgeAccess?: import("@/lib/knowledge-base/runtime/progressive-reading").KnowledgeReadingAccess
   /** Reuse the accepted background-result batch identity for a fusion run. */
@@ -1532,6 +1528,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     character = (await resolveCharacterById(session.characterId)) ?? null
   }
   const supportAgent = isSupportAgentId(character?.id)
+  // Code-owned prompt slots this turn uses (ADR-0236) resolve against this
+  // context and ONE snapshot captured here, so a publish that lands while the
+  // turn assembles cannot mix two revision sets in one request.
+  const promptContext: PromptResolutionContext = {
+    sessionId: session?.id,
+    workspaceId: session?.projectId ?? ctx.promptWorkspaceId,
+    agentId: character?.id,
+  }
+  const promptSnapshot = await loadPromptOverrideSnapshot().catch(() => null)
+  const resolveTurnPrompt = (def: PromptDefinitionV1): string =>
+    resolvePrompt(def, { context: promptContext, snapshot: promptSnapshot }).text
   const agentExecutionPolicy = resolveAgentExecutionPolicy(
     character?.executionPolicy,
     session?.executionPolicy
@@ -4798,9 +4805,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const briefMode = session?.briefMode ?? character?.briefMode ?? appSettings?.briefMode
   if (briefMode) {
     const existing = opts.appendSystemPrompt?.trim() ?? ""
-    opts.appendSystemPrompt = existing
-      ? `${existing}\n\n${BRIEF_OUTPUT_SNIPPET}`
-      : BRIEF_OUTPUT_SNIPPET
+    const brief = resolveTurnPrompt(BRIEF_MODE_PROMPT)
+    opts.appendSystemPrompt = existing ? `${existing}\n\n${brief}` : brief
   }
 
   // Plan mode: reinforce "ask questions as plain text, submit the final plan
@@ -4810,10 +4816,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const existing = opts.appendSystemPrompt?.trim() ?? ""
     // Enhanced plan mode: the submitted plan is reviewed in the interactive
     // step editor, so ask for a machine-parsable `## Steps` list too.
+    const planMode = resolveTurnPrompt(PLAN_MODE_PROMPT)
     const planSnippet =
       appSettings?.planSettings?.interactiveHtmlView === true
-        ? `${PLAN_MODE_SNIPPET}\n\n${PLAN_MODE_STRUCTURED_STEPS_SNIPPET}`
-        : PLAN_MODE_SNIPPET
+        ? `${planMode}\n\n${PLAN_MODE_STRUCTURED_STEPS_PROMPT.defaultBody}`
+        : planMode
     opts.appendSystemPrompt = existing ? `${existing}\n\n${planSnippet}` : planSnippet
   }
 
@@ -4864,6 +4871,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       charOv: character?.compactionOverride,
       sessOv: session?.compactionOverride,
       strategy,
+      baseSummaryPrompt: resolveTurnPrompt(CONVERSATION_SUMMARY_PROMPT),
     })
     // `summaryProvider`/`summaryModel` are draft-only — strip them before the
     // wire type and resolve the cheap-model credentials here (async/registry).
@@ -4944,7 +4952,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.compaction = resolved
 
     if (resolved.enabled) {
-      const snippet = resolveCompactInstructions(resolved.focus)
+      const snippet = resolveCompactInstructions(
+        resolved.focus,
+        resolveTurnPrompt(COMPACT_HANDOFF_PROMPT)
+      )
       const existing = opts.appendSystemPrompt?.trim() ?? ""
       opts.appendSystemPrompt = existing ? `${existing}\n\n${snippet}` : snippet
 
@@ -4954,6 +4965,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       if (ctx.postCompaction) {
         const recovery = buildPostCompactionRecovery({
           durableInstructions: ctx.postCompaction.durableInstructions,
+          base: resolveTurnPrompt(POST_COMPACTION_RECOVERY_PROMPT),
         })
         const base = opts.appendSystemPrompt?.trim() ?? ""
         opts.appendSystemPrompt = base ? `${base}\n\n${recovery}` : recovery

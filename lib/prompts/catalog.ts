@@ -11,12 +11,32 @@
  * a send path: consumers import their own definition directly.
  */
 
+import { BRIEF_MODE_PROMPT } from "@/lib/agent/prompts/brief-mode"
+import { CLI_BASE_IDENTITY_PROMPT } from "@/lib/agent/prompts/cli-base"
+import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_PROMPT } from "@/lib/agent/prompts/plan-mode"
+import { SELECTION_SUMMARY_PROMPT } from "@/lib/ai/generation/summarize-material"
+import { CONVERSATION_SUMMARY_PROMPT } from "@/lib/ai/generation/summarizer"
 import { TITLE_CHAT_PROMPT, TITLE_WORK_PROMPT } from "@/lib/ai/generation/title"
+import {
+  COMPACT_HANDOFF_PROMPT,
+  POST_COMPACTION_RECOVERY_PROMPT,
+} from "@/lib/claude/compact-instructions"
 import type { PromptDefinitionV1 } from "./types"
 
 export const PROMPT_DEFINITIONS: readonly PromptDefinitionV1[] = [
+  // chat
+  BRIEF_MODE_PROMPT,
+  COMPACT_HANDOFF_PROMPT,
+  POST_COMPACTION_RECOVERY_PROMPT,
+  CLI_BASE_IDENTITY_PROMPT,
+  // agents
+  PLAN_MODE_PROMPT,
+  PLAN_MODE_STRUCTURED_STEPS_PROMPT,
+  // generation
   TITLE_CHAT_PROMPT,
   TITLE_WORK_PROMPT,
+  CONVERSATION_SUMMARY_PROMPT,
+  SELECTION_SUMMARY_PROMPT,
 ]
 
 const BY_ID = new Map<string, PromptDefinitionV1>()

@@ -1,8 +1,10 @@
+import { buildCliOperatingRules, buildDefaultSystemPrompt } from "./default-system-prompt"
+import { CLI_BASE_IDENTITY_PROMPT } from "@/lib/agent/prompts/cli-base"
+import { PLAN_MODE_PROMPT } from "@/lib/agent/prompts/plan-mode"
 import {
-  buildCliOperatingRules,
-  buildDefaultSystemPrompt,
-  PLAN_MODE_PROMPT_SECTION,
-} from "./default-system-prompt"
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 describe("buildDefaultSystemPrompt", () => {
   const NOW = Date.UTC(2026, 5, 30, 12, 0, 0) // 2026-06-30
@@ -72,7 +74,7 @@ describe("buildDefaultSystemPrompt", () => {
 
   it("appends the explore→plan workflow section only in plan mode", () => {
     const base = buildDefaultSystemPrompt({ cwd: "/x", now: NOW, platform: "linux" })
-    expect(base).not.toContain(PLAN_MODE_PROMPT_SECTION)
+    expect(base).not.toContain(PLAN_MODE_PROMPT.defaultBody)
 
     const planned = buildDefaultSystemPrompt({
       cwd: "/x",
@@ -80,7 +82,7 @@ describe("buildDefaultSystemPrompt", () => {
       platform: "linux",
       permissionMode: "plan",
     })
-    expect(planned).toContain(PLAN_MODE_PROMPT_SECTION)
+    expect(planned).toContain(PLAN_MODE_PROMPT.defaultBody)
     // Names the read-only subagents and the plan-ready signal.
     expect(planned).toMatch(/`Explore` subagent/)
     expect(planned).toMatch(/`Plan` subagent/)
@@ -116,5 +118,53 @@ describe("buildCliOperatingRules", () => {
     expect(rules).not.toContain("<env>")
     expect(rules).not.toContain("You are Cognia's command-line coding agent")
     expect(rules).toContain("Verifying your work:")
+  })
+})
+
+describe("customizable base identity (ADR-0236)", () => {
+  const NOW = Date.UTC(2026, 5, 30, 12, 0, 0)
+  afterEach(() => __setPromptOverrideSnapshotForTests(null))
+
+  it("keeps the shipped layout byte-for-byte with no override", () => {
+    const out = buildDefaultSystemPrompt({
+      cwd: "/x",
+      now: NOW,
+      platform: "linux",
+      shell: "/bin/zsh",
+    })
+    const [identity, tone] = CLI_BASE_IDENTITY_PROMPT.defaultBody.split("\n\n")
+    expect(out.startsWith(`${identity}\n\n<env>\nWorking directory: /x\n`)).toBe(true)
+    expect(out).toContain(`</env>\n\n${tone}\n\n`)
+  })
+
+  it("swaps the identity and tone but keeps the host env block and operating rules", () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("cli-db", [
+        {
+          bindingId: "pob",
+          promptId: CLI_BASE_IDENTITY_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws1",
+          revisionId: "por",
+          body: "You are a terse Rust reviewer.",
+          contractVersion: CLI_BASE_IDENTITY_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const out = buildDefaultSystemPrompt({
+      cwd: "/x",
+      now: NOW,
+      platform: "linux",
+      workspaceId: "ws1",
+    })
+    expect(out.startsWith("You are a terse Rust reviewer.\n\n<env>\nWorking directory: /x")).toBe(
+      true
+    )
+    expect(out).not.toContain("command-line coding agent")
+    expect(out).toContain("File-editing rules:")
+    // A session outside that workspace keeps the shipped identity.
+    expect(buildDefaultSystemPrompt({ cwd: "/x", now: NOW, platform: "linux" })).toContain(
+      "command-line coding agent"
+    )
   })
 })

@@ -34,6 +34,7 @@ import { loadMcpServers } from "../mcp/load-mcp-config"
 import { applyDisabled, readDisabled, readDisabledTools } from "../mcp/mcp-state"
 import { readEnabled } from "../skill/skill-state"
 import { ensureCliDb, CliDbSnapshotError } from "../db/bootstrap"
+import { primeCliPromptOverrides, type PrimedCliPromptOverrides } from "./prompt-overrides"
 import { ensurePluginRuntime } from "../plugin/plugin-runtime"
 import { resolveDevPluginsDir } from "../plugin/dev-plugins"
 import { fetchTwinContext as defaultFetchTwinContext } from "../twin/context-client"
@@ -178,6 +179,8 @@ export interface CliContextAssemblerParams {
    */
   agentKind?: SendOptions["agentKind"]
   agentRef?: SendOptions["agentRef"]
+  /** Load Prompt Center overrides before options resolve (see `primeCliPromptOverrides`). */
+  primePromptOverrides?: (cwd: string) => Promise<PrimedCliPromptOverrides>
 }
 
 export interface CliContextAssembler {
@@ -231,6 +234,9 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
     })
   const resolveDisabledMcpTools = params.resolveDisabledMcpTools ?? (() => readDisabledTools(home))
   const ensureDb = params.ensureDb ?? (() => ensureCliDb())
+  const primePromptOverrides =
+    params.primePromptOverrides ??
+    ((cwd: string) => primeCliPromptOverrides(cwd, { home, ensureDb }))
   const resolveApprovedTools =
     params.resolveApprovedTools ?? (() => readToolApprovals(home, undefined, config.cwd))
   const devPluginsEnabled = config.devPlugins === true
@@ -308,11 +314,15 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
     }
     const agentMode = await resolveAgentMode().catch(() => null)
     const mcpServers = resolveMcpServers()
+    // Prompt Center overrides (ADR-0236). Skipped when the store was found
+    // unsafe above: the user's data was moved aside and is reported once.
+    const primedPrompts = databaseError === null ? await primePromptOverrides(config.cwd) : {}
     const ctx = toBuildContext({
       sessionId,
       config,
       mcpServers,
       ephemeralSkillIds,
+      ...(primedPrompts.workspaceId ? { promptWorkspaceId: primedPrompts.workspaceId } : {}),
       ...(params.sessionKind ? { sessionKind: params.sessionKind } : {}),
       ...(agentMode ? { agentMode } : {}),
       // Live TUI turn: request token-level partials so the deltas keep feeding

@@ -1145,6 +1145,37 @@ export type SnapshotStoreImportResult =
   | { kind: "table-store"; tables: number }
   | { kind: "legacy-file"; tables: number }
 
+/**
+ * Whether the CLI store may hold rows of `tableName`, answered without opening
+ * the database. Plain chat never opens it; a feature whose rows are usually
+ * absent (prompt overrides) uses this to stay off the open/restore cost unless
+ * there is something to read. `true` when the database is already open in this
+ * process, or when only a legacy single-file store exists (it cannot be probed
+ * per table without parsing the whole file).
+ */
+export function cliStoreMayHoldRows(
+  tableName: string,
+  opts: { home?: string; fileName?: string } = {}
+): boolean {
+  if (cached) return true
+  const home = opts.home ?? resolveHome(process.env, os.homedir())
+  const file = path.join(home, opts.fileName ?? "db.json")
+  const tableDirectory = `${file}.tables`
+  if (!fs.existsSync(path.join(tableDirectory, "manifest.json"))) return fs.existsSync(file)
+  const suffix = `--${encodeURIComponent(tableName)}.json`
+  for (const entry of fs.readdirSync(tableDirectory)) {
+    if (!entry.endsWith(suffix)) continue
+    try {
+      const rows: unknown = JSON.parse(fs.readFileSync(path.join(tableDirectory, entry), "utf8"))
+      if (!Array.isArray(rows) || rows.length > 0) return true
+    } catch {
+      // Unreadable: let the real open decide (it quarantines and reports).
+      return true
+    }
+  }
+  return false
+}
+
 /** Whether `home` holds a `snapshot-v3` store (table store or legacy single file) for `fileName`. */
 export function hasSnapshotStore(home: string, fileName: string): boolean {
   const file = path.join(home, fileName)

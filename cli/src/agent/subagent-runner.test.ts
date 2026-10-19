@@ -637,3 +637,35 @@ describe("runCliSubagent, definition fidelity", () => {
     expect(seen[1]).toContain("`dispatch_agent`")
   })
 })
+
+describe("runCliSubagent Prompt Center overrides (ADR-0236)", () => {
+  it("resolves the child's prompt slots against the workspace mounting its cwd", async () => {
+    let seen: BuildOptionsContext | undefined
+    const prime = jest.fn(async () => ({ workspaceId: "ws-9" }))
+    await runCliSubagent(def(), "task", "parent", {
+      config: cfg(),
+      home: "/h",
+      cwd: "/work",
+      gate: createPermissionGate({ yes: true }),
+      mcpServers: [],
+      approvedTools: new Set(),
+      disabledMcpTools: new Set(),
+      primePromptOverrides: prime,
+      resolveOptions: async (ctx) => {
+        seen = ctx
+        return {} as SendOptions
+      },
+      resolveHooks: () => undefined,
+      capture: jest.fn(async () => ({
+        text: "ok",
+        messageId: "m",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as unknown as RunCliSubagentDeps["capture"],
+      closeSession: jest.fn(async () => undefined),
+      mintId: () => "p",
+    })
+    expect(prime).toHaveBeenCalledWith("/work")
+    expect(seen?.promptWorkspaceId).toBe("ws-9")
+  })
+})

@@ -83,6 +83,9 @@ export const BACKUP_PAYLOAD_DOMAIN: Record<keyof BackupPayloadV3, BackupShareDom
   skillResources: "library",
   teams: "library",
   promptPresets: "library",
+  // Customized built-in prompts (ADR-0236): user-authored template text.
+  promptOverrides: "library",
+  promptOverrideRevisions: "library",
   chatTemplates: "library",
   documentTemplates: "library",
   templateDefinitions: "library",

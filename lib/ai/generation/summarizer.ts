@@ -10,6 +10,7 @@
 
 import type { UIMessage } from "ai"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
+import { definePrompt } from "@/lib/prompts/types"
 
 const ROLE_LABEL: Record<string, string> = {
   user: "User",
@@ -21,14 +22,31 @@ const ROLE_LABEL: Record<string, string> = {
  * Canonical conversation-summary system prompt. Single source of truth shared
  * by summarize-then-branch (`summarize-material.ts`) and context-window compaction
  * (`lib/claude/compact-instructions.ts` composes its summary prompt from this
- * + the active strategy + the user focus). Do not fork the wording.
+ * + the active strategy + the user focus). Do not fork the wording; customize
+ * it through the Prompt Center, which both consumers resolve.
  */
-export const CONVERSATION_SUMMARY_SYSTEM_PROMPT =
-  "You summarize a chat conversation so it can seed a new branch of the same " +
-  "discussion. Write a concise, neutral summary that preserves: the user's " +
-  "goal, key facts and decisions, any constraints, and open / unresolved " +
-  "threads. Use short paragraphs or bullet points. Do not add a preamble like " +
-  "'Here is a summary'. Write in the same language as the conversation."
+export const CONVERSATION_SUMMARY_PROMPT = definePrompt({
+  id: "generation.summary.conversation",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "generation",
+  operation: "replace-template",
+  scopes: ["account", "workspace", "agent"],
+  activation: "next-operation",
+  // Compaction keeps working from this summary, so a careless edit loses the
+  // goals and constraints a long session depends on.
+  risk: "protocol",
+  hosts: ["app", "cli"],
+  defaultBody:
+    "You summarize a chat conversation so it can seed a new branch of the same " +
+    "discussion. Write a concise, neutral summary that preserves: the user's " +
+    "goal, key facts and decisions, any constraints, and open / unresolved " +
+    "threads. Use short paragraphs or bullet points. Do not add a preamble like " +
+    "'Here is a summary'. Write in the same language as the conversation.",
+  outputContract: "Free-text summary; it becomes the authoritative record after compaction.",
+  maxChars: 8_000,
+  consumers: ["lib/ai/generation/summarize-material.ts", "lib/claude/build-options.ts"],
+})
 
 /**
  * Render a conversation slice as a plain-text transcript. Empty turns

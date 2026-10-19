@@ -4531,11 +4531,50 @@ describe("resolveSendOptions — video generation tools (ADR-0205)", () => {
 })
 
 describe("resolveSendOptions — brief mode", () => {
-  it("appends BRIEF_OUTPUT_SNIPPET to appendSystemPrompt when set", async () => {
+  it("appends the brief-mode prompt to appendSystemPrompt when set", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", briefMode: true }),
     })
     expect(opts.appendSystemPrompt).toContain("Respond concisely")
+  })
+
+  it("uses a customized brief-mode prompt for the workspace the turn belongs to (ADR-0236)", async () => {
+    const { __setPromptOverrideSnapshotForTests, buildPromptOverrideSnapshot } =
+      await import("@/lib/prompts/snapshot")
+    const { BRIEF_MODE_PROMPT } = await import("@/lib/agent/prompts/brief-mode")
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: BRIEF_MODE_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por",
+          body: "One sentence, no lists.",
+          contractVersion: BRIEF_MODE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    try {
+      // The app names the workspace on the session; the CLI passes the
+      // workspace mounting its cwd.
+      const inWorkspace = await resolveSendOptions({
+        session: makeSession({ id: "s1", briefMode: true, projectId: "ws-1" }),
+      })
+      expect(inWorkspace.appendSystemPrompt).toContain("One sentence, no lists.")
+      expect(inWorkspace.appendSystemPrompt).not.toContain("Respond concisely")
+      const fromCli = await resolveSendOptions({
+        session: makeSession({ id: "s2", briefMode: true }),
+        promptWorkspaceId: "ws-1",
+      })
+      expect(fromCli.appendSystemPrompt).toContain("One sentence, no lists.")
+      const elsewhere = await resolveSendOptions({
+        session: makeSession({ id: "s3", briefMode: true, projectId: "ws-2" }),
+      })
+      expect(elsewhere.appendSystemPrompt).toContain("Respond concisely")
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+    }
   })
 
   it("merges with an existing appendSystemPrompt (e.g., A2UI block) under a blank line", async () => {
@@ -5332,7 +5371,7 @@ describe("resolveSendOptions — workflow-editor (Workflow Copilot mode)", () =>
       session: makeSession({ id: "workflow:wf_42", kind: "workflow-editor" }),
     })
     // appendSystemPrompt is either undefined (no editor open) or only the
-    // workflow snapshot block — definitely NOT BRIEF_OUTPUT_SNIPPET text.
+    // workflow snapshot block — definitely NOT brief-mode text.
     if (opts.appendSystemPrompt) {
       // It can only contain the workflow snapshot block, never the brief snippet.
       expect(opts.appendSystemPrompt).not.toContain("Keep responses")
