@@ -9,6 +9,7 @@ import type { RunAndCaptureOptions, RunAndCaptureResult } from "@/lib/claude/run
 import { createToolRuleState } from "../tool-rules"
 import { makeComponents, makeRun, makeTask } from "../test-fixtures"
 import type { IsolationDeps } from "./isolation"
+import { isSessionExcludedFromLiveToolRules } from "./live-rules"
 import {
   createProbePermissionResponder,
   discoverProbeToolSurface,
@@ -166,8 +167,10 @@ const reply = (over: Partial<RunAndCaptureResult> = {}): RunAndCaptureResult => 
 
 describe("runProbe", () => {
   it("runs the snapshot isolated, records evidence and cleans up", async () => {
+    let excludedDuringTurn = false
     const h = harness(
       async (cap) => {
+        excludedDuringTurn = isSessionExcludedFromLiveToolRules("s1")
         cap.onEvent?.({ type: "text-delta", delta: "Working" })
         cap.onEvent?.({
           type: "tool-call",
@@ -181,6 +184,9 @@ describe("runProbe", () => {
       { files: { "report.md": "# Report", "data.csv": "a,b\n1,2\n" } }
     )
     const outcome = await runProbe(input(), h.deps)
+    // The stored agent's live tool rules stay off the probe while it runs.
+    expect(excludedDuringTurn).toBe(true)
+    expect(isSessionExcludedFromLiveToolRules("s1")).toBe(false)
 
     const ctx = h.contexts[0]
     expect(ctx.character?.systemPrompt).toBe(makeComponents().systemPrompt)

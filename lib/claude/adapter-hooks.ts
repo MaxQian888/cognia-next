@@ -121,14 +121,17 @@ export async function dispatchPostToolUse(
   toolName: string,
   toolArgs: unknown,
   toolResult: unknown,
-  sessionId: string
+  sessionId: string,
+  /** What the call site knows about the call: its outcome and its turn. */
+  call?: { isError?: boolean; turnId?: string }
 ): Promise<PostToolUseResultLike> {
   if (!hasInterceptors("tool.result.project")) return {}
   return (await getPluginEventHooks().dispatchPostToolUse(
     toolName,
     toolArgs,
     toolResult,
-    sessionId
+    sessionId,
+    ...(call ? [call] : [])
   )) as PostToolUseResultLike
 }
 

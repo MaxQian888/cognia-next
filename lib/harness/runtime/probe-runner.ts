@@ -52,6 +52,7 @@ import {
 } from "../tool-rules"
 import { createTrajectoryRecorder } from "../trajectory"
 import { prepareRolloutWorkspace, type IsolationDeps, type RolloutWorkspace } from "./isolation"
+import { excludeSessionFromLiveToolRules } from "./live-rules"
 import { decideProbeToolCall, probeCapabilityGrant, type ProbePolicyContext } from "./probe-policy"
 
 /** Usage-ledger surface every rollout books under. */
@@ -181,6 +182,8 @@ export async function runProbe(input: ProbeInput, deps: ProbeRunnerDeps): Promis
     visibility: "embedded",
     ...(run.projectId ? { projectId: run.projectId } : {}),
   })
+  // The candidate's rules apply below; the stored agent's live rules must not stack on them.
+  const includeInLiveRules = excludeSessionFromLiveToolRules(session.id)
   let workspace: RolloutWorkspace | undefined
   let finalState: "ready" | "failed" | "cancelled" = "failed"
   const recorder = createTrajectoryRecorder()
@@ -377,6 +380,7 @@ export async function runProbe(input: ProbeInput, deps: ProbeRunnerDeps): Promis
     throw error
   } finally {
     await Promise.allSettled([workspace?.release(finalState), deps.deleteSession(session.id)])
+    includeInLiveRules()
   }
 }
 

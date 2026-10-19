@@ -256,14 +256,16 @@ export interface ToolResultProjection {
  * pre-execution gate) has its result withheld and replaced by the cap's reason:
  * the model gets the teaching message instead of more of what kept it looping.
  * Every other rule only reshapes text, so a non-text result is left alone
- * (though it is still counted).
+ * (though it is still counted). `isError` absent means the call site cannot
+ * tell success from failure: the outcome-dependent rules (`error-hint`,
+ * `verify-after-write`) then stay silent rather than guess.
  */
 export function projectToolResult(
   rules: readonly HarnessToolRule[],
   state: ToolRuleState,
   toolName: string,
   result: unknown,
-  isError: boolean
+  isError: boolean | undefined
 ): ToolResultProjection {
   for (const rule of rules) {
     if (rule.kind !== "call-cap" || !toolMatches(rule.tool, toolName)) continue
@@ -291,7 +293,7 @@ export function projectToolResult(
     }
   }
   const appendix: string[] = []
-  if (isError) {
+  if (isError === true) {
     const haystack = original.toLowerCase()
     for (const rule of rules) {
       if (rule.kind !== "error-hint" || !toolMatches(rule.tool, toolName)) continue
@@ -300,7 +302,7 @@ export function projectToolResult(
         applied.push(rule.id)
       }
     }
-  } else {
+  } else if (isError === false) {
     for (const rule of rules) {
       if (rule.kind !== "verify-after-write" || !toolMatches(rule.tool, toolName)) continue
       appendix.push(`[harness reminder ${rule.id}] ${rule.reminder}`)

@@ -13,6 +13,7 @@
  * - `provider-diagnostics-refresh`
  * - `conversation-auto-archive`
  * - `files-trash-purge`
+ * - `harness-evolution-sweep`
  * - every connector-owned `connection:housekeeping:*` type
  * - `connection:presence:refresh`
  * - any task tagged `system:<owner>` (housekeeping, provider diagnostics, bot
@@ -29,6 +30,7 @@ export const MAINTENANCE_TASK_TYPES: readonly string[] = Object.freeze([
   "provider-diagnostics-refresh",
   "conversation-auto-archive",
   "files-trash-purge",
+  "harness-evolution-sweep",
   "connection:presence:refresh",
 ])
 

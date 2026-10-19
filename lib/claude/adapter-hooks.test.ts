@@ -121,6 +121,15 @@ describe("adapter-hooks", () => {
     expect(result.modifiedResult).toEqual({ ok: true })
   })
 
+  it("forwards the call's outcome and turn to the dispatcher", async () => {
+    enableAllEventHooks()
+    const spy = jest
+      .spyOn(getPluginEventHooks(), "dispatchPostToolUse")
+      .mockResolvedValue({} as never)
+    await dispatchPostToolUse("calc", {}, "out", "s", { isError: false, turnId: "t9" })
+    expect(spy).toHaveBeenCalledWith("calc", {}, "out", "s", { isError: false, turnId: "t9" })
+  })
+
   it("skips the dispatch entirely when nothing is registered on the point", async () => {
     __resetInterceptorRegistryForTesting()
     const spy = jest.spyOn(getPluginEventHooks(), "dispatchPostToolUse")

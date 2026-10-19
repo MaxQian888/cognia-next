@@ -1392,11 +1392,20 @@ export class PluginEventHooks {
     toolName: string,
     toolArgs: unknown,
     toolResult: unknown,
-    sessionId: string
+    sessionId: string,
+    call: { isError?: boolean; turnId?: string } = {}
   ): Promise<import("@/types/plugin/plugin-hooks").PostToolUseResult> {
     const { value } = await dispatchTransform<ToolResultProjectValue>(
       "tool.result.project",
-      { toolName, toolArgs, toolResult, sessionId, projection: {} },
+      {
+        toolName,
+        toolArgs,
+        toolResult,
+        sessionId,
+        ...(call.isError !== undefined ? { isError: call.isError } : {}),
+        ...(call.turnId ? { turnId: call.turnId } : {}),
+        projection: {},
+      },
       {
         operationId: `tool-result:${sessionId}:${toolName}`,
         sessionId,

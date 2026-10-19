@@ -184,6 +184,20 @@ describe("projectToolResult", () => {
     ).toEqual([])
   })
 
+  it("adds no hint or reminder when the outcome is unknown, but still trims", () => {
+    expect(
+      projectToolResult(rules, createToolRuleState(), "Bash", "ENOENT: no such file", undefined)
+        .changed
+    ).toBe(false)
+    expect(
+      projectToolResult(rules, createToolRuleState(), "Write", "ok", undefined).appliedRuleIds
+    ).toEqual([])
+    const long = "x".repeat(3000)
+    expect(
+      projectToolResult(rules, createToolRuleState(), "Read", long, undefined).appliedRuleIds
+    ).toEqual(["trim"])
+  })
+
   it("never rewrites a non-text result", () => {
     expect(
       projectToolResult(rules, createToolRuleState(), "Read", [{ type: "image" }], false)

@@ -1943,5 +1943,19 @@ describe("chat dispatchers route through the interceptor chain (ADR-0189)", () =
       await hooks.dispatchPostToolUse("read", {}, null, "s1")
       expect(seen).toEqual(["read"])
     })
+
+    it("tells interceptors the call's outcome and turn when the call site knows them", async () => {
+      const seen: unknown[] = []
+      register("a:post", "tool.result.project", (value: { isError?: boolean; turnId?: string }) => {
+        seen.push({ isError: value.isError, turnId: value.turnId })
+        return value
+      })
+      await hooks.dispatchPostToolUse("read", {}, "x", "s1", { isError: true, turnId: "t1" })
+      await hooks.dispatchPostToolUse("read", {}, "x", "s1")
+      expect(seen).toEqual([
+        { isError: true, turnId: "t1" },
+        { isError: undefined, turnId: undefined },
+      ])
+    })
   })
 })

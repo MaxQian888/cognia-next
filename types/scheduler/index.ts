@@ -107,6 +107,11 @@ export type ScheduledTaskType =
   // `lib/files-library/trash-purge-schedule.ts`; a paired client whose Host
   // owns the data skips it.
   | "files-trash-purge"
+  // Launches Harness Evolution runs queued from failed turns (ADR-0237).
+  // Installed at scheduler init and executed by
+  // `lib/harness/runtime/background.ts`; a paired client whose Host owns the
+  // conversations skips it.
+  | "harness-evolution-sweep"
 
 // Task execution status
 export type TaskExecutionStatus =

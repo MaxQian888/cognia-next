@@ -146,6 +146,8 @@ export async function initSchedulerSystem(driver?: SchedulerTimingDriver): Promi
   const { installFilesTrashPurgeSchedule } =
     await import("@/lib/files-library/trash-purge-schedule")
   await installFilesTrashPurgeSchedule()
+  const { installHarnessEvolutionSweepSchedule } = await import("@/lib/harness/runtime/background")
+  await installHarnessEvolutionSweepSchedule()
   log.info("[Scheduler] Scheduler system initialized")
 }
 

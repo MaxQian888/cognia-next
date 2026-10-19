@@ -999,7 +999,8 @@ export async function handleEvent(
           evt.toolName || call?.name || "",
           call?.input ?? {},
           evt.result,
-          evt.sessionId
+          evt.sessionId,
+          { isError: evt.isError, ...(frame.turnId ? { turnId: frame.turnId } : {}) }
         )
         updatedToolOutput = post.modifiedResult
       } catch {

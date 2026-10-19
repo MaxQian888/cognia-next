@@ -1188,7 +1188,8 @@ async function captureAssistantReplyCore(
               req.toolName || call?.name || "",
               call?.input ?? {},
               req.result,
-              sessionId
+              sessionId,
+              { isError: req.isError, turnId }
             )
             updatedToolOutput = post.modifiedResult
           } catch {

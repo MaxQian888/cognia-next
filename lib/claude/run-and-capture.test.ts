@@ -1845,6 +1845,24 @@ describe("runAndCaptureAssistantReply", () => {
     expect(toolResultDecisionMock).toHaveBeenCalledWith(SESSION, "rev_1", "redacted:web_fetch")
   })
 
+  it("tells the global post-tool interceptors the call's outcome and turn", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", { turnId: "turn-7" } as never, {
+      timeoutMs: 1_000,
+    })
+    await Promise.resolve()
+    fire(toolUseEventWithId("tu_e", "Bash", { command: "ls" }))
+    fire(toolResultReview("rev_e", "tu_e", "Bash", "ENOENT", true))
+    await Promise.resolve()
+    await Promise.resolve()
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(postToolUseMock).toHaveBeenCalledWith("Bash", { command: "ls" }, "ENOENT", SESSION, {
+      isError: true,
+      turnId: "turn-7",
+    })
+  })
+
   it("correlates input from the originating tool_use into the review responder", async () => {
     const seen: unknown[] = []
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {

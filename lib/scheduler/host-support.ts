@@ -86,6 +86,9 @@ export const CARD_AUTHORED_TASK_TYPES: readonly ScheduledTaskType[] = Object.fre
   // Installed at scheduler init (`lib/files-library/trash-purge-schedule.ts`);
   // its only input is the Files Trash, never a form.
   "files-trash-purge",
+  // Installed at scheduler init (`lib/harness/runtime/background.ts`); it
+  // drains runs queued from failed turns, never a form.
+  "harness-evolution-sweep",
   "connection:scheduled:digest",
   "connection:outbound:send",
   "connection:housekeeping:clock",

@@ -149,6 +149,10 @@ export interface ToolResultProjectValue {
   toolArgs: unknown
   toolResult: unknown
   sessionId: string
+  /** Whether the tool reported failure. Absent when the call site cannot say. */
+  isError?: boolean
+  /** The turn the call belongs to, when the call site knows it. */
+  turnId?: string
   projection: PostToolUseResult
 }
 
