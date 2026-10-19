@@ -71,6 +71,7 @@
     "cognia-ops-controller": "service",
     "cognia-docker-proxy": "service",
     "cognia-deploy-agent": "service",
+    "cognia-host-installer": "service",
     "cognia-sandbox-runner": "service",
     "cognia-elevated-setup": "service",
 

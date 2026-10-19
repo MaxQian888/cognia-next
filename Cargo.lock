@@ -2683,6 +2683,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-host-installer"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "cognia-host-service",
+ "cognia-update-catalog",
+ "hex",
+ "parking_lot",
+ "rand 0.10.3",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
 name = "cognia-host-service"
 version = "0.1.0"
 dependencies = [

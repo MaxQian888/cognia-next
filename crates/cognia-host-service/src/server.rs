@@ -260,11 +260,20 @@ pub fn lookup_account(_name: &str) -> Option<AccountRecord> {
 /// directory `cognia-server` picks when that user runs it by hand, so `pair`
 /// and `devices` find the service's state without flags.
 pub fn default_data_dir(platform: ServicePlatform, home: &Path) -> PathBuf {
+    home.join(data_dir_in_home(platform))
+}
+
+/// The default data dir relative to the service account's home, with `/`
+/// separators. A remote installer joins it onto a remote home as a string.
+pub fn data_dir_in_home(platform: ServicePlatform) -> &'static str {
     match platform {
-        ServicePlatform::MacOs => home.join("Library/Application Support/cognia-server"),
-        ServicePlatform::Linux => home.join(".local/share/cognia-server"),
+        ServicePlatform::MacOs => "Library/Application Support/cognia-server",
+        ServicePlatform::Linux => ".local/share/cognia-server",
     }
 }
+
+/// `bin/cognia-server` inside an install directory, with `/` separators.
+pub const SERVER_BINARY_IN_INSTALL: &str = "bin/cognia-server";
 
 /// Whether `raw` is a master key (64 hex characters, surrounding whitespace allowed).
 pub fn is_master_key(raw: &str) -> bool {
@@ -1066,6 +1075,21 @@ mod tests {
         let round_trip: ServerStatusReport =
             serde_json::from_value(serde_json::to_value(&with_readiness).unwrap()).unwrap();
         assert_eq!(round_trip, with_readiness);
+    }
+
+    #[test]
+    fn the_string_layout_names_the_same_paths_as_the_path_layout() {
+        let layout = HostLayout::new("/opt/cognia");
+        assert_eq!(
+            layout.server_binary(),
+            Path::new("/opt/cognia").join(SERVER_BINARY_IN_INSTALL)
+        );
+        for platform in [ServicePlatform::Linux, ServicePlatform::MacOs] {
+            assert_eq!(
+                default_data_dir(platform, Path::new("/h")),
+                Path::new("/h").join(data_dir_in_home(platform))
+            );
+        }
     }
 
     #[test]

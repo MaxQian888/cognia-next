@@ -162,6 +162,9 @@ members = [
   "crates/cognia-deployment",
   "crates/cognia-ops-controller",
   "crates/cognia-deploy-agent",
+  # ADR-0235 — installs a headless Host over a remote shell (VS Code tunnel
+  # first, SSH later), driving the catalog and `cognia-server` entry points.
+  "crates/cognia-host-installer",
   # ADR-0224 A10 — the signed update catalog, verified on an always-on host.
   "crates/cognia-update-catalog",
   # ADR-0224 A8 — the always-on host's Docker API proxy: body-inspecting,

@@ -37,8 +37,9 @@ pub const MAX_TRIAL_BOOTS: u32 = 3;
 /// Largest archive a host unpacks (the real one is about 150 MiB).
 pub const MAX_UNPACKED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
-const VERSIONS_DIR: &str = "versions";
-const CURRENT_LINK: &str = "current";
+pub const VERSIONS_DIR: &str = "versions";
+/// The link the service runs through: `<home>/current/bin/cognia-server`.
+pub const CURRENT_LINK: &str = "current";
 const PENDING_FILE: &str = "pending-update.json";
 const OUTCOME_FILE: &str = "last-update.json";
 
