@@ -36,8 +36,8 @@ A host release ships its server and brain as one unit, so the signed catalog
 lists it as a `host-server` entry (the archive's `url` and `sha256`, or the
 Compose image's repository and `sha256:` digest) paired with a `host-brain`
 entry of the same version; both name the command contract. Targets are
-`darwin-arm64`, `darwin-x64`, `oci-slim-amd64` and `oci-full-amd64` (a Compose
-host stays on the image variant it runs). The Worker splits a target at its
+`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`, `oci-slim-amd64` and
+`oci-full-amd64` (a Compose host stays on the image variant it runs). The Worker splits a target at its
 last hyphen into its `target` and `arch` columns.
 
 A host installs a release only when it is in the verified catalog **and**

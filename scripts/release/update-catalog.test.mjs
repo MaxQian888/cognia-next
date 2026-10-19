@@ -8,6 +8,7 @@ import {
   FIXTURE_NOW,
   FIXTURE_PATH,
   FIXTURE_SEEDS,
+  HOST_TARGETS,
   ROLES,
   buildFixture,
   buildRoot,
@@ -156,6 +157,20 @@ describe("host entries", () => {
     assert.match(entryProblems([server, brain, brain]).join(), /listed twice/)
     assert.match(entryProblems([{ ...server, url: "http://plain" }, brain]).join(), /https url/)
     assert.deepEqual(entryProblems([server, brain]), [])
+  })
+
+  it("publishes an archive for every machine the remote installer resolves", () => {
+    // cognia-host-installer maps a probed machine to one of these targets and
+    // downloads its archive from the catalog, so each must be an archive target.
+    const probe = readFileSync(
+      new URL("../../crates/cognia-host-installer/src/probe.rs", import.meta.url),
+      "utf8"
+    )
+    const resolved = [...probe.matchAll(/RemoteArch::\w+\) => "([a-z0-9-]+)"/g)].map((m) => m[1])
+    assert.deepEqual(resolved.sort(), ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"])
+    for (const target of resolved) assert.equal(HOST_TARGETS[target], "archive", target)
+    const [linux] = hostStageBodies(release("1.4.0", { target: "linux-arm64" }))
+    assert.deepEqual([linux.target, linux.arch], ["linux", "arm64"])
   })
 
   it("leaves other kinds alone", () => {

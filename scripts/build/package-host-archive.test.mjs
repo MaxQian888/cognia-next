@@ -5,15 +5,20 @@ import { join } from "node:path"
 import { test } from "node:test"
 
 import {
+  LINUX_GLIBC_BASELINE,
   assembleHostArchive,
+  assertGlibcBaseline,
   hostArchiveLayout,
+  isElf,
   isMachO,
   machOFilesUnder,
   hostArchiveName,
   hostArchiveTarget,
   installInstructions,
+  newestGlibcRequirement,
   notarizeHostArchive,
   parseArgs,
+  serverBuildArgs,
   signHostArchive,
 } from "./package-host-archive.mjs"
 
@@ -31,11 +36,84 @@ function parts(dir) {
   return { serverBinary: server, nodeBinary: node, nodeLicense: license, brainLayoutDir: brain }
 }
 
-test("only the two macOS targets are packaged; Linux uses Compose", () => {
+test("packages macOS and glibc Linux targets and nothing else", () => {
   assert.equal(hostArchiveTarget("darwin-arm64").rust, "aarch64-apple-darwin")
   assert.equal(hostArchiveTarget("darwin-x64").arch, "x64")
-  assert.throws(() => hostArchiveTarget("linux-x64"), /Compose server profile/)
+  assert.equal(hostArchiveTarget("linux-x64").rust, "x86_64-unknown-linux-gnu")
+  assert.equal(hostArchiveTarget("linux-arm64").platform, "linux")
+  assert.throws(() => hostArchiveTarget("linux-x64-musl"), /Unsupported host archive target/)
   assert.equal(hostArchiveName({ version: "1.2.3", target: "darwin-arm64" }), "cognia-host-1.2.3-darwin-arm64")
+  assert.equal(hostArchiveName({ version: "1.2.3", target: "linux-arm64" }), "cognia-host-1.2.3-linux-arm64")
+})
+
+test("Linux archives carry the ocrs engine and the installer's glibc baseline", () => {
+  assert.deepEqual(serverBuildArgs("darwin-arm64"), [
+    "build", "-p", "cognia-server", "--release", "--bin", "cognia-server", "--target", "aarch64-apple-darwin",
+  ])
+  assert.deepEqual(serverBuildArgs("linux-x64"), [
+    "build", "-p", "cognia-server", "--release", "--bin", "cognia-server",
+    "--no-default-features", "--features", "ocr-ocrs", "--target", "x86_64-unknown-linux-gnu",
+  ])
+  assert.equal(hostArchiveTarget("linux-arm64").glibc, LINUX_GLIBC_BASELINE)
+  // The installer refuses machines below the same floor (cognia-host-installer probe.rs).
+  const probe = readFileSync(new URL("../../crates/cognia-host-installer/src/probe.rs", import.meta.url), "utf8")
+  const [, major, minor] = probe.match(/GLIBC_BASELINE: \(u32, u32\) = \((\d+), (\d+)\)/)
+  assert.equal(`${major}.${minor}`, LINUX_GLIBC_BASELINE)
+})
+
+const VERSION_INFO = `
+Version symbols section '.gnu.version' contains 4 entries:
+ Addr: 0x0000000000000a18  Offset: 0x000a18  Link: 6 (.dynsym)
+  000:   0 (*local*)       2 (GLIBC_2.2.5)   3 (GLIBC_2.34)
+
+Version definition section '.gnu.version_d' contains 2 entries:
+  000000: Rev: 1  Flags: BASE  Index: 1  Cnt: 1  Name: libfoo.so
+  0x001c: Rev: 1  Flags: none  Index: 2  Cnt: 1  Name: GLIBC_2.99
+
+Version needs section '.gnu.version_r' contains 1 entry:
+ Addr: 0x0000000000000a28  Offset: 0x000a28  Link: 7 (.dynstr)
+  000000: Version: 1  File: libc.so.6  Cnt: 3
+  0x0010:   Name: GLIBC_2.2.5  Flags: none  Version: 2
+  0x0020:   Name: GLIBC_2.34  Flags: none  Version: 3
+  0x0030:   Name: GLIBC_2.17  Flags: none  Version: 4
+`
+
+test("reads the newest glibc a binary needs, ignoring the versions it defines", () => {
+  assert.equal(newestGlibcRequirement(VERSION_INFO), "2.34")
+  assert.equal(newestGlibcRequirement("There are no version information sections."), null)
+})
+
+test("refuses an archive whose ELF files need a glibc above the baseline", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cognia-host-archive-"))
+  try {
+    const elf = Buffer.concat([Buffer.from([0x7f, 0x45, 0x4c, 0x46]), Buffer.alloc(12)])
+    mkdirSync(join(dir, "bin"))
+    writeFileSync(join(dir, "bin", "cognia-server"), elf)
+    writeFileSync(join(dir, "bin", "node"), elf)
+    writeFileSync(join(dir, "cli.mjs"), "brain")
+    assert.equal(isElf(join(dir, "bin", "node")), true)
+    assert.equal(isElf(join(dir, "cli.mjs")), false)
+
+    const needs = (versions) => (command, args) => {
+      assert.equal(command, "readelf")
+      const file = args.at(-1)
+      const version = file.endsWith("node") ? versions.node : versions.server
+      return { status: 0, stdout: `Version needs section '.gnu.version_r'\n  Name: GLIBC_${version}  Flags: none\n` }
+    }
+    assert.equal(assertGlibcBaseline({ root: dir, baseline: "2.35", run: needs({ server: "2.35", node: "2.28" }) }), 2)
+    assert.throws(
+      () => assertGlibcBaseline({ root: dir, baseline: "2.35", run: needs({ server: "2.39", node: "2.28" }) }),
+      /bin\/cognia-server needs GLIBC_2\.39/
+    )
+    assert.throws(
+      () => assertGlibcBaseline({ root: dir, baseline: "2.35", run: () => ({ status: 1, stderr: "boom" }) }),
+      /readelf failed/
+    )
+    rmSync(join(dir, "bin"), { recursive: true })
+    assert.throws(() => assertGlibcBaseline({ root: dir, baseline: "2.35" }), /no ELF files/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test("assembles the layout cognia-host-service expects, with a manifest of every file", () => {
@@ -190,6 +268,10 @@ test("parses its flags and rejects unknown ones", () => {
   assert.throws(() => parseArgs(["--target", "darwin-x64"], "darwin-arm64"), /cannot package darwin-x64 on darwin-arm64/)
   assert.throws(() => parseArgs(["--bogus"]), /unknown argument/)
   assert.throws(() => parseArgs(["--target", "win32-x64"]), /Unsupported host archive target/)
+  assert.equal(parseArgs([], "linux-arm64").target, "linux-arm64")
+  assert.throws(() => parseArgs(["--target", "linux-x64"], "darwin-arm64"), /Build on a linux-x64 machine/)
+  // Code signing and notarization are Apple's; a Linux archive has neither.
+  assert.throws(() => parseArgs(["--sign", "ID"], "linux-x64"), /macOS code signing/)
 })
 
 test("install instructions name the relay pairing and the master key backup", () => {
@@ -198,4 +280,15 @@ test("install instructions name the relay pairing and the master key backup", ()
   assert.match(text, /master\.key/)
   assert.match(text, /--scope user/)
   assert.match(text, /updates itself/)
+})
+
+test("Linux install instructions use systemd, lingering and the glibc floor", () => {
+  const text = installInstructions({ version: "1", target: "linux-x64" })
+  assert.match(text, /service install --scope user/)
+  assert.match(text, /loginctl enable-linger/)
+  assert.match(text, /glibc 2\.35/)
+  assert.match(text, /\.local\/share\/cognia-server/)
+  assert.match(text, /master\.key/)
+  assert.match(text, /updates itself/)
+  assert.doesNotMatch(text, /LaunchDaemon|Library\/Application Support/)
 })

@@ -157,6 +157,8 @@ Each spike is an opt-in script in an owned scratch directory, run against a disp
 
 **Exit and rollback.** The archives are additive; withdrawing them from the catalog stops new installs. Changeset: `minor`.
 
+**Progress (2026-10-19).** Decided: the Linux archives build with `--no-default-features --features ocr-ocrs` (PaddleOCR's prebuilt ONNX Runtime needs glibc 2.38) on a glibc 2.35 machine, the floor `cognia-host-installer` already probes for; the Compose image keeps PaddleOCR. Done: `linux-x64` / `linux-arm64` packager targets with `serverBuildArgs`, a `readelf` glibc-ceiling check over every ELF file in the archive, Linux install instructions, `--sign`/`--notarize` refused for Linux, the catalog's `HOST_TARGETS` (pinned against the installer's resolved targets), and the docs. Self-update needed no change: `detect_host_install` keys on `COGNIA_SERVICE_MANAGED`, which every unit sets, and `cognia-host-service` already tests a Linux user-scope install. Open: the CI host-archive job (a release workflow change, waiting on the owner's approval) and the systemd container smoke.
+
 ## P4 — Installer crate, Host CLI entry points, tunnel helper, GitHub device flow
 
 **Installer crate (_new_ `crates/cognia-host-installer/`, service layer)**

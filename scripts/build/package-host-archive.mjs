@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// ADR-0224 A1: the standalone always-on host archive for macOS.
+// ADR-0224 A1 / ADR-0235 P3: the standalone always-on host archive, for macOS
+// and Linux.
 //
 // One directory, laid out the way `cognia-host-service`'s `HostLayout` expects,
 // so `bin/cognia-server service install` can find everything relative to itself:
@@ -14,8 +15,11 @@
 //     host-manifest.json        version, target, Node version, command contract, sha256 of every file
 //     INSTALL.txt
 //
-// Linux hosts run the Compose `server` profile instead (ADR-0224), so only the
-// two macOS targets are packaged here.
+// Linux archives run on glibc 2.35 and newer (Ubuntu 22.04, Debian 12): they
+// are built on a glibc 2.35 machine, and every ELF file is checked against that
+// baseline before packaging. They carry the pure-Rust `ocrs` OCR engine instead
+// of the desktop's PaddleOCR, whose prebuilt ONNX Runtime needs glibc 2.38. The
+// Compose `server` profile remains the containerized Linux install.
 
 import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
@@ -45,20 +49,53 @@ import { PLUGIN_NODE_VERSION, archiveFor, verifyArchive } from "./prepare-plugin
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const projectRoot = resolve(scriptDir, "../..")
 
-/** Packaged targets: archive target → Rust triple + Node archive platform/arch. */
+/**
+ * The oldest glibc a Linux host archive runs on. Mirrors `GLIBC_BASELINE` in
+ * `crates/cognia-host-installer/src/probe.rs`, which refuses an older machine
+ * before uploading anything.
+ */
+export const LINUX_GLIBC_BASELINE = "2.35"
+
+/** The Linux OCR engine: pure Rust, no ONNX Runtime and so no glibc 2.38 floor. */
+const LINUX_SERVER_FEATURES = ["--no-default-features", "--features", "ocr-ocrs"]
+
+/**
+ * Packaged targets: archive target → Rust triple, Node archive platform/arch,
+ * the server's cargo feature flags and, on Linux, the glibc baseline.
+ */
 export const HOST_ARCHIVE_TARGETS = Object.freeze({
-  "darwin-arm64": { rust: "aarch64-apple-darwin", platform: "darwin", arch: "arm64" },
-  "darwin-x64": { rust: "x86_64-apple-darwin", platform: "darwin", arch: "x64" },
+  "darwin-arm64": { rust: "aarch64-apple-darwin", platform: "darwin", arch: "arm64", features: [] },
+  "darwin-x64": { rust: "x86_64-apple-darwin", platform: "darwin", arch: "x64", features: [] },
+  "linux-x64": {
+    rust: "x86_64-unknown-linux-gnu",
+    platform: "linux",
+    arch: "x64",
+    features: LINUX_SERVER_FEATURES,
+    glibc: LINUX_GLIBC_BASELINE,
+  },
+  "linux-arm64": {
+    rust: "aarch64-unknown-linux-gnu",
+    platform: "linux",
+    arch: "arm64",
+    features: LINUX_SERVER_FEATURES,
+    glibc: LINUX_GLIBC_BASELINE,
+  },
 })
 
 export function hostArchiveTarget(name) {
   const target = HOST_ARCHIVE_TARGETS[name]
   if (!target) {
     throw new Error(
-      `Unsupported host archive target ${name}; expected one of ${Object.keys(HOST_ARCHIVE_TARGETS).join(", ")}. Linux hosts use the Compose server profile.`
+      `Unsupported host archive target ${name}; expected one of ${Object.keys(HOST_ARCHIVE_TARGETS).join(", ")}.`
     )
   }
   return target
+}
+
+/** The `cargo` argv that builds a target's server binary. */
+export function serverBuildArgs(name) {
+  const { rust, features } = hostArchiveTarget(name)
+  return ["build", "-p", "cognia-server", "--release", "--bin", "cognia-server", ...features, "--target", rust]
 }
 
 export function hostArchiveName({ version, target }) {
@@ -80,6 +117,12 @@ export function hostArchiveLayout(root) {
 }
 
 export function installInstructions({ version, target }) {
+  return hostArchiveTarget(target).platform === "linux"
+    ? linuxInstallInstructions({ version, target })
+    : macInstallInstructions({ version, target })
+}
+
+function macInstallInstructions({ version, target }) {
   return `Cognia always-on host ${version} (${target})
 
 Install as a LaunchDaemon that starts at boot, running as your account:
@@ -102,6 +145,47 @@ The master key is written to <data dir>/master.key on first install. Back it up:
 without it the secrets this host stores cannot be read.
 
 Prefer a per-user agent that starts at login? Use --scope user (no sudo).
+`
+}
+
+function linuxInstallInstructions({ version, target }) {
+  return `Cognia always-on host ${version} (${target})
+
+Needs glibc ${LINUX_GLIBC_BASELINE} or newer (Ubuntu 22.04, Debian 12 and later) and
+systemd. Check with: getconf GNU_LIBC_VERSION
+
+Install as a systemd user service, running as your account (no sudo):
+
+  ./bin/cognia-server service install --scope user
+
+A user service starts at login. To start it at boot without one, enable
+lingering once:
+
+  loginctl enable-linger "$USER"
+
+Or install a system service that starts at boot, running as the account that
+ran sudo (pick another with --run-as):
+
+  sudo ./bin/cognia-server service install
+
+Either way this copies the host into its data dir's install home, where it
+updates itself later; this unpacked directory is not needed afterwards.
+
+Then pair your phone or desktop over the relay (no public domain needed) with
+the pair command the install prints; for the user service it is:
+
+  COGNIA_DATA_DIR="$HOME/.local/share/cognia-server" ./bin/cognia-server pair
+
+Check or remove the service:
+
+  ./bin/cognia-server service status --scope user
+  ./bin/cognia-server service uninstall --scope user
+
+The master key is written to <data dir>/master.key on first install. Back it up:
+without it the secrets this host stores cannot be read.
+
+OCR on this host uses the ocrs engine rather than the desktop's PaddleOCR.
+Prefer containers? The Compose server profile runs the same host in Docker.
 `
 }
 
@@ -214,6 +298,75 @@ export function isMachO(path) {
 /** Every Mach-O file under `dir` (native addons, helpers, vendored binaries). */
 export function machOFilesUnder(dir) {
   return existsSync(dir) ? walkFiles(dir).filter(isMachO) : []
+}
+
+/** Whether `path` is an ELF file. */
+export function isElf(path) {
+  const header = Buffer.alloc(4)
+  const fd = openSync(path, "r")
+  try {
+    if (readSync(fd, header, 0, 4, 0) < 4) return false
+  } finally {
+    closeSync(fd)
+  }
+  return header.equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))
+}
+
+function compareVersions(left, right) {
+  const a = left.split(".").map(Number)
+  const b = right.split(".").map(Number)
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0)
+    if (difference !== 0) return Math.sign(difference)
+  }
+  return 0
+}
+
+/**
+ * The newest `GLIBC_x.y` symbol version a `readelf --version-info` dump
+ * requires, or `null` when it requires none (a static or non-glibc binary).
+ * Only the version-needs section names requirements; the definitions a
+ * library exports would read as requirements of the library itself.
+ */
+export function newestGlibcRequirement(versionInfo) {
+  const needs = versionInfo.split(/\n(?=Version (?:needs|definition) section)/)
+  let newest = null
+  for (const section of needs) {
+    if (!section.startsWith("Version needs section")) continue
+    for (const [, version] of section.matchAll(/Name: GLIBC_(\d+(?:\.\d+)+)\b/g)) {
+      if (newest === null || compareVersions(version, newest) > 0) newest = version
+    }
+  }
+  return newest
+}
+
+/**
+ * Refuse an archive whose ELF files need a glibc newer than `baseline`: the
+ * server, Node and every native addon in the brain. A build on a newer
+ * machine links newer symbol versions silently, and the installer only
+ * checks the baseline, so the binary would then fail to load on a machine
+ * the installer accepted.
+ */
+export function assertGlibcBaseline({ root, baseline, run = spawnSync }) {
+  const elves = walkFiles(root).filter(isElf)
+  if (elves.length === 0) throw new Error(`no ELF files under ${root}; is this a Linux archive?`)
+  const offenders = []
+  for (const file of elves) {
+    const result = run("readelf", ["--version-info", "--wide", file], { encoding: "utf8" })
+    if (result.status !== 0) {
+      throw new Error(`readelf failed on ${file}: ${result.stderr || result.error}`)
+    }
+    const newest = newestGlibcRequirement(result.stdout ?? "")
+    if (newest !== null && compareVersions(newest, baseline) > 0) {
+      offenders.push(`${relative(root, file)} needs GLIBC_${newest}`)
+    }
+  }
+  if (offenders.length > 0) {
+    throw new Error(
+      `the archive needs a glibc newer than its ${baseline} baseline; build it on a glibc ${baseline} machine:\n  ${offenders.join("\n  ")}`
+    )
+  }
+  return elves.length
 }
 
 /**
@@ -329,11 +482,14 @@ export function parseArgs(argv, host = `${process.platform}-${process.arch}`) {
   if (!options.target) {
     options.target = host
   }
-  hostArchiveTarget(options.target)
+  const { platform } = hostArchiveTarget(options.target)
   if (options.target !== host) {
     throw new Error(
-      `cannot package ${options.target} on ${host}: the brain's native addons (better-sqlite3, node-pty) and platform runtimes come from this machine's install. Build on a ${options.target} Mac.`
+      `cannot package ${options.target} on ${host}: the brain's native addons (better-sqlite3, node-pty) and platform runtimes come from this machine's install. Build on a ${options.target} machine.`
     )
+  }
+  if (platform !== "darwin" && (options.sign || options.notarize)) {
+    throw new Error("--sign and --notarize are macOS code signing; a Linux archive is verified by its catalog digest")
   }
   if (options.notarize && !options.sign) {
     throw new Error("--notarize needs --sign with a Developer ID identity")
@@ -343,19 +499,10 @@ export function parseArgs(argv, host = `${process.platform}-${process.arch}`) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2))
-  const { rust } = hostArchiveTarget(options.target)
+  const { rust, platform, glibc } = hostArchiveTarget(options.target)
   const version = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8")).version
   if (!options.skipBuild) {
-    run("cargo", [
-      "build",
-      "-p",
-      "cognia-server",
-      "--release",
-      "--bin",
-      "cognia-server",
-      "--target",
-      rust,
-    ])
+    run("cargo", serverBuildArgs(options.target))
     // The layout copies webclone's runtime closure into the sidecar tree.
     run(process.execPath, [join(scriptDir, "build-webclone-sidecar.mjs"), "--install-only"])
     run(process.execPath, [join(scriptDir, "build-cli-binary.mjs"), "--layout-only"])
@@ -374,13 +521,19 @@ async function main() {
       brainLayoutDir,
       ...node,
     })
-    const mode = signHostArchive({
-      root,
-      identity: options.sign,
-      entitlements: join(scriptDir, "bun-entitlements.plist"),
-    })
-    if (options.notarize) {
-      notarizeHostArchive({ root, identity: options.sign, profile: options.notarize })
+    let mode = "no"
+    if (platform === "darwin") {
+      mode = signHostArchive({
+        root,
+        identity: options.sign,
+        entitlements: join(scriptDir, "bun-entitlements.plist"),
+      })
+      if (options.notarize) {
+        notarizeHostArchive({ root, identity: options.sign, profile: options.notarize })
+      }
+    } else {
+      const checked = assertGlibcBaseline({ root, baseline: glibc })
+      console.log(`glibc ${glibc} baseline: ${checked} ELF files checked`)
     }
     writeHostManifest(root, { version, target: options.target })
     const tarball = `${root}.tar.gz`

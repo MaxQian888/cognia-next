@@ -1,6 +1,6 @@
 ---
 title: 运行常驻 host
-description: 在你自己的机器上（带 Docker 的 Linux VPS 或 NAS，或家里的 Mac）持续运行 Cognia，让 bot、定时任务和连接器在笔记本合盖时照常工作。安装、经中继配对（无需公网域名）、备份主密钥。ADR-0224。
+description: 在你自己的机器上（Linux VPS 或 NAS，有没有 Docker 均可，或家里的 Mac）持续运行 Cognia，让 bot、定时任务和连接器在笔记本合盖时照常工作。安装、经中继配对（无需公网域名）、备份主密钥。ADR-0224。
 ---
 
 # 运行常驻 host
@@ -9,11 +9,12 @@ description: 在你自己的机器上（带 Docker 的 Linux VPS 或 NAS，或�
 它是桌面端的对等设备，而不是替代品。它运行放在它上面的一切：从手机发起的对话、定时任务、
 bot 和连接器，所以笔记本休眠时这些照常工作。
 
-有两种运行方式：
+有几种运行方式：
 
 | 机器                       | 方式                                    |
 | -------------------------- | --------------------------------------- |
 | Linux VPS、NAS、家用服务器 | Docker Compose 的 `server` profile      |
+| 没有 Docker 的 Linux       | host 安装包，安装为 systemd 服务        |
 | Mac（例如 Mac mini）       | host 安装包，安装为 LaunchDaemon        |
 | 一直开着的桌面电脑         | 桌面应用的**常驻 host 模式**（见下文）  |
 
@@ -84,10 +85,37 @@ sudo /opt/cognia-host/bin/cognia-server service status      # 是否已安装、
 sudo /opt/cognia-host/bin/cognia-server service uninstall   # 保留数据和密钥
 ```
 
-在没有 Docker 的 Linux 上，同一命令会安装 systemd unit；系统级服务会以 root 专属的 systemd
-credential 从 `/etc/cognia-server/master.key` 读取主密钥。
-
 如果希望 Mac 像服务器一样工作，还要在「系统设置 → 能源」中开启断电后自动启动，并在显示器关闭时阻止休眠。
+
+## 用 host 安装包运行在 Linux 上
+
+没有 Docker 的 Linux 机器使用 Linux 安装包。它需要 **glibc 2.35 或更新版本**（Ubuntu 22.04、
+Debian 12 及以后；可用 `getconf GNU_LIBC_VERSION` 查看）和 systemd。下载
+`cognia-host-<version>-linux-x64.tar.gz`（或 `linux-arm64`），解压到任意位置，然后安装一个 systemd
+**用户**服务，无需 sudo：
+
+```bash
+./cognia-host-<version>-linux-x64/bin/cognia-server service install --scope user
+loginctl enable-linger "$USER"   # 开机即启动，而不只是登录时
+```
+
+unit 写入 `~/.config/systemd/user/`，数据目录和主密钥位于 `~/.local/share/cognia-server`，
+host 会像在 Mac 上一样把自己复制到数据目录的安装区，之后解压出的目录就不再需要了。
+不开启 lingering 时，用户服务会在你注销后停止，直到再次登录才会启动。
+
+如果需要无论是否登录都开机启动，改为安装系统级服务：
+
+```bash
+sudo ./cognia-host-<version>-linux-x64/bin/cognia-server service install
+```
+
+它以执行 `sudo` 的账号运行（`--run-as` 可指定其他账号，永远不是 root），unit 位于
+`/etc/systemd/system`，并以 root 专属的 systemd credential 从 `/etc/cognia-server/master.key`
+读取主密钥。两种方式都会打印确切的配对命令；上表中的参数同样适用，`service status` 和
+`service uninstall` 使用相同的 `--scope`。
+
+Linux 安装包用 **ocrs** 引擎识别图片中的文字，而不是桌面应用和 Compose
+镜像使用的 PaddleOCR 引擎：PaddleOCR 的运行时需要比 2.35 更新的 glibc。
 
 ## 一直开着的桌面电脑
 

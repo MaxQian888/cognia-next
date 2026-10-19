@@ -1,6 +1,6 @@
 ---
 title: Run an always-on host
-description: Keep Cognia running on a machine you own (a Linux VPS or NAS with Docker, or a Mac at home) so its bots, schedules and connectors keep working while your laptop is closed. Install, pair over the relay without a public domain, back up the master key. ADR-0224.
+description: Keep Cognia running on a machine you own (a Linux VPS or NAS, with or without Docker, or a Mac at home) so its bots, schedules and connectors keep working while your laptop is closed. Install, pair over the relay without a public domain, back up the master key. ADR-0224.
 ---
 
 # Run an always-on host
@@ -10,11 +10,12 @@ around the clock (ADR-0224). It is a peer of your desktop, not a replacement for
 It runs whatever lives on it: chats you start from your phone, scheduled tasks, bots and
 connectors, so they keep working while your laptop sleeps.
 
-There are two ways to run one:
+There are several ways to run one:
 
 | Machine                      | How                                                |
 | ---------------------------- | -------------------------------------------------- |
 | Linux VPS, NAS, home server  | Docker Compose, `server` profile                   |
+| Linux without Docker         | The host archive, installed as a systemd service   |
 | Mac (for example a Mac mini) | The host archive, installed as a LaunchDaemon      |
 | A desktop you leave running  | The desktop app's **Always-on host mode** (below)  |
 
@@ -92,13 +93,41 @@ sudo /opt/cognia-host/bin/cognia-server service status      # installed, running
 sudo /opt/cognia-host/bin/cognia-server service uninstall   # keeps data and the key
 ```
 
-On a Linux machine without Docker the same command installs a systemd unit; a system
-service there reads its master key as a root-only systemd credential from
-`/etc/cognia-server/master.key`.
-
 For a Mac that should behave like a server, also set System Settings → Energy to
 start up automatically after a power failure and to prevent sleep while the display
 is off.
+
+## Linux with the host archive
+
+On a Linux machine without Docker, use the Linux archive. It needs **glibc 2.35 or
+newer** (Ubuntu 22.04, Debian 12 and later; check with `getconf GNU_LIBC_VERSION`) and
+systemd. Download `cognia-host-<version>-linux-x64.tar.gz` (or `linux-arm64`), unpack it
+somewhere, then install a systemd **user** service, which needs no sudo:
+
+```bash
+./cognia-host-<version>-linux-x64/bin/cognia-server service install --scope user
+loginctl enable-linger "$USER"   # start at boot, not only at login
+```
+
+The unit lands in `~/.config/systemd/user/`, the data dir and master key in
+`~/.local/share/cognia-server`, and the host copies itself into the data dir's install
+home just as on a Mac, so the unpacked directory is not needed afterwards. Without
+lingering, a user service stops when you log out and only starts again when you log in.
+
+For a service that starts at boot regardless, install a system service instead:
+
+```bash
+sudo ./cognia-host-<version>-linux-x64/bin/cognia-server service install
+```
+
+It runs as the account that ran `sudo` (`--run-as` picks another, never root), its unit
+goes in `/etc/systemd/system`, and it reads its master key as a root-only systemd
+credential from `/etc/cognia-server/master.key`. Either way the install prints the exact
+pairing command; the flags in the table above apply too, and `service status` and
+`service uninstall` take the same `--scope`.
+
+The Linux archive recognises text in images with the **ocrs** engine rather than the PaddleOCR engine the desktop app and the Compose
+image use: PaddleOCR's runtime needs a newer glibc than 2.35.
 
 ## A desktop you leave running
 

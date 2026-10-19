@@ -65,7 +65,8 @@ pub struct HostRelease {
 pub struct HostReleaseQuery<'a> {
     /// The channel the host follows (pushed by its owner's device).
     pub channel: &'a str,
-    /// `darwin-arm64`, `darwin-x64`, `oci-slim-amd64`, `oci-full-amd64`.
+    /// `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`,
+    /// `oci-slim-amd64`, `oci-full-amd64`.
     pub target: &'a str,
     /// The installed release; `None` offers any.
     pub current_version: Option<&'a str>,

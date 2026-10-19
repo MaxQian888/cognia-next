@@ -44,15 +44,18 @@ export const FIXTURE_PATH = join(projectRoot, "test-fixtures", "updates", "host-
 export const HOST_ASSET_ID = "host"
 
 /**
- * Platforms a host release ships for: the macOS archives
- * (`scripts/build/package-host-archive.mjs`) and the Compose image by variant
- * and architecture (`Dockerfile.cognia-server`'s `runtime-slim` and
+ * Platforms a host release ships for: the macOS and glibc Linux archives
+ * (`scripts/build/package-host-archive.mjs`, the targets
+ * `cognia-host-installer` resolves a machine to) and the Compose image by
+ * variant and architecture (`Dockerfile.cognia-server`'s `runtime-slim` and
  * `runtime-full`, built for amd64 by `.github/workflows/images.yml`). A
  * Compose host stays on the variant it runs.
  */
 export const HOST_TARGETS = Object.freeze({
   "darwin-arm64": "archive",
   "darwin-x64": "archive",
+  "linux-x64": "archive",
+  "linux-arm64": "archive",
   "oci-slim-amd64": "image",
   "oci-full-amd64": "image",
 })
