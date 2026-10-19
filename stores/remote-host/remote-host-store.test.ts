@@ -143,6 +143,28 @@ describe("addHost", () => {
     expect(plain).not.toHaveProperty("alwaysOn")
   })
 
+  it("records the machine an installed Host runs on and keeps it across a re-pair", () => {
+    const binding = { kind: "ssh" as const, profileId: "ssh-3", installedAt: 1_700_000_000_000 }
+    const host = useRemoteHostStore.getState().addHost({
+      label: "Build box",
+      config: makeConfig(),
+      alwaysOn: true,
+      installBinding: binding,
+    })
+    expect(host.installBinding).toEqual(binding)
+    expect(window.localStorage.getItem("cognia-remote-hosts")).toContain('"profileId":"ssh-3"')
+
+    // A pasted invitation for the same host keeps how it was installed.
+    const repaired = useRemoteHostStore.getState().addHost({ config: makeConfig() })
+    expect(repaired.id).toBe(host.id)
+    expect(repaired.installBinding).toEqual(binding)
+    // Pairing a host this desktop did not install records no binding.
+    const plain = useRemoteHostStore
+      .getState()
+      .addHost({ config: makeConfig({ baseUrl: "https://other.example:27890" }) })
+    expect(plain).not.toHaveProperty("installBinding")
+  })
+
   it("uses an explicit label and normalizes a trailing-slash baseUrl", () => {
     const host = useRemoteHostStore.getState().addHost({
       label: "  Dev box  ",

@@ -95,7 +95,10 @@ export function HostConnectionState({ row }: { row: DeviceRow }) {
 
 export interface HostControlsProps {
   row: DeviceRow
-  /** Opens the add-host sheet, so a revoked host can be paired again in place. */
+  /**
+   * Pairs a revoked host again in place: the add-host sheet, or the installer
+   * on its machine for a Host this desktop installed (ADR-0235 P5).
+   */
   onRepair?: () => void
   /** Turns the masthead title into the rename field. */
   onRename?: () => void

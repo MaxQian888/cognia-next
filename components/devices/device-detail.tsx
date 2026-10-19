@@ -37,7 +37,7 @@
  *    that is what happened.
  */
 
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { TerminalIcon } from "lucide-react"
 
@@ -58,6 +58,8 @@ import { HostSecretsSection } from "./host-secrets/host-secrets-section"
 import { HostRuntimesSection } from "./host-runtimes/host-runtimes-section"
 import { HostUpdatesSection } from "./host-updates/host-updates-section"
 import { HostSystemSection } from "./host-system/host-system-section"
+import { HostInstallSection } from "./host-install/host-install-section"
+import { HostInstallSheet, hostInstallerUnavailable } from "./host-install/host-install-sheet"
 import { RemoteDesktopSection } from "./remote-desktop/remote-desktop-section"
 import { DeviceHero, DeviceStatSummary } from "./device-hero"
 import { DeviceSection } from "./device-section"
@@ -92,6 +94,7 @@ const SECTION_LABEL_KEY: Record<DeviceSectionId, string> = {
   "host-updates": "hostUpdates.title",
   "host-runtimes": "hostRuntimes.title",
   "host-system": "hostSystem.title",
+  "host-install": "hostInstall.section.title",
   ssh: "ssh.title",
   files: "files.title",
   access: "access.title",
@@ -148,6 +151,8 @@ function PlannedSection({
       return <HostRuntimesSection row={row} />
     case "host-system":
       return <HostSystemSection row={row} />
+    case "host-install":
+      return <HostInstallSection row={row} />
     case "ssh":
       // Full width because of what it holds: the identity record, the
       // forwarding rules and three controls. In half a pane that is a 700px
@@ -208,6 +213,17 @@ export function DeviceDetail({
 
   const plan = useMemo(() => (row ? planDeviceSections(row) : null), [row])
 
+  /**
+   * A Host this desktop installed is repaired where it was installed: the
+   * masthead's repair opens the installer for its machine (ADR-0235 P5),
+   * which inspects it and offers re-pair or repair. Without the installer
+   * here, it is the add-host sheet like any other Host.
+   */
+  const installBinding = row?.installBinding
+  const [installerOpen, setInstallerOpen] = useState(false)
+  const repairInPlace = Boolean(installBinding) && hostInstallerUnavailable() === null
+  const repairHost = repairInPlace ? () => setInstallerOpen(true) : onRepairHost
+
   const navItems = useMemo<DeviceSectionNavItem[]>(() => {
     if (!plan) return []
     const items = plan.sections.map((section) => ({
@@ -263,7 +279,7 @@ export function DeviceDetail({
       data-testid="device-detail"
       data-kind={row.kind}
     >
-      <DeviceHero row={row} actions={actions} onRepairHost={onRepairHost}>
+      <DeviceHero row={row} actions={actions} onRepairHost={repairHost}>
         <DeviceSectionNav items={navItems} activeAnchor={activeId} onJump={scrollTo} />
       </DeviceHero>
 
@@ -306,6 +322,13 @@ export function DeviceDetail({
           />
         </div>
       </div>
+      {repairInPlace && installBinding ? (
+        <HostInstallSheet
+          open={installerOpen}
+          onOpenChange={setInstallerOpen}
+          profileId={installBinding.profileId}
+        />
+      ) : null}
     </div>
   )
 }

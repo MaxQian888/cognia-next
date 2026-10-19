@@ -388,6 +388,7 @@ function buildRemoteHostRow(host: RemoteHostInput, input: BuildDeviceRowsInput):
     hostId: host.id,
     platform,
     hostRole: resolveHostRole({ alwaysOn: host.alwaysOn, platform }),
+    ...(host.installBinding ? { installBinding: host.installBinding } : {}),
     ...(host.featureManifest ? { featureManifest: host.featureManifest } : {}),
     serverVersion: host.config.serverVersion,
     baseUrl: host.config.baseUrl,

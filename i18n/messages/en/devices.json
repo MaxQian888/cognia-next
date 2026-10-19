@@ -793,5 +793,218 @@
   "remoteDesktop": {
     "title": "Remote desktops",
     "viaHost": "This device has no remote desktops of its own. Open them on the page of the Host it is paired to, which reaches them on its network."
+  },
+  "hostInstall": {
+    "title": "Install a Cognia Host",
+    "description": "On the machine behind {name}",
+    "heading": {
+      "idle": "Install a Cognia Host on {name}",
+      "invalid_profile": "{name} cannot be dialled yet",
+      "connecting": "Signing in to {name}",
+      "inspecting": "Reading the machine",
+      "ready": "Choose what to do",
+      "running": "Working on the machine",
+      "paired": "The Host is ready",
+      "uninstalled": "The Host is uninstalled",
+      "failed": "That did not finish"
+    },
+    "intro": {
+      "body": "Cognia signs in to {name} with its saved profile and reads the machine. Nothing on it changes until you choose what to do.",
+      "cost": "Signing in authenticates like any session: it lands in the machine's auth log (and every jump host's), it can ask your SSH agent for a passphrase, and on first contact the host key is learned and trusted.",
+      "connect": "Connect and inspect"
+    },
+    "invalidProfile": {
+      "title": "This profile cannot produce a connection",
+      "edit": "Edit the profile"
+    },
+    "status": {
+      "connecting": "Signing in to {name}…",
+      "inspecting": "Reading the machine…"
+    },
+    "hostKey": {
+      "learned": "First connection: host key {fingerprint} was learned and is now trusted.",
+      "verified": "Host key {fingerprint} matches the one trusted before."
+    },
+    "facts": {
+      "machine": "Machine",
+      "platform": "Platform",
+      "service": "Runs as",
+      "dataDir": "Data",
+      "freeSpace": "Free space",
+      "glibc": "glibc",
+      "existing": "Cognia Host",
+      "unknown": "Unknown"
+    },
+    "serviceManager": {
+      "systemd": "a systemd user service",
+      "launchd": "a launchd agent"
+    },
+    "existing": {
+      "none": "Not installed",
+      "running": "{version}, running",
+      "stopped": "{version}, stopped",
+      "notReady": "{version}, running but not ready",
+      "versionUnknown": "unknown version",
+      "noMasterKey": "Its data key is missing, so its data cannot be read."
+    },
+    "notice": {
+      "linger_off": {
+        "title": "The Host stops when {user} logs out",
+        "body": "Linger is off for {user}, so systemd stops user services at logout. Run `loginctl enable-linger {user}` on the machine to keep the Host running."
+      },
+      "linger_unknown": {
+        "title": "The Host may stop when {user} logs out",
+        "body": "Whether linger is on for {user} could not be read. Without it, systemd stops user services at logout; `loginctl enable-linger {user}` keeps the Host running."
+      }
+    },
+    "plan": {
+      "legend": "What to do",
+      "none": "There is nothing this installer can do on this machine.",
+      "fresh": {
+        "label": "Install",
+        "body": "Install a Cognia Host and pair this desktop with it."
+      },
+      "repair": {
+        "label": "Repair",
+        "body": "Reinstall the Host over the existing one, keeping its data, then pair this desktop."
+      },
+      "re_pair": {
+        "label": "Pair again",
+        "body": "Leave the running Host as it is and pair this desktop with it again."
+      },
+      "uninstall": {
+        "label": "Uninstall",
+        "body": "Stop and remove the Host's service. Its data stays unless you choose to delete it."
+      }
+    },
+    "channel": {
+      "stable": "stable",
+      "beta": "beta"
+    },
+    "consent": {
+      "title": "What happens on {hostname}",
+      "steps": {
+        "fresh": "This desktop downloads the {channel} release for {target} and checks its signature and digest, uploads it, installs it as {service} for {user}, waits until it reports healthy, then pairs this desktop.",
+        "repair": "This desktop downloads the {channel} release for {target} and checks its signature and digest, uploads it, reinstalls {service} for {user} over the existing Host, waits until it reports healthy, then pairs this desktop.",
+        "re_pair": "The running Host mints a one-time owner invitation and this desktop redeems it. Nothing is installed or restarted.",
+        "uninstall": "Stops and removes {service} for {user}."
+      },
+      "scope": "Everything is installed for {user} only, under {dataDir}. Nothing uses sudo.",
+      "disk": "{free} free on the machine.",
+      "lingerOff": "Linger is off, so the Host stops whenever {user} logs out.",
+      "shellEquivalence": "Anyone who can sign in as {user} over SSH can already do everything this installer does, and the Host runs with that account's permissions. Install it only on a machine you would hand that shell to."
+    },
+    "pairing": {
+      "label": "Name on this device",
+      "alwaysOn": "Always-on Host",
+      "alwaysOnHint": "Runs work for this device while it is closed. This window keeps running where it is.",
+      "connectAfter": "Switch this window to the Host when it is paired"
+    },
+    "uninstall": {
+      "deleteData": "Also delete the Host's data",
+      "deleteDataHint": "Type the machine's name, {hostname}, to delete {dataDir}. This cannot be undone.",
+      "keepData": "The data stays, so installing again later brings back the same Host and its pairings."
+    },
+    "action": {
+      "fresh": "Install",
+      "repair": "Repair",
+      "re_pair": "Pair again",
+      "uninstall": "Uninstall"
+    },
+    "progress": {
+      "title": "Progress",
+      "keepOpen": "Keep this open until it finishes. Closing it stops waiting, not the step running on the machine.",
+      "announce": "{stage}: {status}"
+    },
+    "stage": {
+      "probe": "Read the machine",
+      "plan": "Plan the steps",
+      "fetch": "Download and verify the release",
+      "upload": "Upload it",
+      "stage": "Unpack and check it",
+      "service": "Set up the service",
+      "pair": "Pair this desktop",
+      "route": "Publish the route"
+    },
+    "stageStatus": {
+      "pending": "waiting",
+      "running": "in progress",
+      "done": "done",
+      "failed": "failed"
+    },
+    "done": {
+      "pairedTitle": "{label} is paired",
+      "pairedBody": "It is in this device's hosts now.",
+      "pairedAlwaysOn": "It is in this device's hosts as an always-on Host. Move work to it from its page.",
+      "close": "Done",
+      "uninstalledTitle": "The Host is uninstalled from {hostname}",
+      "uninstalledDataDeleted": "Its service and its data are gone.",
+      "uninstalledDataKept": "Its service is gone. Its data stays on the machine.",
+      "forget": "Remove {label} from this device",
+      "forgotten": "{label} was removed from this device."
+    },
+    "next": {
+      "retry": "Try again",
+      "reinspect": "Inspect the machine again",
+      "reconnect": "Connect again",
+      "none": "Close",
+      "hostKey": "Review the host key"
+    },
+    "failure": {
+      "during": "During: {stage}",
+      "detail": "Technical detail",
+      "noSession": "The connection to the machine is gone.",
+      "busy": "Another step is still running on this machine.",
+      "stale": "The machine was inspected again since this choice was made.",
+      "hostKeyChanged": "The machine presented a different host key ({presented}) than the one trusted before. Nothing was sent.",
+      "connect": "Could not sign in to the machine.",
+      "unsupported": {
+        "windows": "Windows machines are not supported.",
+        "os": "{name} is not a supported operating system.",
+        "arch": "{name} is not a supported processor architecture.",
+        "noServiceManager": "The machine has neither systemd nor launchd to run the Host as a service.",
+        "glibcTooOld": "The machine's glibc {found} is older than the {baseline} the Host needs.",
+        "glibcUnknown": "The machine's glibc version could not be read.",
+        "noHome": "The account has no home directory to install into."
+      },
+      "notEnoughSpace": "Not enough space on the machine: {free} free, {needed} needed.",
+      "release": {
+        "noTrustRoot": "This build has no release signing key, so no release can be verified.",
+        "unreachable": "The release catalog could not be reached.",
+        "noCatalog": "No release catalog is published.",
+        "untrusted": "The release catalog's signature did not verify.",
+        "noRelease": "No Host release is published for this machine on this channel.",
+        "notAnArchive": "The release for this machine is not an installable archive.",
+        "digestMismatch": "The downloaded release did not match its published digest.",
+        "io": "The release could not be saved on this desktop."
+      },
+      "denied": "The machine refused the step.",
+      "refused": "The machine refused the step before it ran.",
+      "fault": "The step failed before it reached the machine.",
+      "unknown": "The connection dropped mid-step, so it may or may not have run. Inspect the machine before doing anything else.",
+      "timeout": "The step took too long.",
+      "failed": "The step ran and failed on the machine.",
+      "relayUnavailable": "The Host cannot reach the relay, so it cannot issue an invitation.",
+      "ipc": "The installer is not available in this window."
+    },
+    "profileMissing": {
+      "title": "The SSH profile is gone",
+      "body": "The saved SSH profile this Host was installed over no longer exists. Add it again under Settings → Terminal to repair or uninstall from here."
+    },
+    "entry": {
+      "action": "Install a Cognia Host",
+      "body": "Run a full Cognia Host on this machine, paired to this desktop.",
+      "notInBuild": "Installing a Cognia Host over SSH is not in this build yet.",
+      "desktopOnly": "Installing a Cognia Host signs in with this machine's saved SSH credentials, so it runs from the desktop app."
+    },
+    "section": {
+      "title": "This machine",
+      "via": "Installed over",
+      "profileGone": "A removed SSH profile",
+      "installedAt": "Installed",
+      "manage": "Repair, pair again or uninstall",
+      "manageBody": "Inspects the machine first, then offers what it can do there.",
+      "openSshSettings": "Open SSH settings"
+    }
   }
 }

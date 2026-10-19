@@ -14918,6 +14918,219 @@
         "updateUnsupported": "这台主机早于自更新功能。请手动更新一次，之后它会自行更新。"
       }
     },
+    "hostInstall": {
+      "action": {
+        "fresh": "安装",
+        "re_pair": "重新配对",
+        "repair": "修复",
+        "uninstall": "卸载"
+      },
+      "channel": {
+        "beta": "测试版",
+        "stable": "稳定版"
+      },
+      "consent": {
+        "disk": "机器上可用空间 {free}。",
+        "lingerOff": "linger 未开启，{user} 每次注销时 Host 都会停止。",
+        "scope": "所有内容只为 {user} 安装在 {dataDir} 下，不使用 sudo。",
+        "shellEquivalence": "任何能以 {user} 身份通过 SSH 登录的人，本来就能做到安装器所做的一切，Host 也以该账户的权限运行。只在你愿意交出这个 shell 的机器上安装。",
+        "steps": {
+          "fresh": "这台桌面会下载适用于 {target} 的{channel}发布包并校验签名和摘要，上传后以 {user} 的身份安装为{service}，等待其报告健康，然后与这台桌面配对。",
+          "re_pair": "正在运行的 Host 会生成一次性的所有者邀请，由这台桌面兑换。不会安装或重启任何东西。",
+          "repair": "这台桌面会下载适用于 {target} 的{channel}发布包并校验签名和摘要，上传后以 {user} 的身份在现有 Host 上重新安装{service}，等待其报告健康，然后与这台桌面配对。",
+          "uninstall": "停止并移除 {user} 的{service}。"
+        },
+        "title": "将在 {hostname} 上执行的操作"
+      },
+      "description": "安装到 {name} 所指向的机器",
+      "done": {
+        "close": "完成",
+        "forget": "从本设备移除 {label}",
+        "forgotten": "已从本设备移除 {label}。",
+        "pairedAlwaysOn": "它已作为常驻 Host 加入本设备的 Host 列表。可在它的页面中把工作移过去。",
+        "pairedBody": "它已加入本设备的 Host 列表。",
+        "pairedTitle": "{label} 已配对",
+        "uninstalledDataDeleted": "它的服务和数据都已删除。",
+        "uninstalledDataKept": "它的服务已删除，数据仍保留在机器上。",
+        "uninstalledTitle": "已从 {hostname} 卸载 Host"
+      },
+      "entry": {
+        "action": "安装 Cognia Host",
+        "body": "在这台机器上运行完整的 Cognia Host，并与这台桌面配对。",
+        "desktopOnly": "安装 Cognia Host 需要使用本机保存的 SSH 凭据登录，因此只能在桌面应用中进行。",
+        "notInBuild": "此构建暂未提供通过 SSH 安装 Cognia Host。"
+      },
+      "existing": {
+        "noMasterKey": "它的数据密钥缺失，数据无法读取。",
+        "none": "未安装",
+        "notReady": "{version}，运行中但未就绪",
+        "running": "{version}，运行中",
+        "stopped": "{version}，已停止",
+        "versionUnknown": "版本未知"
+      },
+      "facts": {
+        "dataDir": "数据",
+        "existing": "Cognia Host",
+        "freeSpace": "可用空间",
+        "glibc": "glibc",
+        "machine": "机器",
+        "platform": "平台",
+        "service": "运行方式",
+        "unknown": "未知"
+      },
+      "failure": {
+        "busy": "这台机器上还有另一个步骤正在执行。",
+        "connect": "无法登录这台机器。",
+        "denied": "机器拒绝了这个步骤。",
+        "detail": "技术细节",
+        "during": "发生在：{stage}",
+        "failed": "这个步骤已在机器上执行但失败了。",
+        "fault": "这个步骤在到达机器之前就失败了。",
+        "hostKeyChanged": "这台机器出示的主机密钥（{presented}）与此前信任的不同。未发送任何内容。",
+        "ipc": "此窗口中无法使用安装器。",
+        "noSession": "与这台机器的连接已断开。",
+        "notEnoughSpace": "机器空间不足：可用 {free}，需要 {needed}。",
+        "refused": "机器在执行前拒绝了这个步骤。",
+        "relayUnavailable": "Host 无法连接中继，因此无法生成邀请。",
+        "release": {
+          "digestMismatch": "下载的发布包与公布的摘要不一致。",
+          "io": "无法在这台桌面上保存发布包。",
+          "noCatalog": "尚未发布发布目录。",
+          "noRelease": "此频道没有适用于这台机器的 Host 发布包。",
+          "noTrustRoot": "此构建没有发布签名密钥，无法校验任何发布包。",
+          "notAnArchive": "适用于这台机器的发布包不是可安装的归档。",
+          "unreachable": "无法访问发布目录。",
+          "untrusted": "发布目录的签名校验失败。"
+        },
+        "stale": "做出这个选择之后，机器已被重新检查。",
+        "timeout": "这个步骤耗时过长。",
+        "unknown": "连接在步骤中途断开，无法确定是否已执行。请先重新检查机器，再做其他操作。",
+        "unsupported": {
+          "arch": "不支持 {name} 处理器架构。",
+          "glibcTooOld": "这台机器的 glibc {found} 低于 Host 所需的 {baseline}。",
+          "glibcUnknown": "无法读取这台机器的 glibc 版本。",
+          "noHome": "该账户没有可安装的主目录。",
+          "noServiceManager": "这台机器既没有 systemd 也没有 launchd，无法以服务方式运行 Host。",
+          "os": "不支持 {name} 操作系统。",
+          "windows": "不支持 Windows 机器。"
+        }
+      },
+      "heading": {
+        "connecting": "正在登录 {name}",
+        "failed": "操作未完成",
+        "idle": "在 {name} 上安装 Cognia Host",
+        "inspecting": "正在读取机器信息",
+        "invalid_profile": "暂时无法连接 {name}",
+        "paired": "Host 已就绪",
+        "ready": "选择要做的操作",
+        "running": "正在机器上执行",
+        "uninstalled": "Host 已卸载"
+      },
+      "hostKey": {
+        "learned": "首次连接：已学习并信任主机密钥 {fingerprint}。",
+        "verified": "主机密钥 {fingerprint} 与此前信任的一致。"
+      },
+      "intro": {
+        "body": "Cognia 会用 {name} 的已保存配置登录并读取这台机器的信息。在你选择操作之前，机器上的任何东西都不会改变。",
+        "connect": "连接并检查",
+        "cost": "登录与普通会话一样需要认证：它会记录在这台机器（以及每个跳板机）的认证日志中，可能向 ssh-agent 索要口令，首次连接时会学习并信任主机密钥。"
+      },
+      "invalidProfile": {
+        "edit": "编辑配置",
+        "title": "该配置无法生成连接"
+      },
+      "next": {
+        "hostKey": "查看主机密钥",
+        "none": "关闭",
+        "reconnect": "重新连接",
+        "reinspect": "重新检查机器",
+        "retry": "重试"
+      },
+      "notice": {
+        "linger_off": {
+          "body": "{user} 未开启 linger，systemd 会在注销时停止用户服务。在机器上运行 `loginctl enable-linger {user}` 可让 Host 持续运行。",
+          "title": "{user} 注销后 Host 会停止"
+        },
+        "linger_unknown": {
+          "body": "无法读取 {user} 是否开启了 linger。未开启时，systemd 会在注销时停止用户服务；运行 `loginctl enable-linger {user}` 可让 Host 持续运行。",
+          "title": "{user} 注销后 Host 可能会停止"
+        }
+      },
+      "pairing": {
+        "alwaysOn": "常驻 Host",
+        "alwaysOnHint": "在本设备关闭时替它运行工作。这个窗口仍在原处运行。",
+        "connectAfter": "配对完成后将这个窗口切换到该 Host",
+        "label": "在本设备上的名称"
+      },
+      "plan": {
+        "fresh": {
+          "body": "安装 Cognia Host，并与这台桌面配对。",
+          "label": "安装"
+        },
+        "legend": "要做的操作",
+        "none": "安装器在这台机器上没有可执行的操作。",
+        "re_pair": {
+          "body": "保持正在运行的 Host 不变，重新与这台桌面配对。",
+          "label": "重新配对"
+        },
+        "repair": {
+          "body": "在现有 Host 上重新安装并保留其数据，然后与这台桌面配对。",
+          "label": "修复"
+        },
+        "uninstall": {
+          "body": "停止并移除 Host 的服务。除非你选择删除，否则数据会保留。",
+          "label": "卸载"
+        }
+      },
+      "profileMissing": {
+        "body": "安装此 Host 时使用的 SSH 配置已被删除。在 设置 → 终端 中重新添加后，即可在这里修复或卸载。",
+        "title": "SSH 配置已不存在"
+      },
+      "progress": {
+        "announce": "{stage}：{status}",
+        "keepOpen": "请保持打开直到完成。关闭只会停止等待，不会停止机器上正在执行的步骤。",
+        "title": "进度"
+      },
+      "section": {
+        "installedAt": "安装时间",
+        "manage": "修复、重新配对或卸载",
+        "manageBody": "会先检查机器，再列出可以执行的操作。",
+        "openSshSettings": "打开 SSH 设置",
+        "profileGone": "已删除的 SSH 配置",
+        "title": "这台机器",
+        "via": "安装方式"
+      },
+      "serviceManager": {
+        "launchd": "launchd 代理",
+        "systemd": "systemd 用户服务"
+      },
+      "stage": {
+        "fetch": "下载并校验发布包",
+        "pair": "与这台桌面配对",
+        "plan": "规划步骤",
+        "probe": "读取机器信息",
+        "route": "发布路由",
+        "service": "设置服务",
+        "stage": "解包并检查",
+        "upload": "上传"
+      },
+      "stageStatus": {
+        "done": "已完成",
+        "failed": "失败",
+        "pending": "等待中",
+        "running": "进行中"
+      },
+      "status": {
+        "connecting": "正在登录 {name}…",
+        "inspecting": "正在读取机器信息…"
+      },
+      "title": "安装 Cognia Host",
+      "uninstall": {
+        "deleteData": "同时删除 Host 的数据",
+        "deleteDataHint": "输入机器名称 {hostname} 以删除 {dataDir}。此操作无法撤销。",
+        "keepData": "数据会保留，之后再次安装会恢复同一个 Host 及其配对。"
+      }
+    },
     "hostRole": {
       "always-on": "常驻 host",
       "desktop": "桌面",

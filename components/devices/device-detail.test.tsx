@@ -47,6 +47,21 @@ jest.mock("./host-runtimes/host-runtimes-section", () => ({
 }))
 jest.mock("./always-on/always-on-section", () => ({ AlwaysOnSection: marker("always-on") }))
 jest.mock("./sections/files-section", () => ({ FilesSection: marker("files") }))
+jest.mock("./host-updates/host-updates-section", () => ({
+  HostUpdatesSection: marker("host-updates"),
+}))
+jest.mock("./remote-desktop/remote-desktop-section", () => ({
+  RemoteDesktopSection: marker("remote-desktop"),
+}))
+jest.mock("./host-install/host-install-section", () => ({
+  HostInstallSection: marker("host-install"),
+}))
+let mockInstallerUnavailable: string | null = "notInBuild"
+jest.mock("./host-install/host-install-sheet", () => ({
+  hostInstallerUnavailable: () => mockInstallerUnavailable,
+  HostInstallSheet: ({ open, profileId }: { open: boolean; profileId: string }) =>
+    open ? <div data-testid="installer-sheet" data-profile={profileId} /> : null,
+}))
 jest.mock("./ssh-host-controls", () => ({
   SshHostControls: () => <div data-testid="ssh-controls" />,
 }))
@@ -341,5 +356,49 @@ describe("a machine that can only give a shell", () => {
       />
     )
     expect(applied).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("a Host this desktop installed (ADR-0235 P5)", () => {
+  const installed = (connectionState: DeviceRow["connectionState"]) =>
+    row({
+      ref: "host:h1",
+      kind: "remote-host",
+      label: "Build box",
+      deviceId: undefined,
+      hostId: "h1",
+      connectionState,
+      wan: undefined,
+      installBinding: { kind: "ssh", profileId: "ssh-1", installedAt: 1 },
+    })
+
+  afterEach(() => {
+    mockInstallerUnavailable = "notInBuild"
+  })
+
+  it("lists the machine's own section", () => {
+    render(<DeviceDetail row={installed("ready")} actions={actions} />)
+    expect(renderedCards()).toContain("host-install")
+  })
+
+  it("repairs a revoked Host on its machine when the installer is here", async () => {
+    mockInstallerUnavailable = null
+    const onRepairHost = jest.fn()
+    render(
+      <DeviceDetail row={installed("revoked")} actions={actions} onRepairHost={onRepairHost} />
+    )
+    await userEvent.click(screen.getByTestId("host-repair"))
+    expect(screen.getByTestId("installer-sheet").dataset.profile).toBe("ssh-1")
+    expect(onRepairHost).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the add-host sheet when the installer is not", async () => {
+    const onRepairHost = jest.fn()
+    render(
+      <DeviceDetail row={installed("revoked")} actions={actions} onRepairHost={onRepairHost} />
+    )
+    await userEvent.click(screen.getByTestId("host-repair"))
+    expect(onRepairHost).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId("installer-sheet")).toBeNull()
   })
 })

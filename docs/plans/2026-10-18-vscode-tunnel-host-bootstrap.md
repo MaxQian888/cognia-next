@@ -300,6 +300,16 @@ Still waiting:
 - **Caller.** `Session::fetch` reports the `fetch` stage. `desktop::InstallerSessions` is the desktop's registry: one entry per open shell, steps bound to the latest inspection and an offered plan, never overlapping, and failures typed for the UI (`InstallerFailure`). Its Tauri shells live in `commands` (feature `tauri-host`), registered in `src-tauri` with `InstallerSessions` managed. Stage transitions are emitted on `host-installer://stage`. The TS client is `lib/host-installer/client.ts`.
 - **Open:** the opt-in real-host test, which runs with P5's desktop smoke.
 
+**P5 progress (2026-10-19), SSH path first.** The Devices UI drives the P6 backend; the tunnel entry waits for the spikes.
+
+- **Entry.** The installer opens from a saved SSH host's card (`SshHostInstallEntry` in `components/devices/host-install/host-install-sheet.tsx`), not from `AddHostSheet`: the profile is the thing being installed on, and the card already states its route, auth and host key. The tunnel entry joins `AddHostSheet` with P1's account picker.
+- **Flag.** `lib/host-installer/feature-flag.ts`. Per Rule 7 a flag-off build does not show nothing: the card and the "This machine" section say the installer is not in this build, and tests pin both. Off the desktop they say it is desktop-only.
+- **Flow.** `hooks/host-installer/use-host-install.ts` holds the session; `lib/host-installer/flow.ts` holds the pure decisions (stage rows, `nextStepFor`, failure copy). An `unknown` outcome only re-inspects; a retry repeats the step that failed (a faulted pairing after a landed install asks for a new invitation only); a registration failure re-inspects, since only a fresh `re_pair` mints another invitation. The invitation goes from the native pair step to `registerPairPayload` and is never in state. The shared pre-flight is `components/connectivity/pair/pair-preflight.ts`, and the registry write is `hooks/devices/use-register-paired-host.ts`, shared with `AddHostForm`.
+- **Binding.** `RemoteHost.installBinding` (`{ kind: "ssh", profileId, installedAt }`) is the SSH twin of `tunnelBinding`: optional, no persist bump, kept on re-pair. It reaches `DeviceRow.installBinding`, which adds the `host-install` section and routes the masthead's repair for a revoked bound Host to the installer.
+- **Sheet.** `components/devices/host-install/host-install-flow.tsx`: intro with the sign-in cost, machine facts and notices, plan choice with consent copy (machine, user, steps, disk, scope, linger, ADR-0162 shell equivalence), pairing options (always-on by default), typed-hostname data deletion, staged progress announced through `aria-live`, focus on each step's heading, a host-key change reviewed through `SshHostKeyDialog`, and pairing failures in the add-host form's own `PairFailurePanel`.
+- **Account.** The Host serves its default `local_acct_a`, which its brain registers; passing this desktop's account id would make the brain's sync pulls disagree.
+- **Open:** the Playwright run with the installer commands faked, and the real desktop smoke on a disposable machine.
+
 ## P7 — Microsoft accounts
 
 Only the account types that passed S4. They become a provider in the same TS account layer, with an account picker and tests. If S4 passes nothing, the plan records that and P7 closes without code.

@@ -54,15 +54,25 @@ import { isTauri } from "@/lib/platform/detect"
 import { useSettingsStore } from "@/stores/settings"
 
 import { DeviceFactList, DeviceFactRow, shortenFingerprint } from "./device-visuals"
+import {
+  SshHostInstallEntry,
+  type HostInstallerUnavailable,
+} from "./host-install/host-install-sheet"
 import { sshProfileIdFrom } from "./sections/files-section"
 
 export interface SshHostControlsProps {
   row: DeviceRow
   /** Test seam. Defaults to the real dock launcher. */
   connect?: typeof connectSshFromDock
+  /** Test seam for the installer entry's gate. */
+  installerUnavailable?: HostInstallerUnavailable | null
 }
 
-export function SshHostControls({ row, connect: connectImpl }: SshHostControlsProps) {
+export function SshHostControls({
+  row,
+  connect: connectImpl,
+  installerUnavailable,
+}: SshHostControlsProps) {
   const t = useTranslations("devices.ssh")
   const savedHosts = useSettingsStore(selectSavedSshHosts)
   const [error, setError] = useState<string | null>(null)
@@ -316,6 +326,14 @@ export function SshHostControls({ row, connect: connectImpl }: SshHostControlsPr
       ) : null}
 
       <SshProbeResult state={probeState} />
+
+      {/*
+        Installing a Cognia Host here (ADR-0235 P5). Only for a profile this
+        card can describe: the installer dials it by id with the saved set.
+      */}
+      {profile ? (
+        <SshHostInstallEntry profileId={profile.id} unavailable={installerUnavailable} />
+      ) : null}
 
       {sshConnect.dialog}
 

@@ -47,12 +47,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { useExecutionHostSwitch } from "@/hooks/devices/use-execution-host-switch"
+import { useRegisterPairedHost } from "@/hooks/devices/use-register-paired-host"
 import { remoteHostRef } from "@/lib/devices/build-device-rows"
 import { deviceConsoleHref } from "@/lib/devices/device-console-href"
 import { isNativeMobile, isTauri } from "@/lib/platform/detect"
 import type { CompanionConfig } from "@/lib/tauri/transport-companion"
-import { useRemoteHostStore, type RemoteHost } from "@/stores/remote-host/remote-host-store"
+import type { RemoteHost } from "@/stores/remote-host/remote-host-store"
 
 import { PairStep, type PairStepProps } from "./pair-step"
 
@@ -97,8 +97,7 @@ export function AddHostForm({
   defaultAlwaysOn = false,
 }: AddHostFormProps) {
   const t = useTranslations("settings.remoteHosts")
-  const addHost = useRemoteHostStore((s) => s.addHost)
-  const { requestSwitch, dialog } = useExecutionHostSwitch()
+  const { register, dialog } = useRegisterPairedHost()
   const scanAvailable = useScanAvailable()
 
   /** What the field holds right now, as reported by the step. Read-only here. */
@@ -129,11 +128,9 @@ export function AddHostForm({
   // through `onPaired`, which is where the success line and the caller run.
   const persistPairing = useCallback(
     async (config: CompanionConfig) => {
-      const host = addHost({
-        label: label.trim() || undefined,
-        config,
-        ...(alwaysOn ? { alwaysOn: true } : {}),
-      })
+      // `register` returns once the host is filed; a switch it starts is
+      // answered in its own dialog, so the pair step's spinner never waits on it.
+      const host = register(config, { label, alwaysOn, connectAfter }, onPaired)
       setSuccess(
         alwaysOn
           ? t("add.successAlwaysOn", { label: host.label })
@@ -141,18 +138,8 @@ export function AddHostForm({
       )
       setPairedAlwaysOn(alwaysOn ? host : null)
       setLabel("")
-      if (alwaysOn || !connectAfter) {
-        onPaired?.(host)
-        return
-      }
-      // Fire-and-forget on purpose. The pairing itself succeeded the moment
-      // `addHost` returned; whether this window also starts driving the host
-      // is a separate question the user may still be answering, and holding
-      // `persistPairing` open on it would keep the pair step's spinner turning
-      // over a dialog.
-      void requestSwitch(host.id, { onSettled: () => onPaired?.(host) })
     },
-    [addHost, alwaysOn, connectAfter, label, onPaired, requestSwitch, t]
+    [alwaysOn, connectAfter, label, onPaired, register, t]
   )
 
   return (

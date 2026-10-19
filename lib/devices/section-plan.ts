@@ -32,6 +32,7 @@ export type DeviceSectionId =
   | "host-updates"
   | "host-runtimes"
   | "host-system"
+  | "host-install"
   | "ssh"
   | "files"
   | "access"
@@ -93,6 +94,7 @@ const WIDE: Record<DeviceSectionId, boolean> = {
   "host-updates": true,
   "host-runtimes": true,
   "host-system": false,
+  "host-install": false,
   ssh: true,
   files: true,
   access: true,
@@ -161,6 +163,7 @@ const ORDER: Record<DeviceKind, readonly DeviceSectionId[]> = {
     "shell-tiers",
     "identity",
     "host-system",
+    "host-install",
     "presence",
     "event-plane",
     "capabilities",
@@ -210,6 +213,9 @@ function isApplicable(row: DeviceRow, id: DeviceSectionId): boolean {
     // The Host's own system details travel the same channel.
     case "host-system":
       return Boolean(managementRefOf(row))
+    // The machine a Host was installed on by this desktop (ADR-0235 P5).
+    case "host-install":
+      return row.kind === "remote-host" && Boolean(row.installBinding)
     case "ssh":
     case "files":
       return row.kind === "ssh-host"

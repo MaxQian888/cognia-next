@@ -90,6 +90,15 @@ export interface RemoteHost {
    */
   alwaysOn?: boolean
   /**
+   * How this desktop installed the Host, when it did (ADR-0235): the saved SSH
+   * profile that reaches its machine. The device console's "This machine"
+   * controls reopen the installer through it to repair, re-pair or uninstall.
+   * Like `alwaysOn` it never alters the config, activation or routing, and as
+   * an optional field it survives `partialize` and `merge` with no persist
+   * version bump.
+   */
+  installBinding?: HostInstallBinding
+  /**
    * The last liveness probe through the management channel (ADR-0224 A4).
    *
    * A host this desktop is not routing to has no live connection to report on,
@@ -106,6 +115,15 @@ export interface RemoteHost {
    * next handshake. See `lib/remote-host/host-version.ts`.
    */
   version?: HostVersionState
+}
+
+/** The machine a Host was installed on, as this desktop reaches it. */
+export interface HostInstallBinding {
+  kind: "ssh"
+  /** The saved SSH profile (`settings.terminal.sshHosts[].id`). */
+  profileId: string
+  /** Epoch ms the install finished. */
+  installedAt: number
 }
 
 export interface RemoteHostProbe {
@@ -127,7 +145,12 @@ export interface RemoteHostState {
    * `alwaysOn` marks an always-on peer; a re-pair that omits it keeps the
    * host's existing role.
    */
-  addHost: (input: { label?: string; config: CompanionConfig; alwaysOn?: boolean }) => RemoteHost
+  addHost: (input: {
+    label?: string
+    config: CompanionConfig
+    alwaysOn?: boolean
+    installBinding?: HostInstallBinding
+  }) => RemoteHost
   /** Rename a host. No-op if the id is unknown. */
   updateHostLabel: (id: string, label: string) => void
   /** Remove a host; deactivates first if it is the active one. */
@@ -587,7 +610,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
       hosts: [],
       activeHostId: null,
 
-      addHost: ({ label, config, alwaysOn }) => {
+      addHost: ({ label, config, alwaysOn, installBinding }) => {
         if (!config.devicePrivateKeyJwk || !config.deviceKeyThumbprint) {
           throw new Error("remote host device identity is unavailable; pair again")
         }
@@ -607,6 +630,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
             connectionState: "disconnected",
             connectionError: undefined,
             ...(alwaysOn === undefined ? {} : { alwaysOn }),
+            ...(installBinding ? { installBinding } : {}),
           }
           set({ hosts: get().hosts.map((h) => (h.id === existing.id ? updated : h)) })
           notifyRemoteHostPairingChanged()
@@ -624,6 +648,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
           addedAt: Date.now(),
           connectionState: "disconnected",
           ...(alwaysOn ? { alwaysOn: true } : {}),
+          ...(installBinding ? { installBinding } : {}),
         }
         set({ hosts: [...get().hosts, host] })
         // The host profile is derived from this list, and localStorage has no

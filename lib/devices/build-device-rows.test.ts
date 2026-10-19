@@ -1037,6 +1037,15 @@ describe("host roles (ADR-0224 A4)", () => {
     expect(byHost("h4")?.hostRole).toBeUndefined()
   })
 
+  it("carries the machine a Host was installed on, and nothing for any other Host", () => {
+    const binding = { kind: "ssh" as const, profileId: "ssh-1", installedAt: 5 }
+    const rows = buildDeviceRows(
+      input({ remoteHosts: [host({ id: "h1", installBinding: binding }), host({ id: "h2" })] })
+    )
+    expect(rows.find((row) => row.hostId === "h1")?.installBinding).toEqual(binding)
+    expect(rows.find((row) => row.hostId === "h2")).not.toHaveProperty("installBinding")
+  })
+
   it("labels this desktop always-on in host mode, and a desktop otherwise", () => {
     expect(find(buildDeviceRows(input()), "local").hostRole).toBe("desktop")
     expect(

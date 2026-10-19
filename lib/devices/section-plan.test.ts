@@ -197,6 +197,33 @@ describe("planDeviceSections", () => {
     ])
   })
 
+  it("adds the machine's own section only for a Host this desktop installed", () => {
+    const installed = row({
+      ref: "host:h1",
+      kind: "remote-host",
+      hostId: "h1",
+      installBinding: { kind: "ssh", profileId: "ssh-1", installedAt: 1 },
+    })
+    const plain = row({ ref: "host:h2", kind: "remote-host", hostId: "h2" })
+    const sections = ids(planDeviceSections(installed).sections)
+    expect(sections).toContain("host-install")
+    // After the Host's own system details: both describe the machine.
+    expect(sections.indexOf("host-install")).toBeGreaterThan(sections.indexOf("host-system"))
+    expect(ids(planDeviceSections(plain).sections)).not.toContain("host-install")
+    // An SSH box is where an install starts, not a Host that has one.
+    expect(
+      ids(
+        planDeviceSections(
+          row({
+            ref: "ssh:ssh-1",
+            kind: "ssh-host",
+            installBinding: { kind: "ssh", profileId: "ssh-1", installedAt: 1 },
+          })
+        ).sections
+      )
+    ).not.toContain("host-install")
+  })
+
   it("drops routing for a /pair host the store cannot address and is not routed to", () => {
     const pairHost = row({ ref: "companion:x", kind: "remote-host", hostId: undefined })
     expect(canOwnTiming(pairHost)).toBe(false)

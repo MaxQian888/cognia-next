@@ -292,6 +292,11 @@ export interface DeviceRow {
   /** Host rows only: what kind of host this is. See {@link HostRole}. */
   hostRole?: HostRole
   /**
+   * Remote-host rows only: the machine this desktop installed the Host on
+   * (ADR-0235 P5), so the page can offer repair, re-pair and uninstall there.
+   */
+  installBinding?: DeviceInstallBinding
+  /**
    * Local row only: this machine is a Host that brokers external remote
    * desktops (ADR-0234), the desktop shell. A Host row reached over its
    * management channel lists its own (`remoteDesktopHostOf`).
@@ -348,6 +353,14 @@ export interface DeviceRow {
   runtime: DeviceRuntimeSummary
 }
 
+/** Structural copy of the store's `HostInstallBinding`. */
+export interface DeviceInstallBinding {
+  kind: "ssh"
+  /** The saved SSH profile the Host was installed over. */
+  profileId: string
+  installedAt: number
+}
+
 export type RemoteHostConnectionState =
   "disconnected" | "connecting" | "ready" | "degraded" | "revoked" | "versionMismatch"
 
@@ -370,6 +383,8 @@ export interface RemoteHostInput {
   label: string
   /** Paired as the user's always-on host (ADR-0224). */
   alwaysOn?: boolean
+  /** Installed by this desktop over SSH (ADR-0235 P5). */
+  installBinding?: DeviceInstallBinding
   /** The last liveness probe this session, if any. */
   lastProbe?: RemoteHostProbeInput
   /** Which side to update, from the last handshake (ADR-0224 A10). */

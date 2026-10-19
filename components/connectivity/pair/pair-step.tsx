@@ -16,7 +16,7 @@
  * listening there". The probe runs *only* on the failure path, so a healthy pair
  * costs nothing.
  *
- * **A one-shot invitation is checked before it is spent.** `diagnoseTransport`
+ * **A one-shot invitation is checked before it is spent.** `preflightPairing`
  * runs before the first request, so an `https://<lan-ip>` invitation that no
  * browser can ever complete is rejected while it is still redeemable elsewhere,
  * instead of after the Host has burned it.
@@ -54,22 +54,21 @@ import { notify } from "@/lib/capacitor/haptics"
 import { recordRecentServer } from "@/lib/connectivity/recent-servers"
 import { probeOriginReachable } from "@/lib/connectivity/origin-reachability"
 import { decodePairPayload } from "@/lib/qr/pair-payload"
-import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
 import { readClipboardText } from "@/lib/tauri/clipboard"
 import { saveCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 import { cn } from "@/lib/utils"
-import { useAccountStore, usesBrowserVault } from "@/stores/account/account-store"
+import { useAccountStore } from "@/stores/account/account-store"
 
 import { registerPairPayload } from "./pair-api"
 import {
   diagnosePairFailure,
   diagnosePayloadFailure,
-  diagnoseTransport,
   fingerprintMismatchFailure,
   normalizeFingerprint,
   type PairFailure,
 } from "./pair-failure"
 import { PairFailurePanel } from "./pair-failure-panel"
+import { credentialStoreReady, preflightPairing } from "./pair-preflight"
 import { InvitationCard, type InvitationTone } from "./invitation-card"
 import { DiscoverHelp } from "./discover-help"
 
@@ -153,17 +152,6 @@ type Phase =
 const PROBE_TIMEOUT_MS = 2000
 
 /**
- * Can this client keep a device key?
- *
- * Only the web answers "not yet": `getActiveBrowserVault()` is null until
- * someone unlocks the account with its password, and every credential write
- * through it throws `BrowserVaultLockedError`.
- */
-function defaultCredentialStoreReady(): boolean {
-  return !usesBrowserVault() || getActiveBrowserVault() !== null
-}
-
-/**
  * Make the app agree with its own vault, which is what puts the lock screen on
  * screen.
  *
@@ -204,7 +192,7 @@ export function PairStep({
   webMode = false,
   expectedFingerprint,
   persistPairing = saveCompanionConfig,
-  isCredentialStoreReady = defaultCredentialStoreReady,
+  isCredentialStoreReady = credentialStoreReady,
   onRequestUnlock = defaultRequestUnlock,
   onPaired,
   onBack,
@@ -240,42 +228,26 @@ export function PairStep({
       const canonicalPayload = raw.trim()
       const decoded = decodePairPayload(canonicalPayload)
       const baseUrl = decoded.kind === "ok" ? decoded.payload.baseUrl : undefined
-      const hasRelay = decoded.kind === "ok" && decoded.payload.relay !== undefined
 
-      // Cheapest check first, and the only one that runs while the invitation
-      // is still redeemable: a transport this browser can never complete. An
-      // invitation that carries a relay room (ADR-0170) is redeemable through
-      // it regardless of what `baseUrl` looks like from here, so the direct
-      // address is not a reason to refuse.
-      if (baseUrl && !hasRelay) {
-        const transportFailure = diagnoseTransport(baseUrl, webMode)
-        if (transportFailure) {
-          setPhase({ kind: "error", failure: transportFailure })
-          return
-        }
-      }
-
-      // The second pre-flight, and the reason this one cannot wait until the
-      // write fails: the Host burns the invitation at registration, before this
-      // client ever reaches its credential store. Submitting with a locked
-      // vault therefore spends a one-shot code on a save that is already known
-      // to throw, and leaves the only way forward — unlock, pair again —
-      // needing an invitation that no longer exists. Checked here, nothing has
-      // been sent and the string in the field is still redeemable.
-      if (!isCredentialStoreReady()) {
+      // The checks that must run while the invitation is still redeemable: a
+      // transport this browser can never complete, then a credential store
+      // that would refuse the device key after the Host has burned the code
+      // (`pair-preflight.ts`, shared with the Host installer).
+      const preflightFailure = preflightPairing({
+        baseUrl,
+        hasRelay: decoded.kind === "ok" && decoded.payload.relay !== undefined,
+        webMode,
+        credentialStoreReady: isCredentialStoreReady(),
+        vaultLockedText: t("failure.body.vaultLockedPending"),
+      })
+      if (preflightFailure) {
         setPhase({
           kind: "error",
-          failure: {
-            stage: "persist",
-            kind: "vault_locked",
-            detail: t("failure.body.vaultLockedPending"),
-            bodyText: t("failure.body.vaultLockedPending"),
-            remedies: ["unlockAccount"],
-            retryable: true,
-            invitationSpent: false,
-            baseUrl,
-          },
-          action: { label: tAccount("unlockAccount"), onAction: onRequestUnlock },
+          failure: preflightFailure,
+          action:
+            preflightFailure.kind === "vault_locked"
+              ? { label: tAccount("unlockAccount"), onAction: onRequestUnlock }
+              : undefined,
         })
         return
       }

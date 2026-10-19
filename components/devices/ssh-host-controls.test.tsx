@@ -526,3 +526,27 @@ describe("the probe's desktop-only disable", () => {
     expect(screen.queryByTestId("ssh-probe-desktop-only")).toBeNull()
   })
 })
+
+describe("installing a Cognia Host (ADR-0235 P5)", () => {
+  it("says the installer is not in this build instead of offering it", () => {
+    render(<SshHostControls row={row()} installerUnavailable="notInBuild" />)
+    expect(screen.getByTestId("host-install-unavailable")).toHaveTextContent(
+      "devices.hostInstall.entry.notInBuild"
+    )
+    expect(screen.queryByTestId("host-install-open")).toBeNull()
+  })
+
+  it("offers the installer for a saved profile when this build and shell can run it", () => {
+    render(<SshHostControls row={row()} installerUnavailable={null} />)
+    expect(screen.getByTestId("host-install-open")).toHaveTextContent(
+      "devices.hostInstall.entry.action"
+    )
+  })
+
+  it("offers nothing to install on a row no saved profile describes", () => {
+    sshHosts = []
+    render(<SshHostControls row={row()} installerUnavailable={null} />)
+    expect(screen.queryByTestId("host-install-entry")).toBeNull()
+    expect(screen.queryByTestId("host-install-unavailable")).toBeNull()
+  })
+})
