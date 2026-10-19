@@ -209,6 +209,27 @@ The crate is registered in `scripts/gates/rust-architecture.json`, with Tauri sh
 
 **Exit.** Behind the flag, with no UI entry. No changeset (internal).
 
+**Progress (2026-10-19).** Landed without the spikes:
+
+- **Host CLI.** `cognia-server stage`, `service status --json` (`ServerStatusReport` plus `Readiness` in `cognia-host-service`) and `pair --json`. A refusal carries a cause: `relay_unavailable`, `not_running` or `failed`.
+- **The `cognia-host-installer` crate.** It contains:
+  - the `RemoteShell` seam;
+  - the exec-built probe;
+  - the target rules (`GLIBC_BASELINE` 2.35 for now, systemd, a linger notice);
+  - release selection and verified download through `cognia-update-catalog`;
+  - the consent-bound `Session` (inspect, install, pair, uninstall). Data is deleted only with the typed machine name. Tunnel-only pairing needs its own consent.
+
+  It has no adapter and no caller yet. A test pins that.
+
+- **GitHub.** The dormant device flow (`lib/integrations/github-device-flow.ts`, client id `NEXT_PUBLIC_COGNIA_GITHUB_OAUTH_CLIENT_ID`) and the github.com-only `github-oauth` provider.
+
+Still waiting:
+
+- **The helper and its adapter wait for S2.** Its `fs_write`/`spawn` path over the `code tunnel` control protocol is what S2 verifies.
+- **The `PairStep` pre-flight extraction and `tunnelBinding`** land with their second caller, the installer flow in P5.
+- **Ensure-route** waits for S1.
+- **The device-flow scopes** the tunnel needs are decided by S3. The module takes them as a parameter.
+
 ## P5 — Devices UI
 
 | Surface               | Reuse                                                                                                                                                          | New                                                                                                                               |
