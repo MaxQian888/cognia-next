@@ -30,6 +30,7 @@ use rustls::{ClientConfig, RootCertStore};
 use tokio_postgres::Config;
 use tokio_postgres_rustls::MakeRustlsConnect;
 
+use crate::auth::{authorize_org_role_mutation, authorize_workspace_role_mutation};
 use crate::rollout::{FeatureKey, FeaturePolicy};
 
 use crate::model::{
@@ -41,6 +42,8 @@ use crate::model::{
 pub enum StoreError {
     #[error("not found")]
     NotFound,
+    #[error("forbidden")]
+    Forbidden,
     #[error("stored row is unreadable: {0}")]
     Corrupt(String),
     #[error("database error: {0}")]
@@ -56,6 +59,8 @@ pub enum StoreError {
     },
     #[error("the last active organization owner cannot be removed or downgraded")]
     LastOwner,
+    #[error("ownership_conflict")]
+    OwnershipConflict,
     #[error("invitation is expired, revoked, or already redeemed")]
     InvitationUnavailable,
     #[error("authorization policy rejected the mutation: {0}")]
@@ -923,7 +928,13 @@ pub trait Store: Send + Sync {
         user_id: &str,
         role: OrgRole,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError>;
+    ) -> Result<Vec<String>, StoreError>;
+
+    /// Atomically promote the target, step down the actor, and audit the transfer.
+    async fn transfer_org_ownership(
+        &self, org_id: &str, to_user_id: &str, previous_owner_role: OrgRole,
+        context: AuthorizationContext,
+    ) -> Result<Vec<String>, StoreError>;
 
     /// Removes all organization and workspace standing and revokes outstanding
     /// invitations created by the offboarded person in one transaction.
@@ -1224,6 +1235,43 @@ impl InMemoryStore {
             .users
             .insert(user_id.to_owned(), display_name.to_owned());
     }
+}
+
+/// Org mutations share offboarding's standing barrier and lock owners plus
+/// their participants in one ascending user-id order. In particular, transfer
+/// never locks its target behind a separately locked (possibly larger) owner.
+async fn pg_lock_org_memberships(
+    transaction: &tokio_postgres::Transaction<'_>, org_id: &str, participants: &[&str],
+) -> Result<Vec<tokio_postgres::Row>, StoreError> {
+    crate::chat_store::pg_lock_invite_standing(transaction, org_id, true).await?;
+    transaction.query(
+        "SELECT user_id, role FROM org_memberships WHERE org_id=$1 AND (role='owner' OR user_id=ANY($2)) ORDER BY user_id FOR UPDATE",
+        &[&org_id, &participants],
+    ).await.map_err(|error| StoreError::Database(error.to_string()))
+}
+
+fn locked_org_role(rows: &[tokio_postgres::Row], user_id: &str) -> Result<Option<OrgRole>, StoreError> {
+    rows.iter().find(|row| row.get::<_, String>("user_id") == user_id)
+        .map(|row| OrgRole::parse(&row.get::<_, String>("role")).map_err(|e| StoreError::Corrupt(e.to_string()))).transpose()
+}
+
+async fn pg_authorize_workspace_mutation(
+    transaction: &tokio_postgres::Transaction<'_>, org_id: &str, workspace_id: &str,
+    actor: &str, target: &str, requested: Option<WorkspaceRole>,
+) -> Result<Option<WorkspaceRole>, StoreError> {
+    // Take the standing barrier, sorted org locks, then sorted workspace locks
+    // for BOTH participants. Every membership mutation follows this order.
+    let org_rows = pg_lock_org_memberships(transaction, org_id, &[actor, target]).await?;
+    let participants = [actor, target];
+    let rows = transaction.query(
+        "SELECT user_id, role FROM workspace_memberships WHERE org_id=$1 AND workspace_id=$2 AND user_id=ANY($3) ORDER BY user_id FOR UPDATE",
+        &[&org_id, &workspace_id, &&participants[..]],
+    ).await.map_err(|e| StoreError::Database(e.to_string()))?;
+    let role = |user: &str| rows.iter().find(|row| row.get::<_, String>("user_id") == user)
+        .map(|row| WorkspaceRole::parse(&row.get::<_, String>("role")).map_err(|e| StoreError::Corrupt(e.to_string()))).transpose();
+    let target_role = role(target)?;
+    authorize_workspace_role_mutation(locked_org_role(&org_rows, actor)?, role(actor)?, target_role, requested)?;
+    Ok(target_role)
 }
 
 fn ensure_another_owner(
@@ -1859,17 +1907,22 @@ impl Store for InMemoryStore {
         user_id: &str,
         role: OrgRole,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut tables = self.tables.write();
         if !tables.users.contains_key(user_id) {
             return Err(StoreError::NotFound);
         }
         let key = (org_id.to_owned(), user_id.to_owned());
         let old = tables.org_memberships.get(&key).copied();
+        let actor = tables.org_memberships.get(&(org_id.to_owned(), context.actor_user_id.clone())).copied();
+        authorize_org_role_mutation(actor, old, Some(role))?;
         if old == Some(OrgRole::Owner) && role != OrgRole::Owner {
             ensure_another_owner(&tables.org_memberships, org_id, user_id)?;
         }
         tables.org_memberships.insert(key, role);
+        let affected = if old.is_some_and(OrgRole::can_traverse_workspaces) && role == OrgRole::Member {
+            crate::chat_store::memory_cleanup_standing(&mut tables, org_id, None, user_id, false, context.now)
+        } else { Vec::new() };
         tables.authorization_audit.push(membership_audit_event(
             org_id,
             None,
@@ -1879,7 +1932,34 @@ impl Store for InMemoryStore {
             Some(role.as_str().to_owned()),
             context,
         ));
-        Ok(())
+        Ok(affected)
+    }
+
+    async fn transfer_org_ownership(
+        &self, org_id: &str, to_user_id: &str, previous_owner_role: OrgRole,
+        context: AuthorizationContext,
+    ) -> Result<Vec<String>, StoreError> {
+        let mut tables = self.tables.write();
+        let actor = context.actor_user_id.clone();
+        if actor == to_user_id || previous_owner_role == OrgRole::Owner {
+            return Err(StoreError::Policy("invalid ownership transfer".into()));
+        }
+        if tables.org_memberships.get(&(org_id.into(), actor.clone())) != Some(&OrgRole::Owner) {
+            return Err(StoreError::OwnershipConflict);
+        }
+        let target_key = (org_id.to_owned(), to_user_id.to_owned());
+        let old = tables.org_memberships.get(&target_key).copied().ok_or(StoreError::NotFound)?;
+        if old == OrgRole::Owner { return Err(StoreError::OwnershipConflict); }
+        tables.org_memberships.insert(target_key, OrgRole::Owner);
+        tables.org_memberships.insert((org_id.into(), actor.clone()), previous_owner_role);
+        let affected = if previous_owner_role == OrgRole::Member {
+            crate::chat_store::memory_cleanup_standing(&mut tables, org_id, None, &actor, false, context.now)
+        } else { Vec::new() };
+        tables.authorization_audit.push(membership_audit_event(
+            org_id, None, to_user_id, "org.ownership.transferred",
+            Some(old.as_str().into()), Some("owner".into()), context,
+        ));
+        Ok(affected)
     }
 
     async fn offboard_org_member(
@@ -1895,6 +1975,14 @@ impl Store for InMemoryStore {
             .get(&key)
             .copied()
             .ok_or(StoreError::NotFound)?;
+        let actor = tables.org_memberships.get(&(org_id.to_owned(), context.actor_user_id.clone())).copied();
+        authorize_org_role_mutation(actor, Some(old), None)?;
+        // HTTP authorization records its target snapshot. Direct store callers
+        // may omit it, retaining the existing offboarding API behavior.
+        if context.source.get("expectedTargetOrgRole").and_then(serde_json::Value::as_str)
+            .is_some_and(|expected| expected != old.as_str()) {
+            return Err(StoreError::OwnershipConflict);
+        }
         if old == OrgRole::Owner {
             ensure_another_owner(&tables.org_memberships, org_id, user_id)?;
         }
@@ -1941,6 +2029,10 @@ impl Store for InMemoryStore {
         {
             return Err(StoreError::NotFound);
         }
+        let actor_org = tables.org_memberships.get(&(org_id.to_owned(), context.actor_user_id.clone())).copied();
+        let actor_workspace = tables.workspace_memberships.get(&(org_id.to_owned(), workspace_id.to_owned(), context.actor_user_id.clone())).copied();
+        let target_workspace = tables.workspace_memberships.get(&(org_id.to_owned(), workspace_id.to_owned(), user_id.to_owned())).copied();
+        authorize_workspace_role_mutation(actor_org, actor_workspace, target_workspace, Some(role))?;
         let key = (
             org_id.to_owned(),
             workspace_id.to_owned(),
@@ -1970,6 +2062,10 @@ impl Store for InMemoryStore {
         context: AuthorizationContext,
     ) -> Result<Vec<String>, StoreError> {
         let mut tables = self.tables.write();
+        let actor_org = tables.org_memberships.get(&(org_id.to_owned(), context.actor_user_id.clone())).copied();
+        let actor_workspace = tables.workspace_memberships.get(&(org_id.to_owned(), workspace_id.to_owned(), context.actor_user_id.clone())).copied();
+        let target_workspace = tables.workspace_memberships.get(&(org_id.to_owned(), workspace_id.to_owned(), user_id.to_owned())).copied();
+        authorize_workspace_role_mutation(actor_org, actor_workspace, target_workspace, None)?;
         let old = tables
             .workspace_memberships
             .remove(&(
@@ -4213,25 +4309,15 @@ impl Store for PgStore {
         user_id: &str,
         role: OrgRole,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
-        let owner_rows = transaction
-            .query(
-                "SELECT user_id FROM org_memberships WHERE org_id = $1 AND role = 'owner' FOR UPDATE",
-                &[&org_id],
-            )
-            .await
-            .map_err(|error| StoreError::Database(error.to_string()))?;
-        let old = transaction
-            .query_opt(
-                "SELECT role FROM org_memberships WHERE org_id = $1 AND user_id = $2 FOR UPDATE",
-                &[&org_id, &user_id],
-            )
-            .await
-            .map_err(|error| StoreError::Database(error.to_string()))?
-            .map(|row| row.get::<_, String>("role"));
-        if old.as_deref() == Some("owner") && role != OrgRole::Owner && owner_rows.len() <= 1 {
+        let owner_rows = pg_lock_org_memberships(&transaction, org_id, &[&context.actor_user_id, user_id]).await?;
+        let actor = locked_org_role(&owner_rows, &context.actor_user_id)?;
+        let target = locked_org_role(&owner_rows, user_id)?;
+        authorize_org_role_mutation(actor, target, Some(role))?;
+        let old = target.map(|role| role.as_str().to_owned());
+        if old.as_deref() == Some("owner") && role != OrgRole::Owner && owner_rows.iter().filter(|row| row.get::<_, String>("role") == "owner").count() <= 1 {
             return Err(StoreError::LastOwner);
         }
         transaction
@@ -4243,6 +4329,9 @@ impl Store for PgStore {
             )
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
+        let affected = if old.as_deref().and_then(|r| OrgRole::parse(r).ok()).is_some_and(OrgRole::can_traverse_workspaces) && role == OrgRole::Member {
+            crate::chat_store::pg_cleanup_standing(&transaction, org_id, None, user_id, false, context.now).await?
+        } else { Vec::new() };
         let event = membership_audit_event(
             org_id,
             None,
@@ -4257,7 +4346,35 @@ impl Store for PgStore {
             .commit()
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
-        Ok(())
+        Ok(affected)
+    }
+
+    async fn transfer_org_ownership(
+        &self, org_id: &str, to_user_id: &str, previous_owner_role: OrgRole,
+        context: AuthorizationContext,
+    ) -> Result<Vec<String>, StoreError> {
+        let actor = context.actor_user_id.clone();
+        if actor == to_user_id || previous_owner_role == OrgRole::Owner {
+            return Err(StoreError::Policy("invalid ownership transfer".into()));
+        }
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let rows = pg_lock_org_memberships(&transaction, org_id, &[&actor, to_user_id]).await?;
+        let role = |user: &str| rows.iter().find(|r| r.get::<_, String>("user_id") == user).map(|r| r.get::<_, String>("role"));
+        if role(&actor).as_deref() != Some("owner") { return Err(StoreError::OwnershipConflict); }
+        let old = role(to_user_id).ok_or(StoreError::NotFound)?;
+        if old == "owner" { return Err(StoreError::OwnershipConflict); }
+        transaction.execute(
+            "UPDATE org_memberships SET role=CASE WHEN user_id=$2 THEN 'owner' ELSE $4 END, updated_at=$5 WHERE org_id=$1 AND user_id IN ($2,$3)",
+            &[&org_id, &to_user_id, &actor, &previous_owner_role.as_str(), &context.now],
+        ).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        let affected = if previous_owner_role == OrgRole::Member {
+            crate::chat_store::pg_cleanup_standing(&transaction, org_id, None, &actor, false, context.now).await?
+        } else { Vec::new() };
+        let event = membership_audit_event(org_id, None, to_user_id, "org.ownership.transferred", Some(old), Some("owner".into()), context);
+        insert_authorization_audit(&transaction, &event).await?;
+        transaction.commit().await.map_err(|e| StoreError::Database(e.to_string()))?;
+        Ok(affected)
     }
 
     async fn offboard_org_member(
@@ -4268,24 +4385,16 @@ impl Store for PgStore {
     ) -> Result<Vec<String>, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
-        crate::chat_store::pg_lock_invite_standing(&transaction, org_id, true).await?;
-        let owner_rows = transaction
-            .query(
-                "SELECT user_id FROM org_memberships WHERE org_id = $1 AND role = 'owner' FOR UPDATE",
-                &[&org_id],
-            )
-            .await
-            .map_err(|error| StoreError::Database(error.to_string()))?;
-        let old = transaction
-            .query_opt(
-                "SELECT role FROM org_memberships WHERE org_id = $1 AND user_id = $2 FOR UPDATE",
-                &[&org_id, &user_id],
-            )
-            .await
-            .map_err(|error| StoreError::Database(error.to_string()))?
-            .map(|row| row.get::<_, String>("role"))
-            .ok_or(StoreError::NotFound)?;
-        if old == "owner" && owner_rows.len() <= 1 {
+        let owner_rows = pg_lock_org_memberships(&transaction, org_id, &[&context.actor_user_id, user_id]).await?;
+        let actor = locked_org_role(&owner_rows, &context.actor_user_id)?;
+        let target = locked_org_role(&owner_rows, user_id)?;
+        authorize_org_role_mutation(actor, target, None)?;
+        let old = target.ok_or(StoreError::NotFound)?.as_str().to_owned();
+        if context.source.get("expectedTargetOrgRole").and_then(serde_json::Value::as_str)
+            .is_some_and(|expected| expected != old) {
+            return Err(StoreError::OwnershipConflict);
+        }
+        if old == "owner" && owner_rows.iter().filter(|row| row.get::<_, String>("role") == "owner").count() <= 1 {
             return Err(StoreError::LastOwner);
         }
         transaction
@@ -4339,15 +4448,8 @@ impl Store for PgStore {
     ) -> Result<Vec<String>, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
-        let old = transaction
-            .query_opt(
-                "SELECT role FROM workspace_memberships \
-                 WHERE org_id = $1 AND workspace_id = $2 AND user_id = $3 FOR UPDATE",
-                &[&org_id, &workspace_id, &user_id],
-            )
-            .await
-            .map_err(|error| StoreError::Database(error.to_string()))?
-            .map(|row| row.get::<_, String>("role"));
+        let old = pg_authorize_workspace_mutation(&transaction, org_id, workspace_id, &context.actor_user_id, user_id, Some(role)).await?
+            .map(|role| role.as_str().to_owned());
         transaction
             .execute(
                 "INSERT INTO workspace_memberships \
@@ -4394,6 +4496,7 @@ impl Store for PgStore {
     ) -> Result<Vec<String>, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
+        pg_authorize_workspace_mutation(&transaction, org_id, workspace_id, &context.actor_user_id, user_id, None).await?;
         let row = transaction
             .query_opt(
                 "DELETE FROM workspace_memberships \
@@ -5213,6 +5316,166 @@ mod tests {
         assert_eq!(audit["reason"], "pause");
         assert_eq!(audit["summary"]["changed_fields"], serde_json::json!(["phase", "revision"]));
         assert!(audit["summary"].to_string().len() < 4096);
+    }
+
+    #[tokio::test]
+    async fn membership_mutations_reject_stale_actor_and_target_authorization() {
+        for mutation in ["patch", "delete"] {
+            for changed in ["target-promoted", "actor-demoted", "actor-offboarded"] {
+                let store = InMemoryStore::new();
+                for (user, role) in [("alice", OrgRole::Owner), ("carol", OrgRole::Owner), ("bob", OrgRole::Member), ("dave", OrgRole::Admin)] {
+                    store.add_user(user, user);
+                    store.add_org_member("org_1", user, role);
+                }
+                // These are the HTTP handler's snapshots before it calls the store.
+                assert_eq!(store.membership("org_1", "dave", None).await.unwrap().org_role, Some(OrgRole::Admin));
+                assert_eq!(store.membership("org_1", "bob", None).await.unwrap().org_role, Some(OrgRole::Member));
+                match changed {
+                    "target-promoted" => { store.transfer_org_ownership("org_1", "bob", OrgRole::Member, ownership_context("alice")).await.unwrap(); }
+                    "actor-demoted" => { store.set_org_member("org_1", "dave", OrgRole::Member, ownership_context("alice")).await.unwrap(); }
+                    _ => { store.offboard_org_member("org_1", "dave", ownership_context("alice")).await.unwrap(); }
+                }
+                let audit_count = store.tables.read().authorization_audit.len();
+                let result = if mutation == "patch" {
+                    store.set_org_member("org_1", "bob", OrgRole::Member, ownership_context("dave")).await
+                } else {
+                    store.offboard_org_member("org_1", "bob", ownership_context("dave")).await
+                };
+                assert!(matches!(result, Err(StoreError::Forbidden)), "{mutation} accepted stale {changed} authorization: {result:?}");
+                let refusal = axum::response::IntoResponse::into_response(crate::api::Failure::Store(result.unwrap_err()));
+                assert_eq!(refusal.status(), axum::http::StatusCode::FORBIDDEN);
+                assert_eq!(store.tables.read().authorization_audit.len(), audit_count);
+                assert_eq!(store.membership("org_1", "bob", None).await.unwrap().org_role,
+                    Some(if changed == "target-promoted" { OrgRole::Owner } else { OrgRole::Member }));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn workspace_membership_mutations_recheck_current_actor_and_target_standing() {
+        for remove in [false, true] {
+            for changed in ["org-demoted", "offboarded", "workspace-demoted", "target-promoted"] {
+                let store = InMemoryStore::new();
+                store.add_workspace("org_1", "ws_1", "Workspace");
+                for user in ["alice", "bob", "dave"] { store.add_user(user, user); }
+                store.add_org_member("org_1", "alice", OrgRole::Owner);
+                store.add_org_member("org_1", "bob", OrgRole::Member);
+                store.add_org_member("org_1", "dave", if changed == "org-demoted" || changed == "offboarded" { OrgRole::Admin } else { OrgRole::Member });
+                store.add_workspace_member("org_1", "ws_1", "dave", WorkspaceRole::Maintainer);
+                store.add_workspace_member("org_1", "ws_1", "bob", if changed == "org-demoted" { WorkspaceRole::Maintainer } else { WorkspaceRole::Member });
+                let actor = store.membership("org_1", "dave", Some("ws_1")).await.unwrap();
+                let target = store.membership("org_1", "bob", Some("ws_1")).await.unwrap();
+                authorize_workspace_role_mutation(actor.org_role, actor.workspace_role, target.workspace_role, None).unwrap();
+                match changed {
+                    "org-demoted" => { store.set_org_member("org_1", "dave", OrgRole::Member, ownership_context("alice")).await.unwrap(); }
+                    "offboarded" => { store.offboard_org_member("org_1", "dave", ownership_context("alice")).await.unwrap(); }
+                    "workspace-demoted" => { store.set_workspace_member("org_1", "ws_1", "dave", WorkspaceRole::Viewer, ownership_context("alice")).await.unwrap(); }
+                    _ => { store.set_workspace_member("org_1", "ws_1", "bob", WorkspaceRole::Maintainer, ownership_context("alice")).await.unwrap(); }
+                }
+                let before = store.membership("org_1", "bob", Some("ws_1")).await.unwrap();
+                let audit_count = store.tables.read().authorization_audit.len();
+                let result = if remove {
+                    store.remove_workspace_member("org_1", "ws_1", "bob", ownership_context("dave")).await
+                } else {
+                    store.set_workspace_member("org_1", "ws_1", "bob", WorkspaceRole::Viewer, ownership_context("dave")).await
+                };
+                assert!(matches!(result, Err(StoreError::Forbidden)), "remove={remove}, {changed}: {result:?}");
+                assert_eq!(store.membership("org_1", "bob", Some("ws_1")).await.unwrap(), before);
+                assert_eq!(store.tables.read().authorization_audit.len(), audit_count);
+            }
+        }
+    }
+
+    fn ownership_context(actor: &str) -> AuthorizationContext {
+        AuthorizationContext { actor_user_id: actor.into(), reason: "handoff".into(), request_id: "transfer".into(), grant_id: None, source: serde_json::json!({}), now: 10 }
+    }
+
+    #[tokio::test]
+    async fn ownership_transfer_is_atomic_and_rejects_stale_callers_and_invalid_targets() {
+        let store = InMemoryStore::new();
+        for user in ["alice", "bob", "carol"] { store.add_user(user, user); }
+        store.add_org_member("org_1", "alice", OrgRole::Owner);
+        store.add_org_member("org_1", "bob", OrgRole::Member);
+        store.add_org_member("org_other", "carol", OrgRole::Member);
+        assert!(matches!(store.transfer_org_ownership("org_1", "carol", OrgRole::Member, ownership_context("alice")).await, Err(StoreError::NotFound)));
+        assert!(matches!(store.transfer_org_ownership("org_1", "alice", OrgRole::Member, ownership_context("alice")).await, Err(StoreError::Policy(_))));
+        assert!(matches!(store.transfer_org_ownership("org_1", "bob", OrgRole::Owner, ownership_context("alice")).await, Err(StoreError::Policy(_))));
+        assert!(store.tables.read().authorization_audit.is_empty());
+        assert_eq!(store.membership("org_1", "alice", None).await.unwrap().org_role, Some(OrgRole::Owner));
+        store.transfer_org_ownership("org_1", "bob", OrgRole::Admin, ownership_context("alice")).await.unwrap();
+        assert_eq!(store.membership("org_1", "alice", None).await.unwrap().org_role, Some(OrgRole::Admin));
+        assert_eq!(store.membership("org_1", "bob", None).await.unwrap().org_role, Some(OrgRole::Owner));
+        assert!(matches!(store.transfer_org_ownership("org_1", "bob", OrgRole::Member, ownership_context("alice")).await, Err(StoreError::OwnershipConflict)));
+        assert_eq!(store.tables.read().authorization_audit.len(), 1);
+        store.add_org_member("org_1", "alice", OrgRole::Owner);
+        assert!(matches!(store.transfer_org_ownership("org_1", "bob", OrgRole::Member, ownership_context("alice")).await, Err(StoreError::OwnershipConflict)));
+        assert_eq!(store.tables.read().authorization_audit.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn ownership_transfer_and_org_demotion_reuse_effective_standing_cleanup() {
+        use crate::{chat::{SessionStatus, SessionRole}, chat_store::{ChatStore, NewSharedSession, NewChatRunQueueItem, NewChatRunLease}};
+        for transfer in [false, true] {
+            let store = InMemoryStore::new();
+            store.add_workspace("org_1", "ws_1", "Workspace");
+            for user in ["alice", "bob"] {
+                store.add_user(user, user);
+                store.add_org_member("org_1", user, OrgRole::Owner);
+            }
+            store.add_workspace_member("org_1", "ws_1", "alice", WorkspaceRole::Viewer);
+            let chat = crate::chat_store::InMemoryChatStore::from_store(&store);
+            chat.create_session(NewSharedSession {
+                id: "session".into(), org_id: "org_1".into(), workspace_id: "ws_1".into(), title: "Transfer".into(),
+                status: SessionStatus::Active, created_by_user_id: "alice".into(), now: 1, operation_id: "create".into(),
+            }).await.unwrap();
+            chat.enqueue_run_input(NewChatRunQueueItem {
+                id: "queue".into(), org_id: "org_1".into(), workspace_id: "ws_1".into(), session_id: "session".into(),
+                requested_by_user_id: "alice".into(), payload: serde_json::json!({}), now: 2, operation_id: "queue".into(),
+            }).await.unwrap();
+            chat.acquire_run_lease(NewChatRunLease {
+                id: "lease".into(), org_id: "org_1".into(), workspace_id: "ws_1".into(), session_id: "session".into(),
+                run_id: "run".into(), holder_user_id: "alice".into(), holder_device_id: "device".into(), token_hash: "hash".into(),
+                token_expires_at: 100, heartbeat_expires_at: 100, now: 3, operation_id: "lease".into(),
+            }).await.unwrap();
+            let affected = if transfer {
+                store.add_org_member("org_1", "bob", OrgRole::Member);
+                store.transfer_org_ownership("org_1", "bob", OrgRole::Member, ownership_context("alice")).await.unwrap()
+            } else {
+                store.set_org_member("org_1", "alice", OrgRole::Member, ownership_context("bob")).await.unwrap()
+            };
+            assert_eq!(affected, vec!["session"]);
+            let member = chat.effective_member("org_1", "session", "alice").await.unwrap().unwrap();
+            assert_eq!(member.role, SessionRole::Viewer);
+            assert!(!member.approver);
+            assert!(chat.list_run_queue("org_1", "session").await.unwrap().is_empty());
+            assert!(chat.active_run_lease("org_1", "session", 10).await.unwrap().is_none());
+            assert!(chat.validate_run_token("org_1", "session", "run", "hash", 10).await.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_transfer_and_offboard_have_one_winner_and_keep_an_owner() {
+        for (previous_role, offboard_first) in [(OrgRole::Admin, false), (OrgRole::Admin, true), (OrgRole::Member, false), (OrgRole::Member, true)] {
+            let store = InMemoryStore::new();
+            for (user, role) in [("alice", OrgRole::Owner), ("bob", OrgRole::Member), ("carol", OrgRole::Owner)] {
+                store.add_user(user, user);
+                store.add_org_member("org_1", user, role);
+            }
+            let transfer = async {
+                if offboard_first { tokio::task::yield_now().await; }
+                store.transfer_org_ownership("org_1", "bob", previous_role, ownership_context("alice")).await
+            };
+            let offboard = async {
+                if !offboard_first { tokio::task::yield_now().await; }
+                let mut context = ownership_context("carol");
+                context.source["expectedTargetOrgRole"] = serde_json::json!("owner");
+                store.offboard_org_member("org_1", "alice", context).await
+            };
+            let (transfer, offboard) = tokio::join!(transfer, offboard);
+            assert_eq!(usize::from(transfer.is_ok()) + usize::from(offboard.is_ok()), 1);
+            assert!(store.tables.read().org_memberships.iter().any(|((org, _), role)| org == "org_1" && *role == OrgRole::Owner));
+            if offboard_first { assert!(offboard.is_ok()); } else { assert!(transfer.is_ok()); }
+        }
     }
 
     use super::*;

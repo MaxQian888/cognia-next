@@ -2160,3 +2160,121 @@ async fn rollout_app_tables_remain_select_only_after_every_boot() {
     admin_task.await.unwrap();
     database.cleanup_with_role(Some(&role)).await;
 }
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance with a superuser admin URL"]
+async fn ownership_transfer_racing_offboard_has_one_winner_and_never_zero_owners() {
+    use cognia_tenant_auth::OrgRole;
+    use cognia_collab_server::store::StoreError;
+    use std::time::Duration;
+    let (database, store, owner, member, other_owner) = standing_fixture().await;
+    let org = &owner.org_id;
+    store.set_org_member(org, &other_owner.user_id, OrgRole::Owner, standing_context(&owner.user_id)).await.unwrap();
+    let transfer = store.transfer_org_ownership(org, &member.user_id, OrgRole::Member, standing_context(&owner.user_id));
+    let mut offboard_context = standing_context(&other_owner.user_id);
+    offboard_context.source["expectedTargetOrgRole"] = serde_json::json!("owner");
+    let offboard = store.offboard_org_member(org, &owner.user_id, offboard_context);
+    let (transfer, offboard) = tokio::time::timeout(Duration::from_secs(10), async { tokio::join!(transfer, offboard) }).await.expect("no membership-lock deadlock");
+    assert_eq!(usize::from(transfer.is_ok()) + usize::from(offboard.is_ok()), 1, "transfer={transfer:?}, offboard={offboard:?}");
+    let caller_role = store.membership(org, &owner.user_id, None).await.unwrap().org_role;
+    let target_role = store.membership(org, &member.user_id, None).await.unwrap().org_role;
+    let remaining_owner = store.membership(org, &other_owner.user_id, None).await.unwrap().org_role;
+    assert_eq!(remaining_owner, Some(OrgRole::Owner));
+    if transfer.is_ok() {
+        assert_eq!(caller_role, Some(OrgRole::Member));
+        assert_eq!(target_role, Some(OrgRole::Owner));
+        assert!(matches!(offboard, Err(StoreError::OwnershipConflict)));
+    } else {
+        assert!(matches!(transfer, Err(StoreError::OwnershipConflict)));
+        assert!(caller_role.is_none());
+        assert_eq!(target_role, Some(OrgRole::Member));
+    }
+    drop(store);
+    database.cleanup().await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance with a superuser admin URL"]
+async fn membership_mutations_recheck_actor_and_target_after_the_standing_barrier() {
+    use std::{sync::Arc, time::Duration};
+    use cognia_collab_server::store::StoreError;
+    use cognia_tenant_auth::{OrgRole, WorkspaceRole};
+    for (mutation, changed) in [
+        ("patch", "target-promoted"), ("delete", "target-promoted"),
+        ("patch", "actor-demoted"), ("delete", "actor-offboarded"),
+        ("workspace-set", "actor-demoted"), ("workspace-remove", "actor-offboarded"),
+        ("workspace-set", "workspace-target-promoted"), ("workspace-remove", "workspace-target-promoted"),
+    ] {
+        let (database, store, owner, target, carol) = standing_fixture().await;
+        store.set_org_member(&owner.org_id, &carol.user_id, OrgRole::Owner, standing_context(&owner.user_id)).await.unwrap();
+        let mut dave = bootstrap("standing_dave");
+        dave.org_id = owner.org_id.clone();
+        dave.logto_organization_id = owner.logto_organization_id.clone();
+        dave.workspace_id = owner.workspace_id.clone();
+        store.bootstrap_operator(&dave).await.unwrap();
+        let workspace_target = changed == "workspace-target-promoted";
+        store.set_org_member(&owner.org_id, &dave.user_id, if workspace_target { OrgRole::Member } else { OrgRole::Admin }, standing_context(&owner.user_id)).await.unwrap();
+        store.set_workspace_member(&owner.org_id, &owner.workspace_id, &dave.user_id, if workspace_target { WorkspaceRole::Maintainer } else { WorkspaceRole::Viewer }, standing_context(&owner.user_id)).await.unwrap();
+        if workspace_target {
+            store.set_workspace_member(&owner.org_id, &owner.workspace_id, &target.user_id, WorkspaceRole::Member, standing_context(&owner.user_id)).await.unwrap();
+        }
+        // Snapshot authorization happens before either mutation is allowed to
+        // take the standing barrier. The next operation invalidates it first.
+        let before = store.membership(&owner.org_id, &dave.user_id, Some(&owner.workspace_id)).await.unwrap();
+        assert_eq!(before.org_role, Some(if workspace_target { OrgRole::Member } else { OrgRole::Admin }));
+        assert_eq!(store.membership(&owner.org_id, &target.user_id, None).await.unwrap().org_role, Some(OrgRole::Member));
+        let store = Arc::new(store);
+        let (gate, connection) = tokio_postgres::connect(&database.url, NoTls).await.unwrap();
+        let gate_task = tokio::spawn(async move { connection.await.unwrap() });
+        gate.query_one("SELECT pg_advisory_lock_shared(hashtextextended('cognia.collab.invite-standing:' || $1::text, 0))", &[&owner.org_id]).await.unwrap();
+        let wait_for_blocked = |expected| {
+            let gate = &gate;
+            let name = &database.name;
+            async move {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    loop {
+                        let waiting: i64 = gate.query_one("SELECT count(*) FROM pg_stat_activity WHERE application_name=$1 AND wait_event='advisory'", &[name]).await.unwrap().get(0);
+                        if waiting == expected { break; }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                }).await.expect("mutation must wait on the membership standing barrier");
+            }
+        };
+        let invalidate = {
+            let store = store.clone(); let owner = owner.clone(); let target = target.clone(); let dave = dave.clone();
+            tokio::spawn(async move {
+                let context = standing_context(&owner.user_id);
+                match changed {
+                    "target-promoted" => store.transfer_org_ownership(&owner.org_id, &target.user_id, OrgRole::Member, context).await,
+                    "actor-demoted" => store.set_org_member(&owner.org_id, &dave.user_id, OrgRole::Member, context).await,
+                    "actor-offboarded" => store.offboard_org_member(&owner.org_id, &dave.user_id, context).await,
+                    _ => store.set_workspace_member(&owner.org_id, &owner.workspace_id, &target.user_id, WorkspaceRole::Maintainer, context).await,
+                }
+            })
+        };
+        wait_for_blocked(1).await;
+        let stale = {
+            let store = store.clone(); let owner = owner.clone(); let target = target.clone(); let dave = dave.clone();
+            tokio::spawn(async move {
+                let context = standing_context(&dave.user_id);
+                match mutation {
+                    "patch" => store.set_org_member(&owner.org_id, &target.user_id, OrgRole::Member, context).await,
+                    "delete" => store.offboard_org_member(&owner.org_id, &target.user_id, context).await,
+                    "workspace-set" => store.set_workspace_member(&owner.org_id, &owner.workspace_id, &target.user_id, WorkspaceRole::Viewer, context).await,
+                    _ => store.remove_workspace_member(&owner.org_id, &owner.workspace_id, &target.user_id, context).await,
+                }
+            })
+        };
+        wait_for_blocked(2).await;
+        gate.query_one("SELECT pg_advisory_unlock_shared(hashtextextended('cognia.collab.invite-standing:' || $1::text, 0))", &[&owner.org_id]).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(10), invalidate).await.unwrap().unwrap().unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(10), stale).await.unwrap().unwrap();
+        assert!(matches!(result, Err(StoreError::Forbidden)), "{mutation}/{changed}: {result:?}");
+        assert_eq!(store.membership(&owner.org_id, &target.user_id, None).await.unwrap().org_role,
+            Some(if changed == "target-promoted" { OrgRole::Owner } else { OrgRole::Member }));
+        assert_eq!(store.membership(&owner.org_id, &target.user_id, Some(&owner.workspace_id)).await.unwrap().workspace_role, Some(WorkspaceRole::Maintainer));
+        drop((gate, store));
+        gate_task.await.unwrap();
+        database.cleanup().await;
+    }
+}

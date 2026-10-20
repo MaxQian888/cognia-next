@@ -2777,6 +2777,8 @@ mod tests {
             for (user, role) in [(OWNER, cognia_tenant_auth::WorkspaceRole::Maintainer), (MEMBER, cognia_tenant_auth::WorkspaceRole::Maintainer), (VIEWER, cognia_tenant_auth::WorkspaceRole::Viewer)] {
                 store.add_workspace_member(ORG, "workspace", user, role);
             }
+            store.add_user("usr_authorization_admin", "Organization manager");
+            store.add_org_member(ORG, "usr_authorization_admin", OrgRole::Owner);
             let signer = GrantSigner::new(&[9; 32]).unwrap();
             let mut state = AppState::new(
                 Arc::new(store),
@@ -3722,7 +3724,7 @@ mod tests {
 
     fn revocation_context() -> crate::store::AuthorizationContext {
         crate::store::AuthorizationContext {
-            actor_user_id: OWNER.into(), reason: "file standing revoked".into(), request_id: "file-revocation".into(),
+            actor_user_id: "usr_authorization_admin".into(), reason: "file standing revoked".into(), request_id: "file-revocation".into(),
             grant_id: None, source: serde_json::json!({}), now: 1_001,
         }
     }

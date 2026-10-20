@@ -93,7 +93,7 @@ struct Args {
     /// `printf %s "$CRED" | sha256sum`, and hand the clear value to the first owner.
     #[arg(long, env = "COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256")]
     account_bootstrap_credential_sha256: Option<String>,
-    /// SHA-256 (hex) of the credential a tenant Host presents on `/internal`
+    /// SHA-256 (hex), or a comma-separated list of hashes, of credentials tenant Hosts present on `/internal`
     /// routes — today, to ask what one person may do in one workspace before
     /// it acts on their behalf (ADR-0182 approvals). Unset means every
     /// `/internal` authorization route answers 401, which is the safe default:
@@ -104,6 +104,11 @@ struct Args {
     /// as `COGNIA_COLLAB_SERVICE_CREDENTIAL`.
     #[arg(long, env = "COLLAB_INTERNAL_SERVICE_CREDENTIAL_SHA256")]
     internal_service_credential_sha256: Option<String>,
+    /// JSON map of configured lowercase SHA-256 hashes to org-id arrays.
+    /// "*" grants every org and deployment-wide shared-chat metrics; a missing
+    /// entry denies. Unset preserves the existing deployment-wide authority.
+    #[arg(long, env = "COLLAB_INTERNAL_SERVICE_CREDENTIAL_SCOPES")]
+    internal_service_credential_scopes: Option<String>,
     /// Logto's public base URL (NOT the `/oidc` issuer), for the Management API.
     #[arg(long, env = "COLLAB_LOGTO_ENDPOINT")]
     logto_endpoint: Option<String>,
@@ -226,6 +231,10 @@ async fn main() -> anyhow::Result<()> {
         println!("{}", serde_json::to_string(&report)?);
         return Ok(());
     }
+    let service_hashes = cognia_collab_server::service_credentials::parse_hashes(args.internal_service_credential_sha256.as_deref())?;
+    let service_scopes = cognia_collab_server::service_credentials::parse_scopes(
+        args.internal_service_credential_scopes.as_deref(), service_hashes.as_deref(),
+    )?;
     let database_url = args.database_url.as_deref().ok_or_else(|| anyhow::anyhow!("COLLAB_DATABASE_URL or --database-url is required"))?;
     let grant_key = args.grant_key.as_deref().ok_or_else(|| anyhow::anyhow!("COLLAB_GRANT_KEY is required"))?;
     let key = decode_hex(grant_key)
@@ -305,10 +314,8 @@ async fn main() -> anyhow::Result<()> {
         .with_feed_enabled(args.feed_enabled)
         .with_logto_management(logto)
         .with_account_control(account_control)
-        .with_internal_service_credential(credential_hash(
-            "COLLAB_INTERNAL_SERVICE_CREDENTIAL_SHA256",
-            args.internal_service_credential_sha256.as_deref(),
-        )?);
+        .with_internal_service_credential_scopes(service_scopes)
+        .with_internal_service_credential(service_hashes);
 
     let (allowed_origins, rejected_origins) =
         cognia_collab_server::cors::parse_allowed_origins(args.allowed_origins.as_deref());
@@ -377,6 +384,22 @@ async fn shutdown() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn host_scope_flags_parse_without_changing_no_subcommand_startup() {
+        use clap::Parser;
+        let hashes = format!("{},{}", "ab".repeat(32), "cd".repeat(32));
+        let scopes = serde_json::json!({"ab".repeat(32): ["org_alpha"]}).to_string();
+        let args = super::Args::try_parse_from([
+            "cognia-collab-server", "--internal-service-credential-sha256", &hashes,
+            "--internal-service-credential-scopes", &scopes,
+        ]).unwrap();
+        assert!(args.command.is_none());
+        let parsed = cognia_collab_server::service_credentials::parse_hashes(args.internal_service_credential_sha256.as_deref()).unwrap();
+        assert_eq!(parsed.as_deref(), Some(hashes.as_str()));
+        let parsed = cognia_collab_server::service_credentials::parse_scopes(args.internal_service_credential_scopes.as_deref(), parsed.as_deref()).unwrap().unwrap();
+        assert_eq!(parsed[&"ab".repeat(32)], vec!["org_alpha"]);
+    }
+
     #[test]
     fn rollout_args_accept_show_apply_and_reject_unknown_features() {
         use clap::Parser;

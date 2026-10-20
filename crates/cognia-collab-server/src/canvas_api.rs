@@ -1439,6 +1439,8 @@ mod tests {
             store.add_user(user.as_str(), name);
             store.add_org_member(ORG, user.as_str(), OrgRole::Member);
         }
+        store.add_user("usr_authorization_admin", "Organization manager");
+        store.add_org_member(ORG, "usr_authorization_admin", OrgRole::Owner);
         store.add_workspace_member(ORG, "proj-1", ada().as_str(), WorkspaceRole::Member);
         store.add_workspace_member(ORG, "proj-1", viv().as_str(), WorkspaceRole::Viewer);
         store
@@ -1886,7 +1888,7 @@ mod tests {
 
     fn removal_context() -> crate::store::AuthorizationContext {
         crate::store::AuthorizationContext {
-            actor_user_id: ada().to_string(), reason: "remove".into(), request_id: "canvas-remove".into(),
+            actor_user_id: "usr_authorization_admin".into(), reason: "remove".into(), request_id: "canvas-remove".into(),
             grant_id: None, source: serde_json::json!({}), now: 1_000,
         }
     }

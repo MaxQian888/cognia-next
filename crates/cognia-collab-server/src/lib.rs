@@ -55,6 +55,8 @@
 
 pub mod api;
 pub mod auth;
+pub mod capabilities_api;
+pub mod service_credentials;
 pub mod canvas;
 pub mod canvas_api;
 pub mod canvas_store;

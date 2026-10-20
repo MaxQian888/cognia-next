@@ -60,6 +60,14 @@ impl Action {
     ];
 }
 
+/// Org lookups have no workspace target, so traversal grants no workspace actions.
+pub fn org_actions_for(org_role: Option<OrgRole>) -> Vec<Action> {
+    actions_for(org_role, None).into_iter().filter(|action| matches!(action,
+        Action::OrgMembersManage | Action::OrgAdminsManage | Action::OrgOwnershipTransfer
+        | Action::OrgPolicyManage | Action::HostGlobalSurfaces
+    )).collect()
+}
+
 /// Contract order, with traversal resolved before capability and guest checks.
 pub fn actions_for(org_role: Option<OrgRole>, workspace_role: Option<WorkspaceRole>) -> Vec<Action> {
     let access = resolve_workspace_access(org_role, workspace_role);
@@ -85,6 +93,17 @@ pub fn actions_for(org_role: Option<OrgRole>, workspace_role: Option<WorkspaceRo
 mod tests {
     use super::*;
     use serde_json::{json, Value};
+
+    #[test]
+    fn org_scope_excludes_workspace_traversal_actions() {
+        let contract: Value = serde_json::from_str(include_str!("../../../protocol/collab-capabilities-v1.json")).unwrap();
+        for role in [None, Some(OrgRole::Owner), Some(OrgRole::Admin), Some(OrgRole::Member)] {
+            let expected: Vec<_> = contract["actions"].as_array().unwrap().iter().filter(|a| {
+                a["scope"] == "org" && role.is_some_and(|r| a["orgRoles"].as_array().unwrap().contains(&json!(r)))
+            }).map(|a| a["action"].clone()).collect();
+            assert_eq!(json!(org_actions_for(role)), json!(expected));
+        }
+    }
 
     #[test]
     fn contract_actions_and_every_preset_are_pinned() {

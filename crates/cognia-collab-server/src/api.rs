@@ -24,7 +24,7 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
-use crate::auth::{authorize_workspace, readable_scope, verify_grant, AuthError, WorkspaceScope};
+use crate::auth::{authorize_org_role_mutation, authorize_workspace_role_mutation, authorize_workspace, readable_scope, verify_grant, AuthError, WorkspaceScope};
 use crate::canvas_api::CanvasHub;
 use crate::canvas_store::{CanvasStore, InMemoryCanvasStore};
 use crate::chat_api::ChatHub;
@@ -89,11 +89,12 @@ pub struct AppState {
     /// The account control plane (bootstrap, discovery, generic invitation
     /// acceptance). Off by default: `COLLAB_ACCOUNT_BOOTSTRAP_ENABLED`.
     pub account_control: AccountControlConfig,
-    /// SHA-256 (lowercase hex) of the credential a tenant Host presents on the
-    /// `/internal` authorization routes. `None` — the default — makes every
+    /// SHA-256 (lowercase hex) digests, comma-separated, of credentials tenant
+    /// Hosts present on the `/internal` authorization routes. `None` — the default — makes every
     /// one of them answer 401, so a deployment that never configured a Host
     /// cannot have one asking about its members.
     pub internal_service_credential_sha256: Option<String>,
+    pub internal_service_credential_scopes: Option<crate::service_credentials::CredentialScopes>,
 }
 
 /// Rollout gate and policy for the account control plane.
@@ -127,6 +128,7 @@ impl AppState {
             logto: Arc::new(UnconfiguredLogtoManagement),
             account_control: AccountControlConfig::default(),
             internal_service_credential_sha256: None,
+            internal_service_credential_scopes: None,
             store,
             chat_store,
             chat_hub: Arc::new(ChatHub::default()),
@@ -222,6 +224,11 @@ impl AppState {
         self
     }
 
+    pub fn with_internal_service_credential_scopes(mut self, scopes: Option<crate::service_credentials::CredentialScopes>) -> Self {
+        self.internal_service_credential_scopes = scopes;
+        self
+    }
+
     pub fn with_internal_service_credential(mut self, sha256: Option<String>) -> Self {
         self.internal_service_credential_sha256 = sha256;
         self
@@ -231,7 +238,10 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     let routes = Router::new()
         .route("/health", get(health))
+        .route("/v1/orgs/{org_id}/capabilities", get(crate::capabilities_api::capabilities))
+        .route("/v1/orgs/{org_id}/ownership-transfer", axum::routing::post(transfer_org_ownership))
         .route("/internal/shared-chat-metrics", get(shared_chat_metrics))
+        .route("/internal/v1/orgs/{org_id}/access/{user_id}", get(internal_org_access))
         .route(
             "/internal/v1/orgs/{org_id}/workspaces/{workspace_id}/access/{user_id}",
             get(internal_workspace_access),
@@ -324,7 +334,7 @@ struct HealthResponse {
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
-    let mut features = vec!["issue-writes", "plan-writes", "run-writes", "notifications"];
+    let mut features = vec!["issue-writes", "plan-writes", "run-writes", "notifications", "org-capabilities"];
     if state.shared_chat_enabled {
         features.push("shared-chat");
         features.push("shared-chat-execution-v2");
@@ -347,7 +357,7 @@ async fn shared_chat_metrics(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<crate::chat_metrics::ChatMetricsSnapshot>, Failure> {
-    require_service_credential(&state, &headers)?;
+    require_service_credential(&state, &headers, None)?;
     Ok(Json(state.chat_metrics.snapshot()))
 }
 
@@ -380,13 +390,16 @@ async fn internal_workspace_access(
     headers: HeaderMap,
     Path((org_id, workspace_id, user_id)): Path<(String, String, String)>,
 ) -> Result<Json<WorkspaceAccessResponse>, Failure> {
-    require_service_credential(&state, &headers)?;
+    require_service_credential(&state, &headers, Some(&org_id))?;
     let membership = state
         .store
         .membership(&org_id, &user_id, Some(&workspace_id))
         .await?;
     Ok(Json(WorkspaceAccessResponse {
         access: resolve_workspace_access(membership.org_role, membership.workspace_role),
+        org_role: membership.org_role,
+        actions: crate::capabilities_api::scoped_actions(&membership, true),
+        features: crate::capabilities_api::feature_decisions(&state, &org_id, Some(&workspace_id), None).await,
     }))
 }
 
@@ -397,17 +410,49 @@ pub struct WorkspaceAccessResponse {
     /// for a workspace that does not exist, so a Host cannot use this to
     /// enumerate an org's workspaces.
     pub access: Option<cognia_tenant_auth::membership::EffectiveWorkspaceAccess>,
+    pub org_role: Option<OrgRole>,
+    pub actions: Vec<cognia_tenant_auth::actions::Action>,
+    pub features: Vec<crate::rollout::FeatureDecision>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OrgAccessResponse {
+    org_id: String,
+    user_id: String,
+    org_role: Option<OrgRole>,
+    actions: Vec<cognia_tenant_auth::actions::Action>,
+    features: Vec<crate::rollout::FeatureDecision>,
+}
+
+async fn internal_org_access(
+    State(state): State<AppState>, headers: HeaderMap,
+    Path((org_id, user_id)): Path<(String, String)>,
+) -> Result<Json<OrgAccessResponse>, Failure> {
+    require_service_credential(&state, &headers, Some(&org_id))?;
+    let membership = state.store.membership(&org_id, &user_id, None).await?;
+    if membership.org_role.is_none() { return Err(StoreError::NotFound.into()); }
+    Ok(Json(OrgAccessResponse {
+        features: crate::capabilities_api::feature_decisions(&state, &org_id, None, None).await,
+        actions: crate::capabilities_api::scoped_actions(&membership, false),
+        org_role: membership.org_role, org_id, user_id,
+    }))
 }
 
 /// Prove the caller is the Host this deployment configured.
-fn require_service_credential(state: &AppState, headers: &HeaderMap) -> Result<(), Failure> {
+fn require_service_credential(state: &AppState, headers: &HeaderMap, org: Option<&str>) -> Result<(), Failure> {
     let Some(expected) = state.internal_service_credential_sha256.as_deref() else {
         return Err(Failure::ServiceCredentialInvalid);
     };
     let token = crate::auth::bearer_token(authorization(headers))
         .map_err(|_| Failure::ServiceCredentialInvalid)?;
-    if !constant_time_eq(&sha256_hex(token), expected) {
+    let hash = sha256_hex(token);
+    let matched = expected.split(',').fold(false, |matched, expected| constant_time_eq(&hash, expected) | matched);
+    if !matched {
         return Err(Failure::ServiceCredentialInvalid);
+    }
+    if !crate::service_credentials::allows(state.internal_service_credential_scopes.as_ref(), &hash, org) {
+        return Err(Failure::CredentialScope);
     }
     Ok(())
 }
@@ -451,6 +496,7 @@ pub(crate) enum Failure {
     /// deployment configured none. One answer for all three: a caller that
     /// cannot present it must not learn which of the three it was.
     ServiceCredentialInvalid,
+    CredentialScope,
     /// The identity provider could not be mutated. The saga is left resumable.
     Idp(LogtoManagementError),
 }
@@ -500,10 +546,12 @@ impl Failure {
             }
             Self::Auth(AuthError::Store(error)) | Self::Store(error) => match error {
                 StoreError::NotFound => (StatusCode::NOT_FOUND, "not found".into()),
+                StoreError::Forbidden => (StatusCode::FORBIDDEN, "forbidden".into()),
                 StoreError::Conflict(_) | StoreError::FieldConflict { .. } => {
                     unreachable!("conflicts are handled before this match")
                 }
                 StoreError::LastOwner => (StatusCode::CONFLICT, error.to_string()),
+                StoreError::OwnershipConflict => (StatusCode::CONFLICT, "ownership_conflict".into()),
                 StoreError::InvitationUnavailable => (StatusCode::GONE, error.to_string()),
                 StoreError::BootstrapCredentialConsumed => {
                     (StatusCode::CONFLICT, error.to_string())
@@ -530,6 +578,7 @@ impl Failure {
                 StatusCode::FORBIDDEN,
                 "the bootstrap credential was not accepted".into(),
             ),
+            Self::CredentialScope => (StatusCode::FORBIDDEN, "credential_scope".into()),
             Self::ServiceCredentialInvalid => (
                 StatusCode::UNAUTHORIZED,
                 "the service credential was not accepted".into(),
@@ -1789,6 +1838,53 @@ async fn accept_invitation_by_token(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct OwnershipTransferBody {
+    to_user_id: String,
+    previous_owner_role: PreviousOwnerRole,
+    reason: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum PreviousOwnerRole { Admin, Member }
+
+// The error arm is a finished axum response; boxing it buys nothing here.
+#[allow(clippy::result_large_err)]
+async fn transfer_org_ownership(
+    State(state): State<AppState>, Path(org_id): Path<String>, headers: HeaderMap,
+    body: Result<Json<OwnershipTransferBody>, axum::extract::rejection::JsonRejection>,
+) -> Result<StatusCode, Response> {
+    let Json(body) = body.map_err(|_| (StatusCode::UNPROCESSABLE_ENTITY, Json(serde_json::json!({"error": "malformed body"}))).into_response())?;
+    let reason = body.reason.trim();
+    if !(1..=500).contains(&reason.chars().count()) || UserId::parse(&body.to_user_id).is_err() {
+        return Err((StatusCode::UNPROCESSABLE_ENTITY, Json(serde_json::json!({"error": "malformed body"}))).into_response());
+    }
+    let (claims, role) = authorize_org_management(&state, &org_id, &headers).await.map_err(IntoResponse::into_response)?;
+    if role != OrgRole::Owner { return Err(Failure::Auth(AuthError::Forbidden).into_response()); }
+    if body.to_user_id == claims.user_id.as_str() {
+        return Err((StatusCode::UNPROCESSABLE_ENTITY, Json(serde_json::json!({"error": "target must differ from caller"}))).into_response());
+    }
+    let previous_role = match body.previous_owner_role { PreviousOwnerRole::Admin => OrgRole::Admin, PreviousOwnerRole::Member => OrgRole::Member };
+    let actor = claims.user_id.to_string();
+    let context = authorization_context(&claims, &headers, reason.to_owned(), (state.now)());
+    let affected = state.store.transfer_org_ownership(&org_id, &body.to_user_id, previous_role, context).await
+        .map_err(|e| Failure::Store(e).into_response())?;
+    if previous_role == OrgRole::Member {
+        revoke_org_standing_tickets(&state, &org_id, &actor, affected);
+    }
+    for user in [&actor, &body.to_user_id] {
+        crate::feed::publish(&state, &org_id, crate::feed::FeedFrame::membership(user, None));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn revoke_org_standing_tickets(state: &AppState, org_id: &str, user_id: &str, affected: Vec<String>) {
+    state.canvas_hub.revoke_user_tickets(org_id, None, user_id);
+    for session_id in affected { state.chat_hub.revoke_user_tickets(&session_id, user_id); }
+}
+
 async fn patch_org_member(
     State(state): State<AppState>,
     Path((org_id, user_id)): Path<(String, String)>,
@@ -1800,12 +1896,15 @@ async fn patch_org_member(
     }
     let (claims, actor_role) = authorize_org_management(&state, &org_id, &headers).await?;
     let target = state.store.membership(&org_id, &user_id, None).await?;
-    authorize_org_role_mutation(actor_role, target.org_role, Some(body.role))?;
+    authorize_org_role_mutation(Some(actor_role), target.org_role, Some(body.role))?;
     let context = authorization_context(&claims, &headers, body.reason, (state.now)());
-    state
+    let affected = state
         .store
         .set_org_member(&org_id, &user_id, body.role, context)
         .await?;
+    if body.role == OrgRole::Member {
+        revoke_org_standing_tickets(&state, &org_id, &user_id, affected);
+    }
     crate::feed::publish(
         &state,
         &org_id,
@@ -1821,21 +1920,21 @@ async fn delete_org_member(
 ) -> Result<StatusCode, Failure> {
     let (claims, actor_role) = authorize_org_management(&state, &org_id, &headers).await?;
     let target = state.store.membership(&org_id, &user_id, None).await?;
-    authorize_org_role_mutation(actor_role, target.org_role, None)?;
-    let context = authorization_context(
+    authorize_org_role_mutation(Some(actor_role), target.org_role, None)?;
+    let mut context = authorization_context(
         &claims,
         &headers,
         header_reason(&headers, "organization member offboarded"),
         (state.now)(),
     );
+    // Compare the target role observed during authorization under the same
+    // lock as offboarding. A concurrent transfer must invalidate this request.
+    context.source["expectedTargetOrgRole"] = serde_json::json!(target.org_role);
     let affected = state
         .store
         .offboard_org_member(&org_id, &user_id, context)
         .await?;
-    state.canvas_hub.revoke_user_tickets(&org_id, None, &user_id);
-    for session_id in affected {
-        state.chat_hub.revoke_user_tickets(&session_id, &user_id);
-    }
+    revoke_org_standing_tickets(&state, &org_id, &user_id, affected);
     crate::feed::publish(
         &state,
         &org_id,
@@ -2646,23 +2745,6 @@ pub(crate) async fn authorize_org_management(
     Ok((claims, role))
 }
 
-fn authorize_org_role_mutation(
-    actor: OrgRole,
-    current: Option<OrgRole>,
-    requested: Option<OrgRole>,
-) -> Result<(), Failure> {
-    if actor == OrgRole::Owner {
-        return Ok(());
-    }
-    if actor == OrgRole::Admin
-        && current != Some(OrgRole::Owner)
-        && requested != Some(OrgRole::Owner)
-    {
-        return Ok(());
-    }
-    Err(Failure::Auth(AuthError::Forbidden))
-}
-
 async fn authorize_invitation_target(
     state: &AppState,
     claims: &GrantClaims,
@@ -2677,7 +2759,7 @@ async fn authorize_invitation_target(
             .await?
             .org_role
             .ok_or(Failure::Auth(AuthError::Forbidden))?;
-        return authorize_org_role_mutation(actor, None, Some(role));
+        return authorize_org_role_mutation(Some(actor), None, Some(role)).map_err(Failure::from);
     }
     let workspace_id = workspace_id
         .ok_or_else(|| Failure::BadRequest("workspace invitation needs workspaceId".into()))?;
@@ -2711,29 +2793,9 @@ async fn authorize_workspace_member_mutation(
     target_user_id: &str,
     requested: Option<WorkspaceRole>,
 ) -> Result<(), Failure> {
-    authorize_workspace(
-        state.store.as_ref(),
-        claims,
-        workspace_id,
-        WorkspaceCapability::Manage,
-    )
-    .await?;
-    let actor = state
-        .store
-        .membership(claims.org_id.as_str(), claims.user_id.as_str(), None)
-        .await?;
-    if matches!(actor.org_role, Some(OrgRole::Owner | OrgRole::Admin)) {
-        return Ok(());
-    }
-    let target = state
-        .store
-        .membership(claims.org_id.as_str(), target_user_id, Some(workspace_id))
-        .await?;
-    if target.workspace_role == Some(WorkspaceRole::Maintainer)
-        || requested == Some(WorkspaceRole::Maintainer)
-    {
-        return Err(Failure::Auth(AuthError::Forbidden));
-    }
+    let actor = state.store.membership(claims.org_id.as_str(), claims.user_id.as_str(), Some(workspace_id)).await?;
+    let target = state.store.membership(claims.org_id.as_str(), target_user_id, Some(workspace_id)).await?;
+    authorize_workspace_role_mutation(actor.org_role, actor.workspace_role, target.workspace_role, requested)?;
     Ok(())
 }
 
@@ -3565,13 +3627,15 @@ mod tests {
 
         // Once Bob loses the workspace his rows stop being shown, but the
         // cursor still moves past them.
+        store.add_user("usr_authorization_admin", "Organization manager");
+        store.add_org_member(ORG, "usr_authorization_admin", OrgRole::Owner);
         store
             .remove_workspace_member(
                 ORG,
                 "proj-1",
                 bob().as_str(),
                 AuthorizationContext {
-                    actor_user_id: ada().to_string(),
+                    actor_user_id: "usr_authorization_admin".into(),
                     reason: "test".into(),
                     request_id: "req_test".into(),
                     grant_id: None,
@@ -5204,6 +5268,195 @@ mod tests {
         assert!(!constant_time_eq("abc", "abd"));
         assert!(!constant_time_eq("abc", "abcd"));
         assert!(!constant_time_eq("", "a"));
+    }
+
+    #[tokio::test]
+    async fn capabilities_contract_shape_and_private_cache() {
+        let store = seeded();
+        store.add_workspace(ORG, "proj-1", "Project");
+        let response = app(store).oneshot(get(
+            &format!("/v1/orgs/{ORG}/capabilities?workspaceId=proj-1"), &token_for(&ada()),
+        )).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "private, no-store");
+        let body: serde_json::Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+        let contract: serde_json::Value = serde_json::from_str(include_str!("../../../protocol/collab-capabilities-v1.json")).unwrap();
+        let example = &contract["exampleResponse"];
+        for (actual, expected) in [(&body, example), (&body["standing"], &example["standing"]), (&body["features"][0], &example["features"][0])] {
+            assert_eq!(actual.as_object().unwrap().keys().collect::<Vec<_>>(), expected.as_object().unwrap().keys().collect::<Vec<_>>());
+        }
+        assert_eq!(body["schemaVersion"], 1);
+        assert_eq!(body["orgId"], ORG);
+        assert_eq!(body["workspaceId"], "proj-1");
+        assert_eq!(body["standing"], example["standing"]);
+        assert_eq!(body["actions"], example["actions"]);
+        assert_eq!(body["features"].as_array().unwrap().iter().map(|f| f["key"].clone()).collect::<Vec<_>>(), *contract["featureKeys"].as_array().unwrap());
+        assert_eq!(body["evaluatedAt"], 1000);
+        let round_trip: crate::capabilities_api::CapabilitiesResponse = serde_json::from_value(body.clone()).unwrap();
+        assert_eq!(serde_json::to_value(round_trip).unwrap(), body);
+    }
+
+    #[tokio::test]
+    async fn capabilities_hide_unknown_and_unreadable_workspaces_and_reject_unreadable_org() {
+        for workspace in ["unknown", "private"] {
+            let store = seeded();
+            store.add_workspace(ORG, "private", "Private");
+            let response = app(store).oneshot(get(&format!("/v1/orgs/{ORG}/capabilities?workspaceId={workspace}"), &token_for(&ada()))).await.unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            assert_eq!(response.headers()["cache-control"], "private, no-store");
+        }
+        let (status, _) = call(app(InMemoryStore::new()), get(&format!("/v1/orgs/{ORG}/capabilities"), &token_for(&ada()))).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let store = seeded();
+        store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+        let (status, _) = call(app(store), get(&format!("/v1/orgs/{ORG}/capabilities?workspaceId=unknown"), &token_for(&ada()))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "traversal does not manufacture a workspace");
+    }
+
+    #[tokio::test]
+    async fn capabilities_guest_and_org_admin_traversal() {
+        for org_role in [None, Some(OrgRole::Admin)] {
+            let store = InMemoryStore::new();
+            store.add_workspace(ORG, "proj-1", "Project");
+            store.add_workspace_member(ORG, "proj-1", ada().as_str(), WorkspaceRole::Viewer);
+            if let Some(role) = org_role { store.add_org_member(ORG, ada().as_str(), role); }
+            let (status, body) = call(app(store.clone()), get(&format!("/v1/orgs/{ORG}/capabilities?workspaceId=proj-1"), &token_for(&ada()))).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(body["standing"]["guest"], org_role.is_none());
+            assert_eq!(body["standing"]["orgRole"], serde_json::json!(org_role));
+            assert_eq!(body["standing"]["workspaceRole"], if org_role.is_some() { "maintainer" } else { "viewer" });
+            assert_eq!(body["standing"]["via"], if org_role.is_some() { "org-admin" } else { "membership" });
+            if org_role.is_none() { assert_eq!(body["actions"], serde_json::json!(["workspace.read"])); }
+            let (status, body) = call(app(store), get(&format!("/v1/orgs/{ORG}/capabilities"), &token_for(&ada()))).await;
+            assert_eq!(status, StatusCode::OK);
+            assert!(body["workspaceId"].is_null());
+            let access = resolve_workspace_access(org_role, None);
+            assert_eq!(body["standing"]["workspaceRole"], serde_json::json!(access.map(|a| a.role)));
+            assert_eq!(body["standing"]["via"], serde_json::json!(access.map(|a| a.via)));
+            assert_eq!(body["actions"], serde_json::json!(cognia_tenant_auth::actions::actions_for(org_role, None)));
+        }
+    }
+
+    #[tokio::test]
+    async fn capabilities_reflect_revision_protocol_and_recursive_prerequisites_without_policy_secrets() {
+        use crate::rollout::{tests::policy, FeatureKey, Phase};
+        let store = seeded();
+        let mut paused = policy();
+        paused.phase = Phase::Paused;
+        paused.feature_key = FeatureKey::SharedChatExecution;
+        store.apply_feature_policy(paused, 0, "pause", "pause execution", "operator").await.unwrap();
+        let mut client = policy();
+        client.minimum_contract_version = 3;
+        store.apply_feature_policy(client, 0, "client", "upgrade client", "operator").await.unwrap();
+        let mut dependent = policy();
+        dependent.feature_key = FeatureKey::OrgGovernance;
+        dependent.requires = vec![FeatureKey::SharedChatExecution];
+        store.apply_feature_policy(dependent, 0, "dependency", "require execution", "operator").await.unwrap();
+        let mut request = get(&format!("/v1/orgs/{ORG}/capabilities"), &token_for(&ada()));
+        request.headers_mut().insert("x-cognia-collab-protocol", "2".parse().unwrap());
+        let (status, body) = call(app(store.clone()), request).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["features"][0]["reason"], "client_contract_unsupported");
+        assert_eq!(body["features"][1], serde_json::json!({"key":"shared-chat-execution", "state":"existing-only", "reason":"feature_paused", "policyRevision":1}));
+        assert_eq!(body["features"][3]["reason"], "prerequisite_unavailable");
+        for feature in body["features"].as_array().unwrap() { assert_eq!(feature.as_object().unwrap().len(), 4); }
+        for header in [None, Some("not-a-version"), Some("3")] {
+            let mut request = get(&format!("/v1/orgs/{ORG}/capabilities"), &token_for(&ada()));
+            if let Some(header) = header { request.headers_mut().insert("x-cognia-collab-protocol", header.parse().unwrap()); }
+            let (_, body) = call(app(store.clone()), request).await;
+            assert_eq!(body["features"][0]["state"], "available");
+        }
+        let (_, health) = call(app(store), get("/health", "")).await;
+        assert!(health["features"].as_array().unwrap().contains(&serde_json::json!("org-capabilities")));
+    }
+
+    #[tokio::test]
+    async fn internal_access_is_additive_and_scopes_apply_to_both_org_paths_and_metrics() {
+        let store = seeded();
+        store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+        let make_app = |scopes| router(AppState::new(Arc::new(store.clone()), signer(), Arc::new(cognia_tenant_auth::oidc::TestAuthenticator))
+            .with_internal_service_credential(Some(format!("{},{}", sha256_hex(SERVICE_CREDENTIAL), sha256_hex("second"))))
+            .with_internal_service_credential_scopes(scopes));
+        let org_path = format!("/internal/v1/orgs/{ORG}/access/{}", ada());
+        let (_, org_body) = call(make_app(None), get(&org_path, &service_credential())).await;
+        assert_eq!(org_body["orgId"], ORG);
+        assert_eq!(org_body["userId"], ada().as_str());
+        assert_eq!(org_body["orgRole"], "owner");
+        assert_eq!(org_body["actions"], serde_json::json!(cognia_tenant_auth::actions::org_actions_for(Some(OrgRole::Owner))));
+        assert_eq!(org_body["features"].as_array().unwrap().len(), 5);
+        let (_, workspace_body) = call(make_app(None), get(&access_path(&ada()), &service_credential())).await;
+        assert_eq!(workspace_body["orgRole"], "owner");
+        assert_eq!(workspace_body["features"], org_body["features"]);
+        assert_eq!(workspace_body["actions"], serde_json::json!(cognia_tenant_auth::actions::actions_for(Some(OrgRole::Owner), Some(WorkspaceRole::Member))));
+        assert_eq!(workspace_body["access"]["via"], "org-admin");
+        for allowed in [vec![ORG.to_owned()], vec!["*".to_owned()], vec![], vec!["org_other".to_owned()]] {
+            let scopes = Some(std::collections::HashMap::from([(sha256_hex(SERVICE_CREDENTIAL), allowed.clone())]));
+            for path in [&org_path, &access_path(&ada()), &"/internal/shared-chat-metrics".to_owned()] {
+                let permitted = allowed.iter().any(|org| org == "*" || (org == ORG && path != "/internal/shared-chat-metrics"));
+                let (status, body) = call(make_app(scopes.clone()), get(path, &service_credential())).await;
+                assert_eq!(status, if permitted { StatusCode::OK } else { StatusCode::FORBIDDEN }, "{path}: {body}");
+                if !permitted { assert_eq!(body, serde_json::json!({"error":"credential_scope"})); }
+                let (status, body) = call(make_app(scopes.clone()), get(path, "Bearer second")).await;
+                assert_eq!(status, StatusCode::FORBIDDEN);
+                assert_eq!(body["error"], "credential_scope");
+            }
+        }
+        let (status, _) = call(make_app(None), get(&org_path, "Bearer second")).await;
+        assert_eq!(status, StatusCode::OK);
+        let guest = InMemoryStore::new();
+        guest.add_workspace_member(ORG, "proj-1", ada().as_str(), WorkspaceRole::Member);
+        let (status, _) = call(host_app(guest), get(&org_path, &service_credential())).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "workspace-only guests have no org standing");
+    }
+
+    #[tokio::test]
+    async fn ownership_transfer_route_validates_body_and_authority_and_audits_success() {
+        let path = format!("/v1/orgs/{ORG}/ownership-transfer");
+        let body = |role| serde_json::json!({"toUserId":bob(), "previousOwnerRole":role, "reason":"  handoff  "});
+        for invalid in [serde_json::json!({}), body("owner"),
+            serde_json::json!({"toUserId":bob(), "previousOwnerRole":"member", "reason":" "}),
+            serde_json::json!({"toUserId":bob(), "previousOwnerRole":"member", "reason":"x".repeat(501)}),
+            serde_json::json!({"toUserId":bob(), "previousOwnerRole":"member", "reason":"ok", "extra":true}),
+            serde_json::json!({"toUserId":ada(), "previousOwnerRole":"member", "reason":"ok"})] {
+            let store = seeded();
+            store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+            let (status, _) = call(app(store), json_post(&path, &token_for(&ada()), invalid)).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        let malformed = Request::builder().method("POST").uri(&path)
+            .header("authorization", token_for(&ada())).header("content-type", "application/json")
+            .body(Body::from("{invalid json")).unwrap();
+        assert_eq!(call(app(seeded()), malformed).await.0, StatusCode::UNPROCESSABLE_ENTITY);
+        for caller_role in [OrgRole::Member, OrgRole::Admin] {
+            let store = seeded();
+            store.add_org_member(ORG, ada().as_str(), caller_role);
+            let (status, _) = call(app(store), json_post(&path, &token_for(&ada()), body("member"))).await;
+            assert_eq!(status, StatusCode::FORBIDDEN);
+        }
+        let store = InMemoryStore::new();
+        store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+        store.add_workspace_member(ORG, "proj-1", bob().as_str(), WorkspaceRole::Member);
+        let (status, _) = call(app(store), json_post(&path, &token_for(&ada()), body("member"))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let store = seeded();
+        store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+        store.add_org_member(ORG, bob().as_str(), OrgRole::Owner);
+        let (status, error) = call(app(store), json_post(&path, &token_for(&ada()), body("member"))).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(error, serde_json::json!({"error":"ownership_conflict"}));
+        for previous in ["admin", "member"] {
+            let store = seeded();
+            store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+            let (status, _) = call(app(store.clone()), json_post(&path, &token_for(&ada()), body(previous))).await;
+            assert_eq!(status, StatusCode::NO_CONTENT);
+            assert_eq!(store.membership(ORG, bob().as_str(), None).await.unwrap().org_role, Some(OrgRole::Owner));
+            assert_eq!(store.membership(ORG, ada().as_str(), None).await.unwrap().org_role.unwrap().as_str(), previous);
+            let audit = store.tables.read().authorization_audit.last().unwrap().clone();
+            assert_eq!(audit.action, "org.ownership.transferred");
+            assert_eq!(audit.actor_user_id, ada().as_str());
+            assert_eq!(audit.target_user_id.as_deref(), Some(bob().as_str()));
+            assert_eq!(audit.reason, "handoff");
+        }
     }
 
     // ── /internal workspace access (ADR-0182 approvals) ──────────────────

@@ -3253,6 +3253,8 @@ mod tests {
             store.add_workspace_member(NOTICE_ORG, "workspace", user, WorkspaceRole::Member);
         }
         store.add_workspace_member(NOTICE_ORG, "workspace", ADA, WorkspaceRole::Maintainer);
+        store.add_user("usr_authorization_admin", "Organization manager");
+        store.add_org_member(NOTICE_ORG, "usr_authorization_admin", OrgRole::Owner);
         let signer = cognia_tenant_auth::grant::GrantSigner::new(&[9; 32]).unwrap();
         let mut state = AppState::new(
             Arc::new(store),
@@ -3567,7 +3569,7 @@ mod tests {
 
     fn revocation_context() -> crate::store::AuthorizationContext {
         crate::store::AuthorizationContext {
-            actor_user_id: ADA.into(), reason: "offboard".into(), request_id: "request".into(),
+            actor_user_id: "usr_authorization_admin".into(), reason: "offboard".into(), request_id: "request".into(),
             grant_id: None, source: serde_json::json!({}), now: 10,
         }
     }
