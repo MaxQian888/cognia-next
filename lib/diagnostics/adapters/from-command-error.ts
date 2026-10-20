@@ -17,6 +17,25 @@ import type { DiagnosticCode } from "@cognia/diagnostics"
 import type { ParsedCommandError } from "@/lib/tauri/command-error"
 
 /**
+ * Multi-tenant Host refusals: the problem codes from
+ * `crates/cognia-companion/src/host_surface_gate.rs`. The first three are
+ * intentional dormancy (Rule 7) and get their own labels, so they never read
+ * as a fault or as a permission the member could be granted.
+ */
+const HOST_REFUSAL_TO_DIAGNOSTIC: Readonly<Record<string, DiagnosticCode>> = {
+  host_data_unpartitioned: "hostDataUnavailable",
+  execution_isolation_unavailable: "executionUnavailable",
+  workspace_unresolved: "workspaceUnresolved",
+  host_surface_forbidden: "forbidden",
+  host_principal_unbound: "forbidden",
+  execution_request_forbidden: "forbidden",
+  credential_use_forbidden: "forbidden",
+  workspace_mount_forbidden: "forbidden",
+  placement_binding_client_supplied: "forbidden",
+  host_authority_unavailable: "serviceUnavailable",
+}
+
+/**
  * Deliberately partial: unmapped codes fall through to `unknown` rather than
  * forcing a guess for every future backend error.
  */
@@ -43,6 +62,17 @@ const COMMAND_CODE_TO_DIAGNOSTIC: Readonly<Record<string, DiagnosticCode>> = {
   task_not_found: "notFound",
   // "extension not loaded" — the VS Code host has no such extension running.
   not_loaded: "pluginToolMissing",
+
+  ...HOST_REFUSAL_TO_DIAGNOSTIC,
+}
+
+/**
+ * Host refusal codes travel on several carriers (a `CompanionError`, a raw
+ * problem document, a command envelope). This lets the dispatcher route any
+ * of them here instead of to a table that does not know them.
+ */
+export function isHostRefusalCode(code: string): boolean {
+  return Object.prototype.hasOwnProperty.call(HOST_REFUSAL_TO_DIAGNOSTIC, code)
 }
 
 export interface CommandErrorDiagnosis {

@@ -440,6 +440,18 @@
     "projectPaused": {
       "hint": "This project is paused, so its coordinator and threads don't run. Resume the project to continue.",
       "label": "Project paused"
+    },
+    "hostDataUnavailable": {
+      "label": "Not available on this shared Host",
+      "hint": "This Host is shared by an organization, and it doesn't keep chats, files and other personal data separate per member yet. Use your own device or the shared workspace for this until that ships."
+    },
+    "executionUnavailable": {
+      "label": "Running work is unavailable on this Host",
+      "hint": "This Host can't run this here: it is in control-plane-only mode, has no sandbox isolation, or the work would run inside the Host itself, which a shared Host never allows. Ask the Host's administrator if you expected it to work."
+    },
+    "workspaceUnresolved": {
+      "label": "No workspace for this request",
+      "hint": "A shared Host only runs work inside a workspace it can verify. Start it from a workspace you belong to; work that wasn't started that way can't be continued here."
     }
   },
   "detail": {
