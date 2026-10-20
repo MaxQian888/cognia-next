@@ -28,7 +28,7 @@ use crate::auth::{authorize_workspace, readable_scope, verify_grant, AuthError, 
 use crate::canvas_api::CanvasHub;
 use crate::canvas_store::{CanvasStore, InMemoryCanvasStore};
 use crate::chat_api::ChatHub;
-use crate::chat_store::{ChatStore, InMemoryChatStore};
+use crate::chat_store::ChatStore;
 use crate::logto_management::{LogtoManagement, LogtoManagementError, UnconfiguredLogtoManagement};
 use crate::model::{
     ActorError, ActorKind, ArtifactError, CollabActor, Issue, IssueEvent, IssuePriority,
@@ -121,12 +121,14 @@ impl Default for AccountControlConfig {
 
 impl AppState {
     pub fn new(store: Arc<dyn Store>, signer: GrantSigner, oidc: Arc<dyn Authenticator>) -> Self {
+        let chat_store = Arc::new(store.in_memory_chat_store().unwrap_or_default());
+        let session_files_store = Arc::new(store.in_memory_session_file_store().unwrap_or_default());
         Self {
             logto: Arc::new(UnconfiguredLogtoManagement),
             account_control: AccountControlConfig::default(),
             internal_service_credential_sha256: None,
             store,
-            chat_store: Arc::new(InMemoryChatStore::new()),
+            chat_store,
             chat_hub: Arc::new(ChatHub::default()),
             chat_attachments: Arc::new(
                 crate::chat_attachment_store::ObjectStoreChatAttachments::in_memory(),
@@ -140,7 +142,7 @@ impl AppState {
             feed_enabled: true,
             notification_store: Arc::new(crate::notifications::InMemoryNotificationStore::new()),
             file_sharing_store: Arc::new(crate::file_sharing::InMemoryFileSharingPolicyStore::new()),
-            session_files_store: Arc::new(crate::session_files::InMemorySessionFileStore::new()),
+            session_files_store,
             session_files_hub: Arc::new(crate::session_files::SessionFilesHub::default()),
             signer: Arc::new(signer),
             oidc,
@@ -341,8 +343,10 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 
 async fn shared_chat_metrics(
     State(state): State<AppState>,
-) -> Json<crate::chat_metrics::ChatMetricsSnapshot> {
-    Json(state.chat_metrics.snapshot())
+    headers: HeaderMap,
+) -> Result<Json<crate::chat_metrics::ChatMetricsSnapshot>, Failure> {
+    require_service_credential(&state, &headers)?;
+    Ok(Json(state.chat_metrics.snapshot()))
 }
 
 /// What one person may do in one workspace — the answer a tenant Host needs
@@ -1822,10 +1826,14 @@ async fn delete_org_member(
         header_reason(&headers, "organization member offboarded"),
         (state.now)(),
     );
-    state
+    let affected = state
         .store
         .offboard_org_member(&org_id, &user_id, context)
         .await?;
+    state.canvas_hub.revoke_user_tickets(&org_id, None, &user_id);
+    for session_id in affected {
+        state.chat_hub.revoke_user_tickets(&session_id, &user_id);
+    }
     crate::feed::publish(
         &state,
         &org_id,
@@ -1847,10 +1855,14 @@ async fn set_workspace_member(
     authorize_workspace_member_mutation(&state, &claims, &workspace_id, &user_id, Some(body.role))
         .await?;
     let context = authorization_context(&claims, &headers, body.reason, (state.now)());
-    state
+    let affected = state
         .store
         .set_workspace_member(&org_id, &workspace_id, &user_id, body.role, context)
         .await?;
+    state.canvas_hub.revoke_user_tickets(&org_id, Some(&workspace_id), &user_id);
+    for session_id in affected {
+        state.chat_hub.revoke_user_tickets(&session_id, &user_id);
+    }
     crate::feed::publish(
         &state,
         &org_id,
@@ -1872,10 +1884,14 @@ async fn delete_workspace_member(
         header_reason(&headers, "workspace membership revoked"),
         (state.now)(),
     );
-    state
+    let affected = state
         .store
         .remove_workspace_member(&org_id, &workspace_id, &user_id, context)
         .await?;
+    state.canvas_hub.revoke_user_tickets(&org_id, Some(&workspace_id), &user_id);
+    for session_id in affected {
+        state.chat_hub.revoke_user_tickets(&session_id, &user_id);
+    }
     crate::feed::publish(
         &state,
         &org_id,
@@ -5204,6 +5220,17 @@ mod tests {
 
     fn service_credential() -> String {
         format!("Bearer {SERVICE_CREDENTIAL}")
+    }
+
+    #[tokio::test]
+    async fn shared_chat_metrics_require_the_internal_service_credential() {
+        let app = host_app(seeded());
+        for credential in ["", "Bearer wrong"] {
+            let (status, _) = call(app.clone(), get("/internal/shared-chat-metrics", credential)).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED);
+        }
+        let (status, _) = call(app, get("/internal/shared-chat-metrics", &service_credential())).await;
+        assert_eq!(status, StatusCode::OK);
     }
 
     #[tokio::test]

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use cognia_collab_server::api::AccountControlConfig;
 use cognia_collab_server::chat_attachment_store::ObjectStoreChatAttachments;
 use cognia_collab_server::logto_management::{
@@ -15,23 +15,25 @@ use tracing_subscriber::EnvFilter;
 
 // No `Debug`: the arguments carry the M2M client secret and the grant key.
 #[derive(Parser)]
-#[command(name = "cognia-collab-server", about = "Cognia collaboration plane")]
+#[command(name = "cognia-collab-server", about = "Cognia collaboration plane", subcommand_negates_reqs = true)]
 struct Args {
+    #[command(subcommand)]
+    command: Option<Command>,
     #[arg(long, env = "COLLAB_BIND", default_value = "0.0.0.0:8080")]
     bind: String,
-    #[arg(long, env = "COLLAB_DATABASE_URL")]
-    database_url: String,
+    #[arg(long, env = "COLLAB_DATABASE_URL", global = true)]
+    database_url: Option<String>,
     #[arg(long, env = "COLLAB_DB_MAX_CONNECTIONS", default_value_t = 16)]
     db_max_connections: usize,
     /// Hex-encoded HMAC key for grant signing, at least 32 bytes.
     #[arg(long, env = "COLLAB_GRANT_KEY")]
-    grant_key: String,
+    grant_key: Option<String>,
     /// The Logto issuer whose access tokens may be exchanged for a grant.
     #[arg(long, env = "COLLAB_OIDC_ISSUER")]
-    oidc_issuer: String,
+    oidc_issuer: Option<String>,
     /// The audience this service is registered under (RFC 8707 `resource`).
     #[arg(long, env = "COLLAB_OIDC_AUDIENCE")]
-    oidc_audience: String,
+    oidc_audience: Option<String>,
     /// The claim carrying the Logto organization id.
     #[arg(
         long,
@@ -117,6 +119,17 @@ struct Args {
     allowed_origins: Option<String>,
 }
 
+#[derive(Subcommand)]
+enum Command {
+    /// Report stale non-guest session standing; optionally repair in batches.
+    AuditStanding {
+        #[arg(long)]
+        apply: bool,
+        #[arg(long, default_value_t = 100)]
+        batch_size: usize,
+    },
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -130,18 +143,27 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("a rustls crypto provider was already installed"))?;
 
     let args = Args::parse();
-    let key = decode_hex(&args.grant_key)
+    let database_url = args.database_url.as_deref().ok_or_else(|| anyhow::anyhow!("COLLAB_DATABASE_URL or --database-url is required"))?;
+    if let Some(Command::AuditStanding { apply, batch_size }) = args.command {
+        let store = PgStore::connect(database_url, args.db_max_connections).await?;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as i64;
+        let report = cognia_collab_server::standing_audit::audit_standing(&store, apply, batch_size, now).await?;
+        println!("{}", serde_json::to_string(&report)?);
+        return Ok(());
+    }
+    let grant_key = args.grant_key.as_deref().ok_or_else(|| anyhow::anyhow!("COLLAB_GRANT_KEY is required"))?;
+    let key = decode_hex(grant_key)
         .ok_or_else(|| anyhow::anyhow!("COLLAB_GRANT_KEY must be hex-encoded"))?;
     let signer = GrantSigner::new(&key)?;
 
     let oidc = OidcAuthenticator::new(OidcConfig {
-        issuer: args.oidc_issuer,
-        audience: args.oidc_audience,
+        issuer: args.oidc_issuer.ok_or_else(|| anyhow::anyhow!("COLLAB_OIDC_ISSUER is required"))?,
+        audience: args.oidc_audience.ok_or_else(|| anyhow::anyhow!("COLLAB_OIDC_AUDIENCE is required"))?,
         tenant_claim: args.oidc_tenant_claim,
         jwks_ttl: std::time::Duration::from_secs(args.jwks_ttl_seconds),
     })?;
 
-    let store = Arc::new(PgStore::connect(&args.database_url, args.db_max_connections).await?);
+    let store = Arc::new(PgStore::connect(database_url, args.db_max_connections).await?);
     let attachment_store = if let Some(root) = args.object_store_local_dir {
         ObjectStoreChatAttachments::local(root)?
     } else if args.s3_endpoint.is_some()
@@ -269,6 +291,15 @@ async fn shutdown() {
 #[cfg(test)]
 mod tests {
     use super::{credential_hash, decode_hex};
+
+    #[test]
+    fn audit_is_optional_and_does_not_require_server_credentials() {
+        use clap::Parser;
+        let args = super::Args::try_parse_from(["cognia-collab-server", "audit-standing", "--database-url", "postgresql://localhost/collab", "--apply", "--batch-size", "2"]).unwrap();
+        assert!(matches!(args.command, Some(super::Command::AuditStanding { apply: true, batch_size: 2 })));
+        let args = super::Args::try_parse_from(["cognia-collab-server", "--database-url", "postgresql://localhost/collab", "--grant-key", "00", "--oidc-issuer", "https://issuer", "--oidc-audience", "collab"]).unwrap();
+        assert!(args.command.is_none());
+    }
 
     #[test]
     fn a_credential_hash_must_be_a_sha256_digest() {

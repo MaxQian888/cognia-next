@@ -51,7 +51,7 @@ use tokio::sync::Notify;
 use uuid::Uuid;
 
 use crate::api::AppState;
-use crate::chat::{authorize_session_action, SessionAction, SessionRole, SessionStatus};
+use crate::chat::{authorize_session_action, SessionAction, SessionMembership, SessionRole, SessionStatus};
 use crate::chat_api::{token_hash, visible, ChatFailure, MAX_ATTACHMENT_BYTES};
 use crate::store::{AuthorizationAuditEvent, PgStore, StoreError};
 
@@ -613,17 +613,100 @@ fn completed(
 // ── In-memory ────────────────────────────────────────────────────────────────
 
 #[derive(Default)]
+pub(crate) struct MemoryFileTables {
+    hosts: HashMap<(String, String), FileHost>,
+    grants: HashMap<(String, String), FileGrant>,
+    requests: HashMap<String, FileRequest>,
+}
+
+#[derive(Default)]
 pub struct InMemorySessionFileStore {
-    hosts: RwLock<HashMap<(String, String), FileHost>>,
-    /// Keyed by `(org_id, grant id)`: a host picks the id, unique per org.
-    grants: RwLock<HashMap<(String, String), FileGrant>>,
-    requests: RwLock<HashMap<String, FileRequest>>,
+    tables: Arc<RwLock<crate::store::Tables>>,
 }
 
 impl InMemorySessionFileStore {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new() -> Self { Self::default() }
+
+    pub(crate) fn from_store(store: &crate::store::InMemoryStore) -> Self {
+        Self { tables: store.tables.clone() }
     }
+
+    fn hosts(&self) -> parking_lot::MappedRwLockReadGuard<'_, HashMap<(String, String), FileHost>> {
+        parking_lot::RwLockReadGuard::map(self.tables.read(), |t| &t.session_files.hosts)
+    }
+    fn hosts_mut(&self) -> parking_lot::MappedRwLockWriteGuard<'_, HashMap<(String, String), FileHost>> {
+        parking_lot::RwLockWriteGuard::map(self.tables.write(), |t| &mut t.session_files.hosts)
+    }
+    fn grants_read(&self) -> parking_lot::MappedRwLockReadGuard<'_, HashMap<(String, String), FileGrant>> {
+        parking_lot::RwLockReadGuard::map(self.tables.read(), |t| &t.session_files.grants)
+    }
+    fn grants_mut(&self) -> parking_lot::MappedRwLockWriteGuard<'_, HashMap<(String, String), FileGrant>> {
+        parking_lot::RwLockWriteGuard::map(self.tables.write(), |t| &mut t.session_files.grants)
+    }
+    fn requests(&self) -> parking_lot::MappedRwLockReadGuard<'_, HashMap<String, FileRequest>> {
+        parking_lot::RwLockReadGuard::map(self.tables.read(), |t| &t.session_files.requests)
+    }
+    fn requests_mut(&self) -> parking_lot::MappedRwLockWriteGuard<'_, HashMap<String, FileRequest>> {
+        parking_lot::RwLockWriteGuard::map(self.tables.write(), |t| &mut t.session_files.requests)
+    }
+}
+
+fn request_action(op: FileOp) -> SessionAction {
+    if op.changes() { SessionAction::FilesWriteLive } else { SessionAction::FilesReadLive }
+}
+
+fn permits(member: Option<&SessionMembership>, action: SessionAction) -> bool {
+    authorize_session_action(member, action, 0).allowed
+}
+
+fn fail_revoked(request: &mut FileRequest, now: i64) {
+    request.status = RequestStatus::Failed;
+    request.error = Some("revoked".into());
+    request.completed_at = Some(now);
+    request.expires_at = now + RESULT_TTL_MS;
+}
+
+/// Called while holding the shared standing/session write lock. Claimed work
+/// has already been dispatched; only requests still waiting are revoked here.
+pub(crate) fn memory_revoke_member_files(
+    tables: &mut crate::store::Tables, org_id: &str, session_id: &str,
+    user_id: &str, member: Option<&SessionMembership>, now: i64,
+) {
+    let files = &mut tables.session_files;
+    let host_removed = !permits(member, SessionAction::FilesShare)
+        && files.hosts.get(&key(org_id, session_id)).is_some_and(|h| h.registered_by == user_id);
+    if host_removed {
+        files.hosts.remove(&key(org_id, session_id));
+        for grant in files.grants.values_mut().filter(|g| g.org_id == org_id && g.session_id == session_id && g.revoked_at.is_none()) {
+            grant.status = "revoked".into();
+            grant.revoked_at = Some(now);
+            grant.updated_at = now;
+        }
+    }
+    for request in files.requests.values_mut().filter(|r| r.org_id == org_id && r.session_id == session_id
+        && matches!(r.status, RequestStatus::Pending | RequestStatus::AwaitingUpload)) {
+        if host_removed || (request.requester_user_id == user_id && !permits(member, request_action(request.op))) {
+            fail_revoked(request, now);
+        }
+    }
+}
+
+/// The caller holds the chat_sessions row lock, shared with all standing
+/// changes and claims. Keep object references until the ordinary result reaper.
+pub(crate) async fn pg_revoke_member_files(
+    tx: &tokio_postgres::Transaction<'_>, org_id: &str, session_id: &str,
+    user_id: &str, member: Option<&SessionMembership>, now: i64,
+) -> Result<(), StoreError> {
+    let host_removed = if !permits(member, SessionAction::FilesShare) {
+        tx.execute("DELETE FROM session_file_hosts WHERE org_id=$1 AND session_id=$2 AND registered_by=$3", &[&org_id, &session_id, &user_id]).await.map_err(db)? > 0
+    } else { false };
+    if host_removed {
+        tx.execute("UPDATE session_file_grants SET status='revoked',revoked_at=$3,updated_at=$3 WHERE org_id=$1 AND session_id=$2 AND revoked_at IS NULL", &[&org_id, &session_id, &now]).await.map_err(db)?;
+    }
+    let read = permits(member, SessionAction::FilesReadLive);
+    let write = permits(member, SessionAction::FilesWriteLive);
+    tx.execute("UPDATE host_file_requests SET status='failed',error='revoked',completed_at=$4,expires_at=$5 WHERE org_id=$1 AND session_id=$2 AND status IN ('pending','awaiting_upload') AND ($6 OR (requester_user_id=$3 AND CASE WHEN op IN ('write','mkdir','delete','rename') THEN NOT $8 ELSE NOT $7 END))", &[&org_id, &session_id, &user_id, &now, &(now + RESULT_TTL_MS), &host_removed, &read, &write]).await.map_err(db)?;
+    Ok(())
 }
 
 fn key(org_id: &str, session_id: &str) -> (String, String) {
@@ -633,18 +716,17 @@ fn key(org_id: &str, session_id: &str) -> (String, String) {
 #[async_trait]
 impl SessionFileStore for InMemorySessionFileStore {
     async fn put_host(&self, host: FileHost) -> Result<FileHost, StoreError> {
-        self.hosts
-            .write()
+        self.hosts_mut()
             .insert(key(&host.org_id, &host.session_id), host.clone());
         Ok(host)
     }
 
     async fn host(&self, org_id: &str, session_id: &str) -> Result<Option<FileHost>, StoreError> {
-        Ok(self.hosts.read().get(&key(org_id, session_id)).cloned())
+        Ok(self.hosts().get(&key(org_id, session_id)).cloned())
     }
 
     async fn touch_host(&self, org_id: &str, session_id: &str, now: i64) -> Result<(), StoreError> {
-        if let Some(host) = self.hosts.write().get_mut(&key(org_id, session_id)) {
+        if let Some(host) = self.hosts_mut().get_mut(&key(org_id, session_id)) {
             host.last_seen_at = Some(now);
         }
         Ok(())
@@ -656,8 +738,8 @@ impl SessionFileStore for InMemorySessionFileStore {
         session_id: &str,
         now: i64,
     ) -> Result<Vec<String>, StoreError> {
-        self.hosts.write().remove(&key(org_id, session_id));
-        for grant in self.grants.write().values_mut() {
+        self.hosts_mut().remove(&key(org_id, session_id));
+        for grant in self.grants_mut().values_mut() {
             if grant.org_id == org_id
                 && grant.session_id == session_id
                 && grant.revoked_at.is_none()
@@ -668,7 +750,7 @@ impl SessionFileStore for InMemorySessionFileStore {
             }
         }
         let mut keys = Vec::new();
-        for request in self.requests.write().values_mut() {
+        for request in self.requests_mut().values_mut() {
             if request.org_id == org_id
                 && request.session_id == session_id
                 && request.status.is_open()
@@ -682,7 +764,7 @@ impl SessionFileStore for InMemorySessionFileStore {
     }
 
     async fn put_grant(&self, grant: FileGrant) -> Result<FileGrant, StoreError> {
-        let mut grants = self.grants.write();
+        let mut grants = self.grants_mut();
         let id = key(&grant.org_id, &grant.id);
         if let Some(existing) = grants.get(&id) {
             if existing.session_id != grant.session_id {
@@ -707,7 +789,7 @@ impl SessionFileStore for InMemorySessionFileStore {
         grant_id: &str,
         now: i64,
     ) -> Result<bool, StoreError> {
-        let mut grants = self.grants.write();
+        let mut grants = self.grants_mut();
         match grants.get_mut(&key(org_id, grant_id)) {
             Some(grant) if grant.session_id == session_id => {
                 if grant.revoked_at.is_some() {
@@ -723,9 +805,7 @@ impl SessionFileStore for InMemorySessionFileStore {
     }
 
     async fn grants(&self, org_id: &str, session_id: &str) -> Result<Vec<FileGrant>, StoreError> {
-        let mut grants: Vec<FileGrant> = self
-            .grants
-            .read()
+        let mut grants: Vec<FileGrant> = self.grants_read()
             .values()
             .filter(|grant| grant.org_id == org_id && grant.session_id == session_id)
             .cloned()
@@ -744,17 +824,14 @@ impl SessionFileStore for InMemorySessionFileStore {
         session_id: &str,
         grant_id: &str,
     ) -> Result<Option<FileGrant>, StoreError> {
-        Ok(self
-            .grants
-            .read()
+        Ok(self.grants_read()
             .get(&key(org_id, grant_id))
             .filter(|grant| grant.session_id == session_id)
             .cloned())
     }
 
     async fn create_request(&self, request: FileRequest) -> Result<FileRequest, StoreError> {
-        self.requests
-            .write()
+        self.requests_mut()
             .insert(request.id.clone(), request.clone());
         Ok(request)
     }
@@ -765,9 +842,7 @@ impl SessionFileStore for InMemorySessionFileStore {
         session_id: &str,
         request_id: &str,
     ) -> Result<Option<FileRequest>, StoreError> {
-        Ok(self
-            .requests
-            .read()
+        Ok(self.requests()
             .get(request_id)
             .filter(|request| request.org_id == org_id && request.session_id == session_id)
             .cloned())
@@ -779,9 +854,7 @@ impl SessionFileStore for InMemorySessionFileStore {
         session_id: &str,
         now: i64,
     ) -> Result<Vec<FileRequest>, StoreError> {
-        Ok(self
-            .requests
-            .read()
+        Ok(self.requests()
             .values()
             .filter(|request| {
                 request.org_id == org_id
@@ -799,7 +872,7 @@ impl SessionFileStore for InMemorySessionFileStore {
         request_id: &str,
         now: i64,
     ) -> Result<FileRequest, StoreError> {
-        let mut requests = self.requests.write();
+        let mut requests = self.requests_mut();
         let request = requests
             .get_mut(request_id)
             .filter(|request| request.org_id == org_id && request.session_id == session_id)
@@ -821,32 +894,30 @@ impl SessionFileStore for InMemorySessionFileStore {
         host_token_hash: &str,
         now: i64,
     ) -> Result<Option<FileRequest>, StoreError> {
-        let hosts = self.hosts.read();
-        let registered = hosts
-            .get(&key(org_id, session_id))
-            .is_some_and(|host| host.host_token_hash == host_token_hash);
-        if !registered {
+        let mut tables = self.tables.write();
+        let Some(host) = tables.session_files.hosts.get(&key(org_id, session_id))
+            .filter(|h| h.host_token_hash == host_token_hash).cloned() else { return Ok(None) };
+        let registrant = crate::chat_store::memory_member(&tables, org_id, session_id, &host.registered_by);
+        if !permits(registrant.as_ref(), SessionAction::FilesShare) {
+            memory_revoke_member_files(&mut tables, org_id, session_id, &host.registered_by, registrant.as_ref(), now);
             return Ok(None);
         }
-        let mut requests = self.requests.write();
-        let next = requests
-            .values_mut()
-            .filter(|request| {
-                request.org_id == org_id
-                    && request.session_id == session_id
-                    && request.status_at(now) == RequestStatus::Pending
-            })
-            .min_by(|a, b| {
-                a.created_at
-                    .cmp(&b.created_at)
-                    .then_with(|| a.id.cmp(&b.id))
-            });
-        Ok(next.map(|request| {
+        loop {
+            let next = tables.session_files.requests.values().filter(|r| r.org_id == org_id && r.session_id == session_id
+                && r.status_at(now) == RequestStatus::Pending).min_by(|a,b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id))).cloned();
+            let Some(next) = next else { return Ok(None) };
+            let member = crate::chat_store::memory_member(&tables, org_id, session_id, &next.requester_user_id);
+            let request = tables.session_files.requests.get_mut(&next.id).expect("request under write lock");
+            if !permits(member.as_ref(), request_action(request.op)) {
+                fail_revoked(request, now);
+                continue;
+            }
+            request.requester_role = member.expect("authorized member").role;
             request.status = RequestStatus::Claimed;
             request.claimed_at = Some(now);
             request.expires_at = now + REQUEST_WAIT_MS;
-            request.clone()
-        }))
+            return Ok(Some(request.clone()));
+        }
     }
 
     async fn complete_request(
@@ -857,7 +928,7 @@ impl SessionFileStore for InMemorySessionFileStore {
         outcome: RequestOutcome,
         now: i64,
     ) -> Result<FileRequest, StoreError> {
-        let mut requests = self.requests.write();
+        let mut requests = self.requests_mut();
         let request = requests
             .get_mut(request_id)
             .filter(|request| request.org_id == org_id && request.session_id == session_id)
@@ -874,7 +945,7 @@ impl SessionFileStore for InMemorySessionFileStore {
         now: i64,
     ) -> Result<Vec<String>, StoreError> {
         let mut keys = Vec::new();
-        for request in self.requests.write().values_mut() {
+        for request in self.requests_mut().values_mut() {
             if request.org_id != org_id
                 || request.session_id != session_id
                 || request.expires_at > now
@@ -896,9 +967,7 @@ impl SessionFileStore for InMemorySessionFileStore {
         org_id: &str,
         session_id: &str,
     ) -> Result<Vec<String>, StoreError> {
-        Ok(self
-            .requests
-            .read()
+        Ok(self.requests()
             .values()
             .filter(|request| request.org_id == org_id && request.session_id == session_id)
             .flat_map(FileRequest::object_keys)
@@ -1389,27 +1458,37 @@ impl SessionFileStore for PgStore {
     ) -> Result<Option<FileRequest>, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
-        // SKIP LOCKED: two replicas answering one host's polls never hand out
-        // the same request twice.
-        let row = tx
-            .query_opt(
-                &format!(
-                    "UPDATE host_file_requests SET status = 'claimed', claimed_at = $3, expires_at = $4 \
-                     WHERE id = (SELECT id FROM host_file_requests \
-                                 WHERE org_id = $1 AND session_id = $2 AND status = 'pending' \
-                                   AND expires_at > $3 \
-                                   AND EXISTS (SELECT 1 FROM session_file_hosts h \
-                                               WHERE h.org_id = $1 AND h.session_id = $2 \
-                                                 AND h.host_token_hash = $5) \
-                                 ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED) \
-                     RETURNING {REQUEST_COLUMNS}"
-                ),
-                &[&org_id, &session_id, &now, &(now + REQUEST_WAIT_MS), &host_token_hash],
-            )
-            .await
-            .map_err(db)?;
-        tx.commit().await.map_err(db)?;
-        row.as_ref().map(request_from_row).transpose()
+        // Serialize every poll attempt with standing cleanup, not just the
+        // initial HTTP authentication before a long poll starts waiting.
+        if tx.query_opt("SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE", &[&org_id, &session_id]).await.map_err(db)?.is_none() {
+            return Ok(None);
+        }
+        let host = tx.query_opt(&format!("SELECT {HOST_COLUMNS} FROM session_file_hosts WHERE org_id=$1 AND session_id=$2 AND host_token_hash=$3"), &[&org_id, &session_id, &host_token_hash]).await.map_err(db)?;
+        let Some(host) = host else { return Ok(None) };
+        let host = host_from_row(&host);
+        let registrant = crate::chat_store::pg_member(&tx, org_id, session_id, &host.registered_by).await?;
+        if !permits(registrant.as_ref(), SessionAction::FilesShare) {
+            pg_revoke_member_files(&tx, org_id, session_id, &host.registered_by, registrant.as_ref(), now).await?;
+            tx.commit().await.map_err(db)?;
+            return Ok(None);
+        }
+        loop {
+            let row = tx.query_opt(&format!("SELECT {REQUEST_COLUMNS} FROM host_file_requests WHERE org_id=$1 AND session_id=$2 AND status='pending' AND expires_at>$3 ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED"), &[&org_id, &session_id, &now]).await.map_err(db)?;
+            let Some(row) = row else {
+                tx.commit().await.map_err(db)?;
+                return Ok(None);
+            };
+            let request = request_from_row(&row)?;
+            let member = crate::chat_store::pg_member(&tx, org_id, session_id, &request.requester_user_id).await?;
+            if !permits(member.as_ref(), request_action(request.op)) {
+                tx.execute("UPDATE host_file_requests SET status='failed',error='revoked',completed_at=$4,expires_at=$5 WHERE org_id=$1 AND session_id=$2 AND id=$3", &[&org_id, &session_id, &request.id, &now, &(now + RESULT_TTL_MS)]).await.map_err(db)?;
+                continue;
+            }
+            let role = member.expect("authorized member").role.as_str();
+            let row = tx.query_one(&format!("UPDATE host_file_requests SET status='claimed',claimed_at=$4,expires_at=$5,requester_role=$6 WHERE org_id=$1 AND session_id=$2 AND id=$3 RETURNING {REQUEST_COLUMNS}"), &[&org_id, &session_id, &request.id, &now, &(now + REQUEST_WAIT_MS), &role]).await.map_err(db)?;
+            tx.commit().await.map_err(db)?;
+            return request_from_row(&row).map(Some);
+        }
     }
 
     async fn complete_request(
@@ -2690,9 +2769,13 @@ mod tests {
     impl Fixture {
         async fn new() -> Self {
             let store = crate::store::InMemoryStore::new();
+            store.add_workspace(ORG, "workspace", "Files");
             for user in [OWNER, MEMBER, VIEWER, GUEST] {
                 store.add_user(user, user);
                 store.add_org_member(ORG, user, OrgRole::Member);
+            }
+            for (user, role) in [(OWNER, cognia_tenant_auth::WorkspaceRole::Maintainer), (MEMBER, cognia_tenant_auth::WorkspaceRole::Maintainer), (VIEWER, cognia_tenant_auth::WorkspaceRole::Viewer)] {
+                store.add_workspace_member(ORG, "workspace", user, role);
             }
             let signer = GrantSigner::new(&[9; 32]).unwrap();
             let mut state = AppState::new(
@@ -2724,7 +2807,7 @@ mod tests {
             ] {
                 state
                     .chat_store
-                    .put_member(ORG, SESSION, "workspace", user, role, false, guest, 2)
+                    .put_member(ORG, SESSION, "workspace", user, role, false, guest, OWNER, 2)
                     .await
                     .unwrap();
             }
@@ -3082,6 +3165,7 @@ mod tests {
                 SessionRole::Maintainer,
                 false,
                 false,
+                OWNER,
                 3,
             )
             .await
@@ -3106,12 +3190,13 @@ mod tests {
                 SessionRole::Member,
                 false,
                 false,
+                OWNER,
                 4,
             )
             .await
             .unwrap();
         let (status, _) = f.claim(&token).await;
-        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "cleanup already deleted the revoked registration");
         assert!(f
             .state
             .session_files_store
@@ -3633,6 +3718,142 @@ mod tests {
         assert_eq!(body["reason"], "no_file_host");
         let (status, _) = f.claim(&token).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    fn revocation_context() -> crate::store::AuthorizationContext {
+        crate::store::AuthorizationContext {
+            actor_user_id: OWNER.into(), reason: "file standing revoked".into(), request_id: "file-revocation".into(),
+            grant_id: None, source: serde_json::json!({}), now: 1_001,
+        }
+    }
+
+    fn pending_file_request(id: &str, user: &str, op: FileOp, status: RequestStatus) -> FileRequest {
+        FileRequest {
+            id: id.into(), org_id: ORG.into(), workspace_id: "workspace".into(), session_id: SESSION.into(), grant_id: "fg_1".into(),
+            requester_user_id: user.into(), requester_role: SessionRole::Member, op, path: "/workspace/src".into(), dest_path: None,
+            upload: None, status, result: None, result_object: None, error: None, created_at: 1_000, claimed_at: None, completed_at: None,
+            expires_at: 1_000 + REQUEST_WAIT_MS,
+        }
+    }
+
+    #[tokio::test]
+    async fn removed_requester_file_work_is_failed_before_the_host_can_claim_it() {
+        let f = Fixture::new().await;
+        let token = f.hosted(&["read", "download"]).await;
+        f.state.session_files_store.create_request(pending_file_request("queued", MEMBER, FileOp::Read, RequestStatus::Pending)).await.unwrap();
+        f.state.store.offboard_org_member(ORG, MEMBER, revocation_context()).await.unwrap();
+        let request = f.state.session_files_store.request(ORG, SESSION, "queued").await.unwrap().unwrap();
+        assert_eq!(request.status, RequestStatus::Failed);
+        assert_eq!(request.error.as_deref(), Some("revoked"));
+        assert!(f.state.session_files_store.claim_next(ORG, SESSION, &token_hash(&token), 1_001).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_claim_attempt_rechecks_the_host_registrant_after_initial_authentication() {
+        let f = Fixture::new().await;
+        let token = f.hosted(&["read", "download"]).await;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-cognia-collab-protocol", PROTOCOL.parse().unwrap());
+        headers.insert(HOST_TOKEN_HEADER, token.parse().unwrap());
+        let host = authenticate_host(&f.state, &headers, ORG, SESSION).await.unwrap();
+        assert!(f.state.session_files_store.claim_next(ORG, SESSION, &host.host_token_hash, 1_000).await.unwrap().is_none());
+        f.state.store.offboard_org_member(ORG, OWNER, revocation_context()).await.unwrap();
+        f.state.session_files_store.create_request(pending_file_request("late", MEMBER, FileOp::Read, RequestStatus::Pending)).await.unwrap();
+        assert!(f.state.session_files_store.claim_next(ORG, SESSION, &host.host_token_hash, 1_001).await.unwrap().is_none());
+        assert!(f.state.session_files_store.host(ORG, SESSION).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn viewer_demotion_revokes_only_write_requests_including_uploads() {
+        let f = Fixture::new().await;
+        let token = f.hosted(&["read", "download"]).await;
+        for (id, op, status) in [
+            ("write", FileOp::Write, RequestStatus::Pending),
+            ("upload", FileOp::Write, RequestStatus::AwaitingUpload),
+            ("read", FileOp::Read, RequestStatus::Pending),
+            ("claimed", FileOp::Write, RequestStatus::Claimed),
+        ] {
+            f.state.session_files_store.create_request(pending_file_request(id, MEMBER, op, status)).await.unwrap();
+        }
+        f.state.store.set_workspace_member(ORG, "workspace", MEMBER, cognia_tenant_auth::WorkspaceRole::Viewer, revocation_context()).await.unwrap();
+        for id in ["write", "upload"] {
+            let r = f.state.session_files_store.request(ORG, SESSION, id).await.unwrap().unwrap();
+            assert_eq!(r.status, RequestStatus::Failed);
+            assert_eq!(r.error.as_deref(), Some("revoked"));
+        }
+        assert_eq!(f.state.session_files_store.request(ORG, SESSION, "claimed").await.unwrap().unwrap().status, RequestStatus::Claimed);
+        let r = f.state.session_files_store.claim_next(ORG, SESSION, &token_hash(&token), 1_001).await.unwrap().unwrap();
+        assert_eq!(r.id, "read");
+        assert_eq!(r.requester_role, SessionRole::Viewer);
+        assert!(f.state.session_files_store.host(ORG, SESSION).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn claim_fences_legacy_requesters_and_skips_revoked_work() {
+        let f = Fixture::new().await;
+        let token = f.hosted(&["read", "download"]).await;
+        // A legacy row bypassing write-time cleanup must still be checked.
+        for (id, user, op) in [("a", MEMBER, FileOp::Read), ("b", VIEWER, FileOp::Write), ("c", GUEST, FileOp::Read)] {
+            f.state.session_files_store.create_request(pending_file_request(id, user, op, RequestStatus::Pending)).await.unwrap();
+        }
+        let chat = f.state.store.in_memory_chat_store().unwrap();
+        chat.tables.write().workspace_memberships.remove(&(ORG.into(), "workspace".into(), MEMBER.into()));
+        let request = f.state.session_files_store.claim_next(ORG, SESSION, &token_hash(&token), 1_001).await.unwrap().unwrap();
+        assert_eq!(request.id, "c", "a session-only Guest still reads");
+        for id in ["a", "b"] {
+            let r = f.state.session_files_store.request(ORG, SESSION, id).await.unwrap().unwrap();
+            assert_eq!(r.status, RequestStatus::Failed);
+            assert_eq!(r.error.as_deref(), Some("revoked"));
+        }
+    }
+
+    #[tokio::test]
+    async fn losing_files_share_removes_host_and_fails_every_unclaimed_request() {
+        for legacy in [false, true] {
+            let f = Fixture::new().await;
+            let token = f.hosted(&["read", "download"]).await;
+            for (id, status) in [("pending", RequestStatus::Pending), ("upload", RequestStatus::AwaitingUpload), ("claimed", RequestStatus::Claimed)] {
+                f.state.session_files_store.create_request(pending_file_request(id, MEMBER, FileOp::Read, status)).await.unwrap();
+            }
+            if legacy {
+                f.state.store.in_memory_chat_store().unwrap().tables.write().workspace_memberships.remove(&(ORG.into(), "workspace".into(), OWNER.into()));
+                assert!(f.state.session_files_store.claim_next(ORG, SESSION, &token_hash(&token), 1_001).await.unwrap().is_none());
+            } else {
+                f.state.store.set_workspace_member(ORG, "workspace", OWNER, cognia_tenant_auth::WorkspaceRole::Viewer, revocation_context()).await.unwrap();
+            }
+            assert!(f.state.session_files_store.host(ORG, SESSION).await.unwrap().is_none());
+            assert_eq!(f.state.session_files_store.grant(ORG, SESSION, "fg_1").await.unwrap().unwrap().status, "revoked");
+            for id in ["pending", "upload"] {
+                let r = f.state.session_files_store.request(ORG, SESSION, id).await.unwrap().unwrap();
+                assert_eq!(r.status, RequestStatus::Failed);
+                assert_eq!(r.error.as_deref(), Some("revoked"));
+            }
+            assert_eq!(f.state.session_files_store.request(ORG, SESSION, "claimed").await.unwrap().unwrap().status, RequestStatus::Claimed);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_long_poll_authenticated_before_offboarding_cannot_claim_after_waking() {
+        let f = Arc::new(Fixture::new().await);
+        let token = f.hosted(&["read", "download"]).await;
+        f.advance(1);
+        let waiter = {
+            let f = f.clone();
+            tokio::spawn(async move { f.json("POST", "/file-host/claim?waitMs=5000", Auth::Host(&token), None).await })
+        };
+        // authenticate_host touches last_seen_at after checking FilesShare.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if f.state.session_files_store.host(ORG, SESSION).await.unwrap().unwrap().last_seen_at == Some(1_001) { break; }
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
+        f.state.store.offboard_org_member(ORG, OWNER, revocation_context()).await.unwrap();
+        f.state.session_files_store.create_request(pending_file_request("late", MEMBER, FileOp::Read, RequestStatus::Pending)).await.unwrap();
+        f.state.session_files_hub.wake(SESSION);
+        let (status, _) = tokio::time::timeout(Duration::from_secs(2), waiter).await.unwrap().unwrap();
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(f.state.session_files_store.request(ORG, SESSION, "late").await.unwrap().unwrap().status, RequestStatus::Pending);
     }
 
     #[tokio::test]

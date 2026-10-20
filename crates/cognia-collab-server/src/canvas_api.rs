@@ -142,6 +142,11 @@ impl CanvasHub {
             .map_err(|_| CanvasFailure::TicketCapacity)
     }
 
+    pub(crate) fn revoke_user_tickets(&self, org_id: &str, workspace_id: Option<&str>, user_id: &str) {
+        self.tickets.revoke(|ticket| ticket.org_id == org_id && ticket.user_id == user_id
+            && workspace_id.is_none_or(|workspace| ticket.workspace_id == workspace));
+    }
+
     /// Redeem a ticket. Removed on the way out whether or not it was still
     /// valid, so a leaked ticket cannot be replayed even by the person it was
     /// minted for.
@@ -904,13 +909,7 @@ async fn open_stream(
         .iter()
         .find(|value| value.starts_with("ct_"))
         .ok_or(CanvasFailure::Unauthorized)?;
-    let ticket = state
-        .canvas_hub
-        .consume_ticket(ticket_value, (state.now)())
-        .ok_or(CanvasFailure::Gone)?;
-    if ticket.org_id != org_id || ticket.document_id != document_id {
-        return Err(CanvasFailure::Hidden);
-    }
+    let ticket = redeem_stream_ticket(&state, &org_id, &document_id, ticket_value).await?;
     let receiver = state.canvas_hub.sender(&document_id).subscribe();
     Ok(ws
         .protocols([CANVAS_SUBPROTOCOL])
@@ -918,7 +917,19 @@ async fn open_stream(
         .into_response())
 }
 
+async fn redeem_stream_ticket(
+    state: &AppState, org_id: &str, document_id: &str, value: &str,
+) -> Result<SocketTicket, CanvasFailure> {
+    let ticket = state.canvas_hub.consume_ticket(value, (state.now)()).ok_or(CanvasFailure::Gone)?;
+    if ticket.org_id != org_id || ticket.document_id != document_id
+        || !workspace_access(state, org_id, &ticket.workspace_id, &ticket.user_id, cognia_tenant_auth::WorkspaceCapability::Read).await {
+        return Err(CanvasFailure::Hidden);
+    }
+    Ok(ticket)
+}
+
 /// Everything one connection knows about itself.
+#[derive(Clone)]
 struct Connection {
     org_id: String,
     document_id: String,
@@ -950,9 +961,18 @@ async fn stream_loop(
     // frame into it. It merges two sources: what this connection is answering
     // directly, and what the document is broadcasting to everyone.
     let mine = connection.participant_id.clone();
+    let writer_connection = connection.clone();
+    let writer_state = state.clone();
     let mut writer = tokio::spawn(async move {
+        let period = std::time::Duration::from_secs(5);
+        let mut standing_tick = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+        standing_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let frame = tokio::select! {
+                _ = standing_tick.tick() => {
+                    if !may_read(&writer_state, &writer_connection).await { break; }
+                    continue;
+                }
                 direct = outbound_rx.recv() => match direct {
                     Some(frame) => frame,
                     None => break,
@@ -975,6 +995,9 @@ async fn stream_loop(
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
             };
+            // A queued direct answer and a broadcast both need current access
+            // at delivery, independently of when the ticket was minted.
+            if !may_read(&writer_state, &writer_connection).await { break; }
             let Ok(text) = serde_json::to_string(&frame) else {
                 continue;
             };
@@ -1062,6 +1085,7 @@ async fn handle_frame(
     outbound: &tokio::sync::mpsc::Sender<CanvasFrame>,
     frame: CanvasFrame,
 ) -> bool {
+    if !may_read(state, connection).await { return false; }
     match frame.kind.as_str() {
         "presence" => handle_presence(state, connection, outbound, frame).await,
         "operation" => handle_operation(state, connection, frame).await,
@@ -1232,6 +1256,7 @@ async fn handle_sync(
     outbound: &tokio::sync::mpsc::Sender<CanvasFrame>,
     frame: CanvasFrame,
 ) -> bool {
+    if !may_read(state, connection).await { return false; }
     if frame.data.get("action").and_then(|value| value.as_str()) != Some("request") {
         return true;
     }
@@ -1272,6 +1297,7 @@ async fn send_catch_up(
 ) -> bool {
     let mut cursor = since;
     for _ in 0..max_pages {
+        if !may_read(state, connection).await { return false; }
         let Ok(caught_up) = state
             .canvas_store
             .catch_up(
@@ -1304,6 +1330,7 @@ async fn send_catch_up(
             .unwrap_or(cursor)
             .max(cursor);
         for (payload, sequence, snapshot) in payloads {
+            if !may_read(state, connection).await { return false; }
             let sent = outbound
                 .send(CanvasFrame {
                     kind: "sync".into(),
@@ -1336,27 +1363,26 @@ async fn send_catch_up(
     true
 }
 
+async fn may_read(state: &AppState, connection: &Connection) -> bool {
+    workspace_access(state, &connection.org_id, &connection.workspace_id, &connection.user_id,
+        cognia_tenant_auth::WorkspaceCapability::Read).await
+}
+
 /// Whether this connection may still write to this document.
 async fn may_edit(state: &AppState, connection: &Connection) -> bool {
-    // The workspace came from the ticket, so this is one lookup rather than
-    // two. A document cannot change workspace, and there is no route that
-    // would let it, so the cached value cannot go stale.
-    let Ok(membership) = state
-        .store
-        .membership(
-            &connection.org_id,
-            &connection.user_id,
-            Some(&connection.workspace_id),
-        )
-        .await
-    else {
-        return false;
-    };
-    cognia_tenant_auth::membership::resolve_workspace_access(
-        membership.org_role,
-        membership.workspace_role,
-    )
-    .is_some_and(|access| access.allows(CanvasAction::Edit.required_capability()))
+    workspace_access(state, &connection.org_id, &connection.workspace_id, &connection.user_id,
+        CanvasAction::Edit.required_capability()).await
+}
+
+async fn workspace_access(
+    state: &AppState, org_id: &str, workspace_id: &str, user_id: &str,
+    required: cognia_tenant_auth::WorkspaceCapability,
+) -> bool {
+    // The immutable workspace binding comes from the server-issued ticket;
+    // current org/workspace rows, including admin traversal, remain authoritative.
+    let Ok(membership) = state.store.membership(org_id, user_id, Some(workspace_id)).await else { return false };
+    cognia_tenant_auth::membership::resolve_workspace_access(membership.org_role, membership.workspace_role)
+        .is_some_and(|access| access.allows(required))
 }
 
 #[cfg(test)]
@@ -1856,6 +1882,101 @@ mod tests {
             .await;
             assert_eq!(status, StatusCode::CREATED);
         }
+    }
+
+    fn removal_context() -> crate::store::AuthorizationContext {
+        crate::store::AuthorizationContext {
+            actor_user_id: ada().to_string(), reason: "remove".into(), request_id: "canvas-remove".into(),
+            grant_id: None, source: serde_json::json!({}), now: 1_000,
+        }
+    }
+
+    #[tokio::test]
+    async fn canvas_ticket_redemption_rechecks_read_access_and_keeps_admin_traversal() {
+        use crate::store::Store;
+        for admin in [false, true] {
+            let (store, canvas) = with_document().await;
+            if admin { store.add_org_member(ORG, viv().as_str(), OrgRole::Admin); }
+            let state = test_state(store.clone(), canvas);
+            let value = state.canvas_hub.issue_ticket(SocketTicket {
+                org_id: ORG.into(), document_id: DOCUMENT.into(), workspace_id: "proj-1".into(),
+                user_id: viv().to_string(), expires_at: 31_000,
+            }, 1_000).unwrap();
+            store.remove_workspace_member(ORG, "proj-1", viv().as_str(), removal_context()).await.unwrap();
+            let result = redeem_stream_ticket(&state, ORG, DOCUMENT, &value).await;
+            if admin { assert!(result.is_ok()); } else { assert!(matches!(result, Err(CanvasFailure::Hidden))); }
+            assert!(matches!(redeem_stream_ticket(&state, ORG, DOCUMENT, &value).await, Err(CanvasFailure::Gone)));
+        }
+    }
+
+    #[tokio::test]
+    async fn canvas_tickets_are_revoked_after_committed_standing_mutations() {
+        for mutation in ["offboard", "remove", "demote"] {
+            let (store, canvas) = with_document().await;
+            store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+            store.add_workspace(ORG, "proj-1", "Workspace");
+            if mutation == "demote" {
+                store.add_workspace_member(ORG, "proj-1", viv().as_str(), WorkspaceRole::Maintainer);
+            }
+            let state = test_state(store, canvas);
+            let make_ticket = |user: &UserId, workspace: &str, org: &str| SocketTicket {
+                org_id: org.into(), document_id: DOCUMENT.into(), workspace_id: workspace.into(),
+                user_id: user.to_string(), expires_at: 31_000,
+            };
+            let mine = state.canvas_hub.issue_ticket(make_ticket(&viv(), "proj-1", ORG), 1_000).unwrap();
+            let other_user = state.canvas_hub.issue_ticket(make_ticket(&ada(), "proj-1", ORG), 1_000).unwrap();
+            let other_workspace = state.canvas_hub.issue_ticket(make_ticket(&viv(), "proj-2", ORG), 1_000).unwrap();
+            let other_org = state.canvas_hub.issue_ticket(make_ticket(&viv(), "proj-1", "other-org"), 1_000).unwrap();
+            let path = if mutation == "offboard" { format!("/v1/orgs/{ORG}/members/{}", viv()) }
+                else { format!("/v1/orgs/{ORG}/workspaces/proj-1/members/{}", viv()) };
+            let body = if mutation == "demote" { Some(serde_json::json!({"role":"viewer", "reason":"demote"})) } else { None };
+            let (status, _) = call(crate::router(state.clone()), request(if mutation == "demote" { "PATCH" } else { "DELETE" }, &path, &token_for(&ada()), body)).await;
+            assert_eq!(status, StatusCode::NO_CONTENT, "{mutation}");
+            assert!(state.canvas_hub.consume_ticket(&mine, 1_000).is_none());
+            assert!(state.canvas_hub.consume_ticket(&other_user, 1_000).is_some());
+            assert_eq!(state.canvas_hub.consume_ticket(&other_workspace, 1_000).is_some(), mutation != "offboard");
+            assert!(state.canvas_hub.consume_ticket(&other_org, 1_000).is_some());
+        }
+    }
+
+    #[tokio::test]
+    async fn canvas_idle_socket_closes_when_workspace_read_access_is_removed() {
+        use crate::store::Store;
+        use futures_util::StreamExt;
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let (store, canvas) = with_document().await;
+        let state = test_state(store.clone(), canvas);
+        let ticket = state.canvas_hub.issue_ticket(SocketTicket {
+            org_id: ORG.into(), document_id: DOCUMENT.into(), workspace_id: "proj-1".into(),
+            user_id: viv().to_string(), expires_at: 31_000,
+        }, 1_000).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { let _ = axum::serve(listener, crate::router(state)).await; });
+        let mut handshake = format!("ws://{address}/v1/orgs/{ORG}/canvas-documents/{DOCUMENT}/stream").into_client_request().unwrap();
+        handshake.headers_mut().insert("sec-websocket-protocol", format!("{CANVAS_SUBPROTOCOL}, {ticket}").parse().unwrap());
+        let (mut socket, _) = tokio_tungstenite::connect_async(handshake).await.unwrap();
+        store.remove_workspace_member(ORG, "proj-1", viv().as_str(), removal_context()).await.unwrap();
+        let closed = tokio::time::timeout(Duration::from_secs(6), async {
+            while let Some(frame) = socket.next().await {
+                if matches!(frame, Ok(tokio_tungstenite::tungstenite::Message::Close(_)) | Err(_)) { return; }
+            }
+        }).await;
+        server.abort();
+        assert!(closed.is_ok(), "an idle revoked reader must close within one standing tick");
+    }
+
+    #[tokio::test]
+    async fn a_removed_reader_cannot_request_socket_history() {
+        use crate::store::Store;
+        let (store, canvas) = with_document().await;
+        push_updates(&store, &canvas, 1).await;
+        let state = test_state(store.clone(), canvas);
+        store.remove_workspace_member(ORG, "proj-1", viv().as_str(), removal_context()).await.unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let frame = CanvasFrame { kind: "sync".into(), session_id: DOCUMENT.into(), participant_id: "viewer".into(), data: serde_json::json!({"action":"request","since":0}), timestamp: 1_000 };
+        assert!(!handle_sync(&state, &connection_for(&viv()), &tx, frame).await);
+        assert!(rx.try_recv().is_err());
     }
 
     #[tokio::test]

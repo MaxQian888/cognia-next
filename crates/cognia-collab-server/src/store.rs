@@ -741,6 +741,8 @@ pub fn ended_at_for(terminal: bool, previous: Option<i64>, now: i64) -> Option<i
 
 #[async_trait]
 pub trait Store: Send + Sync {
+    fn in_memory_chat_store(&self) -> Option<crate::chat_store::InMemoryChatStore> { None }
+    fn in_memory_session_file_store(&self) -> Option<crate::session_files::InMemorySessionFileStore> { None }
     /// What `user_id` may do in `org_id` / `workspace_id`.
     ///
     /// Returns the two raw memberships; collapsing them into a decision is
@@ -919,7 +921,7 @@ pub trait Store: Send + Sync {
         org_id: &str,
         user_id: &str,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError>;
+    ) -> Result<Vec<String>, StoreError>;
 
     async fn set_workspace_member(
         &self,
@@ -928,7 +930,7 @@ pub trait Store: Send + Sync {
         user_id: &str,
         role: WorkspaceRole,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError>;
+    ) -> Result<Vec<String>, StoreError>;
 
     async fn remove_workspace_member(
         &self,
@@ -936,7 +938,7 @@ pub trait Store: Send + Sync {
         workspace_id: &str,
         user_id: &str,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError>;
+    ) -> Result<Vec<String>, StoreError>;
 
     async fn append_authorization_audit(
         &self,
@@ -1023,15 +1025,17 @@ struct BootstrapCredentialRow {
 }
 
 #[derive(Default)]
-struct Tables {
-    org_memberships: HashMap<(String, String), OrgRole>,
+pub(crate) struct Tables {
+    pub(crate) chat: crate::chat_store::MemoryTables,
+    pub(crate) session_files: crate::session_files::MemoryFileTables,
+    pub(crate) org_memberships: HashMap<(String, String), OrgRole>,
     /// `org_id -> display name`, for the account membership listing.
     org_names: HashMap<String, String>,
     provisioning: HashMap<String, ProvisioningOperation>,
     bootstrap_credentials: HashMap<String, BootstrapCredentialRow>,
     /// `(org_id, workspace_id, user_id) -> role`. The tenant belongs in the
     /// key: workspace ids are only unique inside an organization.
-    workspace_memberships: HashMap<(String, String, String), WorkspaceRole>,
+    pub(crate) workspace_memberships: HashMap<(String, String, String), WorkspaceRole>,
     /// `org_id -> logto organization id`
     org_logto_ids: HashMap<String, String>,
     /// `(org_id, provider, tenant, subject) -> user_id`
@@ -1042,7 +1046,7 @@ struct Tables {
     /// second table the test double does not have.
     users: HashMap<String, String>,
     invitations: HashMap<String, (String, Invitation)>,
-    authorization_audit: Vec<AuthorizationAuditEvent>,
+    pub(crate) authorization_audit: Vec<AuthorizationAuditEvent>,
     issues: HashMap<String, Issue>,
     events: Vec<(String, IssueEvent)>,
     /// Plans always hold `steps: Some(..)` in here; `list_plans` strips them,
@@ -1058,7 +1062,7 @@ struct Tables {
 /// Test double. Scopes by `org_id` in Rust on purpose — see the module note.
 #[derive(Default, Clone)]
 pub struct InMemoryStore {
-    tables: Arc<RwLock<Tables>>,
+    pub(crate) tables: Arc<RwLock<Tables>>,
 }
 
 impl InMemoryStore {
@@ -1243,6 +1247,12 @@ fn membership_audit_event(
 
 #[async_trait]
 impl Store for InMemoryStore {
+    fn in_memory_session_file_store(&self) -> Option<crate::session_files::InMemorySessionFileStore> {
+        Some(crate::session_files::InMemorySessionFileStore::from_store(self))
+    }
+    fn in_memory_chat_store(&self) -> Option<crate::chat_store::InMemoryChatStore> {
+        Some(crate::chat_store::InMemoryChatStore::from_store(self))
+    }
     async fn membership(
         &self,
         org_id: &str,
@@ -1779,7 +1789,7 @@ impl Store for InMemoryStore {
         org_id: &str,
         user_id: &str,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut tables = self.tables.write();
         let key = (org_id.to_owned(), user_id.to_owned());
         let old = tables
@@ -1803,6 +1813,8 @@ impl Store for InMemoryStore {
                 invitation.revoked_at = Some(context.now);
             }
         }
+        crate::chat_store::memory_revoke_offboarded_invites(&mut tables, org_id, user_id);
+        let affected = crate::chat_store::memory_cleanup_standing(&mut tables, org_id, None, user_id, true, context.now);
         tables.authorization_audit.push(membership_audit_event(
             org_id,
             None,
@@ -1812,7 +1824,7 @@ impl Store for InMemoryStore {
             None,
             context,
         ));
-        Ok(())
+        Ok(affected)
     }
 
     async fn set_workspace_member(
@@ -1822,7 +1834,7 @@ impl Store for InMemoryStore {
         user_id: &str,
         role: WorkspaceRole,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut tables = self.tables.write();
         if !tables.users.contains_key(user_id)
             || !tables
@@ -1837,6 +1849,9 @@ impl Store for InMemoryStore {
             user_id.to_owned(),
         );
         let old = tables.workspace_memberships.insert(key, role);
+        let affected = if old.is_some_and(|old| old.capability().permits(role.capability()) && old != role) {
+            crate::chat_store::memory_cleanup_standing(&mut tables, org_id, Some(workspace_id), user_id, false, context.now)
+        } else { Vec::new() };
         tables.authorization_audit.push(membership_audit_event(
             org_id,
             Some(workspace_id.to_owned()),
@@ -1846,7 +1861,7 @@ impl Store for InMemoryStore {
             Some(role.as_str().to_owned()),
             context,
         ));
-        Ok(())
+        Ok(affected)
     }
 
     async fn remove_workspace_member(
@@ -1855,7 +1870,7 @@ impl Store for InMemoryStore {
         workspace_id: &str,
         user_id: &str,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut tables = self.tables.write();
         let old = tables
             .workspace_memberships
@@ -1865,6 +1880,9 @@ impl Store for InMemoryStore {
                 user_id.to_owned(),
             ))
             .ok_or(StoreError::NotFound)?;
+        // Recomputed, not forced: the seat is already gone, and an org owner or
+        // admin keeps the standing their org role gives them.
+        let affected = crate::chat_store::memory_cleanup_standing(&mut tables, org_id, Some(workspace_id), user_id, false, context.now);
         tables.authorization_audit.push(membership_audit_event(
             org_id,
             Some(workspace_id.to_owned()),
@@ -1874,7 +1892,7 @@ impl Store for InMemoryStore {
             None,
             context,
         ));
-        Ok(())
+        Ok(affected)
     }
 
     async fn append_authorization_audit(
@@ -3948,9 +3966,10 @@ impl Store for PgStore {
         org_id: &str,
         user_id: &str,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
+        crate::chat_store::pg_lock_invite_standing(&transaction, org_id, true).await?;
         let owner_rows = transaction
             .query(
                 "SELECT user_id FROM org_memberships WHERE org_id = $1 AND role = 'owner' FOR UPDATE",
@@ -3992,6 +4011,8 @@ impl Store for PgStore {
             )
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
+        let affected = crate::chat_store::pg_cleanup_standing(&transaction, org_id, None, user_id, true, context.now).await?;
+        transaction.execute("UPDATE chat_session_invites SET status='revoked' WHERE org_id=$1 AND status='pending' AND (target_user_id=$2 OR created_by_user_id=$2)", &[&org_id, &user_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
         let event = membership_audit_event(
             org_id,
             None,
@@ -4006,7 +4027,7 @@ impl Store for PgStore {
             .commit()
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
-        Ok(())
+        Ok(affected)
     }
 
     async fn set_workspace_member(
@@ -4016,7 +4037,7 @@ impl Store for PgStore {
         user_id: &str,
         role: WorkspaceRole,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
         let old = transaction
@@ -4045,6 +4066,9 @@ impl Store for PgStore {
             )
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
+        let affected = if old.as_deref().and_then(|old| WorkspaceRole::parse(old).ok()).is_some_and(|old| old.capability().permits(role.capability()) && old != role) {
+            crate::chat_store::pg_cleanup_standing(&transaction, org_id, Some(workspace_id), user_id, false, context.now).await?
+        } else { Vec::new() };
         let event = membership_audit_event(
             org_id,
             Some(workspace_id.to_owned()),
@@ -4059,7 +4083,7 @@ impl Store for PgStore {
             .commit()
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
-        Ok(())
+        Ok(affected)
     }
 
     async fn remove_workspace_member(
@@ -4068,7 +4092,7 @@ impl Store for PgStore {
         workspace_id: &str,
         user_id: &str,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
         let row = transaction
@@ -4080,6 +4104,10 @@ impl Store for PgStore {
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?
             .ok_or(StoreError::NotFound)?;
+        // Recomputed, not forced: the seat is already deleted in this
+        // transaction, and an org owner or admin keeps the standing their org
+        // role gives them.
+        let affected = crate::chat_store::pg_cleanup_standing(&transaction, org_id, Some(workspace_id), user_id, false, context.now).await?;
         let event = membership_audit_event(
             org_id,
             Some(workspace_id.to_owned()),
@@ -4094,7 +4122,7 @@ impl Store for PgStore {
             .commit()
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
-        Ok(())
+        Ok(affected)
     }
 
     async fn append_authorization_audit(
