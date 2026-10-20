@@ -25,6 +25,8 @@ export interface CompanionAuthConfig {
    */
   configVersion?: number
   deploymentMode: "single-user" | "multi-tenant"
+  /** Version 6. Older Hosts omit execution availability. */
+  execution?: "available" | "unavailable"
   hostId: string
   tenantId?: string
   oidc?: {
@@ -395,6 +397,9 @@ export function parseCompanionAuthConfig(body: unknown): CompanionAuthConfig {
     body === null ||
     (record.deploymentMode !== "single-user" && record.deploymentMode !== "multi-tenant") ||
     typeof record.hostId !== "string" ||
+    (record.execution !== undefined &&
+      record.execution !== "available" &&
+      record.execution !== "unavailable") ||
     !isSignalingConfig(record.signaling)
   ) {
     throw new Error("companion auth config response is malformed")

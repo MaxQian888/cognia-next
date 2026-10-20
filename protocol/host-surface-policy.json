@@ -1,6 +1,1054 @@
 {
-  "$comment": "Multi-tenant Host surface policy (docs/plans/2026-10-20-multi-user-organizations-permissions-and-rollout.md §8). Maps every CommandDescriptor capability in protocol/companion-commands.json to the collaboration action a tenant principal must hold before the Host dispatches the command. A test fails when the manifest gains a capability this file does not classify; an unclassified capability is denied in multi-tenant mode. Single-user mode never consults this file. Actions come from protocol/collab-capabilities-v1.json.",
+  "$comment": "Multi-tenant Host surface policy (docs/plans/2026-10-20-multi-user-organizations-permissions-and-rollout.md \u00a78). Maps every CommandDescriptor capability in protocol/companion-commands.json to the collaboration action a tenant principal must hold before the Host dispatches the command. A test fails when the manifest gains a capability this file does not classify; an unclassified capability is denied in multi-tenant mode. Single-user mode skips Host standing checks; executionCapabilities and executionCommands still apply when execution is explicitly disabled. Actions come from protocol/collab-capabilities-v1.json. commandOverrides correct capability-level client standing for Host-global arms; client is not a claim about where code executes. Stream adapters have explicit execution flags when no descriptor exists.",
   "schemaVersion": 1,
+  "workspaceResolution": "fallback-only-until-P4",
+  "executionCapabilities": ["agent.worker"],
+  "executionCommands": [
+    "acp_terminal_create",
+    "acp_terminal_write",
+    "agent_compact",
+    "agent_gateway_lease_prepare",
+    "agent_resolve_permission",
+    "agent_send",
+    "agent_session_api",
+    "agent_start",
+    "agent_task_resume",
+    "agent_task_start",
+    "agent_tool_host_control",
+    "automation_execute",
+    "background_job_spawn_bridge",
+    "background_job_spawn_scheduled",
+    "background_job_spawn_session",
+    "background_monitor_register_scheduled",
+    "best_of_n_select",
+    "best_of_n_start",
+    "bot_delivery_replay",
+    "bot_installation_mutate",
+    "bot_run_manual",
+    "bot_trigger_set_armed",
+    "browser_act",
+    "browser_back",
+    "browser_cdp_execute",
+    "browser_context_submit",
+    "browser_credential_fill",
+    "browser_drag",
+    "browser_embed_act",
+    "browser_embed_back",
+    "browser_embed_create",
+    "browser_embed_evaluate",
+    "browser_embed_forward",
+    "browser_embed_navigate",
+    "browser_embed_reload",
+    "browser_evaluate",
+    "browser_extension_install_confirm",
+    "browser_extension_install_crx",
+    "browser_extension_install_unpacked",
+    "browser_extension_install_webstore",
+    "browser_extension_remove",
+    "browser_extension_set_enabled",
+    "browser_extension_update",
+    "browser_extensions_check_updates",
+    "browser_forward",
+    "browser_handle_dialog",
+    "browser_local_frames_subscribe",
+    "browser_local_install",
+    "browser_local_rpc",
+    "browser_local_start",
+    "browser_navigate",
+    "browser_new_page",
+    "browser_press_key",
+    "browser_reload",
+    "browser_scroll",
+    "browser_session_ensure",
+    "browser_set_files",
+    "browser_set_zoom",
+    "browser_switch_page",
+    "canvas_run_python",
+    "claude_approve",
+    "claude_call_reserve_respond",
+    "claude_compact",
+    "claude_plugin_hook_response",
+    "claude_plugin_tool_response",
+    "claude_protocol_adapter_message",
+    "claude_restart_sidecar",
+    "claude_restore",
+    "claude_send",
+    "claude_session_control",
+    "claude_set_mode",
+    "claude_tool_result_decision",
+    "code_checkout_export",
+    "code_result_apply",
+    "code_snapshot_apply",
+    "code_snapshot_checkout_get",
+    "code_snapshot_create",
+    "codeserver_activate_proxy",
+    "codeserver_activate_proxy_temporary",
+    "codeserver_agent_run_in_terminal",
+    "codeserver_build_proxy",
+    "codeserver_ensure",
+    "codex_app_task_create",
+    "codex_app_task_send",
+    "companion_tunnel_start",
+    "control_managed_process",
+    "cua_sandbox_exec",
+    "cua_sandbox_start",
+    "desktop_click",
+    "desktop_drag",
+    "desktop_expand_element",
+    "desktop_hold_key",
+    "desktop_invoke_pattern",
+    "desktop_keys",
+    "desktop_launch_app",
+    "desktop_mouse_button",
+    "desktop_paste",
+    "desktop_perform_action",
+    "desktop_scroll",
+    "desktop_type",
+    "desktop_window_op",
+    "desktop_zoom",
+    "download_cognia_cli",
+    "dsh_runtime_finalize",
+    "dsh_runtime_install",
+    "ensure_system_lsp_host",
+    "environment_build_start",
+    "environment_local_call",
+    "environment_ports_list",
+    "environment_task_shell_exec",
+    "execution_run_approval_respond",
+    "execution_run_control",
+    "execution_run_create",
+    "execution_run_resume",
+    "external_agent_admit_run",
+    "external_agent_detect_runtimes",
+    "external_agent_probe_runtime_version",
+    "external_agent_resolve_decision",
+    "external_agent_run_turn",
+    "external_agent_session_mutate",
+    "external_agent_update",
+    "external_bridge_restart",
+    "external_bridge_start",
+    "file_share_activate",
+    "file_share_sftpgo_set",
+    "fleet_codex_hooks_install",
+    "fleet_codex_install",
+    "fleet_opencode_install",
+    "fleet_scripts_install",
+    "git_blame",
+    "git_checkout_branch",
+    "git_cherry_pick",
+    "git_clone",
+    "git_clone_guarded",
+    "git_commit",
+    "git_create_branch",
+    "git_create_tag",
+    "git_delete_branch",
+    "git_delete_tag",
+    "git_diff_staged_all",
+    "git_discard",
+    "git_discard_all",
+    "git_fetch",
+    "git_init",
+    "git_interactive_rebase",
+    "git_merge",
+    "git_merge_abort",
+    "git_pull",
+    "git_push",
+    "git_push_tag",
+    "git_rebase",
+    "git_remote_add",
+    "git_remote_remove",
+    "git_rename_branch",
+    "git_reset",
+    "git_resolve_conflict",
+    "git_restore",
+    "git_revert",
+    "git_sequencer_abort",
+    "git_sequencer_continue",
+    "git_stack_capabilities",
+    "git_stack_history",
+    "git_stack_push",
+    "git_stack_restack",
+    "git_stack_revert",
+    "git_stack_set_parent",
+    "git_stack_validate",
+    "git_stage",
+    "git_stash_apply",
+    "git_stash_drop",
+    "git_stash_pop",
+    "git_stash_push",
+    "git_sync",
+    "git_unstage",
+    "git_worktree_add",
+    "git_worktree_commit",
+    "git_worktree_list",
+    "git_worktree_prune",
+    "git_worktree_remove",
+    "github_runner_cancel",
+    "github_runner_create",
+    "github_runner_pairing",
+    "github_runner_preflight",
+    "github_runner_refresh",
+    "github_workspace_clone",
+    "github_workspace_commit_and_push",
+    "github_workspace_remove",
+    "goal_accept",
+    "goal_continue",
+    "goal_resume",
+    "goal_subgoals_generate",
+    "goal_verify_retry",
+    "host_runtime_restart",
+    "host_update_install",
+    "lsp_host_ensure",
+    "lsp_host_request",
+    "managed_desktop_connect",
+    "managed_desktop_control_input",
+    "managed_desktop_create",
+    "managed_desktop_handoff_revoke_source",
+    "managed_desktop_local_call",
+    "managed_desktop_prepare_template",
+    "managed_desktop_results_capture",
+    "managed_desktop_results_complete",
+    "mcp_server_restart",
+    "mcp_server_start",
+    "plugin_activate_vscode",
+    "plugin_api_batch_invoke",
+    "plugin_api_invoke",
+    "plugin_backup_restore",
+    "plugin_bundle_install_from_file",
+    "plugin_bundle_install_from_url",
+    "plugin_cli_exec",
+    "plugin_cogpack_install_staged",
+    "plugin_cogpack_transfer_install",
+    "plugin_cogset_activate",
+    "plugin_commit_staged_update",
+    "plugin_computer_use_bash",
+    "plugin_computer_use_execute",
+    "plugin_deactivate_js",
+    "plugin_deactivate_vscode",
+    "plugin_download_version",
+    "plugin_finalize_staged_update",
+    "plugin_install",
+    "plugin_install_from_directory",
+    "plugin_install_from_files",
+    "plugin_install_from_github",
+    "plugin_invoke_js_callback",
+    "plugin_invoke_vscode_rpc",
+    "plugin_launch_js",
+    "plugin_load_vscode",
+    "plugin_media_add_transition",
+    "plugin_media_apply_video_effect",
+    "plugin_media_concatenate_videos",
+    "plugin_media_export_video",
+    "plugin_media_get_video_frame",
+    "plugin_media_read_analysis_frame",
+    "plugin_python_call",
+    "plugin_python_call_hook",
+    "plugin_python_call_tool",
+    "plugin_python_eval",
+    "plugin_python_get_tools",
+    "plugin_python_host_response",
+    "plugin_python_import",
+    "plugin_python_initialize",
+    "plugin_python_install_deps",
+    "plugin_python_install_uv",
+    "plugin_python_load",
+    "plugin_python_module_call",
+    "plugin_python_module_getattr",
+    "plugin_python_push_config",
+    "plugin_python_unload",
+    "plugin_set_enabled",
+    "plugin_stage_from_directory",
+    "plugin_stage_version",
+    "plugin_unload_vscode",
+    "plugin_vscode_download_vsix",
+    "plugin_vscode_install_vsix",
+    "plugin_vscode_install_vsix_from_path",
+    "plugin_vscode_send_response",
+    "plugin_wasm_activate",
+    "plugin_wasm_call",
+    "plugin_wasm_deactivate",
+    "plugin_wasm_install_from_file",
+    "plugin_wasm_install_from_git",
+    "plugin_wasm_install_from_url",
+    "plugin_wasm_load",
+    "plugin_wasm_renderer_response",
+    "plugin_wasm_unload",
+    "plugin_watch_start",
+    "project_environment_execute",
+    "project_mutate",
+    "provider_diagnostics_run_balance_script",
+    "provider_diagnostics_start",
+    "remote_desktop_binding_launch",
+    "remote_desktop_local_call",
+    "remote_desktop_session_open",
+    "room_send",
+    "run_agent_hook",
+    "sandbox_exec",
+    "sandbox_snapshot_create",
+    "sandbox_snapshot_fork",
+    "sandbox_snapshot_restore",
+    "scheduled_task_backfill",
+    "scheduled_task_create",
+    "scheduled_task_emit_event",
+    "scheduled_task_import",
+    "scheduled_task_resume",
+    "scheduled_task_run_now",
+    "scheduled_task_update",
+    "scheduler_arm_task",
+    "scheduler_confirm_task",
+    "scheduler_create_task",
+    "scheduler_enable_task",
+    "scheduler_request_elevation",
+    "scheduler_run_task_now",
+    "scheduler_update_task",
+    "selection_toolbar_execute",
+    "send_to_external_agent",
+    "sftp_create_dir",
+    "sftp_delete_entry",
+    "sftp_download_close",
+    "sftp_download_open",
+    "sftp_download_read_chunk",
+    "sftp_list_dir",
+    "sftp_realpath",
+    "sftp_rename_entry",
+    "sftp_session_close",
+    "sftp_stat",
+    "sftp_upload_abort",
+    "sftp_upload_commit",
+    "sftp_upload_open",
+    "sftp_upload_write_chunk",
+    "shell_exec",
+    "siwc_responses_open",
+    "siwc_send_app_server",
+    "siwc_spawn_app_server",
+    "skills_bundle_upload_commit",
+    "skills_install_atomic",
+    "skills_install_mirrored",
+    "skills_install_native",
+    "spawn_external_agent",
+    "ssh_terminal_set_forward_enabled",
+    "ssh_terminal_spawn",
+    "ssh_terminal_write",
+    "task_workspace_apply",
+    "task_workspace_begin",
+    "task_workspace_bundle_acquire",
+    "task_workspace_bundle_apply",
+    "task_workspace_bundle_begin",
+    "task_workspace_bundle_handoff_retry",
+    "task_workspace_bundle_handoff_undo",
+    "task_workspace_bundle_turn_begin",
+    "task_workspace_bundle_turn_settle",
+    "task_workspace_changeset_capture",
+    "task_workspace_environment_adopt",
+    "task_workspace_environment_create_branch",
+    "task_workspace_environment_delete_branch",
+    "task_workspace_integration_prepare",
+    "task_workspace_integration_publish",
+    "task_workspace_integration_rebuild",
+    "task_workspace_integration_rollback",
+    "task_workspace_maintenance_run",
+    "task_workspace_managed_adopt",
+    "task_workspace_managed_archive",
+    "task_workspace_managed_delete",
+    "task_workspace_managed_restore",
+    "task_workspace_project_source_ensure",
+    "task_workspace_prune",
+    "task_workspace_reconcile",
+    "task_workspace_remote_source_ensure",
+    "task_workspace_resolve_conflict",
+    "task_workspace_restore_snapshot",
+    "task_workspace_revision_apply",
+    "task_workspace_session_scratch_ensure",
+    "task_workspace_settle",
+    "task_workspace_undo",
+    "team_run_resume",
+    "team_run_start",
+    "team_task_create",
+    "terminal_exec",
+    "terminal_headless_exec",
+    "terminal_headless_run",
+    "terminal_headless_spawn",
+    "terminal_host_service",
+    "terminal_kill_port",
+    "terminal_list_all",
+    "terminal_list_for_project",
+    "terminal_list_tmux_sessions",
+    "terminal_list_tmux_windows",
+    "terminal_open_serial",
+    "terminal_reattach",
+    "terminal_serial_attach",
+    "terminal_serial_write",
+    "terminal_spawn",
+    "terminal_take_control",
+    "terminal_write",
+    "thread_handoff_accept",
+    "thread_handoff_commit",
+    "thread_handoff_offer",
+    "tray_run_native_action",
+    "twin_ingest_source",
+    "twin_job_resume",
+    "twin_job_retry",
+    "video_analyze",
+    "video_get_info",
+    "video_trim",
+    "workflow_approval_respond",
+    "workflow_create",
+    "workflow_handoff_create",
+    "workflow_human_input_submit",
+    "workflow_register_trigger",
+    "workflow_schedule_resume",
+    "workflow_step_result",
+    "workflow_trigger_manual",
+    "workflow_update",
+    "workflow_waitpoint_decide"
+  ],
+  "nonExecutionCommands": [
+    {
+      "arm": "a2ui_bridge_runtime_paths",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "acp_terminal_get_info",
+      "reason": "Observes or waits for an existing terminal/forward; does not create or write to a process."
+    },
+    {
+      "arm": "acp_terminal_get_session_terminals",
+      "reason": "Observes or waits for an existing terminal/forward; does not create or write to a process."
+    },
+    {
+      "arm": "acp_terminal_is_running",
+      "reason": "Observes or waits for an existing terminal/forward; does not create or write to a process."
+    },
+    {
+      "arm": "acp_terminal_kill",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "acp_terminal_kill_session_terminals",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "acp_terminal_list",
+      "reason": "Observes or waits for an existing terminal/forward; does not create or write to a process."
+    },
+    {
+      "arm": "acp_terminal_output",
+      "reason": "Observes or waits for an existing terminal/forward; does not create or write to a process."
+    },
+    {
+      "arm": "acp_terminal_release",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "acp_terminal_wait_for_exit",
+      "reason": "Observes or waits for an existing terminal/forward; does not create or write to a process."
+    },
+    {
+      "arm": "background_job_list",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "background_job_read",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "background_monitor_list",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "browser_embed_start_record",
+      "reason": "Starts recording observations of browser/native input, not a process, agent, PTY, workflow or plugin program."
+    },
+    {
+      "arm": "browser_extension_install_cancel",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "browser_extensions_list",
+      "reason": "Reads the on-disk extension registry or installed browser candidates; no browser runtime is started (browser/extensions.rs, user_chrome)."
+    },
+    {
+      "arm": "browser_local_uninstall",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "browser_runtime_status",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "browser_user_chrome_discover",
+      "reason": "Reads the on-disk extension registry or installed browser candidates; no browser runtime is started (browser/extensions.rs, user_chrome)."
+    },
+    {
+      "arm": "canvas_cancel_python",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "ccswitch_watch_start",
+      "reason": "Starts an observation/listener/controller task, not a user process, agent, PTY, workflow or plugin code."
+    },
+    {
+      "arm": "codeserver_read_runtime_args",
+      "reason": "Reads/writes runtime argument configuration files without starting or restarting code-server (rpc/plugins.rs)."
+    },
+    {
+      "arm": "codeserver_uninstall",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "codeserver_write_runtime_args",
+      "reason": "Reads/writes runtime argument configuration files without starting or restarting code-server (rpc/plugins.rs)."
+    },
+    {
+      "arm": "codex_app_runtime_status",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "companion_mdns_start",
+      "reason": "Starts an observation/listener/controller task, not a user process, agent, PTY, workflow or plugin code."
+    },
+    {
+      "arm": "companion_server_start",
+      "reason": "Starts an observation/listener/controller task, not a user process, agent, PTY, workflow or plugin code."
+    },
+    {
+      "arm": "companion_set_remote_terminal",
+      "reason": "Updates settings, flow control, dimensions or an existing process state flag; does not launch or send executable input."
+    },
+    {
+      "arm": "connectors_runtime_lease_acquire",
+      "reason": "Updates the connector runtime ownership lease only; it does not instantiate the runtime (connectors/runtime-lease.ts)."
+    },
+    {
+      "arm": "connectors_runtime_lease_release",
+      "reason": "Updates the connector runtime ownership lease only; it does not instantiate the runtime (connectors/runtime-lease.ts)."
+    },
+    {
+      "arm": "connectors_runtime_lease_renew",
+      "reason": "Updates the connector runtime ownership lease only; it does not instantiate the runtime (connectors/runtime-lease.ts)."
+    },
+    {
+      "arm": "connectors_start_server",
+      "reason": "Starts an observation/listener/controller task, not a user process, agent, PTY, workflow or plugin code."
+    },
+    {
+      "arm": "desktop_pick_session_start",
+      "reason": "Starts an observation/listener/controller task, not a user process, agent, PTY, workflow or plugin code."
+    },
+    {
+      "arm": "dsh_runtime_facts",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "dsh_runtime_remove",
+      "reason": "Removes an inactive runtime installation directory (external-agent/dsh_runtime); no executable is launched."
+    },
+    {
+      "arm": "environment_task_shell_release",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "execution_run_approval_list",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "execution_run_detail",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "execution_run_events",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "execution_run_get",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "external_agent_cancel_run",
+      "reason": "Stops/releases existing work; no new process or resumed execution is requested."
+    },
+    {
+      "arm": "external_agent_cognia_models",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "external_agent_config_get",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "external_agent_config_list",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "external_agent_list",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "external_agent_release_run",
+      "reason": "Stops/releases existing work; no new process or resumed execution is requested."
+    },
+    {
+      "arm": "external_agent_session_query",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "fleet_codex_hooks_capabilities",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "fleet_codex_hooks_status",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "fleet_codex_hooks_uninstall",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "fleet_codex_uninstall",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "fleet_focus_terminal",
+      "reason": "Focuses an existing terminal view; it does not create a PTY (desktop-write-source.ts)."
+    },
+    {
+      "arm": "fleet_monitor_start",
+      "reason": "Starts an observation/listener/controller task, not a user process, agent, PTY, workflow or plugin code."
+    },
+    {
+      "arm": "fleet_opencode_uninstall",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "fleet_scripts_status",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "fleet_scripts_uninstall",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "gateway_start",
+      "reason": "Starts an observation/listener/controller task, not a user process, agent, PTY, workflow or plugin code."
+    },
+    {
+      "arm": "git_stack_parents",
+      "reason": "Reads branch parent pointers through libgit2 config; stack::parent_map does not spawn git (cognia-git/src/stack.rs:137)."
+    },
+    {
+      "arm": "git_watch_start",
+      "reason": "Starts an observation/listener/controller task, not a user process, agent, PTY, workflow or plugin code."
+    },
+    {
+      "arm": "github_runner_list",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "host_runtime_status",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "is_external_agent_running",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "list_managed_processes",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "mcp_server_status",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "perf_start_sampling",
+      "reason": "Starts an observation/listener/controller task, not a user process, agent, PTY, workflow or plugin code."
+    },
+    {
+      "arm": "plugin_disable",
+      "reason": "Updates the Rust plugin metadata/status ledger or stops its process; executable activation uses plugin_set_enabled/launch_js/WASM/VSCode arms (plugin-runtime/lifecycle.rs)."
+    },
+    {
+      "arm": "plugin_enable",
+      "reason": "Updates the Rust plugin metadata/status ledger or stops its process; executable activation uses plugin_set_enabled/launch_js/WASM/VSCode arms (plugin-runtime/lifecycle.rs)."
+    },
+    {
+      "arm": "plugin_get_capabilities",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "plugin_install_origin_record",
+      "reason": "Persists validated installation provenance only; desktop-write-source.ts does not install or activate content."
+    },
+    {
+      "arm": "plugin_list",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "plugin_load",
+      "reason": "Updates the Rust plugin metadata/status ledger or stops its process; executable activation uses plugin_set_enabled/launch_js/WASM/VSCode arms (plugin-runtime/lifecycle.rs)."
+    },
+    {
+      "arm": "plugin_permission_list",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "plugin_process_kill",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "plugin_python_get_info",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "plugin_python_is_initialized",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "plugin_python_list",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "plugin_python_runtime_info",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "plugin_runtime_snapshot",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "plugin_set_shell_allowlist",
+      "reason": "Updates settings, flow control, dimensions or an existing process state flag; does not launch or send executable input."
+    },
+    {
+      "arm": "plugin_uninstall",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "plugin_unload",
+      "reason": "Updates the Rust plugin metadata/status ledger or stops its process; executable activation uses plugin_set_enabled/launch_js/WASM/VSCode arms (plugin-runtime/lifecycle.rs)."
+    },
+    {
+      "arm": "plugin_vscode_uninstall",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "record_start",
+      "reason": "Starts recording observations of browser/native input, not a process, agent, PTY, workflow or plugin program."
+    },
+    {
+      "arm": "scheduled_task_cancel_run",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "scheduled_task_runs",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "selection_toolbar_start",
+      "reason": "Starts an observation/listener/controller task, not a user process, agent, PTY, workflow or plugin code."
+    },
+    {
+      "arm": "session_import_watch_start",
+      "reason": "Starts an observation/listener/controller task, not a user process, agent, PTY, workflow or plugin code."
+    },
+    {
+      "arm": "session_reference_search",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "session_reference_snapshot",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "set_external_agent_running",
+      "reason": "Updates settings, flow control, dimensions or an existing process state flag; does not launch or send executable input."
+    },
+    {
+      "arm": "sidecar_restart_count",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "skills_empty_trash",
+      "reason": "Deletes stored files; no executable installation or invocation."
+    },
+    {
+      "arm": "skills_uninstall",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "skills_uninstall_native",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "ssh_terminal_forward_status",
+      "reason": "Observes or waits for an existing terminal/forward; does not create or write to a process."
+    },
+    {
+      "arm": "ssh_terminal_kill",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "ssh_terminal_resize",
+      "reason": "Updates settings, flow control, dimensions or an existing process state flag; does not launch or send executable input."
+    },
+    {
+      "arm": "subscription_authed_get",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_authed_request",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_clear_runtime",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_delete_account",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_delete_preset",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_get_account",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_get_account_detail",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "subscription_get_account_env",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "subscription_get_active",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_get_preset",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_init",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_list_accounts",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_list_presets",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_list_provider_ids",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "subscription_reauthenticate_codex_account",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_refresh_codex_account",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_rename_account",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_replace_account_credential",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_save_account",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_save_preset",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_set_active",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_set_default_preset",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_set_preset",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "subscription_volcengine_usage",
+      "reason": "Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution."
+    },
+    {
+      "arm": "task_workspace_list_runs",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "team_run_pause",
+      "reason": "Stops/releases existing work; no new process or resumed execution is requested."
+    },
+    {
+      "arm": "team_run_stop",
+      "reason": "Stops/releases existing work; no new process or resumed execution is requested."
+    },
+    {
+      "arm": "terminal_close_serial",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "terminal_complete_paths",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "terminal_detach",
+      "reason": "Updates settings, flow control, dimensions or an existing process state flag; does not launch or send executable input."
+    },
+    {
+      "arm": "terminal_detect_multiplexer",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "terminal_headless_kill",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "terminal_host_configure",
+      "reason": "Updates settings, flow control, dimensions or an existing process state flag; does not launch or send executable input."
+    },
+    {
+      "arm": "terminal_host_status",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "terminal_host_sync_profiles",
+      "reason": "Updates settings, flow control, dimensions or an existing process state flag; does not launch or send executable input."
+    },
+    {
+      "arm": "terminal_kill",
+      "reason": "Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available)."
+    },
+    {
+      "arm": "terminal_list_path_executables",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "terminal_list_serial_ports",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "terminal_release_control",
+      "reason": "Updates settings, flow control, dimensions or an existing process state flag; does not launch or send executable input."
+    },
+    {
+      "arm": "terminal_resize",
+      "reason": "Updates settings, flow control, dimensions or an existing process state flag; does not launch or send executable input."
+    },
+    {
+      "arm": "terminal_serial_status",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "terminal_set_flow_control",
+      "reason": "Updates settings, flow control, dimensions or an existing process state flag; does not launch or send executable input."
+    },
+    {
+      "arm": "transcript_capabilities",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "vector_cloud_truncate",
+      "reason": "Deletes vector records; the run substring in truncate does not denote workload execution."
+    },
+    {
+      "arm": "vector_truncate_collection",
+      "reason": "Deletes vector records; the run substring in truncate does not denote workload execution."
+    },
+    {
+      "arm": "workflow_approval_list",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "workflow_cancel_run",
+      "reason": "Stops/releases existing work; no new process or resumed execution is requested."
+    },
+    {
+      "arm": "workflow_get_webhook_url",
+      "reason": "Reads/persists/prunes workflow mirror state or answers an existing webhook HTTP response; execution resumes through separately gated commands (workflow/commands.rs)."
+    },
+    {
+      "arm": "workflow_human_input_list",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "workflow_persist_run_state",
+      "reason": "Reads/persists/prunes workflow mirror state or answers an existing webhook HTTP response; execution resumes through separately gated commands (workflow/commands.rs)."
+    },
+    {
+      "arm": "workflow_placement_probe",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "workflow_reload_in_flight_runs",
+      "reason": "Reads/persists/prunes workflow mirror state or answers an existing webhook HTTP response; execution resumes through separately gated commands (workflow/commands.rs)."
+    },
+    {
+      "arm": "workflow_run_list",
+      "reason": "Read-only status, capability, metadata or file-system query; no executable workload is launched by this target."
+    },
+    {
+      "arm": "workflow_wait_event_prune",
+      "reason": "Reads/persists/prunes workflow mirror state or answers an existing webhook HTTP response; execution resumes through separately gated commands (workflow/commands.rs)."
+    },
+    {
+      "arm": "workflow_webhook_respond",
+      "reason": "Reads/persists/prunes workflow mirror state or answers an existing webhook HTTP response; execution resumes through separately gated commands (workflow/commands.rs)."
+    }
+  ],
+  "commandOverrides": {
+    "adapter_update_policy": {
+      "class": "org-action",
+      "action": "host.global-surfaces"
+    },
+    "app_settings_update": {
+      "class": "org-action",
+      "action": "host.global-surfaces"
+    },
+    "mcp_set_enabled": {
+      "class": "org-action",
+      "action": "host.global-surfaces"
+    },
+    "mcp_set_tool_rules": {
+      "class": "org-action",
+      "action": "host.global-surfaces"
+    },
+    "plugin_cogset_activate": {
+      "class": "org-action",
+      "action": "host.global-surfaces"
+    },
+    "plugin_install_origin_record": {
+      "class": "org-action",
+      "action": "host.global-surfaces"
+    },
+    "plugin_set_enabled": {
+      "class": "org-action",
+      "action": "host.global-surfaces"
+    },
+    "skill_set_enabled": {
+      "class": "org-action",
+      "action": "host.global-surfaces"
+    }
+  },
+  "socketChannels": {
+    "agent.worker": { "class": "operator-only" }
+  },
   "classes": {
     "client": "Runs on the client, never on the Host; not gated here.",
     "operator-only": "Never served to a tenant principal in multi-tenant mode.",

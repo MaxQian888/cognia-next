@@ -1806,6 +1806,15 @@ impl DockerSandboxBackend {
 
 #[async_trait]
 impl SandboxExecBackend for DockerSandboxBackend {
+    fn fault_allows_fallback(&self, isolation_mandatory: bool) -> bool {
+        // Placement retains the brain's combined requireSandbox/minimum
+        // decision, not the original explicit minimum. Passing it as the
+        // mandatory flag preserves both reasons without inventing a tier.
+        cognia_environment::policy::fault_disposition(
+            self.multi_tenant(), isolation_mandatory, None,
+        ) == cognia_environment::policy::FaultDisposition::FallBack
+    }
+
     async fn spawn_sandboxed(
         &self,
         config: ExternalAgentSpawnConfig,

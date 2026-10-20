@@ -277,7 +277,21 @@ pub fn spawn(
     state: SharedState,
     device_id: String,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(run(carrier, inbound_data, state, device_id))
+    tokio::spawn(async move {
+        // Main DataChannel and relay share this admission; no event/media
+        // subscription attaches before it. RPCs remain gated per command.
+        if let Err(error) =
+            super::client::authorize_datachannel(super::peer::DATACHANNEL_LABEL, &device_id).await
+        {
+            log::warn!("signaling::dispatch: device {device_id} refused: {}", error.code);
+            carrier.set_relay_open(false);
+            if let Some(peer) = carrier.detach_peer().await {
+                peer.close().await;
+            }
+            return;
+        }
+        run(carrier, inbound_data, state, device_id).await;
+    })
 }
 
 async fn run(
@@ -853,6 +867,15 @@ pub(super) fn empty_rpc_for_test(id: &str, method: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn main_and_relay_dispatcher_gate_before_starting_the_event_or_rpc_pump() {
+        let source = include_str!("dispatch.rs");
+        let spawn = source.split("pub fn spawn(").nth(1).unwrap().split("async fn run(").next().unwrap();
+        assert!(spawn.find("authorize_datachannel(").unwrap() < spawn.find("run(carrier,").unwrap());
+        assert!(spawn.contains("carrier.set_relay_open(false)"));
+        assert!(spawn.contains("carrier.detach_peer()"));
+    }
 
     #[tokio::test]
     async fn slow_mutation_does_not_block_reads_and_mutations_keep_order() {

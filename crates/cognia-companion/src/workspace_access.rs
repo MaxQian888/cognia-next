@@ -231,6 +231,50 @@ fn is_path_segment(value: &str) -> bool {
         && value != ".."
 }
 
+/// Actions are collaboration-owned standing, not a renderer projection.
+/// This deliberately shares the approval client's proxy, timeout, credential
+/// and no-redirect policy. The admission cache lives in host_surface_gate.
+pub async fn standing_actions(
+    org_id: &str,
+    workspace_id: Option<&str>,
+    user_id: &str,
+) -> Result<Vec<String>, WorkspaceAccessError> {
+    let config = CollabServiceConfig::from_env().ok_or(WorkspaceAccessError::NotConfigured)?;
+    let endpoint = match workspace_id {
+        Some(workspace) => access_endpoint(&config.base_url, org_id, workspace, user_id)?,
+        None => {
+            let org = OrgId::parse(org_id)
+                .map_err(|error| WorkspaceAccessError::InvalidTarget(error.to_string()))?;
+            let user = UserId::parse(user_id)
+                .map_err(|error| WorkspaceAccessError::InvalidTarget(error.to_string()))?;
+            format!("{}/internal/v1/orgs/{}/access/{}", config.base_url, org.as_str(), user.as_str())
+        }
+    };
+    let client = cognia_net::proxy_config::managed_client(
+        reqwest::Client::builder().timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none()),
+        &endpoint,
+    ).map_err(|error| WorkspaceAccessError::Unreachable(error.to_string()))?;
+    let response = client.get(&endpoint)
+        .bearer_auth(&config.credential)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send().await
+        .map_err(|error| WorkspaceAccessError::Unreachable(error.to_string()))?;
+    if !response.status().is_success() {
+        return Err(WorkspaceAccessError::Upstream { status: response.status().as_u16() });
+    }
+    let body = response.bytes().await
+        .map_err(|error| WorkspaceAccessError::Unreachable(error.to_string()))?;
+    parse_standing_actions(&body)
+}
+
+fn parse_standing_actions(body: &[u8]) -> Result<Vec<String>, WorkspaceAccessError> {
+    #[derive(Deserialize)]
+    struct Standing { actions: Vec<String> }
+    serde_json::from_slice::<Standing>(body).map(|standing| standing.actions)
+        .map_err(|error| WorkspaceAccessError::Malformed(error.to_string()))
+}
+
 /// Who may approve a repository-declared runtime environment (ADR-0182).
 ///
 /// `Manage` is the bar because that is exactly what a Workspace Maintainer
@@ -383,6 +427,15 @@ mod tests {
 
     const ORG: &str = "org_acme";
     const USER: &str = "usr_alice";
+
+    #[test]
+    fn admission_actions_fail_closed_on_missing_or_malformed_standing() {
+        assert_eq!(parse_standing_actions(br#"{"actions":["execution.request"]}"#).unwrap(), vec!["execution.request"]);
+        assert!(parse_standing_actions(br#"{"actions":[]}"#).unwrap().is_empty());
+        for body in [b"{}".as_slice(), b"null", br#"{"actions":[true]}"#, b"not json"] {
+            assert!(parse_standing_actions(body).is_err());
+        }
+    }
 
     fn config() -> CollabServiceConfig {
         CollabServiceConfig::from_parts(

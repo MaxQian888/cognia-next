@@ -135,6 +135,9 @@ pub mod workflow_app_api;
 pub mod workflow_app_challenge;
 /// Who may approve a repository-declared runtime environment (ADR-0182).
 pub mod workspace_access;
+pub mod host_surface_policy;
+pub mod host_surface_gate;
+pub mod host_routes;
 pub mod ws;
 pub mod ws_bridge;
 /// The Browser Companion's device socket: status hints and, for a browser

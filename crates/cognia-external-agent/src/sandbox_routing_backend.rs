@@ -303,6 +303,12 @@ pub trait SandboxExecBackend: ExecBackend {
     /// This Host forces sandboxes (a multi-tenant baseline): a spawn without
     /// a placement is refused and a fault never falls back.
     fn multi_tenant(&self) -> bool;
+
+    /// The environment-owning driver applies the shared fault_disposition
+    /// policy. Keeping that call behind this existing boundary avoids adding
+    /// cognia-environment (and its network/store stack) to this leaf crate.
+    /// `isolation_mandatory` is the brain's folded requireSandbox/minimum rule.
+    fn fault_allows_fallback(&self, isolation_mandatory: bool) -> bool;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -624,8 +630,10 @@ impl SandboxRoutingBackend {
             }
             Err(error)
                 if error.kind == SandboxErrorKind::Fault
-                    && !placement.isolation_mandatory()
-                    && !self.sandbox.multi_tenant()
+                    // The brain folded requireSandbox and any explicit minimum
+                    // into isolation_mandatory. Placement no longer retains
+                    // their separate origins; preserve that combined decision.
+                    && self.sandbox.fault_allows_fallback(placement.isolation_mandatory())
                     && self.fallback_can_carry(&config) =>
             {
                 log::warn!("sandbox for agent {id} fell back to the existing path: {error}");
@@ -753,6 +761,10 @@ mod tests {
         }
         fn multi_tenant(&self) -> bool {
             self.multi_tenant
+        }
+        fn fault_allows_fallback(&self, mandatory: bool) -> bool {
+            // Fake driver's answer; production drivers call the shared policy.
+            !self.multi_tenant && !mandatory
         }
     }
 

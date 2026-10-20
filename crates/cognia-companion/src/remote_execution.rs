@@ -376,6 +376,12 @@ async fn execute_inner(
 ) -> Result<ExecutionOutcome, Problem> {
     let descriptor = super::command_manifest::descriptor(&request.command)
         .ok_or_else(|| missing_command_problem(&request.request_id, &request.command))?;
+    super::host_surface_gate::authorize(
+        &descriptor.capability,
+        Some(&descriptor.arm),
+        &request.principal,
+        super::host_surface_gate::command_workspace(&descriptor.arm, &request.args),
+    ).await?;
     authorize_transport(&request, descriptor)?;
     if let Err(error) = authorize_capability(&request, descriptor) {
         super::audit::record_async(

@@ -289,6 +289,14 @@ async fn dispatch_bridge(
     command: &str,
     payload: Value,
 ) -> Result<Value, Problem> {
+    // App keys/sessions authorize the application; they do not isolate the
+    // workflow's JavaScript from the Host brain. This also protects callers
+    // of these handlers outside the main router boundary.
+    require_app_execution(
+        command,
+        super::deployment::deployment_mode(),
+        super::host_surface_gate::execution_enabled(),
+    )?;
     let span = tracing::info_span!("workflow_app.bridge", command = command);
     let result = async {
         let transport = super::ws_bridge::resolve_bridge_transport(state).map_err(|_| {
@@ -352,6 +360,18 @@ async fn dispatch_bridge(
     });
     super::metrics::record_workflow_app_request(result.is_ok(), quota_rejected);
     result
+}
+
+fn require_app_execution(command: &str, mode: super::deployment::DeploymentMode, enabled: bool) -> Result<(), Problem> {
+    let executes = matches!(command,
+        "workflow_app_run_create" | "workflow_app_chat_message" | "workflow_app_batch_create"
+        | "workflow_app_batch_resume" | "workflow_app_human_input_submit" | "workflow_app_mcp"
+        | "dify_workflow_run" | "dify_chat_message");
+    if executes && (!enabled || mode == super::deployment::DeploymentMode::MultiTenant) {
+        return Err(api_error(StatusCode::SERVICE_UNAVAILABLE, "execution_isolation_unavailable",
+            "Application execution in the Host brain is unavailable"));
+    }
+    Ok(())
 }
 
 fn json_response(status: StatusCode, value: Value) -> Response {
@@ -2144,6 +2164,23 @@ pub async fn events_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_brain_execution_commands_refuse_multi_tenant_and_disabled_but_reads_remain() {
+        use crate::deployment::DeploymentMode::{MultiTenant, SingleUser};
+        for command in ["workflow_app_run_create", "workflow_app_chat_message", "workflow_app_batch_create", "workflow_app_batch_resume", "workflow_app_human_input_submit", "workflow_app_mcp", "dify_workflow_run", "dify_chat_message"] {
+            assert!(require_app_execution(command, SingleUser, true).is_ok());
+            for (mode, enabled) in [(MultiTenant, true), (MultiTenant, false), (SingleUser, false)] {
+                let error = require_app_execution(command, mode, enabled).unwrap_err();
+                assert_eq!(error.status, 503);
+                assert_eq!(error.code, "execution_isolation_unavailable");
+            }
+        }
+        for command in ["workflow_app_bootstrap", "workflow_app_run_get", "workflow_app_events_list", "workflow_app_batch_get", "workflow_app_human_input_list", "dify_workflow_status", "dify_conversations_list"] {
+            assert!(require_app_execution(command, MultiTenant, true).is_ok());
+            assert!(require_app_execution(command, MultiTenant, false).is_ok());
+        }
+    }
 
     fn claims() -> AppSessionClaims {
         AppSessionClaims {

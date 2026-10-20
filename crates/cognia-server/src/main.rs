@@ -2577,6 +2577,18 @@ fn start_host_updater(
     tokio::spawn(updater.run());
 }
 
+fn configured_exec_backend(
+    execution: cognia_sandbox_pool::boot::ExecutionSetting,
+    deployment_id: &str,
+) -> Result<Arc<dyn cognia_external_agent::exec_backend::ExecBackend>, String> {
+    if execution == cognia_sandbox_pool::boot::ExecutionSetting::Disabled {
+        // No process manager or runtime configuration exists on this path.
+        Ok(Arc::new(cognia_external_agent::exec_backend::DisabledExecBackend))
+    } else {
+        exec_backend_from_env(deployment_id).map_err(|error| format!("exec backend: {error}"))
+    }
+}
+
 async fn run_serve(
     store: &std::sync::Arc<SqliteAppStore>,
     tls_material: &tls::TlsMaterial,
@@ -2587,6 +2599,12 @@ async fn run_serve(
     mdns_requested: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // ADR-0224 A10: before anything starts, settle a pending update.
+    let execution_setting = match std::env::var("COGNIA_EXECUTION") {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => return Err("COGNIA_EXECUTION must be enabled or disabled (invalid Unicode)".into()),
+    };
+    let execution = cognia_sandbox_pool::boot::ExecutionSetting::parse(execution_setting.as_deref())?;
     let host_install = detect_host_install();
     let host_update_trial = boot_host_update(&host_install)?;
     let (restart_for_update, mut restart_requested) = tokio::sync::watch::channel(false);
@@ -2789,13 +2807,17 @@ async fn run_serve(
     {
         log::warn!("managed desktops unavailable: {}", error.code);
     }
-    let exec = exec_backend_from_env(&deployment_id).map_err(|e| format!("exec backend: {e}"))?;
+    let exec = configured_exec_backend(execution, &deployment_id)?;
     // ADR-0182/0183 — runtime environment sandboxes, in front of whatever the
     // line above resolved. Off unless this deployment enabled the pool, and
     // then it hands the same backend straight back; a deployment that DID
     // enable it and cannot get a sandbox is refused here rather than served by
     // the legacy runner it asked to stop using.
-    let pool = cognia_sandbox_pool::boot::install(exec, &data_dir, &deployment_id)
+    let pool = cognia_sandbox_pool::boot::install_for_deployment(
+        exec, &data_dir, &deployment_id,
+        cognia_companion::deployment::deployment_mode() == cognia_companion::deployment::DeploymentMode::MultiTenant,
+        execution_setting.as_deref(),
+    ).await
         .map_err(|e| format!("sandbox pool: {e}"))?;
     let exec = pool.backend;
     cognia_companion_rpc::managed_desktop_results::install_task_cleanup_backend(exec.clone());
@@ -3233,6 +3255,17 @@ async fn run_serve(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn control_plane_boot_selects_a_refusing_backend_without_runtime_configuration() {
+        let backend = super::configured_exec_backend(cognia_sandbox_pool::boot::ExecutionSetting::Disabled, "control-plane").unwrap();
+        assert_eq!(backend.kind(), "disabled");
+        assert!(backend.list().await.is_empty());
+        assert!(backend.status("unknown").await.is_none());
+        assert!(backend.reap_orphans().await.unwrap().is_empty());
+        backend.kill_all().await.unwrap();
+        assert_eq!(backend.send("unknown", "run").await.unwrap_err(), "execution_isolation_unavailable");
+    }
+
     #[test]
     fn remote_desktop_audit_is_installed_beside_companion_audit() {
         let source = include_str!("main.rs");

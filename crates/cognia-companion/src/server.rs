@@ -557,7 +557,7 @@ pub fn build_router_with_origin_policy(
 
 fn build_router_for_mode(
     state: SharedState,
-    _mode: super::deployment::DeploymentMode,
+    mode: super::deployment::DeploymentMode,
     origin_policy: super::web_origin::WebOriginPolicy,
 ) -> Router {
     // Unmetered public routes — no rate limit, no JWT. Used for service
@@ -585,6 +585,7 @@ fn build_router_for_mode(
             "/operator/maintenance/backups",
             post(super::maintenance::backup_handler),
         )
+        .layer(from_fn(super::host_routes::operator_admission))
         .layer(from_fn(middleware::require_loopback_operator));
 
     // Public Workflow App / Chatflow surface. Browser sessions are separately
@@ -810,6 +811,7 @@ fn build_router_for_mode(
         // `claude_*` commands through `remote_execution`, so a device access
         // token plus DPoP proof suffices.
         .route("/a2a", post(a2a::a2a_rpc_handler))
+        .layer(from_fn(super::host_routes::admission))
         .layer(from_fn_with_state(
             state.clone(),
             super::api::require_device_access,
@@ -846,6 +848,7 @@ fn build_router_for_mode(
             "/api/policies",
             get(super::api::policies_handler).post(super::api::create_policy_handler),
         )
+        .layer(from_fn(super::host_routes::admission))
         .layer(from_fn_with_state(
             state.clone(),
             super::api::require_owner_access,
@@ -880,6 +883,7 @@ fn build_router_for_mode(
             INTERNAL_BODY_LIMIT_BYTES,
         ))
         .layer(RequestBodyLimitLayer::new(INTERNAL_BODY_LIMIT_BYTES))
+        .layer(from_fn(super::host_routes::admission))
         .layer(from_fn_with_state(
             state.clone(),
             middleware::require_service_jwt,
@@ -892,6 +896,7 @@ fn build_router_for_mode(
             "/operator/lark/admin/{request_id}",
             get(lark_entry::admin_poll_handler),
         )
+        .layer(from_fn(super::host_routes::operator_admission))
         .layer(from_fn(middleware::require_loopback_operator));
 
     // Lark dual-entry public surface (plan 2026-07-24) — cloned handle so the
@@ -942,7 +947,11 @@ fn build_router_for_mode(
     // scripts have no pairing) nor pre-auth rate limit (events fire on every
     // tool call and are already token-gated). Merged after `with_state`
     // because the fleet router is stateless (process-global runtime).
-    router = router.merge(cognia_fleet::routes::router());
+    // Fleet hooks have machine-local auth but no tenant/person admission.
+    // Explicitly dormant on multi-tenant Hosts until they enter dispatch.
+    if mode == super::deployment::DeploymentMode::SingleUser {
+        router = router.merge(cognia_fleet::routes::router());
+    }
 
     // Public connector webhook ingress (ADR-0059 F4 / R12) — headless only.
     // Deliberately OUTSIDE the JWT middleware: webhook auth is the platform
@@ -953,7 +962,9 @@ fn build_router_for_mode(
     // cloud installs. Nested after `with_state` because the connectors
     // router carries its own (already-resolved) `ConnectorsState`.
     let headless = super::runtime::headless();
-    if let Some(services) = headless.as_deref() {
+    // Connector/Lark ingress is authenticated by its own protocol, but it
+    // can trigger Host work without a tenant-aware execution admission.
+    if let Some(services) = headless.as_deref().filter(|_| mode == super::deployment::DeploymentMode::SingleUser) {
         let emitter: std::sync::Arc<dyn cognia_connectors::axum_app::EventEmitter> =
             std::sync::Arc::new(crate::connector_events::ConnectorEventEmitter(
                 services.event_bus(),
@@ -1010,6 +1021,7 @@ fn build_router_for_mode(
     );
     let Some(services) = headless else {
         return router
+            .layer(from_fn_with_state(mode, super::host_routes::boundary))
             .layer(from_fn_with_state(
                 origin_policy,
                 super::web_origin::enforce,
@@ -1022,6 +1034,7 @@ fn build_router_for_mode(
     let content_router = services
         .ide_content_routes()
         .layer(RequestBodyLimitLayer::new(64 * 1024 * 1024))
+        .layer(from_fn(super::host_routes::admission))
         .layer(from_fn_with_state(
             state.clone(),
             middleware::require_service_jwt,
@@ -1030,6 +1043,7 @@ fn build_router_for_mode(
         .with_state(state);
     router
         .merge(content_router)
+        .layer(from_fn_with_state(mode, super::host_routes::boundary))
         .layer(from_fn_with_state(
             origin_policy,
             super::web_origin::enforce,

@@ -552,3 +552,458 @@ GRANT SELECT, INSERT ON deployment_feature_policy_audit TO collab_rollout_operat
 Both tables are deployment-level and have no RLS. The application's role is
 SELECT-only; the migrator revokes its write privileges after blanket grants
 on every boot. Audit rows are append-only, with bounded change summaries.
+
+## Multi-tenant Host
+
+Set `COGNIA_DEPLOYMENT_MODE=multi-tenant`. Before serving, the Host requires a
+`COGNIA_ENVIRONMENT_BASELINE_FILE` visible inside the container with
+`multiTenant: true`, `sandboxPool.enabled: true`, and `isolationFloor` of
+`gvisor` or `vm`. The existing catalog validator checks the baseline. The
+reachable providers' placement tiers must attest that floor (Docker checks
+registered OCI runtimes, including `runsc`; remote drivers use their tier probe).
+With a provider set, preflight probes the default remote provider used by auto
+placement and the other explicitly selectable members. It unions only healthy
+answers; a weak local primary cannot hide a healthy remote VM, and a failed VM
+provider cannot borrow a VM tier from configuration.
+Mount the baseline file and configure the sandbox runtime/provider separately.
+Configure `COGNIA_COLLAB_URL` and `COGNIA_COLLAB_SERVICE_CREDENTIAL` for standing
+lookups; no standing or an unreachable collaboration plane grants no Host access.
+
+`COGNIA_EXECUTION=disabled` boots a control-plane-only Host without a sandbox
+runtime. Execution surfaces return `503 execution_isolation_unavailable` and
+`/api/auth/config` reports `execution: "unavailable"`. Only `enabled` and
+`disabled` are accepted; the default is `enabled`. Missing or empty Compose mode
+uses `single-user`, preserving existing behavior. A stricter `multiTenant`
+baseline remains allowed in single-user mode.
+
+The disabled backend owns no process manager: even callers outside RPC cannot
+spawn or send work. Boot-time orphan reaping and empty status/list reads need
+no runtime. Disabled execution is independent of standing and applies to both
+deployment modes and to device, owner and service scopes.
+
+The policy uses resolved descriptor **arms**, after command alias resolution:
+
+- `executionCapabilities` contains only `agent.worker`, the worker-only stream
+  capability. The five manifest candidates are mixed: `agent.run` has
+  `claude_sidecar_status`, `workflow.run` has `workflow_run_list`,
+  `terminal.open` has `terminal_host_status`, `process.spawn` has `plugin_list`,
+  and `host.execute` has deletion preparation/abort and approval bookkeeping.
+  None can safely disable its whole capability. The other capabilities are
+  also mixed and retain their existing entries byte-for-byte.
+- `executionCommands` names the specific arms that launch/drive work or
+  install/activate executable content. This includes internal `client.local`
+  calls, plugin activation through `client.write`, Git subprocesses/hooks,
+  and lazy process creation hidden behind some read-looking adapters. For
+  example, Git status uses libgit2 and remains available; Git blame and stack
+  capability probing invoke system Git and are disabled. GitHub runner status
+  probes invoke `gh`; SFTP goes through `connect_or_spawn_terminal_host`.
+- `nonExecutionCommands` contains explicit `{arm, reason}` exceptions to the
+  suspicious-name guard. A name alone is not classification: `subscription`
+  and `truncate` match the regex, but do not execute scripts or runs. Likewise,
+  recording/listener tasks and stored metadata are distinct from workloads.
+
+The co-located policy tests require every manifest arm matching
+`spawn|exec|run|terminal|pty|shell|process|install|activate|launch|start|hook|python|script`
+to be execution-gated or explicitly explained. Both lists must be unique,
+disjoint and reference real arms; no regex default grants authority.
+
+`/api/whoami`, `/api/catalog`, device/invitation/policy management, `/metrics`,
+`/internal/catalog`, `/internal/events`, and `/ws/events` are not execution
+routes. Their existing authentication/standing still applies. RPC routes
+check each command, so reads in a mixed capability remain usable. The main
+DataChannel and relay likewise admit `host.observe` and gate RPCs individually.
+Descriptor-less PTY, browser/ACP, worker and interactive remote-desktop streams
+carry an explicit execution flag before attachment/ticket minting. This avoids
+turning their shared observation capability into a blanket execution ban.
+
+### Host-global overrides within mixed client capabilities
+
+`commandOverrides` applies only in multi-tenant mode, before capability standing:
+all eight arms below require `org-action` / `host.global-surfaces`. Single-user
+standing remains unchanged, and the independent execution switch still applies.
+
+| Arms                                           | Host-global effect / implementation evidence                                                                                                                     |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plugin_set_enabled`, `plugin_cogset_activate` | Reconcile the Host plugin manager/cogset; `lib/companion/desktop-write-source.ts:1840`, `:1882`, `lib/plugin/core/manager.ts:1622`. Both are execution commands. |
+| `plugin_install_origin_record`                 | Writes Host installation provenance, without installing code; `desktop-write-source.ts:1856`. It is an explicit non-execution exception.                         |
+| `mcp_set_enabled`, `mcp_set_tool_rules`        | Host MCP definitions, governance and config-sync jobs; `desktop-write-source.ts:1914`, `lib/db/mcp-servers.ts:154`.                                              |
+| `skill_set_enabled`                            | Host skill status; `desktop-write-source.ts:1819`.                                                                                                               |
+| `adapter_update_policy`                        | Host adapter configuration; `desktop-write-source.ts:1987`.                                                                                                      |
+| `app_settings_update`                          | Host settings patch; `desktop-write-source.ts:2082`.                                                                                                             |
+
+The override regression tests require real manifest arms and prohibit weakening
+the capability's standing constraint. `plugin_set_enabled` without the org
+action returns `403 host_surface_forbidden`; unavailable standing fails closed.
+The retained `client` class means no capability-wide standing requirement; it
+must not be interpreted as proof that a command runs off the Host.
+
+### Remaining client data partitioning findings (behavior unchanged)
+
+The 17 `client.read` and 44 `client.write` arms are execution targets over
+HTTP/WebSocket/WebRTC. Apart from the eight global overrides, their existing
+client classification is preserved. Account-selected storage is not proof of
+per-request tenant/person authorization. These are read-only audit findings,
+not a claim that P1 implements row-level isolation:
+
+| Family                                                                         | Current partition and evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Messages, sessions, transcript capabilities/timeline/turns, history references | Desktop/brain use the Host's active account/runtime-target Dexie (`lib/db/schema.ts:2372`, `:2434`; `lib/companion/desktop-message-source.ts:396`, `:446`; `lib/chat/mentions/host-reference-rpc.ts:140`). RPC does not select that database from the caller's person (`crates/cognia-companion-rpc/src/rpc/data_sync.rs:463`). Degraded `SqliteAppStore` is explicitly single-tenant; session/message tables lack tenant/user columns (`crates/cognia-companion-bus/src/store.rs:165`, `:190`, `:239`). No per-caller user partition is established here. |
+| Sync table discovery / `sync_pull`                                             | Discovery lists the Host registry; pull requires the authenticated tenant, maps it to a local account namespace and checks the active account (`rpc/data_sync.rs:407`, `lib/sync/desktop-sync-source.ts:146`). This is an account/tenant boundary, not separate users within the same account.                                                                                                                                                                                                                                                             |
+| `files_library_*`                                                              | Uses the active-account library without a caller-person selector (`lib/files-library/remote/host-dispatch.ts:170`, `:215`). Upload handles are bound to authenticated device IDs (`:527`); that does not partition persisted library rows or listing by tenant/user.                                                                                                                                                                                                                                                                                       |
+| `pet_*`                                                                        | Uses active Host pet/profile/character binding and conversation tables (`lib/pet/remote/host-dispatch.ts:126`, `:147`, `:402`). Device-scoped idempotency (`:486`) is not content authorization; no per-caller user partition. Headless writes are refused.                                                                                                                                                                                                                                                                                                |
+| Push token registration/revocation                                             | Partitioned by server-authenticated device ID (`rpc/data_sync.rs:283`; `crates/cognia-companion-bus/src/push.rs:103`, `:146`). One persisted Host map keyed by device, not independent tenant/user stores.                                                                                                                                                                                                                                                                                                                                                 |
+| Issues                                                                         | Active-account DB with project/container consistency checks (`lib/db/issues.ts:132`). Remote calls use a generic human actor and client-supplied project IDs (`desktop-write-source.ts:2001`, `:2039`); no caller tenant/user membership check in this path.                                                                                                                                                                                                                                                                                               |
+| Characters                                                                     | Active-account `characters` table keyed by character ID (`lib/db/characters.ts:382`, `:402`; `desktop-write-source.ts:1790`). No caller tenant/user row selector.                                                                                                                                                                                                                                                                                                                                                                                          |
+| Glance / `glance_quota_enable`                                                 | Desktop Host publisher/settings; headless refuses. Consumer leases are device-prefixed, but quota-enable forwards provider/account IDs from the payload to the shared executor (`lib/glance/remote/host-dispatch.ts:45`, `:95`). No per-caller tenant/user partition at this boundary.                                                                                                                                                                                                                                                                     |
+| `twin_profile_get`                                                             | Reads a twin ID from the active account's `twinProfile` table (`desktop-write-source.ts:2093`), without a caller-person selector.                                                                                                                                                                                                                                                                                                                                                                                                                          |
+
+### Exact execution and exception inventories
+
+The protocol JSON is the authority. The following review snapshot lists every
+arm, grouped by the dispatch target used to classify it; the test checks the
+protocol inventory against the manifest rather than inferring behavior from names.
+
+<details>
+<summary>Agent/workflow dispatch (rpc/chat.rs, rpc/data_sync.rs, desktop-write-source.ts)</summary>
+
+```text
+agent_compact, agent_resolve_permission, agent_send, agent_session_api, agent_task_resume,
+agent_task_start, bot_delivery_replay, bot_run_manual, browser_act, browser_back, browser_drag,
+browser_evaluate, browser_forward, browser_handle_dialog, browser_navigate, browser_new_page,
+browser_press_key, browser_reload, browser_scroll, browser_session_ensure, browser_set_files,
+browser_set_zoom, browser_switch_page, claude_approve, claude_call_reserve_respond, claude_compact,
+claude_plugin_tool_response, claude_protocol_adapter_message, claude_restart_sidecar,
+claude_restore, claude_send, claude_session_control, claude_set_mode, claude_tool_result_decision,
+codex_app_task_create, codex_app_task_send, execution_run_approval_respond, execution_run_control,
+execution_run_create, execution_run_resume, goal_accept, goal_continue, goal_resume,
+goal_subgoals_generate, goal_verify_retry, room_send, team_run_resume, team_run_start,
+team_task_create, workflow_approval_respond, workflow_create, workflow_handoff_create,
+workflow_human_input_submit, workflow_schedule_resume, workflow_step_result,
+workflow_trigger_manual, workflow_update
+```
+
+</details>
+
+<details>
+<summary>External agents and background/MCP process drivers (rpc/native_tools.rs, rpc/data_sync.rs, exec_backend.rs)</summary>
+
+```text
+agent_gateway_lease_prepare, agent_start, agent_tool_host_control, background_job_spawn_bridge,
+background_job_spawn_scheduled, background_job_spawn_session, background_monitor_register_scheduled,
+external_agent_admit_run, external_agent_detect_runtimes, external_agent_probe_runtime_version,
+external_agent_resolve_decision, external_agent_run_turn, external_agent_session_mutate,
+external_agent_update, external_bridge_restart, external_bridge_start, mcp_server_restart,
+mcp_server_start, plugin_api_batch_invoke, plugin_api_invoke, send_to_external_agent,
+siwc_responses_open, siwc_send_app_server, siwc_spawn_app_server, spawn_external_agent
+```
+
+</details>
+
+<details>
+<summary>Terminal/shell/SSH and sandbox dispatch (rpc/terminal.rs, terminal/headless.rs, commands.rs, host_bridge.rs)</summary>
+
+```text
+acp_terminal_create, acp_terminal_write, cua_sandbox_exec, cua_sandbox_start,
+environment_task_shell_exec, project_environment_execute, run_agent_hook, sandbox_exec, shell_exec,
+ssh_terminal_set_forward_enabled, ssh_terminal_spawn, ssh_terminal_write, terminal_exec,
+terminal_headless_exec, terminal_headless_run, terminal_headless_spawn, terminal_host_service,
+terminal_kill_port, terminal_list_tmux_sessions, terminal_list_tmux_windows, terminal_open_serial,
+terminal_reattach, terminal_serial_attach, terminal_serial_write, terminal_spawn,
+terminal_take_control, terminal_write
+```
+
+</details>
+
+<details>
+<summary>Plugin executable lifecycle (rpc/plugins.rs, plugin-runtime/lifecycle.rs and python/commands.rs)</summary>
+
+```text
+plugin_activate_vscode, plugin_backup_restore, plugin_bundle_install_from_file,
+plugin_bundle_install_from_url, plugin_cli_exec, plugin_cogpack_install_staged,
+plugin_cogpack_transfer_install, plugin_cogset_activate, plugin_commit_staged_update,
+plugin_computer_use_bash, plugin_computer_use_execute, plugin_deactivate_js,
+plugin_deactivate_vscode, plugin_download_version, plugin_finalize_staged_update, plugin_install,
+plugin_install_from_directory, plugin_install_from_files, plugin_install_from_github,
+plugin_invoke_js_callback, plugin_invoke_vscode_rpc, plugin_launch_js, plugin_load_vscode,
+plugin_python_call, plugin_python_call_hook, plugin_python_call_tool, plugin_python_eval,
+plugin_python_get_tools, plugin_python_host_response, plugin_python_import,
+plugin_python_initialize, plugin_python_install_deps, plugin_python_install_uv, plugin_python_load,
+plugin_python_module_call, plugin_python_module_getattr, plugin_python_push_config,
+plugin_python_unload, plugin_set_enabled, plugin_stage_from_directory, plugin_stage_version,
+plugin_unload_vscode, plugin_vscode_download_vsix, plugin_vscode_install_vsix,
+plugin_vscode_install_vsix_from_path, plugin_vscode_send_response, plugin_wasm_activate,
+plugin_wasm_call, plugin_wasm_deactivate, plugin_wasm_install_from_file,
+plugin_wasm_install_from_git, plugin_wasm_install_from_url, plugin_wasm_load,
+plugin_wasm_renderer_response, plugin_wasm_unload
+```
+
+</details>
+
+<details>
+<summary>Host provisioning/session launch (rpc/host_admin.rs, remote-desktop/session.rs, siwc/app_server.rs)</summary>
+
+```text
+automation_execute, browser_cdp_execute, browser_credential_fill, browser_embed_act,
+browser_embed_back, browser_embed_create, browser_embed_evaluate, browser_embed_forward,
+browser_embed_navigate, browser_embed_reload, browser_extension_install_confirm,
+browser_extension_install_crx, browser_extension_install_unpacked,
+browser_extension_install_webstore, browser_extension_remove, browser_extension_set_enabled,
+browser_extension_update, browser_extensions_check_updates, browser_local_frames_subscribe,
+browser_local_install, browser_local_rpc, browser_local_start, canvas_run_python,
+desktop_launch_app, environment_local_call, file_share_activate, file_share_sftpgo_set,
+host_runtime_restart, host_update_install, managed_desktop_connect, managed_desktop_control_input,
+managed_desktop_create, managed_desktop_local_call, managed_desktop_prepare_template,
+remote_desktop_binding_launch, remote_desktop_local_call, remote_desktop_session_open
+```
+
+</details>
+
+<details>
+<summary>Executable installation and scheduler dispatch (scheduling/scheduler, plugin-runtime, sidecar)</summary>
+
+```text
+browser_context_submit, codeserver_activate_proxy, codeserver_activate_proxy_temporary,
+codeserver_agent_run_in_terminal, codeserver_build_proxy, codeserver_ensure, download_cognia_cli,
+dsh_runtime_finalize, dsh_runtime_install, ensure_system_lsp_host, fleet_codex_hooks_install,
+fleet_codex_install, fleet_opencode_install, fleet_scripts_install, lsp_host_ensure,
+lsp_host_request, scheduled_task_backfill, scheduled_task_create, scheduled_task_emit_event,
+scheduled_task_import, scheduled_task_resume, scheduled_task_run_now, scheduled_task_update,
+scheduler_arm_task, scheduler_confirm_task, scheduler_create_task, scheduler_enable_task,
+scheduler_request_elevation, scheduler_run_task_now, scheduler_update_task,
+skills_bundle_upload_commit, skills_install_atomic, skills_install_mirrored, skills_install_native
+```
+
+</details>
+
+<details>
+<summary>Workspace/environment/media execution (rpc/environment.rs, task-workspace, plugin media)</summary>
+
+```text
+best_of_n_select, best_of_n_start, bot_installation_mutate, bot_trigger_set_armed,
+code_checkout_export, code_result_apply, code_snapshot_apply, code_snapshot_checkout_get,
+code_snapshot_create, environment_build_start, environment_ports_list, github_workspace_clone,
+github_workspace_commit_and_push, github_workspace_remove, managed_desktop_handoff_revoke_source,
+managed_desktop_results_capture, managed_desktop_results_complete, plugin_media_add_transition,
+plugin_media_apply_video_effect, plugin_media_concatenate_videos, plugin_media_export_video,
+plugin_media_get_video_frame, plugin_media_read_analysis_frame, project_mutate,
+provider_diagnostics_run_balance_script, provider_diagnostics_start, sandbox_snapshot_create,
+sandbox_snapshot_fork, sandbox_snapshot_restore, task_workspace_apply, task_workspace_begin,
+task_workspace_bundle_acquire, task_workspace_bundle_apply, task_workspace_bundle_begin,
+task_workspace_bundle_handoff_retry, task_workspace_bundle_handoff_undo,
+task_workspace_bundle_turn_begin, task_workspace_bundle_turn_settle,
+task_workspace_changeset_capture, task_workspace_environment_adopt,
+task_workspace_environment_create_branch, task_workspace_environment_delete_branch,
+task_workspace_integration_prepare, task_workspace_integration_publish,
+task_workspace_integration_rebuild, task_workspace_integration_rollback,
+task_workspace_maintenance_run, task_workspace_managed_adopt, task_workspace_managed_archive,
+task_workspace_managed_delete, task_workspace_managed_restore, task_workspace_project_source_ensure,
+task_workspace_prune, task_workspace_reconcile, task_workspace_remote_source_ensure,
+task_workspace_resolve_conflict, task_workspace_restore_snapshot, task_workspace_revision_apply,
+task_workspace_session_scratch_ensure, task_workspace_settle, task_workspace_undo,
+thread_handoff_accept, thread_handoff_commit, thread_handoff_offer, twin_ingest_source,
+twin_job_resume, twin_job_retry, video_analyze, video_get_info, video_trim
+```
+
+</details>
+
+<details>
+<summary>Git subprocesses/hooks (cognia-git commands.rs and exec-backed mutations)</summary>
+
+```text
+git_blame, git_checkout_branch, git_cherry_pick, git_clone, git_clone_guarded, git_commit,
+git_create_branch, git_create_tag, git_delete_branch, git_delete_tag, git_diff_staged_all,
+git_discard, git_discard_all, git_fetch, git_init, git_interactive_rebase, git_merge,
+git_merge_abort, git_pull, git_push, git_push_tag, git_rebase, git_remote_add, git_remote_remove,
+git_rename_branch, git_reset, git_resolve_conflict, git_restore, git_revert, git_sequencer_abort,
+git_sequencer_continue, git_stack_capabilities, git_stack_history, git_stack_push,
+git_stack_restack, git_stack_revert, git_stack_set_parent, git_stack_validate, git_stage,
+git_stash_apply, git_stash_drop, git_stash_pop, git_stash_push, git_sync, git_unstage,
+git_worktree_add, git_worktree_commit, git_worktree_list, git_worktree_prune, git_worktree_remove
+```
+
+</details>
+
+<details>
+<summary>SFTP reaches/starts terminal-host (rpc/sftp.rs -> terminal/sftp_service.rs -> host_client.rs)</summary>
+
+```text
+sftp_create_dir, sftp_delete_entry, sftp_download_close, sftp_download_open,
+sftp_download_read_chunk, sftp_list_dir, sftp_realpath, sftp_rename_entry, sftp_session_close,
+sftp_stat, sftp_upload_abort, sftp_upload_commit, sftp_upload_open, sftp_upload_write_chunk
+```
+
+</details>
+
+<details>
+<summary>Native control/openers can restart processes, launch applications or provision executable runners (process_registry, github/runner, selection_toolbar, tray).</summary>
+
+```text
+companion_tunnel_start, control_managed_process, github_runner_create, selection_toolbar_execute,
+tray_run_native_action
+```
+
+</details>
+
+<details>
+<summary>Terminal host adapter uses connect_or_spawn_terminal_host even for these requests (terminal/host_client.rs:308).</summary>
+
+```text
+terminal_list_all, terminal_list_for_project, terminal_reattach, terminal_serial_attach,
+terminal_take_control
+```
+
+</details>
+
+<details>
+<summary>Registers executable-content reload or workflow triggers (plugin watcher and workflow/commands.rs).</summary>
+
+```text
+plugin_watch_start, workflow_register_trigger
+```
+
+</details>
+
+<details>
+<summary>GitHub runner commands spawn gh even for network status/preflight/cancel (cognia-github-runner/src/lib.rs:300).</summary>
+
+```text
+github_runner_cancel, github_runner_pairing, github_runner_preflight, github_runner_refresh
+```
+
+</details>
+
+<details>
+<summary>Input/continuation targets drive existing executable sessions (automation dispatcher, hook response and workflow waitpoint decision).</summary>
+
+```text
+claude_plugin_hook_response, desktop_click, desktop_drag, desktop_expand_element, desktop_hold_key,
+desktop_invoke_pattern, desktop_keys, desktop_mouse_button, desktop_paste, desktop_perform_action,
+desktop_scroll, desktop_type, desktop_window_op, desktop_zoom, workflow_waitpoint_decide
+```
+
+</details>
+
+<details>
+<summary>nonExecutionCommands — every exception and its one-line reason</summary>
+
+- Read-only status, capability, metadata or file-system query; no executable workload is launched by this target.
+
+  `a2ui_bridge_runtime_paths`, `background_job_list`, `background_job_read`, `background_monitor_list`, `browser_runtime_status`, `codex_app_runtime_status`, `dsh_runtime_facts`, `execution_run_approval_list`, `execution_run_detail`, `execution_run_events`, `execution_run_get`, `external_agent_cognia_models`, `external_agent_config_get`, `external_agent_config_list`, `external_agent_list`, `external_agent_session_query`, `fleet_codex_hooks_capabilities`, `fleet_codex_hooks_status`, `fleet_scripts_status`, `github_runner_list`, `host_runtime_status`, `is_external_agent_running`, `list_managed_processes`, `mcp_server_status`, `plugin_get_capabilities`, `plugin_list`, `plugin_permission_list`, `plugin_python_get_info`, `plugin_python_is_initialized`, `plugin_python_list`, `plugin_python_runtime_info`, `plugin_runtime_snapshot`, `scheduled_task_runs`, `session_reference_search`, `session_reference_snapshot`, `sidecar_restart_count`, `subscription_get_account_detail`, `subscription_get_account_env`, `subscription_list_provider_ids`, `task_workspace_list_runs`, `terminal_complete_paths`, `terminal_detect_multiplexer`, `terminal_host_status`, `terminal_list_path_executables`, `terminal_list_serial_ports`, `terminal_serial_status`, `transcript_capabilities`, `workflow_approval_list`, `workflow_human_input_list`, `workflow_placement_probe`, `workflow_run_list`
+
+- Observes or waits for an existing terminal/forward; does not create or write to a process.
+
+  `acp_terminal_get_info`, `acp_terminal_get_session_terminals`, `acp_terminal_is_running`, `acp_terminal_list`, `acp_terminal_output`, `acp_terminal_wait_for_exit`, `ssh_terminal_forward_status`
+
+- Stops, removes or cancels existing work/artifacts; does not start execution (cleanup remains available).
+
+  `acp_terminal_kill`, `acp_terminal_kill_session_terminals`, `acp_terminal_release`, `browser_extension_install_cancel`, `browser_local_uninstall`, `canvas_cancel_python`, `codeserver_uninstall`, `environment_task_shell_release`, `fleet_codex_hooks_uninstall`, `fleet_codex_uninstall`, `fleet_opencode_uninstall`, `fleet_scripts_uninstall`, `plugin_process_kill`, `plugin_uninstall`, `plugin_vscode_uninstall`, `scheduled_task_cancel_run`, `skills_uninstall`, `skills_uninstall_native`, `ssh_terminal_kill`, `terminal_close_serial`, `terminal_headless_kill`, `terminal_kill`
+
+- Starts recording observations of browser/native input, not a process, agent, PTY, workflow or plugin program.
+
+  `browser_embed_start_record`, `record_start`
+
+- Reads the on-disk extension registry or installed browser candidates; no browser runtime is started (browser/extensions.rs, user_chrome).
+
+  `browser_extensions_list`, `browser_user_chrome_discover`
+
+- Starts an observation/listener/controller task, not a user process, agent, PTY, workflow or plugin code.
+
+  `ccswitch_watch_start`, `companion_mdns_start`, `companion_server_start`, `connectors_start_server`, `desktop_pick_session_start`, `fleet_monitor_start`, `gateway_start`, `git_watch_start`, `perf_start_sampling`, `selection_toolbar_start`, `session_import_watch_start`
+
+- Reads/writes runtime argument configuration files without starting or restarting code-server (rpc/plugins.rs).
+
+  `codeserver_read_runtime_args`, `codeserver_write_runtime_args`
+
+- Updates settings, flow control, dimensions or an existing process state flag; does not launch or send executable input.
+
+  `companion_set_remote_terminal`, `plugin_set_shell_allowlist`, `set_external_agent_running`, `ssh_terminal_resize`, `terminal_detach`, `terminal_host_configure`, `terminal_host_sync_profiles`, `terminal_release_control`, `terminal_resize`, `terminal_set_flow_control`
+
+- Updates the connector runtime ownership lease only; it does not instantiate the runtime (connectors/runtime-lease.ts).
+
+  `connectors_runtime_lease_acquire`, `connectors_runtime_lease_release`, `connectors_runtime_lease_renew`
+
+- Removes an inactive runtime installation directory (external-agent/dsh_runtime); no executable is launched.
+
+  `dsh_runtime_remove`
+
+- Stops/releases existing work; no new process or resumed execution is requested.
+
+  `external_agent_cancel_run`, `external_agent_release_run`, `team_run_pause`, `team_run_stop`, `workflow_cancel_run`
+
+- Focuses an existing terminal view; it does not create a PTY (desktop-write-source.ts).
+
+  `fleet_focus_terminal`
+
+- Reads branch parent pointers through libgit2 config; stack::parent_map does not spawn git (cognia-git/src/stack.rs:137).
+
+  `git_stack_parents`
+
+- Updates the Rust plugin metadata/status ledger or stops its process; executable activation uses plugin_set_enabled/launch_js/WASM/VSCode arms (plugin-runtime/lifecycle.rs).
+
+  `plugin_disable`, `plugin_enable`, `plugin_load`, `plugin_unload`
+
+- Persists validated installation provenance only; desktop-write-source.ts does not install or activate content.
+
+  `plugin_install_origin_record`
+
+- Deletes stored files; no executable installation or invocation.
+
+  `skills_empty_trash`
+
+- Subscription credential/account configuration or provider HTTP access; the script substring in subscription does not denote code execution.
+
+  `subscription_authed_get`, `subscription_authed_request`, `subscription_clear_runtime`, `subscription_delete_account`, `subscription_delete_preset`, `subscription_get_account`, `subscription_get_active`, `subscription_get_preset`, `subscription_init`, `subscription_list_accounts`, `subscription_list_presets`, `subscription_reauthenticate_codex_account`, `subscription_refresh_codex_account`, `subscription_rename_account`, `subscription_replace_account_credential`, `subscription_save_account`, `subscription_save_preset`, `subscription_set_active`, `subscription_set_default_preset`, `subscription_set_preset`, `subscription_volcengine_usage`
+
+- Deletes vector records; the run substring in truncate does not denote workload execution.
+
+  `vector_cloud_truncate`, `vector_truncate_collection`
+
+- Reads/persists/prunes workflow mirror state or answers an existing webhook HTTP response; execution resumes through separately gated commands (workflow/commands.rs).
+
+  `workflow_get_webhook_url`, `workflow_persist_run_state`, `workflow_reload_in_flight_runs`, `workflow_wait_event_prune`, `workflow_webhook_respond`
+
+</details>
+
+Application execution is intentionally dormant on multi-tenant Hosts until it
+has a sandbox binding: every `app-session` route marked `execution` returns
+`503 execution_isolation_unavailable`, even with a healthy pool. Workflow runs,
+chat, batches/resume, human-input resume and MCP currently enter the Host brain,
+where code nodes use `new Function`; installing a pool does not isolate them.
+`HostRouteClass`/`HostRoute` document this boundary and regression tests pin it.
+Read-only application routes retain their session/key authentication.
+
+| DataChannel label                      | Adapter / Host capability                                                                                |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `cognia.signaling`, legacy `cognia.v2` | RPC/events/media dispatcher: `host.observe`, plus per-command RPC admission. The relay shares this gate. |
+| `cognia.terminal`                      | Direct terminal adapter: `terminal.open`.                                                                |
+| `cognia.rfb`                           | Direct remote desktop adapter: `host.observe`, plus existing session/control checks.                     |
+
+There is no separate browser or events DataChannel; their RPC/events use the
+main dispatcher. Unknown labels are refused. Exhaustiveness tests compare the
+policy inventory to peer labels and direct callback fields, so new adapters
+must be classified and wired through admission.
+
+P1 workspace-action admissions always require the org fallback
+`host.global-surfaces`; Host-owned root-to-workspace resolution remains dormant
+until P4. Standing, including denials, is cached for at most five seconds per
+org/person/workspace. Revocation applies at the next admission after expiry;
+running-work fencing remains in the collaboration server. Fleet and connector/
+Lark ingress are not mounted in multi-tenant mode: their machine/platform auth
+does not yet provide a tenant execution principal.
+
+The complete per-path inventory is `crates/cognia-companion/src/host_routes.rs`.
+New, unclassified routes fail closed in multi-tenant mode.
+
+| Route class         | Registered surfaces                                                                                                                           | Admission boundary                                                                                                                                                                |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `public-auth`       | Health/discovery and `/api/auth/*`                                                                                                            | Existing authentication; socket tickets also apply the Host capability gate before minting.                                                                                       |
+| `ticketed-socket`   | `/ws/events`, `/ws/terminal`, `/ws/browser/{session_id}`, `/ws/acp`, `/ws/worker`, `/ws/browser-companion`, `/ws/remote-desktop/{session_id}` | Path-bound, single-use tickets; each channel's capability is classified.                                                                                                          |
+| `app-session`       | `/api/portal/bootstrap`, `/api/apps/*`, `/v1/*`                                                                                               | Signed app sessions or hashed app keys with expiry, revocation, scope and app/account binding. Execution routes are dormant in multi-tenant mode regardless of pool availability. |
+| `gated-by-dispatch` | Device/owner REST, RPC/A2A, service/internal routes, IDE relay/content and operator endpoints                                                 | Command admission or the same capability gate after route authentication. Loopback/operator authentication establishes service scope.                                             |
+
+Fleet `/api/fleet/*`, connector `/connectors/*` and integration callbacks are
+inventoried separately as authentication surfaces and mounted only in
+single-user mode. App session validation lives in
+`workflow_app_api.rs::verify_session/session_for_slug`; Dify/MCP app keys reach
+`lib/workflow/apps/api-key-service.ts::authenticateWorkflowAppApiKey` through
+`dify-bridge-service.ts::dispatch` and `mcp-service.ts::invokeWorkflowAppMcp`.

@@ -203,6 +203,10 @@ services:
       # COGNIA_LOGTO_ISSUER must equal the token `iss` claim,
       # i.e. `${LOGTO_ENDPOINT}/oidc`, and be reachable FROM this container —
       # see LOGTO.md for the issuer-consistency footgun.
+      # Empty mode must not reach the fail-closed mode parser.
+      COGNIA_DEPLOYMENT_MODE: ${COGNIA_DEPLOYMENT_MODE:-single-user}
+      COGNIA_ENVIRONMENT_BASELINE_FILE: ${COGNIA_ENVIRONMENT_BASELINE_FILE:-}
+      COGNIA_EXECUTION: ${COGNIA_EXECUTION:-enabled}
       COGNIA_LOGTO_ISSUER: ${COGNIA_LOGTO_ISSUER:-}
       COGNIA_LOGTO_AUDIENCE: ${COGNIA_LOGTO_AUDIENCE:-}
       COGNIA_LOGTO_WEB_CLIENT_ID: ${COGNIA_LOGTO_WEB_CLIENT_ID:-}

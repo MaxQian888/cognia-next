@@ -1042,6 +1042,29 @@ impl SecurityStore {
         Ok(found.flatten())
     }
 
+    /// Resolve a device's person within its own tenant, never the process's
+    /// currently unlocked account. Both status and the person join are checked
+    /// on every admission, outside the short-lived collaboration cache.
+    pub fn active_device_person(
+        &self,
+        tenant_id: &str,
+        device_id: &str,
+    ) -> Result<Option<HostBinding>, SecurityStoreError> {
+        let conn = self.conn.lock();
+        let mut query = conn.prepare(
+            "SELECT h.local_account_namespace, h.tenant_id, h.verifier_digest, h.pair_host_id,
+                    h.user_id, h.org_id, h.canonical_user_id, h.canonical_org_id
+             FROM host_bindings h JOIN devices d
+               ON h.tenant_id = d.tenant_id AND h.user_id = d.user_id
+             WHERE d.tenant_id = ?1 AND d.id = ?2 AND d.status = 'active'
+               AND d.user_id IS NOT NULL",
+        )?;
+        let bindings = query.query_map(params![tenant_id, device_id], HostBinding::from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        // No arbitrary first-row choice if a future schema permits aliases.
+        Ok(if bindings.len() == 1 { bindings.into_iter().next() } else { None })
+    }
+
     /// Whether this device is the tenant's Owner, i.e. the deployment's trust
     /// root rather than a member acting under it.
     ///
@@ -4675,6 +4698,30 @@ CREATE TABLE devices (
 
     const ADA: &str = "usr_aaaaaaaaaaaaaaaaaaaaaaaa";
     const BOB: &str = "usr_bbbbbbbbbbbbbbbbbbbbbbbb";
+
+    #[test]
+    fn admission_person_is_tenant_local_and_requires_an_active_owned_device() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        store.assign_device_user("tenant-a", "device-a", Some(ADA), 101).unwrap();
+        assert_eq!(store.active_device_person("tenant-a", "device-a").unwrap().unwrap().user_id.as_deref(), Some(ADA));
+        store.bind_host_person("test:tenant-a", ADA, Some("org_local"), Some("usr_canonical"), Some("org_canonical"), 101).unwrap();
+        let person = store.active_device_person("tenant-a", "device-a").unwrap().unwrap();
+        assert_eq!(person.canonical_user_id.as_deref(), Some("usr_canonical"));
+        assert_eq!(person.canonical_org_id.as_deref(), Some("org_canonical"));
+        assert!(store.active_device_person("tenant-b", "device-a").unwrap().is_none());
+        store.assign_device_user("tenant-a", "device-a", None, 102).unwrap();
+        assert!(store.active_device_person("tenant-a", "device-a").unwrap().is_none());
+        store.assign_device_user("tenant-a", "device-a", Some(ADA), 103).unwrap();
+        for status in ["revoked", "quarantined", "suspended"] {
+            store.conn.lock().execute("UPDATE devices SET status = ?1 WHERE id = 'device-a'", [status]).unwrap();
+            // device_user alone would still return Some here.
+            assert_eq!(store.device_user("tenant-a", "device-a").unwrap().as_deref(), Some(ADA));
+            assert!(store.active_device_person("tenant-a", "device-a").unwrap().is_none());
+        }
+        store.conn.lock().execute("UPDATE devices SET status = 'active', user_id = ?1 WHERE id = 'device-a'", [BOB]).unwrap();
+        assert!(store.active_device_person("tenant-a", "device-a").unwrap().is_none());
+    }
 
     fn device_user(store: &SecurityStore, tenant: &str, device: &str) -> Option<String> {
         store.device_user(tenant, device).unwrap()

@@ -168,6 +168,31 @@ impl ProviderSet {
             .expect("a provider set is never empty")
     }
 
+    /// Boot admission asks what can actually be placed, not the primary
+    /// driver's status card. Auto placement can use the default remote when
+    /// local cannot meet the floor; explicit placements can name any member.
+    /// Probe the default first, then union reachable members, including
+    /// non-default remotes reachable through explicit provider placement.
+    /// A failed remote
+    /// contributes no tier and can never be attested by the local driver.
+    pub async fn available_placement_tiers(&self) -> Result<Vec<IsolationTier>, SandboxSpawnError> {
+        let mut tiers = std::collections::BTreeSet::new();
+        let mut failure = None;
+        let default = self.default_remote.as_deref();
+        let members = default.and_then(|id| self.members.get(id)).into_iter()
+            .chain(self.members.values().filter(|member| Some(member.id.as_str()) != default));
+        for member in members {
+            match member.status.available_tiers().await {
+                Ok(available) => tiers.extend(available),
+                Err(error) => { if failure.is_none() { failure = Some(error); } }
+            }
+        }
+        if tiers.is_empty() {
+            if let Some(error) = failure { return Err(error); }
+        }
+        Ok(tiers.into_iter().collect())
+    }
+
     /// Every member, as the console lists them.
     pub async fn views(&self) -> Vec<ProviderView> {
         let mut views = Vec::with_capacity(self.members.len());
@@ -244,6 +269,15 @@ impl ProviderSet {
 
 #[async_trait]
 impl SandboxExecBackend for ProviderSet {
+    fn fault_allows_fallback(&self, isolation_mandatory: bool) -> bool {
+        // Placement retains the brain's combined requireSandbox/minimum
+        // decision, not the original explicit minimum. Passing it as the
+        // mandatory flag preserves both reasons without inventing a tier.
+        cognia_environment::policy::fault_disposition(
+            self.multi_tenant(), isolation_mandatory, None,
+        ) == cognia_environment::policy::FaultDisposition::FallBack
+    }
+
     async fn spawn_sandboxed(
         &self,
         mut config: ExternalAgentSpawnConfig,
@@ -773,6 +807,54 @@ mod tests {
     use std::collections::HashMap as StdHashMap;
     use std::time::Duration;
 
+    #[tokio::test]
+    async fn preflight_uses_default_remote_vm_beside_weak_local_and_refuses_when_remote_is_down() {
+        use crate::boot::{preflight, Preflight, PreflightInput};
+        use cognia_environment::baseline::{load_baseline_from, BaselineInputs};
+        let mut baseline = load_baseline_from(&BaselineInputs {
+            sandbox_pool_enabled: Some("true".into()),
+            runner_image: Some(format!("ghcr.io/acme/runner@sha256:{}", "1".repeat(64))),
+            agent_bundle_image: Some(format!("ghcr.io/acme/bundle@sha256:{}", "2".repeat(64))),
+            ..BaselineInputs::default()
+        }).unwrap().baseline;
+        baseline.multi_tenant = true;
+        baseline.isolation_floor = IsolationTier::Vm;
+        for healthy in [true, false] {
+            let (local, _) = member("local", "docker", false);
+            let (mut remote, _) = member("cloud", "e2b", true);
+            remote.status = Arc::new(Member { tiers: vec![IsolationTier::Vm], unreachable: !healthy, ..Default::default() });
+            let set = ProviderSet::new(vec![local, remote], Some("cloud".into())).unwrap();
+            assert_eq!(set.primary().id, "local", "the status card remains local");
+            assert_eq!(set.default_remote(), Some("cloud"));
+            let tiers = set.available_placement_tiers().await.unwrap();
+            assert_eq!(tiers.contains(&IsolationTier::Vm), healthy);
+            let result = preflight(PreflightInput { multi_tenant: true, execution: None,
+                baseline: &baseline, runtime: Some(Ok(&tiers)) });
+            if healthy { assert_eq!(result.unwrap(), Preflight::Ready); }
+            else { assert!(result.unwrap_err().contains("isolationFloor=vm")); }
+        }
+    }
+
+    #[tokio::test]
+    async fn placement_probe_includes_explicit_nondefault_providers_and_never_attests_failed_tiers() {
+        let (local, _) = member("local", "docker", false);
+        let (mut down, _) = member("default", "e2b", true);
+        down.status = Arc::new(Member {
+            tiers: vec![IsolationTier::Vm], unreachable: true, ..Default::default()
+        });
+        let (mut explicit, _) = member("explicit", "e2b", true);
+        explicit.status = Arc::new(Member {
+            tiers: vec![IsolationTier::Vm], ..Default::default()
+        });
+        for default in [None, Some("default".into())] {
+            let set = ProviderSet::new(vec![local.clone(), down.clone(), explicit.clone()], default).unwrap();
+            assert_eq!(set.available_placement_tiers().await.unwrap(),
+                vec![IsolationTier::Container, IsolationTier::Vm]);
+        }
+        let set = ProviderSet::new(vec![down], Some("default".into())).unwrap();
+        assert_eq!(set.available_placement_tiers().await.unwrap_err().code, "sandbox_provider_unreachable");
+    }
+
     /// A member that records spawns and tool leases.
     #[derive(Default)]
     struct Member {
@@ -836,6 +918,10 @@ mod tests {
 
     #[async_trait]
     impl SandboxExecBackend for Member {
+        fn fault_allows_fallback(&self, mandatory: bool) -> bool {
+            cognia_environment::policy::fault_disposition(false, mandatory, None)
+                == cognia_environment::policy::FaultDisposition::FallBack
+        }
         async fn spawn_sandboxed(
             &self,
             config: ExternalAgentSpawnConfig,

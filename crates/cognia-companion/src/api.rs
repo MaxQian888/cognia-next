@@ -66,7 +66,7 @@ pub fn router() -> Router<SharedState> {
 
 /// Bumped when a field is ADDED. Nothing is ever removed or reshaped: a
 /// client built against version 1 keeps reading version 2.
-pub const AUTH_CONFIG_VERSION: u32 = 5;
+pub const AUTH_CONFIG_VERSION: u32 = 6;
 
 /// The name this Host reports to the clients that pair with it. Set it on a
 /// headless or containerised Host, whose machine name is meaningless.
@@ -111,6 +111,7 @@ pub const ENV_WEB_ORIGIN: &str = "COGNIA_WEB_ORIGIN";
 struct AuthConfigResponse {
     config_version: u32,
     deployment_mode: &'static str,
+    execution: &'static str,
     host_id: String,
     tenant_id: Option<String>,
     oidc: Option<OidcPublicConfig>,
@@ -323,6 +324,7 @@ fn auth_config_payload(
     });
     Ok(AuthConfigResponse {
         config_version: AUTH_CONFIG_VERSION,
+        execution: if super::host_surface_gate::execution_available() { "available" } else { "unavailable" },
         deployment_mode: match mode {
             DeploymentMode::SingleUser => "single-user",
             DeploymentMode::MultiTenant => "multi-tenant",
@@ -2209,6 +2211,14 @@ impl SocketChannel {
         }
     }
 
+    fn execution(self) -> bool {
+        matches!(self, Self::Terminal | Self::Browser | Self::Acp | Self::Worker | Self::RemoteDesktop)
+    }
+
+    #[cfg(test)]
+    const ALL: [Self; 7] = [Self::Events, Self::Terminal, Self::Browser, Self::Acp,
+        Self::Worker, Self::BrowserCompanion, Self::RemoteDesktop];
+
     fn binding(self, session_id: Option<&str>) -> Result<(String, &'static str), Problem> {
         match (self, session_id) {
             (Self::Events, None) => Ok(("/ws/events".to_string(), "events")),
@@ -2303,6 +2313,13 @@ async fn socket_ticket_handler(
     let security = store()?;
     consume_device_proof(&access.tenant_id, &access.sub, &verified_proof)?;
     let required_capability = request.channel.capability();
+    super::host_surface_gate::authorize_channel(required_capability, request.channel.execution(), &DeviceContext {
+        device_id: access.sub.clone(),
+        tenant_id: access.tenant_id.clone(),
+        scope: "device".into(),
+        granted_scopes: vec![],
+        authorization_capabilities: Some(snapshot.capabilities.clone()),
+    }).await?;
     if !snapshot
         .capabilities
         .iter()
@@ -3638,6 +3655,7 @@ mod tests {
         let response = AuthConfigResponse {
             config_version: AUTH_CONFIG_VERSION,
             deployment_mode: "multi-tenant",
+            execution: "unavailable",
             host_id: "host".into(),
             tenant_id: None,
             oidc: Some(OidcPublicConfig {
@@ -3658,7 +3676,8 @@ mod tests {
             host_name: None,
         };
         let value = serde_json::to_value(&response).unwrap();
-        assert_eq!(value["configVersion"], 5);
+        assert_eq!(value["configVersion"], 6);
+        assert_eq!(value["execution"], "unavailable");
         assert_eq!(value["oidc"]["issuerKind"], "logto");
         assert_eq!(value["deploymentMode"], "multi-tenant");
         assert_eq!(value["oidc"]["webClientId"], "web");
@@ -3682,6 +3701,38 @@ mod tests {
             serde_json::to_value(&named).unwrap()["hostName"],
             "Studio Mac"
         );
+    }
+
+    #[test]
+    fn every_socket_channel_has_a_host_surface_policy_including_workers() {
+        let policy = super::super::host_surface_policy::POLICY.as_ref().unwrap();
+        // A new enum variant must also enter ALL; otherwise adding a channel
+        // could silently evade the policy exhaustiveness test.
+        let variants = include_str!("api.rs").split("enum SocketChannel {").nth(1).unwrap()
+            .split('}').next().unwrap().lines()
+            .filter(|line| {
+                let line = line.trim();
+                line.ends_with(',') && !line.starts_with("//") && !line.starts_with('#')
+            }).count();
+        assert_eq!(variants, SocketChannel::ALL.len());
+        for channel in SocketChannel::ALL {
+            assert!(policy.get(channel.capability()).is_some(), "{channel:?} is unclassified");
+        }
+        assert_eq!(policy.get("agent.worker").unwrap().class,
+            super::super::host_surface_policy::SurfaceClass::OperatorOnly);
+        assert!(SocketChannel::Terminal.execution(), "terminal tickets must respect execution disabled");
+        assert!(SocketChannel::Browser.execution());
+        assert!(SocketChannel::Acp.execution());
+        assert!(SocketChannel::Worker.execution());
+        assert!(policy.executes(SocketChannel::Worker.capability()));
+        assert!(!SocketChannel::Events.execution());
+        assert!(!policy.executes(SocketChannel::Events.capability()));
+        assert!(SocketChannel::RemoteDesktop.execution());
+        assert!(!policy.executes(SocketChannel::BrowserCompanion.capability()));
+        let handler = include_str!("api.rs").split("async fn socket_ticket_handler(").nth(1).unwrap()
+            .split("/// Host-wide switches").next().unwrap();
+        assert!(handler.find("host_surface_gate::authorize_channel(").unwrap()
+            < handler.find(".issue_socket_ticket(").unwrap(), "tickets must be admitted before minting");
     }
 
     #[test]
