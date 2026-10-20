@@ -18,7 +18,11 @@ import type {
   ExternalAgentCapabilityLevel,
   ExternalAgentCapabilityProfileV1,
 } from "./external-agent-capability"
-import type { ExternalAgentCogniaModelBinding } from "./model-binding"
+import type {
+  AgentModelRoleOverrides,
+  AgentModelSlotSelection,
+  ExternalAgentCogniaModelBinding,
+} from "./model-binding"
 import type {
   AgentCapabilities as SdkAcpAgentCapabilities,
   Annotations as SdkAcpAnnotations,
@@ -1537,7 +1541,7 @@ export interface ExternalAgentRetryConfig {
  * which stores it per conversation; re-exported here for the external-agent code
  * that has always imported it from this module.
  */
-export type { ExternalAgentCogniaModelBinding }
+export type { AgentModelRoleOverrides, AgentModelSlotSelection, ExternalAgentCogniaModelBinding }
 
 export function normalizeCogniaModelBinding(
   value: unknown
@@ -1563,6 +1567,70 @@ export function normalizeCogniaModelBinding(
     modelId: binding.modelId.trim(),
     ...(binding.accountId !== undefined ? { accountId: binding.accountId as string | null } : {}),
   }
+}
+
+/** Most slots one override layer may name. */
+export const AGENT_MODEL_ROLE_SLOT_LIMIT = 64
+
+const SLOT_ID_PATTERN =
+  /^(?:subagent\.default|tier\.(?:haiku|sonnet|opus)|aux\.[a-z][a-z0-9-]{0,31})$/
+const REASONING_EFFORT_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/
+
+/**
+ * Validate per-slot model overrides. `undefined` and `null` pass through
+ * (omitted / cleared); anything malformed throws instead of being dropped, so
+ * a stored override never silently stops applying.
+ */
+export function normalizeAgentModelRoleOverrides(
+  value: unknown
+): AgentModelRoleOverrides | null | undefined {
+  if (value === undefined || value === null) return value
+  if (typeof value !== "object" || Array.isArray(value))
+    throw new Error("Invalid model role overrides")
+  const record = value as Record<string, unknown>
+  if (
+    Object.keys(record).some((key) => key !== "version" && key !== "slots") ||
+    record.version !== 1 ||
+    typeof record.slots !== "object" ||
+    record.slots === null ||
+    Array.isArray(record.slots)
+  )
+    throw new Error("Invalid model role overrides")
+  const entries = Object.entries(record.slots as Record<string, unknown>)
+  if (entries.length > AGENT_MODEL_ROLE_SLOT_LIMIT) throw new Error("Too many model role slots")
+  const slots: Record<string, AgentModelSlotSelection> = {}
+  for (const [slot, raw] of entries) {
+    if (!SLOT_ID_PATTERN.test(slot)) throw new Error(`Invalid model role slot: ${slot}`)
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw))
+      throw new Error(`Invalid model role selection: ${slot}`)
+    const selection = raw as Record<string, unknown>
+    if (selection.kind === "inherit-primary") {
+      if (Object.keys(selection).length !== 1)
+        throw new Error(`Invalid model role selection: ${slot}`)
+      slots[slot] = { kind: "inherit-primary" }
+      continue
+    }
+    if (
+      selection.kind !== "cognia" ||
+      Object.keys(selection).some(
+        (key) => key !== "kind" && key !== "binding" && key !== "reasoningEffort"
+      ) ||
+      (selection.reasoningEffort !== undefined &&
+        (typeof selection.reasoningEffort !== "string" ||
+          !REASONING_EFFORT_PATTERN.test(selection.reasoningEffort)))
+    )
+      throw new Error(`Invalid model role selection: ${slot}`)
+    const binding = normalizeCogniaModelBinding(selection.binding)
+    if (!binding) throw new Error(`Invalid model role selection: ${slot}`)
+    slots[slot] = {
+      kind: "cognia",
+      binding,
+      ...(selection.reasoningEffort !== undefined
+        ? { reasoningEffort: selection.reasoningEffort as string }
+        : {}),
+    }
+  }
+  return { version: 1, slots }
 }
 
 /**
@@ -1681,6 +1749,13 @@ export interface ExternalAgentConfig {
   enabled: boolean
   /** Use task-scoped Cognia gateway access instead of the runtime's own provider settings. */
   cogniaModel?: ExternalAgentCogniaModelBinding | null
+  /**
+   * Per-slot models for this configuration's gateway tasks (child default,
+   * tier aliases, auxiliary calls). Read only alongside `cogniaModel`, and only
+   * for a turn on that binding's provider and account: a turn the caller moves
+   * elsewhere runs on its primary alone.
+   */
+  modelRoles?: AgentModelRoleOverrides
   /** @see ExternalAgentStateIsolation. Absent means `shared`. */
   stateIsolation?: ExternalAgentStateIsolation
   /**
@@ -1777,6 +1852,7 @@ export interface ExternalAgentConfig {
 export interface CreateExternalAgentInput {
   name: string
   cogniaModel?: ExternalAgentCogniaModelBinding | null
+  modelRoles?: AgentModelRoleOverrides
   /** Defaults to `isolated` for a new configuration. */
   stateIsolation?: ExternalAgentStateIsolation
   subscriptionAccountId?: string | null
@@ -1815,6 +1891,8 @@ export interface UpdateExternalAgentInput {
   transport?: ExternalAgentTransport
   /** Null clears the configured binding; omission preserves it. */
   cogniaModel?: ExternalAgentCogniaModelBinding | null
+  /** Null clears the slot overrides; omission preserves them. */
+  modelRoles?: AgentModelRoleOverrides | null
   stateIsolation?: ExternalAgentStateIsolation
   /** Null clears the binding (follow the active account); omission preserves it. */
   subscriptionAccountId?: string | null
@@ -2760,6 +2838,11 @@ export interface ExternalAgentResult {
 export interface ExternalAgentExecutionOptions {
   /** Task-specific Cognia model binding. Omit to inherit the configured binding. */
   cogniaModel?: ExternalAgentCogniaModelBinding | null
+  /**
+   * Task-specific slot overrides, merged slot by slot over the configuration's
+   * `modelRoles`. Only meaningful with a Cognia binding.
+   */
+  modelRoles?: AgentModelRoleOverrides
   /**
    * Ceiling on the gateway ticket a Cognia-model task runs under (a Bot run's
    * remaining token allowance under its cost cap). Only meaningful with a

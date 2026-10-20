@@ -8,9 +8,13 @@ import type {
 import { parse as parseToml } from "smol-toml"
 import { z } from "zod"
 import { resolveModelMeta } from "@/lib/ai/model-options"
+import { reasoningTiersFor } from "@cognia/provider-core/providers/reasoning-tiers"
+import { isHeadlessHost } from "@/lib/platform/detect"
+import { cogniaModelReasoningFacts } from "./cognia-model-options"
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { GatewayModelMetadata } from "@/types/gateway"
 import { findRuntimeForConfig } from "./install-catalog"
+import type { TaskModelPlan } from "./model-plan"
 
 export const GATEWAY_TASK_ENV = "COGNIA_GATEWAY_TASK_CONFIG"
 /** Placeholder GitHub token for Copilot BYOK tasks; never a credential. */
@@ -173,6 +177,19 @@ export function parseGatewaySessionId(
   return { taskId, nativeSessionId, ...(binding ? { binding } : {}) }
 }
 
+export interface CodexCatalogRequestModel {
+  /** Exact Codex catalog slug and gateway model selector. */
+  slug: string
+  /** This model's context capacity in tokens, when known. */
+  contextWindow?: number
+  /** This model's input budget before Codex compacts its history. */
+  autoCompactTokenLimit?: number
+  /** Input kinds supported by this model; text is always included. */
+  inputModalities: ("text" | "image")[]
+  /** Offered effort values; omitted unless reasoning support is confirmed. */
+  reasoningEfforts?: string[]
+}
+
 export interface GatewayTaskPayload {
   taskId: string
   ownerAccountId: string | null
@@ -191,6 +208,22 @@ export interface GatewayTaskPayload {
   rebind?: true
   /** Fixed relative file names only; native hosts derive the state root. No secrets. */
   files: Record<string, string>
+  /** Small catalog request assembled from vendored Codex metadata by the task host. */
+  codexModelCatalog?: { models: CodexCatalogRequestModel[] }
+}
+
+function codexAutoCompactTokenLimit(
+  meta: Pick<GatewayModelMetadata, "contextLength" | "maxInputTokens" | "maxOutputTokens">
+): number | undefined {
+  if (!meta.contextLength) return undefined
+  return Math.max(
+    1,
+    Math.min(
+      meta.maxInputTokens ?? meta.contextLength,
+      meta.contextLength -
+        (meta.maxOutputTokens ?? Math.min(16384, Math.floor(meta.contextLength / 4)))
+    )
+  )
 }
 
 // These are argv grammars, not shell commands. Unknown flags are refused so a
@@ -522,6 +555,8 @@ function customizationEnvironment(
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
         "ANTHROPIC_DEFAULT_SONNET_MODEL",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
         "DEEPSEEK_API_KEY",
         "DEEPSEEK_BASE_URL",
         "CODEX_API_KEY",
@@ -652,7 +687,8 @@ const openCodeV2Customization = z
 /** Explicit inline customization is separate from task-owned provider routing. */
 function openCodeCustomization(
   config: ExternalAgentConfig,
-  selectedModel: string
+  selectedModel: string,
+  subagentModel?: string
 ): Record<string, unknown> {
   const source = config.process?.env
   if (source?.OPENCODE_CONFIG || source?.OPENCODE_CONFIG_DIR)
@@ -660,12 +696,11 @@ function openCodeCustomization(
       "Cognia model customization requires inline OpenCode settings instead of an external configuration path"
     )
   const raw = source?.OPENCODE_CONFIG_CONTENT
-  if (!raw) return {}
   const invalid = () => new Error("Invalid or unsupported Cognia model OpenCode customization")
   let input: Record<string, unknown>
   try {
-    if (raw.length > 65_536) throw invalid()
-    const parsed: unknown = JSON.parse(raw)
+    if (raw && raw.length > 65_536) throw invalid()
+    const parsed: unknown = raw ? JSON.parse(raw) : {}
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw invalid()
     input = { ...parsed }
   } catch {
@@ -685,13 +720,30 @@ function openCodeCustomization(
   const result = (v2 ? openCodeV2Customization : openCodeV1Customization).safeParse(input)
   if (!result.success) throw invalid()
   const output: Record<string, unknown> = { ...result.data }
-  // Custom agents and slash commands may otherwise select a different provider.
-  for (const key of v2 ? ["agents", "commands"] : ["agent", "command"]) {
+  // Commands stay on the primary; only native subagents get the child default.
+  const agentKey = v2 ? "agents" : "agent"
+  for (const key of [agentKey, v2 ? "commands" : "command"]) {
     const entries = output[key] as Record<string, Record<string, unknown>> | undefined
     if (entries)
       output[key] = Object.fromEntries(
-        Object.entries(entries).map(([name, entry]) => [name, { ...entry, model: selectedModel }])
+        Object.entries(entries).map(([name, entry]) => [
+          name,
+          {
+            ...entry,
+            model:
+              key === agentKey && entry.mode === "subagent"
+                ? (subagentModel ?? selectedModel)
+                : selectedModel,
+          },
+        ])
       )
+  }
+  if (subagentModel !== undefined) {
+    const agents = (output[agentKey] ?? {}) as Record<string, Record<string, unknown>>
+    for (const name of ["general", "explore"]) {
+      agents[name] = { ...agents[name], model: subagentModel }
+    }
+    output[agentKey] = agents
   }
   return output
 }
@@ -706,6 +758,8 @@ export function buildGatewayTaskConfig(input: {
   settings: Pick<AppSettings, "providerSettings" | "customProviders">
   ownerAccountId: string | null
   modelMetadata?: GatewayModelMetadata
+  modelMetadataById?: Record<string, GatewayModelMetadata>
+  modelPlan?: TaskModelPlan
   /** The paired device that owns a Host-run task (see {@link GatewayTaskPayload}). */
   originDeviceId?: string | null
   /** Move an existing task to this binding (see {@link GatewayTaskPayload}). */
@@ -719,11 +773,18 @@ export function buildGatewayTaskConfig(input: {
    */
   model: string | undefined
 } {
-  const { config, binding, taskId, endpoint, secret, model, settings } = input
+  const { config, binding, taskId, endpoint, secret, settings } = input
+  const modelPlan =
+    input.modelPlan && Object.keys(input.modelPlan.slots).length ? input.modelPlan : undefined
+  if (input.modelPlan && input.model !== input.modelPlan.primaryModelId)
+    throw new Error("Gateway model and model plan primary model differ")
+  const model = modelPlan?.primaryModelId ?? input.model
+  const subagent = modelPlan?.slots["subagent.default"]
   const runtime = cogniaGatewayRuntime(config)
   if (!runtime)
     throw new Error("This external agent does not support isolated Cognia gateway tasks")
   const meta =
+    input.modelMetadataById?.[model] ??
     input.modelMetadata ??
     resolveModelMeta(
       binding.providerId,
@@ -735,6 +796,58 @@ export function buildGatewayTaskConfig(input: {
     throw new Error(
       "The selected model does not support the tools and streaming this agent requires"
     )
+  }
+  let codexModelCatalog: GatewayTaskPayload["codexModelCatalog"]
+  if (runtime === "codex" && subagent) {
+    const ids = [...new Set([model, ...modelPlan!.models])]
+    const localFacts = isHeadlessHost()
+      ? undefined
+      : cogniaModelReasoningFacts(binding.providerId, settings)
+    codexModelCatalog = {
+      models: ids.map((id) => {
+        const facts =
+          input.modelMetadataById?.[id] ??
+          (id === model
+            ? meta
+            : resolveModelMeta(
+                binding.providerId,
+                id,
+                settings.providerSettings,
+                settings.customProviders
+              ))
+        const autoCompactTokenLimit = codexAutoCompactTokenLimit(facts)
+        return {
+          slug: id,
+          ...(facts.contextLength !== undefined ? { contextWindow: facts.contextLength } : {}),
+          ...(autoCompactTokenLimit !== undefined ? { autoCompactTokenLimit } : {}),
+          inputModalities: facts.supportsVision ? ["text", "image"] : ["text"],
+          ...(facts.supportsReasoning === true
+            ? {
+                reasoningEfforts: [
+                  ...(localFacts
+                    ? localFacts.modelEffortValues(id)
+                    : reasoningTiersFor({
+                        providerId: binding.providerId,
+                        modelId: id,
+                        reasoning: true,
+                      })),
+                ],
+              }
+            : {}),
+        }
+      }),
+    }
+    if (
+      ids.length > 32 ||
+      codexModelCatalog.models.some(
+        (entry) =>
+          [...entry.slug].length < 1 ||
+          [...entry.slug].length > 256 ||
+          /[\u0000-\u001f\u007f-\u009f]/.test(entry.slug) ||
+          entry.reasoningEfforts?.some((effort) => !/^[a-z][a-z0-9_-]{0,31}$/.test(effort))
+      )
+    )
+      throw new Error("Invalid gateway task configuration")
   }
   const launch = customizedGatewayLaunch(config, runtime)
   const files: Record<string, string> = {}
@@ -821,17 +934,26 @@ export function buildGatewayTaskConfig(input: {
     })
   } else if (runtime === "codex") {
     const custom = codexCustomization(config)
+    const agents = subagent
+      ? {
+          default_subagent_model: subagent.modelId,
+          ...(subagent.reasoningEffort !== undefined
+            ? { default_subagent_reasoning_effort: subagent.reasoningEffort }
+            : {}),
+        }
+      : undefined
     files["codex/config.toml"] =
       [
         ...Object.entries(custom).map(([key, value]) => `${key} = ${JSON.stringify(value)}`),
         `model = ${JSON.stringify(model)}`,
         'model_provider = "cognia"',
         `review_model = ${JSON.stringify(model)}`,
-        ...(meta.contextLength ? [`model_context_window = ${meta.contextLength}`] : []),
-        ...(meta.contextLength
-          ? [
-              `model_auto_compact_token_limit = ${Math.max(1, Math.min(meta.maxInputTokens ?? meta.contextLength, meta.contextLength - (meta.maxOutputTokens ?? Math.min(16384, Math.floor(meta.contextLength / 4)))))}`,
-            ]
+        ...(codexModelCatalog ? ['model_catalog_json = "model-catalog.json"'] : []),
+        ...(!codexModelCatalog && meta.contextLength
+          ? [`model_context_window = ${meta.contextLength}`]
+          : []),
+        ...(!codexModelCatalog && meta.contextLength
+          ? [`model_auto_compact_token_limit = ${codexAutoCompactTokenLimit(meta)}`]
           : []),
         "[model_providers.cognia]",
         'name = "Cognia"',
@@ -839,6 +961,12 @@ export function buildGatewayTaskConfig(input: {
         `env_key = ${JSON.stringify(GATEWAY_TOKEN_ENV)}`,
         'wire_api = "responses"',
         "requires_openai_auth = false",
+        ...(agents
+          ? [
+              "[agents]",
+              ...Object.entries(agents).map(([key, value]) => `${key} = ${JSON.stringify(value)}`),
+            ]
+          : []),
       ].join("\n") + "\n"
     if (findRuntimeForConfig(config)?.runtimeId === "codex-acp") {
       // The maintained ACP adapter forwards these overrides on both thread/start
@@ -849,17 +977,11 @@ export function buildGatewayTaskConfig(input: {
         model,
         review_model: model,
         model_provider: "cognia",
-        ...(meta.contextLength
+        ...(agents ? { agents } : {}),
+        ...(!codexModelCatalog && meta.contextLength
           ? {
               model_context_window: meta.contextLength,
-              model_auto_compact_token_limit: Math.max(
-                1,
-                Math.min(
-                  meta.maxInputTokens ?? meta.contextLength,
-                  meta.contextLength -
-                    (meta.maxOutputTokens ?? Math.min(16384, Math.floor(meta.contextLength / 4)))
-                )
-              ),
+              model_auto_compact_token_limit: codexAutoCompactTokenLimit(meta),
             }
           : {}),
         model_providers: {
@@ -875,12 +997,51 @@ export function buildGatewayTaskConfig(input: {
     }
   } else if (runtime === "opencode") {
     selectedModel = `cognia/${model}`
-    const custom = openCodeCustomization(config, selectedModel)
-    const limit = {
-      ...(meta.contextLength ? { context: meta.contextLength } : {}),
-      ...(meta.maxInputTokens ? { input: meta.maxInputTokens } : {}),
-      ...(meta.maxOutputTokens ? { output: meta.maxOutputTokens } : {}),
+    const custom = openCodeCustomization(
+      config,
+      selectedModel,
+      subagent ? `cognia/${subagent.modelId}` : undefined
+    )
+    const modelEntry = (id: string, v2: boolean) => {
+      const facts =
+        id === model
+          ? meta
+          : (input.modelMetadataById?.[id] ??
+            resolveModelMeta(
+              binding.providerId,
+              id,
+              settings.providerSettings,
+              settings.customProviders
+            ))
+      if (facts.supportsTools === false || facts.supportsStreaming === false)
+        throw new Error(
+          `The selected model ${id} does not support the tools and streaming this agent requires`
+        )
+      const limit = {
+        ...(facts.contextLength ? { context: facts.contextLength } : {}),
+        ...(facts.maxInputTokens ? { input: facts.maxInputTokens } : {}),
+        ...(facts.maxOutputTokens ? { output: facts.maxOutputTokens } : {}),
+      }
+      const modalities = {
+        input: facts.supportsVision ? ["text", "image"] : ["text"],
+        output: ["text"],
+      }
+      return v2
+        ? {
+            name: id,
+            ...(Object.keys(limit).length ? { limit } : {}),
+            capabilities: { tools: true, ...modalities },
+          }
+        : {
+            name: id,
+            ...(facts.contextLength && facts.maxOutputTokens ? { limit } : {}),
+            tool_call: true,
+            reasoning: facts.supportsReasoning === true,
+            modalities,
+          }
     }
+    const modelsFor = (v2: boolean) =>
+      Object.fromEntries((modelPlan?.models ?? [model]).map((id) => [id, modelEntry(id, v2)]))
     // The bundled ACP executable is OpenCode V1; V2 provider declarations are
     // explicitly unsupported by its compatibility reader (v1.18.32).
     env.OPENCODE_CONFIG_CONTENT = JSON.stringify(
@@ -888,26 +1049,16 @@ export function buildGatewayTaskConfig(input: {
         ? {
             ...custom,
             model: selectedModel,
-            small_model: selectedModel,
+            small_model: modelPlan?.slots["aux.small"]
+              ? `cognia/${modelPlan.slots["aux.small"].modelId}`
+              : selectedModel,
             enabled_providers: ["cognia"],
             provider: {
               cognia: {
                 name: "Cognia",
                 npm: "@ai-sdk/openai-compatible",
                 options: { baseURL: endpoint, apiKey: `{env:${GATEWAY_TOKEN_ENV}}` },
-                models: {
-                  [model]: {
-                    name: model,
-                    // V1 requires both values when a limit object is present.
-                    ...(meta.contextLength && meta.maxOutputTokens ? { limit } : {}),
-                    tool_call: true,
-                    reasoning: meta.supportsReasoning === true,
-                    modalities: {
-                      input: meta.supportsVision ? ["text", "image"] : ["text"],
-                      output: ["text"],
-                    },
-                  },
-                },
+                models: modelsFor(false),
               },
             },
           }
@@ -920,17 +1071,7 @@ export function buildGatewayTaskConfig(input: {
                 package: "@opencode/ai/providers/openai-compatible",
                 env: [GATEWAY_TOKEN_ENV],
                 settings: { baseURL: endpoint },
-                models: {
-                  [model]: {
-                    name: model,
-                    ...(Object.keys(limit).length ? { limit } : {}),
-                    capabilities: {
-                      tools: true,
-                      input: meta.supportsVision ? ["text", "image"] : ["text"],
-                      output: ["text"],
-                    },
-                  },
-                },
+                models: modelsFor(true),
               },
             },
           }
@@ -1098,9 +1239,10 @@ export function buildGatewayTaskConfig(input: {
     env.ANTHROPIC_BASE_URL = endpoint.replace(/\/v1\/?$/, "")
     env.ANTHROPIC_AUTH_TOKEN = secret
     env.ANTHROPIC_MODEL = model
-    env.ANTHROPIC_DEFAULT_OPUS_MODEL = model
-    env.ANTHROPIC_DEFAULT_SONNET_MODEL = model
-    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = model
+    env.ANTHROPIC_DEFAULT_OPUS_MODEL = modelPlan?.slots["tier.opus"]?.modelId ?? model
+    env.ANTHROPIC_DEFAULT_SONNET_MODEL = modelPlan?.slots["tier.sonnet"]?.modelId ?? model
+    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = modelPlan?.slots["tier.haiku"]?.modelId ?? model
+    if (subagent) env.CLAUDE_CODE_SUBAGENT_MODEL = subagent.modelId
     env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
     if (meta.maxOutputTokens) env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(meta.maxOutputTokens)
   }
@@ -1112,6 +1254,7 @@ export function buildGatewayTaskConfig(input: {
     ...(input.originDeviceId ? { originDeviceId: input.originDeviceId } : {}),
     ...(input.rebind ? { rebind: true as const } : {}),
     files,
+    ...(codexModelCatalog ? { codexModelCatalog } : {}),
   } satisfies GatewayTaskPayload)
   const args = [...launch.args, ...launchArgs]
   if (runtime === "qwen")
@@ -1123,7 +1266,8 @@ export function buildGatewayTaskConfig(input: {
     const overrides: string[] = []
     for (const line of files["codex/config.toml"].split("\n").filter(Boolean)) {
       if (line.startsWith("[")) section = line.slice(1, -1)
-      else overrides.push("-c", `${section ? `${section}.` : ""}${line}`)
+      else if (section || !line.startsWith("model_catalog_json ="))
+        overrides.push("-c", `${section ? `${section}.` : ""}${line}`)
     }
     args.unshift(...overrides)
   }

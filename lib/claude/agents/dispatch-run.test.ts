@@ -637,6 +637,9 @@ describe("startDispatchRun, per-call model override", () => {
       description: "d",
       prompt: "p",
       model: "base",
+      provider: "openai",
+      cogniaModel: { providerId: "p", modelId: "m" },
+      modelRoles: { version: 1, slots: { "subagent.default": { kind: "inherit-primary" } } },
     })
     await startDispatchRun({
       subagentId: "coder",
@@ -647,7 +650,13 @@ describe("startDispatchRun, per-call model override", () => {
       caller,
       model: "fast",
     })
-    expect(mockDispatch.mock.calls[0][0]).toMatchObject({ id: "coder", model: "fast" })
+    expect(mockDispatch.mock.calls[0][0]).toMatchObject({
+      id: "coder",
+      model: "fast",
+      provider: "openai",
+      cogniaModel: { providerId: "p", modelId: "m" },
+      modelRoles: { version: 1, slots: { "subagent.default": { kind: "inherit-primary" } } },
+    })
     // The registry's definition is untouched for the next run.
     expect(mockGetDef.mock.results[0].value).toMatchObject({ model: "base" })
   })

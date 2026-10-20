@@ -305,6 +305,7 @@ fn provider_capabilities(gateway: &GatewayState) -> Value {
                     "credentialPool": pool,
                     "keysOnCooldown": on_cooldown,
                     "models": models,
+                    "modelMetadataById": provider.model_metadata.iter().map(|m| (m.id.clone(), m.clone())).collect::<std::collections::BTreeMap<_, _>>(),
                 })
             })
             .collect();
@@ -850,6 +851,25 @@ mod tests {
         .await
         .expect_err("an unknown name must be refused, not answered");
         assert_eq!(error.code, "unknown_command");
+    }
+
+    #[test]
+    fn provider_capabilities_carry_each_models_own_reasoning_metadata() {
+        let gateway = GatewayState::new();
+        gateway.set_snapshot(serde_json::from_value(serde_json::json!({
+            "providers": [{"id":"p", "protocol":"openai", "baseUrl":"https://example.test/v1", "enabled":true,
+                "models":["parent", "child"], "modelMetadata":[{"id":"parent", "supportsReasoning":false}, {"id":"child", "supportsReasoning":true}]}],
+            "generatedAtMs":1
+        })).unwrap());
+        let capabilities = provider_capabilities(&gateway);
+        assert_eq!(
+            capabilities["providers"][0]["modelMetadataById"]["child"]["supportsReasoning"],
+            true
+        );
+        assert_eq!(
+            capabilities["providers"][0]["modelMetadataById"]["parent"]["supportsReasoning"],
+            false
+        );
     }
 
     /// Before the first profile lands there is no snapshot, and both

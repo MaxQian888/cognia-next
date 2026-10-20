@@ -1216,6 +1216,33 @@
                   "null"
                 ]
               },
+              "modelPlan": {
+                "type": "object",
+                "required": [
+                  "additionalModels",
+                  "modelBindings"
+                ],
+                "properties": {
+                  "additionalModels": {
+                    "type": "array",
+                    "maxItems": 31,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  },
+                  "modelBindings": {
+                    "type": "object",
+                    "maxProperties": 64,
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "example": {}
+                  }
+                },
+                "additionalProperties": false
+              },
               "budget": {
                 "type": "object",
                 "properties": {
@@ -1284,6 +1311,21 @@
               }
             },
             "additionalProperties": true
+          },
+          "modelMetadataById": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
           }
         },
         "additionalProperties": false
@@ -1427,6 +1469,33 @@
                   "openai-responses",
                   "anthropic"
                 ]
+              },
+              "modelPlan": {
+                "type": "object",
+                "required": [
+                  "additionalModels",
+                  "modelBindings"
+                ],
+                "properties": {
+                  "additionalModels": {
+                    "type": "array",
+                    "maxItems": 31,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  },
+                  "modelBindings": {
+                    "type": "object",
+                    "maxProperties": 64,
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "example": {}
+                  }
+                },
+                "additionalProperties": false
               },
               "budget": {
                 "type": "object",
@@ -100903,5 +100972,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "f4f376e7b6850a697990a6131ab56bd499379474d07bba1a69ff1613ecad91ec"
+  "catalogHash": "b27cb0e1574cc42e508bbfda273ead2abb218f70e419e83318ff5fc9fc74cfb4"
 }

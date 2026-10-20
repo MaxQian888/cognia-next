@@ -23,8 +23,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { tokenizeShellCommand } from "@/lib/mcp/config-transfer"
 import {
+  addAgentFormGatewayConfig,
   DEFAULT_RETRY_DELAY_MS,
   DEFAULT_RETRY_MAX_DELAY_MS,
   DEFAULT_RETRY_MAX_RETRIES,
@@ -32,6 +32,7 @@ import {
 } from "@/lib/ai/agent/external/config/add-agent-form"
 import type { AddAgentFormState } from "@/hooks/agent/use-add-agent-form"
 import { CogniaModelPicker } from "../cognia-model-picker"
+import { RoleModelFields, type RoleModelFieldsBlocker } from "../role-model-fields"
 
 export interface ExecutionTuningFieldsProps {
   form: AddAgentFormState
@@ -152,25 +153,30 @@ export function ExecutionTuningFields({ form, collapsible = true }: ExecutionTun
 }
 
 /** The Cognia model binding, judged against the connection the form describes. */
-export function AddAgentCogniaModelField({ form }: { form: AddAgentFormState }) {
+export function AddAgentCogniaModelField({
+  form,
+  roleModelsBlocker,
+}: {
+  form: AddAgentFormState
+  /** Set when the target (a paired Host) cannot store sub-task models yet. */
+  roleModelsBlocker?: RoleModelFieldsBlocker
+}) {
   const { data, setField, shape } = form
+  const config = addAgentFormGatewayConfig(data, shape)
   return (
-    <CogniaModelPicker
-      config={{
-        protocol: data.protocol,
-        transport: data.transport,
-        process: {
-          command: data.command || (data.autoSpawnServer ? "opencode" : ""),
-          args: tokenizeShellCommand(data.args) ?? [],
-        },
-        network:
-          data.transport !== "stdio" && !data.autoSpawnServer
-            ? { endpoint: data.endpoint }
-            : undefined,
-        metadata: { ...shape.preset?.metadata, autoSpawnServer: data.autoSpawnServer },
-      }}
-      value={data.cogniaModel}
-      onChange={(cogniaModel) => setField("cogniaModel", cogniaModel)}
-    />
+    <div className="space-y-3">
+      <CogniaModelPicker
+        config={config}
+        value={data.cogniaModel}
+        onChange={(cogniaModel) => setField("cogniaModel", cogniaModel)}
+      />
+      <RoleModelFields
+        config={config}
+        primary={data.cogniaModel}
+        value={data.modelRoles}
+        blocker={roleModelsBlocker}
+        onChange={(modelRoles) => setField("modelRoles", modelRoles)}
+      />
+    </div>
   )
 }

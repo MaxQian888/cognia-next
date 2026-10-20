@@ -103,6 +103,8 @@ export interface PluginSubagentDef {
   externalAgentConfigId?: string
   /** Task-scoped Cognia model/account for an external preset; null keeps native model selection. */
   cogniaModel?: import("@/types/agent/external-agent").ExternalAgentCogniaModelBinding | null
+  /** Role overrides, read only with an external preset and a Cognia binding. */
+  modelRoles?: import("@cognia/agent-contracts/model-binding").AgentModelRoleOverrides
   /**
    * MCP server ids/names to forward into the external agent's ACP session
    * (`session/new` `mcpServers`) when this subagent runs on an external preset.

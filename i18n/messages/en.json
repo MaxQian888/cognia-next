@@ -18246,6 +18246,55 @@
         "runnable": "Runnable"
       }
     },
+    "roleModels": {
+      "choose": "Choose a model",
+      "description": "Native subagents, model aliases and helper calls of this runtime can run on other models from the primary model's provider and account. Unset slots keep the primary model. A turn moved to another provider or account runs on its primary model alone.",
+      "effort": "Reasoning effort",
+      "effortDefault": "Model default",
+      "efforts": {
+        "high": "High",
+        "low": "Low",
+        "medium": "Medium",
+        "minimal": "Minimal",
+        "xhigh": "Extra high"
+      },
+      "empty": "No other compatible models from this provider.",
+      "hints": {
+        "auxiliary": "Helper calls such as titles and summaries; not a subagent.",
+        "childDefault": "Used when a subagent's own definition and the spawning call name no model.",
+        "tier": "The model this runtime's alias resolves to."
+      },
+      "hostOutdated": "The paired Host must be updated before sub-task models can be set.",
+      "invalid": "Fix the sub-task models before saving.",
+      "modeLabel": "{slot}: model source",
+      "modelLabel": "{slot}: model",
+      "modes": {
+        "inherit": "Inherit from the agent configuration",
+        "model": "Another model",
+        "primary": "Primary model"
+      },
+      "needsPrimary": "Turn on Cognia models and choose a primary model to set sub-task models.",
+      "noSlots": "This runtime runs every call on the primary model.",
+      "refusals": {
+        "crossAccount": "Sub-task models must use the primary model's account.",
+        "crossProvider": "Choose a model from {provider}. Sub-task models must use the primary model's provider.",
+        "effortUnsupported": "This model does not accept the selected reasoning effort.",
+        "tooManyModels": "Too many different models for one task. Use fewer sub-task models.",
+        "unsupportedSlot": "This runtime does not support this sub-task model setting. Remove it to save."
+      },
+      "remove": "Remove",
+      "removeStale": "Remove the unsupported sub-task model setting",
+      "sameAccount": "Uses the primary model's provider account.",
+      "search": "Search {provider} models…",
+      "slots": {
+        "auxSmall": "Small helper model",
+        "subagentDefault": "Default subagent model",
+        "tierHaiku": "Haiku alias",
+        "tierOpus": "Opus alias",
+        "tierSonnet": "Sonnet alias"
+      },
+      "title": "Sub-task models"
+    },
     "runCommand": "Run /{name}",
     "runtimes": {
       "activeSessions": "Sessions running now",
@@ -55866,6 +55915,8 @@
           "research": "Research",
           "writing": "Writing"
         },
+        "cogniaModelHint": "Optional: run this subagent's external task on a Cognia model. Leave it off to follow the agent configuration the dispatch resolves.",
+        "cogniaModelPinnedHint": "The pinned agent configuration already runs on a Cognia model. Set one here only to override it for this subagent.",
         "compactAtTokensInvalid": "Enter a positive whole token count.",
         "compactAtTokensUnsupported": "Context compaction policy is unavailable for provider or external runtime overrides.",
         "configTitle": "Advanced configuration",
@@ -55884,7 +55935,7 @@
         "editorCompactAtTokensHint": "Leave empty to inherit. A positive whole token count can lower the sub-agent context window when supported by the runtime.",
         "editorDescription": "Description",
         "editorExternalRuntime": "External runtime",
-        "editorExternalRuntimeHint": "Run this subagent on an external CLI agent (Claude Code, Codex, …) instead of the built-in engine. Desktop only; the external agent uses its own model and auth.",
+        "editorExternalRuntimeHint": "Run this subagent on an external CLI agent (Claude Code, Codex, …) instead of the built-in engine. Desktop only; the external agent uses its own model and auth unless a Cognia model is set below.",
         "editorIcon": "Icon",
         "editorIconPlaceholder": "Search",
         "editorMaxNestingDepth": "Max nesting depth",
@@ -55921,6 +55972,7 @@
         "mcpLabel": "MCP servers",
         "missingBody": "It may have been deleted in another window.",
         "missingTitle": "Template not found",
+        "modelRolesInvalid": "Fix the sub-task models before saving: they would be refused when this subagent runs.",
         "nameRequired": "Template name is required.",
         "newTemplate": "New template",
         "promptShadowedBody": "A system prompt outranks the task template, so the task template below — and the variables declared for it — will not be used. Clear the system prompt in Advanced configuration to bring them back.",

@@ -38,7 +38,14 @@
  * chain decision, and it belongs to an operator.
  */
 
-import { validateExternalAgentSandboxPolicy } from "@cognia/agent-contracts/external-agent"
+import {
+  normalizeAgentModelRoleOverrides,
+  normalizeCogniaModelBinding,
+  validateExternalAgentSandboxPolicy,
+} from "@cognia/agent-contracts/external-agent"
+import { resolveGatewayModelFacts } from "./gateway-model-facts"
+import { compileTaskModelPlan } from "./model-plan"
+import { gatewayModelSlots } from "./model-slots"
 import {
   ExternalAgentConfigConflictError,
   ExternalAgentConfigNotFoundError,
@@ -345,6 +352,7 @@ async function createWithSecrets(
   secrets: ExternalAgentSecrets,
   deps: HostConfigServiceDeps
 ): Promise<ExternalAgentConfigRecord> {
+  config = await normalizeHostModelRoles(config)
   const scrubbed = scrubInlineCredentials(config as unknown as LifecycleAgentConfig)
   delete scrubbed.credentialRefs
   const base = scrubbed as unknown as StoredExternalAgentConfig
@@ -604,7 +612,9 @@ export interface UpdateHostConfigInput {
    * wire as JSON, which cannot carry `undefined`, so `null` is how a caller
    * clears one of {@link CLEARABLE_FIELDS}.
    */
-  patch: Partial<StoredExternalAgentConfig>
+  patch: Omit<Partial<StoredExternalAgentConfig>, "modelRoles"> & {
+    modelRoles?: StoredExternalAgentConfig["modelRoles"] | null
+  }
 }
 
 /**
@@ -613,7 +623,43 @@ export interface UpdateHostConfigInput {
  * (`maxConcurrentSessions` absent = no limit). `cogniaModel` and
  * `subscriptionAccountId` are not here: `null` is a stored value for them.
  */
-const CLEARABLE_FIELDS = ["description", "maxConcurrentSessions", "sessionIdleTimeout"] as const
+const CLEARABLE_FIELDS = [
+  "description",
+  "maxConcurrentSessions",
+  "sessionIdleTimeout",
+  "modelRoles",
+] as const
+
+/**
+ * Validated against this Host's own model facts, the ones admission judges the
+ * same overrides by, so a configuration that saves is one that runs.
+ */
+async function normalizeHostModelRoles(
+  config: Omit<StoredExternalAgentConfig, "modelRoles"> & {
+    modelRoles?: StoredExternalAgentConfig["modelRoles"] | null
+  }
+): Promise<StoredExternalAgentConfig> {
+  const primary = normalizeCogniaModelBinding(config.cogniaModel)
+  const overrides = normalizeAgentModelRoleOverrides(config.modelRoles) ?? undefined
+  if (primary && overrides) {
+    const facts = await resolveGatewayModelFacts(primary.providerId)
+    const result = compileTaskModelPlan({
+      primary,
+      slots: gatewayModelSlots(config as unknown as ExternalAgentConfig),
+      layers: [{ source: "config", overrides }],
+      modelSupportsReasoning: facts.modelSupportsReasoning,
+      ...(facts.modelEffortValues ? { modelEffortValues: facts.modelEffortValues } : {}),
+    })
+    if (!result.ok)
+      throw new Error(
+        `Invalid model role overrides: ${result.reason}${result.slot ? ` (${result.slot})` : ""}`
+      )
+  }
+  const next: StoredExternalAgentConfig = { ...config, cogniaModel: primary, modelRoles: undefined }
+  if (primary && overrides) next.modelRoles = overrides
+  else delete next.modelRoles
+  return next
+}
 
 export async function updateHostExternalAgentConfig(
   input: UpdateHostConfigInput,
@@ -637,7 +683,12 @@ export async function updateHostExternalAgentConfig(
   if (patch.credentialRefs !== undefined) {
     assertOwnCredentialRefs(patch.credentialRefs, input.configId)
   }
-  const raw: StoredExternalAgentConfig = { ...current.config, ...patch, id: input.configId }
+  const raw = await normalizeHostModelRoles({
+    ...current.config,
+    ...patch,
+    modelRoles: patch.modelRoles === undefined ? current.config.modelRoles : patch.modelRoles,
+    id: input.configId,
+  })
   for (const field of CLEARABLE_FIELDS) {
     if ((raw as unknown as Record<string, unknown>)[field] === null) delete raw[field]
   }

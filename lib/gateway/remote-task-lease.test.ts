@@ -14,7 +14,9 @@ jest.mock("@/lib/tauri/transport-routing", () => ({
 jest.mock("@/stores/remote-host/remote-host-store", () => ({
   activeHostFeatureManifest: () => ({}),
 }))
+const mockModelPlansSupported = jest.fn(() => true)
 jest.mock("@/lib/platform/host-feature-manifest", () => ({
+  hostSupportsExternalAgentModelPlans: () => mockModelPlansSupported(),
   supportsHostFeatureOperation: () => true,
 }))
 import {
@@ -49,6 +51,7 @@ const input = () => ({
 beforeEach(() => {
   jest.useFakeTimers()
   active = target
+  mockModelPlansSupported.mockReturnValue(true)
   call
     .mockReset()
     .mockImplementation(async (command: string) =>
@@ -154,4 +157,21 @@ it.each([
   call.mockResolvedValueOnce({ ...response(), ...override })
   await expect(acquireRemoteTaskLease(input())).rejects.toThrow("invalid task gateway lease")
   expect(call).toHaveBeenLastCalledWith("agent_gateway_lease_revoke", expect.anything())
+})
+
+it("rejects an old Host before sending the model plan", async () => {
+  mockModelPlansSupported.mockReturnValue(false)
+  await expect(
+    acquireRemoteTaskLease({
+      ...input(),
+      modelPlan: { additionalModels: ["child"], modelBindings: {} },
+    })
+  ).rejects.toThrow("does not support external agent model plans")
+  expect(call).not.toHaveBeenCalled()
+})
+it("forwards the exact model plan to a capable Host", async () => {
+  const modelPlan = { additionalModels: ["child"], modelBindings: { haiku: "child" } }
+  const lease = await acquireRemoteTaskLease({ ...input(), modelPlan })
+  expect(call.mock.calls[0][1].request.modelPlan).toEqual(modelPlan)
+  await lease.revoke()
 })

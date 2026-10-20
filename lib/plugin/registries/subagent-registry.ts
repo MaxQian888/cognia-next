@@ -19,6 +19,7 @@
  */
 
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+import { normalizeAgentModelRoleOverrides } from "@cognia/agent-contracts/external-agent"
 import { normalizeCogniaModelBinding } from "@/types/agent/external-agent"
 import { createOverlayRegistry } from "./createOverlayRegistry"
 import { reportRegistryConflict } from "@/lib/plugin/contracts/conflict-reporter"
@@ -42,6 +43,7 @@ const registry = createOverlayRegistry<PluginSubagentDef>({
 /** Register a plugin-contributed subagent. */
 export const registerSubagent: typeof registry.register = (id, entry, options) => {
   normalizeCogniaModelBinding(entry.cogniaModel)
+  normalizeAgentModelRoleOverrides(entry.modelRoles)
   return registry.register(id, entry, options)
 }
 /** Drop a single dynamically-registered subagent by id. */

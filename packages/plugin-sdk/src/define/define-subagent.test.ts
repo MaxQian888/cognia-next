@@ -86,3 +86,23 @@ describe("defineSubagent", () => {
     ).toEqual(["query_logs", "Read"])
   })
 })
+
+it("validates role models on public definitions", () => {
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+  const def = {
+    id: "coder",
+    name: "Coder",
+    description: "code",
+    prompt: "go",
+    externalPresetId: "codex",
+    cogniaModel: { providerId: "p", modelId: "m" },
+    modelRoles,
+  }
+  expect(defineSubagent(def).modelRoles).toEqual(modelRoles)
+  expect(() => defineSubagent({ ...def, modelRoles: { version: 2 } as never })).toThrow(
+    /model role/
+  )
+})

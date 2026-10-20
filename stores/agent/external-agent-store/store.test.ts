@@ -348,3 +348,23 @@ describe("persist.partialize", () => {
     expect(Object.keys(out.agentValidity)).toEqual(["broken"])
   })
 })
+
+it("preserves model roles through persistence projection and reload migration", () => {
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+  const id = useExternalAgentStore.getState().addAgent({
+    name: "Roles",
+    protocol: "codex-app-server",
+    transport: "stdio",
+    cogniaModel: { providerId: "p", modelId: "m" },
+    modelRoles,
+  })
+  const projected = persistOptions.partialize(useExternalAgentStore.getState())
+  const reloaded = persistOptions.migrate(
+    JSON.parse(JSON.stringify(projected)),
+    5
+  ) as ExternalAgentStore
+  expect(reloaded.agents[id].modelRoles).toEqual(modelRoles)
+})

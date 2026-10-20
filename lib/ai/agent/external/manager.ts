@@ -72,6 +72,10 @@ import {
   normalizeCogniaModelBinding,
   parseGatewaySessionId,
 } from "./config/gateway-task"
+import { normalizeAgentModelRoleOverrides } from "@cognia/agent-contracts/external-agent"
+import { compileTaskModelPlan, configModelRolesApply } from "./config/model-plan"
+import { resolveGatewayModelFacts } from "./config/gateway-model-facts"
+import { gatewayModelSlots } from "./config/model-slots"
 import { loggers } from "@cognia/logging"
 import {
   executionSemanticsOf,
@@ -614,6 +618,58 @@ export class ExternalAgentManager {
       } else if (!explicitId) previous = undefined
       else throw new Error("This task is bound to a different model or account; start a new task")
     }
+    const callRoles = normalizeAgentModelRoleOverrides(options?.modelRoles) ?? undefined
+    const configRoles = configModelRolesApply(
+      normalizeCogniaModelBinding(source.config.cogniaModel),
+      options?.cogniaModel === undefined
+        ? undefined
+        : normalizeCogniaModelBinding(options.cogniaModel)
+    )
+      ? (normalizeAgentModelRoleOverrides(source.config.modelRoles) ?? undefined)
+      : undefined
+    // The same model facts the editors and the Host validate sub-task models against.
+    const facts =
+      callRoles || configRoles ? await resolveGatewayModelFacts(binding!.providerId) : undefined
+    // After the lease, the account it resolved has its own model metadata,
+    // which the task's launch files are built from; judge reasoning by it.
+    const compilePlan = (leased?: Record<string, { supportsReasoning?: boolean }>) => {
+      const supportsReasoning = facts?.modelSupportsReasoning
+      const result = compileTaskModelPlan({
+        primary: binding!,
+        slots: gatewayModelSlots(source.config),
+        layers: [
+          { source: "call", overrides: callRoles },
+          { source: "config", overrides: configRoles },
+        ],
+        ...(supportsReasoning
+          ? {
+              modelSupportsReasoning: (modelId: string) =>
+                leased?.[modelId]
+                  ? leased[modelId].supportsReasoning === true
+                  : supportsReasoning(modelId),
+            }
+          : {}),
+        ...(facts?.modelEffortValues ? { modelEffortValues: facts.modelEffortValues } : {}),
+      })
+      if (!result.ok)
+        throw new Error(
+          `Task model plan refused: ${result.reason}${result.slot ? ` (${result.slot})` : ""}`
+        )
+      return Object.keys(result.plan.slots).length ? result.plan : undefined
+    }
+    let modelPlan = compilePlan()
+    // A rebind re-points the task at a new primary, which the plan derives from;
+    // the reminted lease carries the new plan. Otherwise a changed plan is a new task.
+    // Only a task this process recorded can be compared: session metadata is
+    // not persisted, so after a restart the task resumes on the current plan,
+    // as the device and runtime checks above also accept an unknown record.
+    if (
+      previous &&
+      previousMetadata !== undefined &&
+      !rebind &&
+      previousMetadata.cogniaModelPlanFingerprint !== modelPlan?.fingerprint
+    )
+      throw new Error("This task runs on different sub-task models; start a new task")
     const transcript = traits.continuity === "transcript"
     const suppliedHistory = custom?.conversationHistory
     const storedHistory = previous ? previousMetadata?.cogniaGatewayHistory : undefined
@@ -651,6 +707,16 @@ export class ExternalAgentManager {
       const ceiling = options?.gatewayTicketBudget
       lease = await prepareExternalAgentGatewayRoute({
         ...binding,
+        ...(modelPlan
+          ? {
+              modelPlan: {
+                additionalModels: modelPlan.models.filter(
+                  (model) => model !== modelPlan!.primaryModelId
+                ),
+                modelBindings: {},
+              },
+            }
+          : {}),
         sessionId: taskId,
         ingressProtocol: traits.ingress,
         originDeviceId,
@@ -701,6 +767,7 @@ export class ExternalAgentManager {
           ...(conversation !== undefined ? { cogniaSessionId: conversation } : {}),
           ...session.metadata,
           cogniaModel: binding,
+          cogniaModelPlanFingerprint: modelPlan?.fingerprint,
           cogniaGatewayTask: taskId,
           cogniaGatewayRuntime: support.runtime,
           cogniaGatewayOwnerAccountId: ownerAccountId,
@@ -766,10 +833,12 @@ export class ExternalAgentManager {
         if (recordedOwner !== undefined && recordedOwner !== ownerAccountId)
           throw new Error("This task is bound to a different model or account; start a new task")
       }
+      modelPlan = compilePlan(lease.modelMetadataById)
       const prepared = buildGatewayTaskConfig({
         config: source.config,
         taskId,
         ...lease,
+        modelPlan,
         settings,
         originDeviceId,
         rebind,

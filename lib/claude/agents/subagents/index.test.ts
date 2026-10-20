@@ -121,3 +121,69 @@ describe("plugin subagent prompt overrides", () => {
     }
   })
 })
+
+describe("template dispatch model selection", () => {
+  it.each([true, false])(
+    "preserves provider and scopes gateway fields to external templates (%s)",
+    (external) => {
+      const modelRoles = {
+        version: 1 as const,
+        slots: { "subagent.default": { kind: "inherit-primary" as const } },
+      }
+      useSubagentRuntimeStore.getState().addTemplate({
+        id: "model-routing",
+        name: "Model routing",
+        description: "route",
+        category: "coding",
+        taskTemplate: "go",
+        config: {
+          provider: "openai",
+          model: "primary",
+          cogniaModel: { providerId: "p", modelId: "m" },
+          modelRoles,
+          ...(external ? { externalPresetId: "codex" } : {}),
+        },
+      })
+      try {
+        const def = getDispatchableSubagentDef("template:model-routing")!
+        expect(def.provider).toBe("openai")
+        if (external) {
+          expect(def.cogniaModel).toEqual({ providerId: "p", modelId: "m" })
+          expect(def.modelRoles).toEqual(modelRoles)
+        } else {
+          expect(def).not.toHaveProperty("cogniaModel")
+          expect(def).not.toHaveProperty("modelRoles")
+        }
+        expect(resolveAllSubagents({ context: "direct" })).not.toHaveProperty(
+          "template:model-routing"
+        )
+      } finally {
+        useSubagentRuntimeStore.getState().deleteTemplate("model-routing")
+      }
+    }
+  )
+})
+
+it("carries external template roles when its pinned configuration supplies the primary binding", () => {
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+  useSubagentRuntimeStore.getState().addTemplate({
+    id: "pinned-models",
+    name: "Pinned models",
+    description: "route",
+    category: "coding",
+    taskTemplate: "go",
+    config: { externalPresetId: "codex", externalAgentConfigId: "pinned", modelRoles },
+  })
+  try {
+    expect(getDispatchableSubagentDef("template:pinned-models")).toMatchObject({
+      externalPresetId: "codex",
+      externalAgentConfigId: "pinned",
+      modelRoles,
+    })
+  } finally {
+    useSubagentRuntimeStore.getState().deleteTemplate("pinned-models")
+  }
+})

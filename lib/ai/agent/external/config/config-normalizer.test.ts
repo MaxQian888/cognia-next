@@ -724,3 +724,36 @@ describe("recommended actions — persisted shape", () => {
     ])
   })
 })
+
+describe("Cognia model role persistence", () => {
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+  it("normalizes roles with a binding and drops them without one", () => {
+    const input = {
+      name: "Codex",
+      protocol: "codex-app-server" as const,
+      transport: "stdio" as const,
+      modelRoles,
+    }
+    expect(normalizeExternalAgentConfigInput(input).modelRoles).toBeUndefined()
+    expect(
+      normalizeExternalAgentConfigInput({
+        ...input,
+        cogniaModel: { providerId: "p", modelId: "m" },
+      }).modelRoles
+    ).toEqual(modelRoles)
+  })
+  it("refuses malformed overrides", () => {
+    expect(() =>
+      normalizeExternalAgentConfigInput({
+        name: "Codex",
+        protocol: "codex-app-server",
+        transport: "stdio",
+        cogniaModel: { providerId: "p", modelId: "m" },
+        modelRoles: { version: 2 } as never,
+      })
+    ).toThrow(/model role/)
+  })
+})

@@ -21,6 +21,7 @@
  * @see types/agent/external-agent-lifecycle.ts
  */
 
+import { normalizeAgentModelRoleOverrides } from "@cognia/agent-contracts/external-agent"
 import type { KeyringStore } from "@/lib/credentials/keyring-store"
 import type {
   CreateExternalAgentInput,
@@ -187,6 +188,8 @@ const RUNTIME_AFFECTING_KEYS = [
   "stateIsolation",
   "subscriptionAccountId",
   // The manager reads these from the live instance's config.
+  "cogniaModel",
+  "modelRoles",
   "maxConcurrentSessions",
   "sessionIdleTimeout",
 ] as const satisfies readonly (keyof UpdateExternalAgentInput)[]
@@ -244,6 +247,7 @@ export class ExternalAgentLifecycleService {
     carried: ExternalAgentSecrets,
     options: { connect?: boolean } = {}
   ): Promise<string> {
+    normalizeAgentModelRoleOverrides(input.modelRoles)
     const secrets = { ...carried, ...extractInlineCredentials(input as ExternalAgentConfig) }
     const sanitized = scrubInlineCredentials(input as ExternalAgentConfig)
     const id = this.deps.store.addAgent(sanitized as CreateExternalAgentInput)
@@ -314,6 +318,7 @@ export class ExternalAgentLifecycleService {
     updates: UpdateExternalAgentInput & Partial<ExternalAgentLifecycleFields>
   ): Promise<void> {
     const before = this.requireConfig(id)
+    normalizeAgentModelRoleOverrides(updates.modelRoles)
 
     const secrets = extractInlineCredentials(updates as ExternalAgentConfig)
     const hasNewSecrets = occupiedSlots(secrets).length > 0

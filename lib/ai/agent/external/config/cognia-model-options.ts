@@ -28,6 +28,14 @@ import { getAllProviders } from "@cognia/provider-types/provider"
 import type { CustomProviderSettings, UserProviderSettings } from "@cognia/provider-types/provider"
 import type { AppSettings } from "@cognia/agent-config-types"
 import { collectModelOptions, resolveModelMeta, type ModelOption } from "@/lib/ai/model-options"
+import { reasoningTiersFor } from "@cognia/provider-core/providers/reasoning-tiers"
+import type {
+  AgentModelRoleOverrides,
+  ExternalAgentCogniaModelBinding,
+  ExternalAgentConfig,
+} from "@/types/agent/external-agent"
+import { gatewayModelSlots } from "./model-slots"
+import { compileTaskModelPlan, type TaskModelPlanResult } from "./model-plan"
 import { overlayHostProviderKeys } from "@/lib/host-secrets/provider-key-store"
 import { listSubscriptionProviders } from "@/lib/subscription/core/provider-registry"
 import type { SubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
@@ -113,6 +121,24 @@ function findSubscription(
   )
 }
 
+/** The wire protocol a gateway provider speaks, read the way eligibility reads it. */
+function gatewayProviderProtocol(
+  providerId: string,
+  input: {
+    providerSettings?: CogniaGatewayModelFilterInput["providerSettings"]
+    customProviders?: CustomProviderSettings[]
+    subscriptions: readonly SubscriptionProviderDefinition[]
+    catalog: ReturnType<typeof getAllProviders>
+  }
+): string | undefined {
+  return (
+    input.customProviders?.find((provider) => provider.id === providerId)?.apiProtocol ??
+    input.providerSettings?.[providerId]?.apiProtocol ??
+    input.catalog[providerId]?.protocol ??
+    findSubscription(input.subscriptions, providerId)?.protocol
+  )
+}
+
 /**
  * The flat, eligible model list in the picker's `ModelOption` shape (it groups
  * and renders these directly).
@@ -132,11 +158,12 @@ export function filterCogniaGatewayModels(input: CogniaGatewayModelFilterInput):
     const custom = customProviders?.find((provider) => provider.id === model.providerId)
     const provider = catalog[model.providerId]
     const subscription = findSubscription(subscriptions, model.providerId)
-    const protocol =
-      custom?.apiProtocol ??
-      providerSettings?.[model.providerId]?.apiProtocol ??
-      provider?.protocol ??
-      subscription?.protocol
+    const protocol = gatewayProviderProtocol(model.providerId, {
+      providerSettings,
+      customProviders,
+      subscriptions,
+      catalog,
+    })
     const metadata = resolveModelMeta(
       model.providerId,
       model.modelId,
@@ -331,4 +358,57 @@ export function isCogniaGatewayModelCatalog(value: unknown): value is CogniaGate
           typeof model.name === "string"
       )
   )
+}
+
+/**
+ * Model-level reasoning facts the plan compiler needs, from the same settings
+ * the gateway resolves against. Reasoning support is strict: a model whose
+ * support is unknown accepts no effort, because Codex validates the effort
+ * against the levels the task's catalog declares for that model.
+ */
+export function cogniaModelReasoningFacts(
+  providerId: string,
+  input: Partial<
+    Pick<CogniaGatewayModelFilterInput, "providerSettings" | "customProviders" | "subscriptions">
+  >
+): {
+  modelSupportsReasoning: (modelId: string) => boolean
+  modelEffortValues: (modelId: string) => readonly string[]
+} {
+  const settings = overlayHostProviderKeys({ ...input.providerSettings })
+  const supports = (modelId: string) =>
+    resolveModelMeta(providerId, modelId, settings, input.customProviders).supportsReasoning ===
+    true
+  const protocol = gatewayProviderProtocol(providerId, {
+    providerSettings: input.providerSettings ?? {},
+    customProviders: input.customProviders,
+    subscriptions: input.subscriptions ?? listSubscriptionProviders(input.customProviders ?? []),
+    catalog: getAllProviders(),
+  })
+  return {
+    modelSupportsReasoning: supports,
+    modelEffortValues: (modelId) =>
+      reasoningTiersFor({ providerId, modelId, protocol, reasoning: supports(modelId) }),
+  }
+}
+
+/**
+ * What an editor saves must be what admission will run: the same slots, the
+ * same layer order and the same model facts. A subagent template passes its
+ * pinned configuration's overrides as the lower layer.
+ */
+export function compileEditorModelPlan(input: {
+  config: Pick<ExternalAgentConfig, "protocol" | "transport" | "process" | "metadata" | "network">
+  primary: ExternalAgentCogniaModelBinding
+  layers: readonly { source: "call" | "subagent" | "config"; overrides?: AgentModelRoleOverrides }[]
+  providerSettings?: CogniaGatewayModelFilterInput["providerSettings"]
+  customProviders?: CustomProviderSettings[]
+  subscriptions?: readonly SubscriptionProviderDefinition[]
+}): TaskModelPlanResult {
+  return compileTaskModelPlan({
+    primary: input.primary,
+    slots: gatewayModelSlots(input.config),
+    layers: input.layers,
+    ...cogniaModelReasoningFacts(input.primary.providerId, input),
+  })
 }

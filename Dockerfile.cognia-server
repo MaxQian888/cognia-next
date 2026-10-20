@@ -121,6 +121,7 @@ COPY lib/tauri/selection-toolbar.ts ./lib/tauri/selection-toolbar.ts
 COPY lib/plugin/character-pack/__fixtures__/jcs-vectors.json ./lib/plugin/character-pack/__fixtures__/jcs-vectors.json
 COPY lib/router-fusion/gate/run-api-bridge.ts ./lib/router-fusion/gate/run-api-bridge.ts
 COPY cli/src/x/agent-launcher.ts ./cli/src/x/agent-launcher.ts
+COPY cli/src/runtime/external/codex-catalog ./cli/src/runtime/external/codex-catalog
 COPY hooks/matcher-conformance.json hooks/builtin-hooks.lockstep.json ./hooks/
 COPY test-fixtures/scheduler/cron-dialect.json ./test-fixtures/scheduler/cron-dialect.json
 COPY cli/src/serve/fixtures/bridge-frames.json ./cli/src/serve/fixtures/bridge-frames.json
@@ -174,6 +175,7 @@ COPY lib/tauri/selection-toolbar.ts ./lib/tauri/selection-toolbar.ts
 COPY lib/plugin/character-pack/__fixtures__/jcs-vectors.json ./lib/plugin/character-pack/__fixtures__/jcs-vectors.json
 COPY lib/router-fusion/gate/run-api-bridge.ts ./lib/router-fusion/gate/run-api-bridge.ts
 COPY cli/src/x/agent-launcher.ts ./cli/src/x/agent-launcher.ts
+COPY cli/src/runtime/external/codex-catalog ./cli/src/runtime/external/codex-catalog
 COPY hooks/matcher-conformance.json hooks/builtin-hooks.lockstep.json ./hooks/
 COPY test-fixtures/scheduler/cron-dialect.json ./test-fixtures/scheduler/cron-dialect.json
 COPY cli/src/serve/fixtures/bridge-frames.json ./cli/src/serve/fixtures/bridge-frames.json

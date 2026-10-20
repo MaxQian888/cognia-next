@@ -1213,5 +1213,54 @@
       "destroyed": "Instance destroyed"
     },
     "persistFailed": "The Host could not save this delivery update. The recorded status may be out of date after a reload."
+  },
+  "roleModels": {
+    "title": "Sub-task models",
+    "description": "Native subagents, model aliases and helper calls of this runtime can run on other models from the primary model's provider and account. Unset slots keep the primary model. A turn moved to another provider or account runs on its primary model alone.",
+    "needsPrimary": "Turn on Cognia models and choose a primary model to set sub-task models.",
+    "noSlots": "This runtime runs every call on the primary model.",
+    "hostOutdated": "The paired Host must be updated before sub-task models can be set.",
+    "slots": {
+      "subagentDefault": "Default subagent model",
+      "tierHaiku": "Haiku alias",
+      "tierSonnet": "Sonnet alias",
+      "tierOpus": "Opus alias",
+      "auxSmall": "Small helper model"
+    },
+    "hints": {
+      "childDefault": "Used when a subagent's own definition and the spawning call name no model.",
+      "tier": "The model this runtime's alias resolves to.",
+      "auxiliary": "Helper calls such as titles and summaries; not a subagent."
+    },
+    "modes": {
+      "primary": "Primary model",
+      "inherit": "Inherit from the agent configuration",
+      "model": "Another model"
+    },
+    "modeLabel": "{slot}: model source",
+    "modelLabel": "{slot}: model",
+    "choose": "Choose a model",
+    "search": "Search {provider} models…",
+    "empty": "No other compatible models from this provider.",
+    "effort": "Reasoning effort",
+    "effortDefault": "Model default",
+    "efforts": {
+      "minimal": "Minimal",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "xhigh": "Extra high"
+    },
+    "sameAccount": "Uses the primary model's provider account.",
+    "remove": "Remove",
+    "removeStale": "Remove the unsupported sub-task model setting",
+    "refusals": {
+      "unsupportedSlot": "This runtime does not support this sub-task model setting. Remove it to save.",
+      "crossProvider": "Choose a model from {provider}. Sub-task models must use the primary model's provider.",
+      "crossAccount": "Sub-task models must use the primary model's account.",
+      "effortUnsupported": "This model does not accept the selected reasoning effort.",
+      "tooManyModels": "Too many different models for one task. Use fewer sub-task models."
+    },
+    "invalid": "Fix the sub-task models before saving."
   }
 }

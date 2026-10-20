@@ -24,9 +24,26 @@ jest.mock("../cognia-model-picker", () => ({
   ),
 }))
 
+jest.mock("../role-model-fields", () => ({
+  RoleModelFields: jest.fn(
+    ({ onChange }: { onChange: (value: unknown) => void; primary: unknown; blocker?: string }) => (
+      <button
+        type="button"
+        onClick={() =>
+          onChange({ version: 1, slots: { "subagent.default": { kind: "inherit-primary" } } })
+        }
+      >
+        set sub-task models fixture
+      </button>
+    )
+  ),
+}))
+
 import { CogniaModelPicker } from "../cognia-model-picker"
+import { RoleModelFields } from "../role-model-fields"
 
 const pickerMock = CogniaModelPicker as unknown as jest.Mock
+const roleFieldsMock = RoleModelFields as unknown as jest.Mock
 
 const settings = en.externalAgent.settings as unknown as Record<string, string>
 const manager = en.externalAgent.manager as unknown as Record<string, string>
@@ -37,10 +54,12 @@ function Harness({
   presetId = "",
   collapsible,
   withModel = false,
+  roleModelsBlocker,
 }: {
   presetId?: string
   collapsible?: boolean
   withModel?: boolean
+  roleModelsBlocker?: "host-outdated"
 }) {
   const form = useAddAgentForm(presetId)
   useEffect(() => {
@@ -49,7 +68,7 @@ function Harness({
   return (
     <>
       <ExecutionTuningFields form={form} collapsible={collapsible} />
-      {withModel && <AddAgentCogniaModelField form={form} />}
+      {withModel && <AddAgentCogniaModelField form={form} roleModelsBlocker={roleModelsBlocker} />}
     </>
   )
 }
@@ -75,6 +94,7 @@ function lastPickerProps(): { config: PickerConfig; value: unknown } {
 beforeEach(() => {
   latestForm = null
   pickerMock.mockClear()
+  roleFieldsMock.mockClear()
 })
 
 describe("ExecutionTuningFields", () => {
@@ -212,5 +232,28 @@ describe("AddAgentCogniaModelField", () => {
 
     expect(form().data.cogniaModel).toEqual({ providerId: "provider-x", modelId: "model-y" })
     expect(lastPickerProps().value).toEqual({ providerId: "provider-x", modelId: "model-y" })
+  })
+
+  it("gives the sub-task rows the same connection and the picked binding as their primary", async () => {
+    const user = userEvent.setup()
+    render(<Harness withModel roleModelsBlocker="host-outdated" />)
+    await user.click(screen.getByRole("button", { name: "pick model fixture" }))
+    await user.click(screen.getByRole("button", { name: "set sub-task models fixture" }))
+
+    const calls = roleFieldsMock.mock.calls
+    const props = calls[calls.length - 1]![0] as {
+      config: PickerConfig
+      primary: unknown
+      value: unknown
+      blocker?: string
+    }
+    expect(props.config).toEqual(lastPickerProps().config)
+    expect(props.primary).toEqual({ providerId: "provider-x", modelId: "model-y" })
+    expect(props.blocker).toBe("host-outdated")
+    expect(form().data.modelRoles).toEqual({
+      version: 1,
+      slots: { "subagent.default": { kind: "inherit-primary" } },
+    })
+    expect(props.value).toEqual(form().data.modelRoles)
   })
 })

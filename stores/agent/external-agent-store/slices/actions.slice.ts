@@ -1,4 +1,7 @@
-import { validateExternalAgentSandboxPolicy } from "@cognia/agent-contracts/external-agent"
+import {
+  normalizeAgentModelRoleOverrides,
+  validateExternalAgentSandboxPolicy,
+} from "@cognia/agent-contracts/external-agent"
 import type { StoreApi } from "zustand"
 import { nanoid } from "nanoid"
 import { loggers } from "@cognia/logging"
@@ -173,6 +176,7 @@ export const createExternalAgentActionsSlice = (
         codexOptions: presetConfig.codexOptions,
         sandboxPolicy: presetConfig.sandboxPolicy,
         cogniaModel: presetConfig.cogniaModel,
+        modelRoles: overrides?.modelRoles,
         timeout: presetConfig.timeout,
         retryConfig: presetConfig.retryConfig,
         tags: presetConfig.tags,
@@ -220,6 +224,7 @@ export const createExternalAgentActionsSlice = (
   },
 
   updateAgent: (id: string, updates: UpdateExternalAgentInput): void => {
+    const modelRoles = normalizeAgentModelRoleOverrides(updates.modelRoles)
     validateExternalAgentSandboxPolicy(updates.sandboxPolicy)
     set((state) => {
       const agent = state.agents[id]
@@ -245,6 +250,11 @@ export const createExternalAgentActionsSlice = (
         codexOptions: updates.codexOptions ?? agent.codexOptions,
         sandboxPolicy: updates.sandboxPolicy ?? agent.sandboxPolicy,
         cogniaModel: updates.cogniaModel === undefined ? agent.cogniaModel : updates.cogniaModel,
+        modelRoles: (updates.cogniaModel === undefined ? agent.cogniaModel : updates.cogniaModel)
+          ? modelRoles === undefined
+            ? agent.modelRoles
+            : (modelRoles ?? undefined)
+          : undefined,
         stateIsolation: updates.stateIsolation ?? agent.stateIsolation,
         // `null` is the clear (follow the active account), like `cogniaModel`.
         subscriptionAccountId:
@@ -587,14 +597,18 @@ export const createExternalAgentActionsSlice = (
   // ========================================
 
   importAgents: (agents: ExternalAgentConfig[]): void => {
-    for (const agent of agents) validateExternalAgentSandboxPolicy(agent.sandboxPolicy)
+    const normalizedAgents = agents.map((agent) => {
+      validateExternalAgentSandboxPolicy(agent.sandboxPolicy)
+      const modelRoles = normalizeAgentModelRoleOverrides(agent.modelRoles)
+      return { ...agent, modelRoles: agent.cogniaModel ? (modelRoles ?? undefined) : undefined }
+    })
     set((state) => {
       const newAgents = { ...state.agents }
       const newStatus = { ...state.connectionStatus }
       const newValidity = { ...state.agentValidity }
       const newBenchmarkMap = { ...state.benchmarkCapabilityMap }
 
-      for (const agent of agents) {
+      for (const agent of normalizedAgents) {
         const stored: StoredExternalAgentConfig = {
           ...agent,
           createdAt: agent.createdAt?.toISOString() || new Date().toISOString(),

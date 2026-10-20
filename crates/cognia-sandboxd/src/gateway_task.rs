@@ -1,4 +1,5 @@
 //! Host-owned task state. Provider files contain environment references, never lease secrets.
+use crate::codex_catalog::{build_codex_model_catalog, CodexCatalogRequest};
 use serde::Deserialize;
 use std::{
     collections::HashMap,
@@ -22,6 +23,8 @@ pub struct TaskPayload {
     rebind: bool,
     runtime: String,
     files: HashMap<String, String>,
+    #[serde(default, deserialize_with = "crate::codex_catalog::present_option")]
+    codex_model_catalog: Option<CodexCatalogRequest>,
 }
 
 /// Runtimes with a reviewed task-owned launch contract
@@ -57,6 +60,7 @@ fn payload(env: &HashMap<String, String>) -> Result<Option<TaskPayload>, String>
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
         || !RUNTIMES.contains(&value.runtime.as_str())
+        || (value.codex_model_catalog.is_some() && value.runtime != "codex")
         || value.files.iter().any(|(name, contents)| {
             ![
                 "codex/config.toml",
@@ -69,6 +73,9 @@ fn payload(env: &HashMap<String, String>) -> Result<Option<TaskPayload>, String>
         })
     {
         return Err("Invalid gateway task configuration".into());
+    }
+    if let Some(request) = &value.codex_model_catalog {
+        request.validate()?;
     }
     Ok(Some(value))
 }
@@ -519,6 +526,12 @@ fn prepare_inner(
         guard.files.push(path.clone());
         write_private(&path, contents.as_bytes())?;
     }
+    if let Some(request) = &value.codex_model_catalog {
+        let catalog = build_codex_model_catalog(request)?;
+        let path = root.join("codex/model-catalog.json");
+        guard.files.push(path.clone());
+        write_private(&path, catalog.as_bytes())?;
+    }
     for (key, relative) in [
         ("HOME", ""),
         ("USERPROFILE", ""),
@@ -715,6 +728,85 @@ pub fn delete_task_for_device(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn gateway_task_materializes_private_catalog_and_cleans_it() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../cli/src/runtime/external/codex-catalog/fixtures/catalog.json"
+        ))
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let mut input = payload_env(
+            "catalog",
+            serde_json::json!({
+                "runtime":"codex", "codexModelCatalog": fixture["request"],
+                "files":{"codex/config.toml":"model_catalog_json = \"model-catalog.json\"\n"}
+            }),
+        );
+        let root = task_home(&input, dir.path()).unwrap().unwrap();
+        let guard = prepare(&mut input, dir.path()).unwrap().unwrap();
+        let path = root.join("codex/model-catalog.json");
+        let actual: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let expected: serde_json::Value =
+            serde_json::from_str(fixture["expectedOutput"].as_str().unwrap()).unwrap();
+        assert_eq!(actual, expected);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        drop(guard);
+        assert!(!path.exists());
+        assert!(!root.join("codex/config.toml").exists());
+        assert!(root.join("binding.json").exists());
+    }
+
+    #[test]
+    fn gateway_task_rejects_catalog_for_other_runtimes_and_file_injection() {
+        let dir = tempfile::tempdir().unwrap();
+        let request = serde_json::json!({"models":[{"slug":"custom","inputModalities":["text"]}]});
+        for patch in [
+            serde_json::json!({"codexModelCatalog": request}),
+            serde_json::json!({"runtime":"codex","codexModelCatalog":{"models":[]}}),
+            serde_json::json!({"runtime":"codex","codexModelCatalog":null}),
+            serde_json::json!({"runtime":"codex","codexModelCatalog":{"models":[],"extra":true}}),
+            serde_json::json!({"runtime":"codex","files":{"codex/model-catalog.json":"{}"}}),
+            serde_json::json!({"runtime":"codex","extra":true}),
+        ] {
+            assert_eq!(
+                payload(&payload_env("invalid-catalog", patch))
+                    .err()
+                    .unwrap(),
+                "Invalid gateway task configuration"
+            );
+        }
+        assert!(!dir.path().join(".local/share/cognia-agent-tasks").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gateway_task_cleans_config_when_catalog_write_is_refused() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let mut input = payload_env(
+            "catalog-write",
+            serde_json::json!({
+                "runtime":"codex", "files":{"codex/config.toml":"model = \"custom\""},
+                "codexModelCatalog":{"models":[{"slug":"custom","inputModalities":["text"]}]}
+            }),
+        );
+        let root = task_home(&input, dir.path()).unwrap().unwrap();
+        fs::create_dir_all(root.join("codex")).unwrap();
+        let outside = dir.path().join("untouched");
+        fs::write(&outside, "untouched").unwrap();
+        symlink(&outside, root.join("codex/model-catalog.json")).unwrap();
+        assert!(prepare(&mut input, dir.path()).is_err());
+        assert!(!root.join("codex/config.toml").exists());
+        assert_eq!(fs::read_to_string(outside).unwrap(), "untouched");
+    }
+
     fn env(task: &str) -> HashMap<String, String> {
         HashMap::from([(PAYLOAD_ENV.into(), serde_json::json!({"taskId":task,"binding":{"providerId":"gateway","modelId":"model"},"runtime":"pi","files":{"pi/models.json":"{}"}}).to_string())])
     }

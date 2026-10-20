@@ -120,6 +120,8 @@ export interface AddAgentFormData {
   processEnv?: Record<string, string>
   preset?: string
   cogniaModel?: import("./external-agent").ExternalAgentCogniaModelBinding | null
+  /** Sub-task models; stored only alongside `cogniaModel`. */
+  modelRoles?: import("./external-agent").AgentModelRoleOverrides
   /** DeepSeek key is handed only to the lifecycle keyring writer. */
   dshApiKey?: string
   dshWorkspace?: string

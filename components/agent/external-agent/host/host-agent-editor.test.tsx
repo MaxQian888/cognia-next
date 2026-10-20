@@ -30,15 +30,25 @@ jest.mock("@/components/agent/external-agent/cognia-model-picker", () => ({
     </button>
   ),
 }))
+jest.mock("@/components/agent/external-agent/role-model-fields", () => ({
+  RoleModelFields: ({ blocker }: { blocker?: string }) => (
+    <div role="status" aria-label="Role models">
+      {blocker}
+    </div>
+  ),
+}))
 jest.mock("@/components/icons/brand-icon", () => ({
   BrandIcon: ({ id }: { id: string }) => <span data-testid={`brand-icon-${id}`} />,
 }))
+
+let mockSupportsModelRoles = true
 
 const hostState: { current: HostExternalAgentConfigsState } = {
   current: {} as HostExternalAgentConfigsState,
 }
 jest.mock("@/hooks/agent/use-host-external-agent-configs", () => ({
   useHostExternalAgentConfigs: () => hostState.current,
+  useHostSupportsModelRoles: () => mockSupportsModelRoles,
 }))
 
 const onRemoved = jest.fn()
@@ -128,6 +138,7 @@ beforeAll(() => {
   Element.prototype.releasePointerCapture = jest.fn()
 })
 beforeEach(() => {
+  mockSupportsModelRoles = true
   jest.clearAllMocks()
   setHost()
 })
@@ -801,3 +812,20 @@ describe("HostAgentEditor: siblings and actions", () => {
     expect(onDuplicated).not.toHaveBeenCalled()
   })
 })
+
+it.each([true, false])(
+  "gates Host editor role models on capability support (%s)",
+  async (supported) => {
+    mockSupportsModelRoles = supported
+    render(editor())
+    open(messages.cogniaModel.model)
+    expect(within(drawer()).getByRole("status", { name: "Role models" })).toHaveTextContent(
+      supported ? "" : "host-outdated"
+    )
+    save()
+    await waitFor(() => expect(hostState.current.update).toHaveBeenCalled())
+    const patch = (hostState.current.update as jest.Mock).mock.calls[0][1]
+    if (supported) expect(patch.modelRoles).toBeNull()
+    else expect(patch).not.toHaveProperty("modelRoles")
+  }
+)

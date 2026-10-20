@@ -332,6 +332,10 @@ describe("Plugin Validation", () => {
             description: "Writes code",
             prompt: "Code",
             externalPresetId: "codex-app-server",
+            modelRoles: {
+              version: 1 as const,
+              slots: { "subagent.default": { kind: "inherit-primary" as const } },
+            },
             cogniaModel: {
               providerId: "plugin:kimi:subscription",
               modelId: "kimi-for-coding",
@@ -341,6 +345,16 @@ describe("Plugin Validation", () => {
         ],
       }
       expect(validatePluginManifest(manifest).valid).toBe(true)
+      Object.assign(manifest.subagents[0].modelRoles, { version: 2 })
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "subagents[0].modelRoles",
+            code: "manifest.subagent.invalid_model_roles",
+          }),
+        ])
+      )
+      Object.assign(manifest.subagents[0].modelRoles, { version: 1 })
       Object.assign(manifest.subagents[0].cogniaModel, { apiKey: "not-permitted" })
       expect(validatePluginManifest(manifest).diagnostics).toEqual(
         expect.arrayContaining([

@@ -15,12 +15,15 @@ const onCancel = jest.fn()
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
+let mockSupportsModelRoles = true
+
 const hostState: { current: HostExternalAgentConfigsState } = {
   current: {} as HostExternalAgentConfigsState,
 }
 
 jest.mock("@/hooks/agent/use-host-external-agent-configs", () => ({
   useHostExternalAgentConfigs: () => hostState.current,
+  useHostSupportsModelRoles: () => mockSupportsModelRoles,
 }))
 
 jest.mock("@/hooks/agent/use-installed-agent-runtimes", () => ({
@@ -40,7 +43,42 @@ jest.mock("@/hooks/agent/use-external-agent-process-plane", () => ({
 // The model picker reads the settings and account stores; the form only
 // renders it, so a stub keeps this suite about the form.
 jest.mock("@/components/agent/external-agent/cognia-model-picker", () => ({
-  CogniaModelPicker: () => null,
+  CogniaModelPicker: ({
+    onChange,
+  }: {
+    onChange: (binding: { providerId: string; modelId: string }) => void
+  }) => (
+    <button type="button" onClick={() => onChange({ providerId: "p", modelId: "m" })}>
+      Choose model
+    </button>
+  ),
+}))
+
+jest.mock("@/components/agent/external-agent/role-model-fields", () => ({
+  RoleModelFields: ({
+    blocker,
+    onChange,
+  }: {
+    blocker?: string
+    onChange: (roles: unknown) => void
+  }) => (
+    <div>
+      <span role="status" aria-label="Role models">
+        {blocker}
+      </span>
+      <button
+        type="button"
+        onClick={() =>
+          onChange({
+            version: 1 as const,
+            slots: { "subagent.default": { kind: "inherit-primary" as const } },
+          })
+        }
+      >
+        Choose role model
+      </button>
+    </div>
+  ),
 }))
 
 const toastSuccess = toast.success as jest.Mock
@@ -88,6 +126,7 @@ function renderForm(presetId: string) {
 }
 
 beforeEach(() => {
+  mockSupportsModelRoles = true
   jest.clearAllMocks()
   setHost()
 })
@@ -277,3 +316,27 @@ describe("HostAgentCreateForm", () => {
     expect(screen.queryByTestId("add-agent-name-taken")).toBeNull()
   })
 })
+
+it.each([true, false])(
+  "gates create-form role models and omits unsupported fields (%s)",
+  async (supported) => {
+    mockSupportsModelRoles = supported
+    renderForm("claude-code")
+    await userEvent.setup().click(screen.getByRole("button", { name: /Advanced/ }))
+    expect(screen.getByRole("status", { name: "Role models" })).toHaveTextContent(
+      supported ? "" : "host-outdated"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Choose model" }))
+    fireEvent.click(screen.getByRole("button", { name: "Choose role model" }))
+    fireEvent.submit(screen.getByTestId("add-external-agent-form"))
+    await waitFor(() => expect(hostState.current.create).toHaveBeenCalled())
+    const input = (hostState.current.create as jest.Mock).mock.calls[0][0]
+    expect(input.cogniaModel).toEqual({ providerId: "p", modelId: "m" })
+    if (supported)
+      expect(input.modelRoles).toEqual({
+        version: 1 as const,
+        slots: { "subagent.default": { kind: "inherit-primary" as const } },
+      })
+    else expect(input).not.toHaveProperty("modelRoles")
+  }
+)

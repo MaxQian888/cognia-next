@@ -112,3 +112,16 @@ describe("subagent-registry", () => {
     expect(listSubagentEntries()).toEqual([])
   })
 })
+
+it("accepts valid role overrides and refuses malformed selections", () => {
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+  registerSubagent("role-coder", makeSubagent("role-coder", { modelRoles }))
+  expect(getSubagent("role-coder")?.modelRoles).toEqual(modelRoles)
+  expect(() =>
+    registerSubagent("bad-role", makeSubagent("bad-role", { modelRoles: { version: 2 } as never }))
+  ).toThrow(/model role/)
+  expect(getSubagent("bad-role")).toBeUndefined()
+})

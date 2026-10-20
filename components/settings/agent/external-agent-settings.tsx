@@ -376,11 +376,12 @@ export function ExternalAgentSettings() {
     async (data: AgentEditorSaveInput): Promise<boolean> => {
       // `null` means "clear the saved value", which only an edit can mean; a
       // new configuration simply has no limit.
-      const { maxConcurrentSessions, sessionIdleTimeout, ...rest } = data
+      const { maxConcurrentSessions, sessionIdleTimeout, modelRoles, ...rest } = data
       const input: CreateExternalAgentInput = {
         ...rest,
         maxConcurrentSessions: maxConcurrentSessions ?? undefined,
         sessionIdleTimeout: sessionIdleTimeout ?? undefined,
+        modelRoles: modelRoles ?? undefined,
       }
       try {
         const lifecycle = await getExternalAgentLifecycleService()

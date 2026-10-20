@@ -29,6 +29,8 @@
  *    `agent:external:manage` (every write; dangerous, consent-tier).
  */
 
+import { normalizeAgentModelRoleOverrides } from "@cognia/agent-contracts/external-agent"
+import type { AgentModelRoleOverrides } from "@cognia/agent-contracts/model-binding"
 import type {
   AcpPermissionMode,
   CodexAgentOptions,
@@ -114,6 +116,7 @@ export interface PluginExternalAgentSummary {
   /** The endpoint, with any URL credential redacted. Never headers or proxy settings. */
   network: { endpoint: string } | null
   cogniaModel: ExternalAgentCogniaModelBinding | null
+  modelRoles: AgentModelRoleOverrides | null
   /** The bound subscription account id; `null` follows the active account. */
   subscriptionAccountId: string | null
   maxConcurrentSessions: number | null
@@ -223,6 +226,7 @@ interface PluginExternalAgentSharedInput {
   process?: PluginExternalAgentProcessInput
   network?: { endpoint: string }
   cogniaModel?: ExternalAgentCogniaModelBinding | null
+  modelRoles?: AgentModelRoleOverrides
   timeout?: number
   retryConfig?: Partial<ExternalAgentRetryConfig>
   maxConcurrentSessions?: number
@@ -254,6 +258,7 @@ export interface PluginExternalAgentUpdatePatch {
   retryConfig?: Partial<ExternalAgentRetryConfig>
   codexOptions?: CodexAgentOptions
   cogniaModel?: ExternalAgentCogniaModelBinding | null
+  modelRoles?: AgentModelRoleOverrides | null
   stateIsolation?: ExternalAgentStateIsolation
   subscriptionAccountId?: string | null
   maxConcurrentSessions?: number
@@ -398,6 +403,7 @@ const SHARED_INPUT_KEYS = [
   "process",
   "network",
   "cogniaModel",
+  "modelRoles",
   "timeout",
   "retryConfig",
   "maxConcurrentSessions",
@@ -419,6 +425,7 @@ const UPDATE_KEYS = [
   "retryConfig",
   "codexOptions",
   "cogniaModel",
+  "modelRoles",
   "stateIsolation",
   "subscriptionAccountId",
   "maxConcurrentSessions",
@@ -605,6 +612,8 @@ export function projectExternalAgentConfig(
       ? { endpoint: redactEndpoint(scrubbed.network.endpoint) }
       : null,
     cogniaModel: scrubbed.cogniaModel ? { ...scrubbed.cogniaModel } : null,
+    modelRoles:
+      scrubbed.cogniaModel && scrubbed.modelRoles ? structuredClone(scrubbed.modelRoles) : null,
     subscriptionAccountId: text(scrubbed.subscriptionAccountId),
     maxConcurrentSessions: scrubbed.maxConcurrentSessions ?? null,
     sessionIdleTimeout: scrubbed.sessionIdleTimeout ?? null,
@@ -855,6 +864,17 @@ async function validateDeclaredCapabilities(
   return out
 }
 
+function validateModelRoles(
+  method: string,
+  value: unknown
+): AgentModelRoleOverrides | null | undefined {
+  try {
+    return normalizeAgentModelRoleOverrides(value)
+  } catch (error) {
+    return invalid(method, error instanceof Error ? error.message : "Invalid model role overrides")
+  }
+}
+
 async function validateCogniaModel(
   method: string,
   value: unknown
@@ -1003,6 +1023,8 @@ async function applyFormFields(
   }
   if (input.cogniaModel !== undefined)
     next.cogniaModel = await validateCogniaModel(method, input.cogniaModel)
+  if (input.modelRoles !== undefined)
+    next.modelRoles = validateModelRoles(method, input.modelRoles) ?? undefined
   if (input.timeout !== undefined)
     next.timeoutMs = String(
       requireInteger(method, "timeout", input.timeout, { min: 1_000, max: 86_400_000 })
@@ -1035,16 +1057,22 @@ async function buildCreateInput(
   presetId: string,
   extras: SharedExtras
 ): Promise<CreateExternalAgentInput> {
-  const [{ validateAddAgentForm, buildCreateExternalAgentInput }, { adaptPermissionMode }] =
-    await Promise.all([
-      import("@/lib/ai/agent/external/config/add-agent-form"),
-      import("@/lib/ai/agent/external/policy/permission-modes"),
-    ])
+  const [
+    { validateAddAgentForm, buildCreateExternalAgentInput },
+    { adaptPermissionMode },
+    { useSettingsStore },
+  ] = await Promise.all([
+    import("@/lib/ai/agent/external/config/add-agent-form"),
+    import("@/lib/ai/agent/external/policy/permission-modes"),
+    import("@/stores/settings"),
+  ])
   const env = data.processEnv ?? {}
-  const problem = validateAddAgentForm(data, presetId, {
-    names: Object.keys(env),
-    values: env,
-  })
+  const problem = validateAddAgentForm(
+    data,
+    presetId,
+    { names: Object.keys(env), values: env },
+    useSettingsStore.getState().settings
+  )
   if (problem) invalid(method, `the configuration is not valid (${problem})`)
 
   const defaultPermissionMode = extras.defaultPermissionMode
@@ -1128,6 +1156,7 @@ async function validateUpdatePatch(
   }
   if (raw.cogniaModel !== undefined)
     patch.cogniaModel = await validateCogniaModel(method, raw.cogniaModel)
+  if (raw.modelRoles !== undefined) patch.modelRoles = validateModelRoles(method, raw.modelRoles)
   if (raw.timeout !== undefined)
     patch.timeout = requireInteger(method, "timeout", raw.timeout, { min: 1_000, max: 86_400_000 })
 
@@ -1158,6 +1187,27 @@ async function validateUpdatePatch(
   const command = patch.process?.command ?? config.process?.command
   if (patch.process && config.transport === "stdio" && !command?.trim()) {
     invalid(method, "a stdio agent needs process.command")
+  }
+  const primary = patch.cogniaModel === undefined ? config.cogniaModel : patch.cogniaModel
+  const modelRoles = patch.modelRoles === undefined ? config.modelRoles : patch.modelRoles
+  if (primary && modelRoles) {
+    const [{ compileEditorModelPlan }, { useSettingsStore }] = await Promise.all([
+      import("@/lib/ai/agent/external/config/cognia-model-options"),
+      import("@/stores/settings"),
+    ])
+    const settings = useSettingsStore.getState().settings
+    const result = compileEditorModelPlan({
+      config: {
+        ...config,
+        ...patch,
+        process: { ...config.process, ...patch.process },
+      } as ExternalAgentConfig,
+      primary,
+      layers: [{ source: "config", overrides: modelRoles }],
+      providerSettings: settings?.providerSettings,
+      customProviders: settings?.customProviders,
+    })
+    if (!result.ok) invalid(method, `Invalid model role overrides: ${result.reason}`)
   }
   return patch
 }

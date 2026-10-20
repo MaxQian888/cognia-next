@@ -22,6 +22,7 @@ import { resolveExternalAgentSurfaceFromMetadata } from "../ecosystem-adapters"
 import { adaptPermissionMode } from "../policy/permission-modes"
 import { protocolAdapterRegistry } from "../protocol-adapter"
 import { stateIsolationBlockReason } from "../lifecycle/launch-preparation"
+import { normalizeAgentModelRoleOverrides } from "@cognia/agent-contracts/external-agent"
 import { normalizeCogniaModelBinding } from "./gateway-task"
 
 // The protocols with a built-in adapter registered by
@@ -714,6 +715,8 @@ export function normalizeExternalAgentConfigInput(
   }
 
   const runtimeIsTauri = options?.runtimeIsTauri ?? supportsExternalAgents()
+  const cogniaModel = normalizeCogniaModelBinding(input.cogniaModel)
+  const modelRoles = normalizeAgentModelRoleOverrides(input.modelRoles)
   const normalizedConfigBase: ExternalAgentConfig = {
     id: options?.id ?? nanoid(),
     name: input.name.trim(),
@@ -746,7 +749,8 @@ export function normalizeExternalAgentConfigInput(
     requireApprovalFor: input.requireApprovalFor,
     codexOptions: input.codexOptions,
     sandboxPolicy: input.sandboxPolicy,
-    cogniaModel: normalizeCogniaModelBinding(input.cogniaModel),
+    cogniaModel,
+    modelRoles: cogniaModel ? (modelRoles ?? undefined) : undefined,
     timeout: input.timeout ?? DEFAULT_TIMEOUT,
     retryConfig: {
       maxRetries: input.retryConfig?.maxRetries ?? DEFAULT_RETRY_CONFIG.maxRetries,

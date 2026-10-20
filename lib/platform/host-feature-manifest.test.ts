@@ -1,4 +1,8 @@
 import {
+  hostSupportsExternalAgentModelPlans,
+  EXTERNAL_AGENT_MODEL_PLAN_OPERATION,
+} from "./host-feature-manifest"
+import {
   ENVIRONMENT_CATALOG_HOST_OPERATIONS,
   FILES_LIBRARY_REMOTE_HOST_OPERATIONS,
   GLANCE_REMOTE_HOST_OPERATIONS,
@@ -581,6 +585,7 @@ describe("external-agent.host-configs", () => {
       "external_agent_config_get",
       "external_agent_config_create",
       "external_agent_config_update",
+      "external_agent_config_model_roles",
       "external_agent_config_delete",
       "external_agent_config_duplicate",
       "external_agent_config_reconcile",
@@ -638,6 +643,7 @@ describe("external-agent.host-configs", () => {
       for (const operation of [
         "external_agent_cognia_models",
         "external_agent_run_turn_cognia_model",
+        "external_agent_config_model_roles",
       ]) {
         expect(supportsHostFeatureOperation(parsed, "external-agent.host-configs", operation)).toBe(
           true
@@ -994,5 +1000,31 @@ describe("resolve_pi_extension", () => {
           ?.operations
       ).toContain("resolve_pi_extension")
     }
+  })
+})
+
+describe("external agent task model plan negotiation", () => {
+  it.each(["tauri", "headless"] as const)("advertises support on %s", (platform) => {
+    const manifest = buildLocalHostFeatureManifest({ platform })
+    expect(hostSupportsExternalAgentModelPlans(manifest)).toBe(true)
+    // The service-only host-task lease is never offered to paired devices.
+    expect(
+      supportsHostFeatureOperation(
+        manifest,
+        "external-agent.process-plane",
+        "agent_gateway_host_task_prepare"
+      )
+    ).toBe(false)
+    manifest.operations.find((op) => op.name === EXTERNAL_AGENT_MODEL_PLAN_OPERATION)!.healthy =
+      false
+    expect(hostSupportsExternalAgentModelPlans(manifest)).toBe(false)
+  })
+  it("distinguishes unknown and old Hosts", () => {
+    expect(hostSupportsExternalAgentModelPlans(undefined)).toBeUndefined()
+    const manifest = buildLocalHostFeatureManifest({ platform: "headless" })
+    manifest.features["external-agent.process-plane"]!.operations = manifest.features[
+      "external-agent.process-plane"
+    ]!.operations.filter((op) => op !== EXTERNAL_AGENT_MODEL_PLAN_OPERATION)
+    expect(hostSupportsExternalAgentModelPlans(manifest)).toBe(false)
   })
 })

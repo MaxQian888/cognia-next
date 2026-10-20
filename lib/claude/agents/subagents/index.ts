@@ -124,18 +124,23 @@ function projectSubagentTemplate(tpl: SubAgentTemplate): {
   def: AgentDefinition
 } {
   assertSubagentContextPolicy(tpl.config)
-  const def: AgentDefinition = {
+  const def: AgentDefinition & Pick<PluginSubagentDef, "cogniaModel" | "modelRoles"> = {
     description: tpl.description,
     prompt: tpl.config.systemPrompt ?? tpl.taskTemplate ?? tpl.description,
   }
   if (tpl.config.tools) def.tools = tpl.config.tools
   if (tpl.config.model) def.model = tpl.config.model
+  if (tpl.config.provider) def.provider = tpl.config.provider
   if (tpl.config.maxSteps !== undefined) def.maxTurns = tpl.config.maxSteps
   if (tpl.config.contextPolicy) def.contextPolicy = { ...tpl.config.contextPolicy }
   // External-CLI backing (A2): route this subagent to an external agent when the
   // template names a preset, so the dispatching model runs it on Claude Code /
   // Codex / … instead of the built-in executor.
-  if (tpl.config.externalPresetId) def.externalPresetId = tpl.config.externalPresetId
+  if (tpl.config.externalPresetId) {
+    def.externalPresetId = tpl.config.externalPresetId
+    if (tpl.config.cogniaModel !== undefined) def.cogniaModel = tpl.config.cogniaModel
+    if (tpl.config.modelRoles) def.modelRoles = tpl.config.modelRoles
+  }
   if (tpl.config.mcpServerIds?.length) def.mcpServerIds = tpl.config.mcpServerIds
   return { id: projectedTemplateId(tpl.name), def }
 }
@@ -286,6 +291,13 @@ export function resolveDispatchableSubagents(): Array<{ id: string; def: PluginS
         prompt: tpl.config.systemPrompt ?? tpl.taskTemplate ?? tpl.description,
         ...(tpl.config.tools ? { tools: tpl.config.tools } : {}),
         ...(tpl.config.model ? { model: tpl.config.model } : {}),
+        ...(tpl.config.provider ? { provider: tpl.config.provider } : {}),
+        ...(tpl.config.externalPresetId && tpl.config.cogniaModel !== undefined
+          ? { cogniaModel: tpl.config.cogniaModel }
+          : {}),
+        ...(tpl.config.externalPresetId && tpl.config.modelRoles
+          ? { modelRoles: tpl.config.modelRoles }
+          : {}),
         ...(tpl.config.maxSteps !== undefined ? { maxTurns: tpl.config.maxSteps } : {}),
         ...(tpl.config.contextPolicy ? { contextPolicy: { ...tpl.config.contextPolicy } } : {}),
         // External-CLI backing (A2): a template naming a preset dispatches to

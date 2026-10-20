@@ -18246,6 +18246,55 @@
         "runnable": "可运行"
       }
     },
+    "roleModels": {
+      "choose": "选择模型",
+      "description": "此运行时的原生子代理、模型别名和辅助调用可以使用主模型同一供应商、同一账号下的其他模型。未设置的项沿用主模型。若某次运行改用其他供应商或账号，则只使用该次的主模型。",
+      "effort": "推理强度",
+      "effortDefault": "模型默认",
+      "efforts": {
+        "high": "高",
+        "low": "低",
+        "medium": "中",
+        "minimal": "最低",
+        "xhigh": "超高"
+      },
+      "empty": "此供应商没有其他兼容的模型。",
+      "hints": {
+        "auxiliary": "生成标题、摘要等辅助调用，不属于子代理。",
+        "childDefault": "子代理自身定义和发起调用都未指定模型时使用。",
+        "tier": "此运行时的该别名所解析到的模型。"
+      },
+      "hostOutdated": "需要先更新已配对的 Host，才能设置子任务模型。",
+      "invalid": "请先修正子任务模型设置，再保存。",
+      "modeLabel": "{slot}：模型来源",
+      "modelLabel": "{slot}：模型",
+      "modes": {
+        "inherit": "继承 Agent 配置",
+        "model": "其他模型",
+        "primary": "主模型"
+      },
+      "needsPrimary": "开启 Cognia 模型并选择主模型后，才能设置子任务模型。",
+      "noSlots": "此运行时的所有调用都使用主模型。",
+      "refusals": {
+        "crossAccount": "子任务模型必须使用主模型的账号。",
+        "crossProvider": "请选择 {provider} 的模型。子任务模型必须使用主模型的供应商。",
+        "effortUnsupported": "此模型不支持所选的推理强度。",
+        "tooManyModels": "一个任务使用的不同模型过多，请减少子任务模型。",
+        "unsupportedSlot": "此运行时不支持这项子任务模型设置，请移除后再保存。"
+      },
+      "remove": "移除",
+      "removeStale": "移除不受支持的子任务模型设置",
+      "sameAccount": "使用主模型所在供应商的账号。",
+      "search": "搜索 {provider} 的模型…",
+      "slots": {
+        "auxSmall": "小型辅助模型",
+        "subagentDefault": "默认子代理模型",
+        "tierHaiku": "Haiku 别名",
+        "tierOpus": "Opus 别名",
+        "tierSonnet": "Sonnet 别名"
+      },
+      "title": "子任务模型"
+    },
     "runCommand": "运行 /{name}",
     "runtimes": {
       "activeSessions": "正在运行的会话",
@@ -55866,6 +55915,8 @@
           "research": "研究",
           "writing": "写作"
         },
+        "cogniaModelHint": "可选：让该子代理的外部任务使用 Cognia 模型。保持关闭则沿用派发时解析到的代理配置。",
+        "cogniaModelPinnedHint": "已固定的代理配置已在使用 Cognia 模型。仅在需要为该子代理覆盖时在此设置。",
         "compactAtTokensInvalid": "请输入正整数 Token 数。",
         "compactAtTokensUnsupported": "指定其他提供商或外部运行时后，不支持该上下文压缩策略。",
         "configTitle": "高级配置",
@@ -55884,7 +55935,7 @@
         "editorCompactAtTokensHint": "留空时继承默认策略。运行时支持时，正整数 Token 阈值可降低子代理上下文窗口。",
         "editorDescription": "描述",
         "editorExternalRuntime": "外部运行时",
-        "editorExternalRuntimeHint": "让该子代理在外部 CLI 代理（Claude Code、Codex 等）上运行，而非内置引擎。仅桌面端；外部代理使用它自己的模型与鉴权。",
+        "editorExternalRuntimeHint": "让该子代理在外部 CLI 代理（Claude Code、Codex 等）上运行，而非内置引擎。仅桌面端；除非在下方设置了 Cognia 模型，外部代理使用它自己的模型与鉴权。",
         "editorIcon": "图标",
         "editorIconPlaceholder": "Search",
         "editorMaxNestingDepth": "最大嵌套深度",
@@ -55921,6 +55972,7 @@
         "mcpLabel": "MCP 服务",
         "missingBody": "它可能已在其他窗口中被删除。",
         "missingTitle": "找不到该模板",
+        "modelRolesInvalid": "请先修正子任务模型：该子代理运行时会拒绝这些设置。",
         "nameRequired": "模板名称不能为空。",
         "newTemplate": "新建模板",
         "promptShadowedBody": "系统提示词的优先级高于任务模板，因此下面的任务模板——以及为它声明的变量——都不会被使用。到「高级配置」中清空系统提示词即可恢复。",

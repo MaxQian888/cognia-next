@@ -471,6 +471,42 @@ describe("dispatchSubagent — external backing (A2)", () => {
     )
   })
 
+  it("merges per-call role slots over the definition and suppresses them on native runs", async () => {
+    const cogniaModel = { providerId: "p", modelId: "m" }
+    const modelRoles = {
+      version: 1 as const,
+      slots: {
+        "subagent.default": {
+          kind: "cognia" as const,
+          binding: { providerId: "p", modelId: "child" },
+        },
+        "tier.haiku": { kind: "inherit-primary" as const },
+      },
+    }
+    const callRoles = {
+      version: 1 as const,
+      slots: { "subagent.default": { kind: "inherit-primary" as const } },
+    }
+    externalGetAllAgents.mockReturnValue([{ config: { id: "native-source" } }])
+    externalIsFromPreset.mockReturnValue("claude-code")
+    externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })
+    await dispatchSubagent({ ...externalDef, cogniaModel, modelRoles }, "go", {
+      modelRoles: callRoles,
+    })
+    expect(externalExecute.mock.calls[0][2].modelRoles).toEqual({
+      version: 1,
+      slots: {
+        "subagent.default": { kind: "inherit-primary" },
+        "tier.haiku": { kind: "inherit-primary" },
+      },
+    })
+    await dispatchSubagent({ ...externalDef, cogniaModel, modelRoles }, "native", {
+      cogniaModel: null,
+      modelRoles: callRoles,
+    })
+    expect(externalExecute.mock.calls[1][2]).not.toHaveProperty("modelRoles")
+  })
+
   it("lets a per-dispatch binding override the definition and null explicitly choose native mode", async () => {
     const declared = { providerId: "kimi", modelId: "kimi-for-coding", accountId: "a" }
     const override = { ...declared, accountId: "b" }
@@ -517,6 +553,27 @@ describe("dispatchSubagent — external backing (A2)", () => {
       expect(externalEnsureReady).toHaveBeenCalledWith("strict", { deferConnect: true })
       expect(externalCreatePreset).not.toHaveBeenCalled()
       expect(externalExecute.mock.calls[0][0]).toBe("strict")
+      expect(externalExecute.mock.calls[0][2]).not.toHaveProperty("cogniaModel")
+    })
+
+    it("uses definition role overrides when the pinned configuration supplies the binding", async () => {
+      const modelRoles = {
+        version: 1 as const,
+        slots: { "subagent.default": { kind: "inherit-primary" as const } },
+      }
+      externalGetAllAgents.mockReturnValue([
+        {
+          config: {
+            id: "strict",
+            enabled: true,
+            metadata: { preset: "codex" },
+            cogniaModel: { providerId: "p", modelId: "m" },
+          },
+          connectionStatus: "connected",
+        },
+      ])
+      await dispatchSubagent({ ...pinnedDef, modelRoles }, "go")
+      expect(externalExecute.mock.calls[0][2].modelRoles).toEqual(modelRoles)
       expect(externalExecute.mock.calls[0][2]).not.toHaveProperty("cogniaModel")
     })
 

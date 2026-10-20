@@ -2,6 +2,8 @@ import {
   HOST_CONFIG_CAPABILITIES,
   HOST_CONFIG_COMMANDS,
   HostCogniaModelUpdateRequiredError,
+  HostModelRolesUpdateRequiredError,
+  hostSupportsModelRoles,
   HostConfigsUnsupportedError,
   fetchHostCogniaModels,
   hostSupportsCogniaModelTurns,
@@ -451,5 +453,54 @@ describe("Cognia model turns", () => {
       reason: "unsupported",
       operation: HOST_CONFIG_CAPABILITIES.runTurnCogniaModel,
     })
+  })
+})
+
+describe("Host role models capability", () => {
+  it("refuses creates, updates and clears on old Hosts without issuing a lease or command", async () => {
+    setup()
+    const modelRoles = {
+      version: 1 as const,
+      slots: { "subagent.default": { kind: "inherit-primary" as const } },
+    }
+    expect(hostSupportsModelRoles()).toBe(false)
+    await expect(createRemoteHostConfig({ modelRoles })).rejects.toMatchObject({
+      i18nKey: "externalAgent.roleModels.hostOutdated",
+    })
+    for (const value of [modelRoles, null]) {
+      await expect(
+        updateRemoteHostConfig({
+          configId: "c",
+          expectedRevision: "r",
+          patch: { modelRoles: value },
+        })
+      ).rejects.toBeInstanceOf(HostModelRolesUpdateRequiredError)
+    }
+    expect(calls).toEqual([])
+    expect(leaseOperations).toEqual([])
+  })
+  it("sends overrides only when the active Host advertises support", async () => {
+    setup(
+      {
+        getRuntimeSnapshot: snapshot({
+          compatible: true,
+          operations: [...ALL_OPS, HOST_CONFIG_CAPABILITIES.configModelRoles],
+        }),
+      },
+      { config: { configId: "c" } }
+    )
+    const modelRoles = {
+      version: 1 as const,
+      slots: { "subagent.default": { kind: "inherit-primary" as const } },
+    }
+    expect(hostSupportsModelRoles()).toBe(true)
+    await createRemoteHostConfig({ modelRoles })
+    await updateRemoteHostConfig({
+      configId: "c",
+      expectedRevision: "r",
+      patch: { modelRoles: null },
+    })
+    expect(calls[0].payload).toMatchObject({ config: { modelRoles } })
+    expect(calls[1].payload).toMatchObject({ patch: { modelRoles: null } })
   })
 })

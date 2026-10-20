@@ -169,6 +169,19 @@ export interface SubAgentConfig {
    */
   externalAgentConfigId?: string
   /**
+   * Run this sub-agent's external task on a Cognia gateway model instead of the
+   * runtime's own provider settings. Read only alongside `externalPresetId`;
+   * `null` forces the native lane even when the resolved config has a binding.
+   * Projected onto `PluginSubagentDef.cogniaModel`.
+   */
+  cogniaModel?: import("./external-agent").ExternalAgentCogniaModelBinding | null
+  /**
+   * Sub-task models for this sub-agent's gateway task, merged slot by slot
+   * above the resolved external configuration's own `modelRoles`. Read only
+   * when the run is on a Cognia model. Projected onto `PluginSubagentDef.modelRoles`.
+   */
+  modelRoles?: import("./external-agent").AgentModelRoleOverrides
+  /**
    * MCP server ids/names forwarded into the external agent's ACP session
    * (`session/new` `mcpServers`) when this sub-agent runs on an external preset.
    * Projected onto `AgentDefinition.mcpServerIds`, resolved via

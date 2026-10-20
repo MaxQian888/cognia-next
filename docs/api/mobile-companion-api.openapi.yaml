@@ -3223,6 +3223,26 @@ paths:
                         - openai-chat
                         - openai-responses
                         - anthropic
+                    modelPlan:
+                      type: object
+                      required:
+                        - additionalModels
+                        - modelBindings
+                      properties:
+                        additionalModels:
+                          type: array
+                          maxItems: 31
+                          items:
+                            type: string
+                            minLength: 1
+                            maxLength: 256
+                        modelBindings:
+                          type: object
+                          maxProperties: 64
+                          additionalProperties:
+                            type: string
+                          example: {}
+                      additionalProperties: false
                     budget:
                       type: object
                       properties:

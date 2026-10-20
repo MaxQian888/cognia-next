@@ -18709,6 +18709,19 @@
             }
           },
           "additionalProperties": true
+        },
+        "modelMetadataById": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
         }
       },
       "additionalProperties": false

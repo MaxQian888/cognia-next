@@ -44,6 +44,7 @@ import {
 import { ResponsiveFormDialog } from "@/components/shared/responsive-form-dialog"
 import { BrandIcon } from "@/components/icons/brand-icon"
 import { CogniaModelPicker } from "@/components/agent/external-agent/cognia-model-picker"
+import { RoleModelFields } from "@/components/agent/external-agent/role-model-fields"
 import {
   StateIsolationField,
   defaultStateIsolationFor,
@@ -72,6 +73,8 @@ import {
   SIWC_APP_SERVER_PROTOCOL,
 } from "@/lib/ai/agent/external/protocol-options"
 import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
+import { compileEditorModelPlan } from "@/lib/ai/agent/external/config/cognia-model-options"
+import { useSettingsStore } from "@/stores/settings"
 import { uniqueDuplicateName } from "@/lib/ai/agent/external/config/duplicate-config"
 import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
 import { CODEX_PRESET_FAMILY } from "@/lib/ai/agent/external/config/agent-binding"
@@ -94,6 +97,7 @@ import {
 } from "@/stores/agent/external-agent-store"
 import type {
   AcpPermissionMode,
+  AgentModelRoleOverrides,
   CreateExternalAgentInput,
   ExternalAgentProtocol,
   ExternalAgentStateIsolation,
@@ -124,14 +128,17 @@ export const PERMISSION_MODE_LABEL_KEY: Record<AcpPermissionMode, string> = {
  */
 export type AgentEditorSaveInput = Omit<
   CreateExternalAgentInput,
-  "maxConcurrentSessions" | "sessionIdleTimeout"
+  "maxConcurrentSessions" | "sessionIdleTimeout" | "modelRoles"
 > & {
   maxConcurrentSessions?: number | null
   sessionIdleTimeout?: number | null
+  /** `null` clears saved sub-task models (also when the Cognia model is turned off). */
+  modelRoles?: AgentModelRoleOverrides | null
 }
 
 interface AgentFormData {
   cogniaModel?: CreateExternalAgentInput["cogniaModel"]
+  modelRoles?: AgentModelRoleOverrides
   name: string
   protocol: ExternalAgentProtocol
   transport: ExternalAgentTransport
@@ -595,6 +602,7 @@ export function AgentEditorDialog({
   const tManage = useTranslations("externalAgentManage.editor")
   const tCommon = useTranslations("common")
   const tGateway = useTranslations("externalAgent.cogniaModel")
+  const tRoleModels = useTranslations("externalAgent.roleModels")
   const tSiwc = useTranslations("siwc")
   const { getAgent, getAllAgents } = useExternalAgentStore()
   const [customName, setCustomName] = useState(false)
@@ -664,6 +672,7 @@ export function AgentEditorDialog({
       ...DEFAULT_FORM_DATA,
       name: agent.name,
       cogniaModel: agent.cogniaModel,
+      modelRoles: agent.modelRoles,
       protocol: agent.protocol,
       transport: agent.transport,
       processCommand: agent.process?.command || "",
@@ -812,6 +821,7 @@ export function AgentEditorDialog({
     const input: AgentEditorSaveInput = {
       name: formData.name.trim(),
       cogniaModel: siwcMode ? null : (formData.cogniaModel ?? null),
+      modelRoles: siwcMode || !formData.cogniaModel ? null : (formData.modelRoles ?? null),
       protocol: formData.protocol,
       transport: formData.transport,
       description: formData.description.trim(),
@@ -1043,6 +1053,20 @@ export function AgentEditorDialog({
       toast.error(tGateway("invalid"))
       return
     }
+    if (input.cogniaModel && input.modelRoles) {
+      const { settings } = useSettingsStore.getState()
+      const plan = compileEditorModelPlan({
+        config: input as CreateExternalAgentInput,
+        primary: input.cogniaModel,
+        layers: [{ source: "config", overrides: input.modelRoles }],
+        providerSettings: settings?.providerSettings ?? {},
+        customProviders: settings?.customProviders,
+      })
+      if (!plan.ok) {
+        toast.error(tRoleModels("invalid"))
+        return
+      }
+    }
 
     // Secret removals the user asked for, minus any slot a new value replaces.
     const usesServerPassword =
@@ -1103,6 +1127,7 @@ export function AgentEditorDialog({
     t,
     tManage,
     tGateway,
+    tRoleModels,
   ])
 
   // Preset picker — keep tightly aligned with the chat-side AddAgentDialog
@@ -1155,6 +1180,29 @@ export function AgentEditorDialog({
         })
   const validateApproval = (value: string) =>
     isApprovalEntryValid(value) ? null : tManage("approvalInvalid")
+
+  // The connection the form describes, judged by the Cognia model pickers.
+  const gatewayConfig = {
+    protocol: formData.protocol,
+    transport: formData.transport,
+    process: {
+      command: formData.processCommand || (formData.opencodeAutoSpawn ? "opencode" : ""),
+      args: tokenizeShellCommand(formData.processArgs) ?? [],
+    },
+    network:
+      formData.transport !== "stdio" && !formData.opencodeAutoSpawn
+        ? { endpoint: formData.networkEndpoint }
+        : undefined,
+    metadata: {
+      ...(selectedPreset
+        ? getPresetConfig(selectedPreset)?.metadata
+        : editingAgent
+          ? editingAgent.metadata
+          : {}),
+      preset: selectedPreset || undefined,
+      autoSpawnServer: formData.opencodeAutoSpawn,
+    },
+  }
 
   return (
     <ResponsiveFormDialog
@@ -1765,31 +1813,19 @@ export function AgentEditorDialog({
         )}
 
         {!siwcMode && (
-          <CogniaModelPicker
-            config={{
-              protocol: formData.protocol,
-              transport: formData.transport,
-              process: {
-                command: formData.processCommand || (formData.opencodeAutoSpawn ? "opencode" : ""),
-                args: tokenizeShellCommand(formData.processArgs) ?? [],
-              },
-              network:
-                formData.transport !== "stdio" && !formData.opencodeAutoSpawn
-                  ? { endpoint: formData.networkEndpoint }
-                  : undefined,
-              metadata: {
-                ...(selectedPreset
-                  ? getPresetConfig(selectedPreset)?.metadata
-                  : editingAgent
-                    ? editingAgent.metadata
-                    : {}),
-                preset: selectedPreset || undefined,
-                autoSpawnServer: formData.opencodeAutoSpawn,
-              },
-            }}
-            value={formData.cogniaModel}
-            onChange={(cogniaModel) => setFormData((current) => ({ ...current, cogniaModel }))}
-          />
+          <>
+            <CogniaModelPicker
+              config={gatewayConfig}
+              value={formData.cogniaModel}
+              onChange={(cogniaModel) => setFormData((current) => ({ ...current, cogniaModel }))}
+            />
+            <RoleModelFields
+              config={gatewayConfig}
+              primary={formData.cogniaModel}
+              value={formData.modelRoles}
+              onChange={(modelRoles) => setFormData((current) => ({ ...current, modelRoles }))}
+            />
+          </>
         )}
 
         {/* Permission Mode — narrowed to the modes the chosen backend can

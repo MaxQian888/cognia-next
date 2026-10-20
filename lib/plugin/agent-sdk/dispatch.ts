@@ -15,6 +15,8 @@
  * load and unit-testable.
  */
 
+import { normalizeAgentModelRoleOverrides } from "@cognia/agent-contracts/external-agent"
+import { mergeModelRoleLayers } from "@/lib/ai/agent/external/config/model-plan"
 import type { AgentTeamConfig } from "@/lib/ai/agent/team/agent-team"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import { normalizeCogniaModelBinding } from "@/types/agent/external-agent"
@@ -510,11 +512,22 @@ async function runExternalSubagent(
   const { placeDispatchedAgent } = await import("@/lib/sandbox/host-agent-placement")
   await placeDispatchedAgent(agentId, options.cwd, manager)
 
+  const effectiveBinding =
+    cogniaModel === undefined && pinned
+      ? manager.getAgent(agentId)?.config.cogniaModel
+      : cogniaModel
+  const modelRoles = effectiveBinding
+    ? mergeModelRoleLayers(
+        normalizeAgentModelRoleOverrides(options.modelRoles) ?? undefined,
+        normalizeAgentModelRoleOverrides(def.modelRoles) ?? undefined
+      )
+    : undefined
   const result = await manager.execute(agentId, prompt, {
     // A preset names an executable, not another saved agent's model/account.
     // A pinned config IS the saved agent, so without an explicit override its
     // own gateway binding (or native mode) applies.
     ...(cogniaModel !== undefined ? { cogniaModel } : pinned ? {} : { cogniaModel: null }),
+    ...(modelRoles ? { modelRoles } : {}),
     ...(def.prompt ? { systemPrompt: def.prompt } : {}),
     // Honor the subagent's declared model on the external CLI too (the sidecar
     // path already threads `def.model`). Best-effort per the manager.

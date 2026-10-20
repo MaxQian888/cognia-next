@@ -171,7 +171,7 @@
     "editorCompactAtTokensHint": "Leave empty to inherit. A positive whole token count can lower the sub-agent context window when supported by the runtime.",
     "editorDescription": "Description",
     "editorExternalRuntime": "External runtime",
-    "editorExternalRuntimeHint": "Run this subagent on an external CLI agent (Claude Code, Codex, …) instead of the built-in engine. Desktop only; the external agent uses its own model and auth.",
+    "editorExternalRuntimeHint": "Run this subagent on an external CLI agent (Claude Code, Codex, …) instead of the built-in engine. Desktop only; the external agent uses its own model and auth unless a Cognia model is set below.",
     "editorIcon": "Icon",
     "editorIconPlaceholder": "Search",
     "editorMaxNestingDepth": "Max nesting depth",
@@ -228,7 +228,10 @@
     "toolsLabel": "Tool access",
     "variableIndex": "Variable {index}",
     "varsUndeclared": "Used but not declared: {names}",
-    "varsUnused": "Declared but never used: {names}"
+    "varsUnused": "Declared but never used: {names}",
+    "cogniaModelHint": "Optional: run this subagent's external task on a Cognia model. Leave it off to follow the agent configuration the dispatch resolves.",
+    "cogniaModelPinnedHint": "The pinned agent configuration already runs on a Cognia model. Set one here only to override it for this subagent.",
+    "modelRolesInvalid": "Fix the sub-task models before saving: they would be refused when this subagent runs."
   },
   "title": "Sub-agents",
   "toolCatalog": {

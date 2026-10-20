@@ -607,6 +607,7 @@ export function buildLocalHostFeatureManifest({
         "external_agent_config_get",
         "external_agent_config_create",
         "external_agent_config_update",
+        "external_agent_config_model_roles",
         "external_agent_config_delete",
         "external_agent_config_duplicate",
         "external_agent_config_reconcile",
@@ -664,6 +665,9 @@ export function buildLocalHostFeatureManifest({
         "get_external_agent_status",
         // The Rust Host RPC is shared by desktop and cognia-server.
         "agent_tool_host_control",
+        // A marker, not a command: the gateway lease (`agent_gateway_lease_prepare`
+        // and the brain's service-only host-task lease) accepts a task model plan.
+        EXTERNAL_AGENT_MODEL_PLAN_OPERATION,
         "agent_gateway_lease_prepare",
         "agent_gateway_lease_renew",
         "agent_gateway_lease_revoke",
@@ -958,6 +962,8 @@ export function buildLocalHostFeatureManifest({
   }
 }
 
+export const EXTERNAL_AGENT_MODEL_PLAN_OPERATION = "agent_gateway_task_model_plan"
+
 export function supportsHostFeatureOperation(
   manifest: HostFeatureManifest | null | undefined,
   feature: HostFeatureId,
@@ -1114,4 +1120,16 @@ export function parseHostFeatureManifest(value: unknown): HostFeatureManifest | 
   }
 
   return candidate as HostFeatureManifest
+}
+
+/** Undefined until a Host manifest has been received; false for older Hosts. */
+export function hostSupportsExternalAgentModelPlans(
+  manifest: HostFeatureManifest | null | undefined
+): boolean | undefined {
+  if (!manifest) return undefined
+  return supportsHostFeatureOperation(
+    manifest,
+    "external-agent.process-plane",
+    EXTERNAL_AGENT_MODEL_PLAN_OPERATION
+  )
 }

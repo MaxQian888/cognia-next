@@ -956,3 +956,134 @@ describe("getHostCogniaModelCatalog", () => {
     }
   })
 })
+
+describe("Host model role persistence", () => {
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+  const bound = () =>
+    config({
+      protocol: "codex-app-server",
+      process: { command: "codex", args: ["app-server"] },
+      cogniaModel: { providerId: "p", modelId: "m" },
+      modelRoles,
+    })
+  it("creates, preserves, duplicates, and clears roles", async () => {
+    const created = await createHostExternalAgentConfig({ config: bound() }, ready)
+    expect(created.config.modelRoles).toEqual(modelRoles)
+    const renamed = await updateHostExternalAgentConfig(
+      {
+        configId: created.configId,
+        expectedRevision: created.revision,
+        patch: { name: "renamed" },
+      },
+      ready
+    )
+    expect(renamed.config.modelRoles).toEqual(modelRoles)
+    const copied = await duplicateHostExternalAgentConfig({ configId: created.configId }, ready)
+    expect(copied.config.modelRoles).toEqual(modelRoles)
+    const cleared = await updateHostExternalAgentConfig(
+      {
+        configId: created.configId,
+        expectedRevision: renamed.revision,
+        patch: { modelRoles: null },
+      },
+      ready
+    )
+    expect(cleared.config.modelRoles).toBeUndefined()
+    const restored = await updateHostExternalAgentConfig(
+      { configId: created.configId, expectedRevision: cleared.revision, patch: { modelRoles } },
+      ready
+    )
+    const native = await updateHostExternalAgentConfig(
+      {
+        configId: created.configId,
+        expectedRevision: restored.revision,
+        patch: { cogniaModel: null },
+      },
+      ready
+    )
+    expect(native.config.modelRoles).toBeUndefined()
+  })
+  it("refuses malformed, unsupported, cross-provider and cross-account selections before writing", async () => {
+    const created = await createHostExternalAgentConfig({ config: bound() }, ready)
+    for (const invalid of [
+      { version: 2, slots: {} },
+      { version: 1, slots: { "aux.small": { kind: "inherit-primary" } } },
+      {
+        version: 1,
+        slots: {
+          "subagent.default": {
+            kind: "cognia",
+            binding: { providerId: "other", modelId: "child" },
+          },
+        },
+      },
+      {
+        version: 1,
+        slots: {
+          "subagent.default": {
+            kind: "cognia",
+            binding: { providerId: "p", modelId: "child", accountId: "other" },
+          },
+        },
+      },
+    ]) {
+      await expect(
+        createHostExternalAgentConfig(
+          { config: { ...bound(), modelRoles: invalid as never } },
+          ready
+        )
+      ).rejects.toThrow(/model role/)
+      await expect(
+        updateHostExternalAgentConfig(
+          {
+            configId: created.configId,
+            expectedRevision: created.revision,
+            patch: { modelRoles: invalid as never },
+          },
+          ready
+        )
+      ).rejects.toThrow(/model role/)
+    }
+    expect((await getHostExternalAgentConfig(created.configId))?.revision).toBe(created.revision)
+  })
+  it("judges a sub-task effort by this Host's own model metadata, as admission does", async () => {
+    const marker = globalThis as Record<string, unknown>
+    marker.__COGNIA_HEADLESS__ = true
+    const child = (reasoningEffort: string) => ({
+      version: 1 as const,
+      slots: {
+        "subagent.default": {
+          kind: "cognia" as const,
+          binding: { providerId: "p", modelId: "child" },
+          reasoningEffort,
+        },
+      },
+    })
+    try {
+      mockTransportCall.mockImplementation(async (name: string) =>
+        name === "gateway_provider_capabilities"
+          ? { providers: [{ id: "p", modelMetadataById: { child: { supportsReasoning: false } } }] }
+          : undefined
+      )
+      await expect(
+        createHostExternalAgentConfig({ config: { ...bound(), modelRoles: child("high") } }, ready)
+      ).rejects.toThrow("effort-unsupported")
+      mockTransportCall.mockImplementation(async (name: string) =>
+        name === "gateway_provider_capabilities"
+          ? { providers: [{ id: "p", modelMetadataById: { child: { supportsReasoning: true } } }] }
+          : undefined
+      )
+      const created = await createHostExternalAgentConfig(
+        { config: { ...bound(), modelRoles: child("high") } },
+        ready
+      )
+      expect(created.config.modelRoles).toEqual(child("high"))
+    } finally {
+      delete marker.__COGNIA_HEADLESS__
+      mockTransportCall.mockReset()
+    }
+  })
+})

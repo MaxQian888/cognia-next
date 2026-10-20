@@ -56,7 +56,33 @@ jest.mock("@/stores/agent/external-agent-store", () => ({
 }))
 
 jest.mock("@/components/agent/external-agent/cognia-model-picker", () => ({
-  CogniaModelPicker: () => <div data-testid="cognia-model-picker" />,
+  CogniaModelPicker: ({ onChange }: { onChange: (value: unknown) => void }) => (
+    <div data-testid="cognia-model-picker">
+      <button type="button" onClick={() => onChange({ providerId: "gateway", modelId: "big" })}>
+        use gateway model
+      </button>
+      <button type="button" onClick={() => onChange(null)}>
+        use native model
+      </button>
+    </div>
+  ),
+}))
+
+const roleModelProps: Array<Record<string, unknown>> = []
+jest.mock("@/components/agent/external-agent/role-model-fields", () => ({
+  RoleModelFields: (props: { onChange: (value: unknown) => void }) => {
+    roleModelProps.push(props)
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          props.onChange({ version: 1, slots: { "subagent.default": { kind: "inherit-primary" } } })
+        }
+      >
+        set sub-task models
+      </button>
+    )
+  },
 }))
 
 jest.mock("@/lib/files/file-bridge", () => ({
@@ -748,6 +774,55 @@ describe("AgentEditorDialog", () => {
         protocol: "acp",
         process: expect.objectContaining({ command: "claude" }),
       })
+    )
+  })
+
+  it("saves sub-task models beside the Cognia model and clears them on the native lane", async () => {
+    const user = userEvent.setup()
+    const onSave = jest.fn().mockResolvedValue(true)
+    render(
+      <AgentEditorDialog
+        open
+        onOpenChange={jest.fn()}
+        initialPreset="claude-code"
+        onSave={onSave}
+      />
+    )
+    await user.click(screen.getByRole("button", { name: "use gateway model" }))
+    expect(roleModelProps.at(-1)).toMatchObject({
+      primary: { providerId: "gateway", modelId: "big" },
+    })
+    await user.click(screen.getByRole("button", { name: "set sub-task models" }))
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /^add$/i }))
+    })
+    expect(onSave).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        cogniaModel: { providerId: "gateway", modelId: "big" },
+        modelRoles: { version: 1, slots: { "subagent.default": { kind: "inherit-primary" } } },
+      })
+    )
+  })
+
+  it("clears stored sub-task models when the configuration returns to the native lane", async () => {
+    const user = userEvent.setup()
+    const onSave = jest.fn().mockResolvedValue(true)
+    render(
+      <AgentEditorDialog
+        open
+        onOpenChange={jest.fn()}
+        initialPreset="claude-code"
+        onSave={onSave}
+      />
+    )
+    await user.click(screen.getByRole("button", { name: "use gateway model" }))
+    await user.click(screen.getByRole("button", { name: "set sub-task models" }))
+    await user.click(screen.getByRole("button", { name: "use native model" }))
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /^add$/i }))
+    })
+    expect(onSave).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cogniaModel: null, modelRoles: null })
     )
   })
 

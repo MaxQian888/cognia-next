@@ -2,6 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { deleteGatewayTask, gatewayRuntimeEnvironment, prepareGatewayTask } from "./gateway-task"
+import golden from "./codex-catalog/fixtures/catalog.json"
 
 describe("gateway task host state", () => {
   let home: string
@@ -22,6 +23,56 @@ describe("gateway task host state", () => {
         files: { "pi/models.json": '{"apiKey":"$COGNIA_GATEWAY_TOKEN"}' },
       }),
     },
+  })
+
+  it("materializes a private catalog from a small request and cleans it with config files", () => {
+    const input = config()
+    const payload = JSON.parse(input.env.COGNIA_GATEWAY_TASK_CONFIG)
+    payload.runtime = "codex"
+    payload.files = { "codex/config.toml": 'model_catalog_json = "model-catalog.json"\n' }
+    payload.codexModelCatalog = golden.request
+    input.env.COGNIA_GATEWAY_TASK_CONFIG = JSON.stringify(payload)
+    const prepared = prepareGatewayTask(input, home)
+    const filename = path.join(prepared.config.env!.CODEX_HOME, "model-catalog.json")
+    expect(fs.readFileSync(filename, "utf8")).toBe(golden.expectedOutput)
+    if (process.platform !== "win32") expect(fs.statSync(filename).mode & 0o777).toBe(0o600)
+    prepared.cleanup()
+    expect(fs.existsSync(filename)).toBe(false)
+    expect(fs.existsSync(path.join(prepared.config.env!.CODEX_HOME, "config.toml"))).toBe(false)
+  })
+
+  it("refuses catalog requests for other runtimes, invalid metadata, and catalog file injection", () => {
+    for (const patch of [
+      { codexModelCatalog: golden.request },
+      { runtime: "codex", codexModelCatalog: { models: [] } },
+      { runtime: "codex", codexModelCatalog: null },
+      { runtime: "codex", files: { "codex/model-catalog.json": "{}" } },
+    ]) {
+      const input = config()
+      input.env.COGNIA_GATEWAY_TASK_CONFIG = JSON.stringify({
+        ...JSON.parse(input.env.COGNIA_GATEWAY_TASK_CONFIG),
+        ...patch,
+      })
+      expect(() => prepareGatewayTask(input, home)).toThrow("Invalid gateway task configuration")
+    }
+  })
+
+  it("cleans config files if writing the catalog fails", () => {
+    const input = config()
+    const root = path.join(home, ".local/share/cognia-agent-tasks/task-one")
+    fs.mkdirSync(path.join(root, "codex"), { recursive: true })
+    const outside = path.join(home, "untouched")
+    fs.writeFileSync(outside, "untouched")
+    fs.symlinkSync(outside, path.join(root, "codex/model-catalog.json"))
+    input.env.COGNIA_GATEWAY_TASK_CONFIG = JSON.stringify({
+      ...JSON.parse(input.env.COGNIA_GATEWAY_TASK_CONFIG),
+      runtime: "codex",
+      codexModelCatalog: golden.request,
+      files: { "codex/config.toml": 'model = "custom"' },
+    })
+    expect(() => prepareGatewayTask(input, home)).toThrow("symlink")
+    expect(fs.existsSync(path.join(root, "codex/config.toml"))).toBe(false)
+    expect(fs.readFileSync(outside, "utf8")).toBe("untouched")
   })
 
   it("keeps native conversation state across fresh leases and cleans generated files", () => {

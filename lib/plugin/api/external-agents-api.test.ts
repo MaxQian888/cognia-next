@@ -715,3 +715,51 @@ describe("onChange", () => {
     dispose()
   })
 })
+
+describe("plugin API model roles", () => {
+  const api = () => apiWith([READ, MANAGE])
+  it("creates, projects, preserves and clears normalized overrides", async () => {
+    const modelRoles = {
+      version: 1 as const,
+      slots: { "subagent.default": { kind: "inherit-primary" as const } },
+    }
+    const created = await api().create({
+      name: "Model roles",
+      protocol: "codex-app-server",
+      process: { command: "codex", args: ["app-server"] },
+      cogniaModel: { providerId: "p", modelId: "m" },
+      modelRoles,
+    })
+    expect(mockService.createConfig.mock.calls[0][0].modelRoles).toEqual(modelRoles)
+    expect(created.modelRoles).toEqual(modelRoles)
+    await api().update(created.id, { name: "Renamed" })
+    expect(state().getAgent(created.id)?.modelRoles).toEqual(modelRoles)
+    await api().update(created.id, { modelRoles: null })
+    expect(mockService.updateConfig).toHaveBeenLastCalledWith(
+      created.id,
+      expect.objectContaining({ modelRoles: null })
+    )
+    expect(state().getAgent(created.id)?.modelRoles).toBeUndefined()
+  })
+  it("refuses malformed overrides and merged plans the renderer cannot save", async () => {
+    const created = await api().create({
+      name: "Roles",
+      protocol: "codex-app-server",
+      process: { command: "codex", args: ["app-server"] },
+      cogniaModel: { providerId: "p", modelId: "m" },
+    })
+    await expect(
+      api().update(created.id, { modelRoles: { version: 2 } as never })
+    ).rejects.toBeInstanceOf(PluginExternalAgentInputError)
+    await expect(
+      api().update(created.id, {
+        modelRoles: {
+          version: 1,
+          slots: {
+            "subagent.default": { kind: "cognia", binding: { providerId: "other", modelId: "m" } },
+          },
+        },
+      })
+    ).rejects.toBeInstanceOf(PluginExternalAgentInputError)
+  })
+})

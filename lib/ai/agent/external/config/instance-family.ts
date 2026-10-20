@@ -35,6 +35,7 @@ export type InstanceFamilyConfig = Pick<
   | "stateIsolation"
   | "defaultPermissionMode"
   | "cogniaModel"
+  | "modelRoles"
   | "subscriptionAccountId"
   | "codexOptions"
   | "maxConcurrentSessions"
@@ -215,7 +216,18 @@ function isolationOf(config: InstanceFamilyConfig): string | null {
 
 function modelOf(config: InstanceFamilyConfig): string | null {
   const binding = config.cogniaModel
-  return binding?.modelId ? `${binding.providerId}/${binding.modelId}` : null
+  if (!binding?.modelId) return null
+  const roles = Object.entries(config.modelRoles?.slots ?? {}).sort(([a], [b]) =>
+    a.localeCompare(b)
+  )
+  const selections = roles.map(([slot, selection]) => {
+    const value =
+      selection.kind === "inherit-primary"
+        ? selection.kind
+        : `${selection.binding.providerId}/${selection.binding.modelId}${selection.binding.accountId === undefined ? "" : `@${selection.binding.accountId}`}${selection.reasoningEffort ? ` (${selection.reasoningEffort})` : ""}`
+    return `${slot}: ${value}`
+  })
+  return [`${binding.providerId}/${binding.modelId}`, ...selections].join("; ")
 }
 
 function argsOf(config: InstanceFamilyConfig): string | null {

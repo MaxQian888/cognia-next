@@ -3,6 +3,7 @@ import { validateLibrarySchema } from "@/lib/plugin/library/schema"
 import { validateSubscriptionProvider } from "@/types/subscription/provider-definition"
 import { isValidSubscriptionProviderId } from "@/types/subscription/credential"
 import type { PluginSubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
+import { normalizeAgentModelRoleOverrides } from "@cognia/agent-contracts/external-agent"
 import { normalizeCogniaModelBinding } from "@/types/agent/external-agent"
 /**
  * Plugin Validation - Validates plugin manifests and configurations
@@ -2811,6 +2812,15 @@ export function validatePluginManifest(
           `subagents[${index}].cogniaModel`,
           "manifest.subagent.invalid_cognia_model",
           error instanceof Error ? error.message : "Invalid Cognia model binding"
+        )
+      }
+      try {
+        normalizeAgentModelRoleOverrides(entry.modelRoles)
+      } catch (error) {
+        pushError(
+          `subagents[${index}].modelRoles`,
+          "manifest.subagent.invalid_model_roles",
+          error instanceof Error ? error.message : "Invalid model role overrides"
         )
       }
     })
