@@ -318,6 +318,7 @@ pub fn router(state: AppState) -> Router {
 #[serde(rename_all = "camelCase")]
 struct HealthResponse {
     status: &'static str,
+    rls: crate::store::RlsStatus,
     collab_protocol_version: u32,
     features: Vec<&'static str>,
 }
@@ -336,6 +337,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     }
     Json(HealthResponse {
         status: "ok",
+        rls: state.store.rls_status(),
         collab_protocol_version: 2,
         features,
     })
@@ -3189,6 +3191,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn health_reports_when_the_store_has_no_database_rls() {
+        let (status, body) = call(app(InMemoryStore::new()), get("/health", "")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["rls"], "bypassed");
     }
 
     #[tokio::test]

@@ -741,6 +741,8 @@ pub fn ended_at_for(terminal: bool, previous: Option<i64>, now: i64) -> Option<i
 
 #[async_trait]
 pub trait Store: Send + Sync {
+    /// Database RLS is absent for stores without a PostgreSQL connection.
+    fn rls_status(&self) -> RlsStatus { RlsStatus::Bypassed }
     fn in_memory_chat_store(&self) -> Option<crate::chat_store::InMemoryChatStore> { None }
     fn in_memory_session_file_store(&self) -> Option<crate::session_files::InMemorySessionFileStore> { None }
     /// What `user_id` may do in `org_id` / `workspace_id`.
@@ -2406,6 +2408,43 @@ const ISSUE_COLUMNS: &str = "id, org_id, workspace_id, issue_project_id, title, 
 
 pub struct PgStore {
     pool: Pool,
+    rls_status: RlsStatus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RlsStatus {
+    Enforced,
+    Bypassed,
+}
+
+/// Boot configuration carries credentials, so deliberately does not implement Debug.
+#[derive(Default)]
+pub struct PgConnectOptions<'a> {
+    pub migration_database_url: Option<&'a str>,
+    pub app_db_role: Option<&'a str>,
+    pub app_db_password: Option<&'a str>,
+    pub allow_privileged_db_role: bool,
+}
+
+fn application_rls_status(
+    role: &str,
+    superuser: bool,
+    bypass_rls: bool,
+    allow_privileged: bool,
+) -> anyhow::Result<RlsStatus> {
+    if !superuser && !bypass_rls {
+        return Ok(RlsStatus::Enforced);
+    }
+    if !allow_privileged {
+        anyhow::bail!(
+            "application database role {role:?} is SUPERUSER or BYPASSRLS and bypasses row-level security. \
+             Use a NOSUPERUSER NOBYPASSRLS role for COLLAB_DATABASE_URL and an admin \
+             COLLAB_MIGRATION_DATABASE_URL (with COLLAB_APP_DB_ROLE and COLLAB_APP_DB_PASSWORD to provision it). \
+             Only for an intentional bypass, set COLLAB_ALLOW_PRIVILEGED_DB_ROLE=true."
+        );
+    }
+    Ok(RlsStatus::Bypassed)
 }
 
 pub(crate) fn ensure_crypto_provider() {
@@ -2437,6 +2476,64 @@ fn provisioning_write_error(error: tokio_postgres::Error) -> StoreError {
 
 impl PgStore {
     pub async fn connect(database_url: &str, max_connections: usize) -> anyhow::Result<Self> {
+        Self::connect_with_options(database_url, max_connections, PgConnectOptions::default()).await
+    }
+
+    pub async fn connect_with_options(
+        database_url: &str,
+        max_connections: usize,
+        options: PgConnectOptions<'_>,
+    ) -> anyhow::Result<Self> {
+        let mut store = Self::query_pool(database_url, max_connections)?;
+        // An explicit name lets the migrator provision a role before its first
+        // login, including upgrades of volumes containing only POSTGRES_USER.
+        let app_role = match options.app_db_role {
+            Some(role) => role.to_owned(),
+            None => store.database_role().await?.0,
+        };
+        let migrator = Self::query_pool(
+            options.migration_database_url.unwrap_or(database_url), 1,
+        )?;
+        migrator.migrate(Some((&app_role, options.app_db_password))).await?;
+        let (role, superuser, bypass_rls) = store.database_role().await?;
+        if role != app_role {
+            anyhow::bail!("COLLAB_APP_DB_ROLE {app_role:?} does not match COLLAB_DATABASE_URL current_user {role:?}");
+        }
+        store.rls_status = application_rls_status(
+            &role, superuser, bypass_rls, options.allow_privileged_db_role,
+        )?;
+        if store.rls_status == RlsStatus::Bypassed {
+            tracing::warn!(role = %role, "COLLAB_ALLOW_PRIVILEGED_DB_ROLE=true: application database role bypasses RLS on this boot");
+        }
+        Ok(store)
+    }
+
+    /// Operator queries deliberately bypass RLS and never run migrations.
+    pub async fn connect_operator(database_url: &str, max_connections: usize) -> anyhow::Result<Self> {
+        let store = Self::query_pool(database_url, max_connections)?;
+        let (role, superuser, bypass_rls) = store.database_role().await?;
+        if !superuser && !bypass_rls {
+            anyhow::bail!("operator database role {role:?} needs SUPERUSER or BYPASSRLS; set COLLAB_OPERATOR_DATABASE_URL (audit-standing) or COLLAB_BOOTSTRAP_DATABASE_URL (bootstrap) to an admin URL");
+        }
+        Ok(store)
+    }
+
+    /// Standalone bootstrap and integration fixtures retain admin migrations.
+    pub async fn connect_admin(database_url: &str, max_connections: usize) -> anyhow::Result<Self> {
+        let store = Self::connect_operator(database_url, max_connections).await?;
+        store.migrate(None).await?;
+        Ok(store)
+    }
+
+    async fn database_role(&self) -> anyhow::Result<(String, bool, bool)> {
+        let row = self.pool.get().await?.query_one(
+            "SELECT current_user::text, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user",
+            &[],
+        ).await?;
+        Ok((row.get(0), row.get(1), row.get(2)))
+    }
+
+    fn query_pool(database_url: &str, max_connections: usize) -> anyhow::Result<Self> {
         ensure_crypto_provider();
         let config: Config = database_url.parse()?;
         let native_certificates = rustls_native_certs::load_native_certs();
@@ -2466,12 +2563,10 @@ impl PgStore {
             .max_size(max_connections)
             .build()
             .map_err(|error| anyhow::anyhow!(error))?;
-        let store = Self { pool };
-        store.migrate().await?;
-        Ok(store)
+        Ok(Self { pool, rls_status: RlsStatus::Bypassed })
     }
 
-    async fn migrate(&self) -> anyhow::Result<()> {
+    async fn migrate(&self, app_role: Option<(&str, Option<&str>)>) -> anyhow::Result<()> {
         let mut client = self.pool.get().await?;
         let transaction = client.transaction().await?;
         // Concurrent service replicas may bootstrap the same empty database.
@@ -2530,6 +2625,35 @@ impl PgStore {
         transaction
             .batch_execute(include_str!("../migrations/0015_session_files.sql"))
             .await?;
+        if let Some((role, password)) = app_role {
+            // PostgreSQL quotes both the identifier and password literal; no
+            // operator-supplied text is interpolated as SQL syntax.
+            let quoted = transaction.query_one(
+                "SELECT quote_ident($1::text), quote_literal($2::text)", &[&role, &password],
+            ).await?;
+            let identifier: String = quoted.get(0);
+            let exists: bool = transaction.query_one(
+                "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", &[&role],
+            ).await?.get(0);
+            if !exists {
+                let password: Option<String> = quoted.get(1);
+                let password = password.ok_or_else(|| anyhow::anyhow!(
+                    "application database role {role:?} does not exist; set COLLAB_APP_DB_PASSWORD so the migrator can create it"
+                ))?;
+                transaction.batch_execute(&format!(
+                    "CREATE ROLE {identifier} LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD {password}"
+                )).await?;
+            }
+            transaction.batch_execute(&format!(
+                "GRANT USAGE ON SCHEMA public TO {identifier}; \
+                 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {identifier}; \
+                 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {identifier}; \
+                 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO {identifier}; \
+                 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {identifier}; \
+                 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO {identifier}; \
+                 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO {identifier};"
+            )).await?;
+        }
         transaction.commit().await?;
         Ok(())
     }
@@ -3132,6 +3256,8 @@ async fn insert_authorization_audit(
 
 #[async_trait]
 impl Store for PgStore {
+    fn rls_status(&self) -> RlsStatus { self.rls_status }
+
     async fn membership(
         &self,
         org_id: &str,
@@ -4877,6 +5003,24 @@ impl Store for PgStore {
 mod tests {
     use super::*;
     use cognia_tenant_auth::UserId;
+
+    #[test]
+    fn application_role_refuses_each_rls_bypass_unless_explicitly_allowed() {
+        for (superuser, bypass_rls) in [(false, false), (true, false), (false, true), (true, true)] {
+            let decision = application_rls_status("app", superuser, bypass_rls, false);
+            if superuser || bypass_rls {
+                let error = decision.unwrap_err().to_string();
+                assert!(error.contains("app") && error.contains("COLLAB_MIGRATION_DATABASE_URL"));
+                assert!(error.contains("COLLAB_ALLOW_PRIVILEGED_DB_ROLE=true"));
+                assert_eq!(application_rls_status("app", superuser, bypass_rls, true).unwrap(), RlsStatus::Bypassed);
+            } else {
+                assert_eq!(decision.unwrap(), RlsStatus::Enforced);
+                assert_eq!(application_rls_status("app", false, false, true).unwrap(), RlsStatus::Enforced);
+            }
+        }
+        assert_eq!(serde_json::to_value(RlsStatus::Enforced).unwrap(), "enforced");
+        assert_eq!(serde_json::to_value(RlsStatus::Bypassed).unwrap(), "bypassed");
+    }
 
     #[test]
     fn terminal_plan_statuses_mirror_the_client_set() {

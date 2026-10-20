@@ -80,6 +80,35 @@ Caddy forwarded host and scheme. Caddy routes `/signaling` to the signaling
 service while keeping the remaining API and WebSocket paths on
 `cognia-server`.
 
+## Upgrading an existing collaboration database
+
+Set `COLLAB_APP_DB_PASSWORD` to a dedicated password in the operator environment
+and restart/recreate the collaboration service with the updated image and Compose
+file: `docker compose --profile collab up -d --wait collab-server`. Keep the
+existing `COLLAB_DB_PASSWORD` and database volume. On the next boot, the migrator
+uses the admin `COLLAB_MIGRATION_DATABASE_URL` to run migrations, create
+`cognia_collab_app` if absent, and grant its query privileges under the migration
+lock. The query pool uses this ordinary `NOSUPERUSER NOBYPASSRLS` login. This also
+works for existing volumes that contain only the Postgres admin role. Passwords
+are set only when creating the role; rotating an existing role's password requires
+an operator `ALTER ROLE` and updating `COLLAB_APP_DB_PASSWORD` together. The
+Compose password defaults are for local use only; URL-encode reserved characters
+in connection URLs (a long hexadecimal password avoids this issue).
+
+`GET /health` includes `"rls": "enforced"` when the app connection is neither
+SUPERUSER nor BYPASSRLS. A privileged app role refuses to start unless
+`COLLAB_ALLOW_PRIVILEGED_DB_ROLE=true`; that override logs a warning on every
+boot and health reports `"rls": "bypassed"`. Use the split migration/query URLs
+to fix a refusal. This field reports database-role enforcement, not a full
+authorization audit. The standalone bootstrap keeps using its admin
+`COLLAB_BOOTSTRAP_DATABASE_URL` because it must bypass RLS.
+
+For cross-tenant standing audits, run `cognia-collab-server audit-standing`
+with `COLLAB_OPERATOR_DATABASE_URL` set to a role with BYPASSRLS (a superuser also
+works) and the required table privileges. It falls back to `--database-url`
+(or `COLLAB_DATABASE_URL`) when the operator URL is unset. Audits do not run DDL;
+use `--apply` only to repair the reported standing in batches.
+
 ## Multiple instances on one host
 
 Every instance is one directory with its own `.env`, and **`COGNIA_INSTANCE`**

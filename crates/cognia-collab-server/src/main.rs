@@ -8,6 +8,7 @@ use cognia_collab_server::chat_attachment_store::ObjectStoreChatAttachments;
 use cognia_collab_server::logto_management::{
     HttpLogtoManagement, LogtoManagementConfig, UnconfiguredLogtoManagement,
 };
+use cognia_collab_server::store::PgConnectOptions;
 use cognia_collab_server::{router, AppState, PgStore};
 use cognia_tenant_auth::grant::GrantSigner;
 use cognia_tenant_auth::oidc::{OidcAuthenticator, OidcConfig};
@@ -23,6 +24,18 @@ struct Args {
     bind: String,
     #[arg(long, env = "COLLAB_DATABASE_URL", global = true)]
     database_url: Option<String>,
+    /// Admin connection used only for migrations and application-role grants.
+    #[arg(long, env = "COLLAB_MIGRATION_DATABASE_URL")]
+    migration_database_url: Option<String>,
+    #[arg(long, env = "COLLAB_APP_DB_ROLE")]
+    app_db_role: Option<String>,
+    #[arg(long, env = "COLLAB_APP_DB_PASSWORD")]
+    app_db_password: Option<String>,
+    #[arg(long, env = "COLLAB_ALLOW_PRIVILEGED_DB_ROLE", default_value_t = false)]
+    allow_privileged_db_role: bool,
+    /// Cross-tenant audit connection; requires a SUPERUSER or BYPASSRLS role.
+    #[arg(long, env = "COLLAB_OPERATOR_DATABASE_URL", global = true)]
+    operator_database_url: Option<String>,
     #[arg(long, env = "COLLAB_DB_MAX_CONNECTIONS", default_value_t = 16)]
     db_max_connections: usize,
     /// Hex-encoded HMAC key for grant signing, at least 32 bytes.
@@ -143,14 +156,15 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("a rustls crypto provider was already installed"))?;
 
     let args = Args::parse();
-    let database_url = args.database_url.as_deref().ok_or_else(|| anyhow::anyhow!("COLLAB_DATABASE_URL or --database-url is required"))?;
     if let Some(Command::AuditStanding { apply, batch_size }) = args.command {
-        let store = PgStore::connect(database_url, args.db_max_connections).await?;
+        let database_url = audit_database_url(args.operator_database_url.as_deref(), args.database_url.as_deref())?;
+        let store = PgStore::connect_operator(database_url, args.db_max_connections).await?;
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as i64;
         let report = cognia_collab_server::standing_audit::audit_standing(&store, apply, batch_size, now).await?;
         println!("{}", serde_json::to_string(&report)?);
         return Ok(());
     }
+    let database_url = args.database_url.as_deref().ok_or_else(|| anyhow::anyhow!("COLLAB_DATABASE_URL or --database-url is required"))?;
     let grant_key = args.grant_key.as_deref().ok_or_else(|| anyhow::anyhow!("COLLAB_GRANT_KEY is required"))?;
     let key = decode_hex(grant_key)
         .ok_or_else(|| anyhow::anyhow!("COLLAB_GRANT_KEY must be hex-encoded"))?;
@@ -163,7 +177,12 @@ async fn main() -> anyhow::Result<()> {
         jwks_ttl: std::time::Duration::from_secs(args.jwks_ttl_seconds),
     })?;
 
-    let store = Arc::new(PgStore::connect(database_url, args.db_max_connections).await?);
+    let store = Arc::new(PgStore::connect_with_options(database_url, args.db_max_connections, PgConnectOptions {
+        migration_database_url: args.migration_database_url.as_deref(),
+        app_db_role: args.app_db_role.as_deref(),
+        app_db_password: args.app_db_password.as_deref(),
+        allow_privileged_db_role: args.allow_privileged_db_role,
+    }).await?);
     let attachment_store = if let Some(root) = args.object_store_local_dir {
         ObjectStoreChatAttachments::local(root)?
     } else if args.s3_endpoint.is_some()
@@ -283,6 +302,12 @@ fn is_sha256_hex(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+fn audit_database_url<'a>(operator_url: Option<&'a str>, database_url: Option<&'a str>) -> anyhow::Result<&'a str> {
+    operator_url.or(database_url).ok_or_else(|| anyhow::anyhow!(
+        "audit-standing requires COLLAB_OPERATOR_DATABASE_URL or --database-url with a SUPERUSER or BYPASSRLS role"
+    ))
+}
+
 async fn shutdown() {
     let _ = tokio::signal::ctrl_c().await;
     tracing::info!("shutting down");
@@ -291,6 +316,20 @@ async fn shutdown() {
 #[cfg(test)]
 mod tests {
     use super::{credential_hash, decode_hex};
+
+    #[test]
+    fn standing_audit_prefers_operator_url_and_allows_it_without_an_app_url() {
+        use clap::Parser;
+        let args = super::Args::try_parse_from([
+            "cognia-collab-server", "audit-standing",
+            "--operator-database-url", "postgresql://operator@localhost/collab",
+        ]).unwrap();
+        assert_eq!(args.operator_database_url.as_deref(), Some("postgresql://operator@localhost/collab"));
+        assert_eq!(super::audit_database_url(Some("operator"), Some("app")).unwrap(), "operator");
+        assert_eq!(super::audit_database_url(Some("operator"), None).unwrap(), "operator");
+        assert_eq!(super::audit_database_url(None, Some("admin")).unwrap(), "admin");
+        assert!(super::audit_database_url(None, None).is_err());
+    }
 
     #[test]
     fn audit_is_optional_and_does_not_require_server_credentials() {

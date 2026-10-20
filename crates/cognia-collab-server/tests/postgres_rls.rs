@@ -1,7 +1,6 @@
 use cognia_collab_server::{OperatorBootstrap, PgStore};
+use cognia_collab_server::store::{PgConnectOptions, Store};
 use tokio_postgres::{Client, NoTls};
-
-const APP_ROLE: &str = "cognia_rls_app";
 
 struct TestDatabase {
     name: String,
@@ -34,10 +33,19 @@ impl TestDatabase {
     }
 
     async fn cleanup(self) {
+        self.cleanup_with_role(None).await;
+    }
+
+    async fn cleanup_with_role(self, role: Option<&str>) {
         self.cluster_admin
             .batch_execute(&format!("DROP DATABASE {} WITH (FORCE)", self.name))
             .await
             .unwrap();
+        if let Some(role) = role {
+            self.cluster_admin
+                .batch_execute(&format!("DROP ROLE \"{}\"", role.replace('"', "\"\"")))
+                .await.unwrap();
+        }
         drop(self.cluster_admin);
         self.connection_task.await.unwrap();
     }
@@ -62,6 +70,109 @@ fn isolated_database_url_preserves_each_roles_connection_options() {
     }
 }
 
+async fn health_rls(store: PgStore) -> serde_json::Value {
+    use std::{sync::Arc, time::Duration};
+    use axum::{body::{to_bytes, Body}, http::Request};
+    use cognia_collab_server::{router, AppState};
+    use cognia_tenant_auth::{grant::GrantSigner, oidc::{OidcAuthenticator, OidcConfig}};
+    use tower::ServiceExt;
+
+    let oidc = OidcAuthenticator::new(OidcConfig {
+        issuer: "https://issuer.invalid/oidc".into(),
+        audience: "collab".into(),
+        tenant_claim: "organization_id".into(),
+        jwks_ttl: Duration::from_secs(300),
+    }).unwrap();
+    let state = AppState::new(Arc::new(store), GrantSigner::new(&[7; 32]).unwrap(), Arc::new(oidc));
+    let response = router(state).oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    serde_json::from_slice(&to_bytes(response.into_body(), 16_384).await.unwrap()).unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance with a superuser admin URL"]
+async fn privileged_app_url_is_refused_and_explicit_override_reports_bypassed() {
+    let database = TestDatabase::create().await;
+    let result = PgStore::connect(&database.url, 2).await;
+    let error = result.err().expect("superuser app URL must be refused").to_string();
+    assert!(error.contains("COLLAB_MIGRATION_DATABASE_URL"), "{error}");
+    assert!(error.contains("COLLAB_ALLOW_PRIVILEGED_DB_ROLE=true"), "{error}");
+    let store = PgStore::connect_with_options(&database.url, 2, PgConnectOptions {
+        allow_privileged_db_role: true,
+        ..PgConnectOptions::default()
+    }).await.unwrap();
+    assert_eq!(health_rls(store).await["rls"], "bypassed");
+    database.cleanup().await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance with role creation privileges"]
+async fn migrator_provisions_missing_app_role_and_preserves_it_on_reboot() {
+    let database = TestDatabase::create().await;
+    // Exercise server-side SQL quoting of an identifier and a password literal.
+    let role = format!("app_{}\"quoted", uuid::Uuid::new_v4().simple());
+    let password = "synthetic'password";
+    let app_url = format!("{}&user={}&password=synthetic%27password", database.url, role.replace('"', "%22"));
+    let missing_password = PgStore::connect_with_options(&app_url, 2, PgConnectOptions {
+        migration_database_url: Some(&database.url),
+        app_db_role: Some(&role),
+        ..PgConnectOptions::default()
+    }).await.err().expect("creating a missing role requires its password");
+    assert!(missing_password.to_string().contains("COLLAB_APP_DB_PASSWORD"));
+    let store = PgStore::connect_with_options(&app_url, 2, PgConnectOptions {
+        migration_database_url: Some(&database.url),
+        app_db_role: Some(&role),
+        app_db_password: Some(password),
+        ..PgConnectOptions::default()
+    }).await.unwrap();
+    assert_eq!(health_rls(store).await["rls"], "enforced");
+
+    let (admin, connection) = tokio_postgres::connect(&database.url, NoTls).await.unwrap();
+    let task = tokio::spawn(async move { connection.await.unwrap() });
+    let attributes = admin.query_one(
+        "SELECT rolcanlogin, rolsuper, rolbypassrls, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname = $1", &[&role],
+    ).await.unwrap();
+    assert!(attributes.get::<_, bool>(0));
+    for index in 1..5 { assert!(!attributes.get::<_, bool>(index)); }
+    // Objects created after boot inherit the same least-privilege grants.
+    admin.batch_execute(
+        "CREATE TABLE public.future_grants (id bigint); \
+         CREATE SEQUENCE public.future_sequence; \
+         CREATE FUNCTION public.future_function() RETURNS integer LANGUAGE sql AS 'SELECT 1'; \
+         REVOKE EXECUTE ON FUNCTION public.future_function() FROM PUBLIC;"
+    ).await.unwrap();
+    let (app, connection) = tokio_postgres::connect(&app_url, NoTls).await.unwrap();
+    let app_task = tokio::spawn(async move { connection.await.unwrap() });
+    let privileges = app.query_one(
+        "SELECT has_schema_privilege('public', 'USAGE'), \
+         (SELECT bool_and(has_table_privilege('users', privilege)) \
+          FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) AS privilege), \
+         (SELECT bool_and(has_table_privilege('future_grants', privilege)) \
+          FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) AS privilege), \
+         (SELECT bool_and(has_sequence_privilege('future_sequence', privilege)) \
+          FROM unnest(ARRAY['USAGE','SELECT']) AS privilege), \
+         has_function_privilege('future_function()', 'EXECUTE'), \
+         has_table_privilege('future_grants', 'TRUNCATE')", &[],
+    ).await.unwrap();
+    for index in 0..5 { assert!(privileges.get::<_, bool>(index)); }
+    assert!(!privileges.get::<_, bool>(5));
+    app.batch_execute("INSERT INTO future_grants VALUES (1); UPDATE future_grants SET id = 2; SELECT * FROM future_grants; DELETE FROM future_grants; SELECT nextval('future_sequence'); SELECT future_function();").await.unwrap();
+    drop(app);
+    app_task.await.unwrap();
+    // No explicit role name: current_user is resolved from the app connection.
+    // A supplied replacement password must not rotate an existing login.
+    let store = PgStore::connect_with_options(&app_url, 2, PgConnectOptions {
+        migration_database_url: Some(&database.url),
+        app_db_password: Some("must-not-rotate"),
+        ..PgConnectOptions::default()
+    }).await.unwrap();
+    assert_eq!(health_rls(store).await["rls"], "enforced");
+    assert!(PgStore::connect_operator(&app_url, 2).await.is_err());
+    drop(admin);
+    task.await.unwrap();
+    database.cleanup_with_role(Some(&role)).await;
+}
+
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL instance"]
 async fn concurrent_bootstrap_waits_for_migration_lock_and_completes() {
@@ -76,8 +187,8 @@ async fn concurrent_bootstrap_waits_for_migration_lock_and_completes() {
         .await
         .unwrap();
     let first_url = isolated_url.clone();
-    let first = tokio::spawn(async move { PgStore::connect(&first_url, 2).await });
-    let second = tokio::spawn(async move { PgStore::connect(&isolated_url, 2).await });
+    let first = tokio::spawn(async move { PgStore::connect_admin(&first_url, 2).await });
+    let second = tokio::spawn(async move { PgStore::connect_admin(&isolated_url, 2).await });
 
     // Observe both connections waiting at the migration barrier, rather than
     // relying on scheduler timing to reproduce a catalog-write collision.
@@ -136,7 +247,7 @@ async fn shared_chat_claim_is_atomic_and_survives_pool_reconnect() {
     // its DDL must not contend with this scenario's lease transactions.
     let database = TestDatabase::create().await;
     let url = database.url.clone();
-    let store = PgStore::connect(&url, 4).await.unwrap();
+    let store = PgStore::connect_admin(&url, 4).await.unwrap();
     let scope = bootstrap("shared_queue");
     store.bootstrap_operator(&scope).await.unwrap();
     let mut participant = bootstrap("shared_participant");
@@ -245,7 +356,7 @@ async fn shared_chat_claim_is_atomic_and_survives_pool_reconnect() {
     let (winner, item) = first.or(second).unwrap();
     assert_eq!(item.payload["contextSequence"], durable.sequence);
     drop(store);
-    let store = PgStore::connect(&url, 2).await.unwrap();
+    let store = PgStore::connect_admin(&url, 2).await.unwrap();
     let replay = store
         .claim_run_queue(lease(&winner.holder_device_id), &q1, false)
         .await
@@ -318,7 +429,7 @@ async fn force_rls_isolates_reads_and_every_write_across_pool_reuse() {
         .expect("COLLAB_RLS_APP_DATABASE_URL must name a non-BYPASSRLS application role");
     let app_url = TestDatabase::url_for(&app_url, &database.name);
 
-    let admin_store = PgStore::connect(&admin_url, 2)
+    let admin_store = PgStore::connect_admin(&admin_url, 2)
         .await
         .expect("admin migrations must succeed");
     admin_store
@@ -338,14 +449,13 @@ async fn force_rls_isolates_reads_and_every_write_across_pool_reuse() {
             .await
             .expect("admin SQL connection must stay healthy");
     });
-    admin
-        .batch_execute(&format!(
-            "GRANT USAGE ON SCHEMA public TO {APP_ROLE}; \
-             GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {APP_ROLE}; \
-             GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO {APP_ROLE};"
-        ))
-        .await
-        .expect("least-privilege grants must succeed");
+    // Exercise the production migrator's grants, including default privileges.
+    let app_store = PgStore::connect_with_options(&app_url, 2, PgConnectOptions {
+        migration_database_url: Some(&admin_url),
+        ..PgConnectOptions::default()
+    }).await.expect("least-privilege application boot must succeed");
+    assert_eq!(app_store.rls_status(), cognia_collab_server::store::RlsStatus::Enforced);
+    drop(app_store);
 
     let (mut app, app_connection) = tokio_postgres::connect(&app_url, NoTls)
         .await
@@ -863,7 +973,7 @@ async fn stale_patches_merge_by_field_in_postgres() {
     use cognia_collab_server::Store;
 
     let database = TestDatabase::create().await;
-    let store = PgStore::connect(&database.url, 2).await.unwrap();
+    let store = PgStore::connect_admin(&database.url, 2).await.unwrap();
     let scope = bootstrap("field_merge");
     store.bootstrap_operator(&scope).await.unwrap();
     let id = format!("iss_{}", uuid::Uuid::new_v4().simple());
@@ -954,7 +1064,7 @@ async fn notifications_are_per_recipient_ordered_and_deduplicated_in_postgres() 
     };
 
     let database = TestDatabase::create().await;
-    let store = PgStore::connect(&database.url, 2).await.unwrap();
+    let store = PgStore::connect_admin(&database.url, 2).await.unwrap();
     let a = bootstrap("notify_a");
     let b = bootstrap("notify_b");
     store.bootstrap_operator(&a).await.unwrap();
@@ -1069,7 +1179,7 @@ async fn a_targeted_invite_is_accepted_by_its_target_alone_in_postgres() {
     use cognia_collab_server::store::StoreError;
 
     let database = TestDatabase::create().await;
-    let store = PgStore::connect(&database.url, 2).await.unwrap();
+    let store = PgStore::connect_admin(&database.url, 2).await.unwrap();
     let scope = bootstrap("invite_owner");
     store.bootstrap_operator(&scope).await.unwrap();
     let mut people = Vec::new();
@@ -1182,7 +1292,7 @@ async fn session_files_flow_through_postgres_under_rls() {
     };
 
     let database = TestDatabase::create().await;
-    let store = PgStore::connect(&database.url, 4).await.unwrap();
+    let store = PgStore::connect_admin(&database.url, 4).await.unwrap();
     let scope = bootstrap("files_owner");
     store.bootstrap_operator(&scope).await.unwrap();
     let mut member = bootstrap("files_member");
@@ -1435,7 +1545,7 @@ async fn standing_fixture() -> (TestDatabase, PgStore, OperatorBootstrap, Operat
     use cognia_collab_server::{chat::{SessionRole, SessionStatus}, chat_store::{ChatStore, NewSharedSession}, Store};
     use cognia_tenant_auth::{OrgRole, WorkspaceRole};
     let database = TestDatabase::create().await;
-    let store = PgStore::connect(&database.url, 4).await.unwrap();
+    let store = PgStore::connect_admin(&database.url, 4).await.unwrap();
     let owner = bootstrap("standing_owner");
     store.bootstrap_operator(&owner).await.unwrap();
     let mut member = bootstrap("standing_member");
@@ -1529,8 +1639,11 @@ async fn standing_removal_revokes_work_invites_and_membership_but_preserves_sess
         let admin_task = tokio::spawn(async move { connection.await.unwrap() });
         assert_eq!(admin.query_one("SELECT status FROM chat_run_leases WHERE id='standing_lease'", &[]).await.unwrap().get::<_, String>(0), "failed");
         assert_eq!(admin.query_one("SELECT status FROM chat_run_queue WHERE id='standing_queue'", &[]).await.unwrap().get::<_, String>(0), "cancelled");
-        admin.batch_execute(&format!("GRANT USAGE ON SCHEMA public TO {APP_ROLE}; GRANT SELECT ON ALL TABLES IN SCHEMA public TO {APP_ROLE}; GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO {APP_ROLE};")).await.unwrap();
         let app_url = TestDatabase::url_for(&std::env::var("COLLAB_RLS_APP_DATABASE_URL").unwrap(), &database.name);
+        drop(PgStore::connect_with_options(&app_url, 2, PgConnectOptions {
+            migration_database_url: Some(&database.url),
+            ..PgConnectOptions::default()
+        }).await.unwrap());
         let (mut app, connection) = tokio_postgres::connect(&app_url, NoTls).await.unwrap();
         let app_task = tokio::spawn(async move { connection.await.unwrap() });
         let role = app.query_one("SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user", &[]).await.unwrap();
