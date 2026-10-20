@@ -589,7 +589,8 @@ The policy uses resolved descriptor **arms**, after command alias resolution:
   `terminal.open` has `terminal_host_status`, `process.spawn` has `plugin_list`,
   and `host.execute` has deletion preparation/abort and approval bookkeeping.
   None can safely disable its whole capability. The other capabilities are
-  also mixed and retain their existing entries byte-for-byte.
+  also mixed; `client.read` and `client.write` separately use the dormant
+  `host-data` class described below.
 - `executionCommands` names the specific arms that launch/drive work or
   install/activate executable content. This includes internal `client.local`
   calls, plugin activation through `client.write`, Git subprocesses/hooks,
@@ -610,8 +611,9 @@ disjoint and reference real arms; no regex default grants authority.
 `/api/whoami`, `/api/catalog`, device/invitation/policy management, `/metrics`,
 `/internal/catalog`, `/internal/events`, and `/ws/events` are not execution
 routes. Their existing authentication/standing still applies. RPC routes
-check each command, so reads in a mixed capability remain usable. The main
-DataChannel and relay likewise admit `host.observe` and gate RPCs individually.
+check each command, so reads in a mixed capability retain their standing checks
+and the `host-data` refusal below. The main DataChannel and relay likewise admit
+`host.observe` and gate RPCs individually.
 Descriptor-less PTY, browser/ACP, worker and interactive remote-desktop streams
 carry an explicit execution flag before attachment/ticket minting. This avoids
 turning their shared observation capability into a blanket execution ban.
@@ -631,19 +633,38 @@ standing remains unchanged, and the independent execution switch still applies.
 | `adapter_update_policy`                        | Host adapter configuration; `desktop-write-source.ts:1987`.                                                                                                      |
 | `app_settings_update`                          | Host settings patch; `desktop-write-source.ts:2082`.                                                                                                             |
 
-The override regression tests require real manifest arms and prohibit weakening
-the capability's standing constraint. `plugin_set_enabled` without the org
-action returns `403 host_surface_forbidden`; unavailable standing fails closed.
-The retained `client` class means no capability-wide standing requirement; it
-must not be interpreted as proof that a command runs off the Host.
+The override regression tests pin these eight real manifest arms as exceptions
+to `host-data`, retaining their org standing requirement. `plugin_set_enabled`
+without the org action returns `403 host_surface_forbidden`; unavailable
+standing fails closed.
+The `client` class remains for `client.local` bridge plumbing; Host-stored data
+has its own class and must not be treated as client-local.
 
-### Remaining client data partitioning findings (behavior unchanged)
+### Host data unavailable to tenants until P5 (Rule 7)
 
 The 17 `client.read` and 44 `client.write` arms are execution targets over
-HTTP/WebSocket/WebRTC. Apart from the eight global overrides, their existing
-client classification is preserved. Account-selected storage is not proof of
-per-request tenant/person authorization. These are read-only audit findings,
-not a claim that P1 implements row-level isolation:
+HTTP/WebSocket/WebRTC. In multi-tenant mode, the policy's `host-data` class
+refuses every one of these commands to tenant devices and owners with HTTP
+**403** and error code **`host_data_unpartitioned`**, except the eight
+Host-global overrides above. This includes messages, sessions, transcripts and
+history references; sync discovery/pull; the files library (including uploads);
+pet data/chat; issues; characters; glance; push tokens; and twin profiles.
+Account-selected storage does not authorize access by the requesting person.
+These families remain intentionally dormant until P5 adds per-person Host
+store partitions. Use the collaboration server for member collaboration data.
+
+Host `service` principals retain their previous access to these data commands:
+the Host's own brain still needs its active-account store. This is not a new
+service-wide bypass. The eight overrides still require person/org standing
+(an unbound service identity is refused), unknown capabilities still fail
+closed, and the independent execution switch still applies. Tenant devices,
+including owners, cannot obtain this exception through standing grants.
+Single-user mode keeps its existing early return without any policy or
+standing-provider call on the execution-enabled fast path; explicit execution
+disabling retains its existing behavior. No TypeScript export is added; the
+frontend can map HTTP `403` / `host_data_unpartitioned`.
+
+The existing storage boundaries motivating this refusal are recorded below:
 
 | Family                                                                         | Current partition and evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

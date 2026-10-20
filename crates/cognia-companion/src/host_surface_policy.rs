@@ -12,6 +12,10 @@ use serde::{Deserialize, Deserializer};
 #[serde(rename_all = "kebab-case")]
 pub enum SurfaceClass {
     Client,
+    /// Host-side per-user stores lack person partitions until P5 (Rule 7).
+    /// Multi-tenant devices/owners are refused; the Host brain's service
+    /// principal retains existing access, after command override resolution.
+    HostData,
     OperatorOnly,
     OrgAction,
     WorkspaceAction,
@@ -120,7 +124,7 @@ mod tests {
             .map(|command| command["capability"].as_str().unwrap()).collect();
         assert_eq!(capabilities, policy.capabilities.keys().map(String::as_str).collect());
         assert_eq!(policy.schema_version, 1);
-        assert_eq!(policy.classes.len(), 5);
+        assert_eq!(policy.classes.len(), 6);
         for entry in policy.capabilities.values().chain(policy.socket_channels.values()) {
             assert!(policy.classes.contains_key(&entry.class));
             match entry.class {
@@ -193,16 +197,30 @@ mod tests {
             let command = manifest["commands"].as_array().unwrap().iter()
                 .find(|command| command["arm"].as_str() == Some(arm.as_str())).expect("real override arm");
             let base = policy.get(command["capability"].as_str().unwrap()).unwrap();
-            // Client has no standing constraint. For every other base, only
-            // an identical constraint is accepted here; changing authority
-            // domains needs an explicit review, not an invented total order.
-            assert!(base.class == SurfaceClass::Client || (base.class == entry.class
-                && base.action == entry.action && base.fallback_org_action == entry.fallback_org_action), "{arm} weakens standing");
+            // The pinned Host-global exceptions are configuration rather than
+            // per-user data. Other bases must retain identical constraints;
+            // there is no total ordering between these authority domains.
+            assert!(base.class == SurfaceClass::HostData || (base.class == entry.class
+                && base.action == entry.action && base.fallback_org_action == entry.fallback_org_action), "{arm} changes standing");
             assert_eq!(entry.class, SurfaceClass::OrgAction);
             assert_eq!(entry.action.as_deref(), Some("host.global-surfaces"));
         }
         assert_eq!(policy.command_overrides.keys().map(String::as_str).collect::<BTreeSet<_>>(),
             BTreeSet::from(["plugin_set_enabled", "plugin_cogset_activate", "plugin_install_origin_record", "mcp_set_enabled", "mcp_set_tool_rules", "skill_set_enabled", "adapter_update_policy", "app_settings_update"]));
+    }
+
+    #[test]
+    fn host_data_policy_pins_dormant_capabilities_and_loads_the_new_class() {
+        let policy: HostSurfacePolicy = serde_json::from_str(POLICY_JSON).unwrap();
+        assert_eq!(policy.classes.len(), 6);
+        assert!(policy.classes[&SurfaceClass::HostData].contains("until P5"));
+        assert!(policy.classes[&SurfaceClass::HostData].contains("Rule 7"));
+        assert_eq!(policy.capabilities.iter().filter(|(_, entry)| entry.class == SurfaceClass::HostData)
+            .map(|(name, _)| name.as_str()).collect::<BTreeSet<_>>(),
+            BTreeSet::from(["client.read", "client.write"]));
+        assert_eq!(policy.get("client.local").unwrap().class, SurfaceClass::Client);
+        assert!(serde_json::from_str::<HostSurfacePolicy>(
+            &POLICY_JSON.replace("\"host-data\"", "\"unknown-host-data\"")).is_err());
     }
 
     #[test]

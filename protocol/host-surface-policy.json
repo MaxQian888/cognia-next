@@ -1050,7 +1050,8 @@
     "agent.worker": { "class": "operator-only" }
   },
   "classes": {
-    "client": "Runs on the client, never on the Host; not gated here.",
+    "client": "Client-local bridge plumbing; no additional Host standing check. Host-stored data uses host-data instead.",
+    "host-data": "Host-side per-user data whose store is not partitioned by person until P5; refused to tenant devices and owners in multi-tenant mode (Rule 7). Host service principals retain existing data access; commandOverrides take precedence.",
     "operator-only": "Never served to a tenant principal in multi-tenant mode.",
     "org-action": "Requires the named org-scope action for the tenant org.",
     "workspace-action": "Requires the named workspace-scope action in the workspace the Host resolves for the target (never a renderer-supplied id). When the Host cannot resolve a workspace, the fallback org action applies.",
@@ -1058,8 +1059,8 @@
   },
   "capabilities": {
     "client.local": { "class": "client" },
-    "client.read": { "class": "client" },
-    "client.write": { "class": "client" },
+    "client.read": { "class": "host-data" },
+    "client.write": { "class": "host-data" },
     "service.internal": { "class": "operator-only" },
     "host.admin": { "class": "org-action", "action": "host.global-surfaces" },
     "host.execute": { "class": "org-action", "action": "host.global-surfaces" },

@@ -183,6 +183,7 @@ pub async fn decide(mode: DeploymentMode, execution: bool, sandboxes: bool, prov
     let entry = arm.and_then(|arm| policy.command_overrides.get(arm)).unwrap_or(entry);
     let (action, workspace) = match entry.class {
         SurfaceClass::Client => return Ok(()),
+        SurfaceClass::HostData => return if principal.scope == "service" { Ok(()) } else { Err(forbidden("host_data_unpartitioned")) },
         SurfaceClass::OperatorOnly => return if principal.scope == "service" { Ok(()) } else { Err(forbidden("host_surface_forbidden")) },
         SurfaceClass::OrgAction => (entry.action.as_deref(), None),
         // Raw workspace actions retain their org fallback; never use a renderer id here.
@@ -714,6 +715,124 @@ mod tests {
     }
     fn device(scope: &str) -> DeviceContext { DeviceContext { device_id: "device".into(), tenant_id: "tenant".into(), scope: scope.into(), granted_scopes: vec![], authorization_capabilities: None } }
 
+    #[tokio::test]
+    async fn host_data_all_manifest_data_arms_refuse_tenants_until_p5() {
+        let manifest: Value = serde_json::from_str(include_str!("../../../protocol/companion-commands.json")).unwrap();
+        let policy = POLICY.as_ref().unwrap();
+        let provider = Fake { result: 0, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+        let mut refused = std::collections::BTreeSet::new();
+        for command in manifest["commands"].as_array().unwrap() {
+            let capability = command["capability"].as_str().unwrap();
+            let arm = command["arm"].as_str().unwrap();
+            if !matches!(capability, "client.read" | "client.write") || policy.command_overrides.contains_key(arm) { continue; }
+            refused.insert(arm);
+            for scope in ["device", "owner", "unknown"] {
+                for enabled in [false, true] {
+                    for sandboxes in [false, true] {
+                        let refusal = decide(DeploymentMode::MultiTenant, enabled, sandboxes, &provider,
+                            capability, Some(arm), &device(scope), Some("forged-workspace")).await.unwrap_err();
+                        assert_eq!(refusal.status, StatusCode::FORBIDDEN, "{scope}/{arm}");
+                        assert_eq!(refusal.code, "host_data_unpartitioned", "{scope}/{arm}");
+                    }
+                }
+            }
+        }
+        for arm in ["message_send", "files_library_upload_init", "pet_chat_send", "issue_create", "register_push_token"] {
+            assert!(refused.contains(arm), "missing pinned write {arm}");
+        }
+        let reads: Vec<_> = manifest["commands"].as_array().unwrap().iter()
+            .filter(|command| command["capability"] == "client.read").collect();
+        assert_eq!(reads.len(), 17, "review the read inventory when the manifest changes");
+        assert!(reads.iter().all(|command| refused.contains(command["arm"].as_str().unwrap())));
+        assert_eq!(refused.len(), 53, "61 data arms minus eight Host-global overrides");
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0, "standing cannot authorize an unpartitioned store");
+    }
+
+    #[tokio::test]
+    async fn host_data_eight_global_overrides_still_use_org_standing() {
+        let policy = POLICY.as_ref().unwrap();
+        let arms = ["adapter_update_policy", "app_settings_update", "mcp_set_enabled", "mcp_set_tool_rules",
+            "plugin_cogset_activate", "plugin_install_origin_record", "plugin_set_enabled", "skill_set_enabled"];
+        assert_eq!(policy.command_overrides.keys().map(String::as_str).collect::<Vec<_>>(), arms);
+        for scope in ["device", "owner"] {
+            for standing in 0..3 {
+                let provider = Fake { result: standing, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+                for arm in arms {
+                    let result = decide(DeploymentMode::MultiTenant, true, false, &provider,
+                        "client.write", Some(arm), &device(scope), Some("ignored-workspace")).await;
+                    if standing == 0 { assert!(result.is_ok(), "{scope}/{arm}"); }
+                    else {
+                        let refusal = result.unwrap_err();
+                        assert_eq!(refusal.status, if standing == 1 { StatusCode::FORBIDDEN } else { StatusCode::SERVICE_UNAVAILABLE });
+                        assert_eq!(refusal.code, if standing == 1 { "host_surface_forbidden" } else { "host_authority_unavailable" });
+                    }
+                }
+                assert_eq!(provider.calls.load(Ordering::SeqCst), arms.len() * 2);
+                assert!(provider.workspaces.lock().iter().all(Option::is_none));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn host_data_service_retains_brain_data_without_new_standing_bypasses() {
+        let manifest: Value = serde_json::from_str(include_str!("../../../protocol/companion-commands.json")).unwrap();
+        let policy = POLICY.as_ref().unwrap();
+        let provider = Fake { result: 3, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+        let service = device("service");
+        for command in manifest["commands"].as_array().unwrap() {
+            let capability = command["capability"].as_str().unwrap();
+            let arm = command["arm"].as_str().unwrap();
+            if !matches!(capability, "client.read" | "client.write") || policy.command_overrides.contains_key(arm) { continue; }
+            for enabled in [false, true] {
+                assert!(decide(DeploymentMode::MultiTenant, enabled, false, &provider,
+                    capability, Some(arm), &service, None).await.is_ok(), "{arm}");
+            }
+        }
+        assert!(decide(DeploymentMode::MultiTenant, true, false, &provider, "service.internal", None, &service, None).await.is_ok());
+        assert_eq!(decide(DeploymentMode::MultiTenant, true, false, &provider,
+            "unclassified", None, &service, None).await.unwrap_err().code, "host_surface_forbidden");
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+        // LiveStanding refuses service identities: they cannot borrow tenant
+        // standing. The new class must not exempt overrides or other classes.
+        assert_eq!(LiveStanding { cache: Mutex::new(AdmissionCache::default()) }.person(&service).unwrap_err().code, "host_principal_unbound");
+        for arm in policy.command_overrides.keys() {
+            assert_eq!(decide(DeploymentMode::MultiTenant, true, true, &provider,
+                "client.write", Some(arm), &service, None).await.unwrap_err().code, "host_principal_unbound", "{arm}");
+        }
+        for capability in ["host.admin", "workspace.write"] {
+            assert_eq!(decide(DeploymentMode::MultiTenant, true, true, &provider,
+                capability, None, &service, None).await.unwrap_err().code, "host_principal_unbound");
+        }
+        for arm in ["plugin_set_enabled", "plugin_cogset_activate"] {
+            assert_eq!(decide(DeploymentMode::MultiTenant, false, true, &provider,
+                "client.write", Some(arm), &service, None).await.unwrap_err().code, "execution_isolation_unavailable");
+        }
+        assert!(provider.workspaces.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn host_data_single_user_keeps_zero_policy_and_provider_calls() {
+        // Pin the unchanged first statements as well as behavior: a global
+        // Lazy may already be initialized by concurrent tests, so checking its
+        // initialization state alone cannot prove that this path never reads it.
+        let source = include_str!("host_surface_gate.rs");
+        let body = source.split_once("pub async fn decide(").unwrap().1
+            .split_once("-> Result<(), Refusal> {").unwrap().1;
+        assert!(body.starts_with("\n    // No policy parse, identity/store read or provider call on the legacy path.\n    if mode == DeploymentMode::SingleUser && execution { return Ok(()); }\n"));
+        let provider = Fake { result: 3, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+        let manifest: Value = serde_json::from_str(include_str!("../../../protocol/companion-commands.json")).unwrap();
+        for scope in ["device", "owner", "service"] {
+            for command in manifest["commands"].as_array().unwrap() {
+                assert!(decide(DeploymentMode::SingleUser, true, false, &provider,
+                    command["capability"].as_str().unwrap(), command["arm"].as_str(), &device(scope), None).await.is_ok());
+            }
+            // Even an invalid capability bypasses policy on the legacy path.
+            assert!(decide(DeploymentMode::SingleUser, true, false, &provider,
+                "unclassified", None, &device(scope), None).await.is_ok());
+        }
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    }
+
     #[test]
     fn admission_cache_bounds_positive_negative_and_unavailable_standing_to_five_seconds() {
         let now = Instant::now();
@@ -742,15 +861,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn all_five_classes_mode_and_standing_matrix() {
+    async fn all_surface_classes_mode_and_standing_matrix() {
         for mode in [DeploymentMode::SingleUser, DeploymentMode::MultiTenant] {
-            for capability in ["client.read", "service.internal", "host.admin", "workspace.write", "agent.run"] {
+            for capability in ["client.local", "client.read", "service.internal", "host.admin", "workspace.write", "agent.run"] {
                 for standing in 0..3 {
                     let provider = Fake { result: standing, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
                     let result = decide(mode, true, true, &provider, capability, None, &device("device"), Some("project-1")).await;
-                    let allowed = mode == DeploymentMode::SingleUser || capability == "client.read" || (capability != "service.internal" && standing == 0);
+                    let allowed = mode == DeploymentMode::SingleUser || capability == "client.local" || (!matches!(capability, "client.read" | "service.internal") && standing == 0);
                     assert_eq!(result.is_ok(), allowed, "{mode:?}/{capability}/{standing}");
-                    if mode == DeploymentMode::SingleUser || capability == "client.read" || capability == "service.internal" {
+                    if mode == DeploymentMode::SingleUser || matches!(capability, "client.local" | "client.read" | "service.internal") {
                         assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
                     } else if standing == 2 { assert_eq!(result.unwrap_err().code, "host_authority_unavailable"); }
                     if capability == "workspace.write" { assert!(provider.workspaces.lock().iter().all(Option::is_none)); }
@@ -802,7 +921,10 @@ mod tests {
         }
         for (capability, arm) in [("client.local", "acp_terminal_output"), ("client.read", "session_list"), ("client.write", "message_update"), ("host.observe", "host_state_status"), ("host.admin", "host_runtime_status"), ("workspace.read", "git_status"), ("process.spawn", "plugin_list")] {
             for mode in [DeploymentMode::SingleUser, DeploymentMode::MultiTenant] {
-                assert!(decide(mode, false, false, &provider, capability, Some(arm), &device("device"), None).await.is_ok(), "{mode:?}/{arm}");
+                let result = decide(mode, false, false, &provider, capability, Some(arm), &device("device"), None).await;
+                if mode == DeploymentMode::MultiTenant && matches!(capability, "client.read" | "client.write") {
+                    assert_eq!(result.unwrap_err().code, "host_data_unpartitioned", "{arm}");
+                } else { assert!(result.is_ok(), "{mode:?}/{arm}"); }
             }
         }
     }
@@ -822,9 +944,12 @@ mod tests {
                     }
                 }
                 if mode == DeploymentMode::SingleUser { assert_eq!(provider.calls.load(Ordering::SeqCst), 0); }
-                // Per-user data keeps the existing client classification.
+                // Per-user data remains dormant until person partitioning.
                 for (capability, arm) in [("client.write", "pet_chat_send"), ("client.read", "session_list"), ("client.write", "files_library_rename")] {
-                    assert!(decide(mode, true, false, &provider, capability, Some(arm), &device("device"), None).await.is_ok());
+                    let result = decide(mode, true, false, &provider, capability, Some(arm), &device("device"), None).await;
+                    if mode == DeploymentMode::MultiTenant {
+                        assert_eq!(result.unwrap_err().code, "host_data_unpartitioned", "{arm}");
+                    } else { assert!(result.is_ok(), "{arm}"); }
                 }
             }
         }
