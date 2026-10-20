@@ -50,6 +50,7 @@ import {
   suspendSharedSessionRuns,
   publishSharedSessionRun,
   authorizeSharedSessionApproval,
+  heartbeatFailureLosesLease,
 } from "./shared-run-coordinator"
 
 const session = {
@@ -444,9 +445,9 @@ it("rejects a send on a different endpoint and preserves its local draft", async
   expect(client.appendSessionEvent).not.toHaveBeenCalled()
 })
 
-it("fences local output and interrupts the executor when the heartbeat fails", async () => {
+it("fences local output and interrupts the executor when the server refuses the heartbeat", async () => {
   const client = fullClient()
-  client.heartbeatSessionRunLease.mockRejectedValue(new Error("revoked"))
+  client.heartbeatSessionRunLease.mockRejectedValue(new CollabError(403, "revoked"))
   const timers: Array<() => void> = []
   const cancel = jest.fn()
   const result = await beginSharedSessionRun(
@@ -472,6 +473,68 @@ it("fences local output and interrupts the executor when the heartbeat fails", a
   await finishSharedSessionRun(session.id, "cancelled")
   expect(client.releaseSessionRunLease).not.toHaveBeenCalled()
   expect(cancel).toHaveBeenCalled()
+})
+
+it("rides out one transient heartbeat failure but fences before the server TTL lapses", async () => {
+  const client = fullClient()
+  let clock = 1_000
+  client.heartbeatSessionRunLease.mockRejectedValue(new TypeError("Failed to fetch"))
+  const timers: Array<() => void> = []
+  const result = await beginSharedSessionRun(
+    session,
+    "run",
+    { messageId: "message", queueItemId: "queued", takeover: true },
+    {
+      resolveContext: context(client as never),
+      getDeviceId: async () => "device",
+      setInterval: ((fn: () => void) => {
+        timers.push(fn)
+        return timers.length
+      }) as never,
+      clearInterval: jest.fn() as never,
+      now: () => clock,
+    }
+  )
+  const lost = jest.fn()
+  if (result.kind === "acquired") result.setLeaseLostHandler(lost)
+
+  clock += 30_000
+  timers[1]()
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(lost).not.toHaveBeenCalled()
+
+  // A successful beat resets the window.
+  client.heartbeatSessionRunLease.mockResolvedValueOnce({})
+  clock += 30_000
+  timers[1]()
+  await Promise.resolve()
+  await Promise.resolve()
+  clock += 30_000
+  timers[1]()
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(lost).not.toHaveBeenCalled()
+
+  // Two missed beats in a row: the next one could no longer renew the lease.
+  clock += 30_000
+  timers[1]()
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(lost).toHaveBeenCalledTimes(1)
+})
+
+it.each([
+  [new CollabError(401, "grant"), true],
+  [new CollabError(404, "gone"), true],
+  [new CollabError(409, "replaced"), true],
+  [new CollabError(503, "down"), false],
+  [new CollabError(429, "slow"), false],
+  [new TypeError("Failed to fetch"), false],
+])("classifies a heartbeat failure %#", (error, fenced) => {
+  expect(heartbeatFailureLosesLease(error, 0, 30_000)).toBe(fenced)
+  // Past the renewable window every failure fences.
+  expect(heartbeatFailureLosesLease(error, 0, 60_000)).toBe(true)
 })
 
 it("keeps only one publication for unchanged assistant output and fences account teardown", async () => {
