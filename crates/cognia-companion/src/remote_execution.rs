@@ -376,12 +376,21 @@ async fn execute_inner(
 ) -> Result<ExecutionOutcome, Problem> {
     let descriptor = super::command_manifest::descriptor(&request.command)
         .ok_or_else(|| missing_command_problem(&request.request_id, &request.command))?;
-    super::host_surface_gate::authorize(
-        &descriptor.capability,
-        Some(&descriptor.arm),
-        &request.principal,
-        super::host_surface_gate::command_workspace(&descriptor.arm, &request.args),
+    let admission = super::host_surface_gate::authorize_execution(
+        state, &descriptor.capability, &descriptor.arm, &request.principal, &request.args,
     ).await?;
+    execute_with_admission(state, request, descriptor, admission).await
+}
+
+async fn execute_with_admission(state: &SharedState, request: ExecutionRequest, descriptor: &CommandDescriptor,
+    admission: Option<cognia_external_agent::spawn_authority::ExecutionAdmission>) -> Result<ExecutionOutcome, Problem> {
+    cognia_external_agent::spawn_authority::with_execution_admission(
+        admission, execute_admitted(state, request, descriptor),
+    ).await
+}
+
+async fn execute_admitted(state: &SharedState, request: ExecutionRequest,
+    descriptor: &CommandDescriptor) -> Result<ExecutionOutcome, Problem> {
     authorize_transport(&request, descriptor)?;
     if let Err(error) = authorize_capability(&request, descriptor) {
         super::audit::record_async(
@@ -979,6 +988,39 @@ fn local_host_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn p4_runtime_dispatch_receives_typed_admission_and_clears_it_after_the_request() {
+        use cognia_external_agent::spawn_authority::{execution_admission, ExecutionAdmission, PlacementBinding};
+        use crate::*;
+        struct Runtime { expected: Option<PlacementBinding> }
+        #[async_trait::async_trait]
+        impl crate::runtime::CompanionRuntime for Runtime {
+            fn ide_relay_routes(&self) -> axum::Router<SharedState> { axum::Router::new() }
+            fn can_dispatch(&self, _: &SharedState) -> bool { true }
+            async fn dispatch(&self, _: &str, args: Value, _: &SharedState, _: &DeviceContext, _: ExecutionPlane) -> crate::runtime::DispatchResult {
+                assert!(args.get("binding").is_none(), "authority must not be injected into request args");
+                assert_eq!(execution_admission().map(|decision| decision.binding), self.expected);
+                Ok(Value::String("Running".into()))
+            }
+        }
+        let decision = ExecutionAdmission { binding: PlacementBinding { org_id: "org_a".into(), workspace_id: "w".into(), actor_user_id: "usr_a".into(), run_id: "host-run".into() }, actions: vec!["execution.request".into(), "workspace.read".into()] };
+        for admission in [None, Some(decision)] {
+            let state = Arc::new(CompanionState {
+                secret: parking_lot::RwLock::new(vec![0; 32]), deny_list: Arc::new(deny_list::DenyList::new()), renderer: None,
+                runtime: Arc::new(Runtime { expected: admission.as_ref().map(|decision| decision.binding.clone()) }),
+                idempotency: Arc::new(idempotency::IdempotencyCache::new()), event_bus: event_bus::EventBus::new(),
+                sync_bridge: sync_bridge::SyncBridge::new(), desktop_messages_bridge: desktop_messages_bridge::DesktopMessagesBridge::new(),
+                desktop_writes_bridge: desktop_writes_bridge::DesktopWritesBridge::new(), sync_registry: sync_registry::SyncTableRegistry::with_defaults(),
+                rate_limiter: rate_limit::RateLimiter::with_defaults(), push_tokens: push::PushTokenRegistry::new(),
+            });
+            let request = ExecutionRequest::new("get_external_agent_status", json!({"agent_id":"agent"}),
+                execution_request("service", None).principal, ExecutionTransport::Internal, None);
+            let descriptor = command_manifest::descriptor(&request.command).unwrap();
+            assert!(matches!(execute_with_admission(&state, request, descriptor, admission).await.unwrap(), ExecutionOutcome::Completed { result: Value::String(_), .. }));
+            assert!(execution_admission().is_none());
+        }
+    }
 
     fn execution_request(scope: &str, capabilities: Option<Vec<String>>) -> ExecutionRequest {
         ExecutionRequest::new(

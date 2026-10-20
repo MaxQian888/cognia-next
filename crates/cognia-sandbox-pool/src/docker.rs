@@ -38,14 +38,15 @@
 //!   does get is `cap-drop ALL` plus the few capabilities `init-agent`
 //!   needs, `no-new-privileges`, and the size class's PID/CPU/memory bounds.
 //!
-//! Provider credentials never ride the spawn environment into a sandbox:
 //! [`container_env`] drops the ambient-credential names the local launcher
 //! clears (`cognia_sandboxd::env::AMBIENT_CREDENTIAL_ENV`) before the
 //! container sees them, so `init-agent` also scrubs an image-baked copy. A
 //! managed gateway task's lease (`COGNIA_GATEWAY_TASK_CONFIG` /
 //! `COGNIA_GATEWAY_TOKEN`) is not in that list — it is minted per task and is
 //! exactly the ingress the ambient names would bypass. The placement says
-//! `credentials.mode: "gateway-lease"` for such a task, `"none"` otherwise.
+//! In multi-tenant mode `credentials.mode` distinguishes brokered leases,
+//! injected plaintext/configuration readable by the child, and no credentials
+//! (Rule 7). Single-user reports retain `gateway-lease` / `none` exactly.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -526,7 +527,8 @@ impl DockerSandboxBackend {
         let guard = Arc::new(lock.lock_owned().await);
         let owner = host_owner(Path::new(cwd));
 
-        if let Some(entry) = self.admission.cached_probe(&image_digest, &bundle.digest) {
+        if let Some(entry) = self.admission.cached_probe(&image_digest, &bundle.digest)
+            .filter(|_| !matches!(mount, RunnerMount::ReadOnly { .. })) {
             if let Some(report) = cached_report(&entry, user, match_owner, owner) {
                 return refuse_probe(&report).map_or(Ok(report), Err);
             }
@@ -634,7 +636,7 @@ impl DockerSandboxBackend {
 
         // A workspace problem belongs to this workspace, not to the image, so
         // it is never what a later spawn reads back.
-        if !report
+        if !matches!(mount, RunnerMount::ReadOnly { .. }) && !report
             .problems
             .iter()
             .any(|problem| problem.code == ProbeCode::WorkspaceNotWritable)
@@ -645,7 +647,7 @@ impl DockerSandboxBackend {
                 &cache_entry(user, match_owner, owner, &report),
             );
         }
-        refuse_probe(&report).map_or(Ok(report), Err)
+        refuse_probe_for_mount(&report, matches!(mount, RunnerMount::ReadOnly { .. })).map_or(Ok(report), Err)
     }
 
     /// Own the entire helper operation. A cancelled receiver stops waiting
@@ -989,7 +991,11 @@ fn probe_code_name(code: ProbeCode) -> &'static str {
 /// image, or this workspace in it, cannot host the agent, and no other
 /// execution path would change that.
 fn refuse_probe(report: &ProbeReport) -> Option<SandboxSpawnError> {
-    if let Some(problem) = report.problems.first() {
+    refuse_probe_for_mount(report, false)
+}
+
+fn refuse_probe_for_mount(report: &ProbeReport, read_only: bool) -> Option<SandboxSpawnError> {
+    if let Some(problem) = report.problems.iter().find(|problem| !(read_only && problem.code == ProbeCode::WorkspaceNotWritable)) {
         return Some(SandboxSpawnError::refused(
             probe_code_name(problem.code),
             problem.message.clone(),
@@ -1161,17 +1167,17 @@ fn container_env(
     })
 }
 
-/// How this spawn's model credentials reach the sandbox, for the placement
-/// the UI renders. A managed gateway task carries a per-task lease; anything
-/// else carries no provider credentials at all.
-fn credentials_mode(config: &ExternalAgentSpawnConfig) -> &'static str {
-    if config.env.contains_key("COGNIA_GATEWAY_TASK_CONFIG")
-        || config.env.contains_key("COGNIA_GATEWAY_TOKEN")
-    {
-        "gateway-lease"
-    } else {
-        "none"
+/// Preserve the historical single-user wire label exactly. Multi-tenant
+/// admission and reporting share the conservative input classifier.
+fn credentials_mode(config: &ExternalAgentSpawnConfig, spec: &EnvironmentSpec, multi_tenant: bool) -> Value {
+    if !multi_tenant {
+        return json!(if config.env.contains_key("COGNIA_GATEWAY_TASK_CONFIG") || config.env.contains_key("COGNIA_GATEWAY_TOKEN") { "gateway-lease" } else { "none" });
     }
+    let names = config.env.keys().chain(spec.container_env.keys().chain(spec.remote_env.keys()))
+        .map(String::as_str).filter(|name| !AMBIENT_CREDENTIAL_ENV.contains(name));
+    json!(cognia_external_agent::spawn_authority::CredentialDelivery::for_inputs(
+        names, config.args.iter().map(String::as_str), spec.lifecycle_commands != Default::default(),
+    ))
 }
 
 /// What the UI shows for an agent that got a sandbox.
@@ -1183,10 +1189,11 @@ fn sandbox_placement(
     config: &ExternalAgentSpawnConfig,
     driver: &str,
     egress_enforced: bool,
+    multi_tenant: bool,
 ) -> Value {
     let spec = &admitted.spec;
     let bundle = &admitted.admission.bundle;
-    json!({
+    let mut placement = json!({
         "kind": "sandbox",
         "driver": driver,
         "specDigest": spec.spec_digest,
@@ -1213,8 +1220,15 @@ fn sandbox_placement(
             "tier": spec.egress.tier,
             "enforced": egress_enforced,
         },
-        "credentials": { "mode": credentials_mode(config) },
-    })
+        "credentials": { "mode": credentials_mode(config, spec, multi_tenant) },
+    });
+    if let Some(decision) = cognia_external_agent::spawn_authority::execution_admission()
+        .filter(|decision| config.sandbox.as_ref().and_then(SandboxPlacement::binding) == Some(&decision.binding)) {
+        placement["binding"] = json!(decision.binding);
+        placement["scratchPath"] = json!(decision.binding.scratch_path());
+        placement["workspaceReadOnly"] = json!(decision.workspace_read_only().ok());
+    }
+    placement
 }
 
 #[async_trait]
@@ -1253,6 +1267,7 @@ impl SandboxDriverStatus for DockerSandboxBackend {
 /// the admitted spec, the workspace mount, the staged core bundle's probe of
 /// the image, and the leases that keep it all valid.
 struct LocalPrepared {
+    binding: Option<cognia_external_agent::spawn_authority::PlacementBinding>,
     admitted: AdmittedSandbox,
     egress: Option<egress::FrozenPolicy>,
     mount: RunnerMount,
@@ -1275,19 +1290,35 @@ impl DockerSandboxBackend {
         cwd: &str,
         leases: OperationLeases,
     ) -> Result<LocalPrepared, SandboxSpawnError> {
+        let decision = cognia_external_agent::spawn_authority::execution_admission();
+        if self.multi_tenant() && (decision.as_ref().map(|decision| &decision.binding) != placement.binding()
+            || decision.is_none()) {
+            return Err(SandboxSpawnError::refused("placement_binding_required", "multi-tenant placement requires Host admission"));
+        }
         if placement.workspace().is_some() {
             return Err(SandboxSpawnError::refused(
                 "sandbox_workspace_source_unsupported",
                 "a local sandbox mounts this Host's checkout; a remote workspace needs a remote provider",
             ));
         }
-        let mount =
+        let mut mount =
             self.config.host.resolve_mount(cwd).map_err(|error| {
                 SandboxSpawnError::refused("sandbox_workspace_outside_root", error)
             })?;
+        if self.multi_tenant() {
+            let read_only = decision.as_ref().expect("checked admission").workspace_read_only()
+                .map_err(|code| SandboxSpawnError::refused(code, code))?;
+            if read_only { mount = RunnerMount::ReadOnly { mount: Box::new(mount) }; }
+        }
 
         let tiers = self.available_tiers().await?;
         let admitted = self.admission.admit(placement.spec(), &tiers)?;
+        if self.multi_tenant() {
+            decision.as_ref().expect("checked admission").authorize_inputs(
+                admitted.spec.container_env.keys().chain(admitted.spec.remote_env.keys()).map(String::as_str),
+                std::iter::empty(), admitted.spec.lifecycle_commands != Default::default(),
+            ).map_err(|code| SandboxSpawnError::refused(code, code))?;
+        }
         if !tiers.contains(&admitted.admission.actual_tier) {
             // Admission picks from what it was handed, so this is unreachable;
             // it is here because silently running a weaker tier than the
@@ -1334,6 +1365,7 @@ impl DockerSandboxBackend {
             .transpose()?
             .flatten();
         Ok(LocalPrepared {
+            binding: if self.multi_tenant() { placement.binding().cloned() } else { None },
             admitted,
             egress,
             mount,
@@ -1365,6 +1397,12 @@ impl DockerSandboxBackend {
         host_cwd: &str,
     ) -> Result<(), SandboxSpawnError> {
         let workspace_env = workspace_port_env(host_cwd).await?;
+        if self.multi_tenant() {
+            let decision = cognia_external_agent::spawn_authority::execution_admission()
+                .ok_or_else(|| SandboxSpawnError::refused("placement_binding_required", "Host admission is required"))?;
+            decision.authorize_credentials(workspace_env.keys().map(String::as_str))
+                .map_err(|code| SandboxSpawnError::refused(code, code))?;
+        }
         let entries = spec
             .env
             .iter()
@@ -1494,6 +1532,9 @@ impl DockerSandboxBackend {
                     "cognia.spec-digest".into(),
                     admitted.spec.spec_digest.clone(),
                 );
+                if let Some(binding) = &prepared.binding {
+                    labels.insert("cognia.execution-binding".into(), serde_json::to_string(binding).expect("identity serializes"));
+                }
                 labels
             },
             // Root so `init-agent` can switch to the target user; it exits 125
@@ -1524,7 +1565,11 @@ impl DockerSandboxBackend {
             // the helper containers above, which run only our binaries, are
             // the read-only ones.
             read_only_rootfs: false,
-            tmpfs: vec!["/tmp".to_string()],
+            tmpfs: {
+                let mut paths = vec!["/tmp".to_string()];
+                if let Some(binding) = &prepared.binding { paths.push(format!("{}:rw,mode=1777", binding.scratch_path())); }
+                paths
+            },
             writable_dirs: Vec::new(),
         })
     }
@@ -1537,6 +1582,21 @@ impl DockerSandboxBackend {
         sink: Arc<dyn ExternalAgentEventSink>,
         leases: OperationLeases,
     ) -> Result<String, SandboxSpawnError> {
+        if self.multi_tenant() {
+            let decision = cognia_external_agent::spawn_authority::execution_admission()
+                .ok_or_else(|| SandboxSpawnError::refused("placement_binding_required", "Host execution admission is required"))?;
+            if config.sandbox.as_ref().and_then(SandboxPlacement::binding) != Some(&decision.binding) {
+                return Err(SandboxSpawnError::refused("placement_binding_required", "placement differs from Host admission"));
+            }
+            decision.authorize_inputs(config.env.keys().map(String::as_str), config.args.iter().map(String::as_str), false)
+                .map_err(|code| SandboxSpawnError::refused(code, code))?;
+            // Remote provisioners currently expose no mount policy contract.
+            // Intentionally inert in multi-tenant mode (Rule 7): a VM alone
+            // cannot attest a read-only workspace or private task scratch.
+            if self.remote.is_some() {
+                return Err(SandboxSpawnError::refused("execution_isolation_unavailable", "remote provider cannot attest tenant mount policy"));
+            }
+        }
         let id = config.id.clone();
         let refs = config
             .sandbox
@@ -1660,6 +1720,7 @@ impl DockerSandboxBackend {
             &config,
             DRIVER_NAME,
             egress_enforced(admitted.spec.egress.tier, false),
+            self.multi_tenant(),
         );
         if admitted.spec.lifecycle == SandboxLifecycleKind::Persistent {
             let (running, cleanup) = self
@@ -2552,6 +2613,7 @@ pub(crate) mod tests {
             framing: Default::default(),
             sandbox_policy: Default::default(),
             sandbox: Some(SandboxPlacement::Container {
+                binding: None,
                 hosted_tool_host_lease_ids: Vec::new(),
                 provider: None,
                 workspace: None,
@@ -2589,9 +2651,14 @@ pub(crate) mod tests {
 
     impl Harness {
         pub(super) fn new(admitted: AdmittedSandbox, probe: ProbeReport, probe_code: i64) -> Self {
+            Self::with_mode(admitted, probe, probe_code, false)
+        }
+
+        fn with_mode(admitted: AdmittedSandbox, probe: ProbeReport, probe_code: i64, multi_tenant: bool) -> Self {
             let api = FakeContainerApi::new();
             script(&api, probe, probe_code);
-            let admission = FakeAdmission::admitting(admitted);
+            let mut admission = FakeAdmission::admitting(admitted);
+            Arc::get_mut(&mut admission).unwrap().multi_tenant = multi_tenant;
             let backend = DockerSandboxBackend::new(api.clone(), admission.clone(), config());
             Self {
                 api,
@@ -2622,6 +2689,135 @@ pub(crate) mod tests {
                 .map(|(_, payload)| payload["placement"].clone())
                 .expect("a sandbox spawn emits its placement")
         }
+    }
+
+    fn p4_decision(write: bool) -> cognia_external_agent::spawn_authority::ExecutionAdmission {
+        use cognia_external_agent::spawn_authority::{ExecutionAdmission, PlacementBinding};
+        ExecutionAdmission {
+            binding: PlacementBinding { org_id: "org_a".into(), workspace_id: "workspace".into(), actor_user_id: "usr_a".into(), run_id: "task".into() },
+            actions: vec!["execution.request".into(), if write { "workspace.write" } else { "workspace.read" }.into()],
+        }
+    }
+
+    #[tokio::test]
+    async fn p4_review_structured_env_argv_and_lifecycle_config_require_use_and_report_injection() {
+        use cognia_external_agent::spawn_authority::with_execution_admission;
+        for channel in ["spawn", "container", "remote", "argv", "file"] {
+            let mut environment = spec(EgressTier::Off, None);
+            let payload = r#"{"provider":{"options":{"apiKey":"fixture"}}}"#;
+            if channel == "container" { environment.container_env.insert("OPENCODE_CONFIG_CONTENT".into(), payload.into()); }
+            if channel == "remote" { environment.remote_env.insert("OPENCODE_CONFIG_CONTENT".into(), Some(payload.into())); }
+            if channel == "file" { environment.lifecycle_commands.on_create = Some(cognia_environment::spec::CommandSpec::Shell { command: "printf '%s' '{\"apiKey\":\"fixture\"}' > /tmp/provider.json".into() }); }
+            let harness = Harness::with_mode(admitted(environment.clone(), IsolationTier::Container), report(vec![command("kiro-cli", None)], vec![]), 0, true);
+            let mut config = spawn_config("structured", "kiro-cli", &[], &environment);
+            config.env.clear(); // Isolate this channel from the helper's ambient API key.
+            if channel == "spawn" { config.env.insert("OPENCODE_CONFIG_CONTENT".into(), payload.into()); }
+            if channel == "argv" { config.args = vec!["--config".into(), "/workspace/provider.json".into()]; }
+            let mut decision = p4_decision(false); config.sandbox.as_mut().unwrap().stamp(decision.clone()).unwrap();
+            let error = with_execution_admission(Some(decision.clone()), harness.spawn(config.clone())).await.unwrap_err();
+            assert_eq!(error.code, "credential_use_forbidden", "{channel}");
+            assert!(harness.specs().is_empty(), "{channel} ran before credential admission");
+            decision.actions.push("credential.use".into());
+            with_execution_admission(Some(decision), harness.spawn(config)).await.unwrap();
+            assert_eq!(harness.placement()["credentials"]["mode"], "injected-env", "{channel}");
+            harness.backend.kill("structured").await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn p4_review_single_user_full_placement_is_byte_identical_to_the_head_shape() {
+        // Full object frozen from HEAD's sandbox_placement, including its
+        // historical credential label even when explicit plaintext is present.
+        for gateway in [false, true] {
+            let environment = spec(EgressTier::Off, None);
+            let harness = Harness::new(admitted(environment.clone(), IsolationTier::Container), report(vec![command("kiro-cli", None)], vec![]), 0);
+            let mut config = spawn_config("legacy", "kiro-cli", &[], &environment);
+            config.env.insert("OPENCODE_CONFIG_CONTENT".into(), r#"{"apiKey":"fixture"}"#.into());
+            if gateway { config.env.insert("COGNIA_GATEWAY_TOKEN".into(), "fixture-lease".into()); }
+            harness.spawn(config).await.unwrap();
+            let expected = json!({
+                "kind":"sandbox", "driver":"docker", "specDigest":environment.spec_digest,
+                "image":format!("ghcr.io/acme/dev@{IMAGE_DIGEST}"), "sizeClassId":"small", "isolationTier":"container",
+                "bundle":{"digest":BUNDLE_DIGEST,"releaseTag":"v1.2.3","libc":"glibc"}, "command":"kiro-cli",
+                "user":{"name":"vscode","uid":10001,"gid":10001,"remappedFrom":{"uid":1000,"gid":1000}},
+                "egress":{"tier":"off","enforced":true},
+                "credentials":{"mode":if gateway {"gateway-lease"} else {"none"}}
+            });
+            assert_eq!(serde_json::to_vec(&harness.placement()).unwrap(), serde_json::to_vec(&expected).unwrap());
+            harness.backend.kill("legacy").await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn p4_review_reused_agent_id_gets_distinct_persistent_runtime_and_scratch_per_generation() {
+        use cognia_external_agent::spawn_authority::with_execution_admission;
+        let mut environment = spec(EgressTier::Off, None); environment.lifecycle = SandboxLifecycleKind::Persistent;
+        let harness = Harness::with_mode(admitted(environment.clone(), IsolationTier::Container), report(vec![command("kiro-cli", None)], vec![]), 0, true);
+        let mut previous: Option<(String, String)> = None;
+        for run in ["generation-1", "generation-2"] {
+            let mut decision = p4_decision(true); decision.binding.run_id = run.into();
+            let mut config = spawn_config("reused", "kiro-cli", &[], &environment); config.env.clear();
+            config.sandbox.as_mut().unwrap().stamp(decision.clone()).unwrap();
+            with_execution_admission(Some(decision.clone()), harness.spawn(config)).await.unwrap();
+            let specs = harness.specs(); let agent = specs.iter().rev().find(|spec| spec.cmd.first().is_some_and(|arg| arg == "serve")).unwrap();
+            let scratch = agent.tmpfs.iter().find(|path| path.starts_with("/scratch/")).unwrap().clone();
+            assert_eq!(scratch, format!("{}:rw,mode=1777", decision.binding.scratch_path()));
+            let current = (agent.name.clone(), scratch);
+            if let Some(previous) = previous { assert_ne!(current.0, previous.0); assert_ne!(current.1, previous.1); }
+            previous = Some(current);
+            harness.backend.kill("reused").await.unwrap();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while harness.backend.runners.contains("reused") { tokio::task::yield_now().await; }
+            }).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn p4_local_mounts_and_scratch_follow_host_standing_without_changing_single_user() {
+        use cognia_external_agent::spawn_authority::with_execution_admission;
+        for multi in [false, true] {
+            for write in [false, true] {
+                let environment = spec(EgressTier::Off, None);
+                let probe = report(vec![command("kiro-cli", None)], if multi && !write {
+                    vec![ProbeProblem { code: ProbeCode::WorkspaceNotWritable, message: "read-only workspace".into() }]
+                } else { vec![] });
+                let harness = Harness::with_mode(admitted(environment.clone(), IsolationTier::Container), probe, 0, multi);
+                let mut placement = spawn_config("agent", "kiro-cli", &[], &environment).sandbox.unwrap();
+                let decision = p4_decision(write);
+                if multi { placement.stamp(decision.clone()).unwrap(); }
+                with_execution_admission(multi.then_some(decision.clone()), async {
+                    let prepared = harness.backend.prepare_local(&placement, "/srv/workspaces/project", OperationLeases::default()).await.unwrap();
+                    let runner = harness.backend.local_runner_spec("agent", &prepared, "bundle".into(), vec![], vec![]).unwrap();
+                    assert_eq!(matches!(runner.mount, Some(RunnerMount::ReadOnly { .. })), multi && !write);
+                    assert_eq!(runner.tmpfs.iter().any(|path| path.starts_with("/scratch/")), multi);
+                    assert_eq!(runner.labels.contains_key("cognia.execution-binding"), multi);
+                    if multi {
+                        assert!(runner.tmpfs.contains(&format!("{}:rw,mode=1777", decision.binding.scratch_path())));
+                    } else {
+                        assert_eq!(runner.tmpfs, vec!["/tmp"]);
+                        assert!(placement.binding().is_none());
+                    }
+                }).await;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn p4_viewer_unbound_and_credential_injection_refuse_before_sandbox_preparation() {
+        use cognia_external_agent::spawn_authority::with_execution_admission;
+        let environment = spec(EgressTier::Off, None);
+        let harness = Harness::with_mode(admitted(environment.clone(), IsolationTier::Container), report(vec![], vec![]), 0, true);
+        let mut config = spawn_config("agent", "kiro-cli", &[], &environment);
+        assert_eq!(harness.spawn(config.clone()).await.unwrap_err().code, "placement_binding_required");
+        let decision = p4_decision(false);
+        config.sandbox.as_mut().unwrap().stamp(decision.clone()).unwrap();
+        config.env.insert("PROJECT_SECRET".into(), "fixture".into());
+        let error = with_execution_admission(Some(decision.clone()), harness.spawn(config.clone())).await.unwrap_err();
+        assert_eq!(error.code, "credential_use_forbidden");
+        let mut viewer = decision; viewer.actions.retain(|action| action != "execution.request");
+        let error = with_execution_admission(Some(viewer), harness.backend.prepare_local(config.sandbox.as_ref().unwrap(), "/srv/workspaces/project", OperationLeases::default())).await.err().unwrap();
+        assert_eq!(error.code, "execution_request_forbidden");
+        assert!(harness.specs().is_empty());
     }
 
     #[tokio::test]

@@ -56,7 +56,7 @@ pub(super) fn runtime_key(
     // workspace_env remains: a lease change requires a different running instance.
     stable
         .labels
-        .retain(|key, _| key == egress::POLICY_DIGEST_LABEL);
+        .retain(|key, _| key == egress::POLICY_DIGEST_LABEL || key == "cognia.execution-binding");
     let identity = match purpose {
         // Unchanged since agent runtimes were introduced: a new spelling
         // would orphan every existing one.
@@ -416,6 +416,7 @@ impl DockerSandboxBackend {
             key == egress::POLICY_DIGEST_LABEL
                 || key == egress::POLICY_DOMAINS_LABEL
                 || key == egress::TIER_LABEL
+                || key == "cognia.execution-binding"
         });
         spec.labels.extend(ownership_labels(
             &key,
@@ -640,7 +641,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn compatibility_includes_bundle_and_all_container_bounds_but_not_agent_credentials() {
+    async fn p4_compatibility_includes_binding_and_container_bounds_but_not_agent_credentials() {
         use crate::docker::tests::{admitted, command, report, spawn_config, spec, Harness};
         let environment = spec(EgressTier::Off, None);
         let harness = Harness::new(
@@ -661,6 +662,12 @@ mod tests {
             .unwrap()
             .clone();
         let expected = runtime_key(&original, &environment, RuntimePurpose::Agent);
+        let mut tenant = original.clone();
+        tenant.labels.insert("cognia.execution-binding".into(), "actor-a/task".into());
+        let actor_a = runtime_key(&tenant, &environment, RuntimePurpose::Agent);
+        tenant.labels.insert("cognia.execution-binding".into(), "actor-b/task".into());
+        assert_ne!(runtime_key(&tenant, &environment, RuntimePurpose::Agent), actor_a);
+        assert_ne!(expected, actor_a);
         let mut changed = original.clone();
         changed.extra_mounts[0].volume.push_str("-new-bundle");
         assert_ne!(

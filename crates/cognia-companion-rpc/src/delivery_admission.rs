@@ -46,8 +46,9 @@ pub fn consume(
             }
         }
     }
-    let admitted = SourceStore::new(directory).admit(owner, host, task, device, declaration,
-        &repository, &workspace.base_ref, &workspace.branch, credential_ref.clone());
+    let admitted = SourceStore::new(directory).admit_bound(owner, host, task, device, declaration,
+        &repository, &workspace.base_ref, &workspace.branch, credential_ref.clone(),
+        config.sandbox.as_ref().and_then(|placement| placement.binding()).cloned());
     if admitted.is_err() && inserted {
         if let Some(reference) = credential_ref {
             let _ = cognia_secrets::secret_store::delete(SECRET_SERVICE, &reference);
@@ -71,6 +72,16 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn p4_delivery_admission_keeps_the_stamped_identity_across_blocking_persistence() {
+        use cognia_external_agent::spawn_authority::{ExecutionAdmission, PlacementBinding};
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = remote_config("origin", None);
+        let decision = ExecutionAdmission { binding: PlacementBinding { org_id: "org_a".into(), workspace_id: "w".into(), actor_user_id: "usr_a".into(), run_id: "run".into() }, actions: vec!["execution.request".into(), "workspace.read".into()] };
+        config.sandbox.as_mut().unwrap().stamp(decision.clone()).unwrap();
+        let source = consume(directory.path(), "owner", "host", "device", "task", &mut config).unwrap().unwrap();
+        assert_eq!(source.binding, Some(decision.binding));
+    }
     use super::*;
     fn remote_config(run: &str, secret: Option<&str>) -> ExternalAgentSpawnConfig {
         serde_json::from_value(serde_json::json!({

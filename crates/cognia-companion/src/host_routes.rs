@@ -19,7 +19,8 @@ pub enum HostRouteClass {
     TicketedSocket,
     /// Execution is intentionally dormant in multi-tenant mode: application
     /// sessions execute code in the Host brain, without sandbox placement.
-    /// Reads remain served under their own app authentication (until P4).
+    /// Reads retain their app authentication; execution needs a future
+    /// sandbox-aware adapter before this intentional dormancy can be lifted.
     AppSession,
     GatedByDispatch,
 }
@@ -156,7 +157,7 @@ pub fn lookup(path: &str) -> Option<&'static HostRoute> {
 
 pub(crate) fn execution_refused(route: &HostRoute, mode: DeploymentMode, enabled: bool, sandboxes: bool) -> bool {
     route.execution && (!enabled || (mode == DeploymentMode::MultiTenant
-        && (route.class == AppSession || !sandboxes)))
+        && (route.class == AppSession || route.capability == Some("workflow.run") || !sandboxes)))
 }
 
 /// Axum exposes MatchedPath but no public router iterator. The source-pinned
@@ -217,6 +218,12 @@ pub async fn operator_admission(request: Request, next: Next) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn p4_workflow_brain_execution_is_unavailable_even_with_a_healthy_pool() {
+        let route = lookup("/api/workflow-deployments/{deployment_id}/runs").unwrap();
+        assert!(execution_refused(route, DeploymentMode::MultiTenant, true, true));
+        assert!(!execution_refused(route, DeploymentMode::SingleUser, true, true));
+    }
     use super::*;
     use std::collections::BTreeSet;
 

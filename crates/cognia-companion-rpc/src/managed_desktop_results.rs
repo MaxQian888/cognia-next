@@ -363,6 +363,7 @@ mod tests {
     #[test]
     fn human_or_unqualified_agent_cannot_publish_an_agent_verdict() {
         let source = cognia_external_agent::spawn_authority::DeliverySource {
+            binding: None,
             version:1,id:"source".into(),owner_account_id:"owner".into(),host_id:"host".into(),task_id:"task".into(),
             device_id:"device".into(),conversation_id:"chat".into(),coding_run_id:"parent".into(),origin_run_ref:"origin".into(),
             repository_url:"https://example.com/repo.git".into(),base_ref:"main".into(),branch:"branch".into(),credential_ref:None,

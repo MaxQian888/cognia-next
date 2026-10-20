@@ -856,11 +856,11 @@ mod tests {
     #[test]
     fn provider_capabilities_carry_each_models_own_reasoning_metadata() {
         let gateway = GatewayState::new();
-        gateway.set_snapshot(serde_json::from_value(serde_json::json!({
+        gateway.try_set_snapshot(serde_json::from_value(serde_json::json!({
             "providers": [{"id":"p", "protocol":"openai", "baseUrl":"https://example.test/v1", "enabled":true,
                 "models":["parent", "child"], "modelMetadata":[{"id":"parent", "supportsReasoning":false}, {"id":"child", "supportsReasoning":true}]}],
             "generatedAtMs":1
-        })).unwrap());
+        })).unwrap()).unwrap();
         let capabilities = provider_capabilities(&gateway);
         assert_eq!(
             capabilities["providers"][0]["modelMetadataById"]["child"]["supportsReasoning"],

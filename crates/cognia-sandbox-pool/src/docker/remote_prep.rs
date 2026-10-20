@@ -2407,6 +2407,7 @@ fn remote_placement(
         config,
         remote.provisioner.kind(),
         egress_enforced,
+        false, // Remote multi-tenant placement is refused before provisioning.
     );
     placement["provider"] = json!(remote.provider_id);
     placement["workspace"] = json!({
@@ -2429,6 +2430,22 @@ mod tests {
     use cognia_external_agent::sandbox_routing_backend::SandboxErrorKind;
 
     const TOKEN: &str = "ghs_never_in_the_sandbox";
+
+    #[tokio::test]
+    async fn p4_remote_mount_policy_is_explicitly_unavailable_before_provisioning() {
+        use cognia_external_agent::spawn_authority::{ExecutionAdmission, PlacementBinding, with_execution_admission};
+        let environment = spec(EgressTier::Off, None);
+        let mut admission = FakeAdmission::admitting(admitted(environment.clone(), IsolationTier::Vm));
+        Arc::get_mut(&mut admission).unwrap().multi_tenant = true;
+        let fake = FakeRemote::new("fake");
+        let backend = DockerSandboxBackend::new_remote("cloud".into(), fake.clone(), limits(1), admission, driver_config());
+        let decision = ExecutionAdmission { binding: PlacementBinding { org_id: "org_a".into(), workspace_id: "w".into(), actor_user_id: "usr_a".into(), run_id: "run".into() }, actions: vec!["execution.request".into(), "workspace.read".into(), "credential.use".into()] };
+        let mut config = remote_config("agent", &environment);
+        config.sandbox.as_mut().unwrap().stamp(decision.clone()).unwrap();
+        let error = with_execution_admission(Some(decision), backend.spawn_sandboxed(config, EmitterEventSink::new(RecordingAgentEmitter::new()))).await.unwrap_err();
+        assert_eq!(error.code, "execution_isolation_unavailable");
+        assert!(fake.provisions.lock().is_empty());
+    }
 
     fn limits(max_concurrent: u32) -> RemoteLimits {
         RemoteLimits {

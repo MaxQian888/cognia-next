@@ -54655,6 +54655,11 @@ paths:
                 - argv
                 - timeoutMs
               properties:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                  description: Required for multi-tenant creation. Host admission resolves the actor; this field never supplies placement
+                    identity or permissions.
                 placement:
                   type: object
                   description: "The task's runtime environment placement as the brain resolved it (prepareRunEnvironment). The spec is not
@@ -164066,6 +164071,10 @@ paths:
               required:
                 - config
               properties:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                  description: Required for multi-tenant creation. Later agent commands resolve this scope from the immutable Host record.
                 config:
                   type: object
                   required:

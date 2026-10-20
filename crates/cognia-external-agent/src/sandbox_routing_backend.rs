@@ -45,6 +45,9 @@ pub enum SandboxPlacement {
     /// One container per agent, built from a spec the brain resolved (Step ①).
     #[serde(rename_all = "camelCase")]
     Container {
+        /// Server-resolved identity. Absent on the legacy single-user path.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<crate::spawn_authority::PlacementBinding>,
         /// The sealed `EnvironmentSpec`. The Host re-admits it; nothing in it
         /// is trusted because the brain sent it.
         spec: Value,
@@ -115,6 +118,22 @@ pub fn is_provider_id(value: &str) -> bool {
 pub const LOCAL_PROVIDER_ID: &str = "local";
 
 impl SandboxPlacement {
+    pub fn binding(&self) -> Option<&crate::spawn_authority::PlacementBinding> {
+        match self { Self::Container { binding, .. } => binding.as_ref() }
+    }
+
+    /// Refuse a caller's identity even when it happens to match admission.
+    pub fn stamp(&mut self, decision: crate::spawn_authority::ExecutionAdmission) -> Result<(), &'static str> {
+        match self {
+            Self::Container { binding, isolation_mandatory, .. } => {
+                if binding.is_some() { return Err("placement_binding_client_supplied"); }
+                decision.workspace_read_only()?;
+                *binding = Some(decision.binding.clone());
+                *isolation_mandatory = true;
+                Ok(())
+            }
+        }
+    }
     pub fn hosted_tool_host_lease_ids(&self) -> &[String] {
         match self {
             Self::Container {
@@ -181,6 +200,7 @@ impl SandboxPlacement {
             "catalog_entry_id": claimed("/image/catalogEntryId", is_catalog_id),
             "isolation_mandatory": self.isolation_mandatory(),
         });
+        if let Some(binding) = self.binding() { fields["binding"] = json!(binding); }
         // Only a placement that names a provider or a remote workspace adds
         // these, so a local placement's audit line keeps its exact shape.
         let Self::Container {
@@ -657,6 +677,27 @@ impl SandboxRoutingBackend {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn p4_binding_is_host_stamped_client_bindings_refuse_and_legacy_wire_is_unchanged() {
+        use crate::spawn_authority::{ExecutionAdmission, PlacementBinding};
+        let original = placement(false);
+        assert_eq!(serde_json::to_string(&original).unwrap(), format!(
+            "{{\"kind\":\"container\",\"spec\":{{\"specDigest\":\"{}\"}},\"isolationMandatory\":false}}", "a".repeat(64)
+        ));
+        let wire = serde_json::to_value(&original).unwrap();
+        assert!(wire.get("binding").is_none());
+        assert_eq!(serde_json::from_value::<SandboxPlacement>(wire).unwrap(), original);
+        let decision = ExecutionAdmission {
+            binding: PlacementBinding { org_id: "org_a".into(), workspace_id: "w".into(), actor_user_id: "usr_a".into(), run_id: "server-run".into() },
+            actions: vec!["execution.request".into(), "workspace.read".into()],
+        };
+        let mut stamped = original;
+        stamped.stamp(decision.clone()).unwrap();
+        assert_eq!(stamped.binding(), Some(&decision.binding));
+        assert!(stamped.isolation_mandatory());
+        let mut client = serde_json::from_value::<SandboxPlacement>(serde_json::to_value(&stamped).unwrap()).unwrap();
+        assert_eq!(client.stamp(decision), Err("placement_binding_client_supplied"));
+    }
     use super::*;
     use crate::exec_backend::test_support::RecordingAgentEmitter;
     use crate::exec_backend::{EmitterEventSink, PLACEMENT_CHANNEL};
@@ -783,6 +824,7 @@ mod tests {
 
     fn placement(isolation_mandatory: bool) -> SandboxPlacement {
         SandboxPlacement::Container {
+            binding: None,
             hosted_tool_host_lease_ids: Vec::new(),
             provider: None,
             workspace: None,
@@ -839,6 +881,7 @@ mod tests {
     fn audit_fields_record_the_claim_in_the_shape_a_spec_has() {
         let image_digest = format!("sha256:{}", "c".repeat(64));
         let placement = SandboxPlacement::Container {
+            binding: None,
             hosted_tool_host_lease_ids: Vec::new(),
             provider: None,
             workspace: None,
@@ -868,6 +911,7 @@ mod tests {
     #[test]
     fn audit_fields_drop_values_no_valid_spec_could_hold() {
         let placement = SandboxPlacement::Container {
+            binding: None,
             hosted_tool_host_lease_ids: Vec::new(),
             provider: None,
             workspace: None,
@@ -891,6 +935,7 @@ mod tests {
         );
 
         let empty = SandboxPlacement::Container {
+            binding: None,
             hosted_tool_host_lease_ids: Vec::new(),
             provider: None,
             workspace: None,
@@ -903,6 +948,7 @@ mod tests {
 
         // A catalog id is a slug, not any id: a valid project id is not one.
         let not_a_slug = SandboxPlacement::Container {
+            binding: None,
             hosted_tool_host_lease_ids: Vec::new(),
             provider: None,
             workspace: None,
@@ -918,6 +964,7 @@ mod tests {
     fn audit_fields_keep_every_value_a_valid_spec_can_hold() {
         let upper = format!("sha256:{}", "AB".repeat(32));
         let placement = SandboxPlacement::Container {
+            binding: None,
             hosted_tool_host_lease_ids: Vec::new(),
             provider: None,
             workspace: None,
@@ -1410,6 +1457,7 @@ mod tests {
             assert!(!is_provider_id(invalid), "{invalid}");
         }
         let forged = SandboxPlacement::Container {
+            binding: None,
             hosted_tool_host_lease_ids: Vec::new(),
             provider: Some("Not A Slug".into()),
             workspace: None,

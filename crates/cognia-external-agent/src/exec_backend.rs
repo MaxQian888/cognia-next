@@ -625,6 +625,7 @@ mod tests {
             sandbox_policy: Default::default(),
             sandbox: Some(
                 crate::sandbox_routing_backend::SandboxPlacement::Container {
+                    binding: None,
                     hosted_tool_host_lease_ids: Vec::new(),
                     provider: None,
                     workspace: None,

@@ -166,7 +166,8 @@ pub fn runner_pod_manifest(spec: &RunnerSpec, opts: &KubeRunnerOptions) -> Resul
                 .to_string(),
         );
     }
-    let (claim, sub_path) = match &spec.mount {
+    let read_only = matches!(spec.mount, Some(RunnerMount::ReadOnly { .. }));
+    let (claim, sub_path) = match spec.mount.as_ref().map(RunnerMount::source_mount) {
         Some(RunnerMount::Volume { volume, subpath }) => (volume.clone(), subpath.clone()),
         Some(RunnerMount::Bind { host_dir }) => {
             return Err(format!(
@@ -175,6 +176,7 @@ pub fn runner_pod_manifest(spec: &RunnerSpec, opts: &KubeRunnerOptions) -> Resul
             ))
         }
         None => return Err("a kubernetes runner pod needs a workspace mount".to_string()),
+        Some(RunnerMount::ReadOnly { .. }) => unreachable!("source_mount unwraps read-only mounts"),
     };
 
     let merged_env =
@@ -197,6 +199,7 @@ pub fn runner_pod_manifest(spec: &RunnerSpec, opts: &KubeRunnerOptions) -> Resul
     if let Some(sub) = &sub_path {
         volume_mount["subPath"] = json!(sub);
     }
+    if read_only { volume_mount["readOnly"] = json!(true); }
     let mut volume_mounts = vec![volume_mount];
     let mut volumes = vec![json!({
         "name": "workspace",
@@ -663,6 +666,15 @@ mod tests {
             runtime_class: None,
             pod_ready_timeout_secs: 120,
         }
+    }
+
+    #[test]
+    fn p4_kubernetes_workspace_read_only_is_additive() {
+        let original = RunnerMount::Volume { volume: "workspaces".into(), subpath: Some("task".into()) };
+        let legacy = runner_pod_manifest(&spec(original.clone()), &opts()).unwrap();
+        let readonly = runner_pod_manifest(&spec(RunnerMount::ReadOnly { mount: Box::new(original) }), &opts()).unwrap();
+        assert!(legacy["spec"]["containers"][0]["volumeMounts"][0].get("readOnly").is_none());
+        assert_eq!(readonly["spec"]["containers"][0]["volumeMounts"][0]["readOnly"], true);
     }
 
     #[test]

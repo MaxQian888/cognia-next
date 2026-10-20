@@ -51,6 +51,48 @@ beforeEach(() => {
 })
 
 describe("readPlacementEvent", () => {
+  it("reads complete Host placement identity and its private scratch path", () => {
+    const binding = { orgId: "org_a", workspaceId: "w", actorUserId: "usr_a", runId: "run" }
+    expect(
+      readPlacementEvent(
+        sandboxEvent({ binding, scratchPath: "/scratch/task", workspaceReadOnly: true })
+      )
+    ).toMatchObject({
+      binding,
+      scratchPath: "/scratch/task",
+      workspaceReadOnly: true,
+    })
+    expect(
+      readPlacementEvent(sandboxEvent({ binding, workspaceReadOnly: false }))?.workspaceReadOnly
+    ).toBe(false)
+    expect(
+      readPlacementEvent(sandboxEvent({ binding, workspaceReadOnly: "false" }))?.workspaceReadOnly
+    ).toBeUndefined()
+    expect(
+      readPlacementEvent(
+        sandboxEvent({ binding: { workspaceId: "w" }, scratchPath: "/scratch/task" })
+      )?.binding
+    ).toBeUndefined()
+    expect(readPlacementEvent(sandboxEvent())?.binding).toBeUndefined()
+    expect(readPlacementEvent(sandboxEvent())?.scratchPath).toBeUndefined()
+    expect(readPlacementEvent(sandboxEvent())?.workspaceReadOnly).toBeUndefined()
+  })
+
+  it.each(["brokered", "injected-env", "none", "gateway-lease"])(
+    "preserves the credential delivery label %s, including legacy Hosts",
+    (mode) => {
+      expect(readPlacementEvent(sandboxEvent({ credentials: { mode } }))?.credentialsMode).toBe(
+        mode
+      )
+    }
+  )
+
+  it("does not claim a known delivery policy for an unknown credential mode", () => {
+    expect(
+      readPlacementEvent(sandboxEvent({ credentials: { mode: "future" } }))?.credentialsMode
+    ).toBeUndefined()
+  })
+
   it("reads the tier, user and digests the sandbox actually got", () => {
     expect(readPlacementEvent(sandboxEvent())).toEqual({
       agentId: "a1",

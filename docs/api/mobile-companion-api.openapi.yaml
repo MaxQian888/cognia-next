@@ -124522,6 +124522,10 @@ paths:
               required:
                 - config
               properties:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                  description: Required for multi-tenant creation. Later agent commands resolve this scope from the immutable Host record.
                 config:
                   type: object
                   required:

@@ -1067,6 +1067,7 @@ mod tests {
             framing: Default::default(),
             sandbox_policy: Default::default(),
             sandbox: Some(SandboxPlacement::Container {
+                binding: None,
                 hosted_tool_host_lease_ids: leases,
                 provider: provider.map(str::to_string),
                 workspace: None,

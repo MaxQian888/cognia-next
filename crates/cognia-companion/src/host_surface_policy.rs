@@ -1,6 +1,7 @@
 //! Multi-tenant Host admission policy. The protocol file is the authority.
-//! Workspace actions intentionally use their org fallback until P4 provides
-//! a Host-owned root-to-workspace resolver; a client workspace id is not one.
+//! Workspace actions retain their org fallback. Container execution resolves
+//! explicit creation scopes and immutable Host-owned records; Host-brain
+//! execution remains intentionally unavailable in multi-tenant mode.
 
 use std::collections::BTreeMap;
 
@@ -38,8 +39,8 @@ pub struct HostSurfacePolicy {
     #[serde(rename = "$comment")]
     pub comment: String,
     pub schema_version: u32,
-    /// Intentionally dormant: workspace-action always uses fallbackOrgAction
-    /// in P1. This wire label also makes the limitation visible to consumers.
+    /// Container execution uses Host-owned bindings. Raw workspace-action
+    /// roots still use fallbackOrgAction; Host-brain execution is dormant.
     pub workspace_resolution: String,
     /// Only homogeneous execution capabilities; mixed capabilities are
     /// classified by descriptor arm so control-plane reads remain available.
@@ -136,8 +137,8 @@ mod tests {
     }
 
     #[test]
-    fn workspace_resolution_is_explicitly_dormant_until_p4() {
-        assert_eq!(POLICY.as_ref().unwrap().workspace_resolution, "fallback-only-until-P4");
+    fn workspace_resolution_labels_container_binding_and_host_brain_dormancy() {
+        assert_eq!(POLICY.as_ref().unwrap().workspace_resolution, "container-record-bindings;workspace-actions-fallback;host-brain-execution-unavailable");
     }
 
     fn manifest() -> serde_json::Value {

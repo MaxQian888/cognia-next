@@ -1,7 +1,7 @@
 {
   "$comment": "Multi-tenant Host surface policy (docs/plans/2026-10-20-multi-user-organizations-permissions-and-rollout.md \u00a78). Maps every CommandDescriptor capability in protocol/companion-commands.json to the collaboration action a tenant principal must hold before the Host dispatches the command. A test fails when the manifest gains a capability this file does not classify; an unclassified capability is denied in multi-tenant mode. Single-user mode skips Host standing checks; executionCapabilities and executionCommands still apply when execution is explicitly disabled. Actions come from protocol/collab-capabilities-v1.json. commandOverrides correct capability-level client standing for Host-global arms; client is not a claim about where code executes. Stream adapters have explicit execution flags when no descriptor exists.",
   "schemaVersion": 1,
-  "workspaceResolution": "fallback-only-until-P4",
+  "workspaceResolution": "container-record-bindings;workspace-actions-fallback;host-brain-execution-unavailable",
   "executionCapabilities": ["agent.worker"],
   "executionCommands": [
     "acp_terminal_create",

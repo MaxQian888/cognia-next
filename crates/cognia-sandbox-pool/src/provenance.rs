@@ -30,6 +30,17 @@ impl SourceStore {
         declaration: DeliverySourceDeclaration,
         repository: &str, base_ref: &str, branch: &str, credential_ref: Option<String>,
     ) -> Result<DeliverySource, String> {
+        self.admit_bound(owner, host, task, device, declaration, repository, base_ref, branch, credential_ref, None)
+    }
+
+    /// Binding is passed explicitly: persistence runs on a blocking worker
+    /// outside the request's task-local context.
+    pub fn admit_bound(
+        &self, owner: &str, host: &str, task: &str, device: &str,
+        declaration: DeliverySourceDeclaration,
+        repository: &str, base_ref: &str, branch: &str, credential_ref: Option<String>,
+        binding: Option<cognia_external_agent::spawn_authority::PlacementBinding>,
+    ) -> Result<DeliverySource, String> {
         for value in [owner, host, task, device, &declaration.conversation_id, &declaration.origin_run_ref] {
             validate_id(value)?;
         }
@@ -49,12 +60,13 @@ impl SourceStore {
             if existing.task_id != task || existing.device_id != device
                 || existing.conversation_id != declaration.conversation_id
                 || existing.repository_url != repository_url || existing.base_ref != base_ref
-                || existing.branch != branch || existing.credential_ref != credential_ref {
+                || existing.branch != branch || existing.credential_ref != credential_ref || existing.binding != binding {
                 return Err("delivery_source_immutable_binding_conflict".into());
             }
             return Ok(existing.clone());
         }
         let source = DeliverySource {
+            binding,
             version: 1, id: uuid::Uuid::new_v4().to_string(),
             owner_account_id: owner.into(), host_id: host.into(), task_id: task.into(), device_id: device.into(),
             conversation_id: declaration.conversation_id,
@@ -173,6 +185,18 @@ pub fn normalize_repository(value: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn p4_delivery_binding_is_durable_and_cannot_be_retargeted() {
+        use cognia_external_agent::spawn_authority::PlacementBinding;
+        let directory = tempfile::tempdir().unwrap();
+        let store = SourceStore::new(directory.path());
+        let binding = PlacementBinding { org_id: "org_a".into(), workspace_id: "w".into(), actor_user_id: "usr_a".into(), run_id: "run".into() };
+        let declare = || DeliverySourceDeclaration { conversation_id: "conversation".into(), origin_run_ref: "origin".into() };
+        let source = store.admit_bound("owner", "host", "task", "device", declare(), "https://example.com/repo.git", "main", "branch", None, Some(binding.clone())).unwrap();
+        assert_eq!(SourceStore::new(directory.path()).authorize(&source.id, "owner", "host").unwrap().binding, Some(binding));
+        assert_eq!(store.admit_bound("owner", "host", "task", "device", declare(), "https://example.com/repo.git", "main", "branch", None, None).unwrap_err(), "delivery_source_immutable_binding_conflict");
+        assert!(serde_json::to_value(admit(&store, "legacy")).unwrap().get("binding").is_none());
+    }
     fn admit(store: &SourceStore, run: &str) -> DeliverySource {
         store.admit("owner", "host", "task", "device", DeliverySourceDeclaration { conversation_id: "conversation".into(), origin_run_ref: run.into() }, "https://example.com/repo.git", "main", "task/branch", None).unwrap()
     }

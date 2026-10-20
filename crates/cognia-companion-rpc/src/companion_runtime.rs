@@ -29,6 +29,17 @@ struct RpcRuntime {
 
 #[async_trait::async_trait]
 impl CompanionRuntime for RpcRuntime {
+    fn execution_binding_root(&self, state: &SharedState) -> Option<std::path::PathBuf> {
+        (self.resolve)(state)?.cognia_data_dir().ok()
+    }
+
+    async fn prune_execution_bindings(&self, state: &SharedState) -> Result<(), cognia_problem::Problem> {
+        let Some(host) = (self.resolve)(state) else { return Ok(()); };
+        let directory = host.cognia_data_dir().map_err(|_| cognia_problem::Problem::with_status(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE, "execution_binding_store_unavailable", "Host directory unavailable"))?;
+        cognia_companion::host_surface_gate::prune_execution_records(directory, host.exec_backend()).await
+    }
+
     fn can_dispatch(&self, state: &SharedState) -> bool {
         (self.resolve)(state).is_some()
     }
@@ -117,6 +128,7 @@ mod tests {
 
         crate::headless::install_headless_services(None);
         assert!(!state.runtime.can_dispatch(&state));
+        assert!(state.runtime.execution_binding_root(&state).is_none());
         assert!(headless_host(&state).is_none());
 
         crate::headless::install_headless_services(Some(
@@ -124,9 +136,12 @@ mod tests {
         ));
         let with_host = state.runtime.can_dispatch(&state);
         let kind = headless_host(&state).map(|host| host.kind());
+        let binding_root = state.runtime.execution_binding_root(&state);
+        state.runtime.prune_execution_bindings(&state).await.unwrap();
         crate::headless::install_headless_services(None);
         assert!(with_host);
         assert_eq!(kind, Some("headless"));
+        assert!(binding_root.is_some());
     }
 
     /// A state with no host answers an RPC from the table, not from the core:

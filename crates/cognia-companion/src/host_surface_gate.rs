@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 
 use crate::{deployment::{deployment_mode, DeploymentMode}, middleware::DeviceContext};
 use crate::host_surface_policy::{SurfaceClass, POLICY};
+use cognia_external_agent::spawn_authority::{ExecutionAdmission, PlacementBinding};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Person { pub org: String, pub user: String }
@@ -142,6 +143,8 @@ pub async fn authorize(capability: &str, arm: Option<&str>, principal: &DeviceCo
 /// Stream adapters can launch work without a manifest descriptor (PTY/ACP).
 /// Their explicit execution flag does not make observation capabilities
 /// execution-wide; the main events/RPC carrier stays available.
+/// Direct browser/ACP execution has no Host-bound placement and is inert on
+/// multi-tenant Hosts until a sandbox-aware socket adapter exists (Rule 7).
 pub async fn authorize_channel(capability: &str, execution: bool, principal: &DeviceContext) -> Result<(), Problem> {
     authorize_entry(capability, None, execution, principal, None).await
 }
@@ -149,7 +152,7 @@ pub async fn authorize_channel(capability: &str, execution: bool, principal: &De
 async fn authorize_entry(capability: &str, arm: Option<&str>, execution_channel: bool,
     principal: &DeviceContext, workspace: Option<&str>) -> Result<(), Problem> {
     let enabled = execution_enabled();
-    let result = if execution_channel && !enabled {
+    let result = if channel_execution_refused(deployment_mode(), enabled, execution_channel) {
         Err(unavailable("execution_isolation_unavailable"))
     } else {
         decide(deployment_mode(), enabled, crate::environment_pool::installed().is_some(),
@@ -160,6 +163,10 @@ async fn authorize_entry(capability: &str, arm: Option<&str>, execution_channel:
             json!({ "capability": capability, "arm": arm, "code": refusal.code })).await;
     }
     result.map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+}
+
+fn channel_execution_refused(mode: DeploymentMode, enabled: bool, execution: bool) -> bool {
+    execution && (!enabled || mode == DeploymentMode::MultiTenant)
 }
 
 pub async fn decide(mode: DeploymentMode, execution: bool, sandboxes: bool, provider: &dyn StandingProvider,
@@ -178,7 +185,7 @@ pub async fn decide(mode: DeploymentMode, execution: bool, sandboxes: bool, prov
         SurfaceClass::Client => return Ok(()),
         SurfaceClass::OperatorOnly => return if principal.scope == "service" { Ok(()) } else { Err(forbidden("host_surface_forbidden")) },
         SurfaceClass::OrgAction => (entry.action.as_deref(), None),
-        // Intentionally fallback-only until P4: NEVER use a renderer id here.
+        // Raw workspace actions retain their org fallback; never use a renderer id here.
         SurfaceClass::WorkspaceAction => (entry.fallback_org_action.as_deref(), None),
         SurfaceClass::SandboxedExecution => {
             if !sandboxes { return Err(unavailable("execution_isolation_unavailable")); }
@@ -194,10 +201,9 @@ pub async fn decide(mode: DeploymentMode, execution: bool, sandboxes: bool, prov
     if actions.iter().any(|value| value == action) { Ok(()) } else { Err(forbidden("host_surface_forbidden")) }
 }
 
-/// `command` is the descriptor's dispatch arm, after alias resolution.
-/// Only fields consumed as workspace ids by the actual target may authorize
-/// execution. Unknown commands and session/run-only commands cannot borrow an
-/// unrelated `workspaceId` added to their otherwise generic args (P1).
+/// Legacy explicit browser scopes, retained for single-user compatibility.
+/// Multi-tenant execution uses execution_workspace and Host record lookup;
+/// a generic workspaceId on a later request never grants authority.
 pub fn command_workspace<'a>(command: &str, args: &'a Value) -> Option<&'a str> {
     match command {
         // browser_gateway::dispatch reads this exact field for both commands.
@@ -206,10 +212,488 @@ pub fn command_workspace<'a>(command: &str, args: &'a Value) -> Option<&'a str> 
     }
 }
 
+/// Host-owned execution records. Brain-owned sessions, workflow runs, goals,
+/// rooms and tasks deliberately have no resolver here: their execution is
+/// still in the Host process and remains inert in multi-tenant mode (Rule 7).
+pub trait ExecutionBindingLookup: Send + Sync {
+    fn binding(&self, id: &str) -> Result<Option<PlacementBinding>, Refusal>;
+}
+
+fn record_id<'a>(command: &str, args: &'a Value) -> Option<&'a str> {
+    match command {
+        "spawn_external_agent" => args.pointer("/config/id")?.as_str(),
+        "environment_task_shell_exec" => args.get("owner")?.as_str(),
+        "get_external_agent_status" | "send_to_external_agent" | "kill_external_agent" =>
+            args.get("agent_id").or_else(|| args.get("agentId"))?.as_str(),
+        _ => None,
+    }
+}
+
+fn record_key(command: &str, id: &str) -> String {
+    format!("{}:{id}", if command == "environment_task_shell_exec" { "task-shell" } else { "external-agent" })
+}
+
+fn record_command(command: &str) -> bool {
+    matches!(command, "get_external_agent_status" | "send_to_external_agent" | "kill_external_agent")
+}
+
+fn host_brain_execution(capability: &str, command: &str) -> bool {
+    (POLICY.as_ref().ok().and_then(|policy| policy.get(capability))
+        .is_some_and(|entry| entry.class == SurfaceClass::SandboxedExecution) && !record_command(command))
+        || matches!(command, "external_agent_admit_run" | "external_agent_run_turn" | "external_agent_cancel_run"
+            | "external_agent_release_run" | "external_agent_resolve_decision")
+}
+
+/// Pure resolution: creation alone consumes workspaceId; every subsequent
+/// operation ignores it and reads the immutable Host record instead.
+pub fn execution_workspace(command: &str, args: &Value, lookup: &dyn ExecutionBindingLookup)
+    -> Result<Option<String>, Refusal> {
+    if matches!(command, "spawn_external_agent" | "environment_task_shell_exec") {
+        return Ok(args.get("workspaceId").and_then(Value::as_str)
+            .filter(|id| !id.trim().is_empty()).map(str::to_owned));
+    }
+    match record_id(command, args) {
+        Some(id) => Ok(lookup.binding(&record_key(command, id))?.map(|binding| binding.workspace_id)),
+        None => Ok(None),
+    }
+}
+
+/// Stored beside the Host's other companion state. Only a successful Host
+/// creation can replace an execution generation; controls never change it.
+struct ExecutionBindings(std::path::PathBuf);
+static BINDING_WRITER: Mutex<()> = Mutex::new(());
+const EXECUTION_BINDING_LIMIT: usize = 1024;
+const EXECUTION_BINDING_BYTES: u64 = 2 * 1024 * 1024;
+impl ExecutionBindings {
+    fn read(&self) -> Result<HashMap<String, PlacementBinding>, Refusal> {
+        match std::fs::File::open(&self.0) {
+            Ok(file) => {
+                use std::io::Read;
+                let mut bytes = Vec::new();
+                file.take(EXECUTION_BINDING_BYTES + 1).read_to_end(&mut bytes)
+                    .map_err(|_| unavailable("execution_binding_store_unavailable"))?;
+                if bytes.len() as u64 > EXECUTION_BINDING_BYTES { return Err(unavailable("execution_binding_store_full")); }
+                serde_json::from_slice(&bytes).map_err(|_| unavailable("execution_binding_store_unavailable"))
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(_) => Err(unavailable("execution_binding_store_unavailable")),
+        }
+    }
+    fn insert(&self, id: &str, binding: &PlacementBinding) -> Result<(), Refusal> {
+        let _guard = BINDING_WRITER.lock();
+        let mut records = self.read()?;
+        if let Some(existing) = records.get(id) {
+            if existing == binding { return Ok(()); }
+            if existing.org_id != binding.org_id || existing.workspace_id != binding.workspace_id
+                || existing.actor_user_id != binding.actor_user_id { return Err(forbidden("execution_binding_exists")); }
+        } else if records.len() >= EXECUTION_BINDING_LIMIT {
+            return Err(unavailable("execution_binding_store_full"));
+        }
+        records.insert(id.to_owned(), binding.clone());
+        self.write(&records)
+    }
+    fn remove(&self, id: &str, expected: &PlacementBinding) -> Result<(), Refusal> {
+        let _guard = BINDING_WRITER.lock();
+        let mut records = self.read()?;
+        // An old exit/kill must never remove a newer generation with this id.
+        if records.get(id) != Some(expected) { return Ok(()); }
+        records.remove(id);
+        self.write(&records)
+    }
+    fn write(&self, records: &HashMap<String, PlacementBinding>) -> Result<(), Refusal> {
+        let bytes = serde_json::to_vec(records).map_err(|_| unavailable("execution_binding_store_unavailable"))?;
+        if bytes.len() as u64 > EXECUTION_BINDING_BYTES { return Err(unavailable("execution_binding_store_full")); }
+        let parent = self.0.parent().ok_or_else(|| unavailable("execution_binding_store_unavailable"))?;
+        std::fs::create_dir_all(parent).map_err(|_| unavailable("execution_binding_store_unavailable"))?;
+        let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|_| unavailable("execution_binding_store_unavailable"))?;
+        use std::io::Write;
+        file.write_all(&bytes)
+            .and_then(|_| file.as_file().sync_all()).map_err(|_| unavailable("execution_binding_store_unavailable"))?;
+        file.persist(&self.0).map_err(|_| unavailable("execution_binding_store_unavailable"))?;
+        Ok(())
+    }
+}
+impl ExecutionBindingLookup for ExecutionBindings {
+    fn binding(&self, id: &str) -> Result<Option<PlacementBinding>, Refusal> {
+        Ok(self.read()?.remove(id))
+    }
+}
+impl ExecutionBindingLookup for HashMap<String, PlacementBinding> {
+    fn binding(&self, id: &str) -> Result<Option<PlacementBinding>, Refusal> {
+        Ok(self.get(id).cloned())
+    }
+}
+
+/// The mount root is a separate Host authority from a caller's workspaceId.
+/// First assignment requires the existing Host-global administration action;
+/// ordinary execution permission never assigns an arbitrary Host directory.
+struct WorkspaceMounts { path: std::path::PathBuf, base: Option<std::path::PathBuf> }
+impl WorkspaceMounts {
+    fn new(path: std::path::PathBuf, base: Option<std::path::PathBuf>) -> Self {
+        Self { path, base }
+    }
+    fn read(&self) -> Result<HashMap<String, String>, Refusal> {
+        match std::fs::read(&self.path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| unavailable("execution_binding_store_unavailable")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(_) => Err(unavailable("execution_binding_store_unavailable")),
+        }
+    }
+    fn key(decision: &ExecutionAdmission) -> String {
+        serde_json::to_string(&(&decision.binding.org_id, &decision.binding.workspace_id)).expect("identity serializes")
+    }
+    #[cfg(test)]
+    fn authorize(&self, decision: &ExecutionAdmission, cwd: &str) -> Result<(), Refusal> {
+        self.authorized_root(decision, cwd).map(|_| ())
+    }
+    fn authorized_root(&self, decision: &ExecutionAdmission, cwd: &str) -> Result<std::path::PathBuf, Refusal> {
+        let base = self.base.as_ref().ok_or_else(|| forbidden("workspace_root_unconfigured"))?
+            .canonicalize().map_err(|_| forbidden("workspace_root_unconfigured"))?;
+        if !base.is_dir() { return Err(forbidden("workspace_root_unconfigured")); }
+        let supplied = std::path::Path::new(cwd);
+        let cwd = supplied.canonicalize().map_err(|_| forbidden("workspace_mount_forbidden"))?;
+        // The operator base itself cannot be claimed by an org administrator.
+        if cwd == base || !cwd.starts_with(&base) || cwd != supplied || !cwd.is_dir() { return Err(forbidden("workspace_mount_forbidden")); }
+        let roots = self.read()?;
+        let key = Self::key(decision);
+        if roots.iter().any(|(other, root)| other != &key
+            && (cwd.starts_with(root) || std::path::Path::new(root).starts_with(&cwd))) {
+            return Err(forbidden("workspace_root_claimed"));
+        }
+        match roots.get(&key) {
+            // The driver mounts cwd itself. Accepting an arbitrary child
+            // would let a writable sibling replace it with a symlink between
+            // canonicalization and the daemon's bind. Mount the assigned root.
+            Some(root) if cwd == std::path::Path::new(root) => Ok(cwd),
+            Some(_) => Err(forbidden("workspace_mount_forbidden")),
+            None if decision.has("host.global-surfaces") => Ok(cwd),
+            None => Err(forbidden("workspace_unresolved")),
+        }
+    }
+    fn persist(&self, decision: &ExecutionAdmission, cwd: &str) -> Result<(), Refusal> {
+        let _guard = BINDING_WRITER.lock();
+        let canonical = self.authorized_root(decision, cwd)?;
+        let mut roots = self.read()?;
+        let key = Self::key(decision);
+        if roots.contains_key(&key) { return Ok(()); }
+        roots.insert(key, canonical.to_string_lossy().into_owned());
+        let parent = self.path.parent().ok_or_else(|| unavailable("execution_binding_store_unavailable"))?;
+        std::fs::create_dir_all(parent).map_err(|_| unavailable("execution_binding_store_unavailable"))?;
+        let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|_| unavailable("execution_binding_store_unavailable"))?;
+        use std::io::Write;
+        file.write_all(&serde_json::to_vec(&roots).map_err(|_| unavailable("execution_binding_store_unavailable"))?)
+            .and_then(|_| file.as_file().sync_all()).map_err(|_| unavailable("execution_binding_store_unavailable"))?;
+        file.persist(&self.path).map_err(|_| unavailable("execution_binding_store_unavailable"))?;
+        Ok(())
+    }
+}
+
+/// `cwd` must be the canonical path returned by Host SpawnPolicy, never the
+/// caller's raw path. Checks run before staging/probing/starting a container.
+pub async fn authorize_execution_mount(state: &crate::SharedState, cwd: &str) -> Result<(), Problem> {
+    let Some(decision) = cognia_external_agent::spawn_authority::execution_admission() else { return Ok(()); };
+    let root = state.runtime.execution_binding_root(state);
+    let base = state.runtime.execution_workspace_base(state);
+    let cwd = cwd.to_owned();
+    let result = tokio::task::spawn_blocking(move || {
+        root.ok_or_else(|| unavailable("execution_binding_store_unavailable"))
+            // Claim under the writer lock BEFORE a container can see the path.
+            // Concurrent org creations cannot both run before one loses CAS.
+            .and_then(|root| WorkspaceMounts::new(root.join("companion/workspace-mounts.json"), base).persist(&decision, &cwd))
+    }).await.unwrap_or_else(|_| Err(unavailable("execution_binding_store_unavailable")));
+    result.map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+}
+
+async fn resolve_execution_admission(provider: &dyn StandingProvider, lookup: &dyn ExecutionBindingLookup,
+    command: &str, args: &Value, principal: &DeviceContext) -> Result<ExecutionAdmission, Refusal> {
+    if args.pointer("/config/sandbox/binding").is_some() || args.pointer("/placement/binding").is_some() {
+        return Err(forbidden("placement_binding_client_supplied"));
+    }
+    let workspace = execution_workspace(command, args, lookup)?.ok_or_else(|| forbidden("workspace_unresolved"))?;
+    let person = provider.person(principal)?;
+    let id = record_id(command, args).filter(|id| !id.is_empty()).ok_or_else(|| forbidden("workspace_unresolved"))?;
+    let existing = lookup.binding(&record_key(command, id))?;
+    let creating = matches!(command, "spawn_external_agent" | "environment_task_shell_exec");
+    let binding = match existing {
+        Some(binding) => {
+            if binding.org_id != person.org || (creating && (binding.workspace_id != workspace || binding.actor_user_id != person.user)) {
+                return Err(forbidden("execution_binding_exists"));
+            }
+            if creating { PlacementBinding { run_id: uuid::Uuid::new_v4().to_string(), ..binding } } else { binding }
+        }
+        None if creating => PlacementBinding { org_id: person.org.clone(), workspace_id: workspace.clone(), actor_user_id: person.user.clone(), run_id: uuid::Uuid::new_v4().to_string() },
+        None => return Err(forbidden("workspace_unresolved")),
+    };
+    // Actor B uses B's current standing, never A's historical permissions.
+    let actions = provider.actions(&person, Some(&workspace)).await?;
+    let admission = ExecutionAdmission { binding, actions };
+    admission.workspace_read_only().map_err(forbidden)?;
+    Ok(admission)
+}
+
+/// Called only after sandbox creation succeeds. A failed spawn must not bind
+/// a pre-existing legacy process that happened to use the same record id.
+pub async fn persist_execution_binding(state: &crate::SharedState, command: &str, args: &Value, cwd: &str) -> Result<(), Problem> {
+    let Some(decision) = cognia_external_agent::spawn_authority::execution_admission() else { return Ok(()); };
+    if !matches!(command, "spawn_external_agent" | "environment_task_shell_exec") { return Ok(()); }
+    // Capture typed authority before crossing the task-local boundary.
+    let directory = state.runtime.execution_binding_root(state);
+    let base = state.runtime.execution_workspace_base(state);
+    let key = record_id(command, args).map(|id| record_key(command, id));
+    let cwd = cwd.to_owned();
+    let result = tokio::task::spawn_blocking(move || {
+        let directory = directory.ok_or_else(|| unavailable("execution_binding_store_unavailable"))?;
+        let key = key.ok_or_else(|| forbidden("workspace_unresolved"))?;
+        WorkspaceMounts::new(directory.join("companion/workspace-mounts.json"), base).persist(&decision, &cwd)?;
+        ExecutionBindings(directory.join("companion/execution-bindings.json"))
+            .insert(&key, &decision.binding)
+    }).await.unwrap_or_else(|_| Err(unavailable("execution_binding_store_unavailable")));
+    result.map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+}
+
+/// Host lifecycle cleanup uses the exact generation captured at spawn. This
+/// synchronous helper belongs on a blocking worker, including event callbacks.
+pub fn forget_execution_record(directory: &std::path::Path, command: &str, id: &str, expected: &PlacementBinding) -> Result<(), Problem> {
+    ExecutionBindings(directory.join("companion/execution-bindings.json")).remove(&record_key(command, id), expected)
+        .map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+}
+
+pub async fn forget_execution_binding(state: &crate::SharedState, command: &str, id: &str) -> Result<(), Problem> {
+    let Some(decision) = cognia_external_agent::spawn_authority::execution_admission() else { return Ok(()); };
+    let directory = state.runtime.execution_binding_root(state);
+    let command = command.to_owned(); let id = id.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let directory = directory.ok_or_else(|| Problem::with_status(StatusCode::SERVICE_UNAVAILABLE, "execution_binding_store_unavailable", "execution binding directory unavailable"))?;
+        forget_execution_record(&directory, &command, &id, &decision.binding)
+    }).await.unwrap_or_else(|_| Err(Problem::with_status(StatusCode::SERVICE_UNAVAILABLE, "execution_binding_store_unavailable", "execution binding cleanup failed")))
+}
+
+/// Reconcile orphaned records after backend reaping/restart, before admitting
+/// another creation. Snapshot generations make concurrent exits/replacements
+/// safe; a failed lookup never deletes an active generation by id alone.
+pub async fn prune_execution_records(directory: std::path::PathBuf, backend: Arc<dyn cognia_external_agent::exec_backend::ExecBackend>) -> Result<(), Problem> {
+    let root = directory.clone();
+    let records = tokio::task::spawn_blocking(move || ExecutionBindings(root.join("companion/execution-bindings.json")).read())
+        .await.unwrap_or_else(|_| Err(unavailable("execution_binding_store_unavailable")))
+        .map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))?;
+    let mut retired = Vec::new();
+    for (key, binding) in records {
+        if let Some(id) = key.strip_prefix("external-agent:") {
+            use cognia_external_agent::process::ExternalAgentProcessState::{Stopped, Failed};
+            if matches!(backend.status(id).await, None | Some(Stopped | Failed)) { retired.push((key, binding)); }
+        }
+    }
+    tokio::task::spawn_blocking(move || {
+        let store = ExecutionBindings(directory.join("companion/execution-bindings.json"));
+        for (key, binding) in retired { store.remove(&key, &binding)?; }
+        Ok(())
+    }).await.unwrap_or_else(|_| Err(unavailable("execution_binding_store_unavailable")))
+        .map_err(|refusal: Refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+}
+
+/// Admission for the two container dispatch paths and their recorded controls.
+/// The typed decision is scoped over dispatch; it never enters request args.
+pub async fn authorize_execution(state: &crate::SharedState, capability: &str, command: &str,
+    principal: &DeviceContext, args: &Value) -> Result<Option<ExecutionAdmission>, Problem> {
+    if deployment_mode() == DeploymentMode::SingleUser {
+        authorize(capability, Some(command), principal, command_workspace(command, args)).await?;
+        return Ok(None);
+    }
+    POLICY.as_ref().map_err(|_| Problem::with_status(StatusCode::FORBIDDEN, "host_surface_forbidden", "invalid Host policy"))?;
+    let container = matches!(command, "spawn_external_agent" | "environment_task_shell_exec");
+    let recorded = record_command(command);
+    let brain = host_brain_execution(capability, command);
+    if !container && !recorded && !brain {
+        authorize(capability, Some(command), principal, command_workspace(command, args)).await?;
+        return Ok(None);
+    }
+    let result = async {
+        // Pool availability never makes Host JS/sidecar code isolated. These
+        // arms remain intentionally unavailable; no client id can lift this.
+        if (brain && POLICY.as_ref().is_ok_and(|policy| policy.command_executes(capability, Some(command))))
+            || (command == "environment_task_shell_exec" && principal.scope == "service") {
+            return Err(unavailable("execution_isolation_unavailable"));
+        }
+        if brain { return Err(forbidden("workspace_unresolved")); }
+        if !execution_enabled() || crate::environment_pool::installed().is_none() {
+            return Err(unavailable("execution_isolation_unavailable"));
+        }
+        if container {
+            state.runtime.prune_execution_bindings(state).await
+                .map_err(|problem| unavailable(if problem.code == "execution_binding_store_full" { "execution_binding_store_full" } else { "execution_binding_store_unavailable" }))?;
+        }
+        let directory = state.runtime.execution_binding_root(state).ok_or_else(|| unavailable("execution_binding_store_unavailable"))?;
+        let store = tokio::task::spawn_blocking(move || {
+            ExecutionBindings(directory.join("companion/execution-bindings.json")).read()
+        }).await.map_err(|_| unavailable("execution_binding_store_unavailable"))??;
+        if container && store.len() >= EXECUTION_BINDING_LIMIT
+            && !record_id(command, args).is_some_and(|id| store.contains_key(&record_key(command, id))) {
+            return Err(unavailable("execution_binding_store_full"));
+        }
+        resolve_execution_admission(LIVE.as_ref(), &store, command, args, principal).await.map(Some)
+    }.await;
+    if let Err(refusal) = &result {
+        crate::audit::record_async("host_surface_authorize", &principal.device_id, &principal.scope, "deny",
+            json!({ "capability": capability, "arm": command, "code": refusal.code })).await;
+    }
+    result.map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn p4_direct_execution_channels_stay_inert_and_single_user_keeps_its_behavior() {
+        for enabled in [false, true] {
+            assert!(!channel_execution_refused(DeploymentMode::MultiTenant, enabled, false));
+            assert!(channel_execution_refused(DeploymentMode::MultiTenant, enabled, true));
+            assert_eq!(channel_execution_refused(DeploymentMode::SingleUser, enabled, true), !enabled);
+            assert!(!channel_execution_refused(DeploymentMode::SingleUser, enabled, false));
+        }
+        for command in ["claude_send", "agent_send", "workflow_trigger_manual", "execution_run_create", "team_run_start", "goal_create", "room_send", "codex_app_task_create"] {
+            let capability = if command.starts_with("workflow_") { "workflow.run" } else { "agent.run" };
+            assert!(host_brain_execution(capability, command), "{command}");
+        }
+        assert!(!host_brain_execution("agent.run", "get_external_agent_status"));
+    }
+
+    fn p4_binding() -> PlacementBinding {
+        PlacementBinding { org_id: "org_a".into(), workspace_id: "workspace-real".into(), actor_user_id: "usr_owner".into(), run_id: "run-host".into() }
+    }
+
+    #[test]
+    fn p4_records_survive_restart_and_ignore_forged_workspace_and_aliases() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("bindings.json");
+        let store = ExecutionBindings(path.clone());
+        let key = record_key("spawn_external_agent", "agent");
+        store.insert(&key, &p4_binding()).unwrap();
+        store.insert(&key, &p4_binding()).unwrap();
+        let mut forged = p4_binding(); forged.workspace_id = "forged".into();
+        assert_eq!(store.insert(&key, &forged).unwrap_err().code, "execution_binding_exists");
+        let reopened = ExecutionBindings(path);
+        for arm in ["send_to_external_agent", "kill_external_agent", "get_external_agent_status"] {
+            let args = json!({"agent_id":"agent", "agentId":"legacy", "workspaceId":"forged"});
+            assert_eq!(execution_workspace(arm, &args, &reopened).unwrap().as_deref(), Some("workspace-real"));
+            assert_eq!(execution_workspace(arm, &json!({"agentId":"legacy", "workspaceId":"forged"}), &reopened).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn p4_workspace_roots_need_host_authority_and_cannot_be_borrowed_by_another_workspace() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let workspace = base.join("a"); let nested = workspace.join("subdir"); let other = base.join("another");
+        std::fs::create_dir_all(&nested).unwrap(); std::fs::create_dir_all(&other).unwrap();
+        let root = workspace.to_str().unwrap();
+        let roots = WorkspaceMounts::new(temp.path().join("roots.json"), Some(base));
+        let mut decision = ExecutionAdmission { binding: p4_binding(), actions: vec!["execution.request".into(), "workspace.read".into()] };
+        assert_eq!(roots.authorize(&decision, root).unwrap_err().code, "workspace_unresolved");
+        decision.actions.push("host.global-surfaces".into());
+        roots.persist(&decision, root).unwrap();
+        decision.actions.retain(|action| action != "host.global-surfaces");
+        roots.authorize(&decision, root).unwrap();
+        assert_eq!(roots.authorize(&decision, nested.to_str().unwrap()).unwrap_err().code, "workspace_mount_forbidden");
+        assert_eq!(roots.authorize(&decision, other.to_str().unwrap()).unwrap_err().code, "workspace_mount_forbidden");
+        decision.binding.actor_user_id = "usr_other".into();
+        roots.authorize(&decision, root).unwrap();
+        decision.binding.workspace_id = "workspace-other".into();
+        assert_eq!(roots.authorize(&decision, root).unwrap_err().code, "workspace_root_claimed");
+    }
+
+    #[test]
+    fn p4_review_root_claims_require_operator_base_and_exclude_other_orgs_and_nested_paths() {
+        let temp = tempfile::tempdir().unwrap(); let base = temp.path().canonicalize().unwrap().join("base");
+        let workspace = base.join("parent/child"); std::fs::create_dir_all(&workspace).unwrap();
+        let outside = temp.path().canonicalize().unwrap().join("outside"); std::fs::create_dir_all(&outside).unwrap();
+        let mut decision = ExecutionAdmission { binding: p4_binding(), actions: vec!["host.global-surfaces".into()] };
+        let missing = WorkspaceMounts::new(temp.path().join("missing.json"), None);
+        assert_eq!(missing.persist(&decision, workspace.to_str().unwrap()).unwrap_err().code, "workspace_root_unconfigured");
+        let roots = WorkspaceMounts::new(temp.path().join("roots.json"), Some(base.clone()));
+        assert_eq!(roots.persist(&decision, outside.to_str().unwrap()).unwrap_err().code, "workspace_mount_forbidden");
+        assert_eq!(roots.persist(&decision, base.to_str().unwrap()).unwrap_err().code, "workspace_mount_forbidden");
+        roots.persist(&decision, workspace.to_str().unwrap()).unwrap();
+        decision.binding.org_id = "org_other".into();
+        for path in [workspace.as_path(), workspace.parent().unwrap()] {
+            assert_eq!(roots.persist(&decision, path.to_str().unwrap()).unwrap_err().code, "workspace_root_claimed");
+        }
+        let nested = workspace.join("nested"); std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(roots.persist(&decision, nested.to_str().unwrap()).unwrap_err().code, "workspace_root_claimed");
+        #[cfg(unix)] {
+            let link = base.join("symlink"); std::os::unix::fs::symlink(&outside, &link).unwrap();
+            assert_eq!(roots.persist(&decision, link.to_str().unwrap()).unwrap_err().code, "workspace_mount_forbidden");
+        }
+        assert_eq!(roots.read().unwrap().len(), 1);
+        let concurrent = WorkspaceMounts::new(temp.path().join("concurrent.json"), Some(base));
+        let barrier = std::sync::Barrier::new(2);
+        let results = std::thread::scope(|scope| {
+            let first = scope.spawn(|| { barrier.wait(); concurrent.persist(&decision, workspace.to_str().unwrap()) });
+            let mut other = decision.clone(); other.binding.org_id = "org_racer".into();
+            let concurrent = &concurrent; let workspace = &workspace; let barrier = &barrier;
+            let second = scope.spawn(move || { barrier.wait(); concurrent.persist(&other, workspace.to_str().unwrap()) });
+            [first.join().unwrap(), second.join().unwrap()]
+        });
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(results.into_iter().find_map(Result::err).unwrap().code, "workspace_root_claimed");
+    }
+
+    #[tokio::test]
+    async fn p4_review_each_creation_gets_a_fresh_generation_and_cleanup_is_generation_safe_and_bounded() {
+        let temp = tempfile::tempdir().unwrap(); let store = ExecutionBindings(temp.path().join("bindings.json"));
+        let provider = Fake { result: 0, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+        let args = json!({"workspaceId":"workspace-real", "config":{"id":"same-id"}});
+        let first = resolve_execution_admission(&provider, &store, "spawn_external_agent", &args, &device("device")).await.unwrap();
+        let key = record_key("spawn_external_agent", "same-id"); store.insert(&key, &first.binding).unwrap();
+        let second = resolve_execution_admission(&provider, &store, "spawn_external_agent", &args, &device("device")).await.unwrap();
+        assert_ne!(first.binding.run_id, second.binding.run_id);
+        assert_ne!(first.binding.scratch_path(), second.binding.scratch_path());
+        store.insert(&key, &second.binding).unwrap();
+        store.remove(&key, &first.binding).unwrap();
+        assert_eq!(store.binding(&key).unwrap(), Some(second.binding.clone()));
+        store.remove(&key, &second.binding).unwrap();
+        assert_eq!(execution_workspace("kill_external_agent", &json!({"agentId":"same-id", "workspaceId":"forged"}), &store).unwrap(), None);
+        let task = record_key("environment_task_shell_exec", "task");
+        // The public lifecycle helper uses the production companion subdir.
+        let production = ExecutionBindings(temp.path().join("companion/execution-bindings.json"));
+        production.insert(&task, &first.binding).unwrap();
+        forget_execution_record(temp.path(), "environment_task_shell_exec", "task", &first.binding).unwrap();
+        assert!(production.read().unwrap().is_empty());
+        let records = (0..EXECUTION_BINDING_LIMIT).map(|id| (format!("external-agent:{id}"), first.binding.clone())).collect();
+        store.write(&records).unwrap();
+        assert_eq!(store.insert("external-agent:overflow", &second.binding).unwrap_err().code, "execution_binding_store_full");
+        store.remove("external-agent:0", &first.binding).unwrap();
+        store.insert("external-agent:replacement", &second.binding).unwrap();
+        assert_eq!(store.read().unwrap().len(), EXECUTION_BINDING_LIMIT);
+        std::fs::write(&store.0, vec![b' '; EXECUTION_BINDING_BYTES as usize + 1]).unwrap();
+        assert_eq!(store.read().unwrap_err().code, "execution_binding_store_full");
+    }
+
+    #[tokio::test]
+    async fn p4_creation_stamps_the_gate_person_and_later_actors_need_fresh_standing() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = ExecutionBindings(temp.path().join("bindings.json"));
+        let provider = Fake { result: 0, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+        let args = json!({"workspaceId":"workspace-real", "config":{"id":"new"}});
+        let admitted = resolve_execution_admission(&provider, &store, "spawn_external_agent", &args, &device("device")).await.unwrap();
+        assert_eq!(admitted.binding.org_id, "org_a");
+        assert_eq!(admitted.binding.actor_user_id, "usr_a");
+        assert_eq!(admitted.binding.workspace_id, "workspace-real");
+        assert!(uuid::Uuid::parse_str(&admitted.binding.run_id).is_ok());
+        assert!(store.read().unwrap().is_empty(), "admission itself creates no record");
+        store.insert(&record_key("spawn_external_agent", "existing"), &p4_binding()).unwrap();
+        let args = json!({"agentId":"existing", "workspaceId":"forged"});
+        let other_actor = resolve_execution_admission(&provider, &store, "get_external_agent_status", &args, &device("device")).await.unwrap();
+        assert_eq!(other_actor.binding.actor_user_id, "usr_owner");
+        assert!(provider.workspaces.lock().iter().all(|workspace| workspace.as_deref() == Some("workspace-real")));
+        let denied = Fake { result: 1, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+        assert_eq!(resolve_execution_admission(&denied, &store, "get_external_agent_status", &args, &device("device")).await.unwrap_err().code, "execution_request_forbidden");
+        for args in [json!({"workspaceId":"workspace-real", "config":{"id":"new", "sandbox":{"binding":null}}}),
+            json!({"workspaceId":"workspace-real", "placement":{"binding":{"orgId":"org_a"}}, "owner":"task"})] {
+            assert_eq!(resolve_execution_admission(&provider, &store, "spawn_external_agent", &args, &device("device")).await.unwrap_err().code, "placement_binding_client_supplied");
+        }
+    }
     struct Fake { result: u8, calls: AtomicUsize, workspaces: Mutex<Vec<Option<String>>> }
     #[async_trait::async_trait]
     impl StandingProvider for Fake {
@@ -222,7 +706,7 @@ mod tests {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.workspaces.lock().push(workspace.map(str::to_string));
             match self.result {
-                0 => Ok(vec!["host.global-surfaces".into(), "execution.request".into()]),
+                0 => Ok(vec!["host.global-surfaces".into(), "execution.request".into(), "workspace.read".into()]),
                 1 => Ok(vec![]),
                 _ => Err(unavailable("host_authority_unavailable")),
             }
@@ -362,6 +846,14 @@ mod tests {
         assert_eq!(command_workspace("browser_session_ensure", &args), Some("p"));
         assert_eq!(command_workspace("claude_send", &args), None);
         assert_eq!(command_workspace("workflow_trigger_manual", &args), None);
+        struct Missing;
+        impl ExecutionBindingLookup for Missing {
+            fn binding(&self, _: &str) -> Result<Option<PlacementBinding>, Refusal> { Ok(None) }
+        }
+        assert_eq!(execution_workspace("spawn_external_agent", &args, &Missing).unwrap().as_deref(), Some("p"));
+        for arm in ["get_external_agent_status", "send_to_external_agent", "kill_external_agent", "claude_send", "workflow_trigger_manual"] {
+            assert_eq!(execution_workspace(arm, &args, &Missing).unwrap(), None, "{arm}");
+        }
         // The remaining agent/workflow commands are session/run/deployment-
         // scoped today. Review new arms here before admitting a new argument.
         let manifest: Value = serde_json::from_str(include_str!("../../../protocol/companion-commands.json")).unwrap();

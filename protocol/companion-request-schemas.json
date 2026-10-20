@@ -6461,6 +6461,11 @@
         "timeoutMs"
       ],
       "properties": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required for multi-tenant creation. Host admission resolves the actor; this field never supplies placement identity or permissions."
+        },
         "placement": {
           "type": "object",
           "description": "The task's runtime environment placement as the brain resolved it (prepareRunEnvironment). The spec is not described here: the host re-admits it against its own baseline, catalog and approvals and answers with a typed refusal code.",
@@ -17905,6 +17910,11 @@
         "config"
       ],
       "properties": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required for multi-tenant creation. Later agent commands resolve this scope from the immutable Host record."
+        },
         "config": {
           "type": "object",
           "required": [
