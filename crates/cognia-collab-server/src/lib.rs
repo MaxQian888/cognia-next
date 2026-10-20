@@ -69,6 +69,7 @@ pub mod field_merge;
 pub mod file_sharing;
 pub mod logto_management;
 pub mod model;
+pub mod rollout;
 pub mod notifications;
 pub mod session_files;
 pub mod socket_hub;

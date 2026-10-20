@@ -516,3 +516,39 @@ fingerprint; Capacitor still connects directly to `:27890`). We deliberately do
 network costs nothing and keeps the front door's TLS surface unchanged. Set
 `COGNIA_DOMAIN` to a real hostname for Let's Encrypt, or leave it `localhost`
 to use Caddy's internal CA for local testing.
+
+### Feature rollout policy
+
+Run the server once to migrate before using the operator CLI. Set
+`COLLAB_OPERATOR_DATABASE_URL` to the operator role's URL (or pass
+`--database-url`). Rollout commands never run migrations and do not require
+SUPERUSER or BYPASSRLS:
+
+```sh
+cognia-collab-server rollout show
+cognia-collab-server rollout show --feature shared-chat
+cognia-collab-server rollout apply --file policy.json --base-revision 0 \
+  --operation-id rollout-2026-10-20-01 --reason 'Start the canary'
+```
+
+The JSON file uses the snake_case fields in the policy model, including
+`feature_key`, `schema_version: 1`, `revision`, `phase`, `kill`,
+`allow_org_ids`, `deny_org_ids`, `deny_workspace_ids`,
+`percentage_basis_points`, optional `cohort_key`, `cohort_salt`,
+`hash_version: 1`, `minimum_contract_version` and `requires`. Canary policies
+require a non-empty salt. The apply uses compare-and-swap on `--base-revision`
+and assigns the next revision. Repeating the same operation id and request
+returns the original result; changed content conflicts. The authenticated
+PostgreSQL `current_user` is recorded as principal.
+
+Minimal operator grants (replace `collab_rollout_operator` with your role):
+
+```sql
+GRANT USAGE ON SCHEMA public TO collab_rollout_operator;
+GRANT SELECT, INSERT, UPDATE ON deployment_feature_policies TO collab_rollout_operator;
+GRANT SELECT, INSERT ON deployment_feature_policy_audit TO collab_rollout_operator;
+```
+
+Both tables are deployment-level and have no RLS. The application's role is
+SELECT-only; the migrator revokes its write privileges after blanket grants
+on every boot. Audit rows are append-only, with bounded change summaries.

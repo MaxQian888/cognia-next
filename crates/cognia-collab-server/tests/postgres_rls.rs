@@ -2025,3 +2025,138 @@ async fn invite_acceptance_waiting_behind_offboarding_cannot_recreate_a_guest_in
     admin_task.await.unwrap();
     database.cleanup().await;
 }
+
+fn rollout_policy() -> cognia_collab_server::rollout::FeaturePolicy {
+    cognia_collab_server::rollout::validate_document(r#"{
+        "feature_key":"shared-chat", "schema_version":1, "revision":0,
+        "phase":"general", "kill":false, "allow_org_ids":[], "deny_org_ids":[],
+        "deny_workspace_ids":[], "percentage_basis_points":0, "cohort_salt":"s1",
+        "hash_version":1, "minimum_contract_version":1, "requires":[]
+    }"#).unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance with role creation privileges"]
+async fn rollout_minimal_operator_cas_replay_and_atomic_audit() {
+    use cognia_collab_server::{rollout::{FeatureKey, Phase}, store::StoreError};
+    let database = TestDatabase::create().await;
+    let missing = PgStore::connect_rollout(&database.url, 2).await.err().unwrap();
+    assert!(missing.to_string().contains("run the server once to migrate"));
+    let migrator = PgStore::connect_admin(&database.url, 2).await.unwrap();
+    let (admin, connection) = tokio_postgres::connect(&database.url, NoTls).await.unwrap();
+    let admin_task = tokio::spawn(async move { connection.await.unwrap() });
+    let role = format!("rollout_{}", uuid::Uuid::new_v4().simple());
+    admin.batch_execute(&format!(
+        "CREATE ROLE {role} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'synthetic'; \
+         GRANT USAGE ON SCHEMA public TO {role}; \
+         GRANT SELECT, INSERT, UPDATE ON deployment_feature_policies TO {role}; \
+         GRANT SELECT, INSERT ON deployment_feature_policy_audit TO {role};"
+    )).await.unwrap();
+    let url = format!("{}&user={role}&password=synthetic", database.url);
+    assert!(PgStore::connect_operator(&url, 2).await.is_err());
+    let store = PgStore::connect_rollout(&url, 2).await.unwrap();
+    let principal = store.rollout_principal().await.unwrap();
+    assert_eq!(principal, role);
+    assert!(store.feature_policies().await.unwrap().is_empty());
+    let p = rollout_policy();
+    let first = store.apply_feature_policy(p.clone(), 0, "first", "launch", &principal).await.unwrap();
+    assert_eq!(first.revision, 1);
+    assert!(matches!(store.apply_feature_policy(p.clone(), 0, "stale", "launch", &principal).await, Err(StoreError::Conflict(_))));
+    assert_eq!(store.apply_feature_policy(p.clone(), 0, "first", "launch", &principal).await.unwrap(), first);
+    let mut next = p.clone();
+    next.phase = Phase::Paused;
+    assert!(matches!(store.apply_feature_policy(next.clone(), 0, "first", "launch", &principal).await, Err(StoreError::Conflict(_))));
+    assert!(matches!(store.apply_feature_policy(p.clone(), 0, "first", "other reason", &principal).await, Err(StoreError::Conflict(_))));
+    next.revision = 1;
+    let second = store.apply_feature_policy(next.clone(), 1, "second", "pause", &principal).await.unwrap();
+    assert_eq!(second.revision, 2);
+    assert_eq!(store.apply_feature_policy(p.clone(), 0, "first", "launch", &principal).await.unwrap(), first);
+    let audit = admin.query_one(
+        "SELECT old_revision, new_revision, principal, reason, summary, document FROM deployment_feature_policy_audit WHERE operation_id='second'", &[],
+    ).await.unwrap();
+    assert_eq!(audit.get::<_, i64>(0), 1);
+    assert_eq!(audit.get::<_, i64>(1), 2);
+    assert_eq!(audit.get::<_, String>(2), principal);
+    assert_eq!(audit.get::<_, String>(3), "pause");
+    let summary: serde_json::Value = audit.get(4);
+    assert_eq!(summary["changed_fields"], serde_json::json!(["phase", "revision"]));
+    assert!(summary.to_string().len() <= 4096);
+    assert_eq!(audit.get::<_, serde_json::Value>(5), serde_json::json!(second));
+    // Make only the second write (the audit insert) fail. The policy upsert
+    // must roll back, and the operation id must remain available for a retry.
+    admin.batch_execute("ALTER TABLE deployment_feature_policy_audit ADD CONSTRAINT injected_audit_failure CHECK (reason <> 'fail audit')").await.unwrap();
+    assert!(matches!(store.apply_feature_policy(p.clone(), 2, "atomic", "fail audit", &principal).await, Err(StoreError::Database(_))));
+    assert_eq!(store.feature_policy(FeatureKey::SharedChat).await.unwrap(), Some(second.clone()));
+    assert_eq!(admin.query_one("SELECT count(*) FROM deployment_feature_policy_audit", &[]).await.unwrap().get::<_, i64>(0), 2);
+    let third = store.apply_feature_policy(p.clone(), 2, "atomic", "retry audit", &principal).await.unwrap();
+    assert_eq!(third.revision, 3);
+    assert_eq!(store.feature_policies().await.unwrap(), vec![third]);
+    let mut changed_feature = p.clone();
+    changed_feature.feature_key = FeatureKey::EnvironmentBinding;
+    assert!(matches!(store.apply_feature_policy(changed_feature, 0, "first", "launch", &principal).await, Err(StoreError::Conflict(_))));
+    // Concurrent retries of one operation produce only one audit record.
+    let (replay_a, replay_b) = tokio::join!(
+        store.apply_feature_policy(p.clone(), 0, "first", "launch", &principal),
+        store.apply_feature_policy(p.clone(), 0, "first", "launch", &principal),
+    );
+    assert_eq!(replay_a.unwrap(), first);
+    assert_eq!(replay_b.unwrap(), first);
+    // Simultaneous first applies serialize absent rows as well as existing rows.
+    let mut another = p.clone();
+    another.feature_key = FeatureKey::OrgGovernance;
+    let (a, b) = tokio::join!(
+        store.apply_feature_policy(another.clone(), 0, "race-a", "race", &principal),
+        store.apply_feature_policy(another, 0, "race-b", "race", &principal),
+    );
+    assert!(matches!((&a, &b), (Ok(_), Err(StoreError::Conflict(_))) | (Err(StoreError::Conflict(_)), Ok(_))));
+    assert_eq!(admin.query_one("SELECT count(*) FROM deployment_feature_policy_audit", &[]).await.unwrap().get::<_, i64>(0), 4);
+    // Even the table owner cannot accidentally mutate historical audit rows.
+    let error = admin.batch_execute("UPDATE deployment_feature_policy_audit SET reason='rewrite'").await.unwrap_err();
+    assert_eq!(error.as_db_error().unwrap().message(), "deployment_feature_policy_audit is append-only");
+    assert!(admin.batch_execute("TRUNCATE deployment_feature_policy_audit").await.is_err());
+    drop((store, migrator, admin));
+    admin_task.await.unwrap();
+    database.cleanup_with_role(Some(&role)).await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance with role creation privileges"]
+async fn rollout_app_tables_remain_select_only_after_every_boot() {
+    let database = TestDatabase::create().await;
+    let role = format!("rollout_app_{}", uuid::Uuid::new_v4().simple());
+    let app_url = format!("{}&user={role}&password=synthetic", database.url);
+    let (admin, connection) = tokio_postgres::connect(&database.url, NoTls).await.unwrap();
+    let admin_task = tokio::spawn(async move { connection.await.unwrap() });
+    for boot in 0..2 {
+        let store = PgStore::connect_with_options(&app_url, 2, PgConnectOptions {
+            migration_database_url: Some(&database.url), app_db_role: Some(&role),
+            app_db_password: Some("synthetic"), ..PgConnectOptions::default()
+        }).await.unwrap();
+        assert!(store.feature_policies().await.unwrap().is_empty());
+        let (app, connection) = tokio_postgres::connect(&app_url, NoTls).await.unwrap();
+        let task = tokio::spawn(async move { connection.await.unwrap() });
+        for table in ["deployment_feature_policies", "deployment_feature_policy_audit"] {
+            app.query(&format!("SELECT * FROM {table}"), &[]).await.unwrap();
+            let rls: bool = admin.query_one("SELECT relrowsecurity FROM pg_class WHERE oid=$1::text::regclass", &[&table]).await.unwrap().get(0);
+            assert!(!rls);
+            for query in [
+                format!("INSERT INTO {table} (feature_key) VALUES ('shared-chat')"),
+                format!("UPDATE {table} SET reason='forbidden'"),
+                format!("DELETE FROM {table}"), format!("TRUNCATE {table}"),
+            ] {
+                let error = app.batch_execute(&query).await.unwrap_err();
+                assert_eq!(error.code(), Some(&tokio_postgres::error::SqlState::INSUFFICIENT_PRIVILEGE));
+                assert!(error.as_db_error().unwrap().message().contains("permission denied"));
+            }
+        }
+        drop((app, store));
+        task.await.unwrap();
+        if boot == 0 {
+            // Simulate a stray grant between boots; migrations must remove it.
+            admin.batch_execute(&format!("GRANT ALL ON deployment_feature_policies, deployment_feature_policy_audit TO {role}")).await.unwrap();
+        }
+    }
+    drop(admin);
+    admin_task.await.unwrap();
+    database.cleanup_with_role(Some(&role)).await;
+}

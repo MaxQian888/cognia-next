@@ -8,7 +8,8 @@ use cognia_collab_server::chat_attachment_store::ObjectStoreChatAttachments;
 use cognia_collab_server::logto_management::{
     HttpLogtoManagement, LogtoManagementConfig, UnconfiguredLogtoManagement,
 };
-use cognia_collab_server::store::PgConnectOptions;
+use cognia_collab_server::store::{PgConnectOptions, Store};
+use cognia_collab_server::rollout::{FeatureKey, FeaturePolicy, validate_document};
 use cognia_collab_server::{router, AppState, PgStore};
 use cognia_tenant_auth::grant::GrantSigner;
 use cognia_tenant_auth::oidc::{OidcAuthenticator, OidcConfig};
@@ -33,7 +34,7 @@ struct Args {
     app_db_password: Option<String>,
     #[arg(long, env = "COLLAB_ALLOW_PRIVILEGED_DB_ROLE", default_value_t = false)]
     allow_privileged_db_role: bool,
-    /// Cross-tenant audit connection; requires a SUPERUSER or BYPASSRLS role.
+    /// Operator connection (audit-standing requires SUPERUSER or BYPASSRLS).
     #[arg(long, env = "COLLAB_OPERATOR_DATABASE_URL", global = true)]
     operator_database_url: Option<String>,
     #[arg(long, env = "COLLAB_DB_MAX_CONNECTIONS", default_value_t = 16)]
@@ -134,6 +135,11 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Inspect or apply deployment feature policies without running migrations.
+    Rollout {
+        #[command(subcommand)]
+        command: RolloutCommand,
+    },
     /// Report stale non-guest session standing; optionally repair in batches.
     AuditStanding {
         #[arg(long)]
@@ -141,6 +147,58 @@ enum Command {
         #[arg(long, default_value_t = 100)]
         batch_size: usize,
     },
+}
+
+#[derive(Subcommand)]
+enum RolloutCommand {
+    Show {
+        #[arg(long)]
+        feature: Option<FeatureKey>,
+    },
+    Apply {
+        #[arg(long)]
+        file: std::path::PathBuf,
+        #[arg(long, value_parser = clap::value_parser!(i64).range(0..i64::MAX))]
+        base_revision: i64,
+        #[arg(long)]
+        operation_id: String,
+        #[arg(long)]
+        reason: String,
+    },
+}
+
+fn read_rollout_policy(path: &std::path::Path) -> anyhow::Result<FeaturePolicy> {
+    Ok(validate_document(&std::fs::read_to_string(path)?)?)
+}
+
+fn rollout_database_url<'a>(operator: Option<&'a str>, fallback: Option<&'a str>) -> anyhow::Result<&'a str> {
+    operator.or(fallback).ok_or_else(|| anyhow::anyhow!(
+        "rollout requires COLLAB_OPERATOR_DATABASE_URL or --database-url"
+    ))
+}
+
+async fn run_rollout(command: &RolloutCommand, database_url: &str, max_connections: usize) -> anyhow::Result<()> {
+    // Refuse malformed documents before opening a database connection.
+    let document = match command {
+        RolloutCommand::Apply { file, operation_id, reason, .. } => {
+            anyhow::ensure!(!operation_id.trim().is_empty() && !reason.trim().is_empty(), "operation-id and reason must be non-empty");
+            Some(read_rollout_policy(file)?)
+        }
+        RolloutCommand::Show { .. } => None,
+    };
+    let store = PgStore::connect_rollout(database_url, max_connections).await?;
+    let output = match command {
+        RolloutCommand::Show { feature: Some(key) } => serde_json::to_value(store.feature_policy(*key).await?)?,
+        RolloutCommand::Show { feature: None } => serde_json::to_value(store.feature_policies().await?)?,
+        RolloutCommand::Apply { base_revision, operation_id, reason, .. } => {
+            let principal = store.rollout_principal().await?;
+            serde_json::to_value(store.apply_feature_policy(
+                document.expect("apply document was validated"), *base_revision, operation_id, reason, &principal,
+            ).await?)?
+        }
+    };
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
 }
 
 #[tokio::main]
@@ -156,6 +214,10 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("a rustls crypto provider was already installed"))?;
 
     let args = Args::parse();
+    if let Some(Command::Rollout { command }) = &args.command {
+        let url = rollout_database_url(args.operator_database_url.as_deref(), args.database_url.as_deref())?;
+        return run_rollout(command, url, args.db_max_connections).await;
+    }
     if let Some(Command::AuditStanding { apply, batch_size }) = args.command {
         let database_url = audit_database_url(args.operator_database_url.as_deref(), args.database_url.as_deref())?;
         let store = PgStore::connect_operator(database_url, args.db_max_connections).await?;
@@ -315,6 +377,53 @@ async fn shutdown() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rollout_args_accept_show_apply_and_reject_unknown_features() {
+        use clap::Parser;
+        use super::{Args, Command, RolloutCommand};
+        let parse = |tail: &[&str]| Args::try_parse_from(std::iter::once("cognia-collab-server").chain(tail.iter().copied()));
+        let args = parse(&["rollout", "show"]).unwrap();
+        assert!(matches!(args.command, Some(Command::Rollout { command: RolloutCommand::Show { feature: None } })));
+        let args = parse(&["rollout", "show", "--feature", "shared-chat", "--database-url", "postgresql://operator/db"]).unwrap();
+        assert_eq!(args.database_url.as_deref(), Some("postgresql://operator/db"));
+        assert!(matches!(args.command, Some(Command::Rollout { command: RolloutCommand::Show { feature: Some(super::FeatureKey::SharedChat) } })));
+        assert!(parse(&["rollout", "show", "--feature", "unknown"]).is_err());
+        let args = parse(&["rollout", "apply", "--file", "policy.json", "--base-revision", "0", "--operation-id", "op", "--reason", "launch"]).unwrap();
+        assert!(matches!(args.command, Some(Command::Rollout { command: RolloutCommand::Apply { base_revision: 0, .. } })));
+        assert!(parse(&["rollout", "apply", "--file", "policy.json"]).is_err());
+        for base in ["-1", "9223372036854775807"] {
+            assert!(parse(&["rollout", "apply", "--file", "p.json", "--base-revision", base, "--operation-id", "op", "--reason", "launch"]).is_err());
+        }
+        assert_eq!(super::rollout_database_url(Some("operator"), Some("app")).unwrap(), "operator");
+        assert_eq!(super::rollout_database_url(None, Some("fallback")).unwrap(), "fallback");
+        assert!(super::rollout_database_url(None, None).is_err());
+    }
+
+    #[tokio::test]
+    async fn rollout_apply_validates_the_file_before_connecting() {
+        let file = std::env::temp_dir().join(format!("rollout-{}.json", uuid::Uuid::new_v4()));
+        let valid = serde_json::json!({
+            "feature_key": "shared-chat", "schema_version": 1, "revision": 0,
+            "phase": "canary", "kill": false, "allow_org_ids": [], "deny_org_ids": [],
+            "deny_workspace_ids": [], "percentage_basis_points": 5000,
+            "cohort_salt": "s1", "hash_version": 1, "minimum_contract_version": 1, "requires": []
+        });
+        std::fs::write(&file, valid.to_string()).unwrap();
+        assert!(super::read_rollout_policy(&file).is_ok());
+        for (key, value) in [
+            ("unexpected", serde_json::json!(true)), ("schema_version", serde_json::json!(2)),
+            ("cohort_salt", serde_json::json!("")), ("requires", serde_json::json!(["unknown"])),
+        ] {
+            let mut invalid = valid.clone();
+            invalid[key] = value;
+            std::fs::write(&file, invalid.to_string()).unwrap();
+            let command = super::RolloutCommand::Apply { file: file.clone(), base_revision: 0, operation_id: "op".into(), reason: "launch".into() };
+            let error = super::run_rollout(&command, "invalid database URL", 1).await.unwrap_err().to_string();
+            assert!(error.contains("invalid feature policy"), "{error}");
+        }
+        std::fs::remove_file(&file).unwrap();
+    }
+
     use super::{credential_hash, decode_hex};
 
     #[test]

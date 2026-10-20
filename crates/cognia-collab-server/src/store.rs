@@ -30,6 +30,8 @@ use rustls::{ClientConfig, RootCertStore};
 use tokio_postgres::Config;
 use tokio_postgres_rustls::MakeRustlsConnect;
 
+use crate::rollout::{FeatureKey, FeaturePolicy};
+
 use crate::model::{
     ActorError, CollabActor, Issue, IssueEvent, IssuePriority, IssueStatus, Plan, PlanStatus,
     PlanStep, PlanStepKind, PlanStepStatus, Run, RunArtifact, RunKind, RunStatus,
@@ -741,6 +743,13 @@ pub fn ended_at_for(terminal: bool, previous: Option<i64>, now: i64) -> Option<i
 
 #[async_trait]
 pub trait Store: Send + Sync {
+    async fn feature_policy(&self, key: FeatureKey) -> Result<Option<FeaturePolicy>, StoreError>;
+    async fn feature_policies(&self) -> Result<Vec<FeaturePolicy>, StoreError>;
+    async fn apply_feature_policy(
+        &self, document: FeaturePolicy, base_revision: i64, operation_id: &str,
+        reason: &str, principal: &str,
+    ) -> Result<FeaturePolicy, StoreError>;
+
     /// Database RLS is absent for stores without a PostgreSQL connection.
     fn rls_status(&self) -> RlsStatus { RlsStatus::Bypassed }
     fn in_memory_chat_store(&self) -> Option<crate::chat_store::InMemoryChatStore> { None }
@@ -1016,6 +1025,58 @@ pub trait Store: Send + Sync {
     ) -> Result<Run, StoreError>;
 }
 
+// The digest includes the complete request, while the bounded audit summary
+// names changed fields only. Historical results survive subsequent applies.
+#[derive(Clone)]
+struct FeaturePolicyReplay {
+    // Retained for parity with the append-only PostgreSQL audit, which is
+    // intentionally not exposed through the application Store read API.
+    #[allow(dead_code)]
+    audit: serde_json::Value,
+    request_sha256: String,
+    document: FeaturePolicy,
+}
+
+fn policy_db_error(error: tokio_postgres::Error) -> StoreError {
+    StoreError::Database(error.to_string())
+}
+
+fn policy_conflict() -> StoreError {
+    StoreError::Conflict(serde_json::json!({"error": "feature_policy_conflict"}))
+}
+
+fn policy_request_digest(
+    document: &FeaturePolicy, base_revision: i64, operation_id: &str, reason: &str, principal: &str,
+) -> Result<String, StoreError> {
+    use sha2::{Digest, Sha256};
+    document.validate().map_err(|e| StoreError::Policy(e.to_string()))?;
+    if base_revision < 0 || base_revision == i64::MAX {
+        return Err(StoreError::Policy("base_revision must be non-negative and incrementable".into()));
+    }
+    if operation_id.trim().is_empty() || reason.trim().is_empty() || principal.trim().is_empty() {
+        return Err(StoreError::Policy("operation_id, reason and principal must be non-empty".into()));
+    }
+    let request = serde_json::json!({
+        "document": document, "base_revision": base_revision, "operation_id": operation_id,
+        "reason": reason, "principal": principal,
+    });
+    Ok(hex::encode(Sha256::digest(request.to_string().as_bytes())))
+}
+
+fn policy_summary(old: Option<&FeaturePolicy>, new: &FeaturePolicy, digest: &str) -> serde_json::Value {
+    let old = serde_json::json!(old);
+    let new = serde_json::json!(new);
+    let changed: Vec<_> = new.as_object().expect("policy is an object").iter()
+        .filter(|(key, value)| old.get(*key) != Some(*value))
+        .map(|(key, _)| key.clone()).collect();
+    serde_json::json!({"changed_fields": changed, "request_sha256": digest})
+}
+
+fn stored_policy(value: serde_json::Value) -> Result<FeaturePolicy, StoreError> {
+    crate::rollout::validate_document(&value.to_string())
+        .map_err(|error| StoreError::Corrupt(error.to_string()))
+}
+
 // ── In-memory ────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -1028,6 +1089,8 @@ struct BootstrapCredentialRow {
 
 #[derive(Default)]
 pub(crate) struct Tables {
+    feature_policies: HashMap<FeatureKey, FeaturePolicy>,
+    feature_policy_replays: HashMap<String, FeaturePolicyReplay>,
     pub(crate) chat: crate::chat_store::MemoryTables,
     pub(crate) session_files: crate::session_files::MemoryFileTables,
     pub(crate) org_memberships: HashMap<(String, String), OrgRole>,
@@ -1249,6 +1312,39 @@ fn membership_audit_event(
 
 #[async_trait]
 impl Store for InMemoryStore {
+    async fn feature_policy(&self, key: FeatureKey) -> Result<Option<FeaturePolicy>, StoreError> {
+        Ok(self.tables.read().feature_policies.get(&key).cloned())
+    }
+
+    async fn feature_policies(&self) -> Result<Vec<FeaturePolicy>, StoreError> {
+        let tables = self.tables.read();
+        Ok(FeatureKey::ALL.into_iter().filter_map(|key| tables.feature_policies.get(&key).cloned()).collect())
+    }
+
+    async fn apply_feature_policy(
+        &self, mut document: FeaturePolicy, base_revision: i64, operation_id: &str,
+        reason: &str, principal: &str,
+    ) -> Result<FeaturePolicy, StoreError> {
+        let digest = policy_request_digest(&document, base_revision, operation_id, reason, principal)?;
+        let mut tables = self.tables.write();
+        if let Some(replay) = tables.feature_policy_replays.get(operation_id) {
+            return if replay.request_sha256 == digest { Ok(replay.document.clone()) } else { Err(policy_conflict()) };
+        }
+        let current = tables.feature_policies.get(&document.feature_key);
+        if current.map_or(0, |policy| policy.revision) != base_revision { return Err(policy_conflict()); }
+        document.revision = base_revision + 1;
+        let audit = serde_json::json!({
+            "old_revision": base_revision, "new_revision": document.revision,
+            "principal": principal, "reason": reason,
+            "summary": policy_summary(current, &document, &digest),
+        });
+        tables.feature_policy_replays.insert(operation_id.into(), FeaturePolicyReplay {
+            audit, request_sha256: digest, document: document.clone(),
+        });
+        tables.feature_policies.insert(document.feature_key, document.clone());
+        Ok(document)
+    }
+
     fn in_memory_session_file_store(&self) -> Option<crate::session_files::InMemorySessionFileStore> {
         Some(crate::session_files::InMemorySessionFileStore::from_store(self))
     }
@@ -2518,6 +2614,24 @@ impl PgStore {
         Ok(store)
     }
 
+    /// Deployment policies have no RLS: any role with the documented table
+    /// grants may operate them. This path never migrates or requires BYPASSRLS.
+    pub async fn connect_rollout(database_url: &str, max_connections: usize) -> anyhow::Result<Self> {
+        let store = Self::query_pool(database_url, max_connections)?;
+        let row = store.pool.get().await?.query_one(
+            "SELECT to_regclass('public.deployment_feature_policies') IS NOT NULL AND to_regclass('public.deployment_feature_policy_audit') IS NOT NULL", &[],
+        ).await?;
+        if !row.get::<_, bool>(0) {
+            anyhow::bail!("rollout policy tables are missing; run the server once to migrate");
+        }
+        Ok(store)
+    }
+
+    pub async fn rollout_principal(&self) -> Result<String, StoreError> {
+        Ok(self.client().await?.query_one("SELECT current_user::text", &[])
+            .await.map_err(policy_db_error)?.get(0))
+    }
+
     /// Standalone bootstrap and integration fixtures retain admin migrations.
     pub async fn connect_admin(database_url: &str, max_connections: usize) -> anyhow::Result<Self> {
         let store = Self::connect_operator(database_url, max_connections).await?;
@@ -2625,6 +2739,9 @@ impl PgStore {
         transaction
             .batch_execute(include_str!("../migrations/0015_session_files.sql"))
             .await?;
+        transaction
+            .batch_execute(include_str!("../migrations/0016_feature_rollout.sql"))
+            .await?;
         if let Some((role, password)) = app_role {
             // PostgreSQL quotes both the identifier and password literal; no
             // operator-supplied text is interpolated as SQL syntax.
@@ -2651,7 +2768,8 @@ impl PgStore {
                  GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO {identifier}; \
                  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {identifier}; \
                  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO {identifier}; \
-                 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO {identifier};"
+                 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO {identifier}; \
+                 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON deployment_feature_policies, deployment_feature_policy_audit FROM {identifier};"
             )).await?;
         }
         transaction.commit().await?;
@@ -3256,6 +3374,61 @@ async fn insert_authorization_audit(
 
 #[async_trait]
 impl Store for PgStore {
+    async fn feature_policy(&self, key: FeatureKey) -> Result<Option<FeaturePolicy>, StoreError> {
+        self.client().await?.query_opt(
+            "SELECT document FROM deployment_feature_policies WHERE feature_key = $1", &[&key.as_str()],
+        ).await.map_err(policy_db_error)?.map(|row| stored_policy(row.get(0))).transpose()
+    }
+
+    async fn feature_policies(&self) -> Result<Vec<FeaturePolicy>, StoreError> {
+        let rows = self.client().await?.query("SELECT document FROM deployment_feature_policies", &[])
+            .await.map_err(policy_db_error)?;
+        let mut policies = rows.into_iter().map(|row| stored_policy(row.get(0)))
+            .collect::<Result<Vec<_>, _>>()?;
+        policies.sort_by_key(|policy| FeatureKey::ALL.iter().position(|key| *key == policy.feature_key));
+        Ok(policies)
+    }
+
+    async fn apply_feature_policy(
+        &self, mut document: FeaturePolicy, base_revision: i64, operation_id: &str,
+        reason: &str, principal: &str,
+    ) -> Result<FeaturePolicy, StoreError> {
+        let digest = policy_request_digest(&document, base_revision, operation_id, reason, principal)?;
+        let mut client = self.client().await?;
+        let transaction = client.transaction().await.map_err(policy_db_error)?;
+        // Operator writes are rare. One deployment lock serializes both absent
+        // rows and operation ids shared across different feature keys.
+        transaction.batch_execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended('cognia.collab.feature-policies', 0))",
+        ).await.map_err(policy_db_error)?;
+        if let Some(row) = transaction.query_opt(
+            "SELECT summary->>'request_sha256', document FROM deployment_feature_policy_audit WHERE operation_id = $1",
+            &[&operation_id],
+        ).await.map_err(policy_db_error)? {
+            return if row.get::<_, String>(0) == digest { stored_policy(row.get(1)) } else { Err(policy_conflict()) };
+        }
+        let current = transaction.query_opt(
+            "SELECT revision, document FROM deployment_feature_policies WHERE feature_key = $1 FOR UPDATE",
+            &[&document.feature_key.as_str()],
+        ).await.map_err(policy_db_error)?;
+        if current.as_ref().map_or(0, |row| row.get::<_, i64>(0)) != base_revision { return Err(policy_conflict()); }
+        let old = current.map(|row| stored_policy(row.get(1))).transpose()?;
+        document.revision = base_revision + 1;
+        let summary = policy_summary(old.as_ref(), &document, &digest);
+        let value = serde_json::json!(document);
+        transaction.execute(
+            "INSERT INTO deployment_feature_policies (feature_key, revision, document, updated_by, reason, operation_id) VALUES ($1,$2,$3,$4,$5,$6) \
+             ON CONFLICT (feature_key) DO UPDATE SET revision=EXCLUDED.revision, document=EXCLUDED.document, updated_at=now(), updated_by=EXCLUDED.updated_by, reason=EXCLUDED.reason, operation_id=EXCLUDED.operation_id",
+            &[&document.feature_key.as_str(), &document.revision, &value, &principal, &reason, &operation_id],
+        ).await.map_err(policy_db_error)?;
+        transaction.execute(
+            "INSERT INTO deployment_feature_policy_audit (id, feature_key, old_revision, new_revision, operation_id, principal, reason, summary, document) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            &[&uuid::Uuid::new_v4(), &document.feature_key.as_str(), &base_revision, &document.revision, &operation_id, &principal, &reason, &summary, &value],
+        ).await.map_err(policy_db_error)?;
+        transaction.commit().await.map_err(policy_db_error)?;
+        Ok(document)
+    }
+
     fn rls_status(&self) -> RlsStatus { self.rls_status }
 
     async fn membership(
@@ -5001,6 +5174,47 @@ impl Store for PgStore {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn feature_policy_cas_replays_and_audit_are_atomic() {
+        use crate::rollout::{tests::policy, FeatureKey, Phase};
+        let store = InMemoryStore::new();
+        assert!(store.feature_policies().await.unwrap().is_empty());
+        assert!(store.feature_policy(FeatureKey::SharedChat).await.unwrap().is_none());
+        let p = policy();
+        let first = store.apply_feature_policy(p.clone(), 0, "op1", "launch", "operator").await.unwrap();
+        assert_eq!(first.revision, 1);
+        assert!(matches!(store.apply_feature_policy(p.clone(), 0, "stale", "launch", "operator").await, Err(StoreError::Conflict(_))));
+        assert_eq!(store.apply_feature_policy(p.clone(), 0, "op1", "launch", "operator").await.unwrap(), first);
+        let mut next = p.clone();
+        next.phase = Phase::Paused;
+        assert!(matches!(store.apply_feature_policy(next.clone(), 0, "op1", "launch", "operator").await, Err(StoreError::Conflict(_))));
+        for (base, reason, principal) in [(1, "launch", "operator"), (0, "changed", "operator"), (0, "launch", "other")] {
+            assert!(matches!(store.apply_feature_policy(p.clone(), base, "op1", reason, principal).await, Err(StoreError::Conflict(_))));
+        }
+        next.revision = 1;
+        let second = store.apply_feature_policy(next, 1, "op2", "pause", "operator").await.unwrap();
+        assert_eq!(second.revision, 2);
+        // An operation replay returns its original result after a later apply.
+        assert_eq!(store.apply_feature_policy(p.clone(), 0, "op1", "launch", "operator").await.unwrap(), first);
+        assert_eq!(store.feature_policy(FeatureKey::SharedChat).await.unwrap(), Some(second.clone()));
+        assert_eq!(store.feature_policies().await.unwrap(), vec![second]);
+        let mut invalid = p.clone();
+        invalid.schema_version = 2;
+        assert!(matches!(store.apply_feature_policy(invalid, 2, "bad", "reason", "operator").await, Err(StoreError::Policy(_))));
+        for base in [-1, i64::MAX] {
+            assert!(matches!(store.apply_feature_policy(p.clone(), base, "bad", "reason", "operator").await, Err(StoreError::Policy(_))));
+        }
+        let tables = store.tables.read();
+        assert_eq!(tables.feature_policy_replays.len(), 2);
+        let audit = &tables.feature_policy_replays["op2"].audit;
+        assert_eq!(audit["old_revision"], 1);
+        assert_eq!(audit["new_revision"], 2);
+        assert_eq!(audit["principal"], "operator");
+        assert_eq!(audit["reason"], "pause");
+        assert_eq!(audit["summary"]["changed_fields"], serde_json::json!(["phase", "revision"]));
+        assert!(audit["summary"].to_string().len() < 4096);
+    }
+
     use super::*;
     use cognia_tenant_auth::UserId;
 

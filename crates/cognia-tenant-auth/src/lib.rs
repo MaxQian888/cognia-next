@@ -61,6 +61,7 @@
 //! `rust-version = "1.82"` is a floor nothing compiles at). The build context
 //! is the real constraint.
 
+pub mod actions;
 pub mod ids;
 pub mod membership;
 pub mod rls;
