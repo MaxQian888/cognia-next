@@ -42,6 +42,7 @@ import { Separator } from "@/components/ui/separator"
 import { Kbd } from "@/components/ui/kbd"
 import { AccountManageDialog } from "@/components/account/account-manage-dialog"
 import { RuntimeTargetMenuSection } from "@/components/account/runtime-target-menu-section"
+import { SidebarOrgSection } from "@/components/shell/sidebar-org-section"
 import { unlocksWithoutPrompt } from "@/lib/accounts/desktop-local-account"
 import { useSidebarIdentity } from "@/hooks/shell/use-sidebar-identity"
 import { useAppShortcutLabel } from "@/hooks/shortcuts/use-app-shortcut-label"
@@ -228,6 +229,19 @@ export function SidebarUserCard({ className }: { className?: string }) {
             </span>
           </div>
           <Separator className="my-1" />
+          {/* Which org this profile works in and the others it could switch
+              to. Only for a profile bound to an org: a local or personal
+              cloud profile has nothing to switch between. */}
+          {identity.standing === "org" && activeAccount ? (
+            <>
+              <SidebarOrgSection
+                accountId={activeAccount.id}
+                open={open}
+                onSwitched={() => setOpen(false)}
+              />
+              <Separator className="my-1" />
+            </>
+          ) : null}
           {/* The number the status bar shows, where the account it belongs to
               is. `null` means nothing is measured on this install, and a row
               reading "Usage" with no figure beside it is worse than no row. */}

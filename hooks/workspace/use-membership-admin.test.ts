@@ -6,6 +6,9 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { putOrgMembership, putWorkspaceMembership } from "@/lib/db/identity"
 import { CollabError } from "@/lib/collab/client"
+import { parseOrgCapabilities, type OrgCapabilitiesResult } from "@/lib/collab/capabilities"
+import { notifyCollabScopeChanged } from "@/lib/collab/scope-events"
+import { __resetOrgCapabilitiesCacheForTesting } from "@/hooks/collab/use-org-capabilities"
 import type { CurrentCollabContext } from "@/lib/collab/runtime-client"
 import type { UserBindingRegistry } from "@/lib/identity/user-binding"
 import type { UserBindingRow } from "@/lib/accounts/account-db"
@@ -37,6 +40,7 @@ function stubClient() {
     removeWorkspaceMember: jest.fn(async () => undefined),
     setOrgMemberRole: jest.fn(async () => undefined),
     offboardOrgMember: jest.fn(async () => undefined),
+    transferOrgOwnership: jest.fn(async () => undefined),
     listInvitations: jest.fn(async () => [
       { id: "inv_1", orgId: ORG, createdBy: ADA, expiresAt: 10, createdAt: 1 },
     ]),
@@ -75,10 +79,29 @@ function render(workspaceId: string | null, deps: UseMembershipAdminDeps) {
   return renderHook(() => useMembershipAdmin(workspaceId, deps))
 }
 
+function serverSays(actions: string[]): OrgCapabilitiesResult {
+  return {
+    status: "ready",
+    capabilities: parseOrgCapabilities(
+      {
+        schemaVersion: 1,
+        orgId: ORG,
+        workspaceId: WORKSPACE,
+        standing: { orgRole: "member", workspaceRole: "member", via: "membership", guest: false },
+        actions,
+        features: [],
+        evaluatedAt: 1,
+      },
+      { orgId: ORG, workspaceId: WORKSPACE }
+    ),
+  }
+}
+
 describe("useMembershipAdmin", () => {
   beforeEach(async () => {
     await getDb().delete()
     __resetDbForTesting()
+    __resetOrgCapabilitiesCacheForTesting()
   })
   afterEach(async () => {
     await getDb().delete()
@@ -208,6 +231,79 @@ describe("useMembershipAdmin", () => {
     await waitFor(() => expect(result.current.orgRole).toBe("member"))
     expect(result.current.canManageWorkspace).toBe(false)
     expect(result.current.canManageOrg).toBe(false)
+  })
+
+  it("lets the server's action list override the projection in both directions", async () => {
+    // The projection says plain member; the server says this person manages.
+    await putOrgMembership({ orgId: ORG, userId: ADA, role: "member", now: 1 })
+    const client = stubClient()
+    const grant = render(WORKSPACE, {
+      resolveContext: async () => contextFor(client),
+      registry: registryWith({ userId: ADA, orgId: ORG }),
+      capabilities: {
+        fetch: async () =>
+          serverSays(["workspace.members.manage", "org.members.manage", "org.ownership.transfer"]),
+      },
+    })
+    await waitFor(() => expect(grant.result.current.capabilities.status).toBe("ready"))
+    expect(grant.result.current.canManageWorkspace).toBe(true)
+    expect(grant.result.current.canManageOrg).toBe(true)
+    expect(grant.result.current.canTransferOwnership).toBe(true)
+
+    // The projection still says owner after a demotion it has not heard of
+    // yet; the server's answer takes the controls away.
+    __resetOrgCapabilitiesCacheForTesting()
+    await putOrgMembership({ orgId: ORG, userId: ADA, role: "owner", now: 2 })
+    const revoke = render(WORKSPACE, {
+      resolveContext: async () => contextFor(client),
+      registry: registryWith({ userId: ADA, orgId: ORG }),
+      capabilities: { fetch: async () => serverSays(["workspace.read"]) },
+    })
+    await waitFor(() => expect(revoke.result.current.capabilities.status).toBe("ready"))
+    expect(revoke.result.current.canManageOrg).toBe(false)
+    expect(revoke.result.current.canTransferOwnership).toBe(false)
+  })
+
+  it("transfers ownership through the client and asks for capabilities again", async () => {
+    const client = stubClient()
+    const refresh = jest.fn(async () => null)
+    const fetch = jest.fn(async () => serverSays(["org.ownership.transfer"]))
+    const { result } = render(WORKSPACE, {
+      resolveContext: async () => contextFor(client),
+      registry: registryWith({ userId: ADA, orgId: ORG }),
+      refresh,
+      capabilities: { fetch },
+    })
+    await waitFor(() => expect(result.current.capabilities.status).toBe("ready"))
+    const before = fetch.mock.calls.length
+    await act(async () => {
+      await result.current.transferOwnership({
+        toUserId: "usr_cleo",
+        previousOwnerRole: "admin",
+        reason: "handing over",
+      })
+    })
+    expect(client.transferOrgOwnership).toHaveBeenCalledWith(ORG, {
+      toUserId: "usr_cleo",
+      previousOwnerRole: "admin",
+      reason: "handing over",
+    })
+    expect(refresh).toHaveBeenCalledWith("acct_a")
+    await waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThan(before))
+  })
+
+  it("resolves the context again after the profile switches org", async () => {
+    const client = stubClient()
+    const resolveContext = jest.fn(async () => contextFor(client))
+    const deps: UseMembershipAdminDeps = {
+      resolveContext,
+      registry: registryWith({ userId: ADA, orgId: ORG }),
+    }
+    const { result } = render(WORKSPACE, deps)
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    const before = resolveContext.mock.calls.length
+    act(() => notifyCollabScopeChanged())
+    await waitFor(() => expect(resolveContext.mock.calls.length).toBeGreaterThan(before))
   })
 
   it("runs a write through the client, refreshes, and clears busy", async () => {

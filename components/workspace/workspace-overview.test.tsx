@@ -130,6 +130,11 @@ jest.mock("./workspace-environment-list", () => ({
 jest.mock("./workspace-capabilities", () => ({
   WorkspaceCapabilities: () => <section data-testid="workspace-capabilities-stub" />,
 }))
+jest.mock("./workspace-access-summary", () => ({
+  WorkspaceAccessSummary: ({ workspaceId }: { workspaceId: string | null }) => (
+    <section data-testid="workspace-access-stub" data-workspace={workspaceId ?? ""} />
+  ),
+}))
 
 let projectsResult: unknown[] | undefined = []
 let issuesResult: unknown[] | undefined = []
@@ -246,6 +251,15 @@ describe("WorkspaceOverview", () => {
     render(<WorkspaceOverview />)
     expect(screen.getByRole("heading", { name: "Cognia" })).toBeInTheDocument()
     expect(screen.getByTestId("workspace-overview")).toBeInTheDocument()
+  })
+
+  it("shows the reader's access for the active workspace on the Overview tab", () => {
+    storeState = {
+      activeProjectId: "w1",
+      projects: [{ id: "w1", name: "Cognia", roots: [] }],
+    }
+    render(<WorkspaceOverview />)
+    expect(screen.getByTestId("workspace-access-stub")).toHaveAttribute("data-workspace", "w1")
   })
 
   it("switches between Overview, Environments and Capabilities", async () => {

@@ -59,6 +59,7 @@ import { useSharedCanvasActions } from "./canvas-actions-context"
 import { useCanvasSuggestions } from "@/hooks/canvas/use-canvas-suggestions"
 import { useAutoSuggestions } from "@/hooks/canvas/use-auto-suggestions"
 import { useCanvasKeyboardShortcuts } from "@/hooks/canvas/use-canvas-keyboard-shortcuts"
+import { useCanvasCollaborationEnabled } from "@/hooks/canvas/use-canvas-collaboration-enabled"
 import { useCanvasFeatureFlag } from "@/hooks/canvas/use-canvas-feature-flag"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
@@ -208,7 +209,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
 
   // Same flag the collaboration panel is behind, so the editor cannot be bound
   // to a session the rest of the UI does not admit exists.
-  const collaborationEnabled = useCanvasFeatureFlag("canvas.collaboration.v1")
+  const collaborationEnabled = useCanvasCollaborationEnabled()
   const collaborative = useCanvasCollaborativeEditor({
     documentId: activeId,
     enabled: collaborationEnabled,

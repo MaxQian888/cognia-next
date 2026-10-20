@@ -12386,6 +12386,76 @@
     "workingDirectory": "Working directory: {path}",
     "workspaceBoundaryHint": "Choose an accessible directory within the configured COGNIA_WORKSPACES_DIR boundary, or restart the CLI in the intended workspace."
   },
+  "collabCapabilities": {
+    "action": {
+      "credential": {
+        "manage": "Manage workspace credentials",
+        "use": "Use workspace credentials"
+      },
+      "environment": {
+        "manage": "Manage workspace environments",
+        "use": "Use workspace environments"
+      },
+      "execution": {
+        "request": "Run agents in a sandbox"
+      },
+      "host": {
+        "global-surfaces": "Use host-wide terminal, files and plugins",
+        "workspace-surfaces": "Use this workspace's terminal, files and git on the host"
+      },
+      "org": {
+        "admins": {
+          "manage": "Manage organization admins"
+        },
+        "members": {
+          "manage": "Manage organization members"
+        },
+        "ownership": {
+          "transfer": "Transfer organization ownership"
+        },
+        "policy": {
+          "manage": "Manage organization policy"
+        }
+      },
+      "publish": "Publish and share",
+      "workspace": {
+        "members": {
+          "manage": "Manage workspace members"
+        },
+        "read": "Read workspace",
+        "settings": {
+          "manage": "Manage workspace settings"
+        },
+        "write": "Contribute to workspace"
+      }
+    },
+    "feature": {
+      "canvas-collaboration": "Canvas collaboration",
+      "environment-binding": "Workspace environments",
+      "org-governance": "Organization management",
+      "shared-chat": "Shared conversations",
+      "shared-chat-execution": "Shared agent runs"
+    },
+    "reason": {
+      "client_contract_unsupported": "This app is too old for it. Update Cognia to use it.",
+      "deployment_disabled": "This deployment does not offer it.",
+      "execution_isolation_unavailable": "No isolated runtime is available to run it.",
+      "feature_killed": "Stopped by the operator. You can still read, export and leave.",
+      "feature_not_offered": "Not offered to this organization yet.",
+      "feature_paused": "Paused by the operator. Existing work continues.",
+      "org_denied": "Not available to this organization.",
+      "policy_unavailable": "The server could not check availability. Try again shortly.",
+      "prerequisite_unavailable": "Needs another feature that is not available here.",
+      "workspace_denied": "Not available in this workspace."
+    },
+    "refused": "{feature}: {reason}",
+    "state": {
+      "available": "Available",
+      "existing-only": "Existing only",
+      "off": "Off",
+      "read-only": "Read only"
+    }
+  },
   "common": {
     "add": "Add",
     "all": "All",
@@ -14335,6 +14405,14 @@
       "manageAccounts": "Profiles",
       "menuAria": "Account menu for {name}",
       "noProfile": "No profile",
+      "org": {
+        "heading": "Organization",
+        "listFailed": "Other organizations could not be listed",
+        "switchFailed": "Could not switch organization",
+        "switchTo": "Switch to {org}",
+        "switched": "Now working in {org}",
+        "switching": "Switching to {org}…"
+      },
       "petFailed": "The desktop pet could not be opened.",
       "settings": "Settings",
       "showPet": "Desktop pet",
@@ -70843,6 +70921,25 @@
     }
   },
   "workspace": {
+    "access": {
+      "actionsHeading": "What you can do",
+      "featuresHeading": "Shared features",
+      "guest": "Guest",
+      "loading": "Checking your access…",
+      "noActions": "Nothing in this workspace yet. Ask a maintainer to add you.",
+      "none": "None",
+      "orgRole": "Organization role",
+      "refresh": "Refresh access",
+      "title": "Your access",
+      "unavailable": {
+        "error": "Access could not be checked: {message}",
+        "hidden": "This workspace is not shared with you.",
+        "not-signed-in": "Sign in to see your access.",
+        "unsupported": "This collaboration server does not report access yet."
+      },
+      "viaOrgAdmin": "through organization admin",
+      "workspaceRole": "Workspace role"
+    },
     "actionErrors": {
       "consentRequired": "Waiting for approval on the host device. Confirm there with code {code}.",
       "consentRequiredNoCode": "Waiting for approval on the host device. Confirm it there to continue.",
@@ -71355,6 +71452,7 @@
         "invitationRevoked": "Revoked from the workspace roster",
         "offboarded": "Removed from the organization in the workspace roster",
         "orgRoleChanged": "Organization role changed in the workspace roster",
+        "ownershipTransferred": "Ownership transferred from the workspace roster",
         "removed": "Removed from the workspace roster",
         "roleChanged": "Role changed in the workspace roster"
       },
@@ -71374,8 +71472,16 @@
         "invitationRevoked": "Invitation revoked.",
         "offboarded": "Removed from the organization.",
         "orgRoleChanged": "Organization role updated.",
+        "ownershipTransferred": "Ownership transferred.",
         "removed": "Removed from the workspace.",
         "roleChanged": "Role updated."
+      },
+      "transfer": {
+        "action": "Transfer ownership",
+        "body": "They become the organization's owner in one step. You keep your seat with the role you pick below. Only an owner can undo this.",
+        "confirm": "Transfer ownership",
+        "stepDownLabel": "Your role afterwards",
+        "title": "Make {name} the owner?"
       },
       "unavailable": {
         "no-org": "Your sign-in is not scoped to an organization, so there is no roster to manage.",

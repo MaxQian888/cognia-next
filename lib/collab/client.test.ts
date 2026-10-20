@@ -1162,6 +1162,42 @@ describe("membership administration (grant routes)", () => {
     )
   })
 
+  it("asks for capabilities uncached, scoped to the workspace when one is named", async () => {
+    const { calls, fetchImpl } = harness()
+    const c = client(fetchImpl)
+    await c.capabilities(ORG, "ws / 1")
+    await c.capabilities(ORG, null)
+    expect(calls[1]!.url).toBe(
+      `https://collab.test/v1/orgs/${ORG}/capabilities?workspaceId=ws+%2F+1`
+    )
+    expect(calls[1]!.init?.cache).toBe("no-store")
+    expect(calls[2]!.url).toBe(`https://collab.test/v1/orgs/${ORG}/capabilities`)
+  })
+
+  it("transfers ownership with one POST carrying the target, the step-down role and the reason", async () => {
+    const seen: Array<{ url: string; init?: RequestInit }> = []
+    const fetchImpl = async (url: string, init?: RequestInit) => {
+      seen.push({ url, init })
+      if (url.endsWith("/grants")) {
+        return jsonResponse({ grant: "g", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+      }
+      return new Response(null, { status: 204 })
+    }
+    await client(fetchImpl).transferOrgOwnership(ORG, {
+      toUserId: "usr_cleo",
+      previousOwnerRole: "admin",
+      reason: "handing over",
+    })
+    const transfer = seen[1]!
+    expect(transfer.url).toBe(`https://collab.test/v1/orgs/${ORG}/ownership-transfer`)
+    expect(transfer.init?.method).toBe("POST")
+    expect(JSON.parse(String(transfer.init?.body))).toEqual({
+      toUserId: "usr_cleo",
+      previousOwnerRole: "admin",
+      reason: "handing over",
+    })
+  })
+
   it("clamps the audit limit to what the server accepts", async () => {
     const { calls, fetchImpl } = harness()
     const c = client(fetchImpl)

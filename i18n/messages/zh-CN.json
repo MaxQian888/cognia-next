@@ -12386,6 +12386,76 @@
     "workingDirectory": "工作目录：{path}",
     "workspaceBoundaryHint": "请选择可访问且位于 COGNIA_WORKSPACES_DIR 配置范围内的目录，或在目标工作区重新启动 CLI。"
   },
+  "collabCapabilities": {
+    "action": {
+      "credential": {
+        "manage": "管理工作区凭据",
+        "use": "使用工作区凭据"
+      },
+      "environment": {
+        "manage": "管理工作区环境",
+        "use": "使用工作区环境"
+      },
+      "execution": {
+        "request": "在沙箱中运行智能体"
+      },
+      "host": {
+        "global-surfaces": "使用主机级终端、文件与插件",
+        "workspace-surfaces": "在主机上使用该工作区的终端、文件与 git"
+      },
+      "org": {
+        "admins": {
+          "manage": "管理组织管理员"
+        },
+        "members": {
+          "manage": "管理组织成员"
+        },
+        "ownership": {
+          "transfer": "转让组织所有权"
+        },
+        "policy": {
+          "manage": "管理组织策略"
+        }
+      },
+      "publish": "发布与分享",
+      "workspace": {
+        "members": {
+          "manage": "管理工作区成员"
+        },
+        "read": "查看工作区",
+        "settings": {
+          "manage": "管理工作区设置"
+        },
+        "write": "参与工作区"
+      }
+    },
+    "feature": {
+      "canvas-collaboration": "画布协作",
+      "environment-binding": "工作区环境",
+      "org-governance": "组织管理",
+      "shared-chat": "共享对话",
+      "shared-chat-execution": "共享智能体运行"
+    },
+    "reason": {
+      "client_contract_unsupported": "当前应用版本过旧，请更新 Cognia 后使用。",
+      "deployment_disabled": "当前部署未提供此功能。",
+      "execution_isolation_unavailable": "没有可用的隔离运行环境。",
+      "feature_killed": "已被运维停用，仍可阅读、导出和退出。",
+      "feature_not_offered": "尚未向该组织开放。",
+      "feature_paused": "已被运维暂停，进行中的工作会继续完成。",
+      "org_denied": "该组织不可使用。",
+      "policy_unavailable": "服务器暂时无法确认可用性，请稍后重试。",
+      "prerequisite_unavailable": "依赖的其他功能在此不可用。",
+      "workspace_denied": "该工作区不可使用。"
+    },
+    "refused": "{feature}：{reason}",
+    "state": {
+      "available": "可用",
+      "existing-only": "仅限已有内容",
+      "off": "未开启",
+      "read-only": "只读"
+    }
+  },
   "common": {
     "add": "添加",
     "all": "全部",
@@ -14335,6 +14405,14 @@
       "manageAccounts": "配置档案",
       "menuAria": "{name} 的账户菜单",
       "noProfile": "尚未创建档案",
+      "org": {
+        "heading": "组织",
+        "listFailed": "无法列出其他组织",
+        "switchFailed": "无法切换组织",
+        "switchTo": "切换到 {org}",
+        "switched": "已切换到 {org}",
+        "switching": "正在切换到 {org}…"
+      },
       "petFailed": "无法打开桌面宠物。",
       "settings": "设置",
       "showPet": "桌面宠物",
@@ -70843,6 +70921,25 @@
     }
   },
   "workspace": {
+    "access": {
+      "actionsHeading": "可执行的操作",
+      "featuresHeading": "共享功能",
+      "guest": "访客",
+      "loading": "正在检查权限…",
+      "noActions": "你在该工作区暂无权限，请联系维护者添加。",
+      "none": "无",
+      "orgRole": "组织角色",
+      "refresh": "刷新权限",
+      "title": "我的权限",
+      "unavailable": {
+        "error": "无法检查权限：{message}",
+        "hidden": "该工作区未与你共享。",
+        "not-signed-in": "登录后可查看权限。",
+        "unsupported": "当前协作服务器尚不支持报告权限。"
+      },
+      "viaOrgAdmin": "通过组织管理员身份",
+      "workspaceRole": "工作区角色"
+    },
     "actionErrors": {
       "consentRequired": "正在等待宿主设备批准，请在该设备上用验证码 {code} 确认。",
       "consentRequiredNoCode": "正在等待宿主设备批准，请在该设备上确认后继续。",
@@ -71355,6 +71452,7 @@
         "invitationRevoked": "在工作区成员列表中撤销",
         "offboarded": "在工作区名册中移出组织",
         "orgRoleChanged": "在工作区成员列表中更改了组织角色",
+        "ownershipTransferred": "从工作区成员列表转让所有权",
         "removed": "在工作区名册中移出工作区",
         "roleChanged": "在工作区名册中更改角色"
       },
@@ -71374,8 +71472,16 @@
         "invitationRevoked": "邀请已撤销。",
         "offboarded": "已移出组织。",
         "orgRoleChanged": "组织角色已更新。",
+        "ownershipTransferred": "所有权已转让。",
         "removed": "已移出工作区。",
         "roleChanged": "角色已更新。"
+      },
+      "transfer": {
+        "action": "转让所有权",
+        "body": "对方将一步成为组织所有者，你保留席位并使用下方选择的角色。只有所有者可以撤销此操作。",
+        "confirm": "转让所有权",
+        "stepDownLabel": "转让后你的角色",
+        "title": "将 {name} 设为所有者？"
       },
       "unavailable": {
         "no-org": "当前登录未绑定组织，没有可管理的名册。",

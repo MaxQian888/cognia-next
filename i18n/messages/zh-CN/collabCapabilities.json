@@ -1,0 +1,70 @@
+{
+  "feature": {
+    "shared-chat": "共享对话",
+    "shared-chat-execution": "共享智能体运行",
+    "canvas-collaboration": "画布协作",
+    "org-governance": "组织管理",
+    "environment-binding": "工作区环境"
+  },
+  "state": {
+    "available": "可用",
+    "existing-only": "仅限已有内容",
+    "read-only": "只读",
+    "off": "未开启"
+  },
+  "reason": {
+    "deployment_disabled": "当前部署未提供此功能。",
+    "feature_not_offered": "尚未向该组织开放。",
+    "feature_paused": "已被运维暂停，进行中的工作会继续完成。",
+    "feature_killed": "已被运维停用，仍可阅读、导出和退出。",
+    "org_denied": "该组织不可使用。",
+    "workspace_denied": "该工作区不可使用。",
+    "prerequisite_unavailable": "依赖的其他功能在此不可用。",
+    "client_contract_unsupported": "当前应用版本过旧，请更新 Cognia 后使用。",
+    "policy_unavailable": "服务器暂时无法确认可用性，请稍后重试。",
+    "execution_isolation_unavailable": "没有可用的隔离运行环境。"
+  },
+  "action": {
+    "org": {
+      "members": {
+        "manage": "管理组织成员"
+      },
+      "admins": {
+        "manage": "管理组织管理员"
+      },
+      "ownership": {
+        "transfer": "转让组织所有权"
+      },
+      "policy": {
+        "manage": "管理组织策略"
+      }
+    },
+    "host": {
+      "global-surfaces": "使用主机级终端、文件与插件",
+      "workspace-surfaces": "在主机上使用该工作区的终端、文件与 git"
+    },
+    "workspace": {
+      "read": "查看工作区",
+      "write": "参与工作区",
+      "members": {
+        "manage": "管理工作区成员"
+      },
+      "settings": {
+        "manage": "管理工作区设置"
+      }
+    },
+    "execution": {
+      "request": "在沙箱中运行智能体"
+    },
+    "environment": {
+      "use": "使用工作区环境",
+      "manage": "管理工作区环境"
+    },
+    "credential": {
+      "use": "使用工作区凭据",
+      "manage": "管理工作区凭据"
+    },
+    "publish": "发布与分享"
+  },
+  "refused": "{feature}：{reason}"
+}

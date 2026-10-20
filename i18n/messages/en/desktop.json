@@ -729,6 +729,14 @@
     "manageAccounts": "Profiles",
     "menuAria": "Account menu for {name}",
     "noProfile": "No profile",
+    "org": {
+      "heading": "Organization",
+      "switchTo": "Switch to {org}",
+      "switching": "Switching to {org}…",
+      "switched": "Now working in {org}",
+      "switchFailed": "Could not switch organization",
+      "listFailed": "Other organizations could not be listed"
+    },
     "petFailed": "The desktop pet could not be opened.",
     "settings": "Settings",
     "showPet": "Desktop pet",

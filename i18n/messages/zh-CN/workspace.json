@@ -379,7 +379,8 @@
       "removed": "在工作区名册中移出工作区",
       "roleChanged": "在工作区名册中更改角色",
       "orgRoleChanged": "在工作区成员列表中更改了组织角色",
-      "invitationRevoked": "在工作区成员列表中撤销"
+      "invitationRevoked": "在工作区成员列表中撤销",
+      "ownershipTransferred": "从工作区成员列表转让所有权"
     },
     "toast": {
       "failed": "协作服务器拒绝了这次更改。",
@@ -387,7 +388,8 @@
       "removed": "已移出工作区。",
       "roleChanged": "角色已更新。",
       "orgRoleChanged": "组织角色已更新。",
-      "invitationRevoked": "邀请已撤销。"
+      "invitationRevoked": "邀请已撤销。",
+      "ownershipTransferred": "所有权已转让。"
     },
     "inviteDialog": {
       "cancel": "取消",
@@ -434,6 +436,13 @@
       "admin": "组织管理员",
       "member": "组织成员",
       "owner": "组织所有者"
+    },
+    "transfer": {
+      "title": "将 {name} 设为所有者？",
+      "body": "对方将一步成为组织所有者，你保留席位并使用下方选择的角色。只有所有者可以撤销此操作。",
+      "stepDownLabel": "转让后你的角色",
+      "confirm": "转让所有权",
+      "action": "转让所有权"
     },
     "invitations": {
       "title": "邀请",
@@ -582,5 +591,24 @@
     "knowledgeCount": "{count, plural, =0 {没有知识文件} other {# 个知识文件}}",
     "knowledgeOff": "（未注入对话）",
     "tags": "标签"
+  },
+  "access": {
+    "title": "我的权限",
+    "refresh": "刷新权限",
+    "loading": "正在检查权限…",
+    "orgRole": "组织角色",
+    "workspaceRole": "工作区角色",
+    "viaOrgAdmin": "通过组织管理员身份",
+    "guest": "访客",
+    "none": "无",
+    "actionsHeading": "可执行的操作",
+    "noActions": "你在该工作区暂无权限，请联系维护者添加。",
+    "featuresHeading": "共享功能",
+    "unavailable": {
+      "not-signed-in": "登录后可查看权限。",
+      "unsupported": "当前协作服务器尚不支持报告权限。",
+      "hidden": "该工作区未与你共享。",
+      "error": "无法检查权限：{message}"
+    }
   }
 }

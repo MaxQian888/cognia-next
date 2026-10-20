@@ -86,6 +86,26 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key}:${JSON.stringify(values)}` : key,
 }))
+// The rollout gates. Unknown by default, which is what an older server or
+// an unanswered request looks like: the panel's own gates decide alone.
+type MockGate = {
+  known: boolean
+  decision: { key: string; state: string; reason: string | null; policyRevision: number } | null
+  canStart: boolean
+  canMutate: boolean
+  canRead: boolean
+}
+const unknownGate: MockGate = {
+  known: false,
+  decision: null,
+  canStart: true,
+  canMutate: true,
+  canRead: true,
+}
+const mockGates: Record<string, MockGate> = {}
+jest.mock("@/hooks/collab/use-collab-feature", () => ({
+  useCollabFeature: (key: string) => mockGates[key] ?? unknownGate,
+}))
 jest.mock("@/lib/collab/runtime-client", () => ({
   resolveCurrentCollabContext: (...args: unknown[]) => resolveContext(...args),
 }))
@@ -339,6 +359,58 @@ it("offers no share for a team room, and says why rather than hiding the button"
   fireEvent.click(share)
   expect(mockConvert).not.toHaveBeenCalled()
 })
+it("explains and blocks a share the organization is not offered", async () => {
+  configured()
+  mockGates["shared-chat"] = {
+    known: true,
+    decision: {
+      key: "shared-chat",
+      state: "existing-only",
+      reason: "feature_paused",
+      policyRevision: 3,
+    },
+    canStart: false,
+    canMutate: true,
+    canRead: true,
+  }
+  try {
+    render(<SharedSessionPanel session={session()} />)
+    fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+    const share = await screen.findByRole("button", { name: "convertAndShare" })
+    expect(share).toBeDisabled()
+    expect(screen.getByTestId("shared-convert-unavailable")).toHaveTextContent(
+      "reason.feature_paused"
+    )
+    fireEvent.click(share)
+    expect(mockConvert).not.toHaveBeenCalled()
+  } finally {
+    delete mockGates["shared-chat"]
+  }
+})
+
+it("blocks asking for an AI run while shared runs are stopped, and says why", () => {
+  mockGates["shared-chat-execution"] = {
+    known: true,
+    decision: {
+      key: "shared-chat-execution",
+      state: "read-only",
+      reason: "feature_killed",
+      policyRevision: 9,
+    },
+    canStart: false,
+    canMutate: false,
+    canRead: true,
+  }
+  try {
+    render(<SharedSessionPanel session={shared} />)
+    const request = screen.getByRole("button", { name: "requestAI" })
+    expect(request).toBeDisabled()
+    expect(request).toHaveAttribute("title", "reason.feature_killed")
+  } finally {
+    delete mockGates["shared-chat-execution"]
+  }
+})
+
 it("accepts an invitation from private conversation controls", async () => {
   const client = configured()
   mockSync.mockResolvedValue({ localSessionId: "joined" })

@@ -1,0 +1,70 @@
+{
+  "feature": {
+    "shared-chat": "Shared conversations",
+    "shared-chat-execution": "Shared agent runs",
+    "canvas-collaboration": "Canvas collaboration",
+    "org-governance": "Organization management",
+    "environment-binding": "Workspace environments"
+  },
+  "state": {
+    "available": "Available",
+    "existing-only": "Existing only",
+    "read-only": "Read only",
+    "off": "Off"
+  },
+  "reason": {
+    "deployment_disabled": "This deployment does not offer it.",
+    "feature_not_offered": "Not offered to this organization yet.",
+    "feature_paused": "Paused by the operator. Existing work continues.",
+    "feature_killed": "Stopped by the operator. You can still read, export and leave.",
+    "org_denied": "Not available to this organization.",
+    "workspace_denied": "Not available in this workspace.",
+    "prerequisite_unavailable": "Needs another feature that is not available here.",
+    "client_contract_unsupported": "This app is too old for it. Update Cognia to use it.",
+    "policy_unavailable": "The server could not check availability. Try again shortly.",
+    "execution_isolation_unavailable": "No isolated runtime is available to run it."
+  },
+  "action": {
+    "org": {
+      "members": {
+        "manage": "Manage organization members"
+      },
+      "admins": {
+        "manage": "Manage organization admins"
+      },
+      "ownership": {
+        "transfer": "Transfer organization ownership"
+      },
+      "policy": {
+        "manage": "Manage organization policy"
+      }
+    },
+    "host": {
+      "global-surfaces": "Use host-wide terminal, files and plugins",
+      "workspace-surfaces": "Use this workspace's terminal, files and git on the host"
+    },
+    "workspace": {
+      "read": "Read workspace",
+      "write": "Contribute to workspace",
+      "members": {
+        "manage": "Manage workspace members"
+      },
+      "settings": {
+        "manage": "Manage workspace settings"
+      }
+    },
+    "execution": {
+      "request": "Run agents in a sandbox"
+    },
+    "environment": {
+      "use": "Use workspace environments",
+      "manage": "Manage workspace environments"
+    },
+    "credential": {
+      "use": "Use workspace credentials",
+      "manage": "Manage workspace credentials"
+    },
+    "publish": "Publish and share"
+  },
+  "refused": "{feature}: {reason}"
+}
