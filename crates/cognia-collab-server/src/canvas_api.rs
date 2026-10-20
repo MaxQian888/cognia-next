@@ -74,6 +74,9 @@ const MAX_AWARENESS_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone)]
 struct SocketTicket {
+    /// Captured on REST ticket issuance: browser handshakes cannot carry the
+    /// custom protocol header. None retains the legacy unpinned client mode.
+    client_contract: Option<u32>,
     org_id: String,
     document_id: String,
     /// Resolved when the ticket is minted. A document never moves between
@@ -99,6 +102,14 @@ pub struct CanvasFrame {
     pub participant_id: String,
     pub data: serde_json::Value,
     pub timestamp: i64,
+}
+
+impl SocketTicket {
+    fn admission_context(&self) -> crate::admission::Context {
+        let mut context = crate::admission::context();
+        context.client_contract = self.client_contract;
+        context
+    }
 }
 
 impl Expiring for SocketTicket {
@@ -285,6 +296,7 @@ impl IntoResponse for CanvasFailure {
                 StatusCode::CONFLICT,
                 serde_json::json!({"error":"conflict","authoritative":authoritative}),
             ),
+            Self::Store(StoreError::FeatureUnavailable(decision)) => return crate::admission::response(decision),
             Self::Store(StoreError::Policy(reason)) => (
                 StatusCode::FORBIDDEN,
                 serde_json::json!({"error":"forbidden","reason":reason}),
@@ -297,7 +309,11 @@ impl IntoResponse for CanvasFailure {
                 )
             }
         };
-        (status, Json(body)).into_response()
+        let mut response = (status, Json(body)).into_response();
+        if status == StatusCode::NOT_FOUND {
+            response.headers_mut().insert("cache-control", "private, no-store".parse().expect("static header"));
+        }
+        response
     }
 }
 
@@ -874,6 +890,7 @@ async fn create_stream_ticket(
     let expires_at = now + SOCKET_TICKET_TTL_MS;
     let ticket = state.canvas_hub.issue_ticket(
         SocketTicket {
+            client_contract: crate::admission::protocol(&headers),
             org_id,
             document_id,
             workspace_id,
@@ -913,7 +930,10 @@ async fn open_stream(
     let receiver = state.canvas_hub.sender(&document_id).subscribe();
     Ok(ws
         .protocols([CANVAS_SUBPROTOCOL])
-        .on_upgrade(move |socket| stream_loop(socket, state, ticket, receiver))
+        .on_upgrade({
+            let context = ticket.admission_context();
+            move |socket| crate::admission::scope(context, stream_loop(socket, state, ticket, receiver))
+        })
         .into_response())
 }
 
@@ -1086,9 +1106,14 @@ async fn handle_frame(
     frame: CanvasFrame,
 ) -> bool {
     if !may_read(state, connection).await { return false; }
+    if matches!(frame.kind.as_str(), "operation" | "cursor" | "selection" | "awareness") {
+        if let Err(error) = state.canvas_store.admit_document_write(&connection.org_id, &connection.document_id).await {
+            return send_write_error(state, connection, outbound, error).await;
+        }
+    }
     match frame.kind.as_str() {
         "presence" => handle_presence(state, connection, outbound, frame).await,
-        "operation" => handle_operation(state, connection, frame).await,
+        "operation" => handle_operation(state, connection, outbound, frame).await,
         // Cursors and selections are read-level facts about where somebody is
         // looking. They are relayed and never stored, so a stale one dies with
         // the socket instead of outliving the session.
@@ -1197,7 +1222,16 @@ async fn handle_presence(
     }
 }
 
-async fn handle_operation(state: &AppState, connection: &Connection, frame: CanvasFrame) -> bool {
+async fn send_write_error(state: &AppState, connection: &Connection, outbound: &tokio::sync::mpsc::Sender<CanvasFrame>, error: StoreError) -> bool {
+    let StoreError::FeatureUnavailable(decision) = error else { return false; };
+    outbound.send(CanvasFrame {
+        kind: "error".into(), session_id: connection.document_id.clone(), participant_id: String::new(),
+        data: serde_json::json!({"error":"feature_unavailable", "feature":decision.key, "state":decision.state, "reason":decision.reason}),
+        timestamp: (state.now)(),
+    }).await.is_ok()
+}
+
+async fn handle_operation(state: &AppState, connection: &Connection, outbound: &tokio::sync::mpsc::Sender<CanvasFrame>, frame: CanvasFrame) -> bool {
     let Some(update) = frame.data.get("update").and_then(|value| value.as_str()) else {
         return true;
     };
@@ -1243,6 +1277,7 @@ async fn handle_operation(state: &AppState, connection: &Connection, frame: Canv
             true
         }
         Err(StoreError::NotFound) => false,
+        Err(error @ StoreError::FeatureUnavailable(_)) => send_write_error(state, connection, outbound, error).await,
         Err(error) => {
             tracing::warn!(error=%error, document=%connection.document_id, "canvas update rejected");
             true
@@ -1498,7 +1533,7 @@ mod tests {
 
     async fn with_document() -> (InMemoryStore, Arc<InMemoryCanvasStore>) {
         let store = seeded();
-        let canvas = Arc::new(InMemoryCanvasStore::new());
+        let canvas = Arc::new(InMemoryCanvasStore::from_tables(store.tables.clone()));
         let (status, _) = call(
             app(store.clone(), canvas.clone()),
             request(
@@ -1901,6 +1936,7 @@ mod tests {
             if admin { store.add_org_member(ORG, viv().as_str(), OrgRole::Admin); }
             let state = test_state(store.clone(), canvas);
             let value = state.canvas_hub.issue_ticket(SocketTicket {
+                client_contract: None,
                 org_id: ORG.into(), document_id: DOCUMENT.into(), workspace_id: "proj-1".into(),
                 user_id: viv().to_string(), expires_at: 31_000,
             }, 1_000).unwrap();
@@ -1922,6 +1958,7 @@ mod tests {
             }
             let state = test_state(store, canvas);
             let make_ticket = |user: &UserId, workspace: &str, org: &str| SocketTicket {
+                client_contract: None,
                 org_id: org.into(), document_id: DOCUMENT.into(), workspace_id: workspace.into(),
                 user_id: user.to_string(), expires_at: 31_000,
             };
@@ -1949,6 +1986,7 @@ mod tests {
         let (store, canvas) = with_document().await;
         let state = test_state(store.clone(), canvas);
         let ticket = state.canvas_hub.issue_ticket(SocketTicket {
+            client_contract: None,
             org_id: ORG.into(), document_id: DOCUMENT.into(), workspace_id: "proj-1".into(),
             user_id: viv().to_string(), expires_at: 31_000,
         }, 1_000).unwrap();
@@ -2238,6 +2276,7 @@ mod tests {
 
     fn ticket(expires_at: i64) -> SocketTicket {
         SocketTicket {
+            client_contract: None,
             org_id: ORG.into(),
             document_id: DOCUMENT.into(),
             workspace_id: "proj-1".into(),
@@ -2324,4 +2363,100 @@ mod tests {
         assert_eq!(json["timestamp"], 7);
         assert_eq!(json["data"]["update"], "AA==");
     }
+    #[tokio::test]
+    async fn rollout_refuses_write_frames_with_typed_errors_without_closing_and_keeps_sync() {
+        use crate::{store::Store, rollout::{FeatureKey, Phase}, canvas_store::CanvasStore};
+        for kind in ["operation", "cursor", "selection", "awareness"] {
+            let (store, canvas) = with_document().await;
+            let mut policy = crate::rollout::tests::policy();
+            policy.feature_key = FeatureKey::CanvasCollaboration;
+            policy.kill = true;
+            policy.phase = Phase::General;
+            store.apply_feature_policy(policy, 0, "kill", "test", "operator").await.unwrap();
+            let state = test_state(store.clone(), canvas.clone());
+            let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+            let frame = CanvasFrame {
+                kind: kind.into(), session_id: DOCUMENT.into(), participant_id: "ada".into(),
+                data: serde_json::json!({"id":"blocked", "update":"AQ=="}), timestamp: 1000,
+            };
+            assert!(handle_frame(&state, &connection_for(&ada()), &tx, frame).await, "rollout must keep socket open");
+            let error = rx.recv().await.unwrap();
+            assert_eq!(error.kind, "error");
+            assert_eq!(error.data, serde_json::json!({"error":"feature_unavailable", "feature":"canvas-collaboration", "state":"read-only", "reason":"feature_killed"}));
+            assert_eq!(canvas.catch_up(ORG, DOCUMENT, 0, 10).await.unwrap().latest_sequence, 0);
+            let sync = CanvasFrame { kind:"sync".into(), session_id:DOCUMENT.into(), participant_id:"ada".into(), data:serde_json::json!({"action":"request", "since":0}), timestamp:1000 };
+            assert!(handle_frame(&state, &connection_for(&ada()), &tx, sync).await);
+        }
+    }
+
+    #[tokio::test]
+    async fn issued_ticket_pins_each_socket_write_when_the_handshake_has_no_header() {
+        use crate::canvas_store::CanvasStore;
+        for protocol in [Some(2_u32),None,Some(3)] {
+            let (store, canvas) = with_document().await;
+            store.tables.write().canvas.get_mut(DOCUMENT).unwrap().record.contract_version = 3;
+            let state = test_state(store, canvas.clone());
+            let mut issue = request("POST", &format!("/v1/orgs/{ORG}/canvas-documents/{DOCUMENT}/stream-tickets"), &token_for(&ada()), None);
+            if let Some(protocol) = protocol { issue.headers_mut().insert("x-cognia-collab-protocol",protocol.to_string().parse().unwrap()); }
+            let (status,body) = call(crate::router(state.clone()),issue).await;
+            assert_eq!(status,StatusCode::OK,"{body}");
+            let ticket = redeem_stream_ticket(&state,ORG,DOCUMENT,body["ticket"].as_str().unwrap()).await.unwrap();
+            assert_eq!(ticket.client_contract,protocol);
+            // This is the admission context on a header-less browser upgrade.
+            assert_eq!(crate::admission::context().client_contract,None);
+            let (tx,mut rx) = tokio::sync::mpsc::channel(8);
+            let connection = connection_for(&ada());
+            for kind in ["operation","cursor","selection","awareness"] {
+                let frame = CanvasFrame {kind:kind.into(),session_id:DOCUMENT.into(),participant_id:"ada".into(),data:serde_json::json!({"id":"op","update":"AQ=="}),timestamp:1000};
+                assert!(crate::admission::scope(ticket.admission_context(),handle_frame(&state,&connection,&tx,frame)).await);
+                if protocol == Some(2) { assert_eq!(rx.recv().await.unwrap().data["reason"],"client_contract_unsupported"); }
+                else { assert!(rx.try_recv().is_err()); }
+            }
+            assert_eq!(canvas.catch_up(ORG,DOCUMENT,0,10).await.unwrap().latest_sequence,if protocol==Some(2) {0} else {1});
+        }
+    }
+
+    #[tokio::test]
+    async fn ticket_protocol_survives_a_headerless_browser_handshake() {
+        use crate::canvas_store::CanvasStore;
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as ClientMessage};
+        let (store, canvas) = with_document().await;
+        push_updates(&store,&canvas,1).await;
+        store.tables.write().canvas.get_mut(DOCUMENT).unwrap().record.contract_version = 3;
+        let state = test_state(store, canvas.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server_state = state.clone();
+        let server = tokio::spawn(async move { axum::serve(listener, crate::router(server_state)).await.unwrap() });
+        let mut accepted = 1;
+        for protocol in [Some(2_u32), None, Some(3)] {
+            let mut issue = request("POST", &format!("/v1/orgs/{ORG}/canvas-documents/{DOCUMENT}/stream-tickets"), &token_for(&ada()), None);
+            if let Some(protocol) = protocol { issue.headers_mut().insert("x-cognia-collab-protocol", protocol.to_string().parse().unwrap()); }
+            let (status, body) = call(crate::router(state.clone()), issue).await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            let ticket = body["ticket"].as_str().unwrap();
+            let mut handshake = format!("ws://{address}/v1/orgs/{ORG}/canvas-documents/{DOCUMENT}/stream").into_client_request().unwrap();
+            handshake.headers_mut().insert("sec-websocket-protocol", format!("{CANVAS_SUBPROTOCOL}, {ticket}").parse().unwrap());
+            assert!(!handshake.headers().contains_key("x-cognia-collab-protocol"));
+            let (mut socket, _) = tokio_tungstenite::connect_async(handshake).await.unwrap();
+            let frame = CanvasFrame { kind:"operation".into(), session_id:DOCUMENT.into(), participant_id:"browser".into(),
+                data:serde_json::json!({"id":format!("op-{protocol:?}"),"update":"AQ=="}), timestamp:1000 };
+            socket.send(ClientMessage::Text(serde_json::to_string(&frame).unwrap().into())).await.unwrap();
+            let message = tokio::time::timeout(std::time::Duration::from_secs(2), socket.next()).await.unwrap().unwrap().unwrap();
+            let response: CanvasFrame = serde_json::from_str(message.to_text().unwrap()).unwrap();
+            if protocol == Some(2) {
+                assert_eq!(response.kind, "error");
+                assert_eq!(response.data["reason"], "client_contract_unsupported");
+                let sync = CanvasFrame { kind:"sync".into(), data:serde_json::json!({"action":"request","since":0}), ..frame };
+                socket.send(ClientMessage::Text(serde_json::to_string(&sync).unwrap().into())).await.unwrap();
+                let synced = tokio::time::timeout(std::time::Duration::from_secs(2), socket.next()).await.unwrap().unwrap().unwrap();
+                assert_eq!(serde_json::from_str::<CanvasFrame>(synced.to_text().unwrap()).unwrap().kind, "sync");
+            } else { assert_eq!(response.kind,"operation"); accepted += 1; }
+            assert_eq!(canvas.catch_up(ORG, DOCUMENT, 0, 10).await.unwrap().latest_sequence, accepted);
+            socket.close(None).await.unwrap();
+        }
+        server.abort();
+    }
+
 }

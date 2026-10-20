@@ -40,6 +40,8 @@ use crate::model::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    #[error("feature unavailable: {0:?}")]
+    FeatureUnavailable(crate::rollout::FeatureDecision),
     #[error("not found")]
     NotFound,
     #[error("forbidden")]
@@ -1100,7 +1102,8 @@ struct BootstrapCredentialRow {
 
 #[derive(Default)]
 pub(crate) struct Tables {
-    feature_policies: HashMap<FeatureKey, FeaturePolicy>,
+    pub(crate) feature_policies: HashMap<FeatureKey, FeaturePolicy>,
+    pub(crate) canvas: HashMap<String, crate::canvas_store::MemoryDocument>,
     feature_policy_replays: HashMap<String, FeaturePolicyReplay>,
     pub(crate) chat: crate::chat_store::MemoryTables,
     pub(crate) session_files: crate::session_files::MemoryFileTables,
@@ -2838,6 +2841,9 @@ impl PgStore {
         transaction
             .batch_execute(include_str!("../migrations/0016_feature_rollout.sql"))
             .await?;
+        transaction
+            .batch_execute(include_str!("../migrations/0017_collab_contract_pinning.sql"))
+            .await?;
         if let Some((role, password)) = app_role {
             // PostgreSQL quotes both the identifier and password literal; no
             // operator-supplied text is interpolated as SQL syntax.
@@ -3081,6 +3087,20 @@ impl PgStore {
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
         Ok(())
+    }
+
+    /// One bounded deployment-policy snapshot, including every transitive
+    /// prerequisite, for both capability projection and transactional admission.
+    pub(crate) async fn feature_policies_in(client: &impl tokio_postgres::GenericClient) -> Result<Vec<FeaturePolicy>, StoreError> {
+        let rows = client.query("SELECT document FROM deployment_feature_policies", &[]).await.map_err(policy_db_error)?;
+        let mut policies = rows.into_iter().map(|row| stored_policy(row.get(0))).collect::<Result<Vec<_>, _>>()?;
+        policies.sort_by_key(|policy| FeatureKey::ALL.iter().position(|key| *key == policy.feature_key));
+        Ok(policies)
+    }
+
+    pub(crate) async fn feature_policy_in(client: &impl tokio_postgres::GenericClient, key: FeatureKey) -> Result<Option<FeaturePolicy>, StoreError> {
+        let row = client.query_opt("SELECT document FROM deployment_feature_policies WHERE feature_key = $1", &[&key.as_str()]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        row.map(|row| stored_policy(row.get(0))).transpose()
     }
 
     pub(crate) async fn client(&self) -> Result<deadpool_postgres::Client, StoreError> {
@@ -3471,18 +3491,11 @@ async fn insert_authorization_audit(
 #[async_trait]
 impl Store for PgStore {
     async fn feature_policy(&self, key: FeatureKey) -> Result<Option<FeaturePolicy>, StoreError> {
-        self.client().await?.query_opt(
-            "SELECT document FROM deployment_feature_policies WHERE feature_key = $1", &[&key.as_str()],
-        ).await.map_err(policy_db_error)?.map(|row| stored_policy(row.get(0))).transpose()
+        Self::feature_policy_in(&**self.client().await?, key).await
     }
 
     async fn feature_policies(&self) -> Result<Vec<FeaturePolicy>, StoreError> {
-        let rows = self.client().await?.query("SELECT document FROM deployment_feature_policies", &[])
-            .await.map_err(policy_db_error)?;
-        let mut policies = rows.into_iter().map(|row| stored_policy(row.get(0)))
-            .collect::<Result<Vec<_>, _>>()?;
-        policies.sort_by_key(|policy| FeatureKey::ALL.iter().position(|key| *key == policy.feature_key));
-        Ok(policies)
+        Self::feature_policies_in(&**self.client().await?).await
     }
 
     async fn apply_feature_policy(

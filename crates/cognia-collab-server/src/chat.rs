@@ -192,6 +192,7 @@ pub struct SessionMembership {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SharedSession {
+    pub contract_version: i32,
     pub id: String,
     pub org_id: String,
     pub workspace_id: String,

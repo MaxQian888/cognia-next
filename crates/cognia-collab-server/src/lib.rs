@@ -53,6 +53,7 @@
 //! already proved. The zero-knowledge share links of ADR-0037 remain a separate
 //! capability and are untouched.
 
+pub(crate) mod admission;
 pub mod api;
 pub mod auth;
 pub mod capabilities_api;

@@ -1,3 +1,5 @@
+use crate::admission::{self, Requirement};
+use crate::rollout::FeatureKey;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -223,6 +225,9 @@ pub struct NewChatRunQueueItem {
 #[async_trait]
 #[allow(clippy::too_many_arguments)]
 pub trait ChatStore: Send + Sync {
+    async fn admit_session_write(&self, org: &str, session: &str) -> Result<(), StoreError>;
+    /// Read/drain delivery bypasses rollout while retaining the pinned contract.
+    async fn admit_session_contract(&self, org: &str, session: &str) -> Result<(), StoreError>;
     async fn create_session(&self, input: NewSharedSession) -> Result<SharedSession, StoreError>;
     async fn list_sessions(
         &self,
@@ -475,7 +480,7 @@ pub trait ChatStore: Send + Sync {
 
 #[derive(Default)]
 pub(crate) struct MemoryTables {
-    sessions: HashMap<String, SharedSession>,
+    pub(crate) sessions: HashMap<String, SharedSession>,
     memberships: HashMap<(String, String), SessionMembership>,
     events: HashMap<String, Vec<SessionEvent>>,
     leases: HashMap<String, (ChatRunLease, String, String, String)>,
@@ -517,6 +522,7 @@ fn accept_stored_invite(
         && event.created_at >= invite.created_at) {
         return Err(StoreError::InvitationUnavailable);
     }
+    admission::memory_chat(tables, &session.org_id, &invite.session_id, FeatureKey::SharedChat, Requirement::Write)?;
     let invite_snapshot = invite.clone();
     let session = tables
         .chat.sessions
@@ -587,6 +593,21 @@ impl InMemoryChatStore {
 
 fn conflict(value: impl serde::Serialize) -> StoreError {
     StoreError::Conflict(serde_json::to_value(value).unwrap_or_default())
+}
+
+fn event_feature(input: &NewSessionEvent) -> FeatureKey {
+    if input.kind.starts_with("run.") || input.kind.starts_with("approval.") {
+        FeatureKey::SharedChatExecution
+    } else { FeatureKey::SharedChat }
+}
+
+fn event_requirement(input: &NewSessionEvent) -> Requirement {
+    match input.kind.as_str() {
+        "run.completed" | "run.failed" | "run.cancelled" => Requirement::ContractOnly,
+        "approval.resolved" if input.payload.get("status").and_then(|v| v.as_str()) == Some("denied") => Requirement::ContractOnly,
+        "run.started" => Requirement::New,
+        _ => Requirement::Write,
+    }
 }
 
 fn replay_event(
@@ -864,6 +885,12 @@ pub(crate) async fn pg_revoke_member_work(
 
 #[async_trait]
 impl ChatStore for InMemoryChatStore {
+    async fn admit_session_contract(&self, org: &str, session: &str) -> Result<(), StoreError> {
+        admission::memory_chat(&self.tables.read(), org, session, FeatureKey::SharedChat, Requirement::ContractOnly)
+    }
+    async fn admit_session_write(&self, org: &str, session: &str) -> Result<(), StoreError> {
+        admission::memory_chat(&self.tables.read(), org, session, FeatureKey::SharedChat, Requirement::Write)
+    }
     async fn effective_member(
         &self, org_id: &str, session_id: &str, user_id: &str,
     ) -> Result<Option<SessionMembership>, StoreError> {
@@ -872,6 +899,7 @@ impl ChatStore for InMemoryChatStore {
 
     async fn create_session(&self, input: NewSharedSession) -> Result<SharedSession, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory(&tables, FeatureKey::SharedChat, &input.org_id, &input.workspace_id, admission::COLLAB_PROTOCOL_VERSION as i32, Requirement::New)?;
         if let Some(id) = tables
             .chat.operations
             .get(&(input.org_id.clone(), input.operation_id.clone()))
@@ -879,6 +907,7 @@ impl ChatStore for InMemoryChatStore {
             return tables.chat.sessions.get(id).cloned().ok_or(StoreError::NotFound);
         }
         let session = SharedSession {
+            contract_version: crate::admission::COLLAB_PROTOCOL_VERSION as i32,
             id: input.id,
             org_id: input.org_id.clone(),
             workspace_id: input.workspace_id,
@@ -940,6 +969,7 @@ impl ChatStore for InMemoryChatStore {
         now: i64,
     ) -> Result<SharedSession, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, if status == Some(SessionStatus::Deleting) { Requirement::ContractOnly } else if status == Some(SessionStatus::Active) && tables.chat.sessions.get(session_id).is_some_and(|s| s.status == SessionStatus::Importing) { Requirement::New } else { Requirement::Write })?;
         if let Some(id) = tables
             .chat.operations
             .get(&(org_id.to_owned(), operation_id.to_owned()))
@@ -973,6 +1003,7 @@ impl ChatStore for InMemoryChatStore {
 
     async fn delete_session_data(&self, org_id: &str, session_id: &str) -> Result<(), StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly)?;
         if tables
             .chat.sessions
             .get(session_id)
@@ -1087,6 +1118,7 @@ impl ChatStore for InMemoryChatStore {
             .get(&(session_id.to_owned(), user_id.to_owned()));
         let actor = memory_member(&tables, org_id, session_id, actor_user_id);
         authorize_member_change(actor.as_ref(), existing.map(|m| m.role), role)?;
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::Write)?;
         if !grant_role_allowed(memory_standing(&tables, org_id, workspace_id, user_id), role, guest) {
             return Err(StoreError::Policy("session role exceeds grant ceiling".into()));
         }
@@ -1135,6 +1167,7 @@ impl ChatStore for InMemoryChatStore {
         now: i64,
     ) -> Result<(), StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly)?;
         tables
             .chat.sessions
             .get(session_id)
@@ -1191,6 +1224,7 @@ impl ChatStore for InMemoryChatStore {
             .ok_or(StoreError::NotFound)?;
         let actor = memory_member(&tables, &input.org_id, &input.session_id, &input.created_by_user_id);
         authorize_member_change(actor.as_ref(), None, input.role)?;
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::New)?;
         if let Some(target) = input.target_user_id.as_deref() {
             if !grant_role_allowed(memory_standing(&tables, &input.org_id, &input.workspace_id, target), input.role, input.guest) {
                 return Err(StoreError::Policy("session role exceeds grant ceiling".into()));
@@ -1282,6 +1316,7 @@ impl ChatStore for InMemoryChatStore {
         invite_id: &str,
     ) -> Result<ChatSessionInvite, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly)?;
         let (invite, _, _) = tables
             .chat.invites
             .get_mut(invite_id)
@@ -1301,6 +1336,7 @@ impl ChatStore for InMemoryChatStore {
         input: NewSessionEvent,
     ) -> Result<SessionEvent, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, event_feature(&input), event_requirement(&input))?;
         tables
             .chat.sessions
             .get(&input.session_id)
@@ -1373,6 +1409,8 @@ impl ChatStore for InMemoryChatStore {
         if !can_act(memory_member(&tables, &input.org_id, &input.session_id, &holder).as_ref(), SessionAction::StartRun) {
             return Err(StoreError::NotFound);
         }
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, event_requirement(&input))?;
+        if input.kind.starts_with("message.") { admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::Write)?; }
         tables
             .chat.sessions
             .get(&input.session_id)
@@ -1509,6 +1547,7 @@ impl ChatStore for InMemoryChatStore {
 
     async fn acquire_run_lease(&self, input: NewChatRunLease) -> Result<ChatRunLease, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::New)?;
         tables
             .chat.sessions
             .get(&input.session_id)
@@ -1595,6 +1634,7 @@ impl ChatStore for InMemoryChatStore {
                 "queue executor cannot start runs".into(),
             ));
         }
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::New)?;
         let item = tables
             .chat.queue
             .get(item_id)
@@ -1751,6 +1791,7 @@ impl ChatStore for InMemoryChatStore {
         now: i64,
     ) -> Result<ChatRunLease, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChatExecution, Requirement::Write)?;
         let allowed = can_act(memory_member(&tables, org_id, session_id, holder_user_id).as_ref(), SessionAction::StartRun);
         let (lease, stored_org, stored_token, _) = tables
             .chat.leases
@@ -1792,6 +1833,7 @@ impl ChatStore for InMemoryChatStore {
         status: &str,
     ) -> Result<ChatRunLease, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChatExecution, Requirement::ContractOnly)?;
         let allowed = can_act(memory_member(&tables, org_id, session_id, holder_user_id).as_ref(), SessionAction::StartRun);
         let (lease, stored_org, stored_token, _) = tables
             .chat.leases
@@ -1878,6 +1920,7 @@ impl ChatStore for InMemoryChatStore {
         mut input: NewChatRunQueueItem,
     ) -> Result<ChatRunQueueItem, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::New)?;
         tables
             .chat.sessions
             .get(&input.session_id)
@@ -1955,6 +1998,7 @@ impl ChatStore for InMemoryChatStore {
         elevated: bool,
     ) -> Result<ChatRunQueueItem, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChatExecution, Requirement::ContractOnly)?;
         let (item, stored_org, _) = tables.chat.queue.get_mut(item_id).ok_or(StoreError::NotFound)?;
         if stored_org != org_id
             || item.session_id != session_id
@@ -1972,6 +2016,7 @@ impl ChatStore for InMemoryChatStore {
         input: NewBreakGlassGrant,
     ) -> Result<BreakGlassGrant, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::ContractOnly)?;
         if let Some((grant, _, _)) = tables
             .chat.break_glass
             .values()
@@ -2038,6 +2083,7 @@ impl ChatStore for InMemoryChatStore {
         if !can_act(memory_member(&tables, &input.org_id, &input.session_id, &input.requested_by_user_id).as_ref(), SessionAction::StartRun) {
             return Err(StoreError::NotFound);
         }
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::Write)?;
         if let Some((approval, _, _)) = tables
             .chat.approvals
             .values()
@@ -2134,6 +2180,7 @@ impl ChatStore for InMemoryChatStore {
         if !can_act(memory_member(&tables, org_id, session_id, resolver_user_id).as_ref(), action) {
             return Err(StoreError::NotFound);
         }
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChatExecution, if status == "denied" { Requirement::ContractOnly } else if risk == "high" { Requirement::New } else { Requirement::Write })?;
         let (approval, _, _) = tables
             .chat.approvals
             .get_mut(approval_id)
@@ -2164,6 +2211,7 @@ impl ChatStore for InMemoryChatStore {
             return Err(StoreError::Policy("attachment_size_invalid".into()));
         }
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::Write)?;
         tables
             .chat.sessions
             .get(&input.session_id)
@@ -2234,6 +2282,7 @@ impl ChatStore for InMemoryChatStore {
         now: i64,
     ) -> Result<ChatAttachment, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::Write)?;
         let (attachment, _) = tables
             .chat.attachments
             .get_mut(attachment_id)
@@ -2261,6 +2310,7 @@ impl ChatStore for InMemoryChatStore {
         now: i64,
     ) -> Result<ChatAttachment, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly)?;
         let (attachment, _) = tables
             .chat.attachments
             .get_mut(attachment_id)
@@ -2276,6 +2326,7 @@ impl ChatStore for InMemoryChatStore {
 
 fn session_from_row(row: &Row) -> Result<SharedSession, StoreError> {
     Ok(SharedSession {
+        contract_version: row.get("contract_version"),
         id: row.get("id"),
         org_id: row.get("org_id"),
         workspace_id: row.get("workspace_id"),
@@ -2353,7 +2404,7 @@ fn qualified_session_columns() -> String {
         .join(", ")
 }
 
-const SESSION_COLUMNS: &str = "id, org_id, workspace_id, title, status, created_by_user_id, created_at, updated_at, revision, policy_revision";
+const SESSION_COLUMNS: &str = "id, org_id, workspace_id, title, status, created_by_user_id, created_at, updated_at, revision, policy_revision, contract_version";
 pub(crate) const MEMBER_JOINS: &str = "FROM chat_session_memberships m JOIN chat_sessions s ON s.org_id=m.org_id AND s.id=m.session_id LEFT JOIN users u ON u.id=m.user_id LEFT JOIN org_memberships om ON om.org_id=s.org_id AND om.user_id=m.user_id LEFT JOIN workspace_memberships wm ON wm.org_id=s.org_id AND wm.workspace_id=s.workspace_id AND wm.user_id=m.user_id";
 
 pub(crate) fn effective_member_from_row(row: &Row) -> Result<Option<SessionMembership>, StoreError> {
@@ -2499,6 +2550,7 @@ impl PgStore {
         }
         let offboarded: bool = tx.query_one("SELECT EXISTS (SELECT 1 FROM authorization_audit_events WHERE org_id=$1 AND target_user_id=$2 AND action='org.member.offboarded' AND created_at >= $3)", &[&org_id, &user_id, &current.created_at]).await.map_err(|e| StoreError::Database(e.to_string()))?.get(0);
         if offboarded { return Err(StoreError::InvitationUnavailable); }
+        self.admit_chat(&tx, org_id, &current.session_id, FeatureKey::SharedChat, Requirement::Write).await?;
         let workspace_id: String = row.get("workspace_id");
         tx.execute("INSERT INTO chat_session_memberships (org_id,workspace_id,session_id,user_id,role,approver,guest,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) ON CONFLICT (session_id,user_id) DO NOTHING", &[&org_id,&workspace_id,&current.session_id,&user_id,&current.role.as_str(),&current.approver,&current.guest,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
         let invite_row = tx.query_one(&format!("UPDATE chat_session_invites SET status='accepted',accepted_by_user_id=$3,accepted_at=$4 WHERE org_id=$1 AND id=$2 RETURNING {INVITE_COLUMNS}"), &[&org_id,&current.id,&user_id,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
@@ -2513,6 +2565,16 @@ impl PgStore {
 
 #[async_trait]
 impl ChatStore for PgStore {
+    async fn admit_session_contract(&self, org: &str, session: &str) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let tx = self.scoped(&mut client, org).await?;
+        self.admit_chat(&tx, org, session, FeatureKey::SharedChat, Requirement::ContractOnly).await
+    }
+    async fn admit_session_write(&self, org: &str, session: &str) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let tx = self.scoped(&mut client, org).await?;
+        self.admit_chat(&tx, org, session, FeatureKey::SharedChat, Requirement::Write).await
+    }
     async fn effective_member(
         &self, org_id: &str, session_id: &str, user_id: &str,
     ) -> Result<Option<SessionMembership>, StoreError> {
@@ -2524,10 +2586,11 @@ impl ChatStore for PgStore {
     async fn create_session(&self, input: NewSharedSession) -> Result<SharedSession, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit(&tx, FeatureKey::SharedChat, &input.org_id, &input.workspace_id, admission::COLLAB_PROTOCOL_VERSION as i32, Requirement::New).await?;
         if let Some(row) = tx.query_opt(&format!("SELECT {SESSION_COLUMNS} FROM chat_sessions WHERE org_id = $1 AND created_operation_id = $2"), &[&input.org_id, &input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))? {
             return session_from_row(&row);
         }
-        let row = tx.query_one(&format!("INSERT INTO chat_sessions (id, org_id, workspace_id, title, status, created_by_user_id, created_at, updated_at, created_operation_id, last_operation_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$8) RETURNING {SESSION_COLUMNS}"), &[&input.id,&input.org_id,&input.workspace_id,&input.title,&format!("{:?}", input.status).to_lowercase(),&input.created_by_user_id,&input.now,&input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        let row = tx.query_one(&format!("INSERT INTO chat_sessions (id, org_id, workspace_id, title, status, created_by_user_id, created_at, updated_at, created_operation_id, last_operation_id, contract_version) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$8,$9) RETURNING {SESSION_COLUMNS}"), &[&input.id,&input.org_id,&input.workspace_id,&input.title,&format!("{:?}", input.status).to_lowercase(),&input.created_by_user_id,&input.now,&input.operation_id,&(admission::COLLAB_PROTOCOL_VERSION as i32)]).await.map_err(|e| StoreError::Database(e.to_string()))?;
         tx.execute("INSERT INTO chat_session_memberships (org_id, workspace_id, session_id, user_id, role, approver, guest, created_at, updated_at) VALUES ($1,$2,$3,$4,'owner',true,false,$5,$5)", &[&input.org_id,&input.workspace_id,&input.id,&input.created_by_user_id,&input.now]).await.map_err(|e| StoreError::Database(e.to_string()))?;
         tx.commit()
             .await
@@ -2538,6 +2601,7 @@ impl ChatStore for PgStore {
     async fn delete_session_data(&self, org_id: &str, session_id: &str) -> Result<(), StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly).await?;
         let deleted = tx
             .execute(
                 "DELETE FROM chat_sessions WHERE org_id=$1 AND id=$2 AND status='deleting'",
@@ -2592,6 +2656,7 @@ impl ChatStore for PgStore {
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?
             .ok_or(StoreError::NotFound)?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, if status == Some(SessionStatus::Deleting) { Requirement::ContractOnly } else if status == Some(SessionStatus::Active) && existing.get::<_, String>("status") == "importing" { Requirement::New } else { Requirement::Write }).await?;
         if existing.get::<_, String>("last_operation_id") == operation_id {
             return session_from_row(&existing);
         }
@@ -2697,6 +2762,7 @@ impl ChatStore for PgStore {
         let actor = pg_member(&tx, org_id, session_id, actor_user_id).await?;
         let existing = previous.as_ref().map(|row| SessionRole::parse(&row.get::<_, String>(0)).ok_or_else(|| StoreError::Corrupt("unknown session role".into()))).transpose()?;
         authorize_member_change(actor.as_ref(), existing, role)?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::Write).await?;
         if !pg_grant_allowed(&tx, org_id, session_id, user_id, role, guest).await? {
             return Err(StoreError::Policy("session role exceeds grant ceiling".into()));
         }
@@ -2739,6 +2805,7 @@ impl ChatStore for PgStore {
     ) -> Result<(), StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly).await?;
         tx.query_one(
             "SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
             &[&org_id, &session_id],
@@ -2784,6 +2851,7 @@ impl ChatStore for PgStore {
         tx.query_opt("SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE", &[&input.org_id,&input.session_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
         let actor = pg_member(&tx, &input.org_id, &input.session_id, &input.created_by_user_id).await?;
         authorize_member_change(actor.as_ref(), None, input.role)?;
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::New).await?;
         if let Some(target) = input.target_user_id.as_deref() {
             if !pg_grant_allowed(&tx, &input.org_id, &input.session_id, target, input.role, input.guest).await? {
                 return Err(StoreError::Policy("session role exceeds grant ceiling".into()));
@@ -2848,6 +2916,7 @@ impl ChatStore for PgStore {
     ) -> Result<ChatSessionInvite, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly).await?;
         let row = tx.query_opt(&format!("UPDATE chat_session_invites SET status='revoked' WHERE org_id=$1 AND session_id=$2 AND id=$3 AND status='pending' RETURNING {INVITE_COLUMNS}"), &[&org_id,&session_id,&invite_id]).await.map_err(|error| StoreError::Database(error.to_string()))?.ok_or(StoreError::InvitationUnavailable)?;
         tx.commit()
             .await
@@ -2861,6 +2930,7 @@ impl ChatStore for PgStore {
     ) -> Result<SessionEvent, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_chat(&tx, &input.org_id, &input.session_id, event_feature(&input), event_requirement(&input)).await?;
         tx.query_opt(
             "SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
             &[&input.org_id, &input.session_id],
@@ -2907,6 +2977,8 @@ impl ChatStore for PgStore {
         if !can_act(pg_member(&tx, &input.org_id, &input.session_id, &holder).await?.as_ref(), SessionAction::StartRun) {
             return Err(StoreError::NotFound);
         }
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, event_requirement(&input)).await?;
+        if input.kind.starts_with("message.") { self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::Write).await?; }
         if let Some(row)=tx.query_opt(&format!("SELECT {EVENT_COLUMNS} FROM chat_session_events WHERE org_id=$1 AND session_id=$2 AND operation_id=$3"), &[&input.org_id,&input.session_id,&input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))? { return replay_event(event_from_row(&row), &input); }
         if input.kind == "message.created" {
             if let Some(message_id) = input
@@ -2979,6 +3051,7 @@ impl ChatStore for PgStore {
     async fn acquire_run_lease(&self, input: NewChatRunLease) -> Result<ChatRunLease, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::New).await?;
         tx.query_opt(
             "SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
             &[&input.org_id, &input.session_id],
@@ -3036,6 +3109,7 @@ impl ChatStore for PgStore {
                 "queue executor cannot start runs".into(),
             ));
         }
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::New).await?;
         let item = tx.query_opt(&format!("SELECT {QUEUE_COLUMNS} FROM chat_run_queue WHERE org_id=$1 AND session_id=$2 AND id=$3 FOR UPDATE"), &[&input.org_id,&input.session_id,&item_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
         let requested = queue_from_row(&item);
         let requester = pg_member(
@@ -3133,6 +3207,7 @@ impl ChatStore for PgStore {
     ) -> Result<ChatRunLease, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChatExecution, Requirement::Write).await?;
         tx.query_opt("SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE", &[&org_id,&session_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
         if !can_act(pg_member(&tx, org_id, session_id, holder_user_id).await?.as_ref(), SessionAction::StartRun) {
             tx.execute("UPDATE chat_run_leases SET status='failed',updated_at=$7 WHERE org_id=$1 AND session_id=$2 AND id=$3 AND holder_user_id=$4 AND holder_device_id=$5 AND token_hash=$6 AND status IN ('active','paused')", &[&org_id,&session_id,&lease_id,&holder_user_id,&holder_device_id,&token_hash,&now]).await.map_err(|e| StoreError::Database(e.to_string()))?;
@@ -3158,6 +3233,7 @@ impl ChatStore for PgStore {
     ) -> Result<ChatRunLease, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChatExecution, Requirement::ContractOnly).await?;
         tx.query_opt("SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE", &[&org_id,&session_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
         if !can_act(pg_member(&tx, org_id, session_id, holder_user_id).await?.as_ref(), SessionAction::StartRun) {
             tx.execute("UPDATE chat_run_leases SET status='failed',updated_at=$7 WHERE org_id=$1 AND session_id=$2 AND id=$3 AND holder_user_id=$4 AND holder_device_id=$5 AND token_hash=$6 AND status IN ('active','paused')", &[&org_id,&session_id,&lease_id,&holder_user_id,&holder_device_id,&token_hash,&now]).await.map_err(|e| StoreError::Database(e.to_string()))?;
@@ -3211,6 +3287,7 @@ impl ChatStore for PgStore {
     ) -> Result<ChatRunQueueItem, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::New).await?;
         let boundary: i64 = tx.query_opt(
             "SELECT next_sequence-1 AS context_sequence FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
             &[&input.org_id, &input.session_id],
@@ -3257,6 +3334,7 @@ impl ChatStore for PgStore {
     ) -> Result<ChatRunQueueItem, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChatExecution, Requirement::ContractOnly).await?;
         let row = tx.query_opt(&format!("UPDATE chat_run_queue SET status='cancelled' WHERE org_id=$1 AND session_id=$2 AND id=$3 AND status='queued' AND ($5 OR requested_by_user_id=$4) RETURNING {QUEUE_COLUMNS}"), &[&org_id,&session_id,&item_id,&actor_user_id,&elevated]).await.map_err(|error| StoreError::Database(error.to_string()))?.ok_or(StoreError::NotFound)?;
         tx.commit()
             .await
@@ -3270,6 +3348,7 @@ impl ChatStore for PgStore {
     ) -> Result<BreakGlassGrant, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::ContractOnly).await?;
         if let Some(row) = tx
             .query_opt(
                 &format!("SELECT {BREAK_GLASS_COLUMNS} FROM break_glass_grants WHERE org_id=$1 AND session_id=$2 AND operation_id=$3"),
@@ -3327,6 +3406,7 @@ impl ChatStore for PgStore {
         if !can_act(pg_member(&tx, &input.org_id, &input.session_id, &input.requested_by_user_id).await?.as_ref(), SessionAction::StartRun) {
             return Err(StoreError::NotFound);
         }
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::Write).await?;
         if let Some(row) = tx.query_opt(&format!("SELECT {APPROVAL_COLUMNS} FROM chat_approval_requests WHERE org_id=$1 AND session_id=$2 AND operation_id=$3"), &[&input.org_id,&input.session_id,&input.operation_id]).await.map_err(|error| StoreError::Database(error.to_string()))? {
             return Ok(approval_from_row(&row));
         }
@@ -3391,6 +3471,7 @@ impl ChatStore for PgStore {
         if !can_act(pg_member(&tx, org_id, session_id, resolver_user_id).await?.as_ref(), action) {
             return Err(StoreError::NotFound);
         }
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChatExecution, if status == "denied" { Requirement::ContractOnly } else if current.risk == "high" { Requirement::New } else { Requirement::Write }).await?;
         if current.status == "pending" && current.expires_at <= now {
             tx.execute("UPDATE chat_approval_requests SET status='expired',revision=revision+1 WHERE org_id=$1 AND id=$2", &[&org_id,&approval_id]).await.map_err(|error| StoreError::Database(error.to_string()))?;
             tx.commit()
@@ -3417,6 +3498,7 @@ impl ChatStore for PgStore {
         }
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::Write).await?;
         let row = tx.query_one(&format!("INSERT INTO chat_attachments (id,org_id,workspace_id,session_id,object_key,file_name,media_type,byte_length,sha256,status,created_by_user_id,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11,$11) RETURNING {ATTACHMENT_COLUMNS}"), &[&input.id,&input.org_id,&input.workspace_id,&input.session_id,&input.object_key,&input.file_name,&input.media_type,&input.byte_length,&input.sha256,&input.created_by_user_id,&input.now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
         tx.commit()
             .await
@@ -3463,6 +3545,7 @@ impl ChatStore for PgStore {
     ) -> Result<ChatAttachment, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::Write).await?;
         let row = tx.query_opt(&format!("UPDATE chat_attachments SET status='available',event_id=$4,updated_at=$5 WHERE org_id=$1 AND session_id=$2 AND id=$3 AND status='pending' RETURNING {ATTACHMENT_COLUMNS}"), &[&org_id,&session_id,&attachment_id,&event_id,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
         if let Some(row) = row {
             tx.commit()
@@ -3487,6 +3570,7 @@ impl ChatStore for PgStore {
     ) -> Result<ChatAttachment, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly).await?;
         let row = tx.query_opt(&format!("UPDATE chat_attachments SET status='deleted',updated_at=$4 WHERE org_id=$1 AND session_id=$2 AND id=$3 AND status<>'deleted' RETURNING {ATTACHMENT_COLUMNS}"), &[&org_id,&session_id,&attachment_id,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?.ok_or(StoreError::NotFound)?;
         tx.commit()
             .await
@@ -3511,7 +3595,7 @@ mod tests {
 
     #[test]
     fn session_discovery_qualifies_whole_columns_without_corrupting_identifiers() {
-        assert_eq!(qualified_session_columns(), "s.id, s.org_id, s.workspace_id, s.title, s.status, s.created_by_user_id, s.created_at, s.updated_at, s.revision, s.policy_revision");
+        assert_eq!(qualified_session_columns(), "s.id, s.org_id, s.workspace_id, s.title, s.status, s.created_by_user_id, s.created_at, s.updated_at, s.revision, s.policy_revision, s.contract_version");
     }
 
     fn session(operation_id: &str) -> NewSharedSession {

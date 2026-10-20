@@ -15,6 +15,8 @@ pub enum FeatureKey {
 }
 
 impl FeatureKey {
+    // OrgGovernance is client presentation only; EnvironmentBinding is
+    // enforced by the Host (P1), which owns its routes and placements.
     pub const ALL: [Self; 5] = [Self::SharedChat, Self::SharedChatExecution,
         Self::CanvasCollaboration, Self::OrgGovernance, Self::EnvironmentBinding];
 

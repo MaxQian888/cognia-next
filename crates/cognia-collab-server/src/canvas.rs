@@ -95,6 +95,7 @@ impl CanvasAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CanvasDocumentRecord {
+    pub contract_version: i32,
     pub id: String,
     pub org_id: String,
     pub workspace_id: String,

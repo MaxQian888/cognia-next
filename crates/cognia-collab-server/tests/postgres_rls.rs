@@ -2278,3 +2278,247 @@ async fn membership_mutations_recheck_actor_and_target_after_the_standing_barrie
         database.cleanup().await;
     }
 }
+
+fn admission_policy(key: cognia_collab_server::rollout::FeatureKey) -> cognia_collab_server::rollout::FeaturePolicy {
+    use cognia_collab_server::rollout::{FeaturePolicy, Phase};
+    FeaturePolicy {
+        feature_key: key, schema_version: 1, revision: 0, phase: Phase::General, kill: false,
+        allow_org_ids: vec![], deny_org_ids: vec![], deny_workspace_ids: vec![], percentage_basis_points: 10000,
+        cohort_key: None, cohort_salt: "test".into(), hash_version: 1, minimum_contract_version: 2, requires: vec![],
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
+async fn queue_claim_reads_committed_policy_after_waiting_on_session_lock_and_kill_refuses_claim() {
+    use cognia_collab_server::{chat_store::{ChatStore, NewChatRunQueueItem}, rollout::{FeatureKey, FeatureReason, Phase}, store::StoreError};
+    let (database, store, owner, _, _) = standing_fixture().await;
+    let store = std::sync::Arc::new(store);
+    store.enqueue_run_input(NewChatRunQueueItem {
+        id: "admission_queue".into(), org_id: owner.org_id.clone(), workspace_id: owner.workspace_id.clone(),
+        session_id: "standing_session".into(), requested_by_user_id: owner.user_id.clone(),
+        payload: serde_json::json!({"messageId":"m"}), now: 2, operation_id: "admission_queue".into(),
+    }).await.unwrap();
+    let (mut locker, connection) = tokio_postgres::connect(&database.url, NoTls).await.unwrap();
+    let task = tokio::spawn(async move { connection.await.unwrap() });
+    let tx = locker.transaction().await.unwrap();
+    tx.query_one("SELECT id FROM chat_sessions WHERE org_id=$1 AND id='standing_session' FOR UPDATE", &[&owner.org_id]).await.unwrap();
+    let claimant = store.clone();
+    let lease = standing_lease(&owner, &owner.user_id);
+    let claim = tokio::spawn(async move { claimant.claim_run_queue(lease, "admission_queue", false).await });
+    // Observe a real lock wait, rather than relying on a scheduler delay.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            tx.batch_execute("SELECT pg_stat_clear_snapshot()").await.unwrap();
+            let waiting: bool = tx.query_one(
+                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock' AND query LIKE '%chat_sessions%')", &[],
+            ).await.unwrap().get(0);
+            if waiting { break; }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await.expect("claim must be blocked on the held session lock");
+    let mut policy = admission_policy(FeatureKey::SharedChatExecution);
+    policy.phase = Phase::Paused;
+    store.apply_feature_policy(policy.clone(), 0, "pause-during-claim", "test", "operator").await.unwrap();
+    tx.commit().await.unwrap();
+    let error = tokio::time::timeout(std::time::Duration::from_secs(5), claim).await.unwrap().unwrap().unwrap_err();
+    assert!(matches!(error, StoreError::FeatureUnavailable(d) if d.reason == Some(FeatureReason::FeaturePaused)));
+    assert_eq!(store.list_run_queue(&owner.org_id, "standing_session").await.unwrap()[0].status, "queued");
+    policy.kill = true;
+    store.apply_feature_policy(policy, 1, "kill-queue", "test", "operator").await.unwrap();
+    let error = store.claim_run_queue(standing_lease(&owner, &owner.user_id), "admission_queue", false).await.unwrap_err();
+    assert!(matches!(error, StoreError::FeatureUnavailable(d) if d.reason == Some(FeatureReason::FeatureKilled)));
+    drop(locker);
+    task.await.unwrap();
+    drop(store);
+    database.cleanup().await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
+async fn chat_and_canvas_contracts_are_pinned_and_old_clients_can_read_but_cannot_mutate() {
+    use std::{sync::Arc, time::Duration};
+    use axum::{body::{Body, to_bytes}, http::{Request, StatusCode}};
+    use tower::ServiceExt;
+    use cognia_collab_server::{AppState, router, chat_store::ChatStore, canvas_store::{CanvasStore, NewCanvasDocument}};
+    use cognia_tenant_auth::{grant::{GrantSigner, GrantClaims}, oidc::TestAuthenticator, UserId, OrgId};
+    let (database, store, owner, _, _) = standing_fixture().await;
+    let store = std::sync::Arc::new(store);
+    let session = store.admin_session(&owner.org_id, "standing_session").await.unwrap();
+    assert_eq!(session.contract_version, 2);
+    let document = store.create_document(NewCanvasDocument {
+        id: "pinned_canvas".into(), org_id: owner.org_id.clone(), workspace_id: owner.workspace_id.clone(),
+        title: "Pinned".into(), language: "text".into(), created_by_user_id: owner.user_id.clone(), created_at: 1, operation_id: "pinned_canvas".into(),
+    }).await.unwrap();
+    assert_eq!(document.contract_version, 2);
+    let (admin, connection) = tokio_postgres::connect(&database.url, NoTls).await.unwrap();
+    let task = tokio::spawn(async move { connection.await.unwrap() });
+    admin.batch_execute("UPDATE chat_sessions SET contract_version=3 WHERE id='standing_session'; UPDATE canvas_documents SET contract_version=3 WHERE id='pinned_canvas'").await.unwrap();
+    let signer = GrantSigner::new(&[9;32]).unwrap();
+    let claims = GrantClaims::issue(UserId::parse(&owner.user_id).unwrap(), OrgId::parse(&owner.org_id).unwrap(), None, None, Duration::from_secs(300)).unwrap();
+    let bearer = format!("Bearer {}", signer.sign(&claims).unwrap());
+    let state = AppState::new(store.clone(), signer, Arc::new(TestAuthenticator))
+        .with_chat_store(store.clone()).with_canvas_store(store.clone());
+    for (path, feature) in [("chat-sessions/standing_session", "shared-chat"), ("canvas-documents/pinned_canvas", "canvas-collaboration")] {
+        for (method, protocol, expected) in [("GET", 2, StatusCode::OK), ("PATCH", 2, StatusCode::FORBIDDEN), ("PATCH", 3, StatusCode::OK)] {
+            let body = serde_json::json!({"title":"Edited", "operationId":"edit", "baseRevision":1});
+            let response = router(state.clone()).oneshot(Request::builder().method(method).uri(format!("/v1/orgs/{}/{path}",owner.org_id))
+                .header("authorization", &bearer).header("x-cognia-collab-protocol", protocol).header("content-type", "application/json")
+                .body(Body::from(body.to_string())).unwrap()).await.unwrap();
+            let status = response.status();
+            let body: serde_json::Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+            assert_eq!(status, expected, "{method} {path}: {body}");
+            if status == StatusCode::FORBIDDEN {
+                assert_eq!(body, serde_json::json!({"error":"feature_unavailable", "feature":feature, "state":"existing-only", "reason":"client_contract_unsupported"}));
+            } else { assert_eq!(body["contractVersion"], 3); }
+        }
+    }
+    drop((admin, state, store));
+    task.await.unwrap();
+    database.cleanup().await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
+async fn admission_reads_root_and_transitive_prerequisites_in_one_statement_snapshot() {
+    use cognia_collab_server::{chat_store::{ChatStore, NewChatRunQueueItem}, rollout::{FeatureKey, FeatureReason, Phase}, store::StoreError};
+    let (database, store, owner, _, _) = standing_fixture().await;
+    let store = std::sync::Arc::new(store);
+    store.enqueue_run_input(NewChatRunQueueItem {
+        id:"snapshot_queue".into(),org_id:owner.org_id.clone(),workspace_id:owner.workspace_id.clone(),session_id:"standing_session".into(),
+        requested_by_user_id:owner.user_id.clone(),payload:serde_json::json!({}),now:2,operation_id:"snapshot_queue".into(),
+    }).await.unwrap();
+    let mut root = admission_policy(FeatureKey::SharedChatExecution);
+    root.requires = vec![FeatureKey::SharedChat];
+    let mut middle = admission_policy(FeatureKey::SharedChat);
+    middle.requires = vec![FeatureKey::CanvasCollaboration];
+    let mut leaf = admission_policy(FeatureKey::CanvasCollaboration);
+    leaf.phase = Phase::Paused;
+    for policy in [root, middle, leaf] {
+        let operation = policy.feature_key.as_str();
+        store.apply_feature_policy(policy,0,operation,"test","operator").await.unwrap();
+    }
+    let (admin, connection) = tokio_postgres::connect(&database.url,NoTls).await.unwrap();
+    let connection_task = tokio::spawn(async move { connection.await.unwrap() });
+    // Pause the root row while it is being returned. The old per-row reader
+    // then sees the new leaf on its next statement; a single statement keeps
+    // the pre-flip leaf even though the writer commits before this row returns.
+    admin.batch_execute(
+        "ALTER TABLE deployment_feature_policies RENAME TO policy_snapshot_backing;
+         CREATE FUNCTION policy_snapshot_gate(value jsonb, feature text) RETURNS jsonb LANGUAGE plpgsql VOLATILE AS $$
+         BEGIN
+           IF feature='shared-chat-execution' THEN
+             PERFORM pg_advisory_lock_shared(74127123);
+             PERFORM pg_advisory_unlock_shared(74127123);
+           END IF;
+           RETURN value;
+         END $$;
+         CREATE VIEW deployment_feature_policies AS
+           SELECT feature_key, policy_snapshot_gate(document,feature_key) AS document FROM policy_snapshot_backing;
+         SELECT pg_advisory_lock(74127123);"
+    ).await.unwrap();
+    let claimant = store.clone();
+    let lease = standing_lease(&owner,&owner.user_id);
+    let claim = tokio::spawn(async move { claimant.claim_run_queue(lease,"snapshot_queue",false).await });
+    tokio::time::timeout(std::time::Duration::from_secs(5),async {
+        loop {
+            let blocked: bool = admin.query_one(
+                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event='advisory')",&[],
+            ).await.unwrap().get(0);
+            if blocked { break; }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await.expect("root policy SELECT must reach the controlled interleaving");
+    // Atomic flip: both before and after deny admission. Only the hybrid
+    // root=general / leaf=general permits a claim.
+    admin.batch_execute(
+        "BEGIN;
+         UPDATE policy_snapshot_backing SET document=jsonb_set(document,'{phase}','\"paused\"') WHERE feature_key='shared-chat-execution';
+         UPDATE policy_snapshot_backing SET document=jsonb_set(document,'{phase}','\"general\"') WHERE feature_key='canvas-collaboration';
+         COMMIT;
+         SELECT pg_advisory_unlock(74127123);"
+    ).await.unwrap();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5),claim).await.unwrap().unwrap();
+    assert!(matches!(result,Err(StoreError::FeatureUnavailable(d)) if d.reason == Some(FeatureReason::PrerequisiteUnavailable)),"claim must consume the pre-flip snapshot");
+    assert_eq!(store.list_run_queue(&owner.org_id,"standing_session").await.unwrap()[0].status,"queued");
+    drop((admin,store));
+    connection_task.await.unwrap();
+    database.cleanup().await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
+async fn killed_file_queue_skips_mkdir_and_delivers_list_stat_and_read_results_with_contract_checks() {
+    use std::{sync::Arc,time::Duration};
+    use axum::{body::{Body,to_bytes},http::{Request,StatusCode}};
+    use tower::ServiceExt;
+    use cognia_collab_server::{AppState,router,session_files::{SessionFileStore,FileHost,FileRequest,FileOp,RequestStatus,HOST_TOKEN_HEADER}};
+    use cognia_tenant_auth::{grant::GrantSigner,oidc::TestAuthenticator};
+    let (database, store, owner, _, _) = standing_fixture().await;
+    let store = Arc::new(store);
+    let host_token = "file-read-drain-token";
+    use sha2::Digest;
+    let hash = hex::encode(sha2::Sha256::digest(host_token.as_bytes()));
+    store.put_host(FileHost { org_id:owner.org_id.clone(),workspace_id:owner.workspace_id.clone(),session_id:"standing_session".into(),registered_by:owner.user_id.clone(),
+        host_token_hash:hash.clone(),host_label:"Host".into(),registered_at:1,last_seen_at:None }).await.unwrap();
+    store.put_grant(cognia_collab_server::session_files::FileGrant {
+        id:"g".into(),org_id:owner.org_id.clone(),workspace_id:owner.workspace_id.clone(),session_id:"standing_session".into(),label:None,user_ids:None,
+        min_role:cognia_collab_server::chat::SessionRole::Viewer,permissions:vec!["read".into(),"download".into(),"write".into()],
+        paths:vec![cognia_collab_server::session_files::GrantPath {path:"/workspace".into(),is_dir:true}],status:"active".into(),expires_at:1000,revoked_at:None,
+        policy_revision:1,created_by:owner.user_id.clone(),created_at:1,updated_at:1,
+    }).await.unwrap();
+    let mut pending = FileRequest { id:"blocked_mkdir".into(),org_id:owner.org_id.clone(),workspace_id:owner.workspace_id.clone(),session_id:"standing_session".into(),grant_id:"g".into(),
+        requester_user_id:owner.user_id.clone(),requester_role:cognia_collab_server::chat::SessionRole::Owner,op:FileOp::Mkdir,path:"/workspace/src/new".into(),dest_path:None,upload:None,
+        status:RequestStatus::Pending,result:None,result_object:None,error:None,created_at:2,claimed_at:None,completed_at:None,expires_at:1000 };
+    store.create_request(pending.clone()).await.unwrap();
+    let mut policy = admission_policy(cognia_collab_server::rollout::FeatureKey::SharedChat);
+    policy.kill = true;
+    store.apply_feature_policy(policy,0,"kill-file-queue","test","operator").await.unwrap();
+    let mut state = AppState::new(store.clone(),GrantSigner::new(&[9;32]).unwrap(),Arc::new(TestAuthenticator))
+        .with_chat_store(store.clone()).with_session_files_store(store.clone());
+    state.now = Arc::new(|| 10);
+    let send = |state: AppState, path: String, body: Body, json: bool| {
+        let host_token = host_token.to_owned();
+        async move {
+            let response = router(state).oneshot(Request::builder().method(if json {"POST"} else {"PUT"}).uri(path)
+                .header("x-cognia-collab-protocol","2").header(HOST_TOKEN_HEADER,host_token)
+                .header("content-type",if json {"application/json"} else {"application/octet-stream"}).body(body).unwrap()).await.unwrap();
+            let status = response.status();
+            (status,to_bytes(response.into_body(),usize::MAX).await.unwrap())
+        }
+    };
+    for (index,op) in [FileOp::List,FileOp::Stat,FileOp::Read].into_iter().enumerate() {
+        pending.id = format!("drain_{index}"); pending.op=op; pending.created_at=3+index as i64;
+        store.create_request(pending.clone()).await.unwrap();
+        let claimed = store.claim_next(&owner.org_id,"standing_session",&hash,10).await.unwrap().unwrap();
+        assert_eq!(claimed.id,pending.id);
+        let base = format!("/v1/orgs/{}/chat-sessions/standing_session/file-host/requests/{}",owner.org_id,claimed.id);
+        let outcome = if op == FileOp::Read {
+            let (status,bytes) = send(state.clone(),format!("{base}/result"),Body::from("a"),false).await;
+            assert_eq!(status,StatusCode::NO_CONTENT,"{}",String::from_utf8_lossy(&bytes));
+            serde_json::json!({"ok":true,"object":{"byteLength":1,"mediaType":"text/plain"}})
+        } else { serde_json::json!({"ok":true,"result":{"entries":[]}}) };
+        let (status,bytes) = send(state.clone(),format!("{base}/complete"),Body::from(outcome.to_string()),true).await;
+        assert_eq!(status,StatusCode::NO_CONTENT,"{}",String::from_utf8_lossy(&bytes));
+        let done = store.request(&owner.org_id,"standing_session",&claimed.id).await.unwrap().unwrap();
+        assert_eq!(done.status,RequestStatus::Done);
+    }
+    assert!(store.claim_next(&owner.org_id,"standing_session",&hash,10).await.unwrap().is_none());
+    assert_eq!(store.request(&owner.org_id,"standing_session","blocked_mkdir").await.unwrap().unwrap().status,RequestStatus::Pending);
+    // Delivering a read is rollout-exempt, but still mutates stored state and
+    // must respect the pinned contract on both bytes and completion routes.
+    pending.id="old_reader".into(); pending.op=FileOp::Read; pending.created_at=8;
+    store.create_request(pending.clone()).await.unwrap();
+    store.claim_next(&owner.org_id,"standing_session",&hash,10).await.unwrap().unwrap();
+    let (admin,connection)=tokio_postgres::connect(&database.url,NoTls).await.unwrap();
+    let connection_task=tokio::spawn(async move {connection.await.unwrap()});
+    admin.batch_execute("UPDATE chat_sessions SET contract_version=3 WHERE id='standing_session'").await.unwrap();
+    let base=format!("/v1/orgs/{}/chat-sessions/standing_session/file-host/requests/old_reader",owner.org_id);
+    let (status,bytes)=send(state.clone(),format!("{base}/result"),Body::from("a"),false).await;
+    assert_eq!(status,StatusCode::FORBIDDEN);
+    let body:serde_json::Value=serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["reason"],"client_contract_unsupported");
+    drop((admin,state,store));
+    tokio::time::timeout(Duration::from_secs(5),connection_task).await.unwrap().unwrap();
+    database.cleanup().await;
+}

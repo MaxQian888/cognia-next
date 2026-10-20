@@ -130,14 +130,14 @@ impl AppState {
             internal_service_credential_sha256: None,
             internal_service_credential_scopes: None,
             store,
-            chat_store,
+            chat_store: chat_store.clone(),
             chat_hub: Arc::new(ChatHub::default()),
             chat_attachments: Arc::new(
                 crate::chat_attachment_store::ObjectStoreChatAttachments::in_memory(),
             ),
             chat_metrics: Arc::new(crate::chat_metrics::ChatMetrics::default()),
             shared_chat_enabled: true,
-            canvas_store: Arc::new(InMemoryCanvasStore::new()),
+            canvas_store: Arc::new(InMemoryCanvasStore::from_tables(chat_store.tables.clone())),
             canvas_hub: Arc::new(CanvasHub::default()),
             canvas_enabled: true,
             feed_hub: Arc::new(crate::feed::FeedHub::default()),
@@ -321,7 +321,7 @@ pub fn router(state: AppState) -> Router {
     } else {
         routes
     };
-    routes.with_state(state)
+    routes.layer(axum::middleware::from_fn_with_state(state.clone(), crate::admission::middleware)).with_state(state)
 }
 
 #[derive(Debug, Serialize)]
@@ -348,7 +348,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
         rls: state.store.rls_status(),
-        collab_protocol_version: 2,
+        collab_protocol_version: crate::admission::COLLAB_PROTOCOL_VERSION,
         features,
     })
 }

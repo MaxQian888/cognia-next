@@ -33,7 +33,7 @@ const LEASE_TOKEN_TTL_MS: i64 = 5 * 60_000;
 const LEASE_HEARTBEAT_TTL_MS: i64 = 90_000;
 const ATTACHMENT_TICKET_TTL_MS: i64 = 60_000;
 pub(crate) const MAX_ATTACHMENT_BYTES: i64 = 52_428_800;
-const SHARED_CHAT_PROTOCOL_VERSION: u32 = 2;
+const SHARED_CHAT_PROTOCOL_VERSION: u32 = crate::admission::COLLAB_PROTOCOL_VERSION;
 const MAX_PENDING_TICKETS: usize = 8_192;
 
 #[derive(Debug, Clone)]
@@ -325,6 +325,7 @@ impl IntoResponse for ChatFailure {
                 StatusCode::GONE,
                 serde_json::json!({"error":"expired or revoked"}),
             ),
+            Self::Store(StoreError::FeatureUnavailable(decision)) => return crate::admission::response(decision),
             Self::Store(StoreError::Policy(reason)) => (
                 StatusCode::FORBIDDEN,
                 serde_json::json!({"error":"forbidden","reason":reason}),
@@ -337,7 +338,11 @@ impl IntoResponse for ChatFailure {
                 )
             }
         };
-        (status, Json(body)).into_response()
+        let mut response = (status, Json(body)).into_response();
+        if status == StatusCode::NOT_FOUND {
+            response.headers_mut().insert("cache-control", "private, no-store".parse().expect("static header"));
+        }
+        response
     }
 }
 
@@ -347,6 +352,8 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
         .and_then(|value| value.to_str().ok())
 }
 
+/// Legacy 426 floor: RFC 9110 §15.5.22 describes protocol upgrades; plan
+/// A18 records this version-header use as a known wire-compatibility deviation.
 pub(crate) fn require_shared_chat_protocol(headers: &HeaderMap) -> Result<(), ChatFailure> {
     let protocol_version = headers
         .get("x-cognia-collab-protocol")
@@ -2666,6 +2673,9 @@ async fn issue_attachment_ticket(
         .get_attachment(org_id, session_id, attachment_id)
         .await
         .map_err(ChatFailure::Store)?;
+    if action == AttachmentTicketAction::Upload {
+        state.chat_store.admit_session_write(org_id, session_id).await.map_err(ChatFailure::Store)?;
+    }
     if action == AttachmentTicketAction::Upload && attachment.status != "pending" {
         return Err(ChatFailure::Store(StoreError::Conflict(
             serde_json::to_value(&attachment).unwrap_or_default(),
@@ -2756,6 +2766,9 @@ async fn authorize_attachment_ticket(
     };
     if !authorize_session_action(Some(&pair.1), permission, pair.0.policy_revision).allowed {
         return Err(ChatFailure::Forbidden);
+    }
+    if action == AttachmentTicketAction::Upload {
+        state.chat_store.admit_session_write(org_id, &ticket.session_id).await.map_err(ChatFailure::Store)?;
     }
     let attachment = state
         .chat_store
@@ -2951,6 +2964,7 @@ mod tests {
     fn ordinary_posts_bind_the_author_and_only_explicit_imports_preserve_roles() {
         use super::*;
         let mut session = crate::chat::SharedSession {
+            contract_version: crate::admission::COLLAB_PROTOCOL_VERSION as i32,
             id: "session".into(),
             org_id: "org".into(),
             workspace_id: "workspace".into(),

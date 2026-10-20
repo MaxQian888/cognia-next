@@ -50,6 +50,8 @@ use sha2::{Digest, Sha256};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
+use crate::admission::{self, Requirement};
+use crate::rollout::FeatureKey;
 use crate::api::AppState;
 use crate::chat::{authorize_session_action, SessionAction, SessionMembership, SessionRole, SessionStatus};
 use crate::chat_api::{token_hash, visible, ChatFailure, MAX_ATTACHMENT_BYTES};
@@ -640,15 +642,19 @@ impl InMemorySessionFileStore {
     fn grants_read(&self) -> parking_lot::MappedRwLockReadGuard<'_, HashMap<(String, String), FileGrant>> {
         parking_lot::RwLockReadGuard::map(self.tables.read(), |t| &t.session_files.grants)
     }
-    fn grants_mut(&self) -> parking_lot::MappedRwLockWriteGuard<'_, HashMap<(String, String), FileGrant>> {
-        parking_lot::RwLockWriteGuard::map(self.tables.write(), |t| &mut t.session_files.grants)
-    }
     fn requests(&self) -> parking_lot::MappedRwLockReadGuard<'_, HashMap<String, FileRequest>> {
         parking_lot::RwLockReadGuard::map(self.tables.read(), |t| &t.session_files.requests)
     }
     fn requests_mut(&self) -> parking_lot::MappedRwLockWriteGuard<'_, HashMap<String, FileRequest>> {
         parking_lot::RwLockWriteGuard::map(self.tables.write(), |t| &mut t.session_files.requests)
     }
+}
+
+/// Skip only rollout refusals for content-changing work. Contract mismatches
+/// and retryable policy-store failures remain errors, including on read claims.
+fn skip_rollout_blocked_write(error: &StoreError, op: FileOp) -> bool {
+    op.changes() && matches!(error, StoreError::FeatureUnavailable(decision)
+        if matches!(decision.state, crate::rollout::FeatureState::ReadOnly | crate::rollout::FeatureState::Off))
 }
 
 fn request_action(op: FileOp) -> SessionAction {
@@ -716,7 +722,9 @@ fn key(org_id: &str, session_id: &str) -> (String, String) {
 #[async_trait]
 impl SessionFileStore for InMemorySessionFileStore {
     async fn put_host(&self, host: FileHost) -> Result<FileHost, StoreError> {
-        self.hosts_mut()
+        let mut tables = self.tables.write();
+        admission::memory_chat(&tables, &host.org_id, &host.session_id, FeatureKey::SharedChat, Requirement::Write)?;
+        tables.session_files.hosts
             .insert(key(&host.org_id, &host.session_id), host.clone());
         Ok(host)
     }
@@ -738,8 +746,10 @@ impl SessionFileStore for InMemorySessionFileStore {
         session_id: &str,
         now: i64,
     ) -> Result<Vec<String>, StoreError> {
-        self.hosts_mut().remove(&key(org_id, session_id));
-        for grant in self.grants_mut().values_mut() {
+        let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly)?;
+        tables.session_files.hosts.remove(&key(org_id, session_id));
+        for grant in tables.session_files.grants.values_mut() {
             if grant.org_id == org_id
                 && grant.session_id == session_id
                 && grant.revoked_at.is_none()
@@ -750,7 +760,7 @@ impl SessionFileStore for InMemorySessionFileStore {
             }
         }
         let mut keys = Vec::new();
-        for request in self.requests_mut().values_mut() {
+        for request in tables.session_files.requests.values_mut() {
             if request.org_id == org_id
                 && request.session_id == session_id
                 && request.status.is_open()
@@ -764,7 +774,9 @@ impl SessionFileStore for InMemorySessionFileStore {
     }
 
     async fn put_grant(&self, grant: FileGrant) -> Result<FileGrant, StoreError> {
-        let mut grants = self.grants_mut();
+        let mut tables = self.tables.write();
+        admission::memory_chat(&tables, &grant.org_id, &grant.session_id, FeatureKey::SharedChat, Requirement::Write)?;
+        let grants = &mut tables.session_files.grants;
         let id = key(&grant.org_id, &grant.id);
         if let Some(existing) = grants.get(&id) {
             if existing.session_id != grant.session_id {
@@ -789,7 +801,9 @@ impl SessionFileStore for InMemorySessionFileStore {
         grant_id: &str,
         now: i64,
     ) -> Result<bool, StoreError> {
-        let mut grants = self.grants_mut();
+        let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly)?;
+        let grants = &mut tables.session_files.grants;
         match grants.get_mut(&key(org_id, grant_id)) {
             Some(grant) if grant.session_id == session_id => {
                 if grant.revoked_at.is_some() {
@@ -831,7 +845,9 @@ impl SessionFileStore for InMemorySessionFileStore {
     }
 
     async fn create_request(&self, request: FileRequest) -> Result<FileRequest, StoreError> {
-        self.requests_mut()
+        let mut tables = self.tables.write();
+        admission::memory_chat(&tables, &request.org_id, &request.session_id, FeatureKey::SharedChat, if request.op.changes() { Requirement::Write } else { Requirement::ContractOnly })?;
+        tables.session_files.requests
             .insert(request.id.clone(), request.clone());
         Ok(request)
     }
@@ -872,7 +888,9 @@ impl SessionFileStore for InMemorySessionFileStore {
         request_id: &str,
         now: i64,
     ) -> Result<FileRequest, StoreError> {
-        let mut requests = self.requests_mut();
+        let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::Write)?;
+        let requests = &mut tables.session_files.requests;
         let request = requests
             .get_mut(request_id)
             .filter(|request| request.org_id == org_id && request.session_id == session_id)
@@ -902,10 +920,18 @@ impl SessionFileStore for InMemorySessionFileStore {
             memory_revoke_member_files(&mut tables, org_id, session_id, &host.registered_by, registrant.as_ref(), now);
             return Ok(None);
         }
+        let mut skipped = Vec::<String>::new();
         loop {
             let next = tables.session_files.requests.values().filter(|r| r.org_id == org_id && r.session_id == session_id
-                && r.status_at(now) == RequestStatus::Pending).min_by(|a,b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id))).cloned();
+                && r.status_at(now) == RequestStatus::Pending && !skipped.contains(&r.id)).min_by(|a,b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id))).cloned();
             let Some(next) = next else { return Ok(None) };
+            if let Err(error) = admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, if next.op.changes() { Requirement::Write } else { Requirement::ContractOnly }) {
+                if skip_rollout_blocked_write(&error, next.op) {
+                    skipped.push(next.id.clone());
+                    continue;
+                }
+                return Err(error);
+            }
             let member = crate::chat_store::memory_member(&tables, org_id, session_id, &next.requester_user_id);
             let request = tables.session_files.requests.get_mut(&next.id).expect("request under write lock");
             if !permits(member.as_ref(), request_action(request.op)) {
@@ -928,7 +954,9 @@ impl SessionFileStore for InMemorySessionFileStore {
         outcome: RequestOutcome,
         now: i64,
     ) -> Result<FileRequest, StoreError> {
-        let mut requests = self.requests_mut();
+        let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly)?;
+        let requests = &mut tables.session_files.requests;
         let request = requests
             .get_mut(request_id)
             .filter(|request| request.org_id == org_id && request.session_id == session_id)
@@ -1084,6 +1112,7 @@ impl SessionFileStore for PgStore {
     async fn put_host(&self, host: FileHost) -> Result<FileHost, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &host.org_id).await?;
+        self.admit_chat(&tx, &host.org_id, &host.session_id, FeatureKey::SharedChat, Requirement::Write).await?;
         let row = tx
             .query_one(
                 &format!(
@@ -1150,6 +1179,7 @@ impl SessionFileStore for PgStore {
     ) -> Result<Vec<String>, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly).await?;
         tx.execute(
             "DELETE FROM session_file_hosts WHERE org_id = $1 AND session_id = $2",
             &[&org_id, &session_id],
@@ -1193,6 +1223,7 @@ impl SessionFileStore for PgStore {
     async fn put_grant(&self, grant: FileGrant) -> Result<FileGrant, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &grant.org_id).await?;
+        self.admit_chat(&tx, &grant.org_id, &grant.session_id, FeatureKey::SharedChat, Requirement::Write).await?;
         let existing = tx
             .query_opt(
                 &format!(
@@ -1264,6 +1295,7 @@ impl SessionFileStore for PgStore {
     ) -> Result<bool, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly).await?;
         let changed = tx
             .execute(
                 "UPDATE session_file_grants SET status = 'revoked', revoked_at = $4, updated_at = $4 \
@@ -1318,6 +1350,7 @@ impl SessionFileStore for PgStore {
     async fn create_request(&self, request: FileRequest) -> Result<FileRequest, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &request.org_id).await?;
+        self.admit_chat(&tx, &request.org_id, &request.session_id, FeatureKey::SharedChat, if request.op.changes() { Requirement::Write } else { Requirement::ContractOnly }).await?;
         let row = tx
             .query_one(
                 &format!(
@@ -1405,6 +1438,7 @@ impl SessionFileStore for PgStore {
     ) -> Result<FileRequest, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::Write).await?;
         let row = tx
             .query_opt(
                 &format!(
@@ -1472,13 +1506,21 @@ impl SessionFileStore for PgStore {
             tx.commit().await.map_err(db)?;
             return Ok(None);
         }
+        let mut skipped = Vec::<String>::new();
         loop {
-            let row = tx.query_opt(&format!("SELECT {REQUEST_COLUMNS} FROM host_file_requests WHERE org_id=$1 AND session_id=$2 AND status='pending' AND expires_at>$3 ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED"), &[&org_id, &session_id, &now]).await.map_err(db)?;
+            let row = tx.query_opt(&format!("SELECT {REQUEST_COLUMNS} FROM host_file_requests WHERE org_id=$1 AND session_id=$2 AND status='pending' AND expires_at>$3 AND NOT (id = ANY($4::text[])) ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED"), &[&org_id, &session_id, &now, &skipped]).await.map_err(db)?;
             let Some(row) = row else {
                 tx.commit().await.map_err(db)?;
                 return Ok(None);
             };
             let request = request_from_row(&row)?;
+            if let Err(error) = self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, if request.op.changes() { Requirement::Write } else { Requirement::ContractOnly }).await {
+                if skip_rollout_blocked_write(&error, request.op) {
+                    skipped.push(request.id.clone());
+                    continue;
+                }
+                return Err(error);
+            }
             let member = crate::chat_store::pg_member(&tx, org_id, session_id, &request.requester_user_id).await?;
             if !permits(member.as_ref(), request_action(request.op)) {
                 tx.execute("UPDATE host_file_requests SET status='failed',error='revoked',completed_at=$4,expires_at=$5 WHERE org_id=$1 AND session_id=$2 AND id=$3", &[&org_id, &session_id, &request.id, &now, &(now + RESULT_TTL_MS)]).await.map_err(db)?;
@@ -1501,6 +1543,7 @@ impl SessionFileStore for PgStore {
     ) -> Result<FileRequest, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly).await?;
         let row = tx
             .query_opt(
                 &format!(
@@ -1860,6 +1903,7 @@ async fn register_host(
     if !policy.settings.allow_live_grants {
         return Err(policy_refusal("org_file_sharing_policy"));
     }
+    state.chat_store.admit_session_write(&org_id, &session_id).await.map_err(ChatFailure::Store)?;
     let mut bytes = [0_u8; 32];
     rand::fill(&mut bytes);
     let token = format!("fht_{}", hex::encode(bytes));
@@ -2293,6 +2337,9 @@ async fn host_store_result(
             "only a read answers with bytes".into(),
         ));
     }
+    // Bytes returned by an authorized read are drain traffic. They retain
+    // the pinned contract check but must survive rollout pause/kill.
+    state.chat_store.admit_session_contract(&org_id, &session_id).await.map_err(ChatFailure::Store)?;
     let key = object_key(
         &org_id,
         &request.workspace_id,
@@ -2669,6 +2716,7 @@ async fn upload_request_bytes(
     body: Bytes,
 ) -> Result<StatusCode, ChatFailure> {
     let request = own_request(&state, &headers, &org_id, &session_id, &request_id).await?;
+    state.chat_store.admit_session_write(&org_id, &session_id).await.map_err(ChatFailure::Store)?;
     let now = (state.now)();
     let upload = request.upload.as_ref().ok_or(ChatFailure::Hidden)?;
     if request.status_at(now) != RequestStatus::AwaitingUpload {
@@ -4030,7 +4078,15 @@ mod tests {
 
     #[tokio::test]
     async fn the_conversations_objects_are_listed_for_its_deletion() {
-        let store = InMemorySessionFileStore::new();
+        let base = crate::store::InMemoryStore::new();
+        let chat = crate::chat_store::InMemoryChatStore::from_store(&base);
+        for id in [SESSION, "ses_other"] {
+            crate::chat_store::ChatStore::create_session(&chat, crate::chat_store::NewSharedSession {
+                id: id.into(), org_id: ORG.into(), workspace_id: "workspace".into(), title: "Files".into(),
+                status: SessionStatus::Active, created_by_user_id: OWNER.into(), now: 1, operation_id: id.into(),
+            }).await.unwrap();
+        }
+        let store = InMemorySessionFileStore::from_store(&base);
         let mut request = FileRequest {
             id: "frq_1".into(),
             org_id: ORG.into(),
@@ -4074,4 +4130,83 @@ mod tests {
             .unwrap()
             .is_empty());
     }
+    #[tokio::test]
+    async fn rollout_kill_blocks_file_uploads_and_new_writes_but_preserves_live_reads() {
+        let f = Fixture::new().await;
+        f.allow_writes().await;
+        let token = f.hosted(&["read", "download", "write"]).await;
+        let write = serde_json::json!({"grantId":"fg_1", "op":"write", "path":"/workspace/src/new.txt", "upload":{"byteLength":1, "sha256":hex::encode(Sha256::digest(b"a"))}});
+        let (status, pending) = f.json("POST", "/file-requests", Auth::User(MEMBER), Some(write.clone())).await;
+        assert_eq!(status, StatusCode::CREATED, "{pending}");
+        let mut policy = crate::rollout::tests::policy();
+        policy.kill = true;
+        f.state.store.apply_feature_policy(policy, 0, "kill-files", "test", "operator").await.unwrap();
+        let (status, bytes) = f.send("PUT", &format!("/file-requests/{}/upload",pending["id"].as_str().unwrap()), Auth::User(MEMBER), Some(Body::from("a"))).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let error: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(error["reason"], "feature_killed");
+        assert_eq!(error["feature"], "shared-chat");
+        let (status, _) = f.json("POST", "/file-requests", Auth::User(MEMBER), Some(write)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, read) = f.json("POST", "/file-requests", Auth::User(MEMBER), Some(serde_json::json!({"grantId":"fg_1", "op":"read", "path":"/workspace/src/a.ts"}))).await;
+        assert_eq!(status, StatusCode::CREATED, "{read}");
+        let (status, claimed) = f.claim(&token).await;
+        assert_eq!(status, StatusCode::OK, "{claimed}");
+        let (status, _) = f.send("PUT", &format!("/file-host/requests/{}/result", claimed["id"].as_str().unwrap()), Auth::Host(&token), Some(Body::from("a"))).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "authorized read results must drain under kill");
+        let id = claimed["id"].as_str().unwrap();
+        let (status, body) = f.json("POST", &format!("/file-host/requests/{id}/complete"), Auth::Host(&token), Some(serde_json::json!({"ok":true, "object":{"byteLength":1,"mediaType":"text/plain"}}))).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+        let (status, bytes) = f.send("GET", &format!("/file-requests/{id}/result"), Auth::User(MEMBER), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(&bytes[..], b"a");
+    }
+
+    #[tokio::test]
+    async fn rollout_refused_mkdir_does_not_block_later_list_stat_or_read() {
+        let f = Fixture::new().await;
+        f.allow_writes().await;
+        let token = f.hosted(&["read", "download", "write"]).await;
+        let (status, mkdir) = f.json("POST", "/file-requests", Auth::User(MEMBER), Some(serde_json::json!({"grantId":"fg_1", "op":"mkdir", "path":"/workspace/src/new-folder"}))).await;
+        assert_eq!(status, StatusCode::CREATED, "{mkdir}");
+        f.advance(1);
+        let mut policy = crate::rollout::tests::policy();
+        policy.kill = true;
+        f.state.store.apply_feature_policy(policy, 0, "kill-queued-write", "test", "operator").await.unwrap();
+        for op in ["list", "stat", "read"] {
+            let (status, read) = f.json("POST", "/file-requests", Auth::User(MEMBER), Some(serde_json::json!({"grantId":"fg_1", "op":op, "path":"/workspace/src/a.ts"}))).await;
+            assert_eq!(status, StatusCode::CREATED, "{read}");
+            let (status, claimed) = f.claim(&token).await;
+            assert_eq!(status, StatusCode::OK, "{claimed}");
+            assert_eq!(claimed["id"], read["id"]);
+        }
+        assert_eq!(f.claim(&token).await.0, StatusCode::NO_CONTENT);
+        let (status, pending) = f.json("GET", &format!("/file-requests/{}", mkdir["id"].as_str().unwrap()), Auth::User(MEMBER), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(pending["status"], "pending");
+    }
+
+    #[tokio::test]
+    async fn read_result_delivery_keeps_authentication_and_pinned_contract_checks() {
+        let f = Fixture::new().await;
+        let token = f.hosted(&["read","download"]).await;
+        let (status, read) = f.json("POST","/file-requests",Auth::User(MEMBER),Some(serde_json::json!({"grantId":"fg_1","op":"read","path":"/workspace/src/a.ts"}))).await;
+        assert_eq!(status,StatusCode::CREATED,"{read}");
+        let (status,claimed) = f.claim(&token).await;
+        assert_eq!(status,StatusCode::OK,"{claimed}");
+        let mut policy = crate::rollout::tests::policy(); policy.kill=true;
+        f.state.store.apply_feature_policy(policy,0,"kill-result","test","operator").await.unwrap();
+        f.state.store.in_memory_chat_store().unwrap().tables.write().chat.sessions.get_mut(SESSION).unwrap().contract_version=3;
+        let path=format!("/v1/orgs/{ORG}/chat-sessions/{SESSION}/file-host/requests/{}/result",claimed["id"].as_str().unwrap());
+        for (credential,expected) in [(token.as_str(),StatusCode::FORBIDDEN),("wrong",StatusCode::UNAUTHORIZED)] {
+            let response=crate::router(f.state.clone()).oneshot(Request::builder().method("PUT").uri(&path)
+                .header("x-cognia-collab-protocol","2").header(HOST_TOKEN_HEADER,credential).body(Body::from("a")).unwrap()).await.unwrap();
+            assert_eq!(response.status(),expected);
+            if expected==StatusCode::FORBIDDEN {
+                let body:serde_json::Value=serde_json::from_slice(&axum::body::to_bytes(response.into_body(),1024).await.unwrap()).unwrap();
+                assert_eq!(body["reason"],"client_contract_unsupported");
+            }
+        }
+    }
+
 }
