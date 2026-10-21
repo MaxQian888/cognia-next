@@ -23,7 +23,7 @@ function setup(accountId: string | null = "acct-1") {
   let account = accountId
   const deps: FileShareHostSyncDeps = {
     target: { transport },
-    accountId: () => account,
+    localAccountId: () => account,
     loadPolicy: jest.fn(async () => ({
       policy: { ...DEFAULT_FILE_SHARING_POLICY, allowProtocolCredentials: true },
       local: DEFAULT_FILE_SHARING_POLICY,

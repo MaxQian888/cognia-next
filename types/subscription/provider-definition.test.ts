@@ -146,8 +146,10 @@ describe("subscription manifest contract", () => {
     { Authorization: "{{token}}", authorization: "other" },
     { Accept: 1 },
   ])("rejects unsafe headers %j", (headers) => {
-    const value = structuredClone(usage)
-    value.request.headers = headers as Record<string, string>
+    const value = {
+      ...structuredClone(usage),
+      request: { ...usage.request, headers },
+    }
     expect(() => validateSubscriptionProvider(definition({ usage: value }))).toThrow()
   })
 

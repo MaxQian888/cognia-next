@@ -19,7 +19,7 @@ import {
   syncCogniaActiveTheme,
 } from "@/lib/canvas/themes/cognia-active-theme"
 import { resolveActiveThemeColors } from "@/lib/themes"
-import { useSettingsStore } from "@/stores"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 
 type MonacoModule = typeof import("monaco-editor")
 

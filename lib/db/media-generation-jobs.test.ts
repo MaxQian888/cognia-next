@@ -140,7 +140,9 @@ describe("Dexie media job store", () => {
     const removeFile = jest.fn(async () => {
       throw new Error("file in use")
     })
-    await expect(pruneSettledVideoJobs(500, removeFile)).resolves.toBe(1)
+    const report = { failed: 0 }
+    await expect(pruneSettledVideoJobs(500, removeFile, report)).resolves.toBe(1)
+    expect(report.failed).toBe(1)
     expect(await getDb().mediaGenerationJobs.toCollection().primaryKeys()).toEqual(["flow-held"])
   })
 

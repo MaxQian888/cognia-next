@@ -2,6 +2,7 @@
 
 import { create } from "zustand"
 import { readBootLocalePreference, resolveLocalePreference } from "@/lib/i18n/locale-preference"
+import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import type {
   AppSettings,
   AppLanguage,
@@ -893,7 +894,16 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
           // imported-theme row locally should not delete it on the desktop).
           await saveSettings(patch, { mirrorToHost: false })
         }
-        if (isTauri() && s.networkProxy) {
+        const controlsNativeHost = !isSecondaryOverlayRole(getPetWindowRole())
+        if (!controlsNativeHost && s.networkProxy) {
+          // Overlays need presentation settings, not credential migration or
+          // writes to the host's global network policy. Keep legacy secrets
+          // out of their renderer state without persisting a migration here.
+          const networkProxy = { ...s.networkProxy }
+          delete (networkProxy as { password?: string }).password
+          s = { ...s, networkProxy }
+        }
+        if (controlsNativeHost && isTauri() && s.networkProxy) {
           try {
             const { migrateLegacyProxyPassword } = await import("@/lib/network/proxy-credentials")
             const migrated = await migrateLegacyProxyPassword(
@@ -917,13 +927,14 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         set({ settings: s, loaded: true, loadFailed: false, loadError: null })
         // Push the API key to the Rust process on first load. The user expects
         // their previously-entered key to be active without a manual save.
-        if (s.apiKey) {
+        if (controlsNativeHost && s.apiKey) {
           await syncApiKeyToTauri(s.apiKey)
         }
         // Mirror the persisted network proxy config into the Rust
         // `proxy_config::current()` slot so reqwest clients honour it from
         // the very first outbound request. Lazy-import so the network-proxy
         // store doesn't cycle through this file.
+        if (!controlsNativeHost) return
         try {
           const { applyProxyToRust, maybeAutoDetectProxy } = await import("@/stores/network-proxy")
           // An absent row is still an explicit Off policy. Native outbound

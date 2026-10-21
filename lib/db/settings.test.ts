@@ -23,6 +23,28 @@ beforeEach(async () => {
 })
 
 describe("getSettings", () => {
+  it("applies a queued metadata mutation against the latest saved preferences", async () => {
+    const edit = saveSettings(
+      { backupAutoSchedule: { enabled: false, intervalDays: 7, retainCount: 3, dirPath: "/new" } },
+      { mirrorToHost: false }
+    )
+    const stamp = saveSettings(
+      (current) => ({
+        backupAutoSchedule: {
+          ...current.backupAutoSchedule!,
+          lastRunAt: "2026-10-21T00:00:00.000Z",
+        },
+      }),
+      { mirrorToHost: false }
+    )
+    await Promise.all([edit, stamp])
+    expect((await getSettings()).backupAutoSchedule).toMatchObject({
+      enabled: false,
+      dirPath: "/new",
+      intervalDays: 7,
+      lastRunAt: "2026-10-21T00:00:00.000Z",
+    })
+  })
   it("does not create a reader choice when a legacy host imports unrelated preferences", async () => {
     const { webReader: _reader, ...legacy } = DEFAULTS
     await getDb().settings.put(legacy)

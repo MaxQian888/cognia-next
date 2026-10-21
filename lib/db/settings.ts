@@ -570,7 +570,8 @@ export interface SaveSettingsOptions {
 }
 
 export async function saveSettings(
-  patch: Partial<Omit<AppSettings, "id">>,
+  input:
+    Partial<Omit<AppSettings, "id">> | ((current: AppSettings) => Partial<Omit<AppSettings, "id">>),
   options: SaveSettingsOptions & {
     scope?: { db: ReturnType<typeof getDb>; assertActive(): void }
   } = {}
@@ -584,6 +585,7 @@ export async function saveSettings(
       options.scope?.assertActive()
       const current = await getSettings(options.scope)
       options.scope?.assertActive()
+      const patch = typeof input === "function" ? input(current) : input
       // Normalized reads must not turn an unrelated preference import/save
       // into an explicit Reader choice on an existing legacy installation.
       const rawReaderRow = !Object.prototype.hasOwnProperty.call(patch, "webReader")

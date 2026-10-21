@@ -314,11 +314,16 @@ async function defaultListAccountSessionIds(providerId: string): Promise<string[
   return [...new Set(accounts.map((account) => account.authSessionId))]
 }
 
-function session(id: string, accountId: string, label: string, scopes: string[]): AuthSession {
+function session(
+  id: string,
+  providerAccountId: string,
+  label: string,
+  scopes: string[]
+): AuthSession {
   return {
     id,
     accessToken: "host-resolved",
-    account: { id: accountId, label },
+    account: { id: providerAccountId, label },
     scopes: [...new Set(scopes)].sort(),
   }
 }

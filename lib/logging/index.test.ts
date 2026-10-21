@@ -9,7 +9,6 @@ import "fake-indexeddb/auto"
 import { IDBFactory } from "fake-indexeddb"
 
 beforeEach(() => {
-  jest.resetModules()
   const factory = new IDBFactory()
   ;(globalThis as { indexedDB: IDBFactory }).indexedDB = factory
   ;(window as unknown as { indexedDB: IDBFactory }).indexedDB = factory

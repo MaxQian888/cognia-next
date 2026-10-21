@@ -483,6 +483,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
     ownerNames,
     hostPersonUserId,
     runtimeAvailability.microvm.available,
+    runtimeAvailability.container.available,
     runtimeAvailability.os.available,
     now,
     localLabel,

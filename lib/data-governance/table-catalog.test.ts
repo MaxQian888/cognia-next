@@ -170,6 +170,7 @@ describe("DataTableCatalog", () => {
       "memoryGovernance",
       "notificationDelivery",
       "ocrResults",
+      "usageHistory",
       "retrievalControl",
       "workflowAppData",
       "siteArtifacts",

@@ -44,7 +44,7 @@ export interface FileShareHostSyncDeps extends MountTableDeps {
   /** Which host to talk to: this machine's on the desktop, the brain's own server. */
   target: FileShareTarget
   /** The unlocked local account, or null while locked. */
-  accountId: () => string | null
+  localAccountId: () => string | null
   loadPolicy: () => Promise<EffectiveFileSharingPolicy>
   log?: (level: "info" | "warn", message: string) => void
 }
@@ -110,7 +110,7 @@ export function createFileShareHostSync(deps: FileShareHostSyncDeps): FileShareH
   }
 
   const activate = async () => {
-    const localAccountId = deps.accountId()
+    const localAccountId = deps.localAccountId()
     const status = await activateFileShare(localAccountId, deps.target)
     if (!localAccountId) return status
     await pushPolicy()
@@ -119,10 +119,10 @@ export function createFileShareHostSync(deps: FileShareHostSyncDeps): FileShareH
   }
 
   const refresh = async () => {
-    if (!deps.accountId()) return
+    if (!deps.localAccountId()) return
     const status = await getFileShareStatus(deps.target)
     const { accountId: hostLocalAccountId } = status
-    if (!status.active || hostLocalAccountId !== deps.accountId()) {
+    if (!status.active || hostLocalAccountId !== deps.localAccountId()) {
       // The host restarted or lost the account: serve it again.
       await activate()
       return
@@ -132,10 +132,10 @@ export function createFileShareHostSync(deps: FileShareHostSyncDeps): FileShareH
   }
 
   const sessionsChanged = async (sessionIds: readonly string[]) => {
-    if (!deps.accountId() || sessionIds.length === 0) return
+    if (!deps.localAccountId() || sessionIds.length === 0) return
     const status = await getFileShareStatus(deps.target)
     const { accountId: hostLocalAccountId } = status
-    if (!status.active || hostLocalAccountId !== deps.accountId()) return
+    if (!status.active || hostLocalAccountId !== deps.localAccountId()) return
     const granted = new Set(status.sessionsWithGrants)
     await syncSessions(sessionIds.filter((sessionId) => granted.has(sessionId)))
   }

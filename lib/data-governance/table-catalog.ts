@@ -1768,8 +1768,18 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
   sessionUsage: {
     mode: "ttl",
     days: 90,
-    enforcement: "domain",
-    reason: "Provider-cost initializers prune usage older than 90 days.",
+    enforcement: "central",
+    executorId: "usageHistory",
+    reason:
+      "Daily indexed retention prunes raw events at an exact epoch cutoff, atomically with whole local-day cost rollups.",
+  },
+  providerCostDaily: {
+    mode: "ttl",
+    days: 90,
+    enforcement: "central",
+    executorId: "usageHistory",
+    reason:
+      "Daily indexed retention keeps the complete boundary local day; the usage ledger and idempotency receipts are preserved.",
   },
   outboundQueue: {
     mode: "ttl",

@@ -53,7 +53,7 @@ import {
   projectSessionListRow,
   SESSION_LIST_READY_ID,
 } from "./session-list"
-import { createRecreatedDbTestFixture } from "./test-fixture"
+import { createDbTestFixture } from "./test-fixture"
 import { createLoop, getLoop, listLoopsBySession } from "./loops"
 import { createGoal, listGoalsBySession } from "./goals"
 import {
@@ -206,7 +206,9 @@ jest.mock("@/lib/sandbox/session-runtime", () => ({
   sandboxSessionRuntime: { releaseSession: (id: string) => releaseSandboxSessionMock(id) },
 }))
 
-const dbFixture = createRecreatedDbTestFixture()
+// These tests need isolated rows, not a fresh auto-increment counter or account
+// database. Restore the seeded baseline and liveQuery cache between cases.
+const dbFixture = createDbTestFixture({ emptyTables: ["promptPresets"] })
 
 it("projects the same workspace membership and stable timestamp ties without body fields", async () => {
   const db = getDb()
@@ -337,18 +339,36 @@ beforeEach(async () => {
   jest.mocked(runWorkspaceUserAction).mockClear()
   markSessionRemovedMock.mockClear()
   releaseSandboxSessionMock.mockReset().mockResolvedValue(undefined)
-  await getDb().promptPresets.clear()
-  // Cold open builds the full Dexie schema (now v99); can exceed the default 5s
-  // hook budget under fake-indexeddb on the first test.
 })
 afterAll(dbFixture.dispose)
 
-/** Poll until `pred` is true (liveQuery emissions land on microtask timing). */
+/** Own Dexie's deferred cache eviction while leaving real IndexedDB scheduling intact. */
+function withLiveQueryClock(run: () => Promise<void>): () => Promise<void> {
+  return async () => {
+    jest.useFakeTimers({
+      doNotFake: ["nextTick", "setImmediate", "clearImmediate", "queueMicrotask", "performance"],
+    })
+    try {
+      await run()
+    } finally {
+      try {
+        // Unsubscribed cache entries expire after 3s in Dexie 4.4.6. Run their
+        // actual cleanup callbacks before restoring the test's real clock.
+        await jest.advanceTimersByTimeAsync(3000)
+        expect(jest.getTimerCount()).toBe(0)
+      } finally {
+        jest.useRealTimers()
+      }
+    }
+  }
+}
+
+/** Poll liveQuery emissions with a finite clock budget. */
 async function waitUntil(pred: () => boolean, timeoutMs = 3000): Promise<void> {
   const start = Date.now()
   while (!pred()) {
     if (Date.now() - start > timeoutMs) throw new Error("waitUntil timed out")
-    await new Promise((r) => setTimeout(r, 20))
+    await jest.advanceTimersByTimeAsync(20)
   }
 }
 
@@ -761,30 +781,36 @@ describe("setSessionOrder", () => {
   // read even for an explicit pid — the await hops through a native promise,
   // Dexie's dependency-tracking zone is lost, and the (non-indexed)
   // `manualOrder` write never re-emits → drag-reorder visually snaps back.
-  it("re-emits an explicit-pid liveQuery after a reorder", async () => {
-    enableOperationRecording()
-    const a = await createSession({ title: "A" })
-    const b = await createSession({ title: "B" })
-    const c = await createSession({ title: "C" })
-    const pid = (await getSession(a.id))!.projectId!
+  it(
+    "re-emits an explicit-pid liveQuery after a reorder",
+    withLiveQueryClock(async () => {
+      enableOperationRecording()
+      const a = await createSession({ title: "A" })
+      const b = await createSession({ title: "B" })
+      const c = await createSession({ title: "C" })
+      const pid = (await getSession(a.id))!.projectId!
 
-    const emissions: Array<Map<string, number | undefined>> = []
-    // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
-    // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
-    // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
-    const sub = Dexie.liveQuery(() => listScopedSessions(pid)).subscribe({
-      next: (rows) => emissions.push(new Map(rows.map((r) => [r.id, r.manualOrder]))),
+      const emissions: Array<Map<string, number | undefined>> = []
+      // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+      // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+      // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+      const sub = Dexie.liveQuery(() => listScopedSessions(pid)).subscribe({
+        next: (rows) => emissions.push(new Map(rows.map((r) => [r.id, r.manualOrder]))),
+      })
+      try {
+        await waitUntil(() => emissions.length >= 1)
+        await setSessionOrder([c.id, a.id, b.id], "date:today")
+        await waitUntil(() => emissions.length >= 2)
+
+        const last = emissions[emissions.length - 1]
+        expect(last.get(c.id)).toBe(0)
+        expect(last.get(a.id)).toBe(1)
+        expect(last.get(b.id)).toBe(2)
+      } finally {
+        sub.unsubscribe()
+      }
     })
-    await waitUntil(() => emissions.length >= 1)
-    await setSessionOrder([c.id, a.id, b.id], "date:today")
-    await waitUntil(() => emissions.length >= 2)
-    sub.unsubscribe()
-
-    const last = emissions[emissions.length - 1]
-    expect(last.get(c.id)).toBe(0)
-    expect(last.get(a.id)).toBe(1)
-    expect(last.get(b.id)).toBe(2)
-  })
+  )
 })
 
 describe("assignSessionToFolder", () => {
@@ -1908,20 +1934,26 @@ describe("workspace (project) scoping", () => {
     expect(await listWorkspaceSessionIds("proj-empty")).toEqual([legacy.id])
   })
 
-  it("listWorkspaceSessions re-emits in a liveQuery when a workspace-less row changes", async () => {
-    await saveSettings({ activeProjectId: "proj-A" })
-    const legacy = await createSession({ title: "legacy" })
-    await getDb().sessions.update(legacy.id, { projectId: undefined })
-    const emissions: string[][] = []
-    const sub = Dexie.liveQuery(() => listWorkspaceSessions("proj-A")).subscribe({
-      next: (rows) => emissions.push(rows.map((r) => r.title)),
+  it(
+    "listWorkspaceSessions re-emits in a liveQuery when a workspace-less row changes",
+    withLiveQueryClock(async () => {
+      await saveSettings({ activeProjectId: "proj-A" })
+      const legacy = await createSession({ title: "legacy" })
+      await getDb().sessions.update(legacy.id, { projectId: undefined })
+      const emissions: string[][] = []
+      const sub = Dexie.liveQuery(() => listWorkspaceSessions("proj-A")).subscribe({
+        next: (rows) => emissions.push(rows.map((r) => r.title)),
+      })
+      try {
+        await waitUntil(() => emissions.length >= 1)
+        await getDb().sessions.update(legacy.id, { title: "renamed" })
+        await waitUntil(() => emissions.at(-1)?.[0] === "renamed")
+        expect(emissions.at(-1)).toEqual(["renamed"])
+      } finally {
+        sub.unsubscribe()
+      }
     })
-    await waitUntil(() => emissions.length >= 1)
-    await getDb().sessions.update(legacy.id, { title: "renamed" })
-    await waitUntil(() => emissions.at(-1)?.[0] === "renamed")
-    sub.unsubscribe()
-    expect(emissions.at(-1)).toEqual(["renamed"])
-  })
+  )
 
   it("preserves missing, null and empty workspaces and stable timestamp ties", async () => {
     const db = getDb()
@@ -1947,29 +1979,32 @@ describe("workspace (project) scoping", () => {
     }
   })
 
-  it("re-emits when indexed workspace membership enters or leaves the fallback", async () => {
-    const db = getDb()
-    const moved = await createSession({ title: "moving", projectId: "proj-other" })
-    const emissions: string[][] = []
-    const sub = Dexie.liveQuery(() => listWorkspaceSessions("proj-A")).subscribe({
-      next: (rows) => emissions.push(rows.map((row) => row.id)),
+  it(
+    "re-emits when indexed workspace membership enters or leaves the fallback",
+    withLiveQueryClock(async () => {
+      const db = getDb()
+      const moved = await createSession({ title: "moving", projectId: "proj-other" })
+      const emissions: string[][] = []
+      const sub = Dexie.liveQuery(() => listWorkspaceSessions("proj-A")).subscribe({
+        next: (rows) => emissions.push(rows.map((row) => row.id)),
+      })
+      try {
+        await waitUntil(() => emissions.length > 0)
+        expect(emissions.at(-1)).toEqual([])
+        await db.sessions.update(moved.id, { projectId: "" })
+        await waitUntil(() => emissions.at(-1)?.includes(moved.id) === true)
+        await db.sessions.update(moved.id, { projectId: "proj-other" })
+        await waitUntil(() => emissions.at(-1)?.length === 0)
+        await db.sessions.update(moved.id, { projectId: undefined })
+        await waitUntil(() => emissions.at(-1)?.includes(moved.id) === true)
+        await db.sessions.update(moved.id, { projectId: "proj-A" })
+        await waitUntil(() => emissions.at(-1)?.includes(moved.id) === true)
+        expect((await listWorkspaceSessions("proj-A")).map((row) => row.id)).toEqual([moved.id])
+      } finally {
+        sub.unsubscribe()
+      }
     })
-    try {
-      await waitUntil(() => emissions.length > 0)
-      expect(emissions.at(-1)).toEqual([])
-      await db.sessions.update(moved.id, { projectId: "" })
-      await waitUntil(() => emissions.at(-1)?.includes(moved.id) === true)
-      await db.sessions.update(moved.id, { projectId: "proj-other" })
-      await waitUntil(() => emissions.at(-1)?.length === 0)
-      await db.sessions.update(moved.id, { projectId: undefined })
-      await waitUntil(() => emissions.at(-1)?.includes(moved.id) === true)
-      await db.sessions.update(moved.id, { projectId: "proj-A" })
-      await waitUntil(() => emissions.at(-1)?.includes(moved.id) === true)
-      expect((await listWorkspaceSessions("proj-A")).map((row) => row.id)).toEqual([moved.id])
-    } finally {
-      sub.unsubscribe()
-    }
-  })
+  )
 })
 
 describe("countWorkspaceConversations", () => {
@@ -2020,35 +2055,41 @@ describe("countWorkspaceConversations", () => {
     })
   })
 
-  it("re-emits in a liveQuery when a message lands or a conversation joins", async () => {
-    await saveSettings({ activeProjectId: "proj-A" })
-    const own = await createSession({ title: "own" })
-    await putMessages(own.id, 1)
-    const emissions: Array<{ conversations: number; messages: number }> = []
-    const sub = Dexie.liveQuery(() => countWorkspaceConversations("proj-A")).subscribe({
-      next: (counts) => emissions.push(counts),
+  it(
+    "re-emits in a liveQuery when a message lands or a conversation joins",
+    withLiveQueryClock(async () => {
+      await saveSettings({ activeProjectId: "proj-A" })
+      const own = await createSession({ title: "own" })
+      await putMessages(own.id, 1)
+      const emissions: Array<{ conversations: number; messages: number }> = []
+      const sub = Dexie.liveQuery(() => countWorkspaceConversations("proj-A")).subscribe({
+        next: (counts) => emissions.push(counts),
+      })
+      try {
+        await waitUntil(() => emissions.at(-1)?.messages === 1)
+        expect(emissions.at(-1)).toEqual({ conversations: 1, messages: 1 })
+
+        await getDb().messages.put({
+          id: "late",
+          sessionId: own.id,
+          role: "assistant",
+          parts: [],
+          createdAt: 9,
+        } as never)
+        await waitUntil(() => emissions.at(-1)?.messages === 2)
+
+        // A conversation moved in from another workspace brings its messages.
+        const moved = await createSession({ title: "moved", projectId: "proj-B" })
+        await putMessages(moved.id, 4)
+        await getDb().sessions.update(moved.id, { projectId: "proj-A" })
+        await waitUntil(() => emissions.at(-1)?.messages === 6)
+
+        expect(emissions.at(-1)).toEqual({ conversations: 2, messages: 6 })
+      } finally {
+        sub.unsubscribe()
+      }
     })
-    await waitUntil(() => emissions.at(-1)?.messages === 1)
-    expect(emissions.at(-1)).toEqual({ conversations: 1, messages: 1 })
-
-    await getDb().messages.put({
-      id: "late",
-      sessionId: own.id,
-      role: "assistant",
-      parts: [],
-      createdAt: 9,
-    } as never)
-    await waitUntil(() => emissions.at(-1)?.messages === 2)
-
-    // A conversation moved in from another workspace brings its messages.
-    const moved = await createSession({ title: "moved", projectId: "proj-B" })
-    await putMessages(moved.id, 4)
-    await getDb().sessions.update(moved.id, { projectId: "proj-A" })
-    await waitUntil(() => emissions.at(-1)?.messages === 6)
-
-    sub.unsubscribe()
-    expect(emissions.at(-1)).toEqual({ conversations: 2, messages: 6 })
-  })
+  )
 })
 
 describe("clearSessionSdkLink", () => {

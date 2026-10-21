@@ -247,7 +247,7 @@ export function createSocketClient(deps: SocketClientDeps) {
     }
     target.onmessage = (event) => handleMessage(target, event.data)
     target.onerror = () => undefined
-    target.onclose = (event) => {
+    target.onclose = () => {
       if (socket !== target) return
       socket = null
       clearHeartbeat()

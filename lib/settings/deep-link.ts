@@ -138,3 +138,8 @@ export const TEAM_SETTINGS_PARAM = "team"
 export function teamSettingsHref(teamId?: string): string {
   return settingsHref("teams", { params: { [TEAM_SETTINGS_PARAM]: teamId } })
 }
+
+/** The resource-selection param `components/settings/prompts/prompts-section.tsx` consumes. */
+export const PROMPT_RESOURCE_PARAM = "resource"
+/** The workspace whose files and record the Prompt Center lists (`__none__` for none). */
+export const PROMPT_WORKSPACE_PARAM = "workspace"

@@ -6,8 +6,11 @@ import {
   TEAM_SETTINGS_PARAM,
   settingsHref,
   teamSettingsHref,
+  PROMPT_RESOURCE_PARAM,
+  PROMPT_WORKSPACE_PARAM,
 } from "./deep-link"
 import { SETTINGS_NAV } from "@/components/settings/settings-nav-config"
+import { promptCenterHref } from "@/plugins/config-governance/src/runtime/runtime"
 
 describe("settingsHref", () => {
   it("builds a section link", () => {
@@ -138,5 +141,18 @@ describe("teamSettingsHref", () => {
   it("opens the teams section, with the team to edit when one is named", () => {
     expect(teamSettingsHref()).toBe("/settings?section=teams")
     expect(teamSettingsHref("team 1")).toBe(`/settings?section=teams&${TEAM_SETTINGS_PARAM}=team+1`)
+  })
+})
+
+// The Config Governance plugin builds Prompt Center links without host
+// imports (public SDK only); this pins its URL to the params the section reads.
+describe("Prompt Center deep-link params", () => {
+  it("are what the governance plugin's links carry", () => {
+    expect(promptCenterHref("k", null)).toBe(`${SETTINGS_ROUTE}?section=prompts&resource=k`)
+    const href = promptCenterHref("instruction-file:%2Frepo|CLAUDE.md", "ws 1")
+    const params = new URLSearchParams(href.split("?")[1])
+    expect(params.get("section")).toBe("prompts")
+    expect(params.get(PROMPT_RESOURCE_PARAM)).toBe("instruction-file:%2Frepo|CLAUDE.md")
+    expect(params.get(PROMPT_WORKSPACE_PARAM)).toBe("ws 1")
   })
 })

@@ -650,6 +650,26 @@ describe("saveFilesToDir", () => {
 })
 
 describe("streaming backup file transport", () => {
+  it("cancels after the last native close without replacing the previous file", async () => {
+    const controller = new AbortController()
+    mockFsOpen.mockResolvedValue({
+      write: jest.fn(async (bytes: Uint8Array) => bytes.length),
+      close: jest.fn(async () => {
+        controller.abort()
+      }),
+    })
+    await expect(
+      writeBackupStreamFile(
+        "/backup.cbk",
+        (async function* () {
+          yield new Uint8Array([1])
+        })(),
+        () => controller.signal.throwIfAborted()
+      )
+    ).rejects.toThrow()
+    expect(mockRename).not.toHaveBeenCalled()
+    expect(mockRemove).toHaveBeenCalledWith(expect.stringMatching(/partial-/))
+  })
   beforeEach(() => {
     mockFsOpen.mockReset()
     mockRename.mockReset()
