@@ -170,8 +170,6 @@
     "jest-junit",
     // Type declarations consumed implicitly by `import … from "js-yaml"`.
     "@types/js-yaml",
-    // Read as files from node_modules (web/scripts/sync-agent-icons.mjs).
-    "@lobehub/icons-static-svg",
   ],
   "ignoreIssues": {
     // Resolves css-tree / @babel/traverse from the webclone sidecar's own

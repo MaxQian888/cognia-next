@@ -93,7 +93,6 @@ const REGISTRY = [
   // chose a typed `SiteCopy` over an i18n bundle precisely because "a missing
   // or extra key in either locale fails typecheck" — and until this entry
   // existed, nothing on a PR ever ran that check.
-  { script: "web:typecheck", group: "types" },
   // The extension workspace is excluded from the root tsc (chrome globals,
   // its own JSX transform), exactly like `web`, so it needs its own entry or
   // it would be typechecked by nothing.
@@ -310,9 +309,6 @@ const REGISTRY = [
   // `mobile:sync:ios` runs. Jest ignores `scripts/**/*.test.mjs`, so these had
   // no runner at all and their assertions never executed.
   { script: "scripts:test:mobile", group: "gate-tests" },
-  // `node --test` over web/scripts/ — the evidence pipeline and the two capture
-  // scripts. Introduced by ADR-0092 but never registered, so it ran nowhere.
-  { script: "web:test:scripts", group: "gate-tests" },
   { script: "audit:external-agent-runtimes:test", group: "gate-tests" },
   { script: "gen:agent-catalogs:test", group: "gate-tests" },
   { script: "audit:agent-host-image:test", group: "gate-tests" },
@@ -411,8 +407,8 @@ const CONTRACT_INPUTS = [
 const SDK_INPUTS = [...FRONTEND_INPUTS, ...CONTRACT_INPUTS]
 const GATE_INPUTS = {
   typecheck: FRONTEND_INPUTS,
-  knip: [...FRONTEND_INPUTS, "web/", "browser-extension/", "docs/app/", "docs/lib/"],
-  "web:typecheck": ["web/", "packages/"],
+  knip: [...FRONTEND_INPUTS, "browser-extension/", "docs/app/", "docs/lib/"],
+  "web:typecheck": ["packages/"],
   "browser-ext:typecheck": ["browser-extension/", "packages/", "lib/", "types/"],
   "sidecar:typecheck": CONTRACT_INPUTS,
   "build:packages": CONTRACT_INPUTS,
@@ -449,13 +445,7 @@ function matchesInput(path, input) {
 function fullQualityReason(changePlan) {
   if (changePlan.mode === "full") return changePlan.reason
   if (changePlan.deletedFiles.length) return "Deleted or renamed paths require full validation"
-  const knownInputs = [
-    ...FRONTEND_INPUTS,
-    ...CONTRACT_INPUTS,
-    "web/",
-    "browser-extension/",
-    "docs/",
-  ]
+  const knownInputs = [...FRONTEND_INPUTS, ...CONTRACT_INPUTS, "browser-extension/", "docs/"]
   for (const path of changePlan.changedFiles) {
     // Configuration and dependency pins can affect every gate, even when they
     // belong to a single workspace. Tooling changes also invalidate selection.

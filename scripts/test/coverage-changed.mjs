@@ -57,22 +57,12 @@ const COLLECTED_ROOTS = [
   /^stores\//,
   /^cli\/src\//,
   /^packages\/[^/]+\/src\//,
-  // The marketing workspace (ADR-0092), matching `collectCoverageFrom`.
-  /^web\/(components|hooks|lib)\//,
 ]
 
-/**
- * Paths excluded from coverage (mirrors coveragePathIgnorePatterns + globs).
- *
- * `web/components/ui/` needs its own anchored entry: Jest's
- * `coveragePathIgnorePatterns` uses the unanchored `/components/ui/`, which
- * happens to catch the web copy too, but these patterns are anchored at the
- * repo root and would not.
- */
+/** Paths excluded from product coverage, matching the Jest configuration. */
 const EXCLUDED = [
   /^components\/ui\//,
   /^components\/ai-elements\//,
-  /^web\/components\/ui\//,
   // Explicit type-only and PTY-driver exclusions documented in jest.config.ts.
   /^lib\/claude\/agents\/subagents\/types\.ts$/,
   /^packages\/agent-config-types\/src\/lsp-config\.ts$/,
@@ -239,7 +229,6 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
     sidecar: globalJS || any(/^(?:sidecar|cli|packages|lib)\//),
     deepseekRuntime: globalJS || any(/^runtime\/deepseek-harness\//),
     docs: globalJS || any(/^docs\//),
-    web: globalJS || any(/^web\//),
     mobile: globalJS || any(/^mobile\/|^lib\/capacitor\/|\.mobile\.tsx?$|^next\.config\./),
     browserExtension:
       globalJS ||
