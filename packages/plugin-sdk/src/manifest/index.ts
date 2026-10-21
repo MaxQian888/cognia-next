@@ -213,7 +213,7 @@ export {
  * enables a plugin (`engines.cognia`, `minAppVersion`, `maxAppVersion`). Pure:
  * pass the host version you want to test against.
  */
-export { evaluatePluginCompatibility } from "@/lib/plugin/core/compatibility"
+export { evaluatePluginCompatibility } from "@cognia/plugin-contract/lib/plugin/core/compatibility"
 export type {
   CompatibilityDiagnostic,
   CompatibilityEvaluation,

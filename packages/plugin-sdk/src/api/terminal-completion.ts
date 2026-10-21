@@ -28,9 +28,9 @@ export type {
   TerminalCompletionContext,
   TerminalCompletionProvider,
   TerminalCompletionSuggestion,
-} from "@/lib/terminal/completion/types"
+} from "@cognia/plugin-contract/lib/terminal/completion/types"
 
-export { SOURCE_PRIORITY as TERMINAL_COMPLETION_SOURCE_PRIORITY } from "@/lib/terminal/completion/types"
+export { SOURCE_PRIORITY as TERMINAL_COMPLETION_SOURCE_PRIORITY } from "@cognia/plugin-contract/lib/terminal/completion/types"
 
 export type {
   PluginTerminalCompletionContext,

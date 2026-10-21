@@ -1,5 +1,5 @@
 import { evaluatePluginCompatibility, type CompatibilityRuntime } from "./compatibility"
-import type { PluginManifest } from "@/types/plugin"
+import type { PluginManifest } from "../../../types/plugin"
 
 function createManifest(overrides: Partial<PluginManifest> = {}): PluginManifest {
   return {

@@ -1,7 +1,7 @@
 /**
  * The plugin contract's share of `lib/slash-commands/actions/ocr.ts`, which re-exports these.
  */
-import type { OcrError } from "@/lib/ocr/errors"
+import type { OcrError } from "../../ocr/errors"
 import type { OcrResult } from "../../../types/ocr/index"
 
 /** Where the OCR'd image came from — lets the chat card show a thumbnail. */

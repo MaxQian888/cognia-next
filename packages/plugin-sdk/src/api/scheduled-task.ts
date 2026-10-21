@@ -1,10 +1,10 @@
 /** Portable scheduled-task authoring contracts. Runtime operations live on context APIs. */
 
-import type { PluginScheduledTaskDef } from "@/types/plugin"
+import type { PluginScheduledTaskDef } from "@cognia/plugin-contract/types/plugin/index"
 import type { TaskTrigger } from "@cognia/plugin-contract/types/scheduler/index"
 
 export { defineScheduledTask } from "../define/define-scheduled-task"
-export type { PluginScheduledTaskDef } from "@/types/plugin"
+export type { PluginScheduledTaskDef } from "@cognia/plugin-contract/types/plugin/index"
 export type {
   CreatePluginTaskInput,
   PluginScheduledTask,

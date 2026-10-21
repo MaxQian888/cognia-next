@@ -15,4 +15,4 @@ export type { WorkflowWaitEvent } from "@cognia/plugin-contract/types/workflow/w
 export {
   WORKFLOW_RUNNER_TOOL_DEFINITION,
   WORKFLOW_RUNNER_TOOL_NAME,
-} from "@/lib/workflow/publish/runner-tool"
+} from "@cognia/plugin-contract/lib/workflow/publish/runner-tool"

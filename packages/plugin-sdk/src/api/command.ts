@@ -26,4 +26,7 @@ export type {
   CommandRegistryListener,
 } from "@/lib/plugin/commands/registry"
 
-export type { PluginCommand, PluginManifestCommandDef } from "@/types/plugin"
+export type {
+  PluginCommand,
+  PluginManifestCommandDef,
+} from "@cognia/plugin-contract/types/plugin/index"

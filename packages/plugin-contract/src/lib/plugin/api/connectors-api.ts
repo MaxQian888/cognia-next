@@ -19,7 +19,7 @@ import type {
   StreamReplyRequest,
   TransportMode,
   UrgentChannel,
-} from "@/types/connectors"
+} from "../../../types/connectors"
 import type { AdapterInstanceInput } from "../../db/adapter-instances"
 import type { AdapterInstanceRow, DispatchRule, OutboundJobRow } from "../../db/connector-types"
 import type { AdapterRuntimeStateSnapshot } from "../../connectors/outbound-runner"

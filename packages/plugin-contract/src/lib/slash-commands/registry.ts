@@ -16,7 +16,7 @@ export interface SlashCommandContext {
   /** Current character id (if any). */
   characterId?: string
   /** Surface invocation supplied by the unified quick-action dispatcher. */
-  quickAction?: import("@/types/plugin").PluginQuickActionInvocation
+  quickAction?: import("../../types/plugin").PluginQuickActionInvocation
 }
 
 export interface SlashCommandResult {

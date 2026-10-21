@@ -19,8 +19,8 @@
 export { defineConnector } from "../define/define-connector"
 export { buildA2UICapabilityMatrix } from "@cognia/plugin-contract/types/connectors/capability"
 
-export type { PluginConnectorDef } from "@/types/plugin"
-export type { PlatformAdapter } from "@/types/connectors"
+export type { PluginConnectorDef } from "@cognia/plugin-contract/types/plugin/index"
+export type { PlatformAdapter } from "@cognia/plugin-contract/types/connectors/index"
 export type {
   PluginAdapterContext,
   PluginAdapterFactory as AdapterFactory,

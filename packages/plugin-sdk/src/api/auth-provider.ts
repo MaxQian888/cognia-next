@@ -19,7 +19,7 @@ export {
   hydrateFromSecrets,
   __makeSession,
 } from "@/lib/plugin/auth/auth-provider-registry"
-export { runPkceAuthFlow } from "@/lib/plugin/auth/auth-pkce-flow"
+export { runPkceAuthFlow } from "@cognia/plugin-contract/lib/plugin/auth/auth-pkce-flow"
 
 export type {
   AuthSession,

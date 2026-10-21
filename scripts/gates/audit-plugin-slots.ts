@@ -46,7 +46,7 @@ import {
   getExtensionPointContract,
   type CanonicalExtensionPoint,
   type PluginPointContract,
-} from "../../lib/plugin/contracts/plugin-points"
+} from "../../packages/plugin-contract/src/lib/plugin/contracts/plugin-points"
 
 const SLOT_HOST_COMPONENTS = new Set(["PluginExtensionSlot", "PluginExtensionSlotWithOverflow"])
 

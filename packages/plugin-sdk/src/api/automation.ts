@@ -42,7 +42,7 @@ export type {
   UiTreeNode,
   WindowOp,
   ZoomedRegion,
-} from "@/lib/automation/types"
+} from "@cognia/plugin-contract/lib/automation/types"
 
 export type {
   FindScreenTextResult,
@@ -83,7 +83,7 @@ export {
   toToolSchema,
   uiActionSchema,
   uiTreeProjectionKindSchema,
-} from "@/lib/automation/action-schemas"
+} from "@cognia/plugin-contract/lib/automation/action-schemas"
 
 /**
  * Projection of a capture-bearing result into MCP content blocks.
@@ -98,7 +98,7 @@ export {
   frameToModelContent,
   screenshotMetadata,
   screenshotMimeType,
-} from "@/lib/automation/model-frame"
+} from "@cognia/plugin-contract/lib/automation/model-frame"
 
 export type {
   ModelContentBlock,

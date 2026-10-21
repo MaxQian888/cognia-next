@@ -1,8 +1,5 @@
 /**
- * External-agent runtime lifecycle contracts (catalog entries, bindings,
- * credential slots, lifecycle errors).
- *
- * Owned by `@cognia/agent-contracts` (ADR-0217); this path stays as the
- * compatibility entry for app importers.
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract types.
+ * This re-export keeps host imports of `@/types/agent/external-agent-lifecycle` working.
  */
-export * from "@cognia/agent-contracts/external-agent-lifecycle"
+export * from "@cognia/plugin-contract/types/agent/external-agent-lifecycle"

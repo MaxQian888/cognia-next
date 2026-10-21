@@ -1,4 +1,4 @@
-import type { DecisionQuestions } from "@/types/decisions"
+import type { DecisionQuestions } from "../../types/decisions"
 import {
   normalizeDecisionAnswers,
   normalizeDecisionRouting,

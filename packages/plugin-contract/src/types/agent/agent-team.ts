@@ -2151,7 +2151,7 @@ export const TASK_STATUS_CONFIG: Record<
  * layer so team UI + this display map share one union. Computed at read time
  * from durable facts — never stored.
  */
-export type { PrDerivedStatus } from "@/lib/github/pr-observe/types"
+export type { PrDerivedStatus } from "../../lib/github/pr-observe/types"
 
 /**
  * PR status display configuration. `labelKey` is under `agentTeam.prStatus.*`.
@@ -2159,7 +2159,7 @@ export type { PrDerivedStatus } from "@/lib/github/pr-observe/types"
  * changes/review amber, mergeable/approved green, merged/pr_open muted).
  */
 export const PR_STATUS_CONFIG: Record<
-  import("@/lib/github/pr-observe/types").PrDerivedStatus,
+  import("../../lib/github/pr-observe/types").PrDerivedStatus,
   { labelKey: string; color: string; icon: string }
 > = {
   none: { labelKey: "none", color: "text-muted-foreground", icon: "Circle" },

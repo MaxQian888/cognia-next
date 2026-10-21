@@ -1,12 +1,5 @@
-export * from "./platform-kind"
-export * from "./segment"
-export * from "./event"
-export * from "./outbound"
-export * from "./capability"
-export * from "./chat-management"
-export * from "./policy"
-export * from "./binding"
-export * from "./adapter"
-export * from "./audit"
-export * from "./interaction"
-export * from "./escalation"
+/**
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract types.
+ * This re-export keeps host imports of `@/types/connectors` working.
+ */
+export * from "@cognia/plugin-contract/types/connectors/index"

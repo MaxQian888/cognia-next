@@ -1,8 +1,3 @@
-/**
- * The plugin contract's share of `lib/browser/session-types.ts`, which re-exports these.
- */
-import type { BROWSER_DOWNLOAD_STATES } from "@/lib/browser/session-types"
-
 export interface BrowserPageSummary {
   id: string
   url: string
@@ -43,4 +38,50 @@ export interface BrowserDownloadSummary {
   error?: string
   backend?: BrowserDownloadBackend
   state: BrowserDownloadState
+}
+
+export const BROWSER_DOWNLOAD_STATES = [
+  "in_progress",
+  "completed",
+  "cancelled",
+  "failed",
+  "quarantined",
+  "saved",
+  "attached",
+] as const
+
+export function isBrowserDownloadSettled(state: BrowserDownloadState): boolean {
+  return state !== "in_progress"
+}
+
+export function isBrowserDownloadSummary(value: unknown): value is BrowserDownloadSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const item = value as Record<string, unknown>
+  return (
+    typeof item.id === "string" &&
+    typeof item.sessionId === "string" &&
+    typeof item.filename === "string" &&
+    typeof item.size === "number" &&
+    typeof item.state === "string" &&
+    (BROWSER_DOWNLOAD_STATES as readonly string[]).includes(item.state)
+  )
+}
+
+export type BrowserSessionErrorCode =
+  | "browser_session_not_found"
+  | "browser_session_quota_exceeded"
+  | "browser_profile_in_use"
+  | "browser_page_not_found"
+  /** An owner already holds its share of the shared session's pages (ADR-0214). */
+  | "browser_page_quota_exceeded"
+  | "browser_feature_unsupported"
+
+export class BrowserSessionError extends Error {
+  constructor(
+    public readonly code: BrowserSessionErrorCode,
+    message: string
+  ) {
+    super(message)
+    this.name = "BrowserSessionError"
+  }
 }

@@ -2,7 +2,11 @@
  * The plugin contract's share of `lib/db/pet-models.ts`, which re-exports these.
  */
 import type { Live2dCompatibilitySummary } from "../pet/live2d/types"
-import type { Live2dMotionOverrides, Live2dParameterMapping, Live2dTransform } from "@/types/pet"
+import type {
+  Live2dMotionOverrides,
+  Live2dParameterMapping,
+  Live2dTransform,
+} from "../../types/pet"
 
 /** Metadata row for one stored Live2D model. */
 export interface PetModelRow {

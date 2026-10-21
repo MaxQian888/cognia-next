@@ -2,7 +2,7 @@
  * The plugin contract's share of `lib/memory/api/store-memory.ts`, which re-exports these.
  */
 import type { ConsolidationOp } from "@/lib/memory/consolidate/consolidator"
-import type { MemoryScope, MemoryType } from "@/types/memory/memory"
+import type { MemoryScope, MemoryType } from "../../../types/memory/memory"
 
 export type StoreMemoryCoreResult =
   | {

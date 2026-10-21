@@ -15,7 +15,7 @@
  *   })
  */
 
-import type { PluginThemeContribution } from "@/types/plugin"
+import type { PluginThemeContribution } from "@cognia/plugin-contract/types/plugin/index"
 
 export function defineTheme(theme: PluginThemeContribution): PluginThemeContribution {
   return theme

@@ -17,7 +17,7 @@ export interface EvalRunCaseRow {
     {
       value: number
       passed: boolean
-      status?: import("@/types/eval/eval").ScoreStatus
+      status?: import("../../types/eval/eval").ScoreStatus
       reasoning?: string
     }
   >
@@ -26,7 +26,7 @@ export interface EvalRunCaseRow {
    * `lib/ai/eval/report.ts:repetitionVerdict` — the SAME function the run
    * header uses. Absent on legacy rows; fall back to {@link passAt1}.
    */
-  verdict?: import("@/types/eval/eval").RepetitionVerdict
+  verdict?: import("../../types/eval/eval").RepetitionVerdict
   /** Legacy mirror of `verdict === "pass"`. Kept so old rows stay readable. */
   passAt1: boolean
   /**

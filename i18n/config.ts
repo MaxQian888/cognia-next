@@ -1,5 +1,5 @@
-import type { Locale } from "@cognia/plugin-contract/i18n/config"
-export type { Locale } from "@cognia/plugin-contract/i18n/config"
-
-export const locales = ["en", "zh-CN"] as const
-export const defaultLocale: Locale = "en"
+/**
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract.
+ * This re-export keeps host imports of `@/i18n/config` working.
+ */
+export * from "@cognia/plugin-contract/i18n/config"

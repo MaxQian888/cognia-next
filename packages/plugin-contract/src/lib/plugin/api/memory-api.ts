@@ -2,7 +2,7 @@
  * The plugin contract's share of `lib/plugin/api/memory-api.ts`, which re-exports these.
  */
 import type { ExternalMemoryHit } from "../../memory/api/search-memory"
-import type { Memory, MemoryScope, MemoryStatus, MemoryType } from "@/types/memory/memory"
+import type { Memory, MemoryScope, MemoryStatus, MemoryType } from "../../../types/memory/memory"
 import type {
   MutateExternalMemoryResult,
   UpdateExternalMemoryPatch,

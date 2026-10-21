@@ -20,7 +20,7 @@ export type { CanonicalPluginErrorCode, CanonicalPluginPermission } from "./gene
  * activation raises an unhandled rejection inside the extension host, so a
  * scaffold or test can check its API use against this list.
  */
-export { EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS } from "@/lib/plugin/vscode-shim/unavailable-methods"
+export { EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS } from "@cognia/plugin-contract/lib/plugin/vscode-shim/unavailable-methods"
 
 export type PluginCapabilitySupport = "supported" | "partial" | "experimental" | "blocked"
 export type PluginRuntimeKind = "javascript" | "python" | "wasm" | "vscode" | "asset"

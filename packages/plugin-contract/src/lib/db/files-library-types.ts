@@ -1,9 +1,4 @@
 /**
- * The plugin contract's share of `lib/db/files-library-types.ts`, which re-exports these.
- */
-import type { LIBRARY_FOLDER_COLORS, LIBRARY_FOLDER_ICONS } from "@/lib/db/files-library-types"
-
-/**
  * - `artifact` / `canvas` — rows in `artifacts` / `canvasDocuments`.
  * - `image` — a canonical `messageMedia` image (one card per content hash).
  * - `session-upload` — a non-image original uploaded into one or more conversations.
@@ -143,3 +138,66 @@ export interface LibraryFolder {
 export type LibraryFolderColor = (typeof LIBRARY_FOLDER_COLORS)[number]
 
 export type LibraryFolderIcon = (typeof LIBRARY_FOLDER_ICONS)[number]
+
+export const ROOT_LIBRARY_FOLDER_ID = "root" as const
+
+export const LIBRARY_ITEM_KINDS: readonly LibraryItemKind[] = [
+  "artifact",
+  "canvas",
+  "image",
+  "session-upload",
+  "upload",
+  "workspace-file",
+]
+
+export const LIBRARY_FOLDER_COLORS = [
+  "gray",
+  "red",
+  "orange",
+  "amber",
+  "green",
+  "teal",
+  "blue",
+  "violet",
+  "pink",
+] as const
+
+export const LIBRARY_FOLDER_ICONS = [
+  "folder",
+  "star",
+  "briefcase",
+  "book",
+  "code",
+  "image",
+  "music",
+  "archive",
+  "heart",
+  "flag",
+] as const
+
+export function isLibraryFolderColor(value: unknown): value is LibraryFolderColor {
+  return typeof value === "string" && (LIBRARY_FOLDER_COLORS as readonly string[]).includes(value)
+}
+
+export function isLibraryFolderIcon(value: unknown): value is LibraryFolderIcon {
+  return typeof value === "string" && (LIBRARY_FOLDER_ICONS as readonly string[]).includes(value)
+}
+
+export type LibraryFolderPatch = Partial<Omit<LibraryFolder, "id" | "createdAt">>
+
+export function libraryItemKey(kind: LibraryItemKind, sourceId: string): string {
+  return `${kind}:${sourceId}`
+}
+
+export const FILES_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+
+export function isLibraryItemKept(
+  row: Pick<LibraryItemRow, "favoritedAt" | "folderId" | "ownedByFiles" | "trashedAt">
+): boolean {
+  return (
+    row.favoritedAt !== undefined ||
+    row.folderId !== undefined ||
+    row.ownedByFiles === true ||
+    row.trashedAt !== undefined
+  )
+}

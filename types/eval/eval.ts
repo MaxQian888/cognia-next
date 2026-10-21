@@ -1,9 +1,5 @@
 /**
- * Re-export shim. The eval domain model now lives in `@cognia/eval-core` so
- * the CLI, CI, and the app all compile against one definition — see
- * `packages/eval-core/src/domain/eval.ts`.
- *
- * This path is kept because ~83 modules import it; new code should import from
- * `@cognia/eval-core` directly.
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract types.
+ * This re-export keeps host imports of `@/types/eval/eval` working.
  */
-export * from "@cognia/eval-core/domain/eval"
+export * from "@cognia/plugin-contract/types/eval/eval"

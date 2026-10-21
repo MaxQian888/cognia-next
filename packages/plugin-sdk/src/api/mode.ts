@@ -7,11 +7,15 @@
 
 export { defineMode } from "../define/define-mode"
 
-export { BUILT_IN_AGENT_MODES, getAgentMode, getAgentModeByType } from "@/lib/agent/modes/built-ins"
+export {
+  BUILT_IN_AGENT_MODES,
+  getAgentMode,
+  getAgentModeByType,
+} from "@cognia/plugin-contract/lib/agent/modes/built-ins"
 
 export type {
   AgentModeConfig,
   AgentModeType,
   CustomAgentMode,
 } from "@cognia/plugin-contract/types/agent/agent-mode"
-export type { PluginModeDef } from "@/types/plugin"
+export type { PluginModeDef } from "@cognia/plugin-contract/types/plugin/index"

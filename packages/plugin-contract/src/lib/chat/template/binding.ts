@@ -1,6 +1,21 @@
-/**
- * The plugin contract's share of `lib/chat/template/binding.ts`, which re-exports these.
- */
+// What a composer draft remembers about the template it came from.
+//
+// The text in the box already carries WHICH parameters exist — every
+// `{{id}}` token is right there, and `listParamTokens` reads them back after a
+// reload without help. What the text cannot carry is what each one is set TO,
+// because the chip overlay is a character-for-character mirror of the textarea:
+// a pill can only ever paint the token it covers, never a substituted value.
+//
+// So the values live beside the text, on the draft row. That is a deliberate
+// trade with one real cost — you never see the finished sentence while editing
+// — bought against two things worth more: a reload restores the draft exactly,
+// and the composer stays a plain `<textarea>`, with everything (IME, paste
+// folding, ghost text, voice, `@` completion) still working.
+//
+// Nothing here reaches for a store, a database or a registry: these are the
+// pure shapes and predicates, so the send path, the overlay and the persistence
+// layer all answer "is this filled?" the same way.
+
 /**
  * One parameter's value.
  *
@@ -26,3 +41,53 @@ export type ChatTemplateParamValue =
        */
       raw?: string
     }
+
+export interface ChatTemplateBinding {
+  templateId: string
+  /** The template version in force when this draft was inserted. */
+  version: string
+  /** Values by parameter id. A parameter with no entry is simply unfilled. */
+  params: Record<string, ChatTemplateParamValue>
+  insertedAt: number
+}
+
+export type ChatTemplateParamState = "empty" | "filled" | "unresolved"
+
+export function isParamFilled(value: ChatTemplateParamValue | undefined): boolean {
+  if (!value) return false
+  return value.kind === "text" ? value.value.trim().length > 0 : value.id.length > 0
+}
+
+export function paramValueText(value: ChatTemplateParamValue | undefined): string {
+  if (!value) return ""
+  if (value.kind === "text") return value.value
+  return value.raw ?? value.label
+}
+
+export function paramState(
+  value: ChatTemplateParamValue | undefined,
+  isResolvable?: (value: Extract<ChatTemplateParamValue, { kind: "resource" }>) => boolean
+): ChatTemplateParamState {
+  if (!isParamFilled(value)) return "empty"
+  const filled = value as ChatTemplateParamValue
+  if (filled.kind === "resource" && isResolvable && !isResolvable(filled)) return "unresolved"
+  return "filled"
+}
+
+export function withParamValue(
+  binding: ChatTemplateBinding,
+  paramId: string,
+  value: ChatTemplateParamValue
+): ChatTemplateBinding {
+  return { ...binding, params: { ...binding.params, [paramId]: value } }
+}
+
+export function pruneBinding(
+  binding: ChatTemplateBinding,
+  presentParamIds: readonly string[]
+): ChatTemplateBinding {
+  const present = new Set(presentParamIds)
+  const kept = Object.entries(binding.params).filter(([id]) => present.has(id))
+  if (kept.length === Object.keys(binding.params).length) return binding
+  return { ...binding, params: Object.fromEntries(kept) }
+}

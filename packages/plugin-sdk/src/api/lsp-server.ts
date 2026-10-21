@@ -25,4 +25,4 @@ export type {
   LspServerState,
 } from "@/lib/plugin/lsp/lsp-registry"
 
-export type { PluginLspServerDef } from "@/types/plugin"
+export type { PluginLspServerDef } from "@cognia/plugin-contract/types/plugin/index"

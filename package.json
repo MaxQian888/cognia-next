@@ -323,7 +323,7 @@
     "audit:rpc-semantic-parity:test": "node --test scripts/gates/check-rpc-semantic-parity.test.mjs",
     "audit:silent-flags": "node scripts/gates/check-silent-failure-flags.mjs",
     "audit:silent-flags:test": "node --test scripts/gates/check-silent-failure-flags.test.mjs",
-    "audit:slots": "ts-node --project scripts/tsconfig.audit.json scripts/gates/audit-plugin-slots.ts",
+    "audit:slots": "tsx --tsconfig scripts/tsconfig.audit.json scripts/gates/audit-plugin-slots.ts",
     "audit:surfaces": "node scripts/gates/check-surface-usage.mjs",
     "audit:trusted-publishers": "ts-node --project scripts/tsconfig.audit.json scripts/gates/check-trusted-publishers.ts",
     "audit:unreachable-components": "node scripts/gates/check-unreachable-components.mjs",

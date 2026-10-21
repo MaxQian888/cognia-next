@@ -29,4 +29,4 @@ export type {
   PluginSelectionOrigin,
   PluginSelectionQuickActionContext,
   PluginSelectionReplaceCapability,
-} from "@/types/plugin"
+} from "@cognia/plugin-contract/types/plugin/index"

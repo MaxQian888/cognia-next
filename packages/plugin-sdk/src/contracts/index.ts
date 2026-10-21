@@ -28,12 +28,12 @@ export type {
 export {
   getAllContributions,
   getContributionsForCapability,
-} from "@/lib/plugin/contracts/capability-contributions"
+} from "@cognia/plugin-contract/lib/plugin/contracts/capability-contributions"
 
 export type {
   CapabilityContribution,
   CapabilityEntry,
-} from "@/lib/plugin/contracts/capability-contributions"
+} from "@cognia/plugin-contract/lib/plugin/contracts/capability-contributions"
 
 export {
   CANONICAL_ACTIVATION_PATTERNS,
@@ -52,7 +52,7 @@ export {
   validateActivationEvent,
   validateExtensionPoint,
   validateHookPoint,
-} from "@/lib/plugin/contracts/plugin-points"
+} from "@cognia/plugin-contract/lib/plugin/contracts/plugin-points"
 
 export type {
   ActivationEventDeclaration,
@@ -70,7 +70,7 @@ export type {
   PluginPointStability,
   PluginPointStatus,
   PluginPointValidationOutcome,
-} from "@/lib/plugin/contracts/plugin-points"
+} from "@cognia/plugin-contract/lib/plugin/contracts/plugin-points"
 
 export { auditPluginRuntimeClaims } from "@/lib/plugin/contracts/runtime-proof-audit"
 export type {

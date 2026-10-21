@@ -54,5 +54,5 @@ export {
   MAX_CHOICE_OPTIONS,
   validateDecisionQuestions,
   validateDecisionRequest,
-} from "@/lib/decisions/validate"
-export { scoreFraction } from "@/lib/decisions/normalize"
+} from "@cognia/plugin-contract/lib/decisions/validate"
+export { scoreFraction } from "@cognia/plugin-contract/lib/decisions/normalize"

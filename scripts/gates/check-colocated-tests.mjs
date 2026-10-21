@@ -7,7 +7,10 @@
  *   src-tauri/src/**  crates/<crate>/src/** →  foo.rs  needs  #[cfg(test)]
  *
  * A Rust file that only declares modules and re-exports (`mod x;`,
- * `pub use y::*;`) has no behavior to test and is not gated.
+ * `pub use y::*;`) has no behavior to test and is not gated. Neither is a
+ * TypeScript file whose every statement re-exports another module
+ * (`export * from "…"`), such as the host's boundary shims onto a package:
+ * the test belongs beside the module that owns the behavior.
  *
  * Excluded by the rule itself: `components/ui/` (shadcn) and
  * `components/ai-elements/` (vendored).
@@ -145,6 +148,28 @@ export function rustIsDeclarationOnly(source) {
 }
 
 /**
+ * Does this TypeScript source only re-export other modules
+ * (`export * from "x"`, `export { a, type B } from "x"`)? Such a shim forwards
+ * to the module that owns the behavior, and that module's test pins it. Pure.
+ *
+ * @param {string} source
+ * @returns {boolean}
+ */
+export function tsIsReexportOnly(source) {
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")
+  const statement =
+    /^\s*export\s+(?:type\s+)?(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s+from\s+(["'])[^"'\n]+\1\s*;?/
+  let rest = code
+  if (rest.trim() === "") return false
+  while (rest.trim() !== "") {
+    const match = rest.match(statement)
+    if (!match) return false
+    rest = rest.slice(match[0].length)
+  }
+  return true
+}
+
+/**
  * The co-located test paths that would satisfy the rule for a source file.
  * Pure.
  * @param {string} file
@@ -181,7 +206,7 @@ export function rustSplitTestModules(file, source) {
  * Compute the current violation list. Pure — I/O is injected.
  *
  * @param {string[]} files every tracked repo-relative path
- * @param {{ has: (p: string) => boolean, readRust: (p: string) => string }} io
+ * @param {{ has: (p: string) => boolean, readRust: (p: string) => string, readTs?: (p: string) => string }} io
  * @returns {string[]} sorted violating paths
  */
 export function findViolations(files, io) {
@@ -194,7 +219,9 @@ export function findViolations(files, io) {
   for (const file of files) {
     if (rustTestModules.has(file)) continue
     if (isGatedTsSource(file)) {
-      if (!expectedTestPaths(file).some((p) => io.has(p))) violations.push(file)
+      if (expectedTestPaths(file).some((p) => io.has(p))) continue
+      if (io.readTs && tsIsReexportOnly(io.readTs(file))) continue
+      violations.push(file)
     } else if (isGatedRustSource(file)) {
       const source = io.readRust(file)
       if (!rustHasInlineTests(source) && !rustIsDeclarationOnly(source)) violations.push(file)
@@ -287,16 +314,14 @@ export function writeBaseline(violations, file = BASELINE_FILE) {
 export function main(argv = []) {
   const files = listTrackedFiles()
   const known = new Set(files)
-  const io = {
-    has: (p) => known.has(p),
-    readRust: (p) => {
-      try {
-        return readFileSync(join(REPO_ROOT, p), "utf8")
-      } catch {
-        return ""
-      }
-    },
+  const read = (p) => {
+    try {
+      return readFileSync(join(REPO_ROOT, p), "utf8")
+    } catch {
+      return ""
+    }
   }
+  const io = { has: (p) => known.has(p), readRust: read, readTs: read }
 
   const violations = findViolations(files, io)
 

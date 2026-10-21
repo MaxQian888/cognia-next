@@ -3,7 +3,7 @@
  */
 import type { A2UIComponent, A2UISurfaceType } from "../../../types/a2ui/schema"
 import type { A2UIMessageSegment, A2UISegmentContent } from "../../../types/connectors/segment"
-import type { ConversationReference, OutboundRequest } from "@/types/connectors"
+import type { ConversationReference, OutboundRequest } from "../../../types/connectors"
 import type { a2uiComponent } from "@/lib/connectors/a2ui-bridge/surface-builder"
 
 /** Declarative input for {@link buildA2UISurfaceContent}. */

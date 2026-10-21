@@ -1,7 +1,4 @@
 /**
- * The plugin contract's share of `lib/plugin/api/view-container-errors.ts`, which re-exports these.
- */
-/**
  * Refusals from `ctx.ui.openViewContainer(containerId)`.
  *
  * Kept dependency-free (no registry, store or guard) so the plugin SDK root can
@@ -17,3 +14,34 @@
  *   its own.
  */
 export type ViewContainerOpenErrorCode = "invalid-id" | "not-registered" | "foreign"
+
+const VIEW_CONTAINER_OPEN_ERROR_CODES: ReadonlySet<string> = new Set<ViewContainerOpenErrorCode>([
+  "invalid-id",
+  "not-registered",
+  "foreign",
+])
+
+export class ViewContainerOpenError extends Error {
+  readonly code: ViewContainerOpenErrorCode
+  readonly containerId: string
+
+  constructor(code: ViewContainerOpenErrorCode, containerId: string, message: string) {
+    super(message)
+    this.name = "ViewContainerOpenError"
+    this.code = code
+    this.containerId = containerId
+  }
+}
+
+export function isViewContainerOpenError(
+  value: unknown,
+  code?: ViewContainerOpenErrorCode
+): value is ViewContainerOpenError {
+  if (value === null || typeof value !== "object") return false
+  const candidate = value as { name?: unknown; code?: unknown }
+  if (candidate.name !== "ViewContainerOpenError") return false
+  if (typeof candidate.code !== "string" || !VIEW_CONTAINER_OPEN_ERROR_CODES.has(candidate.code)) {
+    return false
+  }
+  return code === undefined || candidate.code === code
+}

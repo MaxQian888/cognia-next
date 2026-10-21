@@ -12,7 +12,7 @@ import type {
   UpdateExternalAgentInput,
 } from "../../../types/agent/external-agent"
 import type { ExternalAgentFailure } from "../../../lib/ai/agent/external/agent-failure"
-import type { ExternalAgentLifecycleFields } from "@/types/agent/external-agent-lifecycle"
+import type { ExternalAgentLifecycleFields } from "../../../types/agent/external-agent-lifecycle"
 import type {
   ExternalAgentSpawnConfig,
   TerminalInfo,

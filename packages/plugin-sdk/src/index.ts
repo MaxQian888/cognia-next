@@ -68,7 +68,7 @@ export {
   UNTRUSTED_CONTENT_NOTICE,
   unwrapUntrustedContent,
   wrapUntrustedContent,
-} from "@/lib/web/untrusted-content"
+} from "@cognia/plugin-contract/lib/web/untrusted-content"
 
 /**
  * The reasoning-tier vocabulary, re-exported (not re-declared) for the same
@@ -100,7 +100,7 @@ export {
   thinkingLevelPatch,
   thinkingLevelToEffort,
   visibleThinkingLevels,
-} from "@/lib/ai/thinking-level"
+} from "@cognia/plugin-contract/lib/ai/thinking-level"
 export type {
   Effort,
   EffortTier,
@@ -314,7 +314,7 @@ export { defineToolRoute } from "./define/define-tool-route"
 export { defineViewContainer } from "./define/define-view-container"
 // `ctx.ui.openViewContainer` refusals. The guard is pure (no host state), so
 // it belongs on the root beside the types.
-export { isViewContainerOpenError } from "@/lib/plugin/api/view-container-errors"
+export { isViewContainerOpenError } from "@cognia/plugin-contract/lib/plugin/api/view-container-errors"
 export type { ViewContainerOpenErrorCode } from "@cognia/plugin-contract/lib/plugin/api/view-container-errors"
 export { defineTreeDataProvider, defineView } from "./define/define-view"
 export { defineWebview } from "./define/define-webview"

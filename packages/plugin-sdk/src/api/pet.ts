@@ -23,7 +23,7 @@ export {
   PetEventKindNotAllowedError,
   PetItemKindMismatchError,
   PetItemNotOwnedError,
-} from "@/lib/plugin/api/pet-api-contract"
+} from "@cognia/plugin-contract/lib/plugin/api/pet-api-contract"
 
 export {
   buildPluginAchievementId,
@@ -50,7 +50,7 @@ export type {
   PluginPetItemDef,
 } from "@cognia/plugin-contract/types/plugin/plugin-pet"
 
-export type { PetEventKind, PetEventSource } from "@/types/pet"
+export type { PetEventKind, PetEventSource } from "@cognia/plugin-contract/types/pet/index"
 
 export type {
   PluginEmittablePetEventKind,

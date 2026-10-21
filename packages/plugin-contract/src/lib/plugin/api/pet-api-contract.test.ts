@@ -11,7 +11,7 @@ import {
   MAX_COINS_PER_REWARD,
   MAX_XP_PER_REWARD,
   PET_REWARDABLE_KINDS,
-} from "@/lib/pet/access/limits"
+} from "../../pet/access/limits"
 
 describe("plugin pet API contract", () => {
   it("publishes exactly the gate's rewardable kinds and per-call limits", () => {

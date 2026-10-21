@@ -26,7 +26,7 @@ export {
 export {
   ViewContainerOpenError,
   isViewContainerOpenError,
-} from "@/lib/plugin/api/view-container-errors"
+} from "@cognia/plugin-contract/lib/plugin/api/view-container-errors"
 
 export type { ViewContainerEntry } from "@/lib/plugin/registries/view-container-registry"
 export type { ViewContainerOpenErrorCode } from "@cognia/plugin-contract/lib/plugin/api/view-container-errors"

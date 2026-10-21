@@ -27,4 +27,4 @@ export type {
   ExternalAgentPresetId,
 } from "@cognia/plugin-contract/lib/ai/agent/external/config/presets"
 
-export type { PluginExternalAgentPresetDef } from "@/types/plugin"
+export type { PluginExternalAgentPresetDef } from "@cognia/plugin-contract/types/plugin/index"

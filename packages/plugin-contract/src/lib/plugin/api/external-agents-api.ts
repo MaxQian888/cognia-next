@@ -27,7 +27,7 @@ import type {
   ExternalAgentCredentialSlot,
   ExternalAgentLifecycleErrorCode,
   ExternalAgentLifecycleStatus,
-} from "@/types/agent/external-agent-lifecycle"
+} from "../../../types/agent/external-agent-lifecycle"
 import type { ExternalAgentStore } from "../../../stores/agent/external-agent-store/types"
 import type { RuntimeResolution } from "../../ai/agent/external/config/installed-runtimes"
 

@@ -1,4 +1,4 @@
-import { partitionByLayout, resolveOrderedLayout } from "@/lib/shell/layout-partition"
+import { partitionByLayout, resolveOrderedLayout } from "./layout-partition"
 
 interface Item {
   id: string

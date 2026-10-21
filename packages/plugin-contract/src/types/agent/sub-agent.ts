@@ -3,7 +3,7 @@
  * Defines types for sub-agents that can be spawned by parent agents
  */
 
-import type { ToolCall } from "@/lib/ai/agent"
+import type { ToolCall } from "../../lib/ai/agent"
 import type { ProviderName } from "@cognia/provider-types/provider"
 import type { AgentSubagentContextPolicy } from "@cognia/agent-contracts/session-operations"
 
