@@ -79,6 +79,9 @@ conclusions validated back.
   500-line change, decompose first.
 - **Contract** — in this repo the contract is largely standardized. Pull in
   only the clauses that apply:
+  - If an evidence ledger exists (`docs/evidence/`, `evidence-driven-dev`):
+    the Problem frame, the C (constraint) items, and the claims with their
+    "Refuted by" column. Never pass its Decisions or design rationale.
   - The relevant **ADR** (see the Subsystem Map in `CLAUDE.md`) and its schema
     version.
   - `output: "export"` holds — no server-only path in bundled code.

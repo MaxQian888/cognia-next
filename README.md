@@ -254,7 +254,10 @@ cognia-next/
 ├── src-tauri/             Tauri 2 Rust core (axum HTTP, scheduler, automation, OCR, …)
 ├── sidecar/               Node agent / extension hosts; separate dependencies and lockfiles
 ├── mobile/                Capacitor 8 shell (workspace package)
-├── docs/                  Fumadocs site + ADRs (workspace package, port 3001)
+├── docs/                  Fumadocs site, ADRs, and contributor guides (port 3001)
+│   └── development/      CI/CD, testing, and development workflow guides
+├── deploy/                Container builds, Compose, Kubernetes, and runner deployment
+│   └── docker/           Dockerfiles built with the repository root as context
 ├── services/              Independently deployed services
 │   ├── workspace-runtime/ Workspace browser runtime
 │   ├── signaling-server/  WebRTC rendezvous service (axum + workers-rs)
@@ -262,6 +265,10 @@ cognia-next/
 ├── tests/e2e/             Playwright suites (workflows, mobile, tauri)
 └── scripts/               Build, audit, and migration helpers
 ```
+
+See the [directory guide](docs/README.md) for file placement, development guides,
+and generated output. Root-level manifests, framework entry points, and tool
+configuration stay at the root so the existing commands can discover them.
 
 ### Configuration
 

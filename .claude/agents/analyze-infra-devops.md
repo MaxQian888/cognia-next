@@ -14,7 +14,7 @@ You analyze the infrastructure and DevOps setup of cognia-next. Focus on:
 - `services/share-server/` — Cloudflare Worker + Vite viewer for zero-knowledge share links
 - Root configs — `package.json` scripts, `pnpm-workspace.yaml`, `tsconfig.json`, `eslint.config.mjs`, `jest.config.ts`, `playwright.config.ts`, `next.config.ts`, `postcss.config.mjs`
 - `husky/`, `.lintstagedrc.json`, `commitlint.config.cjs` — Commit quality gates
-- `Dockerfile.cognia-server` — Container deployment
+- `deploy/docker/Dockerfile.cognia-server` — Container deployment
 - `mobile/` — Capacitor 8 mobile shell
 
 ## Output Format
@@ -33,7 +33,7 @@ You analyze the infrastructure and DevOps setup of cognia-next. Focus on:
 - `next.config.ts` — Next.js config (static export, server-only packages)
 - `jest.config.ts` + `scripts/test/coverage-thresholds.json` — Jest config and coverage thresholds
 - `playwright.config.ts` — E2E projects
-- `Dockerfile.cognia-server`
+- `deploy/docker/Dockerfile.cognia-server`
 
 ## Commands
 

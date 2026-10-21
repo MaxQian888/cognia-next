@@ -254,7 +254,10 @@ cognia-next/
 ├── src-tauri/             Tauri 2 Rust 核心（axum HTTP、调度器、自动化、OCR、…）
 ├── sidecar/               Node 智能体 / 扩展宿主；独立依赖与 lockfile
 ├── mobile/                Capacitor 8 外壳（workspace 子包）
-├── docs/                  Fumadocs 站点 + ADR（workspace 子包，端口 3001）
+├── docs/                  Fumadocs 站点、ADR 与开发指南（端口 3001）
+│   └── development/      CI/CD、测试与开发流程指南
+├── deploy/                容器构建、Compose、Kubernetes 与 runner 部署
+│   └── docker/           以仓库根目录为构建上下文的 Dockerfile
 ├── services/              独立部署的服务
 │   ├── workspace-runtime/ 工作区浏览器运行时
 │   ├── signaling-server/  WebRTC 信令汇合服务（axum + workers-rs）
@@ -262,6 +265,9 @@ cognia-next/
 ├── tests/e2e/             Playwright 套件（workflows、mobile、tauri）
 └── scripts/               构建、审计、迁移辅助
 ```
+
+文件归属、开发指南和生成产物位置见[目录指南](docs/README.md)。根目录保留
+workspace 清单、框架入口和工具配置，供现有命令自动发现。
 
 ### 配置
 

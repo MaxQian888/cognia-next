@@ -5,7 +5,7 @@ The condensed pipeline for turning an idea into merged, gated code in cognia-nex
 It **orchestrates** the skills, sub-agents, and gates that already exist in this
 repo and in your Claude Code install — it does **not** invent new tooling and it
 does **not** restate the hard rules. The five hard rules in
-[`CLAUDE.md`](./CLAUDE.md) (research-before-reuse, no simplifications,
+[`CLAUDE.md`](../../CLAUDE.md) (research-before-reuse, no simplifications,
 co-located tests, i18n parity, EN narration / 中文提问) still govern **every**
 step below. Read CLAUDE.md first; this file tells you _what to run when_.
 

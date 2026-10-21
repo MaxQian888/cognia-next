@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/.pnpm-store/
 node_modules
 /.pnp
 .pnp.*
@@ -183,7 +184,7 @@ sidecar/src/services/code-graph/grammars/*.wasm
 # scripts/build/build-mcp-sidecar.mjs (prebuild), not authored here.
 sidecar/cognia-mcp.mjs
 # Pro IDE managed-broker extension package (ADR-0088). Built by
-# `sidecar/codeserver-agent-ext/build.mjs` and shipped as a Tauri resource, so
+# `sidecar/codeserver-agent-ext/build.ts` and shipped as a Tauri resource, so
 # `beforeDevCommand` / `beforeBuildCommand` regenerate it before the resource
 # walk. It was committed until the packaging became deterministic; a zip that
 # restamped every entry's mtime meant each rebuild was a 34 KB binary diff.
