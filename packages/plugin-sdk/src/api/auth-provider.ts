@@ -18,7 +18,7 @@ export {
   onDidChangeSessions,
   hydrateFromSecrets,
   __makeSession,
-} from "@/lib/plugin/auth/auth-provider-registry"
+} from "@cognia/plugin-contract/lib/plugin/auth/auth-provider-registry"
 export { runPkceAuthFlow } from "@cognia/plugin-contract/lib/plugin/auth/auth-pkce-flow"
 
 export type {
@@ -26,7 +26,7 @@ export type {
   AuthSessionChangeEvent,
   AuthSessionOptions,
   AuthenticationProvider,
-} from "@/lib/plugin/auth/auth-provider-registry"
+} from "@cognia/plugin-contract/lib/plugin/auth/auth-provider-registry"
 export type {
   PkceFlowConfig,
   PkceTokenResult,

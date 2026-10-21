@@ -16,7 +16,7 @@ export {
   getSharedMemoryAdapterEntry,
   listSharedMemoryAdapterIds,
   listSharedMemoryAdapterEntries,
-} from "@/lib/plugin/registries/shared-memory-adapter-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/shared-memory-adapter-registry"
 
 export type { PluginSharedMemoryAdapterDef } from "@cognia/plugin-contract/types/plugin/plugin-shared-memory-adapter"
 

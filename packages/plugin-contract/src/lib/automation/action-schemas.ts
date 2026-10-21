@@ -50,6 +50,12 @@ export type GetAppStateOptions = z.infer<typeof getAppStateOptionsSchema>
 
 export type AppLocator = z.infer<typeof appLocatorSchema>
 
+/**
+ * Rust `ElementRef(pub String)` / `KeyChord(pub String)` are newtype structs.
+ * serde renders a newtype struct transparently, so both cross the wire as a
+ * bare JSON string — not as the one-element tuple `lib/automation/types.ts`
+ * used to declare. See `element-ref-wire-format` in the Rust tests.
+ */
 export const elementRefSchema = z
   .string()
   .describe("Opaque backend element reference. Pass it back unchanged.")
@@ -89,6 +95,10 @@ export const scrollOptsSchema = z.object({
 })
 
 export const uiTreeProjectionKindSchema = z.enum(["model", "inspector"])
+
+// ---------------------------------------------------------------------------
+// Targets
+// ---------------------------------------------------------------------------
 
 export const elementHandleSchema = z
   .object({
@@ -137,6 +147,10 @@ export const actionTargetSchema = z
     "Prefer `element`: it survives layout shifts and is delivered through the accessibility " +
       "API. Use `pixel` only when the tree has no node for what you can see."
   )
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
 
 export const uiActionSchema = z
   .discriminatedUnion("kind", [
@@ -197,6 +211,10 @@ export const actionRequestSchema = z.object({
   strategy: actionStrategySchema,
 })
 
+// ---------------------------------------------------------------------------
+// Queries
+// ---------------------------------------------------------------------------
+
 export const locatorSchema = z
   .object({
     name: z.string().optional(),
@@ -229,6 +247,11 @@ export const appLocatorSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("displayName"), displayName: z.string() }),
 ])
 
+// ---------------------------------------------------------------------------
+// Inferred types — `lib/automation/types.ts` re-exports these so the shapes
+// are declared exactly once on the TS side.
+// ---------------------------------------------------------------------------
+
 export type ElementRef = z.infer<typeof elementRefSchema>
 
 export type KeyChord = z.infer<typeof keyChordSchema>
@@ -241,6 +264,12 @@ export type UiAction = z.infer<typeof uiActionSchema>
 
 export type ActionStrategy = z.infer<typeof actionStrategySchema>
 
+/**
+ * Render a zod schema as the plain JSON Schema the plugin tool surface and the
+ * sidecar's `jsonSchemaToZodShape` both consume. Draft-7 is what the Anthropic
+ * tool API accepts; `io: "input"` renders the pre-parse shape, which is the
+ * one the model has to produce.
+ */
 export function toToolSchema(schema: z.ZodType): Record<string, unknown> {
   return z.toJSONSchema(schema, {
     target: "draft-7",

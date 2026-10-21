@@ -11,6 +11,7 @@
  * the union against the Rust enum. Re-exported here so existing importers of
  * `lib/automation/types` are unaffected.
  */
+
 export type {
   ActionRequest,
   ActionStrategy,
@@ -389,6 +390,7 @@ export type AutomationError =
   | { code: "BACKEND_ERROR"; message: string }
   | { code: "INTERNAL"; message: string }
 
+/** Helper to construct an ElementRef from a raw string. */
 export function elementRef(raw: string): ElementRef {
   return raw
 }
@@ -401,6 +403,11 @@ export function keyChord(raw: string): KeyChord {
   return raw
 }
 
+/**
+ * Tauri commands return `Result<T, String>`. The Rust side serializes
+ * `AutomationError` as a JSON string before raising, so the renderer can
+ * recover the typed shape by `JSON.parse`-ing the error string.
+ */
 export function parseAutomationError(raw: unknown): AutomationError | null {
   if (typeof raw !== "string") return null
   try {
@@ -414,6 +421,9 @@ export function parseAutomationError(raw: unknown): AutomationError | null {
   return null
 }
 
+/**
+ * Stringify an AutomationError for UI display.
+ */
 export function automationErrorMessage(err: AutomationError): string {
   switch (err.code) {
     case "UNSUPPORTED_PLATFORM":

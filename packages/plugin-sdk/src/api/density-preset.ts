@@ -15,9 +15,9 @@ export {
   registerDensityPresetsForPlugin,
   subscribeDensityPresets,
   unregisterDensityPresetsByPlugin,
-} from "@/lib/appearance/density-preset-registry"
+} from "@cognia/plugin-contract/lib/appearance/density-preset-registry"
 
-export type { RegisteredDensityPreset } from "@/lib/appearance/density-preset-registry"
+export type { RegisteredDensityPreset } from "@cognia/plugin-contract/lib/appearance/density-preset-registry"
 
 export type { DensityLevel, DensitySettings } from "@cognia/plugin-contract/types/appearance/index"
 export type { PluginDensityPresetContribution } from "@cognia/plugin-contract/types/plugin/plugin"

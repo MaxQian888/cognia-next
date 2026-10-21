@@ -1,10 +1,41 @@
 "use client"
 
+/**
+ * Default-shell suggestion for the integrated terminal.
+ *
+ * The renderer can't probe the filesystem to know if `/bin/zsh` exists,
+ * so we return a best-guess based on platform. The user can override via
+ * settings (`useSettingsStore`) or per-project (`Project.terminalConfig`)
+ * — those overrides take precedence over the value returned here.
+ *
+ * Detection sources, in priority order:
+ *   1. Per-project override (`Project.terminalConfig.shell`).
+ *   2. User setting (`settings.terminalDefaultShell`).
+ *   3. `navigator.userAgent` platform sniff.
+ *
+ * The Rust side validates the shell binary exists at spawn time; an
+ * invalid path surfaces as a `spawn_command failed` error which the dock
+ * presents to the user.
+ */
+
 export type ShellPlatform = "windows" | "macos" | "linux" | "other"
 
+/**
+ * Shell family. Renderer-side mirror of the Rust `ShellKind`
+ * (`src-tauri/src/terminal/integration.rs`) — kept aligned so shell-aware
+ * features (OSC 633 integration, AI completion syntax hints) agree on both
+ * sides. A superset: `sh` is recognised here for completion purposes even
+ * though the Rust integration layer treats a bare `sh` as `unknown`.
+ */
 export type ShellKind =
   "bash" | "zsh" | "sh" | "pwsh" | "powershell" | "cmd" | "fish" | "nu" | "unknown"
 
+/**
+ * Classify a shell binary path into a `ShellKind`. Mirrors the Rust
+ * `ShellKind::from_shell_path`: take the file stem, drop a trailing
+ * `.exe`, lowercase, and pattern-match. Unknown shells fall back to
+ * `"unknown"` (still spawnable — this only drives shell-aware hints).
+ */
 export function detectShellKind(shellPath: string): ShellKind {
   const base = (shellPath.split(/[\\/]/).pop() ?? "").toLowerCase().replace(/\.exe$/, "")
   switch (base) {
@@ -41,6 +72,10 @@ export function detectPlatform(ua?: string): ShellPlatform {
   return "other"
 }
 
+/**
+ * Best-guess default shell by platform. Use as a fallback when no
+ * project override and no user setting are set.
+ */
 export function platformDefaultShell(platform: ShellPlatform): string {
   switch (platform) {
     case "windows":
@@ -59,6 +94,7 @@ export function platformDefaultShell(platform: ShellPlatform): string {
   }
 }
 
+/** A built-in shell choice offered by the "+ New" shell picker. */
 export interface ShellOption {
   /** Shell binary to spawn — absolute path or PATH-resolvable name. */
   value: string
@@ -68,6 +104,17 @@ export interface ShellOption {
   bin: string
 }
 
+/**
+ * Built-in shell choices appropriate for a platform — Windows shells on
+ * Windows, POSIX shells on macOS/Linux. Excludes the "auto / default"
+ * entry, which the picker always renders. This is the platform half of
+ * "show what fits the OS"; `filterDetectedShellOptions` is the
+ * "show only what's installed" half.
+ *
+ * Pass the HOST's platform, not the client's, whenever the session will spawn
+ * over `ws` / `webrtc` — see `hostShellOptions`, which is the remote form of
+ * both halves at once.
+ */
 export function platformShellOptions(platform: ShellPlatform): ShellOption[] {
   switch (platform) {
     case "windows":
@@ -98,6 +145,14 @@ export function platformShellOptions(platform: ShellPlatform): ShellOption[] {
   }
 }
 
+/**
+ * Narrow a platform option list to the shells actually present on PATH.
+ * `detectedBins` is the set of executable basenames found (lowercased, no
+ * extension). When it is empty — detection unavailable (web) or the scan
+ * failed — the full list is returned unchanged. As a safety net, if the
+ * filter would hide everything (e.g. a misbehaving scan), the full list is
+ * kept so the menu is never empty.
+ */
 export function filterDetectedShellOptions(
   options: readonly ShellOption[],
   detectedBins: ReadonlySet<string>
@@ -107,6 +162,7 @@ export function filterDetectedShellOptions(
   return kept.length > 0 ? kept : [...options]
 }
 
+/** Shell families the picker has a `terminal.shellPicker.*` label for. */
 const LABELLED_SHELL_KINDS: ReadonlySet<string> = new Set([
   "bash",
   "zsh",
@@ -118,6 +174,23 @@ const LABELLED_SHELL_KINDS: ReadonlySet<string> = new Set([
   "cmd",
 ])
 
+/**
+ * Shell choices for a *remote* host, built from what it reported it has.
+ *
+ * This replaces both halves of the local story at once: the host already
+ * filtered to shells that exist on it, so there is nothing left to detect —
+ * and there is nothing the client *could* detect, since the PATH scan behind
+ * `filterDetectedShellOptions` runs a Tauri command against the wrong machine.
+ *
+ * The family comes from the host, deliberately, rather than from re-running
+ * `detectShellKind` on the path: the host classifies against the shells it can
+ * actually launch (it knows `/bin/ash` is a `sh`), and a second classifier here
+ * would be free to disagree with it about the very thing it just answered.
+ *
+ * A family with no translated name (a hand-built shell, a Nix store path) gets
+ * an empty `labelKey`, and the picker renders its path — an exotic `$SHELL` is
+ * still offered rather than silently dropped.
+ */
 export function hostShellOptions(
   shells: ReadonlyArray<{ path: string; kind: string }>
 ): ShellOption[] {
@@ -153,6 +226,11 @@ export interface ResolveShellInput {
   hostDefaultShell?: string
 }
 
+/**
+ * Resolve the shell path the dock should spawn for a new tab. Empty
+ * strings are treated as "unset" so that an empty per-project override
+ * field doesn't shadow the user setting.
+ */
 export function resolveDefaultShell(input: ResolveShellInput): string {
   if (input.projectShell && input.projectShell.trim().length > 0) {
     return input.projectShell

@@ -14,14 +14,14 @@ export {
   registerNodeExecutor,
   subscribeNodeRegistry,
   unregisterNodeExecutor,
-} from "@/lib/workflow/nodes/registry"
+} from "@cognia/plugin-contract/lib/workflow/nodes/registry"
 
 export type {
   NodeExecuteFn,
   NodeExecutorRegistration,
   NodeRegistryEvent,
   NodeRegistryListener,
-} from "@/lib/workflow/nodes/registry"
+} from "@cognia/plugin-contract/lib/workflow/nodes/registry"
 
 export type {
   PluginNodeDef,

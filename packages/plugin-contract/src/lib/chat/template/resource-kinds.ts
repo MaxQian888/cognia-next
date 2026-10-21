@@ -19,12 +19,14 @@ import type { ChatTemplateParamValue } from "./binding"
 
 export type ResourceParamKind = (typeof RESOURCE_PARAM_KINDS)[number]
 
+/** Mention kinds a parameter may be bound to. */
 export const RESOURCE_PARAM_KINDS = ["file", "agent", "subagent", "member"] as const
 
 export function isResourceParamKind(value: string | undefined): value is ResourceParamKind {
   return !!value && (RESOURCE_PARAM_KINDS as readonly string[]).includes(value)
 }
 
+/** One candidate in the parameter's picker. */
 export interface ResourceOption {
   /**
    * Stable handle: relPath for a file, name for an agent, handle for a subagent,
@@ -40,6 +42,15 @@ export interface ResourceOption {
   raw: string
 }
 
+/**
+ * Project a mention handle into a picker row, or null when that kind cannot be
+ * a parameter value.
+ *
+ * Going through `ContextRef` rather than reading the popover item directly is
+ * the point: whatever the `@` menu would have inserted for this pick is exactly
+ * what the parameter substitutes, with no second opinion about how a file path
+ * or an agent handle is spelled.
+ */
 export function resourceOptionFromRef(ref: ContextRef): ResourceOption | null {
   if (!isResourceParamKind(ref.kind)) return null
   return {
@@ -49,6 +60,7 @@ export function resourceOptionFromRef(ref: ContextRef): ResourceOption | null {
   }
 }
 
+/** The bound value for a picked option. */
 export function resourceParamValue(
   resourceKind: ResourceParamKind,
   option: ResourceOption

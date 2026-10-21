@@ -18,8 +18,14 @@ import type { PluginToolDef } from "../../../types/plugin"
 
 export const WORKFLOW_RUNNER_TOOL_NAME = "wf_run_workflow_typed"
 
+/** Plugin id that owns the primary registration of the runner tool. */
 export const WORKFLOW_AI_PLUGIN_ID = "cognia-workflow-ai"
 
+/**
+ * Tool definition shared by the plugin registration and the skills→tools
+ * fallback manifest entry. Single source — the two surfaces must never drift,
+ * or the model would see two contracts for the same tool name.
+ */
 export const WORKFLOW_RUNNER_TOOL_DEFINITION: PluginToolDef = {
   name: WORKFLOW_RUNNER_TOOL_NAME,
   description:

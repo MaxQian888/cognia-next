@@ -86,6 +86,7 @@ function normalizeOne(question: DecisionQuestion, raw: unknown): DecisionAnswer 
   }
 }
 
+/** Answers for the asked questions only; unreadable ones are dropped. */
 export function normalizeDecisionAnswers(
   raw: unknown,
   questions: DecisionQuestions
@@ -131,10 +132,12 @@ export function normalizeDecisionTruncation(
   return Object.keys(out).length ? out : undefined
 }
 
+/** Expected score level mapped to 0..1 (0 = first level, 1 = last). */
 export function scoreFraction(answer: { score: number; levels: number }): number {
   return answer.levels > 1 ? clamp(answer.score / (answer.levels - 1), 0, 1) : 0
 }
 
+/** Keep only finite, non-negative integral SDK accounting fields. */
 function integerFields<K extends string>(
   raw: unknown,
   keys: readonly K[]

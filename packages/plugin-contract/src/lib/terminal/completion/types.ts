@@ -18,6 +18,12 @@
 
 import type { ShellKind } from "../shell-detect"
 
+/**
+ * The context a completion provider receives. Assembled from the focused
+ * session's store row + the locally-tracked input line. All fields are
+ * best-effort — `cwd` may be null before the first OSC 633 `cwd_changed`,
+ * and `recentCommands` is the store's bounded history ring (newest last).
+ */
 export interface TerminalCompletionContext {
   /** The terminal session id the suggestion is for. */
   sessionId: string
@@ -39,6 +45,20 @@ export interface TerminalCompletionContext {
   projectId?: string | null
 }
 
+/**
+ * One suggestion. `text` is the FULL command line that results from
+ * accepting it, not just the suffix.
+ *
+ * Two acceptance shapes exist:
+ *  - *append* (default): `text` starts with the context input; accepting
+ *    writes the remaining suffix. Used by history / AI / most plugins.
+ *  - *replace*: the provider sets `replace` to swap the tail of the input
+ *    from offset `from` with `insert` (e.g. path completion re-casing
+ *    `doc` → `Documents\` or re-quoting a token). Accepting emits
+ *    backspaces for the replaced span, then writes `insert`. The replaced
+ *    span must remain a (case-insensitive) prefix of `insert` so no typed
+ *    characters are ever silently dropped.
+ */
 export interface TerminalCompletionSuggestion {
   /** The full suggested command line (the line after acceptance). */
   text: string
@@ -60,11 +80,23 @@ export interface TerminalCompletionSuggestion {
   replace?: { from: number; insert: string }
 }
 
+/**
+ * The edit a caller must apply to the PTY to accept a suggestion: emit
+ * `backspaces` DEL bytes (`\x7f`) to erase the replaced span, then write
+ * `write`. Append-mode acceptance always has `backspaces === 0`.
+ */
 export interface AcceptEdit {
   backspaces: number
   write: string
 }
 
+/**
+ * A completion provider. The host calls `getCompletions` with the current
+ * context and an AbortSignal; the provider returns zero or more full-line
+ * suggestions. Providers MUST be cancellation-aware (abandon in-flight
+ * model calls when the signal aborts) and MUST never throw — the registry
+ * isolates errors, but returning `[]` is the contract for "nothing".
+ */
 export interface TerminalCompletionProvider {
   /** Stable id, unique across all providers. */
   id: string
@@ -78,6 +110,7 @@ export interface TerminalCompletionProvider {
   ): Promise<TerminalCompletionSuggestion[]>
 }
 
+/** Source-priority weights for ranking (higher wins). */
 export const SOURCE_PRIORITY: Record<TerminalCompletionSuggestion["source"], number> = {
   plugin: 6,
   spec: 5,

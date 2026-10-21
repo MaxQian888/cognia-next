@@ -10,10 +10,84 @@ export type WorkspaceCapabilityOverlay = Partial<
   Record<WorkspaceCapabilityKind, WorkspaceCapabilityOverrides>
 >
 
+/**
+ * Per-workspace enablement for globally-defined capabilities.
+ *
+ * # The shape of the problem
+ *
+ * Skills and MCP servers are defined once, machine-wide, and carry a single
+ * boolean: `skills.status` and `mcpServers.enabled`. That is the right home for
+ * the definition — a skill is a skill wherever you are — but it is the wrong
+ * granularity for *use*. A Jira MCP server belongs to the work repo and has no
+ * business injecting tools into a hobby project; a house-style skill for one
+ * codebase becomes noise in the next. Today the only way to express that is to
+ * toggle the global flag on every workspace switch, by hand, and remember to
+ * put it back.
+ *
+ * # Why an overlay rather than a `projectId` column
+ *
+ * Giving definitions a workspace foreign key would make them *belong* to a
+ * workspace, which is a different and worse model: the same MCP server would
+ * have to be re-registered (and re-authorised) per workspace, and a definition
+ * would vanish from the library when its workspace was deleted. So the
+ * definition tables are untouched. The workspace stores only the deltas, on its
+ * own row — like `terminalConfig` and `knowledgeSettings` already do.
+ *
+ * # One mechanism, three states
+ *
+ * The overlay maps capability id → `true` (on here) / `false` (off here).
+ * An id that is absent inherits the global flag. That is deliberately ONE
+ * mechanism rather than the "allowlist plus overrides" pair sketched during
+ * design: an allowlist and a per-id override answer the same question, and two
+ * ways to say "this is on" is how surfaces start disagreeing with each other.
+ * The allowlist is a projection — `resolveEnabledIds` — not a second store.
+ *
+ * It also matches what mature editors do: VS Code's "Disable (Workspace)" is a
+ * per-extension delta on top of a global state, not a workspace manifest.
+ *
+ * # Why plugins are not here
+ *
+ * `plugins.enabled` is not a preference — it is the runtime's loaded state,
+ * written by `manager.setPluginIntent` as a *consequence* of activation
+ * (`lib/plugin/core/toggle-plugin-enabled.ts`). Overlaying it per workspace
+ * would mean switching workspaces rewrites the column that records what is
+ * actually running, destroying the global baseline it also serves as. Doing it
+ * properly needs a second column separating "installed and enabled by default"
+ * from "loaded right now" — a definition-table change this layer exists to
+ * avoid. Plugins therefore stay out of this overlay, and the Capabilities tab
+ * says so rather than leaving the user to infer it.
+ *
+ * What a workspace can choose instead is a whole cogset (ADR-0209):
+ * `Project.pluginCogsetId`. That is the "separate column" the paragraph above
+ * asks for, done one level up. A cogset owns which plugins *should* run; opening
+ * the workspace makes its cogset the effective one, and the host reconciles to
+ * it through `PluginManager.setPluginIntent` (`lib/plugin/cogset/`), so
+ * `plugins.enabled` stays the record of what is loaded.
+ */
+
+/**
+ * # Why templates are here, and what the overlay does NOT do for them
+ *
+ * A shared template (a built-in, a plugin's, a marketplace one) is defined once
+ * and offered everywhere, which is the same shape as a skill: right for the
+ * definition, wrong for use. Hiding the ones a workspace has no business seeing
+ * is a visibility preference, and that is all the overlay expresses.
+ *
+ * It is deliberately NOT how a template gets an owner. Ownership lives on
+ * `TemplateDefinitionRow.workspaceId`, because "this template belongs to that
+ * workspace" and "I would rather not see this one here" are different claims,
+ * and answering both with one boolean is how a library starts lying about who
+ * made something. A template WITH an owner is not overlaid at all: it is simply
+ * absent elsewhere.
+ */
+
+/** Capability families a workspace may re-scope. See the note on plugins above. */
 export const WORKSPACE_CAPABILITY_KINDS = ["skill", "mcpServer", "template"] as const
 
+/** What the workspace says about one capability, as the UI presents it. */
 export type WorkspaceCapabilityState = "inherit" | "on" | "off"
 
+/** Nothing overridden — the shared value for "this workspace has no opinions". */
 export const EMPTY_CAPABILITY_OVERLAY: WorkspaceCapabilityOverlay = Object.freeze({})
 
 function overridesFor(
@@ -27,6 +101,7 @@ function overridesFor(
   return bucket
 }
 
+/** The workspace's stated position on one capability. */
 export function capabilityStateOf(
   overlay: WorkspaceCapabilityOverlay | null | undefined,
   kind: WorkspaceCapabilityKind,
@@ -38,6 +113,7 @@ export function capabilityStateOf(
   return "inherit"
 }
 
+/** Whether a capability is live in this workspace, given its global flag. */
 export function resolveCapabilityEnabled(
   globalEnabled: boolean,
   overlay: WorkspaceCapabilityOverlay | null | undefined,
@@ -50,6 +126,14 @@ export function resolveCapabilityEnabled(
   return globalEnabled
 }
 
+/**
+ * Filter rows already known to be globally enabled down to this workspace.
+ *
+ * Callers that pre-filter on the global flag (`listEnabledMcpServers`) lose the
+ * disabled rows before we see them, so a `"on"` override could never resurrect
+ * one. `alreadyFiltered` says which contract the caller is using: pass `false`
+ * with the full table to let an override turn something back on.
+ */
 export function applyCapabilityOverlay<T>(
   rows: readonly T[],
   kind: WorkspaceCapabilityKind,
@@ -75,6 +159,14 @@ export function applyCapabilityOverlay<T>(
   })
 }
 
+/**
+ * A new overlay with one capability set to `state`.
+ *
+ * `"inherit"` deletes the entry rather than storing a tombstone, and an empty
+ * bucket is dropped, so a workspace that has been toggled back and forth
+ * persists as `{}` and not as a pile of no-ops. That matters because the
+ * override count is what the UI uses to say "this workspace differs".
+ */
 export function withCapabilityState(
   overlay: WorkspaceCapabilityOverlay | null | undefined,
   kind: WorkspaceCapabilityKind,
@@ -95,6 +187,7 @@ export function withCapabilityState(
   return next
 }
 
+/** How many capabilities this workspace overrides — `kind` narrows the count. */
 export function countCapabilityOverrides(
   overlay: WorkspaceCapabilityOverlay | null | undefined,
   kind?: WorkspaceCapabilityKind
@@ -107,6 +200,14 @@ export function countCapabilityOverrides(
   return total
 }
 
+/**
+ * Drop overrides whose capability no longer exists.
+ *
+ * A deleted skill would otherwise leave its id in every workspace that had an
+ * opinion about it, so the "3 overrides" badge would keep counting a row that
+ * cannot be shown or cleared. Called when the Capabilities tab loads the real
+ * inventory — the only place that knows what still exists.
+ */
 export function pruneCapabilityOverlay(
   overlay: WorkspaceCapabilityOverlay | null | undefined,
   known: Partial<Record<WorkspaceCapabilityKind, Iterable<string>>>

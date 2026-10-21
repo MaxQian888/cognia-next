@@ -14,7 +14,7 @@ export {
   subscribeThemePackRegistry,
   unregisterThemePack,
   unregisterThemePacksByPlugin,
-} from "@/lib/theme/theme-pack-registry"
+} from "@cognia/plugin-contract/lib/theme/theme-pack-registry"
 
-export type { RegisteredThemePack } from "@/lib/theme/theme-pack-registry"
+export type { RegisteredThemePack } from "@cognia/plugin-contract/lib/theme/theme-pack-registry"
 export type { PluginThemePackContribution } from "@cognia/plugin-contract/types/plugin/plugin"

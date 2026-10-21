@@ -47,6 +47,7 @@ export interface CommandClassification {
 
 const RANK: Record<CommandVerdict, number> = { allow: 0, ask: 1, deny: 2 }
 
+/** Read-only / safe-by-default executables — auto-allowed. */
 const SAFE_HEADS = new Set([
   // Inspection.
   "ls",
@@ -199,6 +200,7 @@ const SAFE_HEADS = new Set([
   "poetry",
 ])
 
+/** Executables that always need confirmation (mutate broadly / side effects). */
 const ASK_HEADS = new Set([
   // Deletion / move.
   "mv",
@@ -303,6 +305,7 @@ const ASK_HEADS = new Set([
   "tee",
 ])
 
+/** Deletion heads handled by the dedicated rm classifier. */
 const DELETE_HEADS = new Set(["rm", "rmdir", "del", "erase", "unlink"])
 
 const GIT_ASK_SUBS = new Set([
@@ -347,6 +350,7 @@ const WRAPPERS = new Set([
   "xargs",
 ])
 
+/** Targets that make a recursive force-delete catastrophic. */
 const CRITICAL_RM_TARGETS = new Set([
   "/",
   "/*",
@@ -366,10 +370,12 @@ const CRITICAL_RM_PREFIX =
 
 const ALLOW_REASON = "read-only / safe command"
 
+/** Strip quoted spans so catastrophic patterns don't match quoted literals. */
 function stripQuotes(s: string): string {
   return s.replace(/'[^']*'/g, " ").replace(/"[^"]*"/g, " ")
 }
 
+/** Whole-command catastrophic scan (returns a reason, or null). */
 function matchCatastrophic(command: string): string | null {
   const s = stripQuotes(command)
   // Pipe downloaded/arbitrary content straight into a shell interpreter.
@@ -398,8 +404,15 @@ function bareArgs(args: string[]): string[] {
   return args.filter((a) => !a.startsWith("-"))
 }
 
+/** Directory-changing builtins — `cd`, `pushd`; `popd`/`dirs` share the head
+ * check but only `cd`/`pushd` carry a resolvable target. */
 const DIR_HEADS = new Set(["cd", "pushd", "popd", "dirs"])
 
+/**
+ * Collapse `.`/`..` in a POSIX path without touching the filesystem. `..`
+ * above the root clamps at `/`, matching shell behaviour. Returns the
+ * normalized path, or `undefined` for empty input.
+ */
 export function normalizePosixPath(path: string): string | undefined {
   if (!path) return undefined
   const rooted = path.startsWith("/")
@@ -417,6 +430,11 @@ export function normalizePosixPath(path: string): string | undefined {
   return `${rooted ? "/" : ""}${parts.join("/")}`
 }
 
+/**
+ * Resolve a possibly-relative path against the directory a segment runs in.
+ * Absolute and `~`-rooted targets normalize standalone; relative targets need
+ * a known `workDir`, else the result is ambiguous → `undefined` (fail closed).
+ */
 export function resolvePathInDir(
   target: string,
   workDir: string | undefined,
@@ -432,6 +450,13 @@ export function resolvePathInDir(
   return normalizePosixPath(`${workDir.replace(/\/+$/, "")}/${target}`)
 }
 
+/**
+ * Where a `cd`/`pushd` segment leaves its scope's working directory, or
+ * `undefined` when the target cannot be proven — bare `cd` and `cd ~` go home
+ * (unknown unless `home` was supplied), `cd -` jumps to OLDPWD, and a target
+ * containing a substitution or variable is opaque. Unknown → subsequent
+ * relative paths stay unresolvable → fail closed.
+ */
 function dirAfter(
   head: string,
   raw: string,
@@ -452,6 +477,9 @@ function dirAfter(
   return resolvePathInDir(target, workDir, home)
 }
 
+/** Unwrap `builtin`/`command`/`env`-style wrappers to the head that actually
+ * runs — needed so `builtin cd /x` still moves the tracked directory. Same
+ * wrapper set and depth cap as `classifySegmentInner`. */
 function effectiveDirHead(
   head: string,
   args: string[],
@@ -566,6 +594,7 @@ function classifyDd(args: string[]): SegmentClassification {
   return { head: "dd", verdict: "ask", reason: "low-level disk copy" }
 }
 
+/** Classify a single resolved head + args (after wrapper unwrapping). */
 function classifyHead(
   head: string,
   args: string[],
@@ -592,6 +621,7 @@ function classifyHead(
   return { head, verdict: "ask", reason: "unrecognized command" }
 }
 
+/** Find the wrapped command after a privilege/util wrapper (sudo, env, …). */
 function unwrap(args: string[]): { head: string; args: string[] } | null {
   let i = 0
   while (i < args.length) {
@@ -646,8 +676,25 @@ function classifySegmentInner(
   return classifyHead(head, args, workDir, home)
 }
 
+/**
+ * Redirect targets that write nowhere a later command could read back.
+ * `nul` is the Windows spelling.
+ */
 const DISCARD_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "nul"])
 
+/**
+ * The verdict floor a segment's redirects impose, or `null` when they impose
+ * none.
+ *
+ * `allow` in this classifier means "auto-approve, it is read-only or safe".
+ * A write redirect makes the segment not read-only no matter how safe its
+ * head is, and the head-name table cannot see it: before this,
+ * `curl https://x > /usr/local/bin/y` classified as "read-only network
+ * fetch" and was auto-approved, as was `echo evil >> ~/.zshrc`.
+ *
+ * Deliberately a floor of `ask`, not `deny`: writing a file is ordinary work,
+ * so the user decides. What it must never do again is decide for them.
+ */
 function classifyRedirects(
   redirects: CommandRedirect[]
 ): { verdict: CommandVerdict; reason: string } | null {
@@ -668,6 +715,18 @@ export interface ClassifyOptions {
   home?: string
 }
 
+/**
+ * Classify a (possibly compound) command line into an allow/ask/deny verdict.
+ * The worst verdict across all segments — including those inside command
+ * substitutions and subshells — wins.
+ *
+ * `cd`/`pushd`/`popd` update the tracked working directory for later segments
+ * *in the same scope* (`segment.scope`), so `cd / && rm -rf ./etc` denies —
+ * `./etc` resolves to `/etc`. A `cd` inside `$(...)`/`(...)` lives in a child
+ * scope that inherits the parent's directory at spawn and never writes back,
+ * matching subshell semantics. An ambiguous target (`cd -`, `cd $VAR`) leaves
+ * the scope's directory unknown, so relative paths fail closed at `ask`.
+ */
 export function classifyCommand(
   command: string,
   opts: ClassifyOptions = {}

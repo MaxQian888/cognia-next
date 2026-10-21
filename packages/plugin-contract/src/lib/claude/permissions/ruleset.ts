@@ -42,6 +42,11 @@ export interface ResolveOptions {
   cwd?: string
 }
 
+/**
+ * Baked-in safety defaults (lowest precedence). Secrets are gated behind a
+ * prompt; everything else defaults open so the coarse allow/deny layer
+ * keeps its current behavior unless a higher-precedence ruleset narrows it.
+ */
 export const DEFAULT_RULESET: Ruleset = {
   "*": "allow",
   Read: { "**/*.env": "ask", "**/*.env.*": "ask" },
@@ -61,10 +66,17 @@ function basename(p: string): string {
   return parts[parts.length - 1] ?? p
 }
 
+/** Escape a string for safe inclusion in a RegExp literal. */
 function escapeRegex(s: string): string {
   return s.replace(/[.+^${}()|[\]\\]/g, "\\$&")
 }
 
+/**
+ * Convert a glob to an anchored RegExp. `**` matches across path
+ * separators, `*` matches within a segment, `?` matches a single non-sep
+ * char. Implemented as a single left-to-right scan so `**` is handled
+ * before the `*` rule.
+ */
 function globToRegExp(glob: string): RegExp {
   let re = ""
   for (let i = 0; i < glob.length; i++) {
@@ -96,6 +108,10 @@ function cachedRegex(glob: string): RegExp {
   return r
 }
 
+/**
+ * Match a glob against a target. A glob with no path separator also
+ * matches the target's basename (so `*.env` matches `/proj/.env`).
+ */
 export function matchGlob(glob: string, target: string): boolean {
   const re = cachedRegex(glob)
   if (re.test(target)) return true
@@ -103,6 +119,7 @@ export function matchGlob(glob: string, target: string): boolean {
   return false
 }
 
+/** Specificity score: count of literal (non-wildcard) characters. */
 function specificity(glob: string): number {
   let n = 0
   for (const c of glob) if (c !== "*" && c !== "?") n++
@@ -134,6 +151,15 @@ function better(a: Candidate | null, b: Candidate): Candidate {
   return b.globScore >= a.globScore ? b : a
 }
 
+/**
+ * Resolve the verdict for a tool call. Later rulesets override earlier
+ * ones; within a layer, a more specific (tool, glob) match wins.
+ *
+ * @param tool    Tool name, e.g. `Edit`, `Bash`, `task`.
+ * @param target  The call's target — file path, command, subagent name.
+ * @param rulesets Ordered low→high precedence (the DEFAULT_RULESET is
+ *                 prepended automatically as the lowest layer).
+ */
 export function resolvePermission(
   tool: string,
   target: string | undefined,
@@ -143,12 +169,19 @@ export function resolvePermission(
   return resolvePermissionDetailed(tool, target, rulesets, opts).verdict
 }
 
+/** Resolved verdict plus the layer it came from (0 = baked-in default). */
 export interface ResolvedPermission {
   verdict: PermissionVerdict
   /** 0 = baked-in {@link DEFAULT_RULESET}; >0 = an explicit caller ruleset. */
   layer: number
 }
 
+/**
+ * Like {@link resolvePermission} but also reports which layer won, so callers
+ * can tell an *explicit* user/character/plugin rule (layer > 0) apart from the
+ * permissive baked-in default — the Auto-mode orchestrator only lets an
+ * explicit rule short-circuit the command classifier.
+ */
 export function resolvePermissionDetailed(
   tool: string,
   target: string | undefined,
@@ -189,6 +222,16 @@ export function resolvePermissionDetailed(
   return { verdict: winner.verdict, layer: winner.layer }
 }
 
+/**
+ * Command-aware permission resolution for the agent's shell tool. Splits a
+ * (possibly compound) command line into its head commands and resolves each
+ * against the `Bash` rules — the worst verdict wins, and `explicit` is true
+ * when any segment matched a caller-supplied rule (layer > 0). Rules are
+ * matched against the full segment text, so author them with trailing globs
+ * (e.g. `"git push*": "ask"`). Returns `explicit: false` with the default
+ * verdict when nothing user-defined matched, signalling the caller to fall
+ * back to the classifier.
+ */
 export function resolveBashPermission(
   command: string,
   rulesets: Ruleset[],
@@ -226,6 +269,10 @@ export function resolveBashPermission(
   return { verdict: worst, explicit }
 }
 
+/**
+ * Deep-merge rulesets (later overrides earlier), flattening per-tool glob
+ * maps. Useful for serializing a single resolved ruleset into SendOptions.
+ */
 export function mergeRulesets(...rulesets: Array<Ruleset | undefined | null>): Ruleset {
   const out: Ruleset = {}
   for (const rs of rulesets) {

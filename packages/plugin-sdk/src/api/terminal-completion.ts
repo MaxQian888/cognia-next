@@ -21,7 +21,7 @@ export {
   listProviders as listTerminalCompletionProviders,
   rankSuggestions as rankTerminalCompletionSuggestions,
   registerCompletionProvider as registerTerminalCompletionProvider,
-} from "@/lib/terminal/completion/registry"
+} from "@cognia/plugin-contract/lib/terminal/completion/registry"
 
 export type {
   AcceptEdit,

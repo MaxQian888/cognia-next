@@ -40,6 +40,11 @@ export interface BrowserDownloadSummary {
   state: BrowserDownloadState
 }
 
+/**
+ * Download lifecycle. Local / user Chromium and the embedded webview move
+ * `in_progress → completed | cancelled | failed`; the cloud runtime keeps the
+ * ADR-0085 quarantine semantics (`quarantined → saved | attached`).
+ */
 export const BROWSER_DOWNLOAD_STATES = [
   "in_progress",
   "completed",
@@ -50,6 +55,7 @@ export const BROWSER_DOWNLOAD_STATES = [
   "attached",
 ] as const
 
+/** Terminal states: nothing more will happen to the bytes on its own. */
 export function isBrowserDownloadSettled(state: BrowserDownloadState): boolean {
   return state !== "in_progress"
 }

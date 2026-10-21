@@ -15,6 +15,6 @@ export {
   getLimitsSourceEntry,
   listLimitsSourceIds,
   listLimitsSourceEntries,
-} from "@/lib/plugin/registries/limits-source-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/limits-source-registry"
 
 export type { PluginLimitsSourceDef } from "@cognia/plugin-contract/types/plugin/plugin-limits-source"

@@ -9,7 +9,7 @@ export {
   getPluginCommandRulesets,
   registerPluginCommandRules,
   unregisterPluginCommandRules,
-} from "@/lib/plugin/registries/command-safety-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/command-safety-registry"
 
 export { classifyCommand as classifyCommandSafety } from "@cognia/plugin-contract/lib/claude/permissions/command-safety"
 

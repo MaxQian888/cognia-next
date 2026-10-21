@@ -6,7 +6,7 @@
  * that would otherwise drop the item when the plugin is enabled.
  */
 
-import { assertValidPetItemDef } from "@/lib/plugin/registries/pet-contribution-validation"
+import { assertValidPetItemDef } from "@cognia/plugin-contract/lib/plugin/registries/pet-contribution-validation"
 import type { PluginPetItemDef } from "@cognia/plugin-contract/types/plugin/plugin-pet"
 
 export function definePetItem(def: PluginPetItemDef): PluginPetItemDef {

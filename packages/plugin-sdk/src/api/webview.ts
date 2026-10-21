@@ -18,7 +18,7 @@ export {
   postMessageToWebview,
   dispatchWebviewMessage,
   onWebviewMessage,
-} from "@/lib/plugin/registries/webview-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/webview-registry"
 
 export type {
   PluginWebviewDef,

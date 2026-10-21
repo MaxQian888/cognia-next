@@ -18,7 +18,6 @@
  */
 
 /** A user layout: an explicit pinned order plus a hidden set. */
-
 export interface CatalogLayout {
   /** Ordered ids shown directly, in the user's order. */
   pinned: string[]
@@ -26,12 +25,26 @@ export interface CatalogLayout {
   hidden: string[]
 }
 
+/** Three-way partition of a catalog according to a layout. */
 export interface PartitionedCatalog<T> {
   pinned: T[]
   overflow: T[]
   hidden: T[]
 }
 
+/**
+ * Partition `catalog` according to `layout`:
+ *
+ *  - **pinned**: `layout.pinned` ids that exist in the catalog, in the user's
+ *    stored order. Pinned wins over hidden if an id appears in both. Duplicate
+ *    pinned ids are deduped.
+ *  - **hidden**: `layout.hidden` ids that exist and are not pinned, in catalog
+ *    order.
+ *  - **overflow**: everything else (catalog − pinned − hidden), in catalog
+ *    order — so newly-added catalog items appear in overflow automatically.
+ *
+ * Unknown ids in the layout are dropped.
+ */
 export function partitionByLayout<T extends { id: string }>(
   catalog: T[],
   layout: CatalogLayout
@@ -61,6 +74,7 @@ export function partitionByLayout<T extends { id: string }>(
   return { pinned, overflow, hidden }
 }
 
+/** A user layout for an ordered surface: a full id order plus a hidden set. */
 export interface OrderedLayout {
   /** Every id the user has an opinion about, in render order. */
   order: string[]
@@ -68,6 +82,7 @@ export interface OrderedLayout {
   hidden: string[]
 }
 
+/** Resolution of a catalog against an {@link OrderedLayout}. */
 export interface ResolvedOrderedCatalog<T> {
   /** Full catalog in effective order — visible and hidden interleaved. */
   order: T[]
@@ -77,6 +92,18 @@ export interface ResolvedOrderedCatalog<T> {
   hidden: T[]
 }
 
+/**
+ * Resolve `catalog` against `layout`:
+ *
+ *  - **order**: `layout.order` (known ids, deduped) followed by any catalog
+ *    item the stored order never mentioned, in catalog order — so a catalog
+ *    addition surfaces without a layout edit or a migration.
+ *  - **hidden**: the ids in `layout.hidden` that exist, in effective order.
+ *  - **visible**: everything else, in effective order.
+ *
+ * Hidden items keep their slot in `order` so unhiding one puts it back where
+ * the user left it rather than at the end.
+ */
 export function resolveOrderedLayout<T extends { id: string }>(
   catalog: T[],
   layout: OrderedLayout

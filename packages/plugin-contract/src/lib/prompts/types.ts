@@ -41,8 +41,28 @@ export interface PromptVariableSpec {
   maxChars: number
 }
 
+/**
+ * Management contracts for model-facing prompts (ADR-0236).
+ *
+ * A `PromptDefinitionV1` describes one code-owned prompt slot: who consumes
+ * it, which operation an edit performs, which scopes may override it, which
+ * placeholders its body may use, and how a change reaches the running
+ * consumer. It grants no execution authority: tools, permissions and budgets
+ * stay with the owning host code, and nothing in an override body can change
+ * them.
+ *
+ * Domain-owned prompts (characters, presets, Skills, project instruction
+ * files) are not described here. They keep their own records and are surfaced
+ * through owner adapters (`lib/prompts/adapters/`), so a resource has exactly
+ * one active text authority.
+ */
+
 export const PROMPT_DEFINITION_SCHEMA_VERSION = 1 as const
 
+/**
+ * The composition an edit performs. The editor never infers this from a field
+ * name: each entry declares it, and the UI states its consequence.
+ */
 export type PromptOperation =
   /** Replace a declared feature slot; typed inputs and parsers stay in the owner. */
   | "replace-template"
@@ -64,6 +84,7 @@ export const PROMPT_SCOPE_SPECIFICITY: readonly PromptScope[] = [
   "session",
 ]
 
+/** How a published change reaches its consumer. */
 export type PromptActivation =
   /** The consumer resolves at each operation; the next one uses the new text. */
   | "next-operation"
@@ -74,6 +95,7 @@ export type PromptActivation =
   /** This host cannot apply the entry (e.g. a CLI-only base viewed in the app). */
   | "unsupported"
 
+/** Failure cost of an edit, which sets the validation bar. */
 export type PromptRisk =
   /** A wording change; a bad edit degrades output quality only. */
   | "ordinary"
@@ -82,6 +104,7 @@ export type PromptRisk =
   /** The output takes part in an approval decision. */
   | "approval-sensitive"
 
+/** Which shell runs the consumer. */
 export type PromptHost = "app" | "cli" | "bootstrap"
 
 export interface PromptDefinitionV1 {
@@ -117,12 +140,14 @@ export interface PromptDefinitionV1 {
   consumers: readonly string[]
 }
 
+/** A definition as authored: the schema constant and defaults are filled in. */
 export type PromptDefinitionInput = Omit<
   PromptDefinitionV1,
   "schemaVersion" | "variables" | "requiredFragments" | "maxChars"
 > &
   Partial<Pick<PromptDefinitionV1, "variables" | "requiredFragments" | "maxChars">>
 
+/** Default body ceiling: generous for prose, bounded so an import cannot bloat a call. */
 export const DEFAULT_PROMPT_MAX_CHARS = 32_000
 
 export function definePrompt(input: PromptDefinitionInput): PromptDefinitionV1 {
@@ -142,17 +167,20 @@ export function definePrompt(input: PromptDefinitionInput): PromptDefinitionV1 {
   return def
 }
 
+/** Where an override sits. `targetId` is empty for the account scope. */
 export interface PromptTargetRef {
   scope: PromptScope
   targetId: string
 }
 
+/** The context a consumer resolves in; each id is used only if the entry allows that scope. */
 export interface PromptResolutionContext {
   workspaceId?: string
   agentId?: string
   sessionId?: string
 }
 
+/** Why a resolution used the shipped body although an override exists. */
 export type PromptFallbackReason =
   "contract-incompatible" | "pii-blocked" | "invalid-body" | "snapshot-unavailable"
 

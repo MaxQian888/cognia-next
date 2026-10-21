@@ -55,7 +55,7 @@ export {
   listNativeAnthropicToolIds,
   listNativeAnthropicToolEntries,
   computeAnthropicBetaHeaders,
-} from "@/lib/plugin/registries/native-anthropic-tool-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/native-anthropic-tool-registry"
 export type {
   AnthropicNativeToolType,
   NativeToolPermissionPolicy,

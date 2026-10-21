@@ -13,10 +13,17 @@ import type { DecisionQuestions, DecisionRequest } from "../../types/decisions"
 export type DecisionValidation =
   { ok: true; request: DecisionRequest } | { ok: false; message: string }
 
+/** Choice questions accept at most this many options (TypeSafe limit). */
 export const MAX_CHOICE_OPTIONS = 255
 
+/** Serialized request ceiling — a decision is a small judgment, not a document. */
 export const MAX_DECISION_REQUEST_CHARS = 256 * 1024
 
+/**
+ * Realm-agnostic plain-object check: a payload built in another realm
+ * (structuredClone in a worker or test VM, an iframe, the RPC decoder) has a
+ * different `Object.prototype`, so identity against ours would reject it.
+ */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false
   const proto: unknown = Object.getPrototypeOf(value)
@@ -27,6 +34,7 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0
 }
 
+/** Reason the question map is unusable, or `null` when it is well formed. */
 export function validateDecisionQuestions(questions: unknown): string | null {
   if (!isPlainObject(questions) || Object.keys(questions).length === 0) {
     return "questions must be a non-empty object"
@@ -77,6 +85,10 @@ function validateState(state: unknown): string | null {
   return "state must be an object, array or string"
 }
 
+/**
+ * Validate an untrusted request (plugin input, settings probe) and return it
+ * narrowed. Also refuses requests that cannot be serialized (cycles, BigInt).
+ */
 export function validateDecisionRequest(input: unknown): DecisionValidation {
   if (!isPlainObject(input)) return { ok: false, message: "request must be an object" }
   const stateProblem = validateState(input.state)

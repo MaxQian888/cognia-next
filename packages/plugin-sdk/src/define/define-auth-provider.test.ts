@@ -1,5 +1,5 @@
 import { defineAuthProvider } from "./define-auth-provider"
-import { __makeSession } from "@/lib/plugin/auth/auth-provider-registry"
+import { __makeSession } from "@cognia/plugin-contract/lib/plugin/auth/auth-provider-registry"
 
 describe("defineAuthProvider", () => {
   it("returns the provider unchanged (pure pass-through)", () => {

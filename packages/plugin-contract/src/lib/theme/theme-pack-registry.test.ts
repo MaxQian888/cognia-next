@@ -1,0 +1,186 @@
+import {
+  __resetThemePackRegistryForTesting,
+  getThemePack,
+  hasThemePackKey,
+  listThemePackKeys,
+  listThemePacks,
+  registerThemePack,
+  subscribeThemePackRegistry,
+  unregisterThemePack,
+  themePackPreviewSrc,
+  unregisterThemePacksByPlugin,
+} from "./theme-pack-registry"
+import type { PluginThemePackContribution } from "../../types/plugin/plugin"
+
+function packFixture(
+  id: string,
+  overrides: Partial<PluginThemePackContribution> = {}
+): PluginThemePackContribution {
+  return {
+    id,
+    name: `pack-${id}`,
+    applies: { themeId: `${id}-theme` },
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  __resetThemePackRegistryForTesting()
+})
+
+describe("registerThemePack", () => {
+  it("registers a new pack and surfaces it in the snapshot", () => {
+    registerThemePack({ pluginId: "p1", pluginName: "Plugin One", pack: packFixture("light") })
+    const list = listThemePacks()
+    expect(list).toHaveLength(1)
+    expect(list[0].id).toBe("light")
+    expect(list[0].pluginId).toBe("p1")
+    expect(list[0].pluginName).toBe("Plugin One")
+  })
+
+  it("returns replaced=true on overwrite", () => {
+    registerThemePack({ pluginId: "p1", pack: packFixture("a") })
+    const out = registerThemePack({ pluginId: "p1", pack: packFixture("a", { name: "new" }) })
+    expect(out.replaced).toBe(true)
+    expect(getThemePack("p1", "a")?.name).toBe("new")
+  })
+
+  it("rejects packs without an id", () => {
+    expect(() =>
+      registerThemePack({ pluginId: "p", pack: { ...packFixture("x"), id: "" } })
+    ).toThrow(/id is required/)
+  })
+
+  it("allows the same pack id under two different plugins", () => {
+    registerThemePack({ pluginId: "p1", pack: packFixture("light") })
+    registerThemePack({ pluginId: "p2", pack: packFixture("light") })
+    expect(listThemePacks()).toHaveLength(2)
+  })
+})
+
+describe("unregister", () => {
+  it("unregisterThemePack removes a single pack", () => {
+    registerThemePack({ pluginId: "p1", pack: packFixture("a") })
+    expect(unregisterThemePack("p1", "a")).toBe(true)
+    expect(listThemePacks()).toHaveLength(0)
+  })
+
+  it("unregisterThemePack returns false when missing", () => {
+    expect(unregisterThemePack("p1", "ghost")).toBe(false)
+  })
+
+  it("unregisterThemePacksByPlugin removes every pack owned by the plugin", () => {
+    registerThemePack({ pluginId: "p1", pack: packFixture("a") })
+    registerThemePack({ pluginId: "p1", pack: packFixture("b") })
+    registerThemePack({ pluginId: "p2", pack: packFixture("a") })
+    expect(unregisterThemePacksByPlugin("p1")).toBe(2)
+    expect(listThemePacks()).toHaveLength(1)
+    expect(listThemePacks()[0].pluginId).toBe("p2")
+  })
+
+  it("returns 0 + no notify when nothing to remove", () => {
+    const fires: number[] = []
+    subscribeThemePackRegistry(() => fires.push(0))
+    expect(unregisterThemePacksByPlugin("ghost")).toBe(0)
+    expect(fires).toHaveLength(0)
+  })
+})
+
+describe("Character Pack dependency keys", () => {
+  it("lists and resolves canonical pluginId.packId keys", () => {
+    registerThemePack({ pluginId: "p1", pack: packFixture("light") })
+    registerThemePack({ pluginId: "p2", pack: packFixture("light") })
+
+    expect(listThemePackKeys()).toEqual(["p1.light", "p2.light"])
+    expect(hasThemePackKey("p1.light")).toBe(true)
+    expect(hasThemePackKey("p2.light")).toBe(true)
+    expect(hasThemePackKey("light")).toBe(false)
+    expect(hasThemePackKey("p1.dark")).toBe(false)
+  })
+
+  it("drops keys when a pack is removed or the test registry resets", () => {
+    registerThemePack({ pluginId: "p1", pack: packFixture("light") })
+    expect(unregisterThemePack("p1", "light")).toBe(true)
+    expect(hasThemePackKey("p1.light")).toBe(false)
+
+    registerThemePack({ pluginId: "p1", pack: packFixture("dark") })
+    __resetThemePackRegistryForTesting()
+    expect(listThemePackKeys()).toEqual([])
+    expect(hasThemePackKey("p1.dark")).toBe(false)
+  })
+})
+
+describe("subscribe", () => {
+  it("listener fires on register / unregister and unsubscribe stops it", () => {
+    const fires: number[] = []
+    const unsub = subscribeThemePackRegistry(() => fires.push(listThemePacks().length))
+    registerThemePack({ pluginId: "p1", pack: packFixture("a") })
+    unregisterThemePack("p1", "a")
+    unsub()
+    registerThemePack({ pluginId: "p1", pack: packFixture("b") })
+    expect(fires).toEqual([1, 0])
+  })
+
+  it("snapshot identity stays stable until the next mutation", () => {
+    const a = listThemePacks()
+    const b = listThemePacks()
+    expect(a).toBe(b)
+    registerThemePack({ pluginId: "p1", pack: packFixture("x") })
+    const c = listThemePacks()
+    expect(c).not.toBe(a)
+  })
+})
+
+describe("themePackPreviewSrc", () => {
+  it("loads bytes the manifest already carries", () => {
+    expect(themePackPreviewSrc("demo", "data:image/webp;base64,AAAA")).toBe(
+      "data:image/webp;base64,AAAA"
+    )
+  })
+
+  it("loads the plugin's own public mirror, encoded id and all", () => {
+    expect(themePackPreviewSrc("demo", "/plugins/demo/assets/deck.webp")).toBe(
+      "/plugins/demo/assets/deck.webp"
+    )
+    expect(themePackPreviewSrc("a b", "/plugins/a%20b/x.png")).toBe("/plugins/a%20b/x.png")
+  })
+
+  it("drops anything that would reach off this machine", () => {
+    // The whole point: opening the Appearance tab is not consent to a request.
+    expect(themePackPreviewSrc("demo", "https://tracker.example/p.png")).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "http://tracker.example/p.png")).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "//tracker.example/p.png")).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "blob:https://x/y")).toBeUndefined()
+  })
+
+  it("drops a peer plugin's mirror and any walk back out of its own", () => {
+    expect(themePackPreviewSrc("demo", "/plugins/other/p.png")).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "/plugins/demo/../other/p.png")).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "/plugins/demo/..\\other\\p.png")).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "/plugins/demo/")).toBeUndefined()
+  })
+
+  it("drops a data URL that is not an image", () => {
+    expect(themePackPreviewSrc("demo", "data:text/html,<script>")).toBeUndefined()
+  })
+
+  it("has nothing to say about an absent preview", () => {
+    expect(themePackPreviewSrc("demo", undefined)).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "   ")).toBeUndefined()
+  })
+})
+
+test("accepts only contained generated resource previews for the owning plugin", () => {
+  expect(
+    themePackPreviewSrc("demo", "/_cognia/builtin-plugins/demo/resources/assets/preview.webp")
+  ).toBe("/_cognia/builtin-plugins/demo/resources/assets/preview.webp")
+  expect(
+    themePackPreviewSrc("demo", "/_cognia/builtin-plugins/other/resources/assets/preview.webp")
+  ).toBeUndefined()
+  expect(
+    themePackPreviewSrc("demo", "/_cognia/builtin-plugins/demo/resources/../other.webp")
+  ).toBeUndefined()
+  expect(
+    themePackPreviewSrc("demo", "/_cognia/builtin-plugins/demo/resources/%2e%2e/other.webp")
+  ).toBeUndefined()
+})

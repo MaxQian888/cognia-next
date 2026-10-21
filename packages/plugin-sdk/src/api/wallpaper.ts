@@ -13,14 +13,14 @@ export {
   listPluginWallpapers,
   revertPluginWallpapers,
   subscribePluginWallpapers,
-} from "@/lib/plugin/bridge/wallpaper-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/wallpaper-bridge"
 
 export type {
   ApplyPluginWallpapersArgs,
   ApplyPluginWallpapersResult,
   RegisteredPluginWallpaper,
   WallpaperAssetResolver,
-} from "@/lib/plugin/bridge/wallpaper-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/wallpaper-bridge"
 
 export type { PluginWallpaperContribution } from "@cognia/plugin-contract/types/plugin/plugin"
 export type { Wallpaper } from "@cognia/plugin-contract/types/appearance/index"

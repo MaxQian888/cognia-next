@@ -75,6 +75,23 @@ export type PluginPointStatus = "implemented" | "virtual" | "deprecated"
 
 export type PluginPointHostKind = "jsx-mount" | "registration"
 
+/**
+ * The shape a slot expects its contributions to take.
+ *
+ * Without this a plugin author reads `statusbar.right` and `sidebar.right.top`
+ * and gets identical information from the contract, then guesses — so a status
+ * bar ends up with a full card in it. Declared per point rather than measured,
+ * because the answer is a property of the host region and the author needs it
+ * at authoring time, not at render time. For the cases where width genuinely
+ * varies (the context workbench's narrow/wide/focus modes), slot wrappers carry
+ * `container-type: inline-size` so plugin CSS can use `@container` instead.
+ *
+ *   - `icon`   a single square control; assume ~24-32px and no room for a label
+ *   - `row`    one item in a horizontal action row; keep it to a button or two
+ *   - `block`  full-width band stacked with host content; any height
+ *   - `panel`  an owned region with its own scroll; render a whole view
+ */
+/** @deprecated Use `PluginSurfaceFormFactor`; this alias remains source-compatible. */
 export type PluginPointFormFactor = PluginSurfaceFormFactor
 
 export interface PluginPointContract {
@@ -374,8 +391,26 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "vscode.terminal.output",
 ])
 
+// VS Code extension slots are wired through `components/extensions/
+// vscode-extension-panel.tsx` (sidebar/webview/activity-bar) and
+// `lib/plugin/vscode-shim/terminal-handlers.ts` (terminal output — opens
+// extensions' terminals as tabs in `<TerminalDock>`). Both are direct registration hosts rather than a
+// `<PluginExtensionSlot>` JSX mount. They are fully functional at
+// runtime, so the contract reports `status: "implemented"` with their
+// explicit binding files in `IMPLEMENTED_EXTENSION_POINT_BINDINGS`
+// below, and the `REGISTRATION_HOST_EXTENSION_POINTS` set below tells
+// the slot audit to verify the binding file exists instead of counting
+// JSX mounts.
+// The Set is kept empty (rather than removed) so future "register without
+// JSX mount" slots can be added by id without touching the status logic.
 const VIRTUAL_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>()
 
+/**
+ * UI-slot points whose host registers panels through a bridge function
+ * rather than mounting `<PluginExtensionSlot point="…" />`. The static
+ * slot audit branches on this set: instead of expecting ≥1 JSX mount, it
+ * checks that the `binding` file exists on disk.
+ */
 const REGISTRATION_HOST_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "vscode.sidebar.view",
   "vscode.webview.panel",
@@ -383,6 +418,15 @@ const REGISTRATION_HOST_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "vscode.terminal.output",
 ])
 
+/**
+ * Shape each UI slot expects, keyed by point id. Exhaustive by type — a new
+ * `CanonicalExtensionPoint` will not compile until it is classified here, which
+ * is the point: an unclassified slot is one an author has to guess at.
+ *
+ * Read off the host binding rather than invented: `statusbar.*` mounts into a
+ * ~24px-tall bar, `chat.input.actions` into the composer's flex button row,
+ * `sidebar.right.*` into the context workbench's scrollable column.
+ */
 export const EXTENSION_POINT_FORM_FACTORS: Record<
   CanonicalExtensionPoint,
   PluginSurfaceFormFactor
@@ -454,6 +498,7 @@ export const EXTENSION_POINT_FORM_FACTORS: Record<
   "vscode.webview.panel": "panel",
 }
 
+/** The shape a slot expects its contributions to take. */
 export function getExtensionPointFormFactor(
   point: CanonicalExtensionPoint
 ): PluginSurfaceFormFactor {
@@ -764,6 +809,14 @@ export const CANONICAL_HOOK_POINTS = [
 
 export type CanonicalHookPoint = (typeof CANONICAL_HOOK_POINTS)[number]
 
+/**
+ * Hook points that were demoted from canonical status because the host
+ * event source genuinely doesn't exist in a permissible host file.
+ *
+ * `validatePluginManifest` may still emit a one-shot warning when a plugin
+ * declares one of these, but they are no longer dispatched. See ADR 0016
+ * "Demoted hook points" for per-entry demotion reasoning.
+ */
 export const DEPRECATED_HOOK_POINTS = [
   "onThemeModeChange",
   "onColorPresetChange",
@@ -909,6 +962,23 @@ const extensionPointContracts: Record<CanonicalExtensionPoint, PluginPointContra
     })
   ) as Record<CanonicalExtensionPoint, PluginPointContract>
 
+/**
+ * Hook points that are declared for plugin authors but have no fire site in
+ * the host yet. A plugin may register a handler for one — the SDK types and
+ * `validateHookPoint` accept it — but the host never calls it, so the handler
+ * is a silent no-op.
+ *
+ * These are `status: "virtual"` for the same reason `VIRTUAL_EXTENSION_POINTS`
+ * are: the contract is published, the host implementation is not. Declaring
+ * them here is what makes the dormancy visible on all three axes required by
+ * the repo's working rules — the contract says virtual, `validateHookPoint`
+ * emits a `plugin.point.virtual` diagnostic, and `pnpm audit:hooks` fails if
+ * either the label or the missing fire site stops being true.
+ *
+ * Moving a hook OUT of this set is the last step of wiring it: add the
+ * `executeHook`/`hooks.<name>` call in the binding file first, then delete the
+ * entry here — `audit:hooks` fails while the two disagree in either direction.
+ */
 const VIRTUAL_HOOK_POINTS = new Set<CanonicalHookPoint>([
   // Scheduler CRUD + pre-run hooks. `lib/scheduler/` mutates tasks without
   // going through the plugin hooks system; only onScheduledTaskStart /
@@ -929,8 +999,17 @@ const VIRTUAL_HOOK_POINTS = new Set<CanonicalHookPoint>([
   "onWorkflowTriggerUnregister",
 ])
 
+/** The file whose fire sites `audit:hooks` checks for non-virtual hooks. */
 export const HOOK_POINT_BINDING = "lib/plugin/messaging/hooks-system.ts"
 
+/**
+ * Hooks whose payload is data a plugin API already guards with a permission.
+ * The dispatcher delivers them only to plugins granted it, and the published
+ * contract states it. The pet hooks carry what `ctx.pet.getView` / `onEvent`
+ * return (level, stage, achievements, care condition); behind the `hooks`
+ * capability alone, any plugin could follow the pet without ever asking for
+ * `pet:read`.
+ */
 export const HOOK_POINT_PERMISSIONS: Readonly<
   Partial<Record<CanonicalHookPoint, PluginPermission>>
 > = {
@@ -953,6 +1032,7 @@ export const HOOK_POINT_PERMISSIONS: Readonly<
   onExternalAgentConfigChange: "agent:external:read",
 }
 
+/** The permission a hook's delivery requires, if any. */
 export function getHookPointPermission(hookName: string): PluginPermission | undefined {
   return (HOOK_POINT_PERMISSIONS as Record<string, PluginPermission | undefined>)[hookName]
 }
@@ -982,6 +1062,20 @@ const hookPointContracts: Record<CanonicalHookPoint, PluginPointContract> = Obje
   })
 ) as Record<CanonicalHookPoint, PluginPointContract>
 
+/**
+ * Semantic interceptor points (ADR-0189 §6.2).
+ *
+ * A `hook` point answers "something happened"; an `interceptor` point answers
+ * one of four sharper questions — rewrite this, may this proceed, wrap this
+ * execution, or record that it happened — and the answer decides how the host
+ * treats a failure, whether handlers may run concurrently, and whether a
+ * returned value is allowed to replace the real one.
+ *
+ * Every entry below names the production site that dispatches it. A point with
+ * no fire site is `virtual` and says so; declaring an interceptor point the
+ * host never reaches would hand plugin authors an API that silently does
+ * nothing, which is worse than not shipping it.
+ */
 const INTERCEPTOR_POINT_DOCS = "docs/content/docs/en/adr/0189-semantic-interceptors.mdx"
 
 const INTERCEPTOR_POINT_TESTS = [
@@ -989,6 +1083,17 @@ const INTERCEPTOR_POINT_TESTS = [
   "lib/plugin/interceptors/registry.test.ts",
 ] as const
 
+/**
+ * Same eleven ids the SDK names, typed against the author-facing union.
+ *
+ * Derived from `INTERCEPTOR_POINT_DECLARATIONS` below rather than re-exporting
+ * the SDK's tuple as a value: this module is loaded by `audit:slots` through
+ * `ts-node` in CommonJS, where a runtime `@/…` import does not resolve, and a
+ * type-only import is elided. The `Record<CanonicalInterceptorPoint, …>`
+ * annotation on the declarations makes the two lists provably identical — a
+ * missing id and an extra one are both type errors — and
+ * `plugin-points.test.ts` pins it at runtime too.
+ */
 export type CanonicalInterceptorPoint = PluginInterceptorPoint
 
 interface InterceptorPointDeclaration {
@@ -999,6 +1104,7 @@ interface InterceptorPointDeclaration {
   introducedIn: string
 }
 
+/** Shared default: the strict end of every axis, relaxed only where declared. */
 const GUARDED_TRANSFORM = {
   failurePolicy: "fail-closed",
   reentrancy: { kind: "forbid-same-operation" },
@@ -1224,10 +1330,17 @@ const INTERCEPTOR_POINT_DECLARATIONS: Record<
   },
 }
 
+/**
+ * Every interceptor point id, in declaration order.
+ *
+ * See `CanonicalInterceptorPoint` for why this is derived here rather than
+ * re-exported from the SDK tuple.
+ */
 export const CANONICAL_INTERCEPTOR_POINTS = Object.keys(
   INTERCEPTOR_POINT_DECLARATIONS
 ) as readonly CanonicalInterceptorPoint[]
 
+/** Execution semantics by point id, for the dispatcher. */
 export const INTERCEPTOR_POINT_SEMANTICS: Readonly<
   Record<CanonicalInterceptorPoint, InterceptorPointSemantics>
 > = Object.freeze(
@@ -1265,6 +1378,12 @@ export function getInterceptorPointContract(point: CanonicalInterceptorPoint): P
   return interceptorPointContracts[point]
 }
 
+/**
+ * Runtime extension points — host-managed registries plugins can contribute
+ * implementations to (e.g., workflow node executors and triggers). Distinct
+ * from `ui-slot` (host renders a plugin's React node) and `hook` (host fires
+ * an event a plugin handler reacts to). See ADR 0012.
+ */
 export const CANONICAL_RUNTIME_POINTS = [
   "workflow.node",
   "workflow.trigger",
@@ -1335,6 +1454,8 @@ export const CANONICAL_RUNTIME_POINTS = [
 
 export type CanonicalRuntimePoint = (typeof CANONICAL_RUNTIME_POINTS)[number]
 
+// Exported for the W3.4 dispatch-reachability gate (runtime-proof-audit.test.ts)
+// which verifies each binding function is referenced by production code.
 export const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
   "workflow.node": "lib/workflow/nodes/registry.ts:registerNodeExecutor",
   "workflow.trigger": "lib/workflow/triggers/registry.ts:registerPluginTrigger",
@@ -1425,6 +1546,13 @@ export const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
     "lib/remote-desktop/provider-registry.ts:registerRemoteDesktopProvider",
 }
 
+/**
+ * Permission a plugin must hold to register at the given runtime point.
+ * Reused permission keys per locked decision #3 of ADR-0026, with one
+ * deliberate exception: `remote-desktop:provide` (ADR-0234), because a viewer
+ * renders another machine's screen and no existing permission says that.
+ * The `permission` field on each contract below is sourced from this map.
+ */
 const RUNTIME_POINT_PERMISSIONS: Partial<Record<CanonicalRuntimePoint, string>> = {
   "workflow.node": "extension:workflow",
   "workflow.trigger": "extension:workflow",
@@ -1477,6 +1605,13 @@ const RUNTIME_POINT_PERMISSIONS: Partial<Record<CanonicalRuntimePoint, string>> 
   "provider.remote-desktop": "remote-desktop:provide",
 }
 
+// Runtime points that are NOT yet stable (everything else defaults to
+// "stable" below). Currently empty: `lsp.server` and `cli.tool` graduated
+// experimental→stable alongside their capability promotions in
+// plugin-capabilities.ts — the host runtime is fully wired (lsp-registry /
+// cli-tools exec pipeline), the typed SDK helpers `defineLspServer()` /
+// `defineCliTool()` ship, and their required tests are in place. Add a point
+// here only while its wiring or plugin-facing API surface is still landing.
 const RUNTIME_POINT_STABILITY: Partial<Record<CanonicalRuntimePoint, PluginPointStability>> = {}
 
 const runtimePointContracts: Record<CanonicalRuntimePoint, PluginPointContract> =
@@ -1691,6 +1826,10 @@ const activationPatternContracts: Record<CanonicalActivationPattern, PluginPoint
   }),
 }
 
+/**
+ * A VS Code activation pattern: implemented where `binding` names what fires
+ * it, otherwise `virtual` with `note` saying why it never fires.
+ */
 function vscodeActivationContract(
   id: CanonicalActivationPattern,
   opts: { binding: string } | { note: string }

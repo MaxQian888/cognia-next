@@ -7,7 +7,7 @@
  * achievement could never unlock.
  */
 
-import { assertValidPetAchievementDef } from "@/lib/plugin/registries/pet-contribution-validation"
+import { assertValidPetAchievementDef } from "@cognia/plugin-contract/lib/plugin/registries/pet-contribution-validation"
 import type { PluginPetAchievementDef } from "@cognia/plugin-contract/types/plugin/plugin-pet"
 
 export function definePetAchievement(def: PluginPetAchievementDef): PluginPetAchievementDef {

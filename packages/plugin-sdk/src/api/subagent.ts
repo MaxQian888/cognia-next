@@ -28,6 +28,6 @@ export {
   getSubagentEntry,
   listSubagentIds,
   listSubagentEntries,
-} from "@/lib/plugin/registries/subagent-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/subagent-registry"
 
 export type { PluginSubagentDef } from "@cognia/plugin-contract/types/plugin/plugin-subagent"

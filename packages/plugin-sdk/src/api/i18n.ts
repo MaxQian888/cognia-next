@@ -19,7 +19,7 @@ export {
   registerPluginI18n,
   subscribeToPluginI18n,
   unregisterPluginI18n,
-} from "@/lib/i18n/plugin-i18n-registry"
+} from "@cognia/plugin-contract/lib/i18n/plugin-i18n-registry"
 
 export type {
   LocaleCode,

@@ -16,9 +16,9 @@
  */
 
 /** Redirect operators that CREATE OR APPEND TO a file. */
-
 const WRITE_OPS = new Set([">", ">>", ">|", "&>", "&>>"])
 
+/** One `>`/`<`-family redirect pulled out of a segment. */
 export interface CommandRedirect {
   /** The operator text, e.g. `>`, `>>`, `2>`'s `>`, `&>`, `<`, `<&`. */
   op: string
@@ -60,10 +60,16 @@ export interface CommandSegment {
   scopeParent: number
 }
 
+/** `NAME=value` leading env-assignment prefix (skipped to find the head). */
 const ENV_ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=/
 
 const MAX_DEPTH = 20
 
+/**
+ * Reduce a raw executable token to a comparable name: take the path
+ * basename, lowercase it, and drop a trailing `.exe`. `/usr/bin/RM` → `rm`,
+ * `C:\\Windows\\System32\\cmd.exe` → `cmd`.
+ */
 export function normalizeHead(token: string): string {
   let t = (token ?? "").trim()
   if (!t) return ""
@@ -84,6 +90,7 @@ export function normalizeHead(token: string): string {
   return t.toLowerCase().replace(/\.exe$/i, "")
 }
 
+/** Split a command into top-level statements, respecting quotes + paren depth. */
 function splitTopLevel(command: string): string[] {
   const out: string[] = []
   let cur = ""
@@ -171,6 +178,7 @@ function splitTopLevel(command: string): string[] {
   return out
 }
 
+/** Index of the `)` matching the `(` at `openIdx`, or -1. Quote-aware. */
 function matchParen(text: string, openIdx: number): number {
   let depth = 0
   let inSingle = false
@@ -202,6 +210,11 @@ function matchParen(text: string, openIdx: number): number {
   return -1
 }
 
+/**
+ * Pull `$(...)`, backtick, and `(...)` spans out of `text`. Returns their
+ * inner command strings (for recursive processing) plus a `stripped` copy
+ * with each span replaced by a space so the outer head still tokenizes.
+ */
 function extractSubstitutions(text: string): { inner: string[]; stripped: string } {
   const inner: string[] = []
   let stripped = ""
@@ -267,8 +280,10 @@ function extractSubstitutions(text: string): { inner: string[]; stripped: string
   return { inner, stripped }
 }
 
+/** One lexical unit: a plain word, or a redirect operator. */
 type ParsedToken = { kind: "word"; text: string } | { kind: "op"; op: string; fd?: string }
 
+/** Decode one `$'...'` ANSI-C span starting at the `$`. */
 function readAnsiCQuote(segment: string, start: number): { text: string; next: number } {
   let out = ""
   let i = start + 2 // skip `$'`
@@ -344,6 +359,7 @@ function readAnsiCQuote(segment: string, start: number): { text: string; next: n
   return { text: out, next: i + 1 } // skip the closing `'`
 }
 
+/** Longest redirect operator starting at `i`, or null. */
 function readRedirectOp(segment: string, i: number): string | null {
   for (const op of ["&>>", "&>", "<<<", "<<", ">>", ">|", ">&", "<&", "<>", ">", "<"]) {
     if (segment.startsWith(op, i)) return op
@@ -351,6 +367,16 @@ function readRedirectOp(segment: string, i: number): string | null {
   return null
 }
 
+/**
+ * Quote-aware tokenizer. Quotes are consumed and their contents kept;
+ * `$'...'` is ANSI-C decoded (so `$'\x72\x6d'` is the word `rm`, not the
+ * literal `$\x72\x6d`); redirect operators become their own tokens so the
+ * caller can tell `curl x > file` from `curl x file`.
+ *
+ * Backslashes are deliberately LEFT IN the token text. Whether `\` escapes
+ * the next character or separates a Windows path depends on the shell, and
+ * only the head has enough shape to decide — see {@link normalizeHead}.
+ */
 function tokenize(segment: string): ParsedToken[] {
   const tokens: ParsedToken[] = []
   let cur = ""
@@ -423,6 +449,20 @@ function tokenize(segment: string): ParsedToken[] {
   return tokens
 }
 
+/**
+ * Rewrite a command into the single spelling the shell would actually run:
+ * quotes removed, `$'...'` decoded, backslash escapes applied, whitespace
+ * runs collapsed. `r\\m  -rf  /x`, `"rm" -rf /x` and `$'\\x72\\x6d' -rf /x`
+ * all canonicalise to `rm -rf /x`.
+ *
+ * This exists so a user-authored DENY rule cannot be sidestepped by respelling
+ * the command. It is only ever safe as a deny probe, never as an allow one:
+ * an unquoted Windows path (`type C:\\a\\b`) canonicalises to nonsense
+ * (`type C:ab`), which can fail to match a rule but must never be allowed to
+ * satisfy one. See `resolveBashPermission`, and its sidecar mirror in
+ * `sidecar/src/policy/permission/resolver.ts`, which must stay identical —
+ * `ruleset.sidecar-parity.test.ts` pins that.
+ */
 export function canonicalizeCommand(command: string): string {
   const text = command ?? ""
   let out = ""
@@ -532,6 +572,11 @@ function collect(
   }
 }
 
+/**
+ * Break a command line into the individual executables it would run. Returns
+ * one {@link CommandSegment} per head command, including those hidden inside
+ * command substitutions and subshells. Empty / whitespace-only input → `[]`.
+ */
 export function splitCommandSegments(command: string): CommandSegment[] {
   if (!command || !command.trim()) return []
   const out: CommandSegment[] = []

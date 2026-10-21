@@ -12,14 +12,19 @@
 
 import type { ReviewThread, ReviewThreadComment } from "@cognia/github-bot-kit"
 
+/** Aggregate CI state, normalized across check-runs + commit statuses. */
 export type CiSummary = "unknown" | "pending" | "passing" | "failing"
 
+/** Normalized PR lifecycle state. */
 export type PrState = "draft" | "open" | "merged" | "closed"
 
+/** Normalized review decision computed from the PR's latest reviews. */
 export type ReviewDecision = "none" | "approved" | "changes_requested" | "review_required"
 
+/** Normalized mergeability verdict. */
 export type MergeabilityState = "unknown" | "mergeable" | "conflicting" | "behind" | "blocked"
 
+/** One normalized check-run / status context that is currently failing. */
 export interface PrCheckObservation {
   /** Check-run name or status context name. */
   name: string
@@ -37,10 +42,15 @@ export interface PrCheckObservation {
   providerId?: string
 }
 
+/**
+ * Review threads come from the shared GitHub Bot kit, which groups them for
+ * this observer and for the GitHub Bot plugins alike.
+ */
 export type PrReviewCommentObservation = ReviewThreadComment
 
 export type PrReviewThreadObservation = ReviewThread
 
+/** PR metadata facts. */
 export interface PrMetaObservation {
   url: string
   number: number
@@ -57,17 +67,20 @@ export interface PrMetaObservation {
   author: string
 }
 
+/** CI facts (rolled-up summary + only the failing checks that may need action). */
 export interface PrCiObservation {
   summary: CiSummary
   headSha: string
   failedChecks: PrCheckObservation[]
 }
 
+/** Review facts (decision + normalized threads/comments). */
 export interface PrReviewObservation {
   decision: ReviewDecision
   threads: PrReviewThreadObservation[]
 }
 
+/** Mergeability facts. */
 export interface PrMergeabilityObservation {
   state: MergeabilityState
   mergeable: boolean
@@ -75,12 +88,20 @@ export interface PrMergeabilityObservation {
   behindBase: boolean
 }
 
+/** Which semantic buckets changed vs the previous snapshot (semantic diff). */
 export interface PrChangedBuckets {
   metadata: boolean
   ci: boolean
   review: boolean
 }
 
+/**
+ * Display status DERIVED from a {@link PrObservation} at read time (never
+ * stored). A trimmed port of agent-orchestrator's status-derivation precedence
+ * (docs/architecture.md "Status Derivation"), scoped to PR facts. Session-level
+ * states (needs_input / working / terminated) are derived separately by the
+ * team runtime, not here.
+ */
 export type PrDerivedStatus =
   | "none"
   | "pr_open"
@@ -95,6 +116,7 @@ export type PrDerivedStatus =
   | "merged"
   | "closed"
 
+/** ETag cache validators carried forward for conditional (304) requests. */
 export interface PrObserveEtags {
   pr?: string
   checks?: string
@@ -102,6 +124,11 @@ export interface PrObserveEtags {
   comments?: string
 }
 
+/**
+ * A complete provider-neutral PR observation. When `fetched` is false the nested
+ * facts are zero-valued and must not be treated as authoritative (mirrors AO's
+ * `SCMObservation.Fetched`).
+ */
 export interface PrObservation {
   fetched: boolean
   observedAt: number
@@ -116,6 +143,7 @@ export interface PrObservation {
   etags?: PrObserveEtags
 }
 
+/** A repository reference for the observation fetch. */
 export interface ObserveRepo {
   /** "owner/name". */
   fullName: string
@@ -123,8 +151,17 @@ export interface ObserveRepo {
   name: string
 }
 
+/**
+ * How to locate the PR to observe: by explicit number, or by discovering the
+ * open PR whose head is `branch`.
+ */
 export type ObserveRef = { number: number; url?: string } | { branch: string }
 
+/**
+ * The minimal Octokit surface the fetcher needs. Injected so pure fetch logic is
+ * decoupled from `@octokit/core` and trivially mockable in tests (mirrors the
+ * poller's `GhTable` minimal-interface pattern).
+ */
 export interface OctokitLike {
   request(
     route: string,
@@ -136,6 +173,7 @@ export interface OctokitLike {
   }>
 }
 
+/** Zero-valued observation for the not-fetched / no-PR path. */
 export function unfetchedObservation(repo: string, observedAt: number): PrObservation {
   return {
     fetched: false,
@@ -163,6 +201,7 @@ export function unfetchedObservation(repo: string, observedAt: number): PrObserv
   }
 }
 
+/** Split "owner/name" into parts. Throws on a malformed repo full name. */
 export function parseRepoFullName(fullName: string): ObserveRepo {
   const trimmed = fullName.trim().replace(/\.git$/, "")
   const slash = trimmed.indexOf("/")

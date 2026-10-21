@@ -13,5 +13,4 @@
  * Empty while every method the host sends is backed. A method belongs here
  * when the host gains it before the renderer does.
  */
-
 export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS: readonly string[] = []

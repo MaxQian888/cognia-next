@@ -13,6 +13,7 @@ export type PetInteractionKind = (typeof PET_INTERACTION_KINDS)[number]
 
 export type PetRewardableKind = (typeof PET_REWARDABLE_KINDS)[number]
 
+/** Nurture kinds any subject may drive directly. */
 export const PET_INTERACTION_KINDS = [
   "fed",
   "played",
@@ -23,12 +24,23 @@ export const PET_INTERACTION_KINDS = [
   "treated",
 ] as const satisfies readonly PetEventKind[]
 
+/**
+ * Kinds a non-user subject may reward through the gate's `requestPetReward`:
+ * the seven care actions, the legacy `workflowRun`, and `pluginReward`, the
+ * neutral kind for a reward that is not itself a care action.
+ */
 export const PET_REWARDABLE_KINDS = [
   ...PET_INTERACTION_KINDS,
   "workflowRun",
   "pluginReward",
 ] as const satisfies readonly PetEventKind[]
 
+/** Hard per-call XP ceiling, below the daily budget. */
 export const MAX_XP_PER_REWARD = 10
 
+/**
+ * Hard per-call coin ceiling, below the daily budget (100). Without it one
+ * call could take the whole day's coins at once, which is not what "clamped
+ * per call" promised plugin authors.
+ */
 export const MAX_COINS_PER_REWARD = 20

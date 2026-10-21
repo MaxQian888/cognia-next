@@ -20,9 +20,9 @@ export {
   subscribeThemeRegistry,
   unregisterPluginTheme,
   unregisterThemesByPlugin,
-} from "@/lib/theme/theme-registry"
+} from "@cognia/plugin-contract/lib/theme/theme-registry"
 
-export type { PluginTheme } from "@/lib/theme/theme-registry"
+export type { PluginTheme } from "@cognia/plugin-contract/lib/theme/theme-registry"
 export type { PluginThemeContribution } from "@cognia/plugin-contract/types/plugin/plugin"
 export type {
   ColorThemePreset,

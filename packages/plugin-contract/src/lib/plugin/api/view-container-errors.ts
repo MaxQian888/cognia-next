@@ -21,6 +21,7 @@ const VIEW_CONTAINER_OPEN_ERROR_CODES: ReadonlySet<string> = new Set<ViewContain
   "foreign",
 ])
 
+/** Why a view container could not be opened. `code` is stable; `message` is for logs. */
 export class ViewContainerOpenError extends Error {
   readonly code: ViewContainerOpenErrorCode
   readonly containerId: string
@@ -33,6 +34,14 @@ export class ViewContainerOpenError extends Error {
   }
 }
 
+/**
+ * True when `value` is a view-container refusal, optionally of one `code`.
+ *
+ * Checks the shape (`name` + a known `code`) rather than `instanceof`, so it
+ * still answers correctly when the error was constructed by another copy of
+ * this module — a plugin bundle that inlined its own SDK, or a rejection that
+ * crossed the Python host-call boundary as a plain object.
+ */
 export function isViewContainerOpenError(
   value: unknown,
   code?: ViewContainerOpenErrorCode

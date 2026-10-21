@@ -15,6 +15,6 @@ export {
   getImRateSourceEntry,
   listImRateSourceIds,
   listImRateSourceEntries,
-} from "@/lib/plugin/registries/im-rate-source-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/im-rate-source-registry"
 
 export type { PluginImRateSourceDef } from "@cognia/plugin-contract/types/plugin/plugin-im-rate-source"

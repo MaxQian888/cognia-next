@@ -73,7 +73,7 @@ declare global {
  * dynamically (rather than declaring them in the manifest) registers against
  * this same instance, so the workbench sees one list.
  */
-export { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
+export { contextPanelRegistry } from "@cognia/plugin-contract/lib/context-workbench/panel-registry"
 export type { ContextPanelRegistry } from "@cognia/plugin-contract/lib/context-workbench/panel-registry"
 
 /**
@@ -82,4 +82,4 @@ export type { ContextPanelRegistry } from "@cognia/plugin-contract/lib/context-w
  * breakpoint guess renders wrong in half its placements; this measures the
  * element it is given.
  */
-export { useElementWidth } from "@/hooks/use-element-width"
+export { useElementWidth } from "@cognia/plugin-contract/hooks/use-element-width"

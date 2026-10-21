@@ -97,6 +97,12 @@ function compact<T>(values: Array<T | null>): T[] {
   return values.filter((v): v is T => v !== null)
 }
 
+/**
+ * Return the concrete entries this plugin contributes for a single capability
+ * tag. Unknown capabilities (or capabilities whose manifest field isn't yet
+ * mapped) return an empty array — callers should treat that as "no rich data
+ * available" rather than an error.
+ */
 export function getContributionsForCapability(
   manifest: unknown,
   capability: PluginCapability | string
@@ -232,6 +238,11 @@ export function getContributionsForCapability(
   }
 }
 
+/**
+ * Resolve every capability tag the plugin declares into its contribution
+ * entries. Preserves the order of `capabilities[]` so the UI can render
+ * predictable summaries like "4 tools · 2 skills · 1 theme".
+ */
 export function getAllContributions(
   capabilities: ReadonlyArray<PluginCapability | string>,
   manifest: unknown

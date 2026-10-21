@@ -13,7 +13,7 @@ export {
   getViewSnapshot,
   listViewsForContainer,
   subscribeViews,
-} from "@/lib/plugin/registries/tree-view-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/tree-view-registry"
 
 export type {
   PluginTreeNode,

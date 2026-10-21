@@ -32,7 +32,7 @@ export {
   listCompiledPluginAchievements,
   listPetAchievementEntries,
   unregisterPetAchievementsByPlugin,
-} from "@/lib/plugin/registries/pet-achievement-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/pet-achievement-registry"
 
 export {
   buildPluginItemId,
@@ -42,7 +42,7 @@ export {
   listProjectedPluginItems,
   projectPluginItem,
   unregisterPetItemsByPlugin,
-} from "@/lib/plugin/registries/pet-item-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/pet-item-registry"
 
 export type {
   PluginPetAchievementCondition,

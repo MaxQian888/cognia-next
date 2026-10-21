@@ -12,8 +12,8 @@ export {
   getUriHandler,
   unregisterUriHandlersByPlugin,
   dispatchUri,
-} from "@/lib/plugin/uri/uri-handler-registry"
+} from "@cognia/plugin-contract/lib/plugin/uri/uri-handler-registry"
 
-export type { UriHandler } from "@/lib/plugin/uri/uri-handler-registry"
+export type { UriHandler } from "@cognia/plugin-contract/lib/plugin/uri/uri-handler-registry"
 export type { ParsedDeepLink } from "@cognia/plugin-contract/lib/plugin/uri/parse-deep-link"
 export type { PluginUriHandlerDef } from "@cognia/plugin-contract/lib/plugin/api/uri-api"

@@ -24,6 +24,31 @@ export interface ComposerSkinOverrides {
   toolbarLayout?: ComposerToolbarLayout
 }
 
+/**
+ * Composer skins — the table that decides how the input box is arranged.
+ *
+ * A skin is data, not a component. It resolves to a handful of CSS custom
+ * properties plus three layout enums, which `ComposerBox` consumes; there is no
+ * per-skin fork of the render tree. Adding a sixth skin is one row in
+ * {@link COMPOSER_SKINS} plus two i18n keys.
+ *
+ * ## The invariant: reachability, not visibility
+ *
+ * A skin decides WHERE each control sits — inline, on a rail, or folded behind
+ * the toolbar's "⋯" disclosure. It never removes one. `focus` is allowed to
+ * fold more than the others; it is not allowed to drop a control on the floor.
+ * `bottom-toolbar.tsx` already owns that disclosure, so "folded" is an existing
+ * mechanism a skin selects, not one it authors.
+ *
+ * ## `classic` is preserved by construction
+ *
+ * `classic` is today's composer. It deliberately carries NO token values: the
+ * box branches on the id and renders its original literal Tailwind classes, so
+ * "unchanged" does not depend on anyone getting a rem→px conversion right. See
+ * `composer-box.tsx` and the parity test beside it.
+ */
+
+/** Stable ids. `classic` is the default and must stay first. */
 export const COMPOSER_SKIN_IDS = ["classic", "airy", "dense", "full", "focus", "sharp"] as const
 
 export const DEFAULT_COMPOSER_SKIN: ComposerSkinId = "classic"
@@ -44,6 +69,13 @@ export interface ComposerSkinTokens {
   toolbarLayout: ComposerToolbarLayout
 }
 
+/**
+ * `classic` carries the real values today's Tailwind classes compile to, for
+ * reference and for the settings preview ONLY. The box never reads them — it
+ * renders the original literals. Keeping them here (rather than leaving the row
+ * empty) means the settings preview can draw `classic` truthfully without the
+ * box having to opt into the variable path.
+ */
 export const COMPOSER_SKINS: Record<ComposerSkinId, ComposerSkinTokens> = {
   classic: {
     radiusPx: 16, // rounded-2xl
@@ -112,10 +144,24 @@ export const COMPOSER_SKINS: Record<ComposerSkinId, ComposerSkinTokens> = {
   },
 }
 
+/**
+ * Does this arrangement sit INSIDE the composer box, or below it?
+ *
+ * Two separate questions got conflated in the first draft of this table:
+ * where the status row lives, and how much of its roster is spelled out. They
+ * are not the same axis. `expanded` spells everything out and therefore needs
+ * the full pane width — it belongs BELOW the box, like `detached`. The three
+ * tighter arrangements fit inside it.
+ *
+ * This matters beyond aesthetics: a row placed inside the box has to share the
+ * flex line with the textarea, so the box must stack (textarea on its own row,
+ * controls beneath) or the chips overlap the input. See `compactLayout` below.
+ */
 export function toolbarSitsInBox(layout: ComposerToolbarLayout): boolean {
   return layout === "embedded" || layout === "rail" || layout === "folded"
 }
 
+/** The `composerBehavior` fields this resolver reads. */
 export interface ComposerSkinSettings {
   skin?: ComposerSkinId
   skinOverrides?: ComposerSkinOverrides
@@ -131,10 +177,22 @@ export interface ResolvedComposerSkin extends ComposerSkinTokens {
   isClassic: boolean
 }
 
+/**
+ * Touch floors. A skin may not put a primary control below the platform
+ * minimum, however dense it wants to be — so `dense` on a phone keeps its
+ * corners and its typography but not its 26px send button.
+ */
 export const MOBILE_MIN_TOUCH_PX = 44
 
+/**
+ * Deliberately no radius floor (ADR-0148). Touch SIZE is a usability red line
+ * and stays enforced below; corner radius is pure aesthetics, and holding a
+ * 12px floor made the phone composer the only rounded object left on a squared
+ * screen. A square button is no harder to hit than a round one.
+ */
 const MOBILE_MIN_PAD_PX = 10
 
+/** Clamp so a hand-edited settings row cannot produce an unusable box. */
 const RADIUS_RANGE = [0, 32] as const
 
 const PAD_RANGE = [2, 24] as const
@@ -148,6 +206,18 @@ function isSkinId(value: unknown): value is ComposerSkinId {
   return typeof value === "string" && (COMPOSER_SKIN_IDS as readonly string[]).includes(value)
 }
 
+/**
+ * Preset ← user overrides ← mobile floors, in that order.
+ *
+ * Two rules worth stating because they are easy to get backwards:
+ *
+ *  1. **`classic` ignores overrides.** Its whole contract is "today's box,
+ *     untouched"; honouring a radius knob would break that silently. Pick
+ *     another skin to adjust anything.
+ *  2. **`compactLayout` is honoured only under `classic`.** Under any other
+ *     skin the skin owns the layout and the legacy flag is inert — labelled as
+ *     such in settings, and pinned by the test beside this file.
+ */
 export function resolveComposerSkin(
   settings: ComposerSkinSettings | undefined,
   opts: { isMobile: boolean; packSkin?: ComposerSkinId }
@@ -224,6 +294,14 @@ export function resolveComposerSkin(
   }
 }
 
+/**
+ * The CSS custom properties the box sets for a non-classic skin. Returned as a
+ * plain object so it can go straight into a `style` prop — inline properties
+ * beat every stylesheet rule, including the ~3400 unlayered lines in
+ * `globals.css` that outrank Tailwind utilities.
+ *
+ * Returns `undefined` for `classic` so that path emits no properties at all.
+ */
 export function composerSkinVars(skin: ResolvedComposerSkin): Record<string, string> | undefined {
   if (skin.isClassic) return undefined
   return {
@@ -239,6 +317,18 @@ export function composerSkinVars(skin: ResolvedComposerSkin): Record<string, str
   }
 }
 
+/**
+ * Skin proposes, width disposes.
+ *
+ * A skin picks a toolbar layout for a comfortable pane. A genuinely narrow one
+ * cannot hold `expanded`'s labelled roster (or `detached`'s single wide row)
+ * whatever the user chose, so below the threshold it degrades to the packing
+ * layout. This is the same rule the toolbar already applied to width alone; the
+ * skin just gets a say first.
+ *
+ * `width === 0` means "not measured yet" — keep the proposal rather than
+ * flashing a compact layout on first paint.
+ */
 export const COMPACT_TOOLBAR_PX = 420
 
 export function resolveToolbarLayout(
@@ -257,6 +347,30 @@ export function resolveToolbarLayout(
   return "embedded"
 }
 
+/**
+ * Fold tiers — how much of the toolbar roster the measured pane width can
+ * hold without shaving a label into "A…". A different axis from
+ * {@link COMPACT_TOOLBAR_PX}: that constant decides which LAYOUT a skin may
+ * keep; this ladder decides how much of the roster ANY layout spells out
+ * inline, and in what form.
+ *
+ * Priority order (least essential folds first — the per-turn answers "which
+ * model / how deep / what may it do" are the last to give up their words):
+ *
+ *  - tier 0 (≥ `labelled`): the full roster, every chip labelled.
+ *  - tier 1 (≥ `packed`):   preset, sandbox and the plugin slots fold behind
+ *    "⋯"; the session-cost badge switches to its short `$x.xx` form.
+ *  - tier 2 (≥ `glyphs`):   effort / fusion / permission go icon-only, the
+ *    runtime chip drops its name, and Agent mode joins "⋯".
+ *  - tier 3 (≥ `tight`):    fusion and session cost fold into "⋯" (both render
+ *    their full form inside the popover); the model chip narrows.
+ *  - tier 4 (< `tight`):    the context indicator drops its percentage and
+ *    keeps only the ring.
+ *
+ * The edges are deliberately conservative: a chip whose label still fits
+ * stays labelled, and what folds is always reachable in the SAME "⋯"
+ * disclosure — nothing is ever dropped outright.
+ */
 export type ToolbarFoldTier = 0 | 1 | 2 | 3 | 4
 
 export const TOOLBAR_FOLD_PX = {
@@ -280,7 +394,32 @@ export function resolveToolbarFoldTier(toolbarWidth: number): ToolbarFoldTier {
   return 4
 }
 
+/**
+ * The one chip style every composer toolbar control wears — the model, effort,
+ * permission, mode, runtime, preset, context, cost and credential chips, and
+ * anything a host puts on the same row. Lives here rather than in
+ * `bottom-toolbar.tsx` so the controls that toolbar imports (the composition
+ * chip) can wear it without an import cycle.
+ *
+ * - `h-7 rounded-md text-[11px]`: one height, one radius, one type size, so the
+ *   row reads as a single quiet strip.
+ * - `min-w-0 shrink`: the shadcn button base is `shrink-0`, so a chip inside a
+ *   `min-w-0` group kept its intrinsic width while the group compressed and
+ *   the surplus painted over its neighbour. Shrinkable chips ellipsize instead.
+ * - `has-[>svg]:px-2`: the Button's size variants carry `has-[>svg]:px-2.5` /
+ *   `px-3`, and `:has()` out-specifies a bare `px-2` — so without this every
+ *   chip with a leading icon was 2-4px wider per side than the row it sat in,
+ *   and the context chip's `px-1.5` never applied at all.
+ * - `touch-hit`: a 44px hit area on a coarse pointer without a 44px box — the
+ *   row paints at 28px on a phone and still answers a thumb.
+ */
 export const COMPOSER_TOOLBAR_CHIP =
   "touch-hit h-7 min-w-0 shrink rounded-md border-transparent bg-transparent px-2 has-[>svg]:px-2 text-[11px] font-normal text-muted-foreground shadow-none hover:border-transparent hover:bg-muted/60 hover:text-foreground dark:border-transparent dark:bg-transparent dark:hover:bg-muted/60"
 
+/**
+ * The square, icon-only form of a toolbar chip. Goes AFTER
+ * {@link COMPOSER_TOOLBAR_CHIP} in `cn(...)` so its padding wins — including
+ * over the Button's `has-[>svg]` padding, which is why the `has-` reset is part
+ * of it.
+ */
 export const COMPOSER_TOOLBAR_GLYPH = "w-7 justify-center px-0 has-[>svg]:px-0"

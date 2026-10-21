@@ -15,7 +15,7 @@ export {
   getBalanceAdapterEntry,
   listBalanceAdapterIds,
   listBalanceAdapterEntries,
-} from "@/lib/plugin/registries/balance-adapter-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/balance-adapter-registry"
 
 export type { PluginBalanceAdapterDef } from "@cognia/plugin-contract/types/plugin/plugin-balance-adapter"
 

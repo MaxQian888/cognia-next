@@ -55,11 +55,14 @@ export interface PluginPetEvent {
   at: number
 }
 
+/** Kinds a plugin may emit through `emitEvent`, nurture and neutral only. */
 export const PLUGIN_EMITTABLE_PET_EVENT_KINDS: readonly PluginEmittablePetEventKind[] =
   PET_REWARDABLE_KINDS
 
+/** Hard per-call XP ceiling, below the daily budget. */
 export const MAX_XP_PER_EMIT = MAX_XP_PER_REWARD
 
+/** Hard per-call coin ceiling, below the daily budget. */
 export const MAX_COINS_PER_EMIT = MAX_COINS_PER_REWARD
 
 export class PetEventKindNotAllowedError extends Error {
@@ -71,6 +74,13 @@ export class PetEventKindNotAllowedError extends Error {
   }
 }
 
+/**
+ * Thrown when a plugin names an item it does not own (or one that is not a
+ * consumable). `applyPetEvent` applies the named item's stronger `needsEffect`
+ * in place of the base restore, so before the access gate an unowned id was a
+ * free upgrade: the shop path checked ownership and decremented stock, this
+ * path did neither.
+ */
 export class PetItemNotOwnedError extends Error {
   constructor(itemId: string) {
     super(`Pet item "${itemId}" is not owned, or is not a consumable.`)
@@ -78,6 +88,10 @@ export class PetItemNotOwnedError extends Error {
   }
 }
 
+/**
+ * Thrown when an item is used for an interaction it is not for (a food item
+ * on `petted`). The item is not spent.
+ */
 export class PetItemKindMismatchError extends Error {
   readonly itemId: string
   readonly kind: string
@@ -93,6 +107,11 @@ export class PetItemKindMismatchError extends Error {
   }
 }
 
+/**
+ * Thrown when the pet is still recovering from the same action: the host
+ * would drop it, so nothing was spent (no budget, no item). Retry after
+ * `retryAfterMs`.
+ */
 export class PetCooldownError extends Error {
   readonly kind: string
   readonly retryAfterMs: number
