@@ -63,7 +63,6 @@ import { resolveBinding, type ResolvedBinding } from "./policy-resolve"
 import { routeInboundFromComposition, toRouteDecision, type RouteDecision } from "./mode-router"
 import { resolveImEffectiveConfig } from "./effective-config"
 import { recordConnectorRouteGovernance } from "@/lib/governance/producers/connector"
-import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { findMatchingWorkflows } from "@/lib/workflow/runtime/trigger-subscriptions"
 import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
@@ -1904,6 +1903,7 @@ export class ConnectorBus {
     await Promise.all(
       matches.map(async (m) => {
         try {
+          const { dispatchTrigger } = await import("@/lib/workflow/runtime/trigger-bridge")
           await dispatchTrigger({
             workflowId: m.workflowId,
             kind: "trigger.connector.system",
@@ -1968,6 +1968,7 @@ export class ConnectorBus {
     const occurrenceKey = connectorOccurrenceKey(event)
     const dispatches = matches.map(async (m) => {
       try {
+        const { dispatchTrigger } = await import("@/lib/workflow/runtime/trigger-bridge")
         await dispatchTrigger({
           workflowId: m.workflowId,
           kind: "trigger.connector.inbound",

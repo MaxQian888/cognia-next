@@ -21,6 +21,12 @@ import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
 import { evaluatePolicy } from "./policy-eval"
 import type { TriggerPolicy } from "@/types/connectors/policy"
 
+// Registry, outbound and callback operations must not initialize workflow
+// execution. A static or transitive eager import evaluates this factory.
+jest.mock("@/lib/workflow/runtime/trigger-bridge", () => {
+  throw new Error("ConnectorBus loaded workflow execution without a matching trigger")
+})
+
 // The callback dispatch path touches Dexie via dedup / audit / binding lookup.
 // Stub those three out so the observer wiring can be exercised in isolation —
 // the existing registry / sendOutbound / dispatchInbound (Task 25) tests never

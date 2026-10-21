@@ -49,6 +49,8 @@ jest.mock("@/lib/claude/provider-telemetry", () => {
 
 jest.mock("@/lib/task-workspace/client", () => ({
   __esModule: true,
+  WorkspacePortLeaseError: jest.requireActual("@/lib/task-workspace/client")
+    .WorkspacePortLeaseError,
   acquireWorkspaceBundle: jest.fn(),
   ensureSessionScratchWorkspaceBundle: jest.fn(),
 }))

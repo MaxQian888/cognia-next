@@ -519,6 +519,7 @@ export type RunAndCaptureFn = (
 ) => Promise<{
   text: string
   messageId: string
+  resultSubtype?: import("@/lib/claude/run-and-capture").RunAndCaptureResult["resultSubtype"]
   /**
    * A2UI surfaces emitted during this turn via the `builtin:a2ui-bridge`
    * MCP tools. Empty for plain-text turns. The runtime projects them into

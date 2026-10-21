@@ -3715,11 +3715,12 @@ describe("installRuntime — ai-run (stopped at a limit)", () => {
   })
 
   it("finishes the run failed and marks the delivered partial reply as incomplete", async () => {
-    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockResolvedValueOnce({
+    const captured: Awaited<ReturnType<RunAndCaptureFn>> = {
       text: "partial answer",
       messageId: "uuid-max-turns",
       resultSubtype: "error_max_turns",
-    })
+    }
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockResolvedValueOnce(captured)
     const key = "telegram:adapter_1:chat_max_turns"
 
     await callHandler(makeEvent({ conversationKey: key }), "ai-run")
