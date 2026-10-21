@@ -85,6 +85,32 @@ If the cache has not been published or is inaccessible, BuildKit falls back to
 a cold build; neither path writes the release registry cache. The large Cargo
 layers remain outside the shared GitHub Actions cache budget.
 
+## Dependabot dependency batches
+
+The root Cargo workspace shares one lockfile. Dependabot proposes one weekly
+`cargo-dependencies` batch (including major updates), with at most one open
+version-update PR. GitHub Actions updates, including majors, also share one
+weekly batch. npm retains separate production/tooling minor-and-patch batches.
+Security updates remain enabled and are not delayed by the version cooldown.
+
+Two native type families currently require a coordinated migration: `windows`
+0.62 / `windows-future` 0.3, and `ocrs` 0.13 / RTen 0.26. The incompatible
+Windows 0.100 and RTen 0.27 releases are ignored explicitly rather than repeatedly
+proposed as isolated bumps. Revisit these exclusions when migrating the families.
+Rust toolchain selection is pinned via the action's `toolchain` input, avoiding
+Dependabot treating future compiler-version action refs as action upgrades.
+
+For a Cargo-only dependency diff, Images builds the four root-workspace Rust
+service consumers, the server check, the managed desktop guard, and both native
+agent-bundle `sandboxd` stages. It does not rebuild independent-lock services,
+the web export, Node runtime or unchanged external agent CLI payloads. Bundle
+runtime smoke still runs for source changes, mixed diffs, missing history,
+manual runs and release tags; publication always requires both native smoke jobs.
+The Git-only planner uses the exact tested HEAD and PR base, with no bot-name or
+PR-label bypass. The image summary records the selected consumers.
+
+Configuration reference: [GitHub Dependabot groups](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#groups).
+
 ## Quality gates
 
 The gate list lives in exactly one place: **`scripts/gates/check-all.mjs`**.
@@ -106,8 +132,13 @@ The first affected-gate rollout declares input scopes for 22 expensive checks
 (type/build/SDK/native). Unscoped checks, including registry and cross-cutting
 invariants, remain always-on. Documentation content skips these expensive checks;
 shared API/metadata inputs retain their contract consumers. Unknown paths,
-deletions/renames, dependency/configuration changes, and workflow/tooling changes
-select the entire registry. Selected checks still inspect their complete input
+deletions/renames, mixed dependency/configuration changes, and workflow/tooling changes
+select the entire registry. A complete, nonempty diff containing only the root
+`Cargo.lock` and workspace `Cargo.toml` files selects the native dependency gates:
+Rust format, clippy, architecture checks, Rust SDK tests, cargo-deny, the gate
+registry and deploy-suite contract. It skips JavaScript builds, lint, typechecking
+and SDK packaging because no JavaScript input changed. Full/manual/nightly plans
+and deleted manifests always retain the complete registry. Selected checks still inspect their complete input
 domain and remain blocking; this is gate selection, not line-only validation.
 
 The `quality-change-plan` artifact records selected/skipped scripts and reasons.

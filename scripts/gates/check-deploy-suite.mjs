@@ -176,8 +176,15 @@ export function ghcrImageName(reference) {
 export function publishedImageNames(imagesWorkflowText) {
   const names = new Set()
   const workflow = parseYaml(imagesWorkflowText)
+  const catalog = JSON.parse(workflow?.env?.FAST_IMAGE_MATRIX ?? "[]")
+  if (!Array.isArray(catalog)) throw new Error("Invalid FAST_IMAGE_MATRIX publication catalog")
+  for (const entry of catalog) {
+    if (typeof entry?.name !== "string") throw new Error("Invalid image catalog entry")
+    names.add(entry.name)
+  }
   for (const job of Object.values(workflow?.jobs ?? {})) {
-    for (const entry of job?.strategy?.matrix?.include ?? []) {
+    const include = job?.strategy?.matrix?.include
+    for (const entry of Array.isArray(include) ? include : []) {
       if (typeof entry?.name === "string") names.add(entry.name)
     }
   }

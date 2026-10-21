@@ -7,6 +7,7 @@ import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import {
   createChangePlan,
+  isCargoDependencyChange,
   isPushBaselineValidated,
   readChangePlan,
   validateChangePlan,
@@ -231,4 +232,22 @@ test("push catch-up accepts only a successful CI run of the exact predecessor an
     }),
     false
   )
+})
+
+test("Cargo dependency selection is nonempty, complete, and fails closed", () => {
+  const plan = {
+    mode: "incremental",
+    changedFiles: ["Cargo.lock", "Cargo.toml", "crates/cognia-cli/Cargo.toml"],
+    deletedFiles: [],
+  }
+  assert.equal(isCargoDependencyChange(plan), true)
+  for (const override of [
+    { mode: "full" },
+    { changedFiles: [] },
+    { changedFiles: ["Cargo.lock", "src-tauri/src/lib.rs"] },
+    { changedFiles: ["services/diagnostic-server/Cargo.lock"] },
+    { changedFiles: ["crates/cognia-cli/build.rs"] },
+    { deletedFiles: ["Cargo.toml"] },
+  ])
+    assert.equal(isCargoDependencyChange({ ...plan, ...override }), false)
 })
