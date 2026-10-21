@@ -1,13 +1,11 @@
 /**
  * Plugin SDK - `importer` capability surface.
  *
- * Re-exports the custom importer authoring helper and runtime plugin import
- * API used by `ctx.import.registerImporter(...)`.
+ * Exports the custom importer authoring helper and the types behind
+ * `ctx.import.registerImporter(...)`. The host builds `ctx.import`.
  */
 
 export { defineImporter } from "../define/define-importer"
-
-export { clearCustomImporters, createImportAPI } from "@/lib/plugin/api/import-api"
 
 export type {
   CustomImporter,

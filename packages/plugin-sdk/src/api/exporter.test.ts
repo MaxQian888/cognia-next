@@ -9,10 +9,13 @@ import type {
 } from "./exporter"
 
 describe("plugin-sdk api/exporter", () => {
-  it("exposes the authoring helper and plugin export API registry", () => {
+  it("exposes the authoring helper", () => {
     expect(typeof sdk.defineExporter).toBe("function")
-    expect(typeof sdk.createExportAPI).toBe("function")
-    expect(typeof sdk.clearCustomExporters).toBe("function")
+  })
+
+  it("keeps host wiring off the author surface (plugins reach it through ctx.export)", () => {
+    expect(sdk).not.toHaveProperty("createExportAPI")
+    expect(sdk).not.toHaveProperty("clearCustomExporters")
   })
 
   it("re-exports custom exporter and export API contract types", () => {

@@ -8,15 +8,18 @@ import type {
 } from "./deployment-filter"
 
 describe("plugin-sdk api/deployment-filter", () => {
-  it("exposes the authoring helper, manifest bridge, and dynamic registry", () => {
+  it("exposes the authoring helper and the dynamic registry", () => {
     expect(typeof sdk.defineDeploymentFilter).toBe("function")
-    expect(typeof sdk.registerDeploymentFiltersForPlugin).toBe("function")
-    expect(typeof sdk.unregisterDeploymentFiltersForPlugin).toBe("function")
     expect(typeof sdk.registerDeploymentFilter).toBe("function")
     expect(typeof sdk.unregisterDeploymentFilter).toBe("function")
     expect(typeof sdk.unregisterDeploymentFiltersByPlugin).toBe("function")
     expect(typeof sdk.getDeploymentFilter).toBe("function")
     expect(typeof sdk.listDeploymentFilters).toBe("function")
+  })
+
+  it("keeps host wiring off the author surface (plugins contribute through their manifest)", () => {
+    expect(sdk).not.toHaveProperty("registerDeploymentFiltersForPlugin")
+    expect(sdk).not.toHaveProperty("unregisterDeploymentFiltersForPlugin")
   })
 
   it("re-exports deployment filter manifest and bridge types", () => {

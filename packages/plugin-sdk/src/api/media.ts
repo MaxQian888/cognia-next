@@ -1,11 +1,9 @@
 /**
  * Plugin SDK - `media` capability runtime surface.
  *
- * Re-exports the host media API exposed as `ctx.media` plus the shared
- * filter/effect registry used by media-capable plugins.
+ * Exports the types of `ctx.media`, the API media-capable plugins use for
+ * filters and effects. The host builds `ctx.media` and owns its registry.
  */
-
-export { createMediaAPI, getMediaRegistry } from "@/lib/plugin/api/media-api"
 
 export type {
   ExportProgress,

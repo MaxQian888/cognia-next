@@ -8,7 +8,6 @@
 export { defineLspServer } from "../define/define-lsp-server"
 
 export {
-  configureLspRegistry,
   getLspServerForLanguage,
   listLspServers,
   lspServerKey,

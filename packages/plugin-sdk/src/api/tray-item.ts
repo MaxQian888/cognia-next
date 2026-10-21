@@ -1,13 +1,12 @@
 /**
  * Plugin SDK — `tray-item` capability surface.
  *
- * Re-exports the authoring helper, plugin context API factory, and renderer
- * tray registry used by plugin-contributed tray menu items.
+ * Exports the authoring helper, the types of `ctx.tray`, and the renderer
+ * tray registry used by plugin-contributed tray menu items. The host builds
+ * `ctx.tray`.
  */
 
 export { defineTrayItem } from "../define/define-tray-item"
-
-export { createTrayAPI } from "@/lib/plugin/api/tray-api"
 
 export {
   getTrayItem,

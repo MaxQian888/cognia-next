@@ -1,18 +1,14 @@
 /**
  * Plugin SDK — `terminal-completion` capability surface.
  *
- * Re-exports the authoring helper, manifest bridge, plugin adapter, and
- * namespaced host completion registry aliases for terminal suggestions.
+ * Exports the authoring helper, provider registration, and namespaced host
+ * completion registry aliases for terminal suggestions. The host adapts and
+ * registers manifest-declared providers itself.
  */
 
 export { defineTerminalCompletionProvider } from "../define/define-terminal-completion"
 
-export {
-  adaptPluginCompletionProvider,
-  registerPluginCompletionProvider,
-  registerTerminalCompletionProvidersForPlugin,
-  unregisterTerminalCompletionProvidersForPlugin,
-} from "@/lib/plugin/bridge/terminal-completion-bridge"
+export { registerPluginCompletionProvider } from "@/lib/plugin/bridge/terminal-completion-bridge"
 
 export type {
   TerminalCompletionBridgeError,

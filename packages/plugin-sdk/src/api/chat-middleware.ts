@@ -1,20 +1,15 @@
 /**
  * Plugin SDK - `chat-middleware` capability surface.
  *
- * Re-exports the declarative authoring helper, manifest bridge, imperative
- * `ctx.chat.use(...)` runtime API, and the host middleware registry.
+ * Exports the declarative authoring helper, the types of the imperative
+ * `ctx.chat.use(...)` API, and the host middleware registry. The host builds
+ * `ctx.chat`, registers manifest-declared middleware and runs the circuit
+ * breaker itself; none of that wiring is on the author surface.
  */
 
 export { defineChatMiddleware } from "../define/define-chat-middleware"
 
-export {
-  registerChatMiddlewaresForPlugin,
-  unregisterChatMiddlewaresForPlugin,
-} from "@/lib/plugin/bridge/chat-middleware-bridge"
-
 export type { RegisterChatMiddlewaresOptions } from "@/lib/plugin/bridge/chat-middleware-bridge"
-
-export { clearChatMiddlewaresForPluginContext, createChatAPI } from "@/lib/plugin/api/chat-api"
 
 export type { PluginChatAPI } from "@cognia/plugin-contract/lib/plugin/api/chat-api"
 
@@ -26,10 +21,7 @@ export {
   listActiveChatMiddlewares,
   listAllChatMiddlewares,
   MAX_MIDDLEWARE_TIMEOUT_MS,
-  recordMiddlewareFailure,
-  recordMiddlewareSuccess,
   registerChatMiddleware,
-  resetChatMiddlewareBreaker,
   subscribeChatMiddlewareRegistry,
   unregisterChatMiddleware,
 } from "@/lib/claude/chat-middleware/registry"
