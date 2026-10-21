@@ -153,7 +153,7 @@ Projections never carry a secret, env, headers or keyring refs. Inputs with inli
 credentials are refused; credentials and unsandboxed consent stay in the host UI.
 Writes go through the lifecycle service and record `metadata.createdByPluginId`.
 
-`runExternalAgent` refuses when the master switch is off or the target is disabled or
+`runExternalAgent` refuses when the target is disabled or
 not ready, clamps the requested permission mode to the configuration's default (the
 global default for a preset's temporary instance) and removes that temporary
 instance after the run. `dispatchSubagent` aimed at an external agent also requires
@@ -183,3 +183,9 @@ instance after the run. `dispatchSubagent` aimed at an external agent also requi
   `lib/plugin/messaging/external-agent-config-hook-source.test.ts`,
   `plugin-sdk/python/tests/test_contributions.py`
 - `components/settings/agent/*.test.tsx`, `components/mobile/external-agents/*.test.tsx`
+
+## Global switch removal (2026-10-20)
+
+External agents are controlled by each configuration's `enabled` state. The settings page, runtime catalog, chat routing and plugin APIs no longer use a global enable flag. `getSettings` omits `enabled`, and `updateSettings` rejects it as an unknown setting; `setEnabled(id, enabled)` continues to control one configuration.
+
+Persist version 7 removes the legacy flag. A saved global `enabled: false` becomes `enabled: false` on every existing configuration, so upgrading does not launch agents the user had suspended. A true or absent legacy flag preserves each configuration's state. Configurations, credentials, routing rules and connection preferences are retained. Users can re-enable configurations individually.

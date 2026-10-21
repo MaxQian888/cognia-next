@@ -106,7 +106,7 @@ Calls the host makes arrive as `vscode://rpc/<pluginId>` events. `rpc-dispatcher
 
 **Diagnostics.** A `DiagnosticCollection` sends `languages:setDiagnostics` / `clearDiagnostics`, which become Monaco markers.
 
-**Language servers in extensions.** Most language extensions use `vscode-languageclient`. It runs unchanged: its `child_process` is the extension's `process:spawn`, the server process is the extension's own, and the client's providers and diagnostics take the path above. `tests/host-languageclient.test.mjs` runs a real `vscode-languageclient` against `tests/fixtures/echo-lsp.mjs` on the built host, with the client's dependencies copied into the fixture the way an unbundled extension ships them, and checks the registrations, the server's diagnostics, completion and hover.
+**Language servers in extensions.** Most language extensions use `vscode-languageclient`. It runs unchanged: its `child_process` is the extension's `process:spawn`, the server process is the extension's own, and the client's providers and diagnostics take the path above. `tests/host-languageclient.test.ts` runs a real `vscode-languageclient` against `tests/fixtures/echo-lsp.ts` on the built host, with the client's dependencies copied into the fixture the way an unbundled extension ships them, and checks the registrations, the server's diagnostics, completion and hover.
 
 **Grammars, themes, snippets, languages.** Contributed languages are registered with Monaco (`contributed-languages-monaco.ts`). Themes and icon themes go through the theme bridges. Grammars color code in chat and previews (`grammars-bridge.ts`, Shiki), not in the Monaco editor. A dormant extension's grammars, themes and snippets appear once it runs.
 
@@ -185,7 +185,7 @@ graph TD
 
 ## 9. Testing
 
-- **Host** (`pnpm sidecar:vscode:test`, which builds `dist/` first): `tests/host-*.test.mjs` drive the built `host.js` over stdio with fixture extensions under `tests/fixtures/` (providers, documents, window, terminals, tasks, webviews, workspace, `vscode.lm`, the sandbox, and `vscode-languageclient` with `echo-lsp.mjs`). The other suites test one module each.
+- **Host** (`pnpm sidecar:vscode:test`, which builds `dist/` first): `tests/host-*.test.ts` drive the built `host.js` over stdio with fixture extensions under `tests/fixtures/` (providers, documents, window, terminals, tasks, webviews, workspace, `vscode.lm`, the sandbox, and `vscode-languageclient` with `echo-lsp.ts`). The other suites test one module each.
 - **Rust**: `cargo test -p cognia-plugin-runtime --features tauri-host --lib -- vscode::` covers install, uninstall, the state directory, signatures and receipts, and host stderr and exit.
 - **Renderer**: co-located Jest suites under `lib/plugin/vscode-shim/` and the plugin detail components. The coverage gate is `pnpm audit:vscode-api-coverage`.
 

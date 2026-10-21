@@ -146,12 +146,14 @@ Settings → Prompts (desktop and standalone web) has:
   variants follow their base, plugins own their definitions.
 - A new model-facing text must be declared and resolved at its call. The
   catalog test enforces that every declared definition is consumed.
+- As of 2026-10-20, the terminal dock mounts AI Shell. Its plan generator and
+  error advisor resolve `developer.ai-shell.plan` and
+  `developer.ai-shell.error-advisor` at their calls; both are account-scoped
+  Prompt Center slots with their JSON response contracts preserved.
 - Plugin authors get a stable, permission-free contract to make wording
   tunable, and cannot widen where an edit applies.
 - Out of scope:
   - Hidden provider prompts.
   - Tool schemas and authorization code.
-  - The unmounted terminal AI Shell, whose prompts are not registered until the
-    feature is wired or removed.
   - Paired-client writes. Companion sync has no configuration-write channel;
     profiles cover transfer.

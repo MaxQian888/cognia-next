@@ -113358,6 +113358,7 @@ paths:
                         - provider-diagnostics-refresh
                         - conversation-auto-archive
                         - files-trash-purge
+                        - harness-evolution-sweep
                     trigger:
                       oneOf:
                         - type: object
@@ -114562,6 +114563,7 @@ paths:
                               - provider-diagnostics-refresh
                               - conversation-auto-archive
                               - files-trash-purge
+                              - harness-evolution-sweep
                           trigger:
                             oneOf:
                               - type: object
@@ -115116,6 +115118,7 @@ paths:
                           - provider-diagnostics-refresh
                           - conversation-auto-archive
                           - files-trash-purge
+                          - harness-evolution-sweep
                     statuses:
                       type: array
                       items:
@@ -124522,10 +124525,6 @@ paths:
               required:
                 - config
               properties:
-                workspaceId:
-                  type: string
-                  minLength: 1
-                  description: Required for multi-tenant creation. Later agent commands resolve this scope from the immutable Host record.
                 config:
                   type: object
                   required:

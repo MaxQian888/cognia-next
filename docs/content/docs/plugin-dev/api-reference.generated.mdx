@@ -13,6 +13,7 @@ Contract `1.3.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | --- | ---: | --- | --- | --- |
 | `ctx.a2ui` | 8 | None | frontend, hybrid, python | internal |
 | `ctx.agent` | 29 | `agent:control`, `twin:read`, `agent:shared-memory:read`, `agent:dispatch`, `agent:dispatch-external` | frontend, hybrid, python | sensitive |
+| `ctx.agentConfig` | 7 | `agent-config:read`, `agent-config:write` | frontend, hybrid | sensitive |
 | `ctx.ai` | 7 | `ai:chat`, `ai:embed` | frontend, hybrid, python | sensitive |
 | `ctx.artifact` | 12 | `artifact:write`, `artifact:read` | frontend, hybrid | internal |
 | `ctx.auth` | 5 | `auth:provide`, `auth:consume` | frontend, hybrid | secret |
@@ -159,6 +160,18 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `agent.sessions.resume` | `agent:control` | high | No | frontend, hybrid, python |
 | `agent.unregisterMode` | None | low | No | frontend, hybrid, python |
 | `agent.unregisterTool` | None | low | No | frontend, hybrid, python |
+
+## `ctx.agentConfig`
+
+| Method | Permissions | Risk | Idempotent | Runtimes |
+| --- | --- | --- | --- | --- |
+| `agentConfig.applyEdit` | `agent-config:read`, `agent-config:write` | high | No | frontend, hybrid |
+| `agentConfig.checkReferences` | `agent-config:read` | medium | Yes | frontend, hybrid |
+| `agentConfig.listSurfaces` | `agent-config:read` | medium | Yes | frontend, hybrid |
+| `agentConfig.readFacts` | `agent-config:read` | medium | Yes | frontend, hybrid |
+| `agentConfig.readProvenance` | `agent-config:read` | medium | Yes | frontend, hybrid |
+| `agentConfig.readSurface` | `agent-config:read` | medium | Yes | frontend, hybrid |
+| `agentConfig.redactForModel` | None | low | Yes | frontend, hybrid |
 
 ## `ctx.ai`
 

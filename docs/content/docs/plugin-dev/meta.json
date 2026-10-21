@@ -16,6 +16,7 @@
     "interceptors",
     "decision-providers",
     "prompts",
+    "agent-config",
     "devtools",
     "packaging"
   ]

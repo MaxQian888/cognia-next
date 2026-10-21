@@ -50,6 +50,8 @@ owner surface it routes to. A size a module does not support degrades to the nea
 Presets (`balanced`, `usage-first`, `agent-ops`, `minimal`) live in `lib/glance/presets.ts`.
 `normalizeGlancePanelSettings` is the only reader of stored layouts: unknown ids drop, duplicates
 keep the first, missing modules are appended hidden, out-of-range heights clamp.
+The default width is 460 px (`wide`). Missing or invalid stored widths use this default;
+valid saved choices, including 320 px (`narrow`) and 380 px (`standard`), are retained.
 
 ## Plugin modules
 

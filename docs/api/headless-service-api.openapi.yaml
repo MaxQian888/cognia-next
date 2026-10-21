@@ -28951,7 +28951,7 @@ paths:
             application/json:
               schema:
                 type: object
-                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.mjs applyEdit
+                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.ts applyEdit
                 description: "`reflected` is true only when a stale open buffer was replaced through a WorkspaceEdit, so the change
                   entered the undo stack. `opened` is false only when the file was gone or unreadable, which the caller
                   degrades on rather than treating as an error."
@@ -29140,7 +29140,7 @@ paths:
             application/json:
               schema:
                 type: object
-                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.mjs notify + protocol.mjs notificationKind
+                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.ts notify + protocol.ts notificationKind
                 description: "`kind` is the narrowed kind actually shown. An unrecognised kind reads as `info` rather than being
                   dropped, so this echoes back what the user saw."
                 required:
@@ -29333,7 +29333,7 @@ paths:
             application/json:
               schema:
                 type: object
-                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.mjs openFile
+                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.ts openFile
                 description: "The extension revealed `path`. `opened` is always true: a failure throws instead."
                 required:
                   - opened
@@ -29510,7 +29510,7 @@ paths:
             application/json:
               schema:
                 type: object
-                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.mjs readActive
+                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.ts readActive
                 description: What the user is looking at. Every field is present; `path`, `selection` and `selectedText` are null when
                   no file editor is focused (or nothing is selected). Whole-file bodies are deliberately absent. The app
                   PII-gates this payload before it reaches a model.
@@ -29552,7 +29552,7 @@ paths:
                     type: array
                     items:
                       type: object
-                      x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.mjs diagnosticSeverityName + the
+                      x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.ts diagnosticSeverityName + the
                         readActive/captureDiagnosticsContext mappers
                       description: One editor diagnostic, 1-based line and column. `severity` is the narrowed vocabulary
                         `diagnosticSeverityName` emits, not VS Code's numeric enum.
@@ -29752,7 +29752,7 @@ paths:
             application/json:
               schema:
                 type: object
-                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.mjs revealInExplorer
+                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.ts revealInExplorer
                 required:
                   - revealed
                   - path
@@ -29937,7 +29937,7 @@ paths:
             application/json:
               schema:
                 type: object
-                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.mjs runInTerminal
+                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.ts runInTerminal
                 description: "`sent` reports that the text reached the terminal, not that the command succeeded: the extension host
                   cannot read a terminal's output back. `terminal` is the reused terminal's name."
                 required:
@@ -30119,7 +30119,7 @@ paths:
             application/json:
               schema:
                 type: object
-                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.mjs saveAll
+                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.ts saveAll
                 description: A partial flush is reported rather than thrown, so `failed` names the files whose disk copy the caller must
                   not trust.
                 required:
@@ -30313,7 +30313,7 @@ paths:
             application/json:
               schema:
                 type: object
-                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.mjs showDiff
+                x-cognia-wire-source: sidecar/codeserver-agent-ext/src/extension.ts showDiff
                 required:
                   - shown
                   - path
@@ -54655,11 +54655,6 @@ paths:
                 - argv
                 - timeoutMs
               properties:
-                workspaceId:
-                  type: string
-                  minLength: 1
-                  description: Required for multi-tenant creation. Host admission resolves the actor; this field never supplies placement
-                    identity or permissions.
                 placement:
                   type: object
                   description: "The task's runtime environment placement as the brain resolved it (prepareRunEnvironment). The spec is not
@@ -150084,6 +150079,7 @@ paths:
                         - provider-diagnostics-refresh
                         - conversation-auto-archive
                         - files-trash-purge
+                        - harness-evolution-sweep
                     status:
                       type: string
                       enum:
@@ -150737,6 +150733,7 @@ paths:
                         - provider-diagnostics-refresh
                         - conversation-auto-archive
                         - files-trash-purge
+                        - harness-evolution-sweep
                     trigger:
                       oneOf:
                         - type: object
@@ -151029,6 +151026,7 @@ paths:
                       - provider-diagnostics-refresh
                       - conversation-auto-archive
                       - files-trash-purge
+                      - harness-evolution-sweep
                   trigger:
                     type: object
                     x-cognia-wire-source: types/scheduler TaskTrigger
@@ -151819,6 +151817,7 @@ paths:
                             - provider-diagnostics-refresh
                             - conversation-auto-archive
                             - files-trash-purge
+                            - harness-evolution-sweep
                         trigger:
                           type: object
                           x-cognia-wire-source: types/scheduler TaskTrigger
@@ -152251,6 +152250,7 @@ paths:
                           - provider-diagnostics-refresh
                           - conversation-auto-archive
                           - files-trash-purge
+                          - harness-evolution-sweep
                       trigger:
                         type: object
                         x-cognia-wire-source: types/scheduler TaskTrigger
@@ -152667,6 +152667,7 @@ paths:
                               - provider-diagnostics-refresh
                               - conversation-auto-archive
                               - files-trash-purge
+                              - harness-evolution-sweep
                           trigger:
                             oneOf:
                               - type: object
@@ -153218,6 +153219,7 @@ paths:
                           - provider-diagnostics-refresh
                           - conversation-auto-archive
                           - files-trash-purge
+                          - harness-evolution-sweep
                     statuses:
                       type: array
                       items:
@@ -153314,6 +153316,7 @@ paths:
                         - provider-diagnostics-refresh
                         - conversation-auto-archive
                         - files-trash-purge
+                        - harness-evolution-sweep
                     trigger:
                       type: object
                       x-cognia-wire-source: types/scheduler TaskTrigger
@@ -154092,6 +154095,7 @@ paths:
                           - provider-diagnostics-refresh
                           - conversation-auto-archive
                           - files-trash-purge
+                          - harness-evolution-sweep
                       status:
                         type: string
                         enum:
@@ -154399,6 +154403,7 @@ paths:
                         - provider-diagnostics-refresh
                         - conversation-auto-archive
                         - files-trash-purge
+                        - harness-evolution-sweep
                     status:
                       type: string
                       enum:
@@ -154896,6 +154901,7 @@ paths:
                         - provider-diagnostics-refresh
                         - conversation-auto-archive
                         - files-trash-purge
+                        - harness-evolution-sweep
                     trigger:
                       type: object
                       x-cognia-wire-source: types/scheduler TaskTrigger
@@ -155545,6 +155551,7 @@ paths:
                           - provider-diagnostics-refresh
                           - conversation-auto-archive
                           - files-trash-purge
+                          - harness-evolution-sweep
                       trigger:
                         type: object
                         x-cognia-wire-source: types/scheduler TaskTrigger
@@ -164071,10 +164078,6 @@ paths:
               required:
                 - config
               properties:
-                workspaceId:
-                  type: string
-                  minLength: 1
-                  description: Required for multi-tenant creation. Later agent commands resolve this scope from the immutable Host record.
                 config:
                   type: object
                   required:

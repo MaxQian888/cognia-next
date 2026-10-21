@@ -1,0 +1,946 @@
+{
+  "date": "2026-10-20",
+  "scope": "Read-only source inventory; no claim of full behavioral conformance",
+  "localUiSourceFiles": 71,
+  "catalogRendererTypes": 68,
+  "uiStatusCounts": {
+    "direct": 44,
+    "candidate": 7,
+    "composition": 2,
+    "icon-helper": 11,
+    "alternative": 2,
+    "host-helper": 4,
+    "composition-gap": 1
+  },
+  "ui": [
+    {
+      "file": "components/ui/accordion.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Accordion"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/alert-dialog.tsx",
+      "status": "candidate",
+      "a2uiTypes": [],
+      "note": "No distinct model confirmation primitive. Dialog can visually approximate; destructive confirmation semantics are not equivalent."
+    },
+    {
+      "file": "components/ui/alert.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Alert", "Error", "RichOutput", "WidgetStatus"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/aspect-ratio.tsx",
+      "status": "composition",
+      "a2uiTypes": [],
+      "note": "Image sizing/style or container style covers fixed ratios; direct wrapper optional."
+    },
+    {
+      "file": "components/ui/avatar.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Avatar"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/badge.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Badge", "ComparisonCards", "WidgetStatus", "InteractiveGuide"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/bell.tsx",
+      "status": "icon-helper",
+      "a2uiTypes": [],
+      "note": "Animated/imperative icon helper. A2UI Icon resolves static Lucide names; animation handles intentionally not exposed."
+    },
+    {
+      "file": "components/ui/bookmark.tsx",
+      "status": "icon-helper",
+      "a2uiTypes": [],
+      "note": "Animated/imperative icon helper. A2UI Icon resolves static Lucide names; animation handles intentionally not exposed."
+    },
+    {
+      "file": "components/ui/breadcrumb.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Breadcrumb"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/button-group.tsx",
+      "status": "direct",
+      "a2uiTypes": ["ButtonGroup"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/button.tsx",
+      "status": "direct",
+      "a2uiTypes": [
+        "StepperShell",
+        "Alert",
+        "Error",
+        "Empty",
+        "WidgetStatus",
+        "Button",
+        "DatePicker",
+        "Table",
+        "InteractiveGuide"
+      ],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/calendar.tsx",
+      "status": "direct",
+      "a2uiTypes": ["DatePicker"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/card.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Card", "StepperShell", "ComparisonCards", "InteractiveGuide"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/carousel.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Carousel"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/chart.tsx",
+      "status": "alternative",
+      "a2uiTypes": [],
+      "note": "A2UI Chart uses Recharts directly; RichOutput also has chart profiles. Local ChartContainer/theme/tooltip helpers not reused."
+    },
+    {
+      "file": "components/ui/check.tsx",
+      "status": "icon-helper",
+      "a2uiTypes": [],
+      "note": "Animated/imperative icon helper. A2UI Icon resolves static Lucide names; animation handles intentionally not exposed."
+    },
+    {
+      "file": "components/ui/checkbox.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Checkbox", "Table"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/collapsible.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Collapsible"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/combobox.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Combobox"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/command.tsx",
+      "status": "candidate",
+      "a2uiTypes": [],
+      "note": "No command palette/searchable action list contract. Combobox is a selection field, not equivalent."
+    },
+    {
+      "file": "components/ui/context-menu.tsx",
+      "status": "direct",
+      "a2uiTypes": ["ContextMenu"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/contribution-graph.tsx",
+      "status": "candidate",
+      "a2uiTypes": [],
+      "note": "No dedicated contribution/heatmap primitive; Table/Chart are alternate displays, not this layout."
+    },
+    {
+      "file": "components/ui/copy.tsx",
+      "status": "icon-helper",
+      "a2uiTypes": [],
+      "note": "Animated/imperative icon helper. A2UI Icon resolves static Lucide names; animation handles intentionally not exposed."
+    },
+    {
+      "file": "components/ui/dialog.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Dialog"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/direction.tsx",
+      "status": "host-helper",
+      "a2uiTypes": [],
+      "note": "Host locale/direction provider responsibility; avoid model-owned global provider."
+    },
+    {
+      "file": "components/ui/download.tsx",
+      "status": "icon-helper",
+      "a2uiTypes": [],
+      "note": "Animated/imperative icon helper. A2UI Icon resolves static Lucide names; animation handles intentionally not exposed."
+    },
+    {
+      "file": "components/ui/drawer.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Drawer"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/dropdown-menu.tsx",
+      "status": "direct",
+      "a2uiTypes": ["DropdownMenu"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/empty.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Empty"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/field.tsx",
+      "status": "composition-gap",
+      "a2uiTypes": [],
+      "note": "Labels/errors exist in individual fields; Field/FieldGroup/FieldSet composition not reused by A2UI wrappers."
+    },
+    {
+      "file": "components/ui/floating-action-button.tsx",
+      "status": "host-helper",
+      "a2uiTypes": [],
+      "note": "Viewport/host anchored product affordance; Button + approved placement can cover intended action."
+    },
+    {
+      "file": "components/ui/form.tsx",
+      "status": "host-helper",
+      "a2uiTypes": [],
+      "note": "React Hook Form context API is not JSON-serializable. A2UI needs its own wired form-state contract (S01), not exposing FormProvider to the model."
+    },
+    {
+      "file": "components/ui/heart.tsx",
+      "status": "icon-helper",
+      "a2uiTypes": [],
+      "note": "Animated/imperative icon helper. A2UI Icon resolves static Lucide names; animation handles intentionally not exposed."
+    },
+    {
+      "file": "components/ui/hover-card.tsx",
+      "status": "direct",
+      "a2uiTypes": ["HoverCard"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/input-group.tsx",
+      "status": "direct",
+      "a2uiTypes": ["InputGroup"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/input-otp.tsx",
+      "status": "direct",
+      "a2uiTypes": ["InputOTP"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/input.tsx",
+      "status": "direct",
+      "a2uiTypes": ["TextField", "TimePicker", "DateTimePicker"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/item.tsx",
+      "status": "composition",
+      "a2uiTypes": [],
+      "note": "Card/Row/Column/List cover many item layouts; no direct Item media/actions/separator schema."
+    },
+    {
+      "file": "components/ui/kbd.tsx",
+      "status": "candidate",
+      "a2uiTypes": [],
+      "note": "Text code styling is only approximation; optional semantic keyboard-shortcut primitive."
+    },
+    {
+      "file": "components/ui/label.tsx",
+      "status": "direct",
+      "a2uiTypes": [
+        "TextField",
+        "TextArea",
+        "Select",
+        "Checkbox",
+        "Radio",
+        "RadioGroup",
+        "Slider",
+        "DatePicker",
+        "TimePicker",
+        "DateTimePicker",
+        "Switch",
+        "Combobox",
+        "InputOTP",
+        "ToggleGroup"
+      ],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/loading-region.tsx",
+      "status": "host-helper",
+      "a2uiTypes": [],
+      "note": "Host load lifecycle/error/progress wrapper; model already has Loading/WidgetStatus/Progress."
+    },
+    {
+      "file": "components/ui/loading-states.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Loading"],
+      "note": "A2UI Loading directly reuses LoadingSpinner; other host skeleton composites do not all need model exposure."
+    },
+    {
+      "file": "components/ui/menubar.tsx",
+      "status": "candidate",
+      "a2uiTypes": [],
+      "note": "DropdownMenu covers one popup only; persistent multi-menu strip/submenus/check/radio remain absent."
+    },
+    {
+      "file": "components/ui/message-circle.tsx",
+      "status": "icon-helper",
+      "a2uiTypes": [],
+      "note": "Animated/imperative icon helper. A2UI Icon resolves static Lucide names; animation handles intentionally not exposed."
+    },
+    {
+      "file": "components/ui/moon.tsx",
+      "status": "icon-helper",
+      "a2uiTypes": [],
+      "note": "Animated/imperative icon helper. A2UI Icon resolves static Lucide names; animation handles intentionally not exposed."
+    },
+    {
+      "file": "components/ui/native-select.tsx",
+      "status": "alternative",
+      "a2uiTypes": [],
+      "note": "Select covers ordinary single choice; native/mobile/no-popup alternative not directly exposed."
+    },
+    {
+      "file": "components/ui/navigation-menu.tsx",
+      "status": "candidate",
+      "a2uiTypes": [],
+      "note": "Sidebar/Breadcrumb/Link cover navigation tasks, not navigation-menu mega-menu/viewport composition."
+    },
+    {
+      "file": "components/ui/pagination.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Pagination"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/pause.tsx",
+      "status": "icon-helper",
+      "a2uiTypes": [],
+      "note": "Animated/imperative icon helper. A2UI Icon resolves static Lucide names; animation handles intentionally not exposed."
+    },
+    {
+      "file": "components/ui/play.tsx",
+      "status": "icon-helper",
+      "a2uiTypes": [],
+      "note": "Animated/imperative icon helper. A2UI Icon resolves static Lucide names; animation handles intentionally not exposed."
+    },
+    {
+      "file": "components/ui/popover.tsx",
+      "status": "direct",
+      "a2uiTypes": ["DatePicker", "Popover"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/progress.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Progress", "InteractiveGuide"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/radio-group.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Radio", "RadioGroup"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/resizable.tsx",
+      "status": "candidate",
+      "a2uiTypes": [],
+      "note": "No resizable panel contract; sizing/drag-persistence needs host policy before adding."
+    },
+    {
+      "file": "components/ui/scroll-area.tsx",
+      "status": "direct",
+      "a2uiTypes": ["ScrollArea"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/select.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Select"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/separator.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Divider"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/settings.tsx",
+      "status": "icon-helper",
+      "a2uiTypes": [],
+      "note": "Animated/imperative icon helper. A2UI Icon resolves static Lucide names; animation handles intentionally not exposed."
+    },
+    {
+      "file": "components/ui/sheet.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Sheet"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/sidebar.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Sidebar"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/skeleton.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Skeleton"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/slider.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Slider"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/sonner.tsx",
+      "status": "direct",
+      "a2uiTypes": [],
+      "note": "A2UI Toast calls sonner directly; global Toaster is host-owned, not imported by the leaf."
+    },
+    {
+      "file": "components/ui/spinner.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Spinner"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/switch.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Switch"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/table.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Table"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/tabs.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Tabs"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/textarea.tsx",
+      "status": "direct",
+      "a2uiTypes": ["TextArea"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/toggle-group.tsx",
+      "status": "direct",
+      "a2uiTypes": ["ToggleGroup"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/toggle.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Toggle"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    },
+    {
+      "file": "components/ui/tooltip.tsx",
+      "status": "direct",
+      "a2uiTypes": ["Tooltip"],
+      "note": "Direct local primitive reuse by A2UI leaf/composition; this does not certify every prop or behavior."
+    }
+  ],
+  "adapters": [
+    {
+      "type": "Row",
+      "renderer": "components/a2ui/layout/a2ui-row.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Column",
+      "renderer": "components/a2ui/layout/a2ui-column.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Card",
+      "renderer": "components/a2ui/layout/a2ui-card.tsx",
+      "localUiImports": ["card"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Divider",
+      "renderer": "components/a2ui/layout/a2ui-divider.tsx",
+      "localUiImports": ["separator"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Spacer",
+      "renderer": "components/a2ui/layout/a2ui-spacer.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Dialog",
+      "renderer": "components/a2ui/layout/a2ui-dialog.tsx",
+      "localUiImports": ["dialog"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Tabs",
+      "renderer": "components/a2ui/layout/a2ui-tabs.tsx",
+      "localUiImports": ["tabs"],
+      "factoryCase": true,
+      "audit": "Local active tab initialized once from binding; no binding write-back; icon metadata ignored (S04/S06)."
+    },
+    {
+      "type": "Accordion",
+      "renderer": "components/a2ui/layout/a2ui-accordion.tsx",
+      "localUiImports": ["accordion"],
+      "factoryCase": true,
+      "audit": "Single/multiple and item defaults; custom keyboard handling layered on Radix; defaults intentionally not controlled."
+    },
+    {
+      "type": "StepperShell",
+      "renderer": "components/a2ui/layout/a2ui-stepper-shell.tsx",
+      "localUiImports": ["button", "card"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "MockupFrame",
+      "renderer": "components/a2ui/layout/a2ui-mockup-frame.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Text",
+      "renderer": "components/a2ui/display/a2ui-text.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Image",
+      "renderer": "components/a2ui/display/a2ui-image.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Icon",
+      "renderer": "components/a2ui/display/a2ui-icon.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Link",
+      "renderer": "components/a2ui/display/a2ui-link.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Badge",
+      "renderer": "components/a2ui/display/a2ui-badge.tsx",
+      "localUiImports": ["badge"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Alert",
+      "renderer": "components/a2ui/display/a2ui-alert.tsx",
+      "localUiImports": ["alert", "button"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Progress",
+      "renderer": "components/a2ui/display/a2ui-progress.tsx",
+      "localUiImports": ["progress"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Loading",
+      "renderer": "components/a2ui/display/a2ui-loading.tsx",
+      "localUiImports": ["loading-states"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Error",
+      "renderer": "components/a2ui/display/a2ui-error.tsx",
+      "localUiImports": ["alert", "button"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Empty",
+      "renderer": "components/a2ui/display/a2ui-empty.tsx",
+      "localUiImports": ["button", "empty"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "RichOutput",
+      "renderer": "components/a2ui/display/a2ui-rich-output.tsx",
+      "localUiImports": ["alert"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "ComparisonCards",
+      "renderer": "components/a2ui/display/a2ui-comparison-cards.tsx",
+      "localUiImports": ["badge", "card"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "WidgetStatus",
+      "renderer": "components/a2ui/display/a2ui-widget-status.tsx",
+      "localUiImports": ["alert", "badge", "button"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Markdown",
+      "renderer": "components/a2ui/display/a2ui-markdown.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Lazy chat Markdown pipeline reuse; file link actions; not a shadcn primitive."
+    },
+    {
+      "type": "Button",
+      "renderer": "components/a2ui/form/a2ui-button.tsx",
+      "localUiImports": ["button"],
+      "factoryCase": true,
+      "audit": "Bound text/loading/disabled + action; declared icon/iconPosition ignored (S06)."
+    },
+    {
+      "type": "TextField",
+      "renderer": "components/a2ui/form/a2ui-textfield.tsx",
+      "localUiImports": ["input", "label"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "TextArea",
+      "renderer": "components/a2ui/form/a2ui-textarea.tsx",
+      "localUiImports": ["label", "textarea"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Select",
+      "renderer": "components/a2ui/form/a2ui-select.tsx",
+      "localUiImports": ["label", "select"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Checkbox",
+      "renderer": "components/a2ui/form/a2ui-checkbox.tsx",
+      "localUiImports": ["checkbox", "label"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Radio",
+      "renderer": "components/a2ui/form/a2ui-radio.tsx",
+      "localUiImports": ["label", "radio-group"],
+      "factoryCase": true,
+      "audit": "One-item RadioGroup composition with checked boolean binding."
+    },
+    {
+      "type": "RadioGroup",
+      "renderer": "components/a2ui/form/a2ui-radio.tsx",
+      "localUiImports": ["label", "radio-group"],
+      "factoryCase": true,
+      "audit": "Real group with string value binding, option disabled and orientation."
+    },
+    {
+      "type": "Slider",
+      "renderer": "components/a2ui/form/a2ui-slider.tsx",
+      "localUiImports": ["label", "slider"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "DatePicker",
+      "renderer": "components/a2ui/form/a2ui-datepicker.tsx",
+      "localUiImports": ["button", "calendar", "label", "popover"],
+      "factoryCase": true,
+      "audit": "Calendar/Popover composition, bounds and write; ISO UTC split shifts local date (S10)."
+    },
+    {
+      "type": "TimePicker",
+      "renderer": "components/a2ui/form/a2ui-timepicker.tsx",
+      "localUiImports": ["input", "label"],
+      "factoryCase": true,
+      "audit": "Native time input; bound value write; disabled object leak (S02)."
+    },
+    {
+      "type": "DateTimePicker",
+      "renderer": "components/a2ui/form/a2ui-datetimepicker.tsx",
+      "localUiImports": ["input", "label"],
+      "factoryCase": true,
+      "audit": "Native datetime-local; UTC/local display conversion inconsistent (S10), disabled object leak (S02)."
+    },
+    {
+      "type": "Toggle",
+      "renderer": "components/a2ui/form/a2ui-toggle.tsx",
+      "localUiImports": ["toggle"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "FormGroup",
+      "renderer": "components/a2ui/form/a2ui-form-group.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Local renderer interface only; form hook is disconnected from fields and submit (S01)."
+    },
+    {
+      "type": "Switch",
+      "renderer": "components/a2ui/form/a2ui-switch.tsx",
+      "localUiImports": ["label", "switch"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Chart",
+      "renderer": "components/a2ui/data/a2ui-chart.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Recharts implementation, no local ui/chart import; clickAction attached only to Bar (S06)."
+    },
+    {
+      "type": "Table",
+      "renderer": "components/a2ui/data/a2ui-table.tsx",
+      "localUiImports": ["button", "checkbox", "table"],
+      "factoryCase": true,
+      "audit": "Sorting/pagination/selection/virtualization; selectedRows never read; select-all action absent (S09)."
+    },
+    {
+      "type": "List",
+      "renderer": "components/a2ui/data/a2ui-list.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "Animation",
+      "renderer": "components/a2ui/display/a2ui-animation.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "InteractiveGuide",
+      "renderer": "components/a2ui/display/a2ui-interactive-guide.tsx",
+      "localUiImports": ["badge", "button", "card", "progress"],
+      "factoryCase": true,
+      "audit": "Existing implementation; no full behavioral conformance claim from this audit."
+    },
+    {
+      "type": "AcademicAnalysis",
+      "renderer": "components/a2ui/academic/a2ui-analysis-adapter.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "withA2UIContext bridge to academic feature; not a shadcn primitive."
+    },
+    {
+      "type": "AcademicSearchResults",
+      "renderer": "components/a2ui/academic/a2ui-search-results-adapter.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "withA2UIContext bridge to academic feature; not a shadcn primitive."
+    },
+    {
+      "type": "Avatar",
+      "renderer": "components/a2ui/display/a2ui-avatar.tsx",
+      "localUiImports": ["avatar"],
+      "factoryCase": true,
+      "audit": "Bound src, explicit fallback, schema md maps to local default size."
+    },
+    {
+      "type": "Skeleton",
+      "renderer": "components/a2ui/display/a2ui-skeleton.tsx",
+      "localUiImports": ["skeleton"],
+      "factoryCase": true,
+      "audit": "Text/circle/rectangle + lines; pure display, not missing interactive behavior."
+    },
+    {
+      "type": "Spinner",
+      "renderer": "components/a2ui/display/a2ui-spinner.tsx",
+      "localUiImports": ["spinner"],
+      "factoryCase": true,
+      "audit": "Existing local spinner reused with host loading i18n."
+    },
+    {
+      "type": "Toast",
+      "renderer": "components/a2ui/display/a2ui-toast.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Bound message/description + action; mount-effect emits without stable toast ID/cleanup (S08)."
+    },
+    {
+      "type": "Tooltip",
+      "renderer": "components/a2ui/overlay/a2ui-tooltip.tsx",
+      "localUiImports": ["tooltip"],
+      "factoryCase": true,
+      "audit": "Bound text + child IDs; nested provider and span trigger require correction (S07)."
+    },
+    {
+      "type": "Popover",
+      "renderer": "components/a2ui/overlay/a2ui-popover.tsx",
+      "localUiImports": ["popover"],
+      "factoryCase": true,
+      "audit": "Child/trigger graph wired; no controlled-open API declared; span trigger (S07)."
+    },
+    {
+      "type": "HoverCard",
+      "renderer": "components/a2ui/overlay/a2ui-hover-card.tsx",
+      "localUiImports": ["hover-card"],
+      "factoryCase": true,
+      "audit": "Child/trigger graph + delay; span trigger (S07)."
+    },
+    {
+      "type": "DropdownMenu",
+      "renderer": "components/a2ui/overlay/a2ui-dropdown-menu.tsx",
+      "localUiImports": ["dropdown-menu"],
+      "factoryCase": true,
+      "audit": "Flat item actions/icons/disabled/destructive/separators; no submenu/checkbox/radio API declared."
+    },
+    {
+      "type": "ContextMenu",
+      "renderer": "components/a2ui/overlay/a2ui-context-menu.tsx",
+      "localUiImports": ["context-menu"],
+      "factoryCase": true,
+      "audit": "Flat menu + plugin announcement hook; submenu/checkbox/radio API not declared."
+    },
+    {
+      "type": "Combobox",
+      "renderer": "components/a2ui/form/a2ui-combobox.tsx",
+      "localUiImports": ["combobox", "label"],
+      "factoryCase": true,
+      "audit": "Bound options/value + change write; wrong Base UI composition and missing disabled (S02/S03)."
+    },
+    {
+      "type": "InputOTP",
+      "renderer": "components/a2ui/form/a2ui-input-otp.tsx",
+      "localUiImports": ["input-otp", "label"],
+      "factoryCase": true,
+      "audit": "Bound value + write, generated slots; disabled only boolean in its narrowed interface (S02)."
+    },
+    {
+      "type": "ToggleGroup",
+      "renderer": "components/a2ui/form/a2ui-toggle-group.tsx",
+      "localUiImports": ["label", "toggle-group"],
+      "factoryCase": true,
+      "audit": "Bound string[] + write; single/multiple supported, base disabled ignored (S02)."
+    },
+    {
+      "type": "ButtonGroup",
+      "renderer": "components/a2ui/form/a2ui-button-group.tsx",
+      "localUiImports": ["button-group"],
+      "factoryCase": true,
+      "audit": "Orientation + child graph forwarded; separators/text can be composition extensions if needed."
+    },
+    {
+      "type": "InputGroup",
+      "renderer": "components/a2ui/form/a2ui-input-group.tsx",
+      "localUiImports": ["input-group"],
+      "factoryCase": true,
+      "audit": "Container exists, specialized control/addon composition unavailable (S05)."
+    },
+    {
+      "type": "Breadcrumb",
+      "renderer": "components/a2ui/navigation/a2ui-breadcrumb.tsx",
+      "localUiImports": ["breadcrumb"],
+      "factoryCase": true,
+      "audit": "Data items with href/current/ellipsis; emits navigate and also allows default href navigation."
+    },
+    {
+      "type": "Carousel",
+      "renderer": "components/a2ui/navigation/a2ui-carousel.tsx",
+      "localUiImports": ["carousel"],
+      "factoryCase": true,
+      "audit": "Children + loop/controls forwarded; advanced Embla API intentionally not exposed."
+    },
+    {
+      "type": "Drawer",
+      "renderer": "components/a2ui/navigation/a2ui-drawer.tsx",
+      "localUiImports": ["drawer"],
+      "factoryCase": true,
+      "audit": "Unbound local open works; controlled path cannot open/close via interaction (S04)."
+    },
+    {
+      "type": "Sheet",
+      "renderer": "components/a2ui/navigation/a2ui-sheet.tsx",
+      "localUiImports": ["sheet"],
+      "factoryCase": true,
+      "audit": "Side plus unbound local open; controlled path cannot open/close via interaction (S04)."
+    },
+    {
+      "type": "ScrollArea",
+      "renderer": "components/a2ui/navigation/a2ui-scroll-area.tsx",
+      "localUiImports": ["scroll-area"],
+      "factoryCase": true,
+      "audit": "Children + height forwarded; no need to expose every scrollbar subcomponent."
+    },
+    {
+      "type": "Pagination",
+      "renderer": "components/a2ui/navigation/a2ui-pagination.tsx",
+      "localUiImports": ["pagination"],
+      "factoryCase": true,
+      "audit": "Action-only page changes; does not update currentPage binding (S04)."
+    },
+    {
+      "type": "Sidebar",
+      "renderer": "components/a2ui/navigation/a2ui-sidebar.tsx",
+      "localUiImports": ["sidebar"],
+      "factoryCase": true,
+      "audit": "Groups/actions work; icon ignored, collapsed default-only; host-oriented fixed positioning (S06)."
+    },
+    {
+      "type": "Tree",
+      "renderer": "components/a2ui/navigation/a2ui-tree.tsx",
+      "localUiImports": [],
+      "factoryCase": true,
+      "audit": "Custom recursive semantic tree + select/expand actions; nodes are data, not component references."
+    },
+    {
+      "type": "Collapsible",
+      "renderer": "components/a2ui/layout/a2ui-collapsible.tsx",
+      "localUiImports": ["collapsible"],
+      "factoryCase": true,
+      "audit": "Resolves open binding but passes defaultOpen only (S04)."
+    }
+  ]
+}
