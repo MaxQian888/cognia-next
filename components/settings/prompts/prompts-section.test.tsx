@@ -7,7 +7,12 @@ jest.mock("@/lib/tauri", () => ({
   ...jest.requireActual("@/lib/tauri"),
   isTauri: jest.fn(() => false),
 }))
-jest.mock("next/navigation", () => ({ useRouter: () => ({ push: jest.fn(), replace: jest.fn() }) }))
+let mockSearchParams = new URLSearchParams()
+const mockReplace = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: jest.fn(), replace: mockReplace }),
+  useSearchParams: () => mockSearchParams,
+}))
 jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn(), info: jest.fn(), warning: jest.fn() },
 }))
@@ -58,6 +63,8 @@ beforeEach(async () => {
   await dbFixture.restore()
   invalidatePromptOverrideSnapshot()
   mockDensity = "split"
+  mockSearchParams = new URLSearchParams()
+  mockReplace.mockClear()
   useCustomModeStore.setState({ customModes: {} })
   useProjectStore.setState({
     activeProjectId: "ws-1",
@@ -154,6 +161,30 @@ it("opens a built-in prompt and an owner resource in their own detail views", as
       "Say it plainly."
     )
   )
+})
+
+it("selects the resource a deep link names in its workspace, then drops the params", async () => {
+  mockSearchParams = new URLSearchParams({
+    section: "prompts",
+    resource: `code:${BRIEF_MODE_PROMPT.id}`,
+    workspace: "__none__",
+  })
+  await renderSection()
+  expect(await screen.findByTestId("code-prompt-detail")).toHaveTextContent(BRIEF_MODE_PROMPT.id)
+  // The named workspace replaced the active one: no workspace, no instruction files.
+  expect(instructionFileButton()).toBeNull()
+  await waitFor(() =>
+    expect(mockReplace).toHaveBeenCalledWith("?section=prompts", { scroll: false })
+  )
+})
+
+it("drops a deep link to a resource that does not exist without selecting anything", async () => {
+  mockSearchParams = new URLSearchParams({ section: "prompts", resource: "code:no.such.prompt" })
+  await renderSection()
+  await waitFor(() =>
+    expect(mockReplace).toHaveBeenCalledWith("?section=prompts", { scroll: false })
+  )
+  expect(screen.getByTestId("effective-preview-panel")).toBeInTheDocument()
 })
 
 it("lists instruction files for the workspace chosen here, not the active one", async () => {

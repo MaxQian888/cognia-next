@@ -8,6 +8,19 @@ const repoRoot = path.resolve(__dirname, "../..")
 describe("prompt catalog", () => {
   const defs = listPromptDefinitions()
 
+  it("registers the mounted AI Shell planning and error advisor consumers", () => {
+    expect(getPromptDefinition("developer.ai-shell.plan")).toMatchObject({
+      consumers: ["lib/terminal/ai-shell/plan-generator.ts"],
+      activation: "next-operation",
+      risk: "protocol",
+    })
+    expect(getPromptDefinition("developer.ai-shell.error-advisor")).toMatchObject({
+      consumers: ["lib/terminal/ai-shell/error-advisor.ts"],
+      activation: "next-operation",
+      risk: "protocol",
+    })
+  })
+
   it("has unique namespaced ids that resolve back to their definition", () => {
     const ids = defs.map((def) => def.id)
     expect(new Set(ids).size).toBe(ids.length)

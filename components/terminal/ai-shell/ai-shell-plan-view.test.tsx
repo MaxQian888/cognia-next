@@ -23,6 +23,7 @@ const messages = {
         completed: "All steps completed.",
         cancelled: "Plan cancelled.",
         error: "Failed to generate plan.",
+        failed: "Execution stopped after a failed step.",
       },
       step: {
         pending: "Pending",
@@ -123,6 +124,63 @@ describe("AiShellPlanView", () => {
     expect(screen.getByTestId("ai-shell-steps")).toBeInTheDocument()
     expect(screen.getByTestId("ai-shell-step-0")).toBeInTheDocument()
     expect(screen.getByTestId("ai-shell-step-1")).toBeInTheDocument()
+  })
+
+  it("reports failed execution instead of a completed plan", () => {
+    const plan = makePlan({ status: "completed" })
+    plan.steps = plan.steps.map((step) => ({ ...step, status: "failed", exitCode: 1 }))
+    renderPlanView(plan)
+    expect(screen.getByText("Execution stopped after a failed step.")).toBeInTheDocument()
+    expect(screen.queryByText("All steps completed.")).not.toBeInTheDocument()
+  })
+
+  it("lets a failed command be edited for an explicit retry", () => {
+    const plan = makePlan()
+    plan.steps[0] = { ...plan.steps[0], status: "failed", exitCode: 1 }
+    const { props } = renderPlanView(plan)
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit command" })[0])
+    const input = screen.getByRole("textbox", { name: "Edit command" })
+    fireEvent.change(input, { target: { value: "pnpm build" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(props.onEdit).toHaveBeenCalledWith(0, "pnpm build")
+  })
+
+  it("retries a failed step only after explicit user action", () => {
+    const plan = makePlan()
+    plan.steps[0] = { ...plan.steps[0], status: "failed", exitCode: 1 }
+    const { props } = renderPlanView(plan)
+    expect(props.onRunNext).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Retry step" }))
+    expect(props.onRunNext).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("button", { name: "Run all" })).not.toBeInTheDocument()
+  })
+
+  it("keeps an in-flight advisory fix disabled", () => {
+    renderPlanView(makePlan(), {
+      executing: true,
+      advisory: {
+        stepIndex: 0,
+        diagnosis: "Missing dependency",
+        suggestedFix: "pnpm install",
+        retryAfterFix: true,
+      },
+    })
+    expect(screen.getByRole("button", { name: "Apply fix" })).toBeDisabled()
+  })
+
+  it("shows the full command and warning before approving a dangerous step", () => {
+    const plan = makePlan()
+    plan.steps[0] = {
+      ...plan.steps[0],
+      command: "rm -rf /tmp/project-build-cache",
+      requiresConfirmation: true,
+    }
+    renderPlanView(plan)
+    expect(screen.getByText("This step may be destructive. Run it?")).toBeInTheDocument()
+    expect(screen.getByText("rm -rf /tmp/project-build-cache")).toHaveClass(
+      "whitespace-pre-wrap",
+      "break-all"
+    )
   })
 
   it("shows empty message when no steps", () => {

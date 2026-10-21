@@ -130,6 +130,7 @@ const REVISION_ORIGINS = keysOf<PromptRevisionOrigin>({
   import: true,
   restore: true,
   cli: true,
+  plugin: true,
 })
 const IMPORT_STATUSES = keysOf<PromptImportStatus>({
   new: true,

@@ -11,7 +11,8 @@
  * AI Shell conversation).
  */
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useTranslations } from "next-intl"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
@@ -22,13 +23,13 @@ import {
   isContextPiiSafe,
   generatePlan,
   executePlan,
+  executeStep,
   getErrorAdvisory,
   type AiShellMessage,
   type AiShellContext,
   type ExecutionPlan,
   type ErrorAdvisory,
   type AiShellSession,
-  type PlanExecutionResult,
 } from "@/lib/terminal/ai-shell"
 
 /** State shape returned by the hook. */
@@ -80,6 +81,11 @@ export interface UseAiShellActions {
 export type UseAiShellReturn = [UseAiShellState, UseAiShellActions]
 
 let messageIdCounter = 0
+// A session can outlive its keyed React surface. Preserve an execution lease
+// across tab switches, including an unacknowledged interrupt, until real shell
+// readiness/exit or a replacement live connection establishes recovery.
+const activeAiShellSessions = new WeakSet<object>()
+const unconfirmedAiShellSessions = new WeakSet<object>()
 function nextMessageId(): string {
   return `ai-shell-msg-${++messageIdCounter}`
 }
@@ -94,36 +100,46 @@ function buildSessionAdapter(sessionId: string): AiShellSession | null {
 
   return {
     write(data: string) {
-      void live.write(data)
+      if (data !== "\u0003") {
+        if (activeAiShellSessions.has(live))
+          return Promise.reject(new Error("AI Shell session is busy"))
+        activeAiShellSessions.add(live)
+        unconfirmedAiShellSessions.delete(live)
+        const recover = () => {
+          activeAiShellSessions.delete(live)
+          unconfirmedAiShellSessions.delete(live)
+          offIntegration?.()
+          offExit?.()
+        }
+        const offIntegration = live.onIntegration?.((event) => {
+          if (
+            event.kind === "command_end" ||
+            (event.kind === "prompt_start" && unconfirmedAiShellSessions.has(live))
+          )
+            recover()
+        })
+        const offExit = live.onExit?.(recover)
+      }
+      return live.write(data)
     },
     onNextPrompt(cb: () => void) {
-      // Use integration event listener if available
-      const off = live.onIntegration?.((event) => {
-        if (event.kind === "prompt_start") {
-          off?.()
-          cb()
-        }
-      })
-      // Fallback: if no integration events, resolve after delay
-      if (!off) {
-        const timer = setTimeout(cb, 250)
-        return () => clearTimeout(timer)
-      }
-      return off
+      return (
+        live.onIntegration?.((event) => {
+          if (event.kind === "prompt_start") cb()
+        }) ?? (() => undefined)
+      )
     },
     onCommandEnd(cb: (exitCode: number | null) => void) {
-      const off = live.onIntegration?.((event) => {
-        if (event.kind === "command_end") {
-          off?.()
-          cb(event.exit_code ?? null)
-        }
+      // No timer can prove a command succeeded. The executor fails with an
+      // unknown exit code if shell integration never reports completion.
+      const offIntegration = live.onIntegration?.((event) => {
+        if (event.kind === "command_end") cb(event.exit_code ?? null)
       })
-      if (!off) {
-        // Fallback: assume success after 5 seconds
-        const timer = setTimeout(() => cb(0), 5000)
-        return () => clearTimeout(timer)
+      const offExit = live.onExit?.(() => cb(null))
+      return () => {
+        offIntegration?.()
+        offExit?.()
       }
-      return off
     },
     getRecentOutput(maxLines = 20) {
       // Attempt to get output from the live session's buffer
@@ -139,6 +155,7 @@ function buildSessionAdapter(sessionId: string): AiShellSession | null {
  * @param sessionId - The terminal session this AI Shell is attached to
  */
 export function useAiShell(sessionId: string | null): UseAiShellReturn {
+  const t = useTranslations("terminal.aiShell")
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<AiShellMessage[]>([])
   const [plan, setPlan] = useState<ExecutionPlan | null>(null)
@@ -148,6 +165,25 @@ export function useAiShell(sessionId: string | null): UseAiShellReturn {
   const [advisoryLoading, setAdvisoryLoading] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
+  useEffect(() => {
+    return () => {
+      const controller = abortRef.current
+      abortRef.current = null
+      controller?.abort()
+    }
+  }, [sessionId])
+
+  const reportError = useCallback((content: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: nextMessageId(),
+        role: "system",
+        content,
+        timestamp: Date.now(),
+      },
+    ])
+  }, [])
 
   /** Resolve an LlmClient from current settings. */
   const getClient = useCallback((): LlmClient | null => {
@@ -169,12 +205,7 @@ export function useAiShell(sessionId: string | null): UseAiShellReturn {
     const live = getLiveSession(sessionId)
     const recentOutput = live?.getLastOutput?.() ?? ""
 
-    return buildAiShellContext(row, recentOutput, {
-      platform:
-        typeof navigator !== "undefined" && navigator.userAgent.includes("Mac")
-          ? "darwin"
-          : "linux",
-    })
+    return buildAiShellContext(row, recentOutput)
   }, [sessionId])
 
   const toggle = useCallback(() => setOpen((o) => !o), [])
@@ -183,7 +214,7 @@ export function useAiShell(sessionId: string | null): UseAiShellReturn {
 
   const submit = useCallback(
     async (intent: string) => {
-      if (!intent.trim() || !sessionId) return
+      if (!intent.trim() || !sessionId || abortRef.current) return
 
       // Add user message
       const userMsg: AiShellMessage = {
@@ -201,7 +232,7 @@ export function useAiShell(sessionId: string | null): UseAiShellReturn {
         const errMsg: AiShellMessage = {
           id: nextMessageId(),
           role: "system",
-          content: "No active terminal session.",
+          content: t("messages.noSession"),
           timestamp: Date.now(),
         }
         setMessages((prev) => [...prev, errMsg])
@@ -213,15 +244,13 @@ export function useAiShell(sessionId: string | null): UseAiShellReturn {
         const errMsg: AiShellMessage = {
           id: nextMessageId(),
           role: "system",
-          content: "Context contains sensitive information. Cannot proceed.",
+          content: t("messages.sensitiveContext"),
           timestamp: Date.now(),
         }
         setMessages((prev) => [...prev, errMsg])
         return
       }
 
-      // Abort any previous generation
-      abortRef.current?.abort()
       const controller = new AbortController()
       abortRef.current = controller
 
@@ -234,15 +263,21 @@ export function useAiShell(sessionId: string | null): UseAiShellReturn {
         { getClient },
         { signal: controller.signal },
         (partial) => {
-          if (partial.status === "generating") {
+          if (
+            abortRef.current === controller &&
+            !controller.signal.aborted &&
+            partial.status === "generating"
+          ) {
             setPlan(partial as ExecutionPlan)
           }
         }
       )
 
+      if (abortRef.current !== controller) return
+      abortRef.current = null
       setGenerating(false)
 
-      if (result.status === "cancelled") return
+      if (controller.signal.aborted || result.status === "cancelled") return
 
       setPlan(result)
 
@@ -252,106 +287,92 @@ export function useAiShell(sessionId: string | null): UseAiShellReturn {
         role: "assistant",
         content:
           result.status === "ready"
-            ? `Generated a plan with ${result.steps.length} step${result.steps.length === 1 ? "" : "s"}.`
-            : (result.error ?? "Failed to generate plan."),
+            ? t("messages.generatedPlan", { count: result.steps.length })
+            : t("messages.generationFailed"),
         timestamp: Date.now(),
       }
       setMessages((prev) => [...prev, assistantMsg])
     },
-    [sessionId, buildContext, getClient]
+    [sessionId, buildContext, getClient, t]
   )
 
-  const runAll = useCallback(async () => {
-    if (!plan || !sessionId || plan.status !== "ready") return
-
-    const session = buildSessionAdapter(sessionId)
-    if (!session) return
-
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
-
-    setExecuting(true)
-    setPlan((p) => (p ? { ...p, status: "executing" } : p))
-
-    const result: PlanExecutionResult = await executePlan(
-      plan,
-      session,
-      { signal: controller.signal },
-      (stepIndex, status, exitCode, outputSnippet) => {
-        setPlan((p) => {
-          if (!p) return p
-          const steps = [...p.steps]
-          steps[stepIndex] = { ...steps[stepIndex], status, exitCode, outputSnippet }
-          return { ...p, steps }
-        })
+  const runSteps = useCallback(
+    async (single: boolean) => {
+      if (!plan || !sessionId || plan.status !== "ready" || abortRef.current) return
+      const live = getLiveSession(sessionId)
+      if (live && activeAiShellSessions.has(live)) {
+        reportError(t("messages.executionFailed"))
+        return
       }
-    )
-
-    setExecuting(false)
-    setPlan((p) => {
-      if (!p) return p
-      return {
-        ...p,
-        status: result.allSucceeded
-          ? "completed"
-          : controller.signal.aborted
-            ? "cancelled"
-            : "ready",
+      const row = useTerminalStore.getState().sessions[sessionId]
+      const session = buildSessionAdapter(sessionId)
+      if (!row || row.kind === "serial" || row.status === "exited" || !session) {
+        reportError(t("messages.terminalUnavailable"))
+        return
       }
-    })
-  }, [plan, sessionId])
-
-  const runNextStep = useCallback(async () => {
-    if (!plan || !sessionId) return
-
-    const nextPendingIdx = plan.steps.findIndex((s) => s.status === "pending")
-    if (nextPendingIdx === -1) return
-
-    const session = buildSessionAdapter(sessionId)
-    if (!session) return
-
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
-
-    setExecuting(true)
-
-    // Execute only a single-step plan
-    const singleStepPlan: ExecutionPlan = {
-      ...plan,
-      steps: [plan.steps[nextPendingIdx]],
-    }
-
-    await executePlan(
-      singleStepPlan,
-      session,
-      { signal: controller.signal },
-      (_, status, exitCode, outputSnippet) => {
-        setPlan((p) => {
-          if (!p) return p
-          const steps = [...p.steps]
-          steps[nextPendingIdx] = { ...steps[nextPendingIdx], status, exitCode, outputSnippet }
-          return { ...p, steps }
-        })
+      if (row.status === "running") {
+        reportError(t("messages.terminalBusy"))
+        return
       }
-    )
+      const nextStep = plan.steps.find((s) => s.status === "pending" || s.status === "failed")
+      if (!nextStep) return
+      const controller = new AbortController()
+      abortRef.current = controller
+      setExecuting(true)
+      setAdvisory(null)
+      setPlan((p) => (p ? { ...p, status: "executing" } : p))
 
-    setExecuting(false)
+      const result = await executePlan(
+        single ? { ...plan, steps: [nextStep] } : plan,
+        session,
+        { signal: controller.signal },
+        (stepIndex, status, exitCode, outputSnippet) => {
+          if (abortRef.current !== controller) return
+          setPlan((p) => {
+            if (!p) return p
+            const steps = p.steps.map((step) =>
+              step.index === stepIndex ? { ...step, status, exitCode, outputSnippet } : step
+            )
+            return { ...p, steps }
+          })
+        }
+      )
+      if (live && activeAiShellSessions.has(live) && result.steps.some((s) => s.unconfirmed)) {
+        unconfirmedAiShellSessions.add(live)
+      }
+      if (abortRef.current !== controller) return
+      abortRef.current = null
+      setExecuting(false)
+      setPlan((p) => {
+        if (!p) return p
+        const allDone = p.steps.every((s) => s.status === "succeeded" || s.status === "skipped")
+        return {
+          ...p,
+          status: result.steps.some((s) => s.status === "failed")
+            ? "ready"
+            : controller.signal.aborted
+              ? "cancelled"
+              : allDone
+                ? "completed"
+                : "ready",
+        }
+      })
+      if (result.steps.some((s) => s.status === "failed" && s.exitCode === null)) {
+        reportError(t("messages.executionFailed"))
+      }
+    },
+    [plan, sessionId, reportError, t]
+  )
 
-    // Check if all steps are done
-    setPlan((p) => {
-      if (!p) return p
-      const allDone = p.steps.every((s) => s.status === "succeeded" || s.status === "skipped")
-      return { ...p, status: allDone ? "completed" : "ready" }
-    })
-  }, [plan, sessionId])
+  const runAll = useCallback(() => runSteps(false), [runSteps])
+  const runNextStep = useCallback(() => runSteps(true), [runSteps])
 
   const skipStep = useCallback((index: number) => {
+    if (abortRef.current) return
     setPlan((p) => {
       if (!p) return p
       const steps = [...p.steps]
-      if (steps[index] && steps[index].status === "pending") {
+      if (steps[index] && (steps[index].status === "pending" || steps[index].status === "failed")) {
         steps[index] = { ...steps[index], status: "skipped" }
       }
       const allDone = steps.every((s) => s.status === "succeeded" || s.status === "skipped")
@@ -360,56 +381,126 @@ export function useAiShell(sessionId: string | null): UseAiShellReturn {
   }, [])
 
   const editStep = useCallback((index: number, newCommand: string) => {
+    if (abortRef.current || !newCommand.trim()) return
     setPlan((p) => {
       if (!p) return p
       const steps = [...p.steps]
-      if (steps[index]) {
-        steps[index] = { ...steps[index], command: newCommand }
+      if (steps[index] && (steps[index].status === "pending" || steps[index].status === "failed")) {
+        steps[index] = {
+          ...steps[index],
+          command: newCommand.trim(),
+          status: "pending",
+          exitCode: null,
+          outputSnippet: null,
+        }
       }
       return { ...p, steps }
     })
   }, [])
 
   const cancel = useCallback(() => {
-    abortRef.current?.abort()
-    setGenerating(false)
-    setExecuting(false)
-    setPlan((p) => (p ? { ...p, status: "cancelled" } : p))
-  }, [])
+    const controller = abortRef.current
+    // Keep execution locked until the executor has sent the interrupt.
+    if (!executing) {
+      abortRef.current = null
+      setGenerating(false)
+      setAdvisoryLoading(false)
+      setPlan((p) => (p ? { ...p, status: "cancelled" } : p))
+    }
+    controller?.abort()
+  }, [executing])
 
   const requestAdvisory = useCallback(
     async (stepIndex: number) => {
-      if (!plan || !sessionId) return
+      if (!plan || !sessionId || abortRef.current) return
       const step = plan.steps[stepIndex]
       if (!step || step.status !== "failed") return
 
       const context = buildContext()
       if (!context) return
 
+      const controller = new AbortController()
+      abortRef.current = controller
       setAdvisoryLoading(true)
       const result = await getErrorAdvisory(
         step,
         { cwd: context.cwd, shell: context.shell, platform: context.platform },
-        { getClient }
+        { getClient },
+        controller.signal
       )
-      setAdvisory(result)
+      if (abortRef.current !== controller) return
+      abortRef.current = null
+      if (!controller.signal.aborted) setAdvisory(result)
       setAdvisoryLoading(false)
     },
     [plan, sessionId, buildContext, getClient]
   )
 
   const applyFix = useCallback(async () => {
-    if (!advisory?.suggestedFix || !sessionId) return
-
+    if (!advisory?.suggestedFix || !sessionId || !plan || abortRef.current) return
+    const live = getLiveSession(sessionId)
+    if (live && activeAiShellSessions.has(live)) {
+      reportError(t("messages.executionFailed"))
+      return
+    }
     const session = buildSessionAdapter(sessionId)
-    if (!session) return
-
-    // Write the fix command
-    session.write(advisory.suggestedFix + "\r")
-    setAdvisory(null)
-  }, [advisory, sessionId])
+    const row = useTerminalStore.getState().sessions[sessionId]
+    if (!session || !row || row.kind === "serial" || row.status === "exited") {
+      reportError(t("messages.terminalUnavailable"))
+      return
+    }
+    if (row.status === "running") {
+      reportError(t("messages.terminalBusy"))
+      return
+    }
+    const step = plan.steps[advisory.stepIndex]
+    if (!step || step.status !== "failed") return
+    const controller = new AbortController()
+    abortRef.current = controller
+    setExecuting(true)
+    const result = await executeStep({ ...step, command: advisory.suggestedFix }, session, {
+      signal: controller.signal,
+    })
+    if (live && activeAiShellSessions.has(live) && result.unconfirmed) {
+      unconfirmedAiShellSessions.add(live)
+    }
+    if (abortRef.current !== controller) return
+    abortRef.current = null
+    setExecuting(false)
+    if (result.status === "succeeded") {
+      setAdvisory(null)
+      setPlan((p) => {
+        if (!p) return p
+        const steps = p.steps.map<ExecutionPlan["steps"][number]>((s) =>
+          s.index === step.index
+            ? advisory.retryAfterFix
+              ? { ...s, status: "pending", exitCode: null, outputSnippet: null }
+              : {
+                  ...s,
+                  command: advisory.suggestedFix!,
+                  status: "succeeded",
+                  exitCode: 0,
+                  outputSnippet: null,
+                }
+            : s
+        )
+        return {
+          ...p,
+          steps,
+          status: steps.every((s) => s.status === "succeeded" || s.status === "skipped")
+            ? "completed"
+            : "ready",
+        }
+      })
+    } else if (result.status === "cancelled") {
+      setPlan((p) => (p ? { ...p, status: "cancelled" } : p))
+    } else {
+      reportError(t("messages.executionFailed"))
+    }
+  }, [advisory, sessionId, plan, reportError, t])
 
   const clearHistory = useCallback(() => {
+    if (abortRef.current) return
     setMessages([])
     setPlan(null)
     setAdvisory(null)

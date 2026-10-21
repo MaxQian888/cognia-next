@@ -36,10 +36,10 @@ export function AiShellPanel({ state, actions, className }: AiShellPanelProps) {
   const [inputValue, setInputValue] = useState("")
 
   const handleSubmit = useCallback(() => {
-    if (!inputValue.trim()) return
+    if (!inputValue.trim() || state.generating || state.executing || state.advisoryLoading) return
     void actions.submit(inputValue.trim())
     setInputValue("")
-  }, [inputValue, actions])
+  }, [inputValue, actions, state.generating, state.executing, state.advisoryLoading])
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -54,13 +54,14 @@ export function AiShellPanel({ state, actions, className }: AiShellPanelProps) {
   return (
     <MotionPopover
       open={state.open}
-      className={cn("absolute right-0 top-0 z-10 h-full", className)}
+      className={cn("absolute right-0 top-0 z-10 h-full w-80 max-w-full", className)}
       from={{ opacity: 0, x: "100%" }}
     >
       <aside
         role="complementary"
+        aria-label={t("title")}
         data-testid="ai-shell-panel"
-        className="flex h-full w-80 flex-col border-l bg-background/95 backdrop-blur"
+        className="flex h-full w-full min-w-0 flex-col border-l bg-background/95 backdrop-blur"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b px-3 py-2">
@@ -74,6 +75,7 @@ export function AiShellPanel({ state, actions, className }: AiShellPanelProps) {
               variant="ghost"
               className="h-6 w-6"
               onClick={actions.clearHistory}
+              disabled={state.generating || state.executing || state.advisoryLoading}
               aria-label={t("history.clear")}
               data-testid="ai-shell-clear"
             >
@@ -84,7 +86,7 @@ export function AiShellPanel({ state, actions, className }: AiShellPanelProps) {
               variant="ghost"
               className="h-6 w-6"
               onClick={actions.closePanel}
-              aria-label={t("toggle")}
+              aria-label={t("close")}
               data-testid="ai-shell-close"
             >
               <XIcon className="h-3 w-3" />
@@ -93,7 +95,7 @@ export function AiShellPanel({ state, actions, className }: AiShellPanelProps) {
         </div>
 
         {/* Messages + Plan */}
-        <ScrollArea className="flex-1 px-3 py-2">
+        <ScrollArea className="min-h-0 min-w-0 flex-1 px-3 py-2">
           {state.messages.length === 0 && !state.plan ? (
             <p
               className="py-4 text-center text-[11px] text-muted-foreground"
@@ -107,7 +109,7 @@ export function AiShellPanel({ state, actions, className }: AiShellPanelProps) {
                 <div
                   key={msg.id}
                   className={cn(
-                    "rounded-md px-2 py-1.5 text-[11px]",
+                    "break-words rounded-md px-2 py-1.5 text-[11px]",
                     msg.role === "user"
                       ? "ml-4 bg-primary/10 text-foreground"
                       : msg.role === "assistant"
@@ -146,6 +148,17 @@ export function AiShellPanel({ state, actions, className }: AiShellPanelProps) {
 
         {/* Input */}
         <div className="border-t px-3 py-2">
+          {(state.generating || state.advisoryLoading) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="mb-1 h-6 text-[10px]"
+              onClick={actions.cancel}
+            >
+              <CircleStopIcon className="h-3 w-3" />
+              {t("actions.cancel")}
+            </Button>
+          )}
           <div className="flex items-end gap-1.5">
             <textarea
               ref={inputRef}
@@ -153,9 +166,10 @@ export function AiShellPanel({ state, actions, className }: AiShellPanelProps) {
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={t("inputPlaceholder")}
-              className="flex-1 resize-none rounded-md border bg-muted/50 px-2 py-1.5 text-[11px] placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              aria-label={t("inputPlaceholder")}
+              className="min-w-0 flex-1 resize-none rounded-md border bg-muted/50 px-2 py-1.5 text-[11px] placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               rows={2}
-              disabled={state.generating || state.executing}
+              disabled={state.generating || state.executing || state.advisoryLoading}
               data-testid="ai-shell-input"
             />
             <Button
@@ -163,7 +177,9 @@ export function AiShellPanel({ state, actions, className }: AiShellPanelProps) {
               variant="default"
               className="h-7 w-7"
               onClick={handleSubmit}
-              disabled={!inputValue.trim() || state.generating || state.executing}
+              disabled={
+                !inputValue.trim() || state.generating || state.executing || state.advisoryLoading
+              }
               aria-label={t("send")}
               data-testid="ai-shell-send"
             >

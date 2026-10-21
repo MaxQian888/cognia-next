@@ -43,7 +43,8 @@ export interface PromptOverrideBindingRow {
 }
 
 export type PromptRevisionKind = "draft" | "published" | "reset"
-export type PromptRevisionOrigin = "editor" | "import" | "restore" | "cli"
+/** Who wrote a revision. `plugin` is a change a plugin applied after the user confirmed it. */
+export type PromptRevisionOrigin = "editor" | "import" | "restore" | "cli" | "plugin"
 
 export interface PromptOverrideRevisionRow {
   /** `por_…` */

@@ -19,7 +19,8 @@ import { useSettingsStore } from "@/stores/settings"
 
 export type PromptResourcesState =
   | { status: "loading"; listing?: PromptResourceListing }
-  | { status: "ready"; listing: PromptResourceListing }
+  /** `context` is the one the listing was read for, so a caller can tell it from a stale one. */
+  | { status: "ready"; listing: PromptResourceListing; context: PromptResourceContext }
   | { status: "error"; error: string; listing?: PromptResourceListing }
 
 export function usePromptResources(ctx: PromptResourceContext): {
@@ -40,7 +41,7 @@ export function usePromptResources(ctx: PromptResourceContext): {
     let cancelled = false
     listPromptResources(ctx)
       .then((listing) => {
-        if (!cancelled) setState({ status: "ready", listing })
+        if (!cancelled) setState({ status: "ready", listing, context: ctx })
       })
       .catch((error: unknown) => {
         if (cancelled) return

@@ -70,6 +70,8 @@ export function AiShellPlanView({
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [editValue, setEditValue] = useState("")
 
+  const busy = generating || executing || advisoryLoading
+  const hasFailedSteps = plan.steps.some((s) => s.status === "failed")
   const hasPendingSteps = plan.steps.some((s) => s.status === "pending")
   const startEdit = (index: number) => {
     setEditingIdx(index)
@@ -93,15 +95,21 @@ export function AiShellPlanView({
         <span className="text-[10px] text-muted-foreground">
           {generating
             ? t("plan.generating")
-            : plan.status === "completed"
-              ? t("plan.completed")
+            : executing
+              ? t("plan.executing")
               : plan.status === "cancelled"
                 ? t("plan.cancelled")
                 : plan.status === "error"
                   ? t("plan.error")
-                  : hasPendingSteps
-                    ? t("plan.ready")
-                    : t("plan.completed")}
+                  : hasFailedSteps
+                    ? t("plan.failed")
+                    : plan.status === "completed"
+                      ? t("plan.completed")
+                      : hasPendingSteps
+                        ? t("plan.ready")
+                        : plan.steps.length === 0
+                          ? ""
+                          : t("plan.completed")}
         </span>
       </div>
 
@@ -129,17 +137,27 @@ export function AiShellPlanView({
                       if (e.key === "Escape") setEditingIdx(null)
                     }}
                     className="w-full rounded border bg-background px-1 py-0.5 font-mono text-[10px]"
+                    aria-label={t("step.edit")}
                     autoFocus
                     data-testid="ai-shell-step-edit-input"
                   />
                 ) : (
                   <>
-                    <code className="block truncate font-mono">{step.command}</code>
+                    <code className="block whitespace-pre-wrap break-all font-mono">
+                      {step.command}
+                    </code>
                     {step.description && (
                       <span className="text-muted-foreground">{step.description}</span>
                     )}
                   </>
                 )}
+                {step.requiresConfirmation &&
+                  (step.status === "pending" || step.status === "failed") && (
+                    <p className="mt-1 flex items-start gap-1 text-amber-700 dark:text-amber-300">
+                      <AlertTriangleIcon className="h-3 w-3 shrink-0" />
+                      {t("step.confirm")}
+                    </p>
+                  )}
                 {/* Failed step — show output snippet */}
                 {step.status === "failed" && step.outputSnippet && (
                   <pre className="mt-0.5 max-h-16 overflow-auto rounded bg-destructive/5 px-1 py-0.5 text-[9px] text-destructive">
@@ -148,7 +166,7 @@ export function AiShellPlanView({
                 )}
               </div>
               {/* Per-step actions */}
-              {step.status === "pending" && !executing && (
+              {(step.status === "pending" || step.status === "failed") && !busy && (
                 <div className="flex shrink-0 gap-0.5">
                   <button
                     className="rounded p-0.5 hover:bg-muted"
@@ -158,18 +176,20 @@ export function AiShellPlanView({
                   >
                     <PencilIcon className="h-2.5 w-2.5" />
                   </button>
-                  <button
-                    className="rounded p-0.5 hover:bg-muted"
-                    onClick={() => onSkip(step.index)}
-                    aria-label={t("step.skip")}
-                    data-testid="ai-shell-step-skip"
-                  >
-                    <SkipForwardIcon className="h-2.5 w-2.5" />
-                  </button>
+                  {step.status === "pending" && (
+                    <button
+                      className="rounded p-0.5 hover:bg-muted"
+                      onClick={() => onSkip(step.index)}
+                      aria-label={t("step.skip")}
+                      data-testid="ai-shell-step-skip"
+                    >
+                      <SkipForwardIcon className="h-2.5 w-2.5" />
+                    </button>
+                  )}
                 </div>
               )}
               {/* Failed step — request advisory */}
-              {step.status === "failed" && !executing && (
+              {step.status === "failed" && !busy && (
                 <button
                   className="shrink-0 rounded p-0.5 hover:bg-muted"
                   onClick={() => onRequestAdvisory(step.index)}
@@ -201,12 +221,13 @@ export function AiShellPlanView({
               <span className="text-[9px] text-amber-600 dark:text-amber-400">
                 {t("advisory.fix")}
               </span>
-              <code className="ml-1 font-mono text-[10px]">{advisory.suggestedFix}</code>
+              <code className="ml-1 break-all font-mono text-[10px]">{advisory.suggestedFix}</code>
               <Button
                 size="sm"
                 variant="outline"
                 className="ml-2 h-5 px-1.5 text-[9px]"
                 onClick={onApplyFix}
+                disabled={busy}
                 data-testid="ai-shell-apply-fix"
               >
                 {t("advisory.applyFix")}
@@ -228,7 +249,7 @@ export function AiShellPlanView({
 
       {/* Action buttons */}
       {plan.status !== "error" && plan.status !== "completed" && plan.status !== "cancelled" && (
-        <div className="mt-2 flex items-center gap-1.5" data-testid="ai-shell-actions">
+        <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="ai-shell-actions">
           {executing ? (
             <Button
               size="sm"
@@ -241,13 +262,25 @@ export function AiShellPlanView({
             </Button>
           ) : (
             <>
-              {hasPendingSteps && (
+              {hasFailedSteps && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-[10px]"
+                  onClick={onRunNext}
+                  disabled={busy}
+                >
+                  {t("step.retry")}
+                </Button>
+              )}
+              {hasPendingSteps && !hasFailedSteps && (
                 <>
                   <Button
                     size="sm"
                     variant="default"
                     className="h-6 px-2 text-[10px]"
                     onClick={onRunAll}
+                    disabled={busy}
                     data-testid="ai-shell-run-all"
                   >
                     {t("actions.runAll")}
@@ -257,6 +290,7 @@ export function AiShellPlanView({
                     variant="outline"
                     className="h-6 px-2 text-[10px]"
                     onClick={onRunNext}
+                    disabled={busy}
                     data-testid="ai-shell-step-by-step"
                   >
                     {t("actions.stepByStep")}

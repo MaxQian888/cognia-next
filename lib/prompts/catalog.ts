@@ -54,6 +54,8 @@ import {
 } from "@/lib/issues/ai-issue-assist"
 import { RADAR_SYSTEM_PROMPT } from "@/lib/radar/prompts"
 import { TERMINAL_COMPLETION_PROMPT } from "@/lib/terminal/completion/prompt"
+import { AI_SHELL_PLAN_PROMPT } from "@/lib/terminal/ai-shell/plan-generator"
+import { AI_SHELL_ERROR_ADVISOR_PROMPT } from "@/lib/terminal/ai-shell/error-advisor"
 import {
   ENTITY_MERGE_AGENT_PROMPT,
   EVALUATOR_PROMPT,
@@ -310,6 +312,8 @@ export const PROMPT_DEFINITIONS: readonly PromptDefinitionV1[] = [
   RAG_STEP_BACK_PROMPT,
   CLI_OCR_VISION_PROMPT,
   // developer
+  AI_SHELL_PLAN_PROMPT,
+  AI_SHELL_ERROR_ADVISOR_PROMPT,
   DIFF_REVIEW_PROMPT,
   CREATOR_SURVEY_PROMPT,
   CREATOR_PLAN_PROMPT,

@@ -12,7 +12,8 @@
  * defaults to the active one; it never follows the chat on screen.
  */
 
-import { useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import {
   AlertTriangleIcon,
   ArrowLeftRightIcon,
@@ -40,6 +41,7 @@ import {
 import { usePromptResourceContext } from "@/hooks/prompts/use-prompt-resource-context"
 import { usePromptResources } from "@/hooks/prompts/use-prompt-resources"
 import { getPromptDefinition } from "@/lib/prompts/catalog"
+import { PROMPT_RESOURCE_PARAM, PROMPT_WORKSPACE_PARAM } from "@/lib/settings/deep-link"
 import type { PromptResourceSource, PromptResourceSummary } from "@/lib/prompts/resources"
 import type { PromptGroup } from "@/lib/prompts/types"
 import { cn } from "@/lib/utils"
@@ -124,6 +126,56 @@ export function PromptsSection() {
   const [modifiedOnly, setModifiedOnly] = useState(false)
   const [selectedKey, setSelectedKey] = useState<string>(PREVIEW_KEY)
   const [profileOpen, setProfileOpen] = useState(false)
+
+  // `?resource=<key>&workspace=<id>` (the Config Governance plugin links here): select that
+  // resource once the listing for that workspace has loaded, then drop the
+  // params so a refresh or back-navigation does not select it again. A key
+  // the listing does not hold is dropped without a word; the user still lands
+  // on the Prompt Center.
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const requestedResource = searchParams?.get(PROMPT_RESOURCE_PARAM) ?? null
+  const requestedWorkspace = searchParams?.get(PROMPT_WORKSPACE_PARAM) ?? null
+  useEffect(() => {
+    if (!requestedWorkspace) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- consuming a one-shot URL request
+    setWorkspaceChoice(requestedWorkspace === NO_WORKSPACE ? null : requestedWorkspace)
+  }, [requestedWorkspace])
+  useEffect(() => {
+    if (!requestedResource && !requestedWorkspace) return
+    if (
+      requestedWorkspace &&
+      (requestedWorkspace === NO_WORKSPACE ? null : requestedWorkspace) !== workspaceId
+    )
+      return
+    // Wait for the listing of the requested workspace, not the previous one's.
+    if (
+      requestedResource &&
+      (state.status === "loading" || (state.status === "ready" && state.context !== ctx))
+    ) {
+      return
+    }
+    if (
+      requestedResource &&
+      listing?.resources.some((resource) => resource.key === requestedResource)
+    ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- consuming a one-shot URL request
+      setSelectedKey(requestedResource)
+    }
+    const next = new URLSearchParams(searchParams?.toString() ?? "")
+    next.delete(PROMPT_RESOURCE_PARAM)
+    next.delete(PROMPT_WORKSPACE_PARAM)
+    router.replace(`?${next.toString()}`, { scroll: false })
+  }, [
+    ctx,
+    listing,
+    requestedResource,
+    requestedWorkspace,
+    router,
+    searchParams,
+    state,
+    workspaceId,
+  ])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

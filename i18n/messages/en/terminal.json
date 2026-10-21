@@ -39,7 +39,8 @@
       "executing": "Executing…",
       "generating": "Generating plan…",
       "ready": "Plan ready — review and run.",
-      "title": "Execution Plan"
+      "title": "Execution Plan",
+      "failed": "Execution stopped after a failed step."
     },
     "send": "Send",
     "step": {
@@ -56,7 +57,17 @@
       "succeeded": "Done"
     },
     "title": "AI Shell",
-    "toggle": "Toggle AI Shell (Ctrl+Shift+I)"
+    "toggle": "Toggle AI Shell",
+    "close": "Close AI Shell",
+    "messages": {
+      "noSession": "No active terminal session.",
+      "sensitiveContext": "Terminal context contains sensitive data. Redact it before retrying.",
+      "generatedPlan": "Generated a plan with {count, plural, one {# step} other {# steps}}. Review each command before running.",
+      "generationFailed": "Failed to generate a plan.",
+      "terminalUnavailable": "The terminal session is unavailable.",
+      "terminalBusy": "The terminal is busy. Wait for the current command to finish.",
+      "executionFailed": "Command completion could not be confirmed. An interrupt was requested; inspect the terminal before retrying."
+    }
   },
   "commandMenu": {
     "copyCommand": "Copy command",
@@ -285,14 +296,16 @@
     "participantViewer": "viewing",
     "participantsLabel": "Attached devices",
     "readOnly": "Read-only",
-    "releaseConfirm": "Release control of this session? Another client can then take over.",
+    "releaseConfirm": "Another client can then take over.",
     "releaseControl": "Release control",
     "replayGap": "Output before sequence {firstAvailable} is no longer available.",
     "replayGapMarker": "Earlier terminal output is unavailable because the replay buffer was truncated.",
     "sandboxed": "Sandboxed",
     "shared": "Shared with {count, plural, one {# device} other {# devices}}",
     "takeControl": "Take control",
-    "takeoverConfirm": "Take control of this session? The current controller will become read-only."
+    "takeoverConfirm": "The current controller will become read-only.",
+    "takeoverConfirmTitle": "Take control of this session?",
+    "releaseConfirmTitle": "Release control of this session?"
   },
   "share": {
     "description": "Paired devices with the remote-terminal grant attach to this host session over the companion link and share the same control lease: one controller at a time, everyone else read-only. Nothing is copied and no link is created.",

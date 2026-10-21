@@ -54,7 +54,7 @@ export type PlanStatus =
   | "generating" // LLM is still streaming the plan
   | "ready" // plan is complete, awaiting user action
   | "executing" // steps are being run
-  | "completed" // all steps finished (some may have failed)
+  | "completed" // all steps succeeded or were explicitly skipped
   | "cancelled" // user cancelled the plan
   | "error" // plan generation failed
 
@@ -142,11 +142,11 @@ export type PlanStreamCallback = (partial: Partial<ExecutionPlan>) => void
  */
 export interface AiShellSession {
   /** Write text to the PTY (no automatic newline — include \r if needed). */
-  write(data: string): void
+  write(data: string): void | Promise<void>
   /**
    * Register a callback for the next OSC 633 prompt_start event (command
-   * completed). Returns an unsubscribe function. If shell integration is
-   * not available, the callback fires after a fallback timeout.
+   * completed). Returns an unsubscribe function. No event is fabricated
+   * when shell integration is unavailable.
    */
   onNextPrompt(cb: () => void): () => void
   /** Register a callback for the next command_end event with exit code. */

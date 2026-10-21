@@ -59,3 +59,10 @@ it("reports owners that failed without dropping the rest", async () => {
   await waitFor(() => expect(result.current.state.status).toBe("ready"))
   expect(result.current.state.listing?.failed).toEqual(["app-setting"])
 })
+
+it("names the context a ready listing was read for", async () => {
+  const { result } = renderHook(() => usePromptResources(ctx))
+  await waitFor(() => expect(result.current.state.status).toBe("ready"))
+  const state = result.current.state
+  expect(state.status === "ready" && state.context).toBe(ctx)
+})
