@@ -44,7 +44,7 @@ function interpolate(template: string, vars: Record<string, string>): string {
 }
 
 /** Resolve the wire reasoning-effort value, honoring a per-channel override map.
- * The default map lives in `reasoning-effort-tables.mjs`, shared with the
+ * The default map lives in `reasoning-effort-tables.ts`, shared with the
  * renderer so it never offers tiers this channel folds together. */
 function resolveVariantEffort(effort: string, map: Record<string, string> | undefined): string {
   if (map && typeof map[effort] === "string") return map[effort]

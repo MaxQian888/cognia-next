@@ -9,6 +9,7 @@ nodeLinker: hoisted
 allowBuilds:
   "@ast-grep/cli": false
   better-sqlite3: true
+  esbuild: true
   # Optional msgpackr acceleration; keep the portable JavaScript decoder.
   msgpackr-extract: false
   node-pty: true

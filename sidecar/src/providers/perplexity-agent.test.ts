@@ -79,16 +79,21 @@ test("the real installed SDK sends a preset without a fabricated model and reads
   const result = await model.doGenerate({
     prompt: [{ role: "user", content: [{ type: "text", text: "News?" }] }],
   })
-  assert.equal(request!.url, "https://api.perplexity.ai/v1/responses")
-  const body = (await request!.json()) as {
+  assert.ok(request)
+  assert.equal(request.url, "https://api.perplexity.ai/v1/responses")
+  const body = (await request.json()) as {
     preset?: string
     model?: string
     input: { content: { text: string }[] }[]
   }
   assert.equal(body.preset, "fast")
   assert.equal(body.model, undefined)
-  assert.equal(body.input[0].content[0].text, "News?")
-  assert.equal(request!.headers.get("authorization"), "Bearer test-key")
+  const input = body.input[0]
+  assert.ok(input)
+  const content = input.content[0]
+  assert.ok(content)
+  assert.equal(content.text, "News?")
+  assert.equal(request.headers.get("authorization"), "Bearer test-key")
   assert.ok(result.content.some((part) => part.type === "text" && part.text === "Latest news [1]"))
   assert.ok(
     result.content.some(

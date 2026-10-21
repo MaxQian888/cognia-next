@@ -61,7 +61,7 @@ export function dispatchAnthropic(
   const pendingPluginToolCalls: PendingPluginToolCalls = new Map()
   // `{ type: "plugin" }` lifecycle-hook handlers round-trip through the renderer
   // the same way plugin tools do; `claude-host.mjs` settles this map from the
-  // `plugin_hook_response` frame. See `dispatch/plugin-hook-exec.mjs` for why
+  // `plugin_hook_response` frame. See `dispatch/plugin-hook-exec.ts` for why
   // `host_rpc` cannot be used for this.
   const pendingPluginHookCalls: PendingPluginHooks = new Map()
 

@@ -1,7 +1,7 @@
 // Execute the `ast-grep` CLI with an argv array (never a shell string — the
 // pattern must not be able to break out) and parse its `--json=compact`
 // output. Ported from oh-my-opencode-slim's `src/tools/ast-grep/cli.ts`, adapted
-// to cognia's `core/rg.mjs` spawn conventions (node:child_process, byte cap,
+// to cognia's `core/rg.ts` spawn conventions (node:child_process, byte cap,
 // timeout, no-binary → structured error).
 
 import { spawnInProcessSandbox as spawn } from "../../../platform/process/exec.ts"

@@ -24,9 +24,11 @@ desktop profile.
 
 ## Layout and TypeScript (ADR-0197)
 
-The Claude sidecar is moving, one layer per batch, from untyped `.mjs` into
-strict TypeScript under `src/`, which Node 26 runs **unbuilt** by stripping the
-types. See `docs/content/docs/en/adr/0197-the-sidecar-runs-its-typescript-unbuilt.md`.
+The Claude sidecar uses strict TypeScript under `src/`, which Node 26 runs
+**unbuilt** by stripping the types. Handwritten `.mjs` remains only in the
+eight compatibility launchers; `a2ui-mcp.mjs` and `cognia-mcp.mjs` are generated
+bundles. The nested packages also use TypeScript for their source, tests and
+broker build utilities. See `docs/content/docs/en/adr/0197-the-sidecar-runs-its-typescript-unbuilt.md`.
 
 - **Launchers.** `agent-host.mjs`, `claude-host.mjs`, `cognia-tool-bridge.mjs`,
   `mcp-stdio-relay.mjs`, `mcp-oauth-helper.mjs` and
@@ -35,9 +37,9 @@ types. See `docs/content/docs/en/adr/0197-the-sidecar-runs-its-typescript-unbuil
 - **`src/<layer>/`.** `shared` → `platform` → `policy` / `services` /
   `context` / `providers` → `tools` → `hooks` → `mcp` → `runtimes` → `host` →
   `entry`. A layer imports only itself and the layers before it
-  (`scripts/gates/sidecar-architecture.json`). `src/` never imports the legacy
-  `dispatch/`, `builtin-tools/`, `lsp/` or `a2ui-tools/` code that has not moved
-  yet; the legacy code may import `src/`.
+  (`scripts/gates/sidecar-architecture.json`). The legacy `dispatch/`,
+  `builtin-tools/`, `lsp/` and `a2ui-tools/` directories have been removed; the
+  architecture gate forbids new legacy `.mjs` implementation files.
 - **Writing `.ts` here.** Erasable syntax only (no `enum`, `namespace` or
   parameter properties), relative imports spell `.ts`, types come in through
   `import type`, no path aliases. Run `pnpm sidecar:typecheck`.
@@ -195,19 +197,24 @@ pnpm sidecar:start        # node sidecar/claude-host.mjs   (stdio protocol)
 pnpm sidecar:smoke        # one-shot smoke test
 pnpm sidecar:test         # every sidecar/**/*.test.{mjs,ts} (scripts/test/run-sidecar-tests.mjs)
 pnpm sidecar:test:live    # the *.live.test.* suites (real host + SDK subprocess, mock server)
-pnpm sidecar:typecheck    # strict tsc over the sidecar (root toolchain)
+pnpm sidecar:typecheck    # main host, Pi extension, nested packages and their tests
 pnpm audit:sidecar-architecture   # layer map, import cycles, public surface
 
 # VS Code extension host
 pnpm sidecar:vscode:install   # idempotent npm install in vscode-ext-host/
 pnpm sidecar:vscode:build     # tsc → dist/host.js (auto-runs on prebuild)
-pnpm sidecar:vscode:test      # node --test on tests/**/*.test.mjs
+pnpm sidecar:vscode:test      # node --test on tests/**/*.test.ts
 pnpm sidecar:vscode:clean     # rm -rf vscode-ext-host/dist
+
+# Nested package contracts and the broker extension
+pnpm sidecar:packages:typecheck
+pnpm sidecar:codeserver-agent:build
+pnpm sidecar:codeserver-agent:test
 ```
 
 `SIDECAR_TEST_CONCURRENCY` caps `sidecar:test` (default: half the cores, at
 most 4); pass file paths to run a subset:
-`node scripts/test/run-sidecar-tests.mjs sidecar/dispatch/ai-sdk.test.mjs`.
+`node scripts/test/run-sidecar-tests.mjs sidecar/src/runtimes/ai-sdk/index.test.ts`.
 
 `prebuild` (root) automatically runs `sidecar:vscode:build` so `pnpm build` and
 `tauri build` always pick up a fresh `dist/host.js`. `predev` does not — VS Code

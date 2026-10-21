@@ -2,7 +2,7 @@
 //
 // Pure decomposition of "what to compact and how" for each CompressionStrategy
 // (types/system/compression.ts). The LLM round-trips + final assembly stay in
-// `ai-sdk.mjs maybeCompact` (it owns `protocolAdapter.start`). `planStrategy`
+// `runtimes/ai-sdk/index.ts maybeCompact` (it owns `protocolAdapter.start`). `planStrategy`
 // returns a structured plan; the orchestrator runs 0/1/N summary calls per kind.
 //
 // Plan kinds:

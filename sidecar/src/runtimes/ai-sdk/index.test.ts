@@ -870,7 +870,7 @@ test("tool_result_review round-trip rewrites the tool output the model sees", as
   })
   // The review now runs at the tool EXECUTE layer: `buildAiSdkTools` /
   // `buildAiSdkMcpTools` call `reviewToolOutput` before a tool's output reaches
-  // the model (the fullStream interception was removed — see ai-sdk.mjs). Drive
+  // the model (the fullStream interception was removed — see runtimes/ai-sdk/index.ts). Drive
   // that round-trip directly; the execute-layer application is covered by
   // ai-sdk-tools.test.mjs.
   const reviewed = session.reviewToolOutput("web_fetch", "c1", "RAW SECRET", false)

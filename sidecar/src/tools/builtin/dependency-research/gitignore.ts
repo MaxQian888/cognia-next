@@ -1,6 +1,6 @@
 // Manage a single self-contained marker block in `.gitignore` so git ignores the
 // cloned dependency source while keeping the manifest tracked. Pure string ops —
-// `clone.mjs` does the file read/write. Idempotent: applying twice is a no-op.
+// `clone.ts` does the file read/write. Idempotent: applying twice is a no-op.
 
 export const MARKER_START = "# >>> cognia clonedeps (managed) >>>"
 export const MARKER_END = "# <<< cognia clonedeps (managed) <<<"

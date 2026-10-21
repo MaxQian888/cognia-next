@@ -36,7 +36,7 @@ import { createToolSessionContext } from "../../tools/session.ts"
 // for OpenAI when the user is on Anthropic, etc.
 //
 // Tool-calling IS wired (ADR-0043 Phase 2): built-in tools + renderer-proxied
-// plugin tools are converted to native AI SDK tools by `ai-sdk-tools.mjs` and
+// plugin tools are converted to native AI SDK tools by `ai-sdk-tools.ts` and
 // driven through `streamText`'s multi-step loop. Tool execution is gated by the
 // same `permission_request` round-trip as the Anthropic path (resolved via
 // `pendingApprovals`), so a local model can't silently run shell/process tools.
@@ -91,7 +91,7 @@ const MAX_UNKNOWN_FINISH_CONTINUES = 3
 // Map a provider id (or explicit `protocol` field) to the AI SDK family the
 // renderer uses to construct a model instance. Custom provider ids must
 // supply `providerCredentials.protocol` because the id alone tells us nothing.
-// The id→protocol table is the single source of truth in `provider-protocol.mjs`;
+// The id→protocol table is the single source of truth in `provider-protocol.ts`;
 // the renderer's resolver forwards `providerCredentials.protocol` for every turn,
 // so this id-based path is the fallback for callers that don't (CLI, older code).
 function resolveProtocol(provider: string, credentials?: AdapterCredentials, model?: string) {

@@ -421,7 +421,7 @@ test("start passes model/messages/params through to streamText verbatim", async 
 })
 
 test("start hoists leading system messages out of messages, cacheControl intact", async () => {
-  // AI SDK 7 rejects `{ role: "system" }` inside `messages`. dispatch/ai-sdk.mjs
+  // AI SDK 7 rejects `{ role: "system" }` inside `messages`. src/runtimes/ai-sdk/index.ts
   // plants up to three Anthropic cache breakpoints on separate leading system
   // messages; each must arrive with its own providerOptions.
   const cacheControl = { anthropic: { cacheControl: { type: "ephemeral" } } }

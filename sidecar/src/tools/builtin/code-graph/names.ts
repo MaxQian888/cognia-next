@@ -1,5 +1,5 @@
 // Bare tool names for the codeGraph category — used by the disabled-category
-// denylist in index.mjs (mirrors LSP_TOOL_NAMES). Keep in sync with the
+// denylist in index.ts (mirrors LSP_TOOL_NAMES). Keep in sync with the
 // `codeGraph` entry in lib/settings/builtin-tools-data.json.
 
 export const CODE_GRAPH_TOOL_NAMES = [

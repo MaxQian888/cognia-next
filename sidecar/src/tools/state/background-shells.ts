@@ -95,7 +95,7 @@ export function createBgShellRegistry(): BgShellRegistry {
     const id = randomUUID()
     const child = spawn(shell, shellArgs, {
       cwd,
-      // `env` carries the PowerShell-scrubbed environment when bash.mjs supplies
+      // `env` carries the PowerShell-scrubbed environment when bash.ts supplies
       // it; undefined (legacy callers / tests) inherits the parent process env.
       ...(env ? { env } : {}),
       windowsHide: true,

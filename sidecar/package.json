@@ -29,8 +29,8 @@
     "@anthropic-ai/sdk": "0.125.0",
     "@aws-sdk/client-bedrock": "^3.1141.0",
     "@aws-sdk/credential-providers": "^3.1141.0",
-    "@cognia/agent-contracts": "link:../packages/agent-contracts",
     "@cognia/agent-config-types": "link:../packages/agent-config-types",
+    "@cognia/agent-contracts": "link:../packages/agent-contracts",
     "@cognia/provider-routing": "link:../packages/provider-routing",
     "@cognia/redact": "link:../packages/redact",
     "@langfuse/otel": "5.11.1",
@@ -56,5 +56,9 @@
     "node-pty": "^1.1.0",
     "tree-sitter-wasms": "^0.1.13",
     "web-tree-sitter": "^0.25.10"
+  },
+  "devDependencies": {
+    "@ai-sdk/provider": "4.0.22",
+    "esbuild": "^0.28.2"
   }
 }

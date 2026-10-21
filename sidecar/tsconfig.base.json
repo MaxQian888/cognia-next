@@ -29,7 +29,9 @@
       "@cognia/redact": ["../packages/redact/src/index.ts"],
       "@cognia/redact/*": ["../packages/redact/src/*"],
       "@cognia/agent-config-types": ["../packages/agent-config-types/src/index.ts"],
-      "@cognia/agent-config-types/*": ["../packages/agent-config-types/src/*"]
+      "@cognia/agent-config-types/*": ["../packages/agent-config-types/src/*"],
+      "@cognia/agent-contracts": ["../packages/agent-contracts/src/index.ts"],
+      "@cognia/agent-contracts/*": ["../packages/agent-contracts/src/*"]
     },
     "typeRoots": ["../node_modules/@types"],
     "noEmit": true,
@@ -38,8 +40,8 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "resolveJsonModule": true,
-    // Mixed period: `.mjs` modules not yet converted are resolved and inferred,
-    // never checked.
+    // Compatibility .mjs launchers remain resolvable; implementations and tests
+    // are TypeScript. Launchers opt into checking with their @ts-check header.
     "allowJs": true,
     "checkJs": false,
     "strict": true,

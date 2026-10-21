@@ -40,7 +40,7 @@ var TOOL_NAMES = [
 ];
 var TOOL_DESCRIPTIONS = {
   a2ui_create_surface: "Create a new A2UI surface where the agent can render interactive UI. Reuse the same surfaceId on subsequent updates.",
-  a2ui_update_components: "Replace the components tree on an existing surface. Components must follow the A2UI v0.9 schema.",
+  a2ui_update_components: "Upsert components by id on an existing surface; omitted components remain. Uses Cognia legacy descriptors, not the official A2UI envelope. Alert uses message; Table uses columns (key/header) and data; Chart uses chartType/data/xKey/yKeys.",
   a2ui_data_model_update: "Patch (or replace) the surface's data model \u2014 form values, chart data, table rows, etc.",
   a2ui_delete_surface: "Remove an A2UI surface and free its resources.",
   a2ui_handle_connector_action: "Inject a user action that arrived from an IM channel (Slack block_actions, Lark interactive card, Telegram callback_query, Discord component interaction) onto the matching A2UI surface. The agent receives this as a userAction event on the next turn \u2014 identical to in-renderer interactions \u2014 so the same flow handles both browser-side and IM-side users."

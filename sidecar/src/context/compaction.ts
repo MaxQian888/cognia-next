@@ -1,7 +1,7 @@
 // Conversation compaction for the non-Anthropic (AI SDK) path.
 //
 // The Anthropic Agent SDK auto-compacts the conversation when the context
-// window fills; the AI SDK path (`ai-sdk.mjs`) keeps a flat `conversation`
+// window fills; the AI SDK path (`runtimes/ai-sdk/index.ts`) keeps a flat `conversation`
 // array that grows unbounded across turns and eventually overflows the model.
 // This module gives that path parity: detect the threshold from the last
 // turn's real input-token count, summarize the older messages, and splice the

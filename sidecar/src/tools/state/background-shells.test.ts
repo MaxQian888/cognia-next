@@ -15,7 +15,7 @@ function expectOk(result: ReadResult): ReadOk {
   return result
 }
 
-/** Build a shell invocation the same way bash.mjs does. */
+/** Build a shell invocation the same way bash.ts does. */
 function inv(command: string): SpawnBackgroundOptions {
   const shell = isWin ? (process.env.ComSpec ?? "cmd.exe") : "/bin/sh"
   const shellArgs = isWin ? ["/d", "/s", "/c", command] : ["-c", command]

@@ -1,6 +1,6 @@
 // TypeScript / TSX / JavaScript extraction descriptor.
 //
-// The generic extractor (`../extractor.mjs`) walks the tree-sitter AST and
+// The generic extractor (`../extractor.ts`) walks the tree-sitter AST and
 // consults this descriptor to turn nodes into graph nodes/edges. We keep the
 // grammar-specific knowledge here (node-type → symbol kind, how to read a
 // callee/import/heritage) rather than hand-writing S-expression queries, which

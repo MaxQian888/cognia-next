@@ -1,6 +1,6 @@
 // Shared lazy LSP resolver construction for both dispatch paths.
 //
-// Lifted from anthropic.mjs so the ai-sdk path gets the identical lazy-proxy
+// Lifted from runtimes/claude-agent-sdk/index.ts so the ai-sdk path gets the identical lazy-proxy
 // semantics: the resolver (and any language server) is created only on first
 // use, and the proxy degrades cleanly when the LSP host is unavailable
 // (mobile / dist not built). Callers MUST invoke `dispose()` at session end

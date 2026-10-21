@@ -1,7 +1,7 @@
 // Shared child-process exec primitives for built-in tools.
 //
 // Single home for the `promisify(execFile)` wrapper that was previously
-// copy-pasted into git.mjs, process.mjs, and shell-advanced.mjs. Callers that
+// copy-pasted into git.ts, tools/builtin/process/index.ts, and tools/builtin/shell-advanced/index.ts. Callers that
 // need the raw rejection shape (stdout/stderr/code/signal attached on non-zero
 // exit) import `execFileAsync` directly; callers that just want the
 // stringified output of a successful run use `runCapped`.
