@@ -840,7 +840,6 @@
       "blocked": "{runtime} 无法在此运行",
       "blockedDetail": "{runtime} 无法在此运行：{detail}",
       "busy": "请等当前回复结束后，再发给 @{handle}。",
-      "disabled": "外部智能体已关闭。",
       "emptyPrompt": "请在 @{handle} 后输入消息。",
       "memberMissing": "@{handle} 已不在任何 Squad 中。",
       "memberRuntime": "{name} 运行在 {runtime} 上，此处不可用。",

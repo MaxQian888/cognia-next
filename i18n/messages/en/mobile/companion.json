@@ -503,6 +503,8 @@
     "forgetConfirmDescription": "This browser was revoked. Forgetting removes it from this list and every other list on this Host. To use it again, pair it with a new code.",
     "forgetConfirm": "Forget",
     "forgetConfirmCancel": "Cancel",
+    "pairedConnectedAt": "Connected since {time}",
+    "pairedFeatures": "Features: {features}",
     "pairedVersion": "Extension {version}",
     "driveLabel": "Let agents act here",
     "driveAria": "Let agents act in {name}",

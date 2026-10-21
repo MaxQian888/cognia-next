@@ -553,6 +553,28 @@
       "execution": "Real execution",
       "title": "Provider summary",
       "transport": "Transport"
+    },
+    "maintenance": {
+      "title": "Background maintenance",
+      "description": "Source attempts, successes and backoff are independent of clock completion. These diagnostics do not send notifications.",
+      "unknown": "No source maintenance evidence is available in this runtime. Remote source state is not projected.",
+      "never": "No evidence",
+      "manualRetry": "Waiting for manual credential verification",
+      "times": "Last attempt: {attempt}; last success: {success}; next check: {next}; consecutive failures: {failures}",
+      "status": {
+        "idle": "Idle",
+        "scheduled": "Scheduled (including backoff)",
+        "running": "Running",
+        "paused-auth": "Authentication paused",
+        "paused-offline": "Offline paused",
+        "paused-vault": "Vault paused"
+      },
+      "outcome": {
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "blocked": "Blocked",
+        "skipped": "Skipped"
+      }
     }
   },
   "differentSettings": "Different",
@@ -592,7 +614,6 @@
     "manage": "Manage in External Agents",
     "runsOnHost": "Runs on the paired host",
     "summary": "{working} of {total} ready",
-    "switchedOff": "External agents are switched off, so the {count} configured here will not run until you turn them back on.",
     "title": "Agents with their own model access"
   },
   "failed": "failed",

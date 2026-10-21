@@ -550,12 +550,6 @@
   "preview": "Preview (counts in file)",
   "privacyTitle": "Privacy",
   "reset": "Reset",
-  "retention": {
-    "desc": "Agent trace spans older than this are pruned on startup and once a day to keep the local database from growing without bound.",
-    "title": "Trace retention",
-    "unit": "days",
-    "zeroHint": "Set to 0 to keep traces forever."
-  },
   "schedule": {
     "currentCount": "{count, plural, =1 {1 active schedule} other {# active schedules}}",
     "desc": "Run additional encrypted backups on arbitrary cron expressions through the task scheduler. Tasks survive restarts and surface under Settings → Scheduled Tasks.",
@@ -787,5 +781,57 @@
     "cancel": "Cancel",
     "confirmRelease": "Confirm release",
     "releasing": "Releasing…"
+  },
+  "retentionHealth": {
+    "title": "Background retention diagnostics",
+    "description": "Last sweep in this window and account only. Other windows or a restart have unknown evidence. No notifications are sent. Raw usage keeps 90 days; cost rollups also keep the complete boundary local day.",
+    "unknown": "No sweep evidence in this window.",
+    "lastSweep": "Last completed: {when}",
+    "removed": "{count} removed",
+    "status": {
+      "completed": "Completed",
+      "completed-no-work": "Completed, no work",
+      "partial": "Partially completed",
+      "blocked": "Blocked",
+      "off": "Off or inapplicable",
+      "failed": "Failed",
+      "unknown": "Unknown"
+    },
+    "reasons": {
+      "configured-off": "Retention disabled",
+      "prune-failed": "Prune incomplete",
+      "file-delete-failed": "File deletion incomplete",
+      "file-metadata-unknown": "File age unknown",
+      "vault-locked": "Vault locked",
+      "cleanup-pending": "Waiting for original host cleanup",
+      "unsupported-host": "Inapplicable on this host"
+    },
+    "stages": {
+      "rows": "Job records",
+      "files": "Files"
+    },
+    "targets": {
+      "agentTraces": "Agent traces",
+      "evalArtifacts": "Evaluation artifacts",
+      "evalOnline": "Online evaluation",
+      "workSubmissions": "Work submissions",
+      "managedDesktopDeletion": "Desktop result deletion",
+      "mediaGenerationJobs": "Video jobs and files",
+      "memoryGovernance": "Memory governance",
+      "notificationDelivery": "Notification delivery",
+      "ocrResults": "OCR cache",
+      "usageHistory": "Usage and cost history",
+      "retrievalControl": "Retrieval governance",
+      "workflowAppData": "Workflow app data",
+      "siteArtifacts": "Site artifacts",
+      "syncTombstones": "Sync deletion markers",
+      "sessionSideChats": "Session side chats"
+    }
+  },
+  "retention": {
+    "desc": "Agent trace spans older than this are pruned on startup and once a day to keep the local database from growing without bound.",
+    "title": "Trace retention",
+    "unit": "days",
+    "zeroHint": "Set to 0 to keep traces forever."
   }
 }

@@ -58,7 +58,7 @@
     "stageVerifying": "校验密码",
     "storageLayoutBody": "本机数据由另一个版本的应用写入。密码没有问题，但在重置本机数据之前没有可解锁的内容。重置只会删除本机的这份副本，已备份或已同步到其他设备的数据不受影响。",
     "storageLayoutReset": "重置本机数据",
-    "storageLayoutResetConfirm": "确定删除本机数据吗？此操作不可撤销。备份和其他设备不受影响。",
+    "storageLayoutResetConfirm": "此操作不可撤销。备份和其他设备不受影响。",
     "storageLayoutResetting": "正在重置…",
     "storageLayoutTitle": "无法打开本机数据",
     "stuckBody": "可能有本应用的另一个窗口仍占用着数据库。请关闭其他窗口或标签页后重新加载。",
@@ -86,7 +86,12 @@
     "rememberOnDeviceLabel": "记住密码",
     "rememberOnDeviceHelp": "保存在本设备的安全存储中，下次打开时自动解锁。原密码仍然有效。",
     "shareGuestHint": "这是一条分享链接，持有链接的人无需账户即可阅读；解锁后可将其加入你的库。",
-    "shareGuestAction": "不解锁，直接阅读"
+    "shareGuestAction": "不解锁，直接阅读",
+    "registryFailureTitle": "无法加载本地账号",
+    "registryTimeoutDescription": "读取本地账号超时。请关闭其他 Cognia 标签页或窗口后重试。本地数据未被删除。",
+    "registryUnavailableDescription": "无法读取本地账号。请检查浏览器是否允许使用本地存储，然后重试。",
+    "retryRegistry": "重新加载账号",
+    "storageLayoutResetConfirmTitle": "确定删除本机数据吗？"
   },
   "manage": {
     "activeAccountLabel": "当前账户",
@@ -289,15 +294,19 @@
     "active": "当前",
     "addHost": "添加 Host",
     "fallbackInvalid": "请选择一个已保存的备用 Host。",
-    "fallbackPrompt": "请输入备用 Host ID（{choices}）。",
     "heading": "运行目标",
     "legacyMixed": "旧版混合数据（只读）",
     "loadFailed": "无法加载运行目标。",
-    "removeConfirm": "要移除 {name} 吗？只有 Host 确认撤销后才会删除本地数据。",
+    "removeConfirm": "只有 Host 确认撤销后才会删除本地数据。",
     "removeFailed": "无法移除该 Host。",
     "removeHost": "移除 {name}",
     "switchFailed": "无法切换运行目标。",
-    "thisBrowser": "此浏览器"
+    "thisBrowser": "此浏览器",
+    "removeConfirmTitle": "要移除 {name} 吗？",
+    "removeConfirmAction": "移除 Host",
+    "fallbackTitle": "选择替代 Host",
+    "fallbackDescription": "{name} 是当前使用的 Host。请选择移除后此浏览器要切换到的 Host。",
+    "fallbackField": "替代 Host"
   },
   "switcher": {
     "active": "当前账户：{name}",

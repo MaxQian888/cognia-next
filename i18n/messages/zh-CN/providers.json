@@ -553,6 +553,28 @@
       "execution": "真实执行",
       "title": "提供商概览",
       "transport": "网络传输"
+    },
+    "maintenance": {
+      "title": "后台维护状态",
+      "description": "按来源显示实际尝试、成功与退避状态；调度时钟完成不代表所有来源刷新成功。这里只显示诊断，不发送通知。",
+      "unknown": "当前运行环境没有可用的来源维护记录；远程来源状态尚未投影。",
+      "never": "尚无记录",
+      "manualRetry": "等待手动验证凭据",
+      "times": "最近尝试：{attempt}；最近成功：{success}；下次检查：{next}；连续失败：{failures}",
+      "status": {
+        "idle": "空闲",
+        "scheduled": "已安排（含退避）",
+        "running": "执行中",
+        "paused-auth": "凭据暂停",
+        "paused-offline": "离线暂停",
+        "paused-vault": "保险库锁定暂停"
+      },
+      "outcome": {
+        "succeeded": "成功",
+        "failed": "失败",
+        "blocked": "受阻",
+        "skipped": "跳过"
+      }
     }
   },
   "differentSettings": "配置不同",
@@ -592,7 +614,6 @@
     "manage": "在“外部智能体”中管理",
     "runsOnHost": "在已配对的主机上运行",
     "summary": "{working}/{total} 已就绪",
-    "switchedOff": "外部智能体已关闭，此处配置的 {count} 个智能体在重新开启前不会运行。",
     "title": "自带模型访问的智能体"
   },
   "failed": "失败",

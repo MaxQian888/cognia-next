@@ -98,6 +98,7 @@
       "cli": "来自 CLI",
       "editor": "来自编辑器",
       "import": "导入",
+      "plugin": "由插件应用",
       "restore": "恢复"
     },
     "restore": "恢复为新修订版本",

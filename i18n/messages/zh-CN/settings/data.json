@@ -550,12 +550,6 @@
   "preview": "预览（文件中的条目数）",
   "privacyTitle": "隐私",
   "reset": "重置",
-  "retention": {
-    "desc": "超过此天数的 Agent 追踪 span 会在启动时及每天清理一次，避免本地数据库无限增长。",
-    "title": "追踪保留期",
-    "unit": "天",
-    "zeroHint": "设为 0 则永久保留追踪记录。"
-  },
   "schedule": {
     "currentCount": "{count, plural, =1 {1 个活跃计划} other {# 个活跃计划}}",
     "desc": "通过任务调度器以任意 cron 表达式执行加密备份。任务在重启后保留，并可在 设置 → 计划任务 中查看。",
@@ -787,5 +781,57 @@
     "cancel": "取消",
     "confirmRelease": "确认释放",
     "releasing": "正在释放…"
+  },
+  "retentionHealth": {
+    "title": "后台清理诊断",
+    "description": "仅显示当前窗口、当前账户最近一次清理的结果。其他窗口或重启后的状态未知；不会发送通知。用量明细保留 90 天，费用汇总额外保留边界所在的完整本地日。",
+    "unknown": "当前窗口尚无清理记录。",
+    "lastSweep": "最近完成：{when}",
+    "removed": "已移除 {count} 项",
+    "status": {
+      "completed": "完成",
+      "completed-no-work": "完成，无需清理",
+      "partial": "部分完成",
+      "blocked": "受阻",
+      "off": "已关闭或不适用",
+      "failed": "失败",
+      "unknown": "未知"
+    },
+    "reasons": {
+      "configured-off": "设置为保留",
+      "prune-failed": "清理未完成",
+      "file-delete-failed": "文件删除未完成",
+      "file-metadata-unknown": "文件时间未知",
+      "vault-locked": "保险库未解锁",
+      "cleanup-pending": "等待原主机完成清理",
+      "unsupported-host": "当前主机不适用"
+    },
+    "stages": {
+      "rows": "任务记录",
+      "files": "文件"
+    },
+    "targets": {
+      "agentTraces": "Agent 追踪",
+      "evalArtifacts": "评估产物",
+      "evalOnline": "在线评估",
+      "workSubmissions": "工作提交",
+      "managedDesktopDeletion": "桌面结果删除",
+      "mediaGenerationJobs": "视频任务和文件",
+      "memoryGovernance": "记忆治理",
+      "notificationDelivery": "通知投递记录",
+      "ocrResults": "OCR 缓存",
+      "usageHistory": "用量与费用历史",
+      "retrievalControl": "检索治理",
+      "workflowAppData": "工作流应用数据",
+      "siteArtifacts": "站点产物",
+      "syncTombstones": "同步删除标记",
+      "sessionSideChats": "会话侧聊"
+    }
+  },
+  "retention": {
+    "desc": "超过此天数的 Agent 追踪 span 会在启动时及每天清理一次，避免本地数据库无限增长。",
+    "title": "追踪保留期",
+    "unit": "天",
+    "zeroHint": "设为 0 则永久保留追踪记录。"
   }
 }

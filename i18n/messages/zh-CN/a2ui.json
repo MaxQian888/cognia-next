@@ -15,6 +15,7 @@
   "aiEditUnavailable": "AI 暂不可用——本次未做任何改动。",
   "aiGenerate": "AI 生成",
   "aiPaperAnalysis": "AI 论文分析",
+  "aiPartialFailure": "AI 已应用部分修改后中止。请先检查当前草稿，再决定是否重试。",
   "aiRegeneratePrompt": "描述你想要修改的内容...",
   "allApps": "全部应用",
   "allCategories": "全部",
@@ -94,6 +95,16 @@
   "componentTree": "组件",
   "componentType": "组件类型",
   "continueWorking": "继续工作",
+  "controls": {
+    "dialogContent": "对话框内容",
+    "noResults": "无匹配结果",
+    "pickDate": "选择日期",
+    "required": "此项为必填项",
+    "search": "搜索…",
+    "select": "请选择…",
+    "submit": "提交",
+    "untitled": "未命名"
+  },
   "copied": "已复制!",
   "copiedExclamation": "已复制！",
   "copy": "复制",
@@ -412,8 +423,8 @@
     "errorLoading": "加载表层失败",
     "loading": "加载中...",
     "noContent": "暂无内容可显示",
-    "rendering": "渲染中...",
-    "preparing": "准备中…"
+    "preparing": "准备中…",
+    "rendering": "渲染中..."
   },
   "surfaceRoot": "Surface 根（包装现有根）",
   "systemShare": "系统分享",

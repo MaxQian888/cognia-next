@@ -54,5 +54,10 @@
   "stillWorking": "Still working… ({seconds}s)",
   "thinking": "Claude is thinking…",
   "languageLoadFailed": "Unable to load the language pack.",
-  "retryLanguage": "Retry"
+  "retryLanguage": "Retry",
+  "startupRecovery": {
+    "title": "The app could not finish starting",
+    "description": "The interface has not started yet. Check your connection and reload to try again. Your local data will be kept.",
+    "reload": "Reload app"
+  }
 }

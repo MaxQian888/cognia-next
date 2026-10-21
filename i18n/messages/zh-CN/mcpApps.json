@@ -5,11 +5,33 @@
   "resourceError": "无法安全加载 MCP App 资源。",
   "provenance": "来自 {server} 的应用 · {uri}",
   "reviewTitle": "逐项审阅应用请求的能力",
-  "confirmToolCall": "允许 {server} 调用 {tool} 吗？风险：{risk}。",
-  "confirmDestructiveToolCall": "这是破坏性操作。再次确认 {tool}？",
-  "confirmOpenLink": "打开指向 {hostname} 的链接吗？",
-  "confirmDownload": "将此下载放入隔离区以供审阅吗？",
   "quarantinedDownload": "隔离的下载（{count} 项）",
   "saveDownload": "审阅并保存",
-  "discardDownload": "丢弃"
+  "discardDownload": "丢弃",
+  "deny": "拒绝",
+  "risk": {
+    "read": "只读",
+    "write": "可修改数据",
+    "destructive": "破坏性"
+  },
+  "toolCall": {
+    "title": "允许应用运行 {tool}？",
+    "description": "{server} 请求调用 {tool}。风险：{risk}。",
+    "allow": "允许"
+  },
+  "destructiveToolCall": {
+    "title": "确认破坏性操作",
+    "description": "{tool} 被标记为破坏性操作，可能无法撤销。确定允许运行吗？",
+    "allow": "运行 {tool}"
+  },
+  "openLink": {
+    "title": "打开外部链接？",
+    "description": "应用请求在浏览器中打开 {hostname} 上的页面。",
+    "allow": "打开链接"
+  },
+  "download": {
+    "title": "隔离此下载？",
+    "description": "应用请求保存文件。文件会先隔离在此处，待你检查后再保存或丢弃。",
+    "allow": "隔离"
+  }
 }

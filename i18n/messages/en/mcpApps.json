@@ -5,11 +5,33 @@
   "resourceError": "The MCP App resource could not be loaded safely.",
   "provenance": "App from {server} · {uri}",
   "reviewTitle": "Review each requested app capability",
-  "confirmToolCall": "Allow {server} to call {tool}? Risk: {risk}.",
-  "confirmDestructiveToolCall": "This is destructive. Confirm {tool} again?",
-  "confirmOpenLink": "Open a link to {hostname}?",
-  "confirmDownload": "Place this download in quarantine for review?",
   "quarantinedDownload": "Quarantined download ({count} items)",
   "saveDownload": "Review and save",
-  "discardDownload": "Discard"
+  "discardDownload": "Discard",
+  "deny": "Deny",
+  "risk": {
+    "read": "read-only",
+    "write": "can change data",
+    "destructive": "destructive"
+  },
+  "toolCall": {
+    "title": "Allow the app to run {tool}?",
+    "description": "{server} wants to call {tool}. Risk: {risk}.",
+    "allow": "Allow"
+  },
+  "destructiveToolCall": {
+    "title": "Confirm a destructive action",
+    "description": "{tool} is marked destructive and may not be reversible. Allow it to run?",
+    "allow": "Run {tool}"
+  },
+  "openLink": {
+    "title": "Open an external link?",
+    "description": "The app wants to open a page on {hostname} in your browser.",
+    "allow": "Open link"
+  },
+  "download": {
+    "title": "Quarantine this download?",
+    "description": "The app wants to save files. They are held in quarantine here until you review and save or discard them.",
+    "allow": "Quarantine"
+  }
 }

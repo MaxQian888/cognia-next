@@ -16,6 +16,7 @@
     "aiEditUnavailable": "AI is unavailable right now — nothing was changed.",
     "aiGenerate": "AI Generate",
     "aiPaperAnalysis": "AI Paper Analysis",
+    "aiPartialFailure": "AI stopped after applying part of the change. Review the current draft before retrying.",
     "aiRegeneratePrompt": "Describe what you want to change...",
     "allApps": "All Apps",
     "allCategories": "All",
@@ -95,6 +96,16 @@
     "componentTree": "Components",
     "componentType": "Component type",
     "continueWorking": "Continue Working",
+    "controls": {
+      "dialogContent": "Dialog content",
+      "noResults": "No results",
+      "pickDate": "Pick a date",
+      "required": "This field is required",
+      "search": "Search...",
+      "select": "Select...",
+      "submit": "Submit",
+      "untitled": "Untitled"
+    },
     "copied": "Copied!",
     "copiedExclamation": "Copied!",
     "copy": "Copy",
@@ -1697,9 +1708,13 @@
       "recoveryUnlockAction": "Unlock and set a new password",
       "recoveryUnlockDescription": "Enter the one-time recovery key you saved when this account was created, then choose a new password. The recovery key keeps working afterwards.",
       "recoveryUnlockForm": "Unlock with a recovery key",
+      "registryFailureTitle": "Your accounts could not be loaded",
+      "registryTimeoutDescription": "Reading your local accounts took too long. Close other Cognia tabs or windows, then try again. Your local data has not been deleted.",
+      "registryUnavailableDescription": "Your local accounts could not be read. Check that this browser allows local storage, then try again.",
       "reloadWindow": "Reload the window",
       "rememberOnDeviceHelp": "Saved in this device’s secure storage, so it opens without asking next time. Your password keeps working.",
       "rememberOnDeviceLabel": "Remember password",
+      "retryRegistry": "Try loading accounts again",
       "revealPassword": "Show password",
       "runtimeBadgeBrowser": "Browser Vault on this device",
       "runtimeBadgeDesktop": "Desktop keychain on this device",
@@ -1714,7 +1729,8 @@
       "stageVerifying": "Checking your password",
       "storageLayoutBody": "The data on this device was written by a different version of the app. Your password is fine — there is nothing to unlock until the local data is reset. Resetting deletes this device's local copy. Anything you have backed up or synced to another device is not affected.",
       "storageLayoutReset": "Reset local data",
-      "storageLayoutResetConfirm": "Delete this device's local data? This cannot be undone. Backups and other devices are not affected.",
+      "storageLayoutResetConfirm": "This cannot be undone. Backups and other devices are not affected.",
+      "storageLayoutResetConfirmTitle": "Delete this device's local data?",
       "storageLayoutResetting": "Resetting…",
       "storageLayoutTitle": "Local data cannot be opened",
       "stuckBody": "Another window of this app may still be holding the database open. Close any other windows or tabs, then reload.",
@@ -2011,12 +2027,16 @@
     "runtimeTarget": {
       "active": "Active",
       "addHost": "Add Host",
+      "fallbackDescription": "{name} is the active Host. Pick the Host this browser should switch to after it is removed.",
+      "fallbackField": "Replacement Host",
       "fallbackInvalid": "Choose one of the saved fallback Hosts.",
-      "fallbackPrompt": "Enter the fallback Host id ({choices}).",
+      "fallbackTitle": "Choose a replacement Host",
       "heading": "Runtime target",
       "legacyMixed": "Legacy mixed (read-only)",
       "loadFailed": "Runtime targets could not be loaded.",
-      "removeConfirm": "Remove {name}? The Host must confirm revocation before local data is deleted.",
+      "removeConfirm": "The Host must confirm revocation before local data is deleted.",
+      "removeConfirmAction": "Remove Host",
+      "removeConfirmTitle": "Remove {name}?",
       "removeFailed": "The Host could not be removed.",
       "removeHost": "Remove {name}",
       "switchFailed": "Runtime target could not be switched.",
@@ -3075,11 +3095,9 @@
     "addExternalAgent": "Add an external agent…",
     "ariaLabel": "Choose agent runtime",
     "cogniaAgent": "Cognia Agent",
-    "enableExternal": "Turn on external agents",
     "engineAiSdk": "AI SDK, running {provider}",
     "engineClaudeAgentSdk": "Anthropic Agent SDK, in the bundled sidecar",
     "externalEmpty": "No external agents configured yet.",
-    "externalTurnedOff": "External agents are turned off.",
     "externalUnconfigured": "External (none selected)",
     "label": "Agent runtime",
     "lastCheckFailed": "Last check failed — it may not start.",
@@ -5070,7 +5088,9 @@
         "generatedEventCount": "{count} generated events",
         "generatedFiles": "Generated outputs",
         "generatedMetadataOnly": "Generated output content is not retained. Only its path, type, size, and lifecycle are recorded.",
-        "irreversibleApplyConfirm": "The local task ledger is full, so Cognia cannot retain the inverse patch. Apply this selection once without task undo? Existing workspace changes remain protected by conflict checks.",
+        "irreversibleApplyConfirm": "The local task ledger is full, so Cognia cannot keep the inverse patch for this apply. Existing workspace changes stay protected by conflict checks.",
+        "irreversibleApplyConfirmAction": "Apply once",
+        "irreversibleApplyConfirmTitle": "Apply without task undo?",
         "lastDay": "Last 24 hours",
         "lastFiveMinutes": "Last 5 minutes",
         "lastHour": "Last hour",
@@ -5095,7 +5115,8 @@
         "selectHunks": "Select hunks",
         "selectResource": "Select a task resource to inspect it.",
         "sensitive": "Sensitive resource",
-        "sensitiveConfirm": "Authorize this one sensitive resource operation? Its contents remain on the execution host.",
+        "sensitiveConfirm": "This authorizes a single operation on a sensitive resource. Its contents remain on the execution host.",
+        "sensitiveConfirmTitle": "Authorize one sensitive operation?",
         "sensitiveDescription": "This path may contain credentials or secrets. Each read or download requires explicit authorization and remote control.",
         "source": "Source",
         "sourceEventCount": "{count} source events",
@@ -5214,6 +5235,13 @@
     },
     "audit": {
       "clear": "Clear Log",
+      "clearConfirm": {
+        "action": "Clear log",
+        "description": "Every automation audit record on this device will be deleted. This cannot be undone.",
+        "title": "Clear the audit log?"
+      },
+      "clearFailed": "Failed to clear the audit log",
+      "cleared": "Audit log cleared",
       "columns": {
         "command": "Command",
         "decision": "Decision",
@@ -5237,6 +5265,7 @@
         "surfacePlugin": "Plugin",
         "surfaceWorkflow": "Workflow"
       },
+      "loadFailed": "Failed to load the audit log",
       "loading": "Loading audit log…",
       "title": "Audit Log"
     },
@@ -5829,7 +5858,9 @@
     },
     "chip": "Best-of-N for the next send",
     "chooseBranch": "Choose an existing branch",
+    "clear": "Turn off Best-of-N for the next send",
     "committedOnly": "Attempts start from the committed SHA only. Uncommitted changes are never carried over.",
+    "compactAttempts": "×{count}",
     "description": "Run independent attempts from one committed base, then choose a winner manually.",
     "dirty": "This checkout has uncommitted changes. They will not be carried into the attempts.",
     "existingBranch": "Explicitly choose an existing branch",
@@ -5837,6 +5868,7 @@
     "externalCost": "External agents do not report cost, so their cost is shown as unknown. A dollar budget cannot be enforced for them.",
     "failed": "Could not start best-of-N: {error}",
     "invalidPolicy": "The committed acceptance policy is invalid. Fix it before starting best-of-N.",
+    "label": "Best-of-N",
     "manualOnly": "You choose the winner manually. Picking early stops the other attempts. Publishing updates only the chosen local branch; nothing is pushed.",
     "mixedBatch": "/best-of-n must be the whole message. Send it on its own, without other commands.",
     "needsCommit": "Commit the repository before starting best-of-N.",
@@ -8381,7 +8413,6 @@
         "blocked": "{runtime} can't run here",
         "blockedDetail": "{runtime} can't run here: {detail}",
         "busy": "Wait for the current reply to finish before addressing @{handle}.",
-        "disabled": "External agents are turned off.",
         "emptyPrompt": "Add a message after @{handle}.",
         "memberMissing": "@{handle} is no longer in a Squad.",
         "memberRuntime": "{name} runs on {runtime}, which isn't available here.",
@@ -17977,13 +18008,17 @@
     },
     "instanceSection": {
       "description": "What sets it apart from the other configurations of the same runtime, and what it shares with them.",
+      "folderCopied": "Folder path copied",
+      "folderCopy": "Copy folder path",
+      "folderCopyFailed": "Couldn't copy the folder path",
       "folderElsewhere": "Its state folder is on the computer that runs it.",
       "folderError": "Couldn't read its state folder: {message}",
+      "folderLabel": "State folder",
       "folderLoading": "Looking up its state folder…",
       "folderNotCreated": "Created on first launch",
       "folderReveal": "Show folder",
       "remoteState": "This agent runs on a server, which keeps its state. There is nothing on this computer to separate.",
-      "sessionLimit": "Open sessions at most",
+      "sessionLimit": "Session limit",
       "sessionLimitHint": "Opening one more closes the least recently used idle session first. Leave empty for no limit.",
       "sessionLimitUnlimited": "Unlimited",
       "sharedWith": "{count, plural, one {Shares its login, settings and session history with {names}. Choose “Own state” to keep them apart.} other {Shares its login, settings and session history with {names}. Choose “Own state” to keep them apart.}}",
@@ -18719,8 +18754,6 @@
       "duplicateHint": "Make a copy with the same settings and credentials. The copy asks again for any unsandboxed-launch approval.",
       "duplicateName": "{name} (copy)",
       "editAgent": "Edit Agent",
-      "enableExternalAgents": "Enable External Agents",
-      "enableExternalAgentsDesc": "Allow using external agents like Claude Code via ACP protocol",
       "endpoint": "Endpoint URL",
       "endpointInvalid": "Enter a valid HTTP or HTTPS endpoint URL.",
       "endpointRequired": "Endpoint URL is required for HTTP transport",
@@ -18746,9 +18779,9 @@
       "inspectorEnabled": "Enabled",
       "inspectorEnabledAria": "Enable {name}",
       "inspectorKeySaved": "Saved — leave empty to keep",
-      "inspectorMasterDisabled": "Enable external agents to connect.",
       "inspectorNameLabel": "Name",
       "inspectorRename": "Rename {name}",
+      "inspectorRuntimeDetails": "Runtime details",
       "inspectorStatus": "Status",
       "inspectorTabAdvanced": "Advanced",
       "inspectorTabConnection": "Connection",
@@ -22049,8 +22082,12 @@
         "pinned": "Pinned",
         "proactivePush": "Proactive IM notifications",
         "proactivePushHint": "Allow the assistant to proactively push task-complete / error / input-required events back to this conversation. Off by default.",
-        "promoteConfirm": "Promote these explicit conversation values to adapter defaults?\n\n{changes}",
-        "promotePermissionConfirm": "This promotion changes the adapter Built-in Skill ceiling or HITL default and can affect other conversations. Continue?",
+        "promoteConfirm": "These explicit values from this conversation become the adapter defaults. Existing conversation overrides are not rewritten.",
+        "promoteConfirmAction": "Promote",
+        "promoteConfirmTitle": "Promote to adapter defaults?",
+        "promotePermissionAction": "Promote anyway",
+        "promotePermissionConfirm": "The promotion changes the adapter Built-in Skill ceiling or write-skill HITL default, which applies to every conversation that does not override it.",
+        "promotePermissionTitle": "This affects other conversations",
         "promoteToAdapter": "Promote to Adapter default",
         "promoteToAdapterTitle": "Promote supported explicit values without rewriting conversation overrides",
         "promotionFields": {
@@ -22221,8 +22258,10 @@
       "description": "One or more inbound messages could not be processed and need recovery.",
       "dismiss": "Dismiss",
       "message": "Message {id}: {reason}",
+      "retryConfirmAction": "Retry from start",
+      "retryConfirmTitle": "Retry from the start?",
       "retryFromStart": "Retry from start",
-      "retryWarning": "Retrying from the start will re-process the message and may repeat external side effects. Continue?",
+      "retryWarning": "The message will be processed again from the beginning, which may repeat external side effects such as sent replies or created records.",
       "title": "Inbound recovery",
       "unknown": "Unknown reason"
     },
@@ -24332,6 +24371,11 @@
     },
     "pageLoading": "Loading…",
     "retryLanguage": "Retry",
+    "startupRecovery": {
+      "description": "The interface has not started yet. Check your connection and reload to try again. Your local data will be kept.",
+      "reload": "Reload app",
+      "title": "The app could not finish starting"
+    },
     "stillWorking": "Still working… ({seconds}s)",
     "thinking": "Claude is thinking…"
   },
@@ -26186,18 +26230,40 @@
   },
   "mcpApps": {
     "approvalRequired": "This MCP App requests capabilities that have not been approved.",
-    "confirmDestructiveToolCall": "This is destructive. Confirm {tool} again?",
-    "confirmDownload": "Place this download in quarantine for review?",
-    "confirmOpenLink": "Open a link to {hostname}?",
-    "confirmToolCall": "Allow {server} to call {tool}? Risk: {risk}.",
+    "deny": "Deny",
+    "destructiveToolCall": {
+      "allow": "Run {tool}",
+      "description": "{tool} is marked destructive and may not be reversible. Allow it to run?",
+      "title": "Confirm a destructive action"
+    },
     "discardDownload": "Discard",
+    "download": {
+      "allow": "Quarantine",
+      "description": "The app wants to save files. They are held in quarantine here until you review and save or discard them.",
+      "title": "Quarantine this download?"
+    },
     "frameTitle": "App from {server}",
+    "openLink": {
+      "allow": "Open link",
+      "description": "The app wants to open a page on {hostname} in your browser.",
+      "title": "Open an external link?"
+    },
     "provenance": "App from {server} · {uri}",
     "quarantinedDownload": "Quarantined download ({count} items)",
     "resourceError": "The MCP App resource could not be loaded safely.",
     "reviewTitle": "Review each requested app capability",
+    "risk": {
+      "destructive": "destructive",
+      "read": "read-only",
+      "write": "can change data"
+    },
     "runtimeError": "The MCP App could not start safely.",
-    "saveDownload": "Review and save"
+    "saveDownload": "Review and save",
+    "toolCall": {
+      "allow": "Allow",
+      "description": "{server} wants to call {tool}. Risk: {risk}.",
+      "title": "Allow the app to run {tool}?"
+    }
   },
   "memory": {
     "add": {
@@ -26971,7 +27037,9 @@
         "listenerFailed": "Could not read browser access status. Reopen this page to try again.",
         "originHint": "After installing the extension, add its chrome-extension:// origin to the allowed origins under Connectivity → Local host → Browser access. The extension shows it on its connection screen.",
         "pairedConnected": "Connected",
+        "pairedConnectedAt": "Connected since {time}",
         "pairedEmpty": "No browser is paired yet.",
+        "pairedFeatures": "Features: {features}",
         "pairedHint": "Paired browsers appear in the device console, where you can revoke one.",
         "pairedLoadFailed": "Could not read the paired browsers.",
         "pairedOffline": "Not connected",
@@ -28826,9 +28894,11 @@
         "cta": "Sign out / re-pair"
       },
       "signOutDescription": "You'll need to scan the QR again to reconnect.",
+      "signOutFallbackConfirm": "Sign out",
+      "signOutFallbackDescription": "This Host is the active one. Pick the saved Host this device should switch to after signing out.",
+      "signOutFallbackField": "Replacement Host",
       "signOutFallbackInvalid": "Choose one of the saved fallback Hosts.",
-      "signOutFallbackPrompt": "Enter the fallback Host id ({choices}).",
-      "signOutFallbackRequired": "A fallback Host is required before removing the active Host.",
+      "signOutFallbackTitle": "Choose a replacement Host",
       "signOutReason": "Confirm sign out",
       "signOutTitle": "Sign out",
       "step": {
@@ -34916,6 +34986,8 @@
       "dangerousAria": "Sensitive permission",
       "dangerousSection": "Sensitive permissions",
       "descriptions": {
+        "agent-config:read": "See your agent configuration — instruction files, Skills, agents, prompts and templates — and a summary of hooks, permission rules and MCP servers (never their secrets)",
+        "agent-config:write": "Change your instruction files, Skills, agents and prompts, after you confirm each change",
         "agent:control": "Control agent execution",
         "agent:dispatch": "Dispatch built-in subagents and agent teams",
         "agent:dispatch-external": "Dispatch external coding agents (Claude Code / Codex / …)",
@@ -37910,6 +37982,28 @@
         "exportJson": "Export sanitized diagnostic history as JSON",
         "title": "History"
       },
+      "maintenance": {
+        "description": "Source attempts, successes and backoff are independent of clock completion. These diagnostics do not send notifications.",
+        "manualRetry": "Waiting for manual credential verification",
+        "never": "No evidence",
+        "outcome": {
+          "blocked": "Blocked",
+          "failed": "Failed",
+          "skipped": "Skipped",
+          "succeeded": "Succeeded"
+        },
+        "status": {
+          "idle": "Idle",
+          "paused-auth": "Authentication paused",
+          "paused-offline": "Offline paused",
+          "paused-vault": "Vault paused",
+          "running": "Running",
+          "scheduled": "Scheduled (including backoff)"
+        },
+        "times": "Last attempt: {attempt}; last success: {success}; next check: {next}; consecutive failures: {failures}",
+        "title": "Background maintenance",
+        "unknown": "No source maintenance evidence is available in this runtime. Remote source state is not projected."
+      },
       "matrix": {
         "cost": "Estimated cost",
         "description": "Raw metrics and confidence remain visible; no opaque composite score is calculated.",
@@ -37997,7 +38091,6 @@
       "manage": "Manage in External Agents",
       "runsOnHost": "Runs on the paired host",
       "summary": "{working} of {total} ready",
-      "switchedOff": "External agents are switched off, so the {count} configured here will not run until you turn them back on.",
       "title": "Agents with their own model access"
     },
     "failed": "failed",
@@ -47807,7 +47900,8 @@
       "permissionsEditor": {
         "builtInSkills": "Built-in Skills ceiling",
         "cancel": "Cancel",
-        "confirmImpact": "Save this permission ceiling? It can block skills and host capabilities across every conversation on this adapter.",
+        "confirmImpact": "It can block skills and host capabilities across every conversation on this adapter.",
+        "confirmImpactTitle": "Save this permission ceiling?",
         "conversationGrantRequired": "The adapter can only cap this capability; each conversation must grant it explicitly.",
         "hitl": "Require HITL for write skills",
         "hitlHelp": "Conversation settings may override this default. Destructive skills always require approval.",
@@ -48899,6 +48993,7 @@
       "tunnel": {
         "busyBody": "This app runs one cloudflared process. It is exposing {localUrl} at {publicUrl} for another feature. Replacing it changes what that public URL points at.",
         "busyCancelled": "Left the existing tunnel running.",
+        "busyKeep": "Keep it",
         "busyReplace": "Replace the tunnel",
         "busyStopBody": "This app runs one cloudflared process, and it is exposing {localUrl} at {publicUrl} for another feature. Stopping it here takes that public URL down too.",
         "busyStopConfirm": "Stop it anyway",
@@ -49753,6 +49848,52 @@
         "title": "Trace retention",
         "unit": "days",
         "zeroHint": "Set to 0 to keep traces forever."
+      },
+      "retentionHealth": {
+        "description": "Last sweep in this window and account only. Other windows or a restart have unknown evidence. No notifications are sent. Raw usage keeps 90 days; cost rollups also keep the complete boundary local day.",
+        "lastSweep": "Last completed: {when}",
+        "reasons": {
+          "cleanup-pending": "Waiting for original host cleanup",
+          "configured-off": "Retention disabled",
+          "file-delete-failed": "File deletion incomplete",
+          "file-metadata-unknown": "File age unknown",
+          "prune-failed": "Prune incomplete",
+          "unsupported-host": "Inapplicable on this host",
+          "vault-locked": "Vault locked"
+        },
+        "removed": "{count} removed",
+        "stages": {
+          "files": "Files",
+          "rows": "Job records"
+        },
+        "status": {
+          "blocked": "Blocked",
+          "completed": "Completed",
+          "completed-no-work": "Completed, no work",
+          "failed": "Failed",
+          "off": "Off or inapplicable",
+          "partial": "Partially completed",
+          "unknown": "Unknown"
+        },
+        "targets": {
+          "agentTraces": "Agent traces",
+          "evalArtifacts": "Evaluation artifacts",
+          "evalOnline": "Online evaluation",
+          "managedDesktopDeletion": "Desktop result deletion",
+          "mediaGenerationJobs": "Video jobs and files",
+          "memoryGovernance": "Memory governance",
+          "notificationDelivery": "Notification delivery",
+          "ocrResults": "OCR cache",
+          "retrievalControl": "Retrieval governance",
+          "sessionSideChats": "Session side chats",
+          "siteArtifacts": "Site artifacts",
+          "syncTombstones": "Sync deletion markers",
+          "usageHistory": "Usage and cost history",
+          "workSubmissions": "Work submissions",
+          "workflowAppData": "Workflow app data"
+        },
+        "title": "Background retention diagnostics",
+        "unknown": "No sweep evidence in this window."
       },
       "schedule": {
         "currentCount": "{count, plural, =1 {1 active schedule} other {# active schedules}}",
@@ -53281,6 +53422,7 @@
           "cli": "from the CLI",
           "editor": "from the editor",
           "import": "imported",
+          "plugin": "applied by a plugin",
           "restore": "restored"
         },
         "restore": "Restore as a new revision",
@@ -61490,6 +61632,7 @@
         "retryHint": "Re-run the original step after applying the fix.",
         "title": "Error Diagnosis"
       },
+      "close": "Close AI Shell",
       "context": {
         "branch": "Branch",
         "cwd": "CWD",
@@ -61507,12 +61650,22 @@
         "title": "AI Shell history"
       },
       "inputPlaceholder": "Describe what you want to do…",
+      "messages": {
+        "executionFailed": "Command completion could not be confirmed. An interrupt was requested; inspect the terminal before retrying.",
+        "generatedPlan": "Generated a plan with {count, plural, one {# step} other {# steps}}. Review each command before running.",
+        "generationFailed": "Failed to generate a plan.",
+        "noSession": "No active terminal session.",
+        "sensitiveContext": "Terminal context contains sensitive data. Redact it before retrying.",
+        "terminalBusy": "The terminal is busy. Wait for the current command to finish.",
+        "terminalUnavailable": "The terminal session is unavailable."
+      },
       "plan": {
         "cancelled": "Plan cancelled.",
         "completed": "All steps completed.",
         "empty": "No steps generated.",
         "error": "Failed to generate plan.",
         "executing": "Executing…",
+        "failed": "Execution stopped after a failed step.",
         "generating": "Generating plan…",
         "ready": "Plan ready — review and run.",
         "title": "Execution Plan"
@@ -61532,7 +61685,7 @@
         "succeeded": "Done"
       },
       "title": "AI Shell",
-      "toggle": "Toggle AI Shell (Ctrl+Shift+I)"
+      "toggle": "Toggle AI Shell"
     },
     "commandMenu": {
       "copyCommand": "Copy command",
@@ -61767,14 +61920,16 @@
       "participantViewer": "viewing",
       "participantsLabel": "Attached devices",
       "readOnly": "Read-only",
-      "releaseConfirm": "Release control of this session? Another client can then take over.",
+      "releaseConfirm": "Another client can then take over.",
+      "releaseConfirmTitle": "Release control of this session?",
       "releaseControl": "Release control",
       "replayGap": "Output before sequence {firstAvailable} is no longer available.",
       "replayGapMarker": "Earlier terminal output is unavailable because the replay buffer was truncated.",
       "sandboxed": "Sandboxed",
       "shared": "Shared with {count, plural, one {# device} other {# devices}}",
       "takeControl": "Take control",
-      "takeoverConfirm": "Take control of this session? The current controller will become read-only."
+      "takeoverConfirm": "The current controller will become read-only.",
+      "takeoverConfirmTitle": "Take control of this session?"
     },
     "share": {
       "description": "Paired devices with the remote-terminal grant attach to this host session over the companion link and share the same control lease: one controller at a time, everyone else read-only. Nothing is copied and no link is created.",

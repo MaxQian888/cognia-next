@@ -374,8 +374,8 @@
       "pinned": "Pinned",
       "proactivePush": "Proactive IM notifications",
       "proactivePushHint": "Allow the assistant to proactively push task-complete / error / input-required events back to this conversation. Off by default.",
-      "promoteConfirm": "Promote these explicit conversation values to adapter defaults?\n\n{changes}",
-      "promotePermissionConfirm": "This promotion changes the adapter Built-in Skill ceiling or HITL default and can affect other conversations. Continue?",
+      "promoteConfirm": "These explicit values from this conversation become the adapter defaults. Existing conversation overrides are not rewritten.",
+      "promotePermissionConfirm": "The promotion changes the adapter Built-in Skill ceiling or write-skill HITL default, which applies to every conversation that does not override it.",
       "promoteToAdapter": "Promote to Adapter default",
       "promoteToAdapterTitle": "Promote supported explicit values without rewriting conversation overrides",
       "promotionFields": {
@@ -435,7 +435,11 @@
       "workflowBinding": "Visual Workflow (name or id)",
       "workflowBindingHelp": "When set (and no team is bound — a team wins), inbound messages run this Visual Workflow instead of a single character; the message text is the trigger payload and progress streams back to the conversation.",
       "workflowBindingPlaceholder": "(none — replies use the character)",
-      "workflowProduction": "Production"
+      "workflowProduction": "Production",
+      "promoteConfirmTitle": "Promote to adapter defaults?",
+      "promoteConfirmAction": "Promote",
+      "promotePermissionTitle": "This affects other conversations",
+      "promotePermissionAction": "Promote anyway"
     },
     "gearAria": "Open per-conversation override settings",
     "mediaGrant": {
@@ -538,9 +542,11 @@
     "dismiss": "Dismiss",
     "message": "Message {id}: {reason}",
     "retryFromStart": "Retry from start",
-    "retryWarning": "Retrying from the start will re-process the message and may repeat external side effects. Continue?",
+    "retryWarning": "The message will be processed again from the beginning, which may repeat external side effects such as sent replies or created records.",
     "title": "Inbound recovery",
-    "unknown": "Unknown reason"
+    "unknown": "Unknown reason",
+    "retryConfirmTitle": "Retry from the start?",
+    "retryConfirmAction": "Retry from start"
   },
   "labels": {
     "addAria": "Add or remove labels",

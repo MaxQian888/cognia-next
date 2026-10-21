@@ -16,6 +16,7 @@
     "aiEditUnavailable": "AI 暂不可用——本次未做任何改动。",
     "aiGenerate": "AI 生成",
     "aiPaperAnalysis": "AI 论文分析",
+    "aiPartialFailure": "AI 已应用部分修改后中止。请先检查当前草稿，再决定是否重试。",
     "aiRegeneratePrompt": "描述你想要修改的内容...",
     "allApps": "全部应用",
     "allCategories": "全部",
@@ -95,6 +96,16 @@
     "componentTree": "组件",
     "componentType": "组件类型",
     "continueWorking": "继续工作",
+    "controls": {
+      "dialogContent": "对话框内容",
+      "noResults": "无匹配结果",
+      "pickDate": "选择日期",
+      "required": "此项为必填项",
+      "search": "搜索…",
+      "select": "请选择…",
+      "submit": "提交",
+      "untitled": "未命名"
+    },
     "copied": "已复制!",
     "copiedExclamation": "已复制！",
     "copy": "复制",
@@ -1697,9 +1708,13 @@
       "recoveryUnlockAction": "解锁并设置新密码",
       "recoveryUnlockDescription": "输入创建账户时保存的一次性恢复密钥，然后设置新密码。恢复密钥在此之后依然有效。",
       "recoveryUnlockForm": "使用恢复密钥解锁",
+      "registryFailureTitle": "无法加载本地账号",
+      "registryTimeoutDescription": "读取本地账号超时。请关闭其他 Cognia 标签页或窗口后重试。本地数据未被删除。",
+      "registryUnavailableDescription": "无法读取本地账号。请检查浏览器是否允许使用本地存储，然后重试。",
       "reloadWindow": "重新加载窗口",
       "rememberOnDeviceHelp": "保存在本设备的安全存储中，下次打开时自动解锁。原密码仍然有效。",
       "rememberOnDeviceLabel": "记住密码",
+      "retryRegistry": "重新加载账号",
       "revealPassword": "显示密码",
       "runtimeBadgeBrowser": "本设备的浏览器保险库",
       "runtimeBadgeDesktop": "本设备的桌面密钥链",
@@ -1714,7 +1729,8 @@
       "stageVerifying": "校验密码",
       "storageLayoutBody": "本机数据由另一个版本的应用写入。密码没有问题，但在重置本机数据之前没有可解锁的内容。重置只会删除本机的这份副本，已备份或已同步到其他设备的数据不受影响。",
       "storageLayoutReset": "重置本机数据",
-      "storageLayoutResetConfirm": "确定删除本机数据吗？此操作不可撤销。备份和其他设备不受影响。",
+      "storageLayoutResetConfirm": "此操作不可撤销。备份和其他设备不受影响。",
+      "storageLayoutResetConfirmTitle": "确定删除本机数据吗？",
       "storageLayoutResetting": "正在重置…",
       "storageLayoutTitle": "无法打开本机数据",
       "stuckBody": "可能有本应用的另一个窗口仍占用着数据库。请关闭其他窗口或标签页后重新加载。",
@@ -2011,12 +2027,16 @@
     "runtimeTarget": {
       "active": "当前",
       "addHost": "添加 Host",
+      "fallbackDescription": "{name} 是当前使用的 Host。请选择移除后此浏览器要切换到的 Host。",
+      "fallbackField": "替代 Host",
       "fallbackInvalid": "请选择一个已保存的备用 Host。",
-      "fallbackPrompt": "请输入备用 Host ID（{choices}）。",
+      "fallbackTitle": "选择替代 Host",
       "heading": "运行目标",
       "legacyMixed": "旧版混合数据（只读）",
       "loadFailed": "无法加载运行目标。",
-      "removeConfirm": "要移除 {name} 吗？只有 Host 确认撤销后才会删除本地数据。",
+      "removeConfirm": "只有 Host 确认撤销后才会删除本地数据。",
+      "removeConfirmAction": "移除 Host",
+      "removeConfirmTitle": "要移除 {name} 吗？",
       "removeFailed": "无法移除该 Host。",
       "removeHost": "移除 {name}",
       "switchFailed": "无法切换运行目标。",
@@ -3075,11 +3095,9 @@
     "addExternalAgent": "添加外部代理…",
     "ariaLabel": "选择代理运行时",
     "cogniaAgent": "Cognia 智能体",
-    "enableExternal": "启用外部代理",
     "engineAiSdk": "AI SDK，运行 {provider}",
     "engineClaudeAgentSdk": "Anthropic Agent SDK，运行于随附 sidecar",
     "externalEmpty": "尚未配置外部代理。",
-    "externalTurnedOff": "外部代理已关闭。",
     "externalUnconfigured": "外部代理（未选择）",
     "label": "代理运行时",
     "lastCheckFailed": "上次检查失败 — 可能无法启动。",
@@ -5070,7 +5088,9 @@
         "generatedEventCount": "{count} 个产物事件",
         "generatedFiles": "生成产物",
         "generatedMetadataOnly": "不会保留生成产物正文，仅记录相对路径、类型、大小和生命周期。",
-        "irreversibleApplyConfirm": "本地任务账本容量已满，Cognia 无法保留反向补丁。是否单次不可逆地应用所选改动？现有工作区改动仍受冲突检查保护。",
+        "irreversibleApplyConfirm": "本地任务账本容量已满，Cognia 无法为本次应用保留反向补丁。现有工作区改动仍受冲突检查保护。",
+        "irreversibleApplyConfirmAction": "单次应用",
+        "irreversibleApplyConfirmTitle": "不保留任务撤销直接应用？",
         "lastDay": "最近 24 小时",
         "lastFiveMinutes": "最近 5 分钟",
         "lastHour": "最近 1 小时",
@@ -5095,7 +5115,8 @@
         "selectHunks": "选择差异区块",
         "selectResource": "选择一个任务资源进行检查。",
         "sensitive": "敏感资源",
-        "sensitiveConfirm": "授权本次敏感资源操作？正文仍保留在实际执行端。",
+        "sensitiveConfirm": "仅授权对此敏感资源的单次操作，正文仍保留在实际执行端。",
+        "sensitiveConfirmTitle": "授权一次敏感操作？",
         "sensitiveDescription": "此路径可能包含凭据或密钥。每次读取或下载都需要显式授权和远程控制权限。",
         "source": "源码",
         "sourceEventCount": "{count} 个源码事件",
@@ -5214,6 +5235,13 @@
     },
     "audit": {
       "clear": "清除日志",
+      "clearConfirm": {
+        "action": "清空日志",
+        "description": "将删除此设备上的全部自动化审计记录，且无法撤销。",
+        "title": "清空审计日志？"
+      },
+      "clearFailed": "清空审计日志失败",
+      "cleared": "审计日志已清空",
       "columns": {
         "command": "命令",
         "decision": "裁决",
@@ -5237,6 +5265,7 @@
         "surfacePlugin": "插件",
         "surfaceWorkflow": "工作流"
       },
+      "loadFailed": "加载审计日志失败",
       "loading": "正在加载审计日志……",
       "title": "审计日志"
     },
@@ -5829,7 +5858,9 @@
     },
     "chip": "下一次发送的 Best-of-N",
     "chooseBranch": "选择已有分支",
+    "clear": "取消下一次发送的多方案尝试",
     "committedOnly": "候选尝试仅从已提交的 SHA 开始，未提交的修改不会带入。",
+    "compactAttempts": "×{count}",
     "description": "从同一已提交基线运行多个独立尝试，然后手动选择结果。",
     "dirty": "当前工作区存在未提交的修改，这些修改不会带入候选尝试。",
     "existingBranch": "明确选择已有分支",
@@ -5837,6 +5868,7 @@
     "externalCost": "外部 agent 不报告费用，费用显示为未知，也无法对其执行金额预算。",
     "failed": "无法启动 Best-of-N：{error}",
     "invalidPolicy": "已提交的验收策略无效，请修复后再启动。",
+    "label": "多方案尝试",
     "manualOnly": "由你手动选择结果。提前选择会停止其他尝试。发布仅更新选定的本地分支，不会推送。",
     "mixedBatch": "/best-of-n 必须单独作为整条消息发送，不能和其他命令一起发送。",
     "needsCommit": "请先提交仓库，再启动 Best-of-N。",
@@ -8381,7 +8413,6 @@
         "blocked": "{runtime} 无法在此运行",
         "blockedDetail": "{runtime} 无法在此运行：{detail}",
         "busy": "请等当前回复结束后，再发给 @{handle}。",
-        "disabled": "外部智能体已关闭。",
         "emptyPrompt": "请在 @{handle} 后输入消息。",
         "memberMissing": "@{handle} 已不在任何 Squad 中。",
         "memberRuntime": "{name} 运行在 {runtime} 上，此处不可用。",
@@ -17977,13 +18008,17 @@
     },
     "instanceSection": {
       "description": "它与同一运行时的其他配置有何不同，又共享了什么。",
+      "folderCopied": "已复制目录路径",
+      "folderCopy": "复制目录路径",
+      "folderCopyFailed": "无法复制目录路径",
       "folderElsewhere": "其状态目录位于运行它的电脑上。",
       "folderError": "无法读取其状态目录：{message}",
+      "folderLabel": "状态目录",
       "folderLoading": "正在查找其状态目录…",
       "folderNotCreated": "首次启动时创建",
       "folderReveal": "显示目录",
       "remoteState": "该 Agent 运行在服务端，状态由服务端保存，这台电脑上没有需要隔离的内容。",
-      "sessionLimit": "最多同时打开的会话数",
+      "sessionLimit": "会话上限",
       "sessionLimitHint": "再打开一个会话时，会先关闭最久未使用的空闲会话。留空表示不限制。",
       "sessionLimitUnlimited": "不限",
       "sharedWith": "与 {names} 共用登录、设置和会话历史。{count, plural, other {选择「独立状态」可将它们分开。}}",
@@ -18719,8 +18754,6 @@
       "duplicateHint": "创建一个设置和凭据相同的副本。副本需要重新批准非沙箱启动。",
       "duplicateName": "{name}（副本）",
       "editAgent": "编辑代理",
-      "enableExternalAgents": "启用外部代理",
-      "enableExternalAgentsDesc": "允许通过 ACP 协议使用外部代理（如 Claude Code）",
       "endpoint": "Endpoint URL",
       "endpointInvalid": "请输入有效的 HTTP 或 HTTPS 服务地址。",
       "endpointRequired": "HTTP 传输需要填写 Endpoint URL",
@@ -18746,9 +18779,9 @@
       "inspectorEnabled": "已启用",
       "inspectorEnabledAria": "启用 {name}",
       "inspectorKeySaved": "已保存 — 留空以保留",
-      "inspectorMasterDisabled": "请先启用外部代理，再连接。",
       "inspectorNameLabel": "名称",
       "inspectorRename": "重命名 {name}",
+      "inspectorRuntimeDetails": "运行信息",
       "inspectorStatus": "状态",
       "inspectorTabAdvanced": "高级",
       "inspectorTabConnection": "连接",
@@ -22049,8 +22082,12 @@
         "pinned": "置顶",
         "proactivePush": "主动 IM 通知",
         "proactivePushHint": "允许助手将任务完成 / 出错 / 需输入等事件主动推送回此会话。默认关闭。",
-        "promoteConfirm": "将这些会话显式值提升为 Adapter 默认值？\n\n{changes}",
-        "promotePermissionConfirm": "本次提升会改变 Adapter 的内置 Skill 上限或 HITL 默认值，并可能影响其他会话。是否继续？",
+        "promoteConfirm": "此会话中的以下显式值将成为 Adapter 默认值，已有的会话覆盖不会被改写。",
+        "promoteConfirmAction": "提升",
+        "promoteConfirmTitle": "提升为 Adapter 默认值？",
+        "promotePermissionAction": "仍然提升",
+        "promotePermissionConfirm": "本次提升会改变 Adapter 的内置 Skill 上限或写入类 Skill 二次确认默认值，并作用于所有未单独覆盖的会话。",
+        "promotePermissionTitle": "此操作会影响其他会话",
         "promoteToAdapter": "提升为 Adapter 默认",
         "promoteToAdapterTitle": "仅提升支持的显式值，不改写已有会话覆盖",
         "promotionFields": {
@@ -22221,8 +22258,10 @@
       "description": "有一条或多条入站消息未能处理，需要恢复。",
       "dismiss": "忽略",
       "message": "消息 {id}：{reason}",
+      "retryConfirmAction": "从头重试",
+      "retryConfirmTitle": "从头重试？",
       "retryFromStart": "从头重试",
-      "retryWarning": "从头重试会重新处理该消息，并可能重复触发外部副作用。是否继续？",
+      "retryWarning": "消息将从头重新处理，可能重复已发生的外部副作用，例如已发送的回复或已创建的记录。",
       "title": "入站恢复",
       "unknown": "未知原因"
     },
@@ -24332,6 +24371,11 @@
     },
     "pageLoading": "加载中…",
     "retryLanguage": "重试",
+    "startupRecovery": {
+      "description": "界面尚未启动，请检查网络连接后重新载入。本地数据会保留。",
+      "reload": "重新载入应用",
+      "title": "应用启动未完成"
+    },
     "stillWorking": "仍在进行…（{seconds} 秒）",
     "thinking": "Claude 正在思考…"
   },
@@ -26186,18 +26230,40 @@
   },
   "mcpApps": {
     "approvalRequired": "此 MCP App 请求了尚未批准的能力。",
-    "confirmDestructiveToolCall": "这是破坏性操作。再次确认 {tool}？",
-    "confirmDownload": "将此下载放入隔离区以供审阅吗？",
-    "confirmOpenLink": "打开指向 {hostname} 的链接吗？",
-    "confirmToolCall": "允许 {server} 调用 {tool} 吗？风险：{risk}。",
+    "deny": "拒绝",
+    "destructiveToolCall": {
+      "allow": "运行 {tool}",
+      "description": "{tool} 被标记为破坏性操作，可能无法撤销。确定允许运行吗？",
+      "title": "确认破坏性操作"
+    },
     "discardDownload": "丢弃",
+    "download": {
+      "allow": "隔离",
+      "description": "应用请求保存文件。文件会先隔离在此处，待你检查后再保存或丢弃。",
+      "title": "隔离此下载？"
+    },
     "frameTitle": "来自 {server} 的应用",
+    "openLink": {
+      "allow": "打开链接",
+      "description": "应用请求在浏览器中打开 {hostname} 上的页面。",
+      "title": "打开外部链接？"
+    },
     "provenance": "来自 {server} 的应用 · {uri}",
     "quarantinedDownload": "隔离的下载（{count} 项）",
     "resourceError": "无法安全加载 MCP App 资源。",
     "reviewTitle": "逐项审阅应用请求的能力",
+    "risk": {
+      "destructive": "破坏性",
+      "read": "只读",
+      "write": "可修改数据"
+    },
     "runtimeError": "MCP App 无法安全启动。",
-    "saveDownload": "审阅并保存"
+    "saveDownload": "审阅并保存",
+    "toolCall": {
+      "allow": "允许",
+      "description": "{server} 请求调用 {tool}。风险：{risk}。",
+      "title": "允许应用运行 {tool}？"
+    }
   },
   "memory": {
     "add": {
@@ -26971,7 +27037,9 @@
         "listenerFailed": "无法读取浏览器访问状态，请重新打开此页面重试。",
         "originHint": "安装扩展后，把它的 chrome-extension:// 来源加入 连接 → 本机主机 → 浏览器访问 中的允许来源。扩展会在连接页面显示该来源。",
         "pairedConnected": "已连接",
+        "pairedConnectedAt": "连接时间：{time}",
         "pairedEmpty": "还没有配对任何浏览器。",
+        "pairedFeatures": "支持能力：{features}",
         "pairedHint": "已配对的浏览器会出现在设备控制台，可在那里撤销。",
         "pairedLoadFailed": "无法读取已配对的浏览器。",
         "pairedOffline": "未连接",
@@ -28826,9 +28894,11 @@
         "cta": "退出 / 重新配对"
       },
       "signOutDescription": "退出后需重新扫码配对才能再次连接。",
+      "signOutFallbackConfirm": "退出登录",
+      "signOutFallbackDescription": "当前正在使用此 Host。请选择退出登录后此设备要切换到的已保存 Host。",
+      "signOutFallbackField": "替代 Host",
       "signOutFallbackInvalid": "请选择一个已保存的备用 Host。",
-      "signOutFallbackPrompt": "请输入备用 Host ID（{choices}）。",
-      "signOutFallbackRequired": "移除活动 Host 前必须选择备用 Host。",
+      "signOutFallbackTitle": "选择替代 Host",
       "signOutReason": "确认退出当前配对",
       "signOutTitle": "退出登录",
       "step": {
@@ -34916,6 +34986,8 @@
       "dangerousAria": "敏感权限",
       "dangerousSection": "敏感权限",
       "descriptions": {
+        "agent-config:read": "查看你的 Agent 配置（指令文件、技能、Agent、提示词和模板），以及 Hook、权限规则和 MCP 服务器的摘要（绝不包括其中的密钥）",
+        "agent-config:write": "修改你的指令文件、技能、Agent 和提示词，每次修改前都需你确认",
         "agent:control": "控制智能体的执行",
         "agent:dispatch": "派发内置子智能体和智能体团队",
         "agent:dispatch-external": "派发外部编程智能体（Claude Code / Codex / …）",
@@ -37910,6 +37982,28 @@
         "exportJson": "导出脱敏诊断历史 JSON",
         "title": "历史"
       },
+      "maintenance": {
+        "description": "按来源显示实际尝试、成功与退避状态；调度时钟完成不代表所有来源刷新成功。这里只显示诊断，不发送通知。",
+        "manualRetry": "等待手动验证凭据",
+        "never": "尚无记录",
+        "outcome": {
+          "blocked": "受阻",
+          "failed": "失败",
+          "skipped": "跳过",
+          "succeeded": "成功"
+        },
+        "status": {
+          "idle": "空闲",
+          "paused-auth": "凭据暂停",
+          "paused-offline": "离线暂停",
+          "paused-vault": "保险库锁定暂停",
+          "running": "执行中",
+          "scheduled": "已安排（含退避）"
+        },
+        "times": "最近尝试：{attempt}；最近成功：{success}；下次检查：{next}；连续失败：{failures}",
+        "title": "后台维护状态",
+        "unknown": "当前运行环境没有可用的来源维护记录；远程来源状态尚未投影。"
+      },
       "matrix": {
         "cost": "预估费用",
         "description": "始终展示原始指标与置信度，不计算不透明的综合分数。",
@@ -37997,7 +38091,6 @@
       "manage": "在“外部智能体”中管理",
       "runsOnHost": "在已配对的主机上运行",
       "summary": "{working}/{total} 已就绪",
-      "switchedOff": "外部智能体已关闭，此处配置的 {count} 个智能体在重新开启前不会运行。",
       "title": "自带模型访问的智能体"
     },
     "failed": "失败",
@@ -47807,7 +47900,8 @@
       "permissionsEditor": {
         "builtInSkills": "内置 Skills 上限",
         "cancel": "取消",
-        "confirmImpact": "保存此权限上限？它可能阻止该适配器全部会话中的 Skill 和主机能力。",
+        "confirmImpact": "它可能阻止该适配器全部会话中的 Skill 和主机能力。",
+        "confirmImpactTitle": "保存此权限上限？",
         "conversationGrantRequired": "Adapter 只能限制此能力上限；每个会话仍需显式授权。",
         "hitl": "写入类 Skill 需要 HITL",
         "hitlHelp": "会话设置可覆盖此默认值；破坏性 Skill 始终需要审批。",
@@ -48899,6 +48993,7 @@
       "tunnel": {
         "busyBody": "本应用只运行一个 cloudflared 进程。它正为另一功能把 {localUrl} 暴露在 {publicUrl}。替换后，这个公网地址会指向别处。",
         "busyCancelled": "保留了现有隧道。",
+        "busyKeep": "保留",
         "busyReplace": "替换隧道",
         "busyStopBody": "本应用只运行一个 cloudflared 进程，它正为另一功能把 {localUrl} 暴露在 {publicUrl}。在这里停止，那个公网地址也会一并失效。",
         "busyStopConfirm": "仍然停止",
@@ -49753,6 +49848,52 @@
         "title": "追踪保留期",
         "unit": "天",
         "zeroHint": "设为 0 则永久保留追踪记录。"
+      },
+      "retentionHealth": {
+        "description": "仅显示当前窗口、当前账户最近一次清理的结果。其他窗口或重启后的状态未知；不会发送通知。用量明细保留 90 天，费用汇总额外保留边界所在的完整本地日。",
+        "lastSweep": "最近完成：{when}",
+        "reasons": {
+          "cleanup-pending": "等待原主机完成清理",
+          "configured-off": "设置为保留",
+          "file-delete-failed": "文件删除未完成",
+          "file-metadata-unknown": "文件时间未知",
+          "prune-failed": "清理未完成",
+          "unsupported-host": "当前主机不适用",
+          "vault-locked": "保险库未解锁"
+        },
+        "removed": "已移除 {count} 项",
+        "stages": {
+          "files": "文件",
+          "rows": "任务记录"
+        },
+        "status": {
+          "blocked": "受阻",
+          "completed": "完成",
+          "completed-no-work": "完成，无需清理",
+          "failed": "失败",
+          "off": "已关闭或不适用",
+          "partial": "部分完成",
+          "unknown": "未知"
+        },
+        "targets": {
+          "agentTraces": "Agent 追踪",
+          "evalArtifacts": "评估产物",
+          "evalOnline": "在线评估",
+          "managedDesktopDeletion": "桌面结果删除",
+          "mediaGenerationJobs": "视频任务和文件",
+          "memoryGovernance": "记忆治理",
+          "notificationDelivery": "通知投递记录",
+          "ocrResults": "OCR 缓存",
+          "retrievalControl": "检索治理",
+          "sessionSideChats": "会话侧聊",
+          "siteArtifacts": "站点产物",
+          "syncTombstones": "同步删除标记",
+          "usageHistory": "用量与费用历史",
+          "workSubmissions": "工作提交",
+          "workflowAppData": "工作流应用数据"
+        },
+        "title": "后台清理诊断",
+        "unknown": "当前窗口尚无清理记录。"
       },
       "schedule": {
         "currentCount": "{count, plural, =1 {1 个活跃计划} other {# 个活跃计划}}",
@@ -53281,6 +53422,7 @@
           "cli": "来自 CLI",
           "editor": "来自编辑器",
           "import": "导入",
+          "plugin": "由插件应用",
           "restore": "恢复"
         },
         "restore": "恢复为新修订版本",
@@ -61490,6 +61632,7 @@
         "retryHint": "应用修复后重新运行原始步骤。",
         "title": "错误诊断"
       },
+      "close": "关闭 AI Shell",
       "context": {
         "branch": "分支",
         "cwd": "工作目录",
@@ -61507,12 +61650,22 @@
         "title": "AI Shell 历史"
       },
       "inputPlaceholder": "描述你想做什么…",
+      "messages": {
+        "executionFailed": "无法确认命令已完成，已请求中断；请检查终端后再重试。",
+        "generatedPlan": "已生成包含 {count} 个步骤的计划，请在运行前检查每条命令。",
+        "generationFailed": "生成计划失败。",
+        "noSession": "没有活动的终端会话。",
+        "sensitiveContext": "终端上下文包含敏感数据，请脱敏后重试。",
+        "terminalBusy": "终端忙碌中，请等待当前命令结束。",
+        "terminalUnavailable": "终端会话不可用。"
+      },
       "plan": {
         "cancelled": "计划已取消。",
         "completed": "所有步骤已完成。",
         "empty": "未生成任何步骤。",
         "error": "生成计划失败。",
         "executing": "执行中…",
+        "failed": "执行因步骤失败而停止。",
         "generating": "正在生成计划…",
         "ready": "计划就绪 — 审阅后执行。",
         "title": "执行计划"
@@ -61532,7 +61685,7 @@
         "succeeded": "完成"
       },
       "title": "AI Shell",
-      "toggle": "切换 AI Shell（Ctrl+Shift+I）"
+      "toggle": "切换 AI Shell"
     },
     "commandMenu": {
       "copyCommand": "复制命令",
@@ -61767,14 +61920,16 @@
       "participantViewer": "查看中",
       "participantsLabel": "已连接的设备",
       "readOnly": "只读",
-      "releaseConfirm": "要释放此会话的控制权吗？释放后其他客户端可以接管。",
+      "releaseConfirm": "释放后其他客户端可以接管。",
+      "releaseConfirmTitle": "要释放此会话的控制权吗？",
       "releaseControl": "释放控制权",
       "replayGap": "序列 {firstAvailable} 之前的输出已不可用。",
       "replayGapMarker": "由于回放缓冲区已截断，更早的终端输出不可用。",
       "sandboxed": "已沙箱化",
       "shared": "已与 {count} 台设备共享",
       "takeControl": "接管控制",
-      "takeoverConfirm": "要接管此会话吗？当前控制者将变为只读。"
+      "takeoverConfirm": "当前控制者将变为只读。",
+      "takeoverConfirmTitle": "要接管此会话吗？"
     },
     "share": {
       "description": "持有远程终端授权的已配对设备会通过伴侣链路接入这个宿主会话，并共用同一把控制权租约：同一时刻只有一个控制者，其余只读。不会复制任何内容，也不会生成链接。",

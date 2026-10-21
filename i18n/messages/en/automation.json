@@ -90,7 +90,15 @@
       "surfaceWorkflow": "Workflow"
     },
     "loading": "Loading audit log…",
-    "title": "Audit Log"
+    "title": "Audit Log",
+    "clearConfirm": {
+      "title": "Clear the audit log?",
+      "description": "Every automation audit record on this device will be deleted. This cannot be undone.",
+      "action": "Clear log"
+    },
+    "loadFailed": "Failed to load the audit log",
+    "cleared": "Audit log cleared",
+    "clearFailed": "Failed to clear the audit log"
   },
   "behavior": {
     "consentTimeout": {

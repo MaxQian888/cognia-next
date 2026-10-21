@@ -98,6 +98,7 @@
       "cli": "from the CLI",
       "editor": "from the editor",
       "import": "imported",
+      "plugin": "applied by a plugin",
       "restore": "restored"
     },
     "restore": "Restore as a new revision",

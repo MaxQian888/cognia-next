@@ -374,8 +374,8 @@
       "pinned": "置顶",
       "proactivePush": "主动 IM 通知",
       "proactivePushHint": "允许助手将任务完成 / 出错 / 需输入等事件主动推送回此会话。默认关闭。",
-      "promoteConfirm": "将这些会话显式值提升为 Adapter 默认值？\n\n{changes}",
-      "promotePermissionConfirm": "本次提升会改变 Adapter 的内置 Skill 上限或 HITL 默认值，并可能影响其他会话。是否继续？",
+      "promoteConfirm": "此会话中的以下显式值将成为 Adapter 默认值，已有的会话覆盖不会被改写。",
+      "promotePermissionConfirm": "本次提升会改变 Adapter 的内置 Skill 上限或写入类 Skill 二次确认默认值，并作用于所有未单独覆盖的会话。",
       "promoteToAdapter": "提升为 Adapter 默认",
       "promoteToAdapterTitle": "仅提升支持的显式值，不改写已有会话覆盖",
       "promotionFields": {
@@ -435,7 +435,11 @@
       "workflowBinding": "可视化工作流（名称或 id）",
       "workflowBindingHelp": "设置后（且未绑定团队 —— 团队优先），入站消息将运行该可视化工作流而非单个角色；消息文本作为触发载荷，进度会回流到会话中。",
       "workflowBindingPlaceholder": "（无 —— 由角色回复）",
-      "workflowProduction": "Production"
+      "workflowProduction": "Production",
+      "promoteConfirmTitle": "提升为 Adapter 默认值？",
+      "promoteConfirmAction": "提升",
+      "promotePermissionTitle": "此操作会影响其他会话",
+      "promotePermissionAction": "仍然提升"
     },
     "gearAria": "打开该会话的覆盖设置",
     "mediaGrant": {
@@ -538,9 +542,11 @@
     "dismiss": "忽略",
     "message": "消息 {id}：{reason}",
     "retryFromStart": "从头重试",
-    "retryWarning": "从头重试会重新处理该消息，并可能重复触发外部副作用。是否继续？",
+    "retryWarning": "消息将从头重新处理，可能重复已发生的外部副作用，例如已发送的回复或已创建的记录。",
     "title": "入站恢复",
-    "unknown": "未知原因"
+    "unknown": "未知原因",
+    "retryConfirmTitle": "从头重试？",
+    "retryConfirmAction": "从头重试"
   },
   "labels": {
     "addAria": "添加或移除标签",
