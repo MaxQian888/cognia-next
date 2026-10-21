@@ -3,7 +3,7 @@
  *
  * The website's product films and screenshots are recorded by playing a
  * scripted conversation into the real renderers, one stage at a time
- * (`web/scripts/record-product.mjs`). This spec is the seam's contract with the
+ * (`cognia-labs/cognia-website:scripts/record-product.mjs`). This spec is the seam's contract with the
  * running app: every stage kind lands on the surface the recorder frames —
  * the message, a failing and a passing terminal run, the plan card, the edit
  * card, the awaiting-approval plan dock, the artifact dock and the permission

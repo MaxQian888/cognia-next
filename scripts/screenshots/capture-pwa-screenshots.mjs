@@ -8,7 +8,7 @@
  *   public/pwa/screenshots/chat-narrow.png    750×1334 (form_factor: narrow)
  *
  * Two rules this script exists to enforce (same contract as
- * web/scripts/capture-product.mjs):
+ * cognia-labs/cognia-website:scripts/capture-product.mjs):
  *
  *  1. **Never the author's data.** It seeds the disposable E2E stub account
  *     through IndexedDB exactly like tests/e2e/helpers/db-reset.ts, so the

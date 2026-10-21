@@ -11,6 +11,43 @@ import { ESLint } from "eslint"
 const readWorkflow = (name) =>
   readFile(new URL(`../../.github/workflows/${name}`, import.meta.url), "utf8")
 
+test("website extraction removes the old workspace from install and release metadata", async () => {
+  const [workspace, lockfile, changesets] = await Promise.all(
+    ["pnpm-workspace.yaml", "pnpm-lock.yaml", ".changeset/config.json"].map((file) =>
+      readFile(new URL(`../../${file}`, import.meta.url), "utf8")
+    )
+  )
+  assert.ok(!parse(workspace).packages.includes("web"))
+  assert.ok(!/^ {2}web:/m.test(lockfile), "pnpm-lock.yaml must not retain the website importer")
+  assert.ok(!JSON.parse(changesets).ignore.includes("web"))
+})
+
+test("website extraction removes retired local launch commands", async () => {
+  const [packageJson, claudeLaunch, vscodeLaunch] = await Promise.all(
+    ["package.json", ".claude/launch.json", ".vscode/launch.json"].map((file) =>
+      readFile(new URL(`../../${file}`, import.meta.url), "utf8")
+    )
+  )
+  assert.ok(Object.keys(JSON.parse(packageJson).scripts).every((name) => !name.startsWith("web:")))
+  const args = JSON.parse(claudeLaunch).configurations.flatMap((config) => config.runtimeArgs ?? [])
+  assert.ok(args.every((arg) => !/^web(?:\/|:|$)/.test(arg)))
+  assert.doesNotMatch(vscodeLaunch, /pnpm web:/)
+})
+
+test("website extraction keeps bilingual onboarding and ignore rules current", async () => {
+  for (const file of ["README.md", "README_zh.md"]) {
+    const readme = await readFile(new URL(`../../${file}`, import.meta.url), "utf8")
+    assert.ok(
+      readme.includes("https://github.com/cognia-labs/cognia-website"),
+      `${file}: website repository link`
+    )
+    assert.ok(!/\bpnpm web:[a-z:-]+/.test(readme), `${file}: no retired website commands`)
+    assert.ok(!/[├└]── web\//u.test(readme), `${file}: no retired website directory`)
+  }
+  const ignored = await readFile(new URL("../../.gitignore", import.meta.url), "utf8")
+  assert.doesNotMatch(ignored, /^\/web\//m)
+})
+
 test("Jest bundle suites consume a verified artifact from the frozen plan", async () => {
   const { jobs } = parse(await readWorkflow("test.yml"))
   const producer = jobs["jest-plan"].steps
@@ -175,13 +212,11 @@ test("frontend build caches cover each build mode without sharing incompatible c
     ["test.yml", "build", ".next/cache"],
     ["test.yml", "build-e2e", ".next/cache"],
     ["test.yml", "docs-build", "docs/.next/cache"],
-    ["test.yml", "web-build", "web/.next/cache"],
     ["test.yml", "mobile-android-build", ".next/cache"],
     ["test.yml", "mobile-ios-build", ".next/cache"],
     ["test.yml", "e2e-tauri", ".next/cache"],
     ["build-tauri.yml", "build-tauri", ".next/cache"],
     ["deploy.yml", "deploy-docs", "docs/.next/cache"],
-    ["deploy.yml", "deploy-web", "web/.next/cache"],
   ]) {
     const { jobs } = parse(await readWorkflow(workflow))
     const job = jobs[jobName]
@@ -203,7 +238,6 @@ test("frontend build caches cover each build mode without sharing incompatible c
     if (workflow === "deploy.yml") {
       assert.match(scope, /inputs\.environment/)
       assert.match(scope, /vars\.DOCS_SITE_URL/)
-      if (jobName === "deploy-web") assert.match(scope, /vars\.WEB_SITE_URL/)
     }
   }
 })
@@ -212,7 +246,6 @@ test("Linux frontend consumers reuse this run's compiled packages before frozen 
   const { jobs } = parse(await readWorkflow("test.yml"))
   for (const name of [
     "docs-build",
-    "web-build",
     "mobile-android-build",
     "sidecar",
     "build",
@@ -492,7 +525,6 @@ test("expensive PR lanes follow runtime impacts without skipping Windows prerequ
   const { jobs } = parse(await readWorkflow("test.yml"))
   for (const [name, impact] of Object.entries({
     "docs-build": "docs",
-    "web-build": "web",
     "mobile-android-build": "mobile",
     sidecar: "sidecar",
     conformance: "gateway",
@@ -545,7 +577,8 @@ test("CI exposes stable and complete verification seams", async () => {
   )
   assert.match(testWorkflow, /conformance:[\s\S]*pnpm test:conformance/)
   assert.match(testWorkflow, /docs-build:[\s\S]*pnpm docs:build/)
-  assert.match(testWorkflow, /web-build:[\s\S]*pnpm web:build/)
+  assert.equal(parse(testWorkflow).jobs["web-build"], undefined)
+  assert.equal(parse(await readWorkflow("deploy.yml")).jobs["deploy-web"], undefined)
   assert.match(testWorkflow, /mobile-android-build:[\s\S]*assembleDebug/)
   // The nightly Tauri matrix is the most expensive job in the repo and is
   // gated on quality and tests for that reason: a bundle built
@@ -690,14 +723,6 @@ test("quality setup avoids redundant history, native packages and workspace buil
   )
   const { selectGates } = await import("../gates/check-all.mjs")
   assert.equal(selectGates({ group: "artifacts" })[0].script, "build:packages")
-  const deployment = parse(await readWorkflow("deploy.yml"))
-  const website = Object.values(deployment.jobs).find((job) =>
-    job.steps?.some((step) => step.run === "pnpm --filter web build")
-  )
-  assert.equal(
-    website.steps.find((step) => step.uses?.startsWith("actions/checkout@")).with["fetch-depth"],
-    0
-  )
 })
 
 test("pnpm caches immutable store data but always validates and links frozen installs", async () => {

@@ -293,7 +293,6 @@ cross-run flake history is not available.
 | npm downloads              | OS + architecture + Node 26 + npm sidecar locks; isolated runtime manifest                       | Every root workspace install; isolated DeepSeek runtime job                                                                               |
 | Root `.next/cache`         | OS + runner architecture + Node 26 + lockfiles + build configuration + commit                    | Separate desktop production, desktop E2E, Android, iOS, Tauri E2E and Tauri release scopes; release additionally separates target triples |
 | `docs/.next/cache`         | Same compiler identity; CI and deploy scopes separate                                            | Docs verification and Pages deploy; deploy adds environment and canonical docs origin                                                     |
-| `web/.next/cache`          | Same compiler identity; CI and deploy scopes separate                                            | Marketing verification and Pages deploy; deploy adds environment plus website/docs origins                                                |
 | TypeScript `*.tsbuildinfo` | OS + architecture + Node 26 + all pnpm locks and tsconfigs + commit                              | Quality `types`; state remains advisory and cannot replace the compiler check                                                             |
 | Playwright browsers        | OS + lockfile                                                                                    | Browser and extension E2E workers; system libraries are installed on cache hits too                                                       |
 | Cargo `target/`            | `Swatinem/rust-cache` compiler/dependency identity                                               | Rust jobs, with standalone service/toolchain scopes                                                                                       |
@@ -363,7 +362,7 @@ and real-launcher smoke suites are excluded from Jest, not from CI.
 
 Compiled workspace packages and Webclone output are built once in the Jest
 planner, or restored there on PRs from an exact-source trunk cache entry. Its run-scoped artifact is restored before root installs by Jest shards,
-Linux docs/marketing/Android builds, sidecar tests, production/E2E exports and
+Linux docs/Android builds, sidecar tests, production/E2E exports and
 browser-extension E2E. Consumers download from the same workflow run and checkout;
 when the plan contains no Jest suites, they build their own prerequisites normally.
 The production and E2E static exports remain different artifacts because their
@@ -412,10 +411,10 @@ quality registry checks perform no install and need neither cache.
 
 Local development keeps its existing policy: production Webpack caches normally,
 while the repository's default Turbopack development cache opt-out and explicit
-`dev:cached` opt-in remain unchanged. Installed Next 16.3.6 enables Turbopack build
-filesystem caching by default, so marketing builds reuse `web/.next/cache`
-without changing Next configuration. Compiler cache compression follows Next's
-defaults; the Actions cache service compresses the uploaded directory.
+`dev:cached` opt-in remain unchanged. Marketing builds and their caches now
+belong to [cognia-labs/cognia-website](https://github.com/cognia-labs/cognia-website).
+Compiler cache compression follows Next's defaults; the Actions cache service
+compresses the uploaded directory.
 
 Root `postbuild` removes only obsolete Webpack `index.pack.old` backups under
 `.next/cache/webpack` after a successful build, and only when the current
@@ -596,7 +595,7 @@ signing key.
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
 | CI         | CI/CD Pipeline, Code Quality, Test Suite, CI Report, Nightly, Compose E2E, Share Server, Signaling Server, Standalone bootstrap scripts | `FEISHU_CI_WEBHOOK_URL`, `FEISHU_CI_SIGNING_SECRET`           |
 | Release    | Release, Build Tauri, Images                                                                                                            | `FEISHU_RELEASE_WEBHOOK_URL`, `FEISHU_RELEASE_SIGNING_SECRET` |
-| Operations | Deploy, Refresh website evidence, Sync model catalog, daily digest                                                                      | `FEISHU_OPS_WEBHOOK_URL`, `FEISHU_OPS_SIGNING_SECRET`         |
+| Operations | Deploy, Sync model catalog, daily digest                                                                                                | `FEISHU_OPS_WEBHOOK_URL`, `FEISHU_OPS_SIGNING_SECRET`         |
 
 An absent route override falls back to the default pair. URLs and signing keys
 are passed only to the two notification CLI steps. The workflow checks out the

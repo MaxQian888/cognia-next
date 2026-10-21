@@ -205,7 +205,6 @@
     "browser-extension",
     "node_modules",
     "docs",
-    "web",
     "mobile",
     "sidecar",
     "services/identity-server",

@@ -40,21 +40,13 @@ import { dirname, join } from "node:path"
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 export const BASELINE_FILE = join(REPO_ROOT, "scripts", "gates", "colocated-test-baseline.json")
 
-/**
- * Roots the rule covers, verbatim from CLAUDE.md hard rule 3, plus the same
- * three roots inside the marketing workspace (ADR-0092 §11). `web/app/` follows
- * the product `app/` precedent — tests are written, but page files are not
- * gated — and `web/content/` is data whose en/zh parity `tsc` already proves.
- */
+/** Product and in-repository workspace roots covered by the co-located-test rule. */
 export const TS_ROOTS = [
   "components/",
   "hooks/",
   "lib/",
-  "web/components/",
-  "web/hooks/",
-  "web/lib/",
   // The browser extension's own three roots (ADR-0154). Its entrypoints under
-  // `browser-extension/src/app/` are excluded for the same reason `web/app/`
+  // `browser-extension/src/app/` are excluded for the same reason product `app/`
   // is: they are the thin shells that hand the real `chrome.*` surface to code
   // that takes it as a parameter, and everything worth asserting lives on the
   // other side of that seam.
@@ -74,16 +66,8 @@ export const TS_ROOTS = [
   "plugins/pi-latex-workbench/src/",
   "plugins/pi-latex-workbench/pi/",
 ]
-/**
- * Carve-outs the rule names explicitly.
- *
- * `web/components/ui/` needs its own entry rather than riding on
- * `components/ui/`: the match is `file.startsWith(root)`, so the marketing
- * workspace's shadcn copies never match the product path. Without it every
- * generated shadcn file would demand a hand-written test, which is the same
- * bargain the product tree already declined.
- */
-export const TS_EXCLUDED = ["components/ui/", "components/ai-elements/", "web/components/ui/"]
+/** Vendored UI remains outside the authored-source test requirement. */
+export const TS_EXCLUDED = ["components/ui/", "components/ai-elements/"]
 export const RUST_ROOT = "src-tauri/src/"
 /**
  * Workspace crates carry the same rule (ADR-0196): code that moves out of

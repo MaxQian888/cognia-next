@@ -192,7 +192,7 @@ AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy --check
 - `services/signaling-server/`：WebRTC 信令服务，包含 axum 和 workers-rs 实现。
 - `services/share-server/`：分享链接服务、加密内容存储与查看器。
 
-`web/` 是产品网站，`docs/` 是 Fumadocs 文档站，均与根目录的应用分别构建。生产打包前，应先生成正确目标的资源。
+产品官网在独立仓库 [cognia-labs/cognia-website](https://github.com/cognia-labs/cognia-website) 中维护，拥有独立的开发、CI 和静态部署流程。`docs/` 仍是本仓库的 Fumadocs 文档站。生产打包前，应先生成正确目标的资源。
 
 重大架构决策记录在 [`docs/content/docs/zh/adr/`](./docs/content/docs/zh/adr/) 中。当前行为应以子系统文档为入口，并核对实现和测试；ADR 用于解释架构选择的理由。
 
@@ -216,7 +216,7 @@ AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy --check
 | 移动端 IDE            | `pnpm mobile:open:ios`、`pnpm mobile:open:android`                                                      |
 | Android 开发与 APK    | `pnpm mobile:dev:android`、`pnpm mobile:build:android`、`pnpm mobile:deploy`、`pnpm mobile:deploy:fast` |
 | 文档站，端口 3001     | `pnpm docs:dev`、`pnpm docs:build`                                                                      |
-| 产品网站，端口 3002   | `pnpm web:dev`、`pnpm web:build`                                                                        |
+| 产品官网              | [cognia-labs/cognia-website](https://github.com/cognia-labs/cognia-website) 中的独立开发与构建命令      |
 | Chrome/Edge 扩展      | `pnpm browser-ext:build`                                                                                |
 | Sidecar               | `pnpm sidecars:install`、`pnpm sidecar:start`、`pnpm sidecar:test`、`pnpm sidecars:build`               |
 | E2E                   | `pnpm test:e2e`、`pnpm test:e2e:workflows`、`pnpm test:e2e:mobile`、`pnpm test:e2e:tauri`               |
@@ -249,7 +249,6 @@ cognia-next/
 ├── crates/               Rust 宿主、协议、安全与运行时实现
 ├── cli/                  cognia-agent 独立终端 / headless 智能体
 ├── browser-extension/    Chrome/Edge 网页伴侣扩展
-├── web/                  产品网站（workspace 子包，端口 3002）
 ├── i18n/                  next-intl request + messages（en、zh-CN）
 ├── src-tauri/             Tauri 2 Rust 核心（axum HTTP、调度器、自动化、OCR、…）
 ├── sidecar/               Node 智能体 / 扩展宿主；独立依赖与 lockfile
