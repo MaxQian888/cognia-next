@@ -3,28 +3,8 @@
  */
 
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { A2UIFormGroup, type A2UIFormGroupComponent } from "./a2ui-form-group"
-
-// Mock useA2UIForm hook
-const mockFormState = {
-  values: {},
-  errors: {},
-  touched: {},
-  isValid: true,
-  isDirty: false,
-  isSubmitting: false,
-  handleChange: jest.fn(),
-  handleBlur: jest.fn(),
-  handleSubmit: jest.fn(),
-  reset: jest.fn(),
-  setFieldValue: jest.fn(),
-  setFieldError: jest.fn(),
-  validate: jest.fn(() => true),
-}
-jest.mock("@/hooks/a2ui/use-a2ui-form", () => ({
-  useA2UIForm: () => mockFormState,
-}))
 
 // Mock the child renderer
 jest.mock("../a2ui-child-renderer", () => ({
@@ -50,6 +30,39 @@ const defaultProps = {
 }
 
 describe("A2UIFormGroup", () => {
+  it("validates and submits the current surface model without creating a nested form", () => {
+    const onAction = jest.fn()
+    const component = createMockComponent({
+      validationRules: { name: { required: "Name is required" } },
+    })
+    const { rerender, container } = render(
+      <form>
+        <A2UIFormGroup
+          {...defaultProps}
+          component={component}
+          onAction={onAction}
+          dataModel={{ name: "" }}
+        />
+      </form>
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+    expect(screen.getByRole("alert")).toHaveTextContent("Name is required")
+    expect(onAction).not.toHaveBeenCalled()
+    rerender(
+      <form>
+        <A2UIFormGroup
+          {...defaultProps}
+          component={component}
+          onAction={onAction}
+          dataModel={{ name: "Ada", draft: "keep" }}
+        />
+      </form>
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+    expect(onAction).toHaveBeenCalledWith("formSubmit", { values: { name: "Ada", draft: "keep" } })
+    expect(container.querySelectorAll("form")).toHaveLength(1)
+  })
+
   describe("rendering", () => {
     it("should render form group with children", () => {
       render(
@@ -221,11 +234,12 @@ describe("A2UIFormGroup", () => {
 
   describe("form validation integration", () => {
     it("should not set aria-invalid when form is valid", () => {
-      mockFormState.isValid = true
-      mockFormState.isDirty = false
-
       const { container } = render(
-        <A2UIFormGroup {...defaultProps} component={createMockComponent()} onAction={jest.fn()} />
+        <A2UIFormGroup
+          {...defaultProps}
+          component={createMockComponent({ validationRules: { name: { required: true } } })}
+          onAction={jest.fn()}
+        />
       )
 
       const fieldset = container.querySelector("fieldset")
@@ -233,27 +247,45 @@ describe("A2UIFormGroup", () => {
     })
 
     it("should set aria-invalid when form is invalid and dirty", () => {
-      mockFormState.isValid = false
-      mockFormState.isDirty = true
-
       const { container } = render(
-        <A2UIFormGroup {...defaultProps} component={createMockComponent()} onAction={jest.fn()} />
+        <A2UIFormGroup
+          {...defaultProps}
+          component={createMockComponent({ validationRules: { name: { required: true } } })}
+          onAction={jest.fn()}
+        />
       )
 
       const fieldset = container.querySelector("fieldset")
+      fireEvent.click(screen.getByRole("button", { name: "Submit" }))
       expect(fieldset).toHaveAttribute("aria-invalid", "true")
     })
 
     it("should not set aria-invalid when form is invalid but not dirty", () => {
-      mockFormState.isValid = false
-      mockFormState.isDirty = false
-
       const { container } = render(
-        <A2UIFormGroup {...defaultProps} component={createMockComponent()} onAction={jest.fn()} />
+        <A2UIFormGroup
+          {...defaultProps}
+          component={createMockComponent({ validationRules: { name: { required: true } } })}
+          onAction={jest.fn()}
+        />
       )
 
       const fieldset = container.querySelector("fieldset")
       expect(fieldset).not.toHaveAttribute("aria-invalid", "true")
     })
   })
+})
+
+it("blocks submission for a disabled FormGroup", () => {
+  const onAction = jest.fn()
+  render(
+    <A2UIFormGroup
+      {...defaultProps}
+      component={createMockComponent({ disabled: true })}
+      onAction={onAction}
+    />
+  )
+  const submit = screen.getByRole("button", { name: "Submit" })
+  expect(submit).toBeDisabled()
+  fireEvent.click(submit)
+  expect(onAction).not.toHaveBeenCalled()
 })

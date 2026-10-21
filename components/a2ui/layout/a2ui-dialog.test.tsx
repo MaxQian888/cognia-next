@@ -69,6 +69,17 @@ const defaultProps = {
 }
 
 describe("A2UIDialog", () => {
+  it("hides the close control when closable is false", () => {
+    render(
+      <A2UIDialog
+        {...defaultProps}
+        component={createMockComponent({ open: true, closable: false })}
+        onAction={jest.fn()}
+      />
+    )
+    expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument()
+  })
+
   beforeEach(() => {
     jest.clearAllMocks()
   })

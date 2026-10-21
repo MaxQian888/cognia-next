@@ -5,6 +5,7 @@
  * Combined date and time selection
  */
 
+import { format, isValid, parseISO } from "date-fns"
 import React, { memo } from "react"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
@@ -18,16 +19,22 @@ export const A2UIDateTimePicker = memo(function A2UIDateTimePicker({
   component,
   onDataChange,
 }: A2UIComponentProps<A2UIDateTimePickerComponent>) {
-  const { resolveString } = useA2UIData()
+  const { resolveString, resolveBoolean } = useA2UIData()
 
   const value = resolveString(component.value, "")
   const bindingPath = getBindingPath(component.value)
 
   // Convert ISO string to datetime-local format
-  const formattedValue = value ? value.slice(0, 16) : ""
+  const toLocalInput = (value: string | undefined) => {
+    if (!value) return ""
+    const parsed = parseISO(value)
+    return isValid(parsed) ? format(parsed, "yyyy-MM-dd'T'HH:mm") : ""
+  }
+  const formattedValue = toLocalInput(value)
+  const disabled = resolveBoolean(component.disabled ?? false, false)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (bindingPath) {
+    if (!disabled && bindingPath) {
       // Convert back to ISO format
       const isoValue = e.target.value ? new Date(e.target.value).toISOString() : ""
       onDataChange(bindingPath, isoValue)
@@ -53,10 +60,10 @@ export const A2UIDateTimePicker = memo(function A2UIDateTimePicker({
           value={formattedValue}
           onChange={handleChange}
           placeholder={component.placeholder}
-          disabled={component.disabled as boolean}
+          disabled={disabled}
           required={component.required}
-          min={component.minDate?.slice(0, 16)}
-          max={component.maxDate?.slice(0, 16)}
+          min={toLocalInput(component.minDate)}
+          max={toLocalInput(component.maxDate)}
           className="pl-10"
         />
       </div>

@@ -8,6 +8,9 @@
  * read from it.
  */
 
+import { createA2UIComponentBundle } from "./component-definitions"
+import { getStandardComponentTypes } from "./catalog"
+import { getA2UIEnumPropertyDefinitions } from "./component-properties"
 import { definePrompt } from "@/lib/prompts/types"
 
 export const A2UI_PROTOCOL_PROMPT = definePrompt({
@@ -26,7 +29,8 @@ export const A2UI_PROTOCOL_PROMPT = definePrompt({
   // build-options appends it (with the agent's catalog section); this module
   // renders it from the definition.
   consumers: ["lib/a2ui/prompts.ts"],
-  defaultBody: `You have the ability to generate interactive UI components using the A2UI protocol. When appropriate, you can create rich, interactive interfaces that users can interact with directly in the chat.
+  defaultBody:
+    `You have the ability to generate interactive UI components using the A2UI protocol. When appropriate, you can create rich, interactive interfaces that users can interact with directly in the chat.
 
 ## A2UI Capabilities
 
@@ -89,7 +93,7 @@ Wrap A2UI content in a code block with the \`a2ui\` language identifier:
 - **Text**: Display text with \`text\` and optional \`variant\` (heading1-4, body, label, code, caption)
 - **Badge**: Small label with \`text\` and optional \`variant\`
 - **Progress**: Progress bar with \`value\` (0-100)
-- **Alert**: Notification with \`title\`, \`description\`, and \`variant\` (info, success, warning, error)
+- **Alert**: Notification with \`title\`, \`message\`, and \`variant\` (info, success, warning, error)
 
 ### Input Components
 - **Button**: Clickable with \`text\`, \`action\`, and optional \`variant\`
@@ -102,9 +106,9 @@ Wrap A2UI content in a code block with the \`a2ui\` language identifier:
 - **Slider**: Range input with \`value\`, \`min\`, \`max\`, \`step\`, \`label\`
 
 ### Data Components
-- **Table**: Data table with \`columns\` and \`rows\`
-- **List**: List with \`items\` array
-- **Chart**: Visualization with \`type\` (line, bar, pie), \`data\`, \`options\`
+- **Table**: Data table with \`columns\` (key, header) and \`data\` (row objects or a path)
+- **List**: Component IDs in \`children\`, or \`template\` with \`dataPath\` and \`itemId\`
+- **Chart**: Visualization with \`chartType\` (line, bar, pie, area, scatter, radar, donut), \`data\`, \`xKey\`, and \`yKeys\`
 
 ## Data Binding
 
@@ -200,7 +204,18 @@ useful if the visualization can't render. Example (a trend chart):
 }
 \`\`\`
 
-Remember: Only use A2UI when it genuinely improves the user experience. For simple text responses, regular markdown is preferred.`,
+Remember: Only use A2UI when it genuinely improves the user experience. For simple text responses, regular markdown is preferred.` +
+    "\n\n## Complete standard catalog starting descriptors\n" +
+    "These examples come from the editor's component factories. Use unique IDs and update child references together. Bind values to dataModel paths. Optional fields are not exhaustively listed here.\n" +
+    getStandardComponentTypes()
+      .map((type) =>
+        JSON.stringify({
+          component: type,
+          example: createA2UIComponentBundle(type, "example").components,
+          enums: getA2UIEnumPropertyDefinitions(type),
+        })
+      )
+      .join("\n"),
 })
 
 /**

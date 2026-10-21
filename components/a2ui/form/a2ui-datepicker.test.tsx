@@ -40,8 +40,10 @@ jest.mock("@/lib/a2ui/data-model", () => ({
   ),
 }))
 jest.mock("@/components/ui/calendar", () => ({
-  Calendar: ({ autoFocus }: { autoFocus?: boolean }) => (
-    <div data-testid="calendar" data-auto-focus={String(autoFocus)} />
+  Calendar: ({ autoFocus, onSelect }: { autoFocus?: boolean; onSelect: (date: Date) => void }) => (
+    <div data-testid="calendar" data-auto-focus={String(autoFocus)}>
+      <button onClick={() => onSelect(new Date(2026, 9, 20))}>Select fixture date</button>
+    </div>
   ),
 }))
 
@@ -62,6 +64,22 @@ const defaultProps = {
 }
 
 describe("A2UIDatePicker", () => {
+  it("writes the selected local calendar day without a UTC conversion", () => {
+    const onDataChange = jest.fn()
+    jest.requireMock("@/lib/a2ui/data-model").getBindingPath.mockReturnValueOnce("/day")
+    render(
+      <A2UIDatePicker
+        {...defaultProps}
+        onDataChange={onDataChange}
+        onAction={jest.fn()}
+        component={createMockComponent({ value: "" })}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Pick a date" }))
+    fireEvent.click(screen.getByRole("button", { name: "Select fixture date" }))
+    expect(onDataChange).toHaveBeenCalledWith("/day", "2026-10-20")
+  })
+
   beforeEach(() => {
     jest.clearAllMocks()
   })

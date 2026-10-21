@@ -1,7 +1,9 @@
 "use client"
 
+import { useTranslations } from "next-intl"
+import { getBindingPath } from "@/lib/a2ui/data-model"
 import React, { memo, useState } from "react"
-import { cn } from "@/lib/utils"
+import { A2UITrigger } from "../a2ui-child-renderer"
 import {
   Drawer,
   DrawerContent,
@@ -30,30 +32,38 @@ export interface A2UIDrawerComponent extends A2UIBaseComponent {
 export const A2UIDrawer = memo(function A2UIDrawer({
   component,
   renderChild,
+  onDataChange,
 }: A2UIComponentProps<A2UIDrawerComponent>) {
+  const t = useTranslations("a2ui.controls")
   const { resolveString, resolveBoolean } = useA2UIData()
   const title = component.title ? resolveString(component.title) : undefined
   const description = component.description ? resolveString(component.description) : undefined
-  const controlledOpen = component.open ? resolveBoolean(component.open) : undefined
+  const controlledOpen = component.open !== undefined ? resolveBoolean(component.open) : undefined
   const [internalOpen, setInternalOpen] = useState(false)
 
+  const bindingPath = getBindingPath(component.open)
+  const handleOpenChange = (open: boolean) => {
+    if (bindingPath) onDataChange(bindingPath, open)
+    else setInternalOpen(open)
+  }
+
   return (
-    <Drawer open={controlledOpen ?? internalOpen} onOpenChange={setInternalOpen}>
+    <Drawer open={controlledOpen ?? internalOpen} onOpenChange={handleOpenChange}>
       <DrawerTrigger asChild>
-        <span
-          className={cn("inline-flex", component.className)}
+        <A2UITrigger
+          componentId={component.trigger}
+          renderChild={renderChild}
+          className={component.className}
           style={component.style as React.CSSProperties}
-        >
-          {renderChild(component.trigger)}
-        </span>
+        />
       </DrawerTrigger>
       <DrawerContent>
-        {(title || description) && (
-          <DrawerHeader>
-            {title && <DrawerTitle>{title}</DrawerTitle>}
-            {description && <DrawerDescription>{description}</DrawerDescription>}
-          </DrawerHeader>
-        )}
+        <DrawerHeader>
+          <DrawerTitle className={title ? undefined : "sr-only"}>
+            {title || t("untitled")}
+          </DrawerTitle>
+          {description && <DrawerDescription>{description}</DrawerDescription>}
+        </DrawerHeader>
         {component.children.map((childId) => (
           <React.Fragment key={childId}>{renderChild(childId)}</React.Fragment>
         ))}

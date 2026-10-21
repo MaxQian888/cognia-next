@@ -1,7 +1,7 @@
 "use client"
 
 import React, { memo } from "react"
-import { cn } from "@/lib/utils"
+import { A2UITrigger } from "../a2ui-child-renderer"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import type { A2UIComponentProps, A2UIBaseComponent } from "@/types/a2ui/schema"
 
@@ -21,12 +21,12 @@ export const A2UIHoverCard = memo(function A2UIHoverCard({
   return (
     <HoverCard openDelay={component.openDelay ?? 300}>
       <HoverCardTrigger asChild>
-        <span
-          className={cn("inline-flex", component.className)}
+        <A2UITrigger
+          componentId={component.trigger}
+          renderChild={renderChild}
+          className={component.className}
           style={component.style as React.CSSProperties}
-        >
-          {renderChild(component.trigger)}
-        </span>
+        />
       </HoverCardTrigger>
       <HoverCardContent align={component.align || "center"} side={component.side || "bottom"}>
         {component.children.map((childId) => (

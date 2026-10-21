@@ -5,6 +5,7 @@
  * Modal dialog with content and actions
  */
 
+import { useTranslations } from "next-intl"
 import React, { memo, useRef, useEffect } from "react"
 import { cn } from "@/lib/utils"
 import {
@@ -25,6 +26,7 @@ export const A2UIDialog = memo(function A2UIDialog({
   onAction,
   onDataChange,
 }: A2UIComponentProps<A2UIDialogComponent>) {
+  const t = useTranslations("a2ui.controls")
   const { resolveString, resolveBoolean } = useA2UIData()
   const { getBindingPath } = useA2UIActions()
 
@@ -44,6 +46,7 @@ export const A2UIDialog = memo(function A2UIDialog({
   const bindingPath = getBindingPath(component.open)
 
   const handleOpenChange = (newOpen: boolean) => {
+    if (!newOpen && component.closable === false) return
     if (bindingPath) {
       onDataChange(bindingPath, newOpen)
     }
@@ -55,13 +58,20 @@ export const A2UIDialog = memo(function A2UIDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
+        showCloseButton={component.closable !== false}
+        onEscapeKeyDown={(event) => {
+          if (component.closable === false) event.preventDefault()
+        }}
+        onInteractOutside={(event) => {
+          if (component.closable === false) event.preventDefault()
+        }}
         className={cn(component.className)}
         style={component.style as React.CSSProperties}
       >
         <DialogHeader className={cn(!title && !description && "sr-only")}>
-          <DialogTitle className={cn(!title && "sr-only")}>{title || "Dialog"}</DialogTitle>
+          <DialogTitle className={cn(!title && "sr-only")}>{title || t("untitled")}</DialogTitle>
           <DialogDescription className={cn(!description && "sr-only")}>
-            {description || "Dialog content"}
+            {description || t("dialogContent")}
           </DialogDescription>
         </DialogHeader>
 

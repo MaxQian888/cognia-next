@@ -1,5 +1,6 @@
 "use client"
 
+import { resolveIcon } from "@/lib/a2ui/resolve-icon"
 import React, { memo } from "react"
 import {
   Sidebar,
@@ -61,16 +62,20 @@ export const A2UISidebar = memo(function A2UISidebar({
               {group.label && <SidebarGroupLabel>{group.label}</SidebarGroupLabel>}
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {group.items.map((item) => (
-                    <SidebarMenuItem key={item.id}>
-                      <SidebarMenuButton
-                        isActive={item.active}
-                        onClick={() => item.action && onAction(item.action, { itemId: item.id })}
-                      >
-                        {item.label}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  {group.items.map((item) => {
+                    const Icon = resolveIcon(item.icon)
+                    return (
+                      <SidebarMenuItem key={item.id}>
+                        <SidebarMenuButton
+                          isActive={item.active}
+                          onClick={() => item.action && onAction(item.action, { itemId: item.id })}
+                        >
+                          {Icon && <Icon className="size-4" aria-hidden="true" />}
+                          {item.label}
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    )
+                  })}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>

@@ -3,6 +3,7 @@
  */
 
 import {
+  parseA2UIDispatchMessage,
   parseA2UIMessages,
   parseA2UIInput,
   parseA2UIString,
@@ -531,5 +532,29 @@ describe("A2UI parser boundaries", () => {
         "```jsonl\n" + JSON.stringify(ready) + '\n{"type":"unknown","surfaceId":"s"}\n```'
       )
     ).toEqual([])
+  })
+})
+
+describe("dispatch validation", () => {
+  it.each(["button", "select", "checkbox", "input", "submit", "dismiss", "platform_specific"])(
+    "accepts the declared connector action %s",
+    (actionType) => {
+      const message = {
+        type: "connectorAction",
+        surfaceId: "s",
+        actionType,
+        value: "value",
+        payload: { nested: [true] },
+      }
+      expect(parseA2UIDispatchMessage(message)).toEqual(message)
+    }
+  )
+  it.each([
+    null,
+    { type: "createSurface" },
+    { type: "connectorAction", surfaceId: "s", actionType: "invalid" },
+    { type: "connectorAction", surfaceId: "s", actionType: "button", value: 1 },
+  ])("rejects malformed dispatch %j", (message) => {
+    expect(parseA2UIDispatchMessage(message)).toBeNull()
   })
 })

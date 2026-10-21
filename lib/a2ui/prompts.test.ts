@@ -7,6 +7,7 @@ import {
   buildPromptOverrideSnapshot,
 } from "@/lib/prompts/snapshot"
 import { __resetPromptVerdictsForTests, resolvePrompt } from "@/lib/prompts/resolve"
+import { getStandardComponentTypes } from "./catalog"
 import { A2UI_PROTOCOL_PROMPT, A2UI_SYSTEM_PROMPT } from "./prompts"
 
 afterEach(() => {
@@ -79,6 +80,20 @@ describe("A2UI_SYSTEM_PROMPT", () => {
     // parser expects (not the connector-layer object action).
     expect(A2UI_SYSTEM_PROMPT).toContain('"component": "RadioGroup"')
     expect(A2UI_SYSTEM_PROMPT).toContain('"action": "submit-poll"')
+  })
+
+  it("teaches the actual Alert, Table, List and Chart renderer fields", () => {
+    expect(A2UI_SYSTEM_PROMPT).toContain("\`message\`")
+    expect(A2UI_SYSTEM_PROMPT).toContain("\`chartType\`")
+    expect(A2UI_SYSTEM_PROMPT).toContain("\`xKey\`")
+    expect(A2UI_SYSTEM_PROMPT).toContain("\`yKeys\`")
+    expect(A2UI_SYSTEM_PROMPT).not.toContain("**Table**: Data table with `columns` and `rows`")
+    expect(A2UI_SYSTEM_PROMPT).not.toContain("**List**: List with `items` array")
+  })
+
+  it("includes renderer-valid starting descriptors for every standard catalog type", () => {
+    for (const type of getStandardComponentTypes())
+      expect(A2UI_SYSTEM_PROMPT).toContain(`"component":"${type}"`)
   })
 
   it("documents the RichOutput component and its advanced profiles", () => {

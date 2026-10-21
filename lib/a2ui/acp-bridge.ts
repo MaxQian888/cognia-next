@@ -2,8 +2,9 @@
 //
 // Some agents (the new wave of ACP-native CLIs) emit A2UI protocol JSON-lines
 // directly on their stdout instead of going through MCP tool calls. The
-// external-agent stdout reader passes every received line through
-// `detectAndDispatchA2uiLine`; if the line parses as an A2UI server message,
+// transport integrations may pass received lines through
+// `detectAndDispatchA2uiLine`; no production transport currently invokes it.
+// If a line parses as an A2UI server message,
 // we dispatch it into the store and return `true` so the caller knows it's
 // handled (and shouldn't forward the same line as a regular ACP event).
 //
@@ -12,14 +13,7 @@
 // looks "a2ui-like" but doesn't pass strict shape checks is left alone.
 
 import { useA2UIStore } from "@/stores/a2ui"
-import {
-  isCreateSurfaceMessage,
-  isUpdateComponentsMessage,
-  isUpdateDataModelMessage,
-  isDeleteSurfaceMessage,
-  isSurfaceReadyMessage,
-} from "@/lib/a2ui/parser"
-import type { A2UIServerMessage } from "@/types/a2ui/schema"
+import { parseA2UIMessage } from "@/lib/a2ui/parser"
 import { loggers } from "@cognia/logging"
 
 /** Returns true if the line was recognised + dispatched. */
@@ -32,16 +26,8 @@ export function detectAndDispatchA2uiLine(line: string): boolean {
   } catch {
     return false
   }
-  const candidate = parsed as A2UIServerMessage
-  if (
-    !isCreateSurfaceMessage(candidate) &&
-    !isUpdateComponentsMessage(candidate) &&
-    !isUpdateDataModelMessage(candidate) &&
-    !isDeleteSurfaceMessage(candidate) &&
-    !isSurfaceReadyMessage(candidate)
-  ) {
-    return false
-  }
+  const candidate = parseA2UIMessage(parsed)
+  if (!candidate) return false
   try {
     useA2UIStore.getState().processMessage(candidate)
     return true

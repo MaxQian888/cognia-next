@@ -5,9 +5,11 @@
  * Multi-line text input with data binding
  */
 
-import React, { memo } from "react"
+import React, { memo, useContext } from "react"
 import { cn } from "@/lib/utils"
 import { Textarea } from "@/components/ui/textarea"
+import { A2UIInputGroupContext } from "./a2ui-input-group"
+import { InputGroupTextarea, InputGroupAddon } from "@/components/ui/input-group"
 import { Label } from "@/components/ui/label"
 import type { A2UIComponentProps, A2UITextAreaComponent } from "@/types/a2ui/schema"
 import { useA2UIData } from "../a2ui-context"
@@ -19,6 +21,8 @@ export const A2UITextArea = memo(function A2UITextArea({
 }: A2UIComponentProps<A2UITextAreaComponent>) {
   const { resolveString } = useA2UIData()
 
+  const grouped = useContext(A2UIInputGroupContext)
+  const Control = grouped ? InputGroupTextarea : Textarea
   const value = resolveString(component.value, "")
   const error = component.error ? resolveString(component.error, "") : ""
   const bindingPath = getBindingPath(component.value)
@@ -28,6 +32,35 @@ export const A2UITextArea = memo(function A2UITextArea({
       onDataChange(bindingPath, e.target.value)
     }
   }
+
+  const control = (
+    <Control
+      id={component.id}
+      value={value}
+      onChange={handleChange}
+      placeholder={component.placeholder}
+      disabled={component.disabled as boolean}
+      required={component.required}
+      minLength={component.minLength}
+      maxLength={component.maxLength}
+      rows={component.rows || 3}
+      className={cn(error && "border-destructive focus-visible:ring-destructive")}
+    />
+  )
+  if (grouped)
+    return (
+      <>
+        {component.label && (
+          <InputGroupAddon align="block-start">
+            <Label htmlFor={component.id}>{component.label}</Label>
+          </InputGroupAddon>
+        )}
+        {control}
+        {(error || component.helperText) && (
+          <InputGroupAddon align="block-end">{error || component.helperText}</InputGroupAddon>
+        )}
+      </>
+    )
 
   return (
     <div
@@ -40,18 +73,7 @@ export const A2UITextArea = memo(function A2UITextArea({
           {component.required && <span className="text-destructive ml-1">*</span>}
         </Label>
       )}
-      <Textarea
-        id={component.id}
-        value={value}
-        onChange={handleChange}
-        placeholder={component.placeholder}
-        disabled={component.disabled as boolean}
-        required={component.required}
-        minLength={component.minLength}
-        maxLength={component.maxLength}
-        rows={component.rows || 3}
-        className={cn(error && "border-destructive focus-visible:ring-destructive")}
-      />
+      {control}
       {(error || component.helperText) && (
         <p className={cn("text-xs", error ? "text-destructive" : "text-muted-foreground")}>
           {error || component.helperText}

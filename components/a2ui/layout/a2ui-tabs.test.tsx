@@ -34,12 +34,6 @@ jest.mock("../a2ui-context", () => ({
   }),
 }))
 
-// Mock data-model resolvers
-jest.mock("@/lib/a2ui/data-model", () => ({
-  resolveStringOrPath: (value: string | { path: string }, _dm: unknown, def: string) =>
-    typeof value === "string" ? value : def,
-}))
-
 // Mock A2UIChildRenderer
 jest.mock("../a2ui-child-renderer", () => ({
   A2UIChildRenderer: ({ childIds }: { childIds: string[] }) => (
@@ -63,6 +57,39 @@ describe("A2UITabs", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+  })
+
+  it("follows external activeTab changes and writes tab selections", async () => {
+    const component: A2UITabsComponent = {
+      id: "bound",
+      component: "Tabs",
+      activeTab: { path: "/tab" },
+      tabs: [
+        { id: "one", label: "One", children: [] },
+        { id: "two", label: "Two", children: [] },
+      ],
+    }
+    mockDataCtx.dataModel = { tab: "one" }
+    const { rerender } = render(<A2UITabs {...createProps(component)} />)
+    mockDataCtx.dataModel = { tab: "two" }
+    rerender(<A2UITabs {...createProps({ ...component })} />)
+    expect(screen.getByRole("tab", { name: "Two" })).toHaveAttribute("aria-selected", "true")
+    await userEvent.click(screen.getByRole("tab", { name: "One" }))
+    expect(mockOnDataChange).toHaveBeenCalledWith("/tab", "one")
+    mockDataCtx.dataModel = {}
+  })
+
+  it("renders a configured tab icon", () => {
+    render(
+      <A2UITabs
+        {...createProps({
+          id: "icons",
+          component: "Tabs",
+          tabs: [{ id: "one", label: "One", icon: "Star", children: [] }],
+        })}
+      />
+    )
+    expect(screen.getByRole("tab", { name: "One" }).querySelector("svg")).toBeInTheDocument()
   })
 
   it("should render tabs with labels", () => {

@@ -10,6 +10,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
+import { getBindingPath } from "@/lib/a2ui/data-model"
 import { useA2UIData } from "../a2ui-context"
 import type { A2UIComponentProps, A2UIBaseComponent, A2UINumberOrPath } from "@/types/a2ui/schema"
 
@@ -37,19 +38,24 @@ function getPageRange(current: number, total: number, siblings: number): (number
 export const A2UIPagination = memo(function A2UIPagination({
   component,
   onAction,
+  onDataChange,
 }: A2UIComponentProps<A2UIPaginationComponent>) {
-  const { resolveNumber } = useA2UIData()
+  const { resolveNumber, resolveBoolean } = useA2UIData()
   const current = resolveNumber(component.currentPage, 1)
   const total = component.totalPages
-  const siblings = component.siblingCount || 1
+  const siblings = component.siblingCount ?? 1
+  const path = getBindingPath(component.currentPage)
+  const disabled = resolveBoolean(component.disabled ?? false, false)
 
   const handlePage = useCallback(
     (page: number) => {
+      if (disabled || page < 1 || page > total) return
+      if (path) onDataChange(path, page)
       if (component.pageChangeAction) {
         onAction(component.pageChangeAction, { page })
       }
     },
-    [component.pageChangeAction, onAction]
+    [component.pageChangeAction, onAction, path, disabled, total, onDataChange]
   )
 
   if (total <= 1) return null

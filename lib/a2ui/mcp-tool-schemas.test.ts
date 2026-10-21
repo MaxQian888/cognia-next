@@ -167,3 +167,10 @@ describe("a2ui MCP tool schemas", () => {
     })
   })
 })
+
+it("describes component updates as legacy upserts rather than tree replacement", () => {
+  const tool = A2UI_BRIDGE_TOOLS.find((tool) => tool.name === "a2ui_update_components")
+  expect(tool?.description).toContain("Upsert components by id")
+  expect(tool?.description).toContain("omitted components remain")
+  expect(tool?.description).toContain("Cognia legacy")
+})

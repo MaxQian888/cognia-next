@@ -307,8 +307,9 @@ async function runAiTurn(
  * Generate (or edit) an A2UI app. The caller applies the returned pieces:
  *  - hub create → `createCustomApp(title, components, dataModel)`
  *  - workspace regenerate → `replaceSurfaceContent(surfaceId, components, dataModel, rootId)`
- *  - workspace edit → streaming already patched the canvas; reconcile with
- *    `updateComponents(surfaceId, components)` + `updateDataModel(surfaceId, dataModel, false)`
+ *  - workspace edit → streaming already applied the data operations; reconcile
+ *    component patches only. Captured data is partial and must not replace the
+ *    live data model.
  */
 export async function generateA2UIApp(opts: A2UIGenerateOptions): Promise<A2UIGenerateResult> {
   const language = opts.language ?? detectLanguage(opts.instruction)

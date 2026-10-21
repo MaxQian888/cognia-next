@@ -53,6 +53,24 @@ describe("A2UIButton", () => {
     jest.clearAllMocks()
   })
 
+  it("renders the configured icon after its text", () => {
+    render(
+      <A2UIButton
+        {...createProps({
+          id: "icon",
+          component: "Button",
+          text: "Next",
+          action: "next",
+          icon: "ArrowRight",
+          iconPosition: "right",
+        })}
+      />
+    )
+    const button = screen.getByRole("button", { name: "Next" })
+    expect(button.querySelector("svg")).toBeInTheDocument()
+    expect(button.lastElementChild?.tagName.toLowerCase()).toBe("svg")
+  })
+
   it("should render button with label", () => {
     const component: A2UIButtonComponent = {
       id: "btn-1",

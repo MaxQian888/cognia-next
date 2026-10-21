@@ -354,3 +354,19 @@ export function canDuplicateComponentSubtree(
       )
   )
 }
+
+/** Infer an initial streamed root, then preserve it across component patches. */
+export function resolveStreamedRootId(
+  existing: Record<string, unknown>,
+  rootId: string,
+  components: A2UIComponent[]
+): string {
+  if (Object.keys(existing).length > 0 || components.length === 0) return rootId
+  if (components.some((component) => component.id === "root")) return "root"
+  const referencedIds = new Set(
+    components.flatMap((component) =>
+      getComponentChildReferences(component).map((reference) => reference.id)
+    )
+  )
+  return components.find((component) => !referencedIds.has(component.id))?.id ?? components[0].id
+}

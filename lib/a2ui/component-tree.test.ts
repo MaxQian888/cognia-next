@@ -1,4 +1,5 @@
 import {
+  resolveStreamedRootId,
   canDuplicateComponentSubtree,
   collectComponentSubtreeIds,
   getComponentChildReferences,
@@ -151,5 +152,20 @@ describe("A2UI component-tree references", () => {
     const withFooter = rewriteComponentCollectionSlot(emptyCard, "/footer", () => ["button"])
     expect(withFooter).toMatchObject({ footer: ["button"] })
     expect(emptyCard).not.toHaveProperty("footer")
+  })
+})
+
+describe("resolveStreamedRootId", () => {
+  it("infers an unreferenced root and preserves it during patches", () => {
+    const batch = [
+      component({ id: "label", component: "Text" }),
+      component({ id: "app", component: "Column", children: ["label"] }),
+    ]
+    expect(resolveStreamedRootId({}, "root", batch)).toBe("app")
+    expect(resolveStreamedRootId({ app: batch[1] }, "app", [batch[0]])).toBe("app")
+    expect(resolveStreamedRootId({}, "root", [])).toBe("root")
+    expect(
+      resolveStreamedRootId({}, "root", [...batch, component({ id: "root", component: "Text" })])
+    ).toBe("root")
   })
 })

@@ -3,6 +3,7 @@
  * Tests for A2UI Store
  */
 
+import { registerComponent, unregisterComponent } from "@/lib/a2ui/catalog"
 import { act } from "@testing-library/react"
 import {
   __resetA2UISurfacePersistenceForTesting,
@@ -40,43 +41,6 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 // Mock dependencies
-jest.mock("@/lib/a2ui/parser", () => ({
-  isCreateSurfaceMessage: (msg: { type: string }) => msg.type === "createSurface",
-  isUpdateComponentsMessage: (msg: { type: string }) => msg.type === "updateComponents",
-  isUpdateDataModelMessage: (msg: { type: string }) => msg.type === "dataModelUpdate",
-  isDeleteSurfaceMessage: (msg: { type: string }) => msg.type === "deleteSurface",
-  isSurfaceReadyMessage: (msg: { type: string }) => msg.type === "surfaceReady",
-  isConnectorActionMessage: (msg: { type: string }) => msg.type === "connectorAction",
-}))
-
-jest.mock("@/lib/a2ui/data-model", () => ({
-  setValueByPath: jest.fn((obj, path, value) => {
-    const result = { ...obj }
-    const segments = path.split("/").filter(Boolean)
-    let current = result
-    for (let i = 0; i < segments.length - 1; i++) {
-      current[segments[i]] = current[segments[i]] || {}
-      current = current[segments[i]]
-    }
-    current[segments[segments.length - 1]] = value
-    return result
-  }),
-  getValueByPath: jest.fn((obj, path) => {
-    const segments = path.split("/").filter(Boolean)
-    let current = obj
-    for (const segment of segments) {
-      if (current && typeof current === "object") {
-        current = current[segment]
-      } else {
-        return undefined
-      }
-    }
-    return current
-  }),
-  deepMerge: jest.fn((target, source) => ({ ...target, ...source })),
-  deepClone: jest.fn((obj) => JSON.parse(JSON.stringify(obj))),
-}))
-
 jest.mock("@/lib/a2ui/events", () => ({
   globalEventEmitter: { emitAction: jest.fn(), emitDataChange: jest.fn() },
   createUserAction: jest.fn((surfaceId, action, componentId, data) => ({
@@ -430,6 +394,48 @@ describe("useA2UIStore", () => {
 
       expect(useA2UIStore.getState().streamingSurfaces["surface-1"]).toBeUndefined()
     })
+  })
+
+  it("rejects component schema violations before applying any component", () => {
+    const store = useA2UIStore.getState()
+    registerComponent("Text", () => null, {
+      catalogId: "strict",
+      schema: { type: "object", required: ["text"], properties: { text: { type: "string" } } },
+    })
+    try {
+      store.createSurface("strict", "panel", { catalogId: "strict" })
+      expect(() =>
+        store.processMessage({
+          type: "updateComponents",
+          surfaceId: "strict",
+          components: [
+            { id: "valid", component: "Text", text: "ok" },
+            { id: "invalid", component: "Text", text: 42 } as never,
+          ],
+        })
+      ).toThrow(TypeError)
+      expect(store.getSurface("strict")?.components).toEqual({})
+    } finally {
+      unregisterComponent("Text", "strict")
+    }
+  })
+
+  it("renders a standalone MCP surface as soon as its root arrives", () => {
+    const store = useA2UIStore.getState()
+    store.processMessage({ type: "createSurface", surfaceId: "mcp", surfaceType: "panel" })
+    store.processMessage({ type: "updateComponents", surfaceId: "mcp", components: [] })
+    expect(store.getSurface("mcp")?.ready).toBe(false)
+    store.setSurfaceLoading("mcp", true)
+    store.processMessage({
+      type: "updateComponents",
+      surfaceId: "mcp",
+      components: [
+        { id: "app", component: "Column", children: ["label"] },
+        { id: "label", component: "Text", text: "Ready without a private ready message" },
+      ],
+    })
+    expect(store.getSurface("mcp")).toMatchObject({ rootId: "app", ready: true })
+    expect(useA2UIStore.getState().loadingSurfaces.mcp).toBe(true)
   })
 
   describe("updateComponents", () => {

@@ -1,7 +1,9 @@
 "use client"
 
+import { useTranslations } from "next-intl"
+import { getBindingPath } from "@/lib/a2ui/data-model"
 import React, { memo, useState } from "react"
-import { cn } from "@/lib/utils"
+import { A2UITrigger } from "../a2ui-child-renderer"
 import {
   Sheet,
   SheetContent,
@@ -31,30 +33,38 @@ export interface A2UISheetComponent extends A2UIBaseComponent {
 export const A2UISheet = memo(function A2UISheet({
   component,
   renderChild,
+  onDataChange,
 }: A2UIComponentProps<A2UISheetComponent>) {
+  const t = useTranslations("a2ui.controls")
   const { resolveString, resolveBoolean } = useA2UIData()
   const title = component.title ? resolveString(component.title) : undefined
   const description = component.description ? resolveString(component.description) : undefined
-  const controlledOpen = component.open ? resolveBoolean(component.open) : undefined
+  const controlledOpen = component.open !== undefined ? resolveBoolean(component.open) : undefined
   const [internalOpen, setInternalOpen] = useState(false)
 
+  const bindingPath = getBindingPath(component.open)
+  const handleOpenChange = (open: boolean) => {
+    if (bindingPath) onDataChange(bindingPath, open)
+    else setInternalOpen(open)
+  }
+
   return (
-    <Sheet open={controlledOpen ?? internalOpen} onOpenChange={setInternalOpen}>
+    <Sheet open={controlledOpen ?? internalOpen} onOpenChange={handleOpenChange}>
       <SheetTrigger asChild>
-        <span
-          className={cn("inline-flex", component.className)}
+        <A2UITrigger
+          componentId={component.trigger}
+          renderChild={renderChild}
+          className={component.className}
           style={component.style as React.CSSProperties}
-        >
-          {renderChild(component.trigger)}
-        </span>
+        />
       </SheetTrigger>
       <SheetContent side={component.side || "right"}>
-        {(title || description) && (
-          <SheetHeader>
-            {title && <SheetTitle>{title}</SheetTitle>}
-            {description && <SheetDescription>{description}</SheetDescription>}
-          </SheetHeader>
-        )}
+        <SheetHeader>
+          <SheetTitle className={title ? undefined : "sr-only"}>
+            {title || t("untitled")}
+          </SheetTitle>
+          {description && <SheetDescription>{description}</SheetDescription>}
+        </SheetHeader>
         {component.children.map((childId) => (
           <React.Fragment key={childId}>{renderChild(childId)}</React.Fragment>
         ))}
