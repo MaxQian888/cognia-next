@@ -35,24 +35,18 @@ import type {
 } from "@/lib/terminal/completion/types"
 import { registerCompletionProvider } from "@/lib/terminal/completion/registry"
 import { loggers } from "@/lib/plugin/core/logger"
+import type {
+  TerminalCompletionBridgeError,
+  TerminalCompletionBridgeOptions,
+  TerminalCompletionBridgeResult,
+} from "@cognia/plugin-contract/lib/plugin/bridge/terminal-completion-bridge"
+export type {
+  TerminalCompletionBridgeError,
+  TerminalCompletionBridgeResult,
+  TerminalCompletionBridgeOptions,
+} from "@cognia/plugin-contract/lib/plugin/bridge/terminal-completion-bridge"
 
 const unregistrarsByPlugin = new Map<string, Array<() => void>>()
-
-export interface TerminalCompletionBridgeError {
-  pluginId: string
-  providerId: string
-  message: string
-}
-
-export interface TerminalCompletionBridgeResult {
-  registered: number
-  errors: TerminalCompletionBridgeError[]
-}
-
-export interface TerminalCompletionBridgeOptions {
-  importer?: (entry: string) => Promise<Record<string, unknown>>
-  getConfig?: (pluginId: string, key: string) => unknown
-}
 
 const DEFAULT_IMPORTER: NonNullable<TerminalCompletionBridgeOptions["importer"]> = (entry) =>
   import(/* @vite-ignore */ /* webpackIgnore: true */ entry)

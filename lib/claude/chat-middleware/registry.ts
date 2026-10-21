@@ -1,55 +1,22 @@
-/**
- * Chat-middleware registry.
- *
- * Holds the ordered list of around-style middlewares registered through
- * `ctx.chat.use(...)` (Phase 4 §A of ADR-0026). Each entry tracks:
- *   - the owning plugin id (for circuit-breaker bookkeeping + cleanup),
- *   - the middleware id (unprefixed, used as the breaker key),
- *   - the function itself,
- *   - the per-middleware timeout (default 5000 ms, clamped to ≤ 60000),
- *   - priority (higher runs outer in the chain),
- *   - the current consecutive-failure counter (reset on success),
- *   - a `disabled` flag the runner consults on each turn (set true once
- *     the breaker trips).
- *
- * Mutations notify listeners so settings UIs can render the disabled
- * banner without polling. ADR-0026 §4 §A circuit-breaker semantics:
- * three consecutive failures (timeout OR throw) → set `disabled=true` and
- * fire a `breaker-tripped` event. Plugin disable + re-enable resets the
- * counter via `clearChatMiddlewaresForPlugin(pluginId)`.
- */
-
-import type { ChatMiddleware } from "@/types/plugin/plugin-chat-middleware"
 import {
   interceptorFromChatMiddleware,
   registerInterceptor,
   unregisterInterceptor,
 } from "@/lib/plugin/interceptors"
+import type {
+  ChatMiddlewareEvent,
+  ChatMiddlewareRegistration,
+  RegisterChatMiddlewareArgs,
+} from "@cognia/plugin-contract/lib/claude/chat-middleware/registry"
+export type {
+  ChatMiddlewareRegistration,
+  ChatMiddlewareEvent,
+  RegisterChatMiddlewareArgs,
+} from "@cognia/plugin-contract/lib/claude/chat-middleware/registry"
 
 export const DEFAULT_MIDDLEWARE_TIMEOUT_MS = 5_000
 export const MAX_MIDDLEWARE_TIMEOUT_MS = 60_000
 export const CIRCUIT_BREAKER_THRESHOLD = 3
-
-export interface ChatMiddlewareRegistration {
-  pluginId: string
-  /** Unprefixed middleware id; key for the breaker counter. */
-  middlewareId: string
-  /** Full id used in logs (`<pluginId>:<middlewareId>`). */
-  fullId: string
-  fn: ChatMiddleware
-  priority: number
-  timeoutMs: number
-  consecutiveFailures: number
-  disabled: boolean
-  /** True once the breaker has tripped — surfaced to settings UI. */
-  breakerTripped: boolean
-}
-
-export type ChatMiddlewareEvent =
-  | { type: "registered"; fullId: string; pluginId: string }
-  | { type: "unregistered"; fullId: string; pluginId: string }
-  | { type: "breaker-tripped"; fullId: string; pluginId: string; reason: string }
-  | { type: "breaker-reset"; fullId: string; pluginId: string }
 
 const registry = new Map<string, ChatMiddlewareRegistration>()
 const listeners = new Set<(event: ChatMiddlewareEvent) => void>()
@@ -71,14 +38,6 @@ function clampTimeout(value: number | undefined): number {
     return DEFAULT_MIDDLEWARE_TIMEOUT_MS
   }
   return Math.min(value, MAX_MIDDLEWARE_TIMEOUT_MS)
-}
-
-export interface RegisterChatMiddlewareArgs {
-  pluginId: string
-  middlewareId: string
-  fn: ChatMiddleware
-  priority?: number
-  timeoutMs?: number
 }
 
 export function registerChatMiddleware(args: RegisterChatMiddlewareArgs): () => void {

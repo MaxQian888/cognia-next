@@ -30,21 +30,16 @@ import {
   registerDeploymentFilter,
   unregisterDeploymentFiltersByPlugin,
 } from "@cognia/provider-routing/filter-registry"
-
-export interface DeploymentFiltersBridgeError {
-  pluginId: string
-  filterId: string
-  message: string
-}
-
-export interface DeploymentFiltersBridgeResult {
-  registered: number
-  errors: DeploymentFiltersBridgeError[]
-}
-
-export interface DeploymentFiltersBridgeOptions {
-  importer?: (entry: string) => Promise<Record<string, unknown>>
-}
+import type {
+  DeploymentFiltersBridgeError,
+  DeploymentFiltersBridgeOptions,
+  DeploymentFiltersBridgeResult,
+} from "@cognia/plugin-contract/lib/plugin/bridge/deployment-filters-bridge"
+export type {
+  DeploymentFiltersBridgeError,
+  DeploymentFiltersBridgeResult,
+  DeploymentFiltersBridgeOptions,
+} from "@cognia/plugin-contract/lib/plugin/bridge/deployment-filters-bridge"
 
 const DEFAULT_IMPORTER: NonNullable<DeploymentFiltersBridgeOptions["importer"]> = (entry) =>
   import(/* @vite-ignore */ /* webpackIgnore: true */ entry)

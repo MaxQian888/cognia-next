@@ -10,23 +10,8 @@
 
 import { loggers } from "@cognia/logging"
 import { registerCommand } from "@/lib/plugin/commands/registry"
-
-export interface PluginTrayItem {
-  id: string
-  pluginId: string
-  label: string
-  labelKey?: string
-  icon?: string
-  /** when-expression evaluated by `lib/tray/when.ts` before flushing. */
-  when?: string
-  /** Free-form category — used by `lib/tray/all-commands.ts` for grouping. */
-  category?: string
-  /** Optional shortcut hint, cosmetic in the OS menu. */
-  accelerator?: string
-  command?: string
-  slash?: string
-  run?: () => void | Promise<void>
-}
+import type { PluginTrayItem } from "@cognia/plugin-contract/lib/tray/registry"
+export type { PluginTrayItem } from "@cognia/plugin-contract/lib/tray/registry"
 
 type Listener = (snapshot: PluginTrayItem[]) => void
 

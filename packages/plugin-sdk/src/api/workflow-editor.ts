@@ -19,11 +19,13 @@ export type {
   CopilotI18n,
   CopilotSlotValues,
   CopilotTemplateSlot,
+  WorkflowCopilotTemplate,
+} from "@cognia/plugin-contract/lib/workflow/copilot-templates/types"
+export type {
   MaterializeFailure,
   MaterializeResult,
   MaterializeSuccess,
-  WorkflowCopilotTemplate,
-} from "@/lib/workflow/copilot-templates"
+} from "@cognia/plugin-contract/lib/workflow/copilot-templates/index"
 export type {
   ExplainedLastRun,
   ExplainedSeverity,

@@ -17,7 +17,11 @@ export type {
   PluginIssueEventOptions,
 } from "@cognia/plugin-contract/lib/plugin/api/issues-api"
 
-export type { IssueBulkAction, IssueBulkOutcome, IssueWire } from "@/lib/issues/service"
+export type {
+  IssueBulkAction,
+  IssueBulkOutcome,
+} from "@cognia/plugin-contract/lib/issues/bulk-actions"
+export type { IssueWire } from "@cognia/plugin-contract/lib/issues/service"
 
 export type {
   IssueSyncBinding,

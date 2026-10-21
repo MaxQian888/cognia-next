@@ -1,7 +1,7 @@
 /**
  * The plugin contract's share of `lib/plugin/api/eval-api.ts`, which re-exports these.
  */
-import type { getRunDetail, listDatasetSummaries } from "@/lib/ai/eval/service"
+import type { EvalDatasetSummary, EvalRunDetail } from "../../ai/eval/service"
 
 export interface PluginRunDatasetArgs {
   datasetId: string
@@ -37,8 +37,8 @@ export interface PluginEvalProjectArgs {
 }
 
 export interface PluginEvalAPI {
-  listDatasets(): ReturnType<typeof listDatasetSummaries>
-  getRun(runId: string): ReturnType<typeof getRunDetail>
+  listDatasets(): Promise<EvalDatasetSummary[]>
+  getRun(runId: string): Promise<EvalRunDetail | undefined>
   runDataset(args: PluginRunDatasetArgs): Promise<unknown>
   runCalibration(args: PluginRunCalibrationArgs): Promise<unknown>
   runProject(args: PluginEvalProjectArgs): Promise<unknown>

@@ -9,13 +9,6 @@ import type {
   SiteVersionRow,
   SiteVisitorPolicy,
 } from "../../../types/sites"
-import type {
-  getSiteProductionUrl,
-  listSiteDeploymentsForPlugin,
-  listSiteOperationsForPlugin,
-  listSiteVersionsForPlugin,
-  listSites,
-} from "@/lib/plugin/api/sites"
 
 export interface PluginSiteSummary {
   id: string
@@ -56,9 +49,9 @@ export type PluginSiteOperation = Pick<
 >
 
 export interface PluginSitesAPI {
-  listSites: typeof listSites
-  listVersions: typeof listSiteVersionsForPlugin
-  listDeployments: typeof listSiteDeploymentsForPlugin
-  listOperations: typeof listSiteOperationsForPlugin
-  getProductionUrl: typeof getSiteProductionUrl
+  listSites: () => Promise<PluginSiteSummary[]>
+  listVersions: (siteId: string) => Promise<PluginSiteVersion[]>
+  listDeployments: (siteId: string) => Promise<PluginSiteDeployment[]>
+  listOperations: (siteId: string) => Promise<PluginSiteOperation[]>
+  getProductionUrl: (siteId: string) => Promise<string | undefined>
 }

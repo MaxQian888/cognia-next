@@ -17,6 +17,7 @@ import type {
   PluginBrowserEngine,
   PrivilegedBrowserEngineMethod,
 } from "@cognia/plugin-contract/lib/plugin/api/browser-api"
+export { PRIVILEGED_BROWSER_ENGINE_METHODS } from "@cognia/plugin-contract/lib/plugin/api/browser-api"
 export type {
   PluginBrowserAPI,
   PluginBrowserEngine,
@@ -36,20 +37,6 @@ export const FIRST_PARTY_BROWSER_PLUGIN_ID = "cognia-browser-tools"
 export function isFirstPartyBrowserPlugin(pluginId: string, source: PluginSource | undefined) {
   return pluginId === FIRST_PARTY_BROWSER_PLUGIN_ID && source === "builtin"
 }
-
-/**
- * Engine methods only the first-party Browser Tools plugin receives. They put a
- * vault password into a page, or return a site's session state (storage
- * values, request bodies, cookie metadata) or wipe it (cookies) — the plugin
- * gates each behind an approval / trust check; any other plugin would not.
- */
-export const PRIVILEGED_BROWSER_ENGINE_METHODS = [
-  "fillCredential",
-  "getStorage",
-  "networkRequest",
-  "listCookies",
-  "clearCookies",
-] as const
 
 /** Methods the facade forwards unchanged (`evaluate` is forwarded with its options dropped). */
 const FACADE_METHODS = [

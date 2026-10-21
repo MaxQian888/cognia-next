@@ -28,7 +28,6 @@ import type {
   AiMessage,
 } from "@/types/plugin/plugin-ai-provider"
 import type { CatalogContribution } from "@cognia/provider-types/model-catalog"
-import type { CatalogRepository } from "@cognia/provider-core/providers/catalog-repository"
 import type {
   AIProviderDefinition,
   AIChatMessage,
@@ -43,26 +42,18 @@ import {
 } from "@/lib/plugin/bridge/_shared/python-backed-proxy"
 import { createAIProviderAPI } from "@/lib/plugin/api/ai-provider-api"
 import { providerCatalogRepository } from "@/lib/db/provider-catalog"
+import type {
+  AiProvidersBridgeError,
+  AiProvidersBridgeOptions,
+  AiProvidersBridgeResult,
+} from "@cognia/plugin-contract/lib/plugin/bridge/ai-providers-bridge"
+export type {
+  AiProvidersBridgeError,
+  AiProvidersBridgeResult,
+  AiProvidersBridgeOptions,
+} from "@cognia/plugin-contract/lib/plugin/bridge/ai-providers-bridge"
 
 const unregistrarsByPlugin = new Map<string, Array<() => void>>()
-
-export interface AiProvidersBridgeError {
-  pluginId: string
-  providerId: string
-  message: string
-}
-
-export interface AiProvidersBridgeResult {
-  registered: number
-  errors: AiProvidersBridgeError[]
-}
-
-export interface AiProvidersBridgeOptions {
-  importer?: (entry: string) => Promise<Record<string, unknown>>
-  getConfig?: (pluginId: string, key: string) => unknown
-  getSecret?: (pluginId: string, key: string) => Promise<string | undefined>
-  catalogRepository?: CatalogRepository
-}
 
 const DEFAULT_IMPORTER: NonNullable<AiProvidersBridgeOptions["importer"]> = (entry) =>
   import(/* @vite-ignore */ /* webpackIgnore: true */ entry)

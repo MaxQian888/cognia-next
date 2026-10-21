@@ -9,7 +9,7 @@ import type {
   BrowserEngineBackend,
   EngineBackendPreference,
 } from "../../browser/agent-engine"
-import type { PRIVILEGED_BROWSER_ENGINE_METHODS } from "@/lib/plugin/api/browser-api"
+
 import type { TrustTier } from "../../browser/protocol"
 
 export type PrivilegedBrowserEngineMethod = (typeof PRIVILEGED_BROWSER_ENGINE_METHODS)[number]
@@ -66,3 +66,17 @@ export interface PluginBrowserAPI {
   /** Whether a person can currently see the app window. */
   isSurfaceVisible(): boolean
 }
+
+/**
+ * Engine methods only the first-party Browser Tools plugin receives. They put a
+ * vault password into a page, or return a site's session state (storage
+ * values, request bodies, cookie metadata) or wipe it (cookies) — the plugin
+ * gates each behind an approval / trust check; any other plugin would not.
+ */
+export const PRIVILEGED_BROWSER_ENGINE_METHODS = [
+  "fillCredential",
+  "getStorage",
+  "networkRequest",
+  "listCookies",
+  "clearCookies",
+] as const

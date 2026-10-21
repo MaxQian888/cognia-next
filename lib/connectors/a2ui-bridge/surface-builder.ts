@@ -20,24 +20,7 @@
  * `connectors:send`.
  */
 
-import type {
-  A2UIComponent,
-  A2UITextComponent,
-  A2UIButtonComponent,
-  A2UICardComponent,
-  A2UIRowComponent,
-  A2UIColumnComponent,
-  A2UIAlertComponent,
-  A2UIImageComponent,
-  A2UILinkComponent,
-  A2UISelectComponent,
-  A2UISelectOption,
-  A2UITextFieldComponent,
-  A2UIListComponent,
-  A2UIDividerComponent,
-  A2UIBadgeComponent,
-  A2UIPathValue,
-} from "@/types/a2ui/schema"
+import type { A2UIComponent } from "@/types/a2ui/schema"
 import type { A2UIMessageSegment, A2UISegmentContent } from "@/types/connectors/segment"
 import type { OutboundRequest } from "@/types/connectors"
 import { newIdempotencyKey } from "@/types/connectors/outbound"
@@ -47,6 +30,8 @@ import type {
   A2UISurfaceInput,
   PluginConnectorsA2UIBuilder,
 } from "@cognia/plugin-contract/lib/connectors/a2ui-bridge/surface-builder"
+import { a2uiComponent } from "@cognia/plugin-contract/lib/connectors/a2ui-bridge/surface-builder"
+export { a2uiComponent } from "@cognia/plugin-contract/lib/connectors/a2ui-bridge/surface-builder"
 export type {
   A2UIMessageInput,
   A2UISurfaceInput,
@@ -182,99 +167,6 @@ export function buildA2UIOutboundRequest(input: A2UIMessageInput): OutboundReque
     segments,
     metadata: { idempotencyKey: input.idempotencyKey ?? newIdempotencyKey() },
   }
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-// Component factories — thin, typed constructors that remove the boilerplate
-// of writing `{ id, component, … }` literals by hand. Each returns the
-// canonical `A2UIComponent` subtype, so the output is renderer- and
-// mapper-ready with no further shaping.
-// ───────────────────────────────────────────────────────────────────────────
-
-type Extra<T> = Omit<T, "id" | "component">
-
-export const a2uiComponent = {
-  text(
-    id: string,
-    text: A2UITextComponent["text"],
-    extra: Omit<Extra<A2UITextComponent>, "text"> = {}
-  ): A2UITextComponent {
-    return { id, component: "Text", text, ...extra }
-  },
-  button(
-    id: string,
-    text: A2UIButtonComponent["text"],
-    action: string,
-    extra: Omit<Extra<A2UIButtonComponent>, "text" | "action"> = {}
-  ): A2UIButtonComponent {
-    return { id, component: "Button", text, action, ...extra }
-  },
-  card(id: string, extra: Extra<A2UICardComponent> = {}): A2UICardComponent {
-    return { id, component: "Card", ...extra }
-  },
-  row(
-    id: string,
-    children: string[],
-    extra: Omit<Extra<A2UIRowComponent>, "children"> = {}
-  ): A2UIRowComponent {
-    return { id, component: "Row", children, ...extra }
-  },
-  column(
-    id: string,
-    children: string[],
-    extra: Omit<Extra<A2UIColumnComponent>, "children"> = {}
-  ): A2UIColumnComponent {
-    return { id, component: "Column", children, ...extra }
-  },
-  alert(
-    id: string,
-    message: A2UIAlertComponent["message"],
-    extra: Omit<Extra<A2UIAlertComponent>, "message"> = {}
-  ): A2UIAlertComponent {
-    return { id, component: "Alert", message, ...extra }
-  },
-  image(
-    id: string,
-    src: A2UIImageComponent["src"],
-    extra: Omit<Extra<A2UIImageComponent>, "src"> = {}
-  ): A2UIImageComponent {
-    return { id, component: "Image", src, ...extra }
-  },
-  link(
-    id: string,
-    text: A2UILinkComponent["text"],
-    extra: Omit<Extra<A2UILinkComponent>, "text"> = {}
-  ): A2UILinkComponent {
-    return { id, component: "Link", text, ...extra }
-  },
-  select(
-    id: string,
-    value: A2UISelectComponent["value"],
-    options: A2UISelectOption[] | A2UIPathValue<A2UISelectOption[]>,
-    extra: Omit<Extra<A2UISelectComponent>, "value" | "options"> = {}
-  ): A2UISelectComponent {
-    return { id, component: "Select", value, options, ...extra }
-  },
-  textField(
-    id: string,
-    value: A2UITextFieldComponent["value"],
-    extra: Omit<Extra<A2UITextFieldComponent>, "value"> = {}
-  ): A2UITextFieldComponent {
-    return { id, component: "TextField", value, ...extra }
-  },
-  list(id: string, extra: Extra<A2UIListComponent> = {}): A2UIListComponent {
-    return { id, component: "List", ...extra }
-  },
-  divider(id: string, extra: Extra<A2UIDividerComponent> = {}): A2UIDividerComponent {
-    return { id, component: "Divider", ...extra }
-  },
-  badge(
-    id: string,
-    text: A2UIBadgeComponent["text"],
-    extra: Omit<Extra<A2UIBadgeComponent>, "text"> = {}
-  ): A2UIBadgeComponent {
-    return { id, component: "Badge", text, ...extra }
-  },
 }
 
 /** Build the `ctx.connectors.a2ui` namespace. Pure — no permission needed. */

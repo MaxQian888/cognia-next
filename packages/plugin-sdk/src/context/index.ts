@@ -137,32 +137,34 @@ export type {
 // =============================================================================
 export type { PluginOcrAPI } from "@cognia/plugin-contract/lib/plugin/api/ocr-api"
 export type { PluginDecisionsAPI } from "@cognia/plugin-contract/lib/plugin/api/decisions-api"
+export type { PluginPromptDeclaration } from "@cognia/plugin-contract/lib/prompts/plugin-prompts"
 export type {
-  PluginPromptDeclaration,
   PluginPromptRegistration,
   PluginPromptResolveOptions,
   PluginPromptsAPI,
   PluginResolvedPrompt,
-} from "@/lib/plugin/api/prompts-api"
+} from "@cognia/plugin-contract/lib/plugin/api/prompts-api"
 export type {
   PluginAgentConfigAPI,
-  PluginAgentConfigApplyResult,
-  PluginAgentConfigEdit,
-  PluginAgentConfigFacts,
-  PluginAgentConfigHookFact,
-  PluginAgentConfigLineProvenance,
-  PluginAgentConfigMcpServerFact,
-  PluginAgentConfigPathStatus,
-  PluginAgentConfigPermissionFact,
-  PluginAgentConfigReferenceCheck,
-  PluginAgentConfigReferenceInput,
   PluginAgentConfigScope,
-  PluginAgentConfigSkillFacts,
-  PluginAgentConfigSurface,
-  PluginAgentConfigSurfaceDocument,
-  PluginAgentConfigSurfaceListing,
-  PluginAgentConfigSurfaceSource,
-} from "@/lib/plugin/api/agent-config-api"
+} from "@cognia/plugin-contract/lib/plugin/api/agent-config-api"
+export type {
+  AgentConfigApplyResult as PluginAgentConfigApplyResult,
+  AgentConfigEdit as PluginAgentConfigEdit,
+  AgentConfigFacts as PluginAgentConfigFacts,
+  AgentConfigHookFact as PluginAgentConfigHookFact,
+  AgentConfigLineProvenance as PluginAgentConfigLineProvenance,
+  AgentConfigMcpServerFact as PluginAgentConfigMcpServerFact,
+  AgentConfigPathStatus as PluginAgentConfigPathStatus,
+  AgentConfigPermissionFact as PluginAgentConfigPermissionFact,
+  AgentConfigReferenceCheck as PluginAgentConfigReferenceCheck,
+  AgentConfigReferenceInput as PluginAgentConfigReferenceInput,
+  AgentConfigSkillFacts as PluginAgentConfigSkillFacts,
+  AgentConfigSurface as PluginAgentConfigSurface,
+  AgentConfigSurfaceDocument as PluginAgentConfigSurfaceDocument,
+  AgentConfigSurfaceListing as PluginAgentConfigSurfaceListing,
+  AgentConfigSurfaceSource as PluginAgentConfigSurfaceSource,
+} from "@cognia/plugin-contract/lib/agent-config/types"
 export type { PluginWorkspaceAPI } from "@cognia/plugin-contract/lib/plugin/api/workspace-api"
 export type { PluginModalAPI } from "@cognia/plugin-contract/lib/plugin/api/modal-api"
 export type {
@@ -178,10 +180,8 @@ export type {
   PluginUriAPI,
   PluginUriHandlerDef,
 } from "@cognia/plugin-contract/lib/plugin/api/uri-api"
-export type {
-  PluginRemoteDesktopAPI,
-  RemoteDesktopProviderDefinition,
-} from "@/lib/plugin/api/remote-desktop-api"
+export type { PluginRemoteDesktopAPI } from "@cognia/plugin-contract/lib/plugin/api/remote-desktop-api"
+export type { RemoteDesktopProviderDefinition } from "@cognia/plugin-contract/lib/remote-desktop/provider-registry"
 export type { PluginChatAPI } from "@cognia/plugin-contract/lib/plugin/api/chat-api"
 export type { PluginCapabilitiesAPI } from "@cognia/plugin-contract/lib/plugin/api/capabilities-api"
 export type {
@@ -211,15 +211,17 @@ export type {
   PluginAdapterInstanceInfo,
   PluginAdapterInstancePatch,
   PluginAdapterInstanceInput,
-  PluginConnectorsA2UIBuilder,
   PluginBoundSessionInfo,
   PluginOutboundJobInfo,
-  SiblingConversation,
-  DispatchRuleHit,
-  AtGateDecision,
+} from "@cognia/plugin-contract/lib/plugin/api/connectors-api"
+export type { PluginConnectorsA2UIBuilder } from "@cognia/plugin-contract/lib/connectors/a2ui-bridge/surface-builder"
+export type { SiblingConversation } from "@cognia/plugin-contract/lib/connectors/session-bindings"
+export type { DispatchRuleHit } from "@cognia/plugin-contract/lib/connectors/dispatch-rules"
+export type { AtGateDecision } from "@cognia/plugin-contract/lib/connectors/at-gate"
+export type {
   BootstrapConversationInput,
   BootstrapConversationResult,
-} from "@/lib/plugin/api/connectors-api"
+} from "@cognia/plugin-contract/lib/connectors/conversation-bootstrap"
 export type { PluginIntegrationsAPI } from "@cognia/plugin-contract/types/plugin/plugin-integration"
 export type {
   PluginTeamAPI,
@@ -328,8 +330,10 @@ export type {
   PluginMemoryStoreInput,
 } from "@cognia/plugin-contract/lib/plugin/api/memory-api"
 export type {
-  PluginExternalAgentChangeEvent,
-  PluginExternalAgentChangeType,
+  ExternalAgentChangeEvent as PluginExternalAgentChangeEvent,
+  ExternalAgentChangeType as PluginExternalAgentChangeType,
+} from "@cognia/plugin-contract/lib/plugin/api/external-agents-changes"
+export type {
   PluginExternalAgentCreateInput,
   PluginExternalAgentDelegationRule,
   PluginExternalAgentDelegationRuleInput,
@@ -348,16 +352,18 @@ export type {
   PluginExternalAgentSummary,
   PluginExternalAgentUpdatePatch,
   PluginExternalAgentsAPI,
-} from "@/lib/plugin/api/external-agents-api"
+} from "@cognia/plugin-contract/lib/plugin/api/external-agents-api"
 export type {
   PluginEmittablePetEventKind,
-  PluginPetAPI,
   PluginPetAvailability,
   PluginPetEvent,
+  PluginPetUnavailableReason,
+} from "@cognia/plugin-contract/lib/plugin/api/pet-api-contract"
+export type {
+  PluginPetAPI,
   PluginPetInteractionKind,
   PluginPetSummary,
-  PluginPetUnavailableReason,
-} from "@/lib/plugin/api/pet-api"
+} from "@cognia/plugin-contract/lib/plugin/api/pet-api"
 export type { PluginMessagePartAPI } from "@cognia/plugin-contract/lib/plugin/api/message-part-api"
 export type {
   PluginContextPanelAPI,

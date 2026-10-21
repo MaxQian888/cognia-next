@@ -12,7 +12,7 @@ export type {
   DeploymentFiltersBridgeError,
   DeploymentFiltersBridgeOptions,
   DeploymentFiltersBridgeResult,
-} from "@/lib/plugin/bridge/deployment-filters-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/deployment-filters-bridge"
 
 export {
   DEFAULT_FILTER_CHAIN,

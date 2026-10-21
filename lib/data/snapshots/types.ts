@@ -14,12 +14,9 @@
 
 import type { ImportMergeStrategy } from "./../types"
 import type { LocalStorageSnapshot } from "@cognia/plugin-contract/lib/data/snapshots/types"
+import { SNAPSHOT_FORMAT_VERSION } from "@cognia/plugin-contract/lib/data/snapshots/types"
+export { SNAPSHOT_FORMAT_VERSION } from "@cognia/plugin-contract/lib/data/snapshots/types"
 export type { LocalStorageSnapshot } from "@cognia/plugin-contract/lib/data/snapshots/types"
-
-/** Snapshot format version emitted by these modules. Independent of any
- * single store's `persist.version`; bump only when this wrapper shape
- * changes (almost never). */
-export const SNAPSHOT_FORMAT_VERSION = 1 as const
 
 /** Tiny abstraction over `localStorage` so we can mock it in unit tests and
  * tolerate non-browser execution (Node-only build hosts, SSR, etc.). */

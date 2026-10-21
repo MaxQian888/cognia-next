@@ -31,17 +31,20 @@ export type {
  * keys, same locale → English → key fallback, and it re-renders on a language
  * switch or when the plugin's bundle registers.
  */
-import type { usePluginTranslations as HostUsePluginTranslations } from "@/lib/plugin/api/use-plugin-translations"
+import type { PluginTranslate } from "@cognia/plugin-contract/lib/plugin/api/use-plugin-translations"
+
+/** The host's `usePluginTranslations` hook, bound by the subpath loader. */
+type HostUsePluginTranslations = (pluginId: string) => PluginTranslate
 import { PluginAdapterError } from "../errors/adapter-error"
 
-let hostTranslate: typeof HostUsePluginTranslations | undefined
+let hostTranslate: HostUsePluginTranslations | undefined
 
 /** Host loader seam; excluded from the evaluated plugin module. */
-export function bindPluginTranslationsHost(hook: typeof HostUsePluginTranslations): void {
+export function bindPluginTranslationsHost(hook: HostUsePluginTranslations): void {
   hostTranslate = hook
 }
 
-export const usePluginTranslations: typeof HostUsePluginTranslations = (pluginId) => {
+export const usePluginTranslations: HostUsePluginTranslations = (pluginId) => {
   if (!hostTranslate) {
     throw new PluginAdapterError(
       "DEPENDENCY_MISSING",

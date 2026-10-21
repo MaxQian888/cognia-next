@@ -20,26 +20,17 @@
  */
 
 import type { E2BBackend } from "./workspace"
-
-export interface WorkspaceBackendRegistration {
-  /** Already-prefixed backend id (`<pluginId>:<id>`; unprefixed only in tests/host code). */
-  backendId: string
-  /** Owning plugin id; "host" for host-owned registrations. */
-  pluginId: string
-  /** Human label shown in the picker UI. */
-  label: string
-  /** Optional description rendered alongside the label. */
-  description?: string
-  /** The actual backend instance. */
-  backend: E2BBackend
-}
+import type {
+  WorkspaceBackendRegistration,
+  WorkspaceBackendRegistryEvent,
+} from "@cognia/plugin-contract/lib/github/workspace-backend-registry"
+export type {
+  WorkspaceBackendRegistration,
+  WorkspaceBackendRegistryEvent,
+} from "@cognia/plugin-contract/lib/github/workspace-backend-registry"
 
 const registry = new Map<string, WorkspaceBackendRegistration>()
 const listeners = new Set<(event: WorkspaceBackendRegistryEvent) => void>()
-
-export type WorkspaceBackendRegistryEvent =
-  | { type: "register"; backendId: string; pluginId: string }
-  | { type: "unregister"; backendId: string; pluginId: string }
 
 function emit(event: WorkspaceBackendRegistryEvent): void {
   for (const fn of listeners) {

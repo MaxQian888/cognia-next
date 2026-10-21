@@ -10,7 +10,7 @@ import type { OpencodePlan, OpencodeZenData, ProviderCredential } from "./creden
 export type {
   DiscoveredOpencodeAuth,
   DiscoveredOpencodeEntry,
-} from "@/lib/subscription/core/transport"
+} from "../../lib/subscription/core/transport"
 
 /**
  * Whitelisted OpenCode sub-providers. Only these are surfaced from

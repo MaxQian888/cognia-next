@@ -28,13 +28,12 @@ import type {
   ProjectCommandDir,
   WorkspaceCustomCommand,
 } from "@cognia/plugin-contract/lib/slash-commands/custom-workspace"
+import { PROJECT_COMMAND_DIRS } from "@cognia/plugin-contract/lib/slash-commands/custom-workspace"
+export { PROJECT_COMMAND_DIRS } from "@cognia/plugin-contract/lib/slash-commands/custom-workspace"
 export type {
   ProjectCommandDir,
   WorkspaceCustomCommand,
 } from "@cognia/plugin-contract/lib/slash-commands/custom-workspace"
-
-/** The two directories a repository may keep its commands in. */
-export const PROJECT_COMMAND_DIRS = [".cognia/commands", ".claude/commands"] as const
 
 /** The directory a NEW project-scope command is written to. */
 export const DEFAULT_PROJECT_COMMAND_DIR: ProjectCommandDir = ".claude/commands"

@@ -12,7 +12,7 @@ export type {
   RoutingStrategiesBridgeError,
   RoutingStrategiesBridgeOptions,
   RoutingStrategiesBridgeResult,
-} from "@/lib/plugin/bridge/routing-strategies-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/routing-strategies-bridge"
 
 export {
   getRoutingStrategy,

@@ -12,7 +12,7 @@ export type {
   AiProvidersBridgeError,
   AiProvidersBridgeOptions,
   AiProvidersBridgeResult,
-} from "@/lib/plugin/bridge/ai-providers-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/ai-providers-bridge"
 
 export type {
   AiCompletionRequest,

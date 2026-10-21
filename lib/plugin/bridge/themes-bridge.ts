@@ -46,17 +46,14 @@ import {
 import { DEFAULT_FALLBACKS, THEME_COLOR_KEYS } from "@/lib/appearance/vscode-theme/token-mapping"
 import { themeKeyToCssVar } from "@/lib/appearance/css-var"
 import { loggers } from "@/lib/plugin/core/logger"
-
-export interface ThemesBridgeError {
-  pluginId: string
-  contributionId: string
-  message: string
-}
-
-export interface ThemesBridgeRegisterResult {
-  registered: number
-  errors: ThemesBridgeError[]
-}
+import type {
+  ThemesBridgeError,
+  ThemesBridgeRegisterResult,
+} from "@cognia/plugin-contract/lib/plugin/bridge/themes-bridge"
+export type {
+  ThemesBridgeError,
+  ThemesBridgeRegisterResult,
+} from "@cognia/plugin-contract/lib/plugin/bridge/themes-bridge"
 
 /**
  * Convert a ThemeColors object to a flat CSS-variable map. The shape is

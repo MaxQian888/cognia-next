@@ -11,7 +11,7 @@ export { defineTheme } from "../define/define-theme"
 export type {
   ThemesBridgeError,
   ThemesBridgeRegisterResult,
-} from "@/lib/plugin/bridge/themes-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/themes-bridge"
 
 export {
   getPluginTheme,

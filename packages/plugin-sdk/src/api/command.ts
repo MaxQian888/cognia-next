@@ -24,7 +24,7 @@ export type {
   CommandRegistration,
   CommandRegistryEvent,
   CommandRegistryListener,
-} from "@/lib/plugin/commands/registry"
+} from "@cognia/plugin-contract/lib/plugin/commands/registry"
 
 export type {
   PluginCommand,

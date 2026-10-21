@@ -22,7 +22,7 @@ import {
   type ProviderSettingsSnapshot,
   type ResolvedProvider,
 } from "@/lib/ai/provider-consumption"
-import { resolveImageModel, type ImageProviderId } from "./image-generation-sdk"
+import { resolveImageModel } from "./image-generation-sdk"
 import {
   VIDEO_GENERATION_PROVIDER_IDS,
   isSupportedVideoProvider,
@@ -35,27 +35,13 @@ import type {
   ProviderImageGenerationRequest,
   ProviderImagePrompt,
 } from "@cognia/plugin-contract/lib/ai/media/provider-generation"
+import { IMAGE_GENERATION_PROVIDER_IDS } from "@cognia/plugin-contract/lib/ai/media/provider-generation"
+export { IMAGE_GENERATION_PROVIDER_IDS } from "@cognia/plugin-contract/lib/ai/media/provider-generation"
 export type {
   ImageGenerationProviderId,
   ProviderImageGenerationRequest,
   ProviderImagePrompt,
 } from "@cognia/plugin-contract/lib/ai/media/provider-generation"
-
-export const IMAGE_GENERATION_PROVIDER_IDS = [
-  "openai",
-  "azure",
-  "bedrock",
-  "google",
-  "xai",
-  "togetherai",
-  "fireworks",
-  "deepinfra",
-  "fal",
-  "replicate",
-  "nvidia",
-  "doubao",
-  "volcengine",
-] as const satisfies readonly ImageProviderId[]
 
 export type ProviderVideoPrompt = GenerateVideoPrompt
 

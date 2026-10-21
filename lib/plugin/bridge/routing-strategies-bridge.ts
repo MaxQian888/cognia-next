@@ -29,21 +29,16 @@ import {
   registerRoutingStrategy,
   unregisterRoutingStrategiesByPlugin,
 } from "@cognia/provider-routing/strategy-registry"
-
-export interface RoutingStrategiesBridgeError {
-  pluginId: string
-  strategyId: string
-  message: string
-}
-
-export interface RoutingStrategiesBridgeResult {
-  registered: number
-  errors: RoutingStrategiesBridgeError[]
-}
-
-export interface RoutingStrategiesBridgeOptions {
-  importer?: (entry: string) => Promise<Record<string, unknown>>
-}
+import type {
+  RoutingStrategiesBridgeError,
+  RoutingStrategiesBridgeOptions,
+  RoutingStrategiesBridgeResult,
+} from "@cognia/plugin-contract/lib/plugin/bridge/routing-strategies-bridge"
+export type {
+  RoutingStrategiesBridgeError,
+  RoutingStrategiesBridgeResult,
+  RoutingStrategiesBridgeOptions,
+} from "@cognia/plugin-contract/lib/plugin/bridge/routing-strategies-bridge"
 
 const DEFAULT_IMPORTER: NonNullable<RoutingStrategiesBridgeOptions["importer"]> = (entry) =>
   import(/* @vite-ignore */ /* webpackIgnore: true */ entry)

@@ -8,7 +8,7 @@
 
 export { defineToolRoute } from "../define/define-tool-route"
 
-export type { ToolRoutesBridgeResult } from "@/lib/plugin/bridge/tool-routes-bridge"
+export type { ToolRoutesBridgeResult } from "@cognia/plugin-contract/lib/plugin/bridge/tool-routes-bridge"
 
 export type { PluginToolRouteDef } from "@cognia/plugin-contract/types/plugin/plugin-tool-route"
 

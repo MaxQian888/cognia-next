@@ -20,7 +20,7 @@ import type {
   TransportMode,
   UrgentChannel,
 } from "../../../types/connectors"
-import type { AdapterInstanceInput } from "../../db/adapter-instances"
+import type { AdapterInstanceInput, AdapterInstancePatch } from "../../db/adapter-instances"
 import type { AdapterInstanceRow, DispatchRule, OutboundJobRow } from "../../db/connector-types"
 import type { AdapterRuntimeStateSnapshot } from "../../connectors/outbound-runner"
 import type { AtGateDecision } from "../../connectors/at-gate"
@@ -41,7 +41,6 @@ import type { DispatchRuleHit } from "../../connectors/dispatch-rules"
 import type { PlatformSkillCapability } from "../../../types/connectors/skill-capability"
 import type { PluginConnectorsA2UIBuilder } from "../../connectors/a2ui-bridge/surface-builder"
 import type { SiblingConversation } from "../../connectors/session-bindings"
-import type { updateAdapterInstance } from "@/lib/db/adapter-instances"
 
 /** Optional-method support flags so plugins can feature-detect per adapter. */
 export interface PluginConnectorAdapterSupport {
@@ -73,7 +72,7 @@ export interface PluginConnectorAdapterInfo {
 export type PluginAdapterInstanceInfo = Omit<AdapterInstanceRow, "credentialsRef">
 
 /** Patch shape accepted by `updateInstance` (mirrors the DB whitelist). */
-export type PluginAdapterInstancePatch = Parameters<typeof updateAdapterInstance>[1]
+export type PluginAdapterInstancePatch = AdapterInstancePatch
 
 /** Input shape accepted by `createInstance` (full instance minus id/timestamps). */
 export type PluginAdapterInstanceInput = AdapterInstanceInput

@@ -21,16 +21,8 @@ import { loggers } from "@cognia/logging"
 import { registerCommand } from "@/lib/plugin/commands/registry"
 import { reportRegistryConflict } from "@/lib/plugin/contracts/conflict-reporter"
 import { createOverlayRegistry } from "./createOverlayRegistry"
-
-export interface QuickActionEntry extends PluginQuickActionInput {
-  /** Namespaced id: `<pluginId>:<localId>`. */
-  fullId: string
-  pluginId: string
-  /** Id of the mirrored command-registry entry (dispatch handle). */
-  commandId: string
-  /** Resolved surfaces (defaults applied). */
-  surfaces: PluginQuickActionSurface[]
-}
+import type { QuickActionEntry } from "@cognia/plugin-contract/lib/plugin/registries/quick-action-registry"
+export type { QuickActionEntry } from "@cognia/plugin-contract/lib/plugin/registries/quick-action-registry"
 
 const ALL_SURFACES: PluginQuickActionSurface[] = ["palette", "composer", "tray"]
 

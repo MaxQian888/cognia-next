@@ -9,7 +9,7 @@
 
 export { defineChatMiddleware } from "../define/define-chat-middleware"
 
-export type { RegisterChatMiddlewaresOptions } from "@/lib/plugin/bridge/chat-middleware-bridge"
+export type { RegisterChatMiddlewaresOptions } from "@cognia/plugin-contract/lib/plugin/bridge/chat-middleware-bridge"
 
 export type { PluginChatAPI } from "@cognia/plugin-contract/lib/plugin/api/chat-api"
 
@@ -30,7 +30,7 @@ export type {
   ChatMiddlewareEvent,
   ChatMiddlewareRegistration,
   RegisterChatMiddlewareArgs,
-} from "@/lib/claude/chat-middleware/registry"
+} from "@cognia/plugin-contract/lib/claude/chat-middleware/registry"
 
 export type {
   ChatMiddleware,

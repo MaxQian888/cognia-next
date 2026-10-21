@@ -12,7 +12,7 @@ export type {
   ProtocolAdaptersBridgeError,
   ProtocolAdaptersBridgeOptions,
   ProtocolAdaptersBridgeResult,
-} from "@/lib/plugin/bridge/protocol-adapters-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/protocol-adapters-bridge"
 
 export {
   getCodeAdapterExecutor,

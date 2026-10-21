@@ -27,7 +27,7 @@
  *   }))
  */
 
-import type { RemoteDesktopProviderDefinition } from "@/lib/plugin/api/remote-desktop-api"
+import type { RemoteDesktopProviderDefinition } from "@cognia/plugin-contract/lib/remote-desktop/provider-registry"
 
 export function defineRemoteDesktopProvider<const T extends RemoteDesktopProviderDefinition>(
   def: T

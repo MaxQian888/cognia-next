@@ -1,7 +1,6 @@
 /**
  * The plugin contract's share of `lib/data/snapshots/types.ts`, which re-exports these.
  */
-import type { SNAPSHOT_FORMAT_VERSION } from "@/lib/data/snapshots/types"
 
 export interface LocalStorageSnapshot<T = unknown> {
   /** The Zustand persist `name` (e.g. "cognia-external-agents"). */
@@ -18,3 +17,8 @@ export interface LocalStorageSnapshot<T = unknown> {
    * not load-bearing for replay. */
   capturedAt: string
 }
+
+/** Snapshot format version emitted by these modules. Independent of any
+ * single store's `persist.version`; bump only when this wrapper shape
+ * changes (almost never). */
+export const SNAPSHOT_FORMAT_VERSION = 1 as const

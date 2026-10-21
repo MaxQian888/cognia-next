@@ -14,7 +14,7 @@ export type {
   TerminalCompletionBridgeError,
   TerminalCompletionBridgeOptions,
   TerminalCompletionBridgeResult,
-} from "@/lib/plugin/bridge/terminal-completion-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/terminal-completion-bridge"
 
 export {
   getCompletions as getTerminalCompletions,

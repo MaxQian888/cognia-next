@@ -13,7 +13,7 @@ export type {
   WorkspaceBackendBridgeError,
   WorkspaceBackendBridgeOptions,
   WorkspaceBackendBridgeResult,
-} from "@/lib/plugin/bridge/workspace-backend-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/workspace-backend-bridge"
 
 export type { PluginWorkspaceAPI } from "@cognia/plugin-contract/lib/plugin/api/workspace-api"
 
@@ -30,7 +30,7 @@ export {
 export type {
   WorkspaceBackendRegistration,
   WorkspaceBackendRegistryEvent,
-} from "@/lib/github/workspace-backend-registry"
+} from "@cognia/plugin-contract/lib/github/workspace-backend-registry"
 
 export type {
   PluginWorkspaceBackendDef,

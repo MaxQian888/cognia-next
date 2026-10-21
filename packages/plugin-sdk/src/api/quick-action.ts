@@ -17,7 +17,7 @@ export {
   runQuickAction,
 } from "@/lib/plugin/registries/quick-action-registry"
 
-export type { QuickActionEntry } from "@/lib/plugin/registries/quick-action-registry"
+export type { QuickActionEntry } from "@cognia/plugin-contract/lib/plugin/registries/quick-action-registry"
 export type {
   PluginQuickActionDef,
   PluginQuickActionInput,

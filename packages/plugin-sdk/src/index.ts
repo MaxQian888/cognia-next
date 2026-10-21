@@ -323,14 +323,16 @@ export { defineUriHandler } from "./define/define-uri-handler"
 export { defineRemoteDesktopProvider } from "./define/define-remote-desktop-provider"
 export type {
   RemoteDesktopConnection,
+  RemoteDesktopRawChannel,
+} from "@cognia/plugin-contract/lib/remote-desktop/stream"
+export type {
   RemoteDesktopIntegrationMode,
   RemoteDesktopProviderCapabilities,
   RemoteDesktopProviderDefinition,
-  RemoteDesktopRawChannel,
   RemoteDesktopViewer,
   RemoteDesktopViewerProps,
   RemoteDesktopViewerStatus,
-} from "@/lib/remote-desktop/provider-registry"
+} from "@cognia/plugin-contract/lib/remote-desktop/provider-registry"
 export { defineTheme } from "./define/define-theme"
 export { defineThemePack } from "./define/define-theme-pack"
 export { defineFontContribution } from "./define/define-font-contribution"

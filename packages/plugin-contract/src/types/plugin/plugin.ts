@@ -25,7 +25,7 @@ import type {
 } from "./plugin-knowledge"
 import type { LspServerConfig } from "../lsp/config"
 import type { ExternalAgentPresetConfig } from "../../lib/ai/agent/external/config/presets"
-import type { ProtocolAdapterFactory } from "@/lib/ai/agent/external/protocol-adapter"
+import type { ProtocolAdapterFactory } from "@cognia/agent-contracts/adapter"
 import type {
   Skill as _Skill,
   Session,
