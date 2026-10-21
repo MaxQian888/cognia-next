@@ -538,7 +538,6 @@ jest.mock("./provider-onboarding-banner", () => ({
 // the page matters. The hook reads the runtime catalog, which is stubbed to a
 // mutable value per test.
 const mockExternalRuntimes = {
-  externalEnabled: true,
   configuredCount: 0,
   rows: [] as Array<{ key: string; name: string; state: string }>,
   workingCount: 0,

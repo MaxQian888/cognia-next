@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 /**
  * @jest-environment jsdom
  *
@@ -159,7 +160,7 @@ describe("RunList", () => {
     await seedRun("r2", { status: "failed" })
     wrap()
     await screen.findByTestId("runs-actions-r1")
-    await user().selectOptions(screen.getByTestId("runs-filter-status"), "failed")
+    await selectOption(screen.getByTestId("runs-filter-status"), "failed")
     await waitFor(() => expect(screen.queryByTestId("runs-actions-r1")).not.toBeInTheDocument())
     expect(screen.getByTestId("runs-actions-r2")).toBeInTheDocument()
   })
@@ -169,7 +170,7 @@ describe("RunList", () => {
     await seedRun("r2", { triggerKind: "trigger.cron" })
     wrap()
     await screen.findByTestId("runs-actions-r1")
-    await user().selectOptions(screen.getByTestId("runs-filter-trigger"), "trigger.cron")
+    await selectOption(screen.getByTestId("runs-filter-trigger"), "trigger.cron")
     await waitFor(() => expect(screen.queryByTestId("runs-actions-r1")).not.toBeInTheDocument())
     expect(screen.getByTestId("runs-actions-r2")).toBeInTheDocument()
   })
@@ -180,7 +181,7 @@ describe("RunList", () => {
     await seedRun("old", { startedAt: now - 10 * 24 * 60 * 60 * 1000 })
     wrap()
     await screen.findByTestId("runs-actions-recent")
-    await user().selectOptions(screen.getByTestId("runs-filter-window"), "24h")
+    await selectOption(screen.getByTestId("runs-filter-window"), "24h")
     await waitFor(() => expect(screen.queryByTestId("runs-actions-old")).not.toBeInTheDocument())
     expect(screen.getByTestId("runs-actions-recent")).toBeInTheDocument()
   })
@@ -279,7 +280,7 @@ describe("RunList", () => {
     await seedRun("r1", { status: "succeeded" })
     wrap()
     await screen.findByTestId("runs-actions-r1")
-    await user().selectOptions(screen.getByTestId("runs-filter-status"), "failed")
+    await selectOption(screen.getByTestId("runs-filter-status"), "failed")
     expect(await screen.findByText("No runs match")).toBeInTheDocument()
   })
 
@@ -300,7 +301,7 @@ describe("RunList", () => {
     await seedRun("beta", { status: "failed", triggerKind: "trigger.cron" })
     wrap()
     await screen.findByTestId("runs-actions-alpha")
-    await user().selectOptions(screen.getByTestId("runs-filter-status"), "failed")
+    await selectOption(screen.getByTestId("runs-filter-status"), "failed")
     await waitFor(() => expect(screen.queryByTestId("runs-actions-alpha")).not.toBeInTheDocument())
 
     // Type and clear inside the same 200ms window.
@@ -332,7 +333,7 @@ describe("RunList", () => {
     wrap()
     await screen.findByTestId("runs-actions-r1")
     const u = user()
-    await u.selectOptions(screen.getByTestId("runs-filter-status"), "failed")
+    await selectOption(screen.getByTestId("runs-filter-status"), "failed")
     await waitFor(() => expect(screen.queryByTestId("runs-actions-r1")).not.toBeInTheDocument())
     await u.click(screen.getByTestId("runs-clear-filters"))
     expect(await screen.findByTestId("runs-actions-r1")).toBeInTheDocument()

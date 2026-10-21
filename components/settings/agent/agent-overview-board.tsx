@@ -34,7 +34,6 @@ const ACTION_LABEL_KEY: Record<AgentReadinessAction, string> = {
 
 export function AgentOverviewBoard({
   entries,
-  enabled,
   stateFilter,
   onStateFilterChange,
   onOpenAgent,
@@ -42,7 +41,6 @@ export function AgentOverviewBoard({
   onPickPreset,
 }: {
   entries: OverviewAgentEntry[]
-  enabled: boolean
   stateFilter: AgentStateFilter
   onStateFilterChange: (filter: AgentStateFilter) => void
   onOpenAgent: (agentId: string) => void
@@ -77,7 +75,7 @@ export function AgentOverviewBoard({
       </header>
       {entries.length === 0 ? (
         <div className="min-w-0 space-y-4" data-testid="overview-empty">
-          <PresetPickerList onPick={onPickPreset} disabled={!enabled} />
+          <PresetPickerList onPick={onPickPreset} />
         </div>
       ) : (
         <>
@@ -160,7 +158,6 @@ export function AgentOverviewBoard({
                             size="sm"
                             className="ml-auto shrink-0"
                             data-testid={`overview-action-${agent.id}`}
-                            disabled={!enabled && action !== "inspect"}
                             onClick={() => onAction(agent.id, action)}
                           >
                             {tReadiness(ACTION_LABEL_KEY[action])}
@@ -198,7 +195,6 @@ export function AgentOverviewBoard({
                         variant="link"
                         size="sm"
                         className="h-auto whitespace-normal px-0 py-1 text-xs text-muted-foreground"
-                        disabled={!enabled}
                         onClick={() => onAction(agent.id, "add-rule")}
                       >
                         {tReadiness("actions.addRule")}

@@ -22,6 +22,7 @@ import { useTranslations } from "next-intl"
 import { z } from "zod"
 import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
 import { DownloadIcon as AnimatedDownloadIcon } from "@/components/ui/download"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { downloadBlob, copyBlobToClipboard } from "@/lib/files/download"
 import { useA2UIStore } from "@/stores/a2ui"
@@ -285,15 +286,16 @@ function AddToLibraryButton({ run }: { run: () => Promise<void> }) {
   }
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         onClick={onClick}
         disabled={state === "busy" || state === "done"}
         data-testid="share-add-to-library"
-        className={cn(ACTION_BUTTON_CLASS, "disabled:opacity-60")}
       >
         {state === "busy" ? t("addToLibraryBusy") : t("addToLibrary")}
-      </button>
+      </Button>
       {state === "done" ? (
         <span className="text-xs text-muted-foreground">{t("addToLibraryDone")}</span>
       ) : null}
@@ -592,10 +594,6 @@ function KindPill({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** The viewer's own outline-button look, shared by every action it offers. */
-const ACTION_BUTTON_CLASS =
-  "inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
-
 function MarkdownText({
   text,
   title,
@@ -822,18 +820,19 @@ function ImageView({
         src={`data:${mime};base64,${dataB64}`}
       />
       <div className="flex items-center gap-2">
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={() => downloadBlob(blob, filename)}
-          className={ACTION_BUTTON_CLASS}
         >
           <AnimatedActionIcon icon={AnimatedDownloadIcon} size={14} />
           {t("downloadImage")}
-        </button>
-        <button type="button" onClick={() => void onCopy()} className={ACTION_BUTTON_CLASS}>
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => void onCopy()}>
           <CopyFeedbackIcon copied={copied} size={14} />
           {copied ? t("copyImageDone") : t("copyImage")}
-        </button>
+        </Button>
       </div>
     </div>
   )

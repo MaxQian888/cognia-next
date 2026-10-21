@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
@@ -30,7 +31,7 @@ describe("CaseEditor", () => {
     )
   })
 
-  it("parses multi-line contains/context and valid expectedToolArgs JSON", () => {
+  it("parses multi-line contains/context and valid expectedToolArgs JSON", async () => {
     const onSave = jest.fn()
     render(<CaseEditor onSave={onSave} onCancel={jest.fn()} />)
     fireEvent.change(screen.getByLabelText("case.input"), { target: { value: "x" } })
@@ -40,7 +41,7 @@ describe("CaseEditor", () => {
     fireEvent.change(screen.getByLabelText("case.expectedContext"), {
       target: { value: "ctx1\nctx2" },
     })
-    fireEvent.change(screen.getByLabelText("case.split"), { target: { value: "test" } })
+    await selectOption(screen.getByLabelText("case.split"), "test")
     fireEvent.change(screen.getByLabelText("case.notes"), { target: { value: "a note" } })
     fireEvent.change(screen.getByLabelText("case.expectedToolArgs"), {
       target: { value: '{"Read":{"path":"x"}}' },
@@ -104,9 +105,7 @@ describe("CaseEditor", () => {
     }))
     render(<CaseEditor onSave={onSave} onCancel={jest.fn()} onAttach={onAttach} />)
     fireEvent.change(screen.getByLabelText("case.input"), { target: { value: "inspect" } })
-    fireEvent.change(screen.getByLabelText("case.attachmentPrivacy"), {
-      target: { value: "manual" },
-    })
+    await selectOption(screen.getByLabelText("case.attachmentPrivacy"), "manual")
     const picker = screen.getByLabelText("case.pickAttachments")
     expect(picker).toBeDisabled()
     fireEvent.change(screen.getByLabelText("case.reviewerId"), {

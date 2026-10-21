@@ -1,5 +1,6 @@
 "use client"
 
+import { NativeSelect } from "@/components/ui/native-select"
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { createPlatformFetch } from "@/lib/network/platform-fetch"
@@ -1201,8 +1202,9 @@ export function WorkflowPortal() {
                             }
                           />
                         ) : field.type === "single-select" ? (
-                          <select
+                          <NativeSelect
                             id={inputId}
+                            wrapperClassName="w-full"
                             className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
                             value={typeof value === "string" ? value : ""}
                             onChange={(event) =>
@@ -1215,7 +1217,7 @@ export function WorkflowPortal() {
                                 {option.label}
                               </option>
                             ))}
-                          </select>
+                          </NativeSelect>
                         ) : field.type === "multi-select" ? (
                           <div className="space-y-2">
                             {field.options?.map((option) => {

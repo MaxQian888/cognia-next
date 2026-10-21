@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { selectOption } from "@/lib/testing/select-option"
+import { render, screen } from "@testing-library/react"
 import { makeComponents, makeEvidence, makeSnapshot, makeStep } from "@/lib/harness/test-fixtures"
 import { HarnessCandidateCompare } from "./harness-candidate-compare"
 
@@ -25,7 +26,7 @@ const steps = [
 ]
 
 describe("HarnessCandidateCompare", () => {
-  it("opens on the base against the chosen harness, and compares any pair", () => {
+  it("opens on the base against the chosen harness, and compares any pair", async () => {
     render(
       <HarnessCandidateCompare
         run={{
@@ -39,10 +40,10 @@ describe("HarnessCandidateCompare", () => {
     expect(screen.getByTestId("diff-probe")).toHaveTextContent("BASE -> INV")
     expect(screen.getByTestId("harness-compare-summary-base")).toHaveTextContent("No")
     expect(screen.getByTestId("harness-compare-summary-inv1")).toHaveTextContent("1 of 1 passed")
-    fireEvent.change(screen.getByLabelText("Right harness"), { target: { value: "agg1" } })
+    await selectOption(screen.getByLabelText("Right harness"), "agg1")
     expect(screen.getByTestId("diff-probe")).toHaveTextContent("BASE -> AGG")
     expect(screen.getByText("Not rolled out yet.")).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText("Left harness"), { target: { value: "inv1" } })
+    await selectOption(screen.getByLabelText("Left harness"), "inv1")
     expect(screen.getByTestId("diff-probe")).toHaveTextContent("INV -> AGG")
   })
 

@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import type { AppSettings } from "@cognia/agent-config-types"
@@ -160,11 +161,11 @@ it("saves enable, default, fallback and distillation independently without tests
   mount()
   fireEvent.click(screen.getByRole("switch", { name: "Jina" }))
   await waitFor(() => expect(mockSetEntry).toHaveBeenCalledWith("jina", { enabled: true }))
-  fireEvent.change(screen.getByLabelText("Default reader"), { target: { value: "direct" } })
+  await selectOption(screen.getByLabelText("Default reader"), "direct")
   await waitFor(() => expect(mockSetDefault).toHaveBeenCalledWith("direct"))
-  fireEvent.change(screen.getByLabelText("External fallback"), { target: { value: "configured" } })
+  await selectOption(screen.getByLabelText("External fallback"), "configured")
   await waitFor(() => expect(mockSetFallback).toHaveBeenCalledWith("configured"))
-  fireEvent.change(screen.getByLabelText("Distillation"), { target: { value: "required" } })
+  await selectOption(screen.getByLabelText("Distillation"), "required")
   await waitFor(() => expect(mockSetDistillation).toHaveBeenCalledWith("required"))
   expect(screen.getByText(en.consequences.required)).toBeInTheDocument()
   expect(mockTestReader).not.toHaveBeenCalled()
@@ -226,7 +227,7 @@ it.each([
   async (label, value, setter) => {
     mockSettings.webReader = { version: 99, future: "keep" }
     mount()
-    fireEvent.change(screen.getByLabelText(label), { target: { value } })
+    await selectOption(screen.getByLabelText(label), value)
     expect(setter).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Replace settings" }))
     await waitFor(() => expect(setter).toHaveBeenCalledWith(value))

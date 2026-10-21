@@ -111,7 +111,6 @@ function renderInspector(over: Partial<Parameters<typeof AgentInspector>[0]> = {
     onOpenAgent: jest.fn(),
     readiness: ready,
     isConnecting: false,
-    masterEnabled: true,
     onOpenRuntimes: jest.fn(),
     onOpenPlugins: jest.fn(),
     onConnect: jest.fn(),
@@ -179,14 +178,9 @@ describe("AgentInspector", () => {
     toastSuccess.mockClear()
   })
 
-  it("disables Connect with a reason while the master switch is off", () => {
-    renderInspector({ masterEnabled: false })
-    const connect = screen.getByRole("button", { name: /^connect$/i })
-    expect(connect).toBeDisabled()
-    expect(connect).toHaveAttribute("title", externalAgentMessages.settings.inspectorMasterDisabled)
-    expect(connect).toHaveAccessibleDescription(
-      externalAgentMessages.settings.inspectorMasterDisabled
-    )
+  it("allows connecting an enabled agent without a global gate", () => {
+    renderInspector()
+    expect(screen.getByRole("button", { name: /^connect$/i })).toBeEnabled()
   })
 
   it("mounts OpenCode status for V2 and uses semantic, wrapping facts", () => {
@@ -195,6 +189,97 @@ describe("AgentInspector", () => {
     expect(screen.getByText("/work").closest("dl")).toBeInTheDocument()
     expect(screen.getByText("/work")).toHaveClass("break-all")
     expect(screen.getByRole("tablist")).not.toHaveClass("overflow-x-auto")
+  })
+
+  it.each([
+    [undefined, undefined, "300000 ms", "3 × 1000 ms", "Exponential"],
+    [0, { maxRetries: 0, retryDelay: 0, exponentialBackoff: false }, "0 ms", "0 × 0 ms", "Fixed"],
+  ] as const)(
+    "groups the runtime policy and preserves defaults and zero values",
+    (timeout, retryConfig, timeoutText, retryText, backoffText) => {
+      renderInspector({ agent: { ...agent, timeout, retryConfig } as LifecycleExternalAgentConfig })
+      const section = screen.getByRole("heading", { name: "Runtime details" }).closest("section")!
+      for (const [label, value] of [
+        ["Timeout", timeoutText],
+        ["Retry", retryText],
+        ["Backoff", backoffText],
+      ] as const) {
+        const term = within(section).getByText(label, { selector: "dt" })
+        expect(term.nextElementSibling).toHaveTextContent(value)
+      }
+      expect(within(section).getByText("npx").closest("dl")).toBeInTheDocument()
+      expect(within(section).getByText("/work")).toBeInTheDocument()
+      expect(
+        within(section).queryByRole("button", { name: /Recommended actions/ })
+      ).not.toBeInTheDocument()
+    }
+  )
+
+  it("keeps the complete remote endpoint in the runtime details without local process facts", () => {
+    const endpoint = "https://agents.example.com/teams/reviews/" + "long-path/".repeat(15)
+    renderInspector({
+      agent: { ...agent, transport: "http", process: undefined, network: { endpoint } },
+    })
+    const section = screen.getByRole("heading", { name: "Runtime details" }).closest("section")!
+    expect(within(section).getByText(endpoint)).toHaveTextContent(endpoint)
+    expect(within(section).queryByText("Command", { selector: "dt" })).not.toBeInTheDocument()
+    expect(
+      within(section).queryByText("Working Directory", { selector: "dt" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps documentation compact and guidance collapsed until requested", async () => {
+    const user = userEvent.setup()
+    const view = renderInspector({
+      agent: {
+        ...agent,
+        validitySnapshot: {
+          executable: true,
+          checkedAt: new Date(0),
+          source: "config",
+          sessionExtensions: {
+            "session/list": { state: "unknown" },
+            "session/fork": { state: "unknown" },
+            "session/resume": { state: "unknown" },
+          },
+          ecosystem: {
+            adapterName: "Review adapter",
+            surfaceName: "Local process",
+            prerequisiteStatus: "ready",
+            docsUrl: "https://example.com/agent-docs",
+            limitationNote: "Requires a signed-in CLI.",
+            recommendedActions: ["Sign in before connecting."],
+          },
+        },
+      },
+    })
+    const section = screen.getByRole("heading", { name: "Runtime details" }).closest("section")!
+    expect(within(section).getByText("Review adapter")).toBeInTheDocument()
+    expect(within(section).getByText("Local process")).toBeInTheDocument()
+    expect(within(section).getByText("Prerequisite status").nextElementSibling).toHaveTextContent(
+      "Ready"
+    )
+    expect(within(section).getByRole("link", { name: "Official docs" })).toHaveAttribute(
+      "href",
+      "https://example.com/agent-docs"
+    )
+    expect(within(section).getByText("Requires a signed-in CLI.")).toBeVisible()
+    const disclosure = within(section).getByRole("button", { name: /Recommended actions/ })
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    expect(within(section).queryByRole("list")).not.toBeInTheDocument()
+    disclosure.focus()
+    await user.keyboard("{Enter}")
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    expect(within(section).getByText("Sign in before connecting.")).toBeVisible()
+    await user.click(disclosure)
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    expect(within(section).queryByRole("list")).not.toBeInTheDocument()
+    await user.click(disclosure)
+    view.rerenderAgent({ ...view.agent, id: "another", name: "Another agent" })
+    expect(within(section).getByRole("button", { name: /Recommended actions/ })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    )
   })
 
   it("shows the saved-key hint without putting credentials into the input", async () => {
@@ -289,18 +374,43 @@ describe("AgentInspector", () => {
     expect(onConnect).toHaveBeenCalled()
   })
 
-  it("offers the non-header next actions (enable, add routing rule)", async () => {
+  it("disconnects a connected agent from the grouped header controls", async () => {
+    const user = userEvent.setup()
+    const { onDisconnect } = renderInspector({
+      readiness: { ...ready, state: "connected", ready: true, nextAction: null },
+    })
+    const controls = screen.getByRole("group", { name: "Actions for Alpha" })
+    expect(within(controls).queryByRole("button", { name: /^connect$/i })).not.toBeInTheDocument()
+    await user.click(within(controls).getByRole("button", { name: /^disconnect$/i }))
+    expect(onDisconnect).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers the routing action outside the header", async () => {
     const user = userEvent.setup()
     const { onAddRule } = renderInspector({
       readiness: { ...ready, state: "connected", nextAction: "add-rule" },
     })
     await user.click(screen.getByTestId("inspector-next-action"))
     expect(onAddRule).toHaveBeenCalled()
+  })
 
-    renderInspector({ readiness: { ...ready, state: "disabled", nextAction: "enable" } })
-    const enableButtons = screen.getAllByTestId("inspector-next-action")
-    await user.click(enableButtons[enableButtons.length - 1]!)
+  it("enables from the header switch without a duplicate Enable button", async () => {
+    const user = userEvent.setup()
+    const view = renderInspector({
+      agent: { ...agent, enabled: false },
+      readiness: { ...ready, state: "disabled", nextAction: "enable" },
+    })
+    const controls = screen.getByRole("group", { name: "Actions for Alpha" })
+    const toggle = within(controls).getByRole("switch", { name: "Enable Alpha" })
+    expect(toggle).not.toBeChecked()
+    expect(toggle).toHaveAccessibleDescription("Disabled")
+    expect(screen.queryByRole("button", { name: /^enable$/i })).not.toBeInTheDocument()
+    expect(within(controls).getByRole("button", { name: /^connect$/i })).toBeDisabled()
+    await user.click(toggle)
     expect(updateConfigMock).toHaveBeenCalledWith("a1", { enabled: true })
+    view.rerenderAgent({ ...agent, enabled: true })
+    expect(toggle).toBeChecked()
+    expect(toggle).toHaveAccessibleDescription("Enabled")
   })
 
   it("preserves argument boundaries and environment when changing the cwd inline", async () => {
@@ -453,6 +563,26 @@ describe("AgentInspector", () => {
     expect(onOpenAgent).toHaveBeenCalledWith("src")
   })
 
+  it("places editable context before technical badges and saves its draft", async () => {
+    const user = userEvent.setup()
+    const source = { ...agent, id: "src", name: "Original" } as LifecycleExternalAgentConfig
+    const copy = { ...agent, duplicatedFromAgentId: "src", description: "Reviews only" }
+    renderInspector({ agent: copy, allAgents: [source, copy] })
+    const description = screen.getByRole("textbox", { name: "Description" })
+    const lineage = screen.getByRole("button", { name: "Copy of Original" })
+    const protocol = screen.getByText("ACP", { selector: '[data-slot="badge"]' })
+    expect(
+      lineage.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      description.compareDocumentPosition(protocol) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    await user.clear(description)
+    await user.type(description, "Read-only code reviews")
+    await user.click(screen.getByRole("button", { name: /^save$/i }))
+    expect(updateConfigMock).toHaveBeenCalledWith("a1", { description: "Read-only code reviews" })
+  })
+
   it("says nothing about lineage once the source is gone", () => {
     renderInspector({
       agent: { ...agent, duplicatedFromAgentId: "deleted" } as LifecycleExternalAgentConfig,
@@ -583,7 +713,7 @@ describe("inspector draft safety", () => {
         target: { value: "Keep me" },
       })
       if (control === "enable") {
-        await act(async () => fireEvent.click(screen.getByTestId("inspector-next-action")))
+        await userEvent.click(screen.getByRole("switch", { name: "Enable Alpha" }))
       } else {
         await userEvent.click(screen.getByRole("tab", { name: /advanced/i }))
         if (control === "permission" || control === "web") {

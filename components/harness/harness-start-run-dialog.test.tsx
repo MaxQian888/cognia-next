@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { makeRun } from "@/lib/harness/test-fixtures"
 
@@ -114,9 +115,7 @@ describe("HarnessStartRunDialog", () => {
     await flushEstimate()
     expect(screen.getByLabelText("Title")).toHaveValue("Fix the parser")
     expect(screen.getByLabelText("Repository")).toHaveValue("/repo")
-    fireEvent.change(screen.getByLabelText("Where an improvement applies"), {
-      target: { value: "session" },
-    })
+    await selectOption(screen.getByLabelText("Where an improvement applies"), "session")
     fireEvent.change(screen.getByLabelText("Cost ceiling (USD)"), { target: { value: "2" } })
     fireEvent.change(screen.getByLabelText("Expected files"), {
       target: { value: "src/parser.ts\n\n" },
@@ -169,9 +168,7 @@ describe("HarnessStartRunDialog", () => {
     render(<HarnessStartRunDialog open onOpenChange={jest.fn()} agent={agent} />)
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Report" } })
     fireEvent.change(screen.getByLabelText("Request"), { target: { value: "Summarise" } })
-    fireEvent.change(screen.getByLabelText("Where each attempt works"), {
-      target: { value: "files" },
-    })
+    await selectOption(screen.getByLabelText("Where each attempt works"), "files")
     await act(async () => {
       fireEvent.click(screen.getByTestId("harness-add-files"))
     })
@@ -196,7 +193,7 @@ describe("HarnessStartRunDialog", () => {
       Object.assign(new Error("x"), { name: "HarnessStartError", code: "model-unavailable" })
     )
     render(<HarnessStartRunDialog open onOpenChange={jest.fn()} agent={agent} />)
-    expect(screen.getByRole("option", { name: "Git worktree" })).toBeDisabled()
+    expect(screen.getByRole("option", { hidden: true, name: "Git worktree" })).toBeDisabled()
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "T" } })
     fireEvent.change(screen.getByLabelText("Request"), { target: { value: "Do the thing" } })
     await act(async () => {

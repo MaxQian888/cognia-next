@@ -59,6 +59,7 @@ import {
   getLatestRunProviderId,
   getLatestUsage,
   resolveContextWindowUsage,
+  computeContextWindowUsage,
   sumSessionUsage,
   type ContextLevel,
   type SessionUsageTotals,
@@ -94,6 +95,8 @@ interface ContextUsageIndicatorProps {
   providerId?: string
   /** Override the model-derived window size (mostly for tests). */
   maxTokens?: number
+  /** Selected gateway capacity; null means unknown, undefined leaves sizing to the runtime. */
+  selectedModelContextWindow?: number | null
   /** Extra classes for the trigger button (e.g. `ml-auto` on the generic toolbar). */
   triggerClassName?: string
   /**
@@ -115,6 +118,7 @@ export function ContextUsageIndicator({
   modelId,
   providerId,
   maxTokens,
+  selectedModelContextWindow,
   triggerClassName,
   ringOnly,
   sdkUsage,
@@ -157,8 +161,20 @@ export function ContextUsageIndicator({
   )
   const effectiveMax = maxTokens ?? catalogWindow
   const win = useMemo(
-    () => resolveContextWindowUsage(sdkUsage, usage, modelId, effectiveMax),
-    [sdkUsage, usage, modelId, effectiveMax]
+    () =>
+      selectedModelContextWindow === undefined
+        ? resolveContextWindowUsage(sdkUsage, usage, modelId, effectiveMax)
+        : {
+            ...computeContextWindowUsage(
+              // A previous turn may belong to another gateway model. The
+              // current binding configures this capacity on the next request.
+              usage ? { ...usage, contextWindow: undefined } : null,
+              modelId,
+              selectedModelContextWindow ?? 0
+            ),
+            ...(selectedModelContextWindow === null ? { reported: false } : {}),
+          },
+    [sdkUsage, usage, modelId, effectiveMax, selectedModelContextWindow]
   )
   // O(n) over the whole history — recomputed only when the usage signature
   // above moves (a few times per turn), never per streamed token. Reading the
@@ -208,7 +224,7 @@ export function ContextUsageIndicator({
       data-session-tokens={sessionTokens}
       data-session-cost={sessionCostUsd}
       data-compaction={compaction.source}
-      data-window-source={win.windowSource}
+      data-window-source={selectedModelContextWindow === null ? "unknown" : win.windowSource}
     >
       <Context
         maxTokens={win.max}

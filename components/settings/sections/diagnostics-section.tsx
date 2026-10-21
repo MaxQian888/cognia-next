@@ -8,7 +8,7 @@ import { ArrowUpRightIcon, BugIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { cn } from "@/lib/utils"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 import { SandboxAuditCard } from "./sandbox-audit-card"
 import { SidecarRestartCard } from "./sidecar-restart-card"
@@ -82,55 +82,43 @@ export function DiagnosticsSection() {
   const [activeTab, setActiveTab] = useState<DiagnosticsTab>("native-reports")
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3" data-testid="diagnostics-section">
-      <div
-        role="tablist"
+    <Tabs
+      value={activeTab}
+      onValueChange={(value) => setActiveTab(value as DiagnosticsTab)}
+      className="h-full min-h-0 gap-3"
+      data-testid="diagnostics-section"
+    >
+      <TabsList
         aria-label={t("label")}
-        className="inline-flex w-fit shrink-0 items-center gap-0.5 rounded-lg bg-muted p-[3px]"
+        className="shrink-0 gap-0.5 group-data-[orientation=horizontal]/tabs:h-auto"
       >
-        {TAB_ORDER.map((tab) => {
-          const active = activeTab === tab
-          return (
-            <Button
-              key={tab}
-              type="button"
-              role="tab"
-              variant="ghost"
-              size="sm"
-              aria-selected={active}
-              onClick={() => setActiveTab(tab)}
-              className={cn(
-                "h-auto rounded-md px-2.5 py-1 text-xs",
-                active
-                  ? "bg-background text-foreground shadow-sm hover:bg-background"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {t(TAB_LABEL_KEY[tab])}
-            </Button>
-          )
-        })}
-      </div>
+        {TAB_ORDER.map((tab) => (
+          <TabsTrigger
+            key={tab}
+            value={tab}
+            className="h-auto flex-none px-2.5 py-1 text-xs text-muted-foreground data-[state=active]:text-foreground"
+          >
+            {t(TAB_LABEL_KEY[tab])}
+          </TabsTrigger>
+        ))}
+      </TabsList>
 
       <ScrollArea className="min-h-0 flex-1">
-        <div className="mx-auto w-full max-w-5xl space-y-4">
-          {activeTab === "native-reports" ? (
-            <>
-              {/* Where these reports go, above the way to what is here. */}
-              <DiagnosticServiceCard />
-              <CrashReportsLinkCard />
-            </>
-          ) : (
-            <>
-              <DeveloperFlagsCard />
-              <SandboxAuditCard />
-              <PluginMessagingCard />
-              <SidecarRestartCard />
-              <InboxTelemetryCard />
-            </>
-          )}
+        <div className="mx-auto w-full max-w-5xl">
+          <TabsContent value="native-reports" className="space-y-4">
+            {/* Where these reports go, above the way to what is here. */}
+            <DiagnosticServiceCard />
+            <CrashReportsLinkCard />
+          </TabsContent>
+          <TabsContent value="system" className="space-y-4">
+            <DeveloperFlagsCard />
+            <SandboxAuditCard />
+            <PluginMessagingCard />
+            <SidecarRestartCard />
+            <InboxTelemetryCard />
+          </TabsContent>
         </div>
       </ScrollArea>
-    </div>
+    </Tabs>
   )
 }

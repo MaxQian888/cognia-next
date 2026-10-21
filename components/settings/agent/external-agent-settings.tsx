@@ -56,7 +56,6 @@ import { cn } from "@/lib/utils"
 import { toast } from "@/components/ui/sonner"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
 import {
   SettingsStack,
   SettingsBlock,
@@ -219,8 +218,6 @@ export function ExternalAgentSettings() {
     getConnectionStatus,
     getAgentValidity,
     recordAgentFailure,
-    enabled,
-    setEnabled,
     defaultPermissionMode,
     setDefaultPermissionMode,
     autoConnectOnStartup,
@@ -552,7 +549,7 @@ export function ExternalAgentSettings() {
     >
       {/* Section header — the same compact shape the other agent sections
           use (small muted icon, tracking-tight title, one-line description);
-          the master switch and add action sit on the right. */}
+          the add action sits on the right. */}
       {density === "split" || stackedView === "list" ? (
         <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 flex-1 items-start gap-2.5 @[560px]/agents-page:basis-64">
@@ -565,22 +562,10 @@ export function ExternalAgentSettings() {
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2">
-              <Switch
-                id="external-agents-enabled"
-                checked={enabled}
-                onCheckedChange={setEnabled}
-                aria-label={t("enableExternalAgents")}
-              />
-              <Label htmlFor="external-agents-enabled" className="text-sm">
-                {t("enableExternalAgents")}
-              </Label>
-            </div>
             <Button
               size="sm"
               data-testid="add-agent-button"
               onClick={openAddDialog}
-              disabled={!enabled}
               aria-label={t("addAgent")}
               className="size-8 shrink-0 p-0 @[560px]/agents-page:h-8 @[560px]/agents-page:w-auto @[560px]/agents-page:px-3"
             >
@@ -638,7 +623,6 @@ export function ExternalAgentSettings() {
             readinessById={readinessById}
             traitsById={traitsById}
             view={view}
-            enabled={enabled}
             groupBy={railGroupBy}
             onGroupByChange={setRailGroupBy}
             stateFilter={stateFilter}
@@ -665,7 +649,6 @@ export function ExternalAgentSettings() {
                 allAgents={agents}
                 readiness={readinessById.get(selectedAgent.id)!}
                 isConnecting={isConnecting(selectedAgent.id)}
-                masterEnabled={enabled}
                 onOpenRuntimes={() => openView({ kind: "runtimes" })}
                 onOpenPlugins={() => navigate(() => router.push("/plugins"))}
                 onConnect={() => handleConnect(selectedAgent.id)}
@@ -695,7 +678,6 @@ export function ExternalAgentSettings() {
                       traits: traitsById.get(agent.id) ?? [],
                       failureHeadline: agentFailures[agent.id]?.message,
                     }))}
-                    enabled={enabled}
                     stateFilter={stateFilter}
                     onStateFilterChange={setStateFilter}
                     onOpenAgent={(id) => openView({ kind: "agent", id })}
@@ -707,7 +689,6 @@ export function ExternalAgentSettings() {
                 {view.kind === "delegation" && (
                   <div className="space-y-4">
                     <DelegationRulesSection
-                      disabled={!enabled}
                       createForAgent={delegationSeed}
                       onAddAgent={openAddDialog}
                       onOpenAgent={(id) => openView({ kind: "agent", id })}
@@ -753,7 +734,6 @@ export function ExternalAgentSettings() {
                           htmlFor={`${controlId}-auto-connect`}
                           label={t("autoConnect")}
                           description={t("autoConnectDesc")}
-                          disabled={!enabled}
                           className="flex-row items-center justify-between gap-4"
                         >
                           <span id={`${controlId}-auto-connect-description`} className="sr-only">
@@ -764,7 +744,6 @@ export function ExternalAgentSettings() {
                             aria-describedby={`${controlId}-auto-connect-description`}
                             checked={autoConnectOnStartup}
                             onCheckedChange={setAutoConnectOnStartup}
-                            disabled={!enabled}
                           />
                         </SettingsField>
 
@@ -772,7 +751,6 @@ export function ExternalAgentSettings() {
                           htmlFor={`${controlId}-notifications`}
                           label={t("showNotifications")}
                           description={t("showNotificationsDesc")}
-                          disabled={!enabled}
                           className="flex-row items-center justify-between gap-4"
                         >
                           <span id={`${controlId}-notifications-description`} className="sr-only">
@@ -783,7 +761,6 @@ export function ExternalAgentSettings() {
                             aria-describedby={`${controlId}-notifications-description`}
                             checked={showConnectionNotifications}
                             onCheckedChange={setShowConnectionNotifications}
-                            disabled={!enabled}
                           />
                         </SettingsField>
                       </SettingsBlock>
@@ -796,7 +773,6 @@ export function ExternalAgentSettings() {
                           htmlFor={`${controlId}-permission`}
                           label={t("defaultPermissionMode")}
                           description={t("defaultPermissionModeDesc")}
-                          disabled={!enabled}
                         >
                           <span id={`${controlId}-permission-description`} className="sr-only">
                             {t("defaultPermissionModeDesc")}
@@ -808,7 +784,6 @@ export function ExternalAgentSettings() {
                                 v as "default" | "acceptEdits" | "bypassPermissions" | "plan"
                               )
                             }
-                            disabled={!enabled}
                           >
                             <SelectTrigger
                               id={`${controlId}-permission`}
@@ -834,7 +809,6 @@ export function ExternalAgentSettings() {
                           htmlFor={`${controlId}-failure-policy`}
                           label={t("chatFailurePolicy")}
                           description={t("chatFailurePolicyDesc")}
-                          disabled={!enabled}
                         >
                           <span id={`${controlId}-failure-policy-description`} className="sr-only">
                             {t("chatFailurePolicyDesc")}
@@ -844,7 +818,6 @@ export function ExternalAgentSettings() {
                             onValueChange={(value) =>
                               setChatFailurePolicy(value as "fallback" | "strict")
                             }
-                            disabled={!enabled}
                           >
                             <SelectTrigger
                               id={`${controlId}-failure-policy`}
@@ -871,12 +844,7 @@ export function ExternalAgentSettings() {
         </SettingsListDetail>
       </div>
 
-      <AddAgentDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        onPick={openEditorForNew}
-        disabled={!enabled}
-      />
+      <AddAgentDialog open={addOpen} onOpenChange={setAddOpen} onPick={openEditorForNew} />
 
       {/* Agent Editor Dialog */}
       <AgentEditorDialog

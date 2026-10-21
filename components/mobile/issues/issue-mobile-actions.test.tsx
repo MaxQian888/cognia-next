@@ -18,6 +18,7 @@ jest.mock("@/components/issues/assignee-picker", () => ({
   },
 }))
 
+import { selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { toast } from "sonner"
 import { statusCategoryOf } from "@/types/issues"
@@ -56,7 +57,7 @@ describe("IssueMobileActions", () => {
   it("queues a status move for the host instead of writing locally", async () => {
     render(<IssueMobileActions item={item()} />)
     await act(async () => {
-      fireEvent.change(screen.getByTestId("issues-mobile-status"), { target: { value: "done" } })
+      await selectOption(screen.getByTestId("issues-mobile-status"), "done")
     })
     expect(mockQueue).toHaveBeenCalledWith({
       issueId: "i1",
@@ -69,7 +70,7 @@ describe("IssueMobileActions", () => {
   it("does not queue a move to the status the issue already has", async () => {
     render(<IssueMobileActions item={item()} />)
     await act(async () => {
-      fireEvent.change(screen.getByTestId("issues-mobile-status"), { target: { value: "todo" } })
+      await selectOption(screen.getByTestId("issues-mobile-status"), "todo")
     })
     expect(mockQueue).not.toHaveBeenCalled()
   })

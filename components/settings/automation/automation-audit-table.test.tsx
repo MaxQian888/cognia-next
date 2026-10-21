@@ -4,7 +4,9 @@
  * filters (responsive classes), and the empty state.
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { toast } from "sonner"
 
 const listAuditRows = jest.fn()
 const clearAuditLog = jest.fn()
@@ -90,5 +92,52 @@ describe("AutomationAuditTable", () => {
     expect(tableWrap.className).toContain("hidden")
     expect(tableWrap.className).toContain("sm:block")
     expect(tableWrap.querySelector("table")).not.toBeNull()
+  })
+  describe("clearing the log", () => {
+    it("asks in a themed dialog and keeps the log when cancelled", async () => {
+      const user = userEvent.setup()
+      listAuditRows.mockResolvedValue([row()])
+      render(<AutomationAuditTable />)
+      await screen.findByTitle("screenshot")
+      await user.click(screen.getByRole("button", { name: /clear log/i }))
+      const dialog = await screen.findByRole("alertdialog", { name: "Clear the audit log?" })
+      expect(dialog).toHaveAccessibleDescription(/cannot be undone/i)
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+      await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+      expect(clearAuditLog).not.toHaveBeenCalled()
+    })
+
+    it("clears, reloads and confirms with a toast once accepted", async () => {
+      const user = userEvent.setup()
+      listAuditRows.mockResolvedValue([row()])
+      render(<AutomationAuditTable />)
+      await screen.findByTitle("screenshot")
+      await user.click(screen.getByRole("button", { name: /clear log/i }))
+      const dialog = await screen.findByRole("alertdialog")
+      listAuditRows.mockResolvedValue([])
+      await user.click(within(dialog).getByRole("button", { name: "Clear log" }))
+      await waitFor(() => expect(clearAuditLog).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Audit log cleared"))
+      expect(await screen.findByText(/no audit records/i)).toBeInTheDocument()
+    })
+
+    it("reports a failed clear instead of claiming success", async () => {
+      const user = userEvent.setup()
+      listAuditRows.mockResolvedValue([row()])
+      clearAuditLog.mockRejectedValue(new Error("disk"))
+      ;(toast.success as jest.Mock).mockClear()
+      render(<AutomationAuditTable />)
+      await screen.findByTitle("screenshot")
+      await user.click(screen.getByRole("button", { name: /clear log/i }))
+      await user.click(
+        within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Clear log" })
+      )
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith("Failed to clear the audit log", {
+          description: "Error: disk",
+        })
+      )
+      expect(toast.success).not.toHaveBeenCalled()
+    })
   })
 })

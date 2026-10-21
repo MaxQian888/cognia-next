@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import messages from "@/i18n/messages/en/settings/managedDesktops.json"
@@ -77,7 +78,7 @@ function panel(selectedTarget = target) {
 async function fill() {
   fireEvent.click(screen.getByRole("button", { name: t.load }))
   await screen.findByLabelText(t.delivery)
-  fireEvent.change(screen.getByLabelText(t.delivery), { target: { value: delivery.id } })
+  await selectOption(screen.getByLabelText(t.delivery), delivery.id)
   fireEvent.change(screen.getByLabelText(t.criteria), {
     target: { value: "Login works\nLogout works" },
   })
@@ -105,7 +106,7 @@ test("mount labels all dormant axes and does not fetch, prepare or start accepta
 test("user prepares exact source, explicit files and argv on selected Host and sees bounded cost", async () => {
   render(panel())
   await fill()
-  fireEvent.change(screen.getByLabelText(t.mode), { target: { value: "bundle" } })
+  await selectOption(screen.getByLabelText(t.mode), "bundle")
   fireEvent.change(screen.getByLabelText(t.files), { target: { value: "acceptance/login.md" } })
   fireEvent.change(screen.getByLabelText(t.argv), { target: { value: '["npm","run","test"]' } })
   fireEvent.click(screen.getByRole("button", { name: t.prepare }))

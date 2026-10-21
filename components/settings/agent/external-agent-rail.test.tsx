@@ -108,7 +108,6 @@ function renderRail(
   options: {
     groupBy?: AgentRailGroupBy
     stackedView?: AgentRailStackedView
-    enabled?: boolean
     stateFilter?: AgentStateFilter
   } = {}
 ) {
@@ -126,7 +125,6 @@ function renderRail(
         readinessById={fixture.readinessById}
         traitsById={fixture.traitsById ?? new Map()}
         view={nextView}
-        enabled={options.enabled ?? true}
         groupBy={options.groupBy ?? "readiness"}
         onGroupByChange={onGroupByChange}
         stateFilter={options.stateFilter ?? "all"}
@@ -193,11 +191,11 @@ describe("ExternalAgentRail", () => {
     expect(screen.getByTestId("nav-all-agents")).not.toHaveAttribute("aria-current")
   })
 
-  it("leaves the power button off for a disabled master switch but keeps rows selectable", async () => {
+  it("keeps management and connection actions available independently", async () => {
     const user = userEvent.setup()
-    const { onViewChange } = renderRail(undefined, defaultFixture(), { enabled: false })
-    expect(screen.getByTestId("agent-power-a1")).toBeDisabled()
-    expect(screen.getByTestId("nav-new-agent")).toBeDisabled()
+    const { onViewChange } = renderRail()
+    expect(screen.getByTestId("agent-power-a1")).toBeEnabled()
+    expect(screen.getByTestId("nav-new-agent")).toBeEnabled()
     await user.click(screen.getByTestId("agent-row-a2"))
     expect(onViewChange).toHaveBeenCalledWith({ kind: "agent", id: "a2" })
   })

@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
@@ -50,7 +51,7 @@ it("shows the inferred boundary and saves only after explicit confirmation", asy
   expect(screen.getByTestId("node-group-interface")).toHaveTextContent("payload · Required")
   expect(screen.getByTestId("node-group-interface")).toHaveTextContent("result")
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Review chain" } })
-  fireEvent.change(screen.getByLabelText("Distribution"), { target: { value: "workspace" } })
+  await selectOption(screen.getByLabelText("Distribution"), "workspace")
   fireEvent.click(screen.getByRole("button", { name: "Create Node Group" }))
 
   await waitFor(() =>

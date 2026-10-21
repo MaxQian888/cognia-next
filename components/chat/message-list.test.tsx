@@ -36,6 +36,7 @@ const useVirtualizerCalls: Array<{
   getItemKey: (i: number) => string
 }> = []
 const measureSpy = jest.fn()
+const resizeItemSpy = jest.fn()
 const scrollToIndexSpy = jest.fn()
 const messageRendererProps: Array<Record<string, unknown>> = []
 const messageActionSheetProps: Array<Record<string, unknown>> = []
@@ -65,6 +66,7 @@ const virtualizerMock = {
   getTotalSize: () => virtualizerMock.count * 120,
   measureElement: () => {},
   measure: measureSpy,
+  resizeItem: resizeItemSpy,
   scrollToIndex: scrollToIndexSpy,
   // Read by the timeline scroll-sync that `ActiveTurnPublisher` runs, to
   // place off-screen turns from the virtualizer's own cache.
@@ -263,6 +265,7 @@ import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { useSettingsStore } from "@/stores/settings"
+import { useUIStore } from "@/stores/ui/ui-store"
 import { usePlatform } from "@/hooks/use-platform"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 
@@ -309,6 +312,7 @@ beforeEach(() => {
   useChatStore.getState().setActiveSession("ses_1")
   useVirtualizerCalls.length = 0
   measureSpy.mockClear()
+  resizeItemSpy.mockClear()
   messageRendererProps.length = 0
   messageActionSheetProps.length = 0
 })
@@ -469,6 +473,31 @@ describe("MessageList", () => {
     expect(container.querySelectorAll('[data-index]:not([data-index="-1"])')).toHaveLength(count)
     expect(document.querySelector(`[data-test="msg-vm-0"]`)).toBeTruthy()
     expect(document.querySelector(`[data-test="msg-vm-${count - 1}"]`)).toBeTruthy()
+  })
+
+  it("settles mounted row heights before painting a sidebar toggle", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const count = VIRTUALIZE_THRESHOLD + 1
+    const collapsed = useUIStore.getState().sidebarCollapsed
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={manyMsgs(count)} status="idle" />
+      </Wrapper>
+    )
+    const rows = container.querySelectorAll<HTMLElement>('[data-index]:not([data-index="-1"])')
+    rows.forEach((row) => {
+      jest.spyOn(row, "getBoundingClientRect").mockReturnValue({ height: 180.3 } as DOMRect)
+    })
+    resizeItemSpy.mockClear()
+    const measureCalls = measureSpy.mock.calls.length
+
+    act(() => useUIStore.setState({ sidebarCollapsed: !collapsed }))
+
+    expect(resizeItemSpy).toHaveBeenCalledTimes(rows.length)
+    expect(resizeItemSpy).toHaveBeenCalledWith(0, 180)
+    expect(resizeItemSpy).toHaveBeenCalledWith(count - 1, 180)
+    expect(measureSpy).toHaveBeenCalledTimes(measureCalls)
+    act(() => useUIStore.setState({ sidebarCollapsed: collapsed }))
   })
 
   // ADR-0127 §3: a short transcript made of huge messages must virtualize too.

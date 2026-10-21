@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { HarnessTaskCheck } from "@/types/harness/evolution"
 
@@ -41,7 +42,7 @@ describe("availableCheckKinds", () => {
 })
 
 describe("HarnessTaskChecksEditor", () => {
-  it("adds, edits and removes checks", () => {
+  it("adds, edits and removes checks", async () => {
     const onChange = jest.fn()
     render(<Harness initial={[]} isolation="files" onChange={onChange} />)
     expect(screen.getByText(/No checks/)).toBeInTheDocument()
@@ -52,22 +53,18 @@ describe("HarnessTaskChecksEditor", () => {
     expect(onChange).toHaveBeenLastCalledWith([
       { kind: "output-contains", value: "Total", caseSensitive: true },
     ])
-    fireEvent.change(screen.getByLabelText("Kind of check"), { target: { value: "output-json" } })
+    await selectOption(screen.getByLabelText("Kind of check"), "output-json")
     fireEvent.click(screen.getByTestId("harness-add-check"))
     fireEvent.change(screen.getByLabelText("Required keys"), { target: { value: "total, rows ," } })
     expect(onChange).toHaveBeenLastCalledWith([
       { kind: "output-contains", value: "Total", caseSensitive: true },
       { kind: "output-json", requiredKeys: ["total", "rows"] },
     ])
-    fireEvent.change(screen.getByLabelText("Kind of check"), {
-      target: { value: "max-tool-errors" },
-    })
+    await selectOption(screen.getByLabelText("Kind of check"), "max-tool-errors")
     fireEvent.click(screen.getByTestId("harness-add-check"))
     fireEvent.change(screen.getByLabelText("Maximum tool errors"), { target: { value: "2.6" } })
     expect(onChange.mock.lastCall?.[0][2]).toEqual({ kind: "max-tool-errors", max: 3 })
-    fireEvent.change(screen.getByLabelText("Kind of check"), {
-      target: { value: "deliverable-file" },
-    })
+    await selectOption(screen.getByLabelText("Kind of check"), "deliverable-file")
     fireEvent.click(screen.getByTestId("harness-add-check"))
     fireEvent.change(screen.getByLabelText("File path"), { target: { value: "report.md" } })
     expect(onChange.mock.lastCall?.[0][3]).toEqual({ kind: "deliverable-file", path: "report.md" })
@@ -96,8 +93,8 @@ describe("HarnessTaskChecksEditor", () => {
       />
     )
     await waitFor(() => expect(screen.getByLabelText("Acceptance profile")).toBeInTheDocument())
-    expect(screen.queryByRole("option", { name: "e2e" })).not.toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText("Acceptance profile"), { target: { value: "unit" } })
+    expect(screen.queryByRole("option", { hidden: true, name: "e2e" })).not.toBeInTheDocument()
+    await selectOption(screen.getByLabelText("Acceptance profile"), "unit")
     expect(onChange).toHaveBeenLastCalledWith([{ kind: "acceptance-profile", profileId: "unit" }])
   })
 

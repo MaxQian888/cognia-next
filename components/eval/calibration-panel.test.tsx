@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { CalibrationItemRow } from "@/lib/db/calibration-items"
 import type { CalibrationRunRow } from "@/lib/db/calibration-runs"
@@ -373,7 +374,7 @@ describe("CalibrationPanel", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("weird failure"))
   })
 
-  it("switches the active set via the picker", () => {
+  it("switches the active set via the picker", async () => {
     mockSets.mockReturnValue([
       {
         setId: "set-a",
@@ -393,9 +394,11 @@ describe("CalibrationPanel", () => {
       },
     ])
     render(<CalibrationPanel />)
-    fireEvent.change(screen.getByLabelText("calibration.pickSet"), { target: { value: "set-b" } })
-    // selecting the (empty) sentinel value clears back to the first set
-    fireEvent.change(screen.getByLabelText("calibration.pickSet"), { target: { value: "" } })
+    await selectOption(screen.getByLabelText("calibration.pickSet"), "set-b")
+    // A stale native form value clears back to the first set.
+    fireEvent.change(getNativeSelect(screen.getByLabelText("calibration.pickSet")), {
+      target: { value: "" },
+    })
     expect(screen.getByLabelText("calibration.pickSet")).toBeInTheDocument()
   })
 
@@ -497,8 +500,8 @@ describe("CalibrationPanel", () => {
     ])
     render(<CalibrationPanel />)
     const picker = screen.getByLabelText("calibration.pickSet")
-    expect(picker).toHaveTextContent("Judge A (aaaaaa)")
-    expect(picker).toHaveTextContent("Judge A (bbbbbb)")
+    expect(getNativeSelect(picker)).toHaveTextContent("Judge A (aaaaaa)")
+    expect(getNativeSelect(picker)).toHaveTextContent("Judge A (bbbbbb)")
   })
 
   it("warns when a set's items name different judges", () => {

@@ -296,31 +296,44 @@ export function WorkspacePickerList({
       <div
         key={`${keyPrefix}${p.id}`}
         className={cn(
-          "group flex w-full items-center rounded-md text-sm transition-colors hover:bg-accent",
-          isActive && "bg-primary/10"
+          "group flex w-full min-w-0 items-center rounded-lg border border-transparent text-sm transition-colors hover:bg-accent/60",
+          isActive && "border-border/70 bg-accent/70"
         )}
       >
         <button
           type="button"
           onClick={() => handleSwitch(p.id)}
+          aria-current={isActive ? "true" : undefined}
           data-testid={`workspace-switch-${keyPrefix}${p.id}`}
           className={cn(
-            "flex min-w-0 flex-1 items-center gap-2 px-2 text-left",
-            roomy ? "py-2.5" : "py-1.5"
+            "flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+            roomy ? "py-2.5" : "py-2"
           )}
         >
           <span
             className={cn(
-              "flex shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground",
-              roomy ? "size-8" : "size-7",
-              isActive && "bg-primary/15 text-primary"
+              "flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 text-muted-foreground",
+              isActive && "bg-background text-foreground shadow-xs ring-1 ring-border/60"
             )}
           >
-            {isActive ? <FolderOpenIcon className="size-4" /> : <FolderIcon className="size-4" />}
+            {isActive ? (
+              <FolderOpenIcon aria-hidden className="size-4" />
+            ) : (
+              <FolderIcon aria-hidden className="size-4" />
+            )}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-1">
-              <span className={cn("truncate", isActive && "font-medium")}>{p.name}</span>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span
+                title={p.name}
+                className={cn(
+                  "truncate font-medium",
+                  roomy ? "text-sm" : "text-[13px]",
+                  isActive && "text-foreground"
+                )}
+              >
+                {p.name}
+              </span>
               {!selection && untrustedMap[p.id] && (
                 <ShieldAlertIcon
                   aria-label={t("untrustedHint")}
@@ -329,7 +342,10 @@ export function WorkspacePickerList({
               )}
             </span>
             {primaryPath && (
-              <span className="block truncate font-mono text-[10px] text-muted-foreground">
+              <span
+                title={primaryPath}
+                className="mt-0.5 block truncate text-[11px] leading-4 text-muted-foreground/80"
+              >
                 {primaryPath}
                 {rootCount > 1 && (
                   <span className="ml-1">· {t("folderCount", { count: rootCount })}</span>
@@ -337,7 +353,14 @@ export function WorkspacePickerList({
               </span>
             )}
           </span>
-          {isActive && <CheckIcon className="size-4 shrink-0 text-primary" />}
+          {isActive && (
+            <span
+              aria-hidden
+              className="flex size-4 shrink-0 items-center justify-center rounded-full bg-foreground text-background"
+            >
+              <CheckIcon className="size-2.5" />
+            </span>
+          )}
         </button>
         {!selection && (
           <button
@@ -346,8 +369,11 @@ export function WorkspacePickerList({
             data-testid={`workspace-pin-${keyPrefix}${p.id}`}
             onClick={() => updateProject(p.id, { pinned: !p.pinned })}
             className={cn(
-              "mr-1 flex shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground",
-              roomy ? "size-9" : "size-7"
+              "mr-1 flex shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-[color,opacity] hover:bg-background/70 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50",
+              roomy ? "size-9" : "size-7",
+              !roomy &&
+                !p.pinned &&
+                "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100"
             )}
           >
             <StarIcon className={cn("size-3.5", p.pinned && "fill-current text-amber-500")} />
@@ -369,8 +395,8 @@ export function WorkspacePickerList({
       onClick={onClick}
       data-testid={key}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 text-sm transition-colors hover:bg-accent",
-        roomy ? "py-2.5" : "py-1.5"
+        "flex w-full shrink-0 items-center gap-2.5 rounded-md px-2 outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50",
+        roomy ? "py-2.5 text-sm" : "min-h-8 py-1.5 text-xs"
       )}
     >
       {icon}
@@ -381,14 +407,14 @@ export function WorkspacePickerList({
 
   return (
     <div className={cn("flex min-h-0 flex-col", className)} data-testid="workspace-picker-list">
-      <div className="flex items-center justify-between gap-2 px-2 py-1.5">
-        <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+      <div className="flex shrink-0 items-center justify-between gap-2 px-2 py-2">
+        <span className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
           {t("heading")}
         </span>
         {visible.length > 0 && (
-          <span className="rounded-pill bg-muted px-1.5 text-[10px] font-medium text-muted-foreground tabular-nums">
+          <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-medium tabular-nums">
             {visible.length}
-          </span>
+          </Badge>
         )}
       </div>
 
@@ -405,7 +431,7 @@ export function WorkspacePickerList({
             placeholder={t("searchPlaceholder")}
             aria-label={t("searchPlaceholder")}
             data-testid="workspace-switcher-search"
-            className="h-8 pr-8 pl-8 text-sm"
+            className="h-8 rounded-md border-border/60 bg-muted/30 pr-8 pl-8 text-xs shadow-none"
           />
           {query && (
             <button
@@ -421,8 +447,13 @@ export function WorkspacePickerList({
         </div>
       )}
 
-      <ScrollArea className={cn("min-h-0", roomy ? "max-h-[60vh]" : "max-h-[min(20rem,50vh)]")}>
-        <div className="flex flex-col">
+      <ScrollArea
+        className={cn(
+          "min-h-0 [&_[data-slot=scroll-area-viewport]>div]:!block",
+          roomy ? "max-h-[60vh]" : "max-h-[min(20rem,50vh)]"
+        )}
+      >
+        <div className="flex flex-col gap-0.5">
           {visible.length === 0 ? (
             <div className="px-2 py-1.5 text-sm text-muted-foreground">{t("empty")}</div>
           ) : trimmed && filtered.length === 0 ? (

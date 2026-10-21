@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 /**
  * Coverage for `<TwinCreationWizard />` — the guided twin-creation flow.
  * Real Dexie under fake-indexeddb; the source uploader, worker-config probe,
@@ -268,9 +269,9 @@ describe("TwinCreationWizard", () => {
     await userEvent.click(await screen.findByTestId("twin-wizard-bind-existing"))
     const picker = await screen.findByTestId("twin-wizard-char-existing")
     // Wait for the character live-query to populate the picker before selecting.
-    const option = await screen.findByRole("option", { name: "Existing Bot" })
+    const option = await screen.findByRole("option", { hidden: true, name: "Existing Bot" })
     const existing = (await listCharacters()).find((c) => c.name === "Existing Bot")!
-    await userEvent.selectOptions(picker, option)
+    await selectOption(picker, option)
     await waitFor(() => expect((picker as HTMLSelectElement).value).toBe(existing.id))
     await userEvent.click(screen.getByTestId("twin-wizard-next"))
 

@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 const mockContinue = jest.fn(async (_id: string) => ({ resumed: true as const }))
 const mockRetry = jest.fn(async (_id: string, _options: { confirmed: boolean }) => true)
@@ -53,13 +54,17 @@ describe("InboundRecoveryNotice", () => {
   })
 
   it("warns before a full retry and replays once confirmed", async () => {
-    const confirm = jest.spyOn(window, "confirm").mockReturnValue(true)
+    const user = userEvent.setup()
     render(<InboundRecoveryNotice jobs={[job()]} />)
-    fireEvent.click(screen.getByRole("button", { name: "Retry from start" }))
+    await user.click(screen.getByRole("button", { name: "Retry from start" }))
+    const dialog = await screen.findByRole("alertdialog", { name: "Retry from the start?" })
+    expect(dialog).toHaveAccessibleDescription(/repeat external side effects/i)
+    // The warning names the message it is about.
+    expect(within(dialog).getByText("Message om-1: lease_expired")).toBeInTheDocument()
+    expect(mockRetry).not.toHaveBeenCalled()
+    await user.click(within(dialog).getByRole("button", { name: "Retry from start" }))
     await waitFor(() => expect(mockRetry).toHaveBeenCalledWith("job-1", { confirmed: true }))
-    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/repeat.*side effects/i))
     await waitFor(() => expect(mockResume).toHaveBeenCalledWith())
-    confirm.mockRestore()
   })
 
   it("dismisses without replaying the inbound job", async () => {
@@ -70,12 +75,15 @@ describe("InboundRecoveryNotice", () => {
     expect(mockResume).not.toHaveBeenCalled()
   })
 
-  it("declining the retry warning leaves the job untouched", () => {
-    const confirm = jest.spyOn(window, "confirm").mockReturnValue(false)
+  it("declining the retry warning leaves the job untouched", async () => {
+    const user = userEvent.setup()
     render(<InboundRecoveryNotice jobs={[job()]} />)
-    fireEvent.click(screen.getByRole("button", { name: "Retry from start" }))
+    await user.click(screen.getByRole("button", { name: "Retry from start" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Cancel" })
+    )
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
     expect(mockRetry).not.toHaveBeenCalled()
-    confirm.mockRestore()
   })
 
   it("skips the durable resume when the job did not actually change", async () => {

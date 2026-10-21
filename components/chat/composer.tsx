@@ -137,6 +137,7 @@ import { useComposerKeyboardAvoidance } from "./composer/use-composer-keyboard-a
 import { useCoarsePointer } from "@/hooks/ui/use-pointer"
 import { useStableCallback } from "@/hooks/ui/use-stable-callback"
 import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import {
   detectTrigger,
@@ -313,7 +314,6 @@ import { useOcr } from "@/hooks/use-ocr"
 import { buildOcrDeps } from "@/lib/ocr/deps"
 import type { OcrResult } from "@/types/ocr"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
-import { BestOfNChip } from "./composer/best-of-n-chip"
 import { BestOfNStartDialog } from "./composer/best-of-n-start-dialog"
 import type { PreparedBestOfN } from "@/lib/best-of-n/entry"
 import { BottomToolbar } from "./composer/bottom-toolbar"
@@ -4105,6 +4105,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   )
   const bestOfNCount =
     bestOfNChoice && bestOfNChoice.sessionId === session?.id ? bestOfNChoice.n : null
+  const bestOfNControl =
+    session?.kind === "direct" && !session.platformBinding
+      ? {
+          value: bestOfNCount,
+          disabled,
+          onChange: (n: 2 | 3 | 4 | null) =>
+            setBestOfNChoice(n ? { sessionId: session.id, n } : null),
+        }
+      : undefined
   const [bestOfNStart, setBestOfNStart] = useState<{
     prepared: PreparedBestOfN
     resolve(value: boolean): void
@@ -4863,11 +4872,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                         tCommands("running", { command: commandProgress.command })}
                     </span>
                     {commandProgress.value !== undefined && (
-                      <progress
+                      <Progress
                         className="h-1 w-full"
                         aria-label={tCommands("progress", { command: commandProgress.command })}
-                        max={1}
-                        value={commandProgress.value}
+                        value={commandProgress.value * 100}
                       />
                     )}
                   </div>
@@ -4875,13 +4883,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                     {tCommands("cancel")}
                   </Button>
                 </div>
-              )}
-              {session?.kind === "direct" && !session.platformBinding && (
-                <BestOfNChip
-                  value={bestOfNCount}
-                  disabled={disabled || status === "streaming" || status === "awaiting_approval"}
-                  onChange={(n) => setBestOfNChoice(n ? { sessionId: session.id, n } : null)}
-                />
               )}
               <ExternalAgentExtensionUi chatSessionId={session?.id} link={externalSessionLink}>
                 <ComposerInner
@@ -4931,6 +4932,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                         {toolbar}
                         {toolbarInBox ? (
                           <BottomToolbar
+                            bestOfN={bestOfNControl}
                             session={session ?? null}
                             status={status}
                             variant={
@@ -4946,6 +4948,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               </ExternalAgentExtensionUi>
               {toolbarInBox ? null : (
                 <BottomToolbar
+                  bestOfN={bestOfNControl}
                   session={session ?? null}
                   status={status}
                   onOpenProviderSettings={() => onOpenSettings("api-key")}

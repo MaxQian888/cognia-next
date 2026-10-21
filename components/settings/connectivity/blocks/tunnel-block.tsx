@@ -6,14 +6,24 @@
  * from any other shell the block says so instead of vanishing.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckIcon, CloudIcon, ShieldAlertIcon } from "lucide-react"
+import { CheckIcon, CloudIcon, LoaderIcon, ShieldAlertIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { TunnelInstallGuide } from "@/components/connectivity/tunnel-install-guide"
 import { SettingsBlock, SettingsField } from "@/components/settings/common/settings-block"
-import { Surface } from "@/components/surface/surface"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -53,14 +63,24 @@ export function TunnelBlock() {
   const [probing, setProbing] = useState(false)
   // The one cloudflared child is shared with the Connections tunnel tab, so
   // both taking it over and shutting it down need the user's word first.
+  // `open` is separate from the payload so the dialog keeps the host and the
+  // intent it asked about on screen while it animates out.
   const [conflict, setConflict] = useState<{
     current: TunnelInfo
     intent: "start" | "stop"
+    open: boolean
   } | null>(null)
+  const closeConflict = useCallback(
+    () => setConflict((prev) => (prev ? { ...prev, open: false } : prev)),
+    []
+  )
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState(false)
   const [hostnameInput, setHostnameInput] = useState("")
   const [tokenInput, setTokenInput] = useState("")
+  // The conflict dialog opens from an async answer, not from a Trigger, so
+  // Radix has nothing to hand focus back to; the switch that asked gets it.
+  const switchRef = useRef<HTMLButtonElement>(null)
 
   const runProbe = useCallback(async () => {
     if (!desktop) return
@@ -117,13 +137,13 @@ export function TunnelBlock() {
         switch (outcome.kind) {
           case "started":
             setInfo(outcome.info)
-            setConflict(null)
+            closeConflict()
             toast.success(t("started"))
             break
           case "busy":
             // The child is serving another origin. Show the conflict and let
             // the user decide, instead of the old silent swap.
-            setConflict({ current: outcome.current, intent: "start" })
+            setConflict({ current: outcome.current, intent: "start", open: true })
             break
           case "not_installed":
             setProbe({ installed: false })
@@ -140,7 +160,7 @@ export function TunnelBlock() {
         setBusy(false)
       }
     },
-    [t]
+    [closeConflict, t]
   )
 
   const stop = useCallback(async () => {
@@ -148,14 +168,14 @@ export function TunnelBlock() {
     try {
       await stopTunnel()
       setInfo(null)
-      setConflict(null)
+      closeConflict()
       toast.success(t("stopped"))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
-  }, [t])
+  }, [closeConflict, t])
 
   const onToggle = useCallback(
     async (enabled: boolean) => {
@@ -167,7 +187,7 @@ export function TunnelBlock() {
       if (exposingOther && info) {
         // Stopping would take down a public URL another surface is showing.
         // The same conflict `TunnelError::Busy` refuses on the way in.
-        setConflict({ current: info, intent: "stop" })
+        setConflict({ current: info, intent: "stop", open: true })
         return
       }
       await stop()
@@ -258,6 +278,7 @@ export function TunnelBlock() {
       }
       action={
         <Switch
+          ref={switchRef}
           checked={!!info}
           onCheckedChange={onToggle}
           disabled={!desktop || busy || (mode === "named" && !namedReady)}
@@ -293,55 +314,74 @@ export function TunnelBlock() {
           testid="tunnel-install-guide"
         />
       ) : null}
-      {conflict ? (
-        <Surface asChild layer="base" radius="control">
-          <div
-            role="alertdialog"
-            aria-label={tc("busyTitle")}
-            className="space-y-2 border border-amber-300/70 px-3 py-2.5 dark:border-amber-800"
-            data-testid="tunnel-conflict"
-            data-intent={conflict.intent}
-          >
-            <p className="flex items-start gap-2 text-xs font-medium">
-              <ShieldAlertIcon className="mt-px size-3.5 shrink-0" aria-hidden="true" />
-              {tc("busyTitle")}
-            </p>
-            <p className="text-[11px] text-muted-foreground">
-              {conflict.intent === "stop"
-                ? tc("busyStopBody", {
-                    localUrl: conflict.current.localUrl,
-                    publicUrl: conflict.current.publicUrl,
-                  })
-                : tc("busyBody", {
-                    localUrl: conflict.current.localUrl,
-                    publicUrl: conflict.current.publicUrl,
-                  })}
-            </p>
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                onClick={() => void (conflict.intent === "stop" ? stop() : start(true))}
-                disabled={busy}
-                data-testid="tunnel-conflict-replace"
-              >
-                {conflict.intent === "stop" ? tc("busyStopConfirm") : tc("busyReplace")}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setConflict(null)
-                  toast.success(tc("busyCancelled"))
-                }}
-                disabled={busy}
-                data-testid="tunnel-conflict-keep"
-              >
-                {t("clearButton")}
-              </Button>
-            </div>
-          </div>
-        </Surface>
-      ) : null}
+      {/*
+        Taking over or stopping the one shared cloudflared child changes a
+        public URL another surface is showing, so it is a modal decision. It
+        stays open while the chosen action runs and closes once it lands; a
+        second refusal re-renders it with the host that refused.
+      */}
+      <AlertDialog
+        open={conflict?.open === true}
+        onOpenChange={(next) => {
+          if (next || busy || !conflict?.open) return
+          closeConflict()
+          toast.success(tc("busyCancelled"))
+        }}
+      >
+        <AlertDialogContent
+          data-testid="tunnel-conflict"
+          data-intent={conflict?.intent}
+          aria-busy={busy}
+          onCloseAutoFocus={(event) => {
+            const target = switchRef.current
+            if (target?.isConnected) {
+              event.preventDefault()
+              target.focus()
+            }
+          }}
+        >
+          {conflict ? (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogMedia className="bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                  <ShieldAlertIcon aria-hidden="true" />
+                </AlertDialogMedia>
+                <AlertDialogTitle>{tc("busyTitle")}</AlertDialogTitle>
+                <AlertDialogDescription className="wrap-anywhere">
+                  {conflict.intent === "stop"
+                    ? tc("busyStopBody", {
+                        localUrl: conflict.current.localUrl,
+                        publicUrl: conflict.current.publicUrl,
+                      })
+                    : tc("busyBody", {
+                        localUrl: conflict.current.localUrl,
+                        publicUrl: conflict.current.publicUrl,
+                      })}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={busy} data-testid="tunnel-conflict-keep">
+                  {tc("busyKeep")}
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  disabled={busy}
+                  onClick={(event) => {
+                    // Stay open while it runs: success clears the conflict,
+                    // a failure leaves the question standing.
+                    event.preventDefault()
+                    void (conflict.intent === "stop" ? stop() : start(true))
+                  }}
+                  data-testid="tunnel-conflict-replace"
+                >
+                  {busy ? <LoaderIcon className="animate-spin" aria-hidden="true" /> : null}
+                  {conflict.intent === "stop" ? tc("busyStopConfirm") : tc("busyReplace")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          ) : null}
+        </AlertDialogContent>
+      </AlertDialog>
       <RadioGroup
         value={mode}
         onValueChange={(v) => void onModeChange(v as "quick" | "named")}

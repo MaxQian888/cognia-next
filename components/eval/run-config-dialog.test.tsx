@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
@@ -106,7 +107,7 @@ describe("RunConfigDialog", () => {
     fireEvent.click(screen.getByText("runConfig.addTarget"))
     const refs = screen.getAllByLabelText("runConfig.targetRef")
     expect(refs).toHaveLength(2)
-    fireEvent.change(refs[1], { target: { value: "claude-opus-4-8" } })
+    await selectOption(refs[1], "claude-opus-4-8")
     fireEvent.click(screen.getByText("runConfig.run"))
     await waitFor(() => expect(runEvalService).toHaveBeenCalled())
     expect(runEvalService.mock.calls[0][0].config.targets).toHaveLength(2)
@@ -115,7 +116,7 @@ describe("RunConfigDialog", () => {
   it("errors when every target ref is blank", async () => {
     renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     const ref = screen.getByLabelText("runConfig.targetRef")
-    fireEvent.change(ref, { target: { value: "" } })
+    await selectOption(ref, "")
     fireEvent.click(screen.getByText("runConfig.run"))
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
     expect(runEvalService).not.toHaveBeenCalled()
@@ -124,7 +125,7 @@ describe("RunConfigDialog", () => {
   it("passes a scorer subset when some scorers are unchecked", async () => {
     renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
     fireEvent.click(screen.getByLabelText("scorerCatalog.cost")) // uncheck one
-    fireEvent.change(screen.getByLabelText("runConfig.targetRef"), { target: { value: "m" } })
+    await selectOption(screen.getByLabelText("runConfig.targetRef"), "m")
     fireEvent.click(screen.getByText("runConfig.run"))
     await waitFor(() => expect(runEvalService).toHaveBeenCalled())
     const config = runEvalService.mock.calls[0][0].config
@@ -145,10 +146,10 @@ describe("RunConfigDialog", () => {
       onClose: jest.fn(),
     })
     // RefField renders a <select> when options.models is provided
-    fireEvent.change(screen.getByLabelText("runConfig.targetRef"), { target: { value: "m2" } })
-    fireEvent.change(screen.getByLabelText("runConfig.character"), { target: { value: "char-1" } })
+    await selectOption(screen.getByLabelText("runConfig.targetRef"), "m2")
+    await selectOption(screen.getByLabelText("runConfig.character"), "char-1")
     fireEvent.change(screen.getByLabelText("runConfig.k"), { target: { value: "3" } })
-    fireEvent.change(screen.getByLabelText("runConfig.split"), { target: { value: "test" } })
+    await selectOption(screen.getByLabelText("runConfig.split"), "test")
     fireEvent.change(screen.getByLabelText("runConfig.capabilities"), { target: { value: "a, b" } })
     fireEvent.click(screen.getByText("runConfig.run"))
     await waitFor(() => expect(runEvalService).toHaveBeenCalled())
@@ -160,15 +161,11 @@ describe("RunConfigDialog", () => {
 
   it("builds team and workflow target specs from the kind select", async () => {
     renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
-    fireEvent.change(screen.getByLabelText("runConfig.targetKind"), { target: { value: "team" } })
-    fireEvent.change(screen.getByLabelText("runConfig.targetRef"), { target: { value: "tm1" } })
+    await selectOption(screen.getByLabelText("runConfig.targetKind"), "team")
+    await selectOption(screen.getByLabelText("runConfig.targetRef"), "tm1")
     fireEvent.click(screen.getByText("runConfig.addTarget"))
-    fireEvent.change(screen.getAllByLabelText("runConfig.targetKind")[1], {
-      target: { value: "workflow" },
-    })
-    fireEvent.change(screen.getAllByLabelText("runConfig.targetRef")[1], {
-      target: { value: "wf1" },
-    })
+    await selectOption(screen.getAllByLabelText("runConfig.targetKind")[1], "workflow")
+    await selectOption(screen.getAllByLabelText("runConfig.targetRef")[1], "wf1")
     fireEvent.click(screen.getByText("runConfig.run"))
     await waitFor(() => expect(runEvalService).toHaveBeenCalled())
     const config = runEvalService.mock.calls[0][0].config
@@ -183,15 +180,9 @@ describe("RunConfigDialog", () => {
       options: { models: ["m1", "m2"], twins: [{ id: "twin-1", name: "Alice" }] },
       onClose: jest.fn(),
     })
-    fireEvent.change(screen.getByLabelText("runConfig.targetKind"), {
-      target: { value: "twin" },
-    })
-    fireEvent.change(screen.getByLabelText("runConfig.targetRef"), {
-      target: { value: "twin-1" },
-    })
-    fireEvent.change(screen.getByLabelText("runConfig.twinModel"), {
-      target: { value: "m2" },
-    })
+    await selectOption(screen.getByLabelText("runConfig.targetKind"), "twin")
+    await selectOption(screen.getByLabelText("runConfig.targetRef"), "twin-1")
+    await selectOption(screen.getByLabelText("runConfig.twinModel"), "m2")
     fireEvent.click(screen.getByText("runConfig.run"))
     await waitFor(() => expect(runEvalService).toHaveBeenCalled())
     expect(runEvalService.mock.calls[0][0].config.targets[0]).toMatchObject({
@@ -418,8 +409,8 @@ describe("RunConfigDialog", () => {
       onClose: jest.fn(),
     })
     const picker = screen.getByLabelText("runConfig.character")
-    fireEvent.change(picker, { target: { value: "char-1" } })
-    fireEvent.change(picker, { target: { value: "" } })
+    await selectOption(picker, "char-1")
+    await selectOption(picker, "")
     fireEvent.click(screen.getByText("runConfig.run"))
     await waitFor(() => expect(runEvalService).toHaveBeenCalled())
     expect(runEvalService.mock.calls[0][0].config.targets[0]).not.toHaveProperty("characterId")

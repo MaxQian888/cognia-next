@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 
+import { selectOption } from "@/lib/testing/select-option"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
@@ -63,12 +64,12 @@ describe("QuietHoursAndMute — timezone selector", () => {
     expect(input.value).toBe("Asia/Singapore")
   })
 
-  it("selecting 'Custom…' from the dropdown switches into a freeform input", () => {
+  it("selecting 'Custom…' from the dropdown switches into a freeform input", async () => {
     setup({
       quietHours: { from: "09:00", to: "17:00", tz: "UTC" },
     })
     const select = screen.getByTestId("qhm-quiet-tz") as HTMLSelectElement
-    fireEvent.change(select, { target: { value: "__custom__" } })
+    await selectOption(select, "__custom__")
     expect(screen.getByTestId("qhm-tz-custom-input")).toBeInTheDocument()
   })
 

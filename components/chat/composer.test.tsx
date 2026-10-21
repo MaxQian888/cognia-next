@@ -183,6 +183,7 @@ jest.mock("@/lib/chat/attachments/prepare", () => {
 
 import { toast } from "sonner"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { act } from "react"
 import type { ReactNode } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -1709,7 +1710,11 @@ describe("plugin command progress and cancellation", () => {
         })
         fireEvent.click(screen.getByRole("button", { name: /^Send$/ }))
         await waitFor(() => expect(screen.getByText("Searching sources")).toBeInTheDocument())
-        expect(screen.getByRole("progressbar")).toHaveAttribute("value", "0.4")
+        const progress = screen.getByRole("progressbar")
+        expect(progress).toHaveAttribute("aria-valuemin", "0")
+        expect(progress).toHaveAttribute("aria-valuemax", "100")
+        expect(progress).toHaveAttribute("aria-valuenow", "40")
+        expect(progress).toHaveClass("bg-primary/20")
         fireEvent.click(screen.getByRole("button", { name: cancelLabel }))
         await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument())
         expect(commandContext.signal?.aborted).toBe(true)
@@ -1733,6 +1738,7 @@ describe("plugin command progress and cancellation", () => {
 
 describe("Composer — best-of-N consumes exactly one send", () => {
   it("uses the shared start preview then resets the chip before the next ordinary send", async () => {
+    const user = userEvent.setup()
     const { startPreparedBestOfN } = await import("@/lib/best-of-n/entry")
     jest.mocked(startPreparedBestOfN).mockClear()
     const onSend = jest.fn(async () => undefined)
@@ -1748,9 +1754,16 @@ describe("Composer — best-of-N consumes exactly one send", () => {
         />
       </Wrapper>
     )
-    fireEvent.change(screen.getByRole("combobox", { name: "Best-of-N for the next send" }), {
-      target: { value: "3" },
-    })
+    expect(
+      screen.queryByRole("combobox", { name: "Best-of-N for the next send" })
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "More controls" }))
+    await user.click(screen.getByRole("combobox", { name: "Best-of-N for the next send" }))
+    await user.click(screen.getByRole("option", { name: "Best of 3" }))
+    await user.keyboard("{Escape}")
+    expect(
+      screen.getByRole("button", { name: "Turn off Best-of-N for the next send" })
+    ).toBeVisible()
     const ta = document.querySelector("textarea") as HTMLTextAreaElement
     fireEvent.change(ta, { target: { value: "try three approaches" } })
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
@@ -1758,7 +1771,14 @@ describe("Composer — best-of-N consumes exactly one send", () => {
     await waitFor(() => expect(startPreparedBestOfN).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
     expect(onSend).not.toHaveBeenCalled()
-    expect(screen.getByRole("combobox", { name: "Best-of-N for the next send" })).toHaveValue("off")
+    expect(
+      screen.queryByRole("button", { name: "Turn off Best-of-N for the next send" })
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "More controls" }))
+    expect(screen.getByRole("combobox", { name: "Best-of-N for the next send" })).toHaveTextContent(
+      "Best-of-N off"
+    )
+    await user.keyboard("{Escape}")
     fireEvent.change(ta, { target: { value: "ordinary follow-up" } })
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))

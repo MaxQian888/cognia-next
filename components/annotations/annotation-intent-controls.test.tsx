@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
+import { render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -37,8 +38,12 @@ describe("AnnotationIntentControls", () => {
     const intent = screen.getByLabelText("intent.label") as HTMLSelectElement
     const severity = screen.getByLabelText("severity.label") as HTMLSelectElement
 
-    expect([...intent.options].map((o) => o.value)).toEqual([...ANNOTATION_INTENTS])
-    expect([...severity.options].map((o) => o.value)).toEqual([...ANNOTATION_SEVERITIES])
+    expect([...getNativeSelect(intent).options].map((o) => o.value)).toEqual([
+      ...ANNOTATION_INTENTS,
+    ])
+    expect([...getNativeSelect(severity).options].map((o) => o.value)).toEqual([
+      ...ANNOTATION_SEVERITIES,
+    ])
   })
 
   it("shows the current values", () => {
@@ -47,15 +52,15 @@ describe("AnnotationIntentControls", () => {
     expect((screen.getByLabelText("severity.label") as HTMLSelectElement).value).toBe("blocking")
   })
 
-  it("reports a changed intent", () => {
+  it("reports a changed intent", async () => {
     const { onIntentChange } = setup()
-    fireEvent.change(screen.getByLabelText("intent.label"), { target: { value: "question" } })
+    await selectOption(screen.getByLabelText("intent.label"), "question")
     expect(onIntentChange).toHaveBeenCalledWith("question")
   })
 
-  it("reports a changed severity", () => {
+  it("reports a changed severity", async () => {
     const { onSeverityChange } = setup()
-    fireEvent.change(screen.getByLabelText("severity.label"), { target: { value: "important" } })
+    await selectOption(screen.getByLabelText("severity.label"), "important")
     expect(onSeverityChange).toHaveBeenCalledWith("important")
   })
 

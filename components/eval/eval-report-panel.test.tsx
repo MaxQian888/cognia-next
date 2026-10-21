@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { EvalReportView } from "@cognia/eval-core"
 import { EvalReportPanel } from "./eval-report-panel"
@@ -62,14 +63,12 @@ it("renders report costs, provider failures and expandable evidence from public 
   expect(screen.getByText("exact: 1.00")).toBeVisible()
 })
 
-it("filters evidence and reports filter changes to its owner", () => {
+it("filters evidence and reports filter changes to its owner", async () => {
   const handlers = props()
   const { rerender } = render(<EvalReportPanel {...handlers} />)
-  fireEvent.change(screen.getByLabelText("lab.review.filterVariant"), { target: { value: "a" } })
+  await selectOption(screen.getByLabelText("lab.review.filterVariant"), "a")
   expect(handlers.onVariantChange).toHaveBeenCalledWith("a")
-  fireEvent.change(screen.getByLabelText("lab.review.filterStatus"), {
-    target: { value: "failed" },
-  })
+  await selectOption(screen.getByLabelText("lab.review.filterStatus"), "failed")
   expect(handlers.onStatusChange).toHaveBeenCalledWith("failed")
   rerender(<EvalReportPanel {...handlers} reportVariant="a" reportStatus="passed" />)
   expect(screen.getByRole("button", { name: /case-a/ })).toBeInTheDocument()

@@ -10,6 +10,7 @@ jest.mock("@/lib/issues/remote-write", () => ({
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
+import { selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { toast } from "sonner"
 import type { IssueProject } from "@/types/issues"
@@ -39,7 +40,7 @@ describe("IssueCreateSheet", () => {
     const { onOpenChange } = renderSheet()
     expect(screen.getByTestId("issues-mobile-create-submit")).toBeDisabled()
     fireEvent.change(screen.getByTestId("issues-mobile-create-title"), { target: { value: "Fix it" } })
-    fireEvent.change(screen.getByTestId("issues-mobile-create-priority"), { target: { value: "high" } })
+    await selectOption(screen.getByTestId("issues-mobile-create-priority"), "high")
     await act(async () => {
       fireEvent.click(screen.getByTestId("issues-mobile-create-submit"))
     })
@@ -70,7 +71,7 @@ describe("IssueCreateSheet", () => {
 
   it("lets the user pick another container", async () => {
     renderSheet()
-    fireEvent.change(screen.getByTestId("issues-mobile-create-project"), { target: { value: "p2" } })
+    await selectOption(screen.getByTestId("issues-mobile-create-project"), "p2")
     fireEvent.change(screen.getByTestId("issues-mobile-create-title"), { target: { value: "x" } })
     await act(async () => {
       fireEvent.click(screen.getByTestId("issues-mobile-create-submit"))

@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { HarnessExperience } from "@/types/harness/experience"
 import { makeExperience } from "@/lib/harness/test-fixtures"
@@ -39,19 +40,15 @@ beforeEach(() => {
 })
 
 describe("HarnessExperienceLibrary", () => {
-  it("lists one agent's lessons and filters them by status", () => {
+  it("lists one agent's lessons and filters them by status", async () => {
     render(<HarnessExperienceLibrary characterId="agent-1" />)
     expect(mockQuery).toHaveBeenCalledWith({ characterId: "agent-1" })
     expect(screen.getByText(/Retrieved 3 · helped 2 · hurt 0/)).toBeInTheDocument()
     expect(screen.getByText(/1 conflict/)).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText("Filter lessons by status"), {
-      target: { value: "deprecated" },
-    })
+    await selectOption(screen.getByLabelText("Filter lessons by status"), "deprecated")
     expect(screen.queryByTestId("harness-experience-e1")).not.toBeInTheDocument()
     expect(screen.getByTestId("harness-experience-e2")).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText("Filter lessons by status"), {
-      target: { value: "rejected" },
-    })
+    await selectOption(screen.getByLabelText("Filter lessons by status"), "rejected")
     expect(screen.getByTestId("harness-experience-empty")).toBeInTheDocument()
   })
 

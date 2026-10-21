@@ -17,6 +17,9 @@ jest.mock("@cognia/logging", () => ({
 const isTauriMock = jest.fn()
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 
+jest.mock("@/lib/tauri/os", () => ({ isMacPlatform: jest.fn(() => false) }))
+import { isMacPlatform } from "@/lib/tauri/os"
+
 const show = jest.fn().mockResolvedValue(undefined)
 const setFocus = jest.fn().mockResolvedValue(undefined)
 jest.mock("@tauri-apps/api/window", () => ({
@@ -72,6 +75,7 @@ let raf: ReturnType<typeof flushRaf>
 beforeEach(() => {
   logWarn.mockReset()
   isTauriMock.mockReset()
+  jest.mocked(isMacPlatform).mockReturnValue(false)
   show.mockReset().mockResolvedValue(undefined)
   setFocus.mockReset().mockResolvedValue(undefined)
   invoke.mockReset()
@@ -100,6 +104,24 @@ test("Tauri mode reveals and focuses the window after two frames", async () => {
   await waitFor(() => expect(show).toHaveBeenCalledTimes(1))
   await waitFor(() => expect(invoke).toHaveBeenCalledWith("webview_acknowledge_boot_reveal"))
   await waitFor(() => expect(setFocus).toHaveBeenCalledTimes(1))
+})
+
+test("a hidden macOS window reveals without receiving animation frames", async () => {
+  isTauriMock.mockReturnValue(true)
+  jest.mocked(isMacPlatform).mockReturnValue(true)
+  render(<WindowShowInitializer />)
+  await waitFor(() => expect(show).toHaveBeenCalledTimes(1))
+  expect(invoke).toHaveBeenCalledWith("webview_acknowledge_boot_reveal")
+})
+
+test("a cancelled macOS reveal does not show or focus the window", async () => {
+  isTauriMock.mockReturnValue(true)
+  jest.mocked(isMacPlatform).mockReturnValue(true)
+  const { unmount } = render(<WindowShowInitializer />)
+  unmount()
+  await Promise.resolve()
+  expect(show).not.toHaveBeenCalled()
+  expect(setFocus).not.toHaveBeenCalled()
 })
 
 test("does not reveal when unmounted before the frames fire", async () => {

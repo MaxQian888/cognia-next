@@ -75,7 +75,6 @@ const entries = [
 function renderBoard(over: Partial<Parameters<typeof AgentOverviewBoard>[0]> = {}) {
   const props = {
     entries,
-    enabled: true,
     stateFilter: "all" as const,
     onStateFilterChange: jest.fn(),
     onOpenAgent: jest.fn(),
@@ -194,9 +193,8 @@ describe("AgentOverviewBoard", () => {
     expect(screen.getByText("runtime update in progress")).toHaveClass("text-muted-foreground")
   })
 
-  it("disables mutations while the master switch is off but keeps inspection available", () => {
+  it("offers per-agent remedies without a global gate", () => {
     renderBoard({
-      enabled: false,
       entries: [
         entries[1],
         entries[2],
@@ -208,12 +206,12 @@ describe("AgentOverviewBoard", () => {
         },
       ],
     })
-    expect(screen.getByTestId("overview-action-off")).toBeDisabled()
-    expect(screen.getByTestId("overview-action-failed")).toBeDisabled()
-    expect(screen.getByTestId("overview-action-disabled")).toBeDisabled()
+    expect(screen.getByTestId("overview-action-off")).toBeEnabled()
+    expect(screen.getByTestId("overview-action-failed")).toBeEnabled()
+    expect(screen.getByTestId("overview-action-disabled")).toBeEnabled()
     expect(
       within(screen.getByTestId("overview-suggestion-unrouted")).getByRole("button")
-    ).toBeDisabled()
+    ).toBeEnabled()
     expect(screen.getByTestId("overview-action-blocked")).toBeEnabled()
   })
 
@@ -231,8 +229,8 @@ describe("AgentOverviewBoard", () => {
     expect(heading).toHaveAttribute("tabindex", "-1")
   })
 
-  it("disables the first-run picker while the master switch is off", () => {
-    renderBoard({ entries: [], enabled: false })
-    for (const button of screen.getAllByRole("button")) expect(button).toBeDisabled()
+  it("keeps the first-run picker available", () => {
+    renderBoard({ entries: [] })
+    for (const button of screen.getAllByRole("button")) expect(button).toBeEnabled()
   })
 })

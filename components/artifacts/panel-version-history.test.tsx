@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 import { render, screen, fireEvent } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
@@ -93,7 +94,7 @@ describe("PanelVersionHistory", () => {
     expect(screen.queryByTestId("version-inline-diff")).not.toBeInTheDocument()
   })
 
-  it("compares any two saved versions, older to newer, from the picker", () => {
+  it("compares any two saved versions, older to newer, from the picker", async () => {
     const a = makeArtifact()
     useArtifactStore.getState().saveArtifactVersion(a.id, "first")
     useArtifactStore.getState().updateArtifact(a.id, { content: "v2" })
@@ -112,14 +113,14 @@ describe("PanelVersionHistory", () => {
     const picker = screen.getByTestId("version-compare-against") as HTMLSelectElement
     expect(picker.value).toBe("current")
     // The opened version is not offered against itself.
-    expect([...picker.options].map((o) => o.value)).toEqual(["current", first.id])
-    fireEvent.change(picker, { target: { value: first.id } })
+    expect([...getNativeSelect(picker).options].map((o) => o.value)).toEqual(["current", first.id])
+    await selectOption(picker, first.id)
     // v1 → v2 whichever was opened first: one line removed, one added.
     expect(screen.getByTestId("version-compare-stats")).toHaveTextContent("+1 -1")
     expect(screen.getByRole("region", { name: /v1 · first → v2 · second/ })).toBeInTheDocument()
   })
 
-  it("starts each newly opened comparison against the current version", () => {
+  it("starts each newly opened comparison against the current version", async () => {
     const a = makeArtifact()
     useArtifactStore.getState().saveArtifactVersion(a.id, "first")
     useArtifactStore.getState().updateArtifact(a.id, { content: "v2" })
@@ -129,7 +130,7 @@ describe("PanelVersionHistory", () => {
     const buttons = screen.getAllByRole("button", { name: "compareVersion" })
     fireEvent.click(buttons[0])
     const picker = screen.getByTestId("version-compare-against") as HTMLSelectElement
-    fireEvent.change(picker, { target: { value: picker.options[1].value } })
+    await selectOption(picker, getNativeSelect(picker).options[1].value)
     fireEvent.click(buttons[1])
     expect((screen.getByTestId("version-compare-against") as HTMLSelectElement).value).toBe(
       "current"

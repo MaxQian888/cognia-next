@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import type { Character } from "@cognia/agent-config-types"
+import type { CogniaDiagnostic } from "@cognia/diagnostics"
 import type { HarnessEvolutionRun } from "@/types/harness/evolution"
 import { makeRun } from "@/lib/harness/test-fixtures"
 
@@ -28,13 +29,17 @@ jest.mock("./harness-start-run-dialog", () => ({
 import { HarnessFailureOffer } from "./harness-failure-offer"
 
 const agent = { id: "agent-1", name: "Analyst" } as Character
-const diagnostic = {
+const diagnostic: CogniaDiagnostic = {
   id: "d1",
   at: 1,
   code: "budgetExhausted",
   severity: "warning",
   retryable: false,
-} as never
+  persistent: false,
+  source: "chat",
+  message: "Budget exhausted",
+  actions: [],
+}
 
 beforeEach(() => {
   localStorage.clear()

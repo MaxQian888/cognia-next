@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { AdapterPermissions } from "./adapter-permissions"
@@ -31,7 +31,6 @@ it("keeps Skills, Host Capabilities, and HITL as distinct permission groups", ()
  */
 it("defaults to local extraction and can be widened deliberately", async () => {
   const user = userEvent.setup()
-  jest.spyOn(window, "confirm").mockReturnValue(true)
   render(<AdapterPermissions adapterId="a" />)
 
   expect(screen.queryByTestId("adapter-media-policy-warning")).not.toBeInTheDocument()
@@ -42,6 +41,11 @@ it("defaults to local extraction and can be widened deliberately", async () => {
   expect(screen.getByTestId("adapter-media-policy-warning")).toBeInTheDocument()
 
   await user.click(screen.getByRole("button", { name: "save" }))
+  const dialog = await screen.findByTestId("adapter-permissions-confirm")
+  expect(dialog).toHaveTextContent("confirmImpact")
+  expect(mockUpdate).not.toHaveBeenCalled()
+  await user.click(within(dialog).getByTestId("adapter-permissions-confirm-confirm"))
+  await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1))
   expect(mockUpdate).toHaveBeenCalledWith(
     "a",
     "permissions",
@@ -54,4 +58,25 @@ it("seeds from the stored policy", () => {
   mockRow.current = { id: "a", mediaModelPolicy: "allow_cloud_binary", updatedAt: 1 }
   render(<AdapterPermissions adapterId="a" />)
   expect(screen.getByTestId("adapter-media-policy-warning")).toBeInTheDocument()
+})
+
+it("saves nothing when the impact confirmation is cancelled", async () => {
+  const user = userEvent.setup()
+  render(<AdapterPermissions adapterId="a" />)
+  await user.click(screen.getByRole("button", { name: "save" }))
+  await user.click(await screen.findByTestId("adapter-permissions-confirm-cancel"))
+  await waitFor(() =>
+    expect(screen.queryByTestId("adapter-permissions-confirm")).not.toBeInTheDocument()
+  )
+  expect(mockUpdate).not.toHaveBeenCalled()
+})
+
+it("resets the media policy along with the other fields", async () => {
+  const user = userEvent.setup()
+  render(<AdapterPermissions adapterId="a" />)
+  await user.click(screen.getByTestId("adapter-media-policy"))
+  await user.click(screen.getByRole("option", { name: "mediaPolicyCloud" }))
+  expect(screen.getByTestId("adapter-media-policy-warning")).toBeInTheDocument()
+  await user.click(screen.getByRole("button", { name: "cancel" }))
+  expect(screen.queryByTestId("adapter-media-policy-warning")).not.toBeInTheDocument()
 })

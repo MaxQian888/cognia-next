@@ -1,4 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { toast } from "sonner"
 
 import { TunnelBlock } from "./tunnel-block"
 
@@ -55,6 +57,7 @@ describe("TunnelBlock", () => {
   beforeEach(() => {
     reach.mockReturnValue({ available: true })
     call.mockClear()
+    jest.mocked(toast.success).mockClear()
     if (defaultCall) call.mockImplementation(defaultCall)
   })
 
@@ -118,7 +121,8 @@ describe("TunnelBlock", () => {
     })
     // The intl stub echoes keys, so the body reads as its key.
     expect(screen.getByTestId("tunnel-conflict")).toHaveTextContent("busyBody")
-    expect(screen.getByRole("switch")).not.toBeChecked()
+    // The modal hides the block from assistive tech while it asks.
+    expect(screen.getByRole("switch", { hidden: true })).not.toBeChecked()
     await act(async () => {
       fireEvent.click(screen.getByTestId("tunnel-conflict-replace"))
     })
@@ -128,6 +132,85 @@ describe("TunnelBlock", () => {
     })
     expect(screen.queryByTestId("tunnel-conflict")).toBeNull()
     expect(screen.getByTestId("tunnel-url")).toHaveTextContent("https://y.trycloudflare.com")
+  })
+
+  function busyOnStart() {
+    call.mockImplementation(async (name: string, args?: Record<string, unknown>) => {
+      if (name === "companion_tunnel_current") return null
+      if (name === "companion_tunnel_get_config") return { mode: "quick", hasToken: false }
+      if (name === "companion_tunnel_probe") return { installed: true, path: "/x" }
+      if (name === "companion_tunnel_start") {
+        if (args?.replace === true)
+          return { publicUrl: "https://y.trycloudflare.com", localUrl: "https://127.0.0.1:27890" }
+        throw new Error(
+          "tunnel_busy: already exposing http://127.0.0.1:7891 at https://a.trycloudflare.com"
+        )
+      }
+      return undefined
+    })
+  }
+
+  it("asks in a modal dialog named for the conflict, keeping the start intent", async () => {
+    busyOnStart()
+    const user = userEvent.setup()
+    render(<TunnelBlock />)
+    await waitFor(() => expect(call).toHaveBeenCalledWith("companion_tunnel_get_config"))
+    await user.click(screen.getByRole("switch"))
+    const dialog = await screen.findByRole("alertdialog", { name: "busyTitle" })
+    expect(dialog).toHaveAccessibleDescription("busyBody")
+    expect(dialog).toHaveAttribute("data-intent", "start")
+    expect(screen.getByTestId("tunnel-conflict-replace")).toHaveTextContent("busyReplace")
+    expect(screen.getByTestId("tunnel-conflict-keep")).toHaveTextContent("busyKeep")
+  })
+
+  it("keeps the existing tunnel on Escape and hands focus back to the switch", async () => {
+    busyOnStart()
+    const user = userEvent.setup()
+    render(<TunnelBlock />)
+    await waitFor(() => expect(call).toHaveBeenCalledWith("companion_tunnel_get_config"))
+    const toggle = screen.getByRole("switch")
+    await user.click(toggle)
+    await screen.findByRole("alertdialog")
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(toast.success).toHaveBeenCalledWith("busyCancelled")
+    expect(call).not.toHaveBeenCalledWith(
+      "companion_tunnel_start",
+      expect.objectContaining({ replace: true })
+    )
+    expect(toggle).not.toBeChecked()
+    expect(toggle).toHaveFocus()
+  })
+
+  it("stays open and inert while the chosen stop runs, then closes", async () => {
+    let finishStop: () => void = () => {}
+    call.mockImplementation(async (name: string) => {
+      if (name === "companion_tunnel_current")
+        return { publicUrl: "https://a.trycloudflare.com", localUrl: "http://127.0.0.1:17890" }
+      if (name === "companion_tunnel_get_config") return { mode: "quick", hasToken: false }
+      if (name === "companion_tunnel_probe") return { installed: true, path: "/x" }
+      if (name === "companion_tunnel_stop")
+        return new Promise<undefined>((resolve) => {
+          finishStop = () => resolve(undefined)
+        })
+      return undefined
+    })
+    const user = userEvent.setup()
+    render(<TunnelBlock />)
+    await waitFor(() => expect(screen.getByTestId("tunnel-exposing")).toBeInTheDocument())
+    await user.click(screen.getByRole("switch"))
+    const dialog = await screen.findByRole("alertdialog", { name: "busyTitle" })
+    expect(dialog).toHaveAccessibleDescription("busyStopBody")
+    await user.click(screen.getByTestId("tunnel-conflict-replace"))
+    expect(screen.getByRole("alertdialog")).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByTestId("tunnel-conflict-replace")).toBeDisabled()
+    expect(screen.getByTestId("tunnel-conflict-keep")).toBeDisabled()
+    // Escape cannot abandon an action already under way.
+    await user.keyboard("{Escape}")
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    await act(async () => finishStop())
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(toast.success).toHaveBeenCalledWith("stopped")
   })
 
   it("says what a tunnel started elsewhere is exposing instead of claiming it", async () => {

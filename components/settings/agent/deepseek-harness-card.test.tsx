@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { selectOption } from "@/lib/testing/select-option"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
@@ -61,13 +62,13 @@ beforeEach(() => {
 })
 
 describe("DeepSeekHarnessCard", () => {
-  it("switches the certified profile and displays its native authority", () => {
+  it("switches the certified profile and displays its native authority", async () => {
     renderCard()
     const dsh = messages.externalAgent.settings.deepseekHarness
     const selector = screen.getByRole("combobox", { name: dsh.profile })
     const row = (name: string) => screen.getByText(name).closest("div")!
     expect(row(dsh.nativeFileWrite)).toHaveTextContent(dsh.capabilityUnsupported)
-    fireEvent.change(selector, { target: { value: "cognia-sdk-workspace" } })
+    await selectOption(selector, "cognia-sdk-workspace")
     expect(useDshRuntime).toHaveBeenLastCalledWith("cognia-sdk-workspace")
     expect(row(dsh.nativeFileWrite)).toHaveTextContent(dsh.capabilitySupported)
     expect(row(dsh.nativeShell)).toHaveTextContent(dsh.capabilitySupported)
@@ -75,7 +76,7 @@ describe("DeepSeekHarnessCard", () => {
     expect(row(dsh.nativeJobsManagement)).toHaveTextContent(dsh.capabilityUnsupported)
     expect(row(dsh.nativeSubagents)).toHaveTextContent(dsh.capabilityUnsupported)
     expect(row(dsh.nativeSkills)).toHaveTextContent(dsh.capabilityUnsupported)
-    fireEvent.change(selector, { target: { value: "cognia-acp" } })
+    await selectOption(selector, "cognia-acp")
     expect(row(dsh.nativeShell)).toHaveTextContent(dsh.capabilityUnsupported)
     expect(row(dsh.nativeSessionResume)).toHaveTextContent(dsh.capabilitySupported)
     expect(screen.queryByText(dsh.approvalNotice)).not.toBeInTheDocument()

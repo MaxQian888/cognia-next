@@ -654,10 +654,12 @@ describe("ChatHeader — title-bar projection", () => {
   function CenterOutlet() {
     const ref = useTitleBarOutletRef("center")
     const actionsRef = useTitleBarOutletRef("actions")
+    const sessionActionsRef = useTitleBarOutletRef("sessionActions")
     return (
       <>
         <div ref={ref} data-testid="center-outlet" />
         <div ref={actionsRef} data-testid="actions-outlet" />
+        <div ref={sessionActionsRef} data-testid="session-actions-outlet" />
       </>
     )
   }
@@ -701,6 +703,28 @@ describe("ChatHeader — title-bar projection", () => {
     expect(screen.queryByTestId("chat-artifact-dock-toggle")).toBeNull()
   })
 
+  it("keeps export and handoff outside the resizing conversation-title capture", () => {
+    mockIsTauri.mockReturnValue(true)
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <TitleBarOutletsProvider>
+          <CenterOutlet />
+          <TitleBarProjectionScope enabled>
+            <ChatHeader session={mkSession({ title: "Projected" })} />
+          </TitleBarProjectionScope>
+        </TitleBarOutletsProvider>
+      </Wrapper>
+    )
+    const handoff = screen.getByRole("button", { name: "Open in Codex app" })
+    const share = container.querySelector<HTMLSpanElement>('[data-share-session="ses_1"]')
+    const actions = screen.getByTestId("session-actions-outlet")
+    expect(actions).toContainElement(handoff)
+    expect(actions).toContainElement(share)
+    expect(screen.getByTestId("center-outlet")).not.toContainElement(handoff)
+    expect(screen.getByTestId("center-outlet")).not.toContainElement(share)
+  })
+
   it("projects only the focused pane's actions into the global right toolbar", () => {
     const Wrapper = withAdapter(makeAdapter())
     useChatStore.setState({ activeSessionId: "first" })
@@ -721,6 +745,9 @@ describe("ChatHeader — title-bar projection", () => {
         </TitleBarOutletsProvider>
       </Wrapper>
     )
+    const sessionActions = screen.getByTestId("session-actions-outlet")
+    expect(sessionActions.querySelectorAll("[data-share-session]")).toHaveLength(1)
+    expect(sessionActions.querySelector('[data-share-session="first"]')).not.toBeNull()
     // One summary opener in the bar: the focused pane's, like its split action.
     expect(screen.getAllByRole("button", { name: "Task summary" })).toHaveLength(1)
     expect(screen.getByRole("button", { name: /^split view$/i })).toBeInTheDocument()
@@ -730,6 +757,8 @@ describe("ChatHeader — title-bar projection", () => {
       screen.getByRole("button", { name: /exit split view/i })
     )
     expect(screen.queryByRole("button", { name: /^split view$/i })).not.toBeInTheDocument()
+    expect(sessionActions.querySelectorAll("[data-share-session]")).toHaveLength(1)
+    expect(sessionActions.querySelector('[data-share-session="second"]')).not.toBeNull()
     unmount()
     useChatStore.setState({ activeSessionId: null })
   })

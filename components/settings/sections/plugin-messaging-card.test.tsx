@@ -56,6 +56,11 @@ describe("PluginMessagingCard", () => {
     ])
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
     const table = screen.getByRole("table", { name: "Recent library RPC calls" })
+    // The shared Table: density surface, with the bordered box as the scroller.
+    expect(table).toHaveAttribute("data-slot", "table")
+    const container = table.closest("[data-slot=table-container]")
+    expect(container).toHaveAttribute("data-surface", "table")
+    expect(container).toHaveClass("overflow-x-visible")
     const rows = within(table).getAllByRole("row")
     expect(rows).toHaveLength(3)
     expect(rows[1]).toHaveTextContent("blockedutilsremove1.2.0DestructiveFailed3 ms")
@@ -69,7 +74,10 @@ describe("PluginMessagingCard", () => {
       "Outcome",
       "Duration",
     ]) {
-      expect(within(table).getByRole("columnheader", { name: heading })).toBeInTheDocument()
+      expect(within(table).getByRole("columnheader", { name: heading })).toHaveAttribute(
+        "scope",
+        "col"
+      )
     }
   })
   it("shows the empty state when no plugin exposes methods", () => {

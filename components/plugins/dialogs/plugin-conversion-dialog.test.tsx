@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { PluginConversionDialog } from "./plugin-conversion-dialog"
 
@@ -60,7 +61,7 @@ beforeEach(() => {
 it("inspects, reviews files and writes a copy without installing", async () => {
   render(<PluginConversionDialog open onOpenChange={jest.fn()} />)
   expect(screen.getByLabelText("workspaceRoot")).toHaveValue("/workspace")
-  fireEvent.change(screen.getByLabelText("target"), { target: { value: "claude-code" } })
+  await selectOption(screen.getByLabelText("target"), "claude-code")
   await review()
   expect(inspect).toHaveBeenCalledWith({
     workspaceRoot: "/workspace",
@@ -97,7 +98,7 @@ it("shows blockers and never enables writing", async () => {
     })
   )
   render(<PluginConversionDialog open onOpenChange={jest.fn()} />)
-  fireEvent.change(screen.getByLabelText("surface"), { target: { value: "cloud" } })
+  await selectOption(screen.getByLabelText("surface"), "cloud")
   expect(screen.getByText("cloudHint")).toBeInTheDocument()
   await review()
   expect(screen.getByText("Cloud is unavailable")).toBeInTheDocument()
@@ -133,7 +134,7 @@ it.each([
 ])("invalidates a reviewed plan when %s changes", async (label, value) => {
   render(<PluginConversionDialog open onOpenChange={jest.fn()} />)
   await review()
-  fireEvent.change(screen.getByLabelText(label), { target: { value } })
+  await selectOption(screen.getByLabelText(label), value)
   expect(screen.queryByLabelText("conversion-report")).not.toBeInTheDocument()
   expect(screen.getByRole("button", { name: "write" })).toBeDisabled()
 })
@@ -144,7 +145,7 @@ it("ignores stale inspections after the target changes", async () => {
   render(<PluginConversionDialog open onOpenChange={jest.fn()} />)
   fireEvent.change(screen.getByLabelText("sourceDir"), { target: { value: "source" } })
   fireEvent.click(screen.getByRole("button", { name: "inspect" }))
-  fireEvent.change(screen.getByLabelText("target"), { target: { value: "codex" } })
+  await selectOption(screen.getByLabelText("target"), "codex")
   await act(async () => {
     pending.resolve(plan())
   })

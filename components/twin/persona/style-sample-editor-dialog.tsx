@@ -9,14 +9,7 @@
 import { memo, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { nanoid } from "nanoid"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { ResponsiveFormDialog } from "@/components/shared/responsive-form-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -125,76 +118,74 @@ export const StyleSampleEditorDialog = memo(function StyleSampleEditorDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => (busy ? null : onOpenChange(o))}>
-      <DialogContent
-        className="max-w-2xl max-h-[85vh] overflow-y-auto"
-        data-testid="style-sample-editor-dialog"
-      >
-        <DialogHeader>
-          <DialogTitle>
-            {isEdit ? t("styleSample.titleEdit") : t("styleSample.titleAdd")}
-          </DialogTitle>
-          <DialogDescription>{t("styleSample.description")}</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <div className="grid gap-1">
-            <Label htmlFor="style-editor-context">{t("styleSample.contextLabel")}</Label>
-            <Input
-              id="style-editor-context"
-              data-testid="style-editor-context"
-              value={form.contextLabel}
-              onChange={(e) => setForm((p) => ({ ...p, contextLabel: e.target.value }))}
-              disabled={busy}
-            />
-          </div>
-          <div className="grid gap-1">
-            <Label htmlFor="style-editor-original">{t("styleSample.originalLabel")}</Label>
-            <Textarea
-              id="style-editor-original"
-              data-testid="style-editor-original"
-              value={form.original}
-              onChange={(e) => setForm((p) => ({ ...p, original: e.target.value }))}
-              disabled={busy}
-              className="min-h-32 text-sm"
-            />
-          </div>
-          <div className="grid gap-1">
-            <Label htmlFor="style-editor-summary">{t("styleSample.summaryLabel")}</Label>
-            <Textarea
-              id="style-editor-summary"
-              data-testid="style-editor-summary"
-              value={form.summary}
-              onChange={(e) => setForm((p) => ({ ...p, summary: e.target.value }))}
-              disabled={busy}
-              className="min-h-20 text-sm"
-            />
-          </div>
-          <div className="grid gap-1">
-            <Label htmlFor="style-editor-tone">{t("styleSample.toneLabel")}</Label>
-            <Input
-              id="style-editor-tone"
-              data-testid="style-editor-tone"
-              placeholder={t("styleSample.tonePlaceholder")}
-              value={form.toneText}
-              onChange={(e) => setForm((p) => ({ ...p, toneText: e.target.value }))}
-              disabled={busy}
-            />
-          </div>
-          {error ? (
-            <p className="text-destructive text-sm" data-testid="style-editor-error">
-              {error}
-            </p>
-          ) : null}
-        </div>
-        <DialogFooter>
+    // The draft (`form`, `error`) lives here, above the shell: the shell
+    // remounts its body when a window crosses the phone breakpoint.
+    <ResponsiveFormDialog
+      open={open}
+      onOpenChange={(o) => (busy ? null : onOpenChange(o))}
+      title={isEdit ? t("styleSample.titleEdit") : t("styleSample.titleAdd")}
+      description={t("styleSample.description")}
+      contentClassName="sm:max-w-2xl"
+      testid="style-sample-editor"
+      footer={
+        <>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             {t("actions.cancel")}
           </Button>
           <Button onClick={() => void handleSave()} disabled={busy} data-testid="style-editor-save">
             {busy ? t("actions.saving") : t("actions.save")}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+    >
+      <div className="grid gap-1.5">
+        <Label htmlFor="style-editor-context">{t("styleSample.contextLabel")}</Label>
+        <Input
+          id="style-editor-context"
+          data-testid="style-editor-context"
+          value={form.contextLabel}
+          onChange={(e) => setForm((p) => ({ ...p, contextLabel: e.target.value }))}
+          disabled={busy}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="style-editor-original">{t("styleSample.originalLabel")}</Label>
+        <Textarea
+          id="style-editor-original"
+          data-testid="style-editor-original"
+          value={form.original}
+          onChange={(e) => setForm((p) => ({ ...p, original: e.target.value }))}
+          disabled={busy}
+          className="min-h-32 text-sm"
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="style-editor-summary">{t("styleSample.summaryLabel")}</Label>
+        <Textarea
+          id="style-editor-summary"
+          data-testid="style-editor-summary"
+          value={form.summary}
+          onChange={(e) => setForm((p) => ({ ...p, summary: e.target.value }))}
+          disabled={busy}
+          className="min-h-20 text-sm"
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="style-editor-tone">{t("styleSample.toneLabel")}</Label>
+        <Input
+          id="style-editor-tone"
+          data-testid="style-editor-tone"
+          placeholder={t("styleSample.tonePlaceholder")}
+          value={form.toneText}
+          onChange={(e) => setForm((p) => ({ ...p, toneText: e.target.value }))}
+          disabled={busy}
+        />
+      </div>
+      {error ? (
+        <p role="alert" className="text-destructive text-sm" data-testid="style-editor-error">
+          {error}
+        </p>
+      ) : null}
+    </ResponsiveFormDialog>
   )
 })

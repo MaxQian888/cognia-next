@@ -39,6 +39,7 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { Surface } from "@/components/surface/surface"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { cn } from "@/lib/utils"
 import { MeterRow } from "@/components/settings/subscription/limits-meters-card"
 import { UsageRow } from "@/components/chat/context-usage-indicator"
@@ -89,6 +90,15 @@ const UNKNOWN = "—"
 
 /** Which attribution axis the list is grouped by. Both are always populated. */
 type AttributionAxis = "surface" | "model"
+
+const ATTRIBUTION_AXES: readonly AttributionAxis[] = ["surface", "model"]
+
+/**
+ * The scope and axis choices keep the compact look of a small ghost Button
+ * that turns secondary when chosen, on top of the shared ToggleGroup item.
+ */
+const COMPACT_CHOICE_CLASS =
+  "h-6 min-w-0 px-2 text-[11px] transition-all hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 data-[state=on]:bg-secondary data-[state=on]:text-secondary-foreground data-[state=on]:hover:bg-secondary/80 data-[state=on]:hover:text-secondary-foreground dark:data-[state=on]:hover:bg-secondary/80"
 
 const STATUS_ICON: Record<UsageStatus, { icon: typeof ClockIcon; className: string }> = {
   allowed: { icon: CheckCircle2Icon, className: "text-emerald-500" },
@@ -387,27 +397,32 @@ function ScopeTabs({
       : null
   return (
     <div className="space-y-1 border-t pt-2">
-      <div
-        className="flex flex-wrap items-center gap-1"
-        role="tablist"
+      {/* A filter over every section below, not a tab per panel: one choice
+          from a group, with the shared roving focus. */}
+      <ToggleGroup
+        type="single"
+        spacing={1}
+        value={active}
+        onValueChange={(value) => {
+          // Clicking the chosen scope again emits "": a scope is always chosen.
+          const next = ordered.find((key) => key === value)
+          if (next) onSelect(next)
+        }}
+        className="w-auto flex-wrap"
         aria-label={t("scopeLabel")}
         data-testid="usage-scope-tabs"
       >
         {ordered.map((key) => (
-          <Button
+          <ToggleGroupItem
             key={key}
-            variant={key === active ? "secondary" : "ghost"}
-            size="sm"
-            className="h-6 px-2 text-[11px]"
-            role="tab"
-            aria-selected={key === active}
-            onClick={() => onSelect(key)}
+            value={key}
+            className={COMPACT_CHOICE_CLASS}
             data-testid={`usage-scope-${key}`}
           >
             {t(`scope.${key}`)}
-          </Button>
+          </ToggleGroupItem>
         ))}
-      </div>
+      </ToggleGroup>
       {captured ? (
         <p className="text-[10px] text-muted-foreground" data-testid="usage-captured-at">
           {t("capturedAt", { time: captured })}
@@ -540,27 +555,30 @@ function AttributionSection({
     <section className="space-y-2 border-t pt-2" data-testid="usage-attribution">
       <div className="flex items-center justify-between gap-2">
         <SectionLabel>{t("attributionTitle")}</SectionLabel>
-        <div
-          className="flex items-center gap-1"
-          role="tablist"
+        {/* Groups the one list below; a choice, not a set of panels. */}
+        <ToggleGroup
+          type="single"
+          spacing={1}
+          value={axis}
+          onValueChange={(value) => {
+            // Clicking the chosen axis again emits "": an axis is always chosen.
+            const next = ATTRIBUTION_AXES.find((key) => key === value)
+            if (next) onAxisChange(next)
+          }}
           aria-label={t("axisLabel")}
           data-testid="usage-axis-tabs"
         >
-          {(["surface", "model"] as const).map((key) => (
-            <Button
+          {ATTRIBUTION_AXES.map((key) => (
+            <ToggleGroupItem
               key={key}
-              variant={key === axis ? "secondary" : "ghost"}
-              size="sm"
-              className="h-6 px-2 text-[11px]"
-              role="tab"
-              aria-selected={key === axis}
-              onClick={() => onAxisChange(key)}
+              value={key}
+              className={COMPACT_CHOICE_CLASS}
               data-testid={`usage-axis-${key}`}
             >
               {t(`axis.${key}`)}
-            </Button>
+            </ToggleGroupItem>
           ))}
-        </div>
+        </ToggleGroup>
       </div>
       <ul className="space-y-2">
         {rows.map((row) => {

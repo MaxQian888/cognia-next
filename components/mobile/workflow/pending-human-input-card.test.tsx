@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 /**
  * @jest-environment jsdom
  */
@@ -146,7 +147,7 @@ describe("<PendingHumanInputCard />", () => {
     await user.type(screen.getByLabelText("Details"), "All checks passed")
     await user.type(screen.getByLabelText("Score"), "5")
     await user.click(screen.getByLabelText(/Confirmed/))
-    await user.selectOptions(screen.getByLabelText("Region"), "eu")
+    await selectOption(screen.getByLabelText("Region"), "eu")
     await user.click(screen.getByLabelText("Security"))
     const file = new File([new Uint8Array([1, 2, 3])], "proof.png", { type: "image/png" })
     await user.upload(screen.getByLabelText("Evidence"), file)

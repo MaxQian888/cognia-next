@@ -38,6 +38,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Textarea } from "@/components/ui/textarea"
 import {
   siteAccessLoginUrl,
@@ -275,36 +276,34 @@ export function SiteDomainsTab({
         <div className="space-y-3 p-3">
           <fieldset>
             <legend className="sr-only">{t("access.mode")}</legend>
-            <div className="grid gap-2 @sm/site-pane:grid-cols-3 @2xl/site-pane:grid-cols-5">
+            <RadioGroup
+              name="site-access-mode"
+              aria-label={t("access.mode")}
+              value={accessMode}
+              onValueChange={(value) => {
+                const mode = value as SiteVisitorPolicy["mode"]
+                setAccessMode(mode)
+                // Restore the stored list when returning to the saved mode.
+                setAccessValues(
+                  mode === site.visitorPolicy.mode ? seedAccessValues(site.visitorPolicy) : ""
+                )
+              }}
+              className="grid gap-2 @sm/site-pane:grid-cols-3 @2xl/site-pane:grid-cols-5"
+            >
               {ACCESS_MODES.map((mode) => (
-                <label
+                <Label
                   key={mode}
                   className={cn(
-                    "flex cursor-pointer items-center gap-2 rounded-lg border px-2 py-2 text-xs transition-colors hover:bg-accent/50 motion-reduce:transition-none",
+                    "flex cursor-pointer items-center gap-2 rounded-lg border px-2 py-2 text-xs font-normal transition-colors hover:bg-accent/50 motion-reduce:transition-none",
                     accessMode === mode && "border-primary bg-primary/5 ring-1 ring-primary/40"
                   )}
                 >
-                  <input
-                    type="radio"
-                    name="site-access-mode"
-                    value={mode}
-                    checked={accessMode === mode}
-                    onChange={() => {
-                      setAccessMode(mode)
-                      // Re-seed from the stored policy when the user returns to
-                      // the mode that is actually saved, so switching back and
-                      // forth never quietly empties the list.
-                      setAccessValues(
-                        mode === site.visitorPolicy.mode ? seedAccessValues(site.visitorPolicy) : ""
-                      )
-                    }}
-                    className="size-3.5"
-                  />
+                  <RadioGroupItem value={mode} className="size-3.5" />
                   <ShieldIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 truncate">{t(`access.modes.${mode}`)}</span>
-                </label>
+                </Label>
               ))}
-            </div>
+            </RadioGroup>
           </fieldset>
 
           {accessMode === "identities" ||

@@ -13,16 +13,21 @@
  *    full height and the focused field ends up under the keyboard. `dvh`
  *    shrinks with the visible viewport.
  *  - **One scroll region.** The header and the footer stay put and only the
- *    body scrolls, so the Save button is never scrolled out of reach.
+ *    body scrolls, so the Save button is never scrolled out of reach. Its one
+ *    grid column is `minmax(0, 1fr)`: an `auto` track sizes to the widest
+ *    child's min-content and pushed long forms past a phone's edge.
  *  - **A sticky footer** on the drawer, padded for the home indicator.
  *
  * Both shells render the same `children` and `footer`. Switching shell (a
  * window resized across the breakpoint) remounts them, so any state a caller
  * cannot afford to lose belongs ABOVE this component — the editors that use it
  * keep their form state in the component that renders it, not in its body.
+ * A form whose draft lives inside `children` and cannot be lifted cheaply
+ * passes `holdShellWhileOpen` instead: the shell is chosen when the dialog
+ * opens and kept until it closes, so a resize never remounts the body.
  */
 
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 
 import {
   Dialog,
@@ -61,6 +66,14 @@ export interface ResponsiveFormDialogProps {
    * tell which one rendered: `<testid>-dialog` or `<testid>-drawer`.
    */
   testid?: string
+  /**
+   * Choose the shell when the dialog opens and keep it until it closes,
+   * instead of following the viewport. For forms that own their draft inside
+   * `children`: following a resize across the breakpoint would remount the
+   * body and silently drop what was typed. Both shells fit either width, so
+   * holding one costs only the "wrong" chrome until the next open.
+   */
+  holdShellWhileOpen?: boolean
 }
 
 export function ResponsiveFormDialog({
@@ -73,8 +86,21 @@ export function ResponsiveFormDialog({
   contentClassName,
   bodyClassName,
   testid = "responsive-form",
+  holdShellWhileOpen = false,
 }: ResponsiveFormDialogProps) {
-  const isMobile = useIsMobile()
+  const viewportIsMobile = useIsMobile()
+  // The shell captured at the last opening. Updated while rendering (React's
+  // "adjust state when a prop changes" pattern) so the opening frame already
+  // uses it; kept while closed so the close animation runs in the same shell.
+  const [held, setHeld] = useState({ open, mobile: viewportIsMobile })
+  if (held.open !== open) {
+    setHeld({ open, mobile: open ? viewportIsMobile : held.mobile })
+  }
+  const isMobile = holdShellWhileOpen
+    ? held.open === open
+      ? held.mobile
+      : viewportIsMobile
+    : viewportIsMobile
 
   if (isMobile) {
     return (
@@ -94,7 +120,7 @@ export function ResponsiveFormDialog({
           </DrawerHeader>
           <div
             className={cn(
-              "grid min-h-0 flex-1 content-start gap-3 overflow-y-auto overscroll-contain px-4 pb-3",
+              "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] content-start gap-3 overflow-y-auto overscroll-contain px-4 pb-3",
               bodyClassName
             )}
             data-testid={`${testid}-body`}
@@ -126,7 +152,7 @@ export function ResponsiveFormDialog({
         </DialogHeader>
         <div
           className={cn(
-            "-mx-1 grid min-h-0 flex-1 content-start gap-3 overflow-y-auto px-1 py-3",
+            "-mx-1 grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] content-start gap-3 overflow-y-auto px-1 py-3",
             bodyClassName
           )}
           data-testid={`${testid}-body`}

@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { selectOption } from "@/lib/testing/select-option"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { Account, ProviderPreset } from "@/types/subscription"
@@ -228,7 +229,7 @@ describe("NewAccountPresetSelector", () => {
     async (provider) => {
       const onChange = jest.fn()
       render(<NewAccountPresetSelector provider={provider} value={null} onChange={onChange} />)
-      fireEvent.change(await screen.findByRole("combobox"), { target: { value: "b" } })
+      await selectOption(await screen.findByRole("combobox"), "b")
       expect(onChange).toHaveBeenCalledWith("b")
       expect(listPresetsMock).toHaveBeenCalledWith(provider)
       expect(getAccountMock).not.toHaveBeenCalled()
@@ -239,7 +240,7 @@ describe("NewAccountPresetSelector", () => {
   it("clears a draft binding to follow the provider default", async () => {
     const onChange = jest.fn()
     render(<NewAccountPresetSelector provider="opencode" value="b" onChange={onChange} />)
-    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "__default__" } })
+    await selectOption(await screen.findByRole("combobox"), "__default__")
     expect(onChange).toHaveBeenCalledWith(null)
   })
 

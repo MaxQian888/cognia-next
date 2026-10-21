@@ -118,7 +118,7 @@ export function FileSourceInput({ twinId, busy, setBusy, onStaged, onError }: So
   return (
     <div className="flex flex-col gap-2" data-testid="twin-add-source-file">
       <p className="text-muted-foreground text-xs">{t("filesDescription")}</p>
-      <input
+      <Input
         type="file"
         multiple
         accept={FILE_PICKER_ACCEPT}

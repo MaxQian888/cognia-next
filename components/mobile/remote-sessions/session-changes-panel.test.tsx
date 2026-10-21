@@ -1,3 +1,4 @@
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -190,12 +191,11 @@ describe("SessionChangesPanel", () => {
       ],
       selectedRunId: "run:2",
     })
-    const user = userEvent.setup()
     render(<SessionChangesPanel sessionId="s1" />)
     const select = screen.getByTestId("session-changes-run")
     // Newest first in the list, so the oldest turn is numbered 1.
-    expect(within(select).getByRole("option", { name: /Turn 2/ })).toBeInTheDocument()
-    await user.selectOptions(select, "run:1")
+    expect(within(getNativeSelect(select)).getByRole("option", { hidden: true, name: /Turn 2/ })).toBeInTheDocument()
+    await selectOption(select, "run:1")
     expect(selectRun).toHaveBeenCalledWith("run:1")
   })
 

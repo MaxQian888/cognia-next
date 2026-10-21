@@ -19,10 +19,8 @@ import { AgentReadinessPipeline } from "./agent-readiness-pipeline"
 export function AgentStatusBlock({
   agent,
   readiness,
-  masterEnabled,
   isConnecting,
   onConnect,
-  onEnable,
   onEdit,
   onOpenRuntimes,
   onOpenPlugins,
@@ -32,10 +30,8 @@ export function AgentStatusBlock({
 }: {
   agent: LifecycleExternalAgentConfig
   readiness: AgentReadiness
-  masterEnabled: boolean
   isConnecting: boolean
   onConnect: () => void
-  onEnable: () => void
   onEdit: () => void
   onOpenRuntimes: () => void
   onOpenPlugins: () => void
@@ -57,7 +53,6 @@ export function AgentStatusBlock({
     "edit-credentials": onEdit,
     "use-shared-state": onUseSharedState,
     "edit-session-limit": onEditSessionLimit,
-    enable: onEnable,
   }
   const action =
     remedy === "consent" ? (
@@ -82,7 +77,7 @@ export function AgentStatusBlock({
           {t("remedies.open-plugins")}
         </Link>
       </Button>
-    ) : remedy && remedy !== "connect" && remedy !== "retry" ? (
+    ) : remedy && remedy !== "enable" && remedy !== "connect" && remedy !== "retry" ? (
       <Button
         variant="outline"
         size="sm"
@@ -90,7 +85,7 @@ export function AgentStatusBlock({
         data-testid="inspector-next-action"
         onClick={handlers[remedy]}
       >
-        {remedy === "enable" ? tReadiness("actions.enable") : t(`remedies.${remedy}`)}
+        {t(`remedies.${remedy}`)}
       </Button>
     ) : null
 
@@ -107,7 +102,7 @@ export function AgentStatusBlock({
           reasonCode={agent.lifecycleReasonCode}
           action={action}
         />
-      ) : (
+      ) : readiness.blockReason || action ? (
         <div className="flex flex-wrap items-center gap-2">
           {readiness.blockReason ? (
             <p className="min-w-0 text-xs [overflow-wrap:anywhere] text-muted-foreground">
@@ -116,15 +111,13 @@ export function AgentStatusBlock({
           ) : null}
           {action}
         </div>
-      )}
+      ) : null}
       {failure ? (
         <AgentFailureNotice
           failure={failure}
           className="border-0 [&_li]:[overflow-wrap:anywhere] [&_p]:[overflow-wrap:anywhere]"
           onRetry={
-            masterEnabled && readiness.state !== "disabled" && readiness.state !== "blocked"
-              ? onConnect
-              : undefined
+            readiness.state !== "disabled" && readiness.state !== "blocked" ? onConnect : undefined
           }
           retrying={isConnecting}
           onDismiss={() => clearFailure(agent.id)}

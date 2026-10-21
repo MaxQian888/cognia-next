@@ -448,6 +448,18 @@ describe("ContextUsageIndicator — SDK-authoritative usage", () => {
     expect(node).toHaveAttribute("data-used-tokens", "136000")
   })
 
+  it("updates a selected gateway window without reusing the previous model's capacity", () => {
+    useChatStore
+      .getState()
+      .replaceMessages([assistantWithUsage("reply", { inputTokens: 100, contextWindow: 64_000 })])
+    const { rerender } = render(<ContextUsageIndicator selectedModelContextWindow={64_000} />)
+    const node = screen.getByTestId("context-usage-indicator")
+    expect(node).toHaveAttribute("data-max-tokens", "64000")
+    rerender(<ContextUsageIndicator selectedModelContextWindow={1_000_000} />)
+    expect(node).toHaveAttribute("data-max-tokens", "1000000")
+    expect(node).toHaveAttribute("data-used-tokens", "100")
+  })
+
   it("never claims the sidecar's compaction policy over an external turn", () => {
     act(() => {
       useChatStore.getState().replaceMessages([

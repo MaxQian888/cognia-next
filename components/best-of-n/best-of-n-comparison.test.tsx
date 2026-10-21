@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { BestOfNComparison } from "./best-of-n-comparison"
 import { useBestOfNRun } from "@/hooks/best-of-n/use-best-of-n-run"
 import {
@@ -152,6 +153,55 @@ it("publishes only through the selected-group API after an explicit confirmation
       .getAllByRole("button", { name: "pick" })
       .every((button) => button.hasAttribute("disabled"))
   ).toBe(true)
+})
+it("asks in a modal dialog named for the publication and the exact candidate head", async () => {
+  row.group.phase = "publishing"
+  row.group.selectedCandidateId = "c1"
+  row.group.selectedHeadSha = "head1"
+  const user = userEvent.setup()
+  render(<BestOfNComparison groupId="group" />)
+  await user.click(screen.getByRole("button", { name: "publish" }))
+  const dialog = screen.getByRole("alertdialog", { name: "confirmTitle" })
+  expect(dialog).toHaveAccessibleDescription("confirmPublish")
+  expect(dialog).toHaveAttribute("data-publish-key", "c1:head1:refs/heads/result")
+  expect(within(dialog).getByTestId("best-of-n-publish-candidate")).toHaveTextContent("Candidate 1")
+})
+it("Escape cancels publication and returns focus to the publish button", async () => {
+  row.group.phase = "publishing"
+  row.group.selectedCandidateId = "c1"
+  row.group.selectedHeadSha = "head1"
+  const user = userEvent.setup()
+  render(<BestOfNComparison groupId="group" />)
+  const publish = screen.getByRole("button", { name: "publish" })
+  await user.click(publish)
+  expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+  await user.keyboard("{Escape}")
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+  expect(publish).toHaveFocus()
+  expect(publishBestOfNCandidate).not.toHaveBeenCalled()
+})
+it("drops a confirmation raised for another head instead of publishing the new one", async () => {
+  row.group.phase = "publishing"
+  row.group.selectedCandidateId = "c1"
+  row.group.selectedHeadSha = "head1"
+  const view = render(<BestOfNComparison groupId="group" />)
+  fireEvent.click(screen.getByRole("button", { name: "publish" }))
+  expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+  // The selected head moves underneath the open confirmation.
+  row.group.selectedHeadSha = "head2"
+  row.group.candidates[0].headSha = "head2"
+  row.candidateChangesets!.c1.headSha = "head2"
+  row.candidateChangesets!.c1.checks[0].headSha = "head2"
+  row.group = { ...row.group }
+  view.rerender(<BestOfNComparison groupId="group" />)
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+  expect(publishBestOfNCandidate).not.toHaveBeenCalled()
+  // Asking again names the new head.
+  fireEvent.click(screen.getByRole("button", { name: "publish" }))
+  expect(screen.getByRole("alertdialog")).toHaveAttribute(
+    "data-publish-key",
+    "c1:head2:refs/heads/result"
+  )
 })
 it("refuses stale-head check evidence and keeps paired views read-only", () => {
   row.group.phase = "publishing"

@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { selectOption } from "@/lib/testing/select-option"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { TaskResourcesPanel } from "./task-resources-panel"
@@ -328,23 +329,31 @@ describe("TaskResourcesPanel", () => {
   it("requires consent for sensitive resources and rechecks it after changing views", async () => {
     const user = userEvent.setup()
     listResources.mockResolvedValue([{ ...resource, sensitive: true }])
-    const confirm = jest.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true)
+    const answerConsent = async (answer: "confirm" | "cancel") => {
+      await user.click(screen.getByRole("button", { name: "authorizeOnce" }))
+      const dialog = await screen.findByTestId("task-resources-sensitive-confirm")
+      // The question names the resource it authorizes.
+      expect(dialog).toHaveTextContent(resource.path)
+      await user.click(within(dialog).getByTestId(`task-resources-sensitive-confirm-${answer}`))
+      await waitFor(() =>
+        expect(screen.queryByTestId("task-resources-sensitive-confirm")).not.toBeInTheDocument()
+      )
+    }
     render(<TaskResourcesPanel sessionId="session-1" layout="desktop" />)
     await user.click(await screen.findByRole("button", { name: /src\/result.md/ }))
     expect(readResource).not.toHaveBeenCalled()
-    await user.click(screen.getByRole("button", { name: "authorizeOnce" }))
+    await answerConsent("cancel")
     expect(readResource).not.toHaveBeenCalled()
-    await user.click(screen.getByRole("button", { name: "authorizeOnce" }))
+    await answerConsent("confirm")
     expect(await screen.findByText("# Result")).toBeInTheDocument()
     expect(readResource).toHaveBeenLastCalledWith("run-1", resource.path, {
       maxBytes: 1048576,
       allowSensitive: true,
     })
     await user.click(screen.getByRole("tab", { name: "diff" }))
-    await user.click(screen.getByRole("button", { name: "authorizeOnce" }))
+    await answerConsent("confirm")
     expect(await screen.findByText("@@ diff")).toBeInTheDocument()
     expect(readTaskResourceDiff).toHaveBeenLastCalledWith("run-1", resource.path, true)
-    confirm.mockRestore()
   })
 
   it.each(["generated", "not-captured"])("does not download %s resources", async (mode) => {
@@ -551,21 +560,21 @@ describe("TaskResourcesPanel", () => {
     listResources.mockResolvedValue([{ ...resource, captureClass: "source" }])
     render(<TaskResourcesPanel sessionId="session-1" layout="desktop" />)
     await screen.findByRole("button", { name: /src\/result.md/ })
-    await user.selectOptions(screen.getByRole("combobox", { name: "originFilter" }), "user")
+    await selectOption(screen.getByRole("combobox", { name: "originFilter" }), "user")
     expect(screen.queryByRole("button", { name: /src\/result.md/ })).not.toBeInTheDocument()
-    await user.selectOptions(screen.getByRole("combobox", { name: "originFilter" }), "agent")
-    await user.selectOptions(screen.getByRole("combobox", { name: "statusFilter" }), "created")
+    await selectOption(screen.getByRole("combobox", { name: "originFilter" }), "agent")
+    await selectOption(screen.getByRole("combobox", { name: "statusFilter" }), "created")
     expect(screen.queryByRole("button", { name: /src\/result.md/ })).not.toBeInTheDocument()
-    await user.selectOptions(screen.getByRole("combobox", { name: "statusFilter" }), "modified")
-    await user.selectOptions(screen.getByRole("combobox", { name: "captureFilter" }), "generated")
+    await selectOption(screen.getByRole("combobox", { name: "statusFilter" }), "modified")
+    await selectOption(screen.getByRole("combobox", { name: "captureFilter" }), "generated")
     expect(screen.queryByRole("button", { name: /src\/result.md/ })).not.toBeInTheDocument()
-    await user.selectOptions(screen.getByRole("combobox", { name: "captureFilter" }), "source")
+    await selectOption(screen.getByRole("combobox", { name: "captureFilter" }), "source")
     await user.click(screen.getByRole("tab", { name: "timeline" }))
     expect(screen.getByText("recent.ts")).toBeInTheDocument()
     expect(screen.queryByText("old.ts")).not.toBeInTheDocument()
-    await user.selectOptions(screen.getByRole("combobox", { name: "originFilter" }), "all")
+    await selectOption(screen.getByRole("combobox", { name: "originFilter" }), "all")
     for (const range of ["5m", "1h", "24h", "all"]) {
-      await user.selectOptions(screen.getByRole("combobox", { name: "timeFilter" }), range)
+      await selectOption(screen.getByRole("combobox", { name: "timeFilter" }), range)
       expect(screen.getByText("recent.ts")).toBeInTheDocument()
       if (range === "5m" || range === "1h")
         expect(screen.queryByText("old.ts")).not.toBeInTheDocument()
@@ -579,11 +588,11 @@ describe("TaskResourcesPanel", () => {
       })
     )
     expect(screen.queryByRole("button", { name: "loadMoreEvents" })).not.toBeInTheDocument()
-    await user.selectOptions(screen.getByRole("combobox", { name: "statusFilter" }), "deleted")
+    await selectOption(screen.getByRole("combobox", { name: "statusFilter" }), "deleted")
     expect(screen.getByText("timelineEmpty")).toBeInTheDocument()
-    await user.selectOptions(screen.getByRole("combobox", { name: "captureFilter" }), "generated")
+    await selectOption(screen.getByRole("combobox", { name: "captureFilter" }), "generated")
     expect(screen.getByText("timelineEmpty")).toBeInTheDocument()
-    await user.selectOptions(screen.getByRole("combobox", { name: "runFilter" }), "run-1")
+    await selectOption(screen.getByRole("combobox", { name: "runFilter" }), "run-1")
   })
 
   it("applies only checked hunks and disables undo for irreversible patches", async () => {
@@ -604,7 +613,10 @@ describe("TaskResourcesPanel", () => {
     await user.click(await screen.findByRole("button", { name: /src\/result.md/ }))
     expect(screen.getByRole("button", { name: "undo" })).toBeDisabled()
     await user.click(screen.getByRole("tab", { name: "diff" }))
-    await user.click(screen.getByRole("checkbox", { name: "@@ first" }))
+    const firstHunk = screen.getByRole("checkbox", { name: "@@ first" })
+    expect(firstHunk).toHaveClass("border-input", "focus-visible:border-ring")
+    await user.click(screen.getByText("@@ first"))
+    expect(firstHunk).toBeChecked()
     await user.click(screen.getByRole("checkbox", { name: "@@ second" }))
     await user.click(screen.getByRole("checkbox", { name: "@@ second" }))
     await user.click(screen.getByRole("button", { name: "applySelectedHunks" }))
@@ -652,7 +664,6 @@ describe("TaskResourcesPanel", () => {
 
   it("requires an explicit confirmation before retrying an irreversible apply", async () => {
     const user = userEvent.setup()
-    const confirm = jest.spyOn(window, "confirm").mockReturnValue(true)
     applyWorkspace
       .mockRejectedValueOnce(new Error("task workspace ledger capacity exceeded: 11 > 10 bytes"))
       .mockResolvedValueOnce({ state: "applied", revision: 2, conflicts: [] })
@@ -660,9 +671,30 @@ describe("TaskResourcesPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "applyAll" }))
 
+    const dialog = await screen.findByTestId("task-resources-irreversible-apply-confirm")
+    expect(dialog).toHaveTextContent("irreversibleApplyConfirm")
+    expect(applyWorkspace).toHaveBeenCalledTimes(1)
+    await user.click(
+      within(dialog).getByTestId("task-resources-irreversible-apply-confirm-confirm")
+    )
     await waitFor(() => expect(applyWorkspace).toHaveBeenLastCalledWith("run-1", [], true))
-    expect(confirm).toHaveBeenCalledWith("irreversibleApplyConfirm")
-    confirm.mockRestore()
+  })
+
+  it("keeps the failed apply and reports it when the irreversible retry is declined", async () => {
+    const user = userEvent.setup()
+    applyWorkspace.mockRejectedValueOnce(
+      new Error("task workspace ledger capacity exceeded: 11 > 10 bytes")
+    )
+    render(<TaskResourcesPanel sessionId="session-1" layout="desktop" />)
+    await user.click(await screen.findByRole("button", { name: /src\/result.md/ }))
+
+    await user.click(screen.getByRole("button", { name: "applyAll" }))
+    await user.click(await screen.findByTestId("task-resources-irreversible-apply-confirm-cancel"))
+
+    expect(
+      await screen.findByText("task workspace ledger capacity exceeded: 11 > 10 bytes")
+    ).toBeInTheDocument()
+    expect(applyWorkspace).toHaveBeenCalledTimes(1)
   })
 
   it("shows the durable timeline and exports its privacy-safe manifest", async () => {
@@ -713,7 +745,11 @@ describe("TaskResourcesPanel", () => {
       expect(screen.getByRole("button", { name: "applyAll" })).toHaveClass("shrink-0")
       // …and every picker is bounded to the sheet, so a long run id truncates.
       const runPicker = screen.getByRole("combobox", { name: "runFilter" })
-      expect(runPicker).toHaveClass("w-full", "min-w-0", "truncate", "flex-1")
+      expect(runPicker).toHaveClass("w-full", "min-w-0", "truncate")
+      expect(runPicker.closest('[data-slot="native-select-wrapper"]')).toHaveClass(
+        "flex-1",
+        "min-w-0"
+      )
       for (const name of ["originFilter", "statusFilter", "captureFilter"]) {
         expect(screen.getByRole("combobox", { name })).toHaveClass("w-full", "min-w-0")
       }

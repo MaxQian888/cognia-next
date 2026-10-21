@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import type { BotWriteReadiness } from "@/hooks/bots/use-bot-control-writes"
@@ -91,9 +92,13 @@ describe("RunBotNowButton", () => {
         })}
       />
     )
-    expect(screen.getByRole("option", { name: "Check plugin setup" })).toHaveValue("check")
-    expect(screen.queryByRole("option", { name: "Check setup" })).not.toBeInTheDocument()
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "check" } })
+    expect(screen.getByRole("option", { hidden: true, name: "Check plugin setup" })).toHaveValue(
+      "check"
+    )
+    expect(
+      screen.queryByRole("option", { hidden: true, name: "Check setup" })
+    ).not.toBeInTheDocument()
+    await selectOption(screen.getByRole("combobox"), "check")
     fireEvent.click(screen.getByRole("button", { name: "Run now" }))
     await waitFor(() => expect(runNow).toHaveBeenCalledWith("boti_1", "check"))
   })
@@ -113,7 +118,9 @@ describe("RunBotNowButton", () => {
         })}
       />
     )
-    expect(screen.getByRole("option", { name: "Check plugin setup" })).toHaveValue("check")
+    expect(screen.getByRole("option", { hidden: true, name: "Check plugin setup" })).toHaveValue(
+      "check"
+    )
   })
 
   it.each([
@@ -134,8 +141,10 @@ describe("RunBotNowButton", () => {
           })}
         />
       )
-      expect(screen.getByRole("option", { name: expected })).toHaveValue("check")
-      expect(screen.queryByRole("option", { name: /trigger.missing/ })).not.toBeInTheDocument()
+      expect(screen.getByRole("option", { hidden: true, name: expected })).toHaveValue("check")
+      expect(
+        screen.queryByRole("option", { hidden: true, name: /trigger.missing/ })
+      ).not.toBeInTheDocument()
     }
   )
 
@@ -161,8 +170,10 @@ describe("RunBotNowButton", () => {
         })}
       />
     )
-    expect(screen.getByRole("option", { name: "Local check" })).toHaveValue("check")
-    expect(screen.queryByRole("option", { name: "Check plugin setup" })).not.toBeInTheDocument()
+    expect(screen.getByRole("option", { hidden: true, name: "Local check" })).toHaveValue("check")
+    expect(
+      screen.queryByRole("option", { hidden: true, name: "Check plugin setup" })
+    ).not.toBeInTheDocument()
   })
   it("uses the shared schema form for explicit historical item selection", async () => {
     render(
@@ -185,7 +196,7 @@ describe("RunBotNowButton", () => {
         })}
       />
     )
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "backfill" } })
+    await selectOption(screen.getByRole("combobox"), "backfill")
     fireEvent.change(screen.getByLabelText(/Item numbers/), { target: { value: "12,34" } })
     fireEvent.click(screen.getByRole("button", { name: "Run now" }))
     await waitFor(() =>
@@ -265,8 +276,11 @@ it("constrains the manual trigger picker without losing long option names", () =
       })}
     />
   )
-  expect(screen.getByRole("combobox").parentElement).toHaveClass("min-w-0", "max-w-full")
-  expect(screen.getByRole("option", { name: label.trim() })).toBeInTheDocument()
+  expect(screen.getByRole("combobox").closest('[data-slot="native-select-wrapper"]')).toHaveClass(
+    "min-w-0",
+    "max-w-full"
+  )
+  expect(screen.getByRole("option", { hidden: true, name: label.trim() })).toBeInTheDocument()
 })
 
 /** ADR-0232: bots have no usage history yet, so the estimate is labelled inert. */

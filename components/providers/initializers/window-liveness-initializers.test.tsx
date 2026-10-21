@@ -5,6 +5,12 @@ import { startupMessages } from "@/i18n/messages"
 
 import { WindowLivenessInitializers } from "./window-liveness-initializers"
 
+jest.mock("./window-show-initializer", () => ({
+  WindowShowInitializer: () => (
+    <span data-testid="liveness-child" data-module="window-show-initializer" />
+  ),
+}))
+
 // Replace every `next/dynamic(...)` call with a lightweight stub so we can
 // assert which gated children render without pulling the real desktop subsystem
 // graphs (Tauri window API, watchdog) into the test. The loader is never called

@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { render, screen } from "@testing-library/react"
 import { makeComponents, makeSkill } from "@/lib/harness/test-fixtures"
-import type { DiffLine } from "@/lib/artifacts/diff"
+import type { DiffLine } from "@/types"
 import { HarnessSnapshotDiff } from "./harness-snapshot-diff"
 
 // The real view virtualizes its rows, which jsdom cannot lay out; the probe

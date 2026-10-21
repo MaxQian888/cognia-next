@@ -10,6 +10,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { useConfirmDialog } from "@/components/shared/confirm-dialog"
 import { Button } from "@/components/ui/button"
 import {
   dismissConnectorInboundJobRecovery,
@@ -27,11 +28,27 @@ export interface InboundRecoveryNoticeProps {
 export function InboundRecoveryNotice({ jobs }: InboundRecoveryNoticeProps) {
   const t = useTranslations("inbox.inboundRecovery")
   const [workingId, setWorkingId] = useState<string>()
+  const { confirm, dialog: confirmDialog } = useConfirmDialog()
 
   if (jobs.length === 0) return null
 
   const resolve = async (id: string, action: "continue" | "retry" | "dismiss"): Promise<void> => {
-    if (action === "retry" && !window.confirm(t("retryWarning"))) return
+    if (action === "retry") {
+      const job = jobs.find((candidate) => candidate.id === id)
+      const confirmed = await confirm({
+        title: t("retryConfirmTitle"),
+        description: t("retryWarning"),
+        details: job ? (
+          <p className="truncate text-muted-foreground">
+            {t("message", { id: job.sourceMessageId, reason: job.recoveryReason ?? t("unknown") })}
+          </p>
+        ) : undefined,
+        confirmLabel: t("retryConfirmAction"),
+        destructive: true,
+        testid: "inbound-recovery-retry-confirm",
+      })
+      if (!confirmed) return
+    }
     setWorkingId(id)
     try {
       const changed =
@@ -89,6 +106,7 @@ export function InboundRecoveryNotice({ jobs }: InboundRecoveryNoticeProps) {
           </div>
         ))}
       </div>
+      {confirmDialog}
     </NoticeItem>
   )
 }

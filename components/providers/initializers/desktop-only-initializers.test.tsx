@@ -81,14 +81,14 @@ describe("DesktopOnlyInitializers", () => {
     expect(mockMarkDesktopReady).toHaveBeenCalledWith("desktop-tools")
   })
 
-  it("does not load desktop subsystems until main profile requests them", async () => {
+  it("keeps tray communication mounted before main profile requests desktop tools", async () => {
     isTauriMock.mockReturnValue(true)
     mockDesktopRequested = false
     let container!: HTMLElement
     await act(async () => {
       container = render(<DesktopOnlyInitializers />).container
     })
-    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(0)
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(2)
   })
 
   it.each([

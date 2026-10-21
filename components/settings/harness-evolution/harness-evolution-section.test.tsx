@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen } from "@testing-library/react"
 
 let mockStored: Record<string, unknown> | undefined
@@ -47,7 +48,7 @@ describe("HarnessEvolutionSection", () => {
     expect(mockSave).toHaveBeenCalledWith({ harnessEvolution: { enabled: true } })
   })
 
-  it("keeps the stored settings when changing one field", () => {
+  it("keeps the stored settings when changing one field", async () => {
     mockStored = {
       enabled: true,
       startMode: "manual",
@@ -55,13 +56,11 @@ describe("HarnessEvolutionSection", () => {
       models: { selector: { model: "x" } },
     }
     render(<HarnessEvolutionSection />)
-    fireEvent.change(screen.getByLabelText("How runs may start"), {
-      target: { value: "background" },
-    })
+    await selectOption(screen.getByLabelText("How runs may start"), "background")
     expect(mockSave).toHaveBeenLastCalledWith({
       harnessEvolution: { ...mockStored, startMode: "background" },
     })
-    fireEvent.change(screen.getByLabelText("Recursion"), { target: { value: "sequential" } })
+    await selectOption(screen.getByLabelText("Recursion"), "sequential")
     expect(mockSave).toHaveBeenLastCalledWith({
       harnessEvolution: { ...mockStored, defaultMode: "sequential" },
     })
