@@ -78,24 +78,31 @@ async function resolveRetainCount(): Promise<number> {
 
 export async function uploadSnapshotToWebDav(
   envelopeJson: string,
-  meta: SnapshotMeta
+  meta: SnapshotMeta,
+  assertActive: () => void = () => undefined
 ): Promise<WebDavUploadResult> {
+  assertActive()
   const made = await makeWebDavClient()
+  assertActive()
   if (!made) return { ok: false, error: "WebDAV sync is not configured." }
   const { client, config } = made
 
   try {
     await client.ensureCollection(config.remoteDir)
+    assertActive()
 
     const snapshotName = webdavSnapshotName(meta.exportedAt)
     const snapshotPath = `${config.remoteDir}/${snapshotName}`
     await client.putFile(snapshotPath, envelopeJson)
+    assertActive()
     await client.putFile(`${config.remoteDir}/${LATEST_POINTER}`, envelopeJson)
 
-    await pruneSnapshots(client, config.remoteDir)
+    await pruneSnapshots(client, config.remoteDir, assertActive)
+    assertActive()
 
     return { ok: true, remotePath: snapshotPath }
   } catch (err) {
+    assertActive()
     const error = err instanceof Error ? err.message : String(err)
     log.error("webdav_upload_failed", undefined, { error })
     return { ok: false, error }
@@ -104,10 +111,12 @@ export async function uploadSnapshotToWebDav(
 
 async function pruneSnapshots(
   client: NonNullable<Awaited<ReturnType<typeof makeWebDavClient>>>["client"],
-  remoteDir: string
+  remoteDir: string,
+  assertActive: () => void
 ): Promise<void> {
   const retain = await resolveRetainCount()
   try {
+    assertActive()
     const entries = await client.propfindList(remoteDir)
     const snapshots = entries
       .filter((e) => !e.isCollection && e.name !== LATEST_POINTER && SNAPSHOT_RE.test(e.name))
@@ -122,6 +131,7 @@ async function pruneSnapshots(
 
     for (const stale of snapshots.slice(retain)) {
       try {
+        assertActive()
         await client.deleteFile(`${remoteDir}/${stale.name}`)
       } catch {
         // Best-effort; a failed prune doesn't fail the upload.

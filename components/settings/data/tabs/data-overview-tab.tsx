@@ -8,7 +8,7 @@
 //   5. Last successful backup card
 //   6. Backup history table
 
-import { useCallback } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { createLogger } from "@cognia/logging"
 import { Card } from "@/components/ui/card"
@@ -46,6 +46,7 @@ import { StorageHealthDisplay } from "@/components/data/storage/storage-health-d
 import { LocalPersistenceVisibilityPanel } from "@/components/data/storage/local-persistence-visibility-panel"
 import { useStorageBreakdown, useStorageCleanup } from "@/hooks/storage"
 import type { StorageCategory } from "@/lib/storage"
+import type { RetentionSnapshot } from "@/lib/storage/retention"
 
 const log = createLogger("settings.data.overview")
 
@@ -58,6 +59,20 @@ export function DataOverviewTab() {
     refreshInterval: 30_000,
   })
   const { clearCategory, isRunning: isClearing } = useStorageCleanup()
+  const [retention, setRetention] = useState<RetentionSnapshot | null>(null)
+  useEffect(() => {
+    let active = true
+    void import("@/lib/storage/retention")
+      .then(({ getStorageRetentionSnapshot }) => {
+        if (active) setRetention(getStorageRetentionSnapshot())
+      })
+      .catch(() => {
+        if (active) setRetention(null)
+      })
+    return () => {
+      active = false
+    }
+  }, [stats])
 
   const handleClearCategory = useCallback(
     async (category: StorageCategory) => {
@@ -124,6 +139,52 @@ export function DataOverviewTab() {
           <LocalPersistenceVisibilityPanel />
         </Card>
       </div>
+
+      <details className="rounded-md border p-4 text-xs">
+        <summary className="cursor-pointer font-medium">{t("retentionHealth.title")}</summary>
+        <p className="mt-2 text-muted-foreground">{t("retentionHealth.description")}</p>
+        {!retention ? (
+          <p className="mt-2">{t("retentionHealth.unknown")}</p>
+        ) : (
+          <>
+            <p className="mt-2">
+              {t("retentionHealth.lastSweep", { when: formatTimestamp(retention.completedAt) })}
+            </p>
+            <ul className="mt-2 space-y-1">
+              {retention.results.map((result) => (
+                <li key={result.id}>
+                  {t(`retentionHealth.targets.${result.id}` as never)}
+                  {" · "}
+                  {t(`retentionHealth.status.${result.status}`)}
+                  {" · "}
+                  {t("retentionHealth.removed", { count: result.removed })}
+                  {result.reason && (
+                    <span>
+                      {" · "}
+                      {t(`retentionHealth.reasons.${result.reason}`)}
+                    </span>
+                  )}
+                  {result.stages?.map((stage) => (
+                    <p key={stage.id} className="ml-3 text-muted-foreground">
+                      {t(`retentionHealth.stages.${stage.id}` as never)}
+                      {" · "}
+                      {t(`retentionHealth.status.${stage.status}`)}
+                      {" · "}
+                      {t("retentionHealth.removed", { count: stage.removed })}
+                      {stage.reason && (
+                        <span>
+                          {" · "}
+                          {t(`retentionHealth.reasons.${stage.reason}`)}
+                        </span>
+                      )}
+                    </p>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </details>
 
       <Card className="space-y-2 p-4">
         <div className="flex items-center gap-2">

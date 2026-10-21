@@ -32,23 +32,25 @@ export function remoteLegsFor(destination: BackupDestination | undefined): Backu
 export async function dispatchBackupDestination(
   destination: BackupDestination | undefined,
   envelopeJson: string,
-  meta: SnapshotMeta
+  meta: SnapshotMeta,
+  assertActive: () => void = () => undefined
 ): Promise<DispatchResult> {
+  assertActive()
   if (destination === undefined || destination === "local") {
     return { ok: true, target: "local" }
   }
   if (destination === "webdav" || destination === "all") {
-    const result = await uploadSnapshotToWebDav(envelopeJson, meta)
+    const result = await uploadSnapshotToWebDav(envelopeJson, meta, assertActive)
     return result.ok ? { ok: true, target: result.remotePath } : { ok: false, error: result.error }
   }
   if (destination === "github") {
     const { uploadSnapshotToGithub } = await import("./github")
-    const result = await uploadSnapshotToGithub(envelopeJson, meta)
+    const result = await uploadSnapshotToGithub(envelopeJson, meta, { assertActive })
     return result.ok ? { ok: true, target: result.remotePath } : { ok: false, error: result.error }
   }
   if (destination === "googledrive") {
     const { uploadSnapshotToGoogleDrive } = await import("./google-drive")
-    const result = await uploadSnapshotToGoogleDrive(envelopeJson, meta)
+    const result = await uploadSnapshotToGoogleDrive(envelopeJson, meta, { assertActive })
     return result.ok ? { ok: true, target: result.remotePath } : { ok: false, error: result.error }
   }
   if (isDeprecatedBackupDestination(destination)) {

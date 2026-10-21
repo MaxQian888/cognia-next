@@ -4,7 +4,10 @@ import type { AppSettings } from "@cognia/agent-config-types"
 const settingsState: { current: Partial<AppSettings> } = { current: {} }
 jest.mock("@/lib/db/settings", () => ({
   getSettings: async () => settingsState.current,
-  saveSettings: async (patch: Partial<AppSettings>) => {
+  saveSettings: async (
+    input: Partial<AppSettings> | ((current: AppSettings) => Partial<AppSettings>)
+  ) => {
+    const patch = typeof input === "function" ? input(settingsState.current as AppSettings) : input
     settingsState.current = { ...settingsState.current, ...patch }
     return settingsState.current
   },
@@ -138,6 +141,24 @@ describe("ensureGoogleDriveFolder", () => {
 })
 
 describe("uploadSnapshotToGoogleDrive", () => {
+  it("stops folder/snapshot mutations when ownership changes during an earlier request", async () => {
+    let current = true
+    const http = jest.fn(async () => {
+      current = false
+      return { status: 200, headers: {}, body: "{}" }
+    })
+    await expect(
+      uploadSnapshotToGoogleDrive("encrypted", meta, {
+        config,
+        accessToken: "t",
+        http,
+        assertActive: () => {
+          if (!current) throw new Error("owner changed")
+        },
+      })
+    ).rejects.toThrow("owner changed")
+    expect(http).toHaveBeenCalledTimes(1)
+  })
   it("refuses when not configured / not connected", async () => {
     settingsState.current = { backupDestinations: {} }
     expect(await uploadSnapshotToGoogleDrive("b", meta, { http: makeDrive().http })).toMatchObject({

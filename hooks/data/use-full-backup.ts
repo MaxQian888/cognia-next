@@ -17,6 +17,7 @@ import { backupStreamBlob, writeBackupStreamFile } from "@/lib/files/file-bridge
 import { saveExport } from "@/lib/files/save-export"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { appendBackupHistory } from "@/lib/db/backup-history"
+import { getDb } from "@/lib/db/schema"
 import type { BackupHistoryType } from "@/lib/db/backup-history"
 import type { ExportOptions } from "@/lib/data/types"
 import type { EncryptionMode } from "@/components/data/shared/encryption-options"
@@ -44,9 +45,14 @@ export function useFullBackup() {
 
   const run = useCallback(
     async (args: RunBackupArgs): Promise<RunBackupResult> => {
+      const db = getDb()
+      const assertActive = () => {
+        if (getDb() !== db) throw new Error("backup_owner_changed")
+      }
       setBusy(true)
       try {
         const outcome = await guardExport(async (): Promise<RunBackupResult> => {
+          assertActive()
           if (args.encryption === "plaintext" && args.plaintextConfirmed !== true) {
             throw new Error("Plaintext backup requires explicit confirmation.")
           }
@@ -59,9 +65,17 @@ export function useFullBackup() {
           if (args.encryption !== "plaintext" && !passphrase) {
             throw new Error("Encryption key unavailable on this runtime.")
           }
-          const stream = buildBackupStream(args, {
+          assertActive()
+          const produced = buildBackupStream(args, {
             encryption: passphrase ? { passphrase } : undefined,
           })
+          const stream = (async function* () {
+            for await (const chunk of produced) {
+              assertActive()
+              yield chunk
+            }
+            assertActive()
+          })()
           const historyEncryption = args.encryption === "plaintext" ? "none" : args.encryption
           const isEncrypted = args.encryption !== "plaintext"
           let sizeBytes = 0
@@ -72,7 +86,7 @@ export function useFullBackup() {
           if (args.destination) {
             // Scheduled-backup path: caller resolved the destination already.
             if (isTauri()) {
-              sizeBytes = await writeBackupStreamFile(args.destination, stream)
+              sizeBytes = await writeBackupStreamFile(args.destination, stream, assertActive)
               writtenPath = args.destination
             } else {
               return { ok: false, error: "destination paths require the desktop app." }
@@ -87,10 +101,11 @@ export function useFullBackup() {
               setBusy(false)
               return { ok: true, canceled: true }
             }
-            sizeBytes = await writeBackupStreamFile(path, stream)
+            sizeBytes = await writeBackupStreamFile(path, stream, assertActive)
             writtenPath = String(path)
           } else {
             const blob = await backupStreamBlob(stream)
+            assertActive()
             sizeBytes = blob.size
             const saved = await saveExport({
               filename: fileName,
@@ -103,6 +118,7 @@ export function useFullBackup() {
             if (saved.platform === "mobile") writtenPath = saved.location
           }
 
+          assertActive()
           await appendBackupHistory({
             completedAt: Date.now(),
             type: args.type ?? "manual",
@@ -123,6 +139,7 @@ export function useFullBackup() {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         try {
+          assertActive()
           await appendBackupHistory({
             completedAt: Date.now(),
             type: args.type ?? "manual",

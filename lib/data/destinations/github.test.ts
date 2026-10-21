@@ -4,7 +4,10 @@ import type { AppSettings } from "@cognia/agent-config-types"
 const settingsState: { current: Partial<AppSettings> } = { current: {} }
 jest.mock("@/lib/db/settings", () => ({
   getSettings: async () => settingsState.current,
-  saveSettings: async (patch: Partial<AppSettings>) => {
+  saveSettings: async (
+    input: Partial<AppSettings> | ((current: AppSettings) => Partial<AppSettings>)
+  ) => {
+    const patch = typeof input === "function" ? input(settingsState.current as AppSettings) : input
     settingsState.current = { ...settingsState.current, ...patch }
     return settingsState.current
   },
@@ -98,6 +101,24 @@ beforeEach(() => {
 afterAll(() => __setBackupDestinationSecretStoreForTesting(null))
 
 describe("uploadSnapshotToGithub", () => {
+  it("sends no snapshot after ownership changes during a preceding request", async () => {
+    let current = true
+    const http = jest.fn(async () => {
+      current = false
+      return { status: 200, headers: {}, body: "{}" }
+    })
+    await expect(
+      uploadSnapshotToGithub("encrypted", meta, {
+        config,
+        token: "t",
+        http,
+        assertActive: () => {
+          if (!current) throw new Error("owner changed")
+        },
+      })
+    ).rejects.toThrow("owner changed")
+    expect(http).toHaveBeenCalledTimes(1)
+  })
   it("refuses when not configured or without a token", async () => {
     settingsState.current = { backupDestinations: {} }
     expect(await uploadSnapshotToGithub("b", meta, { http: makeGithub().http })).toMatchObject({

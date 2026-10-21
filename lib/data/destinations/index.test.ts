@@ -39,6 +39,15 @@ beforeEach(() => {
 })
 
 describe("dispatchBackupDestination", () => {
+  it("propagates the owner check into every destination rather than dropping it at dispatch", async () => {
+    const assertActive = jest.fn()
+    await dispatchBackupDestination("webdav", "encrypted", meta, assertActive)
+    expect(uploadMock).toHaveBeenLastCalledWith("encrypted", meta, assertActive)
+    await dispatchBackupDestination("github", "encrypted", meta, assertActive)
+    expect(githubUploadMock).toHaveBeenLastCalledWith("encrypted", meta, { assertActive })
+    await dispatchBackupDestination("googledrive", "encrypted", meta, assertActive)
+    expect(driveUploadMock).toHaveBeenLastCalledWith("encrypted", meta, { assertActive })
+  })
   it("treats local / undefined as a no-op handled by the caller", async () => {
     expect(await dispatchBackupDestination(undefined, "b", meta)).toEqual({
       ok: true,

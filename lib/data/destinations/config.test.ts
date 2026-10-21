@@ -8,7 +8,10 @@ const saveSettingsMock = jest.fn(async (patch: Partial<AppSettings>) => {
 })
 jest.mock("@/lib/db/settings", () => ({
   getSettings: async () => settingsState.current,
-  saveSettings: (patch: Partial<AppSettings>) => saveSettingsMock(patch),
+  saveSettings: (input: Partial<AppSettings> | ((current: AppSettings) => Partial<AppSettings>)) =>
+    saveSettingsMock(
+      typeof input === "function" ? input(settingsState.current as AppSettings) : input
+    ),
 }))
 
 const providerSessions: Record<string, unknown[]> = {}

@@ -1,5 +1,8 @@
 /** @jest-environment node */
 
+let mockDatabase = { name: "account-a" }
+jest.mock("@/lib/db/schema", () => ({ getDb: () => mockDatabase }))
+jest.mock("./crypto", () => ({ sha256Hex: async (value: string) => `hash:${value}` }))
 const mockGetSettings = jest.fn()
 const mockSaveSettings = jest.fn(async (_input?: unknown) => undefined)
 const mockAppendHistory = jest.fn(async (_input?: unknown) => undefined)
@@ -10,7 +13,7 @@ jest.mock("./build-stream", () => ({
   buildBackupStream: (...args: unknown[]) => mockBuildStream(...args),
 }))
 const mockGetAutoKey = jest.fn(async (): Promise<string | null> => "auto-key")
-const mockShouldRun = jest.fn((_input?: unknown) => true)
+const mockShouldRun = jest.fn((_input?: unknown): boolean => true)
 const mockPrune = jest.fn()
 const mockUpload = jest.fn()
 const mockEncrypt = jest.fn(
@@ -26,7 +29,8 @@ const mockAttachPortableRetrievalKeys = jest.fn(
 
 jest.mock("@/lib/db/settings", () => ({
   getSettings: () => mockGetSettings(),
-  saveSettings: (input: unknown) => mockSaveSettings(input),
+  saveSettings: async (input: unknown) =>
+    mockSaveSettings(typeof input === "function" ? input(await mockGetSettings()) : input),
 }))
 jest.mock("@/lib/db/backup-history", () => ({
   appendBackupHistory: (input: unknown) => mockAppendHistory(input),
@@ -88,6 +92,7 @@ const pkg = {
 }
 
 beforeEach(() => {
+  mockDatabase = { name: "account-a" }
   jest.clearAllMocks()
   mockGetSettings.mockResolvedValue({
     backupAutoSchedule: {
@@ -241,7 +246,13 @@ it("writes, prunes, records, and stamps one encrypted scheduled backup through t
     })
   )
   expect(mockSaveSettings).toHaveBeenCalledWith({
-    backupAutoSchedule: expect.objectContaining({ lastRunAt: expect.any(String) }),
+    backupAutoSchedule: expect.objectContaining({
+      lastRunAt: expect.any(String),
+      lastLocalRun: expect.objectContaining({
+        directory: "/srv/backups",
+        content: "interval-full-v1",
+      }),
+    }),
   })
 })
 
@@ -262,17 +273,120 @@ it("does nothing while disabled or before the configured interval is due", async
   expect(mockAppendHistory).not.toHaveBeenCalled()
 })
 
-it("passes only the latest scheduled completion to the due-date policy", async () => {
+it("ignores ambiguous legacy, manual, cron and remote history when determining interval cadence", async () => {
   mockShouldRun.mockReturnValue(false)
-  mockGetLatestSuccessful.mockResolvedValueOnce({ type: "scheduled", completedAt: 123 })
+  mockGetLatestSuccessful.mockResolvedValue({
+    type: "scheduled",
+    destination: "webdav",
+    completedAt: Date.now(),
+  })
   await runScheduledBackupOnce({ filesystem: null, messages })
-  expect(mockShouldRun).toHaveBeenLastCalledWith(expect.objectContaining({ lastSuccessAt: 123 }))
-
-  mockGetLatestSuccessful.mockResolvedValueOnce({ type: "manual", completedAt: 456 })
-  await runScheduledBackupOnce({ filesystem: null, messages })
+  expect(mockGetLatestSuccessful).not.toHaveBeenCalled()
   expect(mockShouldRun).toHaveBeenLastCalledWith(
     expect.objectContaining({ lastSuccessAt: undefined })
   )
+})
+
+it("uses durable scoped progress even without history, and reruns for a different directory/host", async () => {
+  const completedAt = Date.now() - 60_000
+  const config = {
+    enabled: true,
+    intervalDays: 1,
+    dirPath: "/srv/backups",
+    retainCount: 2,
+    lastLocalRun: {
+      scope: "hash:account-a:auto-key",
+      directory: "/srv/backups",
+      content: "interval-full-v1",
+      completedAt,
+    },
+  }
+  mockShouldRun.mockImplementation((input) =>
+    jest.requireActual("./scheduler").shouldRunScheduledBackup(input)
+  )
+  mockGetSettings.mockResolvedValue({ backupAutoSchedule: config })
+  await expect(runScheduledBackupOnce({ filesystem: null, messages })).resolves.toBe(false)
+  expect(mockAppendHistory).not.toHaveBeenCalled()
+  mockGetSettings.mockResolvedValue({ backupAutoSchedule: { ...config, dirPath: "/new" } })
+  await runScheduledBackupOnce({ filesystem: null, messages })
+  expect(mockAppendHistory).toHaveBeenCalledTimes(1)
+  mockGetSettings.mockResolvedValue({
+    backupAutoSchedule: {
+      ...config,
+      lastLocalRun: { ...config.lastLocalRun, scope: "other-host" },
+    },
+  })
+  await runScheduledBackupOnce({ filesystem: null, messages })
+  expect(mockAppendHistory).toHaveBeenCalledTimes(2)
+})
+
+it("serializes distinct local requests and checks cancellation after waiting", async () => {
+  let release!: () => void
+  const firstWrite = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const filesystem = {
+    writeTextFile: jest
+      .fn()
+      .mockImplementationOnce(() => firstWrite)
+      .mockResolvedValue(undefined),
+    readDirNames: jest.fn(),
+    remove: jest.fn(),
+  }
+  const first = writeEncryptedLocalBackup(
+    filesystem,
+    "same",
+    { includeSessions: true, includeApiKey: false },
+    "pass"
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const controller = new AbortController()
+  const cancelled = writeEncryptedLocalBackup(
+    filesystem,
+    "same",
+    { includeSessions: false, includeApiKey: false },
+    "pass",
+    controller.signal
+  )
+  const rejected = expect(cancelled).rejects.toThrow()
+  const distinct = writeEncryptedLocalBackup(
+    filesystem,
+    "same",
+    { includeSettings: true, includeSessions: true, includeApiKey: false },
+    "pass"
+  )
+  controller.abort()
+  expect(filesystem.writeTextFile).toHaveBeenCalledTimes(1)
+  release()
+  await first
+  await rejected
+  await distinct
+  expect(filesystem.writeTextFile).toHaveBeenCalledTimes(2)
+  expect(mockBuildPackage).toHaveBeenCalledWith({
+    includeSettings: true,
+    includeSessions: true,
+    includeApiKey: false,
+  })
+})
+
+it("does not record or upload another account's data after a switch during retention", async () => {
+  mockGetSettings.mockResolvedValue({
+    backupAutoSchedule: { enabled: true, dirPath: "/srv/backups", intervalDays: 1, retainCount: 2 },
+    webdavSync: { enabled: true },
+  })
+  const filesystem = {
+    writeTextFile: jest.fn(),
+    remove: jest.fn(),
+    readDirNames: jest.fn(async () => {
+      mockDatabase = { name: "account-b" }
+      return []
+    }),
+  }
+  await expect(runScheduledBackupOnce({ filesystem, messages })).rejects.toThrow(
+    "backup_owner_changed"
+  )
+  expect(mockAppendHistory).not.toHaveBeenCalled()
+  expect(mockUpload).not.toHaveBeenCalled()
 })
 
 it("keeps a completed backup valid when retention cleanup and metadata stamping fail", async () => {

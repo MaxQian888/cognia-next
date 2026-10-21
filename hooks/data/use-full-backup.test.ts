@@ -66,6 +66,26 @@ beforeEach(async () => {
 })
 
 describe("useFullBackup", () => {
+  it("does not record success or failure under a new owner after the saver returns", async () => {
+    const original = getDb()
+    mockSaveExport.mockImplementationOnce(async () => {
+      __resetDbForTesting()
+      return { kind: "saved", platform: "mobile", filename: "backup.cbk", location: "/backup.cbk" }
+    })
+    const { result } = renderHook(() => useFullBackup())
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.run({
+        includeSessions: false,
+        includeApiKey: false,
+        encryption: "plaintext",
+        plaintextConfirmed: true,
+      })
+    })
+    expect(getDb()).not.toBe(original)
+    expect(outcome).toMatchObject({ ok: false, error: "backup_owner_changed" })
+    expect(await listBackupHistory()).toEqual([])
+  })
   it.each(["saved", "cancelled", "error"] as const)(
     "honours the native saver outcome %s before recording backup success",
     async (kind) => {

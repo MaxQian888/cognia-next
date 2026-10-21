@@ -25,6 +25,8 @@ export interface BackupHistoryRow {
    * the encrypted subscription-vault packages synced to WebDAV.
    */
   payloadKind?: BackupPayloadKind
+  /** Explicit producer identity; legacy scheduled rows cannot establish cadence. */
+  producer?: "interval" | "cron"
   /** Plaintext / encrypted file size on disk, when known. */
   sizeBytes?: number
   /** Filename of the saved file, free-form. */
@@ -65,6 +67,7 @@ export async function appendBackupHistory(
     success: partial.success,
     encryption: partial.encryption,
     payloadKind: partial.payloadKind,
+    producer: partial.producer,
     sizeBytes: partial.sizeBytes,
     filename: partial.filename,
     errorMessage: partial.errorMessage,

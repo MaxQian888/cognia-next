@@ -22,6 +22,7 @@ import type {
 } from "@cognia/agent-config-types"
 import type { BackupDestination } from "@/types/scheduler"
 import { getSettings, saveSettings } from "@/lib/db/settings"
+import { getDb } from "@/lib/db/schema"
 import { createKeyringStore, type KeyringStore } from "@/lib/credentials/keyring-store"
 
 export const BACKUP_DESTINATION_KEYRING_NAMESPACE = "backup-destinations"
@@ -73,13 +74,21 @@ export async function getBackupDestinationsSettings(): Promise<BackupDestination
 export async function updateBackupDestinationsSettings(
   patch:
     | Partial<BackupDestinationsSettings>
-    | ((current: BackupDestinationsSettings) => BackupDestinationsSettings)
+    | ((current: BackupDestinationsSettings) => BackupDestinationsSettings),
+  assertActive: () => void = () => undefined
 ): Promise<BackupDestinationsSettings> {
-  const settings = await getSettings()
-  const current = settings.backupDestinations ?? {}
-  const next = typeof patch === "function" ? patch(current) : { ...current, ...patch }
-  await saveSettings({ backupDestinations: next })
-  return next
+  const db = getDb()
+  const saved = await saveSettings(
+    (settings) => {
+      assertActive()
+      const current = settings.backupDestinations ?? {}
+      return {
+        backupDestinations: typeof patch === "function" ? patch(current) : { ...current, ...patch },
+      }
+    },
+    { scope: { db, assertActive } }
+  )
+  return saved.backupDestinations ?? {}
 }
 
 // ── GitHub ──────────────────────────────────────────────────────────────────

@@ -38,6 +38,7 @@ export type GoogleDriveUploadResult =
   | { ok: false; error: string; code?: "not-configured" | "not-connected" | "http" }
 
 export interface GoogleDriveDestinationDeps extends GoogleOAuthDeps {
+  assertActive?: () => void
   http?: BackupHttpFn
   config?: ResolvedGoogleDriveBackupConfig
   accessToken?: string
@@ -97,7 +98,8 @@ async function listFiles(
 export async function ensureGoogleDriveFolder(
   config: ResolvedGoogleDriveBackupConfig,
   token: string,
-  http: BackupHttpFn = backupHttpRequest
+  http: BackupHttpFn = backupHttpRequest,
+  assertActive: () => void = () => undefined
 ): Promise<string> {
   if (config.folderId) {
     // Verify the remembered id still exists (a user may have trashed it).
@@ -131,12 +133,16 @@ export async function ensureGoogleDriveFolder(
     folderId = parsed.id
   }
   const resolved = folderId
-  await updateBackupDestinationsSettings((current) => ({
-    ...current,
-    googleDrive: current.googleDrive
-      ? { ...current.googleDrive, folderId: resolved }
-      : current.googleDrive,
-  })).catch(() => undefined)
+  await updateBackupDestinationsSettings(
+    (current) => ({
+      ...current,
+      googleDrive: current.googleDrive
+        ? { ...current.googleDrive, folderId: resolved }
+        : current.googleDrive,
+    }),
+    assertActive
+  ).catch(() => undefined)
+  assertActive()
   return resolved
 }
 
@@ -234,7 +240,14 @@ export async function uploadSnapshotToGoogleDrive(
   meta: SnapshotMeta,
   deps: GoogleDriveDestinationDeps = {}
 ): Promise<GoogleDriveUploadResult> {
-  const http = deps.http ?? backupHttpRequest
+  const assertActive = deps.assertActive ?? (() => undefined)
+  assertActive()
+  const http: BackupHttpFn = async (request) => {
+    assertActive()
+    const response = await (deps.http ?? backupHttpRequest)(request)
+    assertActive()
+    return response
+  }
   const settings = await getBackupDestinationsSettings()
   const config = deps.config ?? resolveGoogleDriveBackupConfig(settings.googleDrive)
   if (!config)
@@ -252,7 +265,7 @@ export async function uploadSnapshotToGoogleDrive(
   if (!token) return { ok: false, code: "not-connected", error: "Google Drive is not connected." }
 
   try {
-    const folderId = await ensureGoogleDriveFolder(config, token, http)
+    const folderId = await ensureGoogleDriveFolder(config, token, http, assertActive)
     const snapshotName = webdavSnapshotName(meta.exportedAt)
     const fileId = await createFile(http, token, folderId, snapshotName, envelopeJson)
 
@@ -266,14 +279,19 @@ export async function uploadSnapshotToGoogleDrive(
 
     await pruneSnapshots(http, token, folderId)
     const stamp = new Date(deps.now?.() ?? Date.now()).toISOString()
-    await updateBackupDestinationsSettings((current) => ({
-      ...current,
-      googleDrive: current.googleDrive
-        ? { ...current.googleDrive, lastSyncAt: stamp }
-        : current.googleDrive,
-    })).catch(() => undefined)
+    await updateBackupDestinationsSettings(
+      (current) => ({
+        ...current,
+        googleDrive: current.googleDrive
+          ? { ...current.googleDrive, lastSyncAt: stamp }
+          : current.googleDrive,
+      }),
+      assertActive
+    ).catch(() => undefined)
+    assertActive()
     return { ok: true, fileId, remotePath: `${config.folderName}/${snapshotName}` }
   } catch (err) {
+    assertActive()
     const error = err instanceof Error ? err.message : String(err)
     log.error("google_drive_upload_failed", undefined, { error })
     return { ok: false, code: "http", error }
