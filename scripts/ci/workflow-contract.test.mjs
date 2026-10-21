@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile, symlink } from "node:fs/promises"
 import { execFileSync } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -314,6 +314,7 @@ test("agent bundles build once on each native architecture and smoke that exact 
   assert.equal(builds.length, 1, "the smoke image must not be rebuilt afterward")
   const build = builds[0]
   assert.equal(build.with.platforms, "${{ matrix.platform }}")
+  assert.match(build.with.outputs, /cargo-only == 'true' && 'type=cacheonly'/)
   assert.match(build.with.outputs, /should_push == 'true'/)
   assert.match(build.with.outputs, /push-by-digest=true,name-canonical=true,push=true/)
   assert.match(build.with.outputs, /\|\| 'type=docker'/)
@@ -322,7 +323,11 @@ test("agent bundles build once on each native architecture and smoke that exact 
   assert.match(build.with["cache-to"], /should_push == 'true'/)
   assert.match(build.with["cache-to"], /matrix.arch/)
   const smoke = job.steps.find((step) => step.name === "Smoke against user images")
-  assert.equal(smoke.if, undefined, "both architectures run the full smoke on PRs too")
+  assert.equal(smoke.if, "needs.vars.outputs.cargo-only != 'true'")
+  assert.match(build.with.target, /cargo-only == 'true' && 'sandboxd'/)
+  // Tags/manual publication never qualify for the dependency-only PR branch.
+  const { isCargoDependencyChange } = await import("./change-plan.mjs")
+  assert.equal(isCargoDependencyChange({ mode: "full", changedFiles: [], deletedFiles: [] }), false)
   assert.equal(smoke.env.DIGEST, "${{ steps.build.outputs.digest }}")
   assert.match(smoke.run, /docker pull "\$IMAGE@\$DIGEST"/)
   assert.match(smoke.run, /sh deploy\/bundle\/smoke.sh "\$bundle"/)
@@ -1226,4 +1231,116 @@ test("tagged releases attach a smoked host archive for every catalog archive tar
   assert.match(steps[smoke].run, /\/readyz/)
   assert.match(steps[attach].run, /gh release upload/)
   assert.match(steps[attach].run, /\.tar\.gz\.sha256/)
+})
+
+test("Cargo-only image plans build workspace consumers without unrelated service and web images", async () => {
+  const { jobs } = parse(await readWorkflow("images.yml"))
+  assert.match(jobs.vars.outputs["cargo-only"], /steps\.plan\.outputs\.cargo-only/)
+  const plan = jobs.vars.steps.find((step) => step.id === "plan")
+  assert.match(plan.run, /isCargoDependencyChange/)
+  assert.match(plan.env.PR_BASE_SHA, /pull_request\.base\.sha/)
+  const matrix = jobs["fast-images"].strategy.matrix
+  assert.equal(matrix.include, "${{ fromJSON(needs.vars.outputs.fast-images) }}")
+  const workflow = parse(await readWorkflow("images.yml"))
+  const images = JSON.parse(workflow.env.FAST_IMAGE_MATRIX)
+  assert.deepEqual(
+    images.filter((image) => image.rootCargo).map((image) => image.name),
+    ["cognia-collab", "cognia-deploy-agent", "cognia-ops-controller", "cognia-docker-proxy"]
+  )
+  assert.match(plan.run, /images\.filter\(image => image\.rootCargo === true\)/)
+  const bundle = jobs["agent-bundle"].steps
+  assert.match(bundle.find((step) => step.id === "build").with.target, /sandboxd/)
+  assert.match(bundle.find((step) => step.name === "Smoke against user images").if, /cargo-only/)
+  assert.equal(jobs["cognia-server-check"].if, "github.event_name == 'pull_request'")
+})
+
+test("Dependabot batches the shared Cargo lock and keeps incompatible type families aligned", async () => {
+  const config = parse(
+    await readFile(new URL("../../.github/dependabot.yml", import.meta.url), "utf8")
+  )
+  const cargo = config.updates.find((update) => update["package-ecosystem"] === "cargo")
+  assert.equal(cargo["open-pull-requests-limit"], 1)
+  assert.deepEqual(Object.keys(cargo.groups), ["cargo-dependencies"])
+  assert.deepEqual(cargo.groups["cargo-dependencies"].patterns, ["*"])
+  assert.ok(
+    cargo.ignore.some(
+      (rule) => rule["dependency-name"] === "windows-future" && rule.versions.includes("0.100")
+    )
+  )
+  assert.ok(
+    cargo.ignore.some(
+      (rule) => rule["dependency-name"] === "rten-imageproc" && rule.versions.includes("0.27")
+    )
+  )
+  const actions = config.updates.find((update) => update["package-ecosystem"] === "github-actions")
+  assert.equal(actions.groups["github-actions"]["update-types"], undefined)
+})
+
+test("image planning executes against exact Git trees and preserves full publication", async () => {
+  const workflow = parse(await readWorkflow("images.yml"))
+  const step = workflow.jobs.vars.steps.find((step) => step.id === "plan")
+  const script = step.run.split("<<'NODE'\n")[1].replace(/\nNODE\s*$/, "")
+  const directory = await mkdtemp(join(tmpdir(), "cognia-image-plan-"))
+  const git = (...args) =>
+    execFileSync("git", args, { cwd: directory, encoding: "utf8", stdio: "pipe" }).trim()
+  try {
+    await symlink(fileURLToPath(new URL("../", import.meta.url)), join(directory, "scripts"))
+    git("init", "--quiet")
+    git("config", "user.email", "fixture@example.invalid")
+    git("config", "user.name", "Image fixture")
+    git("remote", "add", "origin", directory)
+    await writeFile(join(directory, "Cargo.lock"), "old")
+    git("add", "Cargo.lock")
+    git("commit", "--quiet", "-m", "base")
+    const base = git("rev-parse", "HEAD")
+    await writeFile(join(directory, "Cargo.lock"), "new")
+    git("add", "Cargo.lock")
+    git("commit", "--quiet", "-m", "dependency batch")
+    const head = git("rev-parse", "HEAD")
+    const output = join(directory, "output")
+    const summary = join(directory, "summary")
+    const run = async (event, prBase = base) => {
+      await writeFile(output, "")
+      execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+        cwd: directory,
+        encoding: "utf8",
+        stdio: "pipe",
+        env: {
+          ...process.env,
+          FAST_IMAGE_MATRIX: workflow.env.FAST_IMAGE_MATRIX,
+          EVENT_NAME: event,
+          PR_BASE_SHA: prBase,
+          GITHUB_SHA: head,
+          GITHUB_OUTPUT: output,
+          GITHUB_STEP_SUMMARY: summary,
+        },
+      })
+      return Object.fromEntries(
+        (await readFile(output, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => {
+            const index = line.indexOf("=")
+            return [line.slice(0, index), line.slice(index + 1)]
+          })
+      )
+    }
+    const cargo = await run("pull_request")
+    assert.equal(cargo["cargo-only"], "true")
+    assert.deepEqual(
+      JSON.parse(cargo["fast-images"]).map((image) => image.name),
+      ["cognia-collab", "cognia-deploy-agent", "cognia-ops-controller", "cognia-docker-proxy"]
+    )
+    for (const [event, prBase] of [
+      ["workflow_dispatch", base],
+      ["push", base],
+      ["pull_request", "f".repeat(40)],
+    ]) {
+      const full = await run(event, prBase)
+      assert.equal(full["cargo-only"], "false")
+      assert.deepEqual(JSON.parse(full["fast-images"]), JSON.parse(workflow.env.FAST_IMAGE_MATRIX))
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
