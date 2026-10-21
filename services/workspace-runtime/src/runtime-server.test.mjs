@@ -673,3 +673,146 @@ test("pick and adjust ops reach the service on the tab they name", async (t) => 
     ["adjust", "s", "revert", { previewId: "x" }],
   ])
 })
+
+test("media generations release retained bytes and reject late publishers without tombstones", async () => {
+  const { MediaLatestStore } = await import("./runtime-server.mjs")
+  const media = new MediaLatestStore()
+  const first = media.publisher("reused")
+  first(Buffer.alloc(1024 * 1024))
+  const cursor = media.latest("reused", 0).sequence
+  const pending = media.next("reused", cursor, 1000)
+  media.release("reused")
+  const replacement = media.publisher("reused")
+  replacement(Buffer.from("new"))
+  first(Buffer.from("stale"))
+  media.release("reused", first)
+  assert.equal(await pending, null, "old polls cannot consume a replacement session's frame")
+  const frame = media.latest("reused", cursor)
+  assert.equal(frame.bytes.toString(), "new")
+  assert.ok(frame.sequence > cursor, "cursor remains monotonic after a session id is reused")
+  media.release("reused")
+  for (let i = 0; i < 100; i += 1) {
+    media.publisher(`closed-${i}`)(Buffer.alloc(1024))
+    media.release(`closed-${i}`)
+  }
+  assert.equal(media.sessions.size, 0, "closed sessions leave neither bytes nor tombstones")
+})
+
+test("media waiter timeout and abort remove empty session state", async () => {
+  const { MediaLatestStore } = await import("./runtime-server.mjs")
+  const media = new MediaLatestStore()
+  assert.equal(await media.next("timeout", 0, 5), null)
+  assert.equal(media.sessions.size, 0)
+  const abort = new AbortController()
+  const pending = media.next("abort", 0, 1000, abort.signal)
+  abort.abort()
+  assert.equal(await pending, null)
+  assert.equal(media.sessions.size, 0)
+  const publish = media.publisher("shutdown")
+  publish(Buffer.alloc(1024))
+  const waiting = media.next("shutdown", media.latest("shutdown", 0).sequence, 1000)
+  media.clear()
+  publish(Buffer.from("late"))
+  assert.equal(await waiting, null)
+  assert.equal(media.sessions.size, 0)
+})
+
+test("runtime releases media on lifecycle events and explicit close with legacy services", async (t) => {
+  const browser = serviceStub()
+  let publish
+  let listener
+  let unsubscribed = false
+  browser.subscribeEvents = (sink) => {
+    listener = sink
+    return () => {
+      unsubscribed = true
+    }
+  }
+  browser.startScreencast = async (_id, sink) => {
+    publish = sink
+  }
+  const runtime = createRuntimeServer({ secret: "x".repeat(32), browserService: browser })
+  const address = await runtime.listen(0, "127.0.0.1")
+  const baseUrl = `http://127.0.0.1:${address.port}`
+  const headers = { authorization: `Bearer ${"x".repeat(32)}`, "content-type": "application/json" }
+  t.after(() => runtime.close())
+  const control = (type) =>
+    fetch(`${baseUrl}/v1/control`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ version: 1, type, payload: { sessionId: "s" } }),
+    })
+  await control("browser.screencast.start")
+  publish(Buffer.from("old"))
+  assert.equal((await fetch(`${baseUrl}/v1/media/s`, { headers })).status, 200)
+  assert.equal(typeof listener, "function")
+  listener({ type: "session.closed", sessionId: "s", reason: "disconnected" })
+  publish(Buffer.from("late"))
+  assert.equal((await fetch(`${baseUrl}/v1/media/s`, { headers })).status, 204)
+  await control("browser.screencast.start")
+  publish(Buffer.from("next"))
+  await control("browser.session.close")
+  publish(Buffer.from("late close"))
+  assert.equal((await fetch(`${baseUrl}/v1/media/s`, { headers })).status, 204)
+  await runtime.close()
+  assert.equal(unsubscribed, true)
+})
+
+test("explicit close releases media for services without subscriptions", async (t) => {
+  const browser = serviceStub()
+  let publish
+  browser.startScreencast = async (_id, sink) => {
+    publish = sink
+  }
+  const baseUrl = await fixture(t, browser)
+  const headers = { authorization: `Bearer ${"x".repeat(32)}`, "content-type": "application/json" }
+  for (const type of ["browser.screencast.start", "browser.session.close"]) {
+    await fetch(`${baseUrl}/v1/control`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ version: 1, type, payload: { sessionId: "legacy" } }),
+    })
+    publish(Buffer.from(type))
+  }
+  assert.equal((await fetch(`${baseUrl}/v1/media/legacy`, { headers })).status, 204)
+})
+
+test("a failed capture start invalidates its publisher without releasing a replacement generation", async (t) => {
+  const browser = serviceStub()
+  let fail
+  let oldPublisher
+  let newPublisher
+  let starts = 0
+  browser.startScreencast = (_id, publish) => {
+    if (starts++ === 0) {
+      oldPublisher = publish
+      return new Promise((_resolve, reject) => {
+        fail = reject
+      })
+    }
+    newPublisher = publish
+    publish(Buffer.from("replacement"))
+    return Promise.resolve()
+  }
+  const baseUrl = await fixture(t, browser)
+  const headers = { authorization: `Bearer ${"x".repeat(32)}`, "content-type": "application/json" }
+  const control = (type) =>
+    fetch(`${baseUrl}/v1/control`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ version: 1, type, payload: { sessionId: "reused" } }),
+    })
+  const starting = control("browser.screencast.start")
+  while (!fail) await new Promise((resolve) => setImmediate(resolve))
+  oldPublisher(Buffer.from("old"))
+  await control("browser.session.close")
+  await control("browser.screencast.start")
+  fail(new Error("old capture failed"))
+  assert.equal((await starting).status, 400)
+  oldPublisher(Buffer.from("late"))
+  const response = await fetch(`${baseUrl}/v1/media/reused`, { headers })
+  assert.equal(await response.text(), "replacement")
+  await control("browser.session.close")
+  newPublisher(Buffer.from("late replacement"))
+  assert.equal((await fetch(`${baseUrl}/v1/media/reused`, { headers })).status, 204)
+})

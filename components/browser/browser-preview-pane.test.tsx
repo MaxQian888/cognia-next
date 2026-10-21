@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { useEffect } from "react"
 
@@ -554,11 +555,11 @@ it.each(["chrome-error://chromewebdata/", "https://chrome-error//chromewebdata/"
   }
 )
 
-it("persists the selected annotation detail level", () => {
+it("persists the selected annotation detail level", async () => {
   renderPane(<BrowserPreviewPane />)
   const control = screen.getByRole("combobox", { name: "Annotation detail" })
   expect(control).toHaveValue("standard")
-  fireEvent.change(control, { target: { value: "forensic" } })
+  await selectOption(control, "forensic")
   expect(control).toHaveValue("forensic")
   expect(window.localStorage.getItem("cognia.browser.output-detail")).toBe("forensic")
 })
@@ -570,12 +571,8 @@ it("queues a selected annotation through durable storage", async () => {
   fireEvent.change(screen.getByPlaceholderText(/Describe the change/i), {
     target: { value: "increase contrast" },
   })
-  fireEvent.change(screen.getByRole("combobox", { name: "Annotation intent" }), {
-    target: { value: "fix" },
-  })
-  fireEvent.change(screen.getByRole("combobox", { name: "Annotation severity" }), {
-    target: { value: "important" },
-  })
+  await selectOption(screen.getByRole("combobox", { name: "Annotation intent" }), "fix")
+  await selectOption(screen.getByRole("combobox", { name: "Annotation severity" }), "important")
   fireEvent.click(screen.getByRole("button", { name: "Add to queue" }))
   await waitFor(() =>
     expect(mockQueueAnnotation).toHaveBeenCalledWith(SELECTION, "increase contrast", {
@@ -1835,12 +1832,13 @@ describe("local engines", () => {
     expect(local).toHaveAttribute("data-browser", "edge")
   })
 
-  it("switches engine from the toolbar's engine switch", () => {
+  it("switches engine from the toolbar's engine switch", async () => {
     mockLocalInstalled = true
     renderPane(<BrowserPreviewPane />)
-    fireEvent.change(within(overflow()).getByRole("combobox", { name: "Browser engine" }), {
-      target: { value: "local-chromium" },
-    })
+    await selectOption(
+      within(overflow()).getByRole("combobox", { name: "Browser engine" }),
+      "local-chromium"
+    )
     expect(screen.getByTestId("local-chromium-preview")).toBeInTheDocument()
   })
 
@@ -1917,13 +1915,14 @@ describe("dock page tabs", () => {
     expect(screen.queryByTestId("browser-engine-chip")).toBeNull()
   })
 
-  it("files an engine switch on the tab rather than the pane", () => {
+  it("files an engine switch on the tab rather than the pane", async () => {
     mockLocalInstalled = true
     const page = dockPage({ engine: "embedded" })
     renderPane(<BrowserPreviewPane initialUrl="http://localhost:5173" dockPage={page} />)
-    fireEvent.change(within(overflow()).getByRole("combobox", { name: "Browser engine" }), {
-      target: { value: "local-chromium" },
-    })
+    await selectOption(
+      within(overflow()).getByRole("combobox", { name: "Browser engine" }),
+      "local-chromium"
+    )
     expect(page.onEngineChange).toHaveBeenCalledWith("local-chromium")
     // The tab still says embedded, so the pane stays on it until the tab changes.
     expect(screen.queryByTestId("local-chromium-preview")).toBeNull()

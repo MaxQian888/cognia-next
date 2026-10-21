@@ -369,6 +369,9 @@ export class RemoteChromiumService {
       throw new Error("cloud browser service requires a workspace file bridge")
     }
     this.onEvent = onEvent
+    this.eventListeners = new Set()
+    // A delayed ACK must not match a capture in a recreated session id.
+    this.frameSequence = 0
     this.devices = devices
     this.localPolicyFactory = localPolicyFactory
     this.userChromeConnectTimeoutMs = userChromeConnectTimeoutMs
@@ -394,11 +397,19 @@ export class RemoteChromiumService {
     this.reaper.unref?.()
   }
 
+  subscribeEvents(listener) {
+    this.eventListeners.add(listener)
+    return () => this.eventListeners.delete(listener)
+  }
+
   emit(event) {
-    try {
-      this.onEvent({ kind: "browser.event", ...event })
-    } catch {
-      // A failing event sink must never break a browser operation.
+    const envelope = { kind: "browser.event", ...event }
+    for (const listener of [this.onEvent, ...this.eventListeners]) {
+      try {
+        listener(envelope)
+      } catch {
+        // A failing event sink must never block other sinks or browser cleanup.
+      }
     }
   }
 
@@ -562,17 +573,25 @@ export class RemoteChromiumService {
     const contextOptions = { viewport: this.viewport, acceptDownloads: true }
     let browser = null
     let context
-    if (profileId) {
-      const profilePath = path.join(this.profilesRoot, profileId)
-      await fs.mkdir(profilePath, { recursive: true, mode: 0o700 })
-      context = await this.chromium.launchPersistentContext(profilePath, {
-        ...browserLaunchOptions,
-        ...contextOptions,
-      })
-      this.profileOwners.set(profileId, id)
-    } else {
-      browser = await this.chromium.launch(browserLaunchOptions)
-      context = await browser.newContext(contextOptions)
+    try {
+      if (profileId) {
+        const profilePath = path.join(this.profilesRoot, profileId)
+        await fs.mkdir(profilePath, { recursive: true, mode: 0o700 })
+        context = await this.chromium.launchPersistentContext(profilePath, {
+          ...browserLaunchOptions,
+          ...contextOptions,
+        })
+        this.profileOwners.set(profileId, id)
+      } else {
+        browser = await this.chromium.launch(browserLaunchOptions)
+        context = await browser.newContext(contextOptions)
+      }
+    } catch (error) {
+      await browser?.close().catch(() => undefined)
+      if (!this.sessions.has(id)) {
+        this.emit({ type: "session.closed", sessionId: id, reason: "creation_failed" })
+      }
+      throw error
     }
 
     const session = this.newSessionRecord({
@@ -585,18 +604,23 @@ export class RemoteChromiumService {
       context,
     })
     this.sessions.set(id, session)
-    await context.addInitScript(OVERLAY_TRANSPORT_SCRIPT)
-    await context.addInitScript(this.overlayScript)
-    await context.route("**/*", async (route) => this.authorizeRoute(session, route))
-    context.on("page", (page) => this.onContextPage(session, page))
-    context.on("close", () => {
-      void this.handleConnectionClosed(session).catch(() => undefined)
-    })
-    browser?.on?.("disconnected", () => {
-      void this.handleConnectionClosed(session).catch(() => undefined)
-    })
-    const firstPage = await context.newPage()
-    this.registerPage(session, firstPage)
+    try {
+      await context.addInitScript(OVERLAY_TRANSPORT_SCRIPT)
+      await context.addInitScript(this.overlayScript)
+      await context.route("**/*", async (route) => this.authorizeRoute(session, route))
+      context.on("page", (page) => this.onContextPage(session, page))
+      context.on("close", () => {
+        void this.handleConnectionClosed(session).catch(() => undefined)
+      })
+      browser?.on?.("disconnected", () => {
+        void this.handleConnectionClosed(session).catch(() => undefined)
+      })
+      const firstPage = await context.newPage()
+      this.registerPage(session, firstPage)
+    } catch (error) {
+      await this.closeSession(id, "creation_failed").catch(() => undefined)
+      throw error
+    }
     return this.summary(id)
   }
 
@@ -652,14 +676,25 @@ export class RemoteChromiumService {
           throw new RemoteBrowserError("browser_session_not_found", "Session was closed")
         }
       } catch (error) {
-        if (this.sessions.get(id) === session) this.sessions.delete(id)
-        if (effectiveProfile && this.profileOwners.get(effectiveProfile) === id) {
-          this.profileOwners.delete(effectiveProfile)
+        session.closing = true
+        clearTimeout(session.pagesChangedTimer)
+        if (this.sessions.get(id) === session) {
+          await this.stopScreencast(id).catch(() => undefined)
+          this.invalidateSession(id)
+          this.clearLoginRefs(id)
         }
         // Never close the user's own context: a failed user-chrome attach only
-        // disconnects.
+        // disconnects. Keep ownership until cleanup ends so a new session
+        // cannot race the old generation's lifecycle notification.
         if (session.kind === "user-chrome") await session.browser?.close().catch(() => undefined)
         else await session.context?.close().catch(() => undefined)
+        if (this.sessions.get(id) === session) {
+          this.sessions.delete(id)
+          if (effectiveProfile && this.profileOwners.get(effectiveProfile) === id) {
+            this.profileOwners.delete(effectiveProfile)
+          }
+          this.emit({ type: "session.closed", sessionId: id, reason: "creation_failed" })
+        }
         throw error
       }
     })()
@@ -1974,23 +2009,55 @@ export class RemoteChromiumService {
   }
 
   /** Stream the page in front; `setActivePage` moves the stream with it. */
-  async startScreencast(sessionId, onFrame, { quality = 70 } = {}) {
+  startScreencast(sessionId, onFrame, { quality = 70 } = {}) {
     const session = this.requireSession(sessionId)
+    const generation = (session.screencastGeneration ?? 0) + 1
+    session.screencastGeneration = generation
+    session.screencastRequest = { onFrame, quality }
+    const run = async () => {
+      await this.releaseScreencast(this.retireScreencast(session))
+      if (session.screencastGeneration !== generation || session.closing || session.restarting)
+        return
+      await this.attachScreencast(session, generation, onFrame, quality)
+    }
+    session.screencastTask = (session.screencastTask ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(run)
+    return session.screencastTask
+  }
+
+  async attachScreencast(session, generation, onFrame, quality) {
+    const sessionId = session.id
     const pageId = session.activePageId
     const record = pageId ? session.pages.get(pageId) : null
     if (!record) throw new RemoteBrowserError("browser_page_not_found", "No active page")
     const { page } = record
-    if (session.screencast) await this.stopScreencast(sessionId)
-    session.screencastRequest = { onFrame, quality }
     const cdp = await session.context.newCDPSession(page)
-    const state = { cdp, pageId, sequence: 0, pending: null, queuedEvent: null, receive: null }
+    if (
+      this.sessions.get(sessionId) !== session ||
+      session.closing ||
+      session.restarting ||
+      session.screencastGeneration !== generation ||
+      session.activePageId !== pageId
+    ) {
+      await cdp.detach().catch(() => undefined)
+      return
+    }
+    const state = {
+      cdp,
+      pageId,
+      sequence: session.screencastSequence ?? 0,
+      pending: null,
+      queuedEvent: null,
+      receive: null,
+    }
     session.screencast = state
     const local = this.mode === "local"
     const frameQuality = local
       ? Math.max(80, Math.min(100, quality))
       : Math.max(60, Math.min(80, quality))
     const receive = async (event, acknowledged = false) => {
-      if (session.screencast !== state) return
+      if (session.screencast !== state || session.screencastGeneration !== generation) return
       if (local) this.scheduleFitCheck(session, record)
       if (state.pending) {
         if (local) {
@@ -2001,7 +2068,8 @@ export class RemoteChromiumService {
         }
         return
       }
-      state.sequence += 1
+      session.screencastSequence = ++this.frameSequence
+      state.sequence = session.screencastSequence
       const pending = {
         sequence: state.sequence,
         cdpSessionId: acknowledged ? null : event.sessionId,
@@ -2045,12 +2113,19 @@ export class RemoteChromiumService {
     }
     state.receive = receive
     cdp.on("Page.screencastFrame", receive)
-    await cdp.send("Page.startScreencast", {
-      format: "jpeg",
-      quality: frameQuality,
-      ...(local ? {} : { maxWidth: 1600, maxHeight: 1200 }),
-      everyNthFrame: 1,
-    })
+    try {
+      await cdp.send("Page.startScreencast", {
+        format: "jpeg",
+        quality: frameQuality,
+        ...(local ? {} : { maxWidth: 1600, maxHeight: 1200 }),
+        everyNthFrame: 1,
+      })
+    } catch (error) {
+      if (session.screencast === state) {
+        await this.releaseScreencast(this.retireScreencast(session)).catch(() => undefined)
+      }
+      throw error
+    }
   }
 
   async ackScreencastFrame(sessionId, sequence) {
@@ -2068,12 +2143,35 @@ export class RemoteChromiumService {
     return true
   }
 
-  async stopScreencast(sessionId) {
-    const session = this.requireSession(sessionId)
-    if (!session.screencast) return
-    await session.screencast.cdp.send("Page.stopScreencast")
-    await session.screencast.cdp.detach()
+  retireScreencast(session) {
+    const state = session.screencast
     session.screencast = null
+    if (!state) return null
+    state.cdp.off("Page.screencastFrame", state.receive)
+    state.pending = null
+    state.queuedEvent = null
+    state.receive = null
+    return state
+  }
+
+  async releaseScreencast(state) {
+    if (!state) return
+    try {
+      await state.cdp.send("Page.stopScreencast")
+    } finally {
+      await state.cdp.detach()
+    }
+  }
+
+  stopScreencast(sessionId) {
+    const session = this.requireSession(sessionId)
+    session.screencastGeneration = (session.screencastGeneration ?? 0) + 1
+    // Retire before waiting for any preceding attach/stop operation.
+    const state = this.retireScreencast(session)
+    session.screencastTask = (session.screencastTask ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.releaseScreencast(state))
+    return session.screencastTask
   }
 
   async dispatchInput(sessionId, input) {
@@ -2114,18 +2212,20 @@ export class RemoteChromiumService {
         // Disconnect only: the user's browser, window and own tabs stay open.
         await session.downloadCdp?.detach().catch(() => undefined)
         await session.browserCdp?.detach().catch(() => undefined)
-        await session.browser.close()
+        await session.browser?.close()
       } else {
-        await session.context.close()
-        if (session.ownsBrowser) await session.browser.close()
+        await session.context?.close()
+        if (session.ownsBrowser) await session.browser?.close()
       }
       await this.fileBridge?.cleanupSession(sessionId)
     } finally {
-      this.sessions.delete(sessionId)
-      if (session.profileId && this.profileOwners.get(session.profileId) === sessionId) {
-        this.profileOwners.delete(session.profileId)
+      if (this.sessions.get(sessionId) === session) {
+        this.sessions.delete(sessionId)
+        if (session.profileId && this.profileOwners.get(session.profileId) === sessionId) {
+          this.profileOwners.delete(session.profileId)
+        }
+        this.emit({ type: "session.closed", sessionId, reason })
       }
-      this.emit({ type: "session.closed", sessionId, reason })
     }
   }
 
@@ -2151,18 +2251,25 @@ export class RemoteChromiumService {
   }
 
   async handleConnectionClosed(session) {
-    if (session.closing || session.restarting || !this.sessions.has(session.id)) return
+    if (session.closing || session.restarting || this.sessions.get(session.id) !== session) return
     session.closing = true
     clearTimeout(session.pagesChangedTimer)
-    await this.dismissPendingDialog(session)
-    this.invalidateSession(session.id)
-    this.clearLoginRefs(session.id)
-    await this.fileBridge?.cleanupSession(session.id)
-    this.sessions.delete(session.id)
-    if (session.profileId && this.profileOwners.get(session.profileId) === session.id) {
-      this.profileOwners.delete(session.profileId)
+    await this.stopScreencast(session.id).catch(() => undefined)
+    try {
+      await this.dismissPendingDialog(session)
+      if (this.sessions.get(session.id) !== session) return
+      this.invalidateSession(session.id)
+      this.clearLoginRefs(session.id)
+      await this.fileBridge?.cleanupSession(session.id)
+    } finally {
+      if (this.sessions.get(session.id) === session) {
+        this.sessions.delete(session.id)
+        if (session.profileId && this.profileOwners.get(session.profileId) === session.id) {
+          this.profileOwners.delete(session.profileId)
+        }
+        this.emit({ type: "session.closed", sessionId: session.id, reason: "disconnected" })
+      }
     }
-    this.emit({ type: "session.closed", sessionId: session.id, reason: "disconnected" })
   }
 
   /**
@@ -2715,6 +2822,15 @@ export class RemoteChromiumService {
     this.assertNoPendingDialog(session, options.pageId)
     const { page, record } = this.pageRecord(session, options.pageId)
     const applied = []
+    if (options.synchronizeFrame !== undefined) {
+      this.assertLocalMode("browser.viewport-synchronize")
+      if (typeof options.synchronizeFrame !== "boolean") {
+        throw new RemoteBrowserError("browser_option_invalid", "synchronizeFrame must be a boolean")
+      }
+      if (options.synchronizeFrame && session.pages.get(session.activePageId) !== record) {
+        throw new RemoteBrowserError("browser_page_not_active", "The requested page is not active")
+      }
+    }
     if (options.reset === true) {
       if (record.emulationCdpReady) {
         const cdp = await record.emulationCdpReady.catch(() => null)
@@ -2865,6 +2981,17 @@ export class RemoteChromiumService {
         uploadThroughput: -1,
       })
       applied.push("offline")
+    }
+    if (options.synchronizeFrame === true) {
+      const request = session.screencastRequest
+      // Retire the old stream before taking the fence. Even an unchanged
+      // viewport needs a fresh damage frame when a pane returns to this page.
+      await this.stopScreencast(sessionId)
+      const frameSequence = session.screencastSequence ?? 0
+      if (request && session.pages.get(session.activePageId) === record) {
+        await this.startScreencast(sessionId, request.onFrame, { quality: request.quality })
+      }
+      return { ok: true, applied, frameSequence }
     }
     return { ok: true, applied }
   }

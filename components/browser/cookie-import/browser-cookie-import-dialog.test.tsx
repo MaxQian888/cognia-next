@@ -1,3 +1,4 @@
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -169,7 +170,12 @@ it("imports this site's cookies into the embedded preview", async () => {
   const user = userEvent.setup()
   const { onImported, onOpenChange } = renderDialog()
   const browser = await screen.findByRole("combobox", { name: copy.browser })
-  expect(within(browser).getByRole("option", { name: "Opera (Not installed)" })).toBeDisabled()
+  expect(
+    within(getNativeSelect(browser)).getByRole("option", {
+      hidden: true,
+      name: "Opera (Not installed)",
+    })
+  ).toBeDisabled()
   expect(screen.getByRole("combobox", { name: copy.profile })).toHaveValue("Default")
   expect(screen.getByRole("radio", { name: "This site (www.github.com)" })).toBeChecked()
   expect(screen.getByText(copy.sink.embedded)).toBeInTheDocument()
@@ -230,13 +236,12 @@ it("imports chosen domains, listed with counts and searchable", async () => {
 })
 
 it("reloads domains for another profile and reports a failed listing", async () => {
-  const user = userEvent.setup()
   ;(listCookieDomains as jest.Mock)
     .mockResolvedValueOnce([{ domain: "github.com", count: 4 }])
     .mockRejectedValueOnce(new Error("locked"))
   renderDialog({ currentHost: null })
   await screen.findByLabelText("github.com")
-  await user.selectOptions(screen.getByRole("combobox", { name: copy.profile }), "Profile 2")
+  await selectOption(screen.getByRole("combobox", { name: copy.profile }), "Profile 2")
   expect(await screen.findByText(copy.domainsLoadFailed)).toBeInTheDocument()
   expect(listCookieDomains).toHaveBeenLastCalledWith("chrome", "Profile 2")
 })
@@ -244,7 +249,7 @@ it("reloads domains for another profile and reports a failed listing", async () 
 it("imports all cookies from another browser into a local session", async () => {
   const user = userEvent.setup()
   renderDialog({ backend: "local-chromium", sessionId: "s1" })
-  await user.selectOptions(await screen.findByRole("combobox", { name: copy.browser }), "firefox")
+  await selectOption(await screen.findByRole("combobox", { name: copy.browser }), "firefox")
   await user.click(screen.getByRole("radio", { name: copy.all }))
   expect(screen.getByText(copy.allHint)).toBeInTheDocument()
   expect(screen.getByText(copy.sink.local)).toBeInTheDocument()
@@ -271,7 +276,7 @@ it("guides Safari users to Full Disk Access and opens the pane on macOS", async 
   const user = userEvent.setup()
   ;(openFullDiskAccessSettings as jest.Mock).mockResolvedValue(undefined)
   renderDialog()
-  await user.selectOptions(await screen.findByRole("combobox", { name: copy.browser }), "safari")
+  await selectOption(await screen.findByRole("combobox", { name: copy.browser }), "safari")
   const guidance = screen.getByTestId("cookie-import-full-disk-access")
   expect(guidance).toHaveTextContent(copy.fullDiskAccess.description)
   expect(screen.getByRole("button", { name: copy.import })).toBeDisabled()
@@ -283,16 +288,15 @@ it("reports when System Settings cannot be opened", async () => {
   const user = userEvent.setup()
   ;(openFullDiskAccessSettings as jest.Mock).mockRejectedValue(new Error("x"))
   renderDialog()
-  await user.selectOptions(await screen.findByRole("combobox", { name: copy.browser }), "safari")
+  await selectOption(await screen.findByRole("combobox", { name: copy.browser }), "safari")
   await user.click(screen.getByRole("button", { name: copy.fullDiskAccess.open }))
   await waitFor(() => expect(toast.error).toHaveBeenCalledWith(copy.fullDiskAccess.openFailed))
 })
 
 it("shows no open button when not on macOS", async () => {
-  const user = userEvent.setup()
   ;(isMacOs as jest.Mock).mockReturnValue(false)
   renderDialog()
-  await user.selectOptions(await screen.findByRole("combobox", { name: copy.browser }), "safari")
+  await selectOption(await screen.findByRole("combobox", { name: copy.browser }), "safari")
   expect(screen.getByTestId("cookie-import-full-disk-access")).toBeInTheDocument()
   expect(screen.queryByRole("button", { name: copy.fullDiskAccess.open })).toBeNull()
 })

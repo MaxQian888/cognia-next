@@ -23,11 +23,18 @@ export interface FramePainter {
 
 export type DecodeFrameBitmap = (jpeg: Blob) => Promise<ImageBitmap>
 
+interface FramePainterOptions {
+  /** Rechecked after decoding: the page or viewport may have changed meanwhile. */
+  canPaint?: (frame: RemoteBrowserFrame) => boolean
+  onPaint?: (frame: RemoteBrowserFrame) => void
+}
+
 const decodeWithBrowser: DecodeFrameBitmap = (jpeg) => createImageBitmap(jpeg)
 
 export function createFramePainter(
   getCanvas: () => HTMLCanvasElement | null,
-  decode: DecodeFrameBitmap = decodeWithBrowser
+  decode: DecodeFrameBitmap = decodeWithBrowser,
+  { canPaint, onPaint }: FramePainterOptions = {}
 ): FramePainter {
   let waiting: RemoteBrowserFrame | null = null
   let painting = false
@@ -39,6 +46,7 @@ export function createFramePainter(
       while (waiting && !disposed) {
         const frame = waiting
         waiting = null
+        if (canPaint && !canPaint(frame)) continue
         let bitmap: ImageBitmap | null = null
         try {
           // Copy out of the frame's buffer: a view into the IPC buffer is not
@@ -47,10 +55,13 @@ export function createFramePainter(
           jpeg.set(frame.jpeg)
           bitmap = await decode(new Blob([jpeg.buffer], { type: "image/jpeg" }))
           const canvas = getCanvas()
-          if (disposed || !canvas) continue
+          if (disposed || !canvas || (canPaint && !canPaint(frame))) continue
           if (canvas.width !== bitmap.width) canvas.width = bitmap.width
           if (canvas.height !== bitmap.height) canvas.height = bitmap.height
-          canvas.getContext("2d")?.drawImage(bitmap, 0, 0)
+          const context = canvas.getContext("2d")
+          if (!context) continue
+          context.drawImage(bitmap, 0, 0)
+          onPaint?.(frame)
         } catch {
           // A frame that fails to decode is skipped; the next one repaints.
         } finally {

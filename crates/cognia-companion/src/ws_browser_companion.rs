@@ -700,6 +700,8 @@ pub struct PairedBrowser {
     pub created_at: i64,
     pub connected: bool,
     pub extension_version: Option<String>,
+    pub connected_at: Option<u64>,
+    pub features: Vec<String>,
     pub drive_allowed: bool,
 }
 
@@ -715,20 +717,29 @@ pub fn paired_browsers(tenant_id: &str) -> Result<Vec<PairedBrowser>, String> {
         .into_iter()
         .map(|device| {
             let connection = connections.get(&(tenant_id.to_string(), device.device_id.clone()));
-            PairedBrowser {
-                drive_allowed: device
-                    .capabilities
-                    .iter()
-                    .any(|capability| capability == DRIVE_CAPABILITY),
-                connected: connection.is_some(),
-                extension_version: connection.map(|c| c.extension_version.clone()),
-                device_id: device.device_id,
-                display_name: device.display_name,
-                status: device.status,
-                created_at: device.created_at,
-            }
+            paired_browser(device, connection)
         })
         .collect())
+}
+
+fn paired_browser(
+    device: super::security_store::DeviceSummary,
+    connection: Option<&Connection>,
+) -> PairedBrowser {
+    PairedBrowser {
+        drive_allowed: device
+            .capabilities
+            .iter()
+            .any(|capability| capability == DRIVE_CAPABILITY),
+        connected: connection.is_some(),
+        extension_version: connection.map(|c| c.extension_version.clone()),
+        connected_at: connection.map(|c| c.connected_at),
+        features: connection.map(|c| c.features.clone()).unwrap_or_default(),
+        device_id: device.device_id,
+        display_name: device.display_name,
+        status: device.status,
+        created_at: device.created_at,
+    }
 }
 
 /// Grant or revoke `browser.drive` for one paired browser, leaving the rest of
@@ -921,6 +932,30 @@ mod tests {
             receiver,
             shutdown_rx,
         )
+    }
+
+    #[test]
+    fn paired_browser_projects_live_handshake_metadata_and_clears_it_offline() {
+        let device = super::super::security_store::DeviceSummary {
+            device_id: "browser".into(),
+            display_name: "Chrome".into(),
+            role: "browser".into(),
+            status: "active".into(),
+            user_id: None,
+            created_at: 1,
+            updated_at: 1,
+            capabilities: vec![],
+        };
+        let (connection, _rx, _shutdown) = test_connection("metadata");
+        let live = paired_browser(device.clone(), Some(&connection));
+        assert_eq!(live.connected_at, Some(1));
+        assert_eq!(live.features, vec!["drive"]);
+        assert_eq!(live.extension_version.as_deref(), Some("0.2.0"));
+        let offline = paired_browser(device, None);
+        assert!(!offline.connected);
+        assert_eq!(offline.connected_at, None);
+        assert!(offline.features.is_empty());
+        assert_eq!(offline.extension_version, None);
     }
 
     #[test]

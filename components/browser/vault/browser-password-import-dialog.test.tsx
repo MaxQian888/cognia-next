@@ -1,3 +1,4 @@
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -76,10 +77,10 @@ it("picks the first usable browser, labels unavailable ones, and imports", async
   const { onImported } = renderDialog()
   const source = await screen.findByRole("combobox", { name: copy.source })
   expect(source).toHaveValue("chrome")
-  expect(screen.getByRole("option", { name: "Arc (Not installed)" })).toBeDisabled()
+  expect(screen.getByRole("option", { hidden: true, name: "Arc (Not installed)" })).toBeDisabled()
   const profile = screen.getByRole("combobox", { name: copy.profile })
   expect(profile).toHaveValue("Default")
-  await user.selectOptions(profile, "Profile 1")
+  await selectOption(profile, "Profile 1")
   await user.click(screen.getByRole("button", { name: copy.run }))
   await waitFor(() =>
     expect(importPasswordsFromBrowser).toHaveBeenCalledWith("chrome", "Profile 1")
@@ -100,7 +101,7 @@ it("explains a Firefox primary password and counts other row errors", async () =
     errors: ["primary_password_set", "row 3: bad url"],
   })
   renderDialog()
-  await user.selectOptions(await screen.findByRole("combobox", { name: copy.source }), "firefox")
+  await selectOption(await screen.findByRole("combobox", { name: copy.source }), "firefox")
   expect(screen.getByRole("combobox", { name: copy.profile })).toHaveValue("abc.default")
   await user.click(screen.getByRole("button", { name: copy.run }))
   const result = await screen.findByTestId("password-import-result")
@@ -146,8 +147,8 @@ it("imports a CSV file with the chosen format, or auto-detects", async () => {
   const { onImported } = renderDialog()
   await user.click(screen.getByRole("tab", { name: copy.csvTab }))
   const format = await screen.findByRole("combobox", { name: copy.format })
-  expect(within(format).getAllByRole("option")).toHaveLength(8)
-  await user.selectOptions(format, "bitwarden")
+  expect(within(getNativeSelect(format)).getAllByRole("option", { hidden: true })).toHaveLength(8)
+  await selectOption(format, "bitwarden")
   await user.click(screen.getByRole("button", { name: copy.chooseFile }))
   await waitFor(() =>
     expect(importPasswordsFromCsv).toHaveBeenCalledWith("/tmp/bw.csv", "bitwarden")
@@ -161,7 +162,7 @@ it("imports a CSV file with the chosen format, or auto-detects", async () => {
   expect(await screen.findByTestId("password-import-result")).toHaveTextContent("Imported 3")
   expect(onImported).toHaveBeenCalledTimes(1)
 
-  await user.selectOptions(format, "auto")
+  await selectOption(format, "auto")
   await user.click(screen.getByRole("button", { name: copy.chooseFile }))
   await waitFor(() =>
     expect(importPasswordsFromCsv).toHaveBeenLastCalledWith("/tmp/any.csv", undefined)

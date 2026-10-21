@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 // The remote toolbar used to be a flat row of ten controls with no responsive
@@ -908,7 +909,7 @@ describe("engine switch", () => {
       name: "browser.backend.label",
     })
     expect(select).toHaveValue("remote")
-    fireEvent.change(select, { target: { value: "embedded" } })
+    await selectOption(select, "embedded")
     expect(onBackendChange).toHaveBeenCalledWith("embedded")
   })
 

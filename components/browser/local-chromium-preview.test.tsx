@@ -187,9 +187,11 @@ function renderPreview(
 describe("adaptive viewport", () => {
   let size: { width: number; height: number }
   let observers: { callback: ResizeObserverCallback; elements: Set<Element> }[]
+  let originalDecode: typeof createImageBitmap
 
   beforeEach(() => {
     jest.useFakeTimers()
+    originalDecode = globalThis.createImageBitmap
     size = { width: 830, height: 1450 }
     observers = []
     jest.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (
@@ -230,6 +232,7 @@ describe("adaptive viewport", () => {
   })
 
   afterEach(() => {
+    globalThis.createImageBitmap = originalDecode
     jest.restoreAllMocks()
     jest.useRealTimers()
   })
@@ -247,6 +250,142 @@ describe("adaptive viewport", () => {
     act(() => observer!.callback([], {} as ResizeObserver))
   }
 
+  function pushFrame(width: number, height: number, sequence: number) {
+    const bytes = new Uint8Array(25)
+    const header = new DataView(bytes.buffer)
+    header.setUint8(0, 1)
+    header.setUint8(1, 1)
+    header.setUint16(2, 24)
+    header.setUint32(4, sequence)
+    header.setUint16(8, width)
+    header.setUint16(10, height)
+    header.setUint32(20, 1)
+    act(() => sharedMock.mock.lastCall[0].onFrame(bytes))
+  }
+
+  it("withholds the default viewport and keeps a fresh frame received before the sizing reply", async () => {
+    let finish!: (result: { frameSequence: number }) => void
+    rpcMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const drawImage = jest.fn()
+    jest
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue({ drawImage } as unknown as ReturnType<HTMLCanvasElement["getContext"]>)
+    globalThis.createImageBitmap = jest
+      .fn()
+      .mockResolvedValue({ width: 1660, height: 2900, close: jest.fn() })
+    renderPreview(makeSession())
+    await act(async () => undefined)
+    const canvas = screen.getByRole("application", { name: "Local browser page" })
+    pushFrame(1280, 720, 1)
+    expect(canvas).toHaveStyle({ opacity: "0" })
+    expect(createImageBitmap).not.toHaveBeenCalled()
+    pushFrame(size.width, size.height, 8)
+    expect(createImageBitmap).not.toHaveBeenCalled()
+    await act(async () => {
+      finish({ frameSequence: 7 })
+    })
+    expect(drawImage).toHaveBeenCalledTimes(1)
+    expect(canvas).toHaveStyle({ opacity: "1" })
+  })
+
+  it("rejects a same-size old-page decode and frames at or before the synchronization fence", async () => {
+    let finishDecode!: (value: ImageBitmap) => void
+    const oldBitmap = { width: 1660, height: 2900, close: jest.fn() } as unknown as ImageBitmap
+    const newBitmap = { width: 1660, height: 2900, close: jest.fn() } as unknown as ImageBitmap
+    globalThis.createImageBitmap = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishDecode = resolve
+          })
+      )
+      .mockResolvedValue(newBitmap)
+    const drawImage = jest.fn()
+    jest
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue({ drawImage } as unknown as ReturnType<HTMLCanvasElement["getContext"]>)
+    rpcMock
+      .mockResolvedValueOnce({ frameSequence: 10 })
+      .mockResolvedValueOnce({ frameSequence: 20 })
+    const session = makeSession()
+    const { rerender, unmount } = renderPreview(session)
+    await settleResize()
+    pushFrame(size.width, size.height, 11)
+    session.activePageId = "p2"
+    rerender(<LocalChromiumPreview backend="local-chromium" />)
+    await settleResize()
+    await act(async () => {
+      finishDecode(oldBitmap)
+    })
+    expect(drawImage).not.toHaveBeenCalled()
+    expect(oldBitmap.close).toHaveBeenCalledTimes(1)
+    pushFrame(size.width, size.height, 20)
+    await act(async () => undefined)
+    expect(drawImage).not.toHaveBeenCalled()
+    pushFrame(size.width, size.height, 21)
+    await act(async () => undefined)
+    expect(drawImage).toHaveBeenCalledWith(newBitmap, 0, 0)
+    unmount()
+    pushFrame(size.width, size.height, 22)
+    await act(async () => undefined)
+    expect(drawImage).toHaveBeenCalledTimes(1)
+  })
+
+  it("synchronizes the first viewport immediately and keeps updating throughout a drag", async () => {
+    renderPreview(makeSession())
+    await act(async () => undefined)
+    expect(rpcMock).toHaveBeenCalledTimes(1)
+    rpcMock.mockClear()
+    for (let index = 0; index < 60; index += 1) {
+      size = { width: 830 - index * 2, height: 1450 }
+      notifyResize()
+      await act(async () => {
+        jest.advanceTimersByTime(16)
+      })
+    }
+    expect(rpcMock.mock.calls.length).toBeGreaterThan(5)
+    expect(rpcMock.mock.calls.length).toBeLessThan(25)
+    await settleResize()
+    expect(rpcMock).toHaveBeenLastCalledWith(
+      "browser.emulate",
+      expect.objectContaining({
+        viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true },
+      })
+    )
+  })
+
+  it("does not rerender the preview body for widths within one rail placement", async () => {
+    jest.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => ({
+      ...size,
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: size.width,
+      bottom: size.height,
+      toJSON: () => ({}),
+    }))
+    renderPreview(makeSession())
+    await settleResize()
+    const before = (useLocalFileChooser as jest.Mock).mock.calls.length
+    const toolbar = screen.getByTestId("browser-toolbar")
+    for (let index = 0; index < 60; index += 1) {
+      size = { width: 830 - index, height: 1450 }
+      act(() => {
+        for (const observer of observers) {
+          if (observer.elements.has(toolbar)) observer.callback([], {} as ResizeObserver)
+        }
+      })
+    }
+    expect((useLocalFileChooser as jest.Mock).mock.calls.length).toBe(before)
+  })
+
   it.each(["local-chromium", "user-chrome"] as const)(
     "fits %s to the content area on opening",
     async (backend) => {
@@ -255,6 +394,7 @@ describe("adaptive viewport", () => {
       expect(rpcMock).toHaveBeenCalledWith("browser.emulate", {
         sessionId: "pane-1",
         pageId: "p1",
+        synchronizeFrame: true,
         viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true },
       })
     }
@@ -349,6 +489,7 @@ describe("adaptive viewport", () => {
     expect(rpcMock).toHaveBeenLastCalledWith("browser.emulate", {
       sessionId: "pane-1",
       pageId: "p2",
+      synchronizeFrame: true,
       viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true },
     })
   })
@@ -388,6 +529,7 @@ describe("adaptive viewport", () => {
     expect(rpcMock).toHaveBeenLastCalledWith("browser.emulate", {
       sessionId: "pane-1",
       pageId: "p1",
+      synchronizeFrame: true,
       viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true },
     })
   })
@@ -403,6 +545,7 @@ describe("adaptive viewport", () => {
     expect(rpcMock).toHaveBeenLastCalledWith("browser.emulate", {
       sessionId: "pane-1",
       pageId: "p1",
+      synchronizeFrame: true,
       viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true },
     })
   })
@@ -424,6 +567,7 @@ describe("adaptive viewport", () => {
     expect(rpcMock).toHaveBeenLastCalledWith("browser.emulate", {
       sessionId: "pane-1",
       pageId: "p1",
+      synchronizeFrame: true,
       viewport: { ...size, deviceScaleFactor: 1, fitToWidth: true },
     })
   })
@@ -435,6 +579,7 @@ describe("adaptive viewport", () => {
     expect(rpcMock).toHaveBeenLastCalledWith("browser.emulate", {
       sessionId: "pane-1",
       pageId: "p1",
+      synchronizeFrame: true,
       viewport: { ...size, deviceScaleFactor: 2, fitToWidth: true },
     })
   })
@@ -476,7 +621,10 @@ it("preserves high-density bitmap pixels while mapping input in CSS page coordin
   const bitmap = { width: 1660, height: 2900, close: jest.fn() }
   globalThis.createImageBitmap = jest.fn().mockResolvedValue(bitmap)
   try {
+    jest.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(830)
+    jest.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(1450)
     renderPreview(makeSession())
+    await act(async () => undefined)
     const canvas = screen.getByRole("application", {
       name: "Local browser page",
     }) as HTMLCanvasElement
