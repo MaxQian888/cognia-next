@@ -37,7 +37,7 @@ interface WorkspaceSwitcherProps {
    * rail, leftward from a right one (`OverlaySideContext`, provided by the
    * rail). `wide` is a text
    * trigger for the title bar's start zone above the expanded sidebar:
-   * initial, name, chevron, with the popover opening downward under it. Same
+   * folder, name, chevron, with the popover opening downward under it. Same
    * list, same actions.
    */
   variant?: "rail" | "wide"
@@ -75,23 +75,27 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
               variant="ghost"
               size="sm"
               aria-label={triggerLabel}
+              title={active?.name ?? t("none")}
               data-testid="workspace-switcher"
               data-variant="wide"
               className={cn(
-                "h-7 max-w-full min-w-0 gap-1.5 rounded-md px-1.5 text-foreground",
+                "group h-7 max-w-[min(14rem,100%)] min-w-0 justify-start gap-1.5 rounded-md border border-border/50 bg-background/30 px-1.5 text-muted-foreground shadow-xs transition-colors hover:border-border hover:bg-accent/70 hover:text-foreground data-[state=open]:border-border data-[state=open]:bg-accent data-[state=open]:text-foreground",
                 className
               )}
             >
               <span
                 aria-hidden
-                className="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/15 text-[11px] font-semibold text-primary"
+                className="flex size-5 shrink-0 items-center justify-center rounded bg-foreground/5 text-muted-foreground group-data-[state=open]:text-foreground"
               >
-                {initial ?? <FolderIcon className="size-3.5" />}
+                <FolderIcon className="size-3.5" />
               </span>
-              <span className="truncate text-sm font-semibold tracking-tight">
+              <span className="min-w-0 truncate text-xs font-medium">
                 {active?.name ?? t("none")}
               </span>
-              <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <ChevronDownIcon
+                aria-hidden
+                className="ml-auto size-3 shrink-0 text-muted-foreground/70 transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none"
+              />
             </Button>
           </PopoverTrigger>
         ) : (
@@ -124,8 +128,22 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
           </Tooltip>
         )}
 
-        <PopoverContent side={wide ? "bottom" : overlaySide} align="start" className="w-72 p-1">
-          <WorkspacePickerList actions={actions} onSwitched={() => setOpen(false)} />
+        <PopoverContent
+          side={wide ? "bottom" : overlaySide}
+          align="start"
+          sideOffset={wide ? 8 : 4}
+          collisionPadding={8}
+          aria-label={t("switchTitle")}
+          className={cn(
+            "flex max-h-[var(--radix-popover-content-available-height)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-xl border-border/70 p-1.5 shadow-lg",
+            wide ? "w-80" : "w-72"
+          )}
+        >
+          <WorkspacePickerList
+            actions={actions}
+            onSwitched={() => setOpen(false)}
+            className="min-h-0 flex-1"
+          />
         </PopoverContent>
       </Popover>
     </>

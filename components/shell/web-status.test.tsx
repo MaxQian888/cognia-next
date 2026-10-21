@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
-import { StrictMode } from "react"
-import { act, render, screen, within } from "@testing-library/react"
+import { StrictMode, useState } from "react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { getBarCatalog, resolveBarLayout } from "@/lib/shell/bar-items"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
@@ -156,6 +156,40 @@ it("chooses only one equal-priority host and releases it on unmount", () => {
 it("does not render status mounts outside the desktop web provider", () => {
   render(<Hosts enabled={false} />)
   expect(screen.queryAllByRole("button")).toHaveLength(0)
+})
+
+it("suspends status hosts without remounting route state", () => {
+  function Route() {
+    const [draft, setDraft] = useState("")
+    return (
+      <>
+        <input
+          aria-label="Draft"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <WebSessionStatus host="header" />
+        <WebGlobalStatusInline />
+      </>
+    )
+  }
+  const tree = (active: boolean) => (
+    <WebStatusProvider enabled active={active}>
+      <Route />
+    </WebStatusProvider>
+  )
+  const { rerender } = render(tree(true))
+  const input = screen.getByRole("textbox", { name: "Draft" })
+  fireEvent.change(input, { target: { value: "Unsaved draft" } })
+  expect(screen.getAllByRole("button").length).toBeGreaterThan(0)
+  rerender(tree(false))
+  expect(screen.queryAllByRole("button")).toHaveLength(0)
+  expect(screen.getByRole("textbox", { name: "Draft" })).toBe(input)
+  expect(input).toHaveValue("Unsaved draft")
+  rerender(tree(true))
+  expect(screen.getAllByRole("button").length).toBeGreaterThan(0)
+  expect(screen.getByRole("textbox", { name: "Draft" })).toBe(input)
+  expect(input).toHaveValue("Unsaved draft")
 })
 
 it.each(["guildRailCollapsed", "sidebarHostsNav"])(

@@ -1,7 +1,8 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen } from "@testing-library/react"
+import { useState } from "react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 import { MobileShellWrapper } from "./mobile-shell-wrapper"
 import { useSettingsStore as realSettingsStore } from "@/stores/settings/settings-store"
@@ -16,8 +17,8 @@ jest.mock("@/hooks/use-platform", () => ({
 // whether the viewport is narrow. They disagree exactly where the bug was: a
 // 375px browser is `web` + compact.
 const compactMock = jest.fn(() => false)
-jest.mock("@/hooks/ui/use-compact-layout", () => ({
-  useCompactLayout: () => compactMock(),
+jest.mock("@/hooks/ui/use-mobile", () => ({
+  useIsMobile: () => compactMock(),
 }))
 
 const pathnameMock = jest.fn(() => "/")
@@ -135,6 +136,44 @@ describe("<MobileShellWrapper />", () => {
       realSettingsStore.setState({ settings: { mobileTabLayout: layout } } as never)
     })
   }
+
+  it.each([false, true])(
+    "preserves the route draft across web shell switches (initial compact: %s)",
+    (initialCompact) => {
+      platformMock.mockReturnValue("web")
+      compactMock.mockReturnValue(initialCompact)
+      function StatefulRoute() {
+        const [draft, setDraft] = useState("")
+        return (
+          <input
+            aria-label="Draft"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+        )
+      }
+      const { rerender } = render(
+        <MobileShellWrapper>
+          <StatefulRoute />
+        </MobileShellWrapper>
+      )
+      const input = screen.getByRole("textbox", { name: "Draft" })
+      fireEvent.change(input, { target: { value: "Unsaved draft" } })
+      for (const compact of [!initialCompact, initialCompact, !initialCompact]) {
+        compactMock.mockReturnValue(compact)
+        rerender(
+          <MobileShellWrapper>
+            <StatefulRoute />
+          </MobileShellWrapper>
+        )
+        expect(screen.getByRole("textbox", { name: "Draft" })).toBe(input)
+        expect(input).toHaveValue("Unsaved draft")
+        expect(input.isConnected).toBe(true)
+        expect(Boolean(screen.queryByTestId("mobile-tab-bar"))).toBe(compact)
+      }
+      expect(replaceMock).not.toHaveBeenCalled()
+    }
+  )
 
   it("renders the tab bar on mobile", () => {
     render(

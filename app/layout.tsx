@@ -12,6 +12,9 @@ import { GeistMono } from "geist/font/mono"
 import Script from "next/script"
 import { getLocale } from "next-intl/server"
 import { BOOT_SCRIPT } from "@/lib/appearance/boot-script"
+import { createStartupRecoveryScript } from "@/lib/boot/startup-recovery"
+import enLoading from "@/i18n/messages/en/loading.json"
+import zhLoading from "@/i18n/messages/zh-CN/loading.json"
 import { AppRuntime } from "@/components/runtime/app-runtime"
 import { WebVitalsReporter } from "@/components/providers/initializers/web-vitals-reporter"
 import "./globals.css"
@@ -74,6 +77,16 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        {/* A native inline script executes even if every Next.js chunk fails.
+            next/script beforeInteractive queues work into the Next runtime. */}
+        <script
+          id="cognia-startup-recovery-script"
+          dangerouslySetInnerHTML={{
+            __html: createStartupRecoveryScript(
+              locale === "zh-CN" ? zhLoading.startupRecovery : enLoading.startupRecovery
+            ),
+          }}
+        />
         {/* FOUC mitigation — applies a mirrored CSS-var snapshot from
             localStorage before React hydrates so custom themes don't
             flash the default palette on first paint. Owns CSS vars

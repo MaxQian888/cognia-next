@@ -120,6 +120,7 @@ describe("ShareViewPage", () => {
     mockDecrypt.mockResolvedValue({ status: "ready", payload: PAYLOAD })
     render(<ShareViewPage />)
     await waitFor(() => expect(screen.getByText("Passphrase required")).toBeInTheDocument())
+    expect(screen.getByLabelText("Passphrase")).toHaveAttribute("aria-invalid", "true")
     fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "pw" } })
     fireEvent.click(screen.getByText("Unlock"))
     await waitFor(() => expect(screen.getByTestId("payload")).toBeInTheDocument())
@@ -133,6 +134,12 @@ describe("ShareViewPage", () => {
 
     render(<ShareViewPage />)
     await waitFor(() => expect(screen.getByText("Passphrase required")).toBeInTheDocument())
+
+    expect(screen.getByLabelText("Passphrase")).toHaveClass(
+      "border-input",
+      "focus-visible:border-ring"
+    )
+    expect(screen.getByRole("button", { name: "Unlock" })).toHaveClass("focus-visible:ring-[3px]")
 
     fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "hunter2" } })
     fireEvent.click(screen.getByText("Unlock"))

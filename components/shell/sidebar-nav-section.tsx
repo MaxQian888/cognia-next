@@ -54,6 +54,7 @@ export interface SidebarRowProps extends Omit<
   "children" | "onClick"
 > {
   active?: boolean
+  pending?: boolean
   onClick?: () => void
   /**
    * Draw the travelling selection tint behind an active row. Off for rows
@@ -81,6 +82,7 @@ export interface SidebarRowProps extends Omit<
  */
 export function SidebarRow({
   active = false,
+  pending,
   onClick,
   highlight = true,
   leading,
@@ -101,6 +103,7 @@ export function SidebarRow({
       type="button"
       variant="ghost"
       {...rest}
+      aria-busy={pending ?? rest["aria-busy"]}
       {...roving.rowProps}
       tabIndex={rest.tabIndex ?? roving.tabIndex}
       onKeyDown={(event) => {
@@ -132,7 +135,13 @@ export function SidebarRow({
         </span>
       ) : null}
       <span className="relative flex size-4 shrink-0 items-center justify-center has-[[data-navigation-artwork]]:size-7 [&>svg]:size-4">
-        {icon}
+        {/* Preserve the artwork selector and its row height throughout navigation. */}
+        <span
+          className={cn("flex items-center justify-center [&>svg]:size-4", pending && "invisible")}
+        >
+          {icon}
+        </span>
+        {pending ? <Spinner className="absolute inset-0 m-auto size-4" /> : null}
       </span>
       <span className="relative min-w-0 flex-1 truncate text-left">{label}</span>
       {trailing ? <span className="relative flex shrink-0 items-center">{trailing}</span> : null}
@@ -217,11 +226,10 @@ export function SidebarNavSection({ className }: { className?: string }) {
                   >
                     <SidebarRow
                       active={isModeActive(mode)}
+                      pending={isModePending(mode)}
                       onClick={() => selectMode(mode)}
                       icon={
-                        isModePending(mode) ? (
-                          <Spinner />
-                        ) : isCanvas ? (
+                        isCanvas ? (
                           <NavigationIcon id="canvas" fallback={PencilRulerIcon} />
                         ) : (
                           <ResolvedRailIcon name={mode.container.def.icon} className="size-4" />
@@ -260,7 +268,7 @@ export function SidebarNavSection({ className }: { className?: string }) {
                     <SidebarRow
                       active={isFeatureActive(item.route)}
                       onClick={() => goToFeature(item.route)}
-                      aria-busy={pendingRoute === item.route}
+                      pending={pendingRoute === item.route}
                       aria-label={count > 0 ? `${label}, ${t("badgeCount", { count })}` : undefined}
                       aria-keyshortcuts={shortcut?.aria}
                       title={
@@ -268,13 +276,7 @@ export function SidebarNavSection({ className }: { className?: string }) {
                           ? t("shortcutHint", { label, shortcut: shortcut.label })
                           : label
                       }
-                      icon={
-                        pendingRoute === item.route ? (
-                          <Spinner />
-                        ) : (
-                          <NavigationIcon id={item.id} fallback={item.Icon} />
-                        )
-                      }
+                      icon={<NavigationIcon id={item.id} fallback={item.Icon} />}
                       label={label}
                       trailing={
                         count > 0 ? (
@@ -295,13 +297,13 @@ export function SidebarNavSection({ className }: { className?: string }) {
             <PopoverTrigger asChild>
               <SidebarRow
                 active={overflowActive}
-                aria-busy={overflowPending}
+                pending={overflowPending}
                 aria-label={
                   overflowBadge > 0
                     ? `${t("more")}, ${t("badgeCount", { count: overflowBadge })}`
                     : undefined
                 }
-                icon={overflowPending ? <Spinner /> : <EllipsisIcon />}
+                icon={<EllipsisIcon />}
                 label={t("more")}
                 trailing={
                   <>

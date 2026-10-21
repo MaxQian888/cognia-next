@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -321,9 +322,7 @@ it("updates retrieval strategy while preserving other project overrides", async 
       project={project({ knowledgeSettings: { ragTopK: 7, enableProjectRag: false } })}
     />
   )
-  await userEvent
-    .setup()
-    .selectOptions(screen.getByRole("combobox", { name: "retrievalStrategy" }), "hybrid")
+  await selectOption(screen.getByRole("combobox", { name: "retrievalStrategy" }), "hybrid")
   expect(updateProject).toHaveBeenCalledWith("ws1", {
     knowledgeSettings: { ragTopK: 7, enableProjectRag: false, retrievalStrategy: "hybrid" },
   })

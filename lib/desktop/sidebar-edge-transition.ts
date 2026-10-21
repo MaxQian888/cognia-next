@@ -62,6 +62,20 @@ export function runSidebarGesture(apply: () => void, sidebarTargetPx: number): v
     useSettingsStore.getState().settings?.sidebarSide ?? DEFAULT_SIDEBAR_SIDE
 
   const rail = document.querySelector<HTMLElement>('[data-variant="rail"]')
+  // Lift the bounded chat pane out of the workspace snapshot. Its reading
+  // column is centered, whereas the workspace image is anchored at the dock
+  // edge: clipping that image holds messages still until the final reflow.
+  // Capture the viewport once, never individual messages or the full history.
+  const chat = workspace.querySelector<HTMLElement>("#artifact-chat")
+  const readingColumn = chat?.querySelector<HTMLElement>(
+    '[data-slot="conversation-reading-column"]'
+  )
+  // The main and optional split pane each keep a stable summary host, even
+  // when the card falls back to its popover. Capture those right-edge anchors
+  // independently so the reading-column translation cannot drag them sideways.
+  const [summary, secondarySummary] = workspace.querySelectorAll<HTMLElement>(
+    '[data-testid="session-summary-stage-host"]'
+  )
   const [outletStart, outletCenter, outletEnd] = TITLE_BAR_ZONES.map((zone) =>
     document.querySelector<HTMLElement>(`[data-title-bar-outlet="${zone}"]`)
   )
@@ -72,6 +86,22 @@ export function runSidebarGesture(apply: () => void, sidebarTargetPx: number): v
       { element: aside, name: "cognia-shell-sidebar" },
       { element: rail, name: "cognia-shell-rail" },
       { element: workspace, name: "cognia-shell-workspace" },
+      {
+        element: chat,
+        name: "cognia-shell-chat",
+        getContentOffset: chat
+          ? () => {
+              const pane = chat.getBoundingClientRect()
+              // The real column accounts for its max width and the timeline
+              // rail. With no transcript, follow the empty pane's center.
+              return readingColumn
+                ? readingColumn.getBoundingClientRect().left - pane.left
+                : pane.width / 2
+            }
+          : undefined,
+      },
+      { element: summary, name: "cognia-shell-summary" },
+      { element: secondarySummary, name: "cognia-shell-summary-secondary" },
       { element: outletStart, name: "cognia-shell-outlet-start" },
       { element: outletCenter, name: "cognia-shell-outlet-center" },
       { element: outletEnd, name: "cognia-shell-outlet-end" },

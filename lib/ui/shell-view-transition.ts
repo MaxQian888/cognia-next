@@ -22,6 +22,12 @@ export interface ShellTransitionCapture {
   element: HTMLElement | null | undefined
   /** The `view-transition-name` it answers to in `app/globals.css`. */
   name: string
+  /**
+   * Horizontal content anchor relative to this capture. Read before and after
+   * the layout commit; their difference is published on the root as
+   * `--<name>-content-offset-x` for a compositor-only snapshot translation.
+   */
+  getContentOffset?: () => number
 }
 
 export interface ShellViewTransitionOptions {
@@ -126,6 +132,7 @@ function afterPendingCommits(): Promise<void> {
  * a plain set/remove would drop the hold out from under it.
  */
 let edgeTransitionHolds = 0
+let cancelActiveTransition: (() => void) | undefined
 
 function holdEdgeTransitions(root: HTMLElement): void {
   edgeTransitionHolds += 1
@@ -147,6 +154,11 @@ export function runShellViewTransition({
   apply,
   onDone,
 }: ShellViewTransitionOptions): () => void {
+  // The browser skips an earlier transition when a new one starts, but its
+  // promise cleanup runs later. Restore its names and caller-owned targets
+  // before the next gesture reads them, so that late cleanup cannot erase the
+  // new capture or leave temporary names behind after a rapid reversal.
+  cancelActiveTransition?.()
   const startViewTransition =
     typeof document !== "undefined" ? document.startViewTransition?.bind(document) : undefined
 
@@ -169,6 +181,8 @@ export function runShellViewTransition({
   const root = document.documentElement
   const previousRootName = root.style.viewTransitionName
   const previousNames = captures.map((capture) => capture.element?.style.viewTransitionName ?? "")
+  const offsetProperties = captures.map((capture) => `--${capture.name}-content-offset-x`)
+  const previousOffsets = offsetProperties.map((property) => root.style.getPropertyValue(property))
   // The document root participates in every transition by default; opting it
   // out is what stops a whole-page crossfade under the panel snapshots.
   root.style.viewTransitionName = "none"
@@ -177,6 +191,7 @@ export function runShellViewTransition({
   })
   holdEdgeTransitions(root)
   const sizesBefore = captures.map((capture) => captureArea(capture.element))
+  const offsetsBefore = captures.map((capture) => capture.getContentOffset?.())
   const reset = () => {
     releaseEdgeTransitions(root)
     root.removeAttribute(SHELL_VIEW_TRANSITION_GROW_ATTRIBUTE)
@@ -184,6 +199,11 @@ export function runShellViewTransition({
     root.style.viewTransitionName = previousRootName
     captures.forEach((capture, index) => {
       if (capture.element) capture.element.style.viewTransitionName = previousNames[index]
+      if (capture.getContentOffset) {
+        if (previousOffsets[index])
+          root.style.setProperty(offsetProperties[index], previousOffsets[index])
+        else root.style.removeProperty(offsetProperties[index])
+      }
     })
   }
 
@@ -205,6 +225,13 @@ export function runShellViewTransition({
       await afterPendingCommits()
       // Settled meanwhile (skipped): the cleanup already ran, leave no marks.
       if (!active) return
+      captures.forEach((capture, index) => {
+        const before = offsetsBefore[index]
+        const after = capture.getContentOffset?.()
+        if (before !== undefined && after !== undefined) {
+          root.style.setProperty(offsetProperties[index], `${before - after}px`)
+        }
+      })
       const { grow, shrink } = classifyCaptures(captures, sizesBefore)
       root.setAttribute(SHELL_VIEW_TRANSITION_GROW_ATTRIBUTE, grow.join(" "))
       root.setAttribute(SHELL_VIEW_TRANSITION_SHRINK_ATTRIBUTE, shrink.join(" "))
@@ -220,17 +247,23 @@ export function runShellViewTransition({
   const finish = () => {
     if (!active) return
     active = false
+    if (cancelActiveTransition === cancel) cancelActiveTransition = undefined
     reset()
     onDone?.()
   }
+  const cancel = () => {
+    if (!active) return
+    // skipTransition still schedules its update callback. Apply it now so a
+    // delayed callback cannot overwrite the gesture that supersedes it.
+    applyOnce()
+    transition.skipTransition()
+    finish()
+  }
+  cancelActiveTransition = cancel
   // `ready` rejects whenever the animation never starts: skipped by the
   // browser (the page went hidden mid-call) or by `skipTransition` below.
   // `finished` still settles in both cases and owns the cleanup.
   void transition.ready.catch(() => undefined)
   void transition.finished.catch(() => undefined).finally(() => finish())
-  return () => {
-    if (!active) return
-    transition.skipTransition()
-    finish()
-  }
+  return cancel
 }

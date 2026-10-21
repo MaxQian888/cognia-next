@@ -15,6 +15,7 @@ import {
 } from "@/lib/i18n/locale-preference"
 import { getPref, setPref } from "@/lib/tauri/store"
 import { useSettingsStore } from "@/stores/settings"
+import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 
 /** Shared by the full shell and least-privilege overlays, including before unlock. */
 export function useAppLocaleState(): { locale: Locale; ready: boolean } {
@@ -22,6 +23,7 @@ export function useAppLocaleState(): { locale: Locale; ready: boolean } {
   const languageMode = useSettingsStore((s) => s.settings?.languageMode)
   const loaded = useSettingsStore((s) => s.loaded)
   const refreshSystemLanguage = useSettingsStore((s) => s.refreshSystemLanguage)
+  const mirrorNativePrefs = !isSecondaryOverlayRole(getPetWindowRole())
   // Match the static export on the initial client render; resolve browser-only
   // preferences immediately after hydration instead of making SSR nondeterministic.
   const [boot, setBoot] = useState<LocalePreference | null>(null)
@@ -38,7 +40,7 @@ export function useAppLocaleState(): { locale: Locale; ready: boolean } {
     }
     update()
     const unsubscribe = subscribeSystemLocale(update)
-    if (!readStoredLocalePreference()) {
+    if (mirrorNativePrefs && !readStoredLocalePreference()) {
       void (async () => {
         const saved = await getPref<LocalePreference>(LOCALE_PREFERENCE_PREF)
         const legacy = saved ? null : await getPref<Locale>(LIGHTWEIGHT_LOCALE_PREF)
@@ -61,16 +63,19 @@ export function useAppLocaleState(): { locale: Locale; ready: boolean } {
       alive = false
       unsubscribe()
     }
-  }, [refreshSystemLanguage])
+  }, [refreshSystemLanguage, mirrorNativePrefs])
 
   useEffect(() => {
     if (!loaded) return
     refreshSystemLanguage()
     const preference = resolveLocalePreference({ language, languageMode })
     persistBootLocalePreference(preference)
+    // Secondary windows consume the shared browser/Dexie mirror. Only the
+    // main window owns writes to the native preferences file.
+    if (!mirrorNativePrefs) return
     void setPref(LOCALE_PREFERENCE_PREF, preference).catch(() => {})
     void setPref(LIGHTWEIGHT_LOCALE_PREF, preference.language).catch(() => {})
-  }, [loaded, language, languageMode, refreshSystemLanguage])
+  }, [loaded, language, languageMode, refreshSystemLanguage, mirrorNativePrefs])
 
   const locale = !boot
     ? defaultLocale

@@ -27,6 +27,12 @@ jest.mock("@/lib/tauri/store", () => ({
 }))
 import { useAppLocale } from "./use-app-locale"
 
+jest.mock("@/lib/pet/window-role", () => ({
+  getPetWindowRole: jest.fn(() => "main"),
+  isSecondaryOverlayRole: (role: string) => role === "overlay",
+}))
+import { getPetWindowRole } from "@/lib/pet/window-role"
+
 beforeEach(() => {
   localStorage.clear()
   state.loaded = false
@@ -34,6 +40,7 @@ beforeEach(() => {
   getPref.mockReset().mockResolvedValue(null)
   setPref.mockReset().mockResolvedValue(undefined)
   refreshSystemLanguage.mockReset()
+  jest.mocked(getPetWindowRole).mockReturnValue("main")
   jest.spyOn(navigator, "languages", "get").mockReturnValue(["zh-Hans-CN"])
 })
 afterEach(() => jest.restoreAllMocks())
@@ -99,4 +106,17 @@ it("keeps boot usable when native preference reads reject", async () => {
   const { result } = renderHook(useAppLocale)
   await act(async () => {})
   expect(result.current).toBe("zh-CN")
+})
+
+it("mirrors an overlay locale without accessing the main native preference store", async () => {
+  jest.mocked(getPetWindowRole).mockReturnValue("overlay")
+  const { result, rerender } = renderHook(useAppLocale)
+  state.loaded = true
+  state.settings = { language: "en", languageMode: "manual" }
+  rerender()
+  await act(async () => {})
+  expect(result.current).toBe("en")
+  expect(getPref).not.toHaveBeenCalled()
+  expect(setPref).not.toHaveBeenCalled()
+  expect(JSON.parse(localStorage.getItem(BOOT_LOCALE_STORAGE_KEY)!)).toEqual(state.settings)
 })

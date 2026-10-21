@@ -138,6 +138,42 @@ describe("runShellViewTransition", () => {
     expect(apply).toHaveBeenCalledTimes(1)
   })
 
+  it("measures the content offset after pending commits and restores it on finish", async () => {
+    installViewTransition()
+    const property = "--chat-content-offset-x"
+    document.documentElement.style.setProperty(property, "7px")
+    let offset = 24
+    const getContentOffset = jest.fn(() => offset)
+    runShellViewTransition({
+      captures: [{ element: document.createElement("div"), name: "chat", getContentOffset }],
+      apply: () => queueMicrotask(() => (offset = 0)),
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(getContentOffset).toHaveBeenCalledTimes(2)
+    expect(document.documentElement.style.getPropertyValue(property)).toBe("24px")
+    stubs[0].resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(document.documentElement.style.getPropertyValue(property)).toBe("7px")
+    document.documentElement.style.removeProperty(property)
+  })
+
+  it("does not publish an offset after a transition was cancelled", async () => {
+    installViewTransition()
+    const getContentOffset = jest.fn(() => 100)
+    const cancel = runShellViewTransition({
+      captures: [{ element: document.createElement("div"), name: "chat", getContentOffset }],
+      apply: jest.fn(),
+    })
+    cancel()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(getContentOffset).toHaveBeenCalledTimes(1)
+    expect(document.documentElement.style.getPropertyValue("--chat-content-offset-x")).toBe("")
+  })
+
   it("cancelling skips the transition and settles cleanup once", () => {
     installViewTransition()
     const el = document.createElement("div")
@@ -279,9 +315,60 @@ describe("edge-panel transition hold", () => {
     expect(held()).toBe(false)
   })
 
+  it("keeps the latest capture intact when an interrupted gesture finishes late", async () => {
+    installViewTransition()
+    const element = document.createElement("div")
+    element.style.viewTransitionName = "original"
+    const captures = [{ element, name: "chat" }]
+    runShellViewTransition({ captures, apply: jest.fn() })
+    runShellViewTransition({ captures, apply: jest.fn() })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    stubs[0].resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(element.style.viewTransitionName).toBe("chat")
+    expect(document.documentElement.style.viewTransitionName).toBe("none")
+    expect(held()).toBe(true)
+
+    stubs[1].resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(element.style.viewTransitionName).toBe("original")
+    expect(document.documentElement.style.viewTransitionName).toBe("")
+    expect(held()).toBe(false)
+  })
+
   it("releases the hold when the transition is cancelled", () => {
     installViewTransition()
     const cancel = runShellViewTransition({ captures: [], apply: jest.fn() })
+    cancel()
+    expect(held()).toBe(false)
+  })
+
+  it("lands a pending update before its replacement and ignores its delayed callback", async () => {
+    const updates: (() => void | Promise<void>)[] = []
+    const start = installViewTransition()
+    start.mockImplementation((update: () => void | Promise<void>) => {
+      updates.push(update)
+      return {
+        ready: Promise.resolve(),
+        finished: new Promise(() => {}),
+        skipTransition: jest.fn(),
+      }
+    })
+    const applied: string[] = []
+    const done = jest.fn()
+    runShellViewTransition({ captures: [], apply: () => applied.push("first"), onDone: done })
+    const cancel = runShellViewTransition({ captures: [], apply: () => applied.push("second") })
+    expect(applied).toEqual(["first"])
+    expect(done).toHaveBeenCalledTimes(1)
+
+    await updates[1]()
+    await updates[0]()
+    expect(applied).toEqual(["first", "second"])
+    expect(done).toHaveBeenCalledTimes(1)
     cancel()
     expect(held()).toBe(false)
   })

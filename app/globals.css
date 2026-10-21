@@ -2661,6 +2661,9 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-dock-panel) {
 ::view-transition-group(cognia-shell-sidebar),
 ::view-transition-group(cognia-shell-rail),
 ::view-transition-group(cognia-shell-workspace),
+::view-transition-group(cognia-shell-summary),
+::view-transition-group(cognia-shell-summary-secondary),
+::view-transition-group(cognia-shell-chat),
 ::view-transition-group(cognia-shell-outlet-start),
 ::view-transition-group(cognia-shell-outlet-center),
 ::view-transition-group(cognia-shell-outlet-end) {
@@ -2677,7 +2680,11 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-dock-panel) {
 ::view-transition-old(cognia-shell-rail),
 ::view-transition-new(cognia-shell-rail),
 ::view-transition-old(cognia-shell-workspace),
+::view-transition-old(cognia-shell-summary),
+::view-transition-old(cognia-shell-summary-secondary),
 ::view-transition-new(cognia-shell-workspace),
+::view-transition-new(cognia-shell-summary),
+::view-transition-new(cognia-shell-summary-secondary),
 ::view-transition-old(cognia-shell-outlet-start),
 ::view-transition-new(cognia-shell-outlet-start),
 ::view-transition-old(cognia-shell-outlet-center),
@@ -2704,12 +2711,55 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-dock-panel) {
 ::view-transition-old(cognia-shell-rail),
 ::view-transition-new(cognia-shell-rail),
 ::view-transition-old(cognia-shell-workspace),
+::view-transition-old(cognia-shell-summary),
+::view-transition-old(cognia-shell-summary-secondary),
 ::view-transition-new(cognia-shell-workspace),
+::view-transition-new(cognia-shell-summary),
+::view-transition-new(cognia-shell-summary-secondary),
 ::view-transition-old(cognia-shell-outlet-end),
 ::view-transition-new(cognia-shell-outlet-end),
 ::view-transition-old(cognia-dock-outlet-end),
 ::view-transition-new(cognia-dock-outlet-end) {
   object-position: right center;
+}
+
+/* Summary cards stay attached to each pane's top-right gutter; they must not
+   inherit the centered reading column's snapshot translation. */
+::view-transition-old(cognia-shell-summary),
+::view-transition-new(cognia-shell-summary),
+::view-transition-old(cognia-shell-summary-secondary),
+::view-transition-new(cognia-shell-summary-secondary) {
+  object-position: right top;
+}
+
+/* The chat has its own viewport-sized snapshot: moving its content anchor lets
+   the reading column travel with the pane instead of waiting for the dock-
+   anchored workspace image to disappear. Always draw the settled new layout,
+   including on shrink, so narrower text wraps before motion rather than
+   snapping at its end. No per-message layers or per-frame text layout. */
+::view-transition-old(cognia-shell-chat) {
+  animation: none;
+  opacity: 0;
+}
+
+::view-transition-new(cognia-shell-chat) {
+  animation: cognia-shell-chat-content-offset calc(280ms * var(--motion-duration-scale, 1))
+    cubic-bezier(0.32, 0.72, 0, 1) both;
+  mix-blend-mode: normal;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: none;
+  object-position: left center;
+  overflow: clip;
+}
+
+@keyframes cognia-shell-chat-content-offset {
+  from {
+    transform: translateX(var(--cognia-shell-chat-content-offset-x, 0px));
+  }
+  to {
+    transform: translateX(0);
+  }
 }
 
 /* Mirror the inboard anchors when the sidebar is pinned to the right edge. */
@@ -2725,6 +2775,10 @@ html.reduce-motion::view-transition-group(cognia-dock-outlet-end),
 html.reduce-motion::view-transition-group(cognia-shell-sidebar),
 html.reduce-motion::view-transition-group(cognia-shell-rail),
 html.reduce-motion::view-transition-group(cognia-shell-workspace),
+html.reduce-motion::view-transition-group(cognia-shell-summary),
+html.reduce-motion::view-transition-group(cognia-shell-summary-secondary),
+html.reduce-motion::view-transition-group(cognia-shell-chat),
+html.reduce-motion::view-transition-new(cognia-shell-chat),
 html.reduce-motion::view-transition-group(cognia-shell-outlet-start),
 html.reduce-motion::view-transition-group(cognia-shell-outlet-center),
 html.reduce-motion::view-transition-group(cognia-shell-outlet-end),
@@ -2733,6 +2787,10 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-dock-outlet-end),
 html[data-reduce-motion="true"]::view-transition-group(cognia-shell-sidebar),
 html[data-reduce-motion="true"]::view-transition-group(cognia-shell-rail),
 html[data-reduce-motion="true"]::view-transition-group(cognia-shell-workspace),
+html[data-reduce-motion="true"]::view-transition-group(cognia-shell-summary),
+html[data-reduce-motion="true"]::view-transition-group(cognia-shell-summary-secondary),
+html[data-reduce-motion="true"]::view-transition-group(cognia-shell-chat),
+html[data-reduce-motion="true"]::view-transition-new(cognia-shell-chat),
 html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-start),
 html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-center),
 html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-end) {
@@ -2745,6 +2803,10 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-end) 
   html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-sidebar),
   html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-rail),
   html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-workspace),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-summary),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-summary-secondary),
+  html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-chat),
+  html:not([data-motion-respect="off"])::view-transition-new(cognia-shell-chat),
   html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-outlet-start),
   html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-outlet-center),
   html:not([data-motion-respect="off"])::view-transition-group(cognia-shell-outlet-end) {
@@ -2869,7 +2931,11 @@ html[data-shell-view-transition]
 ::view-transition-old(cognia-shell-rail),
 ::view-transition-new(cognia-shell-rail),
 ::view-transition-old(cognia-shell-workspace),
+::view-transition-old(cognia-shell-summary),
+::view-transition-old(cognia-shell-summary-secondary),
 ::view-transition-new(cognia-shell-workspace),
+::view-transition-new(cognia-shell-summary),
+::view-transition-new(cognia-shell-summary-secondary),
 ::view-transition-old(cognia-shell-outlet-start),
 ::view-transition-new(cognia-shell-outlet-start),
 ::view-transition-old(cognia-shell-outlet-center),
@@ -2904,6 +2970,12 @@ html[data-shell-view-transition-grow~="cognia-shell-sidebar"]::view-transition-o
 html[data-shell-view-transition-grow~="cognia-shell-rail"]::view-transition-old(cognia-shell-rail),
 html[data-shell-view-transition-grow~="cognia-shell-workspace"]::view-transition-old(
     cognia-shell-workspace
+  ),
+html[data-shell-view-transition-grow~="cognia-shell-summary"]::view-transition-old(
+    cognia-shell-summary
+  ),
+html[data-shell-view-transition-grow~="cognia-shell-summary-secondary"]::view-transition-old(
+    cognia-shell-summary-secondary
   ),
 html[data-shell-view-transition-grow~="cognia-shell-outlet-start"]::view-transition-old(
     cognia-shell-outlet-start
@@ -2947,6 +3019,12 @@ html[data-shell-view-transition-shrink~="cognia-shell-rail"]::view-transition-ne
   ),
 html[data-shell-view-transition-shrink~="cognia-shell-workspace"]::view-transition-new(
     cognia-shell-workspace
+  ),
+html[data-shell-view-transition-shrink~="cognia-shell-summary"]::view-transition-new(
+    cognia-shell-summary
+  ),
+html[data-shell-view-transition-shrink~="cognia-shell-summary-secondary"]::view-transition-new(
+    cognia-shell-summary-secondary
   ),
 html[data-shell-view-transition-shrink~="cognia-shell-outlet-start"]::view-transition-new(
     cognia-shell-outlet-start

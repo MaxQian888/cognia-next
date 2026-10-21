@@ -40,6 +40,7 @@ import {
 import { formatRelative } from "@cognia/time"
 
 import { RuntimeTargetMenuSection } from "@/components/account/runtime-target-menu-section"
+import { keepOpenWhileNestedDialogFocused } from "@/components/shared/confirm-dialog"
 import { hostTone } from "@/components/devices/execution-host-switcher"
 import { SITE_TONE_DOT, SITE_TONE_TEXT, type SiteTone } from "@/components/sites/site-status"
 import { Badge } from "@/components/ui/badge"
@@ -507,7 +508,14 @@ function RuntimeConnectivity({ platform }: { platform: ReturnType<typeof usePlat
         </button>
       </PopoverTrigger>
 
-      <PopoverContent align="start" side="top" sideOffset={4} className="w-96 p-0">
+      <PopoverContent
+        align="start"
+        side="top"
+        sideOffset={4}
+        className="w-96 p-0"
+        // The runtime-target section confirms Host removal in a dialog.
+        onFocusOutside={keepOpenWhileNestedDialogFocused}
+      >
         <PopoverHeader className="p-3">
           <div className="flex items-start gap-3">
             <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">

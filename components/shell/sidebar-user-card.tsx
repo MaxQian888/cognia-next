@@ -37,6 +37,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { keepOpenWhileNestedDialogFocused } from "@/components/shared/confirm-dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
 import { Kbd } from "@/components/ui/kbd"
@@ -190,6 +191,8 @@ export function SidebarUserCard({ className }: { className?: string }) {
           sideOffset={6}
           className="w-64 p-1"
           data-testid="sidebar-user-menu"
+          // The runtime-target section confirms Host removal in a dialog.
+          onFocusOutside={keepOpenWhileNestedDialogFocused}
         >
           <div className="flex items-center gap-2.5 px-2 py-2">
             <span

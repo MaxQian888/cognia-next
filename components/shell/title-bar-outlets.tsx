@@ -8,8 +8,9 @@
  * plus a 44 / 36 / 40px header per column) and the web shell had the three
  * stepped headers and no bar at all. Now `TitleBar` (`components/desktop/`)
  * renders one bar on both platforms and exposes three portal outlets — one per
- * structural zone — plus an independent actions outlet in the right chrome. Each column's header renders its content *into* the
- * outlet above it instead of drawing its own row:
+ * structural zone — plus independent session and pane action outlets in the
+ * right chrome. Each column's header renders its content *into* the outlet
+ * above it instead of drawing its own row:
  *
  *   ┌────────────┬────────────────────────────┬──────────────┐  ← TitleBar, 40px
  *   │ start      │ center                     │ end          │
@@ -35,8 +36,8 @@
  *   provider, or no enabling scope. While it returns an element it counts
  *   itself as projecting, which the bar reads to size the outlet (and to fold
  *   the Windows/Linux menubar out of the conversation rail's column). It does
- *   NOT change which segments the bar draws — those are constant on every
- *   route, so the top row does not reshape itself as you navigate.
+ *   NOT own segment preferences: the bar keeps reading the same configured
+ *   controls, with navigation folded only when the window is narrow.
  *
  * Nothing here is persisted or platform-gated; the mobile shell never mounts
  * the provider, so every hook degrades to "draw inline" there.
@@ -45,9 +46,15 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react"
 import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 
-export type TitleBarZone = "start" | "center" | "end" | "actions"
+export type TitleBarZone = "start" | "center" | "end" | "sessionActions" | "actions"
 
-export const TITLE_BAR_ZONES: readonly TitleBarZone[] = ["start", "center", "end", "actions"]
+export const TITLE_BAR_ZONES: readonly TitleBarZone[] = [
+  "start",
+  "center",
+  "end",
+  "sessionActions",
+  "actions",
+]
 
 type OutletElements = Record<TitleBarZone, HTMLElement | null>
 type ProjectionCounts = Record<TitleBarZone, number>
@@ -60,8 +67,20 @@ interface TitleBarOutletsContextValue {
   registerProjection: (zone: TitleBarZone) => () => void
 }
 
-const EMPTY_OUTLETS: OutletElements = { start: null, center: null, end: null, actions: null }
-const ZERO_PROJECTIONS: ProjectionCounts = { start: 0, center: 0, end: 0, actions: 0 }
+const EMPTY_OUTLETS: OutletElements = {
+  start: null,
+  center: null,
+  end: null,
+  sessionActions: null,
+  actions: null,
+}
+const ZERO_PROJECTIONS: ProjectionCounts = {
+  start: 0,
+  center: 0,
+  end: 0,
+  sessionActions: 0,
+  actions: 0,
+}
 
 const TitleBarOutletsContext = createContext<TitleBarOutletsContextValue | null>(null)
 const TitleBarProjectionScopeContext = createContext(false)
@@ -126,9 +145,10 @@ export function useTitleBarProjectionState(): Record<TitleBarZone, boolean> {
       start: counts.start > 0,
       center: counts.center > 0,
       end: counts.end > 0,
+      sessionActions: counts.sessionActions > 0,
       actions: counts.actions > 0,
     }),
-    [counts.start, counts.center, counts.end, counts.actions]
+    [counts.start, counts.center, counts.end, counts.sessionActions, counts.actions]
   )
 }
 

@@ -6,6 +6,8 @@ import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 
 interface Binding {
   el: HTMLElement
+  layoutKey: unknown
+  measure: () => void
   release: () => void
 }
 
@@ -25,14 +27,24 @@ interface Binding {
  * and came up 16px–256px wrong after a hard reload until something happened
  * to remount. Re-checking is one identity comparison per render; the
  * observer is only rebuilt when the element actually changes.
+ * An optional layout key requests a synchronous remeasurement when a known
+ * layout change must settle before ResizeObserver's next delivery.
  */
-export function useElementWidth(ref: RefObject<HTMLElement | null>): number {
+export function useElementWidth(ref: RefObject<HTMLElement | null>, layoutKey?: unknown): number {
   const [width, setWidth] = useState(0)
   const bound = useRef<Binding | null>(null)
 
   useIsomorphicLayoutEffect(() => {
     const el = ref.current
-    if ((bound.current?.el ?? null) === el) return
+    if ((bound.current?.el ?? null) === el) {
+      // A known layout commit can resize the element before ResizeObserver
+      // delivers. Resolve responsive branches in that commit, before capture.
+      if (bound.current && !Object.is(bound.current.layoutKey, layoutKey)) {
+        bound.current.layoutKey = layoutKey
+        bound.current.measure()
+      }
+      return
+    }
 
     bound.current?.release()
     bound.current = null
@@ -59,6 +71,8 @@ export function useElementWidth(ref: RefObject<HTMLElement | null>): number {
 
     bound.current = {
       el,
+      layoutKey,
+      measure,
       release: () => {
         if (observer) observer.disconnect()
         else window.removeEventListener("resize", measure)

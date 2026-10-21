@@ -88,6 +88,25 @@ describe("useElementWidth", () => {
     expect(result.current).toBe(300)
   })
 
+  it("remeasures a layout key change before waiting for ResizeObserver", () => {
+    const { el, geometry } = setup(900)
+    const { result, rerender } = renderHook(
+      ({ collapsed }: { collapsed: boolean }) => {
+        const ref = useRef(el)
+        return useElementWidth(ref, collapsed)
+      },
+      { initialProps: { collapsed: false } }
+    )
+    geometry.width = 1180
+    rerender({ collapsed: true })
+
+    expect(result.current).toBe(1180)
+    expect(MockResizeObserver.instances).toHaveLength(1)
+    geometry.width = 1200
+    rerender({ collapsed: true })
+    expect(result.current).toBe(1180)
+  })
+
   it("falls back to window resize when ResizeObserver is unavailable", () => {
     ;(globalThis as unknown as { ResizeObserver: undefined }).ResizeObserver = undefined
     const { el, geometry } = setup(250)
