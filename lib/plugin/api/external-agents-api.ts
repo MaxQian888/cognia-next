@@ -183,8 +183,6 @@ export interface PluginExternalAgentRuntimeReport {
 }
 
 export interface PluginExternalAgentSettings {
-  /** The master switch. Off, no external agent runs. */
-  enabled: boolean
   defaultPermissionMode: ExternalAgentStore["defaultPermissionMode"]
   autoConnectOnStartup: boolean
   showConnectionNotifications: boolean
@@ -329,12 +327,7 @@ export interface PluginExternalAgentsAPI {
 }
 
 export type PluginExternalAgentInputErrorCode =
-  | "inline_credentials"
-  | "invalid_input"
-  | "unknown_agent"
-  | "unknown_preset"
-  | "unknown_rule"
-  | "external_agents_disabled"
+  "inline_credentials" | "invalid_input" | "unknown_agent" | "unknown_preset" | "unknown_rule"
 
 /** A refused plugin request. `code` is stable; `message` is for the plugin author. */
 export class PluginExternalAgentInputError extends Error {
@@ -1407,7 +1400,6 @@ export function createExternalAgentsAPI(pluginId: string): PluginExternalAgentsA
     getSettings: async () => {
       const state = await store()
       return {
-        enabled: state.enabled,
         defaultPermissionMode: state.defaultPermissionMode,
         autoConnectOnStartup: state.autoConnectOnStartup,
         showConnectionNotifications: state.showConnectionNotifications,
@@ -1567,13 +1559,7 @@ export function createExternalAgentsAPI(pluginId: string): PluginExternalAgentsA
     },
 
     connect: async (id) => {
-      const { config, state } = await requireAgent("connect", id)
-      if (!state.enabled) {
-        throw new PluginExternalAgentInputError(
-          "external_agents_disabled",
-          "ctx.externalAgents.connect: external agents are turned off in Settings"
-        )
-      }
+      const { config } = await requireAgent("connect", id)
       await (await lifecycle()).connect(config.id)
       return readBack("connect", config.id)
     },
@@ -1661,10 +1647,6 @@ export function createExternalAgentsAPI(pluginId: string): PluginExternalAgentsA
       const state = await store()
       // Validate everything before writing anything: a half-applied settings
       // patch is worse than a refused one.
-      const enabled =
-        patch.enabled === undefined
-          ? undefined
-          : requireBoolean("updateSettings", "enabled", patch.enabled)
       const mode =
         patch.defaultPermissionMode === undefined
           ? undefined
@@ -1695,7 +1677,6 @@ export function createExternalAgentsAPI(pluginId: string): PluginExternalAgentsA
               patch.chatFailurePolicy,
               CHAT_FAILURE_POLICIES
             )
-      if (enabled !== undefined) state.setEnabled(enabled)
       if (mode !== undefined) state.setDefaultPermissionMode(mode)
       if (autoConnect !== undefined) state.setAutoConnectOnStartup(autoConnect)
       if (notifications !== undefined) state.setShowConnectionNotifications(notifications)

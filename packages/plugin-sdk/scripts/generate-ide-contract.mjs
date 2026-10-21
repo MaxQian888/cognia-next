@@ -45,10 +45,7 @@ const brokerProtocolPath = resolve(
   repositoryRoot,
   "crates/cognia-codeserver/src/broker_protocol.rs"
 )
-const brokerExtensionPath = resolve(
-  repositoryRoot,
-  "sidecar/codeserver-agent-ext/src/extension.mjs"
-)
+const brokerExtensionPath = resolve(repositoryRoot, "sidecar/codeserver-agent-ext/src/extension.ts")
 const brokerProtocolSource = await readFile(brokerProtocolPath, "utf8")
 const brokerExtensionSource = await readFile(brokerExtensionPath, "utf8")
 const prettierConfig = (await resolveConfig(resolve(repositoryRoot, "package.json"))) ?? {}

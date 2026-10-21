@@ -3785,6 +3785,14 @@ export class PluginManager {
         )
       }
 
+      // Browser builtins have no native load step. Host APIs invoked during
+      // activate() still require their identity in the native status ledger.
+      // Register only after trust/permissions, and do not publish "loaded"
+      // until activation actually succeeds.
+      if (this.canInvokeNativeHost()) {
+        await this.invokeNativeHost("plugin_set_status", { pluginId, status: "installed" })
+      }
+
       // Seed declarative-config defaults into the persisted row BEFORE building
       // the context, so the plugin's activate() sees `ctx.configuration.get()`
       // values without waiting for the user to open the settings form. Skipped
@@ -4013,6 +4021,7 @@ export class PluginManager {
         ],
       })
       await this.cleanupFailedActivation(pluginId, error)
+      await this.syncBackendStatus(pluginId, "error")
       throw error
     }
   }

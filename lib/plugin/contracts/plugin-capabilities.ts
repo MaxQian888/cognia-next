@@ -956,7 +956,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/lsp/lsp-registry.test.ts",
-      "sidecar/vscode-ext-host/tests/lsp-client.test.mjs",
+      "sidecar/vscode-ext-host/tests/lsp-client.test.ts",
       "packages/plugin-sdk/src/define/define-lsp-server.test.ts",
     ],
   },

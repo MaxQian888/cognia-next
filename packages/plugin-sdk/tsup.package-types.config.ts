@@ -39,7 +39,7 @@ export default defineConfig({
   outDir: local("./dist"),
   target: "es2022",
   platform: "neutral",
-  // Root cwd is CommonJS; tsup uses this mode to name declarations .d.ts.
+  // The isolated build cwd is CommonJS; this mode names declarations .d.ts.
   // Declaration syntax remains ESM and the published SDK has type: module.
   format: ["cjs"],
   noExternal: [/^@cognia\//],

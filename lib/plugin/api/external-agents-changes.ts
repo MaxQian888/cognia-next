@@ -34,7 +34,6 @@ export type ExternalAgentChangeSnapshot = Pick<
   | "agents"
   | "connectionStatus"
   | "delegationRules"
-  | "enabled"
   | "defaultPermissionMode"
   | "autoConnectOnStartup"
   | "showConnectionNotifications"
@@ -43,7 +42,6 @@ export type ExternalAgentChangeSnapshot = Pick<
 
 /** Global settings a plugin can read through `ctx.externalAgents.getSettings`. */
 export const EXTERNAL_AGENT_SETTING_KEYS = [
-  "enabled",
   "defaultPermissionMode",
   "autoConnectOnStartup",
   "showConnectionNotifications",

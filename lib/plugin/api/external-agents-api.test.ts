@@ -78,7 +78,6 @@ beforeEach(() => {
   jest.clearAllMocks()
   resetPermissionGuard()
   state().reset()
-  state().setEnabled(true)
   mockService.createConfig.mockImplementation(async (input: CreateExternalAgentInput) =>
     state().addAgent(input)
   )
@@ -146,7 +145,7 @@ describe("permission gating (fail-closed)", () => {
     expect(() => api.updateDelegationRule("r", {})).toThrow(PermissionError)
     expect(() => api.removeDelegationRule("r")).toThrow(PermissionError)
     expect(() => api.reorderDelegationRules([])).toThrow(PermissionError)
-    expect(() => api.updateSettings({ enabled: false })).toThrow(PermissionError)
+    expect(() => api.updateSettings({ autoConnectOnStartup: true })).toThrow(PermissionError)
     expect(mockService.removeConfig).not.toHaveBeenCalled()
   })
 
@@ -346,26 +345,28 @@ describe("readiness, presets, runtimes, settings", () => {
   it("reads and validates global settings without half-applying a patch", async () => {
     const api = apiWith([READ, MANAGE])
     expect(await api.getSettings()).toEqual({
-      enabled: true,
       defaultPermissionMode: state().defaultPermissionMode,
       autoConnectOnStartup: false,
       showConnectionNotifications: true,
       chatFailurePolicy: "fallback",
     })
-    await refusal(api.updateSettings({ enabled: false, chatFailurePolicy: "sometimes" as never }))
-    expect(state().enabled).toBe(true)
+    await refusal(
+      api.updateSettings({ autoConnectOnStartup: true, chatFailurePolicy: "sometimes" as never })
+    )
+    expect(state().autoConnectOnStartup).toBe(false)
+    expect((await refusal(api.updateSettings({ enabled: false } as never))).code).toBe(
+      "invalid_input"
+    )
     await refusal(api.updateSettings({ defaultPermissionMode: "dontAsk" as never }))
     await refusal(api.updateSettings({ unknown: true } as never))
     expect(
       await api.updateSettings({
-        enabled: false,
         defaultPermissionMode: "plan",
         autoConnectOnStartup: true,
         showConnectionNotifications: false,
         chatFailurePolicy: "strict",
       })
     ).toEqual({
-      enabled: false,
       defaultPermissionMode: "plan",
       autoConnectOnStartup: true,
       showConnectionNotifications: false,
@@ -550,8 +551,6 @@ describe("update / enable / connect / remove", () => {
     expect(mockService.updateConfig).toHaveBeenCalledWith(id, { enabled: false })
     expect((await api().connect(id)).connectionStatus).toBe("connected")
     expect((await api().disconnect(id)).connectionStatus).toBe("disconnected")
-    state().setEnabled(false)
-    expect((await refusal(api().connect(id))).code).toBe("external_agents_disabled")
     await api().remove(id)
     expect(mockService.removeConfig).toHaveBeenCalledWith(id)
     expect(state().getAgent(id)).toBeUndefined()

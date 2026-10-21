@@ -8,7 +8,7 @@
  * maps the specifier here.
  *
  * Only the values the template imports at runtime live here. Types are erased by
- * ts-jest and need no counterpart. If your plugin starts importing another SDK
+ * the test transformer and need no counterpart. If your plugin starts importing another SDK
  * value, add it here too — the failure otherwise reads as a missing module
  * rather than a missing export.
  */

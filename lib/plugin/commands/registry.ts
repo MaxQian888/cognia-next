@@ -190,16 +190,30 @@ export async function executeCommandWithOptions<T = unknown>(
   if (!entry) {
     throw new CommandNotFoundError(id)
   }
+  return invokeGuardedCommand<T>(entry, options, ...args)
+}
+
+/**
+ * Run a handler under the same `ui.action.invoke` guard chain as a
+ * registered command. For dispatch paths that resolve a command outside this
+ * registry (a plugin's manifest command, reached from its own quick action),
+ * so they cannot skip the policy a registered command would meet.
+ */
+export async function invokeGuardedCommand<T = unknown>(
+  entry: Pick<CommandRegistration, "id" | "pluginId" | "handler">,
+  options: ExecuteCommandOptions,
+  ...args: unknown[]
+): Promise<T> {
   if (hasInterceptors("ui.action.invoke")) {
     await requireGuardPass<UiActionInvokeValue>(
       "ui.action.invoke",
       {
-        commandId: id,
+        commandId: entry.id,
         ...(entry.pluginId ? { pluginId: entry.pluginId } : {}),
         origin: options.origin ?? "user",
         args,
       },
-      { operationId: `command:${id}` }
+      { operationId: `command:${entry.id}` }
     )
   }
   const result = await entry.handler(...args)

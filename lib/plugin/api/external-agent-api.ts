@@ -68,10 +68,9 @@ type ExternalAgentManagerInstance = ReturnType<
  * Admit one plugin-requested, non-Bot external run (ADR-0216 decision 3).
  *
  * A plugin holding `agent:dispatch-external` used to be able to start any
- * preset or live agent in any permission mode, with the master switch off and
- * past a config the lifecycle service would refuse to connect. Now:
+ * preset or live agent in any permission mode, including a config the
+ * lifecycle service would refuse to connect. Now:
  *
- *  - the global master switch applies, as it does to every other surface;
  *  - a configured agent must be enabled and pass the lifecycle readiness
  *    verdict, and is registered through the lifecycle service so the launch
  *    carries that config's own keyring credentials;
@@ -103,8 +102,6 @@ async function admitPluginExternalRun(
     import("@/lib/ai/agent/external/policy/permission-cascade"),
   ])
   const state = useExternalAgentStore.getState()
-  if (!state.enabled)
-    throw new Error("agent.runExternalAgent: external agents are turned off in Settings")
   const lifecycle = await getExternalAgentLifecycleService()
   const clamp = (ceiling: AcpPermissionMode): AcpPermissionMode =>
     deriveExternalSessionPermission(

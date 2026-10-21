@@ -2605,6 +2605,9 @@ export interface PluginBaseContext {
   /** The plugin's prompts as Prompt Center slots, and the text to send for them (ADR-0236). */
   prompts?: import("@/lib/plugin/api/prompts-api").PluginPromptsAPI
 
+  /** The user's agent configuration, read through its owners and written with consent (ADR-0238). */
+  agentConfig?: import("@/lib/plugin/api/agent-config-api").PluginAgentConfigAPI
+
   /** Workspace backend registration (ADR-0026 §2 §D). */
   workspace?: import("@/lib/plugin/api/workspace-api").PluginWorkspaceAPI
 
@@ -2698,6 +2701,7 @@ export interface PluginHostContextAPI {
   ocr: import("@/lib/plugin/api/ocr-api").PluginOcrAPI
   decisions: import("@/lib/plugin/api/decisions-api").PluginDecisionsAPI
   prompts: import("@/lib/plugin/api/prompts-api").PluginPromptsAPI
+  agentConfig: import("@/lib/plugin/api/agent-config-api").PluginAgentConfigAPI
   workspace: import("@/lib/plugin/api/workspace-api").PluginWorkspaceAPI
   modal: import("@/lib/plugin/api/modal-api").PluginModalAPI
   webview: import("@/lib/plugin/api/webview-api").PluginWebviewAPI
@@ -5589,6 +5593,8 @@ export type PluginAPIPermission =
   | "agent:external:manage"
   | "agent:dispatch"
   | "agent:shared-memory:read"
+  | "agent-config:read"
+  | "agent-config:write"
   | "twin:read"
   | "templates:read"
   | "templates:contribute"

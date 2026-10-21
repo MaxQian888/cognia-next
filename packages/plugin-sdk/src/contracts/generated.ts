@@ -65,6 +65,8 @@ export const CANONICAL_PLUGIN_PERMISSION_IDS = [
   "agent:external:manage",
   "agent:dispatch",
   "agent:shared-memory:read",
+  "agent-config:read",
+  "agent-config:write",
   "twin:read",
   "templates:read",
   "templates:contribute",
@@ -255,6 +257,27 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     kind: "none",
   },
   "ctx.agent.unregisterTool": {
+    kind: "none",
+  },
+  "ctx.agentConfig.applyEdit": {
+    kind: "none",
+  },
+  "ctx.agentConfig.checkReferences": {
+    kind: "none",
+  },
+  "ctx.agentConfig.listSurfaces": {
+    kind: "none",
+  },
+  "ctx.agentConfig.readFacts": {
+    kind: "none",
+  },
+  "ctx.agentConfig.readProvenance": {
+    kind: "none",
+  },
+  "ctx.agentConfig.readSurface": {
+    kind: "none",
+  },
+  "ctx.agentConfig.redactForModel": {
     kind: "none",
   },
   "ctx.ai.chat": {

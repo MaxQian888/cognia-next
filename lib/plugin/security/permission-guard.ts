@@ -110,6 +110,7 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
   issue: ["issue:read", "issue:write"],
   memory: ["memory:read", "memory:write"],
   externalAgents: ["agent:external:read", "agent:external:manage"],
+  agentConfig: ["agent-config:read", "agent-config:write"],
   decisions: ["decisions:run", "decisions:provide"],
   team: ["team:read", "team:write"],
   connectors: ["connectors:read", "connectors:send", "connectors:manage"],
@@ -208,6 +209,10 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
     "Create, change, duplicate, delete, enable, connect and route your external coding agents, and change their global settings",
   "agent:dispatch": "Dispatch built-in subagents and agent teams",
   "agent:shared-memory:read": "Read team shared-memory entries",
+  "agent-config:read":
+    "See your agent configuration — instruction files, Skills, agents, prompts and templates — and a summary of hooks, permission rules and MCP servers (never their secrets)",
+  "agent-config:write":
+    "Change your instruction files, Skills, agents and prompts, after you confirm each change",
   "twin:read": "Query the employee twin's memory",
   "python:execute": "Execute Python code",
   "sandbox:web-execute": "Execute code inside the browser sandbox",

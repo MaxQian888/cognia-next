@@ -363,7 +363,9 @@
     "valibot": "^1.5.0"
   },
   "devDependencies": {
-    "@cognia/security-findings": "workspace:*"
+    "@cognia/security-findings": "workspace:*",
+    "@typescript/native": "npm:typescript@7.0.2",
+    "typescript": "npm:@typescript/typescript6@6.0.2"
   },
   "peerDependencies": {
     "@agentclientprotocol/sdk": "1.5.0",

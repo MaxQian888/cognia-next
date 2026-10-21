@@ -3,7 +3,11 @@ import {
   __resetInterceptorDispatchForTesting,
   __resetInterceptorRegistryForTesting,
 } from "@/lib/plugin/interceptors"
-import { executeCommandWithOptions, type UiActionInvokeValue } from "./registry"
+import {
+  executeCommandWithOptions,
+  invokeGuardedCommand,
+  type UiActionInvokeValue,
+} from "./registry"
 import {
   CommandNotFoundError,
   __resetCommandRegistryForTesting,
@@ -234,6 +238,20 @@ describe("ui.action.invoke guard (ADR-0189)", () => {
     guard("g1", () => ({ decision: "deny", reason: "policy" }))
     await expect(executeCommand("cmd.b")).rejects.toThrow(/deny on "ui.action.invoke"/)
     expect(handler).not.toHaveBeenCalled()
+  })
+
+  it("guards a handler resolved outside the registry the same way", async () => {
+    const handler = jest.fn(() => "ran")
+    const seen: UiActionInvokeValue[] = []
+    guard("g1", (value) => {
+      seen.push(value)
+      return { decision: "deny", reason: "policy" }
+    })
+    await expect(
+      invokeGuardedCommand({ id: "manifest.cmd", pluginId: "p", handler }, {})
+    ).rejects.toThrow(/deny on "ui.action.invoke"/)
+    expect(handler).not.toHaveBeenCalled()
+    expect(seen[0]).toMatchObject({ commandId: "manifest.cmd", pluginId: "p", origin: "user" })
   })
 
   it("denies when the guard itself crashes — fail-closed", async () => {

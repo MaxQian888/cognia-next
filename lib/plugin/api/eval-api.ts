@@ -8,6 +8,8 @@ import { deterministicScorers } from "@cognia/eval-core"
 import { getRunDetail, listDatasetSummaries, runEvalService } from "@/lib/ai/eval/service"
 import { APP_VERSION } from "@/lib/app-version"
 import type { TargetSpec } from "@/types/eval/run-config"
+import { allRootPaths } from "@/lib/workspace/roots"
+import { useProjectStore } from "@/stores/project/project-store"
 
 export interface PluginRunDatasetArgs {
   datasetId: string
@@ -20,6 +22,13 @@ export interface PluginRunDatasetArgs {
   k?: number
   split?: string
   capabilities?: string[]
+  /**
+   * Working directory of a chat target: which repository's instruction files,
+   * agent files and project settings the run loads. Must be a root of one of
+   * the user's workspaces, so a run against a candidate configuration and one
+   * against the current configuration differ in nothing else.
+   */
+  cwd?: string
 }
 
 export interface PluginRunCalibrationArgs {
@@ -35,6 +44,15 @@ export interface PluginEvalProjectArgs {
   budgetCap?: number
 }
 
+function knownWorkspaceRoot(cwd: string): boolean {
+  const normalized = cwd.replace(/[\\/]+$/, "")
+  return useProjectStore
+    .getState()
+    .projects.some((project) =>
+      allRootPaths(project).some((root) => root.replace(/[\\/]+$/, "") === normalized)
+    )
+}
+
 function buildTarget(args: PluginRunDatasetArgs): TargetSpec {
   const kind = args.targetKind ?? "chat"
   if (kind === "team") {
@@ -48,11 +66,15 @@ function buildTarget(args: PluginRunDatasetArgs): TargetSpec {
     return { kind, label: args.workflowId, workflowId: args.workflowId }
   }
   if (!args.model) throw new Error("eval_run_dataset: model is required for a chat target")
+  if (args.cwd !== undefined && !knownWorkspaceRoot(args.cwd)) {
+    throw new Error("eval_run_dataset: cwd must be a root of one of your workspaces")
+  }
   return {
     kind: "chat",
     label: args.model,
     model: args.model,
     ...(args.characterId ? { characterId: args.characterId } : {}),
+    ...(args.cwd ? { cwd: args.cwd } : {}),
   }
 }
 

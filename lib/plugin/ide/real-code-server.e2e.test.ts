@@ -17,7 +17,7 @@
  *   and activated through the managed handshake.
  *
  * The extension's test probe (`COGNIA_CS_TEST_PROBE=1`, see
- * `sidecar/codeserver-agent-ext/src/test-probe.mjs`) asks VS Code what each
+ * `sidecar/codeserver-agent-ext/src/test-probe.ts`) asks VS Code what each
  * provider produced; a family that does not round-trip fails here. The same
  * run measures the performance gates and writes them for
  * `pnpm audit:pro-ide-perf`.

@@ -20,7 +20,7 @@
 import { useCallback, useSyncExternalStore } from "react"
 
 import { getPluginI18nSnapshot, subscribeToPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
-import { useSettingsStore } from "@/stores"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { TranslationParams } from "@/types/plugin/plugin"
 
 import { translatePluginMessage } from "./i18n-api"

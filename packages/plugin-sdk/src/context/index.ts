@@ -144,6 +144,25 @@ export type {
   PluginPromptsAPI,
   PluginResolvedPrompt,
 } from "@/lib/plugin/api/prompts-api"
+export type {
+  PluginAgentConfigAPI,
+  PluginAgentConfigApplyResult,
+  PluginAgentConfigEdit,
+  PluginAgentConfigFacts,
+  PluginAgentConfigHookFact,
+  PluginAgentConfigLineProvenance,
+  PluginAgentConfigMcpServerFact,
+  PluginAgentConfigPathStatus,
+  PluginAgentConfigPermissionFact,
+  PluginAgentConfigReferenceCheck,
+  PluginAgentConfigReferenceInput,
+  PluginAgentConfigScope,
+  PluginAgentConfigSkillFacts,
+  PluginAgentConfigSurface,
+  PluginAgentConfigSurfaceDocument,
+  PluginAgentConfigSurfaceListing,
+  PluginAgentConfigSurfaceSource,
+} from "@/lib/plugin/api/agent-config-api"
 export type { PluginWorkspaceAPI } from "@/lib/plugin/api/workspace-api"
 export type { PluginModalAPI } from "@/lib/plugin/api/modal-api"
 export type { CreateWebviewInput, PluginWebviewAPI } from "@/lib/plugin/api/webview-api"

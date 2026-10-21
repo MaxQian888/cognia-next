@@ -4,8 +4,8 @@
  * Provides vector/RAG capabilities to plugins.
  */
 
-import { useVectorStore } from "@/stores"
-import { useSettingsStore } from "@/stores"
+import { useVectorStore } from "@/stores/vector/vector-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
   createVectorStore,
   type IVectorStore,

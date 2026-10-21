@@ -76,6 +76,10 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "agent:dispatch": ["agent:dispatch"],
   "agent:shared-memory:read": ["agent:shared-memory:read"],
   "twin:read": ["twin:read"],
+  // Agent configuration (`ctx.agentConfig`, ADR-0238). Guard-enforced; the
+  // identity mappings keep `ctx.permissions.hasPermission` in agreement.
+  "agent-config:read": ["agent-config:read"],
+  "agent-config:write": ["agent-config:write"],
   "templates:read": ["templates:read"],
   "templates:contribute": ["templates:contribute"],
   "templates:instantiate": ["templates:instantiate"],

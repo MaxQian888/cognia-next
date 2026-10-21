@@ -14,12 +14,15 @@ const mockVectorSettings: Record<string, string | undefined> = {
   embeddingModel: "text-embedding-3-small",
 }
 
-jest.mock("@/stores", () => ({
+jest.mock("@/stores/vector/vector-store", () => ({
   useVectorStore: {
     getState: jest.fn(() => ({
       settings: mockVectorSettings,
     })),
   },
+}))
+
+jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: {
     getState: jest.fn(() => ({
       providerSettings: {
@@ -361,7 +364,8 @@ describe("Vector API", () => {
     })
 
     it("threads default-chain Bedrock settings into plugin embeddings", async () => {
-      const { useVectorStore, useSettingsStore } = jest.requireMock("@/stores")
+      const { useVectorStore } = jest.requireMock("@/stores/vector/vector-store")
+      const { useSettingsStore } = jest.requireMock("@/stores/settings/settings-store")
       const { generateEmbedding } = jest.requireMock("@cognia/vector/embedding")
       useVectorStore.getState.mockReturnValueOnce({
         settings: {

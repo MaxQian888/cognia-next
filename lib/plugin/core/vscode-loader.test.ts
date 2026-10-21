@@ -79,6 +79,9 @@ describe("vscode-loader — browser stub mode", () => {
   it("returns a stub definition when Tauri internals are absent", async () => {
     const { isVscodeHostAvailable, loadVscodeDefinition } = await import("./vscode-loader")
     expect(isVscodeHostAvailable()).toBe(false)
+    expect(
+      require.cache[require.resolve("@/lib/plugin/vscode-shim/setup-handlers")] !== undefined
+    ).toBe(false)
     const def = await loadVscodeDefinition(baseManifest, "/tmp/plugin")
     expect(def.manifest).toBe(baseManifest)
     const result = await def.activate!(mockContext)

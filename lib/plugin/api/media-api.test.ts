@@ -83,7 +83,7 @@ jest.mock("@/lib/ai/media/provider-generation", () => ({
   generateProviderImage: jest.fn(),
 }))
 
-jest.mock("@/stores", () => ({
+jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: {
     getState: jest.fn(() => ({
       defaultProvider: "openai",
@@ -100,8 +100,8 @@ jest.mock("@/stores", () => ({
   },
 }))
 
-const mockUseSettingsStoreGetState = jest.requireMock("@/stores").useSettingsStore
-  .getState as jest.Mock
+const mockUseSettingsStoreGetState = jest.requireMock("@/stores/settings/settings-store")
+  .useSettingsStore.getState as jest.Mock
 
 class MockOffscreenCanvas {
   public width: number

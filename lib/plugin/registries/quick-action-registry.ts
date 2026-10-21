@@ -76,6 +76,16 @@ function invalidateSnapshot(): void {
   snapshot = null
 }
 
+async function ownManifestCommand(
+  pluginId: string,
+  commandId: string
+): Promise<{ id: string; execute: () => void | Promise<void> } | undefined> {
+  const { usePluginStore } = await import("@/stores/plugin-runtime")
+  return usePluginStore
+    .getState()
+    .plugins[pluginId]?.commands?.find((command) => command.id === commandId)
+}
+
 /** Run a quick action: inline handler → command id → slash line. */
 export async function runQuickAction(
   entry: QuickActionEntry,
@@ -85,7 +95,23 @@ export async function runQuickAction(
     return entry.run(invocation)
   }
   if (entry.command) {
-    const { executeCommand } = await import("@/lib/plugin/commands/registry")
+    const { executeCommand, getCommand, invokeGuardedCommand } =
+      await import("@/lib/plugin/commands/registry")
+    if (getCommand(entry.command)) {
+      return executeCommand<PluginQuickActionResult>(entry.command, invocation)
+    }
+    // A manifest `commands[]` entry is registered with the plugin registry and
+    // the slash registry, not the unified one; a quick action naming one of its
+    // own plugin's manifest commands runs it from there, under the same guard.
+    const own = await ownManifestCommand(entry.pluginId, entry.command)
+    if (own) {
+      await invokeGuardedCommand(
+        { id: own.id, pluginId: entry.pluginId, handler: () => own.execute() },
+        {},
+        invocation
+      )
+      return undefined
+    }
     return executeCommand<PluginQuickActionResult>(entry.command, invocation)
   }
   if (entry.slash) {

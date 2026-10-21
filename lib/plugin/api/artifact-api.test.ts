@@ -2,7 +2,14 @@
  * Tests for Artifact Plugin API
  */
 
-import { createArtifactAPI, getArtifactRenderers, clearArtifactRenderers } from "./artifact-api"
+import {
+  createArtifactAPI,
+  getArtifactRenderers,
+  clearArtifactRenderers,
+  getBuiltinRenderers,
+  getDefaultArtifactRenderer,
+  getArtifactPreviewComponent,
+} from "./artifact-api"
 import { initializePluginPermissions } from "./permission-api"
 import type { ArtifactRenderer } from "@/types/plugin/plugin"
 
@@ -136,6 +143,19 @@ jest.mock("@/stores", () => ({
 
 describe("Artifact API", () => {
   const testPluginId = "test-plugin"
+
+  it("keeps synchronous, stable component getters for lazy artifact surfaces", () => {
+    for (const [name, renderer] of Object.entries(getBuiltinRenderers())) {
+      expect(renderer).not.toBeInstanceOf(Promise)
+      expect(getBuiltinRenderers()[name as keyof ReturnType<typeof getBuiltinRenderers>]).toBe(
+        renderer
+      )
+    }
+    expect(getDefaultArtifactRenderer()).not.toBeInstanceOf(Promise)
+    expect(getDefaultArtifactRenderer()).toBe(getDefaultArtifactRenderer())
+    expect(getArtifactPreviewComponent()).not.toBeInstanceOf(Promise)
+    expect(getArtifactPreviewComponent()).toBe(getArtifactPreviewComponent())
+  })
 
   beforeEach(() => {
     // Clear state
