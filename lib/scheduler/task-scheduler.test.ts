@@ -292,6 +292,27 @@ describe("TaskScheduler", () => {
     })
 
     describe("createTask", () => {
+      it("defaults internal upkeep to silence while allowing explicit delivery", async () => {
+        const input: CreateScheduledTaskInput = {
+          id: "system:presence",
+          name: "Presence",
+          type: "connection:presence:refresh",
+          trigger: { type: "interval", intervalMs: 60_000 },
+        }
+        const task = await scheduler.createTask(input)
+        expect(task.id).toBe(input.id)
+        expect(task.notification).toMatchObject({
+          channels: ["none"],
+          dueReminder: false,
+          onError: false,
+        })
+        const optedIn = await scheduler.createTask({
+          ...input,
+          id: "explicit",
+          notification: { channels: ["desktop"], onError: true },
+        })
+        expect(optedIn.notification).toMatchObject({ channels: ["desktop"], onError: true })
+      })
       it("should create a new task", async () => {
         const input: CreateScheduledTaskInput = {
           name: "Test Task",
@@ -475,6 +496,20 @@ describe("TaskScheduler", () => {
     })
 
     describe("updateTask", () => {
+      it("does not revive a stopped scheduler when a migration read finishes late", async () => {
+        let resolveRead: (task: ScheduledTask) => void = () => undefined
+        mockSchedulerDb.getTask.mockReturnValueOnce(
+          new Promise((resolve) => {
+            resolveRead = resolve
+          })
+        )
+        const pending = scheduler.updateTask("late", { notification: { channels: ["none"] } })
+        scheduler.stop()
+        resolveRead(ownedTask("late"))
+        await expect(pending).resolves.toBeNull()
+        expect(scheduler.getStatus().initialized).toBe(false)
+        expect(scheduler.getStatus().scheduledCount).toBe(0)
+      })
       it("should return null for non-existent task", async () => {
         mockSchedulerDb.getTask.mockResolvedValueOnce(null)
         const result = await scheduler.updateTask("non-existent", { name: "Updated" })

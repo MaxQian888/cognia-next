@@ -863,6 +863,8 @@ export interface TaskExecutionLog {
  * Input for creating a scheduled task
  */
 export interface CreateScheduledTaskInput {
+  /** Stable identity for subsystem-owned singleton schedules. Duplicate IDs fail; never overwrite. */
+  id?: string
   name: string
   description?: string
   type: ScheduledTaskType

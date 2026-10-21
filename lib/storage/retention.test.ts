@@ -3,6 +3,7 @@ jest.mock("@/lib/automation/managed-desktop-result-deletion", () => ({
   retryManagedDesktopResultDeletions: () => mockRetryDesktopDeletion(),
 }))
 import {
+  getStorageRetentionSnapshot,
   pruneRetainedTables,
   startStorageRetentionSweeper,
   RETENTION_TARGETS,
@@ -14,6 +15,7 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { saveSettings, getSettings, DEFAULTS } from "@/lib/db/settings"
 import { DEFAULT_OCR_SETTINGS } from "@/types/ocr"
 import { DEFAULT_NOTIFICATION_PREFERENCES } from "@/types/notifications"
+import { localDayString } from "@/lib/db/provider-cost-daily"
 
 // Wrap getSettings so one test can force the read to reject; every other call
 // falls through to the real implementation (which reads the saved row).
@@ -66,14 +68,20 @@ afterAll(dbFixture.dispose)
 describe("pruneRetainedTables", () => {
   it("short-circuits without touching targets for days <= 0", async () => {
     const prune = jest.fn(async () => 5)
-    expect(await pruneRetainedTables(0, [{ id: "x", prune }])).toEqual([])
-    expect(await pruneRetainedTables(-3, [{ id: "x", prune }])).toEqual([])
+    expect(await pruneRetainedTables(0, [{ id: "x", prune }])).toEqual([
+      { id: "x", removed: 0, status: "off", reason: "configured-off" },
+    ])
+    expect(await pruneRetainedTables(-3, [{ id: "x", prune }])).toEqual([
+      { id: "x", removed: 0, status: "off", reason: "configured-off" },
+    ])
     expect(prune).not.toHaveBeenCalled()
   })
 
   it("short-circuits for non-finite days", async () => {
     const prune = jest.fn(async () => 1)
-    expect(await pruneRetainedTables(Number.NaN, [{ id: "x", prune }])).toEqual([])
+    expect(await pruneRetainedTables(Number.NaN, [{ id: "x", prune }])).toEqual([
+      { id: "x", removed: 0, status: "off", reason: "configured-off" },
+    ])
     expect(prune).not.toHaveBeenCalled()
   })
 
@@ -86,7 +94,10 @@ describe("pruneRetainedTables", () => {
         { id: "window", policy: "configured-window", prune: windowPrune },
         { id: "expiry", policy: "row-expiry", prune: expiryPrune },
       ])
-    ).resolves.toEqual([{ id: "expiry", removed: 2 }])
+    ).resolves.toEqual([
+      { id: "window", removed: 0, status: "off", reason: "configured-off" },
+      { id: "expiry", removed: 2, status: "completed" },
+    ])
     expect(windowPrune).not.toHaveBeenCalled()
     expect(expiryPrune).toHaveBeenCalledTimes(1)
   })
@@ -107,8 +118,8 @@ describe("pruneRetainedTables", () => {
     const out = await pruneRetainedTables(7, targets)
     const after = Date.now()
     expect(out).toEqual([
-      { id: "a", removed: 2 },
-      { id: "b", removed: 3 },
+      { id: "a", removed: 2, status: "completed" },
+      { id: "b", removed: 3, status: "completed" },
     ])
     expect(seenCutoff).toBeGreaterThanOrEqual(before - 7 * MS_PER_DAY)
     expect(seenCutoff).toBeLessThanOrEqual(after - 7 * MS_PER_DAY)
@@ -122,8 +133,8 @@ describe("pruneRetainedTables", () => {
     ]
     const out = await pruneRetainedTables(1, targets)
     expect(out).toEqual([
-      { id: "bad", removed: 0 },
-      { id: "good", removed: 4 },
+      { id: "bad", removed: 0, status: "failed", reason: "prune-failed" },
+      { id: "good", removed: 4, status: "completed" },
     ])
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
@@ -137,19 +148,24 @@ describe("pruneRetainedTables", () => {
     ])
     const out = await pruneRetainedTables(30)
     expect(out).toEqual([
-      { id: "agentTraces", removed: 1 },
-      { id: "evalArtifacts", removed: 0 },
-      { id: "evalOnline", removed: 0 },
-      { id: "workSubmissions", removed: 0 },
-      { id: "managedDesktopDeletion", removed: 0 },
-      { id: "mediaGenerationJobs", removed: 0 },
-      { id: "memoryGovernance", removed: 0 },
-      { id: "notificationDelivery", removed: 0 },
-      { id: "ocrResults", removed: 0 },
-      { id: "retrievalControl", removed: 0 },
-      { id: "workflowAppData", removed: 0 },
-      { id: "siteArtifacts", removed: 0 },
-      { id: "syncTombstones", removed: 0 },
+      { id: "agentTraces", removed: 1, status: "completed" },
+      { id: "evalArtifacts", removed: 0, status: "completed-no-work" },
+      { id: "evalOnline", removed: 0, status: "completed-no-work" },
+      { id: "workSubmissions", removed: 0, status: "completed-no-work" },
+      { id: "managedDesktopDeletion", removed: 0, status: "completed-no-work" },
+      expect.objectContaining({
+        id: "mediaGenerationJobs",
+        removed: 0,
+        status: "completed-no-work",
+      }),
+      { id: "memoryGovernance", removed: 0, status: "completed-no-work" },
+      { id: "notificationDelivery", removed: 0, status: "completed-no-work" },
+      { id: "ocrResults", removed: 0, status: "completed-no-work" },
+      { id: "usageHistory", removed: 0, status: "completed-no-work" },
+      { id: "retrievalControl", removed: 0, status: "completed-no-work" },
+      { id: "workflowAppData", removed: 0, status: "completed-no-work" },
+      { id: "siteArtifacts", removed: 0, status: "completed-no-work" },
+      { id: "syncTombstones", removed: 0, status: "completed-no-work" },
     ])
     expect((await getDb().agentTraces.toArray()).map((r) => r.id)).toEqual(["fresh"])
   })
@@ -158,16 +174,17 @@ describe("pruneRetainedTables", () => {
     const { sweepVideoAppData } = jest.requireMock("@/lib/ai/media/video-jobs/app-data-sweep")
     const target = RETENTION_TARGETS.find((t) => t.id === "mediaGenerationJobs")!
     ;(sweepVideoAppData as jest.Mock).mockClear()
-    await expect(target.prune(Date.now())).resolves.toBe(0)
+    await expect(target.prune(Date.now())).resolves.toMatchObject({ removed: 0 })
     expect(sweepVideoAppData).toHaveBeenCalledTimes(1)
 
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     ;(sweepVideoAppData as jest.Mock).mockRejectedValueOnce(new Error("fs refused"))
-    await expect(target.prune(Date.now())).resolves.toBe(0)
-    expect(warn).toHaveBeenCalledWith(
-      "storage retention: video file sweep failed",
-      expect.any(Error)
-    )
+    await expect(target.prune(Date.now())).resolves.toMatchObject({
+      removed: 0,
+      status: "partial",
+      stages: expect.arrayContaining([expect.objectContaining({ id: "files", status: "failed" })]),
+    })
+    expect(warn).not.toHaveBeenCalled()
     warn.mockRestore()
   })
 
@@ -185,6 +202,26 @@ describe("pruneRetainedTables", () => {
     // bound. These two entries are what actually sweeps them.
     expect(RETENTION_TARGETS.map((t) => t.id)).toContain("memoryGovernance")
     expect(RETENTION_TARGETS.map((t) => t.id)).toContain("retrievalControl")
+  })
+
+  it("preserves deletions already completed when a later file sweep stage fails", async () => {
+    const { sweepVideoAppData } = jest.requireMock("@/lib/ai/media/video-jobs/app-data-sweep")
+    sweepVideoAppData.mockImplementationOnce(
+      async (_deps: unknown, report: { removed: number }) => {
+        report.removed = 3
+        throw new Error("private filesystem path must not escape")
+      }
+    )
+    const target = RETENTION_TARGETS.find((row) => row.id === "mediaGenerationJobs")!
+    const [result] = await pruneRetainedTables(30, [target])
+    expect(result).toMatchObject({
+      removed: 3,
+      status: "partial",
+      stages: expect.arrayContaining([
+        expect.objectContaining({ id: "files", removed: 3, status: "partial" }),
+      ]),
+    })
+    expect(JSON.stringify(result)).not.toContain("private")
   })
 
   it("sweeps the memory and retrieval control planes on a real database", async () => {
@@ -205,7 +242,7 @@ describe("pruneRetainedTables", () => {
     })
 
     const out = await pruneRetainedTables(30)
-    expect(out).toContainEqual({ id: "memoryGovernance", removed: 2 })
+    expect(out).toContainEqual({ id: "memoryGovernance", removed: 2, status: "completed" })
     expect(await getDb().memoryAuditEvents.count()).toBe(0)
     // The turn path used to leak two of these per turn, and nothing could reach
     // them because `deleteMemoryEvidence` keys on `memoryId`.
@@ -237,12 +274,79 @@ describe("pruneRetainedTables", () => {
 
     const out = await pruneRetainedTables(30)
 
-    expect(out).toContainEqual({ id: "ocrResults", removed: 1 })
+    expect(out).toContainEqual({ id: "ocrResults", removed: 1, status: "completed" })
     expect((await getDb().ocrResults.toArray()).map((row) => row.id)).toEqual(["fresh"])
   })
 })
 
 describe("startStorageRetentionSweeper", () => {
+  it("prunes rolling usage on the existing daily callback, preserves the boundary day, and retries atomically", async () => {
+    const now = Date.now()
+    const cutoff = now - 90 * MS_PER_DAY
+    const raw = (messageId: string, at: number) => ({
+      messageId,
+      at,
+      sessionId: "s",
+      inputTokens: 1,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      costUsd: 1,
+      durationMs: 0,
+    })
+    const cost = (id: string, day: string) => ({
+      id,
+      day,
+      providerId: "p",
+      modelId: "m",
+      totalCostUsd: 1,
+      requestCount: 1,
+      updatedAt: now,
+    })
+    const setSpy = jest.spyOn(global, "setInterval")
+    const stop = await startStorageRetentionSweeper()
+    try {
+      await getDb().sessionUsage.bulkPut([
+        raw("expired", cutoff - 1000),
+        raw("boundary", cutoff + 1000),
+        raw("today", now),
+      ])
+      await getDb().providerCostDaily.bulkPut([
+        cost("old", localDayString(cutoff - 2 * MS_PER_DAY)),
+        cost("boundary", localDayString(cutoff)),
+        cost("today", localDayString(now)),
+      ])
+      const callback = setSpy.mock.calls.find(
+        (args) => args[1] === RETENTION_SWEEP_INTERVAL_MS
+      )![0] as () => Promise<void>
+      const failure = jest
+        .spyOn(getDb().providerCostDaily, "bulkDelete")
+        .mockRejectedValueOnce(new Error("write refused"))
+      await callback()
+      expect(await getDb().sessionUsage.get("expired")).toBeDefined()
+      expect(getStorageRetentionSnapshot()?.results).toContainEqual({
+        id: "usageHistory",
+        removed: 0,
+        status: "failed",
+        reason: "prune-failed",
+      })
+      failure.mockRestore()
+      await callback()
+      expect(await getDb().sessionUsage.toCollection().primaryKeys()).toEqual(["boundary", "today"])
+      expect(await getDb().providerCostDaily.toCollection().primaryKeys()).toEqual([
+        "boundary",
+        "today",
+      ])
+      expect(getStorageRetentionSnapshot()?.results).toContainEqual({
+        id: "usageHistory",
+        removed: 2,
+        status: "completed",
+      })
+    } finally {
+      stop()
+      setSpy.mockRestore()
+    }
+  })
   it("purges orphaned side chats on each sweep and survives that purge failing", async () => {
     mockPurgeOrphanedSessionSideChats.mockClear()
     const stop = await startStorageRetentionSweeper()
@@ -252,7 +356,12 @@ describe("startStorageRetentionSweeper", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     mockPurgeOrphanedSessionSideChats.mockRejectedValueOnce(new Error("locked"))
     const stopAgain = await startStorageRetentionSweeper()
-    expect(warn).toHaveBeenCalledWith("orphaned side chat sweep failed", expect.any(Error))
+    expect(getStorageRetentionSnapshot()?.results).toContainEqual({
+      id: "sessionSideChats",
+      removed: 0,
+      status: "failed",
+      reason: "prune-failed",
+    })
     expect(warn).not.toHaveBeenCalledWith("storage retention sweep failed", expect.anything())
     stopAgain()
     warn.mockRestore()
@@ -352,7 +461,7 @@ it("reconciles explicitly deleted draft rows through the governed sweep even wit
   } as never)
   await db.syncTombstones.put({ table: "sessions", id: "deleted-draft", deletedAt: 1 })
   const result = await pruneRetainedTables(0)
-  expect(result).toContainEqual({ id: "syncTombstones", removed: 2 })
+  expect(result).toContainEqual({ id: "syncTombstones", removed: 2, status: "completed" })
   expect(await db.chatDrafts.get("deleted-draft")).toBeUndefined()
 })
 
@@ -442,7 +551,11 @@ describe("notification delivery retention", () => {
       notificationPreferences: { ...DEFAULT_NOTIFICATION_PREFERENCES, retentionMaxAgeMs: 0 },
     })
     await seedSettledIntent(Date.now() - 400 * MS_PER_DAY)
-    expect(await target().prune(Date.now())).toBe(0)
+    expect(await target().prune(Date.now())).toEqual({
+      removed: 0,
+      status: "off",
+      reason: "configured-off",
+    })
     expect((await getDb().notificationDeliveryIntents.get("i1"))?.compactedAt).toBeUndefined()
   })
 
@@ -456,6 +569,6 @@ it("replays desktop deletion even when configured retention keeps everything", a
   mockRetryDesktopDeletion.mockResolvedValueOnce(2)
   const target = RETENTION_TARGETS.find((row) => row.id === "managedDesktopDeletion")!
   expect(await pruneRetainedTables(0, [target])).toEqual([
-    { id: "managedDesktopDeletion", removed: 2 },
+    { id: "managedDesktopDeletion", removed: 2, status: "completed" },
   ])
 })

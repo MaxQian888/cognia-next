@@ -91,10 +91,13 @@ export async function notifyTaskEvent(
 
   const { title, body } = getNotificationContent(task, execution, eventType)
 
-  // Background maintenance (presence refresh, provider diagnostics,
-  // housekeeping) runs every few minutes; a routine start/complete of one is
-  // not something to surface. Failures and auto-pauses still are.
-  const routineMaintenance = isMaintenanceTask(task) && ROUTINE_TASK_EVENTS.has(eventType)
+  // Legacy maintenance has no explicit reminder policy. Retain its routine
+  // suppression; migrated silent defaults exit above through `none`, while an
+  // explicit notification choice must reach its requested delivery channels.
+  const routineMaintenance =
+    isMaintenanceTask(task) &&
+    task.notification.dueReminder === undefined &&
+    ROUTINE_TASK_EVENTS.has(eventType)
   const recurring = task.trigger.type !== "once"
 
   // Desktop ("desktop" → os) + toast + im → ONE Notification Center emit.

@@ -18,6 +18,8 @@
  */
 
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
+import { saveManagedTask } from "@/lib/scheduler/managed-tasks"
 import { validateCronExpression } from "@/lib/scheduler/cron-parser"
 import type { ScheduledTask, TaskExecutionConfig, TaskNotificationConfig } from "@/types/scheduler"
 import type { TwinCronSettings } from "@/types/twin"
@@ -113,15 +115,15 @@ export async function syncTwinCronToScheduler(
     } else {
       const next = buildTask(twinId, "ingest", ingestExpr, cron?.timezone, existingIngest)
       if (existingIngest) {
-        await schedulerDb.updateTask(next)
+        await saveManagedTask(getTaskScheduler(), next, existingIngest)
         result.ingest = "updated"
       } else {
-        await schedulerDb.createTask(next)
+        await saveManagedTask(getTaskScheduler(), next, null)
         result.ingest = "created"
       }
     }
   } else if (existingIngest) {
-    await schedulerDb.deleteTask(ingestId)
+    await getTaskScheduler().deleteTask(ingestId)
     result.ingest = "deleted"
   }
 
@@ -133,15 +135,15 @@ export async function syncTwinCronToScheduler(
     } else {
       const next = buildTask(twinId, "distill", distillExpr, cron?.timezone, existingDistill)
       if (existingDistill) {
-        await schedulerDb.updateTask(next)
+        await saveManagedTask(getTaskScheduler(), next, existingDistill)
         result.distill = "updated"
       } else {
-        await schedulerDb.createTask(next)
+        await saveManagedTask(getTaskScheduler(), next, null)
         result.distill = "created"
       }
     }
   } else if (existingDistill) {
-    await schedulerDb.deleteTask(distillId)
+    await getTaskScheduler().deleteTask(distillId)
     result.distill = "deleted"
   }
 

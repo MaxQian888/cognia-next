@@ -43,7 +43,13 @@ import {
   isSlotOutsideCatchupWindow,
   resolveOverlapPolicy,
 } from "./runtime-policy"
+import { reconcileMaintenanceNotifications } from "./managed-tasks"
 import { notifyTaskEvent } from "./notification-integration"
+import {
+  isRetiredMaintenanceTask,
+  isSilentMaintenanceType,
+  SILENT_MAINTENANCE_NOTIFICATION,
+} from "./maintenance-tasks"
 import { emitSchedulerEvent } from "./event-integration"
 import { SchedulerError } from "./errors"
 import { recordPhase, summarizePhases } from "./execution-phases"
@@ -419,6 +425,8 @@ export type ExecutionStatusEvent = {
   taskName: string
   duration?: number
   error?: string
+  /** Keeps internal upkeep out of pet activity/speech without hiding execution history. */
+  silentMaintenance?: boolean
 }
 
 /**
@@ -929,6 +937,7 @@ class TaskSchedulerImpl {
       if (version !== this.lifecycleVersion) return
     }
 
+    await reconcileMaintenanceNotifications(this, () => version === this.lifecycleVersion)
     const tasks = await schedulerDb.getTasksByStatus("active")
     if (version !== this.lifecycleVersion) return
     log.info(`Found ${tasks.length} active tasks to schedule`)
@@ -1468,6 +1477,7 @@ class TaskSchedulerImpl {
         taskName: execution.taskName,
         duration: execution.duration,
         error: execution.error,
+        silentMaintenance: isSilentMaintenanceType(task.type),
       } satisfies ExecutionStatusEvent)
     } catch {
       /* channel closed or unavailable */
@@ -1518,7 +1528,7 @@ class TaskSchedulerImpl {
     }
 
     const task: ScheduledTask = {
-      id: nanoid(),
+      id: input.id ?? nanoid(),
       name: input.name,
       description: input.description,
       type: input.type,
@@ -1528,7 +1538,12 @@ class TaskSchedulerImpl {
         ...config,
         maxMissedRuns: Math.max(0, config.maxMissedRuns ?? 1),
       },
-      notification: { ...DEFAULT_NOTIFICATION_CONFIG, ...input.notification },
+      notification: {
+        ...(isSilentMaintenanceType(input.type)
+          ? SILENT_MAINTENANCE_NOTIFICATION
+          : DEFAULT_NOTIFICATION_CONFIG),
+        ...input.notification,
+      },
       status: "active",
       createdBy: input.createdBy ?? { kind: "user" },
       projectId,
@@ -1562,6 +1577,7 @@ class TaskSchedulerImpl {
    * Update an existing task
    */
   async updateTask(taskId: string, input: UpdateScheduledTaskInput): Promise<ScheduledTask | null> {
+    const version = this.lifecycleVersion
     if (input.status !== undefined && input.status !== "active") {
       this.invalidateTaskLifecycle(taskId)
       this.unscheduleTask(taskId)
@@ -1569,6 +1585,7 @@ class TaskSchedulerImpl {
       this.queues.delete(taskId)
     }
     const task = await schedulerDb.getTask(taskId)
+    if (version !== this.lifecycleVersion) return null
     if (!task) {
       log.warn(`Task not found: ${taskId}`)
       return null
@@ -1580,6 +1597,17 @@ class TaskSchedulerImpl {
     assertRunsHere("scheduled-task", task.owner)
 
     const now = new Date()
+    if (
+      isRetiredMaintenanceTask(task) &&
+      ((input.status !== undefined && input.status !== "disabled") ||
+        (input.tags !== undefined && !isRetiredMaintenanceTask({ tags: input.tags })))
+    ) {
+      throw new SchedulerError(
+        "RETIRED_MAINTENANCE_TASK",
+        "Retired maintenance tasks cannot be reactivated",
+        { taskId }
+      )
+    }
     const mergedTrigger: TaskTrigger = {
       ...task.trigger,
       ...(input.trigger ?? {}),
@@ -1633,6 +1661,7 @@ class TaskSchedulerImpl {
 
     // Save to database
     await schedulerDb.updateTask(updatedTask)
+    if (version !== this.lifecycleVersion) return updatedTask
     log.info(`Updated task: ${updatedTask.name} (${taskId})`)
 
     // Reschedule
@@ -1642,7 +1671,7 @@ class TaskSchedulerImpl {
       this.queues.delete(taskId)
     }
     if (updatedTask.status === "active") {
-      await this.scheduleTask(updatedTask)
+      await this.scheduleTask(updatedTask, version)
     }
 
     return updatedTask
@@ -1883,6 +1912,7 @@ class TaskSchedulerImpl {
     // A placeholder stays `disabled`: pausing it would let `resumeTask` reach
     // it later through the paused branch.
     if (isOwnedElsewhere(task.owner)) return false
+    if (isRetiredMaintenanceTask(task)) return false
 
     await schedulerDb.updateTask({ ...task, status: "paused", updatedAt: new Date() })
     log.info(`Paused task: ${task.name} (${taskId})`)
@@ -1913,6 +1943,7 @@ class TaskSchedulerImpl {
     if (!task) return false
     assertRunsHere("scheduled-task", task.owner)
     if (task.status !== "paused") return false
+    if (isRetiredMaintenanceTask(task)) return false
     if (isDeprecatedTaskType(task.type)) {
       throw SchedulerError.deprecatedTaskType(task.type)
     }
@@ -1951,6 +1982,13 @@ class TaskSchedulerImpl {
   ): Promise<ScheduledTask | null> {
     const task = await schedulerDb.getTask(taskId)
     if (!task) return null
+    if (isRetiredMaintenanceTask(task) && options.status && options.status !== "disabled") {
+      throw new SchedulerError(
+        "RETIRED_MAINTENANCE_TASK",
+        "Retired maintenance tasks cannot be reactivated",
+        { taskId }
+      )
+    }
     const now = new Date()
     if (isOwnedElsewhere(owner)) {
       if (task.promotion) {
@@ -2170,6 +2208,7 @@ class TaskSchedulerImpl {
   private async scheduleTask(task: ScheduledTask, expectedVersion?: number): Promise<void> {
     if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) return
     if (task.status !== "active") return
+    if (isRetiredMaintenanceTask(task)) return
     // An event task has no slot to arm, but a bounded one has a deadline: arm
     // that, so it expires when its `endAt` passes rather than whenever the
     // next event happens to arrive (which may be never).
@@ -2403,6 +2442,11 @@ class TaskSchedulerImpl {
     retryAttempt: number,
     context: ExecuteTaskContext
   ): Promise<TaskExecution> {
+    if (isRetiredMaintenanceTask(task)) {
+      throw new SchedulerError("RETIRED_MAINTENANCE_TASK", "Retired maintenance tasks cannot run", {
+        taskId: task.id,
+      })
+    }
     const executionLifecycleVersion = this.lifecycleVersion
     const taskLifecycleVersion = this.getTaskLifecycleVersion(task.id)
     const executionId = context.executionId ?? nanoid()

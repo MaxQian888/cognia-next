@@ -20,6 +20,7 @@
  *   routed archive write every surface shares.
  */
 
+import { ensureMaintenanceSchedule } from "@/lib/scheduler/managed-tasks"
 import type { ChatSession, AppSettings } from "@cognia/agent-config-types"
 import { loggers } from "@cognia/logging"
 
@@ -159,10 +160,6 @@ export function registerConversationAutoArchiveExecutor(): void {
 export async function installConversationAutoArchiveSchedule(): Promise<void> {
   registerConversationAutoArchiveExecutor()
   const scheduler = getTaskScheduler()
-  const existing = (await scheduler.getAllTasks()).filter(
-    (task) => task.type === CONVERSATION_AUTO_ARCHIVE_TASK_TYPE
-  )
-  if (existing.length > 0) return
   const task: CreateScheduledTaskInput = {
     name: "Conversation auto-archive",
     type: CONVERSATION_AUTO_ARCHIVE_TASK_TYPE,
@@ -175,12 +172,12 @@ export async function installConversationAutoArchiveSchedule(): Promise<void> {
       dueReminder: false,
       onStart: false,
       onComplete: false,
-      onError: true,
+      onError: false,
       onProgress: false,
       channels: ["none"],
     },
     createdBy: { kind: "user" },
     tags: [CONVERSATION_AUTO_ARCHIVE_TASK_TAG],
   }
-  await scheduler.createTask(task)
+  await ensureMaintenanceSchedule(scheduler, task)
 }

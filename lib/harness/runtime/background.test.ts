@@ -4,6 +4,7 @@ import { makeRun } from "../test-fixtures"
 import {
   QUEUED_RUN_MAX_AGE_MS,
   runHarnessEvolutionSweep,
+  installHarnessEvolutionSweepSchedule,
   type HarnessSweepDependencies,
 } from "./background"
 
@@ -117,4 +118,30 @@ describe("runHarnessEvolutionSweep", () => {
     const { d } = deps(runs, { hostOwnsSessions: () => true })
     expect((await runHarnessEvolutionSweep(d)).skipped).toBe("host-owned")
   })
+})
+
+jest.mock("@/lib/scheduler/task-scheduler", () => ({
+  registerTaskExecutor: jest.fn(),
+  getTaskScheduler: jest.fn(),
+}))
+
+it("installs the background sweep as a silent managed singleton", async () => {
+  const { getTaskScheduler, registerTaskExecutor } = await import("@/lib/scheduler/task-scheduler")
+  const createTask = jest.fn()
+  jest
+    .mocked(getTaskScheduler)
+    .mockReturnValue({ getAllTasks: async () => [], createTask } as never)
+  await installHarnessEvolutionSweepSchedule()
+  expect(registerTaskExecutor).toHaveBeenCalledWith("harness-evolution-sweep", expect.any(Function))
+  expect(createTask).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: "system:harness-evolution-sweep",
+      type: "harness-evolution-sweep",
+      notification: expect.objectContaining({
+        channels: ["none"],
+        dueReminder: false,
+        onError: false,
+      }),
+    })
+  )
 })

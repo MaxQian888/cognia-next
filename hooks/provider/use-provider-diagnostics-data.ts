@@ -20,6 +20,7 @@ import type {
   ProviderDiagnosticJob,
   ProviderDiagnosticSample,
   ProviderEndpointChange,
+  ProviderDiagnosticsRefreshState,
 } from "@cognia/provider-types"
 
 /** How often a paired (non-desktop) client re-reads the desktop's snapshot. */
@@ -46,6 +47,8 @@ export interface ProviderDiagnosticsData {
   balances: ProviderBalanceSnapshot[]
   legacyBalanceProjection: ReturnType<typeof projectLegacyProviderBalanceRows>
   endpointChanges: ProviderEndpointChange[]
+  /** Local source clocks. Paired hosts have no projection for this evidence yet. */
+  refreshStates: ProviderDiagnosticsRefreshState[] | null
   remoteStatus: RemoteProviderDiagnosticsStatus | null
   remoteHistory: RemoteProviderDiagnosticsHistory | null
   /** Newest sample is old enough that the panel warns the user. */
@@ -127,6 +130,14 @@ export function useProviderDiagnosticsData(providerId: string): ProviderDiagnost
     [providerId],
     []
   )
+  const localRefreshStates = useLiveQuery(
+    async (): Promise<ProviderDiagnosticsRefreshState[]> =>
+      pairedClient
+        ? []
+        : getDb().providerDiagnosticsRefreshState.where("providerId").equals(providerId).toArray(),
+    [providerId, pairedClient],
+    []
+  )
 
   useEffect(() => {
     if (!pairedClient) return
@@ -205,6 +216,7 @@ export function useProviderDiagnosticsData(providerId: string): ProviderDiagnost
     balances,
     legacyBalanceProjection,
     endpointChanges,
+    refreshStates: pairedClient ? null : localRefreshStates,
     remoteStatus,
     remoteHistory,
     stale,

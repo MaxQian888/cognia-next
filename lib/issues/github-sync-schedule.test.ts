@@ -3,6 +3,14 @@ const mockCreateTask = jest.fn()
 const mockDeleteTask = jest.fn()
 const mockUpdateTask = jest.fn()
 
+jest.mock("@/lib/scheduler/task-scheduler", () => ({
+  getTaskScheduler: () => ({
+    createTask: mockCreateTask,
+    updateTask: mockUpdateTask,
+    deleteTask: mockDeleteTask,
+  }),
+}))
+
 jest.mock("@/lib/scheduler/scheduler-db", () => ({
   schedulerDb: {
     getTask: (...args: Parameters<typeof mockGetTask>) => mockGetTask(...args),
@@ -47,7 +55,7 @@ it("creates the singleton row once a repo is bound", async () => {
   const task = mockCreateTask.mock.calls[0][0]
   expect(task.id).toBe(GITHUB_ISSUE_SYNC_TASK_ID)
   expect(task.type).toBe("github-issue-sync")
-  expect(task.status).toBe("active")
+  // The live scheduler assigns the active status.
   expect(task.trigger).toMatchObject({
     type: "interval",
     intervalMs: GITHUB_ISSUE_SYNC_INTERVAL_MS,
@@ -76,20 +84,27 @@ it("does not replay missed windows — the watermark already covers them", async
   expect(mockCreateTask.mock.calls[0][0].config.runMissedOnStartup).toBe(false)
 })
 
-it("notifies on failure only — a quiet successful refresh is not news", async () => {
+it("defaults background sync to silence, including failures", async () => {
   mockResolveBindings.mockResolvedValue(oneBinding)
   await syncGithubIssueSchedule()
 
   expect(mockCreateTask.mock.calls[0][0].notification).toEqual({
     onStart: false,
     onComplete: false,
-    onError: true,
+    onError: false,
+    onProgress: false,
+    dueReminder: false,
+    channels: ["none"],
   })
 })
 
 it("keeps an existing row untouched rather than resetting a retuned cadence", async () => {
   mockResolveBindings.mockResolvedValue(oneBinding)
-  mockGetTask.mockResolvedValue({ id: GITHUB_ISSUE_SYNC_TASK_ID, runCount: 9 })
+  mockGetTask.mockResolvedValue({
+    id: GITHUB_ISSUE_SYNC_TASK_ID,
+    runCount: 9,
+    notification: { channels: ["none"], dueReminder: false },
+  })
 
   await expect(syncGithubIssueSchedule()).resolves.toEqual({
     action: "kept",
@@ -101,7 +116,10 @@ it("keeps an existing row untouched rather than resetting a retuned cadence", as
 
 it("deletes the row when the last binding goes away", async () => {
   mockResolveBindings.mockResolvedValue([])
-  mockGetTask.mockResolvedValue({ id: GITHUB_ISSUE_SYNC_TASK_ID })
+  mockGetTask.mockResolvedValue({
+    id: GITHUB_ISSUE_SYNC_TASK_ID,
+    notification: { channels: ["none"], dueReminder: false },
+  })
 
   await expect(syncGithubIssueSchedule()).resolves.toEqual({
     action: "deleted",
@@ -124,7 +142,10 @@ it("creates nothing on an install that never touches GitHub", async () => {
 it("is idempotent across repeated calls", async () => {
   mockResolveBindings.mockResolvedValue(oneBinding)
   await syncGithubIssueSchedule()
-  mockGetTask.mockResolvedValue({ id: GITHUB_ISSUE_SYNC_TASK_ID })
+  mockGetTask.mockResolvedValue({
+    id: GITHUB_ISSUE_SYNC_TASK_ID,
+    notification: { channels: ["none"], dueReminder: false },
+  })
   await syncGithubIssueSchedule()
 
   expect(mockCreateTask).toHaveBeenCalledTimes(1)

@@ -7,12 +7,54 @@
 import "fake-indexeddb/auto"
 import { syncTwinCronToScheduler, CRON_PRESETS } from "./cron-bridge"
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import {
+  getTaskScheduler,
+  initTaskScheduler,
+  stopTaskScheduler,
+} from "@/lib/scheduler/task-scheduler"
+import { NodeTimingDriver } from "@/lib/scheduler/timing/node-driver"
+
+let driver: NodeTimingDriver
 
 beforeEach(async () => {
   await schedulerDb.clearAll()
+  driver = new NodeTimingDriver()
+  await initTaskScheduler(driver)
 })
 
+afterEach(() => stopTaskScheduler())
+
 describe("syncTwinCronToScheduler", () => {
+  it("arms, retimes and disarms the live clock without restarting", async () => {
+    const arm = jest.spyOn(driver, "arm")
+    await syncTwinCronToScheduler("live", {
+      enabled: true,
+      ingestSchedule: "0 * * * *",
+      distillSchedule: "",
+      timezone: "UTC",
+    })
+    expect(getTaskScheduler().getStatus().scheduledCount).toBe(1)
+    const previous = await schedulerDb.getTask("twin::live::ingest")
+    expect(arm).toHaveBeenCalledWith(previous!.id, previous!.nextRunAt!.getTime())
+    await syncTwinCronToScheduler("live", {
+      enabled: true,
+      ingestSchedule: "0 */6 * * *",
+      distillSchedule: "",
+      timezone: "UTC",
+    })
+    expect(getTaskScheduler().getStatus().scheduledCount).toBe(1)
+    const next = await schedulerDb.getTask("twin::live::ingest")
+    expect(arm).toHaveBeenCalledWith(next!.id, next!.nextRunAt!.getTime())
+    expect(next!.nextRunAt!.getUTCHours() % 6).toBe(0)
+    expect(arm.mock.calls.filter(([id]) => id === next!.id)).toHaveLength(2)
+    await syncTwinCronToScheduler("live", {
+      enabled: false,
+      ingestSchedule: "",
+      distillSchedule: "",
+      timezone: "UTC",
+    })
+    expect(driver.armedCount).toBe(0)
+  })
   it("creates both ingest + distill tasks when both schedules are set", async () => {
     const result = await syncTwinCronToScheduler("twin_a", {
       enabled: true,

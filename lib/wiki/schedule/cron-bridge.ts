@@ -10,6 +10,8 @@
  */
 
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
+import { saveManagedTask } from "@/lib/scheduler/managed-tasks"
 import { validateCronExpression } from "@/lib/scheduler/cron-parser"
 import type { ScheduledTask, TaskExecutionConfig, TaskNotificationConfig } from "@/types/scheduler"
 import type { WikiScheduleSettings } from "@/types/wiki"
@@ -102,7 +104,7 @@ export async function syncWikiCronToScheduler(
 
   if (!schedule || schedule.mode === "off") {
     if (existing) {
-      await schedulerDb.deleteTask(WIKI_REBUILD_TASK_ID)
+      await getTaskScheduler().deleteTask(WIKI_REBUILD_TASK_ID)
       return { action: "deleted" }
     }
     return { action: "skipped" }
@@ -129,9 +131,9 @@ export async function syncWikiCronToScheduler(
 
   const next = buildTask(cronExpression, schedule, existing)
   if (existing) {
-    await schedulerDb.updateTask(next)
+    await saveManagedTask(getTaskScheduler(), next, existing)
     return { action: "updated" }
   }
-  await schedulerDb.createTask(next)
+  await saveManagedTask(getTaskScheduler(), next, null)
   return { action: "created" }
 }

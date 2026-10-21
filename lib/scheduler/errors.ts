@@ -21,6 +21,8 @@ export type SchedulerErrorCode =
   | "PLUGIN_HANDLER_NOT_FOUND"
   | "DEPRECATED_TASK_TYPE"
   | "NEEDS_APPROVAL"
+  | "RETIRED_MAINTENANCE_TASK"
+  | "MAINTENANCE_IDENTITY_COLLISION"
   | "UNKNOWN"
 
 export class SchedulerError extends Error {

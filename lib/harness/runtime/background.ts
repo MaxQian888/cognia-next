@@ -22,6 +22,7 @@
  * to the interval setting takes effect without re-creating the task.
  */
 
+import { ensureMaintenanceSchedule } from "@/lib/scheduler/managed-tasks"
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { HarnessEvolutionRun } from "@/types/harness/evolution"
 import type { CreateScheduledTaskInput, ScheduledTaskType } from "@/types/scheduler"
@@ -148,10 +149,6 @@ export async function installHarnessEvolutionSweepSchedule(): Promise<void> {
   await registerHarnessEvolutionSweepExecutor()
   const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
   const scheduler = getTaskScheduler()
-  const existing = (await scheduler.getAllTasks()).filter(
-    (task) => task.type === HARNESS_EVOLUTION_SWEEP_TASK_TYPE
-  )
-  if (existing.length > 0) return
   const task: CreateScheduledTaskInput = {
     name: "Harness evolution sweep",
     type: HARNESS_EVOLUTION_SWEEP_TASK_TYPE,
@@ -162,12 +159,12 @@ export async function installHarnessEvolutionSweepSchedule(): Promise<void> {
       dueReminder: false,
       onStart: false,
       onComplete: false,
-      onError: true,
+      onError: false,
       onProgress: false,
       channels: ["none"],
     },
     createdBy: { kind: "user" },
     tags: [HARNESS_EVOLUTION_SWEEP_TAG],
   }
-  await scheduler.createTask(task)
+  await ensureMaintenanceSchedule(scheduler, task)
 }

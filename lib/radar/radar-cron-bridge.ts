@@ -5,6 +5,8 @@
  */
 
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
+import { saveManagedTask } from "@/lib/scheduler/managed-tasks"
 import { validateCronExpression } from "@/lib/scheduler/cron-parser"
 import type { ScheduledTask, TaskExecutionConfig, TaskNotificationConfig } from "@/types/scheduler"
 import { RADAR_REPORT_TASK_ID, type RadarScheduleSettings } from "@/types/radar"
@@ -86,7 +88,6 @@ export async function syncRadarCronToScheduler(
 
   if (!enabled || !schedule || schedule.mode === "off") {
     if (existing) {
-      const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
       await getTaskScheduler().deleteTask(RADAR_REPORT_TASK_ID)
       return { action: "deleted" }
     }
@@ -106,13 +107,9 @@ export async function syncRadarCronToScheduler(
 
   const next = buildTask(cronExpression, schedule, existing)
   if (existing) {
-    await schedulerDb.updateTask(next)
-    const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
-    await getTaskScheduler().updateTask(next.id, {})
+    await saveManagedTask(getTaskScheduler(), next, existing)
     return { action: "updated" }
   }
-  await schedulerDb.createTask(next)
-  const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
-  await getTaskScheduler().updateTask(next.id, {})
+  await saveManagedTask(getTaskScheduler(), next, null)
   return { action: "created" }
 }
