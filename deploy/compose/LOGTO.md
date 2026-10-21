@@ -508,3 +508,48 @@ Sources:
 
 - [Official Logto Feishu connector setup](https://docs.logto.io/integrations/feishu-web)
 - [Feishu application console](https://open.feishu.cn/app)
+
+## 11. Email verification-code login through Cloudflare (2026-10-21)
+
+The local Logto installation has an HTTP Email connector targeting
+`https://logto-email.cognia.cn/send`. The independent `cognia-logto-email`
+Worker sends through Cloudflare Email Sending, using the dedicated
+`auth.cognia.cn` domain and the fixed sender `noreply@auth.cognia.cn`.
+Email-body previews are disabled for this sending domain. The initial setup
+used the status domain; authentication mail now has separate DNS and privacy settings.
+Its shared connector secret is separate from Wrangler's OAuth credential.
+
+The email-code sign-in method is added alongside username/password and Feishu.
+Registration rules, mandatory TOTP/backup codes, password policy, lockout and
+automatic-linking settings are preserved. Accounts need a primary email to use
+this method; the configuration does not add email-only registration.
+
+The hardened policy uses five-minute verification codes and at most five failed
+attempts. The mail Worker adds durable per-recipient dedupe, a 60-second cooldown,
+a sliding 10-attempt hourly quota, bounded request/provider deadlines and HTML
+mail with a plain-text alternative. The operator guide documents both required
+secrets and the Durable Object migration; auth-token rotation preserves the
+independent hashing key.
+
+See [the mail Worker operator guide](../../services/logto-email/README.md) for
+deployment, connector configuration, verification and rollback. The local
+policy/connector snapshots and shared secret are kept outside the repository
+under `~/.config/cognia/logto-local/email-setup-2026-10-21/` with private
+permissions. Never commit that directory's contents.
+
+Initial end-to-end verification used the actual Cognia `loginToLogto` client with the Native
+application's registered loopback callback. The recipient confirmed receipt;
+an incorrect code was rejected, the received code was accepted, and mandatory
+TOTP enrollment completed. The PKCE callback/state check, ES384 ID/access-token
+signatures, issuer, audience, expiry, verified-email claim, refresh rotation and
+refresh-token revocation/rejection were verified. The temporary user and local
+test-token file were removed. No organization or administrative scope was
+assigned. This verifies authentication, not Gateway/Collab membership or a
+packaged desktop/mobile application flow.
+
+After hardening, the five-minute/five-attempt policy was read back from Logto.
+A new real Logto request reached the deployed Worker, and the recipient confirmed
+receipt and correct layout from the new authentication sender. This final check
+stopped at email verification; it did not repeat the earlier full MFA/token flow.
+The local workerd smoke separately verified 32-request duplicate bursts, SQLite
+restart dedupe and independent recipient progress without sending internet mail.

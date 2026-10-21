@@ -1,0 +1,25 @@
+# Authentication mail has its own sender domain and private delivery coordination.
+name = "cognia-logto-email"
+main = "index.ts"
+compatibility_date = "2026-10-21"
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "logto-email.cognia.cn", custom_domain = true }]
+
+[vars]
+MAIL_FROM = "noreply@auth.cognia.cn"
+
+[[send_email]]
+name = "EMAIL"
+allowed_sender_addresses = ["noreply@auth.cognia.cn"]
+
+[[durable_objects.bindings]]
+name = "DELIVERY"
+class_name = "EmailDelivery"
+
+[[migrations]]
+tag = "email-delivery-v1"
+new_sqlite_classes = ["EmailDelivery"]
+
+[observability]
+enabled = true
