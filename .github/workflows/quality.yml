@@ -203,8 +203,8 @@ jobs:
         uses: actions/cache@v6
         with:
           path: |
-            tsconfig.tsbuildinfo
-            tsconfig.build.tsbuildinfo
+            .cache/typecheck/
+            .cache/typescript/
           key: ${{ runner.os }}-${{ runner.arch }}-node26-tsbuildinfo-${{ hashFiles('**/pnpm-lock.yaml', '**/tsconfig*.json') }}-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-node26-tsbuildinfo-${{ hashFiles('**/pnpm-lock.yaml', '**/tsconfig*.json') }}-

@@ -34,7 +34,7 @@ Workflow 只检出自己的启动代码，并禁用 Git 凭据持久化。项目
 
 检查前，请在本机安装 GitHub CLI 并运行 `gh auth login`，按上文安装全部五个模板文件。检查通过**不代表**已验证 `COGNIA_RUNNER_ACTORS`、组织 Actions 策略、镜像是否可拉取或信令服务器是否可达；仍须配置允许操作的账号列表，并另行确认这些部署条件。检查总时限为 90 秒；超时或 API 失败也可能源于网络问题，不一定是登录失效。
 
-使用 [Dockerfile.cognia-server](../../Dockerfile.cognia-server) 构建 Host，使用 [deploy/bundle/Dockerfile](../bundle/Dockerfile) 构建 Agent bundle。需要在 Host 上使用预装原生 Agent CLI 时选择 `runtime-full`；`runtime-slim` 提供 headless 服务。开发镜像提供项目工具链。将三个镜像发布到 runner 可以拉取的位置，必要时使用下文的 registry secret，并确认 Linux amd64 架构及 libc 兼容性。
+使用 [deploy/docker/Dockerfile.cognia-server](../docker/Dockerfile.cognia-server) 构建 Host，使用 [deploy/bundle/Dockerfile](../bundle/Dockerfile) 构建 Agent bundle。需要在 Host 上使用预装原生 Agent CLI 时选择 `runtime-full`；`runtime-slim` 提供 headless 服务。开发镜像提供项目工具链。将三个镜像发布到 runner 可以拉取的位置，必要时使用下文的 registry secret，并确认 Linux amd64 架构及 libc 兼容性。
 
 向导会提示并恢复最近一次提交的有效配置。**重置表单**清空当前表单；仅编辑字段不会覆盖已保存配置。本地只保存八个公开字段，不保存配对凭据；存储不可用时仍可创建。操作失败或提交结果不确定时，请先**刷新状态**并**查看 GitHub 运行记录**，再决定是否提交新请求。前置检查失败时，修复问题后点击**检查并继续**重试。
 
@@ -49,7 +49,7 @@ export RUNNER_IMAGE_NAMESPACE=ghcr.io/your-owner
 export RUNNER_IMAGE_TAG=your-release
 
 docker buildx build --platform linux/amd64 --target runtime-full \
-  -f Dockerfile.cognia-server \
+  -f deploy/docker/Dockerfile.cognia-server \
   -t "$RUNNER_IMAGE_NAMESPACE/cognia-host:$RUNNER_IMAGE_TAG" --push .
 
 docker buildx build --platform linux/amd64 -f deploy/bundle/Dockerfile \

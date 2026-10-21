@@ -42,7 +42,7 @@ services:
       COGNIA_WORKSPACES_VOLUME: ${COGNIA_INSTANCE:-cognia}_workspaces
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    # Root only for the socket's owner permission (see Dockerfile.docker-proxy);
+    # Root only for the socket's owner permission (see deploy/docker/Dockerfile.docker-proxy);
     # everything else a root process could use is taken away.
     read_only: true
     cap_drop: [ALL]

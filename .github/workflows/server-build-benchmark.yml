@@ -82,7 +82,7 @@ jobs:
           path.write_text(source)
           PY
           else
-            cp Dockerfile.cognia-server "$dockerfile"
+            cp deploy/docker/Dockerfile.cognia-server "$dockerfile"
           fi
           echo "file=$dockerfile" >> "$GITHUB_OUTPUT"
           if [[ -n "$CACHE_RUN" ]]; then

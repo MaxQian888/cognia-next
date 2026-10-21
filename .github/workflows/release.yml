@@ -387,7 +387,7 @@ jobs:
         run: rustup show active-toolchain
       - if: runner.os == 'Linux'
         name: Install the server's system libraries
-        # The same libraries Dockerfile.cognia-server's build stage installs:
+        # The same libraries deploy/docker/Dockerfile.cognia-server's build stage installs:
         # screen capture (PipeWire, GBM, EGL, Wayland), xkbcommon, OpenSSL,
         # and libclang for bindgen.
         run: >-

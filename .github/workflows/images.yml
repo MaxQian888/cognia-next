@@ -8,12 +8,12 @@ name: Images
 #   ghcr.io/<owner>/cognia-agent-bundle  deploy/bundle (ADR-0183: CLIs injected into user images)
 #   ghcr.io/<owner>/cognia-workspace-runtime services/workspace-runtime
 #   ghcr.io/<owner>/cognia-diagnostics    services/diagnostic-server
-#   ghcr.io/<owner>/cognia-collab         Dockerfile.collab-server
-#   ghcr.io/<owner>/cognia-server        Dockerfile.cognia-server (slim/full)
+#   ghcr.io/<owner>/cognia-collab         deploy/docker/Dockerfile.collab-server
+#   ghcr.io/<owner>/cognia-server        deploy/docker/Dockerfile.cognia-server (slim/full)
 #   ghcr.io/<owner>/cognia-web           deploy/compose/Dockerfile.web (static export + Caddy)
-#   ghcr.io/<owner>/cognia-deploy-agent  Dockerfile.deploy-agent
-#   ghcr.io/<owner>/cognia-ops-controller Dockerfile.ops-controller
-#   ghcr.io/<owner>/cognia-docker-proxy  Dockerfile.docker-proxy (ADR-0224 A8)
+#   ghcr.io/<owner>/cognia-deploy-agent  deploy/docker/Dockerfile.deploy-agent
+#   ghcr.io/<owner>/cognia-ops-controller deploy/docker/Dockerfile.ops-controller
+#   ghcr.io/<owner>/cognia-docker-proxy  deploy/docker/Dockerfile.docker-proxy (ADR-0224 A8)
 #   ghcr.io/<owner>/cognia-managed-desktop crates/cognia-automation/src/cua_sandbox/image (ADR-0233)
 #
 # Publish happens on version tags (and manual dispatch with push=true).
@@ -41,11 +41,11 @@ on:
         default: false
   pull_request:
     paths:
-      - "Dockerfile.cognia-server"
-      - "Dockerfile.deploy-agent"
-      - "Dockerfile.ops-controller"
-      - "Dockerfile.collab-server"
-      - "Dockerfile.docker-proxy"
+      - "deploy/docker/Dockerfile.cognia-server"
+      - "deploy/docker/Dockerfile.deploy-agent"
+      - "deploy/docker/Dockerfile.ops-controller"
+      - "deploy/docker/Dockerfile.collab-server"
+      - "deploy/docker/Dockerfile.docker-proxy"
       - ".dockerignore"
       - "deploy/runner/**"
       # The agent bundle: its Dockerfile, pins, npm lock and smoke script, the
@@ -139,17 +139,17 @@ jobs:
             file: services/diagnostic-server/Dockerfile
           - name: cognia-collab
             context: .
-            file: Dockerfile.collab-server
+            file: deploy/docker/Dockerfile.collab-server
           - name: cognia-deploy-agent
             context: .
-            file: Dockerfile.deploy-agent
+            file: deploy/docker/Dockerfile.deploy-agent
           - name: cognia-ops-controller
             context: .
-            file: Dockerfile.ops-controller
+            file: deploy/docker/Dockerfile.ops-controller
           # ADR-0224 A8: the always-on host's body-inspecting Docker API proxy.
           - name: cognia-docker-proxy
             context: .
-            file: Dockerfile.docker-proxy
+            file: deploy/docker/Dockerfile.docker-proxy
           # Same-origin Web front door: Next.js static export served by Caddy.
           # Root context so the export sees the whole workspace; .dockerignore
           # keeps node_modules/out/target off the daemon.
@@ -470,7 +470,7 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: .
-          file: Dockerfile.cognia-server
+          file: deploy/docker/Dockerfile.cognia-server
           target: check
           push: false
           cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache
@@ -527,7 +527,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: Dockerfile.cognia-server
+          file: deploy/docker/Dockerfile.cognia-server
           target: runtime-full
           push: ${{ needs.vars.outputs.should_push == 'true' }}
           tags: ${{ steps.meta-full.outputs.tags }}
@@ -540,7 +540,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: Dockerfile.cognia-server
+          file: deploy/docker/Dockerfile.cognia-server
           target: runtime-slim
           push: ${{ needs.vars.outputs.should_push == 'true' }}
           tags: ${{ steps.meta-slim.outputs.tags }}
@@ -551,7 +551,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: Dockerfile.cognia-server
+          file: deploy/docker/Dockerfile.cognia-server
           target: build-timings
           outputs: type=local,dest=${{ runner.temp }}/server-cargo-timings
 

@@ -27,7 +27,7 @@ on:
   push:
     branches: [dev]
     paths:
-      - "Dockerfile.cognia-server"
+      - "deploy/docker/Dockerfile.cognia-server"
       - "deploy/compose/**"
       - "scripts/smoke/**"
       - ".github/workflows/compose-e2e.yml"
@@ -214,7 +214,7 @@ jobs:
         run: |
           # GHCR paths are lowercase; the owner name is not.
           docker buildx build --load \
-            --file Dockerfile.cognia-server --target runtime-full \
+            --file deploy/docker/Dockerfile.cognia-server --target runtime-full \
             --tag cognia-server:ci-full \
             --cache-from "type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cognia-server:buildcache" \
             .

@@ -151,7 +151,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-jest-timings-${{ hashFiles('pnpm-lock.yaml', 'jest.config.ts', 'scripts/test/jest-timing-sequencer.cjs') }}-
       - name: Test incremental planner
-        run: node --test scripts/ci/change-plan.test.mjs scripts/test/coverage-changed.test.mjs scripts/test/jest-timing-sequencer.test.mjs scripts/test/cli-bundle.test.mjs scripts/test/release-rust-cache.test.mjs scripts/ci/workflow-contract.test.mjs
+        run: node --test scripts/ci/change-plan.test.mjs scripts/test/coverage-changed.test.mjs scripts/test/jest-config.test.mjs scripts/test/jest-timing-sequencer.test.mjs scripts/test/cli-bundle.test.mjs scripts/test/release-rust-cache.test.mjs scripts/ci/workflow-contract.test.mjs
       - name: Freeze exact test plan
         id: plan
         run: |

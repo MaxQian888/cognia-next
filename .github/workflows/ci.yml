@@ -6,7 +6,7 @@ name: CI/CD Pipeline
 # Runs on every push to a trunk branch and every PR. Everything here has to
 # stay fast enough that people actually wait for it.
 #
-# Tier model (see CI_CD.md):
+# Tier model (see docs/development/CI_CD.md):
 #
 #   PR / trunk push     quality gates · changed/related tests · affected builds
 #   nightly / tag / manual  complete tests and coverage · every lane

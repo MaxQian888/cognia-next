@@ -39,7 +39,7 @@ services:
     profiles: [sftpgo]
     # Pin a digest in production (`docker buildx imagetools inspect`).
     image: ${SFTPGO_IMAGE:-drakkan/sftpgo:v2.7}
-    # The same uid/gid as cognia-server (Dockerfile.cognia-server), so a
+    # The same uid/gid as cognia-server (deploy/docker/Dockerfile.cognia-server), so a
     # write grant can change files the agents created and vice versa.
     user: "10001:10001"
     depends_on:

@@ -168,7 +168,7 @@ secrets. The KV namespace id is injected at deploy time from the
 environment-scoped `CF_SHARE_KV_NAMESPACE_ID` variable (the tracked
 `wrangler.toml` keeps the `REPLACE_WITH_KV_NAMESPACE_ID` placeholder). Fly
 staging needs its own app + `share_data` volume (`FLY_SHARE_APP` variable).
-See `CI_CD.md` → "Deploy (services)".
+See [CI_CD.md](../../docs/development/CI_CD.md) → "Deploy (services)".
 
 ## Security
 

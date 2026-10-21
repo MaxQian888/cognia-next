@@ -21,7 +21,7 @@ name: Deploy
 #              CF_STATUS_D1_DATABASE_ID (staging), CF_IDENTITY_D1_DATABASE_ID,
 #              FLY_SIGNALING_APP, FLY_SHARE_APP
 # `production` should carry protection rules (required reviewers) — configured
-# in Settings → Environments, documented in CI_CD.md.
+# in Settings → Environments, documented in docs/development/CI_CD.md.
 #
 # Staging Workers deploy via the [env.staging] stanzas in each wrangler.toml
 # (separate worker names, no custom-domain routes → *.workers.dev).

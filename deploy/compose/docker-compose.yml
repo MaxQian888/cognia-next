@@ -90,7 +90,7 @@ services:
     image: ${COLLAB_IMAGE:-ghcr.io/maxqian888/cognia-collab:latest}
     build:
       context: ../../
-      dockerfile: Dockerfile.collab-server
+      dockerfile: deploy/docker/Dockerfile.collab-server
     depends_on:
       collab-postgres:
         condition: service_healthy
@@ -140,7 +140,7 @@ services:
     image: ${COLLAB_IMAGE:-ghcr.io/maxqian888/cognia-collab:latest}
     build:
       context: ../../
-      dockerfile: Dockerfile.collab-server
+      dockerfile: deploy/docker/Dockerfile.collab-server
     entrypoint: ["cognia-collab-bootstrap"]
     depends_on:
       collab-postgres:
@@ -169,7 +169,7 @@ services:
     image: ${COGNIA_SERVER_IMAGE:-ghcr.io/maxqian888/cognia-server:latest-full}
     build:
       context: ../../
-      dockerfile: Dockerfile.cognia-server
+      dockerfile: deploy/docker/Dockerfile.cognia-server
       target: runtime-full
     # Multicast has no meaning inside a container network, and advertising the
     # host there would only leak its presence (ADR-0224 A1).

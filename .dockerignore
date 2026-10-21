@@ -1,4 +1,4 @@
-# Build context filter for Dockerfile.cognia-server (ADR-0059 P0.2/W6).
+# Build context filter for deploy/docker/Dockerfile.cognia-server (ADR-0059 P0.2/W6).
 # The context is the repo root; without this file it would ship multi-GB
 # node_modules / target / out trees to the daemon on every build.
 # services/* have their own Dockerfiles with their own directories as context —
@@ -7,6 +7,7 @@
 # Dependency trees (reinstalled inside the image)
 node_modules
 **/node_modules
+.pnpm-store
 
 # Build outputs
 out

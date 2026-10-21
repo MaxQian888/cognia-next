@@ -17,7 +17,7 @@
 ##                                the cognia-runner image so versions can't drift).
 ##
 ## Usage:
-##   docker build -f Dockerfile.cognia-server --target runtime-slim -t cognia-server .
+##   docker build -f deploy/docker/Dockerfile.cognia-server --target runtime-slim -t cognia-server .
 ##   docker run --rm -v $HOME/cognia-data:/data cognia-server init
 ##   docker run --rm -v $HOME/cognia-data:/data -p 27890:27890 cognia-server serve --port 27890 --no-mdns
 ##
