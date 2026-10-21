@@ -408,7 +408,6 @@ const SDK_INPUTS = [...FRONTEND_INPUTS, ...CONTRACT_INPUTS]
 const GATE_INPUTS = {
   typecheck: FRONTEND_INPUTS,
   knip: [...FRONTEND_INPUTS, "browser-extension/", "docs/app/", "docs/lib/"],
-  "web:typecheck": ["packages/"],
   "browser-ext:typecheck": ["browser-extension/", "packages/", "lib/", "types/"],
   "sidecar:typecheck": CONTRACT_INPUTS,
   "build:packages": CONTRACT_INPUTS,
