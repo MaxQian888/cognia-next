@@ -163,18 +163,22 @@ export function GlanceQuotaModule({ size }: { size: GlanceModuleSize }) {
       return (
         <div
           key={w.id}
-          className="grid grid-cols-[4.5rem_1fr_auto] items-center gap-2 py-px text-[11.5px] text-muted-foreground"
+          className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-x-2 gap-y-0.5 py-px @min-[400px]/glance:grid-cols-[4.5rem_minmax(0,1fr)_auto] text-[11.5px] text-muted-foreground"
         >
           <span className="truncate">{windowLabel(w)}</span>
-          <span className="tabular-nums text-foreground">{amount}</span>
-          <span>{reset}</span>
+          <span className="min-w-0 break-words tabular-nums text-foreground">{amount}</span>
+          {reset ? (
+            <span className="col-span-2 break-words text-right @min-[400px]/glance:col-span-1">
+              {reset}
+            </span>
+          ) : null}
         </div>
       )
     }
     return (
       <div
         key={w.id}
-        className="grid grid-cols-[4.5rem_1fr_4.25rem_auto] items-center gap-2 py-px text-[11.5px] text-muted-foreground"
+        className="grid grid-cols-[4.5rem_minmax(2.5rem,1fr)_auto] items-center gap-x-2 gap-y-0.5 py-px @min-[400px]/glance:grid-cols-[4.5rem_minmax(2.5rem,1fr)_auto_auto] text-[11.5px] text-muted-foreground"
         style={source.state === "error" ? { opacity: 0.55 } : undefined}
       >
         <span className="truncate">{windowLabel(w)}</span>
@@ -186,7 +190,11 @@ export function GlanceQuotaModule({ size }: { size: GlanceModuleSize }) {
         <span className="text-right tabular-nums text-foreground">
           {t("used", { pct: Math.round(w.usedPct) })}
         </span>
-        <span className="whitespace-nowrap">{reset}</span>
+        {reset ? (
+          <span className="col-span-3 break-words text-right @min-[400px]/glance:col-span-1">
+            {reset}
+          </span>
+        ) : null}
       </div>
     )
   }

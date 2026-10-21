@@ -146,10 +146,12 @@ describe("GlanceActivityModule", () => {
       expect(cells(container)).toHaveLength(91)
     })
 
-    it("sizes cells from the width step", () => {
-      // 380 - 28 padding = 352; 13 columns -> 25, capped at 11 for standard.
+    it("fills flexible week columns while keeping a compact row height", () => {
       const { container } = setup(makeActivity({ days: makeDays(91) }))
-      expect(cells(container)[0]).toHaveStyle({ width: "11px", height: "11px" })
+      expect(cells(container)[0]).toHaveStyle({ width: "100%", height: "11px" })
+      expect(container.querySelector("span.grid")).toHaveStyle({
+        gridTemplateColumns: "repeat(13, minmax(0, 1fr))",
+      })
     })
 
     it("shrinks cells so a year fits a narrow panel", () => {
@@ -157,7 +159,10 @@ describe("GlanceActivityModule", () => {
       const { container } = setup(makeActivity({ range: "1y", days: makeDays(365) }), "standard", {
         width: "narrow",
       })
-      expect(cells(container)[0]).toHaveStyle({ width: "3px", height: "3px" })
+      expect(cells(container)[0]).toHaveStyle({ width: "100%", height: "3px" })
+      expect(container.querySelector("span.grid")).toHaveStyle({
+        gridTemplateColumns: "repeat(53, minmax(0, 1fr))",
+      })
     })
 
     it("lays the grid out in seven rows", () => {
@@ -172,7 +177,7 @@ describe("GlanceActivityModule", () => {
         platform: "mobile",
         width: "narrow",
       })
-      expect(cells(container)[0]).toHaveStyle({ width: "11px" })
+      expect(cells(container)[0]).toHaveStyle({ width: "100%", height: "11px" })
     })
 
     it("titles each cell with its day and tokens", () => {
@@ -244,7 +249,7 @@ describe("GlanceActivityModule", () => {
 
     it("uses larger cells than standard", () => {
       const { container } = setup(makeActivity(), "expanded")
-      expect(cells(container)[0]).toHaveStyle({ width: "14px" })
+      expect(cells(container)[0]).toHaveStyle({ width: "100%", height: "14px" })
     })
   })
 })

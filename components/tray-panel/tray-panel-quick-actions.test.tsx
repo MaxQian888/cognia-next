@@ -116,6 +116,18 @@ describe("TrayPanelQuickActions", () => {
   )
 
   describe("compact", () => {
+    it("keeps every action and its settings link available in a full toolbar", () => {
+      const actions = Array.from({ length: 12 }, (_, i) => ({
+        ...show,
+        id: `action-${i}`,
+        label: `Action ${i}`,
+      }))
+      renderModule("compact", actions)
+      for (const action of actions)
+        expect(screen.getByRole("button", { name: action.label })).toBeEnabled()
+      expect(screen.getByRole("button", { name: "Edit actions" })).toBeEnabled()
+    })
+
     it("renders an icon toolbar named by each action", () => {
       renderModule("compact", [show, search])
       const toolbar = screen.getByRole("toolbar", { name: "Quick" })

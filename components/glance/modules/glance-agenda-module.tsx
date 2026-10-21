@@ -2,7 +2,7 @@
 
 /**
  * Agenda module: next scheduled run, unread notifications, connectivity
- * (ADR-0225 §2). One line in `compact`, three rows in `standard`. Each part
+ * (ADR-0225 §2). A responsive strip in `compact`, three rows in `standard`. Each part
  * routes to its own owner: the scheduler (selected on the task), the
  * notification center, and the connectivity settings.
  */
@@ -85,42 +85,43 @@ export function GlanceAgendaModule({ size }: { size: GlanceModuleSize }) {
 
   if (size === "compact") {
     const chip =
-      "inline-flex min-w-0 shrink items-center gap-1 rounded px-1 py-0.5 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+      "inline-flex w-full min-w-0 items-center gap-1 overflow-hidden rounded px-1 py-0.5 hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
     return (
       <section
         data-glance-module="agenda"
         aria-label={title}
-        className={platform === "mobile" ? "px-5 py-1.5" : "px-3.5 py-1"}
+        className={platform === "mobile" ? "@container px-5 py-1.5" : "@container px-3.5 py-1"}
       >
-        <div className="flex min-h-7 min-w-0 items-center gap-0.5 overflow-hidden whitespace-nowrap text-[13px]">
+        <div className="grid min-h-7 min-w-0 grid-cols-2 items-center gap-x-2 gap-y-1 text-[13px] @min-[420px]:grid-cols-3">
           <button
             type="button"
             data-glance-nav
-            className={chip}
+            className={`${chip} col-span-2 @min-[420px]:col-span-1`}
             onClick={openScheduler}
             aria-label={t("openScheduler")}
+            title={nextText}
           >
             <ClockIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
             <span className="truncate">{nextText}</span>
           </button>
-          <span className="text-muted-foreground/60">·</span>
           <button
             type="button"
             data-glance-nav
             className={chip}
             onClick={openNotifications}
             aria-label={t("openNotifications")}
+            title={t("unread", { count: agenda.unread })}
           >
             <BellIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-            <span className="tabular-nums">{t("unread", { count: agenda.unread })}</span>
+            <span className="truncate tabular-nums">{t("unread", { count: agenda.unread })}</span>
           </button>
-          <span className="text-muted-foreground/60">·</span>
           <button
             type="button"
             data-glance-nav
             className={chip}
             onClick={openConnectivity}
             aria-label={t("openConnectivity")}
+            title={connectivityText}
           >
             <GlanceDot tone={tone} />
             <span className="truncate">{connectivityText}</span>

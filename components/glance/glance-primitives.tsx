@@ -120,9 +120,12 @@ export function GlanceSection({ moduleId, title, meta, aside, children }: Glance
     <section
       data-glance-module={moduleId}
       aria-label={title}
-      className={cn("min-w-0", platform === "mobile" ? "px-5 py-3" : "px-3.5 py-2.5")}
+      className={cn(
+        "@container/glance min-w-0",
+        platform === "mobile" ? "px-5 py-3" : "px-3.5 py-2.5"
+      )}
     >
-      <header className="mb-1.5 flex min-h-5 items-center gap-2">
+      <header className="mb-1.5 flex min-h-5 flex-wrap items-center gap-x-2 gap-y-1">
         <h3
           className={cn(
             "shrink-0 font-semibold tracking-wide text-muted-foreground",
@@ -131,7 +134,11 @@ export function GlanceSection({ moduleId, title, meta, aside, children }: Glance
         >
           {title}
         </h3>
-        {meta ? <div className="flex min-w-0 items-center gap-1.5">{meta}</div> : null}
+        {meta ? (
+          <div className="order-last flex min-w-0 basis-full items-center gap-1.5 @min-[400px]/glance:order-none @min-[400px]/glance:basis-auto">
+            {meta}
+          </div>
+        ) : null}
         <GlanceOriginTag moduleId={moduleId} />
         <div className="min-w-0 flex-1" />
         {aside ? <div className="flex shrink-0 items-center gap-1.5">{aside}</div> : null}
@@ -169,7 +176,7 @@ export function GlanceCompactSection({
       >
         {title}
       </span>
-      <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden whitespace-nowrap">
+      <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-0.5">
         {children}
       </span>
       <GlanceOriginTag moduleId={moduleId} />
@@ -252,8 +259,9 @@ export function GlanceRow({
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {sub ? (
         <span
+          title={typeof sub === "string" ? sub : undefined}
           className={cn(
-            "shrink-0 whitespace-nowrap text-muted-foreground",
+            "min-w-0 max-w-[50%] truncate text-muted-foreground",
             platform === "mobile" ? "text-[13px]" : "text-[11.5px]"
           )}
         >
@@ -359,7 +367,7 @@ export function GlanceStats({
           <>
             <span
               className={cn(
-                "block whitespace-nowrap text-muted-foreground",
+                "block break-words text-muted-foreground",
                 platform === "mobile" ? "text-[12.5px]" : "text-[11px]"
               )}
             >
@@ -377,7 +385,7 @@ export function GlanceStats({
             {stat.sub ? (
               <span
                 className={cn(
-                  "block whitespace-nowrap tabular-nums text-muted-foreground/80",
+                  "block break-words tabular-nums text-muted-foreground/80",
                   platform === "mobile" ? "text-[12.5px]" : "text-[11px]"
                 )}
               >

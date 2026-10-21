@@ -1520,6 +1520,47 @@ describe("call() — 4xx errors", () => {
 describe("call() — retries", () => {
   beforeEach(() => setConfig())
 
+  it("classifies a failed auth challenge as a transport failure", async () => {
+    __setAuthorizationHeadersProviderForTests(async () => {
+      throw new TypeError("Load failed")
+    })
+    transport = new CompanionTransport()
+    await expect(transport.call("unclassified_mutation", {})).rejects.toMatchObject({
+      code: "network",
+      retryable: true,
+    })
+    expect(transport.getPlaneHealth().rpc).toBe("unavailable")
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("does not retry a refused auth challenge as a network outage", async () => {
+    const error = new CompanionApiError("revoked", "device_revoked", 401)
+    const authorize = jest.fn(async () => {
+      throw error
+    })
+    __setAuthorizationHeadersProviderForTests(authorize)
+    transport = new CompanionTransport()
+    await expect(transport.call("session_list", {})).rejects.toBe(error)
+    expect(authorize).toHaveBeenCalledTimes(1)
+    expect(transport.getPlaneHealth().rpc).toBe("unauthenticated")
+  })
+
+  it("retries a transient challenge failure before sending a safe read", async () => {
+    jest.useFakeTimers()
+    __setBackoffRandomForTests(() => 0)
+    const authorize = jest.fn(async () => ({ Authorization: "Bearer test" }))
+    authorize.mockRejectedValueOnce(new TypeError("Load failed"))
+    __setAuthorizationHeadersProviderForTests(authorize)
+    fetchSpy.mockResolvedValueOnce(mockResponse({ sessions: [] }, 200))
+    transport = new CompanionTransport()
+    const result = transport.call("session_list", {})
+    await jest.advanceTimersByTimeAsync(250)
+    await expect(result).resolves.toEqual({ sessions: [] })
+    expect(authorize).toHaveBeenCalledTimes(2)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(transport.getPlaneHealth().rpc).toBe("ready")
+  })
+
   it("surfaces a transient transport failure without replaying an unsafe command", async () => {
     fetchSpy.mockResolvedValueOnce(
       mockResponse({ code: "service_unavailable", message: "brain bridge disconnected" }, 503)

@@ -108,6 +108,28 @@ describe("GlanceAgendaModule", () => {
       expect(screen.getByText("2/3 devices connected")).toBeInTheDocument()
       expect(screen.getByText(/^Next .* Nightly backup$/)).toBeInTheDocument()
     })
+
+    it("keeps full status text available when the compact labels truncate", () => {
+      setup(
+        makeAgenda({
+          unread: 107,
+          nextRun: { itemId: "long-task", name: "Provider diagnostics refresh", at: NOW + 3600000 },
+        }),
+        "compact"
+      )
+      expect(screen.getByRole("button", { name: "Open scheduled tasks" })).toHaveAttribute(
+        "title",
+        expect.stringContaining("Provider diagnostics refresh")
+      )
+      expect(screen.getByRole("button", { name: "Open notifications" })).toHaveAttribute(
+        "title",
+        "107 unread"
+      )
+      expect(screen.getByRole("button", { name: "Open connection settings" })).toHaveAttribute(
+        "title",
+        "2/3 devices connected"
+      )
+    })
   })
 
   describe("standard", () => {

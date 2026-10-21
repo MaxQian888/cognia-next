@@ -1994,15 +1994,13 @@ export class CompanionTransport implements Transport {
       // DPoP proofs are single-use replay tokens. Mint authorization headers
       // for every network attempt while keeping the request body and
       // Idempotency-Key stable across the logical call.
-      const headers: Record<string, string> = {
-        ...(await authorizationHeadersProvider(initialConfig, "POST", path)),
-        ...baseHeaders,
-      }
-
-      signal.throwIfAborted()
-
       let response: Response
       try {
+        const headers: Record<string, string> = {
+          ...(await authorizationHeadersProvider(initialConfig, "POST", path)),
+          ...baseHeaders,
+        }
+        signal.throwIfAborted()
         // Routed through `pinnedFetch` so Capacitor mobile can use the
         // native HTTP stack (CapacitorHttp) which knows how to trust the
         // desktop's self-signed cert. Web / dev builds fall through to
@@ -2017,6 +2015,14 @@ export class CompanionTransport implements Transport {
           serverFingerprint: initialConfig.serverFingerprint,
         })
       } catch (err: unknown) {
+        // Typed issuer refusals retain their identity: the outer routing
+        // boundary distinguishes 401/403 from a direct-plane 502/503/504.
+        if (err instanceof CompanionApiError) {
+          const refused = [401, 403].includes(err.status)
+          if (refused) this.setConnectionState("unauthenticated")
+          this.setPlaneHealth({ rpc: refused ? "unauthenticated" : "unavailable" })
+          throw err
+        }
         if (isAbortError(err)) {
           this.setPlaneHealth({ rpc: "unavailable" })
           lastError = new CompanionError({

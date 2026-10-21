@@ -14,7 +14,7 @@ import {
 } from "@cognia/agent-config-types"
 
 import { APP_VERSION } from "@/lib/app-version"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isNativeMobile } from "@/lib/platform/detect"
 import { detectOsFamily } from "@/lib/platform/os"
 import { isTauri } from "@/lib/tauri"

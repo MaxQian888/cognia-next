@@ -190,7 +190,7 @@ describe("normalizeGlancePanelSettings", () => {
     expect(DEFAULT_GLANCE_PANEL_SETTINGS).toMatchObject({
       version: 1,
       preset: "balanced",
-      width: "standard",
+      width: "wide",
       maxHeight: GLANCE_MAX_HEIGHT_DEFAULT,
       scope: "all",
       showDelegate: true,
@@ -221,8 +221,17 @@ describe("normalizeGlancePanelSettings", () => {
     for (const width of ["narrow", "standard", "wide"]) {
       expect(normalizeGlancePanelSettings({ width }).width).toBe(width)
     }
-    expect(normalizeGlancePanelSettings({ width: "huge" }).width).toBe("standard")
-    expect(normalizeGlancePanelSettings({ width: 380 }).width).toBe("standard")
+    expect(normalizeGlancePanelSettings({ width: "huge" }).width).toBe("wide")
+    expect(normalizeGlancePanelSettings({ width: 380 }).width).toBe("wide")
+  })
+
+  it("defaults missing legacy widths to wide without replacing saved choices", () => {
+    expect(normalizeGlancePanelSettings({ version: 1, preset: "minimal" }).width).toBe("wide")
+    for (const width of ["narrow", "standard", "wide"] as const) {
+      const stored = { ...DEFAULT_GLANCE_PANEL_SETTINGS, width }
+      expect(normalizeGlancePanelSettings(stored)).toEqual(stored)
+      expect(stored.width).toBe(width)
+    }
   })
 
   it("normalizes scope", () => {

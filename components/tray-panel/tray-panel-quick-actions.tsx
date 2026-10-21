@@ -114,15 +114,19 @@ export function TrayPanelQuickActions({ size }: { size: GlanceModuleSize }) {
 
   if (size === "compact") {
     return (
-      <section data-glance-module="quick" aria-label={title} className="px-3.5 py-1">
-        <div className="flex min-h-7 items-center gap-2">
+      <section
+        data-glance-module="quick"
+        aria-label={title}
+        className="@container/quick px-3.5 py-1"
+      >
+        <div className="grid min-h-7 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 @min-[400px]/quick:grid-cols-[3rem_minmax(0,1fr)_auto]">
           <span className="w-12 shrink-0 text-[11.5px] font-semibold text-muted-foreground">
             {title}
           </span>
           <div
             role="toolbar"
             aria-label={title}
-            className="flex min-w-0 flex-1 flex-wrap gap-0.5"
+            className="order-last col-span-2 flex min-w-0 flex-wrap gap-0.5 @min-[400px]/quick:order-none @min-[400px]/quick:col-span-1"
             data-testid="tray-panel-actions"
           >
             {actions.map((action) => {

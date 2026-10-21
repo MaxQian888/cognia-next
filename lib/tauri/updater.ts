@@ -5,7 +5,7 @@ import { DEFAULT_UPDATE_SETTINGS, type UpdateSettings } from "@cognia/agent-conf
 import { isTauri } from "@/lib/tauri"
 import { isProxyActive } from "@/lib/network/proxy-config"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 /** Available update surfaced to the UI. */
 export interface AvailableUpdate {

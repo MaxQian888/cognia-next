@@ -504,6 +504,9 @@ pub fn run() {
         // first request and can legitimately take longer than the 8s grace;
         // measuring from process boot exposed the still-unpainted black webview.
         .on_page_load(|webview, payload| {
+            #[cfg(all(feature = "agent-debug", desktop))]
+            webview.state::<webview_watchdog::RendererLifecycle>()
+                .record_page_url(webview.label(), payload.url().as_str());
             if payload.event() == tauri::webview::PageLoadEvent::Started {
                 webview
                     .state::<webview_watchdog::RendererLifecycle>()
@@ -2056,6 +2059,35 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn secondary_windows_allow_only_the_notification_startup_query() {
+        // The global notification plugin injects this query into each webview.
+        for raw in [
+            include_str!("../capabilities/pet.json"),
+            include_str!("../capabilities/island.json"),
+            include_str!("../capabilities/tray-panel.json"),
+            include_str!("../capabilities/usage-dock.json"),
+            include_str!("../capabilities/chat-copilot.json"),
+            include_str!("../capabilities/selection-toolbar.json"),
+            include_str!("../capabilities/recorder-controller.json"),
+        ] {
+            let capability: serde_json::Value = serde_json::from_str(raw).unwrap();
+            let notification_permissions: Vec<_> = capability["permissions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .filter(|permission| permission.starts_with("notification:"))
+                .collect();
+            assert_eq!(
+                notification_permissions,
+                ["notification:allow-is-permission-granted"],
+                "{}",
+                capability["identifier"]
+            );
+        }
+    }
+
     #[test]
     fn native_worker_recovery_precedes_the_main_only_boot_guard() {
         let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();

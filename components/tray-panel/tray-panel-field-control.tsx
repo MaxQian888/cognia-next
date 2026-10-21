@@ -63,7 +63,7 @@ export function TrayPanelFieldControl({
   if (field.kind === "switch") {
     return (
       <div className="flex items-center justify-between gap-3">
-        <Label htmlFor={controlId} className="text-xs font-medium">
+        <Label htmlFor={controlId} className="block min-w-0 flex-1 break-words text-xs font-medium">
           {label}
         </Label>
         <Switch
@@ -158,7 +158,10 @@ export function TrayPanelFieldControl({
 
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={controlId} className="text-xs font-medium text-muted-foreground">
+      <Label
+        htmlFor={controlId}
+        className="block min-w-0 break-words text-xs font-medium text-muted-foreground"
+      >
         {label}
       </Label>
       {control}

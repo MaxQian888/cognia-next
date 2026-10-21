@@ -24,6 +24,7 @@ export type PetWindowRole =
   | "tray-panel"
   | "usage-dock"
   | "chat-copilot"
+  | "recorder-controller"
   | "web"
 
 /** Label given to the desktop-pet overlay window by the Rust `open_pet_window`. */
@@ -63,6 +64,9 @@ export const USAGE_DOCK_WINDOW_LABEL = "usage-dock"
  * `chat_copilot/mod.rs:CHAT_COPILOT_LABEL`.
  */
 export const CHAT_COPILOT_WINDOW_LABEL = "chat-copilot"
+
+/** Label for the skill recorder's always-on-top control strip. */
+export const RECORDER_CONTROLLER_WINDOW_LABEL = "recorder-controller"
 
 interface TauriInternalsShape {
   metadata?: {
@@ -110,6 +114,7 @@ export function getPetWindowRole(
   if (label === TRAY_PANEL_WINDOW_LABEL) return "tray-panel"
   if (label === USAGE_DOCK_WINDOW_LABEL) return "usage-dock"
   if (label === CHAT_COPILOT_WINDOW_LABEL) return "chat-copilot"
+  if (label === RECORDER_CONTROLLER_WINDOW_LABEL) return "recorder-controller"
   return "main"
 }
 
@@ -129,7 +134,8 @@ export function isSecondaryOverlayRole(role: PetWindowRole): boolean {
     role === "selection-toolbar" ||
     role === "tray-panel" ||
     role === "usage-dock" ||
-    role === "chat-copilot"
+    role === "chat-copilot" ||
+    role === "recorder-controller"
   )
 }
 

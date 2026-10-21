@@ -255,20 +255,32 @@ pub fn install(webview: &Webview) {
     }
 }
 
-async fn health(State(state): State<SharedState>) -> ApiResult {
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthQuery {
+    #[serde(default)]
+    native_only: bool,
+}
+
+async fn health(State(state): State<SharedState>, Query(query): Query<HealthQuery>) -> ApiResult {
     let app = &state.app_handle;
     let lifecycle = renderer_lifecycle(app);
     // Health must stay fast while a renderer is being replaced: report the
     // restart through `renderers` instead of blocking on the reload.
     let helper = match app.get_webview(DEFAULT_WINDOW) {
-        Some(webview) if !lifecycle.state(DEFAULT_WINDOW).awaiting_load
-            && !lifecycle.state(DEFAULT_WINDOW).document_loading => eval_json(
-            &webview,
-            &lifecycle,
-            "JSON.stringify(window.__cogniaAgentDebug.health())",
-        )
-        .await
-        .ok(),
+        Some(webview)
+            if !query.native_only
+                && !lifecycle.state(DEFAULT_WINDOW).awaiting_load
+                && !lifecycle.state(DEFAULT_WINDOW).document_loading =>
+        {
+            eval_json(
+                &webview,
+                &lifecycle,
+                "JSON.stringify(window.__cogniaAgentDebug.health())",
+            )
+            .await
+            .ok()
+        }
         _ => None,
     };
     Ok(Json(json!({
@@ -286,10 +298,28 @@ async fn health(State(state): State<SharedState>) -> ApiResult {
 
 async fn windows(State(state): State<SharedState>) -> ApiResult {
     let mut entries = Vec::new();
+    let lifecycle = renderer_lifecycle(&state.app_handle);
     for (label, window) in state.app_handle.webview_windows() {
+        let document_url = lifecycle.last_url(&label);
+        // SPA routing does not produce native page-load events. Read the
+        // current route through the guarded JS bridge when a document exists;
+        // never ask Wry for the URL of a not-yet-loaded hidden webview.
+        let current_url = if document_url.is_some() {
+            eval_json_on_renderer_until(
+                window.as_ref(),
+                &lifecycle,
+                "JSON.stringify(location.href)",
+                std::time::Instant::now() + Duration::from_millis(250),
+            )
+            .await
+            .ok()
+            .and_then(|(value, _)| value.as_str().map(str::to_owned))
+        } else {
+            None
+        };
         entries.push(json!({
             "label": label,
-            "url": window.url().map(|url| url.to_string()).ok(),
+            "url": current_url.or(document_url),
             "title": window.title().ok(),
             "visible": window.is_visible().ok(),
             "focused": window.is_focused().ok(),
@@ -522,11 +552,20 @@ async fn navigate(
     let webview = resolve_webview(&state.app_handle, &request.window)?;
     let target = match url::Url::parse(&request.url) {
         Ok(url) => url,
-        Err(url::ParseError::RelativeUrlWithoutBase) => webview
-            .url()
+        Err(url::ParseError::RelativeUrlWithoutBase) => {
+            let lifecycle = renderer_lifecycle(&state.app_handle);
+            let current = eval_json(&webview, &lifecycle, "JSON.stringify(location.href)")
+                .await
+                .map_err(eval_error)?;
+            url::Url::parse(
+                current
+                    .as_str()
+                    .ok_or_else(|| bad_request("invalid_url", "page URL unavailable"))?,
+            )
             .map_err(internal_error)?
             .join(&request.url)
-            .map_err(|error| bad_request("invalid_url", error.to_string()))?,
+            .map_err(|error| bad_request("invalid_url", error.to_string()))?
+        }
         Err(error) => return Err(bad_request("invalid_url", error.to_string())),
     };
     match target.scheme() {
@@ -1200,6 +1239,14 @@ fn api_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_health_probe_is_opt_in_and_does_not_require_a_renderer() {
+        let normal: HealthQuery = serde_json::from_str("{}").unwrap();
+        let native: HealthQuery = serde_json::from_str(r#"{"nativeOnly":true}"#).unwrap();
+        assert!(!normal.native_only);
+        assert!(native.native_only);
+    }
 
     const AGENT_ROUTES: [&str; 14] = [
         "/api/dev/agent/health",

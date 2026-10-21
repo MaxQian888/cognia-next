@@ -14248,7 +14248,7 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs applyEdit",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts applyEdit",
         "description": "`reflected` is true only when a stale open buffer was replaced through a WorkspaceEdit, so the change entered the undo stack. `opened` is false only when the file was gone or unreadable, which the caller degrades on rather than treating as an error.",
         "required": [
           "reflected",
@@ -14305,7 +14305,7 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs notify + protocol.mjs notificationKind",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts notify + protocol.ts notificationKind",
         "description": "`kind` is the narrowed kind actually shown. An unrecognised kind reads as `info` rather than being dropped, so this echoes back what the user saw.",
         "required": [
           "shown",
@@ -14368,7 +14368,7 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs openFile",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts openFile",
         "description": "The extension revealed `path`. `opened` is always true: a failure throws instead.",
         "required": [
           "opened",
@@ -14414,7 +14414,7 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs readActive",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts readActive",
         "description": "What the user is looking at. Every field is present; `path`, `selection` and `selectedText` are null when no file editor is focused (or nothing is selected). Whole-file bodies are deliberately absent. The app PII-gates this payload before it reaches a model.",
         "required": [
           "path",
@@ -14467,7 +14467,7 @@
             "type": "array",
             "items": {
               "type": "object",
-              "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs diagnosticSeverityName + the readActive/captureDiagnosticsContext mappers",
+              "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts diagnosticSeverityName + the readActive/captureDiagnosticsContext mappers",
               "description": "One editor diagnostic, 1-based line and column. `severity` is the narrowed vocabulary `diagnosticSeverityName` emits, not VS Code's numeric enum.",
               "required": [
                 "message",
@@ -14541,7 +14541,7 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs revealInExplorer",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts revealInExplorer",
         "required": [
           "revealed",
           "path"
@@ -14596,7 +14596,7 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs runInTerminal",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts runInTerminal",
         "description": "`sent` reports that the text reached the terminal, not that the command succeeded: the extension host cannot read a terminal's output back. `terminal` is the reused terminal's name.",
         "required": [
           "sent",
@@ -14645,7 +14645,7 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs saveAll",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts saveAll",
         "description": "A partial flush is reported rather than thrown, so `failed` names the files whose disk copy the caller must not trust.",
         "required": [
           "saved",
@@ -14709,7 +14709,7 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs showDiff",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts showDiff",
         "required": [
           "shown",
           "path"
@@ -24233,11 +24233,6 @@
           "timeoutMs"
         ],
         "properties": {
-          "workspaceId": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Required for multi-tenant creation. Host admission resolves the actor; this field never supplies placement identity or permissions."
-          },
           "placement": {
             "type": "object",
             "description": "The task's runtime environment placement as the brain resolved it (prepareRunEnvironment). The spec is not described here: the host re-admits it against its own baseline, catalog and approvals and answers with a typed refusal code.",
@@ -65442,7 +65437,8 @@
                 "radar-report",
                 "provider-diagnostics-refresh",
                 "conversation-auto-archive",
-                "files-trash-purge"
+                "files-trash-purge",
+                "harness-evolution-sweep"
               ]
             },
             "status": {
@@ -65728,7 +65724,8 @@
                   "radar-report",
                   "provider-diagnostics-refresh",
                   "conversation-auto-archive",
-                  "files-trash-purge"
+                  "files-trash-purge",
+                  "harness-evolution-sweep"
                 ]
               },
               "trigger": {
@@ -66115,7 +66112,8 @@
               "radar-report",
               "provider-diagnostics-refresh",
               "conversation-auto-archive",
-              "files-trash-purge"
+              "files-trash-purge",
+              "harness-evolution-sweep"
             ]
           },
           "trigger": {
@@ -66587,7 +66585,8 @@
                     "radar-report",
                     "provider-diagnostics-refresh",
                     "conversation-auto-archive",
-                    "files-trash-purge"
+                    "files-trash-purge",
+                    "harness-evolution-sweep"
                   ]
                 },
                 "trigger": {
@@ -66973,7 +66972,8 @@
                   "radar-report",
                   "provider-diagnostics-refresh",
                   "conversation-auto-archive",
-                  "files-trash-purge"
+                  "files-trash-purge",
+                  "harness-evolution-sweep"
                 ]
               },
               "trigger": {
@@ -67342,7 +67342,8 @@
                         "radar-report",
                         "provider-diagnostics-refresh",
                         "conversation-auto-archive",
-                        "files-trash-purge"
+                        "files-trash-purge",
+                        "harness-evolution-sweep"
                       ]
                     },
                     "trigger": {
@@ -67892,7 +67893,8 @@
                     "radar-report",
                     "provider-diagnostics-refresh",
                     "conversation-auto-archive",
-                    "files-trash-purge"
+                    "files-trash-purge",
+                    "harness-evolution-sweep"
                   ]
                 }
               },
@@ -68002,7 +68004,8 @@
                 "radar-report",
                 "provider-diagnostics-refresh",
                 "conversation-auto-archive",
-                "files-trash-purge"
+                "files-trash-purge",
+                "harness-evolution-sweep"
               ]
             },
             "trigger": {
@@ -68458,7 +68461,8 @@
                   "radar-report",
                   "provider-diagnostics-refresh",
                   "conversation-auto-archive",
-                  "files-trash-purge"
+                  "files-trash-purge",
+                  "harness-evolution-sweep"
                 ]
               },
               "status": {
@@ -68664,7 +68668,8 @@
                 "radar-report",
                 "provider-diagnostics-refresh",
                 "conversation-auto-archive",
-                "files-trash-purge"
+                "files-trash-purge",
+                "harness-evolution-sweep"
               ]
             },
             "status": {
@@ -68926,7 +68931,8 @@
                 "radar-report",
                 "provider-diagnostics-refresh",
                 "conversation-auto-archive",
-                "files-trash-purge"
+                "files-trash-purge",
+                "harness-evolution-sweep"
               ]
             },
             "trigger": {
@@ -69613,7 +69619,8 @@
                   "radar-report",
                   "provider-diagnostics-refresh",
                   "conversation-auto-archive",
-                  "files-trash-purge"
+                  "files-trash-purge",
+                  "harness-evolution-sweep"
                 ]
               },
               "trigger": {
@@ -72510,11 +72517,6 @@
           "config"
         ],
         "properties": {
-          "workspaceId": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Required for multi-tenant creation. Later agent commands resolve this scope from the immutable Host record."
-          },
           "config": {
             "type": "object",
             "required": [
@@ -100982,5 +100984,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "30977c2cc6353c5500abece93d3c8c61f226ca1f5e6399cc62351a9045b70f76"
+  "catalogHash": "86f5dfdfc2b800717ca09efd7827efb5f0574c10427a7215bb319652f06218db"
 }

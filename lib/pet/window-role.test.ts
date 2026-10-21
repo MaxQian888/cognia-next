@@ -168,3 +168,14 @@ describe("the desktop chat copilot overlay (ADR-0194)", () => {
     expect(isMainAppWindow(() => CHAT_COPILOT_WINDOW_LABEL)).toBe(false)
   })
 })
+
+describe("the recorder controller window", () => {
+  afterEach(() => setTauri(false))
+
+  it("hydrates as a secondary window without owning main-window initializers", () => {
+    setTauri(true)
+    expect(getPetWindowRole(() => "recorder-controller")).toBe("recorder-controller")
+    expect(isSecondaryOverlayRole(getPetWindowRole(() => "recorder-controller"))).toBe(true)
+    expect(isMainAppWindow(() => "recorder-controller")).toBe(false)
+  })
+})

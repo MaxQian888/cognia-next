@@ -113,7 +113,8 @@ export async function purgeDatabaseAppData(
  * Returns how many database directories were removed.
  */
 export async function sweepDroppedDatabaseAppData(
-  databaseExists: (databaseName: string) => Promise<boolean>
+  databaseExists: (databaseName: string) => Promise<boolean>,
+  report?: { failed: number; removed?: number }
 ): Promise<number> {
   if (!hasAppData()) return 0
   let removed = 0
@@ -134,12 +135,17 @@ export async function sweepDroppedDatabaseAppData(
         try {
           await removeAppDataDirectory(`${accountDir}/${database.name}`)
           removed += 1
+          if (report) report.removed = (report.removed ?? 0) + 1
           kept -= 1
         } catch {
+          if (report) report.failed++
           // Held open or refused: the next sweep tries again.
         }
       }
-      if (kept === 0) await removeAppDataDirectory(accountDir).catch(() => {})
+      if (kept === 0)
+        await removeAppDataDirectory(accountDir).catch(() => {
+          if (report) report.failed++
+        })
     }
   }
   return removed
