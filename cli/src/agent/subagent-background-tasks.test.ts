@@ -1,7 +1,6 @@
 /**
  * @jest-environment node
  */
-import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
@@ -13,6 +12,7 @@ jest.mock("@/lib/db/seed", () => ({
 
 import { __resetDbForTesting, getDb, type BackgroundTaskJournalRow } from "@/lib/db/schema"
 import { __resetCliDbForTesting, ensureCliDb } from "../db/bootstrap"
+import type { DbLike } from "../db/snapshot"
 import {
   __clearAllCliBackgroundRunsForTesting,
   __disposeCliBackgroundJournalForTesting,
@@ -45,7 +45,7 @@ function deferred<T>(): {
 }
 
 function makeHome(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "cognia-bg-"))
+  return path.join(os.tmpdir(), "cognia-bg-unit")
 }
 
 function meta(home?: string, overrides: Partial<Parameters<typeof startCliBackgroundRun>[1]> = {}) {
@@ -89,6 +89,22 @@ async function resetDb(): Promise<void> {
 
 beforeEach(async () => {
   await resetDb()
+  // Exercise the real Dexie journal and registry, while keeping persistence in
+  // memory and limiting serialization to the table this suite actually owns.
+  // Disk durability and process-restart restoration run in the heavy suite.
+  let snapshot: string | null = null
+  await ensureCliDb({
+    home: makeHome(),
+    getDatabase: () => {
+      const db = getDb()
+      return { name: db.name, verno: db.verno, tables: [db.backgroundTasks] } as DbLike
+    },
+    readSnapshot: () => snapshot,
+    writeSnapshot: (_file, data) => {
+      snapshot = data
+    },
+    schedule: () => () => {},
+  })
 })
 
 afterEach(async () => {
@@ -217,12 +233,6 @@ describe("CLI background subagent tasks", () => {
     await expect(getDb().backgroundTasks.get("stale")).resolves.toMatchObject({
       status: "interrupted",
     })
-    await (await ensureCliDb({ home })).flush()
-    const tables = path.join(home, "db.json.tables")
-    const journal = fs.readdirSync(tables).find((name) => name.endsWith("--backgroundTasks.json"))!
-    expect(JSON.parse(fs.readFileSync(path.join(tables, journal), "utf8"))).toContainEqual(
-      expect.objectContaining({ runId: "stale", status: "interrupted" })
-    )
   })
 
   it("counts interrupted history only for the current chat session", async () => {
@@ -234,24 +244,6 @@ describe("CLI background subagent tasks", () => {
     ])
 
     await expect(countInterruptedCliBackgroundRuns({ home, owner: "session-a" })).resolves.toBe(1)
-  })
-
-  it("does not rewrite unrelated tables when reconciling an empty background journal on resume", async () => {
-    const home = makeHome()
-    const handle = await ensureCliDb({ home })
-    await handle.flush()
-    const tables = path.join(home, "db.json.tables")
-    const file = path.join(
-      tables,
-      fs.readdirSync(tables).find((name) => name.endsWith("--memories.json"))!
-    )
-    fs.utimesSync(file, new Date(1000), new Date(1000))
-
-    await expect(countInterruptedCliBackgroundRuns({ home })).resolves.toBe(0)
-    await handle.flush()
-
-    expect(fs.statSync(file).mtimeMs).toBe(1000)
-    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual([])
   })
 
   it("supports live runs without an explicit CLI home", async () => {

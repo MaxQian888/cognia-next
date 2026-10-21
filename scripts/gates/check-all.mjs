@@ -87,6 +87,7 @@ const REGISTRY = [
   { script: "format:check", group: "format" },
 
   { script: "typecheck", group: "types", resource: "package-build" },
+  { script: "typecheck:workspaces", group: "types", resource: "package-build" },
   { script: "knip", group: "types", resource: "package-build" },
   // The root `typecheck` excludes `web` (tsconfig `exclude`), so the marketing
   // workspace needs its own run. This is not optional bookkeeping: ADR-0092 §5
@@ -411,6 +412,13 @@ const CONTRACT_INPUTS = [
 const SDK_INPUTS = [...FRONTEND_INPUTS, ...CONTRACT_INPUTS]
 const GATE_INPUTS = {
   typecheck: FRONTEND_INPUTS,
+  "typecheck:workspaces": [
+    ...FRONTEND_INPUTS,
+    ...CONTRACT_INPUTS,
+    "docs/",
+    "web/",
+    "browser-extension/",
+  ],
   knip: [...FRONTEND_INPUTS, "web/", "browser-extension/", "docs/app/", "docs/lib/"],
   "web:typecheck": ["web/", "packages/"],
   "browser-ext:typecheck": ["browser-extension/", "packages/", "lib/", "types/"],

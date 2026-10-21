@@ -13,7 +13,11 @@ import { fileURLToPath } from "node:url"
 import path from "node:path"
 import fs from "node:fs"
 
-import { cliEsbuildOptions, loadEsbuild } from "./esbuild-shared.mjs"
+import {
+  cliEsbuildOptions,
+  loadEsbuild,
+  undeclaredCliRuntimeDependencies,
+} from "./esbuild-shared.mjs"
 import { missingNativeHosts, nativeHostFiles } from "./native-host-files.mjs"
 import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
 import {
@@ -21,6 +25,7 @@ import {
   stageBuiltinPluginAssets,
 } from "./lib/stage-builtin-plugin-assets.mjs"
 import { pruneSidecarResidue } from "./lib/prune-sidecar-residue.mjs"
+import { npmBinaryPath } from "../../sidecar/src/tools/builtin/ast-grep/binary.ts"
 
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
 const entry = path.join(root, "cli/src/cli/entry.ts")
@@ -30,6 +35,10 @@ if (outdirIndex >= 0 && (!process.argv[outdirIndex + 1] || process.argv[outdirIn
   throw new Error("build-cli: --outdir requires a directory")
 }
 const outdir = outdirIndex < 0 ? path.join(root, "cli/dist") : path.resolve(process.argv[outdirIndex + 1])
+const inputsIndex = process.argv.indexOf("--inputs-file")
+if (inputsIndex >= 0 && (!process.argv[inputsIndex + 1] || process.argv[inputsIndex + 1].startsWith("--"))) {
+  throw new Error("build-cli: --inputs-file requires a file")
+}
 
 // `--js-only`: bundle the JavaScript and stop before the native-host copies and
 // the asset staging. The bundle-spawn test (cli/src/cli/entry.bundle.test.ts)
@@ -41,7 +50,15 @@ const esbuild = await loadEsbuild()
 
 // The plugin list and the option set are shared with the PTY fixture bundle
 // (scripts/build/esbuild-shared.mjs), so both go through one definition.
-await esbuild.build(cliEsbuildOptions({ root, entry, outdir, entryNames: "cognia-agent" }))
+const result = await esbuild.build({
+  ...cliEsbuildOptions({ root, entry, outdir, entryNames: "cognia-agent" }),
+  metafile: true,
+})
+const manifest = JSON.parse(fs.readFileSync(path.join(root, "cli/package.json"), "utf8"))
+const undeclared = undeclaredCliRuntimeDependencies(result.metafile, manifest)
+if (undeclared.length) {
+  throw new Error(`build-cli: undeclared runtime dependencies: ${undeclared.join(", ")}`)
+}
 
 // A bundled sidecar host left under `dist/sidecar/` by an older packaging
 // layout shadows the repo's `sidecar/` in the runtime walk-up, so every dev
@@ -65,6 +82,23 @@ if (jsOnly) {
   if (fs.existsSync(path.join(root, "public", BUILTIN_PLUGIN_ASSET_DIR))) {
     const staged = stageBuiltinPluginAssets({ root, outDir: outdir })
     console.log(`build-cli: staged ${staged.pluginIds.length} built-in plugin chunk(s)`)
+  }
+  // Local Jest consumers fingerprint the actual esbuild closure and staged
+  // assets. This optional metadata is outside the shipped output directory.
+  if (inputsIndex >= 0) {
+    const files = (directory) => fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const file = path.join(directory, entry.name)
+      return entry.isDirectory() ? files(file) : [file]
+    })
+    const assets = path.join(root, "public", BUILTIN_PLUGIN_ASSET_DIR)
+    fs.writeFileSync(path.resolve(process.argv[inputsIndex + 1]), JSON.stringify([
+      ...Object.keys(result.metafile.inputs).map((file) => path.resolve(file)),
+      ...files(path.join(root, "scripts/build")).filter((file) => file.endsWith(".mjs") && !file.endsWith(".test.mjs")),
+      path.join(root, "cli/package.json"),
+      path.join(root, "sidecar/src/tools/builtin/ast-grep/binary.ts"),
+      npmBinaryPath(),
+      ...(fs.existsSync(assets) ? files(assets) : []),
+    ]))
   }
   console.log(`build-cli: wrote ${path.relative(root, outdir)}/cognia-agent.mjs (JavaScript only)`)
   process.exit(0)

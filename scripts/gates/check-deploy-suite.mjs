@@ -8,7 +8,7 @@
  * tied a compose default image to the workflow that publishes it, and
  * nothing said that two compose instances on one host must not collide.
  *
- *   - `Dockerfile.deploy-agent` / `Dockerfile.ops-controller` built on
+ *   - `deploy/docker/Dockerfile.deploy-agent` / `deploy/docker/Dockerfile.ops-controller` built on
  *     rust:1.89 while the shared Cargo.lock was resolved for the 1.95 pin.
  *   - `deploy/compose/Dockerfile.web` built the export on node:22 against an
  *     `engines.node >= 26` workspace, and the compose-e2e lane installed with
@@ -51,19 +51,19 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
 /** Dockerfiles whose build context is the repo root and whose `cargo build --locked` resolves the shared Cargo.lock. */
 export const ROOT_CONTEXT_RUST_DOCKERFILES = [
-  "Dockerfile.cognia-server",
-  "Dockerfile.collab-server",
-  "Dockerfile.deploy-agent",
-  "Dockerfile.ops-controller",
+  "deploy/docker/Dockerfile.cognia-server",
+  "deploy/docker/Dockerfile.collab-server",
+  "deploy/docker/Dockerfile.deploy-agent",
+  "deploy/docker/Dockerfile.ops-controller",
   // ADR-0224 A8: the always-on host's Docker API proxy.
-  "Dockerfile.docker-proxy",
+  "deploy/docker/Dockerfile.docker-proxy",
   // ADR-0183: builds the static cognia-sandboxd from the workspace.
   "deploy/bundle/Dockerfile",
 ]
 
 /** Dockerfiles that run `pnpm install` against the root workspace. */
 export const ROOT_WORKSPACE_NODE_DOCKERFILES = [
-  "Dockerfile.cognia-server",
+  "deploy/docker/Dockerfile.cognia-server",
   "deploy/compose/Dockerfile.web",
   "services/workspace-runtime/Dockerfile",
 ]

@@ -182,7 +182,7 @@ test("committed planning follows surviving importers of a moved module in a real
 test("the Pro IDE E2E runs for its own pathway, and only for it", () => {
   for (const file of [
     "crates/cognia-codeserver/src/proxy.rs",
-    "sidecar/codeserver-agent-ext/src/extension.mjs",
+    "sidecar/codeserver-agent-ext/src/extension.ts",
     "sidecar/vscode-ext-host/src/host.ts",
     "lib/codeserver/client.ts",
     "lib/plugin/ide/broker-runtime.ts",
@@ -349,6 +349,36 @@ test("selection retains discovered __tests__ files and colocated module-extensio
   assert.deepEqual(plan.testFiles, [...inventory].sort())
 })
 
+test("incremental selection retains heavy companions of changed and related unit suites", () => {
+  const unit = "components/chat/markdown-renderer.test.tsx"
+  const heavy = "components/chat/markdown-renderer.heavy.test.ts"
+  const inventory = [unit, heavy, "components/unrelated.test.tsx"]
+  for (const input of [
+    { changedFiles: ["components/chat/markdown-renderer.tsx"] },
+    { relatedTests: [unit] },
+  ]) {
+    assert.deepEqual(buildIncrementalTestPlan({ ...input, testFiles: inventory }).testFiles, [
+      heavy,
+      unit,
+    ])
+  }
+})
+
+test("Markdown process fixtures and dependency updates retain the real rendering checks", () => {
+  const heavy = "components/chat/markdown-renderer.heavy.test.ts"
+  const inventory = [heavy, "components/unrelated.test.tsx"]
+  for (const file of [
+    "tests/integration/fixtures/markdown-renderer-parity.tsx",
+    "tests/integration/fixtures/markdown-renderer-states.tsx",
+    "pnpm-lock.yaml",
+  ]) {
+    assert.deepEqual(
+      buildIncrementalTestPlan({ changedFiles: [file], testFiles: inventory }).testFiles,
+      [heavy]
+    )
+  }
+})
+
 test("dependency-only plans choose explicit critical suites and changed package contracts, not all tests", () => {
   const critical = "lib/db/messages.test.ts"
   const plan = buildIncrementalTestPlan({
@@ -463,6 +493,23 @@ test("plan execution uses exact paths and forbids coverage for incremental runs"
     () => buildPlannedJestArgs({ ...plan, shards: [plan.shards[0], plan.shards[0]] }, 1),
     /missing or duplicate/
   )
+})
+
+test("full CI plans retain build and PTY suites through exact-path execution", () => {
+  const testFiles = [
+    "cli/src/cli/entry.bundle.test.ts",
+    "cli/src/cli/coding-loop.bundle.test.ts",
+    "cli/src/tui/pty/conversation-driver.test.ts",
+    "cli/src/tui/pty/node-pty-harness.test.ts",
+    "cli/src/tui/pty/terminal-screen.test.ts",
+  ]
+  const plan = buildIncrementalTestPlan({ mode: "full", testFiles })
+  const selected = plan.shards.flatMap((shard) => {
+    const args = buildPlannedJestArgs(plan, shard.shard)
+    assert.equal(args.includes("--selectProjects"), false)
+    return args.slice(args.indexOf("--runTestsByPath") + 1)
+  })
+  assert.deepEqual([...selected].sort(), [...testFiles].sort())
 })
 
 test("incremental runner bounds process size, preserves failures and combines batch timings", () => {

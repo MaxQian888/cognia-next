@@ -14,7 +14,7 @@ import os from "node:os"
 import path from "node:path"
 
 const REPO_ROOT = path.resolve(__dirname, "../../..")
-const BUNDLE = path.join(REPO_ROOT, "cli/dist/cognia-agent.mjs")
+let BUNDLE = path.join(REPO_ROOT, "cli/dist/cognia-agent.mjs")
 
 function run(args: string[], stdin?: string) {
   return spawnSync(process.execPath, [BUNDLE, ...args], {
@@ -69,12 +69,15 @@ describe("cognia-agent bundle", () => {
         `CLI bundle preparation failed (${built.status}):\n${built.stderr}\n${built.stdout}`
       )
     }
+    BUNDLE = built.stdout.trim().split("\n").at(-1)!
+    expect(path.isAbsolute(BUNDLE)).toBe(true)
+    expect(fs.existsSync(BUNDLE)).toBe(true)
   })
 
   it("loads the HTTP MCP egress guard with the CLI runtime dependencies", () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "cli/package.json"), "utf8"))
     expect(manifest.dependencies.undici).toBeDefined()
-    const chunks = path.join(REPO_ROOT, "cli/dist/chunks")
+    const chunks = path.join(path.dirname(BUNDLE), "chunks")
     const helpers = fs.readdirSync(chunks).filter((name) => /^egress-guard-.*\.mjs$/.test(name))
     expect(helpers.length).toBeGreaterThan(0)
     const result = spawnSync(

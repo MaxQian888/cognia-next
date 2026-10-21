@@ -823,11 +823,37 @@ test("documents workflow application routes with their application-scoped bearer
 test("browser socket tickets require a session-bound canonical request", () => {
   const { desiredPublicSpec } = inspectCommittedContract()
   const schema = desiredPublicSpec.components.schemas.SocketTicketRequest
+  const browser = schema.oneOf.find((variant) => variant.properties.channel.const === "browser")
+  const unbound = schema.oneOf.find((variant) => variant.properties.channel.enum)
+  const remoteDesktop = schema.oneOf.find(
+    (variant) => variant.properties.channel.const === "remote-desktop"
+  )
 
-  assert.deepEqual(schema.oneOf[0].required, ["channel", "sessionId"])
-  assert.equal(schema.oneOf[0].properties.channel.const, "browser")
-  assert.equal(schema.oneOf[0].properties.sessionId.minLength, 1)
-  assert.deepEqual(schema.oneOf[1].properties.channel.enum, ["events", "terminal", "acp"])
+  assert.deepEqual(browser.required, ["channel", "sessionId"])
+  assert.equal(browser.properties.channel.const, "browser")
+  assert.equal(browser.properties.sessionId.minLength, 1)
+  assert.deepEqual(unbound.properties.channel.enum, ["events", "terminal", "acp"])
+  assert.deepEqual(unbound.required, ["channel"])
+  assert.deepEqual(remoteDesktop.required, ["channel", "sessionId"])
+  assert.equal(remoteDesktop.properties.sessionId.pattern, "^[0-9a-f]{1,64}$")
+  const validate = new Ajv2020({ strict: false }).compile(schema)
+  for (const body of [
+    { channel: "browser", sessionId: "session" },
+    { channel: "remote-desktop", sessionId: "a1" },
+    ...["events", "terminal", "acp"].map((channel) => ({ channel })),
+  ]) {
+    assert.equal(validate(body), true, JSON.stringify(validate.errors))
+  }
+  for (const body of [
+    { channel: "browser" },
+    { channel: "browser", sessionId: "" },
+    { channel: "remote-desktop" },
+    { channel: "remote-desktop", sessionId: "../other" },
+    { channel: "events", sessionId: "session" },
+    { channel: "unknown" },
+  ]) {
+    assert.equal(validate(body), false)
+  }
   assert.equal(desiredPublicSpec.paths["/api/_rpc/browser_stream_ticket_issue"], undefined)
 })
 

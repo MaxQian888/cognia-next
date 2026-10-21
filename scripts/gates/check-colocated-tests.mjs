@@ -68,6 +68,9 @@ export const TS_ROOTS = [
   // The Impeccable plugin keeps its lifecycle entry and bundle-integrity
   // suite co-located; same contract as the other first-party plugin roots.
   "plugins/impeccable/src/",
+  // Config Governance (ADR-0238): its engine, runtime and view tabs each keep
+  // a co-located suite.
+  "plugins/config-governance/src/",
   // The Pi LaTeX Workbench plugin: its lifecycle entry and the Pi glue it
   // loads into hosted sessions. Its `vendor/` upstream snapshot is not
   // authored here and stays outside every gated root.

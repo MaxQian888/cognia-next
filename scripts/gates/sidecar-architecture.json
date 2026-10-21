@@ -105,6 +105,9 @@
     "sidecar/src/platform/net/egress-guard.ts",
     "sidecar/src/policy/permission/resolver.ts",
     "sidecar/src/providers/protocol-adapters/openai-compatible-variant-adapter.ts",
+    "sidecar/src/providers/perplexity-agent.ts",
+    "sidecar/src/providers/siwc-fetch.ts",
+    "sidecar/src/providers/siwc-language-model.ts",
     "sidecar/src/providers/provider-protocol.ts",
     "sidecar/src/providers/reasoning-effort-tables.ts",
     "sidecar/src/providers/usage-normalize.ts",
@@ -127,7 +130,7 @@
     "tests/",
     "types/"
   ],
-  "legacyMjsAllowed": true,
+  "legacyMjsAllowed": false,
   "vendorIsolation": [
     {
       "package": "@anthropic-ai/claude-agent-sdk",

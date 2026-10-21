@@ -49,6 +49,18 @@ function readJson(file) {
   return JSON.parse(readFileSync(file, "utf8"))
 }
 
+function validateMessageKeys(messages, source, path = []) {
+  if (!isPlainObject(messages)) return
+  for (const [key, value] of Object.entries(messages)) {
+    if (key.includes(".")) {
+      throw new Error(
+        `i18n: message key "${key}" at ${path.join(".") || "<root>"} in ${source} must not contain "."; use nested objects instead`
+      )
+    }
+    validateMessageKeys(value, source, [...path, key])
+  }
+}
+
 /**
  * Assemble one locale's full message object from its split-source directory.
  *
@@ -95,6 +107,7 @@ export function assembleLocale(localeDir) {
     result[ns] = readJson(full)
   }
 
+  validateMessageKeys(result, localeDir)
   return result
 }
 

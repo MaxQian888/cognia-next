@@ -8,11 +8,15 @@ import {
 } from "./build-browser-builtin-plugins.mjs"
 
 test("curates every builtin as an independent asset", () => {
-  assert.equal(BROWSER_BUILTIN_PLUGIN_IDS.length, 54)
+  assert.equal(BROWSER_BUILTIN_PLUGIN_IDS.length, 57)
+  assert.equal(new Set(BROWSER_BUILTIN_PLUGIN_IDS).size, BROWSER_BUILTIN_PLUGIN_IDS.length)
   assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("github-comment-bot"))
   assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("clipboard-tools"))
   assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("ui-surface-reference"))
   assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("cognia-pdf"))
+  assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("remote-desktop-vnc"))
+  assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("remote-desktop-rustdesk"))
+  assert.ok(BROWSER_BUILTIN_PLUGIN_IDS.includes("remote-desktop-web-console"))
 })
 
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile, utimes } from "node:fs/promises"

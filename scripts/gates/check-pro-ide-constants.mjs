@@ -35,13 +35,13 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const FILES = {
   catalogJson: "packages/plugin-sdk/contract/code-1.128-ide.json",
   brokerProtocol: "crates/cognia-codeserver/src/broker_protocol.rs",
-  extension: "sidecar/codeserver-agent-ext/src/extension.mjs",
+  extension: "sidecar/codeserver-agent-ext/src/extension.ts",
   process: "crates/cognia-codeserver/src/process.rs",
   extManifest: "sidecar/codeserver-agent-ext/package.json",
   proxy: "crates/cognia-codeserver/src/proxy.rs",
-  extBuild: "sidecar/codeserver-agent-ext/build.mjs",
+  extBuild: "sidecar/codeserver-agent-ext/build.mts",
   tauriConf: "src-tauri/tauri.conf.json",
-  serverImage: "Dockerfile.cognia-server",
+  serverImage: "deploy/docker/Dockerfile.cognia-server",
   errorCodeRs: "crates/cognia-codeserver/src/error_code.rs",
   errorCodeTs: "lib/codeserver/error-messages.ts",
 }

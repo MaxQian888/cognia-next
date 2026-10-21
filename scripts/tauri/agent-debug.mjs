@@ -352,14 +352,14 @@ function processAlive(pid) {
   }
 }
 
-function terminateProcessTree(pid) {
+function terminateProcessTree(pid, signal = "SIGTERM") {
   if (!Number.isSafeInteger(pid) || pid <= 1) return
   if (process.platform === "win32") {
     spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true })
     return
   }
   try {
-    process.kill(-pid, "SIGTERM")
+    process.kill(-pid, signal)
   } catch (error) {
     if (error.code !== "ESRCH") throw error
   }
@@ -500,24 +500,57 @@ async function launch(options) {
   }
 }
 
-async function stop() {
-  const session = readJson(SESSION_FILE)
-  if (session?.pid && processAlive(session.pid)) {
+export async function shutdownTrackedSession(
+  session,
+  endpoint,
+  {
+    send = request,
+    alive = processAlive,
+    terminate = terminateProcessTree,
+    delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    workspace = fs.realpathSync(REPO_ROOT),
+  } = {}
+) {
+  if (session?.pid && (alive(session.pid) || alive(session.healthPid))) {
     let health
-    let endpoint
     try {
-      endpoint = loadEndpoint(session.endpointFile || discoveryFile())
-      health = await request("/api/dev/agent/health", { endpoint })
-      reconcileDebugSession(session, health, endpoint, fs.realpathSync(REPO_ROOT))
+      // Ownership must remain verifiable when the GUI thread cannot evaluate JS.
+      health = await send("/api/dev/agent/health?nativeOnly=true", { endpoint, timeout: 3_000 })
+      reconcileDebugSession(session, health, endpoint, workspace)
     } catch (error) {
       throw new Error(
         `cannot validate tracked-session ownership; refusing to stop PID ${session.pid}: ${error.message}; session: ${SESSION_FILE}; log: ${session.logFile || "unknown"}`
       )
     }
-    await request("/api/dev/agent/shutdown", { method: "POST", body: {}, endpoint })
-    await new Promise((resolve) => setTimeout(resolve, 750))
-    if (processAlive(session.pid)) terminateProcessTree(session.pid)
+    const exited = () => !alive(session.pid) && !alive(health.pid)
+    const waitForExit = async () => {
+      for (let attempt = 0; attempt < 20; attempt++) {
+        if (exited()) return true
+        await delay(100)
+      }
+      return exited()
+    }
+    try {
+      await send("/api/dev/agent/shutdown", { method: "POST", body: {}, endpoint, timeout: 2_000 })
+    } catch {
+      // Identity was authenticated above; a wedged GUI may never handle exit().
+    }
+    // Even a graceful app exit leaves the dev server/launcher to clean up.
+    if (await waitForExit()) return
+    terminate(session.pid, "SIGTERM")
+    if (await waitForExit()) return
+    terminate(session.pid, "SIGKILL")
+    if (!(await waitForExit())) throw new Error(`tracked Tauri process ${health.pid} did not stop`)
   }
+}
+
+async function stop() {
+  const session = readJson(SESSION_FILE)
+  const endpoint =
+    session && (processAlive(session.pid) || processAlive(session.healthPid))
+      ? loadEndpoint(session.endpointFile || discoveryFile())
+      : undefined
+  await shutdownTrackedSession(session, endpoint)
   removeSession(session)
   output({ ok: true, stoppedPid: session?.pid || null })
 }

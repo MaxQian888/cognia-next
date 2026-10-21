@@ -154,6 +154,7 @@
     "/node_modules/",
     "/.next/",
     "/out/",
+    "<rootDir>/dist/",
     "/coverage/",
     "/components/ui/",
     "/components/ai-elements/"

@@ -471,9 +471,31 @@
       "field": "EncryptedContentEnvelope.accountId",
       "contract": "lib/accounts/content-cipher.ts",
       "test": "lib/accounts/content-cipher.test.ts",
-      "source": "if (envelope.accountId !== this.localAccountId) {",
+      "source": "if (captured.accountId !== this.localAccountId) {",
       "occurrences": 1,
       "reason": "Encrypted payloads persist this key; decryption validates the owning local profile without changing existing ciphertext envelopes."
+    },
+    {
+      "file": "lib/accounts/content-cipher.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "EncryptedContentEnvelope.accountId",
+      "contract": "lib/accounts/content-cipher.ts",
+      "test": "lib/accounts/content-cipher.test.ts",
+      "source": "accountId: envelope.accountId,",
+      "occurrences": 2,
+      "reason": "The authenticated copy retains the persisted envelope's owning local-profile wire key before asynchronous decryption; ciphertext compatibility and cross-profile rejection remain unchanged."
+    },
+    {
+      "file": "lib/accounts/content-cipher.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "EncryptedContentEnvelope.accountId",
+      "contract": "lib/accounts/content-cipher.ts",
+      "test": "lib/accounts/content-cipher.test.ts",
+      "source": "envelope.accountId.length +",
+      "occurrences": 1,
+      "reason": "The bounded plaintext cache accounts for the persisted local-profile wire key's string bytes; no new account identity or persisted field is introduced."
     },
     {
       "file": "lib/accounts/quick-unlock/client.ts",
@@ -1044,7 +1066,7 @@
       "contract": "lib/platform/host-feature-manifest.ts",
       "test": "lib/db/mobile-outbound-queue.test.ts",
       "source": "accountId: local.accountId,",
-      "occurrences": 6,
+      "occurrences": 8,
       "reason": "Host RPC manifests, consent and queued actions share the existing local-profile scope key; preserve account isolation and compatibility across desktop, companion and persisted queues."
     },
     {
@@ -1165,8 +1187,19 @@
       "contract": "lib/platform/host-feature-manifest.ts",
       "test": "lib/db/mobile-outbound-queue.test.ts",
       "source": "row.accountId === local.accountId &&",
-      "occurrences": 2,
+      "occurrences": 4,
       "reason": "Host RPC manifests, consent and queued actions share the existing local-profile scope key; preserve account isolation and compatibility across desktop, companion and persisted queues."
+    },
+    {
+      "file": "lib/db/mobile-outbound-queue.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "HostStateScope.accountId",
+      "contract": "lib/platform/host-feature-manifest.ts",
+      "test": "lib/db/mobile-outbound-queue.test.ts",
+      "source": "row.accountId === candidate.accountId &&",
+      "occurrences": 2,
+      "reason": "Standalone-action deduplication compares the existing persisted local-profile scope keys before reusing a queue row; dropping this comparison would merge actions across accounts."
     },
     {
       "file": "lib/db/mobile-outbound-queue.ts",
@@ -2608,6 +2641,281 @@
       "source": "return (await deps.sources.quota.enable(request.provider, request.accountId))",
       "occurrences": 1,
       "reason": "Glance quota-enable requests arrive through the existing serialized request contract; this receiver reads its provider-login key without changing the cross-device payload."
+    },
+    {
+      "file": "components/devices/device-hero.tsx",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RenameCompanionHostInput.accountId",
+      "contract": "lib/companion/host-orchestration.ts",
+      "test": "components/devices/device-hero.test.tsx",
+      "source": "accountId: getActiveAccountId(),",
+      "occurrences": 1,
+      "reason": "The rename operation selects the paired Host credential book by its existing local-profile input key; the saved pairing and its account isolation remain compatible."
+    },
+    {
+      "file": "components/providers/initializers/renderer-perf-initializer.tsx",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RuntimeTargetScope.accountId",
+      "contract": "lib/runtime/runtime-target-context.ts",
+      "test": "components/providers/initializers/renderer-perf-initializer.test.tsx",
+      "source": "scope ? JSON.stringify([scope.accountId, scope.targetId, scope.routingGeneration]) : null",
+      "occurrences": 1,
+      "reason": "Reads the established RuntimeTargetScope local-profile key to fence work to the active account and target; qualifying a local variable must not rename this shared identity contract."
+    },
+    {
+      "file": "hooks/chat/use-composer-ghost-text.ts",
+      "rule": "bareAccountId",
+      "scope": "provider-account",
+      "field": "ChatSession.accountId",
+      "contract": "packages/agent-config-types/src/index.ts",
+      "test": "hooks/chat/use-composer-ghost-text.test.ts",
+      "source": "session?.accountId,",
+      "occurrences": 1,
+      "reason": "The stored ChatSession keeps its existing provider account routing key; the inference input must use that selected account without migrating or dropping the session field."
+    },
+    {
+      "file": "hooks/chat/use-follow-up-suggestions.ts",
+      "rule": "bareAccountId",
+      "scope": "provider-account",
+      "field": "ChatSession.accountId",
+      "contract": "packages/agent-config-types/src/index.ts",
+      "test": "hooks/chat/use-follow-up-suggestions.test.ts",
+      "source": "session?.accountId,",
+      "occurrences": 1,
+      "reason": "The stored ChatSession keeps its existing provider account routing key; the inference input must use that selected account without migrating or dropping the session field."
+    },
+    {
+      "file": "hooks/eval/use-eval-execution.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RuntimeTargetScope.accountId",
+      "contract": "lib/runtime/runtime-target-context.ts",
+      "test": "hooks/eval/use-eval-execution.test.ts",
+      "source": "!locked && contextKey && JSON.parse(contextKey).accountId === localAccountId",
+      "occurrences": 1,
+      "reason": "Reads the established RuntimeTargetScope local-profile key to fence work to the active account and target; qualifying a local variable must not rename this shared identity contract."
+    },
+    {
+      "file": "lib/ai/eval/execution-runtime.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RuntimeTargetScope.accountId",
+      "contract": "lib/runtime/runtime-target-context.ts",
+      "test": "lib/ai/eval/execution-runtime.test.ts",
+      "source": "this.options.scope.accountId",
+      "occurrences": 1,
+      "reason": "Reads the established RuntimeTargetScope local-profile key to fence work to the active account and target; qualifying a local variable must not rename this shared identity contract."
+    },
+    {
+      "file": "lib/ai/eval/execution-runtime.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RuntimeTargetScope.accountId",
+      "contract": "lib/runtime/runtime-target-context.ts",
+      "test": "lib/ai/eval/execution-runtime.test.ts",
+      "source": "if (!scope || account.locked || account.unlockedAccountId !== scope.accountId)",
+      "occurrences": 1,
+      "reason": "Reads the established RuntimeTargetScope local-profile key to fence work to the active account and target; qualifying a local variable must not rename this shared identity contract."
+    },
+    {
+      "file": "lib/ai/eval/execution-runtime.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RuntimeTargetScope.accountId",
+      "contract": "lib/runtime/runtime-target-context.ts",
+      "test": "lib/ai/eval/execution-runtime.test.ts",
+      "source": "current?.accountId === scope.accountId &&",
+      "occurrences": 2,
+      "reason": "Reads the established RuntimeTargetScope local-profile key to fence work to the active account and target; qualifying a local variable must not rename this shared identity contract."
+    },
+    {
+      "file": "lib/ai/eval/execution-runtime.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RuntimeTargetScope.accountId",
+      "contract": "lib/runtime/runtime-target-context.ts",
+      "test": "lib/ai/eval/execution-runtime.test.ts",
+      "source": "account.unlockedAccountId === scope.accountId &&",
+      "occurrences": 1,
+      "reason": "Reads the established RuntimeTargetScope local-profile key to fence work to the active account and target; qualifying a local variable must not rename this shared identity contract."
+    },
+    {
+      "file": "lib/automation/managed-desktop-client.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "CompanionConfig.accountId",
+      "contract": "lib/tauri/companion-storage.ts",
+      "test": "lib/automation/managed-desktop-client.test.ts",
+      "source": "config.accountId !== account.unlockedAccountId ||",
+      "occurrences": 1,
+      "reason": "Reads the paired Companion configuration and current local-profile scope to reject account changes; the device credential configuration key must retain its stored spelling."
+    },
+    {
+      "file": "lib/automation/managed-desktop-client.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RuntimeTargetScope.accountId",
+      "contract": "lib/runtime/runtime-target-context.ts",
+      "test": "lib/automation/managed-desktop-client.test.ts",
+      "source": "active.accountId !== account.unlockedAccountId",
+      "occurrences": 1,
+      "reason": "Reads the active RuntimeTargetScope local-profile key to reject stale account or target access while preserving the shared scope contract."
+    },
+    {
+      "file": "lib/automation/managed-desktop-client.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "CompanionConfig.accountId",
+      "contract": "lib/tauri/companion-storage.ts",
+      "test": "lib/automation/managed-desktop-client.test.ts",
+      "source": "if (!host || host.config.accountId !== account.unlockedAccountId) return undefined",
+      "occurrences": 1,
+      "reason": "Reads the paired Companion configuration and current local-profile scope to reject account changes; the device credential configuration key must retain its stored spelling."
+    },
+    {
+      "file": "lib/automation/managed-desktop-results-client.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RemoteHostEndpoint.accountId",
+      "contract": "lib/tauri/transport-routing.ts",
+      "test": "lib/automation/managed-desktop-results-client.test.ts",
+      "source": "if (!endpoint?.remoteHost?.id || endpoint.accountId !== owner)",
+      "occurrences": 1,
+      "reason": "Reads the active RemoteHostEndpoint local-profile key to pin private result previews to the selected account and paired device."
+    },
+    {
+      "file": "lib/automation/managed-desktop-results-client.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RuntimeTargetScope.accountId",
+      "contract": "lib/runtime/runtime-target-context.ts",
+      "test": "lib/automation/managed-desktop-results-client.test.ts",
+      "source": "if (!runtime || runtime.accountId !== owner)",
+      "occurrences": 1,
+      "reason": "Reads the active RuntimeTargetScope local-profile key to reject stale account or target access while preserving the shared scope contract."
+    },
+    {
+      "file": "lib/automation/managed-desktop-results-client.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RemoteHostEndpoint.accountId",
+      "contract": "lib/tauri/transport-routing.ts",
+      "test": "lib/automation/managed-desktop-results-client.test.ts",
+      "source": "value.accountId,",
+      "occurrences": 1,
+      "reason": "Reads the active RemoteHostEndpoint local-profile key to pin private result previews to the selected account and paired device."
+    },
+    {
+      "file": "lib/automation/managed-desktop-results-client.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RemoteHostEndpoint.accountId / CompanionConfig.accountId",
+      "contract": "lib/tauri/transport-routing.ts",
+      "test": "lib/automation/managed-desktop-results-client.test.ts",
+      "source": "[\"baseUrl\", \"deviceId\", \"deviceKeyThumbprint\", \"serverFingerprint\", \"accountId\"].some(",
+      "occurrences": 1,
+      "reason": "Compares the active RemoteHostEndpoint with the captured CompanionConfig identity so account or pairing changes invalidate private result access."
+    },
+    {
+      "file": "lib/chat/session-config-inheritance.ts",
+      "rule": "bareAccountId",
+      "scope": "provider-account",
+      "field": "ChatSession.accountId",
+      "contract": "packages/agent-config-types/src/index.ts",
+      "test": "lib/chat/session-config-inheritance.test.ts",
+      "source": "accountId: parent.accountId,",
+      "occurrences": 2,
+      "reason": "A child conversation inherits the parent ChatSession provider-account routing field; preserving both sides of this existing key prevents silently selecting a different provider account."
+    },
+    {
+      "file": "lib/integrations/github-auth.ts",
+      "rule": "bareAccountId",
+      "scope": "provider-account",
+      "field": "GithubOAuthMetadata.accountId",
+      "contract": "lib/integrations/github-auth.ts",
+      "test": "lib/integrations/github-auth.test.ts",
+      "source": "accountId: number",
+      "occurrences": 1,
+      "reason": "Encrypted GitHub OAuth metadata persists the provider numeric account id under this established key; cached sessions and native credential validation must read the same field after restart."
+    },
+    {
+      "file": "lib/integrations/github-auth.ts",
+      "rule": "bareAccountId",
+      "scope": "provider-account",
+      "field": "GithubOAuthMetadata.accountId",
+      "contract": "lib/integrations/github-auth.ts",
+      "test": "lib/integrations/github-auth.test.ts",
+      "source": "return session(id, String(metadata.accountId), metadata.accountLabel, metadata.scopes)",
+      "occurrences": 2,
+      "reason": "Encrypted GitHub OAuth metadata persists the provider numeric account id under this established key; cached sessions and native credential validation must read the same field after restart."
+    },
+    {
+      "file": "lib/integrations/github-auth.ts",
+      "rule": "bareAccountId",
+      "scope": "provider-account",
+      "field": "GithubOAuthMetadata.accountId",
+      "contract": "lib/integrations/github-auth.ts",
+      "test": "lib/integrations/github-auth.test.ts",
+      "source": "accountId: requiredPositiveInteger(values, \"accountId\"),",
+      "occurrences": 2,
+      "reason": "Encrypted GitHub OAuth metadata persists the provider numeric account id under this established key; cached sessions and native credential validation must read the same field after restart."
+    },
+    {
+      "file": "lib/perf/operation-performance.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RuntimeTargetScope.accountId",
+      "contract": "lib/runtime/runtime-target-context.ts",
+      "test": "lib/perf/operation-performance.test.ts",
+      "source": "? JSON.stringify([context.accountId, context.targetId, context.routingGeneration])",
+      "occurrences": 1,
+      "reason": "Reads the established RuntimeTargetScope local-profile key to fence work to the active account and target; qualifying a local variable must not rename this shared identity contract."
+    },
+    {
+      "file": "lib/remote-host/target-transport.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RuntimeTargetScope.accountId",
+      "contract": "lib/runtime/runtime-target-context.ts",
+      "test": "lib/remote-host/target-transport.test.ts",
+      "source": "activeTarget?: () => { accountId: string; targetId: string } | null",
+      "occurrences": 1,
+      "reason": "Reads the established RuntimeTargetScope local-profile key to fence work to the active account and target; qualifying a local variable must not rename this shared identity contract."
+    },
+    {
+      "file": "lib/remote-host/target-transport.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "RuntimeTargetScope.accountId",
+      "contract": "lib/runtime/runtime-target-context.ts",
+      "test": "lib/remote-host/target-transport.test.ts",
+      "source": ")(active.accountId, hostId)",
+      "occurrences": 1,
+      "reason": "Reads the established RuntimeTargetScope local-profile key to fence work to the active account and target; qualifying a local variable must not rename this shared identity contract."
+    },
+    {
+      "file": "lib/work-submission/paired-turn-adapter.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "HostStateScope.accountId",
+      "contract": "packages/agent-config-types/src/host-state.ts",
+      "test": "lib/work-submission/paired-turn-adapter.test.ts",
+      "source": "if (stringField(payload, \"callerAccountId\") !== active.accountId) {",
+      "occurrences": 1,
+      "reason": "Paired-turn admission verifies the submitting local profile against the active HostState scope and serializes that established scope key; neither admission checks nor wire fields may be renamed."
+    },
+    {
+      "file": "lib/work-submission/paired-turn-adapter.ts",
+      "rule": "bareAccountId",
+      "scope": "local-profile",
+      "field": "HostStateScope.accountId",
+      "contract": "packages/agent-config-types/src/host-state.ts",
+      "test": "lib/work-submission/paired-turn-adapter.test.ts",
+      "source": "scope: { accountId: active.accountId, runtimeTargetId: active.targetId, sessionId },",
+      "occurrences": 2,
+      "reason": "Paired-turn admission verifies the submitting local profile against the active HostState scope and serializes that established scope key; neither admission checks nor wire fields may be renamed."
     }
   ]
 }

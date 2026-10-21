@@ -19,6 +19,7 @@ import { assertDeclaredArtifacts } from "../../packages/plugin-sdk/scripts/build
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const packageRoot = join(repoRoot, "packages/plugin-sdk")
+const catalog = JSON.parse(readFileSync(join(packageRoot, "contract/catalog.json"), "utf8"))
 const workDir = mkdtempSync(join(tmpdir(), "cognia-plugin-sdk-pack-"))
 
 function installedVersion(packageName) {
@@ -196,7 +197,7 @@ try {
       'import { definePlugin as invalidHookExport } from "@cognia/plugin-sdk/hooks";',
       'const manifest: PluginManifest = { id: "x", name: "X", description: "X", version: "0.1.0", type: "frontend", capabilities: [], main: "index.js" };',
       "const probe: [EventFilter?, PluginHooks?, PluginPermission?, ExtensionPoint?] = [];",
-      'const contractProbe: ["1.2.0", "2.0.0", PluginApiNamespaceContract?] = [PLUGIN_CONTRACT_VERSION, PLUGIN_GATEWAY_CLIENT_VERSION];',
+      `const contractProbe: [${JSON.stringify(catalog.contractVersion)}, ${JSON.stringify(catalog.protocol.gatewayClientVersion)}, PluginApiNamespaceContract?] = [PLUGIN_CONTRACT_VERSION, PLUGIN_GATEWAY_CLIENT_VERSION];`,
       'defineContextPanel({ id: "x", entry: "panel.js", export: "Panel", resourceKinds: ["project-file"], activity: "inspect", labelKey: "x", label: "X" });',
       "void manifest; void probe; void contractProbe; void invalidHookExport;",
       "",

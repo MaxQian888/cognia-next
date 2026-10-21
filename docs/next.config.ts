@@ -9,6 +9,7 @@ const config: NextConfig = {
   // locale on Pages.
   output: "export",
   reactStrictMode: true,
+  experimental: { useTypeScriptCli: true },
   allowedDevOrigins: ["localhost", "127.0.0.1", "[::1]"],
 }
 

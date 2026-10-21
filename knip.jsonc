@@ -28,12 +28,8 @@
       "ignore": [".agents/**"],
       // Loaded from CSS, dynamic imports, or as providers for workspace peer dependencies.
       "ignoreDependencies": [
-        "@ai-sdk/react",
         // Host provides the router-fusion workspace peer dependency.
         "@xmldom/xmldom",
-        "@hookform/resolvers",
-        "@radix-ui/react-slot",
-        "@tauri-apps/plugin-shell",
         "@types/katex",
         "katex",
         "mammoth",
@@ -43,7 +39,6 @@
         "tailwindcss",
         "tesseract.js",
         "tw-animate-css",
-        "ts-jest",
       ],
       // Host toolchains installed outside pnpm and invoked by repository scripts.
       "ignoreBinaries": ["chcp.com", "osascript", "openssl", "pwsh", "rg", "rustfmt", "uv"],
@@ -168,8 +163,6 @@
     "@babel/standalone",
     // Jest reporter configured by name in jest.config.ts.
     "jest-junit",
-    // Type declarations consumed implicitly by `import … from "js-yaml"`.
-    "@types/js-yaml",
     // Read as files from node_modules (web/scripts/sync-agent-icons.mjs).
     "@lobehub/icons-static-svg",
   ],

@@ -2,9 +2,53 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import path from "node:path"
 
-import { cliEsbuildOptions, createCliEsbuildPlugins } from "./esbuild-shared.mjs"
+import {
+  cliEsbuildOptions,
+  createCliEsbuildPlugins,
+  undeclaredCliRuntimeDependencies,
+} from "./esbuild-shared.mjs"
 
 const root = path.resolve(import.meta.dirname, "../..")
+
+test("CLI runtime checks require an own declaration for prototype-named packages", () => {
+  const metafile = {
+    outputs: { "cli.mjs": { imports: [{ path: "constructor", external: true }] } },
+  }
+  assert.deepEqual(undeclaredCliRuntimeDependencies(metafile, {}), ["constructor"])
+  assert.deepEqual(
+    undeclaredCliRuntimeDependencies(metafile, { dependencies: { constructor: "1.0.0" } }),
+    []
+  )
+})
+
+test("CLI runtime checks reject external packages supplied only by the build environment", () => {
+  const metafile = { outputs: { "cli.mjs": { imports: [
+    { path: "fake-indexeddb/auto", external: true },
+    { path: "@scope/client/http", external: true },
+    { path: "@scope/client", external: true },
+    { path: "chalk", external: true },
+    { path: "node:fs", external: true },
+    { path: "fs/promises", external: true },
+    { path: "./chunks/local.mjs", external: false },
+  ] } } }
+  assert.deepEqual(undeclaredCliRuntimeDependencies(metafile, {
+    dependencies: { chalk: "6.0.1" },
+    devDependencies: { "fake-indexeddb": "6.2.6", "@scope/client": "1.0.0" },
+  }), ["@scope/client", "fake-indexeddb"])
+})
+
+test("CLI runtime checks accept production, peer and optional package contracts", () => {
+  const metafile = { outputs: { "cli.mjs": { imports: [
+    { path: "fake-indexeddb/auto", external: true },
+    { path: "react/jsx-runtime", external: true },
+    { path: "node-pty", external: true },
+  ] } } }
+  assert.deepEqual(undeclaredCliRuntimeDependencies(metafile, {
+    dependencies: { "fake-indexeddb": "6.2.6" },
+    peerDependencies: { react: "^19.0.0" },
+    optionalDependencies: { "node-pty": "1.1.0" },
+  }), [])
+})
 
 test("the option set is the shipped CLI configuration", () => {
   const options = cliEsbuildOptions({

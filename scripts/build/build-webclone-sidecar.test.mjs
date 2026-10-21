@@ -13,7 +13,10 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
 test("root analysis builds generated entrypoints before resolving them", () => {
   const { scripts } = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"))
-  assert.match(scripts.typecheck, /^pnpm run sidecar:webclone:build && .*tsc --noEmit/)
+  assert.match(
+    scripts.typecheck,
+    /^pnpm run sidecar:webclone:build && .*(?:tsc|node scripts\/gates\/typecheck-root\.mjs) --noEmit\b/
+  )
   assert.match(scripts.knip, /^pnpm run sidecar:webclone:build && pnpm --filter docs exec fumadocs-mdx && knip /)
 })
 

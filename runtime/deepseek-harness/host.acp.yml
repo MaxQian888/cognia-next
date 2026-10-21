@@ -24,6 +24,8 @@
   disabled: !!js process.env.COGNIA_DSH_PROVIDER === 'cognia'
   config:
     apiKeyEnv: DEEPSEEK_API_KEY
+    reasoningEffort: !!js process.env.COGNIA_DSH_REASONING_EFFORT
+    maxTokens: !!js Number(process.env.COGNIA_DSH_MAX_TOKENS ?? 256000)
     defaultContextWindow: !!js Number(process.env.COGNIA_DSH_CONTEXT_WINDOW ?? 1000000)
     streamIdleTimeoutMs: 172800000
 

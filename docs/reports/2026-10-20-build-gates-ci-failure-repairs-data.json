@@ -1,0 +1,614 @@
+{
+  "date": "2026-10-20",
+  "timezone": "Asia/Shanghai",
+  "environment": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "node": "v26.5.0",
+    "pnpm": "11.18.0"
+  },
+  "measurementMethod": {
+    "samplingIntervalMs": 200,
+    "metric": "RSS summed across sampled command process tree, MiB",
+    "limits": "Single runs in an already warm shared working tree, no causal speedup or statistical claim."
+  },
+  "measurements": {
+    "acceptance-build": {
+      "command": ["pnpm", "run", "scripts:test:build"],
+      "exit": 0,
+      "wallSec": 72.292,
+      "peakTreeRssMiB": 2699.9,
+      "maxProcesses": 10,
+      "testCounts": {
+        "tests": 438,
+        "pass": 438,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      }
+    },
+    "acceptance-ci": {
+      "command": ["pnpm", "run", "scripts:test:ci"],
+      "exit": 0,
+      "wallSec": 49.976,
+      "peakTreeRssMiB": 1330.7,
+      "maxProcesses": 15,
+      "testCounts": {
+        "tests": 541,
+        "pass": 541,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      }
+    },
+    "acceptance-colocated": {
+      "command": ["node", "scripts/gates/check-colocated-tests.mjs"],
+      "exit": 1,
+      "wallSec": 0.459,
+      "peakTreeRssMiB": 71.7,
+      "maxProcesses": 2
+    },
+    "acceptance-gates": {
+      "command": ["pnpm", "run", "scripts:test:gates"],
+      "exit": 1,
+      "wallSec": 9.754,
+      "peakTreeRssMiB": 2218.5,
+      "maxProcesses": 9,
+      "testCounts": {
+        "tests": 866,
+        "pass": 865,
+        "fail": 1,
+        "cancelled": 0,
+        "skipped": 0
+      }
+    },
+    "acceptance-identity": {
+      "command": ["node", "scripts/gates/check-identity-vocabulary.mjs"],
+      "exit": 0,
+      "wallSec": 2.959,
+      "peakTreeRssMiB": 1420.5,
+      "maxProcesses": 1
+    },
+    "acceptance-lint": {
+      "command": ["pnpm", "lint"],
+      "exit": 0,
+      "wallSec": 10.933,
+      "peakTreeRssMiB": 1654.9,
+      "maxProcesses": 3
+    },
+    "baseline-build": {
+      "command": ["pnpm", "run", "scripts:test:build"],
+      "exit": 1,
+      "wallSec": 79.167,
+      "peakTreeRssMiB": 3065.7,
+      "maxProcesses": 11,
+      "testCounts": {
+        "tests": 438,
+        "pass": 434,
+        "fail": 4,
+        "cancelled": 0,
+        "skipped": 0
+      }
+    },
+    "baseline-ci": {
+      "command": ["pnpm", "run", "scripts:test:ci"],
+      "exit": 1,
+      "wallSec": 49.621,
+      "peakTreeRssMiB": 1331.0,
+      "maxProcesses": 15,
+      "testCounts": {
+        "tests": 522,
+        "pass": 520,
+        "fail": 2,
+        "cancelled": 0,
+        "skipped": 0
+      }
+    },
+    "baseline-gates": {
+      "command": ["pnpm", "run", "scripts:test:gates"],
+      "exit": 1,
+      "wallSec": 11.524,
+      "peakTreeRssMiB": 2069.9,
+      "maxProcesses": 10,
+      "testCounts": {
+        "tests": 866,
+        "pass": 862,
+        "fail": 4,
+        "cancelled": 0,
+        "skipped": 0
+      }
+    },
+    "final-agent-contracts": {
+      "command": [
+        "pnpm",
+        "test",
+        "--",
+        "packages/agent-contracts/src/external-agent-capability.test.ts",
+        "packages/agent-contracts/src/session-operations.test.ts",
+        "--runInBand",
+        "--silent",
+        "--json",
+        "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-gate-failure-fixes-2026-10-20/final-agent-contracts.results.json"
+      ],
+      "exit": 0,
+      "wallSec": 7.274,
+      "peakTreeRssMiB": 1129.2,
+      "maxProcesses": 5
+    },
+    "final-build": {
+      "command": ["pnpm", "run", "scripts:test:build"],
+      "exit": 0,
+      "wallSec": 73.997,
+      "peakTreeRssMiB": 2675.9,
+      "maxProcesses": 10,
+      "testCounts": {
+        "tests": 438,
+        "pass": 438,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      }
+    },
+    "final-ci": {
+      "command": ["pnpm", "run", "scripts:test:ci"],
+      "exit": 0,
+      "wallSec": 47.569,
+      "peakTreeRssMiB": 1312.6,
+      "maxProcesses": 15,
+      "testCounts": {
+        "tests": 541,
+        "pass": 541,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      }
+    },
+    "final-colocated": {
+      "command": ["node", "scripts/gates/check-colocated-tests.mjs"],
+      "exit": 0,
+      "wallSec": 0.46,
+      "peakTreeRssMiB": 75.5,
+      "maxProcesses": 1
+    },
+    "final-contract-check": {
+      "command": ["node", "scripts/build/gen-companion-api.mjs", "--check"],
+      "exit": 0,
+      "wallSec": 2.057,
+      "peakTreeRssMiB": 620.3,
+      "maxProcesses": 1
+    },
+    "final-gates": {
+      "command": ["pnpm", "run", "scripts:test:gates"],
+      "exit": 0,
+      "wallSec": 12.624,
+      "peakTreeRssMiB": 2097.8,
+      "maxProcesses": 9,
+      "testCounts": {
+        "tests": 866,
+        "pass": 866,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0
+      }
+    },
+    "final-harness": {
+      "command": [
+        "pnpm",
+        "test",
+        "--",
+        "components/harness/harness-failure-offer.test.tsx",
+        "components/harness/harness-snapshot-diff.test.tsx",
+        "--runInBand",
+        "--silent",
+        "--json",
+        "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-gate-failure-fixes-2026-10-20/final-harness.results.json"
+      ],
+      "exit": 0,
+      "wallSec": 8.426,
+      "peakTreeRssMiB": 1305.9,
+      "maxProcesses": 5
+    },
+    "final-i18n-check": {
+      "command": ["pnpm", "lint:i18n"],
+      "exit": 0,
+      "wallSec": 4.345,
+      "peakTreeRssMiB": 745.3,
+      "maxProcesses": 3
+    },
+    "final-i18n-sort": {
+      "command": ["pnpm", "i18n:sort:check"],
+      "exit": 0,
+      "wallSec": 0.461,
+      "peakTreeRssMiB": 274.9,
+      "maxProcesses": 2
+    },
+    "final-i18n": {
+      "command": ["pnpm", "lint:i18n"],
+      "exit": 0,
+      "wallSec": 5.075,
+      "peakTreeRssMiB": 748.5,
+      "maxProcesses": 4
+    },
+    "final-identity": {
+      "command": ["node", "scripts/gates/check-identity-vocabulary.mjs"],
+      "exit": 0,
+      "wallSec": 2.736,
+      "peakTreeRssMiB": 1330.0,
+      "maxProcesses": 1
+    },
+    "final-lint-clean": {
+      "command": ["pnpm", "lint"],
+      "exit": 1,
+      "wallSec": 12.044,
+      "peakTreeRssMiB": 1725.3,
+      "maxProcesses": 3
+    },
+    "final-lint-passing": {
+      "command": ["pnpm", "lint"],
+      "exit": 0,
+      "wallSec": 10.032,
+      "peakTreeRssMiB": 1674.8,
+      "maxProcesses": 3
+    },
+    "final-lint-repaired": {
+      "command": ["pnpm", "lint"],
+      "exit": 1,
+      "wallSec": 10.866,
+      "peakTreeRssMiB": 1677.0,
+      "maxProcesses": 3
+    },
+    "final-lint": {
+      "command": ["pnpm", "lint"],
+      "exit": 1,
+      "wallSec": 10.89,
+      "peakTreeRssMiB": 1663.5,
+      "maxProcesses": 3
+    },
+    "final-runtime": {
+      "command": [
+        "pnpm",
+        "test",
+        "--",
+        "components/usage/run-progress-hint.test.tsx",
+        "hooks/usage/use-run-spend.test.ts",
+        "components/providers/initializers/plugin-cogset-initializer.test.tsx",
+        "components/providers/initializers/glance-publisher-initializer.test.tsx",
+        "components/providers/initializers/file-share-host-sync-initializer.test.tsx",
+        "lib/filespace/host-sync.test.ts",
+        "lib/headless/runtimes/file-share-host-sync.test.ts",
+        "lib/integrations/github-auth.test.ts",
+        "lib/remote-host/target-transport.test.ts",
+        "lib/subscription/siwc/transport.test.ts",
+        "lib/accounts/content-cipher.test.ts",
+        "lib/db/mobile-outbound-queue.test.ts",
+        "--runInBand",
+        "--silent",
+        "--json",
+        "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-gate-failure-fixes-2026-10-20/final-runtime.results.json"
+      ],
+      "exit": 0,
+      "wallSec": 15.417,
+      "peakTreeRssMiB": 1469.2,
+      "maxProcesses": 5
+    },
+    "final-sidecar-typecheck": {
+      "command": ["pnpm", "sidecar:typecheck"],
+      "exit": 0,
+      "wallSec": 2.308,
+      "peakTreeRssMiB": 597.7,
+      "maxProcesses": 6
+    },
+    "final-source-gates": {
+      "command": [
+        "pnpm",
+        "test",
+        "--",
+        "hooks/devices/use-device-rows.test.tsx",
+        "components/diff/line-diff-view.test.tsx",
+        "components/source-control/changes-view.test.tsx",
+        "browser-extension/src/lib/agent/socket-client.test.ts",
+        "--runInBand",
+        "--silent",
+        "--json",
+        "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-gate-failure-fixes-2026-10-20/final-source-gates.results.json"
+      ],
+      "exit": 0,
+      "wallSec": 12.476,
+      "peakTreeRssMiB": 1363.3,
+      "maxProcesses": 5
+    },
+    "final-typecheck-clean": {
+      "command": ["pnpm", "typecheck"],
+      "exit": 0,
+      "wallSec": 46.913,
+      "peakTreeRssMiB": 10787.5,
+      "maxProcesses": 8
+    },
+    "final-typecheck-repaired": {
+      "command": ["pnpm", "typecheck"],
+      "exit": 1,
+      "wallSec": 47.516,
+      "peakTreeRssMiB": 10764.5,
+      "maxProcesses": 7
+    },
+    "final-typecheck": {
+      "command": ["pnpm", "typecheck"],
+      "exit": 2,
+      "wallSec": 46.458,
+      "peakTreeRssMiB": 10702.9,
+      "maxProcesses": 5
+    },
+    "acceptance-colocated-recheck": {
+      "command": ["node", "scripts/gates/check-colocated-tests.mjs"],
+      "exit": 1,
+      "wallSec": 0.459,
+      "peakTreeRssMiB": 76.4,
+      "maxProcesses": 1
+    },
+    "acceptance-typecheck": {
+      "command": ["pnpm", "typecheck"],
+      "exit": 2,
+      "wallSec": 44.839,
+      "peakTreeRssMiB": 10740.3,
+      "maxProcesses": 5,
+      "errorCount": 9
+    }
+  },
+  "jest": {
+    "final-runtime": {
+      "numTotalTests": 277,
+      "numPassedTests": 277,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTotalTestSuites": 12,
+      "success": true
+    },
+    "final-harness": {
+      "numTotalTests": 6,
+      "numPassedTests": 6,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTotalTestSuites": 2,
+      "success": true
+    },
+    "final-agent-contracts": {
+      "numTotalTests": 49,
+      "numPassedTests": 49,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTotalTestSuites": 2,
+      "success": true
+    },
+    "final-source-gates": {
+      "numTotalTests": 88,
+      "numPassedTests": 88,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numTotalTestSuites": 4,
+      "success": true
+    }
+  },
+  "sourceSnapshots": {
+    ".github/workflows/feishu-notify.yml": {
+      "beforeSha256": "56af6a6573aa9c1fdff9044dd1bbce4ff720124eb50d7fc16a7cc4eece164899",
+      "afterSha256": "f6290447f0c47fe8d2a8e55e9f58fc2f674146b22484ab14aa09ac365e9622ee"
+    },
+    "browser-extension/src/lib/agent/socket-client.ts": {
+      "beforeSha256": "03dbcbcc5cc27c6f9e427c8f3e607f3ce94be67f6c0963bc9af8063f0eb18040",
+      "afterSha256": "a6340eb3ebedf6d46d9164848f9aa885c3c6fc9b61a0d3a0a30a05b36fb8715a"
+    },
+    "cli/src/serve/fixtures/bridge-frames.json": {
+      "beforeSha256": "adba88839a8f4fd97c3253ab23e31763402864c1b67d7574f96681dfc8fd8664",
+      "afterSha256": "75e0dc68aab7788f3aaab364aded15c0f49beb7533ec138dd9d3ad13239e4313"
+    },
+    "cli/src/serve/headless-contract-identity.ts": {
+      "beforeSha256": "c194f5e43f0e12155a5126ee75eda87bd403d5b28d95d7ca98dbedb0e122a3e6",
+      "afterSha256": "c2dfab975d7ff59338d94840364ce30d1813dda787c4466f7530fcdad05f65c7"
+    },
+    "components/diff/line-diff-view.tsx": {
+      "beforeSha256": "f87b2a89b3914f2800604470a042cfea18455b6c77204ddc9be5d59bbdec188f",
+      "afterSha256": "b8e95fa78aa5805fed82279789e2928ad260639f07c0a274e318bde439cff111"
+    },
+    "components/harness/harness-failure-offer.test.tsx": {
+      "beforeSha256": "f3e5fc29f5d399b56fbe5a48ff9c14d1f3c9ccc9f46d05a0c8508db300c1d6a4",
+      "afterSha256": "56a8479513baf4711ecd628d739bac9dd8af8833d5067e70db3695ef7396f780"
+    },
+    "components/harness/harness-snapshot-diff.test.tsx": {
+      "beforeSha256": "00d6ae5326ccf39f81241f349dce88c4bf44f2feece85e0b6ff1952735d3a956",
+      "afterSha256": "23a32584d852513a7f5f26e9478daf86ed76b4ee970fb4807a7c9b5930846bf1"
+    },
+    "components/providers/initializers/file-share-host-sync-initializer.test.tsx": {
+      "beforeSha256": "24f0f7b32186aa9b4c5cdd908e9dace54f42d7f871e23c70662db1c237703171",
+      "afterSha256": "6c87c960fcd4d0959c327a092c0389c288ef7d02546b3511f9d3b43cb00d731c"
+    },
+    "components/providers/initializers/file-share-host-sync-initializer.tsx": {
+      "beforeSha256": "2db32b90a7682b550f111a633577212fdf340065cb5a0283648722c44144c867",
+      "afterSha256": "90c39085f880b331f5c48a20f81344d65444c866cc391a5470d791a7bc1436e4"
+    },
+    "components/providers/initializers/glance-publisher-initializer.tsx": {
+      "beforeSha256": "e9ca8bf5663d9abc50e90e43f8a9cc484cdd915b797e731a61ee35eb937f5020",
+      "afterSha256": "9222d13c51359474e2eb65628ca967226171f26408b0aabb13faa186cd957ab5"
+    },
+    "components/providers/initializers/plugin-cogset-initializer.tsx": {
+      "beforeSha256": "9219879ca095bea304dd78a75546a07dffb2f6f7594ee445a9ae2667871136e9",
+      "afterSha256": "f143deb9854ae20a7da5f72dbb1b303ee4a410585a0f4e6f4f084744b8021409"
+    },
+    "components/source-control/changes-view.tsx": {
+      "beforeSha256": "b1a136ea9b237eeff22e9831333b2c8766ae096857f4b0c855a264709b3779c9",
+      "afterSha256": "9e66bfb7af2e7f37ca820dd1d1817f5d6a90befa86b0b1367a68ab6e7de79c94"
+    },
+    "components/usage/run-progress-hint.test.tsx": {
+      "beforeSha256": null,
+      "afterSha256": "bcee0d49e887187e2279d7e11aebdd015717605c471662681b7b733edbee9d78"
+    },
+    "crates/cognia-cli/assets/host-command-catalog.json": {
+      "beforeSha256": "a441f7bd5e5b2f315942f37bcff7163ea47cf188f8b67ec8aba6ae2d00c46472",
+      "afterSha256": "cbb6cfc1bd408b586575ff41b66867993fe2a2686828ef87efddcc96b1b184ab"
+    },
+    "crates/cognia-companion-contract/src/generated/known_commands.rs": {
+      "beforeSha256": "2a11f1f784462287c64e45470e055dd1ddbe6d0b02238c52765bcc70817c1a7c",
+      "afterSha256": "e259ef134b3f95e44e8085ecfc36326a839de3d4f2fab532cccf01b22a027541"
+    },
+    "crates/cognia-headless-contract/assets/device-plane-overrides.json": {
+      "beforeSha256": "f6046fa43aa39ed8c40606f98205299cfd45d330b9f637c8709f12e0df329316",
+      "afterSha256": "214953754ce10d153dcf241b109d670278de215a892cd76842c417a03ca5a3cc"
+    },
+    "docs/api/headless-service-api.asyncapi.yaml": {
+      "beforeSha256": "4d612550e83428e192590768d5cfa55cb659bd8c255a79ec304aa34e254eb3cd",
+      "afterSha256": "0fd26e9b8601aafc6bd11ece28518eec15f745bd5cc523f8614c5943548df640"
+    },
+    "docs/api/headless-service-api.openapi.yaml": {
+      "beforeSha256": "edee01e9e97256c4ea228a4c6dba4db51648135742d3b3ec788aac32c3aedfa8",
+      "afterSha256": "434b39fd1142291941c4d10f2857bd907fac66556ba38dcda202cd7d3494eb68"
+    },
+    "docs/api/mobile-companion-api.openapi.yaml": {
+      "beforeSha256": "3f5502d79fdebf18e5c6f279104d792472973d6df957547187ea33a0caee9ab6",
+      "afterSha256": "f0c5fe125809942832e51b5abdaf540b98e00f1716497961410ba625ae81ca73"
+    },
+    "eslint.config.mjs": {
+      "beforeSha256": "2535e9b38d6545ebbdbda5ed77f684dd4561610cfe55a0f2d1eec8269c96d32c",
+      "afterSha256": "13da1bdcfa8843796119b1a78025204e4a0f3e8a7e2812b2ab5b5b8d0f0a4db1"
+    },
+    "hooks/devices/use-device-rows.test.tsx": {
+      "beforeSha256": "873c05baf9b92f653eefea6ec3548b83babe51059b8729bdc0c8215c0ac9ed9f",
+      "afterSha256": "578c01799ead6ce2c80d3a37ce34b6b036f09b1dc59273d2c9526615558e4d96"
+    },
+    "hooks/devices/use-device-rows.ts": {
+      "beforeSha256": "ea596dbe75a90bc908a849508f0a23a747d8ac168b37e65c8a2a6aabaed46870",
+      "afterSha256": "e872417a09eb94afc388ef0d4b29b6cfc84cc56b0e09a90439457a7821e4fa9e"
+    },
+    "hooks/usage/use-run-spend.test.ts": {
+      "beforeSha256": null,
+      "afterSha256": "959feb0ef00fe89c4026fe55851a26865fc9d385d450c1d22109b456a975026e"
+    },
+    "jest.config.ts": {
+      "beforeSha256": "ce6f2051bb10a3949fb7b71bbdec0baa5cd60d9401c98b37a7e85a7d2b88562d",
+      "afterSha256": "6675f40fe94568cd582810d2093d31e6d9c5d7532029cb897ec07fb84c3913a4"
+    },
+    "lib/filespace/host-sync.test.ts": {
+      "beforeSha256": "a044795beb13e1c599e773e29398e8481a9d6ed4b4f0dd633a245bdcb529ea2a",
+      "afterSha256": "139c260151e1f7af97055245df14f45f9ad8da4f1181bf28bc9d7dd9074daa63"
+    },
+    "lib/filespace/host-sync.ts": {
+      "beforeSha256": "10eacc103db0f73f489021b0674c29ac50a99f00cb54397c5b6a089e4b9a674e",
+      "afterSha256": "fb849c93e407690f5af18f89a55e2cfef6b942337719393ba2ff718a54be06a3"
+    },
+    "lib/headless/runtimes/file-share-host-sync.test.ts": {
+      "beforeSha256": "f6812685a56ed01738dcf74a1f146e11950fbb65ccb0869a56912da534ae268b",
+      "afterSha256": "bb9e83bd63abe62aa79b2b3b86ebaa231c1e9fb18d6422436e4efa238f8d086d"
+    },
+    "lib/headless/runtimes/file-share-host-sync.ts": {
+      "beforeSha256": "fc94a918a6a045e271025c6c943dfadba6e9a9fac5366cf24551b563a99d5834",
+      "afterSha256": "6170c72169f17df0e9f22ff09c1de58fe4f1ea625964869b884da030a88e5bd5"
+    },
+    "lib/integrations/github-auth.ts": {
+      "beforeSha256": "a3c0b78f7ff45f7b12704d2794d3593af9e5c58de7aa78622b88b511f4aee00e",
+      "afterSha256": "d5f82bdcca574d24e6eb3a3bd1c74181a4cc8d7d86e95f9bcf8749f0b3cd6bc7"
+    },
+    "lib/remote-host/target-transport.ts": {
+      "beforeSha256": "7f9c11fd7571f8ff9fdbbf99dfdb83b5e90bcd6068b445029503b7efda517add",
+      "afterSha256": "f47d2d319459380ba44ccf2a8a2cc239e82a8d7b35705c6be7e7cb33dd847a5c"
+    },
+    "lib/subscription/siwc/transport.ts": {
+      "beforeSha256": "5199286d67736db1eddaafb9058e9218a2517ecd5dd424bdbacedd3e85cee46d",
+      "afterSha256": "4b2963deb94502eb120550fcde3bddc4ab1e964b94c202c040fd51cbfe1638e5"
+    },
+    "package.json": {
+      "beforeSha256": "5a1a41ea2f616374150b9539c144c59821e3a28512c6485997344def77114a18",
+      "afterSha256": "6a3d0782da4bd1e7f332d4c47628753847c595ca9d59b1e5fbb71163cc02808c"
+    },
+    "packages/agent-contracts/src/external-agent-capability.ts": {
+      "beforeSha256": "04d83d32a28cb4dab01c59bb664a59080248722ffa043748c1f2879759fd0b82",
+      "afterSha256": "d6ce1365b8e68b18e2508b65ff2c1fa35893e282578f246b2fc2be5e5c41bf25"
+    },
+    "packages/agent-contracts/src/session-operations.ts": {
+      "beforeSha256": "268f354c14dd4c3773daff24ba120c1c5d89774f25c14fc15b87d89c1fc158ed",
+      "afterSha256": "c2df90162e963abc00ecbb5cd1800cec7a16e1993bffd91d1d5a7faf21fc9bbd"
+    },
+    "protocol/companion-response-schemas.json": {
+      "beforeSha256": "b98d414750628e29c81642001fb9eb776c8c00529ebd75149ae77b9aae18e108",
+      "afterSha256": "6c71e946e2c33c5c9e29b1b9e07fae65e37bee73e84e5a59aa296a36c4a0fa13"
+    },
+    "scripts/build/build-webclone-sidecar.test.mjs": {
+      "beforeSha256": "fb0e851bb6c30860f0e062122641f2f9a85bcaf0df3c8aa3d65312d39fac04dd",
+      "afterSha256": "9a9f0cfd03339479c4097fe1829f070810fe9be39067a6b24729e7e86c8ad6bb"
+    },
+    "scripts/build/companion-request-schema-contracts.mjs": {
+      "beforeSha256": "b75dea6628eb5379f7cec712f04a2624df6ebd6f6bd64ca9ed5c63edb558f10c",
+      "afterSha256": "f7b6d1f9649f955a396e1a625f2b6d30e1e89b69ce8122a9d6b3a6965577523a"
+    },
+    "scripts/build/gen-companion-api.test.mjs": {
+      "beforeSha256": "f2c6f3949ceefe4c3bd66487d3bb381407497b27100cec1fe91dc390bb8ee291",
+      "afterSha256": "23a280f4bd2a47ca978cca35870200c07fde4584a146d177d4920c0cf6ffc1fd"
+    },
+    "scripts/ci/feishu/policy.mjs": {
+      "beforeSha256": "0944e0b2b43ee4794547680ce7aac3ecb7881ba5fd37829ee5b7d6b3abc74f03",
+      "afterSha256": "ade67490a69f5c28d0326edee29d068d2a173161cbd53a1ae3d257ed286d81c1"
+    },
+    "scripts/gates/check-deploy-suite.test.mjs": {
+      "beforeSha256": "13d5b0498c850e7e9f789a4a574703d722030b2c28eeb0900250462aa855e19e",
+      "afterSha256": "eef6bf56ec473ade1afed38c74c83857762a763b99d39d8fa36984955fe237b2"
+    },
+    "scripts/gates/check-gate-registry.mjs": {
+      "beforeSha256": "37a754d3530f897938ffc9a8c742e0471f909de98074c3ab1fd116fd8837c396",
+      "afterSha256": "eebd9f99d38b1ff042cd2a65b8c992b4c321162e22a00fa8693be14f4a4ca97b"
+    },
+    "scripts/gates/identity-wire-exceptions.json": {
+      "beforeSha256": "32cddf351abc7aea00af5f4d77e0f80a3c9770ebbf547ad4bda8440005d9e17f",
+      "afterSha256": "de0be43ff19cb86d77c6106031bce2b949c82a203af4b8d79a2b2b3a97447a48"
+    },
+    "scripts/test/coverage-sources.json": {
+      "beforeSha256": "24ddb329918ecc493748d1dafa53a4c94b7048f0da7ea246dc1a6ad2dd5da358",
+      "afterSha256": "e0a1028bf1631b52db6c3580097440b005d634d057b0ea2202343835352c7ece"
+    },
+    "scripts/test/merge-coverage.mjs": {
+      "beforeSha256": "64c06fd7a0bdd861f25f499615822f60e43d457b31b2e29933e2653cefc78ba8",
+      "afterSha256": "5a2004ee83f41cec39f748c598492661c8021c48b7e63bec913f15b78e4c46e4"
+    },
+    "scripts/test/merge-coverage.test.mjs": {
+      "beforeSha256": "a146f8847b7593bba4adc009bc4be71eabdc0ceaad1c132e563440800549e94b",
+      "afterSha256": "a5249db33327985a445d9b18503d59dcaab55e5bdf3a6f412c373d7310a76c21"
+    },
+    "sidecar/tsconfig.base.json": {
+      "beforeSha256": "5736173659bc5c395b4670730e5054126d51323ffdd7cf713040ba30bdaf2363",
+      "afterSha256": "a5e08b9e2cb0933d976fa5985492f4a4b222397f55141d3ac8fe4fef61d11d34"
+    }
+  },
+  "emittedJavaScriptComparison": [
+    {
+      "file": "components/diff/line-diff-view.tsx",
+      "emittedJavaScriptEquivalent": true,
+      "ignoredNoopDirective": true
+    },
+    {
+      "file": "components/source-control/changes-view.tsx",
+      "emittedJavaScriptEquivalent": true,
+      "ignoredNoopDirective": true
+    },
+    {
+      "file": "packages/agent-contracts/src/external-agent-capability.ts",
+      "emittedJavaScriptEquivalent": true,
+      "ignoredNoopDirective": false
+    },
+    {
+      "file": "packages/agent-contracts/src/session-operations.ts",
+      "emittedJavaScriptEquivalent": true,
+      "ignoredNoopDirective": false
+    }
+  ],
+  "coverage": "Scope and thresholds retained; no actual coverage collection requested or performed.",
+  "concurrentChange": {
+    "observedAt": "2026-10-20T13:55:21.541377+08:00",
+    "filesAbsentAtTaskStart": true,
+    "originalAggregateFailure": "acceptance-gates passed 865/866 after new source files appeared",
+    "latestColocatedExit": 1,
+    "latestColocatedGaps": ["lib/agent-config/types.ts"],
+    "latestTypecheckExit": 2,
+    "latestTypecheckErrorCount": 9,
+    "latestTypecheckErrorFiles": [
+      "lib/agent-config/references.test.ts",
+      "lib/plugin/api/agent-config-api.ts"
+    ],
+    "scope": "These concurrent source files were not edited by this task."
+  },
+  "evidenceDirectory": ".cache/test-gate-failure-fixes-2026-10-20"
+}

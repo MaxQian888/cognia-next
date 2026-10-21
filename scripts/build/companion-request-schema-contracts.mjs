@@ -153,6 +153,7 @@ const scheduledTaskTypes = [
   "provider-diagnostics-refresh",
   "conversation-auto-archive",
   "files-trash-purge",
+  "harness-evolution-sweep",
 ]
 
 const scheduledTaskType = z.enum(scheduledTaskTypes)

@@ -4,7 +4,17 @@ module.exports = {
   testMatch: ["<rootDir>/src/**/*.test.ts"],
   clearMocks: true,
   transform: {
-    "^.+\\.tsx?$": ["ts-jest", { tsconfig: "<rootDir>/tsconfig.json", diagnostics: true }],
+    "^.+\\.tsx?$": [
+      "@swc/jest",
+      {
+        jsc: {
+          target: "es2022",
+          parser: { syntax: "typescript", tsx: true },
+          transform: { react: { runtime: "automatic" } },
+        },
+        module: { type: "commonjs" },
+      },
+    ],
   },
   moduleNameMapper: {
     "^@cognia/agent-contracts$": "<rootDir>/../agent-contracts/src/index.ts",

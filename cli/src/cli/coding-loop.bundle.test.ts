@@ -12,7 +12,7 @@ import { nodePtyAvailable } from "../tui/pty/node-pty-harness"
 import { defaultNativeCandidates, findNativeBinary } from "../runtime/native-binary"
 
 const ROOT = path.resolve(__dirname, "../../..")
-const BUNDLE = path.join(ROOT, "cli/dist/cognia-agent.mjs")
+let BUNDLE = path.join(ROOT, "cli/dist/cognia-agent.mjs")
 const nativeHelperEnv = Object.fromEntries(
   [
     ["cognia-sandbox-exec", "COGNIA_SANDBOX_EXEC"],
@@ -46,6 +46,9 @@ describe("packaged built-in coding loop", () => {
       { cwd: ROOT, encoding: "utf8", timeout: 120_000 }
     )
     if (result.status !== 0) throw new Error(result.stderr)
+    BUNDLE = result.stdout.trim().split("\n").at(-1)!
+    expect(path.isAbsolute(BUNDLE)).toBe(true)
+    expect(BUNDLE.endsWith("cognia-agent.mjs")).toBe(true)
   })
 
   describe.each(["openai", "anthropic"])("%s through the shipped agent", (protocol) => {

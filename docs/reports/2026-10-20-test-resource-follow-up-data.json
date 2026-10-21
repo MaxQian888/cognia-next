@@ -1,0 +1,723 @@
+{
+  "date": "2026-10-20",
+  "scope": "Research followed by authorized test-cache and tokenizer fixes; original research data retained",
+  "environment": {
+    "root": "/Users/bytedance/Project/cognia-next",
+    "head": "07eb0d44b5567f815bbdf70bcb7693f518a9a38d",
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "files": {
+      "lib/plugin/core/manager.ts": "359d50814706d6447fed825ca95e3e247c3ccf4dee8fe4094935e1a936d34381",
+      "lib/plugin/core/manager.test.ts": "1ea60096f7775d5df6aab1f736fc8eccaed72e227c364ec86392f53462c7c810",
+      "lib/plugin/core/context.ts": "37a4611cf7b55f8e82d579108a9f45e0aa8124d6b281c62a1d48f1cc05e4011e",
+      "lib/plugin/api/project-api.ts": "14c4bf0927799a10bc790a0beba2838f8e126ff45f2115c427edb23b08f88088",
+      "lib/project-knowledge/ingest/ingest-file.ts": "44bcab180726de804de5c0790a63efcffd0a26901d7c7990069d496a9d63af5c",
+      "scripts/test/cli-bundle.mjs": "6b77841727cc99ebe5a4c30005b56bff275d4dc2e046b8d57f81afd4186bc95a",
+      "scripts/build/bundle-tui-fixture.mjs": "9d9462d63fa2af1a30dde5af0da339168c376120edc9f4d0b9a32595ba57bfda",
+      "jest.config.ts": "ce6f2051bb10a3949fb7b71bbdec0baa5cd60d9401c98b37a7e85a7d2b88562d",
+      "package.json": "3cb6c7a2ceac3d80c03a909b5bf14ed1a5dc1a70c922a17b4ef2a15ac336e85d"
+    },
+    "arch": "arm64",
+    "logicalCpus": 14,
+    "physicalMemoryGiB": 48,
+    "node": "v26.5.0",
+    "jest": "30.5.2"
+  },
+  "runs": [
+    {
+      "exit": 0,
+      "wallSec": 17.61,
+      "peakTreeRssMiB": 1619.3,
+      "maxProcesses": 5,
+      "label": "manager-warmup",
+      "passedTests": 267,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "suiteSec": 9.834
+    },
+    {
+      "exit": 0,
+      "wallSec": 22.784,
+      "peakTreeRssMiB": 1492.2,
+      "maxProcesses": 5,
+      "label": "manager-control-1",
+      "passedTests": 267,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "suiteSec": 7.27,
+      "distinctModules": 3663,
+      "moduleEvaluations": 7203,
+      "resetCalls": 0,
+      "tokenizerSelfMs": 297.8455840000006
+    },
+    {
+      "exit": 0,
+      "wallSec": 39.476,
+      "peakTreeRssMiB": 1392.4,
+      "maxProcesses": 5,
+      "label": "manager-constant-1",
+      "passedTests": 267,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "suiteSec": 9.068,
+      "distinctModules": 3658,
+      "moduleEvaluations": 7193,
+      "resetCalls": 0,
+      "tokenizerSelfMs": 391.5987089999908
+    },
+    {
+      "exit": 0,
+      "wallSec": 14.22,
+      "peakTreeRssMiB": 1485.3,
+      "maxProcesses": 5,
+      "label": "manager-constant-2",
+      "passedTests": 267,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "suiteSec": 4.937,
+      "distinctModules": 3658,
+      "moduleEvaluations": 7193,
+      "resetCalls": 0,
+      "tokenizerSelfMs": 247.44279099999767
+    },
+    {
+      "exit": 0,
+      "wallSec": 27.427,
+      "peakTreeRssMiB": 1479.7,
+      "maxProcesses": 5,
+      "label": "manager-control-2",
+      "passedTests": 267,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "suiteSec": 6.387,
+      "distinctModules": 3663,
+      "moduleEvaluations": 7203,
+      "resetCalls": 0,
+      "tokenizerSelfMs": 221.8495409999996
+    },
+    {
+      "exit": 0,
+      "wallSec": 10.5,
+      "peakTreeRssMiB": 1498.6,
+      "maxProcesses": 5,
+      "label": "manager-document-leaves",
+      "passedTests": 267,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "suiteSec": 3.336,
+      "distinctModules": 3653,
+      "moduleEvaluations": 7183,
+      "resetCalls": 0,
+      "tokenizerSelfMs": 218.64091499999995
+    },
+    {
+      "exit": 0,
+      "wallSec": 12.854,
+      "peakTreeRssMiB": 1369.4,
+      "maxProcesses": 5,
+      "label": "manager-lazy-tokenizer",
+      "passedTests": 267,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "suiteSec": 4.365,
+      "distinctModules": 3663,
+      "moduleEvaluations": 7203,
+      "resetCalls": 0,
+      "tokenizerSelfMs": 11.25958300000093
+    },
+    {
+      "exit": 0,
+      "wallSec": 8.614,
+      "peakTreeRssMiB": 1060.1,
+      "maxProcesses": 5,
+      "label": "terminal-helper",
+      "passedTests": 14,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "suiteSec": 0.064,
+      "distinctModules": 73,
+      "moduleEvaluations": 73,
+      "resetCalls": 0,
+      "tokenizerSelfMs": null
+    },
+    {
+      "exit": 0,
+      "wallSec": 5.269,
+      "peakTreeRssMiB": 706.2,
+      "maxProcesses": 5,
+      "label": "terminal-node-only",
+      "passedTests": 14,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "suiteSec": 0.063
+    },
+    {
+      "exit": 0,
+      "wallSec": 7.473,
+      "peakTreeRssMiB": 1051.7,
+      "maxProcesses": 5,
+      "label": "terminal-default-plain",
+      "passedTests": 14,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "suiteSec": 0.05
+    },
+    {
+      "exit": 0,
+      "wallSec": 7.687,
+      "peakTreeRssMiB": 1258.6,
+      "maxProcesses": 5,
+      "label": "estimator-lazy",
+      "passedTests": 6,
+      "failedTests": 0,
+      "skippedTests": 0,
+      "suiteSec": 0.35,
+      "distinctModules": 75,
+      "moduleEvaluations": 75,
+      "resetCalls": 0,
+      "tokenizerSelfMs": 1.482623999999305
+    }
+  ],
+  "cliEnsure": {
+    "exit": 0,
+    "wallSec": 8.78,
+    "peakTreeRssMiB": 2135.0,
+    "maxProcesses": 3
+  },
+  "cliStages": [
+    {
+      "pid": 49418,
+      "command": "/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node",
+      "args": [
+        "/Users/bytedance/Project/cognia-next/scripts/build/build-browser-builtin-plugins.mjs"
+      ],
+      "durationMs": 2067.432416
+    },
+    {
+      "pid": 49418,
+      "command": "/Users/bytedance/.nvm/versions/node/v26.5.0/bin/node",
+      "args": ["/Users/bytedance/Project/cognia-next/scripts/build/build-cli.mjs", "--js-only"],
+      "durationMs": 6498.7919999999995
+    }
+  ],
+  "chunksBefore": {
+    "count": 122225,
+    "bytes": 3242538677,
+    "topVariants": [
+      ["chunk", 61094],
+      ["runtime", 681],
+      ["registry", 363],
+      ["service", 301],
+      ["client", 269],
+      ["build-deps", 267],
+      ["audit", 267],
+      ["settings", 258],
+      ["host", 217],
+      ["agent-turn", 215],
+      ["bootstrap", 214],
+      ["lifecycle", 196]
+    ]
+  },
+  "chunksAfter": {
+    "count": 124086,
+    "bytes": 3302938529,
+    "addedFiles": 1861,
+    "addedBytes": 60399852
+  },
+  "literalJsClosure": {
+    "scope": "conservative literal-relative .mjs closure from CLI and PTY entries, not a deletion manifest",
+    "files": 5101,
+    "bytes": 130563581,
+    "missing": [],
+    "elapsedSec": 11.538
+  },
+  "fixtureCache": {
+    "bundlePath": "/Users/bytedance/Project/cognia-next/cli/dist/tui-app-fixture.mjs",
+    "bundleExists": true,
+    "cases": [
+      {
+        "name": "virtual-fresh-baseline",
+        "stale": false,
+        "statCalls": 12876,
+        "elapsedMs": 830.806916
+      },
+      {
+        "name": "test-only-newer",
+        "file": "/Users/bytedance/Project/cognia-next/cli/src/tui/pty/terminal-screen.test.ts",
+        "stale": true,
+        "statCalls": 1253,
+        "elapsedMs": 8.438750000000027
+      },
+      {
+        "name": "package-source-newer",
+        "file": "/Users/bytedance/Project/cognia-next/packages/agent-acp/src/client.ts",
+        "stale": false,
+        "statCalls": 12876,
+        "elapsedMs": 85.87079100000005
+      }
+    ],
+    "warmScanMs": [
+      83.0279589999999, 70.46391700000004, 73.54554200000007, 70.9325829999998, 75.75083399999994,
+      97.60983400000009, 71.47312499999998, 71.90495800000008, 72.95041699999979, 75.85216600000012
+    ],
+    "note": "Metadata overridden only in this process. No files or source mtimes changed."
+  },
+  "lazyTokenizerBehavior": {
+    "emptyAndReportedUsageSkipEncoder": true,
+    "largeInputSkipsEncoder": true,
+    "largeMs": 42.940208,
+    "exactCountsPreserved": true
+  },
+  "sourceDrift": {},
+  "attribution": {
+    "moduleEvaluationMultiplicity": {
+      "1": 123,
+      "2": 3540
+    },
+    "constantRemovedModules": [
+      "lib/project-knowledge/ingest/ingest-file.ts",
+      "lib/twin/ingest/embed.ts",
+      "lib/twin/job-control.ts",
+      "lib/db/project-chunks.ts",
+      "lib/project-knowledge/ingest/persist.ts"
+    ],
+    "runtimePaths": [
+      [
+        "lib/plugin/core/manager.ts",
+        "lib/plugin/core/context.ts",
+        "lib/plugin/api/index.ts",
+        "lib/plugin/api/connectors-api.ts",
+        "lib/connectors/bus.ts",
+        "lib/connectors/commands/dispatch.ts",
+        "lib/connectors/commands/goal.ts",
+        "lib/scheduler/executors/goal-headless-runner.ts",
+        "lib/claude/build-options.ts"
+      ],
+      [
+        "lib/plugin/core/manager.ts",
+        "lib/plugin/core/context.ts",
+        "lib/plugin/api/index.ts",
+        "lib/plugin/api/workspace-api.ts",
+        "lib/plugin/workspace/bot-run.ts",
+        "lib/plugin/api/bot-integration-binding.ts",
+        "lib/integrations/events.ts",
+        "lib/workflow/runtime/trigger-bridge.ts",
+        "lib/workflow/runtime/execution-authority.ts",
+        "lib/workflow/runtime/orchestrator.ts"
+      ]
+    ]
+  },
+  "fixtureOnlyClosure": {
+    "scope": "literal-relative .mjs closure from PTY fixture only; not a deletion manifest",
+    "files": 2338,
+    "bytes": 62486609,
+    "missing": [],
+    "elapsedSec": 5.792
+  },
+  "fixturePackageSourceVerified": true,
+  "timingLimitations": [
+    "Early manager screens overlapped directory/closure attribution scans; no idle-host timing claim.",
+    "Small exploratory samples; no end-to-end or RSS improvement established.",
+    "Full pnpm/wrapper process tree measured; no direct comparison with prior phase raw traces, which are unavailable."
+  ],
+  "fixes": {
+    "date": "2026-10-20",
+    "rawDirectory": ".cache/test-resource-fixes-2026-10-20",
+    "sampledRssIntervalMs": 200,
+    "cli": {
+      "before": {
+        "samples": [
+          {
+            "exit": 0,
+            "wallSec": 5.886,
+            "peakTreeRssMiB": 2205.8,
+            "maxProcesses": 3
+          },
+          {
+            "exit": 0,
+            "wallSec": 4.519,
+            "peakTreeRssMiB": 2178.2,
+            "maxProcesses": 3
+          },
+          {
+            "exit": 0,
+            "wallSec": 4.296,
+            "peakTreeRssMiB": 2105.6,
+            "maxProcesses": 3
+          },
+          {
+            "exit": 0,
+            "wallSec": 4.998,
+            "peakTreeRssMiB": 2140.9,
+            "maxProcesses": 3
+          },
+          {
+            "exit": 0,
+            "wallSec": 5.009,
+            "peakTreeRssMiB": 2255.8,
+            "maxProcesses": 3
+          },
+          {
+            "exit": 0,
+            "wallSec": 4.553,
+            "peakTreeRssMiB": 2181.1,
+            "maxProcesses": 3
+          },
+          {
+            "exit": 0,
+            "wallSec": 4.358,
+            "peakTreeRssMiB": 2275.7,
+            "maxProcesses": 3
+          },
+          {
+            "exit": 0,
+            "wallSec": 4.586,
+            "peakTreeRssMiB": 2251.4,
+            "maxProcesses": 3
+          },
+          {
+            "exit": 0,
+            "wallSec": 4.588,
+            "peakTreeRssMiB": 2153.3,
+            "maxProcesses": 3
+          },
+          {
+            "exit": 0,
+            "wallSec": 4.354,
+            "peakTreeRssMiB": 2230.7,
+            "maxProcesses": 3
+          }
+        ],
+        "warmSummary": {
+          "wallSec": {
+            "median": 4.553,
+            "mad": 0.19500000000000028,
+            "n": 9
+          },
+          "peakTreeRssMiB": {
+            "median": 2181.1,
+            "mad": 49.59999999999991,
+            "n": 9
+          }
+        }
+      },
+      "after": {
+        "samples": [
+          {
+            "exit": 0,
+            "wallSec": 9.243,
+            "peakTreeRssMiB": 2499.6,
+            "maxProcesses": 3
+          },
+          {
+            "exit": 0,
+            "wallSec": 1.359,
+            "peakTreeRssMiB": 209.7,
+            "maxProcesses": 2
+          },
+          {
+            "exit": 0,
+            "wallSec": 1.36,
+            "peakTreeRssMiB": 249.8,
+            "maxProcesses": 2
+          },
+          {
+            "exit": 0,
+            "wallSec": 1.414,
+            "peakTreeRssMiB": 207.0,
+            "maxProcesses": 2
+          },
+          {
+            "exit": 0,
+            "wallSec": 2.359,
+            "peakTreeRssMiB": 247.1,
+            "maxProcesses": 2
+          },
+          {
+            "exit": 0,
+            "wallSec": 2.054,
+            "peakTreeRssMiB": 252.3,
+            "maxProcesses": 2
+          },
+          {
+            "exit": 0,
+            "wallSec": 2.094,
+            "peakTreeRssMiB": 220.8,
+            "maxProcesses": 2
+          },
+          {
+            "exit": 0,
+            "wallSec": 1.352,
+            "peakTreeRssMiB": 190.2,
+            "maxProcesses": 2
+          },
+          {
+            "exit": 0,
+            "wallSec": 1.615,
+            "peakTreeRssMiB": 214.4,
+            "maxProcesses": 2
+          },
+          {
+            "exit": 0,
+            "wallSec": 1.36,
+            "peakTreeRssMiB": 228.4,
+            "maxProcesses": 2
+          }
+        ],
+        "warmSummary": {
+          "wallSec": {
+            "median": 1.414,
+            "mad": 0.06199999999999983,
+            "n": 9
+          },
+          "peakTreeRssMiB": {
+            "median": 220.8,
+            "mad": 13.800000000000011,
+            "n": 9
+          }
+        }
+      }
+    },
+    "manager": {
+      "before": [
+        {
+          "exit": 0,
+          "wallSec": 10.171,
+          "peakTreeRssMiB": 1520.8
+        },
+        {
+          "exit": 0,
+          "wallSec": 9.613,
+          "peakTreeRssMiB": 1542.2
+        },
+        {
+          "exit": 0,
+          "wallSec": 9.525,
+          "peakTreeRssMiB": 1450.4
+        }
+      ],
+      "after": [
+        {
+          "exit": 0,
+          "wallSec": 11.131,
+          "peakTreeRssMiB": 1399.0
+        },
+        {
+          "exit": 0,
+          "wallSec": 9.27,
+          "peakTreeRssMiB": 1414.1
+        },
+        {
+          "exit": 0,
+          "wallSec": 9.055,
+          "peakTreeRssMiB": 1402.7
+        }
+      ]
+    },
+    "tokenizer": {
+      "before": {
+        "samples": [
+          {
+            "importMs": 129.23725000000002,
+            "fastMs": 41.638041999999984,
+            "exactMs": 1.0035000000000025,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 158.585375,
+            "fastMs": 43.88779100000002,
+            "exactMs": 1.0057919999999854,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 136.38400000000001,
+            "fastMs": 41.322790999999995,
+            "exactMs": 1.0008339999999976,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 135.527875,
+            "fastMs": 43.20025000000001,
+            "exactMs": 1.1762080000000026,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 151.9425,
+            "fastMs": 42.70316700000001,
+            "exactMs": 1.0677499999999895,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 156.177709,
+            "fastMs": 46.389666000000005,
+            "exactMs": 1.0225420000000156,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 178.03474999999997,
+            "fastMs": 41.624375000000015,
+            "exactMs": 1.0280419999999992,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 159.99229200000002,
+            "fastMs": 42.83654199999998,
+            "exactMs": 1.1168749999999932,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 141.543,
+            "fastMs": 42.714459000000005,
+            "exactMs": 1.0224159999999927,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 150.426333,
+            "fastMs": 44.58654199999998,
+            "exactMs": 1.0123330000000124,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          }
+        ],
+        "medians": {
+          "importMs": 151.1844165,
+          "fastMs": 42.77550049999999,
+          "exactMs": 1.0224790000000041
+        }
+      },
+      "after": {
+        "samples": [
+          {
+            "importMs": 40.458417000000004,
+            "fastMs": 43.89291699999999,
+            "exactMs": 110.217458,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 34.701834000000005,
+            "fastMs": 41.003874999999994,
+            "exactMs": 96.42166600000002,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 35.821916,
+            "fastMs": 37.39941700000001,
+            "exactMs": 100.60895799999999,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 34.066708,
+            "fastMs": 41.417750000000005,
+            "exactMs": 90.631833,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 35.048541,
+            "fastMs": 38.51454199999999,
+            "exactMs": 108.38945800000002,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 36.915667,
+            "fastMs": 38.256667,
+            "exactMs": 106.885583,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 35.404917000000005,
+            "fastMs": 38.134458,
+            "exactMs": 118.93845900000001,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 35.511542,
+            "fastMs": 38.953458,
+            "exactMs": 100.86991700000002,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 34.794042000000005,
+            "fastMs": 40.478790999999994,
+            "exactMs": 97.71912499999999,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          },
+          {
+            "importMs": 35.361917,
+            "fastMs": 39.167542000000005,
+            "exactMs": 94.17108300000001,
+            "fast": [0, 7, 625000],
+            "exact": [2, 2, 1]
+          }
+        ],
+        "medians": {
+          "importMs": 35.383417,
+          "fastMs": 39.060500000000005,
+          "exactMs": 100.73943750000001
+        }
+      }
+    },
+    "sharedChunks": {
+      "before": {
+        "files": 124086,
+        "bytes": 3302938529
+      },
+      "after": {
+        "files": 124086,
+        "bytes": 3302938529
+      }
+    },
+    "sourceHashes": {
+      "scripts/build/test-bundle-cache.mjs": "d300c4919610e7ddb0f2f4e434c05207de62f30023b3b149783cafc9af50bf76",
+      "scripts/build/bundle-tui-fixture.mjs": "f500083d878a747409f2bdf9b184f8bcc644b367dbfa8fcc432029f8db8fbec5",
+      "scripts/build/build-cli.mjs": "c4c18d7f6c208dadf70b1097b401abcd412ee54da9af02650bedb4dbe101c09c",
+      "scripts/test/cli-bundle.mjs": "6a10a105f118e1a6ddafd83da1daff831ef5c0dbffe9b816a7d36a29909693b0",
+      "lib/ai/tokens/fallback-estimator.ts": "8d208c019fd695d4bc14ef3875a92bdeb05c5b4284f37ff243781903620980cb",
+      "jest.config.ts": "ce6f2051bb10a3949fb7b71bbdec0baa5cd60d9401c98b37a7e85a7d2b88562d",
+      "package.json": "3cb6c7a2ceac3d80c03a909b5bf14ed1a5dc1a70c922a17b4ef2a15ac336e85d",
+      ".github/workflows/test.yml": "34faf41b406a0f4879eeafb213865c54b3f3156724ad2f29df8ef880c9dfd806"
+    },
+    "head": "07eb0d44b5567f815bbdf70bcb7693f518a9a38d",
+    "verification": {
+      "managerStopEstimator": {
+        "suites": 3,
+        "passed": 651
+      },
+      "cacheBuildContracts": {
+        "passed": 42
+      },
+      "broaderContractsEarlier": {
+        "passed": 101
+      },
+      "buildPty": {
+        "suitesPassed": 12,
+        "suitesFailed": 1,
+        "passed": 81,
+        "failed": 2
+      },
+      "finalPty": {
+        "passed": 7
+      },
+      "defaultDiscoveredPaths": 11889,
+      "scopedLint": "passed",
+      "typecheck": "failed on two out-of-scope harness tests",
+      "fullLint": "81 errors, 4856 warnings outside owned scope"
+    }
+  }
+}

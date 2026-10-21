@@ -2,7 +2,8 @@
  * For a detailed explanation regarding each configuration property, visit:
  * https://jestjs.io/docs/configuration
  *
- * Two-project split (node / jsdom): jsdom costs roughly an order of magnitude
+ * Environment split (node / jsdom), plus explicit heavy / build / PTY projects:
+ * jsdom costs roughly an order of magnitude
  * more per-suite setup than the node environment, and ~half of the ~5k suites
  * never touch the DOM. Suites are routed by path + extension:
  *
@@ -13,6 +14,12 @@
  *     (the docblock always beats the project default — ~600 files use one).
  *   - `jsdom` project — everything else: components/, hooks/, app/, every
  *     `.test.tsx`, and any new top-level directory (safe default).
+ *   - `heavy` project — co-located `*.heavy.test.*` process/build/disk checks.
+ *   - `build` project — CLI bundle checks and the Markdown build probes.
+ *   - `pty` project — real terminal conversations and the node-pty harness.
+ *     Pure terminal-screen helpers remain unit tests.
+ *     Plain `jest` still runs all projects; `test:unit` and `test:heavy` select
+ *     their respective lanes without weakening the default or CI suite.
  *
  * Known node-env traps (from the migration audit): `getDb()` throws without
  * `window` (lib/db/schema.ts) so ALL Dexie-touching tests need the jsdom
@@ -34,41 +41,20 @@ const createJestConfig = nextJest({
   dir: "./",
 })
 
-// Coverage runs are dramatically more memory-hungry than plain test runs. The
-// V8 coverage provider makes every worker retain coverage maps for the *union*
-// of every module graph it has loaded, and `collectCoverageFrom` forces the
-// main process to build an "empty coverage" istanbul map for all ~3k source
-// files — a single-threaded ~2GB cost on its own (measured: a 1-test
-// `--coverage` run already peaks at ~1.9GB and takes ~35s, none of it the
-// test). Plain `jest` runs pay neither cost, so the clamps below are scoped to
-// coverage only and the fast non-coverage path keeps Jest's defaults.
+// Coverage workers retain additional V8 coverage maps. Both lanes need a
+// bounded default: each worker evaluates its own potentially large module graph.
 const isCoverage = process.env.JEST_COVERAGE === "1" || process.argv.includes("--coverage")
 
-// Memory signal for worker budgeting. `os.freemem()` alone is unusable on
-// macOS (and Linux, which reports MemFree not MemAvailable): the OS counts
-// reclaimable file cache as "used", so a 48GB Mac routinely reports ~2GB free
-// and the RAM budget collapses to 1 worker. Treat at least 60% of physical
-// RAM as available — the file cache yields under pressure — while still
-// honoring a genuinely-free reading when it is higher.
-const usableMemGb = Math.max(os.freemem(), os.totalmem() * 0.6) / 1e9
-
-// Pick the coverage worker count from whichever is scarcer: CPU or RAM.
-// Budget ~1.5GB of usable RAM per worker and reserve ~2GB for the parent's
-// empty-coverage aggregation. This self-tunes across machines — a RAM-rich CI
-// box stays CPU-bound (50% of cores), while a high-core but RAM-modest dev
-// box drops the worker count so heavy coverage workers don't swap-thrash.
+// Free memory is a conservative snapshot, not an estimate of reclaimable cache.
+// Do not impose a physical-RAM floor: other local apps and test child processes
+// may already be using that RAM. Reserve 2 GB for the parent and budget another
+// 2 GB per plain worker (1.5 GB for coverage workers, which recycle sooner).
+const availableMemGb = Math.min(os.freemem(), os.totalmem()) / 1e9
 const halfCores = Math.max(1, Math.ceil(os.cpus().length / 2))
-const ramBudgetedWorkers = Math.max(1, Math.floor((usableMemGb - 2) / 1.5))
-const coverageWorkers = Math.min(halfCores, ramBudgetedWorkers)
-
-// Non-coverage runs: the old fixed "50% of cores + 1GB recycle ceiling" left
-// half the cores idle and — because the big suites' module graphs sit right
-// at ~1–1.5GB — recycled workers constantly, re-requiring the whole graph
-// each time. When usable RAM can hold 75%-of-cores workers at a 2GB ceiling,
-// use that; otherwise keep the conservative legacy values.
-const fastCpuWorkers = Math.max(1, Math.floor(os.cpus().length * 0.75))
-const fastRamWorkers = Math.floor((usableMemGb - 2) / 2)
-const fastRoomy = fastRamWorkers >= fastCpuWorkers
+const workerBudgetGb = isCoverage ? 1.5 : 2
+const ramBudgetedWorkers = Math.max(1, Math.floor((availableMemGb - 2) / workerBudgetGb))
+const defaultWorkerCap = process.env.CI ? 4 : 2
+const budgetedWorkers = Math.min(defaultWorkerCap, halfCores, ramBudgetedWorkers)
 
 // This config is loaded two ways depending on the Node version: ts-node
 // compiles it to CJS (`__dirname` defined), while Node ≥ 22.18's native
@@ -88,6 +74,16 @@ const POSIX_ROOT_DIR = CONFIG_DIR.replace(/\\/g, "/")
 // top-level directory is NOT automatically node — it lands in the jsdom
 // project until it is added here, which is the safe direction.
 const NODE_ENV_DIRS = "{lib,stores,cli,packages,types,plugins,i18n}"
+const HEAVY_TEST_PATH_PATTERN = "\\.heavy\\.test\\.[mc]?[jt]sx?$"
+const BUILD_TEST_PATH_PATTERN =
+  "/(?:cli/src/cli/[^/]+\\.bundle\\.test\\.ts|components/chat/markdown-renderer\\.heavy\\.test\\.ts)$"
+const PTY_TEST_PATH_PATTERN =
+  "/cli/src/tui/pty/(?:conversation-[^/]+|node-pty-harness)\\.test\\.ts$"
+const nonUnitTestPatterns = [
+  HEAVY_TEST_PATH_PATTERN,
+  BUILD_TEST_PATH_PATTERN,
+  PTY_TEST_PATH_PATTERN,
+]
 // Regex twin of the node project's testMatch, used to EXCLUDE those files
 // from the jsdom project so no suite runs twice. Must stay in sync with
 // NODE_ENV_DIRS / the node testMatch globs below.
@@ -412,6 +408,15 @@ const projectCommon: Config = {
     "<rootDir>/out/",
     "<rootDir>/storybook-static/",
     "<rootDir>/.next/",
+    "<rootDir>/.next-mobile-dev/",
+    // Local validation bundles and native webview copies are not source
+    // modules. Keeping them out of test discovery alone still builds a huge
+    // Haste map before even a single selected test can run.
+    "<rootDir>/.tmp/",
+    "<rootDir>/.codex-tmp/",
+    "<rootDir>/dist/",
+    "<rootDir>/mobile/android/",
+    "<rootDir>/mobile/ios/",
     "<rootDir>/target/",
     // Build-analysis snapshots are full copies of workspace packages.
     "<rootDir>/.cache/",
@@ -606,6 +611,7 @@ const globalConfig: Config = {
     // primitives / time / latex / mermaid were lifted out of lib/* (coverage-collected).
     "packages/primitives/src/**/*.{ts,tsx}",
     "packages/time/src/**/*.{ts,tsx}",
+    "packages/github-bot-kit/src/**/*.{ts,tsx}",
     "packages/latex/src/**/*.{ts,tsx}",
     "packages/mermaid/src/**/*.{ts,tsx}",
     "packages/plugin-sdk/src/**/*.{ts,tsx}",
@@ -804,33 +810,16 @@ const globalConfig: Config = {
     readFileSync(join(CONFIG_DIR, "scripts/test/coverage-thresholds.json"), "utf8")
   ) as Config["coverageThreshold"],
 
-  // Cap workers at 50% so the deep-import suites (twin / plugin / agent
-  // graphs) don't gang up on a single Node process and OOM with
-  // `ENOMEM: not enough memory, open '…semver/sort.js'` mid-run. Jest's
-  // default uses every core, which on a 16-core box pulls the same
-  // 2 GB-class module graph into RAM 15+ times concurrently.
-  //
-  // Under `--coverage` each worker is far heavier (it also retains V8 coverage
-  // maps for every module it loads), so 50%-of-cores (16 on a 32-core box) was
-  // measured at ~8.8 GB of Jest RSS across 17 processes for a 121-file subset —
-  // the full suite holds those 16 workers the whole run. `coverageWorkers`
-  // (computed above) drops to whatever usable RAM can afford so the coverage
-  // run no longer swap-thrashes; non-coverage runs use 75% of cores when RAM
-  // is roomy (see `fastRoomy` above) and fall back to the legacy 50% cap.
-  maxWorkers: isCoverage ? coverageWorkers : fastRoomy ? fastCpuWorkers : "50%",
+  // Default limits apply across all projects, including heavy tests. Jest's
+  // explicit --maxWorkers option remains authoritative for measured overrides.
+  maxWorkers: budgetedWorkers,
 
-  // Recycle a worker once its heap crosses this ceiling. Jest reuses a worker
-  // process across many test files and never clears the module registry
-  // between them (`resetModules` is off by design, for speed), so a single
-  // worker accumulates the *union* of every module graph it has loaded. With
-  // the suite past 2.7k files (~160 files per worker on a 32-core box) a worker
-  // climbs to ~1.5 GB after just ~10 component files and stays pinned there.
-  // Restarting a worker resets its registry to zero and bounds total RSS
-  // without lowering parallelism. Coverage workers carry the extra V8 coverage
-  // maps, so we recycle them sooner (768MB) to keep the (already RAM-budgeted)
-  // pool's footprint low; non-coverage workers keep the 1GB ceiling tuned for
-  // the plain suite.
-  workerIdleMemoryLimit: isCoverage ? "768MB" : fastRoomy ? "2GB" : "1GB",
+  // Check a worker's heap after a suite and recycle it above this threshold.
+  // Each file has its own Runtime and module registry, but process-level
+  // caches and allocations can outlive it. This is not an in-flight RSS cap
+  // and does not apply when Jest runs suites in the main process (including
+  // --runInBand or an automatically serial run). Coverage workers recycle sooner.
+  workerIdleMemoryLimit: isCoverage ? "768MB" : "2GB",
 
   // Use this configuration option to add custom reporters to Jest
   // CI and the sharded coverage runner consume JUnit. Targeted local runs do
@@ -844,6 +833,7 @@ const createNodeProject = createJestConfig({
   ...projectCommon,
   displayName: "node",
   testEnvironment: "node",
+  testPathIgnorePatterns: [...baseTestPathIgnorePatterns, ...nonUnitTestPatterns],
   // Plain-.ts (and .mts/.cts) tests in the node-safe trees. `.tsx` is
   // deliberately absent — React-rendering suites always need jsdom.
   // POSIX_ROOT_DIR, not `<rootDir>` — jest 30.4's raw substitution leaves
@@ -863,12 +853,50 @@ const createJsdomProject = createJestConfig({
   // The glob patterns Jest uses to detect test files
   testMatch: ["**/__tests__/**/*.?([mc])[jt]s?(x)", "**/?(*.)+(spec|test).?([mc])[jt]s?(x)"],
   // Exclude everything the node project owns so no suite runs twice.
-  testPathIgnorePatterns: [...baseTestPathIgnorePatterns, ...NODE_ENV_TEST_REGEXES],
+  testPathIgnorePatterns: [
+    ...baseTestPathIgnorePatterns,
+    ...NODE_ENV_TEST_REGEXES,
+    ...nonUnitTestPatterns,
+  ],
+})
+
+const createHeavyProject = createJestConfig({
+  ...projectCommon,
+  displayName: "heavy",
+  testEnvironment: "node",
+  testMatch: [`${POSIX_ROOT_DIR}/**/*.heavy.test.?([mc])[jt]s?(x)`],
+  testPathIgnorePatterns: [...baseTestPathIgnorePatterns, BUILD_TEST_PATH_PATTERN],
+})
+
+const createBuildProject = createJestConfig({
+  ...projectCommon,
+  displayName: "build",
+  testEnvironment: "node",
+  testMatch: [
+    `${POSIX_ROOT_DIR}/cli/src/cli/*.bundle.test.ts`,
+    `${POSIX_ROOT_DIR}/components/chat/markdown-renderer.heavy.test.ts`,
+  ],
+})
+
+const createPtyProject = createJestConfig({
+  ...projectCommon,
+  displayName: "pty",
+  testEnvironment: "node",
+  testMatch: [
+    `${POSIX_ROOT_DIR}/cli/src/tui/pty/conversation-*.test.ts`,
+    `${POSIX_ROOT_DIR}/cli/src/tui/pty/node-pty-harness.test.ts`,
+  ],
 })
 
 const buildConfig = async (): Promise<Config> => ({
   ...globalConfig,
-  projects: [await createNodeProject(), await createJsdomProject()],
+  projects: [
+    await createNodeProject(),
+    await createJsdomProject(),
+    await createHeavyProject(),
+    await createBuildProject(),
+    await createPtyProject(),
+  ],
 })
 
 export default buildConfig

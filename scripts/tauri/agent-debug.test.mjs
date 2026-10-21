@@ -17,7 +17,60 @@ import {
   request,
   reconcileDebugSession,
   tauriDevArgs,
+  shutdownTrackedSession,
 } from "./agent-debug.mjs"
+
+test("stop authenticates without renderer evaluation and kills a wedged owned process group", async () => {
+  const session = { pid: 100, healthPid: 101 }
+  const calls = []
+  let appAlive = true
+  await shutdownTrackedSession(
+    session,
+    {},
+    {
+      workspace: "/repo",
+      send: async (route) => {
+        calls.push(route)
+        if (route.includes("health")) return { agentDebug: true, pid: 101 }
+        throw new Error("GUI thread is not responding")
+      },
+      alive: (pid) => pid === 101 && appAlive,
+      terminate: (pid, signal) => {
+        calls.push([pid, signal])
+        if (signal === "SIGKILL") appAlive = false
+      },
+      delay: async () => {},
+    }
+  )
+  assert.deepEqual(calls, [
+    "/api/dev/agent/health?nativeOnly=true",
+    "/api/dev/agent/shutdown",
+    [100, "SIGTERM"],
+    [100, "SIGKILL"],
+  ])
+})
+
+test("stop refuses foreign identity before sending shutdown or signals", async () => {
+  const calls = []
+  await assert.rejects(
+    shutdownTrackedSession(
+      { pid: 100, healthPid: 101 },
+      {},
+      {
+        workspace: "/repo",
+        send: async (route) => {
+          calls.push(route)
+          return { agentDebug: true, pid: 999 }
+        },
+        alive: () => true,
+        terminate: () => assert.fail("must not signal a foreign process"),
+        delay: async () => {},
+      }
+    ),
+    /cannot validate tracked-session ownership/
+  )
+  assert.deepEqual(calls, ["/api/dev/agent/health?nativeOnly=true"])
+})
 
 test("detects terminal Cargo and Tauri launch failures from the log tail", () => {
   assert.match(

@@ -19,10 +19,34 @@
 
 import { spawn } from "node:child_process"
 import { createRequire } from "node:module"
-import { pathToFileURL } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
 /** The arguments to hand Jest, given what pnpm passed this script. */
 export function forwardedJestArgs(argv) {
+  if (argv[0]?.startsWith("--lane=")) {
+    const lane = argv[0].slice("--lane=".length)
+    const lanes = {
+      unit: ["node", "jsdom"],
+      heavy: ["heavy", "build", "pty"],
+      build: ["build"],
+      pty: ["pty"],
+    }
+    const projects = Object.hasOwn(lanes, lane) ? lanes[lane] : undefined
+    if (!projects) throw new Error(`Unknown Jest lane: ${lane}`)
+    const rest = argv.slice(1)
+    const forwarded = rest[0] === "--" ? rest.slice(1) : rest
+    const explicitWorkers = forwarded.some((arg) =>
+      /^(?:--runInBand(?:=|$)|-i$|--maxWorkers(?:=|$)|-w(?:=|\d|$))/.test(arg)
+    )
+    return [
+      "--selectProjects",
+      ...projects,
+      "--config",
+      fileURLToPath(new URL("../../jest.config.ts", import.meta.url)),
+      ...(lane === "unit" || explicitWorkers ? [] : ["--maxWorkers=1"]),
+      ...forwarded,
+    ]
+  }
   return argv[0] === "--" ? argv.slice(1) : argv
 }
 

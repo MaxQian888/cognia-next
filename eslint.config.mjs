@@ -55,6 +55,8 @@ const eslintConfig = defineConfig([
     "plugins/**/types/**",
     "plugins/**/dist/**",
     "public/plugins/**/dist/**",
+    // Tauri stages copies of the same generated plugin bundles before packaging.
+    "src-tauri/resources/plugins/**/dist/**",
     "plugins/**/target/**",
     // Untouched upstream snapshot (plugins/pi-latex-workbench/VENDOR.md) with
     // its own strict tsconfig; verified byte-for-byte by

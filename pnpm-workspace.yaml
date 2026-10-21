@@ -164,8 +164,16 @@ minimumReleaseAgeExclude:
   - "@ai-sdk/togetherai@3.0.64"
   - "@ai-sdk/xai@5.0.15"
   - "@ai-sdk/typesafe-ai@3.0.13"
+  # Exact root-only compiler pins include verified memory compaction fixes.
+  - "@typescript/typescript-darwin-arm64@7.1.0-dev.20261019.1"
+  - "@typescript/typescript-darwin-x64@7.1.0-dev.20261019.1"
+  - "@typescript/typescript-linux-arm64@7.1.0-dev.20261019.1"
+  - "@typescript/typescript-linux-arm@7.1.0-dev.20261019.1"
+  - "@typescript/typescript-linux-x64@7.1.0-dev.20261019.1"
+  - "@typescript/typescript-win32-arm64@7.1.0-dev.20261019.1"
+  - "@typescript/typescript-win32-x64@7.1.0-dev.20261019.1"
 
-# `pnpm audit` is a BLOCKING gate (CI_CD.md, supply-chain group), so every entry
+# `pnpm audit` is a BLOCKING gate (docs/development/CI_CD.md, supply-chain group), so every entry
 # here has to name the advisory and say why no safe upgrade exists. The
 # `audit:deps` script mirrors these ids as `--ignore` flags because JSON cannot
 # carry the reason, and `scripts/ci/workflow-contract.test.mjs` keeps the two

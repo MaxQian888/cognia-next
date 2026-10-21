@@ -7,6 +7,7 @@ import type { NextConfig } from "next"
 const config: NextConfig = {
   output: "export",
   reactStrictMode: true,
+  experimental: { useTypeScriptCli: true },
   images: { unoptimized: true },
   allowedDevOrigins: ["localhost", "127.0.0.1", "[::1]"],
 }

@@ -4,6 +4,30 @@ import { test } from "node:test"
 
 import { forwardedJestArgs } from "./jest.mjs"
 
+test("lanes preserve forwarded flags and keep their project selector separate from paths", () => {
+  for (const [lane, projects] of Object.entries({
+    unit: ["node", "jsdom"],
+    heavy: ["heavy", "build", "pty"],
+    build: ["build"],
+    pty: ["pty"],
+  })) {
+    const args = forwardedJestArgs([`--lane=${lane}`, "--", "--listTests", "--json"])
+    assert.deepEqual(args.slice(0, projects.length + 1), ["--selectProjects", ...projects])
+    assert.equal(args[projects.length + 1], "--config")
+    assert.deepEqual(args.slice(-2), ["--listTests", "--json"])
+    assert.equal(args.includes("--"), false)
+    assert.equal(args.includes("--maxWorkers=1"), lane !== "unit")
+  }
+  assert.throws(() => forwardedJestArgs(["--lane=unknown"]), /Unknown Jest lane/)
+  assert.throws(() => forwardedJestArgs(["--lane=constructor"]), /Unknown Jest lane/)
+  for (const args of [["--runInBand"], ["-i"], ["--maxWorkers=2"], ["-w", "2"]]) {
+    assert.equal(
+      forwardedJestArgs(["--lane=heavy", "--", ...args]).includes("--maxWorkers=1"),
+      false
+    )
+  }
+})
+
 test("drops the separator pnpm leaves in front of forwarded arguments", () => {
   assert.deepEqual(forwardedJestArgs(["--", "lib/a.test.ts", "-t", "name", "--maxWorkers=1"]), [
     "lib/a.test.ts",

@@ -52,11 +52,12 @@ export function mergeCoverageFiles(files) {
  * the exact Jest source globs and ignore patterns so the standalone merger
  * neither invents coverage obligations nor drops a production source.
  */
-export function filterCollectedSources(map, { cwd = process.cwd() } = {}) {
-  const positives = COVERAGE_SOURCES.collectCoverageFrom.filter(
-    (pattern) => !pattern.startsWith("!")
-  )
-  const configuredNegatives = COVERAGE_SOURCES.collectCoverageFrom
+export function filterCollectedSources(
+  map,
+  { cwd = process.cwd(), sources = COVERAGE_SOURCES } = {}
+) {
+  const positives = sources.collectCoverageFrom.filter((pattern) => !pattern.startsWith("!"))
+  const configuredNegatives = sources.collectCoverageFrom
     .filter((pattern) => pattern.startsWith("!"))
     .map((pattern) => pattern.slice(1))
   // Jest also excludes matched test files independently of collectCoverageFrom.
@@ -65,9 +66,17 @@ export function filterCollectedSources(map, { cwd = process.cwd() } = {}) {
   const allowed = new Set(globSync(positives, globOptions).map((file) => path.resolve(file)))
   for (const file of globSync(negatives, globOptions)) allowed.delete(path.resolve(file))
 
-  const ignored = COVERAGE_SOURCES.coveragePathIgnorePatterns.map((pattern) => new RegExp(pattern))
+  const rootPattern = path
+    .resolve(cwd)
+    .replaceAll("\\", "/")
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const ignored = sources.coveragePathIgnorePatterns.map(
+    (pattern) => new RegExp(pattern.replaceAll("<rootDir>", rootPattern))
+  )
   map.filter(
-    (file) => allowed.has(path.resolve(file)) && !ignored.some((pattern) => pattern.test(file))
+    (file) =>
+      allowed.has(path.resolve(file)) &&
+      !ignored.some((pattern) => pattern.test(path.resolve(file).replaceAll("\\", "/")))
   )
   return map
 }

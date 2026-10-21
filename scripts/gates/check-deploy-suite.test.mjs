@@ -335,7 +335,14 @@ test("the web image activates bounded CI static generation inside its build cont
     "utf8"
   )
   assert.match(dockerfile, /^    CI=true \\$/m)
-  assert.match(dockerfile, /^RUN NODE_OPTIONS=--max-old-space-size=8192 pnpm build$/m)
+  assert.match(dockerfile, /^RUN pnpm build$/m)
+  const { scripts } = JSON.parse(
+    readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+  )
+  assert.match(
+    scripts.build,
+    /^cross-env NODE_OPTIONS=--max-old-space-size=16384 next build --webpack$/
+  )
   const config = readFileSync(new URL("../../next.config.ts", import.meta.url), "utf8")
   assert.match(
     config,
