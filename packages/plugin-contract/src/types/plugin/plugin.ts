@@ -13,7 +13,7 @@ import type {
   A2UISurfaceType,
 } from "../artifact/a2ui"
 import type { AgentModeConfig } from "../agent/agent-mode"
-import type { CanonicalPluginPermission } from "@/packages/plugin-sdk/src/contracts/generated"
+import type { CanonicalPluginPermission } from "@cognia/plugin-contract/contracts/generated"
 import type {
   PluginKnowledgeListRequest,
   PluginKnowledgeListResult,

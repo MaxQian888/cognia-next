@@ -39,6 +39,15 @@ export async function loadPluginI18nModule() {
   return publicModule
 }
 
+/** The SDK cannot know the app version; hand plugins the host's own. */
+export async function loadHostEnvironmentModule() {
+  const [facade, host] = await Promise.all([
+    import("@cognia/plugin-sdk/api/host-environment"),
+    import("@/lib/app-version"),
+  ])
+  return { ...facade, APP_VERSION: host.APP_VERSION }
+}
+
 export const PLUGIN_SDK_SUBPATH_LOADERS: Readonly<Record<string, () => Promise<unknown>>> = {
   "@cognia/plugin-sdk/api/abort": () => import("@cognia/plugin-sdk/api/abort"),
   "@cognia/plugin-sdk/api/agent-team-template": () =>
@@ -65,8 +74,7 @@ export const PLUGIN_SDK_SUBPATH_LOADERS: Readonly<Record<string, () => Promise<u
     import("@cognia/plugin-sdk/api/external-agent-adapter"),
   "@cognia/plugin-sdk/api/external-agent-preset": () =>
     import("@cognia/plugin-sdk/api/external-agent-preset"),
-  "@cognia/plugin-sdk/api/host-environment": () =>
-    import("@cognia/plugin-sdk/api/host-environment"),
+  "@cognia/plugin-sdk/api/host-environment": loadHostEnvironmentModule,
   "@cognia/plugin-sdk/api/i18n": loadPluginI18nModule,
   "@cognia/plugin-sdk/api/integration": () => import("@cognia/plugin-sdk/api/integration"),
   "@cognia/plugin-sdk/api/issues": () => import("@cognia/plugin-sdk/api/issues"),

@@ -14,7 +14,7 @@ export {
   auditPluginCapabilityContracts,
   getPluginCapabilityContract,
   validatePluginCapabilities,
-} from "@/lib/plugin/contracts/plugin-capabilities"
+} from "@cognia/plugin-contract/lib/plugin/contracts/plugin-capabilities"
 
 export type {
   PluginCapabilityContract,
@@ -23,7 +23,7 @@ export type {
   PluginCapabilitySupport,
   PluginCapabilityValidationOutcome,
   PluginContractProofStatus,
-} from "@/lib/plugin/contracts/plugin-capabilities"
+} from "@cognia/plugin-contract/lib/plugin/contracts/plugin-capabilities"
 
 export {
   getAllContributions,
@@ -72,8 +72,8 @@ export type {
   PluginPointValidationOutcome,
 } from "@cognia/plugin-contract/lib/plugin/contracts/plugin-points"
 
-export { auditPluginRuntimeClaims } from "@/lib/plugin/contracts/runtime-proof-audit"
+export { auditPluginRuntimeClaims } from "@cognia/plugin-contract/lib/plugin/contracts/runtime-proof-audit"
 export type {
   PluginRuntimeClaimsAuditReport,
   PluginRuntimeRiskAudit,
-} from "@/lib/plugin/contracts/runtime-proof-audit"
+} from "@cognia/plugin-contract/lib/plugin/contracts/runtime-proof-audit"

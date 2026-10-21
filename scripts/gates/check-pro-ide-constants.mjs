@@ -33,7 +33,7 @@ import { fileURLToPath } from "node:url"
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
 const FILES = {
-  catalogJson: "packages/plugin-sdk/contract/code-1.128-ide.json",
+  catalogJson: "packages/plugin-contract/contract/code-1.128-ide.json",
   brokerProtocol: "crates/cognia-codeserver/src/broker_protocol.rs",
   extension: "sidecar/codeserver-agent-ext/src/extension.ts",
   process: "crates/cognia-codeserver/src/process.rs",

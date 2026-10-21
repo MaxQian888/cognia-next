@@ -131,7 +131,7 @@ COPY lib/router-fusion/gate/passthrough-bridge.ts ./lib/router-fusion/gate/passt
 COPY test-fixtures/updates/host-catalog.json ./test-fixtures/updates/host-catalog.json
 COPY sidecar/codeserver-agent-ext/tests/fixtures/session-key.vector sidecar/codeserver-agent-ext/tests/fixtures/content-bearer.vector ./sidecar/codeserver-agent-ext/tests/fixtures/
 COPY docs/api/mobile-companion-api.openapi.yaml docs/api/headless-service-api.openapi.yaml ./docs/api/
-COPY packages/plugin-sdk/contract ./packages/plugin-sdk/contract
+COPY packages/plugin-contract/contract ./packages/plugin-contract/contract
 COPY packages/logging/src/schemas/observability-event-v1.schema.json ./packages/logging/src/schemas/observability-event-v1.schema.json
 COPY protocol ./protocol
 COPY scripts/plugin/node-plugin-host.mjs ./scripts/plugin/node-plugin-host.mjs
@@ -185,7 +185,7 @@ COPY lib/router-fusion/gate/passthrough-bridge.ts ./lib/router-fusion/gate/passt
 COPY test-fixtures/updates/host-catalog.json ./test-fixtures/updates/host-catalog.json
 COPY sidecar/codeserver-agent-ext/tests/fixtures/session-key.vector sidecar/codeserver-agent-ext/tests/fixtures/content-bearer.vector ./sidecar/codeserver-agent-ext/tests/fixtures/
 COPY docs/api/mobile-companion-api.openapi.yaml docs/api/headless-service-api.openapi.yaml ./docs/api/
-COPY packages/plugin-sdk/contract ./packages/plugin-sdk/contract
+COPY packages/plugin-contract/contract ./packages/plugin-contract/contract
 COPY packages/logging/src/schemas/observability-event-v1.schema.json ./packages/logging/src/schemas/observability-event-v1.schema.json
 COPY protocol ./protocol
 COPY scripts/plugin/node-plugin-host.mjs ./scripts/plugin/node-plugin-host.mjs

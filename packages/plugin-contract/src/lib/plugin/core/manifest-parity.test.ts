@@ -1,4 +1,4 @@
-import type { PluginManifest } from "@/types/plugin"
+import type { PluginManifest } from "../../../types/plugin"
 import {
   assertPluginManifestParity,
   findPluginManifestParityIssues,

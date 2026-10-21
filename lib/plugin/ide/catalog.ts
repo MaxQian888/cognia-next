@@ -1,6 +1,6 @@
-import rawCatalog from "@/packages/plugin-sdk/contract/code-1.128-ide.json"
-import upstreamInventory from "@/packages/plugin-sdk/contract/code-1.128-upstream-extension-points.json"
-import upstreamProviderInventory from "@/packages/plugin-sdk/contract/code-1.128-upstream-provider-apis.json"
+import rawCatalog from "@/packages/plugin-contract/contract/code-1.128-ide.json"
+import upstreamInventory from "@/packages/plugin-contract/contract/code-1.128-upstream-extension-points.json"
+import upstreamProviderInventory from "@/packages/plugin-contract/contract/code-1.128-upstream-provider-apis.json"
 import type { PluginIdeProviderKind, PluginIdeTarget } from "@/types/plugin/plugin-ide"
 import type { PluginPermission } from "@/types/plugin/plugin"
 

@@ -3,7 +3,7 @@ import {
   createTemplateDefinition,
   validateTemplateDefinition,
   verifyTemplateDefinitionHash,
-} from "@/lib/templates/contracts"
+} from "@cognia/plugin-contract/lib/templates/contracts"
 import type {
   TemplateDefinitionDraft,
   TemplateDefinitionEnvelope,

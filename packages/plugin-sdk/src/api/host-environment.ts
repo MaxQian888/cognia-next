@@ -22,5 +22,11 @@ export type { PluginCapabilitiesAPI } from "@cognia/plugin-contract/lib/plugin/a
  * The running app's version. A plugin that gates a contribution on a host
  * feature, or that stamps a version into something it writes, needs the real
  * value rather than a manifest-declared guess.
+ *
+ * The SDK cannot know it: the host supplies it. Every plugin, built-in or
+ * installed, receives this module through the host's SDK subpath loader,
+ * which fills in the host's own version. Code that imports the SDK outside a
+ * Cognia host (a unit test, a build script) has no app to ask and sees
+ * `"0.0.0"`.
  */
-export { APP_VERSION } from "@/lib/app-version"
+export const APP_VERSION: string = "0.0.0"

@@ -1,7 +1,7 @@
 import JSZip from "jszip"
 import { generateKeyPairSync, sign } from "node:crypto"
 
-import { sha256Hex } from "@/lib/share/hash"
+import { sha256Hex } from "../share/hash"
 import { createTemplateDefinition } from "./contracts"
 import {
   TEMPLATE_PACKAGE_SCHEMA_VERSION,

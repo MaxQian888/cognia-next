@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 
 const REQUIREMENTS = [
   ["packages/plugin-contract/src/types/plugin/plugin.ts", '"selection"', "selection surface type"],
-  ["packages/plugin-sdk/contract/catalog.json", '"selection:read"', "canonical permission"],
+  ["packages/plugin-contract/contract/catalog.json", '"selection:read"', "canonical permission"],
   [
     "packages/plugin-sdk/src/api/quick-action.ts",
     "PluginSelectionActionSpec",

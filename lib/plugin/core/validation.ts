@@ -89,7 +89,7 @@ import {
   PLUGIN_LOCALIZED_LABEL_PATHS,
   PLUGIN_PATH_FIELD_CONTRACTS,
   PLUGIN_RUNTIME_ENTRY_CONTRACTS,
-} from "@/packages/plugin-sdk/src/contracts/catalog"
+} from "@cognia/plugin-contract/contracts/catalog"
 import type {
   ConfigValidationResult,
   ManifestDiagnostic,

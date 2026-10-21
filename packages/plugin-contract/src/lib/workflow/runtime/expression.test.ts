@@ -6,7 +6,7 @@ import {
   tokenize,
   type ExpressionScope,
 } from "./expression"
-import type { TriggerEvent } from "@/types/workflow/visual"
+import type { TriggerEvent } from "../../../types/workflow/visual"
 
 const trigger: TriggerEvent = {
   workflowId: "wf_test",

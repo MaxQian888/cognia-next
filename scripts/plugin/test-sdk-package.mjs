@@ -19,7 +19,9 @@ import { assertDeclaredArtifacts } from "../../packages/plugin-sdk/scripts/build
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const packageRoot = join(repoRoot, "packages/plugin-sdk")
-const catalog = JSON.parse(readFileSync(join(packageRoot, "contract/catalog.json"), "utf8"))
+const catalog = JSON.parse(
+  readFileSync(join(repoRoot, "packages/plugin-contract/contract/catalog.json"), "utf8")
+)
 const workDir = mkdtempSync(join(tmpdir(), "cognia-plugin-sdk-pack-"))
 
 function installedVersion(packageName) {

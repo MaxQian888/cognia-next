@@ -14,7 +14,7 @@ import {
   type BusEvent,
 } from "./message-bus"
 import { PLUGIN_MESSAGE_HISTORY_MAX, PLUGIN_MESSAGE_MAX_BYTES } from "./constants"
-import catalog from "@/packages/plugin-sdk/contract/catalog.json"
+import catalog from "@/packages/plugin-contract/contract/catalog.json"
 import {
   initializePluginPermissions,
   revokePluginPermissions,

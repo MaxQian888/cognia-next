@@ -1,5 +1,5 @@
-import upstreamInventory from "@/packages/plugin-sdk/contract/code-1.128-upstream-extension-points.json"
-import upstreamProviderInventory from "@/packages/plugin-sdk/contract/code-1.128-upstream-provider-apis.json"
+import upstreamInventory from "@/packages/plugin-contract/contract/code-1.128-upstream-extension-points.json"
+import upstreamProviderInventory from "@/packages/plugin-contract/contract/code-1.128-upstream-provider-apis.json"
 import {
   IDE_CAPABILITY_CATALOG,
   IDE_EXCLUDED_CONTRIBUTIONS,

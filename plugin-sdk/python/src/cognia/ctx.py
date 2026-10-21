@@ -7,7 +7,7 @@ TypeScript plugin gets, and answers. See ADR-0145.
 
 **The method table is not written here.** It is read from
 :data:`API_NAMESPACE_CONTRACTS`, the generated mirror of
-``packages/plugin-sdk/contract/catalog.json`` — the same catalog the host, the
+``packages/plugin-contract/contract/catalog.json`` — the same catalog the host, the
 Rust linter and the TypeScript validator read. A namespace appears here when,
 and only when, its contract entry lists ``python`` among its ``runtimes``.
 Copying the table into this file would create a second source of truth to

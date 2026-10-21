@@ -24,7 +24,7 @@ export const NODE_RUNTIME_SOURCE_MAX_BYTES = 1024 * 1024
 register()
 const requireSource = createRequire(import.meta.url)
 const catalog = JSON.parse(
-  await readFile(path.join(repository, "packages/plugin-sdk/contract/catalog.json"), "utf8")
+  await readFile(path.join(repository, "packages/plugin-contract/contract/catalog.json"), "utf8")
 )
 export const SHARED_MODULES = [
   "react",

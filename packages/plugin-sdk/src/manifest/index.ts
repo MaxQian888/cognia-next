@@ -241,7 +241,7 @@ export {
   assertPluginManifestParity,
   findPluginManifestParityIssues,
   PluginManifestParityError,
-} from "@/lib/plugin/core/manifest-parity"
+} from "@cognia/plugin-contract/lib/plugin/core/manifest-parity"
 
 export type { PluginManifestParityIssue } from "@cognia/plugin-contract/lib/plugin/core/manifest-parity"
 

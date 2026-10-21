@@ -5,6 +5,7 @@ import packageJson from "@/packages/plugin-sdk/package.json"
 
 import {
   loadEffortSurfaceModule,
+  loadHostEnvironmentModule,
   loadPluginI18nModule,
   PLUGIN_SDK_SUBPATH_LOADERS,
 } from "./sdk-subpath-loaders"
@@ -46,6 +47,19 @@ test("host loaders bind runtime ports before publishing only author exports", as
   expect(i18n.usePluginTranslations("fixture")("hello")).toBe("host:hello")
   expect(i18n).not.toHaveProperty("bindPluginTranslationsHost")
   expect(typeof i18n.registerPluginI18n).toBe("function")
+})
+
+jest.mock("@/lib/app-version", () => ({ APP_VERSION: "9.8.7-host" }))
+
+test("the host-environment loader publishes the host's app version, not the SDK's placeholder", async () => {
+  const sdk = await import("@cognia/plugin-sdk/api/host-environment")
+  expect(sdk.APP_VERSION).toBe("0.0.0")
+  const loaded = await loadHostEnvironmentModule()
+  expect(loaded.APP_VERSION).toBe("9.8.7-host")
+  expect(loaded.readHostCapabilities).toBe(sdk.readHostCapabilities)
+  expect(PLUGIN_SDK_SUBPATH_LOADERS["@cognia/plugin-sdk/api/host-environment"]).toBe(
+    loadHostEnvironmentModule
+  )
 })
 
 test("loads the pet API against the host contribution registries", async () => {

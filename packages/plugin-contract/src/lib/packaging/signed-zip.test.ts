@@ -1,5 +1,5 @@
-import { sha256Bytes } from "@/lib/ocr/hash"
-import { encodeBase64 } from "@/lib/share/encoding"
+import { sha256Bytes } from "../ocr/hash"
+import { encodeBase64 } from "../share/encoding"
 
 import {
   assertNoUndeclaredFiles,

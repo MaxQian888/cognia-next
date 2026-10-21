@@ -1,5 +1,5 @@
 import type { ErrorObject } from "ajv"
-import validate from "@/packages/plugin-sdk/contract/ide-manifest-validator.generated.cjs"
+import validate from "@/packages/plugin-contract/contract/ide-manifest-validator.generated.cjs"
 
 export interface IdeManifestSchemaDiagnostic {
   code: "IDE_MANIFEST_SCHEMA_INVALID"
