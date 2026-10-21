@@ -9,14 +9,20 @@ import { __resetIntegrationRegistryForTesting, registerIntegrationDefinitions } 
 import { publishIntegrationEvent } from "./events"
 import { approveIntegrationActionJob, executeIntegrationAction } from "./action-runner"
 import { loadBuiltinArtifactExports } from "@/lib/plugin/core/builtin-artifact-fixture"
-import type { PluginIntegrationDef } from "@/types/plugin/plugin-integration"
+import type {
+  IntegrationEventEnvelope,
+  PluginIntegrationDef,
+} from "@/types/plugin/plugin-integration"
 import type { RegisterIntegrationDefinitionsInput } from "./registry"
 
 /** GitHub Delivery's entry exports, from the built-in chunk the app ships. */
 interface GithubDeliveryExports {
   manifest: { id: string }
   githubIntegration: PluginIntegrationDef
-  normalizeGithub: NonNullable<RegisterIntegrationDefinitionsInput["normalizers"]>[string]
+  /** GitHub Delivery normalizes one webhook into exactly one envelope, synchronously. */
+  normalizeGithub: (
+    ...args: Parameters<NonNullable<RegisterIntegrationDefinitionsInput["normalizers"]>[string]>
+  ) => IntegrationEventEnvelope
   listGithubResources: NonNullable<RegisterIntegrationDefinitionsInput["resourceProviders"]>[string]
   checkGithubHealth: NonNullable<
     RegisterIntegrationDefinitionsInput["accountStatusProviders"]
