@@ -40,7 +40,7 @@ test("green deployment with every target skipped is not a deployment success", (
     run({ path: ".github/workflows/deploy.yml", conclusion: "success" }),
     [
       { name: "Gate (production)", conclusion: "success" },
-      { name: "Pages — website", conclusion: "skipped" },
+      { name: "Pages — docs", conclusion: "skipped" },
     ]
   )
   assert.equal(result.status, "not-deployed")

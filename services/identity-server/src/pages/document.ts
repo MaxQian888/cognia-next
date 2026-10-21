@@ -32,7 +32,7 @@ export function newNonce(): string {
   return btoa(String.fromCharCode(...bytes))
 }
 
-// Cognia's own palette and mark (web/app/globals.css, web/components/brand-mark.tsx):
+// Cognia's own palette and mark (cognia-labs/cognia-website:app/globals.css, cognia-labs/cognia-website:components/brand-mark.tsx):
 // warm paper and ink neutrals, hairlines, and the cyan `action` accent used
 // only as a dot, a line or a glow, never as a text colour. The hero band and
 // the dot grid echo the mark's registration ticks. The one playful element is

@@ -11,6 +11,43 @@ import { ESLint } from "eslint"
 const readWorkflow = (name) =>
   readFile(new URL(`../../.github/workflows/${name}`, import.meta.url), "utf8")
 
+test("website extraction removes the old workspace from install and release metadata", async () => {
+  const [workspace, lockfile, changesets] = await Promise.all(
+    ["pnpm-workspace.yaml", "pnpm-lock.yaml", ".changeset/config.json"].map((file) =>
+      readFile(new URL(`../../${file}`, import.meta.url), "utf8")
+    )
+  )
+  assert.ok(!parse(workspace).packages.includes("web"))
+  assert.ok(!/^ {2}web:/m.test(lockfile), "pnpm-lock.yaml must not retain the website importer")
+  assert.ok(!JSON.parse(changesets).ignore.includes("web"))
+})
+
+test("website extraction removes retired local launch commands", async () => {
+  const [packageJson, claudeLaunch, vscodeLaunch] = await Promise.all(
+    ["package.json", ".claude/launch.json", ".vscode/launch.json"].map((file) =>
+      readFile(new URL(`../../${file}`, import.meta.url), "utf8")
+    )
+  )
+  assert.ok(Object.keys(JSON.parse(packageJson).scripts).every((name) => !name.startsWith("web:")))
+  const args = JSON.parse(claudeLaunch).configurations.flatMap((config) => config.runtimeArgs ?? [])
+  assert.ok(args.every((arg) => !/^web(?:\/|:|$)/.test(arg)))
+  assert.doesNotMatch(vscodeLaunch, /pnpm web:/)
+})
+
+test("website extraction keeps bilingual onboarding and ignore rules current", async () => {
+  for (const file of ["README.md", "README_zh.md"]) {
+    const readme = await readFile(new URL(`../../${file}`, import.meta.url), "utf8")
+    assert.ok(
+      readme.includes("https://github.com/cognia-labs/cognia-website"),
+      `${file}: website repository link`
+    )
+    assert.ok(!/\bpnpm web:[a-z:-]+/.test(readme), `${file}: no retired website commands`)
+    assert.ok(!/[├└]── web\//u.test(readme), `${file}: no retired website directory`)
+  }
+  const ignored = await readFile(new URL("../../.gitignore", import.meta.url), "utf8")
+  assert.doesNotMatch(ignored, /^\/web\//m)
+})
+
 test("Jest bundle suites consume a verified artifact from the frozen plan", async () => {
   const { jobs } = parse(await readWorkflow("test.yml"))
   const producer = jobs["jest-plan"].steps
@@ -686,8 +723,6 @@ test("quality setup avoids redundant history, native packages and workspace buil
   )
   const { selectGates } = await import("../gates/check-all.mjs")
   assert.equal(selectGates({ group: "artifacts" })[0].script, "build:packages")
-  const deployment = parse(await readWorkflow("deploy.yml"))
-  assert.equal(deployment.jobs["deploy-web"], undefined)
 })
 
 test("pnpm caches immutable store data but always validates and links frozen installs", async () => {

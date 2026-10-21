@@ -88,13 +88,8 @@ const REGISTRY = [
 
   { script: "typecheck", group: "types", resource: "package-build" },
   { script: "knip", group: "types", resource: "package-build" },
-  // The root `typecheck` excludes `web` (tsconfig `exclude`), so the marketing
-  // workspace needs its own run. This is not optional bookkeeping: ADR-0092 §5
-  // chose a typed `SiteCopy` over an i18n bundle precisely because "a missing
-  // or extra key in either locale fails typecheck" — and until this entry
-  // existed, nothing on a PR ever ran that check.
   // The extension workspace is excluded from the root tsc (chrome globals,
-  // its own JSX transform), exactly like `web`, so it needs its own entry or
+  // its own JSX transform), so it needs its own entry or
   // it would be typechecked by nothing.
   { script: "browser-ext:typecheck", group: "types" },
   // The sidecar runs its TypeScript unbuilt under Node's type stripping and is

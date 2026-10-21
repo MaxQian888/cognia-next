@@ -34,19 +34,6 @@ junit.xml
 # SWC plugin cache written by next build/dev.
 /.swc/
 /out/
-/web/.next/
-/web/out/
-# Product footage (ADR-0092, product footage amendment). The recordings and raw
-# renders are re-derivable intermediates, tens of megabytes each run:
-# `web/scripts/record-product.mjs` and `render-video.mjs` regenerate them, and
-# only the published cut under `web/public/video/` is committed. The rest is
-# HyperFrames tool state (preview cache, thumbnails, review sheets).
-/web/video/recordings/
-/web/video/renders/
-/web/video/snapshots/
-/web/video/.review/
-/web/video/.thumbnails/
-/web/video/.hyperframes/
 
 # Live2D Cubism Core — proprietary, fetched at build time by
 # scripts/download-cubism-core.mjs (predev/prebuild). Never committed.
@@ -189,9 +176,8 @@ sidecar/cognia-mcp.mjs
 # restamped every entry's mtime meant each rebuild was a 34 KB binary diff.
 sidecar/codeserver-agent-ext/cognia-managed-broker.vsix
 sidecar/codeserver-agent-ext/cognia-managed-broker.vsix.sha256
-# Root-only scratch screenshots. Anchored: unanchored, these matched at any
-# depth and silently swallowed web/public/og/workflows-{en,zh}.png, whose paths
-# web/lib/metadata.ts still advertises as og:image.
+# Root-only scratch screenshots. Keep these anchored so nested published
+# assets with the same filenames remain visible to Git.
 /batch-final-verify-*.png
 /workflows-*.png
 dist

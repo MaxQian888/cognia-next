@@ -45,13 +45,6 @@
       "autoPort": true
     },
     {
-      "name": "web",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "web", "exec", "next", "dev"],
-      "port": 3002,
-      "autoPort": true
-    },
-    {
       "name": "storybook",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["storybook", "--no-open"],
@@ -70,21 +63,6 @@
         "3010"
       ],
       "port": 3010
-    },
-    {
-      "name": "hyperframes-studio",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": [
-        "dlx",
-        "hyperframes@0.8.93",
-        "preview",
-        "web/video",
-        "--port",
-        "3020",
-        "--foreground",
-        "--no-open"
-      ],
-      "port": 3020
     },
     {
       "name": "cognia-status-worker",

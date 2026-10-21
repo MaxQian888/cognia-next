@@ -58,8 +58,9 @@ export function absoluteUrl(path: string): string {
 /**
  * The marketing site's origin, for the landing page's "Website" link.
  *
- * Only `NEXT_PUBLIC_WEB_SITE_URL` counts (the deploy workflow sets it from the
- * same `WEB_SITE_URL` variable the website build reads). There is deliberately
+ * Only `NEXT_PUBLIC_WEB_SITE_URL` counts (the docs deploy workflow sets it from
+ * this repository's `WEB_SITE_URL` variable). The standalone website owns its
+ * own build configuration in cognia-labs/cognia-website. There is deliberately
  * no fallback: a preview deployment or a local build has no website to point
  * at, and a link to `localhost` in a published page is worse than no link.
  */

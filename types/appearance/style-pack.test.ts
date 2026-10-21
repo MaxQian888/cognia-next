@@ -30,7 +30,7 @@ describe("style pack catalogue", () => {
   })
 
   /**
-   * Pins the marketing site's scale (web/app/globals.css: control 8 / panel 12
+   * Pins the marketing site's scale (cognia-labs/cognia-website:app/globals.css: control 8 / panel 12
    * / stage 14). `--radius-control` is `base - 2px` and `--radius-stage` is
    * `base + 4px`, so a 0.625rem (10px) base lands on 8 and 14 exactly. If this
    * base ever moves, the product silently stops matching the website.

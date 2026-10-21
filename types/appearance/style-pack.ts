@@ -71,7 +71,7 @@ export interface StylePackTokens {
  * that a rem→px conversion was done right. Same trick as the `classic`
  * composer skin and `RadiusApplier`'s default branch.
  *
- * `studio` is the language `web/app/globals.css` already pins for the
+ * `studio` is the language `cognia-labs/cognia-website:app/globals.css` already pins for the
  * marketing site: the same 8/12/14 control/panel/stage scale (which the default
  * base happens to produce exactly), hairline rules, a shallow elevation
  * ceiling, and its stated "No oversized pills" — badges drop to the control
