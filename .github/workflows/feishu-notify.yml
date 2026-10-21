@@ -19,7 +19,6 @@ on:
       - Signaling Server
       - Standalone bootstrap scripts
       - Sync model catalog
-      - Refresh website evidence
     types: [completed]
   workflow_dispatch:
     inputs:
