@@ -119,6 +119,7 @@ const SESSION_FIELDS = {
   // runtime (ADR-0220); a builder row without it is not listed as a draft.
   agentBuilder: "local",
   // This device's runtime and machine.
+  runtimeExtensions: "local",
   transcriptRevision: "local",
   executionContext: "local",
   surfaceBinding: "local",

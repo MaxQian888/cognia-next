@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
+import Dexie from "dexie"
 
 import {
   ACCOUNT_REGISTRY_DB_NAME,
@@ -9,7 +10,8 @@ import {
   encryptedAccountDatabaseName,
   generateAccountId,
 } from "./account-db"
-import type { PasswordVerifierRecord } from "./account-types"
+import { ACCOUNT_REGISTRY_STATE_ID, type PasswordVerifierRecord } from "./account-types"
+import { readAccountRegistryForBoot } from "./registry-boot-read"
 
 const verifier: PasswordVerifierRecord = {
   algorithm: "test-only",
@@ -31,6 +33,109 @@ async function freshRegistry(testName: string) {
 }
 
 describe("LocalAccountRegistry", () => {
+  it("bounds a native connection blocking a registry upgrade and can retry after it closes", async () => {
+    const name = registryName("blocked-boot-read")
+    const old = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(name, 10)
+      request.onupgradeneeded = () => {
+        const accounts = request.result.createObjectStore("accounts", { keyPath: "id" })
+        for (const index of ["displayName", "createdAt", "updatedAt"])
+          accounts.createIndex(index, index)
+        accounts.put({
+          id: "acct_preserved",
+          displayName: "Preserved",
+          passwordVerifier: verifier,
+          createdAt: 1,
+          updatedAt: 1,
+        })
+        const state = request.result.createObjectStore("state", { keyPath: "id" })
+        for (const index of ["activeAccountId", "updatedAt"]) state.createIndex(index, index)
+        state.put({
+          id: ACCOUNT_REGISTRY_STATE_ID,
+          activeAccountId: "acct_preserved",
+          updatedAt: 1,
+        })
+      }
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    // This is an older tab that ignores the request to release its connection.
+    old.onversionchange = () => {}
+    const db = new CogniaAccountRegistryDB(name)
+    const registry = new LocalAccountRegistry(db)
+    try {
+      await expect(readAccountRegistryForBoot(registry, 50)).rejects.toMatchObject({
+        code: "registry-timeout",
+      })
+      expect(db.isOpen()).toBe(false)
+      old.close()
+      const [accounts, state] = await readAccountRegistryForBoot(registry, 2_000)
+      expect(accounts).toEqual([
+        expect.objectContaining({ id: "acct_preserved", passwordVerifier: verifier }),
+      ])
+      expect(state.activeAccountId).toBe("acct_preserved")
+      // The ordinary registry is independently usable after the blocked open.
+      expect(await registry.listAccounts()).toEqual(accounts)
+    } finally {
+      old.close()
+      await db.delete()
+    }
+  })
+
+  it("refuses an already cancelled boot read without opening the registry", async () => {
+    const { db, registry } = await freshRegistry("cancelled-boot-read")
+    const controller = new AbortController()
+    controller.abort(new Error("Boot cancelled"))
+    await expect(registry.readBootSnapshot(controller.signal)).rejects.toThrow("Boot cancelled")
+    expect(db.isOpen()).toBe(false)
+    await db.delete()
+  })
+
+  it("aborts an active boot transaction without closing the already open registry or committing state", async () => {
+    const { db, registry } = await freshRegistry("cancel-active-boot-read")
+    await db.open()
+    await db.accounts.put({
+      id: "acct_preserved",
+      displayName: "Preserved",
+      passwordVerifier: verifier,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    expect(db.isOpen()).toBe(true)
+    const controller = new AbortController()
+    const getState = LocalAccountRegistry.prototype.getState
+    const stateRead = jest
+      .spyOn(LocalAccountRegistry.prototype, "getState")
+      .mockImplementationOnce(async function (this: LocalAccountRegistry) {
+        const transaction = Dexie.currentTransaction
+        expect(transaction?.active).toBe(true)
+        expect(transaction?.db).not.toBe(db)
+        const state = await getState.call(this)
+        // ensureState has written inside the boot transaction, which must be
+        // rolled back when this attempt is cancelled before transaction commit.
+        expect(transaction?.active).toBe(true)
+        controller.abort(new Error("Boot cancelled"))
+        expect(transaction?.active).toBe(false)
+        return state
+      })
+    try {
+      await expect(registry.readBootSnapshot(controller.signal)).rejects.toThrow()
+      expect(stateRead).toHaveBeenCalledTimes(1)
+      expect(db.isOpen()).toBe(true)
+      expect(await db.state.get(ACCOUNT_REGISTRY_STATE_ID)).toBeUndefined()
+      expect(await registry.listAccounts()).toEqual([
+        expect.objectContaining({ id: "acct_preserved", passwordVerifier: verifier }),
+      ])
+      const [accounts, state] = await registry.readBootSnapshot(new AbortController().signal)
+      expect(accounts).toHaveLength(1)
+      expect(state.activeAccountId).toBeNull()
+      expect(db.isOpen()).toBe(true)
+    } finally {
+      stateRead.mockRestore()
+      await db.delete()
+    }
+  })
+
   it("uses a transaction-scoped comparison when replacing quick unlock metadata", async () => {
     const { db, registry } = await freshRegistry("quick-unlock-cas")
     await registry.createAccount({ id: "acct_cas", displayName: "CAS", passwordVerifier: verifier })

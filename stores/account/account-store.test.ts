@@ -91,6 +91,7 @@ jest.mock("@/lib/accounts/quick-unlock/native-biometric", () => ({
 
 jest.mock("@/lib/accounts/account-db", () => ({
   LocalAccountRegistry: jest.fn().mockImplementation(() => ({
+    readBootSnapshot: () => Promise.all([mockListAccounts(), mockGetState()]),
     listAccounts: mockListAccounts,
     getState: mockGetState,
     createAccount: mockCreateRegistryAccount,
@@ -720,6 +721,144 @@ beforeEach(() => {
 })
 
 describe("account store load", () => {
+  const rememberedStaleAccount = () => ({
+    ...account("acct_stale", "Stale"),
+    rememberOnDevice: true,
+  })
+
+  it("auto-unlocks the active remembered fixture when its registry read finishes normally", async () => {
+    const stale = rememberedStaleAccount()
+    mockDeviceUnlockSupported = true
+    mockListAccounts.mockResolvedValue([stale])
+    mockGetState.mockResolvedValue({ activeAccountId: stale.id })
+    mockReadDeviceUnlockSecret.mockResolvedValue("hunter22")
+    const store = makeStore()
+
+    await store.getState().load()
+
+    expect(mockReadDeviceUnlockSecret).toHaveBeenCalledWith(stale.id)
+    expect(mockVerifyPassword).toHaveBeenCalledWith("hunter22", expect.anything(), stale.id)
+    expect(mockActivateAccountDatabase).toHaveBeenCalled()
+    expect(store.getState()).toMatchObject({ unlockedAccountId: stale.id, locked: false })
+  })
+
+  it("settles a pending registry read and ignores its late result after a successful retry", async () => {
+    jest.useFakeTimers()
+    const stale = rememberedStaleAccount()
+    mockDeviceUnlockSupported = true
+    mockGetState.mockResolvedValue({ activeAccountId: stale.id })
+    mockReadDeviceUnlockSecret.mockResolvedValue("hunter22")
+    let settleOldRead!: (accounts: LocalAccountRecord[]) => void
+    mockListAccounts.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          settleOldRead = resolve
+        })
+    )
+    const store = makeStore()
+    const firstLoad = store
+      .getState()
+      .load()
+      .catch((error: unknown) => error)
+    try {
+      await jest.advanceTimersByTimeAsync(15_000)
+      expect(store.getState()).toMatchObject({
+        loaded: true,
+        loading: false,
+        locked: true,
+        bootFailure: { code: "registry-timeout" },
+      })
+      expect(await firstLoad).toMatchObject({ code: "registry-timeout" })
+      expect(mockReadDeviceUnlockSecret).not.toHaveBeenCalled()
+
+      const alpha = account("acct_alpha", "Alpha")
+      mockListAccounts.mockResolvedValue([alpha])
+      mockGetState.mockResolvedValue({ activeAccountId: alpha.id })
+      await store.getState().load()
+      expect(store.getState().bootFailure).toBeNull()
+
+      settleOldRead([stale])
+      await jest.advanceTimersByTimeAsync(0)
+      expect(store.getState().accounts).toEqual([alpha])
+      expect(store.getState().activeAccountId).toBe(alpha.id)
+      expect(store.getState().unlockedAccountId).toBeNull()
+      expect(mockActivateAccountDatabase).not.toHaveBeenCalled()
+      expect(mockUnlockBrowserVault).not.toHaveBeenCalled()
+      expect(mockReadDeviceUnlockSecret).not.toHaveBeenCalled()
+      expect(mockVerifyPassword).not.toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("marks an unavailable registry separately from ordinary account action errors", async () => {
+    mockGetState.mockRejectedValueOnce(new Error("registry unavailable"))
+    const store = makeStore()
+    await expect(store.getState().load()).rejects.toThrow("registry unavailable")
+    expect(store.getState().bootFailure).toEqual({ code: "registry-unavailable" })
+    expect(store.getState().locked).toBe(true)
+  })
+
+  it("bounds a stalled state read and retries even if another caller cleared the error", async () => {
+    jest.useFakeTimers()
+    const alpha = account("acct_alpha", "Alpha")
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockImplementationOnce(() => new Promise(() => {}))
+    const store = makeStore()
+    const outcome = store
+      .getState()
+      .load()
+      .catch((error: unknown) => error)
+    try {
+      await jest.advanceTimersByTimeAsync(15_000)
+      expect(await outcome).toMatchObject({ code: "registry-timeout" })
+      expect(store.getState().accounts).toEqual([])
+      store.setState({ error: null })
+      mockGetState.mockResolvedValue({ activeAccountId: alpha.id })
+      await store.getState().load()
+      expect(store.getState()).toMatchObject({
+        accounts: [alpha],
+        activeAccountId: alpha.id,
+        bootFailure: null,
+        loading: false,
+      })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("does not apply the registry deadline to an account unlock already in progress", async () => {
+    jest.useFakeTimers()
+    mockDeviceUnlockSupported = true
+    const alpha = { ...account("acct_alpha", "Alpha"), rememberOnDevice: true }
+    mockListAccounts.mockResolvedValue([alpha])
+    mockGetState.mockResolvedValue({ activeAccountId: alpha.id })
+    let completeUnlock!: (value: string | null) => void
+    mockReadDeviceUnlockSecret.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          completeUnlock = resolve
+        })
+    )
+    const store = makeStore()
+    const loading = store.getState().load()
+    try {
+      await jest.advanceTimersByTimeAsync(20_000)
+      expect(store.getState()).toMatchObject({ loading: true, bootFailure: null })
+      expect(mockReadDeviceUnlockSecret).toHaveBeenCalledWith(alpha.id)
+      completeUnlock("hunter22")
+      await loading
+      expect(store.getState()).toMatchObject({
+        loaded: true,
+        loading: false,
+        unlockedAccountId: alpha.id,
+        bootFailure: null,
+      })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("hydrates accounts and keeps an existing active account locked until password unlock", async () => {
     const alpha = account("acct_alpha", "Alpha")
     const beta = account("acct_beta", "Beta")

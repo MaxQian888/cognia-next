@@ -13,6 +13,7 @@ import {
   Trash2Icon,
 } from "lucide-react"
 
+import { useChoiceDialog, useConfirmDialog } from "@/components/shared/confirm-dialog"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { switchAccountRuntimeTarget } from "@/lib/runtime/account-runtime-target"
 import { removeCompanionHost } from "@/lib/companion/host-removal"
@@ -67,6 +68,8 @@ export function RuntimeTargetMenuSection({
   const [loadedTargets, setLoadedTargets] = useState<RuntimeTargetRecord[]>([])
   const [pendingTargetId, setPendingTargetId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { confirm, dialog: confirmDialog } = useConfirmDialog()
+  const { choose, dialog: choiceDialog } = useChoiceDialog()
 
   useEffect(() => {
     if (targetsOverride || !accountId || snapshot.target?.platform !== "web") return
@@ -115,15 +118,35 @@ export function RuntimeTargetMenuSection({
 
   const removeTarget = async (target: RuntimeTargetRecord) => {
     if (!accountId || pendingTargetId || target.kind !== "companion") return
-    if (!window.confirm(t("removeConfirm", { name: target.label }))) return
+    const confirmed = await confirm({
+      title: t("removeConfirmTitle", { name: target.label }),
+      description: t("removeConfirm", { name: target.label }),
+      confirmLabel: t("removeConfirmAction"),
+      destructive: true,
+      testid: "runtime-target-remove-confirm",
+    })
+    if (!confirmed) return
     const companionAlternatives = targets.filter(
       (candidate) => candidate.kind === "companion" && candidate.id !== target.id
     )
     let fallbackHostId: string | undefined
     if (target.id === activeTargetId && companionAlternatives.length > 0) {
-      const choices = companionAlternatives.map((candidate) => candidate.id).join(", ")
-      const selected = window.prompt(t("fallbackPrompt", { choices }), companionAlternatives[0].id)
+      const selected = await choose({
+        title: t("fallbackTitle"),
+        description: t("fallbackDescription", { name: target.label }),
+        fieldLabel: t("fallbackField"),
+        confirmLabel: t("removeConfirmAction"),
+        destructive: true,
+        options: companionAlternatives.map((candidate) => ({
+          value: candidate.id,
+          label: candidate.label,
+          description: candidate.id,
+        })),
+        testid: "runtime-target-fallback",
+      })
       if (!selected) return
+      // `choose` only answers with one of the options; re-check against the
+      // list as it stands now in case it changed while the dialog was open.
       if (!companionAlternatives.some((candidate) => candidate.id === selected)) {
         setError(t("fallbackInvalid"))
         return
@@ -234,6 +257,8 @@ export function RuntimeTargetMenuSection({
           {error}
         </p>
       )}
+      {confirmDialog}
+      {choiceDialog}
     </section>
   )
 }
