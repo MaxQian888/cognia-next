@@ -226,11 +226,10 @@ describe("useExternalAgentStore settings toggles", () => {
     reset()
   })
 
-  it("setEnabled / setAutoConnectOnStartup / setShowConnectionNotifications mutate flags", () => {
-    useExternalAgentStore.getState().setEnabled(false)
+  it("connection preferences mutate without a global availability flag", () => {
     useExternalAgentStore.getState().setAutoConnectOnStartup(true)
     useExternalAgentStore.getState().setShowConnectionNotifications(false)
-    expect(useExternalAgentStore.getState().enabled).toBe(false)
+    expect(useExternalAgentStore.getState()).not.toHaveProperty("enabled")
     expect(useExternalAgentStore.getState().autoConnectOnStartup).toBe(true)
     expect(useExternalAgentStore.getState().showConnectionNotifications).toBe(false)
   })

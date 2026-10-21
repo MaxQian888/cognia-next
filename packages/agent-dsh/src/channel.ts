@@ -22,6 +22,14 @@ import { z } from "zod"
 export const DSH_TRANSPORTS = ["dsh-sdk", "acp"] as const
 export type DshTransport = (typeof DSH_TRANSPORTS)[number]
 
+/** Fold generic app tiers down to the native DeepSeek Messages vocabulary. */
+export function dshNativeReasoningEffort(effort: string | undefined): string | undefined {
+  if (effort === "minimal" || effort === "medium") return "low"
+  if (effort === "xhigh") return "high"
+  if (effort === "ultracode") return "max"
+  return effort
+}
+
 /**
  * The certified host compositions Cognia ships.
  *

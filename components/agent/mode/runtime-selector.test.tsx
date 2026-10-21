@@ -223,7 +223,6 @@ jest.mock("@/stores/agent/agent-runtime-store", () => ({
   useRuntimeRefForSession: () => runtimeState.runtimeRef,
 }))
 
-const mockSetExternalEnabled = jest.fn()
 const externalAgentState = {
   enabled: true,
   agents: {} as Record<
@@ -232,7 +231,6 @@ const externalAgentState = {
   >,
   connectionStatus: {} as Record<string, string>,
   agentValidity: {} as Record<string, Record<string, unknown>>,
-  setEnabled: mockSetExternalEnabled,
 }
 
 jest.mock("@/stores/agent/external-agent-store", () => ({
@@ -275,7 +273,6 @@ beforeEach(() => {
   mockSetRuntimeRef.mockClear()
   mockSetSessionRuntimeRef.mockClear()
   mockSelectExternalAgent.mockClear()
-  mockSetExternalEnabled.mockClear()
   mockEnsureReady.mockClear()
   mockToastError.mockClear()
   readiness = { ok: true }
@@ -454,31 +451,12 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
     expect(screen.getByTestId("runtime-manage-agents")).toHaveTextContent("manageAgents")
   })
 
-  describe("globally disabled", () => {
-    beforeEach(() => {
-      externalAgentState.enabled = false
-      externalAgentState.agents = { a1: agent("a1", "Codex") }
-    })
-
-    it("hides every agent row", () => {
-      render(<AgentRuntimeSelector />)
-      expect(screen.queryByTestId("runtime-external-a1")).toBeNull()
-    })
-
-    // Regression: this used to render the "nothing configured" sentence, which
-    // is a different problem with a different fix — the agents exist, the
-    // feature is off.
-    it("says the feature is off rather than that nothing is configured", () => {
-      render(<AgentRuntimeSelector />)
-      expect(screen.getByText("externalTurnedOff")).toBeInTheDocument()
-      expect(screen.queryByText("externalEmpty")).toBeNull()
-    })
-
-    it("turns the feature back on from the menu", () => {
-      render(<AgentRuntimeSelector />)
-      fireEvent.click(screen.getByTestId("runtime-enable-external"))
-      expect(mockSetExternalEnabled).toHaveBeenCalledWith(true)
-    })
+  it("offers configured agents and no retired global enable action", () => {
+    externalAgentState.enabled = false
+    externalAgentState.agents = { a1: agent("a1", "Codex") }
+    render(<AgentRuntimeSelector />)
+    expect(screen.getByTestId("runtime-external-a1")).toBeInTheDocument()
+    expect(screen.queryByTestId("runtime-enable-external")).toBeNull()
   })
 
   describe("runtime validity", () => {
@@ -791,14 +769,12 @@ describe("AgentRuntimeSelector — finding a runtime in a long list", () => {
     expect(screen.getByTestId("runtime-manage-agents")).toHaveAttribute("data-force-mount", "true")
   })
 
-  it("keeps the enable-external action mounted too", () => {
+  it("keeps management available with a retired persisted flag", () => {
     externalAgentState.enabled = false
     externalAgentState.agents = manyAgents(6)
     render(<AgentRuntimeSelector />)
-    expect(screen.getByTestId("runtime-enable-external")).toHaveAttribute(
-      "data-force-mount",
-      "true"
-    )
+    expect(screen.getByTestId("runtime-manage-agents")).toHaveAttribute("data-force-mount", "true")
+    expect(screen.queryByTestId("runtime-enable-external")).toBeNull()
   })
 })
 

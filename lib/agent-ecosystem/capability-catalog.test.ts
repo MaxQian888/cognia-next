@@ -18,6 +18,17 @@ const base: CapabilityManifestFile = {
 }
 
 describe("mergeIntegrationCapabilityRows", () => {
+  it("preserves future manifest capability ids without granting support", () => {
+    const merged = mergeIntegrationCapabilityRows(
+      { ...base, capabilityIds: ["future.runtime"] },
+      []
+    )
+    expect(merged.capabilityIds).toContain("future.runtime")
+    expect(merged.protocols.a.capabilities).toMatchObject({
+      "future.runtime": { level: "unknown", evidence: "none" },
+    })
+    expect(base.protocols.a.capabilities).toEqual({ streaming: cell })
+  })
   it("records new portable capabilities as unknown until an integration supplies evidence", () => {
     const merged = mergeIntegrationCapabilityRows(base, [])
     for (const id of [
@@ -25,7 +36,7 @@ describe("mergeIntegrationCapabilityRows", () => {
       "tools.permission-policy",
       "subagents.context-fork",
       "subagents.auto-compaction",
-    ]) {
+    ] as const) {
       expect(merged.capabilityIds).toContain(id)
       expect(merged.protocols.a.capabilities[id]).toEqual({ level: "unknown", evidence: "none" })
     }

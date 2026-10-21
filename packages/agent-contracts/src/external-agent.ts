@@ -2046,6 +2046,8 @@ export interface ExternalAgentContext {
  */
 export interface ExternalAgentTokenUsage {
   promptTokens: number
+  /** True when promptTokens already includes cache read/write tokens. */
+  promptTokensIncludeCache?: boolean
   completionTokens: number
   totalTokens: number
   cacheReadTokens?: number

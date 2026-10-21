@@ -112,6 +112,15 @@ describe("adapter-hooks", () => {
     expect(spy).toHaveBeenCalledWith("calc", { x: 1 }, "session_b")
   })
 
+  it("dispatchPreToolUse surfaces the plugin's denyReason as the reason call sites read", async () => {
+    enableAllEventHooks()
+    jest
+      .spyOn(getPluginEventHooks(), "dispatchPreToolUse")
+      .mockResolvedValue({ action: "deny", denyReason: "Project rule forbids it" } as never)
+    const result = await dispatchPreToolUse("bash", { command: "rm -rf /" }, "session_c")
+    expect(result).toEqual({ action: "deny", reason: "Project rule forbids it" })
+  })
+
   it("dispatchPostToolUse returns the dispatcher's merge result", async () => {
     enableAllEventHooks()
     jest

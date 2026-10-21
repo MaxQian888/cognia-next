@@ -1,5 +1,6 @@
 import {
   clearInstructionCache,
+  discoverProjectAgentFiles,
   discoverProjectInstructionFiles,
   loadProjectInstructions,
 } from "./load"
@@ -309,5 +310,40 @@ describe("discoverProjectInstructionFiles", () => {
     expect(await discoverProjectInstructionFiles({ roots: ["/proj"], isTauriEnv: false })).toEqual(
       []
     )
+  })
+})
+
+describe("discoverProjectAgentFiles", () => {
+  it("lists global then project agent files without reading them", async () => {
+    const fs = fakeFs({
+      "/home/.cognia/agents/global.md": "g",
+      "/proj/.cognia/agents/reviewer.md": "r",
+    })
+    const readText = jest.spyOn(fs, "readText")
+    const found = await discoverProjectAgentFiles({
+      isTauriEnv: true,
+      homeDir: "/home",
+      roots: ["/proj"],
+      fs,
+    })
+    expect(found.map((file) => file.absPath)).toEqual([
+      "/home/.cognia/agents/global.md",
+      "/proj/.cognia/agents/reviewer.md",
+    ])
+    expect(readText).not.toHaveBeenCalled()
+  })
+
+  it("is empty when project agents are off or there is no filesystem", async () => {
+    const fs = fakeFs({ "/proj/.cognia/agents/reviewer.md": "r" })
+    expect(
+      await discoverProjectAgentFiles({
+        isTauriEnv: true,
+        homeDir: null,
+        roots: ["/proj"],
+        config: { loadProjectAgents: false },
+        fs,
+      })
+    ).toEqual([])
+    expect(await discoverProjectAgentFiles({ roots: ["/proj"], isTauriEnv: false })).toEqual([])
   })
 })

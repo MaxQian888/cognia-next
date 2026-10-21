@@ -58,4 +58,15 @@ describe("headless runtime roster", () => {
       expect(new Set(names).size).toBe(names.length)
     })
   })
+
+  it("keeps browser startup recovery out of the headless runtime", async () => {
+    await jest.isolateModulesAsync(async () => {
+      const registry = await import("../registry")
+      registry.__resetHeadlessRuntimesForTesting()
+      await import("./index")
+      expect(registry.listHeadlessRuntimes().map((runtime) => runtime.name)).not.toContain(
+        "startup-recovery"
+      )
+    })
+  })
 })

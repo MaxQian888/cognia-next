@@ -127,6 +127,7 @@ export function getLatestUsage(messages: UIMessage[]): UsageInfo | null {
  */
 export function externalTokenUsageToUsageInfo(usage: {
   promptTokens: number
+  promptTokensIncludeCache?: boolean
   completionTokens: number
   totalTokens: number
   cacheReadTokens?: number
@@ -137,7 +138,14 @@ export function externalTokenUsageToUsageInfo(usage: {
   providerCost?: { amount: number; currency?: string }
 }): UsageInfo {
   return {
-    inputTokens: usage.promptTokens,
+    // The renderer prices uncached input and cache buckets separately. DSH
+    // explicitly reports aggregate prompt counts; do not infer other channels.
+    inputTokens: usage.promptTokensIncludeCache
+      ? Math.max(
+          0,
+          usage.promptTokens - (usage.cacheReadTokens ?? 0) - (usage.cacheWriteTokens ?? 0)
+        )
+      : usage.promptTokens,
     outputTokens: usage.completionTokens,
     ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
     ...(usage.modelContextWindow === undefined ? {} : { contextWindow: usage.modelContextWindow }),

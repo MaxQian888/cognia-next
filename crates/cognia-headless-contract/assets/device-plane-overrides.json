@@ -8155,7 +8155,8 @@
                         "radar-report",
                         "provider-diagnostics-refresh",
                         "conversation-auto-archive",
-                        "files-trash-purge"
+                        "files-trash-purge",
+                        "harness-evolution-sweep"
                       ]
                     },
                     "trigger": {

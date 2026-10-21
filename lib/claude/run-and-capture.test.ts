@@ -1250,6 +1250,67 @@ describe("runAndCaptureAssistantReply", () => {
     expect(result.a2uiSurfaces["sfc"].dataModel).toEqual({ name: "Alice", age: 31 })
   })
 
+  it("deep-merges captured data without losing nested siblings and honors replacement", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_data_model_update", {
+        surfaceId: "nested",
+        data: { profile: { name: "Ada", email: "a@example.test" }, draft: "keep" },
+      })
+    )
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_data_model_update", {
+        surfaceId: "nested",
+        data: { profile: { name: "Grace" } },
+      })
+    )
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_data_model_update", {
+        surfaceId: "replace",
+        data: { old: true },
+      })
+    )
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_data_model_update", {
+        surfaceId: "replace",
+        data: { fresh: true },
+        merge: false,
+      })
+    )
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.a2uiSurfaces.nested.dataModel).toEqual({
+      profile: { name: "Grace", email: "a@example.test" },
+      draft: "keep",
+    })
+    expect(result.a2uiSurfaces.replace.dataModel).toEqual({ fresh: true })
+  })
+
+  it("preserves a named captured root across child-first batches and child-only patches", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_update_components", {
+        surfaceId: "named",
+        components: [
+          { id: "label", component: "Text", text: "before" },
+          { id: "app", component: "Column", children: ["label"] },
+        ],
+      })
+    )
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_update_components", {
+        surfaceId: "named",
+        components: [{ id: "label", component: "Text", text: "after" }],
+      })
+    )
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.a2uiSurfaces.named.rootId).toBe("app")
+    expect(result.a2uiSurfaces.named.components.label).toMatchObject({ text: "after" })
+  })
+
   it("a2ui_delete_surface removes from accumulator and order", async () => {
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
     await Promise.resolve()

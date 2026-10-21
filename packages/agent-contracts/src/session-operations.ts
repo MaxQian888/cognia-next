@@ -75,7 +75,10 @@ export function runtimeFeaturePolicyKey(request: AgentRuntimeFeatureRequest): st
     .map(([name, agent]) => [name, agent.contextPolicy!.compactAtTokens])
     .sort(([a], [b]) => String(a).localeCompare(String(b)))
   const rules = (request.toolPermissionRules ?? [])
-    .map((rule) => [rule.tool, rule.decision])
+    .map((rule): [string, AgentQualifiedToolPermissionRule["decision"]] => [
+      rule.tool,
+      rule.decision,
+    ])
     .sort(
       ([a, decisionA], [b, decisionB]) => a.localeCompare(b) || decisionA.localeCompare(decisionB)
     )

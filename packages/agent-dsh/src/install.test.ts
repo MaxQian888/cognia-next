@@ -372,6 +372,15 @@ describe("buildDshLaunchSpec", () => {
     expect(spec.env.DEEPSEEK_BASE_URL).toBe("http://127.0.0.1:9876")
   })
 
+  it("folds generic native reasoning before either SDK or ACP launch", () => {
+    for (const composition of ["host.sdk-readonly.yml", "host.acp.yml"]) {
+      const settings = options({ reasoningEffort: "medium" })
+      settings.paths.compositionPath = `/rt/${composition}`
+      const spec = buildDshLaunchSpec(settings)
+      expect(spec.env.COGNIA_DSH_REASONING_EFFORT).toBe("low")
+    }
+  })
+
   it("skips allowlisted variables that are absent or empty", () => {
     const spec = buildDshLaunchSpec(options({ parentEnv: { PATH: "/usr/bin", LANG: "" } }))
     expect(spec.env).not.toHaveProperty("LANG")

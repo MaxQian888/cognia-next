@@ -53,14 +53,26 @@ export interface VideoAppDataSweepResult {
   staleStagingCopies: number
 }
 
+export interface VideoAppDataSweepReport {
+  failed: number
+  unknown: number
+  skipped: boolean
+  removed: number
+}
+
 /** Remove each path; one that cannot be removed now is left for the next sweep. */
-async function removeFiles(paths: readonly string[]): Promise<number> {
+async function removeFiles(
+  paths: readonly string[],
+  report?: VideoAppDataSweepReport
+): Promise<number> {
   let removed = 0
   for (const path of paths) {
     try {
       await removeAppDataFile(path)
       removed += 1
+      if (report) report.removed++
     } catch {
+      if (report) report.failed++
       // Held open or refused: the next sweep tries again.
     }
   }
@@ -75,7 +87,10 @@ async function orphanVideos(deps: VideoAppDataSweepDeps): Promise<string[]> {
   return files.filter((f) => !existing.has(jobIdOf(f.name))).map((f) => `${dir}/${f.name}`)
 }
 
-async function staleStagingCopies(deps: VideoAppDataSweepDeps): Promise<string[]> {
+async function staleStagingCopies(
+  deps: VideoAppDataSweepDeps,
+  report?: VideoAppDataSweepReport
+): Promise<string[]> {
   const dir = activeDatabaseAppDataDir(COMPOSER_VIDEO_STAGING_APP_DATA_DIR)
   const cutoff = deps.now() - STALE_STAGING_MS
   const stale: string[] = []
@@ -83,6 +98,7 @@ async function staleStagingCopies(deps: VideoAppDataSweepDeps): Promise<string[]
     if (!entry.isFile) continue
     const path = `${dir}/${entry.name}`
     const modifiedAt = await appDataModifiedAt(path).catch(() => null)
+    if (modifiedAt === null && report) report.unknown++
     if (modifiedAt !== null && modifiedAt < cutoff) stale.push(path)
   }
   return stale
@@ -90,15 +106,17 @@ async function staleStagingCopies(deps: VideoAppDataSweepDeps): Promise<string[]
 
 /** One sweep. A no-op off the desktop, where these directories do not exist. */
 export async function sweepVideoAppData(
-  deps: VideoAppDataSweepDeps = defaultDeps
+  deps: VideoAppDataSweepDeps = defaultDeps,
+  report?: VideoAppDataSweepReport
 ): Promise<VideoAppDataSweepResult> {
   if (detectHostProfile() !== "desktop") {
+    if (report) report.skipped = true
     return { databaseDirectories: 0, orphanVideos: 0, staleStagingCopies: 0 }
   }
-  const databaseDirectories = await sweepDroppedDatabaseAppData(deps.databaseExists)
+  const databaseDirectories = await sweepDroppedDatabaseAppData(deps.databaseExists, report)
   return {
     databaseDirectories,
-    orphanVideos: await removeFiles(await orphanVideos(deps)),
-    staleStagingCopies: await removeFiles(await staleStagingCopies(deps)),
+    orphanVideos: await removeFiles(await orphanVideos(deps), report),
+    staleStagingCopies: await removeFiles(await staleStagingCopies(deps, report), report),
   }
 }

@@ -3,6 +3,36 @@ import { pathToFileURL } from "node:url"
 import { estimateFallbackTokens, resolveTokenCount } from "./fallback-estimator"
 
 describe("cl100k fallback token estimator", () => {
+  it("constructs one encoder only when bounded exact estimation is first needed", () => {
+    try {
+      jest.isolateModules(() => {
+        jest.doMock("js-tiktoken/lite", () => {
+          const actual = jest.requireActual<typeof import("js-tiktoken/lite")>("js-tiktoken/lite")
+          return {
+            ...actual,
+            Tiktoken: jest.fn(
+              (...args: ConstructorParameters<typeof actual.Tiktoken>) =>
+                new actual.Tiktoken(...args)
+            ),
+          }
+        })
+        const fresh =
+          jest.requireActual<typeof import("./fallback-estimator")>("./fallback-estimator")
+        const { Tiktoken } = jest.requireMock("js-tiktoken/lite")
+        expect(Tiktoken.mock.calls.length).toBe(0)
+        expect(fresh.estimateFallbackTokens("")).toBe(0)
+        expect(fresh.resolveTokenCount("provider usage", 7)).toBe(7)
+        expect(fresh.estimateFallbackTokens("x".repeat(2_500_000))).toBe(625_000)
+        expect(Tiktoken.mock.calls.length).toBe(0)
+        expect(fresh.estimateFallbackTokens("Hello world")).toBe(2)
+        expect(fresh.estimateFallbackTokens("abcdefgh")).toBe(1)
+        expect(Tiktoken).toHaveBeenCalledTimes(1)
+      })
+    } finally {
+      jest.dontMock("js-tiktoken/lite")
+    }
+  })
+
   it("counts Latin, CJK, and mixed text with the shared tokenizer", () => {
     expect(estimateFallbackTokens("Hello world")).toBeGreaterThan(0)
     expect(estimateFallbackTokens("你好，世界")).toBeGreaterThan(0)

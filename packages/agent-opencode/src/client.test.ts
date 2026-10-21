@@ -264,6 +264,38 @@ describe("OpenCodeClientAdapter — basic state", () => {
 // ---------------------------------------------------------------------------
 
 describe("OpenCodeClientAdapter — connect", () => {
+  it.each(["model", "small_model", "baseURL", "enabled_providers", "extra_provider"])(
+    "accepts a distinct auxiliary model but strictly refuses %s drift",
+    async (field) => {
+      const expected = {
+        model: "cognia/primary",
+        small_model: "cognia/small",
+        enabled_providers: ["cognia"],
+        provider: { cognia: { options: { baseURL: "http://127.0.0.1:9000/v1" } } },
+      }
+      const client = makeFakeClient()
+      mockCreateOpencodeClient.mockReturnValue(client)
+      const a = new OpenCodeClientAdapter(deps())
+      const config = buildConfig({
+        network: { endpoint: "http://example:9999" },
+        metadata: { cogniaGatewayTask: "task" },
+        process: {
+          command: "opencode",
+          env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(expected) },
+        },
+      })
+      client.config.get.mockResolvedValue({ data: expected })
+      await expect(a.connect(config)).resolves.toBeUndefined()
+      await a.disconnect()
+      const drifted = structuredClone(expected)
+      if (field === "model" || field === "small_model") drifted[field] = "cognia/wrong"
+      else if (field === "baseURL") drifted.provider.cognia.options.baseURL = "http://other/v1"
+      else drifted.enabled_providers = field === "extra_provider" ? ["cognia", "other"] : ["other"]
+      client.config.get.mockResolvedValue({ data: drifted })
+      await expect(a.connect(config)).rejects.toThrow("overrides this task")
+    }
+  )
+
   it("refuses a managed configuration that replaces the task gateway", async () => {
     const client = makeFakeClient()
     mockCreateOpencodeClient.mockReturnValue(client)

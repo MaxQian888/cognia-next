@@ -102,7 +102,7 @@ export function parsePluginExternalAgentProtocol(
 ): ParsedPluginExternalAgentProtocol | null {
   const parts = value.split(":")
   if (parts.length !== 2) return null
-  const [pluginId, adapterId] = parts
+  const [pluginId, adapterId] = parts as [string, string]
   if (!PROTOCOL_SEGMENT.test(pluginId) || !PROTOCOL_SEGMENT.test(adapterId)) return null
   return { pluginId, adapterId }
 }

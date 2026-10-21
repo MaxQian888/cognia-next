@@ -37,9 +37,7 @@ export interface AgentRuntimeCatalogState {
   runtimes: AgentRuntimeDescriptor[]
   /** The row the persisted ref names, or undefined when it no longer exists. */
   selected: AgentRuntimeDescriptor | undefined
-  /** The External Agents master switch, surfaced so the picker can offer it. */
-  externalEnabled: boolean
-  /** How many local agents are configured, regardless of the switch. */
+  /** How many local agents are configured, including disabled configurations. */
   configuredExternalCount: number
 }
 
@@ -79,13 +77,12 @@ function makeWarningDescriber(t: (key: string) => string) {
  */
 export function catalogInputFromState(input: {
   providerId?: string
-  external: Pick<ExternalAgentState, "enabled" | "agents" | "agentValidity">
+  external: Pick<ExternalAgentState, "agents" | "agentValidity">
   hostConfigs: readonly ExternalAgentConfigRecord[]
   describeWarning?: AgentRuntimeCatalogInput["describeWarning"]
 }): AgentRuntimeCatalogInput {
   return {
     providerId: input.providerId,
-    externalEnabled: input.external.enabled,
     externalAgents: Object.values(input.external.agents ?? {}).map(hydrateAgentConfig),
     agentValidity: input.external.agentValidity,
     hostConfigs: input.hostConfigs,
@@ -116,7 +113,6 @@ export function useAgentRuntimeCatalog(
 ): AgentRuntimeCatalogState {
   const t = useTranslations("agentRuntime")
   const runtimeRef = useRuntimeRefForSession(sessionId)
-  const externalEnabled = useExternalAgentStore((s) => s.enabled)
   const storedAgents = useExternalAgentStore((s) => s.agents)
   const agentValidity = useExternalAgentStore((s) => s.agentValidity)
   const { configs: hostConfigs, unavailable: hostUnavailable } = useHostExternalAgentConfigs()
@@ -132,7 +128,7 @@ export function useAgentRuntimeCatalog(
   const runtimes = listAgentRuntimes(
     catalogInputFromState({
       providerId,
-      external: { enabled: externalEnabled, agents: storedAgents, agentValidity },
+      external: { agents: storedAgents, agentValidity },
       hostConfigs: hostUnavailable ? [] : hostConfigs,
       describeWarning: makeWarningDescriber(t),
     })
@@ -141,7 +137,6 @@ export function useAgentRuntimeCatalog(
   return {
     runtimes,
     selected: findRuntimeByKey(runtimes, runtimeRefKey(runtimeRef)),
-    externalEnabled,
     configuredExternalCount: Object.keys(storedAgents ?? {}).length,
   }
 }

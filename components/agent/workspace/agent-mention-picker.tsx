@@ -53,8 +53,6 @@ export function routeFailureText(
   switch (lane.reason) {
     case "not-configured":
       return tRoute("notConfigured", { runtime })
-    case "disabled":
-      return tRoute("disabled")
     case "blocked":
       return lane.detail
         ? tRoute("blockedDetail", { runtime, detail: lane.detail })

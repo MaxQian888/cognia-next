@@ -1,8 +1,10 @@
 "use client"
 
+import { NativeSelect } from "@/components/ui/native-select"
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
@@ -303,7 +305,7 @@ export function ExternalAgentSessionOperations(props: Props) {
             (["steering", "followUp"] as const).map((key) => (
               <label key={key} className="flex items-center justify-between gap-2">
                 {t(key)}
-                <select
+                <NativeSelect
                   className="rounded border bg-background p-1"
                   aria-label={t(key)}
                   value={state?.queuePolicy[key] ?? ""}
@@ -316,14 +318,14 @@ export function ExternalAgentSessionOperations(props: Props) {
                   </option>
                   <option value="all">{t("all")}</option>
                   <option value="one-at-a-time">{t("oneAtATime")}</option>
-                </select>
+                </NativeSelect>
               </label>
             ))}
           {can("runtimeControls") &&
             (["autoCompaction", "autoRetry"] as const).map((key) => (
               <label key={key} className="flex items-center justify-between gap-2">
                 {t(key)}
-                <select
+                <NativeSelect
                   className="rounded border bg-background p-1"
                   aria-label={t(key)}
                   value={state?.controls[key] === undefined ? "" : String(state.controls[key])}
@@ -336,7 +338,7 @@ export function ExternalAgentSessionOperations(props: Props) {
                   </option>
                   <option value="true">{t("enabled")}</option>
                   <option value="false">{t("disabled")}</option>
-                </select>
+                </NativeSelect>
               </label>
             ))}
           {can("abortRetry") && (
@@ -469,10 +471,9 @@ export function ExternalAgentSessionOperations(props: Props) {
                 onChange={(event) => setShell(event.target.value)}
               />
               <label className="flex gap-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={exclude}
-                  onChange={(event) => setExclude(event.target.checked)}
+                  onCheckedChange={(checked) => setExclude(checked === true)}
                 />
                 {t("excludeContext")}
               </label>

@@ -103,7 +103,7 @@ describe("useRouteTargets", () => {
     expect(catalogCalls.at(-1)).toEqual(["deepseek", "chat-1"])
   })
 
-  it("marks an unconfigured Codex, and a configured-but-hidden one, as unavailable", () => {
+  it("marks unconfigured and individually disabled agents as unavailable", () => {
     const { result, rerender } = renderHook(() => useRouteTargets(base))
     expect(result.current.options[1].lane).toEqual({
       ok: false,
@@ -112,10 +112,13 @@ describe("useRouteTargets", () => {
     })
     expect(result.current.options[1].descriptor).toBeUndefined()
 
-    externalState.enabled = false
-    externalState.agents = { cx: { id: "cx", metadata: { preset: "codex" } } }
+    runtimes = [BUILTIN, { ...CODEX, blockedReason: "Agent is disabled." }]
     rerender()
-    expect(result.current.options[1].lane).toMatchObject({ ok: false, reason: "disabled" })
+    expect(result.current.options[1].lane).toMatchObject({
+      ok: false,
+      reason: "blocked",
+      detail: "Agent is disabled.",
+    })
   })
 
   it("lists the bound Squad's members first and reserves the subagent handles", () => {

@@ -75,8 +75,6 @@ export interface ExternalAgentState {
   activeAgentId: string | null
   /** Delegation rules */
   delegationRules: ExternalAgentDelegationRule[]
-  /** Whether external agents are globally enabled */
-  enabled: boolean
   /** Default permission mode */
   defaultPermissionMode: "default" | "acceptEdits" | "bypassPermissions" | "plan"
   /** Auto-connect on startup */
@@ -172,7 +170,6 @@ export interface ExternalAgentActions {
   reorderDelegationRules: (ruleIds: string[]) => void
 
   // Settings
-  setEnabled: (enabled: boolean) => void
   setDefaultPermissionMode: (mode: ExternalAgentState["defaultPermissionMode"]) => void
   setAutoConnectOnStartup: (enabled: boolean) => void
   setShowConnectionNotifications: (enabled: boolean) => void

@@ -1,6 +1,7 @@
 import type { AgentOutboundGate } from "@cognia/agent-contracts/host"
 import {
   DSH_PLATFORMS,
+  dshNativeReasoningEffort,
   dshRuntimeChannelSchema,
   isReadOnlyProfile,
   profileTransport,
@@ -300,7 +301,10 @@ export function buildDshLaunchSpec(options: DshLaunchOptions): DshLaunchSpec {
   if (options.provider) env.COGNIA_DSH_PROVIDER = options.provider
 
   if (options.baseUrl) env.DEEPSEEK_BASE_URL = options.baseUrl
-  if (options.reasoningEffort) env.COGNIA_DSH_REASONING_EFFORT = options.reasoningEffort
+  if (options.reasoningEffort)
+    env.COGNIA_DSH_REASONING_EFFORT = options.gateway
+      ? options.reasoningEffort
+      : dshNativeReasoningEffort(options.reasoningEffort)!
   if (options.maxTokens !== undefined) env.COGNIA_DSH_MAX_TOKENS = String(options.maxTokens)
   if (options.model) env.COGNIA_DSH_MODEL = options.model
   if (options.contextWindow !== undefined) {

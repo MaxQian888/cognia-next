@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import en from "@/i18n/messages/en.json"
@@ -166,7 +167,14 @@ it("keeps shell cancellation available while execution awaits approval or output
   fireEvent.change(await screen.findByRole("textbox", { name: t.shell }), {
     target: { value: "pwd" },
   })
-  fireEvent.click(screen.getByRole("checkbox", { name: t.excludeContext }))
+  const excludeContext = screen.getByRole("checkbox", { name: t.excludeContext })
+  expect(excludeContext).toHaveClass("border-input", "focus-visible:border-ring")
+  fireEvent.click(screen.getByText(t.excludeContext))
+  expect(excludeContext).toBeChecked()
+  fireEvent.click(screen.getByText(t.excludeContext))
+  expect(excludeContext).not.toBeChecked()
+  fireEvent.click(excludeContext)
+  expect(excludeContext).toBeChecked()
   fireEvent.click(screen.getByRole("button", { name: t.runShell }))
   await waitFor(() => expect(onShell).toHaveBeenCalledWith("pwd", { excludeFromContext: true }))
   expect(screen.getByRole("button", { name: t.runShell })).toBeDisabled()
@@ -182,9 +190,7 @@ it("updates only the selected queue policy through the shared manager", async ()
   mockManager.getSessionOperationCapabilities.mockResolvedValue({ queuePolicy: "supported" })
   mockManager.setSessionQueuePolicy.mockResolvedValue(undefined)
   show()
-  fireEvent.change(await screen.findByRole("combobox", { name: t.followUp }), {
-    target: { value: "one-at-a-time" },
-  })
+  await selectOption(await screen.findByRole("combobox", { name: t.followUp }), "one-at-a-time")
   await waitFor(() =>
     expect(mockManager.setSessionQueuePolicy).toHaveBeenCalledWith("agent", "session", {
       followUp: "one-at-a-time",

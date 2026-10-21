@@ -11,7 +11,11 @@
 
 import { isTauri } from "@/lib/tauri"
 import { discoverInstructionPaths, type DiscoveredPath } from "./discover"
-import { discoverMarkdownAgentFiles } from "./discover-agents"
+import {
+  discoverMarkdownAgentFiles,
+  discoverMarkdownAgentPaths,
+  type MarkdownAgentPath,
+} from "./discover-agents"
 import { expandImports } from "./imports"
 import { renderInstructions } from "./render"
 import { dirname, joinPath, pathKey } from "./paths"
@@ -128,6 +132,26 @@ export async function discoverProjectInstructionFiles(
   const tauri = input.isTauriEnv ?? isTauri()
   if (!tauri && !input.fs) return []
   return discoverWithHome(input, config, input.fs ?? realFs(), await resolveHome(input))
+}
+
+/**
+ * The markdown agent files a turn in `roots` would load, in load order, without
+ * reading them. Same directories and order as the send path. Empty off-Tauri
+ * (without an injected fs) and when project agents are off.
+ */
+export async function discoverProjectAgentFiles(
+  input: Omit<LoadInstructionsInput, "now" | "cwd">
+): Promise<MarkdownAgentPath[]> {
+  const config = resolveInstructionsConfig(input.config)
+  if (!config.enabled || !config.loadProjectAgents) return []
+  const tauri = input.isTauriEnv ?? isTauri()
+  if (!tauri && !input.fs) return []
+  const home = await resolveHome(input)
+  return discoverMarkdownAgentPaths({
+    roots: input.roots,
+    globalAgentsDir: home ? joinPath(home, joinPath(".cognia", "agents")) : undefined,
+    fs: input.fs ?? realFs(),
+  })
 }
 
 export async function loadProjectInstructions(

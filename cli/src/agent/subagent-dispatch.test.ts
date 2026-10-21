@@ -1,9 +1,24 @@
 /**
  * @jest-environment node
  */
-import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+
+// Dispatch receives explicit agent/config fixtures. Built-in characters,
+// skills, teams, and workflow publications are unrelated to journal behavior.
+jest.mock("@/lib/db/seed", () => ({
+  seedBuiltIns: jest.fn().mockResolvedValue(undefined),
+}))
+
+jest.mock("../db/bootstrap", () => ({
+  ...jest.requireActual("../db/bootstrap"),
+  ensureCliDb: jest.fn(),
+}))
+
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
+import { __resetCliDbForTesting, ensureCliDb, type CliDbHandle } from "../db/bootstrap"
+import type { DbLike } from "../db/snapshot"
 
 import {
   buildCliSubagentToolManifest,
@@ -36,6 +51,11 @@ import {
 } from "./subagent-live-output"
 
 let testHome = ""
+const dbFixture = createDbTestFixture({ seeded: false })
+let dbInitialized = false
+let dbHandle: CliDbHandle | null = null
+const realEnsureCliDb =
+  jest.requireActual<typeof import("../db/bootstrap")>("../db/bootstrap").ensureCliDb
 
 // For the end-to-end test below: mock the live-sidecar collaborators so a call
 // routed through the REAL handle → REAL handleCliDispatchAgent → REAL
@@ -90,18 +110,58 @@ function req(
 }
 
 beforeEach(() => {
-  testHome = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-dispatch-"))
+  testHome = path.join(os.tmpdir(), "cognia-dispatch-unit")
+  // Keep the real dispatcher, Dexie journal, and snapshot serialization. Disk
+  // durability belongs to the background-task heavy suite, so dispatch tests
+  // persist only their journal table through the existing in-memory seam. Open
+  // and restore the real database only when a test actually needs the journal.
+  let snapshot: string | null = null
+  let prepared: Promise<void> | null = null
+  jest.mocked(ensureCliDb).mockImplementation(async (options = {}) => {
+    prepared ??= (async () => {
+      if (!dbInitialized) {
+        await dbFixture.initialize()
+        dbInitialized = true
+      } else {
+        await dbFixture.restore()
+      }
+    })()
+    await prepared
+    dbHandle = await realEnsureCliDb({
+      ...options,
+      getDatabase: () => {
+        const db = getDb()
+        return { name: db.name, verno: db.verno, tables: [db.backgroundTasks] } as DbLike
+      },
+      readSnapshot: () => snapshot,
+      writeSnapshot: (_file, data) => {
+        snapshot = data
+      },
+      schedule: () => () => {},
+    })
+    return dbHandle
+  })
 })
 
 afterEach(async () => {
   try {
     clearCliSubagentContext("s1")
     await __disposeCliBackgroundJournalForTesting()
-    __clearAllCliBackgroundRunsForTesting()
-    __clearLiveSubagentsForTesting()
   } finally {
-    fs.rmSync(testHome, { recursive: true, force: true })
+    // Some foreground-only tests never attach the journal's lastHandle.
+    try {
+      await dbHandle?.dispose()
+    } finally {
+      dbHandle = null
+      __resetCliDbForTesting()
+      __clearAllCliBackgroundRunsForTesting()
+      __clearLiveSubagentsForTesting()
+    }
   }
+})
+
+afterAll(async () => {
+  if (dbInitialized) await dbFixture.dispose()
 })
 
 describe("buildCliSubagentToolManifest", () => {
@@ -358,9 +418,7 @@ describe("handleCliDispatchAgent", () => {
   })
 
   it("resumes a finished background run with the prior prompt + outcome as context", async () => {
-    // Real tmp home: the resume path reads the journal, and a fake home makes
-    // the CLI DB snapshot dispose throw (the pre-existing red-test trap).
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-resume-"))
+    const home = testHome
     const prompts: string[] = []
     const run = jest.fn(async (_def: unknown, prompt: string) => {
       prompts.push(prompt)
@@ -383,7 +441,7 @@ describe("handleCliDispatchAgent", () => {
   })
 
   it("refuses to resume an unknown or still-running run", async () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-resume-"))
+    const home = testHome
     registerCliSubagentContext("s1", makeCtx({ home }))
     const missing = await handleCliDispatchAgent(req({ resume: "ghost", prompt: "x" }))
     expect(missing.result).toContain('no background run "ghost"')
@@ -686,9 +744,7 @@ describe("nested dispatch (depth / chain / tree edges)", () => {
   })
 
   it("parks a nested background run under the root session so the root can collect it", async () => {
-    // A writable journal home — the shared "/home/.cognia" fixture path is not
-    // creatable on macOS, which reds the journal flush in afterEach.
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-nested-bg-"))
+    const home = testHome
     const run = jest.fn(async () => ({ text: "nested bg done" }))
     registerCliSubagentContext("s1::sub-child", {
       ...makeCtx({ agents: [agent("helper")], run, mintRunId: () => "bg-nested", home }),

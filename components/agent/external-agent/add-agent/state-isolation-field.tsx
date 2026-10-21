@@ -111,13 +111,13 @@ export function StateIsolationField({
   ]
 
   return (
-    <fieldset className={cn("grid gap-2", className)} data-testid="state-isolation-field">
+    <fieldset className={cn("grid min-w-0 gap-2", className)} data-testid="state-isolation-field">
       <legend className="mb-1 text-sm font-medium">{t("legend")}</legend>
       <RadioGroup
         value={value}
         onValueChange={(next) => onChange(next as ExternalAgentStateIsolation)}
         disabled={disabled}
-        className="gap-2"
+        className="grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-2"
         aria-label={t("legend")}
       >
         {options.map((option) => {
@@ -127,7 +127,7 @@ export function StateIsolationField({
               key={option.value}
               htmlFor={id}
               className={cn(
-                "flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal",
+                "flex min-h-11 min-w-0 cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal",
                 value === option.value && "border-primary bg-primary/5",
                 option.disabled && "cursor-not-allowed opacity-60"
               )}

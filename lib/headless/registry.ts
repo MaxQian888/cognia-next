@@ -10,15 +10,16 @@ import type { HeadlessRuntime } from "./types"
 const runtimes = new Map<string, HeadlessRuntime>()
 
 /**
- * Register a runtime. Throws on a duplicate name — two registrations with
- * one name is always a wiring bug (double import or a copy-paste slip), and
- * silently keeping either one hides it.
+ * Register a runtime. Development HMR can reevaluate a runtime module while
+ * retaining this registry, so replace its definition without changing order.
+ * Registration never starts a runtime. Outside development, duplicate names
+ * still throw so wiring mistakes cannot silently replace a runtime.
  */
 export function registerHeadlessRuntime(runtime: HeadlessRuntime): void {
   if (!runtime.name.trim()) {
     throw new Error("headless runtime must have a non-empty name")
   }
-  if (runtimes.has(runtime.name)) {
+  if (runtimes.has(runtime.name) && process.env.NODE_ENV !== "development") {
     throw new Error(`headless runtime "${runtime.name}" is already registered`)
   }
   runtimes.set(runtime.name, runtime)

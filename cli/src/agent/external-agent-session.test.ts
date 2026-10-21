@@ -2231,6 +2231,55 @@ describe("external-agent turn bounds", () => {
     expect(getExecuteOptions()?.permissionMode).toBe("default")
   })
 
+  it.each([
+    { promptTokensIncludeCache: true, expectedInput: 3 },
+    { promptTokensIncludeCache: undefined, expectedInput: 19 },
+  ])(
+    "keeps CLI input/cache buckets disjoint only when declared: $promptTokensIncludeCache",
+    async ({ promptTokensIncludeCache, expectedInput }) => {
+      const transcript = memoryTranscript()
+      const { manager } = fakeManager({
+        tokenUsage: {
+          promptTokens: 19,
+          promptTokensIncludeCache,
+          completionTokens: 2,
+          totalTokens: 21,
+          cacheReadTokens: 7,
+          cacheWriteTokens: 9,
+          contextTokens: 21,
+          modelContextWindow: 1_000_000,
+        },
+      })
+      const session = createExternalAgentSession({
+        disableToolHost: true,
+        config: baseConfig,
+        manager,
+        transcriptFs: transcript.fs,
+      })
+
+      try {
+        const turn = await session.send("go", { gate: async () => ({ decision: "allow" }) })
+        const expectedUsage = {
+          inputTokens: expectedInput,
+          outputTokens: 2,
+          cacheReadInputTokens: 7,
+          cacheCreationInputTokens: 9,
+          contextTokens: 21,
+          contextWindow: 1_000_000,
+        }
+        expect(turn.usage).toMatchObject(expectedUsage)
+        expect(transcript.lines.map((line) => JSON.parse(line))).toContainEqual(
+          expect.objectContaining({
+            role: "assistant",
+            meta: expect.objectContaining({ usage: expect.objectContaining(expectedUsage) }),
+          })
+        )
+      } finally {
+        await session.close()
+      }
+    }
+  )
+
   it("tracks liveness and tolerates a close before any turn", async () => {
     const { manager } = fakeManager()
     const session = createExternalAgentSession({

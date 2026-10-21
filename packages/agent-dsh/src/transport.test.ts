@@ -45,6 +45,22 @@ const COGNIA_GATEWAY_ENV = {
 }
 
 describe("resolveDshLaunchFromConfig", () => {
+  it("folds generic effort only for the native DeepSeek route", () => {
+    const native = resolveDshLaunchFromConfig(
+      config({
+        ...INSTALLED,
+        env: { ...INSTALLED.env, COGNIA_DSH_REASONING_EFFORT: "medium" },
+      })
+    )
+    expect(native.reasoningEffort).toBe("low")
+    const gateway = resolveDshLaunchFromConfig(
+      config({
+        ...INSTALLED,
+        env: { ...COGNIA_GATEWAY_ENV, COGNIA_DSH_REASONING_EFFORT: "medium" },
+      })
+    )
+    expect(gateway.reasoningEffort).toBe("medium")
+  })
   it("forwards process-wide reasoning and output limits", () => {
     expect(
       resolveDshLaunchFromConfig(

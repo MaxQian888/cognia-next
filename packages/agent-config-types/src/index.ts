@@ -6409,6 +6409,15 @@ export interface BackupAutoSchedule {
    * carried in v3 packages).
    */
   lastRunAt?: string
+  /** Local interval producer's durable cadence authority; history may be cleared/capped.
+   * Legacy lastRunAt is ambiguous (cron/remote also wrote it), so is not adopted.
+   * Scope binds the account database, host auto-key and destination/content contract. */
+  lastLocalRun?: {
+    scope: string
+    directory: string
+    content: "interval-full-v1"
+    completedAt: number
+  }
 }
 
 /**

@@ -16,7 +16,6 @@ import { collectSquadPresence } from "@/lib/agent/squad-presence"
 import { buildRouteTargets, type MentionTarget } from "@/lib/agent-team/runtime-targets"
 import type { RouteTargetSquad } from "@/lib/agent-team/runtime-targets"
 import { listAgentRuntimes } from "@/lib/ai/agent/runtime-catalog/catalog"
-import { externalAgentPresetIdOf } from "@/lib/ai/agent/external/config/preset-identity"
 import {
   HOST_CONFIG_COMMANDS,
   hostConfigsAvailability,
@@ -191,9 +190,5 @@ export async function snapshotRouteContext(
     currentRef: runtimeRefForSession(sessionId ?? undefined),
     teams,
     teammates,
-    externalEnabled: external.enabled,
-    configuredPresetIds: Object.values(external.agents ?? {})
-      .map((agent) => externalAgentPresetIdOf(agent))
-      .filter((presetId): presetId is string => !!presetId),
   }
 }

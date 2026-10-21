@@ -6573,16 +6573,18 @@ export function useClaudeChat() {
           },
         ])
       } else {
-        await approveTool(
+        const approvalArgs = [
           approval.sessionId,
           approval.requestId,
           decision === "allow_always" ? "allow" : decision,
-          ...(options?.updatedInput
-            ? ([denialMessage, options.updatedInput] as const)
-            : denialMessage
-              ? ([denialMessage] as const)
-              : ([] as const))
-        )
+        ] as const
+        if (options?.updatedInput) {
+          await approveTool(...approvalArgs, denialMessage, options.updatedInput)
+        } else if (denialMessage) {
+          await approveTool(...approvalArgs, denialMessage)
+        } else {
+          await approveTool(...approvalArgs)
+        }
       }
       // The receipt asserts the backend received the decision, so it is written
       // only after either dispatch path succeeds. A failure leaves the approval

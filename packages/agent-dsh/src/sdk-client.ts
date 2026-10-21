@@ -12,6 +12,7 @@ import { BaseProtocolAdapter } from "@cognia/agent-runtime-kit/base-adapter"
 
 import { translateDshNotification, type DshCodecWarning } from "./event-codec"
 import { DSH_SDK_EXECUTION_SEMANTICS } from "./manifest"
+import { dshNativeReasoningEffort } from "./channel"
 
 /**
  * Protocol adapter for the DeepSeek Harness stdio JSON-RPC SDK runtime.
@@ -149,6 +150,8 @@ interface DshSessionState {
   waiting?: object
   terminal?: Extract<ExternalAgentEvent, { type: "done" }>
   usage?: ExternalAgentTokenUsage
+  /** Request capacity persists across turns until the runtime changes models. */
+  modelContextWindow?: number
   cleanup?: () => void
   messageId?: string
   consumedMessageIds?: Set<string>
@@ -569,11 +572,23 @@ export class DshSdkRuntimeAdapter extends BaseProtocolAdapter {
         if (params.status === "idle" && state.started) state.idle = true
       }
       for (const event of result.events) {
+        if (event.type === "session_info_update" && event.metadata) {
+          const capacity = event.metadata.modelContextWindow
+          if (capacity !== undefined) {
+            state.modelContextWindow = typeof capacity === "number" ? capacity : undefined
+            if (state.usage) {
+              if (state.modelContextWindow === undefined) delete state.usage.modelContextWindow
+              else state.usage.modelContextWindow = state.modelContextWindow
+            }
+          }
+        }
         if (event.type === "done") {
           // A later idle or goal continuation cannot turn a failure into success.
           if (!state.terminal || state.terminal.success) state.terminal = event
         } else {
           if (event.type === "message_end" && event.tokenUsage) {
+            if (state.modelContextWindow !== undefined)
+              event.tokenUsage.modelContextWindow = state.modelContextWindow
             const total = state.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
             for (const key of [
               "promptTokens",
@@ -586,6 +601,14 @@ export class DshSdkRuntimeAdapter extends BaseProtocolAdapter {
               if (event.tokenUsage[key] !== undefined)
                 total[key] = (total[key] ?? 0) + event.tokenUsage[key]
             }
+            if (state.modelContextWindow !== undefined)
+              total.modelContextWindow = state.modelContextWindow
+            total.promptTokensIncludeCache = event.tokenUsage.promptTokensIncludeCache
+            if (
+              params.event?.type === "assistant/message" &&
+              event.tokenUsage.contextTokens !== undefined
+            )
+              total.contextTokens = event.tokenUsage.contextTokens
             state.usage = total
           }
           this.emit(state, event)
@@ -844,6 +867,10 @@ export class DshSdkClientAdapter extends BaseProtocolAdapter {
       delete launchEnv.COGNIA_DSH_REASONING_EFFORT
       if (effort !== undefined) launchEnv.COGNIA_DSH_REASONING_EFFORT = effort
       sessionOptions = { ...options, metadata: { ...options.metadata, reasoningEffort: effort } }
+    } else {
+      const effort = dshNativeReasoningEffort(launchEnv.COGNIA_DSH_REASONING_EFFORT)
+      if (effort !== undefined) launchEnv.COGNIA_DSH_REASONING_EFFORT = effort
+      sessionOptions = { ...options, metadata: { ...options.metadata, reasoningEffort: effort } }
     }
     const childConfig: ExternalAgentConfig = {
       ...config,
@@ -931,14 +958,12 @@ export class DshSdkClientAdapter extends BaseProtocolAdapter {
     return this.owner(sessionId).prompt(
       sessionId,
       message,
-      this.isGatewayTask && options
+      options
         ? {
             ...options,
-            reasoningEffort: gatewayReasoningEffort(
-              this._config!,
-              options.model,
-              options.reasoningEffort
-            ),
+            reasoningEffort: this.isGatewayTask
+              ? gatewayReasoningEffort(this._config!, options.model, options.reasoningEffort)
+              : dshNativeReasoningEffort(options.reasoningEffort),
           }
         : options
     )

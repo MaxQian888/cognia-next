@@ -8,6 +8,7 @@
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { act, renderHook } from "@testing-library/react"
 import type { SendContentBlock, SendOptions } from "@cognia/agent-config-types"
+import type { WithdrawnHostStateMessage } from "@/lib/db/mobile-outbound-queue"
 
 import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 import type {
@@ -134,6 +135,9 @@ const sendPromptMock = jest.fn().mockResolvedValue(undefined)
 const sessionControlMock = jest.fn().mockResolvedValue({ retained: false })
 const enqueueHostStateIntentMock = jest.fn().mockResolvedValue(null)
 const hostStateSessionIntentAvailableMock = jest.fn().mockResolvedValue(false)
+const withdrawUnsentHostStateMessagesMock = jest.fn(
+  async (_sessionId: string): Promise<WithdrawnHostStateMessage[]> => []
+)
 const interruptSessionMock = jest.fn().mockResolvedValue(undefined)
 // Live mid-turn steer into the Anthropic sidecar's streaming input. Rejecting
 // is the realistic default for most tests: an idle/closed query refuses, and
@@ -196,6 +200,8 @@ jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueueHostStateIntentIfAvailable: (...args: unknown[]) => enqueueHostStateIntentMock(...args),
   hostStateSessionIntentAvailable: (...args: unknown[]) =>
     hostStateSessionIntentAvailableMock(...args),
+  withdrawUnsentHostStateMessages: (sessionId: string) =>
+    withdrawUnsentHostStateMessagesMock(sessionId),
 }))
 
 // Standalone (BYOK) chat — off by default so the sidecar-path suite is
@@ -1079,6 +1085,7 @@ beforeEach(() => {
   stopLeaseHeartbeatMock.mockClear()
   enqueueHostStateIntentMock.mockReset().mockResolvedValue(null)
   hostStateSessionIntentAvailableMock.mockReset().mockResolvedValue(false)
+  withdrawUnsentHostStateMessagesMock.mockReset().mockResolvedValue([])
   interruptSessionMock.mockReset().mockResolvedValue(undefined)
   beginSharedSessionRunMock.mockReset().mockResolvedValue({ kind: "private" })
   standaloneFlag.value = false
@@ -4853,6 +4860,83 @@ describe("useClaudeChat — actions", () => {
     expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
   })
 
+  it("stop() restores unoffered HostState sends and keeps confirmed messages", async () => {
+    withdrawUnsentHostStateMessagesMock.mockResolvedValueOnce([
+      {
+        actionId: "queued-action",
+        messageId: "queued-message",
+        text: "try this",
+        attachmentNames: ["notes.txt"],
+      },
+    ])
+    enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "abort-action", status: "pending" })
+    const confirmed = {
+      id: "confirmed-message",
+      role: "user",
+      parts: [{ type: "text", text: "sent" }],
+    }
+    chatState.messages = [
+      confirmed,
+      { id: "queued-message", role: "user", parts: [{ type: "text", text: "try this" }] },
+    ]
+    const taken: Array<Record<string, unknown>> = []
+    const composer = (event: Event) => {
+      const detail = (event as CustomEvent<Record<string, unknown>>).detail
+      taken.push(detail)
+      detail.claimed = true
+    }
+    window.addEventListener("cognia:composer-append", composer)
+    try {
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.stop("sess-1")
+        await flush()
+      })
+      expect(withdrawUnsentHostStateMessagesMock).toHaveBeenCalledWith("sess-1")
+      expect(chatState.messages).toEqual([confirmed])
+      expect(taken).toEqual([
+        expect.objectContaining({ sessionId: "sess-1", text: "try this", missing: ["notes.txt"] }),
+      ])
+      expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+        sessionId: "sess-1",
+        action: { kind: "turn.abort" },
+      })
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener("cognia:composer-append", composer)
+    }
+  })
+
+  it("stop() reports withdrawal failure without discarding messages or queued follow-ups", async () => {
+    withdrawUnsentHostStateMessagesMock.mockRejectedValueOnce(new Error("outbox unavailable"))
+    const message = {
+      id: "queued-message",
+      role: "user",
+      parts: [{ type: "text", text: "keep me" }],
+    }
+    const followUp = { id: "follow-up", text: "keep following" }
+    chatState.otherSlices["stopping-session"] = {
+      ...makeSlice(),
+      messages: [message],
+      steerQueue: [followUp],
+    }
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.stop("stopping-session")
+    })
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+      "stopping-session",
+      expect.objectContaining({ detail: expect.stringContaining("outbox unavailable") })
+    )
+    expect(chatState.otherSlices["stopping-session"]?.messages).toEqual([message])
+    expect(chatState.otherSlices["stopping-session"]?.steerQueue).toEqual([followUp])
+    expect(chatState.clearSteerQueue).not.toHaveBeenCalled()
+    expect(enqueueHostStateIntentMock).not.toHaveBeenCalled()
+    expect(interruptSessionMock).not.toHaveBeenCalled()
+  })
+
   it("stop() releases the GUI before a slow interrupt acknowledgement returns", async () => {
     chatState.status = "streaming"
     let acknowledgeInterrupt: (() => void) | undefined
@@ -4937,25 +5021,28 @@ describe("useClaudeChat — actions", () => {
     expect(chatState.clearApproval).toHaveBeenCalledWith("r-1", "sess-1")
   })
 
-  it("respondToApproval preserves structured elicitation answers on the direct transport", async () => {
-    const { result } = renderHook(() => useClaudeChat())
-    await flush()
-    const updatedInput = { content: { branch: "main" } }
-    await act(async () => {
-      await result.current.respondToApproval(
-        { sessionId: "sess-1", requestId: "form-1", toolName: "interaction", input: {} } as never,
+  it.each(["allow", "allow_always"] as const)(
+    "respondToApproval preserves structured answers for %s on the direct transport",
+    async (decision) => {
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      const updatedInput = { content: { branch: "main" } }
+      await act(async () => {
+        await result.current.respondToApproval(
+          { sessionId: "sess-1", requestId: "form-1", toolName: "interaction", input: {} } as never,
+          decision,
+          { updatedInput }
+        )
+      })
+      expect(approveToolMock).toHaveBeenCalledWith(
+        "sess-1",
+        "form-1",
         "allow",
-        { updatedInput }
+        undefined,
+        updatedInput
       )
-    })
-    expect(approveToolMock).toHaveBeenCalledWith(
-      "sess-1",
-      "form-1",
-      "allow",
-      undefined,
-      updatedInput
-    )
-  })
+    }
+  )
 
   it("respondToApproval through an execution handle journals the resolution approveTool would have", async () => {
     const resolvePermission = jest.fn(async () => undefined)
@@ -8593,8 +8680,6 @@ describe("useClaudeChat — @agent turn routing", () => {
       currentRef: { kind: "builtin" },
       teams: { [reviewSquad.id]: reviewSquad },
       teammates: { [critic.id]: critic },
-      externalEnabled: true,
-      configuredPresetIds: ["codex"],
       ...overrides,
     }
   }
@@ -8674,7 +8759,7 @@ describe("useClaudeChat — @agent turn routing", () => {
     it.each([
       [
         "no Codex is configured",
-        routeContext({ runtimes: [BUILTIN_ROW], configuredPresetIds: [] }),
+        routeContext({ runtimes: [BUILTIN_ROW] }),
         { reason: "not-configured", detail: "" },
       ],
       [
@@ -9523,9 +9608,7 @@ describe("useClaudeChat — @agent turn routing", () => {
 
     it("refuses a route that can no longer run before touching the thread", async () => {
       chatState.messages = routedThread()
-      routeSnapshotMock.mockResolvedValue(
-        routeContext({ runtimes: [BUILTIN_ROW], configuredPresetIds: [] })
-      )
+      routeSnapshotMock.mockResolvedValue(routeContext({ runtimes: [BUILTIN_ROW] }))
       const { result } = await mount()
       await act(async () => {
         await result.current.regenerate("sess-1")
@@ -10131,9 +10214,7 @@ describe("useClaudeChat — @agent turn routing", () => {
         { id: "u-1", role: "user", parts: [{ type: "text", text: "hello" }] },
         { id: "a-1", role: "assistant", parts: [{ type: "text", text: "hi" }] },
       ]
-      routeSnapshotMock.mockResolvedValue(
-        routeContext({ runtimes: [BUILTIN_ROW], configuredPresetIds: [] })
-      )
+      routeSnapshotMock.mockResolvedValue(routeContext({ runtimes: [BUILTIN_ROW] }))
       const { result } = await mount()
       await act(async () => {
         await result.current.editAndResend("u-1", "@codex hello again", "sess-1")

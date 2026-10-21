@@ -754,6 +754,7 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
   })
 
   const base = {
+    kind: "resolved" as const,
     providerId: "p",
     apiKey: "k",
     baseURL: undefined,

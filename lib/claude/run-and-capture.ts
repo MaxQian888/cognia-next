@@ -64,6 +64,9 @@ import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
 import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
 import { getImElicitationContext } from "@/lib/connectors/hitl/im-elicitation-context"
 import { dispatchPreToolUse, dispatchPostToolUse } from "@/lib/claude/adapter-hooks"
+import { deepMerge } from "@/lib/a2ui/data-model"
+import { resolveStreamedRootId } from "@/lib/a2ui/component-tree"
+import type { A2UIComponent } from "@/types/a2ui/schema"
 
 /**
  * Envelope-backed capture subscription (ADR-0090 Phase 3, flag-gated).
@@ -237,11 +240,11 @@ function applyA2UIToolCall(
           map[comp.id] = comp
         }
       }
-      // Pick a sensible root: first component's id if no `root` key
-      // present yet. Mirrors the renderer's "first component is root"
-      // convention for assistant-emitted updates.
-      const firstId = components[0]?.id as string | undefined
-      const rootId = "root" in map ? "root" : (firstId ?? existing.rootId)
+      const rootId = resolveStreamedRootId(
+        existing.components,
+        existing.rootId,
+        components as unknown as A2UIComponent[]
+      )
       acc.surfaces.set(surfaceId, { ...existing, components: map, rootId })
       if (!acc.order.includes(surfaceId)) acc.order.push(surfaceId)
       break
@@ -258,7 +261,7 @@ function applyA2UIToolCall(
       const data =
         input.data && typeof input.data === "object" ? (input.data as Record<string, unknown>) : {}
       const merge = input.merge !== false // default true
-      const dataModel = merge ? { ...existing.dataModel, ...data } : data
+      const dataModel = merge ? deepMerge(existing.dataModel, data) : data
       acc.surfaces.set(surfaceId, { ...existing, dataModel })
       if (!acc.order.includes(surfaceId)) acc.order.push(surfaceId)
       break

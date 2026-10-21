@@ -564,10 +564,6 @@ export const createExternalAgentActionsSlice = (
   // Settings
   // ========================================
 
-  setEnabled: (enabled: boolean): void => {
-    set({ enabled })
-  },
-
   setDefaultPermissionMode: (mode: ExternalAgentState["defaultPermissionMode"]): void => {
     set({ defaultPermissionMode: mode })
   },

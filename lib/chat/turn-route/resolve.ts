@@ -53,10 +53,6 @@ export interface RouteResolutionContext {
   currentRef: AgentRuntimeRef
   teams: Readonly<Record<string, AgentTeam>>
   teammates: Readonly<Record<string, AgentTeammate>>
-  /** The External Agents master switch. */
-  externalEnabled: boolean
-  /** Preset ids of every configured local agent, regardless of the switch. */
-  configuredPresetIds: readonly string[]
 }
 
 /** The preset an external-backed member runs on, or null for the builtin lane. */
@@ -110,10 +106,9 @@ function laneForPresetFamily(
       runtime: presetId,
     }
   }
-  const configured = ctx.configuredPresetIds.some((id) => family.includes(id))
   return {
     ok: false,
-    reason: configured && !ctx.externalEnabled ? "disabled" : "not-configured",
+    reason: "not-configured",
     runtime: presetId,
   }
 }

@@ -204,6 +204,8 @@ export interface ProviderDiagnosticsRefreshState {
   nextDueAt: number
   lastAttemptAt?: number
   lastSuccessAt?: number
+  /** Content-free source outcome, independent of the scheduler clock's completion. */
+  lastOutcome?: "succeeded" | "failed" | "blocked" | "skipped"
   consecutiveFailures: number
   retryAfterMs?: number
   lastObservedRemaining?: number
