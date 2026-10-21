@@ -8,10 +8,10 @@ export type {
   PluginContextPanelRenderer,
   PluginModuleContextPanelDef,
   PluginWebviewContextPanelDef,
-} from "@/types/plugin/plugin-context-panel"
+} from "@cognia/plugin-contract/types/plugin/plugin-context-panel"
 export type { ContextPanelWebviewRpcRegistration } from "@/lib/plugin/bridge/context-panel-webview-rpc"
 /** Read permission each resource kind is gated on — the same map the host uses. */
-export { CONTEXT_RESOURCE_READ_PERMISSIONS } from "@/types/context-workbench"
+export { CONTEXT_RESOURCE_READ_PERMISSIONS } from "@cognia/plugin-contract/types/context-workbench"
 export type {
   PluginContextPanelAPI,
   PluginContextPanelRegistration,
@@ -27,7 +27,7 @@ export type {
   ContextResource,
   ContextResourceKind,
   ContextWorkbenchMode,
-} from "@/types/context-workbench"
+} from "@cognia/plugin-contract/types/context-workbench"
 
 import type { ContextPanelWebviewRpcRegistration } from "@/lib/plugin/bridge/context-panel-webview-rpc"
 import type { PluginContextWorkbenchState } from "@/lib/plugin/api/context-panel-api"
@@ -35,7 +35,7 @@ import type {
   ContextPanelMode,
   ContextResource,
   ContextWorkbenchMode,
-} from "@/types/context-workbench"
+} from "@cognia/plugin-contract/types/context-workbench"
 
 /**
  * The client an author's webview script gets from

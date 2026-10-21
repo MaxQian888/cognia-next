@@ -16,4 +16,4 @@ export type {
   ExportOptions,
   ExportResult,
   PluginExportAPI,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"

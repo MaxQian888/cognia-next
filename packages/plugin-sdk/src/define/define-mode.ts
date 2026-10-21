@@ -4,7 +4,7 @@
  * Pure typesafety pass-through for `manifest.modes[]` entries.
  */
 
-import type { PluginModeDef } from "@/types/plugin/plugin"
+import type { PluginModeDef } from "@cognia/plugin-contract/types/plugin/plugin"
 
 export function defineMode(def: PluginModeDef): PluginModeDef {
   return def

@@ -25,15 +25,15 @@ export {
   upsertToolRoute,
 } from "@/lib/db/tool-routes"
 
-export type { PluginToolRouteDef } from "@/types/plugin/plugin-tool-route"
+export type { PluginToolRouteDef } from "@cognia/plugin-contract/types/plugin/plugin-tool-route"
 
 export {
   DEFAULT_DIFFICULTY_ROUTING,
   DEFAULT_SEMANTIC_TOOL_ROUTING,
-} from "@/types/routing/tool-route"
+} from "@cognia/plugin-contract/types/routing/tool-route"
 
 export type {
   DifficultyRoutingSettings,
   SemanticToolRoutingSettings,
   ToolRouteRecord,
-} from "@/types/routing/tool-route"
+} from "@cognia/plugin-contract/types/routing/tool-route"

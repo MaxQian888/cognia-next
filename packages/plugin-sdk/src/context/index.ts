@@ -13,14 +13,14 @@
  *  - The complete callable API (`PluginContextAPI`)
  */
 
-import type { PluginContext as CtxPluginContext } from "@/types/plugin/plugin"
-export type * from "@/types/plugin/plugin-knowledge"
-export type { PluginProjectWebviewAPI } from "@/types/plugin/plugin"
+import type { PluginContext as CtxPluginContext } from "@cognia/plugin-contract/types/plugin/plugin"
+export type * from "@cognia/plugin-contract/types/plugin/plugin-knowledge"
+export type { PluginProjectWebviewAPI } from "@cognia/plugin-contract/types/plugin/plugin"
 
 declare global {
   interface Window {
     /** Present in a sandboxed webview declaring project read/write permission. */
-    acquireCogniaProjectApi?: () => import("@/types/plugin/plugin").PluginProjectWebviewAPI
+    acquireCogniaProjectApi?: () => import("@cognia/plugin-contract/types/plugin/plugin").PluginProjectWebviewAPI
   }
 }
 
@@ -94,7 +94,7 @@ export type {
   PluginSecretsBackend,
   PluginWorkflowAPI,
   PluginDexieAPI,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"
 
 // =============================================================================
 // Agent runtime companion types referenced by PluginAgentAPI.
@@ -107,7 +107,7 @@ export type {
   PluginSubagentDispatchResult,
   PluginRunTeamOptions,
   PluginRunTeamResult,
-} from "@/types/plugin/plugin-agent-sdk"
+} from "@cognia/plugin-contract/types/plugin/plugin-agent-sdk"
 export type {
   PluginGlanceAPI,
   PluginGlanceAction,
@@ -117,18 +117,18 @@ export type {
   PluginGlanceStat,
   PluginGlanceTone,
   PluginGlanceVisibilityEvent,
-} from "@/types/plugin/plugin-glance"
-export type { PluginAgentGuardrailsAPI } from "@/types/plugin/plugin-agent-guardrails"
+} from "@cognia/plugin-contract/types/plugin/plugin-glance"
+export type { PluginAgentGuardrailsAPI } from "@cognia/plugin-contract/types/plugin/plugin-agent-guardrails"
 export type {
   PluginAgentSessionsAPI,
   PluginCreateSessionOptions,
-} from "@/types/plugin/plugin-agent-session"
+} from "@cognia/plugin-contract/types/plugin/plugin-agent-session"
 export type {
   PluginAgentContextAPI,
   PluginContextProvider,
   PluginSharedMemoryReadOptions,
   PluginTwinMemoryQueryOptions,
-} from "@/types/plugin/plugin-context-provider"
+} from "@cognia/plugin-contract/types/plugin/plugin-context-provider"
 
 // =============================================================================
 // Additional runtime APIs mounted on PluginContext by feature-specific host
@@ -214,7 +214,7 @@ export type {
   BootstrapConversationInput,
   BootstrapConversationResult,
 } from "@/lib/plugin/api/connectors-api"
-export type { PluginIntegrationsAPI } from "@/types/plugin/plugin-integration"
+export type { PluginIntegrationsAPI } from "@cognia/plugin-contract/types/plugin/plugin-integration"
 export type {
   PluginTeamAPI,
   PluginTeamTaskCreateInput,
@@ -356,7 +356,7 @@ export type {
   PluginSchedulerAPI,
   PluginTaskExecutionEvent,
   PluginTaskStatistics,
-} from "@/types/plugin/plugin-scheduler"
+} from "@cognia/plugin-contract/types/plugin/plugin-scheduler"
 
 // =============================================================================
 // Additional callable APIs (from types/plugin/plugin.ts). These are merged
@@ -428,7 +428,7 @@ export type {
   PluginFileHandle,
   PluginSkillsAPI,
   PluginBuiltInSkillSummary,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"
 
 /**
  * The result shape `ctx.skills.invokeBuiltIn()` resolves to. It is part of
@@ -440,7 +440,7 @@ export type { BuiltInSkillResult } from "@/lib/skills/built-in/types"
 export type {
   PluginNodeRuntimeAPI,
   PluginNodeRuntimeStatus,
-} from "@/types/plugin/plugin-node-runtime"
+} from "@cognia/plugin-contract/types/plugin/plugin-node-runtime"
 
 // =============================================================================
 // Author-callable host tools (`ctx.agent.invokeTool`)
@@ -464,7 +464,7 @@ export type {
   PluginWebSearchInput,
   PluginWebSearchResult,
   PluginWebSearchSuccess,
-} from "@/types/plugin/plugin-host-tools"
+} from "@cognia/plugin-contract/types/plugin/plugin-host-tools"
 
 export type {
   PluginLibrarySchema,
@@ -475,4 +475,4 @@ export type {
   PluginLibrariesAPI,
   PluginLibraryModuleInstance,
   PluginLibraryModuleFactory,
-} from "@/types/plugin/plugin-library"
+} from "@cognia/plugin-contract/types/plugin/plugin-library"

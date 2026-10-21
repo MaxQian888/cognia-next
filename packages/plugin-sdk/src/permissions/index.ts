@@ -18,6 +18,6 @@ export type {
   PluginPermission,
   PluginPermissionDecision,
   PluginPermissionPolicy,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"
 
-export type { PluginAPIPermission } from "@/types/plugin/plugin"
+export type { PluginAPIPermission } from "@cognia/plugin-contract/types/plugin/plugin"

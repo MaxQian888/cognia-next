@@ -6,7 +6,7 @@
  * key/matches/fetch — plus a registry `id`) against `PluginLimitsSourceDef`.
  */
 
-import type { PluginLimitsSourceDef } from "@/types/plugin/plugin-limits-source"
+import type { PluginLimitsSourceDef } from "@cognia/plugin-contract/types/plugin/plugin-limits-source"
 
 export function defineLimitsSource(def: PluginLimitsSourceDef): PluginLimitsSourceDef {
   return def

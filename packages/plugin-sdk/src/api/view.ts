@@ -21,4 +21,4 @@ export type {
   PluginViewProps,
   ResolvedPluginView,
   TreeDataProvider,
-} from "@/types/plugin/plugin-view"
+} from "@cognia/plugin-contract/types/plugin/plugin-view"

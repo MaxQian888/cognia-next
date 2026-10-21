@@ -22,7 +22,7 @@ export type {
   BotStepBeginResult,
   BotTriggerSnapshot,
   BotWaitOutcome,
-} from "@/types/bot/api"
+} from "@cognia/plugin-contract/types/bot/api"
 
 export type {
   BotMatchScalar,
@@ -49,14 +49,14 @@ export type {
   PluginSquadBotDef,
   PluginAgentTurnBotDef,
   PluginHandlerBotDef,
-} from "@/types/plugin/plugin-bot"
+} from "@cognia/plugin-contract/types/plugin/plugin-bot"
 
 export {
   BOT_TIMED_TRIGGER_MIN_EVERY_MS,
   PLUGIN_BOT_EXECUTORS,
   PLUGIN_BOT_LIFECYCLE_HOOKS,
   PLUGIN_BOT_TRIGGER_KINDS,
-} from "@/types/plugin/plugin-bot"
+} from "@cognia/plugin-contract/types/plugin/plugin-bot"
 
 export type {
   BotEventEnvelopeV1,
@@ -64,7 +64,7 @@ export type {
   BotEventResource,
   BotEventProvenanceV1,
   BotEventSource,
-} from "@/types/bot/event"
+} from "@cognia/plugin-contract/types/bot/event"
 
 export type {
   BotHandlerV1,
@@ -79,4 +79,4 @@ export type {
   BotWaitForEventInput,
   BotProgressUpdateV1,
   BotLogLevel,
-} from "@/types/bot/run"
+} from "@cognia/plugin-contract/types/bot/run"

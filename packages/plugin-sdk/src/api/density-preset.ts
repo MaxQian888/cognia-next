@@ -25,5 +25,5 @@ export {
   resolveDensityAttrs,
 } from "@/lib/appearance/density-applier"
 
-export type { DensityLevel, DensitySettings } from "@/types/appearance"
-export type { PluginDensityPresetContribution } from "@/types/plugin/plugin"
+export type { DensityLevel, DensitySettings } from "@cognia/plugin-contract/types/appearance/index"
+export type { PluginDensityPresetContribution } from "@cognia/plugin-contract/types/plugin/plugin"

@@ -8,5 +8,5 @@
 export { createCompanionAPI } from "@/lib/plugin/api/companion-api"
 
 export type { CompanionServerStatus, PluginCompanionAPI } from "@/lib/plugin/api/companion-api"
-export type { PairedDeviceRow } from "@/types/mobile/paired-device"
-export type { Goal } from "@/types/goal"
+export type { PairedDeviceRow } from "@cognia/plugin-contract/types/mobile/paired-device"
+export type { Goal } from "@cognia/plugin-contract/types/goal"

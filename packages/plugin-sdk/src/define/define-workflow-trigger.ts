@@ -20,7 +20,7 @@
  *   })
  */
 
-import type { PluginTriggerDef } from "@/types/plugin/plugin-workflow"
+import type { PluginTriggerDef } from "@cognia/plugin-contract/types/plugin/plugin-workflow"
 
 export function defineWorkflowTrigger(trigger: PluginTriggerDef): PluginTriggerDef {
   return trigger

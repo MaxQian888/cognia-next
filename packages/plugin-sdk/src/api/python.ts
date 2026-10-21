@@ -16,4 +16,4 @@ export type {
   PythonParamDef,
   PythonPluginManifest,
   PythonToolDef,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"

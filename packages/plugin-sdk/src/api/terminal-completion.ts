@@ -42,4 +42,4 @@ export type {
   PluginTerminalCompletionItem,
   PluginTerminalCompletionProvider,
   PluginTerminalCompletionProviderDef,
-} from "@/types/plugin/plugin-terminal-completion"
+} from "@cognia/plugin-contract/types/plugin/plugin-terminal-completion"

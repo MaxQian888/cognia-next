@@ -80,21 +80,27 @@ export function stripComments(source) {
     .replace(/(^|[^:])\/\/[^\n]*/g, (line, lead) => lead + " ".repeat(line.length - lead.length))
 }
 
-export function findForbiddenAuthorImports(source, kits = []) {
-  const matches = []
-  source = stripComments(source)
-  /**
-   * `jest.mock(...)` and friends are module references too. A test that imports
-   * a symbol from `@cognia/plugin-sdk` but mocks it through `@/lib/...` still
-   * hard-codes a host-private path — it just does so somewhere a plain import
-   * scan cannot see, which is exactly how several first-party plugin tests kept
-   * a foot on the wrong side of the boundary after their imports were migrated.
-   * The SDK subpath is mockable in its place.
-   */
+/**
+ * Every module specifier a source file references: static and dynamic imports,
+ * `export … from`, `require()`, type queries (`import("…").T`), and
+ * `jest.mock(...)` and friends. Comments are ignored.
+ *
+ * `jest.mock(...)` and friends are module references too. A test that imports
+ * a symbol from `@cognia/plugin-sdk` but mocks it through `@/lib/...` still
+ * hard-codes a host-private path — it just does so somewhere a plain import
+ * scan cannot see, which is exactly how several first-party plugin tests kept
+ * a foot on the wrong side of the boundary after their imports were migrated.
+ * The SDK subpath is mockable in its place.
+ */
+export function moduleReferences(source) {
   const importPattern =
     /(?:from\s*|import\s*\(|require\s*\(|jest\s*\.\s*(?:mock|doMock|unmock|dontMock|setMock|requireActual|requireMock|createMockFromModule)\s*\(|import\s+(?=["']))\s*["']([^"']+)["']/g
-  for (const match of source.matchAll(importPattern)) {
-    const specifier = match[1]
+  return [...stripComments(source).matchAll(importPattern)].map((match) => match[1])
+}
+
+export function findForbiddenAuthorImports(source, kits = []) {
+  const matches = []
+  for (const specifier of moduleReferences(source)) {
     if (
       specifier.startsWith("@/lib") ||
       specifier.startsWith("@/types") ||
@@ -358,7 +364,7 @@ export function writeGovernanceBaseline(repoRoot = process.cwd()) {
   return dirty
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2)
   if (args.includes("--write-baseline")) {
     const dirty = writeGovernanceBaseline()

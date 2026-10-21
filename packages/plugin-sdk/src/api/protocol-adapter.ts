@@ -41,4 +41,4 @@ export type {
   PluginProtocolAdapterDef,
   ProtocolAdapterSpec,
   SidecarCodeAdapterSpec,
-} from "@/types/plugin/plugin-protocol-adapter"
+} from "@cognia/plugin-contract/types/plugin/plugin-protocol-adapter"

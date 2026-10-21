@@ -1,4 +1,4 @@
-import type { PluginManifest } from "@/types/plugin/plugin"
+import type { PluginManifest } from "@cognia/plugin-contract/types/plugin/plugin"
 
 import { definePlugin, definePluginManifest, type PluginManifestJson } from "./define-plugin"
 

@@ -6,7 +6,7 @@ export type {
   PluginWorkflowTemplateDef,
   PluginWorkflowTemplateEdge,
   PluginWorkflowTemplateNode,
-} from "@/types/plugin/plugin-workflow-template"
+} from "@cognia/plugin-contract/types/plugin/plugin-workflow-template"
 export type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 export type {
   PluginWorkflowTemplateWarning,

@@ -265,6 +265,7 @@ const REGISTRY = [
   { script: "lint:frozen-wasm-api", group: "audit" },
   { script: "lint:claude-md", group: "audit" },
   { script: "plugin:author-imports", group: "audit" },
+  { script: "plugin:sdk:standalone", group: "audit" },
 
   // Mirrored config / version files must agree across the tree.
   { script: "release:sync-keys:check", group: "sync" },

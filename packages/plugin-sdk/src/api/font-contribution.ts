@@ -32,4 +32,7 @@ export {
 } from "@/lib/appearance/font-registry"
 
 export type { FontEntry, FontSource } from "@/lib/appearance/font-registry"
-export type { PluginFontContribution, PluginFontFile } from "@/types/plugin/plugin"
+export type {
+  PluginFontContribution,
+  PluginFontFile,
+} from "@cognia/plugin-contract/types/plugin/plugin"

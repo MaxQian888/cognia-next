@@ -31,4 +31,4 @@ export type {
   PluginTriggerHandle,
   PluginTriggerLogger,
   PluginTriggerStartContext,
-} from "@/types/plugin/plugin-workflow"
+} from "@cognia/plugin-contract/types/plugin/plugin-workflow"

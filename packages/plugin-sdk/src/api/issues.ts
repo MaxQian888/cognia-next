@@ -44,4 +44,4 @@ export type {
   IssueProject,
   IssueStatus,
   IssueSyncField,
-} from "@/types/issues"
+} from "@cognia/plugin-contract/types/issues/index"

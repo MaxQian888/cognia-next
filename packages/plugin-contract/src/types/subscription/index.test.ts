@@ -7,7 +7,7 @@ import {
   isValidSubscriptionProviderId,
   DEFAULT_ANTHROPIC_SUBSCRIPTION_SETTINGS,
   DEFAULT_CODEX_SUBSCRIPTION_SETTINGS,
-} from "."
+} from "./"
 
 describe("providerIdForCredential", () => {
   it("dispatches each variant to its parent provider", () => {

@@ -1,0 +1,116 @@
+import type { ConversationDeliveryTarget, ConversationReference } from "./event"
+import type { MessageSegment, SegmentType } from "./segment"
+
+export interface OutboundRequest {
+  conversationRef: ConversationReference
+  /** Complete persisted destination; preferred over the legacy loose reference. */
+  deliveryTarget?: ConversationDeliveryTarget
+  segments: MessageSegment[]
+  replyTo?: { messageId: string }
+  threadId?: string
+  /**
+   * When set, the outbound runner edits this existing platform message id
+   * instead of sending a new one — the dispatch goes to `adapter.edit()`
+   * rather than `adapter.send()`. Adapters that do not implement
+   * `edit()` fall through to a new send (the runner detects via the
+   * adapter capability check and audits the fallback). Used by the
+   * run-presentation runner for in-place status card refresh.
+   */
+  editTargetMessageId?: string
+  metadata: {
+    /** Opt-in Lark bot card visible only to this recipient in an ordinary group.
+     * The ephemeral endpoint has no remote idempotency: ambiguous sends require reconciliation.
+     */
+    larkEphemeral?: { recipientOpenId: string }
+    /** Stable across retries; required. */
+    idempotencyKey: string
+    /** When this is a reply, the inbound StoredMessage.id that triggered it. */
+    sourceMessageId?: string
+    /** When this comes from a scheduled task, the task id. */
+    scheduledTaskId?: string
+    /**
+     * Set when the outbound runner re-enqueued this job through a failover
+     * sibling because the original adapter's circuit was open. Carries the
+     * ORIGINAL adapter id, both as an audit trail and as the single-hop
+     * guard: a job that already failed over once is dead-lettered (never
+     * re-failed-over) if the sibling's circuit is open too.
+     */
+    failoverFromAdapterId?: string
+    /**
+     * Set when the outbound runner re-enqueued this job through a
+     * load-balancing sibling because the original adapter's token bucket
+     * was exhausted. Carries the ORIGINAL adapter id; together with
+     * `failoverFromAdapterId` it forms the single-hop guard — a job that
+     * was rerouted once (either mechanism) is never rerouted again.
+     */
+    balancedFromAdapterId?: string
+    /** Host-enforced provenance for externally delivered generated content. */
+    provenance?: Array<{
+      source: "digital-twin"
+      sourceId: string
+      disclosure: "ai-generated"
+    }>
+    /**
+     * Marks the job as carrying a terminal result card (Lark Card 2.0) for an
+     * execution surface. Forwarded verbatim to the `onConnectorOutbound`
+     * plugin hook so a result-card middleware can tell "this segment list IS
+     * the run's final card" apart from ordinary traffic without parsing card
+     * JSON — the analogue of Aiden's `onResultCard(ctx, card, meta)` seam.
+     * Read-only context for the hook; the runner never acts on it.
+     */
+    resultCard?: {
+      /** The execution run / turn the card reports on. */
+      runId?: string
+      /** Terminal state the card was rendered with. */
+      status: "done" | "error" | "interrupted"
+      /** The triggering inbound StoredMessage, when one exists. */
+      sourceMessageId?: string
+    }
+  }
+}
+
+export interface OutboundError {
+  /** Stable code: "rate_limited" | "auth_failed" | "platform_4xx" | "platform_5xx" | "network" | "validation" | "unsupported_segment" | "circuit_open" */
+  code: string
+  message: string
+  retryable: boolean
+  /** Optional platform-side hint ("retry-after seconds"). */
+  retryAfterMs?: number
+}
+
+/**
+ * Codes meaning the platform rejected a credential after the adapter's own
+ * refresh-and-retry-once: `auth_failed` for the bot/app credential,
+ * `identity_reauthorization_required` for a per-user identity (Lark user
+ * token). Neither heals by retrying or restarting — the user has to
+ * reconnect, so the runner records `adapter.reauth_required` for them.
+ */
+export const REAUTH_ERROR_CODES = ["auth_failed", "identity_reauthorization_required"] as const
+
+export type ReauthErrorCode = (typeof REAUTH_ERROR_CODES)[number]
+
+export function isReauthCode(code: string | undefined): code is ReauthErrorCode {
+  return code !== undefined && (REAUTH_ERROR_CODES as readonly string[]).includes(code)
+}
+
+export interface SegmentDowngrade {
+  from: SegmentType
+  to: SegmentType
+  reason: string
+}
+
+export interface OutboundResult {
+  ok: boolean
+  platformMessageId?: string
+  error?: OutboundError
+  downgrades?: SegmentDowngrade[]
+}
+
+/**
+ * UUIDv4 generator using crypto.randomUUID() (available in jsdom 22+ and
+ * all Tauri webview targets).
+ */
+export function newIdempotencyKey(): string {
+  // crypto.randomUUID always returns lowercase canonical UUIDv4.
+  return crypto.randomUUID()
+}

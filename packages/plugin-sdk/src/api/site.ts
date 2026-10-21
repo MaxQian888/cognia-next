@@ -22,4 +22,4 @@ export type {
   SiteVersionRow,
   SiteVersionStatus,
   SiteVisitorPolicy,
-} from "@/types/sites"
+} from "@cognia/plugin-contract/types/sites"

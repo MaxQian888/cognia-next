@@ -159,4 +159,4 @@ export type {
   ExtensionRegistration,
   ExtensionProps,
   ChatInputEffortSlotContext,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"

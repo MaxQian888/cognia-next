@@ -42,4 +42,4 @@ export type {
   TeamExecutionReport,
   TeamStatus,
   TeamTaskStatus,
-} from "@/types/agent/agent-team"
+} from "@cognia/plugin-contract/types/agent/agent-team"

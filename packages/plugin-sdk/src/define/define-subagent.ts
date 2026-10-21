@@ -17,10 +17,10 @@
  *   })
  */
 
-import type { PluginToolDef } from "@/types/plugin/plugin"
-import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+import type { PluginToolDef } from "@cognia/plugin-contract/types/plugin/plugin"
+import type { PluginSubagentDef } from "@cognia/plugin-contract/types/plugin/plugin-subagent"
 import { normalizeAgentModelRoleOverrides } from "@cognia/agent-contracts/external-agent"
-import { normalizeCogniaModelBinding } from "@/types/agent/external-agent"
+import { normalizeCogniaModelBinding } from "@cognia/plugin-contract/types/agent/external-agent"
 
 export type PluginSubagentToolReference = string | Pick<PluginToolDef, "name">
 

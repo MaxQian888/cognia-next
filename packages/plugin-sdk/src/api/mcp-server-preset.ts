@@ -28,4 +28,4 @@ export {
   listMcpServerPresetEntries,
 } from "@/lib/plugin/registries/mcp-server-preset-registry"
 
-export type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
+export type { PluginMcpServerPresetDef } from "@cognia/plugin-contract/types/plugin/plugin-mcp-preset"

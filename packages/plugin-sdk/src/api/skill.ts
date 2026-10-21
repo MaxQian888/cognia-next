@@ -27,4 +27,7 @@ export {
   listSkillEntries,
 } from "@/lib/plugin/registries/skill-registry"
 
-export type { PluginSkillDef, PluginSkillSource } from "@/types/plugin/plugin-skill"
+export type {
+  PluginSkillDef,
+  PluginSkillSource,
+} from "@cognia/plugin-contract/types/plugin/plugin-skill"

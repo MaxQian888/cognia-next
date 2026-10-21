@@ -239,6 +239,9 @@ importers:
       '@cognia/ocr':
         specifier: workspace:*
         version: link:packages/ocr
+      '@cognia/plugin-contract':
+        specifier: workspace:*
+        version: link:packages/plugin-contract
       '@cognia/plugin-sdk':
         specifier: workspace:*
         version: link:packages/plugin-sdk
@@ -2005,6 +2008,8 @@ importers:
         specifier: '*'
         version: 7.0.0
 
+  packages/plugin-contract: {}
+
   packages/plugin-sdk:
     dependencies:
       '@agentclientprotocol/sdk':
@@ -2016,6 +2021,9 @@ importers:
       '@cognia/ocr':
         specifier: workspace:*
         version: link:../ocr
+      '@cognia/plugin-contract':
+        specifier: workspace:*
+        version: link:../plugin-contract
       '@cognia/provider-core':
         specifier: workspace:*
         version: link:../provider-core

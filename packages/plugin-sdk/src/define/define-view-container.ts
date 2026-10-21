@@ -13,7 +13,7 @@
  *   })
  */
 
-import type { PluginViewContainerDef } from "@/types/plugin/plugin-view-container"
+import type { PluginViewContainerDef } from "@cognia/plugin-contract/types/plugin/plugin-view-container"
 
 export function defineViewContainer(container: PluginViewContainerDef): PluginViewContainerDef {
   return container

@@ -47,4 +47,4 @@ export type {
   PluginWorkspaceBackendFactoryContext,
   PluginWorkspaceBackendRegistration,
   WorkspaceProvider,
-} from "@/types/plugin/plugin-workspace-backend"
+} from "@cognia/plugin-contract/types/plugin/plugin-workspace-backend"

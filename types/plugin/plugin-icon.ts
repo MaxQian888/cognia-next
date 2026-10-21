@@ -1,2 +1,5 @@
-/** Any icon exported by the host-shared `lucide-react` icon registry. */
-export type PluginIconName = keyof typeof import("lucide-react").icons
+/**
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract types.
+ * This re-export keeps host imports of `@/types/plugin/plugin-icon` working.
+ */
+export * from "@cognia/plugin-contract/types/plugin/plugin-icon"

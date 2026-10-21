@@ -4,7 +4,7 @@
  * Pure typesafety pass-through for `manifest.workspaceBackends[]` entries.
  */
 
-import type { PluginWorkspaceBackendDef } from "@/types/plugin/plugin-workspace-backend"
+import type { PluginWorkspaceBackendDef } from "@cognia/plugin-contract/types/plugin/plugin-workspace-backend"
 
 export function defineWorkspaceBackend(def: PluginWorkspaceBackendDef): PluginWorkspaceBackendDef {
   return def

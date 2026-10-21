@@ -4,7 +4,7 @@
  * Pure typesafety pass-through for `manifest.ocrProviders[]` entries.
  */
 
-import type { PluginOcrProviderDef } from "@/types/plugin/plugin-ocr"
+import type { PluginOcrProviderDef } from "@cognia/plugin-contract/types/plugin/plugin-ocr"
 
 export function defineOcrProvider(def: PluginOcrProviderDef): PluginOcrProviderDef {
   return def

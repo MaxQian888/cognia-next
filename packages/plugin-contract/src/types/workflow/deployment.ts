@@ -1,0 +1,124 @@
+import type { VisualWorkflow, WorkflowInterface, WorkflowNodeKind } from "./visual"
+import type { WorkflowRetryMode } from "./visual"
+
+export type WorkflowEnvironment = "production" | "staging" | "development" | (string & {})
+
+export interface WorkflowDependencyManifest {
+  nodeTypes: Array<{ kind: WorkflowNodeKind; typeVersion: number }>
+  workflows: Array<{ workflowId: string; nodeId: string }>
+  credentials: Array<{ key: string; refId: string; kind?: string }>
+}
+
+export interface WorkflowConfigDefinition {
+  constants: Record<string, string>
+  secretRefs: Array<{ key: string; refId: string; kind?: string }>
+}
+
+/** Immutable executable artifact created by every publish operation. */
+export interface WorkflowVersion {
+  id: string
+  accountId: string
+  workflowId: string
+  sequence: number
+  definition: VisualWorkflow
+  interface: WorkflowInterface
+  dependencyManifest: WorkflowDependencyManifest
+  configDefinition: WorkflowConfigDefinition
+  digest: string
+  name: string
+  description?: string
+  /** Operator-authored immutable label for this publication. */
+  versionName?: string
+  /** Operator-authored immutable release notes for this publication. */
+  releaseNotes?: string
+  createdAt: number
+  createdBy?: string
+}
+
+/** Atomic pointer selecting the version executed in one environment. */
+export interface WorkflowDeployment {
+  id: string
+  accountId: string
+  workflowId: string
+  environment: WorkflowEnvironment
+  versionId: string
+  revision: number
+  status: "active" | "disabled"
+  createdAt: number
+  updatedAt: number
+  updatedBy?: string
+}
+
+export type WorkflowEntrypoint =
+  | "http"
+  | "mcp"
+  | "portal"
+  | "trigger"
+  | "skill"
+  | "agent-tool"
+  | "subworkflow"
+  | "desktop"
+  | "cli"
+  // A `workflow` scheduled task (app scheduler) — see
+  // `lib/scheduler/executors/workflow-executor.ts`.
+  | "schedule"
+  // An installed Bot whose executor is a published workflow. Its own
+  // entrypoint so run history can tell a Bot-driven run from a human one, and
+  // so admission can scope a Bot differently from a person at a keyboard.
+  | "bot"
+
+export interface WorkflowInvocation {
+  id: string
+  accountId: string
+  entrypoint: WorkflowEntrypoint
+  caller: string
+  deploymentId: string
+  deploymentRevision: number
+  versionId: string
+  idempotencyKey?: string
+  runId?: string
+  status: "admitted" | "running" | "completed" | "rejected"
+  dependencyLock?: WorkflowDependencyLock
+  retryOfRunId?: string
+  retryMode?: WorkflowRetryMode
+  startStepId?: string
+  seedRunId?: string
+  operatedBy?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface WorkflowDependencyBinding {
+  workflowId: string
+  versionId: string
+  deploymentId: string
+  deploymentRevision: number
+  dependencyLock?: WorkflowDependencyLock
+}
+
+/** Versions resolved before a formal run is admitted. Keys are parent node ids. */
+export interface WorkflowDependencyLock {
+  workflows: Record<string, WorkflowDependencyBinding>
+  indexes: Record<string, string>
+  /** Exact production plugin artifacts selected during application publication. */
+  plugins?: Record<string, WorkflowPluginDependencyBinding>
+}
+
+export interface WorkflowPluginDependencyBinding {
+  pluginId: string
+  version: string
+  manifestDigest: string
+  capabilities: string[]
+  runtimeProfile: "headless"
+}
+
+export interface WorkflowExecutionBinding {
+  invocationId?: string
+  versionId: string
+  deploymentId: string
+  deploymentRevision: number
+  entrypoint: WorkflowEntrypoint
+  caller: string
+  idempotencyKey?: string
+  dependencyLock?: WorkflowDependencyLock
+}

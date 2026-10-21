@@ -1,7 +1,7 @@
 /** Portable scheduled-task authoring contracts. Runtime operations live on context APIs. */
 
 import type { PluginScheduledTaskDef } from "@/types/plugin"
-import type { TaskTrigger } from "@/types/scheduler"
+import type { TaskTrigger } from "@cognia/plugin-contract/types/scheduler/index"
 
 export { defineScheduledTask } from "../define/define-scheduled-task"
 export type { PluginScheduledTaskDef } from "@/types/plugin"
@@ -24,7 +24,7 @@ export type {
   PluginTaskStatus,
   PluginTaskTrigger,
   UpdatePluginTaskInput,
-} from "@/types/plugin/plugin-scheduler"
+} from "@cognia/plugin-contract/types/plugin/plugin-scheduler"
 export type {
   PluginSchedulerActor,
   PluginSchedulerExecutionPage,
@@ -45,8 +45,8 @@ export type {
   TaskTrigger,
   TaskTriggerType,
   UpdateScheduledTaskInput,
-} from "@/types/scheduler"
-export { DEFAULT_PERMISSION_POLICY } from "@/types/scheduler"
+} from "@cognia/plugin-contract/types/scheduler/index"
+export { DEFAULT_PERMISSION_POLICY } from "@cognia/plugin-contract/types/scheduler/index"
 
 /** Project a declarative plugin trigger into the host scheduler vocabulary. */
 export function toTaskTrigger(def: PluginScheduledTaskDef): TaskTrigger {

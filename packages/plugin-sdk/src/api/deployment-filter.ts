@@ -33,7 +33,7 @@ export type {
   PluginDeploymentFilterDef,
   PluginDeploymentFilterFactory,
   PluginDeploymentFilterLike,
-} from "@/types/plugin/plugin-deployment-filter"
+} from "@cognia/plugin-contract/types/plugin/plugin-deployment-filter"
 
 export type {
   DeploymentCandidate,

@@ -39,7 +39,7 @@ export type {
   PluginEmbeddingProviderDef,
   PluginLlmProvider,
   PluginLlmProviderDef,
-} from "@/types/plugin/plugin-ai-provider"
+} from "@cognia/plugin-contract/types/plugin/plugin-ai-provider"
 
 export type {
   AIChatChunk,
@@ -48,4 +48,4 @@ export type {
   AIModel,
   AIProviderDefinition,
   PluginAIProviderAPI,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"

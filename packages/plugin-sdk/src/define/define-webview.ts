@@ -14,7 +14,7 @@
  *   })
  */
 
-import type { PluginWebviewDef } from "@/types/plugin/plugin-webview"
+import type { PluginWebviewDef } from "@cognia/plugin-contract/types/plugin/plugin-webview"
 
 export function defineWebview(webview: PluginWebviewDef): PluginWebviewDef {
   return webview

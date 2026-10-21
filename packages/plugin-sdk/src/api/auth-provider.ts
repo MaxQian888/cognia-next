@@ -33,4 +33,4 @@ export type {
   PluginAuthAPI,
   PluginAuthProvider,
 } from "@/lib/plugin/api/auth-api"
-export type { PluginAuthProviderDef } from "@/types/plugin/plugin-auth"
+export type { PluginAuthProviderDef } from "@cognia/plugin-contract/types/plugin/plugin-auth"

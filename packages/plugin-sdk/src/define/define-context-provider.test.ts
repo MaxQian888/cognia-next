@@ -2,7 +2,7 @@ import { defineContextProvider } from "./define-context-provider"
 import type {
   PluginContextProvider,
   PluginContextProviderDef,
-} from "@/types/plugin/plugin-context-provider"
+} from "@cognia/plugin-contract/types/plugin/plugin-context-provider"
 
 describe("defineContextProvider", () => {
   it("returns the runtime provider unchanged (identity pass-through)", () => {

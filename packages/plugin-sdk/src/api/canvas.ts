@@ -13,7 +13,7 @@ export type {
   CreateCanvasDocumentOptions,
   PluginCanvasAPI,
   PluginCanvasDocument,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"
 
 export type {
   CanvasActionConfig,
@@ -24,8 +24,15 @@ export type {
 } from "@/lib/ai/generation/canvas-actions"
 export type { AddCommentInput, ReplyInput } from "@/lib/db/canvas-comments"
 export type { PythonExecResult } from "@/lib/tauri/canvas"
-export type { CanvasComment, CollaborativeSession } from "@/types/canvas/collaboration"
-export type { ArtifactLanguage, CanvasDocumentVersion, CanvasSuggestion } from "@/types/artifact"
+export type {
+  CanvasComment,
+  CollaborativeSession,
+} from "@cognia/plugin-contract/types/canvas/collaboration"
+export type {
+  ArtifactLanguage,
+  CanvasDocumentVersion,
+  CanvasSuggestion,
+} from "@cognia/plugin-contract/types/artifact/index"
 
 /** The artifact row itself — what `ctx.artifacts` stores and renders. */
-export type { Artifact } from "@/types/artifact"
+export type { Artifact } from "@cognia/plugin-contract/types/artifact/index"

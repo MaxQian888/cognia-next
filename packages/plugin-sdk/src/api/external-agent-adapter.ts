@@ -16,11 +16,11 @@ import type {
   ExternalAgentResult,
   ExternalAgentSession,
   ExternalAgentTokenUsage,
-} from "@/types/agent/external-agent"
+} from "@cognia/plugin-contract/types/agent/external-agent"
 
 export { defineExternalAgentAdapter } from "../define/define-external-agent-adapter"
 
-export type { PluginExternalAgentAdapterDef } from "@/types/plugin/plugin-external-agent-adapter"
+export type { PluginExternalAgentAdapterDef } from "@cognia/plugin-contract/types/plugin/plugin-external-agent-adapter"
 export type {
   AcpPermissionResponse,
   ExternalAgentConfig,
@@ -32,7 +32,7 @@ export type {
   ExternalAgentProtocol,
   ExternalAgentSession,
   ExternalAgentTransport,
-} from "@/types/agent/external-agent"
+} from "@cognia/plugin-contract/types/agent/external-agent"
 
 export interface SessionListOptions {
   cwd?: string

@@ -48,7 +48,7 @@ export type {
   PluginPetAchievementCondition,
   PluginPetAchievementDef,
   PluginPetItemDef,
-} from "@/types/plugin/plugin-pet"
+} from "@cognia/plugin-contract/types/plugin/plugin-pet"
 
 export type { PetEventKind, PetEventSource } from "@/types/pet"
 

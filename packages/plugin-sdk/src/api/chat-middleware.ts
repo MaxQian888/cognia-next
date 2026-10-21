@@ -49,4 +49,4 @@ export type {
   PluginChatMiddlewareFactory,
   PluginChatMiddlewareFactoryContext,
   PluginChatMiddlewareRegistration,
-} from "@/types/plugin/plugin-chat-middleware"
+} from "@cognia/plugin-contract/types/plugin/plugin-chat-middleware"

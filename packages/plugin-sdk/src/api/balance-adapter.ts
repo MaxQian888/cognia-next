@@ -17,7 +17,10 @@ export {
   listBalanceAdapterEntries,
 } from "@/lib/plugin/registries/balance-adapter-registry"
 
-export type { PluginBalanceAdapterDef } from "@/types/plugin/plugin-balance-adapter"
+export type { PluginBalanceAdapterDef } from "@cognia/plugin-contract/types/plugin/plugin-balance-adapter"
 
 /** The query a balance adapter answers, and the snapshot it returns. */
-export type { BalanceQuery, BalanceSnapshot } from "@/types/subscription/balance"
+export type {
+  BalanceQuery,
+  BalanceSnapshot,
+} from "@cognia/plugin-contract/types/subscription/balance"

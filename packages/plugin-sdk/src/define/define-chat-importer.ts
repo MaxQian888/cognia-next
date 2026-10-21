@@ -23,7 +23,7 @@
  *   })
  */
 
-import type { PluginChatImporter } from "@/types/plugin/plugin"
+import type { PluginChatImporter } from "@cognia/plugin-contract/types/plugin/plugin"
 
 export function defineChatImporter<T = unknown>(
   importer: PluginChatImporter<T>

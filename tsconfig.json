@@ -147,6 +147,8 @@
       ],
       "@cognia/security-findings": ["./packages/security-findings/src/index.ts"],
       "@cognia/security-findings/*": ["./packages/security-findings/src/*"],
+      "@cognia/plugin-contract": ["./packages/plugin-contract/src/index.ts"],
+      "@cognia/plugin-contract/*": ["./packages/plugin-contract/src/*"],
       "@cognia/companion-client": ["./packages/companion-client/src/index.ts"],
       "@cognia/companion-client/*": ["./packages/companion-client/src/*"],
       "@cognia/redact": ["./packages/redact/src/index.ts"],

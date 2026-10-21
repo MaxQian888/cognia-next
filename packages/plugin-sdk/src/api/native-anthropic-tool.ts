@@ -60,4 +60,4 @@ export type {
   AnthropicNativeToolType,
   NativeToolPermissionPolicy,
   PluginNativeAnthropicToolDef,
-} from "@/types/plugin/plugin-native-tool"
+} from "@cognia/plugin-contract/types/plugin/plugin-native-tool"

@@ -3,7 +3,7 @@
 import type {
   PluginCharacterDef,
   PluginCharacterPackDef,
-} from "@/types/plugin/plugin-character-pack"
+} from "@cognia/plugin-contract/types/plugin/plugin-character-pack"
 
 export {
   defineCharacterPack,

@@ -1,4 +1,4 @@
-import type { VisualWorkflow } from "@/types/workflow/visual"
+import type { VisualWorkflow } from "@cognia/plugin-contract/types/workflow/visual"
 import * as sdk from "./workflow-editor"
 
 /** Three nodes, two edges, plus one edge whose source is not in the graph. */

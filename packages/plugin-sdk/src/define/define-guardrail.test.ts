@@ -1,5 +1,5 @@
 import { defineGuardrail } from "./define-guardrail"
-import type { PluginGuardrail } from "@/types/plugin/plugin-agent-guardrails"
+import type { PluginGuardrail } from "@cognia/plugin-contract/types/plugin/plugin-agent-guardrails"
 
 describe("defineGuardrail", () => {
   it("returns the guardrail unchanged (identity pass-through)", () => {

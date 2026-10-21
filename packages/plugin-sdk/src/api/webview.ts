@@ -25,7 +25,7 @@ export type {
   PluginWebviewHandle,
   PluginWebviewMessage,
   ResolvedPluginWebview,
-} from "@/types/plugin/plugin-webview"
+} from "@cognia/plugin-contract/types/plugin/plugin-webview"
 
 /**
  * The client an author's webview script gets from `acquireCogniaWebviewApi()`

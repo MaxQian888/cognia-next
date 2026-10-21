@@ -31,7 +31,7 @@ export type {
   PluginRoutingStrategyDef,
   PluginRoutingStrategyFactory,
   PluginRoutingStrategySelectorLike,
-} from "@/types/plugin/plugin-routing-strategy"
+} from "@cognia/plugin-contract/types/plugin/plugin-routing-strategy"
 
 export type {
   RoutingDecisionContext,

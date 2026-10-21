@@ -23,7 +23,7 @@
  * Part of the plugin-first Computer Use plan (M1·T6).
  */
 
-import type { PluginNativeAnthropicToolDef } from "@/types/plugin/plugin-native-tool"
+import type { PluginNativeAnthropicToolDef } from "@cognia/plugin-contract/types/plugin/plugin-native-tool"
 
 export function defineNativeAnthropicTool(
   def: PluginNativeAnthropicToolDef

@@ -2,7 +2,7 @@
 
 export { defineMessageRenderer } from "../define/define-message-renderer"
 
-export type { PluginMessageRendererDef } from "@/types/plugin/plugin-message-renderer"
+export type { PluginMessageRendererDef } from "@cognia/plugin-contract/types/plugin/plugin-message-renderer"
 export type {
   MessagePartRendererEntry,
   MessagePartRendererProps,

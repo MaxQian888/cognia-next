@@ -23,4 +23,7 @@ export type {
   NodeRegistryListener,
 } from "@/lib/workflow/nodes/registry"
 
-export type { PluginNodeDef, PluginNodeExecuteFn } from "@/types/plugin/plugin-workflow"
+export type {
+  PluginNodeDef,
+  PluginNodeExecuteFn,
+} from "@cognia/plugin-contract/types/plugin/plugin-workflow"

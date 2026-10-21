@@ -22,5 +22,5 @@ export type {
   WallpaperAssetResolver,
 } from "@/lib/plugin/bridge/wallpaper-bridge"
 
-export type { PluginWallpaperContribution } from "@/types/plugin/plugin"
-export type { Wallpaper } from "@/types/appearance"
+export type { PluginWallpaperContribution } from "@cognia/plugin-contract/types/plugin/plugin"
+export type { Wallpaper } from "@cognia/plugin-contract/types/appearance/index"

@@ -17,7 +17,7 @@ export type {
   PluginDecisionProviderFactoryContext,
   PluginDecisionProviderInput,
   PluginDecisionRegistration,
-} from "@/types/plugin/plugin-decisions"
+} from "@cognia/plugin-contract/types/plugin/plugin-decisions"
 export type {
   ChoiceAnswer,
   ChoiceQuestion,
@@ -47,8 +47,8 @@ export type {
   NoulQuestion,
   ScoreAnswer,
   ScoreQuestion,
-} from "@/types/decisions"
-export { DECISION_ERROR_KINDS } from "@/types/decisions"
+} from "@cognia/plugin-contract/types/decisions/index"
+export { DECISION_ERROR_KINDS } from "@cognia/plugin-contract/types/decisions/index"
 
 export {
   MAX_CHOICE_OPTIONS,

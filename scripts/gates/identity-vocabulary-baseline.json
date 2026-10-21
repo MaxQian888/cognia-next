@@ -930,46 +930,46 @@
     "stores/remote-host/remote-host-store.ts": {
       "bareAccountId": 2
     },
-    "types/connectors/interaction.ts": {
+    "packages/plugin-contract/src/types/connectors/interaction.ts": {
       "bareAccountId": 1
     },
-    "types/execution/run.ts": {
+    "packages/plugin-contract/src/types/execution/run.ts": {
       "bareAccountId": 1
     },
-    "types/external-service.ts": {
+    "packages/plugin-contract/src/types/external-service.ts": {
       "bareAccountId": 3
     },
-    "types/integrations/binding.ts": {
+    "packages/plugin-contract/src/types/integrations/binding.ts": {
       "bareAccountId": 1
     },
     "types/mobile/mobile-step-receipt.ts": {
       "bareAccountId": 1
     },
-    "types/mobile/paired-device.ts": {
+    "packages/plugin-contract/src/types/mobile/paired-device.ts": {
       "bareAccountId": 1
     },
     "types/placement/host-dispatch.ts": {
       "bareAccountId": 1
     },
-    "types/plugin/plugin-integration.ts": {
+    "packages/plugin-contract/src/types/plugin/plugin-integration.ts": {
       "bareAccountId": 19
     },
-    "types/sites.ts": {
+    "packages/plugin-contract/src/types/sites.ts": {
       "bareAccountId": 1
     },
-    "types/subscription/account.ts": {
+    "packages/plugin-contract/src/types/subscription/account.ts": {
       "bareAccountId": 1
     },
-    "types/subscription/balance.ts": {
+    "packages/plugin-contract/src/types/subscription/balance.ts": {
       "bareAccountId": 2
     },
-    "types/subscription/credential.ts": {
+    "packages/plugin-contract/src/types/subscription/credential.ts": {
       "bareAccountId": 1
     },
-    "types/subscription/descriptor.ts": {
+    "packages/plugin-contract/src/types/subscription/descriptor.ts": {
       "bareAccountId": 2
     },
-    "types/subscription/limits.ts": {
+    "packages/plugin-contract/src/types/subscription/limits.ts": {
       "bareAccountId": 3
     },
     "types/workflow/api-key.ts": {
@@ -984,7 +984,7 @@
     "types/workflow/conversation.ts": {
       "bareAccountId": 4
     },
-    "types/workflow/deployment.ts": {
+    "packages/plugin-contract/src/types/workflow/deployment.ts": {
       "bareAccountId": 3
     },
     "types/workflow/human-input.ts": {
@@ -999,7 +999,7 @@
     "types/workflow/review.ts": {
       "bareAccountId": 2
     },
-    "types/workflow/visual.ts": {
+    "packages/plugin-contract/src/types/workflow/visual.ts": {
       "bareAccountId": 1
     }
   }

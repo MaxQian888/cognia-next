@@ -37,4 +37,4 @@ export type {
   PluginModalHandle,
   PluginModalMountDef,
   PluginModalProps,
-} from "@/types/plugin/plugin-modal"
+} from "@cognia/plugin-contract/types/plugin/plugin-modal"

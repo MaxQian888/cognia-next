@@ -30,4 +30,4 @@ export {
   listSubagentEntries,
 } from "@/lib/plugin/registries/subagent-registry"
 
-export type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+export type { PluginSubagentDef } from "@cognia/plugin-contract/types/plugin/plugin-subagent"

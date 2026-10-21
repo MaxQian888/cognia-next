@@ -20,4 +20,7 @@ export {
 } from "@/lib/tray/registry"
 
 export type { PluginTrayItem } from "@/lib/tray/registry"
-export type { PluginTrayAPI, PluginTrayItemInput } from "@/types/plugin/plugin"
+export type {
+  PluginTrayAPI,
+  PluginTrayItemInput,
+} from "@cognia/plugin-contract/types/plugin/plugin"

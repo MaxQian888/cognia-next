@@ -4,7 +4,7 @@
  */
 
 import { defineMcpServerPreset } from "./define-mcp-server-preset"
-import type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
+import type { PluginMcpServerPresetDef } from "@cognia/plugin-contract/types/plugin/plugin-mcp-preset"
 
 describe("defineMcpServerPreset", () => {
   it("returns the same object reference passed in", () => {

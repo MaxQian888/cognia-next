@@ -26,7 +26,7 @@ export {
 } from "@/lib/theme/theme-registry"
 
 export type { PluginTheme } from "@/lib/theme/theme-registry"
-export type { PluginThemeContribution } from "@/types/plugin/plugin"
+export type { PluginThemeContribution } from "@cognia/plugin-contract/types/plugin/plugin"
 export type {
   ColorThemePreset,
   CustomTheme,
@@ -34,4 +34,4 @@ export type {
   ThemeColors,
   ThemeMode,
   ThemeState,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"

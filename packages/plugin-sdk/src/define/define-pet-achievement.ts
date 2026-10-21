@@ -8,7 +8,7 @@
  */
 
 import { assertValidPetAchievementDef } from "@/lib/plugin/registries/pet-contribution-validation"
-import type { PluginPetAchievementDef } from "@/types/plugin/plugin-pet"
+import type { PluginPetAchievementDef } from "@cognia/plugin-contract/types/plugin/plugin-pet"
 
 export function definePetAchievement(def: PluginPetAchievementDef): PluginPetAchievementDef {
   return assertValidPetAchievementDef(def, `definePetAchievement: achievement "${String(def?.id)}"`)
