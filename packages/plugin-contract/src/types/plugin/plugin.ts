@@ -24,7 +24,7 @@ import type {
   PluginKnowledgeLocation,
 } from "./plugin-knowledge"
 import type { LspServerConfig } from "../lsp/config"
-import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/config/presets"
+import type { ExternalAgentPresetConfig } from "../../lib/ai/agent/external/config/presets"
 import type { ProtocolAdapterFactory } from "@/lib/ai/agent/external/protocol-adapter"
 import type {
   Skill as _Skill,
@@ -101,10 +101,10 @@ import type { PluginToolRouteDef } from "./plugin-tool-route"
 // the runtime parser in lockstep — historically a local alias was used to
 // avoid a dep cycle, but the contracts module has no upward imports so the
 // real type is safe to bring in here.
-import type { ActivationEventDeclaration } from "@/lib/plugin/contracts/plugin-points"
+import type { ActivationEventDeclaration } from "../../lib/plugin/contracts/plugin-points"
 import type { PluginSurfaceFormFactor } from "./plugin-surface"
 import type { PluginIconName } from "./plugin-icon"
-import type { PluginWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
+import type { PluginWorkflowAuthorAPI } from "../../lib/plugin/api/workflow-author-api"
 import type { VsCodeExtensionBlock, VsCodeLanguage } from "./plugin-vscode"
 import type {
   Artifact,
@@ -119,11 +119,11 @@ import type {
   CanvasActionResult,
   CanvasActionType,
   StreamingCallbacks,
-} from "@/lib/ai/generation/canvas-actions"
-import type { AddCommentInput, ReplyInput } from "@/lib/db/canvas-comments"
-import type { AgentSessionSourceAdapter } from "@/lib/session-import/types"
-import type { ChatImporter } from "@/lib/data/importers/types"
-import type { PythonExecResult } from "@/lib/tauri/canvas"
+} from "../../lib/ai/generation/canvas-actions"
+import type { AddCommentInput, ReplyInput } from "../../lib/db/canvas-comments"
+import type { AgentSessionSourceAdapter } from "../../lib/session-import/types"
+import type { ChatImporter } from "../../lib/data/importers/types"
+import type { PythonExecResult } from "../../lib/tauri/canvas"
 import type { CanvasComment, CollaborativeSession } from "../canvas/collaboration"
 // PluginMediaAPI and CanonicalExtensionPoint live in `lib/plugin/api/media-api`
 // and `lib/plugin/contracts/plugin-points` respectively. We mark
@@ -943,7 +943,7 @@ export interface PluginManifest {
    * collection is gated on the `command-hooks` capability being declared;
    * the field alone is inert.
    */
-  commandHooks?: import("@/lib/claude/hooks").HooksConfig
+  commandHooks?: import("../../lib/claude/hooks").HooksConfig
   /**
    * Immutable unified template packages (`template-package` capability).
    * Definitions are overlay-only and are removed with the plugin lifecycle.
@@ -2597,53 +2597,53 @@ export interface PluginBaseContext {
   // ---------------------------------------------------------------------------
 
   /** OCR provider registration (ADR-0026 §2 §A). */
-  ocr?: import("@/lib/plugin/api/ocr-api").PluginOcrAPI
+  ocr?: import("../../lib/plugin/api/ocr-api").PluginOcrAPI
 
   /** System-1 decisions + decision provider registration (ADR-0194). */
-  decisions?: import("@/lib/plugin/api/decisions-api").PluginDecisionsAPI
+  decisions?: import("../../lib/plugin/api/decisions-api").PluginDecisionsAPI
 
   /** The plugin's prompts as Prompt Center slots, and the text to send for them (ADR-0236). */
-  prompts?: import("@/lib/plugin/api/prompts-api").PluginPromptsAPI
+  prompts?: import("../../lib/plugin/api/prompts-api").PluginPromptsAPI
 
   /** The user's agent configuration, read through its owners and written with consent (ADR-0238). */
-  agentConfig?: import("@/lib/plugin/api/agent-config-api").PluginAgentConfigAPI
+  agentConfig?: import("../../lib/plugin/api/agent-config-api").PluginAgentConfigAPI
 
   /** Workspace backend registration (ADR-0026 §2 §D). */
-  workspace?: import("@/lib/plugin/api/workspace-api").PluginWorkspaceAPI
+  workspace?: import("../../lib/plugin/api/workspace-api").PluginWorkspaceAPI
 
   /** Modal stack push/close (ADR-0026 §3 §A). */
-  modal?: import("@/lib/plugin/api/modal-api").PluginModalAPI
+  modal?: import("../../lib/plugin/api/modal-api").PluginModalAPI
 
   /** Sandboxed webview create + messaging (B3). */
-  webview?: import("@/lib/plugin/api/webview-api").PluginWebviewAPI
+  webview?: import("../../lib/plugin/api/webview-api").PluginWebviewAPI
 
   /** Native auth/OAuth provider register + session consume (C1). */
-  auth?: import("@/lib/plugin/api/auth-api").PluginAuthAPI
+  auth?: import("../../lib/plugin/api/auth-api").PluginAuthAPI
 
   /** URI / deep-link handler registration (C2). */
-  uri?: import("@/lib/plugin/api/uri-api").PluginUriAPI
+  uri?: import("../../lib/plugin/api/uri-api").PluginUriAPI
 
   /** Remote desktop provider registration (ADR-0234, `remote-desktop:provide`). */
-  remoteDesktop?: import("@/lib/plugin/api/remote-desktop-api").PluginRemoteDesktopAPI
+  remoteDesktop?: import("../../lib/plugin/api/remote-desktop-api").PluginRemoteDesktopAPI
 
   /** Chat-middleware registration (ADR-0026 §4 §A). */
-  chat?: import("@/lib/plugin/api/chat-api").PluginChatAPI
+  chat?: import("../../lib/plugin/api/chat-api").PluginChatAPI
 
   /** Platform-capability flags (ADR-0026 §5 §C). */
-  capabilities?: import("@/lib/plugin/api/capabilities-api").PluginCapabilitiesAPI
+  capabilities?: import("../../lib/plugin/api/capabilities-api").PluginCapabilitiesAPI
 
   /** Resource-scoped Context Workbench panel registration. */
-  contextPanels?: import("@/lib/plugin/api/context-panel-api").PluginContextPanelAPI
+  contextPanels?: import("../../lib/plugin/api/context-panel-api").PluginContextPanelAPI
 
   /**
    * Live project editor — open files, reflect edits, read what the user is
    * looking at. Engine-agnostic: the built-in Monaco workbench and the embedded
    * code-server "Pro IDE" both answer.
    */
-  editor?: import("@/lib/plugin/api/editor-api").PluginEditorAPI
+  editor?: import("../../lib/plugin/api/editor-api").PluginEditorAPI
 
   /** Desktop pet — available only with the "pet" capability; warn-once no-op otherwise. */
-  pet?: import("@/lib/plugin/api/pet-api").PluginPetAPI
+  pet?: import("../../lib/plugin/api/pet-api").PluginPetAPI
 }
 
 /** Generation-scoped cancellation and teardown registration. */
@@ -2698,20 +2698,20 @@ export interface PluginServicesAPI {
 export interface PluginHostContextAPI {
   lifecycle: PluginLifecycleAPI
   services: PluginServicesAPI
-  ocr: import("@/lib/plugin/api/ocr-api").PluginOcrAPI
-  decisions: import("@/lib/plugin/api/decisions-api").PluginDecisionsAPI
-  prompts: import("@/lib/plugin/api/prompts-api").PluginPromptsAPI
-  agentConfig: import("@/lib/plugin/api/agent-config-api").PluginAgentConfigAPI
-  workspace: import("@/lib/plugin/api/workspace-api").PluginWorkspaceAPI
-  modal: import("@/lib/plugin/api/modal-api").PluginModalAPI
-  webview: import("@/lib/plugin/api/webview-api").PluginWebviewAPI
-  auth: import("@/lib/plugin/api/auth-api").PluginAuthAPI
-  uri: import("@/lib/plugin/api/uri-api").PluginUriAPI
-  remoteDesktop: import("@/lib/plugin/api/remote-desktop-api").PluginRemoteDesktopAPI
-  chat: import("@/lib/plugin/api/chat-api").PluginChatAPI
-  capabilities: import("@/lib/plugin/api/capabilities-api").PluginCapabilitiesAPI
-  git: import("@/lib/plugin/api/git-api").PluginGitAPI
-  goals: import("@/lib/plugin/api/goal-api").PluginGoalAPI
+  ocr: import("../../lib/plugin/api/ocr-api").PluginOcrAPI
+  decisions: import("../../lib/plugin/api/decisions-api").PluginDecisionsAPI
+  prompts: import("../../lib/plugin/api/prompts-api").PluginPromptsAPI
+  agentConfig: import("../../lib/plugin/api/agent-config-api").PluginAgentConfigAPI
+  workspace: import("../../lib/plugin/api/workspace-api").PluginWorkspaceAPI
+  modal: import("../../lib/plugin/api/modal-api").PluginModalAPI
+  webview: import("../../lib/plugin/api/webview-api").PluginWebviewAPI
+  auth: import("../../lib/plugin/api/auth-api").PluginAuthAPI
+  uri: import("../../lib/plugin/api/uri-api").PluginUriAPI
+  remoteDesktop: import("../../lib/plugin/api/remote-desktop-api").PluginRemoteDesktopAPI
+  chat: import("../../lib/plugin/api/chat-api").PluginChatAPI
+  capabilities: import("../../lib/plugin/api/capabilities-api").PluginCapabilitiesAPI
+  git: import("../../lib/plugin/api/git-api").PluginGitAPI
+  goals: import("../../lib/plugin/api/goal-api").PluginGoalAPI
   /**
    * Read-only view of this plugin's lifecycle-hook contribution: whether it is
    * live, which hooks it registered, and the exact settings.json entry that
@@ -2719,42 +2719,42 @@ export interface PluginHostContextAPI {
    * of `activate()` — a second registration path would reintroduce the
    * two-sources-of-truth problem the hook registry removed.
    */
-  hooks: import("@/lib/plugin/api/hooks-api").PluginHooksAPI
+  hooks: import("../../lib/plugin/api/hooks-api").PluginHooksAPI
   /** ADR-0045 plan hub — read/author/approve/run `AgentPlan`s. */
-  plans: import("@/lib/plugin/api/plan-api").PluginPlanAPI
+  plans: import("../../lib/plugin/api/plan-api").PluginPlanAPI
   /** Issue tracker (spec 2026-09-06 D9): read, write, subscribe, register a sync source. */
-  issues: import("@/lib/plugin/api/issues-api").PluginIssuesAPI
-  memory: import("@/lib/plugin/api/memory-api").PluginMemoryAPI
+  issues: import("../../lib/plugin/api/issues-api").PluginIssuesAPI
+  memory: import("../../lib/plugin/api/memory-api").PluginMemoryAPI
   /**
    * External-agent configurations (ADR-0216): read projections, readiness,
    * presets, runtimes, settings and delegation rules (`agent:external:read`);
    * create / update / duplicate / remove / connect them through the lifecycle
    * service (`agent:external:manage`, dangerous). Never carries a credential.
    */
-  externalAgents: import("@/lib/plugin/api/external-agents-api").PluginExternalAgentsAPI
-  team: import("@/lib/plugin/api/team-api").PluginTeamAPI
-  subscription: import("@/lib/plugin/api/subscription-api").PluginSubscriptionAPI
-  terminal: import("@/lib/plugin/api/terminal-api").PluginTerminalAPI
-  perf: import("@/lib/plugin/api/perf-api").PluginPerfAPI
+  externalAgents: import("../../lib/plugin/api/external-agents-api").PluginExternalAgentsAPI
+  team: import("../../lib/plugin/api/team-api").PluginTeamAPI
+  subscription: import("../../lib/plugin/api/subscription-api").PluginSubscriptionAPI
+  terminal: import("../../lib/plugin/api/terminal-api").PluginTerminalAPI
+  perf: import("../../lib/plugin/api/perf-api").PluginPerfAPI
   /** Read-only logs + agent-trace access (`logs:read` / `trace:read`). */
-  logs: import("@/lib/plugin/api/logs-api").PluginLogsAPI
-  connectors: import("@/lib/plugin/api/connectors-api").PluginConnectorsAPI
+  logs: import("../../lib/plugin/api/logs-api").PluginLogsAPI
+  connectors: import("../../lib/plugin/api/connectors-api").PluginConnectorsAPI
   integrations: PluginIntegrationsAPI
   bots: import("../bot/api").PluginBotsAPI
-  share: import("@/lib/plugin/api/share-api").PluginShareAPI
-  backup: import("@/lib/plugin/api/backup-api").PluginBackupAPI
-  automation: import("@/lib/plugin/api/automation-api").PluginAutomationAPI
-  browser: import("@/lib/plugin/api/browser-api").PluginBrowserAPI
-  characterPacks: import("@/lib/plugin/api/character-packs-api").PluginCharacterPacksAPI
-  sandbox: import("@/lib/plugin/api/sandbox-api").PluginSandboxAPI
-  recorder: import("@/lib/plugin/api/recorder-api").PluginRecorderAPI
-  securityScans: import("@/lib/plugin/api/security-scans-api").PluginSecurityScansAPI
-  eval: import("@/lib/plugin/api/eval-api").PluginEvalAPI
-  userScheduler: import("@/lib/plugin/api/scheduler-tasks").PluginUserSchedulerAPI
-  companion: import("@/lib/plugin/api/companion-api").PluginCompanionAPI
-  pet: import("@/lib/plugin/api/pet-api").PluginPetAPI
-  resources: import("@/lib/plugin/api/resources-api").PluginResourcesAPI
-  sites: import("@/lib/plugin/api/sites").PluginSitesAPI
+  share: import("../../lib/plugin/api/share-api").PluginShareAPI
+  backup: import("../../lib/plugin/api/backup-api").PluginBackupAPI
+  automation: import("../../lib/plugin/api/automation-api").PluginAutomationAPI
+  browser: import("../../lib/plugin/api/browser-api").PluginBrowserAPI
+  characterPacks: import("../../lib/plugin/api/character-packs-api").PluginCharacterPacksAPI
+  sandbox: import("../../lib/plugin/api/sandbox-api").PluginSandboxAPI
+  recorder: import("../../lib/plugin/api/recorder-api").PluginRecorderAPI
+  securityScans: import("../../lib/plugin/api/security-scans-api").PluginSecurityScansAPI
+  eval: import("../../lib/plugin/api/eval-api").PluginEvalAPI
+  userScheduler: import("../../lib/plugin/api/scheduler-tasks").PluginUserSchedulerAPI
+  companion: import("../../lib/plugin/api/companion-api").PluginCompanionAPI
+  pet: import("../../lib/plugin/api/pet-api").PluginPetAPI
+  resources: import("../../lib/plugin/api/resources-api").PluginResourcesAPI
+  sites: import("../../lib/plugin/api/sites").PluginSitesAPI
 }
 
 /**
@@ -3006,8 +3006,8 @@ export interface PluginAgentAPI {
   runExternalAgent: (
     presetOrAgentId: string,
     prompt: string,
-    options?: import("@/lib/plugin/api/external-agent-api").PluginExternalAgentOptions
-  ) => Promise<import("@/lib/plugin/api/external-agent-api").PluginExternalAgentResult>
+    options?: import("../../lib/plugin/api/external-agent-api").PluginExternalAgentOptions
+  ) => Promise<import("../../lib/plugin/api/external-agent-api").PluginExternalAgentResult>
   /**
    * Plugin-first Computer Use plan (M1·T5). The four register*Preset / *Tool
    * / *Skill methods below are the imperative-style entry points that mirror
@@ -5208,7 +5208,7 @@ export interface PluginSkillsAPI {
     skillId: string,
     args: Record<string, unknown>,
     options: { sessionId: string; signal?: AbortSignal }
-  ) => Promise<import("@/lib/skills/built-in/types").BuiltInSkillResult>
+  ) => Promise<import("../../lib/skills/built-in/types").BuiltInSkillResult>
 }
 
 // =============================================================================
@@ -5662,10 +5662,10 @@ export interface PluginContextAPI {
   session: PluginSessionAPI
 
   /** Resource-scoped Context Workbench panel registration. */
-  contextPanels: import("@/lib/plugin/api/context-panel-api").PluginContextPanelAPI
+  contextPanels: import("../../lib/plugin/api/context-panel-api").PluginContextPanelAPI
 
   /** Live project editor — open files, reflect edits, read the active editor. */
-  editor: import("@/lib/plugin/api/editor-api").PluginEditorAPI
+  editor: import("../../lib/plugin/api/editor-api").PluginEditorAPI
 
   /** Project management API */
   project: PluginProjectAPI
@@ -5732,7 +5732,7 @@ export interface PluginContextAPI {
    * unchanged. This is the imperative one, for a plugin whose command set is
    * only known once it has talked to something (a repo, an account, a server).
    */
-  commands: import("@/lib/plugin/api/commands-api").PluginCommandsAPI
+  commands: import("../../lib/plugin/api/commands-api").PluginCommandsAPI
 
   /**
    * Message-part renderer API — register a React component for a custom
@@ -5740,7 +5740,7 @@ export interface PluginContextAPI {
    * compiling; new code should use it instead of trying to monkey-patch
    * the chat renderer.
    */
-  messagePart: import("@/lib/plugin/api/message-part-api").PluginMessagePartAPI
+  messagePart: import("../../lib/plugin/api/message-part-api").PluginMessagePartAPI
 
   /**
    * Tool-result renderer API — register the React card that renders this
@@ -5750,5 +5750,5 @@ export interface PluginContextAPI {
    * to the generic content-blocks card. Optional for the same back-compat
    * reason as `messagePart`.
    */
-  toolResult: import("@/lib/plugin/api/tool-result-api").PluginToolResultAPI
+  toolResult: import("../../lib/plugin/api/tool-result-api").PluginToolResultAPI
 }

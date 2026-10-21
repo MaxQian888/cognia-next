@@ -1,5 +1,5 @@
 import type { PlatformKind } from "./platform-kind"
-import type { MediaModelPolicy } from "@/lib/db/connector-types"
+import type { MediaModelPolicy } from "../../lib/db/connector-types"
 import type { MessageSegment } from "./segment"
 
 /**

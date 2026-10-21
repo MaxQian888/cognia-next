@@ -9,15 +9,14 @@
  */
 
 import type { DecisionQuestions, DecisionRequest } from "@/types/decisions"
+import type { DecisionValidation } from "@cognia/plugin-contract/lib/decisions/validate"
+export type { DecisionValidation } from "@cognia/plugin-contract/lib/decisions/validate"
 
 /** Choice questions accept at most this many options (TypeSafe limit). */
 export const MAX_CHOICE_OPTIONS = 255
 
 /** Serialized request ceiling — a decision is a small judgment, not a document. */
 export const MAX_DECISION_REQUEST_CHARS = 256 * 1024
-
-export type DecisionValidation =
-  { ok: true; request: DecisionRequest } | { ok: false; message: string }
 
 /**
  * Realm-agnostic plain-object check: a payload built in another realm

@@ -11,9 +11,8 @@
 import type { EvalReport } from "@/types/eval/eval"
 import { getDb } from "./schema"
 import { deleteCaseResultsForRun } from "./eval-run-cases"
-
-/** The persisted run row is exactly the aggregated report. */
-export type EvalRunRow = EvalReport
+import type { EvalRunRow } from "@cognia/plugin-contract/lib/db/eval-runs"
+export type { EvalRunRow } from "@cognia/plugin-contract/lib/db/eval-runs"
 
 export async function saveRun(report: EvalReport): Promise<void> {
   if (!report.runId) return

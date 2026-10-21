@@ -26,6 +26,8 @@ import {
   parseConversationKey,
 } from "@/types/connectors/event"
 import { getDb } from "@/lib/db/schema"
+import type { SiblingConversation } from "@cognia/plugin-contract/lib/connectors/session-bindings"
+export type { SiblingConversation } from "@cognia/plugin-contract/lib/connectors/session-bindings"
 
 /**
  * Find a ChatSession bound to the given IM conversation. Uses the v85
@@ -99,13 +101,6 @@ export async function listSessionsByConversationChat(
     db.sessions.where("platformConversationKey").startsWith(threadPrefix).toArray(),
   ])
   return [...base, ...threads].sort((a, b) => b.updatedAt - a.updatedAt)
-}
-
-/** A conversation bound to the same remote chat through ANOTHER adapter. */
-export interface SiblingConversation {
-  adapterId: string
-  conversationKey: string
-  sessionId: string
 }
 
 /**

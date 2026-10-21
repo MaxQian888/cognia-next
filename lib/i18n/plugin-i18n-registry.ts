@@ -14,18 +14,14 @@
 // host bundle exposes them as `plugin.<pluginId>.panel.title` — plugins
 // cannot collide with each other or the host namespace.
 
-export type LocaleCode = string
-
-/**
- * One plugin's message contribution: a per-locale flat string map. Nested
- * paths use dot notation (e.g., `"plugin.git.tools.status.label"`).
- */
-export interface PluginI18nBundle {
-  /** Plugin id contributing the messages. */
-  pluginId: string
-  /** Map of locale code → flat string map. */
-  messages: Partial<Record<LocaleCode, Record<string, string>>>
-}
+import type {
+  LocaleCode,
+  PluginI18nBundle,
+} from "@cognia/plugin-contract/lib/i18n/plugin-i18n-registry"
+export type {
+  LocaleCode,
+  PluginI18nBundle,
+} from "@cognia/plugin-contract/lib/i18n/plugin-i18n-registry"
 
 const bundles = new Map<string, PluginI18nBundle>()
 const listeners = new Set<() => void>()

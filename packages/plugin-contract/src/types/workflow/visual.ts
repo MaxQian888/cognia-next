@@ -24,7 +24,7 @@
  * wire format for both the editor (TS-only) and the IPC contract (TS ↔ Rust).
  */
 
-import type { PlacementConstraint } from "@/lib/placement/types"
+import type { PlacementConstraint } from "../../lib/placement/types"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Node taxonomy. Namespaced as `<group>.<kind>` so plugin-contributed nodes

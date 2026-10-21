@@ -219,9 +219,9 @@ export interface PluginDispatchSubagentOptions {
    * fail-closed and monotonic across nesting depth. Populated by the host's
    * `dispatch_agent` tool from the caller's recorded ceiling.
    */
-  _permissionCeiling?: import("@/lib/ai/agent/external/policy/permission-cascade").ExternalSessionPermissionSpec
+  _permissionCeiling?: import("../../lib/ai/agent/external/policy/permission-cascade").ExternalSessionPermissionSpec
   /** Host-owned source authority inherited by nested dispatch; stripped from public plugin arguments. */
-  _knowledgeAccess?: import("@/lib/knowledge-base/runtime/progressive-reading").KnowledgeReadingAccess
+  _knowledgeAccess?: import("../../lib/knowledge-base/runtime/progressive-reading").KnowledgeReadingAccess
   /** Explicit run id (defaults to a generated one) — also the background key. */
   _runId?: string
   /** Host-owned persistent child session for durable background dispatch. */

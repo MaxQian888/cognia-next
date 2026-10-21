@@ -14,11 +14,14 @@ export type {
   PluginCustomCommandWriteInput,
   PluginSlashCommandInput,
   PluginSlashCommandSummary,
-} from "@/lib/plugin/api/commands-api"
+} from "@cognia/plugin-contract/lib/plugin/api/commands-api"
 
 export type {
   ProjectCommandDir,
   WorkspaceCustomCommand,
-} from "@/lib/slash-commands/custom-workspace"
+} from "@cognia/plugin-contract/lib/slash-commands/custom-workspace"
 
-export type { SlashCommandContext, SlashCommandResult } from "@/lib/slash-commands/registry"
+export type {
+  SlashCommandContext,
+  SlashCommandResult,
+} from "@cognia/plugin-contract/lib/slash-commands/registry"

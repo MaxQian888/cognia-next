@@ -9,7 +9,10 @@
  * Backed by `database:read`; no new canonical permission is minted here.
  */
 
-export type { PluginSiteSummary, PluginSitesAPI } from "@/lib/plugin/api/sites"
+export type {
+  PluginSiteSummary,
+  PluginSitesAPI,
+} from "@cognia/plugin-contract/lib/plugin/api/sites"
 
 export type {
   SiteDeploymentRow,

@@ -1,3 +1,6 @@
+import type { LinkDisplayStyle } from "@cognia/plugin-contract/lib/chat/link-display"
+export type { LinkDisplayStyle } from "@cognia/plugin-contract/lib/chat/link-display"
+
 /**
  * How a recognised link READS in the composer — the icon it gets and the short
  * label that stands in for a 90-character URL.
@@ -36,9 +39,6 @@ export interface LinkDisplayRule {
   /** A named built-in shortener. Only the table below sets this. */
   compact?: "repo"
 }
-
-/** How much of a URL a chip should show. */
-export type LinkDisplayStyle = "short" | "host" | "full"
 
 export interface LinkDisplaySettings {
   style?: LinkDisplayStyle

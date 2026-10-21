@@ -16,7 +16,7 @@
  */
 export { createPluginLogger, readHostCapabilities } from "../runtime/host-environment"
 export type { PluginHostEnvironmentSnapshot, PluginHostPlatform } from "../runtime/host-environment"
-export type { PluginCapabilitiesAPI } from "@/lib/plugin/api/capabilities-api"
+export type { PluginCapabilitiesAPI } from "@cognia/plugin-contract/lib/plugin/api/capabilities-api"
 
 /**
  * The running app's version. A plugin that gates a contribution on a host

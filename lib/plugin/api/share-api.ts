@@ -13,36 +13,11 @@
  * Listing the local mirror + reading owner stats is `share:read`.
  */
 
-import {
-  createShareLink,
-  revokeShareLink,
-  getShareStats,
-  type CreateShareInput,
-  type CreatedShare,
-} from "@/lib/share/client"
-import {
-  listSharedLinks,
-  getSharedLinkByCode,
-  deleteSharedLink,
-  type SharedLinkRow,
-} from "@/lib/db/shared-links"
+import { createShareLink, revokeShareLink, getShareStats } from "@/lib/share/client"
+import { listSharedLinks, getSharedLinkByCode, deleteSharedLink } from "@/lib/db/shared-links"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
-import type { ShareStats } from "@/lib/share/types"
-
-export interface PluginShareAPI {
-  /** Create an encrypted public share link. Returns code + full URL (with key fragment). */
-  create(input: CreateShareInput): Promise<CreatedShare>
-  /** Revoke a link on the worker + flag the local mirror. */
-  revoke(code: string): Promise<void>
-  /** List locally-mirrored share links (excludes revoked unless asked). */
-  list(opts?: { includeRevoked?: boolean }): Promise<SharedLinkRow[]>
-  /** Look up one mirrored link by code. */
-  getByCode(code: string): Promise<SharedLinkRow | null>
-  /** Owner-only live stats (view count / expiry / revoked); `null` if gone. */
-  getStats(code: string): Promise<ShareStats | null>
-  /** Remove the local mirror row (does not touch the worker — use `revoke` for that). */
-  delete(code: string): Promise<void>
-}
+import type { PluginShareAPI } from "@cognia/plugin-contract/lib/plugin/api/share-api"
+export type { PluginShareAPI } from "@cognia/plugin-contract/lib/plugin/api/share-api"
 
 /**
  * Create the Share API for a plugin. `list`/`getByCode`/`getStats` need

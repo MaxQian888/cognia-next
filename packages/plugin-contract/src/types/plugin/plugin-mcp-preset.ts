@@ -9,7 +9,7 @@
  * runner) when a preset only makes sense for one of them.
  */
 
-import type { McpPresetField } from "@/lib/claude/mcp-presets"
+import type { McpPresetField } from "../../lib/claude/mcp-presets"
 import type { McpTransport } from "@cognia/agent-config-types"
 
 export interface PluginMcpServerPresetDef {

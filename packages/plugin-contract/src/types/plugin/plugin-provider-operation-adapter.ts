@@ -18,10 +18,8 @@
 
 import type { ProviderOperationId, ResolverProtocol } from "@cognia/provider-types"
 
-import type {
-  ProviderOperationHandler,
-  ProviderOperationProviderMatch,
-} from "@/lib/ai/operations/registry"
+import type { ProviderOperationProviderMatch } from "@/lib/ai/operations/registry"
+import type { ProviderOperationHandler } from "../../lib/ai/operations/registry"
 
 export type { ProviderOperationProviderMatch }
 

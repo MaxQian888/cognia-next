@@ -10,7 +10,7 @@
 
 export { defineDecisionProvider } from "../define/define-decision-provider"
 
-export type { PluginDecisionsAPI } from "@/lib/plugin/api/decisions-api"
+export type { PluginDecisionsAPI } from "@cognia/plugin-contract/lib/plugin/api/decisions-api"
 export type {
   PluginDecisionProviderDef,
   PluginDecisionProviderFactory,

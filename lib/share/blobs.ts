@@ -34,17 +34,8 @@ import {
   shareBlobStoredBytes,
 } from "./blob-crypto"
 import type { ShareFileEntry } from "./types"
-
-/** Bytes of one file, read a slice at a time. */
-export interface ShareBlobSource {
-  /** Plaintext size when the source was opened. */
-  size: number
-  /**
-   * Exactly `length` bytes from `offset`, or a rejection. A source whose
-   * bytes or size moved under it rejects with {@link ShareFileChangedError}.
-   */
-  read(offset: number, length: number, signal?: AbortSignal): Promise<Uint8Array>
-}
+import type { ShareBlobSource, ShareFileDescriptor } from "@cognia/plugin-contract/lib/share/blobs"
+export type { ShareBlobSource, ShareFileDescriptor } from "@cognia/plugin-contract/lib/share/blobs"
 
 /** Progress of one file: plaintext bytes processed out of `total`. */
 export type ShareBlobProgress = (done: number, total: number) => void
@@ -202,14 +193,6 @@ export async function hashShareBlobSource(
     options.onProgress?.(offset + length, source.size)
   }
   return bytesToHex(hasher.digest())
-}
-
-/** What a manifest row needs beyond the bytes. */
-export interface ShareFileDescriptor {
-  /** FileSpace path at share time. */
-  path: string
-  name: string
-  mime: string
 }
 
 /** Hash a source and mint its manifest row (fresh blob id and IV prefix). */

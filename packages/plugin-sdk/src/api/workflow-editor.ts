@@ -1,14 +1,20 @@
 /** Portable workflow-editor value types and pure authoring helpers. */
 
-import type { ProposalOp, ProposalOpCount } from "@/lib/workflow/editor/proposal-types"
+import type {
+  ProposalOp,
+  ProposalOpCount,
+} from "@cognia/plugin-contract/lib/workflow/editor/proposal-types"
 import type {
   VisualWorkflow,
   WorkflowNodeData,
   WorkflowNodeKind,
 } from "@cognia/plugin-contract/types/workflow/visual"
 
-export type { ProposalOp, ProposalOpCount } from "@/lib/workflow/editor/proposal-types"
-export type { ProposalPayload } from "@/lib/workflow/editor/proposal-store"
+export type {
+  ProposalOp,
+  ProposalOpCount,
+} from "@cognia/plugin-contract/lib/workflow/editor/proposal-types"
+export type { ProposalPayload } from "@cognia/plugin-contract/lib/workflow/editor/proposal-store"
 export type {
   CopilotI18n,
   CopilotSlotValues,
@@ -22,7 +28,7 @@ export type {
   ExplainedLastRun,
   ExplainedSeverity,
   ExplainedValidation,
-} from "@/lib/workflow/runtime/error-explainer"
+} from "@cognia/plugin-contract/lib/workflow/runtime/error-explainer"
 
 export const ELK_DIRECTIONS = {
   LR: "RIGHT",

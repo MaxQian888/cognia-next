@@ -23,48 +23,18 @@
  */
 
 import { getDb } from "./schema"
-import type { PromptScope, PromptTargetRef } from "@/lib/prompts/types"
-
-export interface PromptOverrideBindingRow {
-  /** `pob_…` */
-  id: string
-  promptId: string
-  scope: PromptScope
-  /** Workspace / agent / session id; empty for the account scope. */
-  targetId: string
-  /** The published revision consumers resolve, or `null` to inherit. */
-  activeRevisionId: string | null
-  /** Unpublished work in progress, or `null`. */
-  draftRevisionId: string | null
-  /** Concurrency counter; every mutation must name the value it read. */
-  rev: number
-  createdAt: number
-  updatedAt: number
-}
-
-export type PromptRevisionKind = "draft" | "published" | "reset"
-/** Who wrote a revision. `plugin` is a change a plugin applied after the user confirmed it. */
-export type PromptRevisionOrigin = "editor" | "import" | "restore" | "cli" | "plugin"
-
-export interface PromptOverrideRevisionRow {
-  /** `por_…` */
-  id: string
-  bindingId: string
-  promptId: string
-  /** The active revision this one was written over, for history. */
-  parentId: string | null
-  kind: PromptRevisionKind
-  /** Static template text. Empty for a `reset` revision. */
-  body: string
-  /** The definition contract the body was validated against. */
-  contractVersion: number
-  /** Digest of the shipped default the edit was made against (upgrade compare). */
-  baseDigest: string
-  origin: PromptRevisionOrigin
-  /** Caller-supplied idempotency key; a replay returns the settled binding. */
-  mutationId: string
-  createdAt: number
-}
+import type { PromptTargetRef } from "@/lib/prompts/types"
+import type {
+  PromptOverrideBindingRow,
+  PromptOverrideRevisionRow,
+  PromptRevisionOrigin,
+} from "@cognia/plugin-contract/lib/db/prompt-overrides"
+export type {
+  PromptOverrideBindingRow,
+  PromptOverrideRevisionRow,
+  PromptRevisionKind,
+  PromptRevisionOrigin,
+} from "@cognia/plugin-contract/lib/db/prompt-overrides"
 
 /** Inactive published/reset revisions kept per binding, beyond active and draft. */
 export const PROMPT_REVISION_HISTORY_LIMIT = 50

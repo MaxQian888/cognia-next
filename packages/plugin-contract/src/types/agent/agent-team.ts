@@ -18,7 +18,7 @@ import type { TwinSettings } from "../twin"
 import type {
   ExternalAgentPresetId,
   NonExecutablePresetId,
-} from "@/lib/ai/agent/external/config/presets"
+} from "../../lib/ai/agent/external/config/presets"
 import type { ProjectEditorSession } from "../editor/project-editor"
 import type {
   AgentTeamEnvironmentRef,
@@ -973,7 +973,7 @@ export interface TeammateConfig {
    * a project to work in. With Router + Fusion off, every value behaves like
    * `"auto"`. See `lib/ai/agent/team/teammate/member-fusion-turn.ts`.
    */
-  fusionAction?: import("@/lib/router-fusion/gate/explicit-run").FusionActionChoice
+  fusionAction?: import("../../lib/router-fusion/gate/explicit-run").FusionActionChoice
   /**
    * How a `"delegate"` member delivers its verified change. `"patch_only"` —
    * the default — hands back a patch; `"workspace_updated"` writes it into the
@@ -981,7 +981,7 @@ export interface TeammateConfig {
    * exactly that base, in the cockpit, on the team run. Ignored by every other
    * `fusionAction`.
    */
-  fusionDelegateDelivery?: import("@/lib/router-fusion/gate/explicit-run").DelegateDeliveryChoice
+  fusionDelegateDelivery?: import("../../lib/router-fusion/gate/explicit-run").DelegateDeliveryChoice
   /** Custom metadata */
   metadata?: Record<string, unknown>
   /**

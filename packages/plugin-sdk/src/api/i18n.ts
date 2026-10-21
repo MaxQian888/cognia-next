@@ -21,7 +21,10 @@ export {
   unregisterPluginI18n,
 } from "@/lib/i18n/plugin-i18n-registry"
 
-export type { LocaleCode, PluginI18nBundle } from "@/lib/i18n/plugin-i18n-registry"
+export type {
+  LocaleCode,
+  PluginI18nBundle,
+} from "@cognia/plugin-contract/lib/i18n/plugin-i18n-registry"
 
 /**
  * React components receive no `ctx`; this hook is their `ctx.i18n.t` — same
@@ -47,4 +50,4 @@ export const usePluginTranslations: typeof HostUsePluginTranslations = (pluginId
   }
   return hostTranslate(pluginId)
 }
-export type { PluginTranslate } from "@/lib/plugin/api/use-plugin-translations"
+export type { PluginTranslate } from "@cognia/plugin-contract/lib/plugin/api/use-plugin-translations"

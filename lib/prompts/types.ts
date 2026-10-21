@@ -1,3 +1,16 @@
+import type {
+  PromptGroup,
+  PromptResourceKind,
+  PromptScope,
+  PromptVariableSpec,
+} from "@cognia/plugin-contract/lib/prompts/types"
+export type {
+  PromptGroup,
+  PromptResourceKind,
+  PromptScope,
+  PromptVariableSpec,
+} from "@cognia/plugin-contract/lib/prompts/types"
+
 /**
  * Management contracts for model-facing prompts (ADR-0236).
  *
@@ -16,23 +29,6 @@
 
 export const PROMPT_DEFINITION_SCHEMA_VERSION = 1 as const
 
-/** What kind of resource a catalog entry is. Drives grouping and the allowed edit. */
-export type PromptResourceKind =
-  /** A code-owned template a feature sends on its own call (title, judge, …). */
-  | "feature-template"
-  /** A persona or identity: character, agent mode, subagent. */
-  | "role"
-  /** An on-demand procedure: a Skill bundle. */
-  | "procedure"
-  /** Project or user rules: instruction files, project custom instructions. */
-  | "project-rule"
-  /** The base every chat turn starts from (default append, CLI base). */
-  | "runtime-baseline"
-  /** Text a parser or host contract depends on; inspectable, never editable. */
-  | "protocol"
-  /** Text the user inserts into the composer as their own message. */
-  | "composer-template"
-
 /**
  * The composition an edit performs. The editor never infers this from a field
  * name: each entry declares it, and the UI states its consequence.
@@ -50,9 +46,6 @@ export type PromptOperation =
   | "narrow-only"
   /** Visible for inspection only. */
   | "inspect-only"
-
-/** Where an override may apply, most specific last. */
-export type PromptScope = "account" | "workspace" | "agent" | "session"
 
 export const PROMPT_SCOPE_SPECIFICITY: readonly PromptScope[] = [
   "account",
@@ -83,29 +76,6 @@ export type PromptRisk =
 
 /** Which shell runs the consumer. */
 export type PromptHost = "app" | "cli" | "bootstrap"
-
-/** UI grouping of the code-owned catalog. */
-export type PromptGroup =
-  | "chat"
-  | "generation"
-  | "completion"
-  | "agents"
-  | "goals"
-  | "team"
-  | "knowledge"
-  | "developer"
-  | "twin"
-  | "permissions"
-  | "routing"
-
-/** One placeholder an editable body may reference as `{{name}}`. */
-export interface PromptVariableSpec {
-  name: string
-  /** A body that omits a required variable cannot be published. */
-  required: boolean
-  /** Upper bound the owner clips the value to before interpolation. */
-  maxChars: number
-}
 
 export interface PromptDefinitionV1 {
   schemaVersion: typeof PROMPT_DEFINITION_SCHEMA_VERSION

@@ -10,32 +10,21 @@
  */
 
 import type {
-  ProviderOperationDescriptor,
   ProviderOperationId,
-  ProviderOperationRequest,
   ProviderOperationSupport,
   ResolverProtocol,
 } from "@cognia/provider-types"
 
-import type { ProviderSettingsSnapshot, ResolvedProvider } from "@/lib/ai/provider-consumption"
+import type { ProviderOperationHandler } from "@cognia/plugin-contract/lib/ai/operations/registry"
+export type {
+  ProviderOperationHandler,
+  ProviderOperationHandlerContext,
+} from "@cognia/plugin-contract/lib/ai/operations/registry"
 
 export type ProviderOperationProviderMatch =
   | { kind: "provider"; providerId: string }
   | { kind: "protocol"; protocol: ResolverProtocol }
   | { kind: "any" }
-
-export interface ProviderOperationHandlerContext<TInput = unknown> {
-  descriptor: ProviderOperationDescriptor
-  provider: ResolvedProvider
-  request: ProviderOperationRequest<TInput>
-  /** The settings snapshot the provider was resolved from. */
-  settings: ProviderSettingsSnapshot
-  signal?: AbortSignal
-}
-
-export type ProviderOperationHandler<TInput = unknown, TOutput = unknown> = (
-  context: ProviderOperationHandlerContext<TInput>
-) => Promise<TOutput>
 
 export interface ProviderOperationHandlerRegistration<TInput = unknown, TOutput = unknown> {
   operationId: ProviderOperationId

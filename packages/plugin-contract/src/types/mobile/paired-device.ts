@@ -4,7 +4,7 @@
  * the desktop's "Mobile companion" settings tab (M2.8).
  */
 
-import type { RoomDescriptor } from "@/lib/signaling/crypto"
+import type { RoomDescriptor } from "../../lib/signaling/crypto"
 
 /**
  * What a paired device is.

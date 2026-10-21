@@ -22,6 +22,8 @@
 import type { UIMessage } from "ai"
 import type { SdkContextUsage } from "@cognia/agent-config-types"
 import type { UsageInfo } from "@/lib/claude/adapter"
+import type { ContextLevel } from "@cognia/plugin-contract/lib/claude/usage"
+export type { ContextLevel } from "@cognia/plugin-contract/lib/claude/usage"
 
 /**
  * Default context-window size for an unknown / unrecognised model id. 128k is a
@@ -257,9 +259,6 @@ export function sumSessionUsage(messages: UIMessage[]): SessionUsageTotals {
   }
   return total
 }
-
-/** Severity of context-window fill, mirroring the observability threshold dots. */
-export type ContextLevel = "ok" | "warn" | "crit"
 
 /**
  * Map a fill fraction to a severity level. `crit` is reached at the

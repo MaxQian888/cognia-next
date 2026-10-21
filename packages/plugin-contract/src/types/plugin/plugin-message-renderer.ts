@@ -16,9 +16,9 @@
  */
 
 import type React from "react"
-import type { MessagePartRendererProps } from "@/lib/plugin/api/message-part-renderers"
+import type { MessagePartRendererProps } from "../../lib/plugin/api/message-part-renderers"
 
-export type { MessagePartRendererProps } from "@/lib/plugin/api/message-part-renderers"
+export type { MessagePartRendererProps } from "../../lib/plugin/api/message-part-renderers"
 
 /**
  * One renderer contribution in `manifest.messageRenderers[]`. Lazy factory

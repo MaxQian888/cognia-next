@@ -20,6 +20,14 @@ import { sha256Bytes } from "@/lib/ocr/hash"
 import { decodeBase64 } from "@/lib/share/encoding"
 
 import { PackageFormatError, safeArchivePath } from "./archive-path"
+import type {
+  PackageFileRecord,
+  PackageSignature,
+} from "@cognia/plugin-contract/lib/packaging/signed-zip"
+export type {
+  PackageFileRecord,
+  PackageSignature,
+} from "@cognia/plugin-contract/lib/packaging/signed-zip"
 
 export { safeArchivePath } from "./archive-path"
 
@@ -32,22 +40,6 @@ export { safeArchivePath } from "./archive-path"
  */
 export async function loadJSZip(): Promise<typeof JSZip> {
   return (await import("jszip")).default
-}
-
-export interface PackageSignature {
-  algorithm: "ed25519"
-  /** Display name of the signer. */
-  publisher: string
-  /** Base64 raw 32-byte Ed25519 public key. */
-  publicKey: string
-  /** Base64 raw 64-byte Ed25519 signature over the canonical manifest. */
-  signature: string
-}
-
-export interface PackageFileRecord {
-  path: string
-  sha256: string
-  size?: number
 }
 
 export interface ArchiveLimits {

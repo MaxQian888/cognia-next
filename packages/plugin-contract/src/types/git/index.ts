@@ -346,7 +346,7 @@ export interface GitUiSettings {
    * imported type-only to avoid a cycle), so older installs pick up new fields
    * without a Dexie migration.
    */
-  panel?: import("@/lib/git/panel-prefs").PartialSourceControlPanelPrefs
+  panel?: import("../../lib/git/panel-prefs").PartialSourceControlPanelPrefs
 }
 
 /** Forward-compat defaults merged by `lib/db/settings.ts:getSettings()`. */

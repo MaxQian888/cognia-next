@@ -16,9 +16,9 @@
  */
 
 import type React from "react"
-import type { ToolResultRendererProps } from "@/lib/plugin/api/tool-result-renderers"
+import type { ToolResultRendererProps } from "../../lib/plugin/api/tool-result-renderers"
 
-export type { ToolResultRendererProps } from "@/lib/plugin/api/tool-result-renderers"
+export type { ToolResultRendererProps } from "../../lib/plugin/api/tool-result-renderers"
 
 /**
  * One renderer contribution in `manifest.toolRenderers[]`. Lazy factory shape —

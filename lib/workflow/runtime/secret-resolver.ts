@@ -1,18 +1,5 @@
-/**
- * Secret resolver — converts a credential ref id to its keychain value.
- *
- * In Tauri builds the resolver delegates to the existing keychain Tauri
- * commands; in web mode it falls back to the per-browser store. Phase 4
- * ships a stub that returns `undefined` for any ref — the AI/HTTP nodes
- * that need real keys will pull through the existing `lib/ai` provider
- * routing, which already handles credentials. A first-class secret-bag
- * with explicit refs lands when the workflow editor's "Credentials" UI
- * is built (Phase 9 polish).
- */
-
-export interface SecretResolver {
-  resolve(refId: string): Promise<string | undefined>
-}
+import type { SecretResolver } from "@cognia/plugin-contract/lib/workflow/runtime/secret-resolver"
+export type { SecretResolver } from "@cognia/plugin-contract/lib/workflow/runtime/secret-resolver"
 
 /**
  * Default no-op resolver. Returns undefined for every ref. Node executors

@@ -16,12 +16,19 @@ import type {
   InterceptorPointSemantics,
   PluginInterceptorPoint,
 } from "@/types/plugin/plugin-interceptors"
+import type {
+  CanonicalExtensionPoint,
+  PluginPointGovernanceMode,
+} from "@cognia/plugin-contract/lib/plugin/contracts/plugin-points"
+export type {
+  ActivationEventDeclaration,
+  CanonicalExtensionPoint,
+  PluginPointGovernanceMode,
+} from "@cognia/plugin-contract/lib/plugin/contracts/plugin-points"
 
 export type PluginPointKind = "ui-slot" | "hook" | "activation" | "runtime" | "interceptor"
 export type PluginPointStability = "stable" | "experimental" | "deprecated"
 export type PluginPointStatus = "implemented" | "virtual" | "deprecated"
-export type PluginPointGovernanceMode = "warn" | "block"
-
 export type PluginPointHostKind = "jsx-mount" | "registration"
 
 /**
@@ -275,8 +282,6 @@ export const CANONICAL_EXTENSION_POINTS = [
   "vscode.activity-bar",
   "vscode.terminal.output",
 ] as const
-
-export type CanonicalExtensionPoint = (typeof CANONICAL_EXTENSION_POINTS)[number]
 
 const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "sidebar.left.top",
@@ -821,52 +826,6 @@ export const CANONICAL_ACTIVATION_PATTERNS = [
 ] as const
 
 export type CanonicalActivationPattern = (typeof CANONICAL_ACTIVATION_PATTERNS)[number]
-export type ActivationEventDeclaration =
-  | "startup"
-  | "onStartup"
-  | "onCommand:*"
-  | `onCommand:${string}`
-  | "onTool:*"
-  | `onTool:${string}`
-  | "onAgentTool:*"
-  | `onAgentTool:${string}`
-  | "onChat:*"
-  | `onChat:${string}`
-  | "onAgent:start"
-  | "onA2UI:surface"
-  | `onLanguage:${string}`
-  | `onFile:${string}`
-  // VS Code-flavoured activation events. Patterns ending in `:*` may
-  // appear without suffix (e.g. literal `onView:*`) or with one (`onView:foo`).
-  | "onView:*"
-  | `onView:${string}`
-  | "onWebviewPanel:*"
-  | `onWebviewPanel:${string}`
-  | "onCustomEditor:*"
-  | `onCustomEditor:${string}`
-  | "onAuthenticationRequest"
-  | `onAuthenticationRequest:${string}`
-  | "onTaskType:*"
-  | `onTaskType:${string}`
-  | "onFileSystem:*"
-  | `onFileSystem:${string}`
-  | "onDebugResolve:*"
-  | `onDebugResolve:${string}`
-  | "onStartupFinished"
-  | "onUri"
-  | "onTerminal"
-  | "onTerminalProfile:*"
-  | `onTerminalProfile:${string}`
-  | "onNotebook:*"
-  | `onNotebook:${string}`
-  | "onWalkthrough:*"
-  | `onWalkthrough:${string}`
-  | "onChatParticipant:*"
-  | `onChatParticipant:${string}`
-  | "onLanguageModelTool:*"
-  | `onLanguageModelTool:${string}`
-  | `workspaceContains:${string}`
-
 interface UiSlotOverride {
   status: PluginPointStatus
   stability: PluginPointStability

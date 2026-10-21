@@ -899,7 +899,7 @@ export interface PluginHooksAll extends PluginHooks {
    * Delivered only to plugins granted `agent:external:read`.
    */
   onExternalAgentConfigChange?: (
-    event: import("@/lib/plugin/api/external-agents-changes").ExternalAgentChangeEvent
+    event: import("../../lib/plugin/api/external-agents-changes").ExternalAgentChangeEvent
   ) => void | Promise<void>
 
   /**

@@ -16,11 +16,11 @@
 
 import type { ContextRef } from "@/lib/chat/mentions/types"
 import type { ChatTemplateParamValue } from "./binding"
+import type { ResourceParamKind } from "@cognia/plugin-contract/lib/chat/template/resource-kinds"
+export type { ResourceParamKind } from "@cognia/plugin-contract/lib/chat/template/resource-kinds"
 
 /** Mention kinds a parameter may be bound to. */
 export const RESOURCE_PARAM_KINDS = ["file", "agent", "subagent", "member"] as const
-
-export type ResourceParamKind = (typeof RESOURCE_PARAM_KINDS)[number]
 
 export function isResourceParamKind(value: string | undefined): value is ResourceParamKind {
   return !!value && (RESOURCE_PARAM_KINDS as readonly string[]).includes(value)

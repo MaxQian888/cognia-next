@@ -17,19 +17,19 @@ export type {
   ScreenshotOptions,
   ScrollArgs,
   WaitForOptions,
-} from "@/lib/browser/agent-engine"
+} from "@cognia/plugin-contract/lib/browser/agent-engine"
 
 export type {
   BrowserActionResult,
   BrowserDialogState,
   BrowserSelection,
-} from "@/lib/browser/protocol"
+} from "@cognia/plugin-contract/lib/browser/protocol"
 
 export type {
   BrowserAnnotationIntent,
   BrowserAnnotationRow,
   BrowserAnnotationSeverity,
-} from "@/lib/db/browser-annotations"
+} from "@cognia/plugin-contract/lib/db/browser-annotations"
 
 /**
  * The `browser_*` tool table (ADR-0201): names, agent-facing descriptions,

@@ -15,7 +15,7 @@ export {
 export type { RegisterModalMountsOptions } from "@/lib/plugin/bridge/modal-mount-bridge"
 
 export { createModalAPI } from "@/lib/plugin/api/modal-api"
-export type { PluginModalAPI } from "@/lib/plugin/api/modal-api"
+export type { PluginModalAPI } from "@cognia/plugin-contract/lib/plugin/api/modal-api"
 
 export {
   clearModalsForPlugin,

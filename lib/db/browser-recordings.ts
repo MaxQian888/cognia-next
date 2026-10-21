@@ -12,10 +12,9 @@
  * no benefit. Credentials cannot appear here — the recorder never captures a
  * password's value, only a `secret: true` flag.
  */
-import type { RecordedFlow } from "@/lib/browser/recording/protocol"
 import { getDb } from "./schema"
-
-export type BrowserRecordingRow = RecordedFlow
+import type { BrowserRecordingRow } from "@cognia/plugin-contract/lib/db/browser-recordings"
+export type { BrowserRecordingRow } from "@cognia/plugin-contract/lib/db/browser-recordings"
 
 /**
  * Flows recorded against `baseUrl`, newest first — what the pane offers for the

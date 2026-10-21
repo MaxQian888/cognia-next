@@ -1,11 +1,7 @@
 import type { PluginManifest } from "@/types/plugin"
 import { PLUGIN_MANIFEST_CONTRIBUTIONS } from "@/packages/plugin-sdk/src/contracts/catalog"
-
-export interface PluginManifestParityIssue {
-  field: string
-  packaged: unknown
-  module: unknown
-}
+import type { PluginManifestParityIssue } from "@cognia/plugin-contract/lib/plugin/core/manifest-parity"
+export type { PluginManifestParityIssue } from "@cognia/plugin-contract/lib/plugin/core/manifest-parity"
 
 function canonicalize(value: unknown): unknown {
   if (typeof value === "function" || value === undefined) return undefined

@@ -32,7 +32,7 @@ export type {
   PluginSchedulerWriteOptions,
   PluginUpcomingRun,
   PluginUserSchedulerAPI,
-} from "@/lib/plugin/api/scheduler-tasks"
+} from "@cognia/plugin-contract/lib/plugin/api/scheduler-tasks"
 export type {
   CreateScheduledTaskInput,
   ScheduledTask,

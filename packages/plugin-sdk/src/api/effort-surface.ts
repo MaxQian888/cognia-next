@@ -59,4 +59,7 @@ export const subscribeEffortSurface: EffortSurfaceHost["subscribeEffortSurface"]
   sessionId,
   listener
 ) => requireHost().subscribeEffortSurface(sessionId, listener)
-export type { EffortSurface, EffortSurfaceInput } from "@/lib/ai/effort-surface"
+export type {
+  EffortSurface,
+  EffortSurfaceInput,
+} from "@cognia/plugin-contract/lib/ai/effort-surface"

@@ -21,4 +21,4 @@ export type {
   VideoExportOptions,
   VideoTransition,
   VideoTransitionDefinition,
-} from "@/lib/plugin/api/media-api"
+} from "@cognia/plugin-contract/lib/plugin/api/media-api"

@@ -21,9 +21,8 @@
  */
 
 import type { TrustTier } from "@/lib/browser/protocol"
-
-export type BrowserBackend =
-  "embedded" | "local-chromium" | "user-chrome" | "remote" | "web-fallback"
+import type { BrowserBackend } from "@cognia/plugin-contract/lib/browser/backend-availability"
+export type { BrowserBackend } from "@cognia/plugin-contract/lib/browser/backend-availability"
 
 /** The backends the desktop can host itself (no server involved). */
 export type DesktopLocalBackend = "local-chromium" | "user-chrome"

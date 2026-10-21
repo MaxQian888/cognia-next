@@ -39,4 +39,4 @@ export function securityScanRunStatus(record: SecurityScanRunRecord): SecuritySc
 }
 
 /** Host execution-journal operations are governed through `ctx.securityScans`. */
-export type { PluginSecurityScansAPI } from "@/lib/plugin/api/security-scans-api"
+export type { PluginSecurityScansAPI } from "@cognia/plugin-contract/lib/plugin/api/security-scans-api"

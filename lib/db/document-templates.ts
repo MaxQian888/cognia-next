@@ -11,21 +11,8 @@
 
 import type { ArtifactLanguage } from "@/types/artifact/artifact"
 import { getDb } from "./schema"
-
-export interface DocumentTemplateRow {
-  /** "dtpl_" prefix. */
-  id: string
-  name: string
-  description?: string
-  /** The document body a new document starts with. */
-  content: string
-  language: ArtifactLanguage
-  type: "code" | "text"
-  /** Bumped on every content edit, so the template catalog can version it. */
-  revision: number
-  createdAt: number
-  updatedAt: number
-}
+import type { DocumentTemplateRow } from "@cognia/plugin-contract/lib/db/document-templates"
+export type { DocumentTemplateRow } from "@cognia/plugin-contract/lib/db/document-templates"
 
 export interface DocumentTemplateDraft {
   /** Already trimmed and non-empty. */

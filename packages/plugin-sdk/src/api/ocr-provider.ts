@@ -5,7 +5,7 @@ import { documentConfidence } from "@cognia/ocr/confidence"
 
 export { defineOcrProvider } from "../define/define-ocr-provider"
 
-export type { PluginOcrAPI } from "@/lib/plugin/api/ocr-api"
+export type { PluginOcrAPI } from "@cognia/plugin-contract/lib/plugin/api/ocr-api"
 export type { OcrProvider } from "@cognia/plugin-contract/types/ocr/index"
 export type {
   PluginOcrProviderDef,

@@ -12,4 +12,4 @@ export type {
   ContextProvidersBridgeError,
   ContextProvidersBridgeOptions,
   ContextProvidersBridgeResult,
-} from "@/lib/plugin/bridge/context-providers-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/context-providers-bridge"

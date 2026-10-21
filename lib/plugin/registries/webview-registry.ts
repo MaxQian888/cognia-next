@@ -12,6 +12,7 @@
 
 import type { ResolvedPluginWebview, PluginWebviewMessage } from "@/types/plugin/plugin-webview"
 import { loggers } from "@cognia/logging"
+import type { Listener } from "@cognia/plugin-contract/lib/plugin/registries/webview-registry"
 
 const webviews = new Map<string, ResolvedPluginWebview>()
 /**
@@ -32,7 +33,6 @@ const inboundListeners = new Map<string, Set<(m: PluginWebviewMessage) => void>>
  */
 const webviewStates = new Map<string, unknown>()
 
-type Listener = () => void
 const listeners = new Set<Listener>()
 let snapshot: readonly ResolvedPluginWebview[] | null = null
 

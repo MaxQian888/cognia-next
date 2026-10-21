@@ -1,27 +1,15 @@
 import type { PluginManifest } from "@/types/plugin"
-
-export type CompatibilitySeverity = "error" | "warning"
-
-export interface CompatibilityDiagnostic {
-  severity: CompatibilitySeverity
-  code: string
-  field: string
-  message: string
-  hint?: string
-  expected?: string
-  actual?: string
-}
-
-export interface CompatibilityRuntime {
-  cogniaVersion: string
-  nodeVersion?: string
-  pythonVersion?: string
-}
-
-export interface CompatibilityEvaluation {
-  compatible: boolean
-  diagnostics: CompatibilityDiagnostic[]
-}
+import type {
+  CompatibilityDiagnostic,
+  CompatibilityEvaluation,
+  CompatibilityRuntime,
+} from "@cognia/plugin-contract/lib/plugin/core/compatibility"
+export type {
+  CompatibilityDiagnostic,
+  CompatibilityEvaluation,
+  CompatibilityRuntime,
+  CompatibilitySeverity,
+} from "@cognia/plugin-contract/lib/plugin/core/compatibility"
 
 interface ParsedVersion {
   major: number

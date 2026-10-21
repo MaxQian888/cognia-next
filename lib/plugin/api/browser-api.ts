@@ -3,20 +3,26 @@ import {
   primeLocalBrowserRouting,
   routeEngine,
   type BrowserEngine,
-  type BrowserEngineBackend,
-  type EngineBackendPreference,
 } from "@/lib/browser/agent-engine"
-import type { BrowserBackend } from "@/lib/browser/backend-availability"
 import {
   isBrowserDomainAuthorized,
   primeBrowserDomainGrants,
 } from "@/lib/browser/domain-authorization"
 import { requestBrowserDownloadAttach } from "@/lib/browser/downloads-client"
 import { isBrowserSurfaceVisible, requestBrowserUrl } from "@/lib/browser/open-url-request"
-import type { TrustTier } from "@/lib/browser/protocol"
-import type { BrowserDownloadSummary } from "@/lib/browser/session-types"
-import { saveBrowserAnnotation, type BrowserAnnotationRow } from "@/lib/db/browser-annotations"
+import { saveBrowserAnnotation } from "@/lib/db/browser-annotations"
 import type { PluginSource } from "@/types/plugin"
+import type {
+  PluginBrowserAPI,
+  PluginBrowserEngine,
+  PrivilegedBrowserEngineMethod,
+} from "@cognia/plugin-contract/lib/plugin/api/browser-api"
+export type {
+  PluginBrowserAPI,
+  PluginBrowserEngine,
+  PluginBrowserRoute,
+  PluginBrowserRoutingContext,
+} from "@cognia/plugin-contract/lib/plugin/api/browser-api"
 
 /**
  * The one plugin that receives the full engine (ADR-0201): the bundled Browser
@@ -44,17 +50,6 @@ export const PRIVILEGED_BROWSER_ENGINE_METHODS = [
   "listCookies",
   "clearCookies",
 ] as const
-
-type PrivilegedBrowserEngineMethod = (typeof PRIVILEGED_BROWSER_ENGINE_METHODS)[number]
-
-/**
- * The engine a plugin receives. Every other plugin gets a facade WITHOUT the
- * privileged methods (absent at runtime, optional here), and whose `evaluate`
- * never forwards the post-fill approval flag. The first-party plugin receives
- * the engine itself.
- */
-export type PluginBrowserEngine = Omit<BrowserEngine, PrivilegedBrowserEngineMethod> &
-  Partial<Pick<BrowserEngine, PrivilegedBrowserEngineMethod>>
 
 /** Methods the facade forwards unchanged (`evaluate` is forwarded with its options dropped). */
 const FACADE_METHODS = [
@@ -136,50 +131,6 @@ export function createPluginBrowserEngineFacade(engine: BrowserEngine): PluginBr
   const frozen = Object.freeze(facade) as unknown as PluginBrowserEngine
   facades.set(engine, frozen)
   return frozen
-}
-
-export interface PluginBrowserRoute {
-  /** The full engine for the first-party Browser Tools; a facade for every other plugin. */
-  engine: PluginBrowserEngine
-  tier: TrustTier
-  untrusted: boolean
-  /** Which engine the router picked (ADR-0201). */
-  backend?: BrowserEngineBackend
-}
-
-export interface PluginBrowserRoutingContext {
-  domainAuthorized?: boolean
-  /** A per-chat backend choice made with `browser_open` (ADR-0201). */
-  backendPreference?: EngineBackendPreference
-  /**
-   * The conversation the call is for: on local Chromium each conversation
-   * drives its own page (ADR-0214).
-   */
-  chatSessionId?: string
-}
-
-export interface PluginBrowserAPI {
-  routeEngine(url: string, context?: PluginBrowserRoutingContext): PluginBrowserRoute
-  isDomainAuthorized(url: string): boolean
-  primeDomainGrants(): Promise<string[]>
-  saveAnnotation(annotation: BrowserAnnotationRow): Promise<void>
-  /** Warm the "local Chromium installed" snapshot `routeEngine` reads. */
-  primeLocalRouting(): Promise<void>
-  /** Create (once) or reuse the agent's local runtime session for a backend. */
-  ensureLocalEngine(
-    backend: "local-chromium" | "user-chrome",
-    options?: { headless?: boolean; browser?: string; chatSessionId?: string }
-  ): Promise<PluginBrowserEngine>
-  /**
-   * Ask the browser pane to show `url` (empty: whatever it has open) on
-   * `backend`, for `chatSessionId`'s page. True when a pane or a host
-   * revealing one took the request.
-   */
-  openPane(url: string, options?: { backend?: BrowserBackend; chatSessionId?: string }): boolean
-  /** Hand a finished download to the composer of `chatSessionId`. */
-  attachDownload(download: BrowserDownloadSummary, chatSessionId: string): boolean
-  /** Whether a person can currently see the app window. */
-  isSurfaceVisible(): boolean
 }
 
 export interface CreateBrowserAPIOptions {

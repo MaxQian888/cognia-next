@@ -33,35 +33,15 @@ import {
 } from "@/lib/prompts/plugin-prompts"
 import { resolvePromptAsync } from "@/lib/prompts/resolve"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
+import type { PluginPromptsAPI } from "@cognia/plugin-contract/lib/plugin/api/prompts-api"
+export type {
+  PluginPromptRegistration,
+  PluginPromptResolveOptions,
+  PluginPromptsAPI,
+  PluginResolvedPrompt,
+} from "@cognia/plugin-contract/lib/plugin/api/prompts-api"
 
 export type { PluginPromptDeclaration }
-
-export interface PluginPromptRegistration {
-  /** The namespaced ids, `plugin:<pluginId>/<id>`. */
-  promptIds: string[]
-  /** Remove exactly these prompts. Idempotent. */
-  unregister(): void
-}
-
-export interface PluginPromptResolveOptions {
-  /** Values for the declared `{{name}}` placeholders. */
-  values?: Record<string, string>
-  /** The chat the call belongs to; its workspace's override applies. */
-  sessionId?: string
-}
-
-export interface PluginResolvedPrompt {
-  text: string
-  /** Whether the user's override or the plugin's default was used. */
-  source: "default" | "override"
-}
-
-export interface PluginPromptsAPI {
-  /** Declare prompts as Prompt Center slots. Replaces earlier ones with the same ids. */
-  register(declarations: readonly PluginPromptDeclaration[]): PluginPromptRegistration
-  /** The text to send for one of this plugin's registered prompts. */
-  resolve(id: string, options?: PluginPromptResolveOptions): Promise<PluginResolvedPrompt>
-}
 
 /** Where a manifest-less plugin's prompts are consumed, for the detail view. */
 function consumerOf(pluginId: string): string {

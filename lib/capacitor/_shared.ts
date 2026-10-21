@@ -15,10 +15,8 @@
  * lets each plugin file stay focused on its own API surface.
  */
 
-import { detectPlatform, isNativeMobile, type Platform } from "@/lib/platform/detect"
-
-/** @deprecated alias of {@link Platform} — kept so existing imports compile. */
-export type NativePlatform = Platform
+import { detectPlatform, isNativeMobile } from "@/lib/platform/detect"
+export type { NativePlatform } from "@cognia/plugin-contract/lib/capacitor/_shared"
 
 /**
  * Runtime platform. Delegates to the canonical {@link detectPlatform} in

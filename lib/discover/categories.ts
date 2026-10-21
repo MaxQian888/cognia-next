@@ -9,6 +9,8 @@
 
 import { partitionByLayout, type PartitionedCatalog } from "@/lib/shell/layout-partition"
 import type { SidebarLayout } from "@/types/shell/sidebar"
+import type { DiscoverViewMode } from "@cognia/plugin-contract/lib/discover/categories"
+export type { DiscoverViewMode } from "@cognia/plugin-contract/lib/discover/categories"
 
 export const DISCOVER_GROUPS = ["agents", "extensions", "templates", "twin"] as const
 export type DiscoverGroup = (typeof DISCOVER_GROUPS)[number]
@@ -107,7 +109,6 @@ export const DEFAULT_DISCOVER_CATEGORY: DiscoverCategoryId = DISCOVER_CATEGORIES
 // ---------------------------------------------------------------------------
 
 export const DISCOVER_VIEW_MODES = ["grid", "list", "compact"] as const
-export type DiscoverViewMode = (typeof DISCOVER_VIEW_MODES)[number]
 export const DEFAULT_DISCOVER_VIEW: DiscoverViewMode = "grid"
 
 export function isValidViewMode(value: unknown): value is DiscoverViewMode {

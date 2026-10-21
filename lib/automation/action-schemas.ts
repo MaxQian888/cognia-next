@@ -29,6 +29,18 @@
  */
 
 import { z } from "zod"
+export type {
+  ActionRequest,
+  AppLocator,
+  DragOpts,
+  ElementHandle,
+  GetAppStateOptions,
+  Locator,
+  MouseButton,
+  Point,
+  ScrollOpts,
+  UiTreeProjectionKind,
+} from "@cognia/plugin-contract/lib/automation/action-schemas"
 
 /**
  * Rust `ElementRef(pub String)` / `KeyChord(pub String)` are newtype structs.
@@ -234,21 +246,10 @@ export const appLocatorSchema = z.discriminatedUnion("kind", [
 
 export type ElementRef = z.infer<typeof elementRefSchema>
 export type KeyChord = z.infer<typeof keyChordSchema>
-export type Point = z.infer<typeof pointSchema>
-export type MouseButton = z.infer<typeof mouseButtonSchema>
-export type DragOpts = z.infer<typeof dragOptsSchema>
-export type ScrollOpts = z.infer<typeof scrollOptsSchema>
-export type UiTreeProjectionKind = z.infer<typeof uiTreeProjectionKindSchema>
-export type ElementHandle = z.infer<typeof elementHandleSchema>
 export type PixelTarget = z.infer<typeof pixelTargetSchema>
 export type ActionTarget = z.infer<typeof actionTargetSchema>
 export type UiAction = z.infer<typeof uiActionSchema>
 export type ActionStrategy = z.infer<typeof actionStrategySchema>
-export type ActionRequest = z.infer<typeof actionRequestSchema>
-export type Locator = z.infer<typeof locatorSchema>
-export type GetAppStateOptions = z.infer<typeof getAppStateOptionsSchema>
-export type AppLocator = z.infer<typeof appLocatorSchema>
-
 /**
  * Render a zod schema as the plain JSON Schema the plugin tool surface and the
  * sidecar's `jsonSchemaToZodShape` both consume. Draft-7 is what the Anthropic

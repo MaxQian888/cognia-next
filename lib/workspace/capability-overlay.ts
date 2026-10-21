@@ -1,3 +1,14 @@
+import type {
+  WorkspaceCapabilityKind,
+  WorkspaceCapabilityOverlay,
+  WorkspaceCapabilityOverrides,
+} from "@cognia/plugin-contract/lib/workspace/capability-overlay"
+export type {
+  WorkspaceCapabilityKind,
+  WorkspaceCapabilityOverlay,
+  WorkspaceCapabilityOverrides,
+} from "@cognia/plugin-contract/lib/workspace/capability-overlay"
+
 /**
  * Per-workspace enablement for globally-defined capabilities.
  *
@@ -71,18 +82,6 @@
 
 /** Capability families a workspace may re-scope. See the note on plugins above. */
 export const WORKSPACE_CAPABILITY_KINDS = ["skill", "mcpServer", "template"] as const
-
-export type WorkspaceCapabilityKind = (typeof WORKSPACE_CAPABILITY_KINDS)[number]
-
-/**
- * Capability id → forced state in this workspace. An id that is absent
- * inherits the definition's global flag.
- */
-export type WorkspaceCapabilityOverrides = Record<string, boolean>
-
-export type WorkspaceCapabilityOverlay = Partial<
-  Record<WorkspaceCapabilityKind, WorkspaceCapabilityOverrides>
->
 
 /** What the workspace says about one capability, as the UI presents it. */
 export type WorkspaceCapabilityState = "inherit" | "on" | "off"

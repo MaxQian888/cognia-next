@@ -16,7 +16,7 @@ export type { RegisterChatMiddlewaresOptions } from "@/lib/plugin/bridge/chat-mi
 
 export { clearChatMiddlewaresForPluginContext, createChatAPI } from "@/lib/plugin/api/chat-api"
 
-export type { PluginChatAPI } from "@/lib/plugin/api/chat-api"
+export type { PluginChatAPI } from "@cognia/plugin-contract/lib/plugin/api/chat-api"
 
 export {
   CIRCUIT_BREAKER_THRESHOLD,

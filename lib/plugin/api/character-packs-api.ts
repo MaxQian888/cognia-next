@@ -5,18 +5,11 @@ import {
   registerCharacterPack,
   unregisterCharacterPackById,
 } from "@/lib/plugin/registries/character-pack-registry"
-import type { PluginCharacterPackDef } from "@cognia/plugin-sdk/api/character-pack"
-
-export interface PluginCharacterPackRegistration {
-  packId: string
-  unregister(): void
-}
-
-export interface PluginCharacterPacksAPI {
-  register(pack: PluginCharacterPackDef): PluginCharacterPackRegistration
-  get(packId: string): PluginCharacterPackDef | undefined
-  listRegistered(): string[]
-}
+import type { PluginCharacterPacksAPI } from "@cognia/plugin-contract/lib/plugin/api/character-packs-api"
+export type {
+  PluginCharacterPackRegistration,
+  PluginCharacterPacksAPI,
+} from "@cognia/plugin-contract/lib/plugin/api/character-packs-api"
 
 export function createCharacterPacksAPI(pluginId: string): PluginCharacterPacksAPI {
   return {

@@ -21,22 +21,14 @@ import type { Transport } from "@/lib/tauri/transport-types"
 
 import { RemoteDesktopError } from "./host-client"
 import type { RemoteDesktopHostRef, RemoteDesktopSessionOpened } from "./types"
-
-/** The raw-channel surface noVNC's `Websock.attach` checks for. */
-export interface RemoteDesktopRawChannel {
-  binaryType: string
-  readonly protocol: string
-  readonly readyState: string
-  onopen: ((event: Event) => void) | null
-  onmessage: ((event: MessageEvent) => void) | null
-  onclose: ((event: Event) => void) | null
-  onerror: ((event: Event) => void) | null
-  send(data: ArrayBuffer | ArrayBufferView): void
-  close(): void
-}
-
-/** A viewer connects to a URL (it opens the WebSocket) or an open channel. */
-export type RemoteDesktopConnection = string | RemoteDesktopRawChannel
+import type {
+  RemoteDesktopConnection,
+  RemoteDesktopRawChannel,
+} from "@cognia/plugin-contract/lib/remote-desktop/stream"
+export type {
+  RemoteDesktopConnection,
+  RemoteDesktopRawChannel,
+} from "@cognia/plugin-contract/lib/remote-desktop/stream"
 
 export interface RemoteDesktopStream {
   connection: RemoteDesktopConnection

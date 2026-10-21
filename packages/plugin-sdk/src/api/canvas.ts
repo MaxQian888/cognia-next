@@ -21,9 +21,9 @@ export type {
   CanvasActionResult,
   CanvasActionType,
   StreamingCallbacks,
-} from "@/lib/ai/generation/canvas-actions"
-export type { AddCommentInput, ReplyInput } from "@/lib/db/canvas-comments"
-export type { PythonExecResult } from "@/lib/tauri/canvas"
+} from "@cognia/plugin-contract/lib/ai/generation/canvas-actions"
+export type { AddCommentInput, ReplyInput } from "@cognia/plugin-contract/lib/db/canvas-comments"
+export type { PythonExecResult } from "@cognia/plugin-contract/lib/tauri/canvas"
 export type {
   CanvasComment,
   CollaborativeSession,

@@ -32,6 +32,14 @@ import { routerFusionChatRunActive } from "./chat-fusion-run"
 import { breakerThresholdOf, routerFusionGate, type RouterFusionGateSettings } from "./feature-gate"
 import { runExplicitFusion, trippedSurfaceError } from "./guard"
 import { loadRouterFusionHost, type RouterFusionHost } from "./load-engine"
+import type {
+  DelegateDeliveryChoice,
+  FusionActionChoice,
+} from "@cognia/plugin-contract/lib/router-fusion/gate/explicit-run"
+export type {
+  DelegateDeliveryChoice,
+  FusionActionChoice,
+} from "@cognia/plugin-contract/lib/router-fusion/gate/explicit-run"
 
 /** The surface every agent, Squad and workflow generation is booked on (D27). */
 export const AGENTS_WORKFLOWS_SURFACE = "agentsWorkflows" as const
@@ -41,7 +49,6 @@ export const AGENTS_WORKFLOWS_SURFACE = "agentsWorkflows" as const
  * `auto` is the default and means "unchanged": the caller's existing path.
  */
 export const FUSION_ACTION_CHOICES = ["auto", "direct", "cascade", "panel", "delegate"] as const
-export type FusionActionChoice = (typeof FUSION_ACTION_CHOICES)[number]
 /** A choice that asks for a fusion run; `auto` is excluded by construction. */
 export type FusionActionMode = Exclude<FusionActionChoice, "auto">
 
@@ -149,8 +156,6 @@ export function validateFusionActionChoice(input: {
  * that base (a `workspace_apply` approval, DEL-04).
  */
 export const DELEGATE_DELIVERY_CHOICES = ["patch_only", "workspace_updated"] as const
-export type DelegateDeliveryChoice = (typeof DELEGATE_DELIVERY_CHOICES)[number]
-
 export function delegateDeliveryOf(value: unknown): DelegateDeliveryChoice {
   return value === "workspace_updated" ? "workspace_updated" : "patch_only"
 }

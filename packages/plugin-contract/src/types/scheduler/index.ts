@@ -402,7 +402,7 @@ export interface BackgroundCommandTaskPayload extends Record<string, unknown> {
 }
 
 export interface MonitorTaskPayload extends Record<string, unknown> {
-  condition: import("@/lib/jobs/background-jobs").BackgroundMonitorCondition
+  condition: import("../../lib/jobs/background-jobs").BackgroundMonitorCondition
   /** ISO date or epoch milliseconds. Omit to keep the watch until it settles. */
   expiresAt?: string | number
   label?: string

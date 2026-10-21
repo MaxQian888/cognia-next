@@ -8,6 +8,10 @@
 // event bus, and none of that may be bundled into the SDK.
 
 import type { PetEventKind } from "@/types/pet"
+export type {
+  PetInteractionKind,
+  PetRewardableKind,
+} from "@cognia/plugin-contract/lib/pet/access/limits"
 
 /** Nurture kinds any subject may drive directly. */
 export const PET_INTERACTION_KINDS = [
@@ -19,8 +23,6 @@ export const PET_INTERACTION_KINDS = [
   "cleaned",
   "treated",
 ] as const satisfies readonly PetEventKind[]
-export type PetInteractionKind = (typeof PET_INTERACTION_KINDS)[number]
-
 /**
  * Kinds a non-user subject may reward through the gate's `requestPetReward`:
  * the seven care actions, the legacy `workflowRun`, and `pluginReward`, the
@@ -31,8 +33,6 @@ export const PET_REWARDABLE_KINDS = [
   "workflowRun",
   "pluginReward",
 ] as const satisfies readonly PetEventKind[]
-export type PetRewardableKind = (typeof PET_REWARDABLE_KINDS)[number]
-
 /** Hard per-call XP ceiling, below the daily budget. */
 export const MAX_XP_PER_REWARD = 10
 

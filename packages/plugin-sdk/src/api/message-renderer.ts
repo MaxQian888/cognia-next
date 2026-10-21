@@ -6,8 +6,8 @@ export type { PluginMessageRendererDef } from "@cognia/plugin-contract/types/plu
 export type {
   MessagePartRendererEntry,
   MessagePartRendererProps,
-} from "@/lib/plugin/api/message-part-renderers"
-export type { PluginMessagePartAPI } from "@/lib/plugin/api/message-part-api"
+} from "@cognia/plugin-contract/lib/plugin/api/message-part-renderers"
+export type { PluginMessagePartAPI } from "@cognia/plugin-contract/lib/plugin/api/message-part-api"
 
 export const COMPOSER_APPEND_EVENT = "cognia:composer-append"
 

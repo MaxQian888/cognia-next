@@ -23,8 +23,8 @@ import { IDLE_TIMING, nextRunTiming, type RunTiming } from "@/lib/claude/run-sta
 import { nextToolTimestamps } from "@/lib/claude/run-record"
 import { useMemo, useSyncExternalStore } from "react"
 import { getExecutionBroker, DEFAULT_AI_TURN_LIMIT } from "@/lib/execution/broker"
-
-export type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
+import type { ChatStatus, PermissionMode } from "@cognia/plugin-contract/stores/chat/chat-store"
+export type { ChatStatus, PermissionMode } from "@cognia/plugin-contract/stores/chat/chat-store"
 
 /** Optional facts about a status change the store cannot know on its own. */
 export interface SessionStatusOptions {
@@ -59,8 +59,6 @@ export type SteerEntry = {
   /** What the follow-up's context envelope carried; merged on drain. */
   promptPreamble?: PromptPreambleSummary
 }
-
-export type PermissionMode = NonNullable<SendOptions["permissionMode"]>
 
 /**
  * Snapshot of a session's most recent send. The renderer holds this so that

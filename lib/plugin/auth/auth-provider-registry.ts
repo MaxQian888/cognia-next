@@ -21,17 +21,16 @@
  */
 
 import { nanoid } from "nanoid"
-
-export interface AuthSession {
-  /** Stable id assigned when the session was created. */
-  id: string
-  /** Bearer token / API key. Persisted via cognia's secrets API. */
-  accessToken: string
-  /** Account identifier — typically email or user-id. */
-  account: { id: string; label: string }
-  /** Scopes granted with this session. Sorted for deterministic comparison. */
-  scopes: string[]
-}
+import type {
+  AuthSession,
+  AuthSessionChangeEvent,
+  AuthSessionOptions,
+} from "@cognia/plugin-contract/lib/plugin/auth/auth-provider-registry"
+export type {
+  AuthSession,
+  AuthSessionChangeEvent,
+  AuthSessionOptions,
+} from "@cognia/plugin-contract/lib/plugin/auth/auth-provider-registry"
 
 export interface AuthSessionAddedEvent {
   provider: string
@@ -41,12 +40,6 @@ export interface AuthSessionAddedEvent {
 export interface AuthSessionRemovedEvent {
   provider: string
   sessionId: string
-}
-
-export interface AuthSessionChangeEvent {
-  added: AuthSession[]
-  removed: AuthSession[]
-  changed: AuthSession[]
 }
 
 export interface AuthenticationProvider {
@@ -77,15 +70,6 @@ export interface AuthenticationProvider {
   ) => Promise<ResolvedAuthRequestCredential>
   /** Revoke a session. Idempotent. */
   removeSession: (sessionId: string) => Promise<void>
-}
-
-export interface AuthSessionOptions {
-  createIfNone?: boolean
-  forceNewSession?: boolean
-  silent?: boolean
-  clearSessionPreference?: boolean
-  /** Provider-specific setup values collected by a host-owned form. */
-  configuration?: Record<string, unknown>
 }
 
 export interface AuthRequestCredentialContext {

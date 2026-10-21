@@ -13,20 +13,11 @@
  */
 
 import type { ExternalAgentStore } from "@/stores/agent/external-agent-store"
-
-export type ExternalAgentChangeType =
-  | "config-added"
-  | "config-updated"
-  | "config-removed"
-  | "connection-changed"
-  | "settings-changed"
-  | "delegation-changed"
-
-export interface ExternalAgentChangeEvent {
-  type: ExternalAgentChangeType
-  /** The configuration the change concerns; absent for settings and delegation changes. */
-  agentId?: string
-}
+import type { ExternalAgentChangeEvent } from "@cognia/plugin-contract/lib/plugin/api/external-agents-changes"
+export type {
+  ExternalAgentChangeEvent,
+  ExternalAgentChangeType,
+} from "@cognia/plugin-contract/lib/plugin/api/external-agents-changes"
 
 /** The slice of the store the diff reads. */
 export type ExternalAgentChangeSnapshot = Pick<

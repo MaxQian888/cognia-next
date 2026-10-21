@@ -27,4 +27,7 @@ export type {
   ToolRules,
 } from "@/lib/claude/permissions/ruleset"
 
-export type { PluginCommandClassification, PluginCommandRule } from "@/lib/plugin/api/terminal-api"
+export type {
+  PluginCommandClassification,
+  PluginCommandRule,
+} from "@cognia/plugin-contract/lib/plugin/api/terminal-api"

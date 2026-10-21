@@ -17,7 +17,7 @@
 // settings UI, the changed-settings review, and per-section reset all behave
 // the way users already expect from message display.
 
-import type { ComposerSkinId } from "@/lib/chat/composer-skin"
+import type { ComposerSkinId } from "../../lib/chat/composer-skin"
 import type { DensityLevel } from "./index"
 
 /** Stable ids. `soft` is the default and must stay first. */

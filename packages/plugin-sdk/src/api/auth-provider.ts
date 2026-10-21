@@ -27,10 +27,13 @@ export type {
   AuthSessionOptions,
   AuthenticationProvider,
 } from "@/lib/plugin/auth/auth-provider-registry"
-export type { PkceFlowConfig, PkceTokenResult } from "@/lib/plugin/auth/auth-pkce-flow"
+export type {
+  PkceFlowConfig,
+  PkceTokenResult,
+} from "@cognia/plugin-contract/lib/plugin/auth/auth-pkce-flow"
 export type {
   CreateAuthAPIOptions,
   PluginAuthAPI,
   PluginAuthProvider,
-} from "@/lib/plugin/api/auth-api"
+} from "@cognia/plugin-contract/lib/plugin/api/auth-api"
 export type { PluginAuthProviderDef } from "@cognia/plugin-contract/types/plugin/plugin-auth"

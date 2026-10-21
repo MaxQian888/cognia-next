@@ -1,3 +1,21 @@
+import type {
+  LibraryFolder,
+  LibraryFolderColor,
+  LibraryFolderIcon,
+  LibraryItemKind,
+  LibraryItemRow,
+} from "@cognia/plugin-contract/lib/db/files-library-types"
+export type {
+  LibraryFolder,
+  LibraryFolderColor,
+  LibraryFolderIcon,
+  LibraryItemGeneratedVideo,
+  LibraryItemKind,
+  LibraryItemRow,
+  LibraryItemSnapshot,
+  LibraryItemWorkspaceLocation,
+} from "@cognia/plugin-contract/lib/db/files-library-types"
+
 /**
  * Row shapes for the cross-session Files page (Dexie v231, ADR-0200).
  *
@@ -17,18 +35,6 @@
 /** Sentinel id for the root of the Folders tab. Never a real folder row id. */
 export const ROOT_LIBRARY_FOLDER_ID = "root" as const
 
-/**
- * - `artifact` / `canvas` — rows in `artifacts` / `canvasDocuments`.
- * - `image` — a canonical `messageMedia` image (one card per content hash).
- * - `session-upload` — a non-image original uploaded into one or more conversations.
- * - `upload` — a non-image original uploaded straight into Files (Files-owned).
- * - `workspace-file` — a file an agent created, modified or renamed on disk in
- *   a conversation's workspace (ADR-0223 §8), listed from the task-workspace
- *   ledger. Files never writes to or deletes it on disk.
- */
-export type LibraryItemKind =
-  "artifact" | "canvas" | "image" | "session-upload" | "upload" | "workspace-file"
-
 export const LIBRARY_ITEM_KINDS: readonly LibraryItemKind[] = [
   "artifact",
   "canvas",
@@ -37,131 +43,6 @@ export const LIBRARY_ITEM_KINDS: readonly LibraryItemKind[] = [
   "upload",
   "workspace-file",
 ]
-
-/** What a generated video's job recorded about it (ADR-0205). */
-export interface LibraryItemGeneratedVideo {
-  jobId: string
-  prompt: string
-  providerId: string
-  modelId: string
-  durationSec?: number
-  width?: number
-  height?: number
-}
-
-/**
- * Where a workspace file lives on the host's disk (ADR-0223 §8). Kept on the
- * item so a favorited or filed workspace file is still found once its run has
- * left the ledger.
- */
-export interface LibraryItemWorkspaceLocation {
-  sessionId: string
-  /** The conversation's workspace root, where an applied change landed. */
-  workspaceRoot: string
-  /** Root the run that changed it last wrote under, where it waits until applied. */
-  executionRoot: string
-  /** Relative to either root, forward slashes. */
-  relPath: string
-  /**
-   * Which root holds the file: `applied` → `workspaceRoot`, `pending` →
-   * `executionRoot`. Absent when not known (turn rows, or a card rebuilt from
-   * a kept item), and then both are tried, the run's own first. Never kept in
-   * a snapshot: it is only true of the listing it came from.
-   */
-  adoption?: "applied" | "pending"
-  /**
-   * The run that changed it last, from the ledger's index: names the bytes
-   * the ledger captured, which are read when a pending file's run root is
-   * gone. Like `adoption`, only true of the listing; never in a snapshot.
-   */
-  runId?: string
-}
-
-/** Display metadata copied at keep/upload time so an item outlives its source row. */
-export interface LibraryItemSnapshot {
-  title: string
-  mediaType?: string
-  byteSize?: number
-  /** sha-256 of the original bytes (uploads). */
-  contentHash?: string
-  /** Extracted text of an upload, so a kept file stays searchable by body. */
-  extractedText?: string
-  /**
-   * A generated video's record. Its job row goes with the conversation that
-   * started it, so the kept item carries a copy.
-   */
-  generated?: LibraryItemGeneratedVideo
-  /** A workspace file's place on disk. */
-  workspace?: LibraryItemWorkspaceLocation
-}
-
-export interface LibraryItemRow {
-  /** `${kind}:${sourceId}` — see `libraryItemKey`. */
-  key: string
-  kind: LibraryItemKind
-  /**
-   * artifact id | canvas id | canonical image hash |
-   * original content hash for a conversation upload (one card per file, however
-   * many conversations it was attached to) | asset id for a Files upload |
-   * `workspaceFileSourceId(...)` for a workspace file.
-   */
-  sourceId: string
-  /** Conversation the item came from; the session purge reads it to find kept items. */
-  originSessionId?: string
-  /** Workspace at keep/upload time; used for the project filter once the session is gone. */
-  projectId?: string
-  /** Favorite marker. A timestamp, not a boolean: IndexedDB cannot index booleans. */
-  favoritedAt?: number
-  /** `ROOT_LIBRARY_FOLDER_ID` or a folder id; absent = not in the Folders tab. */
-  folderId?: string
-  /** Uploaded straight into Files. Deleting it deletes the bytes. */
-  ownedByFiles?: true
-  /** `messageMedia` key the keep ref pins (canonical hash or `original:<sha>`). */
-  mediaHash?: string
-  snapshot?: LibraryItemSnapshot
-  /** When the item last became kept. */
-  keptAt?: number
-  /** Opened / previewed / used from Files — drives the Recent tab for media. */
-  lastOpenedAt?: number
-  /** "Remove from Files"; the item reappears once its source changes after this. */
-  hiddenAt?: number
-  /**
-   * In the Files Trash since this time (ADR-0223). Unlike `hiddenAt` a trashed
-   * item never comes back on its own when its source changes; only a restore
-   * or the purge (after `FILES_TRASH_RETENTION_MS`) ends it. Favorite and
-   * folder are left as they were, so a restore puts the item back where it was.
-   */
-  trashedAt?: number
-  /**
-   * Name shown in Files instead of the source's title, for kinds whose source
-   * Files must not rename (an artifact, a conversation's image or upload).
-   * Canvas documents and Files-owned uploads are renamed at the source instead.
-   */
-  displayName?: string
-  /**
-   * Codes of share links made from Files that carry this item (ADR-0223).
-   * Only the code: the link itself, its key and its owner token live in
-   * `sharedLinks` on the device that made it, and the "shared by link" marker
-   * shows while one of these codes is still live there.
-   */
-  sharedLinkCodes?: string[]
-  createdAt: number
-  updatedAt: number
-}
-
-export interface LibraryFolder {
-  /** "lbf_" prefix. */
-  id: string
-  name: string
-  /** `ROOT_LIBRARY_FOLDER_ID` for a top-level folder. */
-  parentFolderId: string
-  createdAt: number
-  updatedAt: number
-  /** One of `LIBRARY_FOLDER_COLORS`; absent = the default folder tint. */
-  color?: LibraryFolderColor
-  /** One of `LIBRARY_FOLDER_ICONS`; absent = the plain folder glyph. */
-  icon?: LibraryFolderIcon
-}
 
 /**
  * Tints a folder can carry (ADR-0223). Names, not CSS: the sidebar maps each
@@ -178,8 +59,6 @@ export const LIBRARY_FOLDER_COLORS = [
   "violet",
   "pink",
 ] as const
-export type LibraryFolderColor = (typeof LIBRARY_FOLDER_COLORS)[number]
-
 /** Glyphs a folder can carry instead of the plain folder icon. */
 export const LIBRARY_FOLDER_ICONS = [
   "folder",
@@ -193,8 +72,6 @@ export const LIBRARY_FOLDER_ICONS = [
   "heart",
   "flag",
 ] as const
-export type LibraryFolderIcon = (typeof LIBRARY_FOLDER_ICONS)[number]
-
 export function isLibraryFolderColor(value: unknown): value is LibraryFolderColor {
   return typeof value === "string" && (LIBRARY_FOLDER_COLORS as readonly string[]).includes(value)
 }

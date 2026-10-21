@@ -25,9 +25,12 @@ export type {
   PluginTeamTaskPatch,
   PluginTeamTeammateCreateInput,
   PluginTeamTeammatePatch,
-} from "@/lib/plugin/api/team-api"
+} from "@cognia/plugin-contract/lib/plugin/api/team-api"
 
-export type { BestOfNPublicCandidate, BestOfNPublicRun } from "@/lib/best-of-n/public-run"
+export type {
+  BestOfNPublicCandidate,
+  BestOfNPublicRun,
+} from "@cognia/plugin-contract/lib/best-of-n/public-run"
 
 export type {
   AgentTaskComment,

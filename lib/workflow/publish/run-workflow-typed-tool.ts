@@ -20,19 +20,8 @@ import {
   executeDeployedWorkflow,
   WorkflowAdmissionError,
 } from "@/lib/workflow/runtime/execution-authority"
-
-export type RunWorkflowTypedResult =
-  | {
-      ok: true
-      workflowId: string
-      workflowName: string
-      runId: string
-      output: unknown
-    }
-  | {
-      ok: false
-      error: { code: string; message: string; detail?: unknown }
-    }
+import type { RunWorkflowTypedResult } from "@cognia/plugin-contract/lib/workflow/publish/run-workflow-typed-tool"
+export type { RunWorkflowTypedResult } from "@cognia/plugin-contract/lib/workflow/publish/run-workflow-typed-tool"
 
 function summariesToBullets(candidates: Array<{ name: string; description?: string }>): string {
   return candidates

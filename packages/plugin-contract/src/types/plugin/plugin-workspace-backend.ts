@@ -25,7 +25,7 @@
  * pre-existing `WorkspaceBackend = "local" | "e2b"` string union.
  */
 
-import type { E2BBackend } from "@/lib/github/workspace"
+import type { E2BBackend } from "../../lib/github/workspace"
 import type { PluginContributionBackend } from "./plugin"
 
 /**

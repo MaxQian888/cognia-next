@@ -26,13 +26,23 @@
  * models.dev snapshot.
  */
 
-import type { ChatSession, SendOptions } from "@cognia/agent-config-types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import {
   reasoningTiersFor,
   tiersForSurface,
   type ReasoningSurfaceInput,
   type ReasoningTier,
 } from "@cognia/provider-core/providers/reasoning-tiers"
+import type {
+  Effort,
+  EffortTier,
+  ThinkingLevel,
+} from "@cognia/plugin-contract/lib/ai/thinking-level"
+export type {
+  Effort,
+  EffortTier,
+  ThinkingLevel,
+} from "@cognia/plugin-contract/lib/ai/thinking-level"
 
 /**
  * Every tier, ascending in depth. `satisfies` pins this list to the union
@@ -50,11 +60,6 @@ export const THINKING_LEVELS = [
   "ultracode",
 ] as const satisfies readonly NonNullable<ChatSession["thinkingLevel"]>[]
 
-export type ThinkingLevel = (typeof THINKING_LEVELS)[number]
-
-/** A tier that actually forwards something — every level except `"off"`. */
-export type EffortTier = Exclude<ThinkingLevel, "off">
-
 /**
  * The non-off tiers in slider order (`low` → `ultracode`). Both selector modes
  * index into this; `"off"` is rendered as its own "use model default" choice,
@@ -63,9 +68,6 @@ export type EffortTier = Exclude<ThinkingLevel, "off">
 export const EFFORT_SLIDER_LEVELS = THINKING_LEVELS.filter(
   (level): level is EffortTier => level !== "off"
 )
-
-/** SDK effort value, or `undefined` to leave the model at its own default. */
-export type Effort = NonNullable<SendOptions["effort"]>
 
 /**
  * The tiers that map 1:1 onto `output_config.effort`. Used where only a raw SDK

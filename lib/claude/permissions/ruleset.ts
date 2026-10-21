@@ -21,21 +21,18 @@
  */
 
 import { canonicalizeCommand, splitCommandSegments } from "./command-parse"
-
-export type PermissionVerdict = "allow" | "ask" | "deny"
+import type {
+  PermissionVerdict,
+  Ruleset,
+  ToolRules,
+} from "@cognia/plugin-contract/lib/claude/permissions/ruleset"
+export type {
+  PermissionVerdict,
+  Ruleset,
+  ToolRules,
+} from "@cognia/plugin-contract/lib/claude/permissions/ruleset"
 
 const VERDICT_RANK: Record<PermissionVerdict, number> = { allow: 0, ask: 1, deny: 2 }
-
-/** Map of glob → verdict for a single tool (or the `*` wildcard tool). */
-export type ToolRules = Record<string, PermissionVerdict>
-
-/**
- * A ruleset keyed by tool name (e.g. `Edit`, `Bash`) or `*` for all
- * tools. The value is either a flat verdict for that tool, or a
- * glob→verdict map matched against the call's target (file path, command,
- * subagent name, …).
- */
-export type Ruleset = Record<string, PermissionVerdict | ToolRules>
 
 export interface ResolveOptions {
   /** Workspace root; targets resolving outside it escalate allow→ask. */

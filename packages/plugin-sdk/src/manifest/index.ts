@@ -218,7 +218,7 @@ export type {
   CompatibilityDiagnostic,
   CompatibilityEvaluation,
   CompatibilityRuntime,
-} from "@/lib/plugin/core/compatibility"
+} from "@cognia/plugin-contract/lib/plugin/core/compatibility"
 
 export type {
   ConfigValidationResult,
@@ -226,7 +226,7 @@ export type {
   ManifestValidationOptions,
   ValidationError,
   ValidationResult,
-} from "@/lib/plugin/core/validation"
+} from "@cognia/plugin-contract/lib/plugin/core/validation"
 
 /**
  * Parity between a packaged `plugin.json` and a TypeScript manifest overlay.
@@ -243,7 +243,7 @@ export {
   PluginManifestParityError,
 } from "@/lib/plugin/core/manifest-parity"
 
-export type { PluginManifestParityIssue } from "@/lib/plugin/core/manifest-parity"
+export type { PluginManifestParityIssue } from "@cognia/plugin-contract/lib/plugin/core/manifest-parity"
 
 export type {
   PluginLibrarySchema,

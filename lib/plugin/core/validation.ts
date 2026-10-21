@@ -39,7 +39,6 @@ import {
 import {
   validateActivationEvent,
   validateExtensionPoint,
-  type PluginPointGovernanceMode,
 } from "@/lib/plugin/contracts/plugin-points"
 import { isValidPluginTableName, MAX_TABLES_PER_PLUGIN } from "@/lib/plugin/dexie/namespace"
 import {
@@ -91,16 +90,24 @@ import {
   PLUGIN_PATH_FIELD_CONTRACTS,
   PLUGIN_RUNTIME_ENTRY_CONTRACTS,
 } from "@/packages/plugin-sdk/src/contracts/catalog"
+import type {
+  ConfigValidationResult,
+  ManifestDiagnostic,
+  ManifestValidationOptions,
+  ValidationError,
+  ValidationResult,
+} from "@cognia/plugin-contract/lib/plugin/core/validation"
+export type {
+  ConfigValidationResult,
+  ManifestDiagnostic,
+  ManifestValidationOptions,
+  ValidationError,
+  ValidationResult,
+} from "@cognia/plugin-contract/lib/plugin/core/validation"
 
 // =============================================================================
 // Types
 // =============================================================================
-
-export interface ValidationError {
-  field: string
-  code: string
-  message: string
-}
 
 function compareSemver(left: string, right: string): number {
   const leftParts = left.split(".").map(Number)
@@ -113,28 +120,6 @@ function compareSemver(left: string, right: string): number {
 
 function declaredMinimumHostVersion(constraint: string): string | undefined {
   return constraint.match(/\d+\.\d+\.\d+/)?.[0]
-}
-
-export interface ManifestDiagnostic extends ValidationError {
-  severity: "error" | "warning"
-  hint?: string
-}
-
-export interface ValidationResult {
-  valid: boolean
-  errors: string[]
-  warnings: string[]
-  diagnostics?: ManifestDiagnostic[]
-}
-
-export interface ConfigValidationResult {
-  valid: boolean
-  errors: ValidationError[]
-  warnings: string[]
-}
-
-export interface ManifestValidationOptions {
-  governanceMode?: PluginPointGovernanceMode
 }
 
 // =============================================================================

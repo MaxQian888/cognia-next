@@ -1,4 +1,4 @@
-import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
+import type { CanonicalExtensionPoint } from "../../lib/plugin/contracts/plugin-points"
 
 /**
  * Declarative React contribution mounted at one of Cognia's canonical UI

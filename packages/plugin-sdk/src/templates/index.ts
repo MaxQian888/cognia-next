@@ -3,18 +3,20 @@ import {
   createTemplateDefinition,
   validateTemplateDefinition,
   verifyTemplateDefinitionHash,
-  type TemplateDefinitionDraft,
-  type TemplateDefinitionEnvelope,
-  type TemplateDomain,
-  type TemplateCompatibility,
-  type TemplateInputSpec,
-  type TemplateDependency,
-  type TemplateJson,
-  type TemplateMetadata,
-  type TemplatePlatform,
-  type TemplateVersionBump,
 } from "@/lib/templates/contracts"
-import type { TemplateCatalogQuery } from "@/lib/templates/catalog"
+import type {
+  TemplateDefinitionDraft,
+  TemplateDefinitionEnvelope,
+  TemplateDomain,
+  TemplateCompatibility,
+  TemplateInputSpec,
+  TemplateDependency,
+  TemplateJson,
+  TemplateMetadata,
+  TemplatePlatform,
+  TemplateVersionBump,
+} from "@cognia/plugin-contract/lib/templates/contracts"
+import type { TemplateCatalogQuery } from "@cognia/plugin-contract/lib/templates/catalog"
 
 export {
   TEMPLATE_API_VERSION,

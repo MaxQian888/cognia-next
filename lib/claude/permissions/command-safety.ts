@@ -26,8 +26,8 @@
  */
 
 import { splitCommandSegments, type CommandRedirect } from "./command-parse"
-
-export type CommandVerdict = "allow" | "ask" | "deny"
+import type { CommandVerdict } from "@cognia/plugin-contract/lib/claude/permissions/command-safety"
+export type { CommandVerdict } from "@cognia/plugin-contract/lib/claude/permissions/command-safety"
 
 export interface SegmentClassification {
   head: string

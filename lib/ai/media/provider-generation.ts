@@ -30,6 +30,16 @@ import {
   type VideoProviderId,
 } from "./video-generation-sdk"
 import { checkVideoJobParams } from "./video-jobs/params"
+import type {
+  ImageGenerationProviderId,
+  ProviderImageGenerationRequest,
+  ProviderImagePrompt,
+} from "@cognia/plugin-contract/lib/ai/media/provider-generation"
+export type {
+  ImageGenerationProviderId,
+  ProviderImageGenerationRequest,
+  ProviderImagePrompt,
+} from "@cognia/plugin-contract/lib/ai/media/provider-generation"
 
 export const IMAGE_GENERATION_PROVIDER_IDS = [
   "openai",
@@ -47,23 +57,7 @@ export const IMAGE_GENERATION_PROVIDER_IDS = [
   "volcengine",
 ] as const satisfies readonly ImageProviderId[]
 
-export type ImageGenerationProviderId = (typeof IMAGE_GENERATION_PROVIDER_IDS)[number]
-
-export type ProviderImagePrompt = Parameters<typeof generateImage>[0]["prompt"]
 export type ProviderVideoPrompt = GenerateVideoPrompt
-
-export interface ProviderImageGenerationRequest {
-  snapshot: ProviderSettingsSnapshot
-  prompt: ProviderImagePrompt
-  providerId?: ImageGenerationProviderId
-  model?: string
-  n?: number
-  size?: `${number}x${number}`
-  aspectRatio?: `${number}:${number}`
-  seed?: number
-  providerOptions?: Parameters<typeof generateImage>[0]["providerOptions"]
-  abortSignal?: AbortSignal
-}
 
 export type MediaGenerationErrorCode =
   "UNSUPPORTED_PROVIDER" | "NO_PROVIDER" | "PROVIDER_CONFIGURATION" | "PII_BLOCKED"

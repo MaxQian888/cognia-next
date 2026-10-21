@@ -18,28 +18,18 @@ import {
 import { libraryAssetOwnerKey } from "@/lib/db/session-assets"
 import { collectMessageMediaHashes } from "@/lib/db/message-media-refs"
 import type { MessageMediaRow } from "@/lib/db/message-media"
-
-export interface MessageMediaBackupRow extends Omit<
-  MessageMediaRow,
-  "blob" | "thumbBlob" | "originalBlob"
-> {
-  blobHash: string
-  thumbHash?: string
-  thumbByteSize?: number
-  thumbMediaType?: string
-  originalHash?: string
-}
+import type {
+  MessageMediaBackupRow,
+  SessionAssetSourceChunk,
+} from "@cognia/plugin-contract/lib/data/session-assets-backup"
+export type {
+  MessageMediaBackupRow,
+  SessionAssetSourceChunk,
+} from "@cognia/plugin-contract/lib/data/session-assets-backup"
 
 export type MessageMediaBackupRecord =
   | { section: "messageMedia"; rows: MessageMediaBackupRow[] }
   | { section: "messageMediaChunks"; rows: SessionAssetSourceChunk[] }
-
-export interface SessionAssetSourceChunk {
-  contentHash: string
-  offset: number
-  /** Base64 of at most 48 KiB, avoiding full-source binary arrays. */
-  data: string
-}
 
 export type SessionAssetBackupRecord =
   | { section: "sessionAssets"; rows: SessionAsset[] }

@@ -15,5 +15,5 @@ export {
 } from "@/lib/plugin/uri/uri-handler-registry"
 
 export type { UriHandler } from "@/lib/plugin/uri/uri-handler-registry"
-export type { ParsedDeepLink } from "@/lib/plugin/uri/parse-deep-link"
-export type { PluginUriHandlerDef } from "@/lib/plugin/api/uri-api"
+export type { ParsedDeepLink } from "@cognia/plugin-contract/lib/plugin/uri/parse-deep-link"
+export type { PluginUriHandlerDef } from "@cognia/plugin-contract/lib/plugin/api/uri-api"

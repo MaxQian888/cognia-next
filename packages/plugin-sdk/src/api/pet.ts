@@ -57,10 +57,10 @@ export type {
   PluginPetAvailability,
   PluginPetEvent,
   PluginPetUnavailableReason,
-} from "@/lib/plugin/api/pet-api-contract"
+} from "@cognia/plugin-contract/lib/plugin/api/pet-api-contract"
 
 export type {
   PluginPetAPI,
   PluginPetInteractionKind,
   PluginPetSummary,
-} from "@/lib/plugin/api/pet-api"
+} from "@cognia/plugin-contract/lib/plugin/api/pet-api"

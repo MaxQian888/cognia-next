@@ -14,6 +14,11 @@
  */
 
 import { detectPlatform, type Platform } from "./detect"
+import type { CapabilityId } from "@cognia/plugin-contract/lib/platform/capabilities"
+export type {
+  CapabilityId,
+  CoreCapabilityId,
+} from "@cognia/plugin-contract/lib/platform/capabilities"
 
 /**
  * Core capability ids. Extend deliberately — every id here is wire format
@@ -80,14 +85,6 @@ export const CORE_CAPABILITY_IDS = [
   "media",
   "sandbox-pool",
 ] as const
-
-export type CoreCapabilityId = (typeof CORE_CAPABILITY_IDS)[number]
-
-/**
- * Full capability id space: core ids plus `plugin:<pluginId>` tags a plugin
- * may declare for its own nodes ("this node needs my plugin active here").
- */
-export type CapabilityId = CoreCapabilityId | `plugin:${string}`
 
 const CORE_ID_SET: ReadonlySet<string> = new Set(CORE_CAPABILITY_IDS)
 

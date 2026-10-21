@@ -11,26 +11,14 @@
  * confirms those permissions and the UI calls `confirmExtensionInstall`.
  */
 import { transport } from "@/lib/tauri"
-
-export type BrowserExtensionSource = "webstore" | "crx" | "unpacked"
-
-export interface BrowserExtension {
-  id: string
-  name: string
-  version: string
-  enabled: boolean
-  source: BrowserExtensionSource
-  /** Epoch ms. */
-  installedAt: number
-  permissions: string[]
-  hostPermissions: string[]
-  iconPath: string | null
-  popupPath: string | null
-  optionsPath: string | null
-  description: string | null
-  /** Newer version seen by the last update check, when any. */
-  updateAvailable?: string | null
-}
+import type {
+  BrowserExtension,
+  BrowserExtensionSource,
+} from "@cognia/plugin-contract/lib/browser/extensions-client"
+export type {
+  BrowserExtension,
+  BrowserExtensionSource,
+} from "@cognia/plugin-contract/lib/browser/extensions-client"
 
 /** A verified package waiting for the user to confirm its permissions. */
 export interface PendingExtensionInstall {

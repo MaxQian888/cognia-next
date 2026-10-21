@@ -6,16 +6,8 @@ import { listSkills } from "@/lib/db/skills"
 import { listTeams } from "@/lib/db/teams"
 import { listTwins } from "@/lib/db/twins"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
-
-export interface PluginResourcesAPI {
-  listCharacters: typeof listCharacters
-  listTeams: typeof listTeams
-  listTwins: typeof listTwins
-  listSkills: typeof listSkills
-  listAdapterInstances: typeof listAdapterInstances
-  listMcpServers: typeof listMcpServers
-  listPlugins: typeof listPlugins
-}
+import type { PluginResourcesAPI } from "@cognia/plugin-contract/lib/plugin/api/resources-api"
+export type { PluginResourcesAPI } from "@cognia/plugin-contract/lib/plugin/api/resources-api"
 
 /**
  * Index-level access to resources plugins may reference.

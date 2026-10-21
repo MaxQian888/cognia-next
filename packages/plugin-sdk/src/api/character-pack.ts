@@ -12,7 +12,7 @@ export {
 } from "../define/define-character-pack"
 
 export type { PluginCharacterDef, PluginCharacterPackDef }
-export type { PluginCharacterPackWarning } from "@/lib/plugin/character-pack/validate-requires"
+export type { PluginCharacterPackWarning } from "@cognia/plugin-contract/lib/plugin/character-pack/validate-requires"
 
 export const CHARACTER_PACK_FILE_SCHEMA_VERSION = 2 as const
 export const SUPPORTED_CHARACTER_PACK_SCHEMA_VERSIONS = new Set<number>([1, 2])

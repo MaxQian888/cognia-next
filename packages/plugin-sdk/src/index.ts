@@ -101,7 +101,11 @@ export {
   thinkingLevelToEffort,
   visibleThinkingLevels,
 } from "@/lib/ai/thinking-level"
-export type { Effort, EffortTier, ThinkingLevel } from "@/lib/ai/thinking-level"
+export type {
+  Effort,
+  EffortTier,
+  ThinkingLevel,
+} from "@cognia/plugin-contract/lib/ai/thinking-level"
 
 /**
  * The pure half of the composed answer, published alongside the vocabulary
@@ -120,7 +124,10 @@ export type { Effort, EffortTier, ThinkingLevel } from "@/lib/ai/thinking-level"
  * pulls the settings and agent-runtime stores into a plugin's module graph.
  */
 export { resolveEffortSurface } from "@/lib/ai/effort-surface"
-export type { EffortSurface, EffortSurfaceInput } from "@/lib/ai/effort-surface"
+export type {
+  EffortSurface,
+  EffortSurfaceInput,
+} from "@cognia/plugin-contract/lib/ai/effort-surface"
 
 export {
   AUTHOR_CAPABILITY_CONTRACTS,
@@ -308,7 +315,7 @@ export { defineViewContainer } from "./define/define-view-container"
 // `ctx.ui.openViewContainer` refusals. The guard is pure (no host state), so
 // it belongs on the root beside the types.
 export { isViewContainerOpenError } from "@/lib/plugin/api/view-container-errors"
-export type { ViewContainerOpenErrorCode } from "@/lib/plugin/api/view-container-errors"
+export type { ViewContainerOpenErrorCode } from "@cognia/plugin-contract/lib/plugin/api/view-container-errors"
 export { defineTreeDataProvider, defineView } from "./define/define-view"
 export { defineWebview } from "./define/define-webview"
 export { defineAuthProvider } from "./define/define-auth-provider"
@@ -619,13 +626,13 @@ export type {
   PluginBotExternalAgentPermissionMode,
   PluginExternalAgentOptions,
   PluginExternalAgentResult,
-} from "@/lib/plugin/api/external-agent-api"
+} from "@cognia/plugin-contract/lib/plugin/api/external-agent-api"
 export type {
   BotRunWorkspaceSpec,
   BotWorkspaceFile,
   BotWorkspaceSnapshot,
   BotWorkspacePublishInput,
-} from "@/lib/plugin/workspace/bot-run"
+} from "@cognia/plugin-contract/lib/plugin/workspace/bot-run"
 
 export type {
   PluginLibrarySchema,

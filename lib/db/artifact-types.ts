@@ -14,47 +14,17 @@
  * same field in circulation.
  */
 
+import type { Artifact, ArtifactMetadata, ArtifactVersion } from "@/types/artifact/artifact"
 import type {
-  Artifact,
-  ArtifactLanguage,
-  ArtifactMetadata,
-  ArtifactType,
-  ArtifactVersion,
-} from "@/types/artifact/artifact"
-
-/** `ArtifactMetadata` with its single `Date` field flattened for IndexedDB. */
-export type ArtifactMetadataRow = Omit<ArtifactMetadata, "lastAccessedAt"> & {
-  lastAccessedAt?: number
-}
-
-export interface ArtifactRow {
-  id: string
-  sessionId: string
-  /** Owning workspace id — Workspace isolation column (Dexie v86). See `lib/db/project-scope.ts`. */
-  projectId?: string
-  messageId: string
-  type: ArtifactType
-  title: string
-  content: string
-  language?: ArtifactLanguage
-  version: number
-  createdAt: number
-  updatedAt: number
-  metadata?: ArtifactMetadataRow
-}
-
-export interface ArtifactVersionRow {
-  id: string
-  artifactId: string
-  /** Owning workspace id — inherits the artifact's project. */
-  projectId?: string
-  title?: string
-  content: string
-  version: number
-  createdAt: number
-  changeDescription?: string
-  metadata?: ArtifactMetadataRow
-}
+  ArtifactMetadataRow,
+  ArtifactRow,
+  ArtifactVersionRow,
+} from "@cognia/plugin-contract/lib/db/artifact-types"
+export type {
+  ArtifactMetadataRow,
+  ArtifactRow,
+  ArtifactVersionRow,
+} from "@cognia/plugin-contract/lib/db/artifact-types"
 
 /**
  * Epoch ms for a value that may already be a number, a `Date`, or the ISO

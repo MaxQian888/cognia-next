@@ -15,38 +15,19 @@ import {
 } from "@/lib/integrations/action-runner"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { updateBotInstallation } from "@/lib/db/bot-installations"
+import type {
+  BotRunWorkspaceSpec,
+  BotWorkspaceFile,
+  BotWorkspacePublishInput,
+  BotWorkspaceSnapshot,
+} from "@cognia/plugin-contract/lib/plugin/workspace/bot-run"
+export type {
+  BotRunWorkspaceSpec,
+  BotWorkspaceFile,
+  BotWorkspacePublishInput,
+  BotWorkspaceSnapshot,
+} from "@cognia/plugin-contract/lib/plugin/workspace/bot-run"
 
-export interface BotRunWorkspaceSpec {
-  kind: "bot-run"
-  runId: string
-  repository: string
-  ref: string
-  /** Moving branch whose SHA must still match the acquired commit before publishing. */
-  targetRef?: string
-  credentialSlot: string
-}
-export interface BotWorkspaceFile {
-  path: string
-  oldContent: string | null
-  newContent: string | null
-  status: "added" | "modified" | "deleted"
-  mode: "100644" | "100755"
-}
-export interface BotWorkspaceSnapshot {
-  id: string
-  runId: string
-  baseSha: string
-  headSha: string
-  diff: string
-  files: BotWorkspaceFile[]
-  capturedAt: number
-}
-export interface BotWorkspacePublishInput {
-  approvalId: string
-  snapshotId: string
-  message: string
-  branch: string
-}
 interface OwnedWorkspace {
   pluginId: string
   spec: BotRunWorkspaceSpec

@@ -22,7 +22,7 @@ import type {
   StepExecutionResult,
   WorkflowNodeCategory,
 } from "../workflow/visual"
-import type { CapabilityId } from "@/lib/platform/capabilities"
+import type { CapabilityId } from "../../lib/platform/capabilities"
 import type { PluginIconName } from "./plugin-icon"
 
 /** Node executor function — same shape as built-in node executors. */

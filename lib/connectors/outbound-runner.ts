@@ -77,14 +77,12 @@ import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { parseConversationKey, buildConversationKey } from "@/types/connectors/event"
 import { isReauthCode } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
-import {
-  createCircuitBreaker,
-  type CircuitBreaker,
-  type CircuitBreakerSnapshot,
-} from "./circuit-breaker"
-import { createTokenBucket, type TokenBucket, type TokenBucketSnapshot } from "./rate-limit"
+import { createCircuitBreaker, type CircuitBreaker } from "./circuit-breaker"
+import { createTokenBucket, type TokenBucket } from "./rate-limit"
 import { recordDeliveredMessage } from "./delivered-messages"
 import { createDraft } from "@/lib/db/connector-drafts"
+import type { AdapterRuntimeStateSnapshot } from "@cognia/plugin-contract/lib/connectors/outbound-runner"
+export type { AdapterRuntimeStateSnapshot } from "@cognia/plugin-contract/lib/connectors/outbound-runner"
 
 // ── Quiet hours helpers ────────────────────────────────────────────────────────
 
@@ -408,17 +406,6 @@ interface AdapterState {
 }
 
 // ── Runtime-state registry (heartbeat read-side) ─────────────────────────────
-
-/**
- * Snapshot of the per-adapter outbound runtime state. The heartbeat probe
- * writes this into the `adapter.heartbeat` audit row so the Health Detail
- * panel can render current circuit / rate-limit metadata without holding
- * a reference to the runner.
- */
-export interface AdapterRuntimeStateSnapshot {
-  breaker: CircuitBreakerSnapshot
-  bucket: TokenBucketSnapshot
-}
 
 /**
  * The runner singleton publishes its live `adapterState` Map here so the

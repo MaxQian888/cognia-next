@@ -24,7 +24,7 @@ export {
   createWorkspaceAPI,
 } from "@/lib/plugin/api/workspace-api"
 
-export type { PluginWorkspaceAPI } from "@/lib/plugin/api/workspace-api"
+export type { PluginWorkspaceAPI } from "@cognia/plugin-contract/lib/plugin/api/workspace-api"
 
 export {
   clearWorkspaceBackendsForPlugin,

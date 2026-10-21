@@ -10,39 +10,16 @@ import { APP_VERSION } from "@/lib/app-version"
 import type { TargetSpec } from "@/types/eval/run-config"
 import { allRootPaths } from "@/lib/workspace/roots"
 import { useProjectStore } from "@/stores/project/project-store"
-
-export interface PluginRunDatasetArgs {
-  datasetId: string
-  targetKind?: "chat" | "team" | "workflow"
-  model?: string
-  characterId?: string
-  teamId?: string
-  workflowId?: string
-  scorerIds?: string[]
-  k?: number
-  split?: string
-  capabilities?: string[]
-  /**
-   * Working directory of a chat target: which repository's instruction files,
-   * agent files and project settings the run loads. Must be a root of one of
-   * the user's workspaces, so a run against a candidate configuration and one
-   * against the current configuration differ in nothing else.
-   */
-  cwd?: string
-}
-
-export interface PluginRunCalibrationArgs {
-  setId: string
-  judgeModel?: string
-}
-
-export interface PluginEvalProjectArgs {
-  action:
-    "preflight" | "start" | "pause" | "resume" | "cancel" | "status" | "report" | "extend-budget"
-  projectId?: string
-  experimentId?: string
-  budgetCap?: number
-}
+import type {
+  PluginEvalAPI,
+  PluginRunDatasetArgs,
+} from "@cognia/plugin-contract/lib/plugin/api/eval-api"
+export type {
+  PluginEvalAPI,
+  PluginEvalProjectArgs,
+  PluginRunCalibrationArgs,
+  PluginRunDatasetArgs,
+} from "@cognia/plugin-contract/lib/plugin/api/eval-api"
 
 function knownWorkspaceRoot(cwd: string): boolean {
   const normalized = cwd.replace(/[\\/]+$/, "")
@@ -76,14 +53,6 @@ function buildTarget(args: PluginRunDatasetArgs): TargetSpec {
     ...(args.characterId ? { characterId: args.characterId } : {}),
     ...(args.cwd ? { cwd: args.cwd } : {}),
   }
-}
-
-export interface PluginEvalAPI {
-  listDatasets(): ReturnType<typeof listDatasetSummaries>
-  getRun(runId: string): ReturnType<typeof getRunDetail>
-  runDataset(args: PluginRunDatasetArgs): Promise<unknown>
-  runCalibration(args: PluginRunCalibrationArgs): Promise<unknown>
-  runProject(args: PluginEvalProjectArgs): Promise<unknown>
 }
 
 export function createEvalAPI(): PluginEvalAPI {

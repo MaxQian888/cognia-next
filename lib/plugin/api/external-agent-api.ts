@@ -2,11 +2,9 @@
 import type {
   AcpPermissionMode,
   ExternalAgentConfig,
-  ExternalAgentExecutionOptions,
   ExternalAgentResult,
 } from "@/types/agent/external-agent"
 import type { LifecycleAgentConfig } from "@/lib/ai/agent/external/lifecycle/credentials"
-import type { PluginWorkspaceHandle } from "../workspace/acquire"
 import { assertOwnedBotWorkspace, digestBotArtifact } from "../workspace/bot-run"
 import { getBotRunStep, completeBotRunStep } from "@/lib/db/bot-run-steps"
 import { pluginHasApiPermission } from "./permission-api"
@@ -24,29 +22,16 @@ import {
   remainingBotRunBudgetUsd,
   tokenAllowanceForUsd,
 } from "@/lib/bot/runtime/run-cost"
-
-export type PluginBotExternalAgentPermissionMode = "acceptEdits" | "bypassPermissions"
-export type PluginExternalAgentOptions = Omit<ExternalAgentExecutionOptions, "permissionMode"> & {
-  workspace?: PluginWorkspaceHandle
-  timeoutMs?: number
-  /** Stable step identity; use a new id for a deliberately subsequent turn. */
-  invocationId?: string
-} & (
-    | { runId: string; permissionMode?: PluginBotExternalAgentPermissionMode }
-    | { runId?: undefined; permissionMode?: ExternalAgentExecutionOptions["permissionMode"] }
-  )
-export interface PluginExternalAgentResult extends ExternalAgentResult {
-  agentId: string
-  model?: string
-  status: "completed" | "failed" | "cancelled" | "recovery_required"
-  text: string
-  usage?: ExternalAgentResult["tokenUsage"]
-  /**
-   * What this invocation cost in USD, recorded in the run's cost ledger.
-   * `null` when it could not be priced; absent outside Bot runs.
-   */
-  costUsd?: number | null
-}
+import type {
+  PluginBotExternalAgentPermissionMode,
+  PluginExternalAgentOptions,
+  PluginExternalAgentResult,
+} from "@cognia/plugin-contract/lib/plugin/api/external-agent-api"
+export type {
+  PluginBotExternalAgentPermissionMode,
+  PluginExternalAgentOptions,
+  PluginExternalAgentResult,
+} from "@cognia/plugin-contract/lib/plugin/api/external-agent-api"
 
 const SESSION_STEP = "__host:external-agent"
 const activeBotRuns = new Set<string>()

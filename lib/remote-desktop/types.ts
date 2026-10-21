@@ -1,3 +1,16 @@
+import type {
+  RemoteDesktopAdapter,
+  RemoteDesktopConsoleProfile,
+  RemoteDesktopLauncher,
+  RemoteDesktopSessionMode,
+} from "@cognia/plugin-contract/lib/remote-desktop/types"
+export type {
+  RemoteDesktopAdapter,
+  RemoteDesktopConsoleProfile,
+  RemoteDesktopLauncher,
+  RemoteDesktopSessionMode,
+} from "@cognia/plugin-contract/lib/remote-desktop/types"
+
 /**
  * Wire types for the Host's remote desktop commands (ADR-0234 Phases 2 and
  * 3), mirroring `crates/cognia-remote-desktop`. Credentials are write-only: no
@@ -14,9 +27,6 @@ export type RemoteDesktopHostRef = { kind: "local" } | { kind: "remote"; hostRef
 
 export const LOCAL_REMOTE_DESKTOP_HOST: RemoteDesktopHostRef = { kind: "local" }
 
-/** The Host handshake adapter a binding uses. Closed list (ADR-0234 §4). */
-export type RemoteDesktopAdapter = "vnc" | "none"
-
 /**
  * How a client reaches the machine (ADR-0234 Phase 5): the Host bridges it
  * (VNC), the client opens the user's own web console, or the client hands an
@@ -24,12 +34,6 @@ export type RemoteDesktopAdapter = "vnc" | "none"
  * others are "permissions managed by the provider".
  */
 export type RemoteDesktopAccess = "bridge" | "web-console" | "external-app"
-
-/** How a console link is checked. Closed list. */
-export type RemoteDesktopConsoleProfile = "guacamole" | "meshcentral" | "generic"
-
-/** External-app launchers the Host can build a link for. Closed list. */
-export type RemoteDesktopLauncher = "rustdesk"
 
 export interface RemoteDesktopConsole {
   /** Absent when the caller may only view: opening needs control. */
@@ -49,8 +53,6 @@ export interface RemoteDesktopAppLaunch {
 
 /** `private` is a LAN address; `public` is plaintext over the internet. */
 export type RemoteDesktopEndpointClass = "private" | "public"
-
-export type RemoteDesktopSessionMode = "view" | "control"
 
 export type RemoteDesktopCredentialKind = "control" | "view"
 

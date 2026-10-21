@@ -21,8 +21,6 @@ import {
   writeDeterministicZip,
   type ArchiveEntry,
   type ArchiveLimits,
-  type PackageFileRecord,
-  type PackageSignature,
 } from "@/lib/packaging/signed-zip"
 import { sha256Bytes } from "@/lib/ocr/hash"
 import { sha256Hex } from "@/lib/share/hash"
@@ -33,8 +31,19 @@ import {
   verifyTemplateDefinitionHash,
   type TemplateDefinitionEnvelope,
   type TemplateJson,
-  type TemplatePlatform,
 } from "./contracts"
+import type {
+  TemplatePackageDefinitionRecord,
+  TemplatePackageFileRecord,
+  TemplatePackageManifest,
+  TemplatePackageSignature,
+} from "@cognia/plugin-contract/lib/templates/package"
+export type {
+  TemplatePackageDefinitionRecord,
+  TemplatePackageFileRecord,
+  TemplatePackageManifest,
+  TemplatePackageSignature,
+} from "@cognia/plugin-contract/lib/templates/package"
 
 export const TEMPLATE_PACKAGE_MAX_COMPRESSED_BYTES = 25 * 1024 * 1024
 export const TEMPLATE_PACKAGE_MAX_EXPANDED_BYTES = 100 * 1024 * 1024
@@ -51,15 +60,6 @@ const LIMITS: ArchiveLimits = {
   maxPathDepth: TEMPLATE_PACKAGE_MAX_PATH_DEPTH,
 }
 
-export type TemplatePackageFileRecord = PackageFileRecord
-
-export interface TemplatePackageDefinitionRecord extends TemplatePackageFileRecord {
-  id: string
-  version: string
-}
-
-export type TemplatePackageSignature = PackageSignature
-
 /**
  * What can produce a `TemplatePackageSignature` for a manifest.
  *
@@ -75,24 +75,6 @@ export interface TemplatePackageSigner {
   publicKey: string
   /** Raw 64-byte Ed25519 signature over `templatePackageSignaturePayload`. */
   sign(payload: Uint8Array): Promise<Uint8Array>
-}
-
-export interface TemplatePackageManifest {
-  schemaVersion: typeof TEMPLATE_PACKAGE_SCHEMA_VERSION
-  apiVersion: typeof TEMPLATE_API_VERSION
-  id: string
-  version: string
-  name: string
-  description?: string
-  entrypoints: string[]
-  definitions: TemplatePackageDefinitionRecord[]
-  assets: TemplatePackageFileRecord[]
-  compatibility?: {
-    platforms?: TemplatePlatform[]
-    minHostVersion?: string
-    maxHostVersion?: string
-  }
-  signature?: TemplatePackageSignature
 }
 
 export interface TemplatePackageAsset {

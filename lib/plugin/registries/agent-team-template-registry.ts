@@ -26,6 +26,15 @@ import { listNativeAnthropicToolIds } from "./native-anthropic-tool-registry"
 import { listCharacterPackIds } from "./character-pack-registry"
 import { listSubagentEntries } from "./subagent-registry"
 import { getAvailablePresets } from "@/lib/ai/agent/external/config/presets"
+import type {
+  AgentTeamTemplateValidationResult,
+  PluginAgentTeamTemplateWarning,
+} from "@cognia/plugin-contract/lib/plugin/registries/agent-team-template-registry"
+export type {
+  AgentTeamTemplateValidationResult,
+  PluginAgentTeamTemplateWarning,
+  PluginAgentTeamTemplateWarningCode,
+} from "@cognia/plugin-contract/lib/plugin/registries/agent-team-template-registry"
 
 /**
  * Built-in subagent dispatcher names always available in the team runtime.
@@ -37,27 +46,6 @@ const BUILT_IN_SUBAGENT_IDS: readonly string[] = [
   "workflow-refactorer",
   "workflow-doc-writer",
 ]
-
-export type PluginAgentTeamTemplateWarningCode =
-  | "missing-mcp-preset"
-  | "missing-skill"
-  | "missing-character-pack"
-  | "missing-native-tool"
-  | "missing-external-agent-preset"
-  | "missing-subagent"
-
-export interface PluginAgentTeamTemplateWarning {
-  /** Stable id used to dedupe warnings on the UI. */
-  code: PluginAgentTeamTemplateWarningCode
-  /** The id we couldn't resolve. */
-  missingId: string
-}
-
-export interface AgentTeamTemplateValidationResult {
-  warnings: PluginAgentTeamTemplateWarning[]
-  /** True when nothing's missing. */
-  ok: boolean
-}
 
 const registry = createValidatingOverlayRegistry<
   PluginAgentTeamTemplateDef,

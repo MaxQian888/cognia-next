@@ -13,11 +13,11 @@
  */
 
 import type { IssueEvent, IssueEventKind } from "@/types/issues"
+import type { IssueEventListener } from "@cognia/plugin-contract/lib/issues/event-bus"
+export type { IssueEventListener } from "@cognia/plugin-contract/lib/issues/event-bus"
 
 const EVENT_NAME = "issues:event"
 const bus: EventTarget = new EventTarget()
-
-export type IssueEventListener = (event: IssueEvent) => void
 
 /** Publish one committed trail entry. Called by the append path only. */
 export function emitIssueEvent(event: IssueEvent): void {

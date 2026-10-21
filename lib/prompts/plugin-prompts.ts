@@ -21,12 +21,9 @@
  */
 
 import { validatePromptBody } from "./template"
-import {
-  definePrompt,
-  type PromptDefinitionV1,
-  type PromptGroup,
-  type PromptVariableSpec,
-} from "./types"
+import { definePrompt, type PromptDefinitionV1 } from "./types"
+import type { PluginPromptDeclaration } from "@cognia/plugin-contract/lib/prompts/plugin-prompts"
+export type { PluginPromptDeclaration } from "@cognia/plugin-contract/lib/prompts/plugin-prompts"
 
 export const PLUGIN_PROMPT_ID_PREFIX = "plugin:"
 
@@ -53,25 +50,6 @@ export function parsePluginPromptId(id: string): { pluginId: string; localId: st
   const pluginId = rest.slice(0, slash)
   const localId = rest.slice(slash + 1)
   return SEGMENT.test(pluginId) && SEGMENT.test(localId) ? { pluginId, localId } : undefined
-}
-
-/** What a plugin declares for one prompt. */
-export interface PluginPromptDeclaration {
-  /** Unique within the plugin. */
-  id: string
-  /** Shown in the Prompt Center; plugins localize it themselves. */
-  title: string
-  description?: string
-  /** The plugin's own default, exactly as it sends it with no override. */
-  defaultBody: string
-  /** Bump when the variables, fragments or output contract change. Defaults to 1. */
-  contractVersion?: number
-  variables?: readonly PromptVariableSpec[]
-  requiredFragments?: readonly string[]
-  outputContract?: string
-  maxChars?: number
-  /** Where the entry is grouped; `agents` when omitted. */
-  group?: PromptGroup
 }
 
 /** Host-assigned settings for a contribution kind. */

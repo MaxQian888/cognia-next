@@ -3,15 +3,8 @@
 // commands but live here so the rest of the frontend never has to import
 // from the Tauri bindings layer directly.
 
-export interface WorkspaceEntry {
-  /** Path relative to the search root, normalised to forward slashes. */
-  relPath: string
-  absolutePath: string
-  isDir: boolean
-  size: number
-  /** Last-modified time in ms since epoch, or `null` when unavailable. */
-  mtimeMs: number | null
-}
+import type { WorkspaceEntry } from "@cognia/plugin-contract/lib/files/types"
+export type { WorkspaceEntry } from "@cognia/plugin-contract/lib/files/types"
 
 /**
  * Why a root is browsable, which is also the only thing that says where it can

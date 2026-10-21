@@ -22,23 +22,8 @@ import { listNativeAnthropicToolIds } from "@/lib/plugin/registries/native-anthr
 import { hasThemePackKey } from "@/lib/theme/theme-pack-registry"
 import { isKnownConnectorKind } from "@/lib/connectors/known-kinds"
 import { hasProvider } from "@cognia/provider-types"
-
-export interface PluginCharacterPackWarning {
-  /** Stable id used to dedupe warnings on the UI. */
-  code:
-    | "missing-skill"
-    | "missing-plugin-skill"
-    | "missing-mcp-preset"
-    | "missing-native-tool"
-    | "missing-a2ui-catalog"
-    | "missing-theme-pack"
-    | "missing-connector"
-    | "missing-provider"
-  /** The id we couldn't resolve. */
-  missingId: string
-  /** Which pack character (if any) references the missing id. */
-  characterLocalId?: string
-}
+import type { PluginCharacterPackWarning } from "@cognia/plugin-contract/lib/plugin/character-pack/validate-requires"
+export type { PluginCharacterPackWarning } from "@cognia/plugin-contract/lib/plugin/character-pack/validate-requires"
 
 export interface PackRequiresValidationResult {
   warnings: PluginCharacterPackWarning[]

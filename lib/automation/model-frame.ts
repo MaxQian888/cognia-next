@@ -17,19 +17,14 @@
  */
 
 import type { ImageFormat, Screenshot } from "./types"
-
-export type ModelContentBlock =
-  { type: "image"; data: string; mimeType: string } | { type: "text"; text: string }
-
-export interface ModelFrameResult {
-  content: ModelContentBlock[]
-  /**
-   * The same object the text block carries. MCP `structuredContent` must be a
-   * JSON object, and a caller that reads it instead of the text block must not
-   * be the one path that still receives the base64 payload.
-   */
-  json: Record<string, unknown>
-}
+import type {
+  ModelContentBlock,
+  ModelFrameResult,
+} from "@cognia/plugin-contract/lib/automation/model-frame"
+export type {
+  ModelContentBlock,
+  ModelFrameResult,
+} from "@cognia/plugin-contract/lib/automation/model-frame"
 
 /** MCP image blocks are typed by media type, not by the backend's enum. */
 export function screenshotMimeType(format: ImageFormat): string {
