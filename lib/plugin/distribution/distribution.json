@@ -1,5 +1,5 @@
 {
-  "$comment": "Which first-party plugins that do NOT load from the browser bundle are shipped inside the desktop installer. Frontend plugins are curated separately, by the browser builtin registry (see plugins/builtin-registry-coverage.test.ts). Everything else needs a directory on disk before the Tauri host can run it, so a plugin that is neither staged into the installer nor marked dev-only simply does not exist for a user who installed the app rather than cloning the repo. Keyed by directory name; both scripts/build/stage-bundled-plugins.mjs and the coverage guard read this file.",
+  "$comment": "Which first-party plugins that do NOT load from the browser bundle are shipped inside the desktop installer. Frontend plugins are curated separately, in browser-builtins.json beside this file (see lib/plugin/distribution/builtin-registry-coverage.test.ts). Everything else needs a directory on disk before the Tauri host can run it, so a plugin that is neither staged into the installer nor marked dev-only simply does not exist for a user who installed the app rather than cloning the repo. Host-owned curation: the plugin artifact producer (scripts/plugin/artifacts/desktop-plugins.mjs) reads it to decide what to package, and the coverage guard reads it. Keyed by plugin directory name.",
   "bundled": {
     "repowiki": {
       "id": "cognia-repowiki",

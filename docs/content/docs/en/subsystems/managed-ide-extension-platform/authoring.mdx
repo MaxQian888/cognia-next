@@ -87,7 +87,7 @@ is pointed at its namespaced id; a built-in id such as `typescript` is kept.
 A language server gets exactly the VS Code features it claims in its
 `initialize` capabilities, with its own trigger characters.
 
-`plugins/pro-ide-fixture` declares one provider of every family above and is
+`lib/plugin/ide/pro-ide-fixture` declares one provider of every family above and is
 the reference for these shapes. `pnpm test:pro-ide:e2e` drives it through a
 real code-server, and `pnpm audit:pro-ide-perf` checks that run against the
 performance gates.

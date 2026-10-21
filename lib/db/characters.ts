@@ -14,14 +14,15 @@ import {
   diffPackUpdate,
   type PackUpdateDiff,
 } from "@/lib/plugin/character-pack/diff-pack-update"
-// ADR-0030 Amendment / v50 — built-in characters now live in a first-party
-// plugin. The Dexie seed reuses the same character defs to keep the
-// pre-plugin-boot first-launch rows in sync with the overlay.
+// ADR-0030 Amendment / v50 — built-in characters live in a first-party
+// plugin. The Dexie seed reads the same pack from the generated pre-boot
+// snapshot to keep the pre-plugin-boot first-launch rows in sync with the overlay.
 import {
+  BUILTIN_CHARACTERS_PLUGIN_ID,
   BUILTIN_LEGACY_ID_TO_LOCAL_ID,
-  BUILTIN_PACK,
-  BUILTIN_PLUGIN_ID,
-} from "@/plugins/cognia-builtin-characters/src/index"
+  builtinCharacterRuntimeId,
+  getBuiltinCharacterPack,
+} from "./builtin-character-pack"
 import { getDb } from "./schema"
 import { recordTombstones } from "@/lib/sync/tombstones"
 import {
@@ -682,10 +683,15 @@ async function writeAppliedUpdate(
  * back at them.
  */
 export async function seedBuiltInCharacters(): Promise<void> {
+  const pack = getBuiltinCharacterPack()
+  if (!pack) {
+    log.warn("Built-in character pack is not in this build; skipping built-in character seed")
+    return
+  }
   const db = getDb()
   const now = Date.now()
   const charsByLocalId = new Map<string, PluginCharacterDef>(
-    BUILTIN_PACK.characters.map((c) => [c.localId, c])
+    pack.characters.map((c) => [c.localId, c])
   )
   const legacyIds = Object.keys(BUILTIN_LEGACY_ID_TO_LOCAL_ID)
   const existing = await db.characters.bulkGet(legacyIds)
@@ -698,7 +704,7 @@ export async function seedBuiltInCharacters(): Promise<void> {
     if (existingById.get(legacyId)) continue
     const def = charsByLocalId.get(localId)
     if (!def) continue
-    const runtimeId = `cognia-pack:${BUILTIN_PLUGIN_ID}:${BUILTIN_PACK.id}:${localId}`
+    const runtimeId = builtinCharacterRuntimeId(localId)
     // Prefer the live overlay snapshot when the plugin is already up;
     // otherwise build the snapshot from the static pack definition so
     // first-launch rows still have a baseline for Apply Update.
@@ -712,10 +718,10 @@ export async function seedBuiltInCharacters(): Promise<void> {
       systemPrompt: def.systemPrompt,
       permissionMode: def.permissionMode,
       isBuiltIn: true,
-      sourcePluginId: BUILTIN_PLUGIN_ID,
-      sourcePackId: BUILTIN_PACK.id,
+      sourcePluginId: BUILTIN_CHARACTERS_PLUGIN_ID,
+      sourcePackId: pack.id,
       clonedFromPackCharacterId: runtimeId,
-      packVersionAtClone: BUILTIN_PACK.version,
+      packVersionAtClone: pack.version,
       pristineSnapshot: buildPristineSnapshot(overlayChar),
       createdAt: now,
       updatedAt: now,
@@ -735,10 +741,10 @@ export async function seedBuiltInCharacters(): Promise<void> {
     const row = existingById.get(legacyId)
     if (!row) continue
     if (row.pristineSnapshot) continue
-    if (row.sourcePluginId && row.sourcePluginId !== BUILTIN_PLUGIN_ID) continue
+    if (row.sourcePluginId && row.sourcePluginId !== BUILTIN_CHARACTERS_PLUGIN_ID) continue
     const def = charsByLocalId.get(localId)
     if (!def) continue
-    const runtimeId = `cognia-pack:${BUILTIN_PLUGIN_ID}:${BUILTIN_PACK.id}:${localId}`
+    const runtimeId = builtinCharacterRuntimeId(localId)
     const overlayChar = getPackCharacterByRuntimeId(runtimeId)?.character ?? def
     await db.characters.update(legacyId, {
       pristineSnapshot: buildPristineSnapshot(overlayChar),

@@ -40,3 +40,11 @@ it("refuses a cached inline review with different content instead of suppressing
     )
   ).rejects.toThrow(/content differs/)
 })
+
+it("rejects an empty review body before any request goes out", async () => {
+  const request = jest.fn()
+  await expect(
+    publishGithubReview({ repoFullName: "owner/repo", prNumber: 42, body: " " }, request)
+  ).rejects.toThrow("A review requires a body")
+  expect(request).not.toHaveBeenCalled()
+})

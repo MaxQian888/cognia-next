@@ -7,7 +7,7 @@ test("mobile preparation retains browser resources without staging desktop runti
   await prepareMobile(async (command, args) => calls.push([command, ...args]))
   assert.deepEqual(calls, [
     [process.execPath, "scripts/build/build-workflow-app-embed.mjs"],
-    [process.execPath, "scripts/build/build-browser-builtin-plugins.mjs"],
+    [process.execPath, "scripts/build/stage-plugin-artifacts.mjs", "--web-only"],
     [process.execPath, "scripts/build/download-cubism-core.mjs"],
     [process.execPath, "scripts/build/copy-monaco-assets.mjs"],
     [process.execPath, "scripts/build/build-artifact-runtime.mjs"],

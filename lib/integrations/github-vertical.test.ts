@@ -8,7 +8,26 @@ import { registerGithubIntegrationAuthProviders } from "./github-auth"
 import { __resetIntegrationRegistryForTesting, registerIntegrationDefinitions } from "./registry"
 import { publishIntegrationEvent } from "./events"
 import { approveIntegrationActionJob, executeIntegrationAction } from "./action-runner"
-import * as github from "@/plugins/github-delivery/src/index"
+import { loadBuiltinArtifactExports } from "@/lib/plugin/core/builtin-artifact-fixture"
+import type { PluginIntegrationDef } from "@/types/plugin/plugin-integration"
+import type { RegisterIntegrationDefinitionsInput } from "./registry"
+
+/** GitHub Delivery's entry exports, from the built-in chunk the app ships. */
+interface GithubDeliveryExports {
+  manifest: { id: string }
+  githubIntegration: PluginIntegrationDef
+  normalizeGithub: NonNullable<RegisterIntegrationDefinitionsInput["normalizers"]>[string]
+  listGithubResources: NonNullable<RegisterIntegrationDefinitionsInput["resourceProviders"]>[string]
+  checkGithubHealth: NonNullable<
+    RegisterIntegrationDefinitionsInput["accountStatusProviders"]
+  >[string]
+  [handler: string]: unknown
+}
+
+let github: GithubDeliveryExports
+beforeAll(async () => {
+  github = (await loadBuiltinArtifactExports("github-delivery")) as GithubDeliveryExports
+})
 
 jest.mock("@/lib/workflow/runtime/trigger-subscriptions", () => ({
   findMatchingWorkflows: () => [],

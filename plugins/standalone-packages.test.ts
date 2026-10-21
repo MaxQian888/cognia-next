@@ -1,4 +1,7 @@
-/** @jest-environment jsdom */
+/**
+ * @jest-environment jsdom
+ * @cognia-host-integration-test
+ */
 import { execFileSync } from "node:child_process"
 import { mkdtemp, readFile, readdir, rm, mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"

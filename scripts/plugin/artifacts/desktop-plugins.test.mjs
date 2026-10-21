@@ -1,4 +1,4 @@
-// `node --test scripts/build/stage-bundled-plugins.test.mjs`
+// `node --test scripts/plugin/artifacts/desktop-plugins.test.mjs`
 //
 // The staging step is the only thing standing between a curated plugin and an
 // installer that does not contain it, so its two failure modes both need to be
@@ -12,12 +12,8 @@ import os from "node:os"
 import path from "node:path"
 import { test } from "node:test"
 
-import {
-  CATALOG_FILE,
-  expandInclude,
-  readDistribution,
-  stageBundledPlugins,
-} from "./stage-bundled-plugins.mjs"
+import { PLUGIN_ARTIFACT_SECTIONS } from "../../build/plugin-artifact-format.mjs"
+import { expandInclude, readDistribution, stageBundledPlugins } from "./desktop-plugins.mjs"
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "cognia-stage-"))
@@ -36,7 +32,7 @@ test("staging copies the manifest and the package, and nothing else", async () =
   const out = tempDir()
   try {
     const { catalog } = await stageBundledPlugins({
-      outDir: out,
+      stagedDir: out,
       catalogFile: path.join(out, "catalog.json"),
     })
     const staged = fs
@@ -74,7 +70,7 @@ test("the catalog digests match the staged bytes", async () => {
   const out = tempDir()
   try {
     const { catalog } = await stageBundledPlugins({
-      outDir: out,
+      stagedDir: out,
       catalogFile: path.join(out, "catalog.json"),
     })
     const { createHash } = await import("node:crypto")
@@ -107,7 +103,7 @@ test("an include that matches nothing is a build failure, not a silent skip", as
     await assert.rejects(
       () =>
         stageBundledPlugins({
-          outDir: out,
+          stagedDir: out,
           catalogFile: path.join(out, "catalog.json"),
           fsImpl: fake,
         }),
@@ -122,17 +118,17 @@ test("expandInclude refuses a pattern shape it does not actually support", () =>
   assert.throws(() => expandInclude("/nowhere", "src/*.py"), /unsupported include pattern/u)
 })
 
-test("writes the catalog where the renderer imports it from", async () => {
+test("writes both outputs into the artifact set's desktop sections", async () => {
   const out = tempDir()
   try {
-    const target = path.join(out, "catalog.json")
-    const { catalogPath } = await stageBundledPlugins({ outDir: out, catalogFile: target })
-    assert.equal(catalogPath, target)
-    assert.ok(fs.existsSync(target))
-    // The default target is inside the app tree, not the resource tree: the
-    // renderer imports it, so a read that the fs scope denies cannot silently
-    // look like "nothing to seed".
-    assert.match(CATALOG_FILE.split(path.sep).join("/"), /^lib\/plugin\/distribution\//u)
+    const { catalogPath, stagedDir } = await stageBundledPlugins({ outDir: out })
+    assert.equal(catalogPath, path.join(out, PLUGIN_ARTIFACT_SECTIONS.desktopCatalog.set))
+    assert.equal(stagedDir, path.join(out, PLUGIN_ARTIFACT_SECTIONS.desktopPlugins.set))
+    assert.ok(fs.existsSync(path.join(stagedDir, "repowiki/plugin.json")))
+    // The host stages the catalog inside the app tree, not the resource tree:
+    // the renderer imports it, so a read that the fs scope denies cannot
+    // silently look like "nothing to seed".
+    assert.match(PLUGIN_ARTIFACT_SECTIONS.desktopCatalog.host, /^lib\/plugin\/distribution\//u)
   } finally {
     fs.rmSync(out, { recursive: true, force: true })
   }
@@ -146,8 +142,11 @@ test("stages only curated frontend host runtimes as complete installable package
     fs.writeFileSync(file, data)
   }
   try {
-    write("plugins/distribution.json", JSON.stringify({ bundled: {} }))
-    write("plugins/browser-builtins.json", JSON.stringify(["with-runtime", "ordinary"]))
+    write("lib/plugin/distribution/distribution.json", JSON.stringify({ bundled: {} }))
+    write(
+      "lib/plugin/distribution/browser-builtins.json",
+      JSON.stringify(["with-runtime", "ordinary"])
+    )
     for (const name of ["with-runtime", "ordinary", "not-curated"]) {
       const manifest = {
         id: name,
@@ -177,7 +176,7 @@ test("stages only curated frontend host runtimes as complete installable package
     const outDir = path.join(root, "out")
     const { catalog } = await stageBundledPlugins({
       root,
-      outDir,
+      stagedDir: outDir,
       catalogFile: path.join(root, "catalog.json"),
     })
     assert.deepEqual(Object.keys(catalog.entries), ["with-runtime"])
@@ -226,7 +225,7 @@ test("an unchanged stage is not rewritten, and a drifted one is restaged", async
   const stageDir = path.join(out, "stage")
   const catalogFile = path.join(out, "catalog.json")
   try {
-    const first = await stageBundledPlugins({ outDir: stageDir, catalogFile })
+    const first = await stageBundledPlugins({ stagedDir: stageDir, catalogFile })
     assert.equal(first.changed, true)
     const manifest = path.join(stageDir, "repowiki", "plugin.json")
     const past = new Date(Date.now() - 60_000)
@@ -235,14 +234,14 @@ test("an unchanged stage is not rewritten, and a drifted one is restaged", async
 
     // The `tauri dev` watcher covers the stage dir and the renderer imports the
     // catalog: a no-op predev must leave both untouched.
-    const second = await stageBundledPlugins({ outDir: stageDir, catalogFile })
+    const second = await stageBundledPlugins({ stagedDir: stageDir, catalogFile })
     assert.equal(second.changed, false)
     assert.equal(fs.statSync(manifest).mtimeMs, past.getTime())
     assert.equal(fs.statSync(catalogFile).mtimeMs, past.getTime())
 
     fs.writeFileSync(path.join(stageDir, "repowiki", "stray.txt"), "residue")
     fs.writeFileSync(manifest, "{}")
-    const third = await stageBundledPlugins({ outDir: stageDir, catalogFile })
+    const third = await stageBundledPlugins({ stagedDir: stageDir, catalogFile })
     assert.equal(third.changed, true)
     assert.ok(!fs.existsSync(path.join(stageDir, "repowiki", "stray.txt")))
     assert.equal(
@@ -259,21 +258,25 @@ test("a failing include leaves the previous stage in place", async () => {
   const stageDir = path.join(out, "stage")
   const catalogFile = path.join(out, "catalog.json")
   try {
-    await stageBundledPlugins({ outDir: stageDir, catalogFile })
+    await stageBundledPlugins({ stagedDir: stageDir, catalogFile })
     const fake = {
       ...fs,
       readFileSync: (file, encoding) =>
         String(file).endsWith("distribution.json")
           ? JSON.stringify({
               bundled: {
-                repowiki: { id: "cognia-repowiki", reason: "x", include: ["plugin.json", "gone/**/*"] },
+                repowiki: {
+                  id: "cognia-repowiki",
+                  reason: "x",
+                  include: ["plugin.json", "gone/**/*"],
+                },
               },
               devOnly: {},
             })
           : fs.readFileSync(file, encoding),
     }
     await assert.rejects(
-      () => stageBundledPlugins({ outDir: stageDir, catalogFile, fsImpl: fake }),
+      () => stageBundledPlugins({ stagedDir: stageDir, catalogFile, fsImpl: fake }),
       /matched no files/u
     )
     assert.ok(fs.existsSync(path.join(stageDir, "repowiki", "plugin.json")))

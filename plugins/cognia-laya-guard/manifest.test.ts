@@ -1,4 +1,6 @@
 /**
+ * @cognia-host-integration-test (reads the host's installer curation)
+ *
  * The Laya Guard manifest, checked against the validator the installer runs.
  *
  * The Python suite covers the engine and hook wiring; nothing there can see
@@ -23,9 +25,14 @@ const manifest = JSON.parse(
   configSchema?: { properties?: Record<string, unknown> }
 }
 
-/** The installer's copy list for this plugin (plugins/distribution.json). */
+/** The installer's copy list for this plugin, from the host's curation. */
 const distributionInclude = (
-  JSON.parse(readFileSync(join(__dirname, "..", "distribution.json"), "utf8")) as {
+  JSON.parse(
+    readFileSync(
+      join(__dirname, "..", "..", "lib", "plugin", "distribution", "distribution.json"),
+      "utf8"
+    )
+  ) as {
     bundled: Record<string, { id: string; include: string[] }>
   }
 ).bundled["cognia-laya-guard"]?.include
@@ -75,7 +82,7 @@ describe("cognia-laya-guard manifest", () => {
   it("packs the same files the installer ships", () => {
     // Two copy lists exist — `cognia plugin build` reads plugin.json
     // (`pythonMain` + `bundle_include`), the installer stager reads
-    // plugins/distribution.json. A file in one and not the other is a plugin
+    // lib/plugin/distribution/distribution.json. A file in one and not the other is a plugin
     // that works installed from the desktop app and breaks installed from a
     // built zip (or the reverse).
     expect(distributionInclude).toBeDefined()

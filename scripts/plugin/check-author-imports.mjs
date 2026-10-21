@@ -281,6 +281,21 @@ function pluginDirs(repoRoot) {
     .sort()
 }
 
+/**
+ * Source files directly under `plugins/`, outside every plugin directory. They
+ * are suites about the plugin tree as a whole (curation, packaging, manifest
+ * sweeps) and get no exemption for living beside the plugins: one that
+ * reaches into the host must say so with the host-integration pragma.
+ */
+function pluginRootFiles(repoRoot) {
+  const root = resolve(repoRoot, PLUGIN_GOVERNANCE_ROOT)
+  if (!existsSync(root)) return []
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && SOURCE_EXTENSIONS.has(extname(entry.name)))
+    .map((entry) => resolve(root, entry.name))
+    .sort()
+}
+
 export function readGovernanceBaseline(repoRoot = process.cwd()) {
   const path = resolve(repoRoot, PLUGIN_GOVERNANCE_BASELINE)
   if (!existsSync(path)) return []
@@ -310,6 +325,13 @@ export function checkPluginGovernance(repoRoot = process.cwd()) {
     }
     if (found.length > 0) violations.push(...found)
     else migrated.push(dir)
+  }
+  for (const file of pluginRootFiles(repoRoot)) {
+    const source = readFileSync(file, "utf8")
+    if (isHostIntegrationTest(file, source)) continue
+    for (const specifier of findForbiddenAuthorImports(source, kits)) {
+      violations.push(`${relative(repoRoot, file)} imports ${specifier}`)
+    }
   }
   const unlisted = [...baseline].filter((dir) => !dirs.includes(dir)).sort()
   return { violations, stale, unlisted, migrated }

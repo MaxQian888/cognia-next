@@ -137,12 +137,34 @@ From the repository root:
 pnpm plugin:packages:build                    # every frontend plugin
 pnpm plugin:packages:build cognia-pdf          # one plugin ID or directory
 pnpm plugin:packages:verify                   # rebuild, extract outside the repo, load every package
-pnpm plugin:builtin:build                     # generate the curated browser builtin assets
+pnpm plugin:artifacts:produce --out <dir>     # produce the plugin artifact set the app build consumes
+pnpm plugin:builtin:build                     # stage the artifact set into the host tree (predev/prebuild do this)
 ```
 
 The package builder writes `dist/plugins/<id>/` and `dist/plugins/<id>-<version>.zip`. It materializes the full exported manifest, compiles named contribution entries, includes styles and resources, and preserves executable file modes. The PDF package embeds its worker so it can run without the app's public assets. Importing source for metadata does not activate the plugin.
 
-`plugins/browser-builtins.json` selects which packages ship with the app. These builtins use generated bundles and the same shared SDK boundary; the registry does not import their TypeScript implementations. Independently installed copies take precedence over the builtin with the same ID, and explicit uninstall persists across startup reseeding.
+`lib/plugin/distribution/browser-builtins.json` selects which packages ship with the app as browser builtins, and `lib/plugin/distribution/distribution.json` selects the ones the desktop installer stages. Both are host files: which plugins ship is the app's choice, not the plugin's. These builtins use generated bundles and the same shared SDK boundary; the registry does not import their TypeScript implementations. Independently installed copies take precedence over the builtin with the same ID, and explicit uninstall persists across startup reseeding.
+
+### How first-party plugins reach the app build
+
+The app build never reads plugin source. It consumes a **plugin artifact set**: a directory with a `plugin-artifacts.json` manifest (schema 1) that lists every file with its SHA-256. The format lives in `scripts/build/plugin-artifact-format.mjs`.
+
+| Set path | Staged into | Contents |
+| --- | --- | --- |
+| `builtin-plugins/` | `public/_cognia/builtin-plugins/` | content-addressed browser builtin chunks, their resources, shared workers |
+| `plugin-icons/` | `public/_cognia/plugin-icons/` | plugin icons |
+| `desktop-plugins/` | `src-tauri/resources/plugins/` | installer-staged plugins (replaced as a whole) |
+| `browser-builtin-assets.json` | `lib/plugin/core/browser-builtin-assets.generated.json` | builtin registry index (manifest, chunk URL, digest) |
+| `builtin-preboot-manifests.json` | `lib/plugin/core/builtin-preboot-manifests.generated.json` | the `dexie` and `characterPacks` fields read before the plugin manager boots |
+| `bundled-plugins.json` | `lib/plugin/distribution/bundled-plugins.generated.json` | desktop seed catalog |
+
+`scripts/plugin/artifacts/produce.mjs` produces a set from plugin source; `scripts/build/stage-plugin-artifacts.mjs` verifies it and stages it (`predev`, `prebuild` and `mobile:prepare` run it; mobile passes `--web-only`, which skips `desktop-plugins/`). The stager takes its set from, in order:
+
+1. `--from <dir>` or `COGNIA_PLUGIN_ARTIFACTS=<dir>`: a set produced elsewhere. `plugins/` is not read, so a checkout without plugin sources builds.
+2. `plugins/` in the checkout: a set is produced into `.cache/plugin-artifacts/` (incremental), then staged.
+3. Neither: the build stops and says how to provide a set.
+
+Every file is checked against the manifest before anything is written, so a truncated or tampered set leaves the host tree unchanged. Host tests that drive a real first-party plugin load its staged chunk through `lib/plugin/core/builtin-artifact-fixture.ts`, never its source.
 
 Use Settings → Plugins to install the generated ZIP or its download URL. Frontend and WASM packages share the staged installation flow: preview, validate, register, save configuration, activate, then finalize. Failure rolls back the installation. WASM-specific permission grants apply only to WASM packages. A source checkout is not a release package; build it first.
 

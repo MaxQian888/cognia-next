@@ -186,7 +186,7 @@ test("the Pro IDE E2E runs for its own pathway, and only for it", () => {
     "sidecar/vscode-ext-host/src/host.ts",
     "lib/codeserver/client.ts",
     "lib/plugin/ide/broker-runtime.ts",
-    "plugins/pro-ide-fixture/plugin.json",
+    "lib/plugin/ide/pro-ide-fixture/plugin.json",
     "scripts/gates/check-pro-ide-perf.mjs",
     "scripts/gates/pro-ide-perf-baseline.json",
     "scripts/test/run-pro-ide-e2e.mjs",

@@ -37,12 +37,6 @@ jest.mock("../../agent/subagent-background-tasks", () => ({
   markCliBackgroundDelivery: jest.fn(async () => undefined),
 }))
 
-jest.mock("@/plugins/cognia-builtin-characters/src/index", () => ({
-  BUILTIN_LEGACY_ID_TO_LOCAL_ID: {},
-  BUILTIN_PACK: { id: "builtin", version: "1.0.0", characters: [] },
-  BUILTIN_PLUGIN_ID: "cognia-builtin-characters",
-}))
-
 // marked@18 is ESM-only; this suite exercises App orchestration rather than
 // markdown tokenization, which has its own focused tests.
 jest.mock("../render/cell-terminal-block", () => ({

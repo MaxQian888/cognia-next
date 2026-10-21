@@ -53,4 +53,4 @@ ide: {
 
 selector 或 language server 若引用插件自己的语言，会被指向其 namespace 后的 ID；`typescript` 等内置 ID 保持不变。language server 只获得其 `initialize` capabilities 声明的 VS Code 特性，并使用它自己的 trigger character。
 
-`plugins/pro-ide-fixture` 为上表每个家族各声明一个 provider，是这些形状的参考实现。`pnpm test:pro-ide:e2e` 通过真实 code-server 驱动它，`pnpm audit:pro-ide-perf` 用该次运行检查性能门禁。
+`lib/plugin/ide/pro-ide-fixture` 为上表每个家族各声明一个 provider，是这些形状的参考实现。`pnpm test:pro-ide:e2e` 通过真实 code-server 驱动它，`pnpm audit:pro-ide-perf` 用该次运行检查性能门禁。

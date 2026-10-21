@@ -32,10 +32,19 @@ import type {
   PluginCharacterPackDef,
 } from "@/types/plugin/plugin-character-pack"
 import {
-  BUILTIN_PACK,
-  BUILTIN_PLUGIN_ID,
+  BUILTIN_CHARACTERS_PLUGIN_ID as BUILTIN_PLUGIN_ID,
   BUILTIN_LEGACY_ID_TO_LOCAL_ID,
-} from "@/plugins/cognia-builtin-characters/src/index"
+  builtinCharacterRuntimeId,
+  getBuiltinCharacterPack,
+} from "./builtin-character-pack"
+
+// Real implementation by default; one test makes the shipped pack absent.
+jest.mock("./builtin-character-pack", () => {
+  const actual = jest.requireActual("./builtin-character-pack")
+  return { ...actual, getBuiltinCharacterPack: jest.fn(actual.getBuiltinCharacterPack) }
+})
+
+const BUILTIN_PACK = getBuiltinCharacterPack()!
 
 function makeOverlayChar(
   localId: string,
@@ -270,6 +279,12 @@ describe("seedBuiltInCharacters", () => {
     expect(second.filter((c) => c.isBuiltIn).length).toBe(7)
   })
 
+  it("writes no rows when the build ships no built-in pack", async () => {
+    jest.mocked(getBuiltinCharacterPack).mockReturnValueOnce(undefined)
+    await seedBuiltInCharacters()
+    expect(await getDb().characters.count()).toBe(0)
+  })
+
   it("includes the Goal Tracker character with acceptEdits permission mode", async () => {
     await seedBuiltInCharacters()
     const goalTracker = await getCharacter("char_builtin_goal_tracker")
@@ -476,9 +491,7 @@ describe("cognia-builtin-characters overlay/Dexie coexistence", () => {
     registerCharacterPack(BUILTIN_PACK.id, BUILTIN_PACK, { pluginId: BUILTIN_PLUGIN_ID })
   }
 
-  function runtimeIdFor(localId: string): string {
-    return `cognia-pack:${BUILTIN_PLUGIN_ID}:${BUILTIN_PACK.id}:${localId}`
-  }
+  const runtimeIdFor = builtinCharacterRuntimeId
 
   it("shows exactly 7 built-ins with no duplicates when the overlay is active", async () => {
     registerBuiltinOverlay()

@@ -1,11 +1,11 @@
 /**
- * The authored definitions of the built-in pack: the seven personas and the
- * legacy-id map the Dexie upgrade and `seedBuiltInCharacters` read.
+ * The authored definitions of the built-in pack: the seven personas.
  *
  * Kept apart from the plugin entry point so registration (`index.ts`) and the
- * prose it registers are separate concerns. Every `localId` here MUST
- * round-trip with the v49 upgrade map (`lib/db/schema.ts` → `legacyMap`);
- * changing one orphans existing user customisations.
+ * prose it registers are separate concerns. Every `localId` here is part of a
+ * stable id: the host maps its legacy `char_builtin_*` rows onto these
+ * localIds and seeds them on first launch from the generated pre-boot snapshot.
+ * Changing one orphans existing user customisations.
  */
 
 import { defineCharacterPack } from "@cognia/plugin-sdk"
@@ -89,20 +89,4 @@ export const BUILTIN_PACK = defineCharacterPack({
       permissionMode: "plan",
     },
   ],
-})
-
-/**
- * Stable map from legacy `char_builtin_*` Dexie ids to the v49 pack
- * localIds. Exported so the Dexie upgrade hook + the
- * `seedBuiltInCharacters` adapter (lib/db/characters.ts) reuse one
- * source of truth.
- */
-export const BUILTIN_LEGACY_ID_TO_LOCAL_ID: Readonly<Record<string, string>> = Object.freeze({
-  char_builtin_coding: "coding",
-  char_builtin_writer: "writer",
-  char_builtin_research: "research",
-  char_builtin_brainstorm: "brainstorm",
-  char_builtin_translator: "translator",
-  char_builtin_goal_tracker: "goal-tracker",
-  char_builtin_support: "support",
 })

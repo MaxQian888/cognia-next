@@ -1,5 +1,11 @@
-/** Shared review publication policy for the delivery plugin and repository review UI.
- * Transport and credentials remain owned by their existing callers.
+/**
+ * Pull-request review publication policy, shared by the `github-delivery`
+ * plugin's review actions and the host's repository review UI
+ * (`lib/review/github-provider.ts`): validates inline comments and the
+ * verdict, re-checks the exact head SHA, refuses self-approval, and reconciles
+ * a retried publication against reviews already on the pull request so a lost
+ * response cannot double-post. Transport and credentials remain owned by the
+ * callers, which pass `request`.
  */
 export type GithubReviewRequest = <T>(
   path: string,
@@ -39,7 +45,7 @@ export async function publishGithubReview(
     !(comments?.length && input.body === undefined) &&
     (typeof input.body !== "string" || !input.body.trim())
   )
-    throw new Error("github-delivery requires body")
+    throw new Error("A review requires a body")
   const body = typeof input.body === "string" ? input.body : ""
   const event = input.event ?? "COMMENT"
   if (!["COMMENT", "REQUEST_CHANGES", "APPROVE"].includes(event as string))

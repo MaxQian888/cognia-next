@@ -23,7 +23,7 @@ function fixture(t) {
     ".cache/\ncli/dist/\npublic/\nbuild-count\nplugin-build-count\n"
   )
   fs.writeFileSync(
-    path.join(root, "scripts/build/build-browser-builtin-plugins.mjs"),
+    path.join(root, "scripts/build/stage-plugin-artifacts.mjs"),
     `
     import fs from 'node:fs';
     if (process.env.FIXTURE_PLUGIN_BUILD_FAIL) throw new Error('plugin build failed');

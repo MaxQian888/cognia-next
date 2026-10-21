@@ -19,102 +19,16 @@
  */
 
 import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
-import type { VisualWorkflow, WorkflowNodeData, WorkflowNodeKind } from "@cognia/plugin-sdk"
 import { formatToolError, getWorkflowApi, resolveStore } from "../store-bridge"
 import type { CopilotSlotValues } from "@cognia/plugin-sdk/api/workflow-editor"
 import { workflowEditorRevision } from "@cognia/plugin-sdk/api/workflow-editor"
-import { summarizeOps, type ProposalOp } from "@cognia/plugin-sdk/api/workflow-editor"
+import { summarizeOps, templateToProposalOps } from "@cognia/plugin-sdk/api/workflow-editor"
 
 const WORKFLOW_ID_SCHEMA = {
   type: "string",
   description:
     "Workflow id to target. Omit if exactly one editor is open and you want to act on it.",
 } as const
-
-/**
- * Convert a VisualWorkflow (produced by `template.build(slots)`) into an
- * ordered list of `add_node` + `connect_edge` ops suitable for the
- * proposal store. We re-id every node so the proposal IDs don't collide
- * with the current graph; edges are translated through the same map.
- */
-export function templateToProposalOps(
-  workflow: VisualWorkflow,
-  existing: { nodeIds: Set<string>; edgeIds: Set<string> },
-  reserveId: () => string
-): { ops: ProposalOp[]; idMap: Record<string, string> } {
-  const idMap: Record<string, string> = {}
-  const reservedNodes = new Set<string>(existing.nodeIds)
-  const reservedEdges = new Set<string>(existing.edgeIds)
-
-  function pickNodeId(seed: string): string {
-    let id = `n_${seed}_${reserveId()}`
-    while (reservedNodes.has(id)) id = `n_${seed}_${reserveId()}`
-    reservedNodes.add(id)
-    return id
-  }
-  function pickEdgeId(): string {
-    let id = `e_${reserveId()}`
-    while (reservedEdges.has(id)) id = `e_${reserveId()}`
-    reservedEdges.add(id)
-    return id
-  }
-
-  const ops: ProposalOp[] = []
-
-  for (const node of workflow.nodes) {
-    // Skip annotation-style nodes the template author may have included
-    // for the seed flow — they're surface-only.
-    const realId = pickNodeId(sanitizeForId(node.id))
-    idMap[node.id] = realId
-    const data: Partial<WorkflowNodeData> = {
-      label: node.data.label,
-      params: node.data.params,
-      notes: node.data.notes,
-      credentialRefs: node.data.credentialRefs,
-      disabled: node.data.disabled,
-      authoredBy: "ai",
-    }
-    ops.push({
-      type: "add_node",
-      nodeId: realId,
-      kind: node.type as WorkflowNodeKind,
-      typeVersion: node.typeVersion,
-      position: node.position,
-      data,
-    })
-  }
-
-  for (const edge of workflow.edges) {
-    const realSource = idMap[edge.source]
-    const realTarget = idMap[edge.target]
-    if (!realSource || !realTarget) {
-      // Should never happen if the template author exports a self-contained
-      // graph; we silently drop the dangling edge so the user can still
-      // accept the partial proposal.
-      continue
-    }
-    ops.push({
-      type: "connect_edge",
-      edgeId: pickEdgeId(),
-      source: realSource,
-      target: realTarget,
-      sourceHandle: edge.sourceHandle,
-      targetHandle: edge.targetHandle,
-      label: edge.label,
-    })
-  }
-
-  return { ops, idMap }
-}
-
-function sanitizeForId(raw: string): string {
-  return (
-    raw
-      .replace(/[^a-z0-9]+/gi, "_")
-      .toLowerCase()
-      .slice(0, 24) || "node"
-  )
-}
 
 function nextProposalId(): string {
   return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`

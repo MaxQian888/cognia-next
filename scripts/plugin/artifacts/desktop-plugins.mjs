@@ -1,16 +1,15 @@
-// Stage the curated on-disk plugins into the Tauri resource tree.
+// Producer half of the installer-staged plugins.
 //
-// Frontend plugins ride inside the JS bundle and are curated by
-// `lib/plugin/core/browser-builtin-registry.ts`. Those declaring nodeRuntime
-// also need a disk package of their UI and bounded provisioning sources.
-// Everything else -- Python and
+// Frontend plugins ride inside the app as browser built-ins
+// (`builtin-chunks.mjs`). Those declaring nodeRuntime also need a disk package
+// of their UI and bounded provisioning sources. Everything else -- Python and
 // WASM -- needs a real directory before the Tauri host can run it, and the
-// host only ever scans `<appDataDir>/cognia/plugins`. Nothing copied anything
-// there, and `plugins/` was not in `bundle.resources`, so RepoWiki (ADR-0146,
-// a whole subsystem) did not exist at all in an installed build. This script
-// is the missing half: it stages the shipping files under
-// `src-tauri/resources/plugins/` for `bundle.resources` to pick up, and the
-// renderer seeds them into the plugin directory on first run.
+// host only ever scans `<appDataDir>/cognia/plugins`. This step packages the
+// shipping files of every plugin the host's curation
+// (`lib/plugin/distribution/distribution.json`) lists as bundled into the
+// `desktop-plugins/` section of a plugin artifact set; the host stages that
+// section under `src-tauri/resources/plugins/` for `bundle.resources` to pick
+// up, and the renderer seeds them into the plugin directory on first run.
 //
 // Only what the plugin needs at runtime is copied. A Python plugin's working
 // directory also holds `.venv/`, `__pycache__/`, `.pytest_cache/`, `tests/`
@@ -18,36 +17,21 @@
 // would be both enormous and wrong -- `pythonVenv: "isolated"` means the host
 // provisions one per install.
 //
-// Every staged file is hashed, the same integrity shape
-// `browser-builtin-assets.generated.json` already uses, so the seeder can tell
-// a truncated copy from a good one.
+// Every staged file is hashed into the seed catalog, the same integrity shape
+// the browser built-in index uses, so the seeder can tell a truncated copy
+// from a good one.
 
 import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { buildFrontendPlugin } from "../plugin/build-frontend-plugins.mjs"
+import { buildFrontendPlugin } from "../build-frontend-plugins.mjs"
+import {
+  PLUGIN_ARTIFACT_SECTIONS,
+  PLUGIN_CURATION_FILES,
+} from "../../build/plugin-artifact-format.mjs"
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..")
-const PLUGINS_ROOT = path.join(ROOT, "plugins")
-const DISTRIBUTION_FILE = path.join(PLUGINS_ROOT, "distribution.json")
-
-/** Where `bundle.resources` expects to find the staged tree. */
-export const STAGED_PLUGIN_DIR = path.join("src-tauri", "resources", "plugins")
-/**
- * The catalog is written into the app tree and imported, not read from disk at
- * runtime. Reading it back out of the resource directory would need an
- * `fs:scope` entry for `$RESOURCE`, and a denied read is indistinguishable
- * from an absent catalog, which is how a seeder goes quietly dormant. Same
- * shape and same reasoning as `browser-builtin-assets.generated.json`, which
- * is likewise generated and committed.
- */
-export const CATALOG_FILE = path.join(
-  "lib",
-  "plugin",
-  "distribution",
-  "bundled-plugins.generated.json"
-)
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..")
 
 /**
  * Directory names that never ship, whatever an `include` pattern says. These
@@ -67,8 +51,11 @@ const NEVER_STAGE = new Set([
   "venv",
 ])
 
-export function readDistribution(fsImpl = fs) {
-  const raw = JSON.parse(fsImpl.readFileSync(DISTRIBUTION_FILE, "utf8"))
+/** Read the host's installer curation. */
+export function readDistribution(fsImpl = fs, root = ROOT) {
+  const raw = JSON.parse(
+    fsImpl.readFileSync(path.join(root, PLUGIN_CURATION_FILES.distribution), "utf8")
+  )
   return { bundled: raw.bundled ?? {}, devOnly: raw.devOnly ?? {} }
 }
 
@@ -82,35 +69,35 @@ export function readDistribution(fsImpl = fs) {
  */
 export function expandInclude(pluginDir, pattern, fsImpl = fs) {
   if (typeof pattern !== "string" || !pattern)
-    throw new Error(`stage-bundled-plugins: unsafe include path "${pattern}"`)
+    throw new Error(`desktop-plugins: unsafe include path "${pattern}"`)
   const segments = pattern.split("/")
   if (
     path.isAbsolute(pattern) ||
     /[\\:\0]/.test(pattern) ||
     segments.some((part) => part === ".." || part === "." || !part)
   )
-    throw new Error(`stage-bundled-plugins: unsafe include path "${pattern}"`)
+    throw new Error(`desktop-plugins: unsafe include path "${pattern}"`)
   if (segments.some((part) => NEVER_STAGE.has(part))) return []
   const assertSource = (relative) => {
     let current = pluginDir
     for (const part of relative.split("/")) {
       current = path.join(current, part)
       if (fsImpl.lstatSync(current).isSymbolicLink())
-        throw new Error(`stage-bundled-plugins: symlink source "${relative}"`)
+        throw new Error(`desktop-plugins: symlink source "${relative}"`)
     }
   }
   const recursive = pattern.match(/^(.*)\/\*\*\/\*(\.[A-Za-z0-9]+)?$/u)
   if (!recursive) {
     if (pattern.includes("*")) {
       throw new Error(
-        `stage-bundled-plugins: unsupported include pattern "${pattern}". Use a plain path or "<dir>/**/*[.ext]".`
+        `desktop-plugins: unsupported include pattern "${pattern}". Use a plain path or "<dir>/**/*[.ext]".`
       )
     }
     const absolute = path.join(pluginDir, pattern)
     if (!fsImpl.existsSync(absolute)) return []
     assertSource(pattern)
     if (!fsImpl.statSync(absolute).isFile())
-      throw new Error(`stage-bundled-plugins: expected file "${pattern}"`)
+      throw new Error(`desktop-plugins: expected file "${pattern}"`)
     return [pattern]
   }
 
@@ -123,16 +110,14 @@ export function expandInclude(pluginDir, pattern, fsImpl = fs) {
   const walk = (dir, relative) => {
     for (const entry of fsImpl.readdirSync(dir, { withFileTypes: true })) {
       if (NEVER_STAGE.has(entry.name)) continue
-      if (entry.isSymbolicLink())
-        throw new Error(`stage-bundled-plugins: symlink source "${entry.name}"`)
+      if (entry.isSymbolicLink()) throw new Error(`desktop-plugins: symlink source "${entry.name}"`)
       const next = path.join(dir, entry.name)
       const nextRelative = relative ? `${relative}/${entry.name}` : entry.name
       if (entry.isDirectory()) {
         walk(next, nextRelative)
         continue
       }
-      if (!entry.isFile())
-        throw new Error(`stage-bundled-plugins: unsupported source "${entry.name}"`)
+      if (!entry.isFile()) throw new Error(`desktop-plugins: unsupported source "${entry.name}"`)
       if (extension && !entry.name.endsWith(extension)) continue
       found.push(`${subdir}/${nextRelative}`)
     }
@@ -142,24 +127,31 @@ export function expandInclude(pluginDir, pattern, fsImpl = fs) {
 }
 
 /**
- * Copy every bundled plugin's shipping files into `outDir` and return the
- * catalog. Throws when a declared `include` matches nothing, because that is
- * always a rename that would otherwise ship a plugin missing its own code.
+ * Copy every bundled plugin's shipping files into the set's `desktop-plugins/`
+ * section and write its seed catalog. Throws when a declared `include` matches
+ * nothing, because that is always a rename that would otherwise ship a plugin
+ * missing its own code.
+ *
+ * `outDir` is the artifact set directory; `stagedDir` / `catalogFile` override
+ * the two outputs inside it. `root` is the toolchain and curation root,
+ * `pluginsRoot` the plugin source directory.
  */
 export async function stageBundledPlugins({
   outDir,
+  stagedDir,
   catalogFile,
   fsImpl = fs,
   root = ROOT,
+  pluginsRoot,
   buildFrontend = buildFrontendPlugin,
 } = {}) {
-  const target = outDir ?? path.join(root, STAGED_PLUGIN_DIR)
-  const pluginsRoot = path.join(root, "plugins")
-  const { bundled = {} } = JSON.parse(
-    fsImpl.readFileSync(path.join(pluginsRoot, "distribution.json"), "utf8")
-  )
+  if (!outDir && !(stagedDir && catalogFile))
+    throw new Error("stageBundledPlugins: `outDir` (or `stagedDir` and `catalogFile`) is required")
+  const target = stagedDir ?? path.join(outDir, PLUGIN_ARTIFACT_SECTIONS.desktopPlugins.set)
+  pluginsRoot ??= path.join(root, "plugins")
+  const { bundled = {} } = readDistribution(fsImpl, root)
   const browserBuiltins = JSON.parse(
-    fsImpl.readFileSync(path.join(pluginsRoot, "browser-builtins.json"), "utf8")
+    fsImpl.readFileSync(path.join(root, PLUGIN_CURATION_FILES.browserBuiltins), "utf8")
   )
 
   // Everything is collected first and written last: a failing include leaves
@@ -175,13 +167,13 @@ export async function stageBundledPlugins({
     const manifestPath = path.join(source, "plugin.json")
     if (!fsImpl.existsSync(manifestPath)) {
       throw new Error(
-        `stage-bundled-plugins: plugins/${dir} is listed as bundled but has no plugin.json.`
+        `desktop-plugins: plugins/${dir} is listed as bundled but has no plugin.json.`
       )
     }
     const manifest = JSON.parse(fsImpl.readFileSync(manifestPath, "utf8"))
     if (manifest.id !== entry.id) {
       throw new Error(
-        `stage-bundled-plugins: plugins/${dir} declares id "${manifest.id}" but distribution.json says "${entry.id}".`
+        `desktop-plugins: plugins/${dir} declares id "${manifest.id}" but distribution.json says "${entry.id}".`
       )
     }
 
@@ -190,14 +182,14 @@ export async function stageBundledPlugins({
       const matched = expandInclude(source, pattern, fsImpl)
       if (matched.length === 0) {
         throw new Error(
-          `stage-bundled-plugins: include "${pattern}" for plugins/${dir} matched no files. A rename here ships a plugin without its own code.`
+          `desktop-plugins: include "${pattern}" for plugins/${dir} matched no files. A rename here ships a plugin without its own code.`
         )
       }
       files.push(...matched)
     }
     if (!files.includes("plugin.json")) {
       throw new Error(
-        `stage-bundled-plugins: plugins/${dir} must include plugin.json — the host discovers a plugin by its manifest.`
+        `desktop-plugins: plugins/${dir} must include plugin.json — the host discovers a plugin by its manifest.`
       )
     }
 
@@ -231,7 +223,7 @@ export async function stageBundledPlugins({
     const manifest = JSON.parse(fsImpl.readFileSync(path.join(source, "plugin.json"), "utf8"))
     if (manifest.type !== "frontend" || !manifest.nodeRuntime) continue
     if (catalog.entries[dir]) throw new Error(`Duplicate bundled plugin directory: ${dir}`)
-    const built = await buildFrontend({ root, directory: dir })
+    const built = await buildFrontend({ root, pluginsRoot, directory: dir })
     const staged = []
     for (const [relative, bytes] of [...built.files].sort(([left], [right]) =>
       left.localeCompare(right)
@@ -254,10 +246,8 @@ export async function stageBundledPlugins({
     catalog.entries[dir] = { id: built.manifest.id, version: built.manifest.version, files: staged }
   }
 
-  // `src-tauri/resources/plugins` sits in a folder the `tauri dev` watcher
-  // covers, and the catalog is imported by the renderer: rewriting identical
-  // bytes on every `predev` would restart a running desktop app and push a
-  // pointless HMR update.
+  // An unchanged section is left alone, so the consumer's own unchanged-tree
+  // check (which keeps `tauri dev` from restarting) sees stable mtimes too.
   const changed = !stagedTreeMatches(target, pending, fsImpl)
   if (changed) {
     fsImpl.rmSync(target, { recursive: true, force: true })
@@ -269,7 +259,7 @@ export async function stageBundledPlugins({
     }
   }
 
-  const catalogPath = catalogFile ?? path.join(root, CATALOG_FILE)
+  const catalogPath = catalogFile ?? path.join(outDir, PLUGIN_ARTIFACT_SECTIONS.desktopCatalog.set)
   const catalogText = `${JSON.stringify(catalog, null, 2)}\n`
   const currentCatalog = fsImpl.existsSync(catalogPath)
     ? fsImpl.readFileSync(catalogPath, "utf8")
@@ -304,16 +294,4 @@ export function stagedTreeMatches(target, pending, fsImpl = fs) {
       fsImpl.readFileSync(path.join(target, ...relative.split("/"))).equals(expected)
     )
   })
-}
-
-const invokedDirectly =
-  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-if (invokedDirectly) {
-  const { stagedDir, catalog } = await stageBundledPlugins()
-  const ids = Object.values(catalog.entries).map((e) => `${e.id}@${e.version}`)
-  console.log(
-    ids.length > 0
-      ? `[stage-bundled-plugins] staged ${ids.join(", ")} into ${path.relative(ROOT, stagedDir)}`
-      : "[stage-bundled-plugins] nothing to stage"
-  )
 }

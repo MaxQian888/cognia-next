@@ -1,7 +1,7 @@
 /** Portable workflow-editor value types and pure authoring helpers. */
 
 import type { ProposalOp, ProposalOpCount } from "@/lib/workflow/editor/proposal-types"
-import type { WorkflowNodeKind } from "@/types/workflow/visual"
+import type { VisualWorkflow, WorkflowNodeData, WorkflowNodeKind } from "@/types/workflow/visual"
 
 export type { ProposalOp, ProposalOpCount } from "@/lib/workflow/editor/proposal-types"
 export type { ProposalPayload } from "@/lib/workflow/editor/proposal-store"
@@ -129,6 +129,89 @@ export function summarizeOps(ops: ReadonlyArray<ProposalOp>): ProposalOpCount {
     else count.configure += 1
   }
   return count
+}
+
+function sanitizeForId(raw: string): string {
+  return (
+    raw
+      .replace(/[^a-z0-9]+/gi, "_")
+      .toLowerCase()
+      .slice(0, 24) || "node"
+  )
+}
+
+/**
+ * Convert a VisualWorkflow (produced by a template's `build(slots)`) into an
+ * ordered list of `add_node` + `connect_edge` ops for the proposal store.
+ *
+ * Every node is re-id'd so the proposal never collides with the current graph
+ * (`existing`) or with itself; edges are translated through the same map, and
+ * an edge whose endpoint the workflow does not contain is dropped so the user
+ * can still accept the partial proposal. Added nodes are marked
+ * `authoredBy: "ai"`. Shared by the workflow editor's template tab and the
+ * workflow-ai plugin's `wf_apply_template` tool.
+ */
+export function templateToProposalOps(
+  workflow: VisualWorkflow,
+  existing: { nodeIds: ReadonlySet<string>; edgeIds: ReadonlySet<string> },
+  reserveId: () => string
+): { ops: ProposalOp[]; idMap: Record<string, string> } {
+  const idMap: Record<string, string> = {}
+  const reservedNodes = new Set<string>(existing.nodeIds)
+  const reservedEdges = new Set<string>(existing.edgeIds)
+
+  function pickNodeId(seed: string): string {
+    let id = `n_${seed}_${reserveId()}`
+    while (reservedNodes.has(id)) id = `n_${seed}_${reserveId()}`
+    reservedNodes.add(id)
+    return id
+  }
+  function pickEdgeId(): string {
+    let id = `e_${reserveId()}`
+    while (reservedEdges.has(id)) id = `e_${reserveId()}`
+    reservedEdges.add(id)
+    return id
+  }
+
+  const ops: ProposalOp[] = []
+
+  for (const node of workflow.nodes) {
+    const realId = pickNodeId(sanitizeForId(node.id))
+    idMap[node.id] = realId
+    const data: Partial<WorkflowNodeData> = {
+      label: node.data.label,
+      params: node.data.params,
+      notes: node.data.notes,
+      credentialRefs: node.data.credentialRefs,
+      disabled: node.data.disabled,
+      authoredBy: "ai",
+    }
+    ops.push({
+      type: "add_node",
+      nodeId: realId,
+      kind: node.type as WorkflowNodeKind,
+      typeVersion: node.typeVersion,
+      position: node.position,
+      data,
+    })
+  }
+
+  for (const edge of workflow.edges) {
+    const realSource = idMap[edge.source]
+    const realTarget = idMap[edge.target]
+    if (!realSource || !realTarget) continue
+    ops.push({
+      type: "connect_edge",
+      edgeId: pickEdgeId(),
+      source: realSource,
+      target: realTarget,
+      sourceHandle: edge.sourceHandle,
+      targetHandle: edge.targetHandle,
+      label: edge.label,
+    })
+  }
+
+  return { ops, idMap }
 }
 
 function stableValue(value: unknown): unknown {

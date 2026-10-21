@@ -43,7 +43,7 @@ import {
 } from "@/lib/workflow/copilot-templates"
 import { useProposalStore } from "@/lib/workflow/editor/proposal-store"
 import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
-import { templateToProposalOps } from "@/plugins/workflow-ai/src/tools/template-tools"
+import { templateToProposalOps } from "@cognia/plugin-sdk/api/workflow-editor"
 import { templateCatalog } from "@/lib/templates/catalog"
 import { isWorkflowNodeGroupDefinition } from "@/lib/workflow/node-groups/materialize"
 import type { WorkflowNodeGroupDefinition } from "@cognia/plugin-sdk/templates"
