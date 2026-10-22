@@ -8,7 +8,7 @@
 import type {
   PluginCharacterDef,
   PluginCharacterPackDef,
-} from "@/types/plugin/plugin-character-pack"
+} from "../../../types/plugin/plugin-character-pack"
 import {
   __resetCharacterPacksForTesting,
   buildOverlayCharacterId,

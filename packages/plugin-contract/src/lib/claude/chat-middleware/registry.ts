@@ -1,7 +1,8 @@
-/**
- * The plugin contract's share of `lib/claude/chat-middleware/registry.ts`, which re-exports these.
- */
-
+import {
+  interceptorFromChatMiddleware,
+  registerInterceptor,
+  unregisterInterceptor,
+} from "../../plugin/interceptors"
 import type { ChatMiddleware } from "../../../types/plugin/plugin-chat-middleware"
 
 export interface ChatMiddlewareRegistration {
@@ -31,4 +32,166 @@ export interface RegisterChatMiddlewareArgs {
   fn: ChatMiddleware
   priority?: number
   timeoutMs?: number
+}
+
+export const DEFAULT_MIDDLEWARE_TIMEOUT_MS = 5_000
+
+export const MAX_MIDDLEWARE_TIMEOUT_MS = 60_000
+
+export const CIRCUIT_BREAKER_THRESHOLD = 3
+
+const registry = new Map<string, ChatMiddlewareRegistration>()
+
+const listeners = new Set<(event: ChatMiddlewareEvent) => void>()
+
+function emit(event: ChatMiddlewareEvent): void {
+  for (const fn of listeners) {
+    try {
+      fn(event)
+    } catch (err) {
+      // Listeners must not throw across the registry boundary.
+
+      console.warn("[chat-middleware] listener threw:", err)
+    }
+  }
+}
+
+function clampTimeout(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return DEFAULT_MIDDLEWARE_TIMEOUT_MS
+  }
+  return Math.min(value, MAX_MIDDLEWARE_TIMEOUT_MS)
+}
+
+export function registerChatMiddleware(args: RegisterChatMiddlewareArgs): () => void {
+  const fullId = `${args.pluginId}:${args.middlewareId}`
+  if (registry.has(fullId)) {
+    throw new Error(
+      `[chat-middleware] plugin ${args.pluginId} already registered middleware "${args.middlewareId}"`
+    )
+  }
+  registry.set(fullId, {
+    pluginId: args.pluginId,
+    middlewareId: args.middlewareId,
+    fullId,
+    fn: args.fn,
+    priority: args.priority ?? 0,
+    timeoutMs: clampTimeout(args.timeoutMs),
+    consecutiveFailures: 0,
+    disabled: false,
+    breakerTripped: false,
+  })
+  // Normalize into the one interceptor registry (ADR-0189 §6.1). This registry
+  // stays the owner of the breaker and of the events the settings panel reads;
+  // the interceptor record is what the dispatcher orders and runs, so a
+  // middleware and a `defineInterceptors` contribution on the same point sit on
+  // one chain with one ordering rule instead of two chains that cannot see each
+  // other.
+  const entry = registry.get(fullId)!
+  registerInterceptor(interceptorFromChatMiddleware(entry))
+  emit({ type: "registered", fullId, pluginId: args.pluginId })
+  return () => unregisterChatMiddleware(fullId)
+}
+
+export function unregisterChatMiddleware(fullId: string): boolean {
+  const entry = registry.get(fullId)
+  if (!entry) return false
+  registry.delete(fullId)
+  unregisterInterceptor(fullId)
+  emit({ type: "unregistered", fullId, pluginId: entry.pluginId })
+  return true
+}
+
+/**
+ * Drop every middleware owned by the given plugin id. Called on plugin
+ * disable / unload.
+ */
+export function clearChatMiddlewaresForPlugin(pluginId: string): void {
+  const toDrop: string[] = []
+  for (const [id, entry] of registry) {
+    if (entry.pluginId === pluginId) toDrop.push(id)
+  }
+  for (const id of toDrop) unregisterChatMiddleware(id)
+}
+
+/**
+ * Snapshot of the active middleware chain, sorted by priority desc then
+ * (pluginId, middlewareId) for deterministic order. Disabled middlewares
+ * are excluded — they are skipped silently.
+ */
+export function listActiveChatMiddlewares(): ChatMiddlewareRegistration[] {
+  return Array.from(registry.values())
+    .filter((m) => !m.disabled)
+    .sort((a, b) => {
+      const pd = b.priority - a.priority
+      if (pd !== 0) return pd
+      const ap = `${a.pluginId}:${a.middlewareId}`
+      const bp = `${b.pluginId}:${b.middlewareId}`
+      return ap.localeCompare(bp)
+    })
+}
+
+export function listAllChatMiddlewares(): ChatMiddlewareRegistration[] {
+  return Array.from(registry.values())
+}
+
+export function getChatMiddleware(fullId: string): ChatMiddlewareRegistration | undefined {
+  return registry.get(fullId)
+}
+
+/**
+ * Bump the failure counter for a middleware. Trips the breaker (set
+ * `disabled=true`, emit `breaker-tripped`) once the threshold is reached.
+ * Returns whether the middleware is now tripped.
+ */
+export function recordMiddlewareFailure(fullId: string, reason: string): boolean {
+  const entry = registry.get(fullId)
+  if (!entry) return false
+  entry.consecutiveFailures += 1
+  if (entry.consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD && !entry.disabled) {
+    entry.disabled = true
+    entry.breakerTripped = true
+    emit({ type: "breaker-tripped", fullId, pluginId: entry.pluginId, reason })
+  }
+  return entry.disabled
+}
+
+/** Reset the failure counter (called on each successful run). */
+export function recordMiddlewareSuccess(fullId: string): void {
+  const entry = registry.get(fullId)
+  if (!entry) return
+  if (entry.consecutiveFailures > 0) {
+    entry.consecutiveFailures = 0
+  }
+}
+
+/**
+ * Manually re-enable a tripped middleware. Used by the settings UI's
+ * "retry" button or by `clearChatMiddlewaresForPlugin` indirectly when a
+ * plugin re-enables.
+ */
+export function resetChatMiddlewareBreaker(fullId: string): boolean {
+  const entry = registry.get(fullId)
+  if (!entry) return false
+  entry.consecutiveFailures = 0
+  entry.disabled = false
+  entry.breakerTripped = false
+  emit({ type: "breaker-reset", fullId, pluginId: entry.pluginId })
+  return true
+}
+
+export function subscribeChatMiddlewareRegistry(
+  listener: (event: ChatMiddlewareEvent) => void
+): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+/** Test-only — wipe registry + listeners. */
+export function __resetChatMiddlewareRegistryForTesting(): void {
+  for (const fullId of registry.keys()) unregisterInterceptor(fullId)
+  registry.clear()
+  listeners.clear()
 }

@@ -22,8 +22,12 @@ import {
   unregisterPluginHookContribution,
   __resetHookRegistryForTesting,
 } from "./hook-registry"
+import { installPluginRecordReader } from "./plugin-liveness"
 
 const getState = usePluginStore.getState as unknown as jest.Mock
+// The mocked store never runs the real store's module body, which is what
+// installs the liveness reader; install one over the mock instead.
+installPluginRecordReader((pluginId) => getState().plugins[pluginId])
 
 function setPlugins(plugins: Record<string, { status: string }>) {
   getState.mockReturnValue({ plugins })

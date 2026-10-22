@@ -9,20 +9,23 @@ import type {
 } from "./lsp-server"
 
 describe("plugin-sdk api/lsp-server", () => {
-  it("exposes the LSP server authoring helper and host registry", () => {
+  it("exposes the LSP server authoring helper and the registry's composite key", () => {
     expect(typeof sdk.defineLspServer).toBe("function")
-    expect(typeof sdk.registerLspServer).toBe("function")
-    expect(typeof sdk.unregisterLspServer).toBe("function")
-    expect(typeof sdk.unregisterByOwner).toBe("function")
-    expect(typeof sdk.listLspServers).toBe("function")
-    expect(typeof sdk.getLspServerForLanguage).toBe("function")
-    expect(typeof sdk.registerPluginLspServers).toBe("function")
-    expect(typeof sdk.lspServerKey).toBe("function")
     expect(sdk.lspServerKey("plugin", "ts")).toBe("plugin:ts")
   })
 
-  it("keeps host wiring off the author surface (the host configures the LSP registry)", () => {
-    expect(sdk).not.toHaveProperty("configureLspRegistry")
+  it("keeps the host registry off the author surface (plugins declare manifest.lspServers)", () => {
+    for (const hostOnly of [
+      "configureLspRegistry",
+      "registerLspServer",
+      "unregisterLspServer",
+      "unregisterByOwner",
+      "listLspServers",
+      "getLspServerForLanguage",
+      "registerPluginLspServers",
+    ]) {
+      expect(sdk).not.toHaveProperty(hostOnly)
+    }
   })
 
   it("defineLspServer is a typesafe identity function", () => {

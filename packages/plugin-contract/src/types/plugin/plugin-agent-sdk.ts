@@ -232,7 +232,7 @@ export interface PluginDispatchSubagentOptions {
    * tool-result events stream into the subagent runtime store as the run
    * progresses (lights up `SubagentPart`'s live progress + logs).
    */
-  _onEvent?: (event: import("@/lib/claude/run-and-capture").CaptureStreamEvent) => void
+  _onEvent?: (event: import("../../lib/claude/run-and-capture").CaptureStreamEvent) => void
   /**
    * Headless permission responder for managed host projections. Unlike
    * `_approvalRoute`, this is used when no Cognia chat pane owns the run and

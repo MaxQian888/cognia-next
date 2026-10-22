@@ -8,7 +8,7 @@
 
 export { defineTerminalCompletionProvider } from "../define/define-terminal-completion"
 
-export { registerPluginCompletionProvider } from "@/lib/plugin/bridge/terminal-completion-bridge"
+export { registerPluginCompletionProvider } from "@cognia/plugin-contract/lib/plugin/bridge/terminal-completion-bridge"
 
 export type {
   TerminalCompletionBridgeError,

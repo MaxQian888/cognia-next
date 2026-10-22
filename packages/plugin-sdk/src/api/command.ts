@@ -17,7 +17,7 @@ export {
   subscribeCommandRegistry,
   unregisterCommand,
   unregisterCommandsByPlugin,
-} from "@/lib/plugin/commands/registry"
+} from "@cognia/plugin-contract/lib/plugin/commands/registry"
 
 export type {
   CommandHandler,

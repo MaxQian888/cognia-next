@@ -8,7 +8,7 @@ import {
   snapshotAll,
   snapshotKey,
   type PluginBreakerConfig,
-} from "@/lib/plugin/resilience/breaker-registry"
+} from "./breaker-registry"
 
 const CONFIG: PluginBreakerConfig = {
   failureThreshold: 3,

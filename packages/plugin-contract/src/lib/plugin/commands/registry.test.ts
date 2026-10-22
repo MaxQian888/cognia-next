@@ -2,7 +2,7 @@ import {
   registerInterceptor,
   __resetInterceptorDispatchForTesting,
   __resetInterceptorRegistryForTesting,
-} from "@/lib/plugin/interceptors"
+} from "../interceptors"
 import {
   executeCommandWithOptions,
   invokeGuardedCommand,

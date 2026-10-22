@@ -4,7 +4,7 @@ import {
   getConnectorMeta,
   listConnectorMetadata,
 } from "./adapter-metadata"
-import { ALL_PLATFORM_KINDS } from "@/types/connectors/platform-kind"
+import { ALL_PLATFORM_KINDS } from "../../types/connectors/platform-kind"
 
 describe("lib/connectors/adapter-metadata", () => {
   it("covers every PlatformKind from the union", () => {

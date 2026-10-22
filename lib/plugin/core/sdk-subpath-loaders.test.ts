@@ -5,6 +5,7 @@ import packageJson from "@/packages/plugin-sdk/package.json"
 
 import {
   loadEffortSurfaceModule,
+  loadExternalAgentPresetModule,
   loadHostEnvironmentModule,
   loadPluginI18nModule,
   PLUGIN_SDK_SUBPATH_LOADERS,
@@ -59,6 +60,18 @@ test("the host-environment loader publishes the host's app version, not the SDK'
   expect(loaded.readHostCapabilities).toBe(sdk.readHostCapabilities)
   expect(PLUGIN_SDK_SUBPATH_LOADERS["@cognia/plugin-sdk/api/host-environment"]).toBe(
     loadHostEnvironmentModule
+  )
+})
+
+test("the external-agent-preset loader installs the host's builtin catalog first", async () => {
+  const loaded = await loadExternalAgentPresetModule()
+  const host = await import("@/lib/ai/agent/external/config/presets")
+  expect(loaded.EXTERNAL_AGENT_PRESETS["claude-code"]).toBe(
+    host.EXTERNAL_AGENT_PRESETS["claude-code"]
+  )
+  expect(loaded.listExternalAgentPresetIds()).toContain("claude-code")
+  expect(PLUGIN_SDK_SUBPATH_LOADERS["@cognia/plugin-sdk/api/external-agent-preset"]).toBe(
+    loadExternalAgentPresetModule
   )
 })
 

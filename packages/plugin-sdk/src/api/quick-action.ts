@@ -15,7 +15,7 @@ export {
   getQuickActionSnapshot,
   subscribeQuickActions,
   runQuickAction,
-} from "@/lib/plugin/registries/quick-action-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/quick-action-registry"
 
 export type { QuickActionEntry } from "@cognia/plugin-contract/lib/plugin/registries/quick-action-registry"
 export type {

@@ -24,7 +24,7 @@ export {
   registerChatMiddleware,
   subscribeChatMiddlewareRegistry,
   unregisterChatMiddleware,
-} from "@/lib/claude/chat-middleware/registry"
+} from "@cognia/plugin-contract/lib/claude/chat-middleware/registry"
 
 export type {
   ChatMiddlewareEvent,

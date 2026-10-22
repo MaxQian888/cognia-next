@@ -2,7 +2,7 @@ import {
   GLANCE_MODULE_IDS,
   GLANCE_MODULE_SIZES,
   type GlanceModuleSize,
-} from "@/types/glance/layout"
+} from "../../types/glance/layout"
 
 import {
   effectiveSize,

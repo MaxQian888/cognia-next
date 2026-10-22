@@ -1,4 +1,4 @@
-import type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
+import type { PluginAgentTeamTemplateDef } from "../../../types/plugin/plugin-agent-team-template"
 import {
   __resetAgentTeamTemplatesForTesting,
   getAgentTeamTemplate,
@@ -23,6 +23,11 @@ import {
 } from "./native-anthropic-tool-registry"
 import { __resetCharacterPacksForTesting, registerCharacterPack } from "./character-pack-registry"
 import { __resetSubagentsForTesting, registerSubagent } from "./subagent-registry"
+import {
+  installBuiltinExternalAgentPresets,
+  type ExternalAgentPresetConfig,
+  type ExternalAgentPresetId,
+} from "../../ai/agent/external/config/presets"
 
 function makeTemplate(
   id: string,
@@ -39,6 +44,25 @@ function makeTemplate(
 }
 
 describe("agent-team-template-registry", () => {
+  // The contract's builtin preset table is empty until the host installs its
+  // catalog; install the one preset these templates name.
+  beforeAll(() => {
+    installBuiltinExternalAgentPresets({
+      presets: {
+        "claude-code": {
+          name: "Claude Code",
+          description: "",
+          protocol: "acp",
+          transport: "stdio",
+          process: { command: "claude", args: [] },
+          defaultPermissionMode: "default",
+          tags: [],
+        } as ExternalAgentPresetConfig,
+      } as Record<ExternalAgentPresetId, ExternalAgentPresetConfig | null>,
+      commandExists: async () => false,
+    })
+  })
+
   beforeEach(() => {
     __resetAgentTeamTemplatesForTesting()
     __resetSkillsForTesting()

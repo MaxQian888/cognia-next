@@ -25,7 +25,7 @@ export {
   registerWorkspaceBackend,
   subscribeWorkspaceBackendRegistry,
   unregisterWorkspaceBackend,
-} from "@/lib/github/workspace-backend-registry"
+} from "@cognia/plugin-contract/lib/github/workspace-backend-registry"
 
 export type {
   WorkspaceBackendRegistration,

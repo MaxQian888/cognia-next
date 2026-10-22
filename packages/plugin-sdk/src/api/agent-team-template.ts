@@ -27,6 +27,6 @@ export {
   listAgentTeamTemplateIds,
   listAgentTeamTemplateEntries,
   validateTemplateRequires,
-} from "@/lib/plugin/registries/agent-team-template-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/agent-team-template-registry"
 
 export type { PluginAgentTeamTemplateDef } from "@cognia/plugin-contract/types/plugin/plugin-agent-team-template"

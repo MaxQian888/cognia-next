@@ -7,7 +7,7 @@ import {
   resolveResilienceConfig,
   SIDECAR_IPC_TIMEOUT_MS,
   TOOL_TIMEOUT_SLACK_MS,
-} from "@/lib/plugin/resilience/config"
+} from "./config"
 
 describe("resolveResilienceConfig", () => {
   it("applies defaults when nothing is configured", () => {

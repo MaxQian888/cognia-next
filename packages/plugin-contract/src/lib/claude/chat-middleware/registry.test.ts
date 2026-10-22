@@ -13,11 +13,11 @@ import {
   unregisterChatMiddleware,
   type ChatMiddlewareEvent,
 } from "./registry"
-import type { ChatMiddleware } from "@/types/plugin/plugin-chat-middleware"
+import type { ChatMiddleware } from "../../../types/plugin/plugin-chat-middleware"
 import {
   listInterceptorsForPoint,
   __resetInterceptorRegistryForTesting,
-} from "@/lib/plugin/interceptors"
+} from "../../plugin/interceptors"
 
 const noop: ChatMiddleware = async (_req, next) => next()
 

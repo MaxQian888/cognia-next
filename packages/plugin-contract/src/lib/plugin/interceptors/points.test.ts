@@ -12,8 +12,8 @@ import {
   listInterceptorPoints,
   requireInterceptorPoint,
 } from "./points"
-import { getInterceptorPointContract } from "@/lib/plugin/contracts/plugin-points"
-import { PLUGIN_INTERCEPTOR_POINTS } from "@/types/plugin/plugin-interceptors"
+import { getInterceptorPointContract } from "../contracts/plugin-points"
+import { PLUGIN_INTERCEPTOR_POINTS } from "../../../types/plugin/plugin-interceptors"
 
 describe("interceptor point catalog", () => {
   it("recognizes a declared point and rejects anything else", () => {

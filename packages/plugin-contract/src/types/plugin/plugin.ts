@@ -948,7 +948,7 @@ export interface PluginManifest {
    * Immutable unified template packages (`template-package` capability).
    * Definitions are overlay-only and are removed with the plugin lifecycle.
    */
-  templatePackages?: import("@/packages/plugin-sdk/src/templates").PluginTemplatePackageContribution[]
+  templatePackages?: import("../../templates/index").PluginTemplatePackageContribution[]
   /**
    * Agent team templates contributed by this plugin (`agent-team-template`
    * capability). Each template carries a roster of teammates, optional
@@ -2954,8 +2954,8 @@ export interface PluginAgentAPI {
   run: (prompt: string, options?: PluginAgentRunOptions) => Promise<PluginAgentRunResult>
   /** Run a full tool-enabled character turn pinned to a working directory. */
   runCharacterTurn: (
-    request: import("@/lib/plugin/api/agent-turn").PluginAgentTurnRequest
-  ) => Promise<import("@/lib/plugin/api/agent-turn").PluginAgentTurnResult>
+    request: import("../../api/agent-turn").PluginAgentTurnRequest
+  ) => Promise<import("../../api/agent-turn").PluginAgentTurnResult>
   /**
    * Run one agent turn as a live async-iterable of typed events (`text-delta`
    * / `tool-call` / `tool-result` / `result`). The handle also exposes a
@@ -4041,8 +4041,8 @@ export interface PluginSessionAPI {
 
   /** Create, seed, and activate a host-equivalent conversation. */
   startSeededSession: (
-    input?: import("@/lib/plugin/api/session-seed").PluginSeededSessionInput
-  ) => Promise<import("@/lib/plugin/api/session-seed").PluginSeededSessionResult>
+    input?: import("../../api/agent-turn").PluginSeededSessionInput
+  ) => Promise<import("../../api/agent-turn").PluginSeededSessionResult>
 
   /** Update a session */
   updateSession: (id: string, updates: UpdateSessionInput) => Promise<void>
@@ -5722,7 +5722,7 @@ export interface PluginContextAPI {
   permissions: PluginPermissionAPI
 
   /** Unified template catalog, validation, contribution and guarded execution API. */
-  templates: import("@/packages/plugin-sdk/src/templates").PluginTemplatesAPI
+  templates: import("../../templates/index").PluginTemplatesAPI
 
   /**
    * Slash commands: the registry a plugin registers into at runtime, and the

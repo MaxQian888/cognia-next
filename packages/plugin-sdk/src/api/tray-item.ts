@@ -16,7 +16,7 @@ export {
   subscribeTrayItems,
   unregisterTrayItem,
   unregisterTrayItemsByPlugin,
-} from "@/lib/tray/registry"
+} from "@cognia/plugin-contract/lib/tray/registry"
 
 export type { PluginTrayItem } from "@cognia/plugin-contract/lib/tray/registry"
 export type {

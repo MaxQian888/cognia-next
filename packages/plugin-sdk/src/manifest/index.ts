@@ -206,7 +206,7 @@ export {
   parseManifest,
   validatePluginConfig,
   validatePluginManifest,
-} from "@/lib/plugin/core/validation"
+} from "@cognia/plugin-contract/lib/plugin/core/validation"
 
 /**
  * Host-version compatibility — the same check the manager applies before it

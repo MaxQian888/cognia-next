@@ -33,6 +33,8 @@ import { buildExtensionDescriptor } from "@/lib/plugin/core/descriptor"
 import { grantPluginPermission } from "@/lib/plugin/core/transport"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { loggers } from "@cognia/logging"
+import { installPluginRecordReader } from "@/lib/plugin/registries/plugin-liveness"
+import { installHostPluginDispatch } from "@/lib/plugin/core/install-plugin-host-dispatch"
 import { resolvePluginIcon } from "@/lib/plugin/utils/icon"
 
 const PLUGIN_POLICY_STORAGE_KEY = "cognia.plugins.policy"
@@ -1235,6 +1237,14 @@ export const usePluginStore = create<PluginState>()(
     }
   )
 )
+
+// Interceptor liveness and dispatch trust read plugin rows through this port
+// (lib/plugin/registries/plugin-liveness.ts), which the plugin contract owns.
+installPluginRecordReader((pluginId) => usePluginStore.getState().plugins[pluginId])
+// Quick actions and tray items reach slash lines, manifest commands and the
+// shortcut rail through the contract's dispatch port; every plugin that can
+// register one is loaded through this store.
+installHostPluginDispatch()
 
 /**
  * Select the persisted plugin policy for one LocalProfile. The old global

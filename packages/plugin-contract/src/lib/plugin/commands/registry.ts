@@ -1,6 +1,25 @@
 /**
- * The plugin contract's share of `lib/plugin/commands/registry.ts`, which re-exports these.
+ * Unified command registry for cognia.
+ *
+ * VS Code extensions reuse-layer (see `~/.claude/plans/vscode-snug-squid.md`)
+ * needs a single command bus so `vscode.commands.registerCommand` /
+ * `vscode.commands.executeCommand` / `vscode.commands.getCommands` can be
+ * implemented in the sidecar's `vscode-shim/commands.ts` by RPC-ing into
+ * this registry from the renderer.
+ *
+ * Mirrors `lib/workflow/nodes/registry.ts`:
+ *   • synchronous mutation, microtask-deferred listener dispatch (so React
+ *     effects subscribing after registration still observe initial state),
+ *   • idempotent unregister,
+ *   • per-plugin tracking via `pluginId` so a plugin's commands can be
+ *     bulk-unregistered when it disables.
+ *
+ * Cognia-native commands (slash commands, settings, plugins) register through
+ * the same surface — the registry doesn't distinguish between cognia-side and
+ * VS Code-extension-side callers.
  */
+
+import { hasInterceptors, requireGuardPass } from "../interceptors"
 
 export type CommandHandler = (...args: unknown[]) => unknown | Promise<unknown>
 
@@ -28,3 +47,207 @@ export interface CommandRegistryEvent {
 }
 
 export type CommandRegistryListener = (event: CommandRegistryEvent) => void
+
+const registry = new Map<string, CommandRegistration>()
+
+const listeners = new Set<CommandRegistryListener>()
+
+function emit(event: CommandRegistryEvent): void {
+  queueMicrotask(() => {
+    for (const fn of listeners) {
+      try {
+        fn(event)
+      } catch (err) {
+        // Listeners must not throw across the registry boundary.
+
+        console.warn("Command registry listener threw:", err)
+      }
+    }
+  })
+}
+
+/**
+ * Register a command. If a command with the same id already exists, the
+ * new registration wins and a `replace` warning is logged — VS Code allows
+ * overrides, and the cognia agent system relies on later registrations
+ * taking precedence (e.g. a plugin overriding a built-in slash command).
+ */
+export function registerCommand(reg: CommandRegistration): () => void {
+  if (registry.has(reg.id)) {
+    const existing = registry.get(reg.id)
+    console.warn(
+      `Command "${reg.id}" already registered by plugin "${existing?.pluginId ?? "cognia"}" — overridden by "${reg.pluginId ?? "cognia"}"`
+    )
+  }
+  // Each call owns a distinct entry, even if the caller reuses `reg`.
+  const entry = { ...reg }
+  registry.set(entry.id, entry)
+  emit({ type: "register", id: reg.id, pluginId: reg.pluginId })
+  return () => {
+    if (registry.get(entry.id) === entry) unregisterCommand(entry.id)
+  }
+}
+
+/**
+ * Idempotent — silently no-ops if the command isn't registered.
+ */
+export function unregisterCommand(id: string): void {
+  const entry = registry.get(id)
+  if (!entry) return
+  registry.delete(id)
+  emit({ type: "unregister", id, pluginId: entry.pluginId })
+}
+
+/**
+ * Bulk-remove every command registered by a plugin. Called when the plugin
+ * deactivates / uninstalls. Returns the count removed for logging.
+ */
+export function unregisterCommandsByPlugin(pluginId: string): number {
+  let removed = 0
+  for (const [id, entry] of registry) {
+    if (entry.pluginId === pluginId) {
+      registry.delete(id)
+      emit({ type: "unregister", id, pluginId })
+      removed += 1
+    }
+  }
+  return removed
+}
+
+export function getCommand(id: string): CommandRegistration | undefined {
+  return registry.get(id)
+}
+
+/**
+ * VS Code's `getCommands(filterInternal)` returns either every command id
+ * or a subset filtered by the `filterInternal` flag (commands whose id
+ * starts with `_` are considered internal). We model the same behaviour.
+ */
+export function getCommands(filterInternal = false): string[] {
+  const out: string[] = []
+  for (const id of registry.keys()) {
+    if (filterInternal && id.startsWith("_")) continue
+    out.push(id)
+  }
+  return out.sort()
+}
+
+export function listCommandsByPlugin(pluginId: string): CommandRegistration[] {
+  const out: CommandRegistration[] = []
+  for (const entry of registry.values()) {
+    if (entry.pluginId === pluginId) out.push(entry)
+  }
+  return out
+}
+
+/**
+ * Execute a registered command. Returns the handler's return value (or
+ * resolves the promise). Throws `CommandNotFoundError` when the id is
+ * unknown — VS Code throws the same.
+ */
+export async function executeCommand<T = unknown>(id: string, ...args: unknown[]): Promise<T> {
+  return executeCommandWithOptions<T>(id, {}, ...args)
+}
+
+/** What a `ui.action.invoke` guard is asked about. */
+export interface UiActionInvokeValue {
+  /** Command id about to run. */
+  commandId: string
+  /** Plugin that owns the command, when one does. */
+  pluginId?: string
+  /** Where the invocation came from. Provenance, NOT authorization. */
+  origin: UiActionOrigin
+  args: readonly unknown[]
+}
+
+/**
+ * How a command invocation was started.
+ *
+ * A user gesture and an automated trigger are different facts about the same
+ * call, and a guard is entitled to treat them differently — but neither is a
+ * grant. `"user"` does not mean "already authorized"; it means a human was
+ * present, and the permission checks downstream still run either way.
+ */
+export type UiActionOrigin = "user" | "model" | "automation"
+
+export interface ExecuteCommandOptions {
+  origin?: UiActionOrigin
+}
+
+/**
+ * `executeCommand` with invocation provenance attached.
+ *
+ * Passes through the `ui.action.invoke` guard chain (ADR-0189) before running
+ * the handler. The point is fail-closed: a guard that throws or times out
+ * denies, because "the policy check crashed" must never read as "the policy
+ * allowed it".
+ */
+export async function executeCommandWithOptions<T = unknown>(
+  id: string,
+  options: ExecuteCommandOptions,
+  ...args: unknown[]
+): Promise<T> {
+  const entry = registry.get(id)
+  if (!entry) {
+    throw new CommandNotFoundError(id)
+  }
+  return invokeGuardedCommand<T>(entry, options, ...args)
+}
+
+/**
+ * Run a handler under the same `ui.action.invoke` guard chain as a
+ * registered command. For dispatch paths that resolve a command outside this
+ * registry (a plugin's manifest command, reached from its own quick action),
+ * so they cannot skip the policy a registered command would meet.
+ */
+export async function invokeGuardedCommand<T = unknown>(
+  entry: Pick<CommandRegistration, "id" | "pluginId" | "handler">,
+  options: ExecuteCommandOptions,
+  ...args: unknown[]
+): Promise<T> {
+  if (hasInterceptors("ui.action.invoke")) {
+    await requireGuardPass<UiActionInvokeValue>(
+      "ui.action.invoke",
+      {
+        commandId: entry.id,
+        ...(entry.pluginId ? { pluginId: entry.pluginId } : {}),
+        origin: options.origin ?? "user",
+        args,
+      },
+      { operationId: `command:${entry.id}` }
+    )
+  }
+  const result = await entry.handler(...args)
+  return result as T
+}
+
+export function subscribeCommandRegistry(listener: CommandRegistryListener): () => void {
+  listeners.add(listener)
+  // Emit a "register" event for each existing registration in the next
+  // microtask so subscribers can rehydrate without polling.
+  queueMicrotask(() => {
+    for (const entry of registry.values()) {
+      try {
+        listener({ type: "register", id: entry.id, pluginId: entry.pluginId })
+      } catch (err) {
+        console.warn("Command registry listener threw on rehydrate:", err)
+      }
+    }
+  })
+  return () => listeners.delete(listener)
+}
+
+/**
+ * Test-only: drop everything. Production code should never call this.
+ */
+export function __resetCommandRegistryForTesting(): void {
+  registry.clear()
+  listeners.clear()
+}
+
+export class CommandNotFoundError extends Error {
+  constructor(public readonly id: string) {
+    super(`Command not found: ${id}`)
+    this.name = "CommandNotFoundError"
+  }
+}

@@ -7,6 +7,9 @@
 
 export { defineExternalAgentPreset } from "../define/define-external-agent-preset"
 
+// `EXTERNAL_AGENT_PRESETS` and every read below merge the host's builtin
+// catalog, which the host installs when it loads; outside the host they see
+// plugin-contributed presets only.
 export {
   createAgentFromPreset,
   EXTERNAL_AGENT_PRESETS,
@@ -20,7 +23,7 @@ export {
   resolvePreferredCodexExecutablePresetId,
   unregisterPreset as unregisterExternalAgentPreset,
   unregisterPresetsByPlugin as unregisterExternalAgentPresetsByPlugin,
-} from "@/lib/ai/agent/external/config/presets"
+} from "@cognia/plugin-contract/lib/ai/agent/external/config/presets"
 
 export type {
   ExternalAgentPresetConfig,

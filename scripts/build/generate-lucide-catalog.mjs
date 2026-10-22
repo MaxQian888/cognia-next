@@ -10,6 +10,12 @@ const { icons } = lucideExports
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const outputPath = path.join(repoRoot, "lib/icons/lucide-catalog.generated.json")
+// The plugin contract validates icon names without the SVG data, so it gets the
+// two name spaces on their own (`packages/plugin-contract/src/lib/icons/lucide-icon-names.ts`).
+const namesOutputPath = path.join(
+  repoRoot,
+  "packages/plugin-contract/src/lib/icons/lucide-icon-names.generated.json"
+)
 
 function readCatalogEntry(name, component) {
   const element = component.render({}, null)
@@ -62,17 +68,30 @@ export function serializeLucideCatalog(catalog) {
   return `${JSON.stringify(catalog)}\n`
 }
 
+/** The catalog's name spaces only: what admission checks read. */
+export function lucideCatalogNames(catalog) {
+  return { iconNames: catalog.iconNames, exportNames: catalog.exportNames }
+}
+
 function main() {
-  const expected = serializeLucideCatalog(buildLucideCatalog(icons, lucideExports))
+  const catalog = buildLucideCatalog(icons, lucideExports)
+  const outputs = [
+    [outputPath, serializeLucideCatalog(catalog)],
+    [namesOutputPath, serializeLucideCatalog(lucideCatalogNames(catalog))],
+  ]
   if (process.argv.includes("--check")) {
-    if (!existsSync(outputPath) || readFileSync(outputPath, "utf8") !== expected) {
-      console.error("Lucide catalog is stale; run pnpm lucide:generate")
-      process.exitCode = 1
+    for (const [file, expected] of outputs) {
+      if (!existsSync(file) || readFileSync(file, "utf8") !== expected) {
+        console.error(`${path.relative(repoRoot, file)} is stale; run pnpm lucide:generate`)
+        process.exitCode = 1
+      }
     }
     return
   }
-  writeFileSync(outputPath, expected)
-  console.log(`Generated ${path.relative(repoRoot, outputPath)} (${Object.keys(icons).length} icons)`)
+  for (const [file, expected] of outputs) {
+    writeFileSync(file, expected)
+    console.log(`Generated ${path.relative(repoRoot, file)} (${Object.keys(icons).length} icons)`)
+  }
 }
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) main()

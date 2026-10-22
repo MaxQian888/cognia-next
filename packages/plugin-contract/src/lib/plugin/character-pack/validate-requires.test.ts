@@ -3,22 +3,22 @@
 // deterministic.
 
 import { validatePackRequires } from "./validate-requires"
-import { __resetSkillsForTesting, registerSkill } from "@/lib/plugin/registries/skill-registry"
+import { __resetSkillsForTesting, registerSkill } from "../registries/skill-registry"
 import {
   __resetMcpServerPresetsForTesting,
   registerMcpServerPreset,
-} from "@/lib/plugin/registries/mcp-server-preset-registry"
-import { __resetNativeAnthropicToolsForTesting } from "@/lib/plugin/registries/native-anthropic-tool-registry"
-import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
+} from "../registries/mcp-server-preset-registry"
+import { __resetNativeAnthropicToolsForTesting } from "../registries/native-anthropic-tool-registry"
+import type { PluginCharacterPackDef } from "../../../types/plugin/plugin-character-pack"
 import {
   __resetThemePackRegistryForTesting,
   registerThemePack,
-} from "@/lib/theme/theme-pack-registry"
+} from "../../theme/theme-pack-registry"
 import {
   __resetKnownConnectorKindsForTesting,
   registerPluginConnectorKind,
   unregisterPluginConnectorKindsByPlugin,
-} from "@/lib/connectors/known-kinds"
+} from "../../connectors/known-kinds"
 
 function makePack(overrides: Partial<PluginCharacterPackDef> = {}): PluginCharacterPackDef {
   return {

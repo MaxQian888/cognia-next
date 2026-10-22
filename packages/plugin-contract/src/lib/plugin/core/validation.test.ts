@@ -3,19 +3,19 @@
  */
 
 import { validatePluginManifest, validatePluginConfig } from "./validation"
-import type { PluginConfigSchema } from "@/types/plugin"
-import type { PluginManifest } from "@/types/plugin"
+import type { PluginConfigSchema } from "../../../types/plugin"
+import type { PluginManifest } from "../../../types/plugin"
 import {
   CANONICAL_PLUGIN_SELECTION_CONTENT_TYPES,
   CANONICAL_PLUGIN_SELECTION_INPUTS,
   CANONICAL_PLUGIN_SELECTION_ORIGINS,
   CANONICAL_PLUGIN_SELECTION_OUTPUTS,
-} from "@/types/plugin"
+} from "../../../types/plugin"
 import {
   CANONICAL_CONTEXT_ACTIVITIES,
   CONTEXT_RESOURCE_READ_PERMISSIONS,
-} from "@/types/context-workbench"
-import type { ContextResourceKind } from "@/types/context-workbench"
+} from "../../../types/context-workbench"
+import type { ContextResourceKind } from "../../../types/context-workbench"
 
 describe("Plugin Validation", () => {
   describe("validatePluginManifest", () => {

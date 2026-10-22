@@ -55,6 +55,11 @@ import {
   registerPluginHookContribution,
   __resetHookRegistryForTesting,
 } from "@/lib/plugin/registries/hook-registry"
+import { installPluginRecordReader } from "@/lib/plugin/registries/plugin-liveness"
+
+// The mocked store never runs the real store's module body, which is what
+// installs the liveness reader; install one over the mock instead.
+installPluginRecordReader((pluginId) => usePluginStore.getState().plugins[pluginId])
 /**
  * Seed the plugin runtime for a dispatch test.
  *

@@ -11,7 +11,7 @@ import {
   subscribeLinkMatchers,
   validateLinkMatcherDefinition,
 } from "./link-matchers"
-import type { PluginLinkMatcherRegistrationDef } from "@/types/plugin/plugin-link-matcher"
+import type { PluginLinkMatcherRegistrationDef } from "../../../types/plugin/plugin-link-matcher"
 
 const component = () => null
 const def = (
