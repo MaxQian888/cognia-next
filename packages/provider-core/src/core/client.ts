@@ -26,11 +26,11 @@ import {
   isGenuineOpenAiEndpoint,
   resolveProviderProtocol,
   decideOpenAiEndpointFlavor,
-} from "../../../../sidecar/src/providers/provider-protocol.ts"
+} from "@cognia/provider-types/provider-protocol"
 import {
   resolvePerplexityEndpoint,
   withPerplexityAgentFetch,
-} from "../../../../sidecar/src/providers/perplexity-agent.ts"
+} from "@cognia/provider-types/perplexity-agent"
 
 export type { ProviderName } from "@cognia/provider-types"
 // Re-exported for back-compat with importers that pulled it from here.

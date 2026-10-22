@@ -1,4 +1,3 @@
-import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import {
@@ -10,7 +9,7 @@ import {
   compatibleEffortValuesForModel,
   normalizeCompatibleEffort,
   geminiThinkingLevelsForModel,
-} from "./reasoning-effort-tables.ts"
+} from "./reasoning-effort-tables"
 
 test("current native-compatible effort ladders match vendor contracts and preserve unknown models", () => {
   for (const [model, values] of [

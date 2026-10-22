@@ -1,7 +1,6 @@
-import { test } from "node:test"
 import assert from "node:assert/strict"
 import { createOpenAI } from "@ai-sdk/openai"
-import { resolvePerplexityEndpoint, withPerplexityAgentFetch } from "./perplexity-agent.ts"
+import { resolvePerplexityEndpoint, withPerplexityAgentFetch } from "./perplexity-agent"
 
 const source = { id: 1, url: "https://example.com/news", title: "News", snippet: "Latest" }
 const responseBody = () => ({

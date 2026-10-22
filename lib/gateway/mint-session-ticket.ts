@@ -20,7 +20,7 @@ import type { GatewayTaskBudget, GatewayTaskModelPlan } from "@/types/gateway"
 import { getActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import { captureRemoteGatewayTarget, acquireRemoteTaskLease } from "./remote-task-lease"
 import { getAllProviders } from "@cognia/provider-types/provider"
-import { resolveProviderProtocol } from "@/sidecar/src/providers/provider-protocol.ts"
+import { resolveProviderProtocol } from "@cognia/provider-types/provider-protocol"
 import { isAgentExecutionFlagEnabled } from "@/lib/ai/agent/execution/feature-flags"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import {

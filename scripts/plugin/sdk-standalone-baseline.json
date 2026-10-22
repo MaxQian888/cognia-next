@@ -5,11 +5,6 @@
     "packages/plugin-contract/src/lib/plugin/api/backup-api.ts": 1,
     "packages/plugin-sdk/src/api/effort-surface.test.ts": 1,
     "packages/plugin-sdk/src/index.ts": 1,
-    "packages/provider-core/src/core/client.ts": 2,
-    "packages/provider-core/src/providers/api-test.ts": 1,
-    "packages/provider-core/src/providers/protocol-adapter-registry.ts": 1,
-    "packages/provider-core/src/providers/protocol-adapter-spec.parity.test.ts": 2,
-    "packages/provider-core/src/providers/reasoning-tiers.ts": 1,
     "packages/vector/src/index.test.ts": 1
   }
 }

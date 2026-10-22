@@ -68,7 +68,7 @@ import {
   resolveProviderProtocol,
   normalizeProtocol,
   isMisroutedToOpenAi,
-} from "../../providers/provider-protocol.ts"
+} from "@cognia/provider-types/provider-protocol"
 import { sanitizeToolMessagePairs } from "../../context/tool-message-pairing.ts"
 import { buildMcpLogEvent } from "../../mcp/client/log.ts"
 import {

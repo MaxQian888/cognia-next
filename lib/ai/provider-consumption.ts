@@ -60,7 +60,7 @@ import { withSiwcStreamingGeneration } from "../../sidecar/src/providers/siwc-la
 import {
   resolvePerplexityEndpoint,
   withPerplexityAgentFetch,
-} from "../../sidecar/src/providers/perplexity-agent"
+} from "@cognia/provider-types/perplexity-agent"
 import {
   decodeSiwcReference,
   SIWC_PROTOCOL,
@@ -69,13 +69,13 @@ import {
 } from "../../sidecar/src/providers/siwc-fetch"
 // Single source of truth for provider→protocol (shared with the sidecar; the
 // sidecar can't import `lib/`, so the file lives under `sidecar/` and TS imports
-// it — see sidecar/src/providers/provider-protocol.ts).
+// it — see @cognia/provider-types/provider-protocol).
 import {
   anthropicSdkBaseURL,
   resolveProviderProtocol,
   normalizeProtocol,
   decideOpenAiEndpointFlavor,
-} from "../../sidecar/src/providers/provider-protocol.ts"
+} from "@cognia/provider-types/provider-protocol"
 import type {
   CustomProviderDefinition,
   FeatureRouteProfile,

@@ -22,11 +22,11 @@ import {
   normalizeProtocol,
   resolveProviderProtocol,
   decideOpenAiEndpointFlavor,
-} from "../../../sidecar/src/providers/provider-protocol.ts"
+} from "@cognia/provider-types/provider-protocol"
 import {
   resolvePerplexityEndpoint,
   withPerplexityAgentFetch,
-} from "../../../sidecar/src/providers/perplexity-agent.ts"
+} from "@cognia/provider-types/perplexity-agent"
 import { webviewSafeTelemetry } from "../../ai/webview-safe-telemetry"
 
 export interface LlmClientCallOptions {

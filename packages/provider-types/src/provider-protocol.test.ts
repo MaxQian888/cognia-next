@@ -1,6 +1,5 @@
-import { test } from "node:test"
 import assert from "node:assert/strict"
-import { LOCAL_PROVIDER_NAMES } from "../../../packages/provider-types/src/local-provider.ts"
+import { LOCAL_PROVIDER_NAMES } from "./local-provider"
 import {
   anthropicSdkBaseURL,
   BUILTIN_PROTOCOL_NAMES,
@@ -15,7 +14,7 @@ import {
   isOpenAiNativeSurface,
   isMisroutedToOpenAi,
   decideOpenAiEndpointFlavor,
-} from "./provider-protocol.ts"
+} from "./provider-protocol"
 
 test("isOpenAiNativeSurface covers genuine OpenAI, the Codex backend, and codex relays", () => {
   // Genuine OpenAI (or the implicit default endpoint).

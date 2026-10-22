@@ -10,14 +10,12 @@
 // resolver list had xai/togetherai/fireworks/deepinfra) and a mismatch silently
 // 404s a gateway. This module is the one place that knowledge lives now.
 //
-// CONSTRAINTS: zero dependencies, pure data + pure functions. The sidecar ships
-// standalone, so this lives under sidecar/ and the renderer/CLI import it
-// directly — the repo idiom for "sidecar and renderer must agree" (see
-// lib/claude/usage.compaction-parity.test.ts). `sidecar` cannot import `lib/`,
-// so the dependency direction is always renderer/CLI → this file. The renderer
-// bundles it, so it stays isomorphic (no Node built-ins, packages or
-// `import.meta`; enforced by audit:sidecar-architecture) and within the root
-// tsconfig's ES2018 target.
+// CONSTRAINTS: zero dependencies, pure data + pure functions. It lives in
+// @cognia/provider-types so the renderer, the CLI, provider-core and the
+// sidecar read one copy; the sidecar loads the package's compiled dist through
+// its `link:` dependency. The renderer bundles it, so it stays isomorphic (no
+// Node built-ins, packages or `import.meta`) and within the root tsconfig's
+// ES2018 target.
 
 /**
  * Built-in AI SDK families and the native-only SIWC Responses transport. An id NOT

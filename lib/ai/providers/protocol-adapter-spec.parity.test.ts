@@ -1,8 +1,9 @@
 /**
- * Drift guard: the renderer's protocol-adapter contracts and the sidecar's
- * executing implementation are maintained in two packages (sidecar/ is not
- * in the pnpm workspace). This test cross-imports the sidecar modules (same
- * precedent as `lib/a2ui/mcp-tool-schemas.test.ts`) and pins:
+ * Drift guard: the renderer's protocol-adapter contracts (provider-core) and
+ * the sidecar's executing implementation are maintained in two projects
+ * (sidecar/ is not in the pnpm workspace). The host is the one side that can
+ * import both, so the test lives here and cross-imports the sidecar adapter
+ * (same precedent as `lib/a2ui/mcp-tool-schemas.test.ts`). It pins:
  *
  *  1. the builtin protocol sets stay in sync (renderer `gemini` ↔ sidecar
  *     `google` naming mapped explicitly),
@@ -12,14 +13,14 @@
  */
 
 import { BUILTIN_API_PROTOCOLS } from "@cognia/provider-types/provider"
-import type { OpenAiCompatibleVariantSpec } from "./protocol-adapter-registry"
+import type { OpenAiCompatibleVariantSpec } from "@cognia/provider-core/providers/protocol-adapter-registry"
 // The names the sidecar registry builds its builtin set from. Importing the
 // registry itself would pull the whole AI SDK adapter chain into this build.
-import { BUILTIN_PROTOCOL_NAMES } from "../../../../sidecar/src/providers/provider-protocol.ts"
+import { BUILTIN_PROTOCOL_NAMES } from "@cognia/provider-types/provider-protocol"
 import {
   SPEC_REQUIRED_KEYS,
   validateSpec,
-} from "../../../../sidecar/src/providers/protocol-adapters/openai-compatible-variant-adapter.ts"
+} from "../../../sidecar/src/providers/protocol-adapters/openai-compatible-variant-adapter.ts"
 
 const SIDECAR_BUILTIN_PROTOCOLS: ReadonlySet<string> = new Set(BUILTIN_PROTOCOL_NAMES)
 

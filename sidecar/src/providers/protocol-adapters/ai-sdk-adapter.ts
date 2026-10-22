@@ -16,9 +16,12 @@ import {
   decideOpenAiEndpointFlavor,
   RESPONSES_ONLY_PROVIDERS,
   resolveProviderProtocol,
-} from "../provider-protocol.ts"
+} from "@cognia/provider-types/provider-protocol"
 import { buildBedrockProviderOptions } from "../bedrock.ts"
-import { resolvePerplexityEndpoint, withPerplexityAgentFetch } from "../perplexity-agent.ts"
+import {
+  resolvePerplexityEndpoint,
+  withPerplexityAgentFetch,
+} from "@cognia/provider-types/perplexity-agent"
 import { withSiwcStreamingGeneration } from "../siwc-language-model.ts"
 import {
   createSiwcFetch,
@@ -38,7 +41,7 @@ import {
   claude55CapabilitiesForModel,
   compatibleEffortValuesForModel,
   normalizeCompatibleEffort,
-} from "../reasoning-effort-tables.ts"
+} from "@cognia/provider-types/reasoning-effort-tables"
 import type { JSONValue, LanguageModelMiddleware, ProviderMetadata } from "ai"
 import type {
   AdapterResult,

@@ -59,6 +59,9 @@ importers:
       '@cognia/provider-routing':
         specifier: link:../packages/provider-routing
         version: link:../packages/provider-routing
+      '@cognia/provider-types':
+        specifier: link:../packages/provider-types
+        version: link:../packages/provider-types
       '@cognia/redact':
         specifier: link:../packages/redact
         version: link:../packages/redact

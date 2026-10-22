@@ -59,8 +59,8 @@ Each migration batch appends its moves here (old → new).
 | `dispatch/input-stream.mjs`                                              | `src/shared/input-stream.ts`                                       | 1           |
 | `builtin-tools/shared/truncate.mjs`                                      | `src/shared/text/truncate.ts`                                      | 1           |
 | `builtin-tools/shared/mime.mjs`                                          | `src/shared/mime.ts`                                               | 1           |
-| `dispatch/protocol-adapters/provider-protocol.mjs` (+ `.d.mts`, deleted) | `src/providers/provider-protocol.ts`                               | 1           |
-| `dispatch/protocol-adapters/reasoning-effort-tables.mjs`                 | `src/providers/reasoning-effort-tables.ts`                         | 1           |
+| `dispatch/protocol-adapters/provider-protocol.mjs` (+ `.d.mts`, deleted) | `packages/provider-types/src/provider-protocol.ts`                 | 1           |
+| `dispatch/protocol-adapters/reasoning-effort-tables.mjs`                 | `packages/provider-types/src/reasoning-effort-tables.ts`           | 1           |
 | `dispatch/live-harness.mjs`                                              | `test-support/live-harness.ts`                                     | 1           |
 | `builtin-tools/git/_fixtures.mjs`                                        | `test-support/git-repo.ts`                                         | 1           |
 | `dispatch/agent-event-envelope.fixture.json`                             | `test-support/fixtures/agent-event-envelope.json`                  | 1           |
