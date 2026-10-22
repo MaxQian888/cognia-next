@@ -2,7 +2,6 @@
   "$comment": "Files in the plugin SDK, the plugin contract, and the @cognia packages they reach that still reference host source. Counts may only shrink — see scripts/plugin/check-sdk-standalone.mjs.",
   "files": {
     "packages/agent-config-types/src/agent-execution.test.ts": 1,
-    "packages/agent-config-types/src/index.ts": 100,
     "packages/plugin-contract/src/lib/plugin/api/backup-api.ts": 1,
     "packages/plugin-sdk/src/api/effort-surface.test.ts": 1,
     "packages/plugin-sdk/src/index.ts": 1,
