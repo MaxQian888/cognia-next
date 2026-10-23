@@ -217,7 +217,6 @@ test("Linux frontend consumers reuse this run's compiled packages before frozen 
     "sidecar",
     "build",
     "build-e2e",
-    "e2e-browser-extension",
   ]) {
     const job = jobs[name]
     const download = job.steps.find(
@@ -254,7 +253,7 @@ test("workspace pnpm caches account for the sidecar lock installed by root posti
           installs.length > 0 &&
           installs.every((entry) => {
             const directory = entry["working-directory"] ?? job.defaults?.run?.["working-directory"]
-            return directory?.startsWith("services/") && locks === `${directory}/pnpm-lock.yaml`
+            return directory && directory !== "." && locks === `${directory}/pnpm-lock.yaml`
           })
         )
           continue
@@ -553,12 +552,12 @@ test("CI exposes stable and complete verification seams", async () => {
   assert.deepEqual(parse(nightly).jobs["build-tauri"].needs, ["quality", "test"])
 })
 
-test("formatting and lint exclude generated test and extension artifacts", async () => {
+test("formatting and lint exclude generated test artifacts", async () => {
   const [prettierIgnore, eslintConfig] = await Promise.all([
     readFile(new URL("../../.prettierignore", import.meta.url), "utf8"),
     readFile(new URL("../../eslint.config.mjs", import.meta.url), "utf8"),
   ])
-  assert.match(prettierIgnore, /^browser-extension\/\.wxt\/$/m)
+  assert.match(prettierIgnore, /^\.cache\/$/m)
   assert.match(eslintConfig, /"public\/_cognia\/\*\*"/)
   assert.match(eslintConfig, /"playwright-report\/\*\*"/)
   assert.match(eslintConfig, /"test-results\/\*\*"/)

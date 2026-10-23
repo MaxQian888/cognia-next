@@ -78,10 +78,6 @@ services/diagnostic-server/deploy/helm/cognia-diagnostics/templates
 __mocks__
 # Capacitor mobile shell — separate package, has its own conventions.
 mobile
-# WXT owns this generated TypeScript/config surface and recreates it during
-# pnpm install; formatting authored files must never scan generated output.
-browser-extension/.wxt/
-browser-extension/.output/
 # IDE configuration files — not project source.
 .vscode
 # Fumadocs MDX content — Prettier's MDX support is non-idempotent on
@@ -95,3 +91,6 @@ docs/content
 plugins/pi-latex-workbench/vendor
 plugins/pi-latex-workbench/VENDOR.md
 plugins/pi-latex-workbench/vendor-lock.json
+
+# The pinned external Browser Companion checkout and verification output.
+.cache/

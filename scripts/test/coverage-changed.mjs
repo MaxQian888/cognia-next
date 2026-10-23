@@ -244,7 +244,9 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
     mobile: globalJS || any(/^mobile\/|^lib\/capacitor\/|\.mobile\.tsx?$|^next\.config\./),
     browserExtension:
       globalJS ||
-      any(/^(?:browser-extension|packages|tests\/e2e\/browser-extension)\/|^playwright\./),
+      any(
+        /^(?:integrations\/browser-companion\.json|scripts\/ci\/check-browser-companion-contract\.mjs)|^(?:packages|lib\/browser|lib\/browser-companion|src-tauri\/src\/companion_api|crates\/cognia-companion(?:-[^/]+)?)\//
+      ),
     rust,
     gateway:
       rust ||

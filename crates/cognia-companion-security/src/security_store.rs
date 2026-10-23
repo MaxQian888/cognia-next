@@ -404,7 +404,57 @@ static CAPABILITY_DECISION_SQL: Lazy<String> = Lazy::new(|| {
     )
 });
 
+const DEVICE_AUTHORIZATION_REVISION_SQL: &str = "SELECT id FROM audit_events
+    WHERE tenant_id = ?1 AND target_id = ?2
+      AND (action GLOB 'device.*' OR action IN ('browser.registered', 'worker.registered'))
+    ORDER BY rowid DESC LIMIT 1";
+
 impl SecurityStore {
+    /// Unique audit identity for the last effective-authorization mutation.
+    /// Unlike a seconds timestamp, this detects a revoke/regrant performed in
+    /// the same second by another process sharing this store.
+    pub fn device_authorization_revision(
+        &self,
+        tenant_id: &str,
+        device_id: &str,
+    ) -> Result<Option<String>, SecurityStoreError> {
+        let conn = self.conn.lock();
+        Ok(conn
+            .query_row(
+                DEVICE_AUTHORIZATION_REVISION_SQL,
+                params![tenant_id, device_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Commit a synchronous side effect only while the observed authorization
+    /// revision still holds. IMMEDIATE excludes cross-process auth writers;
+    /// callers must not await or re-enter this store inside `commit`.
+    pub fn with_device_authorization_revision<T>(
+        &self,
+        tenant_id: &str,
+        device_id: &str,
+        expected: &str,
+        commit: impl FnOnce() -> T,
+    ) -> Result<Option<T>, SecurityStoreError> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let revision: Option<String> = tx
+            .query_row(
+                DEVICE_AUTHORIZATION_REVISION_SQL,
+                params![tenant_id, device_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if revision.as_deref() != Some(expected) {
+            return Ok(None);
+        }
+        let result = commit();
+        tx.commit()?;
+        Ok(Some(result))
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Arc<Self>, SecurityStoreError> {
         let path = path.as_ref();
         let mut conn = Connection::open(path)?;
@@ -3762,6 +3812,9 @@ CREATE INDEX IF NOT EXISTS idx_runs_tenant_device_created
     ON runs(tenant_id, device_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_run_events_tenant_run ON run_events(tenant_id, run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_audit_tenant_created ON audit_events(tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_device_authorization
+    ON audit_events(tenant_id, target_id)
+    WHERE action GLOB 'device.*' OR action IN ('browser.registered', 'worker.registered');
 "#;
 
 #[cfg(test)]
@@ -5575,6 +5628,50 @@ CREATE TABLE devices (
             .capability_snapshot("tenant-a", device)
             .unwrap()
             .unwrap()
+    }
+
+    #[test]
+    fn authorization_revision_fences_same_second_changes_from_another_store_connection() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("authorization.sqlite");
+        let reader = SecurityStore::open(&path).unwrap();
+        register_browser(&reader, "tenant-a", "browser-a", 100);
+        let writer = SecurityStore::open(&path).unwrap();
+        let before = reader
+            .device_authorization_revision("tenant-a", "browser-a")
+            .unwrap()
+            .unwrap();
+        let caps = browser_snapshot(&writer, "browser-a");
+        writer
+            .replace_device_capabilities("tenant-a", "owner", "browser-a", &caps, 101)
+            .unwrap();
+        writer
+            .suspend_device("tenant-a", "owner", "browser-a", true, 101)
+            .unwrap();
+        writer
+            .resume_device("tenant-a", "owner", "browser-a", 101)
+            .unwrap();
+        let after = reader
+            .device_authorization_revision("tenant-a", "browser-a")
+            .unwrap()
+            .unwrap();
+        assert_ne!(before, after);
+        let mut committed = false;
+        assert_eq!(
+            reader
+                .with_device_authorization_revision("tenant-a", "browser-a", &before, || {
+                    committed = true;
+                })
+                .unwrap(),
+            None
+        );
+        assert!(!committed);
+        assert_eq!(
+            reader
+                .with_device_authorization_revision("tenant-a", "browser-a", &after, || 42)
+                .unwrap(),
+            Some(42)
+        );
     }
 
     #[test]

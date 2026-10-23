@@ -644,15 +644,21 @@ pub(crate) async fn replace_device_capabilities_handler(
     body: Result<Json<ReplaceCapabilitiesRequest>, JsonRejection>,
 ) -> ApiResult<ReplaceCapabilitiesResponse> {
     let request = parse_public_json(body)?;
-    let capabilities = store()?
-        .replace_device_capabilities(
-            &context.tenant_id,
-            &context.device_id,
-            &device_id,
-            &request.capabilities,
-            unix_time_secs(),
-        )
-        .map_err(store_error)?;
+    let capabilities = super::ws_browser_companion::update_device_authorization(
+        &context.tenant_id,
+        &device_id,
+        || {
+            store()?
+                .replace_device_capabilities(
+                    &context.tenant_id,
+                    &context.device_id,
+                    &device_id,
+                    &request.capabilities,
+                    unix_time_secs(),
+                )
+                .map_err(store_error)
+        },
+    )?;
     Ok(Json(ReplaceCapabilitiesResponse {
         device_id,
         capabilities,

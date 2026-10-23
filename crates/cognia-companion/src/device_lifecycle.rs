@@ -171,32 +171,38 @@ pub fn apply(
         .device_state(&actor.tenant_id, device_id)?
         .ok_or(LifecycleError::UnknownDevice)?;
 
-    let changed = match action {
-        LifecycleAction::Suspend => store.suspend_device(
-            &actor.tenant_id,
-            &actor.actor_id,
-            device_id,
-            actor.trust_root,
-            now,
-        )?,
-        LifecycleAction::Resume => {
-            store.resume_device(&actor.tenant_id, &actor.actor_id, device_id, now)?
-        }
-        LifecycleAction::Revoke => {
-            if previous == DeviceLifecycleState::Revoked {
-                false
-            } else {
-                store.revoke_device(
+    let changed = super::ws_browser_companion::update_device_authorization(
+        &actor.tenant_id,
+        device_id,
+        || -> Result<bool, LifecycleError> {
+            Ok(match action {
+                LifecycleAction::Suspend => store.suspend_device(
                     &actor.tenant_id,
                     &actor.actor_id,
                     device_id,
                     actor.trust_root,
                     now,
-                )?;
-                true
-            }
-        }
-    };
+                )?,
+                LifecycleAction::Resume => {
+                    store.resume_device(&actor.tenant_id, &actor.actor_id, device_id, now)?
+                }
+                LifecycleAction::Revoke => {
+                    if previous == DeviceLifecycleState::Revoked {
+                        false
+                    } else {
+                        store.revoke_device(
+                            &actor.tenant_id,
+                            &actor.actor_id,
+                            device_id,
+                            actor.trust_root,
+                            now,
+                        )?;
+                        true
+                    }
+                }
+            })
+        },
+    )?;
 
     let current = match action {
         LifecycleAction::Suspend => DeviceLifecycleState::Suspended,

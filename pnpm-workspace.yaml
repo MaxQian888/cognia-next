@@ -7,7 +7,6 @@ packages:
   - web
   - mobile
   - cli
-  - browser-extension
   - packages/*
   - services/workspace-runtime
 
@@ -112,9 +111,6 @@ catalog:
 # packages whose scripts are informational or unnecessary at install time.
 allowBuilds:
   "@parcel/watcher": true
-  # WXT's postinstall generates the .wxt/ type surface the extension
-  # workspace compiles against; without it `tsc` there sees no entrypoints.
-  wxt: true
   "@swc/core": true
   core-js: false
   core-js-pure: false

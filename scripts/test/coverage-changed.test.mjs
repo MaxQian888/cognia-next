@@ -231,7 +231,14 @@ test("CI impact distinguishes an ordinary UI edit from native and independent wo
     "next.config.ts",
   ])
     assert.equal(classifyCiImpact([file]).mobile, true, file)
-  for (const file of ["tests/e2e/browser-extension/popup.spec.ts", "playwright.config.ts"])
+  for (const file of [
+    "integrations/browser-companion.json",
+    "scripts/ci/check-browser-companion-contract.mjs",
+    "lib/browser/overlay.injected.js",
+    "lib/browser/extension-engine.ts",
+    "crates/cognia-companion-security/src/security_store.rs",
+    "src-tauri/src/companion_api/mod.rs",
+  ])
     assert.equal(classifyCiImpact([file]).browserExtension, true, file)
   const packageChange = classifyCiImpact(["packages/agent/src/index.ts"])
   assert.equal(packageChange.gateway, true)

@@ -1,0 +1,84 @@
+# Evidence ledger: Browser Companion extraction
+
+- Status: verifying
+- Lane: standard
+- Created: 2026-10-23
+- Updated: 2026-10-23
+- Related: docs/development/browser-extension-extraction.md; docs/evidence/2026-10-23-browser-companion-revocation-protocol.md
+
+## Original request
+
+> 尝试进行拆分，并且模仿官网放到cognia的组织中，确保功能完整
+
+## Knowledge
+
+| ID  | Statement                                                                                 | State    | Basis                                                                                                                                               | Depends on |
+| --- | ----------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| O1  | The website is maintained in public cognia-labs/cognia-website                            | Verified | Current GitHub metadata and website checkout, 2026-10-23                                                                                            | -          |
+| O2  | Extension build/tests depended on parent paths and workspace packages                     | Verified | Initial standalone structural test fails on two workspace dependencies and three parent paths                                                       | -          |
+| O3  | Complete source, resources and vendor inputs were retained                                | Verified | 229 source hashes, 120 src/public inputs; independent locale and wiring auditors, 2026-10-23                                                        | -          |
+| G1  | Extract the complete extension into the Cognia organization following the website pattern | Agreed   | User request, 2026-10-23                                                                                                                            | O1         |
+| C1  | Preserve shared dirty dev work and ship parent changes through an isolated branch         | Verified | Shared dev status; dedicated extraction worktree based on origin/dev                                                                                | -          |
+| H1  | Independent frozen installation and runtime checks establish checkout independence        | Verified | Clean clone outside product ancestry passes frozen installation and full check; organization CI also passes Chromium and archive checks, 2026-10-23 | O2,O3      |
+
+## Problem frame
+
+Move extension ownership and its complete verification surface into the organization without losing the existing capture, pairing, identity, status, appearance or agent behavior. Keep the Host and shared source in the product repository, retain safety hardening and replace local workspace tests with pinned consumer checks. Preserve C1.
+
+## Complexity profile
+
+| Dimension    | Rating | Why / what would resolve it                                                            |
+| ------------ | ------ | -------------------------------------------------------------------------------------- |
+| scale        | high   | Extension, portable snapshots, unit/E2E runners, release automation and parent cleanup |
+| technical    | medium | Independent WXT/TypeScript/Jest/Playwright installation                                |
+| coupling     | high   | Shared protocol, authentication and exact injected overlay bytes                       |
+| requirement  | low    | Explicit extraction and organization destination                                       |
+| verification | high   | Clean consumer, remote CI, real Chromium and Host Rust checks                          |
+| risk         | high   | Authorization semantics and installed browser identity                                 |
+
+## Risks
+
+| ID  | Risk (impact)                                                      | Severity | Source                        | Claim                                                              | Refuted by                                                                                  |
+| --- | ------------------------------------------------------------------ | -------- | ----------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| R1  | New checkout silently resolves product code or dependencies        | high     | O2                            | Install, dev, test, build and zip are self-contained               | A clean checkout outside product ancestry cannot run                                        |
+| R2  | Source, resources, translations or runtime behavior are omitted    | high     | G1,O3                         | Complete source and tests move with the extension                  | Missing imported files or failing original behavioral assertions                            |
+| R3  | Host and independently released extension drift                    | high     | Shared wire/overlay           | Immutable consumer CI compares shared inputs and runs the consumer | Host changes bypass the lane or mismatched source passes                                    |
+| R4  | Extraction changes pairing/signing identity or install permissions | high     | ADR-0154/0228                 | Existing runtime keys/routes and narrow permissions persist        | Changed key slots, signing key or broader install manifest                                  |
+| R5  | Parent cleanup includes unrelated dirty work                       | high     | C1                            | Dedicated origin/dev branch owns only migration/hardening paths    | Unrelated local commits or edits appear in the parent PR                                    |
+| R6  | Parent validation is overstated after local resource exhaustion    | medium   | Parent frozen-install attempt | Standalone acceptance and parent checks have separate evidence     | Reused dependencies or unrun repository-wide checks are presented as a clean parent install |
+
+## Verification obligations
+
+| ID  | Risk  | Method                                                  | Independence   | Evidence                                                                                                                                                                                                                                                                                       | Coverage                                                                                                                                    | Status  |
+| --- | ----- | ------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| V1  | R2,R4 | Complete standalone Jest and Chromium suite             | tool           | 92 suites / 1113 Jest tests passed; 38 Chromium tests passed (32.7s)                                                                                                                                                                                                                           | Production worker/panel/Chrome APIs, pairing/DPoP/capture/status/appearance, safety profile, revocation/Stop/Resume and shipped permissions | passed  |
+| V2  | R1,R2 | Standalone gates and archive byte comparison            | tool           | Initial structural regression fails before path repairs, then passes; types/lint/build pass; all 14 archive files equal build bytes                                                                                                                                                            | Local aliases, CSS source scan, native test environment and packaged assets                                                                 | passed  |
+| V3  | R2,R4 | Independent wiring and native locale audit              | fresh-reviewer | 229 source hashes and all vendor hashes match; complete 120 src/public inputs; both locales retain 224 keys, placeholders and nonempty values                                                                                                                                                  | No production omission, translated-string or wiring finding                                                                                 | passed  |
+| V4  | R3    | Parent contract checker and immutable consumer workflow | tool           | Contract mutation regression passes; actual parent source matches all 12 pinned runtime inputs                                                                                                                                                                                                 | Shared client/overlay byte drift and Host profile mismatch                                                                                  | passed  |
+| V5  | R1    | Clean consumer and organization CI                      | real-env       | Independent /tmp clone passes frozen installation (631 packages) and full pnpm check; [organization CI](https://github.com/cognia-labs/cognia-browser-extension/actions/runs/39912899033) passes format, check, 38 Chromium tests, zip and archive verification                                | No sibling checkout or parent node_modules; GitHub Node 26 consumer                                                                         | passed  |
+| V6  | R3,R5 | Parent cleanup regressions, Host tests and final diff   | tool           | 151 focused Node tests pass; isolated origin/dev Host socket suite passes 18 tests; 94 main-overlay Jest tests pass; full pnpm lint, i18n lint and locale ordering pass; semantic lock comparison confirms only extension importer removed, 53 remaining importers and all snapshots preserved | Workspace/lock importer, root commands, runners, version sync, classifier, Host and owned diff                                              | passed  |
+| V7  | R6    | Clean parent installation and repository-wide gates     | tool           | Parent frozen install reached dependency linking then failed with ENOSPC; failed task-owned node_modules removed. Focused tests and lint used the existing installed dependency runtime. Full parent typecheck/build were not rerun on this isolated baseline                                  | This does not limit the independently installed extension result in V5                                                                      | blocked |
+
+## Decisions
+
+| ID  | Date       | Decision                                                                                                 | Action    | Based on | Reversal trigger                                              |
+| --- | ---------- | -------------------------------------------------------------------------------------------------------- | --------- | -------- | ------------------------------------------------------------- |
+| D1  | 2026-10-23 | Use cognia-labs/cognia-browser-extension with independent CI and archives                                | implement | G1,O1    | User selects another destination                              |
+| D2  | 2026-10-23 | Check in licensed portable source snapshots and provenance rather than publishing private packages first | implement | O2,R1,R3 | Proven independently published artifacts replace snapshots    |
+| D3  | 2026-10-23 | Keep exact Host/consumer source checks and pin a tested commit in product CI                             | harden    | R3       | An equivalent versioned cross-repository contract replaces it |
+| D4  | 2026-10-23 | Preserve the shared dev tree and prepare the parent removal as a reviewable PR                           | implement | C1,R5    | Explicit authorization to update/merge the shared baseline    |
+
+## Residual risks
+
+| ID  | Residual                                                             | From  | Why still open                                                                                         | Next action                                                                                                                                               | Status |
+| --- | -------------------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| X1  | Packaged Host plus installed extension and native permission prompts | V1,R4 | Chromium uses a deterministic Host; Rust verifies the Host separately                                  | Complete real Host/native prompt release acceptance before store publication                                                                              | open   |
+| X2  | Store signing/profile upgrades and real Edge                         | R4    | Repository extraction does not publish to browser stores                                               | Keep listing/signing identity and exercise installed upgrades/Edge                                                                                        | open   |
+| X3  | Clean parent installation and full repository typecheck/build        | V7,R6 | Disk exhaustion interrupted linking; existing installed dependencies supported focused checks and lint | Provision disk capacity, perform a fresh parent frozen install, then run full repository gates; keep parent migration as a draft until its CI is reviewed | open   |
+
+## Outcome
+
+| ID  | Signal                                                             | How / when measured                                                    | Result                                                                                                                         | Status |
+| --- | ------------------------------------------------------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------ |
+| M1  | Original extension behavior is retained in a standalone checkout   | Source audit, original unit tests and Chromium flows                   | 1113 unit and 38 E2E tests pass with complete resources                                                                        | met    |
+| M2  | Organization repository and parent consumer integration are usable | Clean consumer, organization CI and isolated parent integration branch | Public organization repository and CI are available; parent cleanup and immutable consumer integration are prepared for review | met    |
