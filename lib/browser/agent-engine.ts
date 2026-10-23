@@ -268,6 +268,21 @@ export class EmbeddedEngine implements BrowserEngine {
     embeddedSnapshotCache.markDirty()
     return browserClient.embedNavigate(url)
   }
+  recordingControl(action: "start" | "resume" | "stop" | "drain"): Promise<unknown> {
+    switch (action) {
+      case "start":
+        return browserClient.embedStartRecord()
+      case "resume":
+        return browserClient.embedResumeRecord()
+      case "stop":
+        return browserClient.embedStopRecord()
+      case "drain":
+        return browserClient.embedDrainRecord()
+    }
+  }
+  resolveRecordedTarget(selector: string): Promise<string> {
+    return browserClient.embedRefFor(selector)
+  }
   async snapshot(opts?: SnapshotOptions) {
     // ADR-0127: serve the last walk while nothing invalidated it. Every
     // mutating engine call and every `browser://snapshot` marker marks the

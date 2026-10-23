@@ -48,6 +48,15 @@ function install(): RecordApi {
 
 const api = install()
 
+it("locks the narrow recording helpers against page replacement", () => {
+  for (const name of ["__cogniaRecordingControl", "__cogniaRecordedRefFor"]) {
+    expect(Object.getOwnPropertyDescriptor(window, name)).toMatchObject({
+      writable: false,
+      configurable: false,
+    })
+  }
+})
+
 function click(el: Element, init: MouseEventInit = {}) {
   el.dispatchEvent(new MouseEvent("click", { bubbles: true, ...init }))
 }
@@ -400,6 +409,20 @@ describe("password capture", () => {
   })
 })
 
+describe("credential descriptor parity", () => {
+  it.each([
+    '<input id="field" name="password">',
+    '<input id="field" placeholder="Secret">',
+    '<textarea id="field" name="token"></textarea>',
+  ])("never records a value for %s", (html) => {
+    document.body.innerHTML = html
+    const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>("#field")!
+    field.value = "sensitive-fixture"
+    change(field)
+    expect(api.recordedSteps()[0]).toMatchObject({ act: "fill", secret: true, value: "" })
+  })
+})
+
 describe("key capture", () => {
   it.each(["Enter", "Tab", "Escape", "ArrowDown"])("records the bare %s key", (key) => {
     document.body.innerHTML = `<input id="q" />`
@@ -413,10 +436,10 @@ describe("key capture", () => {
     expect(api.recordedSteps()).toEqual([])
   })
 
-  it("records a real chord", () => {
+  it("drops printable chords whose target may be an opaque shadow host", () => {
     document.body.innerHTML = `<input id="q" />`
     keydown(document.querySelector("input")!, { key: "a", ctrlKey: true })
-    expect(api.recordedSteps()[0]).toMatchObject({ act: "press_key", key: "ctrl+a" })
+    expect(api.recordedSteps()).toEqual([])
   })
 
   it("ignores shift+letter — that is capitalisation, not a chord", () => {
@@ -469,10 +492,10 @@ describe("key capture", () => {
     expect(api.recordedSteps()[0]).toMatchObject({ act: "press_key", key })
   })
 
-  it("still records a chord in an ordinary field", () => {
+  it("keeps the same printable-chord restriction in ordinary fields", () => {
     document.body.innerHTML = `<input type="text" id="q" />`
     keydown(document.querySelector("input")!, { key: "a", ctrlKey: true })
-    expect(api.recordedSteps()[0]).toMatchObject({ act: "press_key", key: "ctrl+a" })
+    expect(api.recordedSteps()).toEqual([])
   })
 })
 

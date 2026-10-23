@@ -75,6 +75,7 @@ import { localPathFromAddress, serveLocalFile } from "@/lib/browser/local-conten
 import type { UserChromeBrowser } from "@/lib/browser/local-client"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { useRemoteHostActive } from "@/hooks/use-host-profile"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { isTauri } from "@/lib/tauri"
 import { openExternal } from "@/lib/tauri/opener"
 import { cn } from "@/lib/utils"
@@ -351,8 +352,21 @@ export function BrowserPreviewPane({
     dockEngineChangeRef.current = dockPage?.onEngineChange
   }, [dockPage?.onEngineChange])
   const docked = Boolean(dockPage)
+  const dockNavigated = dockPage?.onNavigated
+  const webLocationRef = useRef(normalizedInitialUrl)
+  const onSurfaceNavigated = useCallback(
+    (url: string) => {
+      webLocationRef.current = url
+      dockNavigated?.(url)
+    },
+    [dockNavigated]
+  )
   const setBackendPreference = useCallback(
     (backend: BrowserBackend | null) => {
+      if (!isTauri() && webLocationRef.current) {
+        const url = webLocationRef.current
+        setSurfaceRequest((previous) => ({ url, nonce: (previous?.nonce ?? 0) + 1 }))
+      }
       const toTab = dockEngineChangeRef.current
       if (docked && toTab) toTab(backend ? dockPageEngineFor(backend) : "auto")
       else setPaneBackendPreference(backend)
@@ -373,6 +387,7 @@ export function BrowserPreviewPane({
   // engine is reachable at all. A one-shot read kept the previous answer (and
   // with it the engine choice) until something unrelated re-rendered the pane.
   const remoteHostActive = useRemoteHostActive()
+  const runtimeSnapshot = useRuntimeSnapshot()
   const backend = resolveDesktopBackend(
     {
       tauri: isTauri(),
@@ -726,7 +741,7 @@ export function BrowserPreviewPane({
   // the one place the cloud browser is genuinely reachable from the desktop —
   // could never select it, and the browser profiles and domain grants in
   // Settings did nothing there. See `lib/browser/backend-availability.ts`.
-  const backendSwitcher = isTauri() ? (
+  const backendSwitcher = (
     <BrowserBackendSwitcher
       decision={backend}
       preference={backendPreference}
@@ -735,7 +750,7 @@ export function BrowserPreviewPane({
       userChromeBrowser={userChromeBrowser}
       onUserChromeBrowserChange={setUserChromeBrowser}
     />
-  ) : undefined
+  )
 
   // A dock page tab switches between Chromium and the lightweight preview from
   // the address bar, where both can serve it.
@@ -786,12 +801,14 @@ export function BrowserPreviewPane({
   if (backend.backend === "remote") {
     return (
       <RemoteBrowserPreview
+        key={runtimeSnapshot.target?.id ?? "local"}
         chatSessionId={effectiveSessionId ?? "browser-preview"}
         workspaceId={activeProjectId ?? "default"}
         initialUrl={normalizedInitialUrl ?? undefined}
         requestedUrl={surfaceRequest?.url}
         requestNonce={surfaceRequest?.nonce}
-        onBackendChange={isTauri() && backend.remoteReachable ? setBackendPreference : undefined}
+        onBackendChange={setBackendPreference}
+        onNavigated={onSurfaceNavigated}
         {...(backendSwitcher ? { backendSwitcher } : {})}
       />
     )
@@ -802,6 +819,8 @@ export function BrowserPreviewPane({
         initialUrl={normalizedInitialUrl ?? undefined}
         requestedUrl={surfaceRequest?.url}
         requestNonce={surfaceRequest?.nonce}
+        backendSwitcher={backendSwitcher}
+        onNavigated={onSurfaceNavigated}
         unreachableReason={
           backend.reason === "no-remote-host" ? t("remote.needsRemoteHost") : undefined
         }

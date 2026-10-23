@@ -146,7 +146,11 @@ export function resolveDesktopBackend(
   preference: BrowserBackend | null
 ): BrowserBackendDecision {
   const decision = resolveBrowserBackend(inputs)
-  if (!inputs.tauri) return decision
+  if (!inputs.tauri) {
+    return preference === "web-fallback" || preference === "embedded"
+      ? { ...decision, backend: "web-fallback" }
+      : decision
+  }
   const embeddedDefault = (): BrowserBackendDecision => ({
     ...decision,
     backend: "embedded",

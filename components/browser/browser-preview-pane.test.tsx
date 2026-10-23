@@ -33,6 +33,7 @@ let mockDevtoolsOptions: Record<string, unknown> | undefined
 const mockTakeLease = jest.fn()
 
 let mockDefaultBackend: string | undefined
+let mockRemoteProps: Record<string, unknown> = {}
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: (selector: (state: unknown) => unknown) =>
     selector({
@@ -55,14 +56,17 @@ jest.mock("@/components/browser/remote-browser-preview", () => {
   return {
     // On the desktop the pane also hands over its engine switcher, a React
     // element JSON cannot serialize; it is dropped from the recorded props.
-    RemoteBrowserPreview: (props: Record<string, unknown>) => (
-      <div
-        data-testid="remote-browser-preview"
-        data-props={JSON.stringify(props, (_key, value: unknown) =>
-          isValidElement(value) ? undefined : value
-        )}
-      />
-    ),
+    RemoteBrowserPreview: (props: Record<string, unknown>) => {
+      mockRemoteProps = props
+      return (
+        <div
+          data-testid="remote-browser-preview"
+          data-props={JSON.stringify(props, (_key, value: unknown) =>
+            isValidElement(value) ? undefined : value
+          )}
+        />
+      )
+    },
   }
 })
 
@@ -640,6 +644,20 @@ it("opens the caller-provided URL in the sandboxed web fallback", () => {
   const { container } = renderPane(<BrowserPreviewPane initialUrl="https://example.com/docs" />)
 
   expect(container.querySelector("iframe")).toHaveAttribute("src", "https://example.com/docs")
+})
+
+it("preserves the submitted Web location when switching to remote and back", async () => {
+  mockTauri = false
+  mockRemoteBrowserEnabled = true
+  mockDefaultBackend = "embedded"
+  const { container } = renderPane(<BrowserPreviewPane initialUrl="https://example.com/start" />)
+  commitUrl("https://example.com/submitted")
+  fireEvent.change(urlBar(), { target: { value: "https://draft.example/" } })
+  await selectOption(screen.getByRole("combobox", { name: "Browser engine" }), "remote")
+  expect(mockRemoteProps.requestedUrl).toBe("https://example.com/submitted")
+  act(() => (mockRemoteProps.onNavigated as (url: string) => void)("https://example.com/remote"))
+  act(() => (mockRemoteProps.onBackendChange as (backend: string) => void)("web-fallback"))
+  expect(container.querySelector("iframe")).toHaveAttribute("src", "https://example.com/remote")
 })
 
 it("renders the empty state and URL bar in Tauri", () => {
@@ -1876,6 +1894,34 @@ describe("dock page tabs", () => {
     onEngineChange: jest.fn(),
     onNavigated: jest.fn(),
     ...overrides,
+  })
+
+  it("remembers an explicit Web preview selection instead of restoring the cloud default", () => {
+    mockTauri = false
+    mockRemoteBrowserEnabled = true
+    mockDefaultBackend = "remote"
+    const page = dockPage({ engine: "remote" })
+    const view = renderPane(
+      <BrowserPreviewPane initialUrl="https://example.com/page" dockPage={page} />
+    )
+    const switcher = mockRemoteProps.backendSwitcher as React.ReactElement<{
+      onPreferenceChange: (backend: string) => void
+    }>
+    act(() => switcher.props.onPreferenceChange("web-fallback"))
+    expect(page.onEngineChange).toHaveBeenLastCalledWith("embedded")
+    view.rerender(
+      <TooltipProvider>
+        <BrowserPreviewPane
+          initialUrl="https://example.com/page"
+          dockPage={{ ...page, engine: jest.mocked(page.onEngineChange!).mock.calls.at(-1)![0] }}
+        />
+      </TooltipProvider>
+    )
+    expect(view.container.querySelector("iframe")).toHaveAttribute(
+      "src",
+      "https://example.com/page"
+    )
+    expect(screen.queryByTestId("remote-browser-preview")).toBeNull()
   })
 
   it("shows the tab's own page in Chromium without a tab row, with the engine chip", () => {
