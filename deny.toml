@@ -77,4 +77,8 @@ confidence-threshold = 0.8
 unknown-registry = "warn"
 unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = ["https://github.com/ahkohd/tauri-nspanel"]
+allow-git = [
+  "https://github.com/ahkohd/tauri-nspanel",
+  # Updater is pinned to the official ZIP 9 fix in src-tauri/Cargo.toml.
+  "https://github.com/tauri-apps/plugins-workspace",
+]
