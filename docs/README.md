@@ -36,6 +36,17 @@ guides in `docs/development/` instead of adding more root Markdown files.
 手册分别放入 `docs/plans/`、`docs/research/`、`docs/reports/`、`docs/runbooks/`。
 开发协作指南统一放入 `docs/development/`。
 
+## Docs workspace dependencies / 文档工作区依赖
+
+The docs site is a member of the root pnpm workspace. Install from the repository
+root with `pnpm install --frozen-lockfile`, then run `pnpm --filter docs typecheck`
+or `pnpm docs:build`. The root `pnpm-lock.yaml` owns its dependency versions;
+there is no independently maintained lockfile under `docs/`. CI also discovers
+the root workspace when it installs from the docs directory.
+
+文档站属于根 pnpm workspace。请在仓库根目录安装依赖，再运行文档类型检查或构建；
+依赖版本统一由根 `pnpm-lock.yaml` 管理，`docs/` 不再维护独立锁文件。
+
 ## Container builds / 容器构建
 
 The five Dockerfiles in `deploy/docker/` use the repository root as their build

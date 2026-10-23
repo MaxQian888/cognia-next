@@ -112,7 +112,7 @@ second, a bounded outbound queue, and closure on revocation or when Browser
 Access is switched off. It needs `browser.read-own`, and carries status hints to
 any paired browser.
 
-A close code is never trusted to be standing. A Host that is stopping closes
+A policy close code alone is not trusted to be standing. A Host that is stopping closes
 every socket with 1001 (going away) before it clears the Browser Access flag, and
 the extension reconnects on its normal backoff; a 1008 close (replaced, revoked,
 switched off) is retried on the same backoff, and the ticket exchange decides:
@@ -120,6 +120,16 @@ it refuses by name — `device_unavailable`, `browser_submissions_disabled`, …
 and only such a standing refusal waits the long interval. The ticket exchange
 refuses this channel while Browser Access is off, so a socket is never opened
 only to be closed a second after its welcome.
+
+The envelope remains v1. Driving additionally requires `agent-safe-v1` in the
+extension's hello features and the Host's selected `welcome.agentProfile`.
+Legacy or unknown profiles remain status-only; the Host refuses operation
+dispatch before queueing, and the extension refuses execution. An incompatible
+envelope (including a protocol-error close) stops automatic retries until an
+explicit reconnect. The extension uses application close code 4002, which is
+legal for browser clients. `packages/companion-client/src/browser-agent-protocol.json`
+pins the version, profile, operation vocabulary and overlay ABI. Both peers test
+against it; the extension verifies the injected overlay's ABI before page actions.
 
 A restarted Host signs access tokens with a new key, so every token cached
 before the restart is refused with `invalid_access_token`. The client drops
@@ -169,11 +179,32 @@ the first time an operation targets an origin. A pending decision with the panel
 closed raises the badge and, when allowed, a notification; it times out to
 `browser_site_permission_required` rather than proceeding. Agent-opened tabs go
 into a "Cognia" tab group and are the only ones `finalizeTabs` closes. While an
-operation runs, an in-page bar says Cognia is acting, with **Stop** (cancels the
-turn) and **Take over** (refuses further operations with `browser_user_takeover`
-until resumed). Password and one-time-code fields stay human input
+operation runs, an in-page bar says Cognia is acting. **Stop** cancels the turn
+and pauses execution; **Take over** pauses execution. Both cancel pending work,
+refuse further operations with `browser_user_takeover`, and retain a paused bar
+until the person presses **Resume**. Release/finalize and new-tab claiming also wait for Resume, so cleanup cannot erase
+the pause or close tabs under human control. Drive revocation, disconnect and disabling
+agent mode cancel pending work too, including site questions. Cancellation is
+checked before and after asynchronous browser boundaries; Chrome calls already
+dispatched cannot be recalled. Password and one-time-code fields stay human input
 (`browser_human_input_required`), and `browser_evaluate`, file and download
 tools keep their per-call approval.
+
+Pauses survive idle-session sweeping. The worker owns session and permission
+writes; panel decisions are serialized through it, and messages from page content
+cannot grant permission. Trusted Stop/Take over gates and cancels work immediately,
+including while an older control is painting its bar; control persistence and
+cleanup remain ordered. Cancelled mutations cannot erase a newer pause or question.
+
+The Host rechecks authorization at the actual socket send. Its connection records
+the unique audit ID of the device's last authorization mutation, so a separate CLI
+process cannot revoke and regrant in the same second to revive old work. Lifecycle
+changes and the Browser Access switch retire old connections as well. A SQLite
+IMMEDIATE transaction excludes cross-process authorization writers during the
+synchronous send; deadline and caller cancellation are checked after acquiring it.
+Authorization changes close the old connection with code 1008 and require fresh
+negotiation. Queued time is subtracted from the transmitted operation budget;
+the extension applies that budget across permissions, storage and native API phases.
 
 ### 8. Drafts survive closing the panel, not the browser
 

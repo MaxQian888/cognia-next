@@ -20,7 +20,7 @@ lib/data/
   build-package.ts           # 从 Dexie 构建 BackupPackageV3 快照
   apply-package.ts           # 把 BackupPackageV3 应用到 Dexie
   crypto.ts                  # AES-GCM 加 / 解密
-  backup-key.ts              # 自动密钥派生（PBKDF2-SHA256-600000）
+  backup-key.ts              # 备份密钥与稳定的安装加密根密钥
   migrate.ts                 # 导入时 v1 → v3 迁移、规范化 JSON
   export.ts / import.ts      # 顶层编排器
   export-schema.ts           # 域导出 schema
@@ -139,7 +139,7 @@ flowchart LR
   BP --> PKG[BackupPackageV3<br/>+ SHA-256 完整性]
 
   PKG --> AUTO{自动密钥<br/>还是密码？}
-  AUTO -->|自动密钥| K1[OS keyring<br/>每设备]
+  AUTO -->|自动密钥| K1[安装密钥存储<br/>每设备]
   AUTO -->|密码| K2[PBKDF2-SHA256<br/>600,000 次迭代]
 
   K1 --> ENC[AES-GCM 加密]
@@ -183,7 +183,15 @@ manifest 在密文外保留一份副本，让用户在不输入密码的情况�
 
 ## 自动密钥
 
-大多数用户不愿记备份密码。`lib/data/backup-key.ts` 在 OS keyring（仅 Tauri）中存一个每设备的"自动密钥"。自动加密的备份**只能**在同一台设备解密 —— 不可移植。
+`lib/data/backup-key.ts` 按安装实例把备份密钥保存在 Tauri plugin store、浏览器 localStorage 或 headless secret store 中。恢复自动密钥备份需要原密钥。实时插件数据与浏览器凭据使用独立、稳定的安装根密钥；轮换备份密钥时会保留该根密钥，并兼容原先共用密钥的迁移。旧备份仍需对应的旧备份密钥。
+
+## 可移植的用户数据
+
+本地导出使用 v4 流容器；旧路径和远端路径仍支持 v3 包，两者复用同一份数据适配器。自 2026-10-21 起，还包含 Workspace 与会话文件夹；工作流文件夹、定义与版本快照；知识库、原始来源与笔记；Issue Project、Cycle、标签、Issue、事件与编号水位；以及 Squad、成员与任务定义。仅会话导出也会携带对应 Workspace 与文件夹。
+
+复制导入会重映射图内引用。覆盖导入保留已有的不可变工作流版本，冲突快照使用新标识。恢复的工作流草稿需要在本地发布，运行中的 Squad 恢复为暂停状态，设备执行授权不随备份迁移。知识原件恢复后索引为 pending，可通过现有知识库控件重建。派生向量、运行中的执行实例与插件自定义表有各自的生命周期要求。
+
+流式导出固定已输出的父节点集合。如果新会话晚于其组织父节点的导出，会保留会话正文并解除缺失的关联；该文件不保证整库在同一时刻的快照。
 
 如果用户显式设置了密码，它优先生效，备份才是可移植的。
 

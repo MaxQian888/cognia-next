@@ -39,7 +39,7 @@ lib/data/
   build-package.ts           # Build snapshot from Dexie → BackupPackageV3
   apply-package.ts           # Apply BackupPackageV3 to Dexie
   crypto.ts                  # AES-GCM encrypt / decrypt
-  backup-key.ts              # Auto-key derivation (PBKDF2-SHA256-600000)
+  backup-key.ts              # Backup key and stable install encryption root
   migrate.ts                 # v1 → v3 migration on import
   export.ts / import.ts      # Top-level orchestrators
   export-schema.ts           # Domain export schemas
@@ -132,7 +132,7 @@ flowchart LR
   BP --> PKG[BackupPackageV3<br/>+ SHA-256 integrity]
 
   PKG --> AUTO{auto-key<br/>or passphrase?}
-  AUTO -->|auto-key| K1[OS keyring<br/>per-device]
+  AUTO -->|auto-key| K1[installation key store<br/>per-device]
   AUTO -->|passphrase| K2[PBKDF2-SHA256<br/>600,000 iterations]
 
   K1 --> ENC[AES-GCM encrypt]
@@ -176,9 +176,17 @@ The manifest is duplicated outside the ciphertext so the user can see _what_ the
 
 ## Auto-key
 
-Most users don't want to memorise a backup passphrase. `lib/data/backup-key.ts` derives a per-device "auto key" stored in the OS keyring (Tauri only). Auto-encrypted backups are decryptable only on the same device — they are not portable.
+`lib/data/backup-key.ts` keeps a per-installation backup key in the Tauri plugin store, browser localStorage, or headless secret store. Recovering an auto-key backup requires its original key. A separate stable install root encrypts live plugin data and browser credentials; backup-key rotation preserves that root, including migration from the older shared key. Older backups still require their older backup key.
 
 If the user explicitly sets a passphrase, that takes precedence and the backup is portable.
+
+## Portable authored content
+
+Local export uses the v4 stream container; the v3 package remains supported by legacy and remote paths. Both share the same authored-data adapter. Since 2026-10-21, it also carries workspaces and conversation folders; workflow folders, definitions and version snapshots; knowledge bases, original sources and notes; issue projects, cycles, labels, issues, events and number watermarks; and Squad definitions, teammates and tasks. Sessions-only exports include their workspace/folder parents.
+
+Restore remaps graph references when duplicating data. Existing immutable workflow versions remain intact on overwrite; conflicting snapshots receive new identities. Imported drafts require local publishing, running Squads return paused, and machine provisioning consent is excluded. Knowledge originals return with a pending index; rebuild them through the existing knowledge-base controls. Derived vectors, running executions and arbitrary plugin-owned tables have separate lifecycle requirements.
+
+Streaming pins emitted parent membership. If a new conversation appears after its organizational parents were exported, its content is retained with missing associations removed. The file is not a single database-wide point-in-time snapshot.
 
 ## Build a snapshot
 

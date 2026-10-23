@@ -30,6 +30,22 @@ schema. cognia-next adopts the same shape, stripped to our domain.
 
 ## Decision
 
+### 2026-10-21 recovery and authored-graph addendum
+
+The v3 payload gains optional authored sections for projects/session folders,
+workflow folders/definitions/versions, knowledge bases/sources/notes,
+labels/issues/projects/cycles/events/counters, and Squad definitions/members/tasks.
+The v3 and v4 writers and importer share `lib/data/authored-content.ts`; no Dexie
+schema bump or second restore engine is introduced. Unknown additive fields
+remain compatible with older readers, which cannot restore those newer fields.
+
+Live install encryption adopts the legacy root into its own durable slot before
+backup rotation. WebDAV forwards its successful outer passphrase to the nested
+retrieval-key importer. Streaming records children only for emitted parents;
+late conversations retain their content with missing authored associations
+detached. Knowledge indexes need rebuilding, imported execution consent is
+excluded, and immutable local workflow versions cannot be replaced by restore.
+
 ### File formats
 
 ```
