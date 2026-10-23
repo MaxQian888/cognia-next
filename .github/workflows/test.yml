@@ -1265,9 +1265,9 @@ jobs:
       - name: Run the browser extension E2E lane
         working-directory: .cache/browser-companion
         run: pnpm test:e2e
-      - name: Package the tested extension
+      - name: Verify the tested extension archive
         working-directory: .cache/browser-companion
-        run: pnpm zip && pnpm archive:check
+        run: pnpm archive:check
       - name: Upload report
         uses: actions/upload-artifact@v7
         if: failure()

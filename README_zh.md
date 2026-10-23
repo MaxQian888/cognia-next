@@ -217,7 +217,7 @@ AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy --check
 | Android 开发与 APK    | `pnpm mobile:dev:android`、`pnpm mobile:build:android`、`pnpm mobile:deploy`、`pnpm mobile:deploy:fast` |
 | 文档站，端口 3001     | `pnpm docs:dev`、`pnpm docs:build`                                                                      |
 | 产品网站，端口 3002   | `pnpm web:dev`、`pnpm web:build`                                                                        |
-| Chrome/Edge 扩展      | `pnpm browser-ext:build`                                                                                |
+| Chrome/Edge 扩展      | [独立扩展仓库命令](https://github.com/cognia-labs/cognia-browser-extension#develop-and-verify)          |
 | Sidecar               | `pnpm sidecars:install`、`pnpm sidecar:start`、`pnpm sidecar:test`、`pnpm sidecars:build`               |
 | E2E                   | `pnpm test:e2e`、`pnpm test:e2e:workflows`、`pnpm test:e2e:mobile`、`pnpm test:e2e:tauri`               |
 | 仓库检查              | `pnpm audit:slots`、`pnpm i18n:build:check`、`pnpm lint:i18n`、`pnpm webrtc:smoke`                      |
@@ -248,7 +248,6 @@ cognia-next/
 ├── packages/             共享 SDK 与业务包（agent、plugin-sdk、provider-* 等）
 ├── crates/               Rust 宿主、协议、安全与运行时实现
 ├── cli/                  cognia-agent 独立终端 / headless 智能体
-├── browser-extension/    Chrome/Edge 网页伴侣扩展
 ├── web/                  产品网站（workspace 子包，端口 3002）
 ├── i18n/                  next-intl request + messages（en、zh-CN）
 ├── src-tauri/             Tauri 2 Rust 核心（axum HTTP、调度器、自动化、OCR、…）
@@ -336,7 +335,7 @@ workspace 清单、框架入口和工具配置，供现有命令自动发现。
 - **独立智能体 CLI**：[`cli/README.md`](./cli/README.md)
 - **智能体执行与恢复**：[`unified-agent-execution/`](./docs/content/docs/zh/subsystems/unified-agent-execution/)
 - **移动端工作流**：[`mobile/README.md`](./mobile/README.md)
-- **浏览器伴侣扩展**：[`browser-extension/`](./browser-extension/)
+- **浏览器伴侣扩展**：[cognia-labs/cognia-browser-extension](https://github.com/cognia-labs/cognia-browser-extension)
 - **插件 SDK**：[`packages/plugin-sdk/`](./packages/plugin-sdk/)
 - **工作规则**：[`CLAUDE.md`](./CLAUDE.md)
 - **外部文档**：[Tauri 2](https://tauri.app/) · [Next.js 16](https://nextjs.org/docs) · [shadcn/ui](https://ui.shadcn.com/) · [Capacitor](https://capacitorjs.com/docs) · [Fumadocs](https://fumadocs.dev/)

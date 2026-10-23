@@ -238,6 +238,15 @@ test("CI impact distinguishes an ordinary UI edit from native and independent wo
     "lib/browser/extension-engine.ts",
     "crates/cognia-companion-security/src/security_store.rs",
     "src-tauri/src/companion_api/mod.rs",
+    "src-tauri/src/lib.rs",
+    "crates/cognia-server/src/main.rs",
+    "src-tauri/Cargo.toml",
+    "src-tauri/src/main.rs",
+    "crates/cognia-headless-contract/src/lib.rs",
+    "crates/cognia-cli/assets/host-command-catalog.json",
+    "protocol/companion-request-schemas.json",
+    "protocol/companion-response-schemas.json",
+    "Cargo.lock",
   ])
     assert.equal(classifyCiImpact([file]).browserExtension, true, file)
   const packageChange = classifyCiImpact(["packages/agent/src/index.ts"])
