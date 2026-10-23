@@ -7,13 +7,14 @@
  * a keyring key would silently couple them: reconnecting one would break the
  * other's identity.
  *
- * Non-secret fields (client id, account email) live in `AppSettings`; the
- * client secret and the OAuth tokens live in the host keyring.
+ * AppSettings stores preferences. The host keyring owns connection readiness,
+ * account metadata, tokens and OAuth generations across all renderers.
  */
 
 import type { GoogleDocsProviderSettings } from "@cognia/agent-config-types"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { createKeyringStore, type KeyringStore } from "@/lib/credentials/keyring-store"
+import { googleState, subscribeGoogleStateChanged } from "./state"
 
 export const DOCS_PROVIDER_KEYRING_NAMESPACE = "docs-providers"
 export const GOOGLE_CLIENT_SECRET_KEY = "google-client-secret"
@@ -60,11 +61,68 @@ export function docsProviderSecrets(): KeyringStore {
 }
 
 export async function getGoogleDocsSettings(): Promise<GoogleDocsProviderSettings> {
+  let preferences: GoogleDocsProviderSettings = {}
   try {
-    const settings = await getSettings()
-    return settings.docsProviders?.google ?? {}
+    preferences = (await getSettings()).docsProviders?.google ?? {}
   } catch {
-    return {}
+    /* Read-only UI remains usable while the DB is unavailable. */
+  }
+  return connectionSettings(preferences)
+}
+
+async function connectionSettings(
+  preferences: GoogleDocsProviderSettings
+): Promise<GoogleDocsProviderSettings> {
+  try {
+    const { state } = await googleState({ action: "snapshot" })
+    return {
+      ...preferences,
+      connected: Boolean(state.tokens?.refreshToken),
+      accountEmail: state.legacyMetadata
+        ? preferences.accountEmail
+        : (state.accountEmail ?? undefined),
+      grantedScopes:
+        state.tokens?.scope ?? (state.legacyMetadata ? preferences.grantedScopes : undefined),
+    }
+  } catch {
+    // Never trust a singleton's stale connected flag if the credential owner
+    // cannot confirm it. Authoritative operations surface their actual error.
+    return { clientId: preferences.clientId, connected: false }
+  }
+}
+
+type GoogleSettingsListener = (settings: GoogleDocsProviderSettings) => void
+const settingsListeners = new Set<GoogleSettingsListener>()
+let stopStateSubscription: (() => void) | undefined
+let notificationVersion = 0
+function notifySettings(settings: GoogleDocsProviderSettings) {
+  for (const listener of settingsListeners) {
+    try {
+      listener(settings)
+    } catch {
+      /* A listener cannot undo a committed save. */
+    }
+  }
+}
+async function reloadConnection() {
+  const version = ++notificationVersion
+  const settings = await getGoogleDocsSettings()
+  if (version === notificationVersion) notifySettings(settings)
+}
+
+/** Observe committed connection state in the credential-owning host. */
+export function subscribeGoogleDocsSettings(listener: GoogleSettingsListener): () => void {
+  settingsListeners.add(listener)
+  if (!stopStateSubscription)
+    stopStateSubscription = subscribeGoogleStateChanged(() => {
+      void reloadConnection()
+    })
+  return () => {
+    settingsListeners.delete(listener)
+    if (!settingsListeners.size) {
+      stopStateSubscription?.()
+      stopStateSubscription = undefined
+    }
   }
 }
 
@@ -73,11 +131,17 @@ export async function updateGoogleDocsSettings(
     | Partial<GoogleDocsProviderSettings>
     | ((current: GoogleDocsProviderSettings) => GoogleDocsProviderSettings)
 ): Promise<GoogleDocsProviderSettings> {
-  const settings = await getSettings()
-  const providers = settings.docsProviders ?? {}
-  const current = providers.google ?? {}
-  const next = typeof patch === "function" ? patch(current) : { ...current, ...patch }
-  await saveSettings({ docsProviders: { ...providers, google: next } })
+  // Apply inside the database's existing save queue, never to a stale snapshot.
+  const saved = await saveSettings((settings) => {
+    const providers = settings.docsProviders ?? {}
+    const current = providers.google ?? {}
+    const next = typeof patch === "function" ? patch(current) : { ...current, ...patch }
+    return { docsProviders: { ...providers, google: next } }
+  })
+  // The DB keeps preferences; host state supplies credential readiness.
+  const next = await connectionSettings(saved.docsProviders?.google ?? {})
+  ++notificationVersion
+  notifySettings(next)
   return next
 }
 
@@ -90,32 +154,17 @@ export async function saveGoogleClientSecret(secret: string): Promise<void> {
 }
 
 export async function loadGoogleTokens(): Promise<GoogleOAuthTokens | null> {
-  const raw = await docsProviderSecrets().load(GOOGLE_TOKENS_KEY)
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw) as Partial<GoogleOAuthTokens>
-    if (typeof parsed.accessToken !== "string" || typeof parsed.expiresAt !== "number") return null
-    return {
-      accessToken: parsed.accessToken,
-      refreshToken: typeof parsed.refreshToken === "string" ? parsed.refreshToken : undefined,
-      expiresAt: parsed.expiresAt,
-      scope: typeof parsed.scope === "string" ? parsed.scope : undefined,
-      tokenType: typeof parsed.tokenType === "string" ? parsed.tokenType : undefined,
-    }
-  } catch {
-    return null
-  }
+  return (await googleState({ action: "snapshot" })).state.tokens
 }
 
+/** Legacy migration fixture/writer. Once the host record exists it is never reimported. */
 export async function saveGoogleTokens(tokens: GoogleOAuthTokens): Promise<void> {
   await docsProviderSecrets().save(GOOGLE_TOKENS_KEY, JSON.stringify(tokens))
 }
 
 /** Forget the connection entirely: tokens out of the keyring, flags out of settings. */
 export async function clearGoogleConnection(): Promise<void> {
-  await docsProviderSecrets().delete(GOOGLE_TOKENS_KEY)
-  await updateGoogleDocsSettings((current) => ({
-    clientId: current.clientId,
-    connected: false,
-  }))
+  const { state } = await googleState({ action: "snapshot" })
+  if (state.tokens) await googleState({ action: "invalidate", connection: state.connection })
+  await updateGoogleDocsSettings((current) => ({ clientId: current.clientId, connected: false }))
 }

@@ -63,6 +63,7 @@ export async function searchLarkDocs(
       providerId: "lark",
       kind,
       id: entity.docs_token,
+      ...(kind === "doc" ? { sourceType: entity.docs_type } : {}),
       title: entity.title?.trim() || entity.docs_token,
     })
   }

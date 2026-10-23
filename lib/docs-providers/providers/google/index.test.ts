@@ -1,6 +1,11 @@
 jest.mock("./config", () => ({ getGoogleDocsSettings: jest.fn() }))
+jest.mock("./state", () => ({
+  googleState: jest.fn(),
+  subscribeGoogleStateChanged: jest.fn(() => jest.fn()),
+}))
 
 import { getGoogleDocsSettings } from "./config"
+import { googleState } from "./state"
 import type { GoogleHttpFn, GoogleHttpRequest } from "./http"
 import { MAX_DOC_CHARS } from "@/lib/docs-providers/limits"
 import { __setGoogleProviderDepsForTests, googleDocsProvider } from "./index"
@@ -23,6 +28,9 @@ function stubHttp(routes: Array<[string, { status?: number; body: string }]>) {
 beforeEach(() => {
   jest.clearAllMocks()
   settingsMock.mockResolvedValue({})
+  jest.mocked(googleState).mockResolvedValue({
+    state: { authorization: "epoch", tokens: { refreshToken: "refresh" } },
+  } as Awaited<ReturnType<typeof googleState>>)
   __setGoogleProviderDepsForTests({})
 })
 
@@ -49,12 +57,23 @@ describe("googleDocsProvider.listAccounts", () => {
 
   it("reports the connected account, labelled by email", async () => {
     settingsMock.mockResolvedValue({ connected: true, accountEmail: "a@b.c" })
-    expect(await googleDocsProvider.listAccounts()).toEqual([{ id: "default", label: "a@b.c" }])
+    jest.mocked(googleState).mockResolvedValue({
+      state: {
+        authorization: "epoch",
+        tokens: { refreshToken: "refresh" },
+        accountEmail: "a@b.c",
+      },
+    } as Awaited<ReturnType<typeof googleState>>)
+    expect(await googleDocsProvider.listAccounts()).toEqual([
+      { id: "default", label: "a@b.c", authorizationEpoch: "epoch" },
+    ])
   })
 
   it("falls back to a generic label when the email is unknown", async () => {
     settingsMock.mockResolvedValue({ connected: true })
-    expect(await googleDocsProvider.listAccounts()).toEqual([{ id: "default", label: "Google" }])
+    expect(await googleDocsProvider.listAccounts()).toEqual([
+      { id: "default", label: "Google", authorizationEpoch: "epoch" },
+    ])
   })
 })
 
@@ -81,6 +100,139 @@ describe("googleDocsProvider.matchRef", () => {
 })
 
 describe("googleDocsProvider.fetch", () => {
+  it.each(["sheet", "search"])(
+    "rejects a delayed %s result after the authorization changes",
+    async (operation) => {
+      let finish!: () => void
+      const http = jest.fn(async (request: GoogleHttpRequest) => {
+        if (operation === "sheet" && !request.url.includes("values:batchGet")) {
+          return {
+            status: 200,
+            headers: {},
+            body: JSON.stringify({
+              properties: { title: "Old budget" },
+              sheets: [
+                { properties: { title: "Q3", gridProperties: { rowCount: 1, columnCount: 1 } } },
+              ],
+            }),
+          }
+        }
+        await new Promise<void>((resolve) => {
+          finish = resolve
+        })
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify(
+            operation === "sheet"
+              ? { valueRanges: [{ values: [["old cell"]] }] }
+              : {
+                  files: [
+                    { id: ID, name: "Old spec", mimeType: "application/vnd.google-apps.document" },
+                  ],
+                }
+          ),
+        }
+      })
+      __setGoogleProviderDepsForTests({ accessToken: async () => "token", http })
+      const opts = { accountId: "default", expectedAuthorizationEpoch: "epoch", limit: 20 }
+      const pending =
+        operation === "search"
+          ? googleDocsProvider.search?.("spec", opts)
+          : googleDocsProvider.fetch(
+              { providerId: "google", kind: "sheet", id: ID, title: "Spec" },
+              opts
+            )
+      for (let i = 0; i < 40 && !finish; i++) await Promise.resolve()
+      expect(finish).toBeDefined()
+      jest.mocked(googleState).mockResolvedValue({
+        state: { authorization: "new", tokens: { refreshToken: "new-refresh" } },
+      } as Awaited<ReturnType<typeof googleState>>)
+      finish()
+      await expect(pending).rejects.toMatchObject({ code: "notAuthorized" })
+    }
+  )
+
+  it("rejects an identity change while token acquisition is pending before any HTTP", async () => {
+    let finish!: (token: string) => void
+    const accessToken = jest.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          finish = resolve
+        })
+    )
+    const http = jest.fn(async () => ({ status: 200, headers: {}, body: "body" }))
+    __setGoogleProviderDepsForTests({ accessToken, http })
+    const pending = googleDocsProvider.fetch(
+      { providerId: "google", kind: "doc", id: ID, title: "Spec" },
+      { accountId: "default", expectedAuthorizationEpoch: "epoch" }
+    )
+    for (let i = 0; i < 10 && !accessToken.mock.calls.length; i++) await Promise.resolve()
+    expect(accessToken).toHaveBeenCalledTimes(1)
+    jest.mocked(googleState).mockResolvedValue({
+      state: { authorization: "new", tokens: { refreshToken: "new-refresh" } },
+    } as Awaited<ReturnType<typeof googleState>>)
+    finish("old-token")
+    await expect(pending).rejects.toMatchObject({ code: "notAuthorized" })
+    expect(http).not.toHaveBeenCalled()
+  })
+
+  it("rejects a document body returned after disconnect or reconnect", async () => {
+    let finish!: (value: { status: number; headers: Record<string, string>; body: string }) => void
+    const http = jest.fn(
+      () =>
+        new Promise<{ status: number; headers: Record<string, string>; body: string }>(
+          (resolve) => {
+            finish = resolve
+          }
+        )
+    )
+    __setGoogleProviderDepsForTests({ accessToken: async () => "token", http })
+    const pending = googleDocsProvider.fetch(
+      {
+        providerId: "google",
+        kind: "doc",
+        id: ID,
+        title: "Spec",
+        accountBinding: { accountId: "default", authorizationEpoch: "epoch" },
+      },
+      { accountId: "default" }
+    )
+    for (let i = 0; i < 20 && !http.mock.calls.length; i++) await Promise.resolve()
+    expect(http).toHaveBeenCalledTimes(1)
+    jest.mocked(googleState).mockResolvedValue({
+      state: { authorization: "new", tokens: { refreshToken: "new-refresh" } },
+    } as Awaited<ReturnType<typeof googleState>>)
+    finish({ status: 200, headers: {}, body: "old body" })
+    await expect(pending).rejects.toMatchObject({ code: "notAuthorized" })
+  })
+  it("rejects another account id and an old authorization epoch before reading", async () => {
+    const urls = stubHttp([["/export?", { body: "body" }]])
+    const ref = { providerId: "google", kind: "doc" as const, id: ID, title: "Spec" }
+    await expect(googleDocsProvider.fetch(ref, { accountId: "other" })).rejects.toMatchObject({
+      code: "notAuthorized",
+    })
+    await expect(
+      googleDocsProvider.fetch(ref, { accountId: "default", expectedAuthorizationEpoch: "old" })
+    ).rejects.toMatchObject({ code: "notAuthorized" })
+    expect(urls).toEqual([])
+  })
+
+  it("rejects an unchanged epoch whose connection was invalidated", async () => {
+    jest
+      .mocked(googleState)
+      .mockResolvedValue({ state: { authorization: "epoch", tokens: null } } as Awaited<
+        ReturnType<typeof googleState>
+      >)
+    const urls = stubHttp([["/export?", { body: "body" }]])
+    await expect(
+      googleDocsProvider.fetch(
+        { providerId: "google", kind: "doc", id: ID, title: "Spec" },
+        { accountId: "default", expectedAuthorizationEpoch: "epoch" }
+      )
+    ).rejects.toMatchObject({ code: "notAuthorized" })
+    expect(urls).toEqual([])
+  })
   it("exports a Doc and resolves its real name when the ref came from a URL", async () => {
     const urls = stubHttp([
       ["/export?", { body: "# Spec\nbody" }],
@@ -197,4 +349,31 @@ describe("googleDocsProvider.search", () => {
       },
     ])
   })
+})
+
+it("does not acquire credentials for a pre-aborted search", async () => {
+  const controller = new AbortController()
+  controller.abort()
+  const accessToken = jest.fn(async () => "tok")
+  const http = jest.fn()
+  __setGoogleProviderDepsForTests({ accessToken, http })
+  await expect(
+    googleDocsProvider.search!("q", { signal: controller.signal, accountId: "default", limit: 20 })
+  ).rejects.toMatchObject({ name: "AbortError" })
+  expect(accessToken).not.toHaveBeenCalled()
+  expect(http).not.toHaveBeenCalled()
+})
+
+it("releases an aborted provider call while shared credential acquisition is pending", async () => {
+  const controller = new AbortController()
+  const http = jest.fn()
+  __setGoogleProviderDepsForTests({ accessToken: () => new Promise(() => undefined), http })
+  const searching = googleDocsProvider.search!("q", {
+    signal: controller.signal,
+    accountId: "default",
+    limit: 20,
+  })
+  controller.abort()
+  await expect(searching).rejects.toMatchObject({ name: "AbortError" })
+  expect(http).not.toHaveBeenCalled()
 })

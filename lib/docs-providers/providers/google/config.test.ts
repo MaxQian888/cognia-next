@@ -1,3 +1,5 @@
+import { createGoogleDocsTestHost } from "@/lib/testing/google-docs-host"
+import { __setGoogleStatePortForTests } from "./state"
 jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn(), saveSettings: jest.fn() }))
 
 import { getSettings, saveSettings } from "@/lib/db/settings"
@@ -15,6 +17,7 @@ import {
   saveGoogleClientSecret,
   saveGoogleTokens,
   updateGoogleDocsSettings,
+  subscribeGoogleDocsSettings,
 } from "./config"
 
 const getSettingsMock = getSettings as jest.Mock
@@ -36,11 +39,18 @@ beforeEach(() => {
   jest.clearAllMocks()
   store = memoryStore()
   __setDocsProviderSecretsForTests(store)
+  __setGoogleStatePortForTests(createGoogleDocsTestHost(store).call)
   getSettingsMock.mockResolvedValue({})
-  saveSettingsMock.mockResolvedValue(undefined)
+  saveSettingsMock.mockImplementation(async (input) => {
+    const current = await getSettingsMock()
+    return { ...current, ...(typeof input === "function" ? input(current) : input) }
+  })
 })
 
-afterEach(() => __setDocsProviderSecretsForTests(null))
+afterEach(() => {
+  __setDocsProviderSecretsForTests(null)
+  __setGoogleStatePortForTests(null)
+})
 
 describe("scopes", () => {
   it("asks for the three read scopes the provider actually uses", () => {
@@ -64,12 +74,12 @@ describe("scopes", () => {
 
 describe("settings", () => {
   it("returns an empty object when nothing is configured", async () => {
-    expect(await getGoogleDocsSettings()).toEqual({})
+    expect(await getGoogleDocsSettings()).toMatchObject({ connected: false })
   })
 
   it("survives a settings read failure rather than breaking the picker", async () => {
     getSettingsMock.mockRejectedValue(new Error("db closed"))
-    expect(await getGoogleDocsSettings()).toEqual({})
+    expect(await getGoogleDocsSettings()).toMatchObject({ connected: false })
   })
 
   it("merges a patch without dropping sibling providers", async () => {
@@ -77,16 +87,20 @@ describe("settings", () => {
       docsProviders: { google: { clientId: "cid" } },
     })
     await updateGoogleDocsSettings({ connected: true })
-    expect(saveSettingsMock).toHaveBeenCalledWith({
-      docsProviders: { google: { clientId: "cid", connected: true } },
+    expect(saveSettingsMock).toHaveBeenCalledWith(expect.any(Function))
+    expect((await saveSettingsMock.mock.results[0].value).docsProviders.google).toEqual({
+      clientId: "cid",
+      connected: true,
     })
   })
 
   it("accepts a functional patch", async () => {
     getSettingsMock.mockResolvedValue({ docsProviders: { google: { clientId: "cid" } } })
     await updateGoogleDocsSettings((current) => ({ clientId: current.clientId, connected: false }))
-    expect(saveSettingsMock).toHaveBeenCalledWith({
-      docsProviders: { google: { clientId: "cid", connected: false } },
+    expect(saveSettingsMock).toHaveBeenCalledWith(expect.any(Function))
+    expect((await saveSettingsMock.mock.results[0].value).docsProviders.google).toEqual({
+      clientId: "cid",
+      connected: false,
     })
   })
 })
@@ -134,8 +148,57 @@ describe("clearGoogleConnection", () => {
     await saveGoogleTokens({ accessToken: "at", expiresAt: 1 })
     await clearGoogleConnection()
     expect(store.map.has(GOOGLE_TOKENS_KEY)).toBe(false)
-    expect(saveSettingsMock).toHaveBeenCalledWith({
-      docsProviders: { google: { clientId: "cid", connected: false } },
+    expect(saveSettingsMock).toHaveBeenCalledWith(expect.any(Function))
+    expect((await saveSettingsMock.mock.results[0].value).docsProviders.google).toEqual({
+      clientId: "cid",
+      connected: false,
     })
   })
+})
+
+it("applies preference patches to the latest queued settings instead of reviving connected state", async () => {
+  getSettingsMock.mockResolvedValue({
+    docsProviders: { google: { clientId: "old", connected: true } },
+  })
+  saveSettingsMock.mockImplementationOnce(async (input) => {
+    const current = { docsProviders: { google: { clientId: "old", connected: false } } }
+    return { ...current, ...(typeof input === "function" ? input(current) : input) }
+  })
+  await expect(updateGoogleDocsSettings({ clientId: "new" })).resolves.toMatchObject({
+    clientId: "new",
+    connected: false,
+  })
+})
+
+it("notifies only committed state and removes unsubscribed observers", async () => {
+  const listener = jest.fn()
+  const unsubscribe = subscribeGoogleDocsSettings(listener)
+  try {
+    await updateGoogleDocsSettings({ clientId: "committed" })
+    expect(listener).toHaveBeenLastCalledWith(
+      expect.objectContaining({ clientId: "committed", connected: false })
+    )
+    saveSettingsMock.mockRejectedValueOnce(new Error("save failed"))
+    await expect(updateGoogleDocsSettings({ connected: false })).rejects.toThrow("save failed")
+    expect(listener).toHaveBeenCalledTimes(1)
+    unsubscribe()
+    await updateGoogleDocsSettings({ connected: false })
+    expect(listener).toHaveBeenCalledTimes(1)
+  } finally {
+    unsubscribe()
+  }
+})
+
+it("does not let a failing observer break a committed settings update", async () => {
+  const unsubscribe = subscribeGoogleDocsSettings(() => {
+    throw new Error("observer")
+  })
+  try {
+    await expect(updateGoogleDocsSettings({ clientId: "committed" })).resolves.toMatchObject({
+      clientId: "committed",
+      connected: false,
+    })
+  } finally {
+    unsubscribe()
+  }
 })
