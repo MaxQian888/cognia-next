@@ -399,6 +399,12 @@ export type DiagnosticCode =
    * itself (no workspace on creation, or a record the Host never bound).
    */
   | "workspaceUnresolved"
+  /**
+   * A member's data partition on a multi-tenant Host has no model access:
+   * it starts with no provider configuration, and brokered credentials are
+   * not available yet (plan §9a, Q11). Inert by design until then.
+   */
+  | "modelAccessUnavailable"
   | "routingNoCandidates"
   // --- Cognia internals ---
   | "settingsLoadFailed"

@@ -224,4 +224,13 @@ import "./bots"
 import "./router-fusion"
 import "./account-sync"
 
-export {}
+/**
+ * Every runtime a person brain starts (`HeadlessHost` "person-brain", plan
+ * §9a). Data only; a runtime added to this list widens what one member's
+ * partition process does on a shared Host, so it needs the same review.
+ */
+export const PERSON_BRAIN_RUNTIMES = [
+  "host-event-publisher",
+  "desktop-sync-source",
+  "desktop-message-source",
+] as const

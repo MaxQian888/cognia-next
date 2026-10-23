@@ -33,6 +33,11 @@ const HOST_REFUSAL_TO_DIAGNOSTIC: Readonly<Record<string, DiagnosticCode>> = {
   workspace_mount_forbidden: "forbidden",
   placement_binding_client_supplied: "forbidden",
   host_authority_unavailable: "serviceUnavailable",
+  // A member's own data partition (plan §9a). Model access is dormant there;
+  // the other two are transient, and the Host marks them retryable.
+  model_access_unavailable: "modelAccessUnavailable",
+  person_brain_capacity: "resourceLimit",
+  person_brain_unavailable: "serviceUnavailable",
 }
 
 /**

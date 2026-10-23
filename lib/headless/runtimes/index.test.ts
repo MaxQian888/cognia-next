@@ -59,6 +59,23 @@ describe("headless runtime roster", () => {
     })
   })
 
+  it("starts only the pinned data runtimes in a person brain", async () => {
+    await jest.isolateModulesAsync(async () => {
+      const registry = await import("../registry")
+      registry.__resetHeadlessRuntimesForTesting()
+      const { PERSON_BRAIN_RUNTIMES } = await import("./index")
+      const personal = registry
+        .listHeadlessRuntimes()
+        .filter((runtime) => runtime.hosts.includes("person-brain"))
+        .map((runtime) => runtime.name)
+      expect(personal.sort()).toEqual([...PERSON_BRAIN_RUNTIMES].sort())
+      // Each is also a Host-brain runtime: the profile only subtracts.
+      for (const runtime of registry.listHeadlessRuntimes()) {
+        expect(runtime.hosts).toContain("brain")
+      }
+    })
+  })
+
   it("keeps browser startup recovery out of the headless runtime", async () => {
     await jest.isolateModulesAsync(async () => {
       const registry = await import("../registry")

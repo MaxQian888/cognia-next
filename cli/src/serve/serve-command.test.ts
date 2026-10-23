@@ -261,6 +261,25 @@ describe("serveCommand", () => {
     expect(out.logs.join("")).toContain("COGNIA_SERVICE_TOKEN")
   })
 
+  it("refuses an unknown brain profile before unlocking any account", async () => {
+    const out = sink()
+    const started = jest.fn()
+    expect(
+      await serveCommand(parseArgv(["serve"]), {
+        out,
+        env: env({
+          COGNIA_SERVER_URL: "https://127.0.0.1:7999",
+          COGNIA_SERVICE_TOKEN: "token",
+          COGNIA_BRAIN_PROFILE: "operator",
+        }),
+        onStarted: started,
+      })
+    ).toBe(2)
+    expect(out.logs.join("")).toContain("COGNIA_BRAIN_PROFILE")
+    expect(out.logs.join("")).not.toContain("unlocked")
+    expect(started).not.toHaveBeenCalled()
+  })
+
   it("boots, answers a sync-pull from Dexie, and flushes on shutdown", async () => {
     mockBootOrder.length = 0
     __resetCliDbForTesting()

@@ -452,6 +452,10 @@
     "workspaceUnresolved": {
       "label": "No workspace for this request",
       "hint": "A shared Host only runs work inside a workspace it can verify. Start it from a workspace you belong to; work that wasn't started that way can't be continued here."
+    },
+    "modelAccessUnavailable": {
+      "label": "No model access on this shared Host",
+      "hint": "Your data on a shared Host has no AI model configured, so this can't generate a reply here yet. It will work once the organization's model access is available to members."
     }
   },
   "detail": {

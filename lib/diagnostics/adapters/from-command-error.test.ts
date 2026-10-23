@@ -122,6 +122,16 @@ describe("multi-tenant Host refusals", () => {
     expect(diagnose("host_authority_unavailable")).toBe("serviceUnavailable")
   })
 
+  it("labels a member partition's dormant model access and its transient refusals", () => {
+    expect(diagnose("model_access_unavailable")).toBe("modelAccessUnavailable")
+    expect(DIAGNOSTIC_CODES.modelAccessUnavailable.retryable).toBe(false)
+    expect(DIAGNOSTIC_CODES.modelAccessUnavailable.actions).toEqual([{ kind: "dismiss" }])
+    // Capacity is a concurrency ceiling, not a fault; both clear on retry.
+    expect(diagnose("person_brain_capacity")).toBe("resourceLimit")
+    expect(diagnose("person_brain_unavailable")).toBe("serviceUnavailable")
+    expect(isHostRefusalCode("person_brain_capacity")).toBe(true)
+  })
+
   it("recognises only Host refusal codes", () => {
     expect(isHostRefusalCode("host_data_unpartitioned")).toBe(true)
     expect(isHostRefusalCode("sidecar_error")).toBe(false)

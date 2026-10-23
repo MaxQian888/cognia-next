@@ -15,20 +15,24 @@ import { registerHeadlessRuntime } from "../registry"
 registerHeadlessRuntime({
   name: "desktop-message-source",
   criticality: "required",
-  hosts: ["brain"],
+  hosts: ["brain", "person-brain"],
   start: async (ctx) => {
     const unsubMessages = await installDesktopMessageSource({ bridge: ctx.bridge })
     const unsubWrites = await installDesktopWriteSource({ bridge: ctx.bridge })
-    const unsubOrchestration = await installOrchestrationDispatchSource({
-      bridge: ctx.bridge,
-      onError: (error) =>
-        ctx.log(
-          "error",
-          `orchestration proxy response failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        ),
-    })
+    // A person brain is data-only (plan §9a): it never proxies orchestration.
+    const unsubOrchestration =
+      ctx.host === "person-brain"
+        ? () => undefined
+        : await installOrchestrationDispatchSource({
+            bridge: ctx.bridge,
+            onError: (error) =>
+              ctx.log(
+                "error",
+                `orchestration proxy response failed: ${
+                  error instanceof Error ? error.message : String(error)
+                }`
+              ),
+          })
     return () => {
       unsubOrchestration()
       unsubWrites()

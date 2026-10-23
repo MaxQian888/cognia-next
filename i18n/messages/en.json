@@ -15937,6 +15937,10 @@
         "hint": "The managed policy disallows this sandbox or approval mode. Choose an allowed mode or contact your administrator.",
         "label": "Managed policy refused"
       },
+      "modelAccessUnavailable": {
+        "hint": "Your data on a shared Host has no AI model configured, so this can't generate a reply here yet. It will work once the organization's model access is available to members.",
+        "label": "No model access on this shared Host"
+      },
       "modelOverloaded": {
         "hint": "The provider is overloaded — retry in a moment.",
         "label": "Model overloaded"
