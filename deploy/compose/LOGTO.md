@@ -553,3 +553,10 @@ receipt and correct layout from the new authentication sender. This final check
 stopped at email verification; it did not repeat the earlier full MFA/token flow.
 The local workerd smoke separately verified 32-request duplicate bursts, SQLite
 restart dedupe and independent recipient progress without sending internet mail.
+
+The local overlay also enables a scoped HTTP Email HTTPS pool through read-only
+`logto-mail/` mounts and a Node preload. It retains up to 32 idle connections
+for reuse across OTP cooldowns, bounds active sockets at 64 per origin and caps
+requests at 20 seconds. It requires Node >=22.15; the current pinned image uses
+22.23.3. Other connectors retain their original Got client. See the operator
+guide's local transport section for verification, measured scope and rollback.

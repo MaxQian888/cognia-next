@@ -19,12 +19,15 @@ set -eu
 bundle=$1
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 pins="$repo/deploy/bundle/agent-versions.json"
-script="$repo/scripts/build/bundle-agent-versions.mjs"
+manifest_dir=$(mktemp -d "${TMPDIR:-/tmp}/cognia-bundle-manifest.XXXXXX")
+manifest_container=""
 prefix="cognia-bundle-smoke-$$"
 created=""
 
 cleanup() {
   for volume in $created; do docker volume rm -f "$volume" >/dev/null 2>&1 || true; done
+  if [ -n "$manifest_container" ]; then docker rm -f "$manifest_container" >/dev/null 2>&1 || true; fi
+  rm -rf "$manifest_dir"
 }
 trap cleanup EXIT
 
@@ -37,7 +40,13 @@ new_volume() {
   name="$prefix-$1"
   docker volume create "$name" >/dev/null
   created="$created $name"
-  echo "$name"
+  new_volume_name=$name
+}
+
+release_case() {
+  # Each libc tree is large; keep only the current case's volumes alive.
+  # The exit trap still covers a failure before this point.
+  docker volume rm "$injection" "$workspace" >/dev/null
 }
 
 # stage_and_probe <case> <image> [probe args...] -> sets $injection $workspace $probe_status
@@ -45,8 +54,10 @@ stage_and_probe() {
   case_name=$1
   image=$2
   shift 2
-  injection=$(new_volume "$case_name-cognia")
-  workspace=$(new_volume "$case_name-workspace")
+  new_volume "$case_name-cognia"
+  injection=$new_volume_name
+  new_volume "$case_name-workspace"
+  workspace=$new_volume_name
   docker run --rm -v "$injection:/cognia" "$bundle" install --stage core --from /opt/cognia --to /cognia >/dev/null
   set +e
   docker run --rm -v "$injection:/cognia" -v "$workspace:/workspace" \
@@ -81,26 +92,80 @@ hosts_runtimes() {
   docker run --rm -v "$injection:/cognia" --entrypoint /cognia/common/bin/cognia-bootstrap "$image" --version
   docker run --rm -v "$injection:/cognia" "$bundle" install --stage libc --from /opt/cognia --to /cognia >/dev/null
   in_image "$image" "/cognia/$libc/node/bin/node" --version
-  for command in $(node "$script" commands --pins "$pins" --libc "$libc"); do
+  version_commands=$(node --input-type=module - "$pins" "$manifest_dir/manifest.json" "$libc" <<'NODE'
+import { readFileSync } from "node:fs"
+const [pinsPath, manifestPath, libc] = process.argv.slice(2)
+const pins = JSON.parse(readFileSync(pinsPath, "utf8"))
+const manifest = JSON.parse(readFileSync(manifestPath, "utf8"))
+const commands = new Set()
+for (const runtime of manifest.runtimes) {
+  const pin = pins.runtimes.find(({ id }) => id === runtime.id)
+  if (!pin || pin.version !== runtime.version) throw new Error(`unrecognized runtime pin ${runtime.id}@${runtime.version}`)
+  if (!runtime.libc.includes(libc)) continue
+  for (const command of runtime.commands) {
+    const source = pin.commands?.find(({ name }) => name === command.name) ?? pin.archive ?? pin.binary
+    if (source?.smoke === "version") commands.add(command.name)
+  }
+}
+console.log([...commands].join(" "))
+NODE
+  )
+  for command in $version_commands; do
     in_image "$image" "/cognia/$libc/bin/$command" --version >/dev/null || fail "$image: $command --version failed"
     echo "smoke: $image $libc/$command ok"
   done
+  # Check the installed npm roots and shims, not merely the advertised set.
+  in_image "$image" "/cognia/$libc/node/bin/node" -e '
+    const fs = require("node:fs"), assert = require("node:assert/strict");
+    const libc = process.argv[1];
+    const manifest = JSON.parse(fs.readFileSync("/cognia/bundle-manifest.json", "utf8"));
+    const expected = [...new Set(manifest.runtimes.flatMap(r => r.commands.map(c => c.package).filter(Boolean)))].sort();
+    const pkg = JSON.parse(fs.readFileSync(`/cognia/${libc}/lib/agents/package.json`, "utf8"));
+    assert.deepEqual(Object.keys(pkg.dependencies).sort(), expected);
+    const commands = [...new Set(manifest.runtimes.filter(r => r.libc.includes(libc)).flatMap(r => r.commands.map(c => c.name)))].sort();
+    assert.deepEqual(fs.readdirSync(`/cognia/${libc}/bin`).sort(), commands);
+  ' "$libc"
+  case " $(probe_field runtimes) " in
+    *" codex-acp "*)
+      node --input-type=module - "$repo" "$image" "$injection" "$workspace" "$libc" <<'NODE'
+import { pathToFileURL } from "node:url"
+const [repo, image, injection, workspace, libc] = process.argv.slice(2)
+const { initializeAcp } = await import(pathToFileURL(`${repo}/deploy/runner/smoke.mjs`))
+await initializeAcp(image, {
+  runArgs: ["-v", `${injection}:/cognia`, "-v", `${workspace}:/workspace`],
+  entrypoint: "/cognia/bin/cognia-sandboxd",
+  args: ["init-agent", "--", `/cognia/${libc}/bin/codex-acp`],
+})
+console.log(`smoke: ${image} ${libc}/codex-acp initialize ok (offline)`)
+NODE
+      ;;
+  esac
   in_image "$image" git --version
   in_image "$image" rg --version >/dev/null
 }
 
+# The image's manifest is authoritative for selected builds. Never assume the
+# full repository runtime set was installed in this artifact.
+manifest_container=$(docker create "$bundle")
+docker cp "$manifest_container:/opt/cognia/bundle-manifest.json" "$manifest_dir/manifest.json" >/dev/null
+
 hosts_runtimes debian debian:bookworm-slim glibc
+release_case
 hosts_runtimes python python:3.12-slim glibc
 in_image python:3.12-slim git ls-remote https://github.com/git/git HEAD >/dev/null ||
   fail "python:3.12-slim: the bundled git cannot fetch over https"
+release_case
 hosts_runtimes alpine alpine:3.22 musl
+release_case
 
 stage_and_probe uclibc busybox:uclibc
 [ "$probe_status" = 64 ] || fail "busybox:uclibc: probe exited $probe_status, expected 64"
 echo "smoke: busybox:uclibc refused with 64"
+release_case
 
 stage_and_probe nonroot python:3.12-slim --user 10001
 [ "$probe_status" = 68 ] || fail "python:3.12-slim --user 10001: probe exited $probe_status, expected 68"
 echo "smoke: uid 10001 on a root-owned workspace refused with 68"
+release_case
 
 echo "smoke: all cases passed"

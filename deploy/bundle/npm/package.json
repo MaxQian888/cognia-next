@@ -15,5 +15,8 @@
     "@qwen-code/qwen-code": "0.24.6",
     "opencode-ai": "1.18.32",
     "pi-acp": "0.0.34"
+  },
+  "overrides": {
+    "sharp": "^0.35.5"
   }
 }

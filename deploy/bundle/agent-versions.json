@@ -2,7 +2,7 @@
   "$comment": "What the cognia-agent-bundle image contains (ADR-0183). Exact versions only: npm packages are also pinned in npm/package.json + npm/package-lock.json (integrity per package), every downloaded artifact carries the vendor-published sha256. This is a bundle lock, not a certification: it does not change protocol/external-agent-runtimes.json certifiedVersions. `node scripts/build/bundle-agent-versions.mjs check` keeps this file, the npm lock, the runtime catalog and the Dockerfile ARGs in agreement.",
   "version": 1,
   "node": {
-    "version": "26.8.2",
+    "version": "26.12.1",
     "alpine": "3.24",
     "minGlibc": "2.28"
   },

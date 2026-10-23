@@ -296,7 +296,7 @@ RUN apt-get update \
 # The plugin permission model is pinned independently from the brain's Node
 # runtime. cognia-plugin-runtime verifies this exact major/minimum patch before
 # executing any installed JavaScript plugin.
-FROM node:26.3.1-bookworm-slim AS plugin-node-runtime
+FROM node:26.12.1-bookworm-slim AS plugin-node-runtime
 RUN node --version
 
 # ── Runtime: slim (sidecar-only execution plane) ────────────────────────────
@@ -381,8 +381,13 @@ FROM runtime-slim AS runtime-full
 ARG TARGETARCH
 ENV COGNIA_HOST_TARGET=oci-full-${TARGETARCH}
 USER root
-COPY deploy/runner/install-agents.sh /tmp/install-agents.sh
-RUN bash /tmp/install-agents.sh \
-    && rm -f /tmp/install-agents.sh \
+COPY deploy/runner/install-agents.sh deploy/runner/install-selected.mjs /tmp/
+COPY deploy/bundle/agent-versions.json /tmp/agent-versions.json
+COPY deploy/bundle/npm/package.json /tmp/agent-packages.json
+RUN COGNIA_AGENT_PACKAGE_JSON=/tmp/agent-packages.json \
+    COGNIA_AGENT_PINS_JSON=/tmp/agent-versions.json \
+    bash /tmp/install-agents.sh \
+    && rm -f /tmp/install-agents.sh /tmp/install-selected.mjs /tmp/agent-versions.json /tmp/agent-packages.json \
     && rm -rf /var/lib/apt/lists/*
+ENV PATH="/cognia/runner/bin:${PATH}"
 USER 10001:10001

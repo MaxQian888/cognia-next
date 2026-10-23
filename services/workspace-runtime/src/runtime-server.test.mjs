@@ -597,6 +597,14 @@ test("a named pageId addresses that tab, except where the page is the op's subje
     calls.push(["createPage", ...args])
     return { id: "page-3", url: "about:blank", title: "", active: false }
   }
+  browser.recordingControl = async (...args) => {
+    calls.push(["recordingControl", ...args])
+    return null
+  }
+  browser.resolveRecordedTarget = async (...args) => {
+    calls.push(["resolveRecordedTarget", ...args])
+    return "opaque-ref"
+  }
   const baseUrl = await fixture(t, browser)
   const control = (type, payload) =>
     fetch(`${baseUrl}/v1/control`, {
@@ -611,12 +619,18 @@ test("a named pageId addresses that tab, except where the page is the op's subje
   await control("browser.page.activate", { sessionId: "s", pageId: "p2" })
   await control("browser.navigate", { sessionId: "s", url: "http://localhost/x" })
   await control("browser.page.create", { sessionId: "s", activate: false })
+  await control("browser.recording.control", { sessionId: "s", pageId: "p2", action: "drain" })
+  await control("browser.recording.ref", { sessionId: "s", pageId: "p2", selector: "#submit" })
   assert.deepEqual(calls, [
     ["target", "s", "p2"],
     ["navigate", "s", "http://localhost/"],
     ["activatePage", "s", "p2"],
     ["navigate", "s", "http://localhost/x"],
     ["createPage", "s", undefined, { activate: false }],
+    ["target", "s", "p2"],
+    ["recordingControl", "s", "drain"],
+    ["target", "s", "p2"],
+    ["resolveRecordedTarget", "s", "#submit"],
   ])
 })
 

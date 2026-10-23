@@ -123,7 +123,9 @@ images, fonts or tracking resources load. The subject and preheader omit OTPs.
 - Authenticated JSON bodies are limited to 16 KiB while streaming, with a
   three-second body deadline. Invalid UTF-8 and malformed payloads are rejected.
 - Each recipient maps to a separate Durable Object through a keyed HMAC.
-  Transactions reserve an attempt before sending. A burst of the same
+  Transactions reserve an attempt and its cleanup alarm atomically before
+  sending. If alarm setup fails, the reservation rolls back and no mail is sent.
+  A burst of the same
   recipient/purpose/code shares one provider attempt; different recipients
   progress independently. Successful duplicates remain suppressed across
   restarts for five minutes.
@@ -138,7 +140,8 @@ images, fonts or tracking resources load. The subject and preheader omit OTPs.
   last attempt. Provider errors are not echoed or logged.
 
 - 流式读取时执行 16 KiB 上限和三秒超时，拒绝非法 UTF-8 与畸形请求。
-- 按收件人 HMAC 分片，每个 Durable Object 独立协调；发送前事务预留。同一收件人、
+- 按收件人 HMAC 分片，每个 Durable Object 独立协调；发送前在同一事务中预留尝试与
+  cleanup alarm，alarm 失败则回滚且不发送。同一收件人、
   用途和验证码的并发请求共用一次投递，成功去重状态可跨重启保留五分钟。
 - 同一收件人的所有用途共用 60 秒冷却、每小时最多 10 次的滑动窗口，失败也计数。
 - 投递等待上限八秒；超时不代表发送已取消。未知结果不自动重发，迟到成功仍记录；
@@ -155,6 +158,57 @@ delivery or unlimited provider throughput.
 `200` 表示服务接受请求或已接受的重复请求，不代表收件箱已收到邮件。验证码的生成、
 校验、消费和 MFA 仍由 Logto 负责；保留其重发倒计时和标识符锁定。此服务不承诺
 邮件恰好送达一次，也不能突破邮件服务商的吞吐与配额。
+
+## Local Logto transport / 本机 Logto 连接复用
+
+The local Compose overlay preloads `deploy/compose/logto-mail/preload.mjs` and
+mounts a small Got adapter beside the pinned HTTP Email connector. This adapter
+extends the connector's existing Got instance with a bounded HTTPS pool: up to
+64 active and 32 idle sockets per origin, a 90-second socket timeout, and a
+20-second request deadline. Other Logto connectors and Got consumers retain their
+original client. TLS verification and request-specific authorization stay intact;
+POST is not added to Got's retry methods.
+
+本机 Compose 为 HTTP Email connector 单独启用有界 HTTPS 连接池：每个 origin 最多
+64 个活动连接、32 个空闲连接，socket timeout 为 90 秒，请求等待最多 20 秒。
+其他 connector 不使用此适配器。鉴权仍逐请求传递，保留 TLS 校验，POST 不自动重试。
+远端可以主动关闭连接，90 秒配置不保证连接始终存在。
+
+These deployment modules are necessary because the pinned, read-only Logto image
+owns the outgoing HTTP client; changing the Cloudflare Worker cannot remove client
+DNS/TLS setup. They reuse the installed Got package without editing vendor files
+or adding a runtime dependency. The Node module hook requires Node 22.15 or newer;
+the current image was checked with Node 22.23.3 and Got 14.0.0. Recheck native
+connector loading whenever changing `LOGTO_IMAGE`.
+
+出站客户端位于只读 Logto 镜像内，因此在部署层挂载适配器，复用镜像已有 Got，
+不修改第三方源码。需要 Node >=22.15；当前已验证 Node 22.23.3／Got 14.0.0。
+升级镜像时须重新验证 connector 的真实加载路径。此配置在本机 overlay 启用，
+独立的 production overlay 不会自动继承它。
+
+The Cloudflare comparison kept every recipient DO fresh but reused client
+connections after 6.5 seconds idle. Median per-request client completion improved from
+1199.5ms to 675.5ms across ten paired 32-request batches; candidate acceptance was
+320/320 versus 315/320 for the baseline. This does not remove named-DO cold lookup
+or establish cold-process/mailbox-delivery latency. See the experiment report below.
+
+十组配对实测中，32 并发的新收件人请求在空闲 6.5 秒后，客户端响应中位数由
+1199.5ms 降至 675.5ms；新路径 320/320 接受，基线有 5 次连接失败。
+此结果限定为已有客户端连接池的场景；命名 DO 冷路径仍存在，未重新测公网收信耗时。
+
+```sh
+node --test deploy/compose/logto-mail/preload.test.mjs
+docker compose --env-file deploy/compose/.env.logto.local \
+  -f deploy/compose/docker-compose.yml \
+  -f deploy/compose/compose.local.logto.yaml up -d --no-deps --wait logto
+```
+
+To roll back just the transport, remove the preload export from the local
+entrypoint and recreate only `logto`. Leave the mail Worker namespace, hash key,
+connector credentials, PostgreSQL and Redis in place so quotas and dedupe survive.
+
+仅回退连接池时，移除本机 entrypoint 的 preload export 后重建 `logto` 服务。
+保留邮件 Worker namespace、hash key、connector 凭据及数据库，去重与限流不会迁移。
 
 ## Verify and recover / 验证与恢复
 
@@ -188,6 +242,32 @@ smoke 使用独立管理的 `services/identity-server` 安装中的 Wrangler/Min
 smoke 在 workerd 中运行真实编译产物和本地 SQLite，使用本地收件器，不向公网发信。
 它验证 32 并发、重启去重、收件人隔离与冷却，原始记录位于
 `.cache/logto-email-hardening/`。合成耗时不代表公网邮件速度；持久化协调有额外成本。
+
+For a comparison against an already durable revision, keep its source and relative
+imports in a local snapshot and explicitly use `--baseline-durable`. Without that
+flag, the baseline is treated as the old uncoordinated sender and cannot establish
+a persistence optimization. Use alternating paired batches and check compatibility:
+
+比较已有持久化版本时，先保存其源码及相对导入，再显式传入 `--baseline-durable`；
+否则基线按旧版无协调发送器处理，不能用于证明持久化优化。交替测量配对批次：
+
+```sh
+node scripts/smoke/logto-email-runtime.mjs \
+  --baseline /absolute/path/to/baseline/index.ts --baseline-durable \
+  --paired --samples 30 --check-compatibility \
+  --output .cache/logto-email-comparison
+```
+
+`--guards-only` skips timing and checks restart-safe sliding quotas, unknown
+outcomes, and state compatibility across baseline → current → baseline reloads.
+The clock used by quota fixtures never enters deployment code or timing samples.
+Run local timing separately from builds and tests. Report medians and MAD;
+small changes within noise are inconclusive. The [2026-10-21 experiment report](../../docs/reports/2026-10-21-logto-email-persistence-performance.md)
+records rejected storage/RPC experiments as well as the retained correctness fix.
+
+`--guards-only` 跳过计时，只验证跨进程重启的滑动额度、未知结果不重发，以及升级/回滚的
+状态兼容。额度测试时钟不进入部署代码或计时样本。计时应与构建、测试分开执行；记录
+中位数与 MAD，噪声内的小幅变化不算提速。上述报告保留失败实验，避免重复采用无效改写。
 
 For rollback, remove only the email sign-in method before removing its connector;
 preserve the other current policies. To rotate the authentication secret, deploy

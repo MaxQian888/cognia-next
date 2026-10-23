@@ -18,11 +18,14 @@
 # below drift from it. Every download is verified (sha256, or curl's PGP
 # signature) before use, and every command is run once before it ships.
 
-ARG NODE_VERSION=26.8.2
+ARG NODE_VERSION=26.12.1
 ARG ALPINE_VERSION=3.24
 
 # ── cognia-sandboxd, static musl ─────────────────────────────────────────────
 FROM rust:1.99.0-alpine AS sandboxd
+# Use the compiler already in the base; the desktop component list in the
+# workspace toolchain is not needed to build these two static executables.
+ENV RUSTUP_TOOLCHAIN=1.99.0
 RUN apk add --no-cache build-base musl-dev binutils
 WORKDIR /work
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
@@ -50,10 +53,25 @@ RUN cargo build --release --locked -p cognia-sandboxd --bin cognia-sandboxd \
 FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS pins
 WORKDIR /build
 COPY deploy/bundle/agent-versions.json scripts/build/bundle-agent-versions.mjs ./
+RUN node -e 'const p=JSON.parse(require("node:fs").readFileSync("agent-versions.json","utf8")); if(process.versions.node !== p.node.version) throw new Error("Node build override disagrees with agent-versions.json")'
+
+# Runtime selection must not invalidate the shared static Git/tool layers.
+FROM pins AS selected-pins
+ARG AGENT_RUNTIMES=full
+WORKDIR /work
+COPY deploy/bundle/agent-versions.json ./deploy/bundle/agent-versions.json
+COPY deploy/bundle/npm/package.json deploy/bundle/npm/package-lock.json ./deploy/bundle/npm/
+COPY deploy/bundle/Dockerfile ./deploy/bundle/Dockerfile
+COPY scripts/build/bundle-agent-versions.mjs ./scripts/build/bundle-agent-versions.mjs
+COPY protocol/external-agent-runtimes.json ./protocol/external-agent-runtimes.json
+COPY crates/cognia-sandboxd/src/layout.rs ./crates/cognia-sandboxd/src/layout.rs
+RUN node scripts/build/bundle-agent-versions.mjs prepare --runtimes "$AGENT_RUNTIMES" --out /build \
+    && cp scripts/build/bundle-agent-versions.mjs /build/bundle-agent-versions.mjs
+WORKDIR /build
 
 # ── static git (with a minimal static libcurl) ───────────────────────────────
 FROM pins AS git
-RUN apk add --no-cache build-base binutils cargo gnupg linux-headers openssl-dev \
+RUN apk add --no-cache build-base binutils cargo findutils gnupg linux-headers openssl-dev \
       openssl-libs-static perl pkgconf tar xz zlib-dev zlib-static
 COPY deploy/bundle/build-static-git.sh /build/
 RUN node bundle-agent-versions.mjs fetch-tool --pins agent-versions.json --tool curl --out /tmp/curl.tar.xz \
@@ -75,8 +93,8 @@ FROM node:${NODE_VERSION}-bookworm-slim AS glibc
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends patchelf libatomic1 \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=pins /build /build
-COPY deploy/bundle/npm/package.json deploy/bundle/npm/package-lock.json /opt/cognia/glibc/lib/agents/
+COPY --from=selected-pins /build /build
+COPY --from=selected-pins /build/npm/ /opt/cognia/glibc/lib/agents/
 RUN cd /opt/cognia/glibc/lib/agents \
     && npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 # The shims name /cognia, where a sandbox mounts the tree; the smoke runs
@@ -89,8 +107,8 @@ RUN ln -s /opt/cognia /cognia \
 FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS musl
 ARG TARGETARCH
 RUN apk add --no-cache patchelf tar
-COPY --from=pins /build /build
-COPY deploy/bundle/npm/package.json deploy/bundle/npm/package-lock.json /opt/cognia/musl/lib/agents/
+COPY --from=selected-pins /build /build
+COPY --from=selected-pins /build/npm/ /opt/cognia/musl/lib/agents/
 RUN cd /opt/cognia/musl/lib/agents \
     && npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 RUN ln -s /opt/cognia /cognia \
@@ -98,7 +116,7 @@ RUN ln -s /opt/cognia /cognia \
          --libc musl --arch "$TARGETARCH" --tree /opt/cognia/musl
 
 # ── manifest ─────────────────────────────────────────────────────────────────
-FROM pins AS manifest
+FROM selected-pins AS manifest
 ARG TARGETARCH
 ARG BUNDLE_RELEASE_TAG=dev
 RUN mkdir -p /out \
