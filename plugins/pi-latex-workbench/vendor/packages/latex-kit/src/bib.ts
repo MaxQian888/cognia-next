@@ -11,8 +11,8 @@
  * Parse errors are recoverable: the scanner resynchronizes at the next
  * top-level `@` so one malformed entry cannot hide the rest of the file.
  */
-import { utf8Bytes } from "@latexwb/contracts";
 import { maskComments } from "./protect.ts";
+import { charToByteMap, utf8Bytes } from "./utf8.ts";
 
 export interface BibError {
   message: string;
@@ -49,22 +49,6 @@ const MONTH_MACROS: ReadonlyMap<string, string> = new Map([
   ["may", "May"], ["jun", "June"], ["jul", "July"], ["aug", "August"],
   ["sep", "September"], ["oct", "October"], ["nov", "November"], ["dec", "December"],
 ]);
-
-function charToByteMap(text: string): Uint32Array {
-  const map = new Uint32Array(text.length + 1);
-  let byte = 0;
-  let i = 0;
-  while (i < text.length) {
-    map[i] = byte;
-    const cp = text.codePointAt(i) as number;
-    const u16 = cp > 0xffff ? 2 : 1;
-    if (u16 === 2) map[i + 1] = byte;
-    byte += cp <= 0x7f ? 1 : cp <= 0x7ff ? 2 : cp <= 0xffff ? 3 : 4;
-    i += u16;
-  }
-  map[text.length] = byte;
-  return map;
-}
 
 export function parseBibTeX(bytes: Uint8Array): BibFile {
   const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
@@ -437,4 +421,14 @@ export function scanCitations(text: string): CitationUse[] {
 /** Convenience: bytes → parse. */
 export function parseBibTeXText(text: string): BibFile {
   return parseBibTeX(utf8Bytes(text));
+}
+
+/** Normalized same-work identity: lowercase DOI, else normalized title+year. */
+export function workIdentity(entry: BibEntry): string | null {
+  const doi = entry.fields.get("doi")?.trim().toLowerCase().replace(/^https?:\/\/(?:dx\.)?doi\.org\//, "");
+  if (doi !== undefined && doi !== "") return `doi:${doi}`;
+  const title = entry.fields.get("title")?.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() ?? "";
+  const year = entry.fields.get("year")?.trim() ?? "";
+  if (title.length < 8) return null;
+  return `title:${title}|${year}`;
 }

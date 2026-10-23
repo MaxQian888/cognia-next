@@ -9,7 +9,7 @@
  * available, so sourceAccess is "fulltext" for the bib record itself.
  */
 import { canonicalJson, sha256Hex, utf8Bytes } from "@latexwb/contracts";
-import { parseBibTeX, type BibEntry } from "../bib.ts";
+import { parseBibTeX, type BibEntry } from "@latexwb/latex-kit";
 import type {
   MetadataProvider,
   ProviderQuery,

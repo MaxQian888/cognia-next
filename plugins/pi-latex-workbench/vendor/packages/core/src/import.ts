@@ -80,17 +80,6 @@ function isExcludedFileName(name: string): boolean {
   return EXCLUDED_FILE_PATTERNS.some((re) => re.test(name));
 }
 
-export function classifyRole(projectPath: string): string {
-  const lower = projectPath.toLowerCase();
-  if (lower.endsWith(".bib")) return "bibliography";
-  if (lower.endsWith(".bbl")) return "provided-bbl";
-  if (/\.(tex|ltx|sty|cls|def|clo|dtx|ins|cfg|fd|ldf|biblatex\.conf)$/.test(lower)) return "source";
-  if (/(^|\/)(latexmkrc|\.latexmkrc|arara\.yaml|arara\.yml|makefile|\.chktexrc|latexmkrcextra)/.test(lower)) {
-    return "project-config";
-  }
-  return "raw-asset";
-}
-
 /**
  * Walk `hostPath` (must be a directory) and classify every entry. Uses
  * lstat throughout so links are seen as links; nothing is followed outside

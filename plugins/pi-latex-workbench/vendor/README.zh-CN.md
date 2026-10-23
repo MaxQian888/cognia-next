@@ -50,7 +50,7 @@
 `PATH` 上已有 `tectonic` 可执行文件（已验证 0.17.0，例如
 `brew install tectonic`——初始化步骤只下载它的 bundle，不下载程序本身）、
 渲染助手需要 macOS arm64 + Xcode CLT（`swiftc`）、agent 会话需要
-Pi ≥ 0.85（已在 0.85.1 与 0.87.0 上验证）、tectonic bundle 约需 3 GB 磁盘。
+Pi ≥ 1.3.0（已在 1.3.0 上验证）、tectonic bundle 约需 3 GB 磁盘。
 不需要 latexmk、Docker 或其他 TeX 后端——tectonic 是唯一引擎。
 
 ```bash
@@ -287,6 +287,9 @@ ADR-0007 写作轮次（空项目写中文论文、修表格、做幻灯片、�
 ```
 packages/contracts/    @latexwb/contracts — schema、生成的类型、校验器、错误码
 packages/storage/      @latexwb/storage — SQLite、migrations、outbox、CAS
+packages/latex-kit/    @latexwb/latex-kit — 纯 LaTeX/BibTeX 分析（受保护内容、BibTeX
+                       解析、draft lint、文本锚点）；不依赖 workbench/fs，
+                       会被其他产品直接复制使用——见其 README
 packages/core/         @latexwb/core — 服务：import/snapshot/build/patch/approvals/
                        workflows/bibliography/assets/checks/render/review/release/inspect
 packages/runtime/      @latexwb/runtime — tectonic + docker runner、工具链初始化、

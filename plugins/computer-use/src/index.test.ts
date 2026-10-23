@@ -122,6 +122,16 @@ describe("computer-use plugin activate()", () => {
     ])
   })
 
+  it("retains per-turn remote tools when the local backend has no app sessions", async () => {
+    mockedAutomation.capabilities.mockResolvedValue({ operations: { appSessions: false } })
+    const context = buildContext()
+    await definition.activate(context as never)
+    const names = context.agent!.registerTool.mock.calls.map((call) => call[0].name)
+    expect(names).toContain("get_app_state")
+    expect(names).toContain("perform_action")
+    expect(names).toContain("wait")
+  })
+
   it("registers only the canonical app-session tools", async () => {
     const context = buildContext()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -348,21 +358,41 @@ describe("zoom / wait / OCR fallbacks", () => {
     mockedAutomation.clickText.mockResolvedValue({ ok: true, clicked: {} })
     const toolContext = { config: {}, sessionId: "chat", messageId: "m1" }
 
-    await (await getTool("find_text")).execute({ query: "Save" }, toolContext as never)
+    await (
+      await getTool("find_text")
+    ).execute({ query: "Save", state: buildRevision() }, toolContext as never)
     await (
       await getTool("click_text")
-    ).execute({ query: "Save", occurrence: 2, button: "right" }, toolContext as never)
+    ).execute(
+      { query: "Save", occurrence: 2, button: "right", state: buildRevision() },
+      toolContext as never
+    )
 
     const origin = { sessionId: "chat", messageId: "m1" }
-    expect(mockedAutomation.findText).toHaveBeenCalledWith({ query: "Save" }, origin)
+    expect(mockedAutomation.findText).toHaveBeenCalledWith(
+      { query: "Save", state: buildRevision() },
+      origin
+    )
     expect(mockedAutomation.clickText).toHaveBeenCalledWith(
-      { query: "Save", occurrence: 2, button: "right" },
+      { query: "Save", occurrence: 2, button: "right", state: buildRevision() },
       origin
     )
   })
 })
 
 describe("published tool schemas", () => {
+  it("requires the current app revision for both model-facing OCR tools", async () => {
+    for (const name of ["find_text", "click_text"]) {
+      const tool = await getTool(name)
+      expect((tool.definition.parametersSchema as { required: string[] }).required).toContain(
+        "state"
+      )
+      await expect(tool.execute({ query: "Save" }, { config: {} } as never)).rejects.toThrow(
+        /state from get_app_state/
+      )
+    }
+  })
+
   it("publishes the action vocabulary instead of an opaque object", async () => {
     // `perform_action` used to declare `request: {type:"object"}`, which the
     // sidecar erases to `z.unknown()` — the model was never told that element

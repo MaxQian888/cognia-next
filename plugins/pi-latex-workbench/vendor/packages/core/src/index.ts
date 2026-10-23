@@ -12,14 +12,12 @@ export * from "./artifacts.ts";
 export * from "./jobs.ts";
 export * from "./build.ts";
 export * from "./project.ts";
-export * from "./protect.ts";
 export * from "./patch.ts";
 export * from "./approvals.ts";
 export * from "./budget.ts";
 export * from "./materialize.ts";
 export * from "./evidence.ts";
 export * from "./service-job.ts";
-export * from "./bib.ts";
 export * from "./metadata/index.ts";
 export * from "./bibliography.ts";
 export * from "./csv.ts";
@@ -37,3 +35,28 @@ export * from "./net.ts";
 export * from "./venue.ts";
 export * from "./operations.ts";
 export * from "./workflow.ts";
+// Pure LaTeX analysis lives in @latexwb/latex-kit; these names have always
+// been part of @latexwb/core's public surface, so they are re-exported here.
+export {
+  analyzeProtectedChanges,
+  classifyRole,
+  collectProjectMacros,
+  collectProjectUsedMacros,
+  DRAFT_FINDING_CAP,
+  extractProtectedSets,
+  isAdditiveChange,
+  lintDraftSources,
+  maskComments,
+  parseBibTeX,
+  parseBibTeXText,
+  scanCitations,
+  type AnalyzeProtectedChangesOptions,
+  type BibEntry,
+  type BibError,
+  type BibFile,
+  type ByteRange,
+  type CitationUse,
+  type DraftLint,
+  type DraftLintResult,
+  type ProtectedSets,
+} from "@latexwb/latex-kit";

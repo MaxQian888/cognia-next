@@ -13,7 +13,7 @@ helper is currently darwin/arm64-only.
 | npm ≥ 10 | workspaces install | `npm --version` |
 | `tectonic` on `PATH` (verified: 0.17.0) | the only LaTeX engine; `provision-toolchain` downloads its **bundle**, not the binary — install it first, e.g. `brew install tectonic` | `tectonic --version` |
 | `swiftc` (Xcode Command Line Tools), macOS arm64 | compiling the Swift/PDFKit render helper (page images, text extraction, page review) | `swiftc --version` |
-| Pi ≥ 0.85 (verified: 0.85.1, 0.87.0) | the controlled agent session; `doctor` also reports it as required | `pi --version` |
+| Pi ≥ 1.3.0 (verified: 1.3.0) | the controlled agent session; `doctor` also reports it as required | `pi --version` |
 | ~3 GB disk | the provisioned tectonic bundle | `provision-toolchain` output |
 | `python3` (dev only) | regenerating contract types / the command vocabulary | `python3 --version` |
 
@@ -130,3 +130,14 @@ node packages/cli/src/bin.ts artifact-save <pdfArtifactId> out.pdf --project dem
 State lands in `./.latexwb/` by default (`--state <dir>` to move it). The full
 command reference, state layout, backup and recovery model are in
 [RUNBOOK.md](RUNBOOK.md).
+
+## Symlink-free plugin hosts
+
+For a host that rejects symbolic links, run `npm run prepare:plugin` in the
+package root. It installs the locked production graph with `npm ci`, omitting
+dev/peer packages and dependency lifecycle scripts, then copies npm's links to
+this checkout's own workspace packages into ordinary directories. Unexpected
+links fail preparation. Source packages and the committed lockfile stay intact.
+Pi and typebox remain provided by the host Pi installation.
+
+The Cognia plugin preparation creates regular ESM bridges to the unchanged workspace TypeScript source: Node cannot strip TypeScript inside node_modules. Pi 1.0.2 and 1.3.0 both pass the hosted extension/session smoke.

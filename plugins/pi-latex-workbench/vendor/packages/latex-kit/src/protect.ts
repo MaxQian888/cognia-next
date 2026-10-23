@@ -15,13 +15,9 @@
  * so intersection tests are exact on non-ASCII files. `*Char` fields are
  * kept only for slicing excerpt text.
  */
-import type { ProtectedChange } from "@latexwb/contracts";
 import { TOOLCHAIN_COMMANDS } from "./known-commands.generated.ts";
-
-export interface ByteRange {
-  startByte: number;
-  endByte: number;
-}
+import type { ByteRange, ProtectedChange } from "./types.ts";
+import { charToByteMap } from "./utf8.ts";
 
 const MATH_ENVS = new Set([
   "equation", "equation*", "align", "align*", "gather", "gather*",
@@ -219,26 +215,6 @@ interface Region {
   /** UTF-8 byte offsets — used for changed-range intersection tests. */
   startByte: number;
   endByte: number;
-}
-
-/**
- * UTF-16 code-unit index → UTF-8 byte offset prefix map. map[i] is the byte
- * offset of code unit i; map[text.length] is the total byte length.
- */
-function charToByteMap(text: string): Uint32Array {
-  const map = new Uint32Array(text.length + 1);
-  let byte = 0;
-  let i = 0;
-  while (i < text.length) {
-    map[i] = byte;
-    const cp = text.codePointAt(i) as number;
-    const u16 = cp > 0xffff ? 2 : 1;
-    if (u16 === 2) map[i + 1] = byte;
-    byte += cp <= 0x7f ? 1 : cp <= 0x7ff ? 2 : cp <= 0xffff ? 3 : 4;
-    i += u16;
-  }
-  map[text.length] = byte;
-  return map;
 }
 
 interface Scanner {
@@ -494,6 +470,27 @@ export function isAdditiveChange(change: ProtectedChange): boolean {
   return change.change === "added" && change.category !== "template";
 }
 
+/** Input of `analyzeProtectedChanges` (one file, before vs after). */
+export interface AnalyzeProtectedChangesOptions {
+  path: string;
+  /** File role (`source`, `bibliography`, `template`, `raw-asset`, …; see classifyRole). */
+  role: string;
+  /** Text before the change; null when the file is being created. */
+  before: string | null;
+  /** Text after the change; null when the file is being deleted. */
+  after: string | null;
+  /** Changed UTF-8 byte ranges in the before text's coordinates. */
+  rangesBefore: ByteRange[];
+  /** Changed UTF-8 byte ranges in the after text's coordinates. */
+  rangesAfter: ByteRange[];
+  /** Union of \newcommand-style macros defined anywhere in the project. */
+  projectDefinedMacros?: Set<string>;
+  /** Control sequences already used anywhere in the base snapshot. */
+  projectUsedMacros?: Set<string>;
+  /** Explicit key renames the caller asserts were applied consistently. */
+  citekeyMapping?: Record<string, string> | undefined;
+}
+
 /**
  * Compare before/after content of one file for protected changes.
  * `rangesBefore`/`rangesAfter` are the UTF-8 byte ranges that actually
@@ -506,20 +503,7 @@ export function isAdditiveChange(change: ProtectedChange): boolean {
  *
  * Comments are masked before any scan: they carry no typeset content.
  */
-export function analyzeProtectedChanges(options: {
-  path: string;
-  role: string;
-  before: string | null;
-  after: string | null;
-  rangesBefore: ByteRange[];
-  rangesAfter: ByteRange[];
-  /** Union of \newcommand-style macros defined anywhere in the project. */
-  projectDefinedMacros?: Set<string>;
-  /** Control sequences already used anywhere in the base snapshot. */
-  projectUsedMacros?: Set<string>;
-  /** Explicit key renames the caller asserts were applied consistently. */
-  citekeyMapping?: Record<string, string> | undefined;
-}): ProtectedChange[] {
+export function analyzeProtectedChanges(options: AnalyzeProtectedChangesOptions): ProtectedChange[] {
   const { path, role, before, after, rangesBefore, rangesAfter } = options;
   const out: ProtectedChange[] = [];
 

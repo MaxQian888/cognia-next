@@ -5,9 +5,9 @@
 | Field | Value |
 | --- | --- |
 | Upstream | <https://github.com/Arxtect/pi-latex-workbench> |
-| Commit | `95e8a6d2838e38bd66766edf677fedfe4db53cac` |
-| Commit date | 2026-09-25T00:55:12+08:00 |
-| Files | 219 |
+| Commit | `76567ee5deaaf279e6f3945e9ca3aecb880e45ac` |
+| Commit date | 2026-10-22T02:58:33+08:00 |
+| Files | 231 |
 | Method | `git archive <commit> -- <paths>` (never the working tree) |
 
 `vendor/` is an **untouched** copy of that commit's archive restricted to the
@@ -21,6 +21,7 @@ Copied (exact files, then rules):
 
 - `package.json`
 - `package-lock.json`
+- `prepare-plugin.mjs`
 - `tsconfig.base.json`
 - `tsconfig.json`
 - `README.md`
@@ -40,8 +41,8 @@ Copied (exact files, then rules):
 - `migrations/**`
 - `runtime/presets/**`
 
-`packages/contracts/schemas/contracts.schema.json` is the one addition to the
-original selection: `packages/contracts/src/validators.ts` reads it at module
+`prepare-plugin.mjs` is required by the package's link-free dependency preparation
+command. `packages/contracts/schemas/contracts.schema.json` is also required: `packages/contracts/src/validators.ts` reads it at module
 initialization, so the CLI and the Pi extension cannot start without it.
 
 Never copied, even when a rule above would match: any path segment named
@@ -85,7 +86,7 @@ artifact containing `vendor/` — is published outside this repository.
 ## Files
 
 <details>
-<summary>219 vendored files</summary>
+<summary>231 vendored files</summary>
 
 - `README.md`
 - `README.zh-CN.md`
@@ -141,7 +142,6 @@ artifact containing `vendor/` — is published outside this repository.
 - `packages/core/src/artifacts.ts`
 - `packages/core/src/assets.ts`
 - `packages/core/src/audit.ts`
-- `packages/core/src/bib.ts`
 - `packages/core/src/bibliography.ts`
 - `packages/core/src/budget.ts`
 - `packages/core/src/build.ts`
@@ -157,7 +157,6 @@ artifact containing `vendor/` — is published outside this repository.
 - `packages/core/src/init.ts`
 - `packages/core/src/inspect.ts`
 - `packages/core/src/jobs.ts`
-- `packages/core/src/known-commands.generated.ts`
 - `packages/core/src/materialize.ts`
 - `packages/core/src/metadata/crossref.ts`
 - `packages/core/src/metadata/index.ts`
@@ -168,7 +167,6 @@ artifact containing `vendor/` — is published outside this repository.
 - `packages/core/src/patch.ts`
 - `packages/core/src/paths.ts`
 - `packages/core/src/project.ts`
-- `packages/core/src/protect.ts`
 - `packages/core/src/recipes.ts`
 - `packages/core/src/release.ts`
 - `packages/core/src/render.ts`
@@ -182,6 +180,20 @@ artifact containing `vendor/` — is published outside this repository.
 - `packages/core/src/workflow.ts`
 - `packages/core/src/zip.ts`
 - `packages/core/tsconfig.json`
+- `packages/latex-kit/package.json`
+- `packages/latex-kit/src/anchor.ts`
+- `packages/latex-kit/src/bib.ts`
+- `packages/latex-kit/src/crossref.ts`
+- `packages/latex-kit/src/draft-lint.ts`
+- `packages/latex-kit/src/index.ts`
+- `packages/latex-kit/src/known-commands.generated.ts`
+- `packages/latex-kit/src/posix-path.ts`
+- `packages/latex-kit/src/protect.ts`
+- `packages/latex-kit/src/roles.ts`
+- `packages/latex-kit/src/submission.ts`
+- `packages/latex-kit/src/types.ts`
+- `packages/latex-kit/src/utf8.ts`
+- `packages/latex-kit/tsconfig.json`
 - `packages/runtime/package.json`
 - `packages/runtime/src/docker-runner.ts`
 - `packages/runtime/src/doctor.ts`
@@ -202,6 +214,7 @@ artifact containing `vendor/` — is published outside this repository.
 - `packages/storage/src/outbox.ts`
 - `packages/storage/src/repos.ts`
 - `packages/storage/tsconfig.json`
+- `prepare-plugin.mjs`
 - `resources/bibliography/registry.json`
 - `resources/bibliography/shared-refs.bib`
 - `resources/profiles/capability-registry.json`
