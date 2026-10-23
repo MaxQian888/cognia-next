@@ -1657,6 +1657,24 @@ export class CogniaDB extends Dexie {
 
   constructor(name = LEGACY_COGNIA_DB_NAME, connectionOwner = "unspecified") {
     super(name)
+    this.use({
+      stack: "dbcore",
+      name: "DocumentReadTransactionLifetime",
+      level: -1,
+      create: (down) => ({
+        ...down,
+        transaction: (stores, mode, options) => {
+          const transaction = down.transaction(stores, mode, options) as IDBTransaction
+          if (mode === "readonly") {
+            _documentReadTransactions.add(transaction)
+            const settled = () => _documentReadTransactions.delete(transaction)
+            transaction.addEventListener("complete", settled, { once: true })
+            transaction.addEventListener("abort", settled, { once: true })
+          }
+          return transaction
+        },
+      }),
+    })
     if (name.startsWith("cognia-account-")) {
       this.use(createEncryptedContentMiddleware(name))
     }
@@ -2057,6 +2075,8 @@ export type {
 
 let _db: CogniaDB | null = null
 const _knownConnections = new Map<string, Set<CogniaDB>>()
+const _documentReadTransactions = new Set<IDBTransaction>()
+let _pageHideListening = false
 let _seedPromise: Promise<void> | null = null
 let _activeDatabaseName: string | null = null
 let _yieldChannel: BroadcastChannel | null = null
@@ -2068,12 +2088,33 @@ const _reportedConnectionOwners = new Map<string, Set<string>>()
 let _stopBlockedRetry: (() => void) | null = null
 
 function registerKnownConnection(database: CogniaDB): void {
+  if (!_pageHideListening && typeof window !== "undefined") {
+    // Capture runs before Dexie's BFCache close listener unregisters handles.
+    window.addEventListener("pagehide", closeDocumentConnections, true)
+    _pageHideListening = true
+  }
   let connections = _knownConnections.get(database.name)
   if (!connections) {
     connections = new Set()
     _knownConnections.set(database.name, connections)
   }
   connections.add(database)
+}
+
+function closeDocumentConnections(): void {
+  // close() alone waits for readers whose crypto awaits cannot resume in a
+  // frozen document. Include retired handles' readers too. Leave readwrite
+  // transactions and existing exit-save handlers free to finish their writes.
+  for (const transaction of _documentReadTransactions) {
+    try {
+      transaction.abort()
+    } catch {
+      // A committed transaction can still be awaiting its completion event.
+    }
+  }
+  _documentReadTransactions.clear()
+  const databases = [..._knownConnections.values()].flatMap((connections) => [...connections])
+  for (const database of databases) database.close({ disableAutoOpen: false })
 }
 
 function unregisterKnownConnection(database: CogniaDB): void {
@@ -2559,6 +2600,8 @@ export function whenSeeded(): Promise<void> {
  * — production code must never call this.
  */
 export function __resetDbForTesting(): void {
+  if (_pageHideListening) window.removeEventListener("pagehide", closeDocumentConnections, true)
+  _pageHideListening = false
   _activeDatabaseName = null
   closeCachedDb()
   try {

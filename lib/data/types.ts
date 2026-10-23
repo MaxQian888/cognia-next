@@ -1,11 +1,13 @@
 // Type contracts for the v3 backup-package format. Modeled on Cognia's
 // `lib/storage/persistence/types.ts` but stripped to cognia-next's domain
-// (no projects/knowledge/workflows/etc).
+// with additive portable authored-domain sections.
 //
 // Versioned independently of the Dexie schema so users can carry data between
 // app versions without surprise migrations: the importer reads `manifest.version`
 // and `manifest.schemaVersion` and refuses anything it doesn't understand.
 
+import type { IssueCounter } from "@/types/issues"
+import type { AuthoredContentPayload } from "./authored-content"
 import type { SessionAsset } from "@/lib/db/session-assets"
 import type { SessionAssetSourceChunk, MessageMediaBackupRow } from "./session-assets-backup"
 import type { DBScheduledTask } from "@/lib/db/scheduled-task-types"
@@ -100,7 +102,9 @@ export interface BackupManifestV3 {
  * intentionally NOT filtered out at this layer — the caller decides. The
  * importer skips writes against locally-built-in rows regardless.
  */
-export interface BackupPayloadV3 {
+export interface BackupPayloadV3 extends AuthoredContentPayload {
+  /** Natural-key issue number watermarks; never lower them on restore. */
+  issueCounters?: IssueCounter[]
   settings?: AppSettings
   characters?: Character[]
   skills?: Skill[]

@@ -46,6 +46,7 @@ import {
   clearSessionSdkLink,
 } from "./sessions"
 import { saveSettings } from "./settings"
+import { DEFAULT_AUTO_ROUTING } from "@/types/routing/tool-route"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
 import { getDb } from "./schema"
 import {
@@ -907,6 +908,81 @@ describe("setSessionRanks", () => {
 })
 
 describe("createSession — default preset auto-apply", () => {
+  it("keeps the preset prompt while an explicit app model remains the manual default", async () => {
+    await saveSettings({ defaultProvider: "anthropic", defaultModel: "claude-haiku-4-5-20251001" })
+    const preset = await createPreset({
+      name: "Manual app default",
+      content: "Preserve this instruction.",
+      model: "claude-sonnet-4-6",
+    })
+    await setDefaultPreset(preset.id)
+    const session = await createSession()
+    expect(session).toMatchObject({ systemPrompt: preset.content, activePresetId: preset.id })
+    // Unpinned manual rows keep following the app setting on later turns.
+    expect(session.model).toBeUndefined()
+    expect(session.providerOverride).toBeUndefined()
+  })
+
+  it("does not let an external agent app model replace the built-in preset model", async () => {
+    await saveSettings({
+      defaultProvider: "cognia:external-agent:pi-local",
+      defaultModel: "commandcode/claude-opus-5",
+    })
+    const preset = await createPreset({
+      name: "Built-in preset",
+      content: "Keep the built-in instruction.",
+      model: "claude-sonnet-4-6",
+    })
+    await setDefaultPreset(preset.id)
+    expect(await createSession()).toMatchObject({
+      model: preset.model,
+      systemPrompt: preset.content,
+      activePresetId: preset.id,
+    })
+  })
+
+  it("keeps the preset prompt but stamps the selected Auto default onto the new session", async () => {
+    await saveSettings({
+      autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true, defaultSelection: "auto" },
+    })
+    const preset = await createPreset({
+      name: "Auto preset",
+      content: "Preserve this instruction.",
+      model: "claude-sonnet-4-6",
+    })
+    await setDefaultPreset(preset.id)
+    const session = await createSession()
+    expect(session).toMatchObject({
+      model: "auto",
+      systemPrompt: preset.content,
+      activePresetId: preset.id,
+    })
+    await expect(getSession(session.id)).resolves.toMatchObject({ model: "auto" })
+  })
+
+  it("preserves explicit model seeds when the app default is Auto", async () => {
+    await saveSettings({
+      autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true, defaultSelection: "auto" },
+    })
+    const session = await createSession({ model: "claude-opus-4-8", effort: "high" })
+    expect(session.model).toBe("claude-opus-4-8")
+    expect(session.effort).toBe("high")
+  })
+
+  it.each([
+    { enabled: false, defaultSelection: "auto" as const },
+    { enabled: true, defaultSelection: "manual" as const },
+  ])("retains the preset model for Auto policy %j", async (policy) => {
+    await saveSettings({ autoRouting: { ...DEFAULT_AUTO_ROUTING, ...policy } })
+    const preset = await createPreset({
+      name: "Manual preset",
+      content: "Be helpful.",
+      model: "claude-sonnet-4-6",
+    })
+    await setDefaultPreset(preset.id)
+    expect((await createSession()).model).toBe(preset.model)
+  })
+
   it("copies preset payload onto an empty new session", async () => {
     const preset = await createPreset({
       name: "Default One",

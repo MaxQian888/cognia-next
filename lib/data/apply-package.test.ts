@@ -1011,6 +1011,120 @@ describe("applyBackupPackage — twin tables", () => {
 })
 
 describe("applyBackupPackage — learned memory", () => {
+  it("shares authored-id remapping with existing character, skill, memory, comment and schedule importers", async () => {
+    const payload = memorySnapshot()
+    const date = "2026-10-21T00:00:00.000Z"
+    Object.assign(payload, {
+      projects: [
+        {
+          id: "project_1",
+          name: "Portable workspace",
+          roots: [],
+          knowledgeBase: [],
+          sessionIds: [],
+          sessionCount: 0,
+          messageCount: 0,
+          createdAt: date,
+          updatedAt: date,
+          lastAccessedAt: date,
+        },
+      ],
+      knowledgeBases: [{ id: "portable-kb", name: "Sources", createdAt: 1, updatedAt: 1 }],
+      workflows: [
+        {
+          id: "portable-workflow",
+          name: "Definition",
+          schemaVersion: 1,
+          nodes: [],
+          edges: [],
+          settings: {},
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      characters: [
+        {
+          id: "portable-character",
+          name: "Reader",
+          systemPrompt: "Read",
+          avatarColor: "blue",
+          knowledgeBaseIds: ["portable-kb"],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      skills: [
+        {
+          id: "portable-skill",
+          name: "Run",
+          kind: "workflow",
+          workflowId: "portable-workflow",
+          content: "",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      contextComments: [
+        {
+          id: "portable-comment",
+          resourceKind: "project-file",
+          resourceId: "README.md",
+          projectId: "project_1",
+          anchor: { kind: "resource" },
+          authorId: "author",
+          authorName: "Author",
+          content: "Keep",
+          createdAt: 1,
+          reactions: [],
+        },
+      ],
+      scheduledTasks: [
+        {
+          id: "portable-schedule",
+          name: "Paused task",
+          type: "backup",
+          trigger: "{}",
+          eventType: "",
+          config: "{}",
+          notification: "{}",
+          createdBySource: "user",
+          projectId: "project_1",
+          status: "paused",
+          runCount: 0,
+          successCount: 0,
+          failureCount: 0,
+          createdAt: date,
+          updatedAt: date,
+        },
+      ],
+    })
+    const options = { mergeStrategy: "skip" as const, includeSessions: false, includeApiKey: false }
+    await applyBackupPackage(pkg(payload), options)
+    await applyBackupPackage(pkg(payload), { ...options, mergeStrategy: "duplicate" })
+    const db = getDb()
+    const project = (await db.projects.toArray()).find(
+      (row) => row.name === "Portable workspace" && row.id !== "project_1"
+    )!
+    expect(project).toBeDefined()
+    const character = (await db.characters.toArray()).find(
+      (row) => row.id !== "portable-character"
+    )!
+    expect(character.knowledgeBaseIds?.[0]).not.toBe("portable-kb")
+    expect(await db.knowledgeBases.get(character.knowledgeBaseIds![0])).toBeDefined()
+    const skill = (await db.skills.toArray()).find((row) => row.id !== "portable-skill")!
+    expect(skill.workflowId).not.toBe("portable-workflow")
+    expect(await db.workflows.get(skill.workflowId!)).toBeDefined()
+    expect((await db.memories.toArray()).find((row) => row.id !== "mem_1")?.projectId).toBe(
+      project.id
+    )
+    expect(
+      (await db.contextComments.toArray()).find((row) => row.id !== "portable-comment")?.projectId
+    ).toBe(project.id)
+    expect(
+      (await db.scheduledTasks.toArray()).find((row) => row.id !== "portable-schedule")?.projectId
+    ).toBe(project.id)
+  })
+
   function memorySnapshot(): BackupPayloadV3 {
     return {
       memories: [

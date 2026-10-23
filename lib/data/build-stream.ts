@@ -1,3 +1,8 @@
+import {
+  exportAuthoredContent,
+  portableSessionReferences,
+  type AuthoredIdMaps,
+} from "./authored-content"
 import { PROFILE_STORE_SCHEMA_VERSION } from "@cognia/provider-types"
 import { isPortableVideoJob } from "@/lib/db/media-generation-jobs"
 import { COGSET_STATE_ID } from "@/types/plugin/plugin-cogset"
@@ -90,6 +95,12 @@ export async function* buildBackupSections(
   const includeSettings = options.includeSettings ?? true
   const includeLocalStorage = options.includeLocalStorage ?? true
 
+  const authoredMembership: AuthoredIdMaps = {}
+  yield* exportAuthoredContent(db, options, {
+    membership: authoredMembership,
+    pageSize: extras.pageSize,
+  })
+
   if (includeSettings) {
     const settingsRow = await getSettings()
     const settings = options.includeApiKey ? { ...settingsRow } : deepStripSecrets(settingsRow)
@@ -100,15 +111,14 @@ export async function* buildBackupSections(
     yield* tableSections("characters", db.characters, iterate, (row) =>
       includeBuiltIns ? true : !row.isBuiltIn
     )
-    yield* tableSections("skills", db.skills, iterate, (row) =>
-      includeBuiltIns ? true : !row.isBuiltIn
-    )
-    const skillPortable = createBoundedLookup<string, boolean>(async (skillId) => {
-      const skill = await db.skills.get(skillId)
-      return !!skill && (includeBuiltIns || !skill.isBuiltIn)
+    const portableSkillIds = new Set<string>()
+    yield* tableSections("skills", db.skills, iterate, (row) => {
+      if (!includeBuiltIns && row.isBuiltIn) return false
+      portableSkillIds.add(row.id)
+      return true
     })
     yield* tableSections("skillResources", db.skillResources, iterate, (row) =>
-      skillPortable(row.skillId)
+      portableSkillIds.has(row.skillId)
     )
     yield* tableSections("teams", db.teams, iterate, (row) =>
       includeBuiltIns ? true : !row.isBuiltIn
@@ -212,21 +222,25 @@ export async function* buildBackupSections(
     ? Math.max(1, Math.floor(((extras.maxChunkBytes - 256) * 3) / 4))
     : undefined
   if (options.includeSessions) {
-    const sessionPortable = createBoundedLookup<string, boolean>(async (sessionId) => {
-      const session = await db.sessions.get(sessionId)
-      return !!session && isSessionExposed(session, "standard-export")
-    })
-    yield* tableSections("sessions", db.sessions, iterate, (row) =>
-      isSessionExposed(row, "standard-export")
+    // Pin parent membership to rows actually emitted, not later live reads.
+    // A new conversation may be created while the sink encrypts/writes a page.
+    yield* tableSections(
+      "sessions",
+      db.sessions,
+      iterate,
+      (row) => {
+        if (!isSessionExposed(row, "standard-export")) return false
+        portableSessionIds.add(row.id)
+        return true
+      },
+      (row) => portableSessionReferences(row, authoredMembership)
     )
-    yield* tableSections("messages", db.messages, iterate, (row) => sessionPortable(row.sessionId))
+    yield* tableSections("messages", db.messages, iterate, (row) =>
+      portableSessionIds.has(row.sessionId)
+    )
     yield* tableSections("sessionState", db.sessionState, iterate, (row) =>
-      sessionPortable(row.sessionId)
+      portableSessionIds.has(row.sessionId)
     )
-    for await (const page of iterate(db.sessions)) {
-      for (const session of page)
-        if (isSessionExposed(session, "standard-export")) portableSessionIds.add(session.id)
-    }
     yield* exportSessionAssetRecords(portableSessionIds, sourceChunkBytes)
   }
 
@@ -245,24 +259,23 @@ export async function* buildBackupSections(
   }
 
   if (includePlugins) {
-    const pluginPortable = createBoundedLookup<string, boolean>(async (pluginId) => {
-      const plugin = await db.plugins.get(pluginId)
-      return !!plugin && (includeBuiltIns || plugin.source !== "builtin")
+    const portablePluginIds = new Set<string>()
+    yield* tableSections("plugins", db.plugins, iterate, (row) => {
+      if (!includeBuiltIns && row.source === "builtin") return false
+      portablePluginIds.add(row.id)
+      return true
     })
-    yield* tableSections("plugins", db.plugins, iterate, (row) =>
-      includeBuiltIns ? true : row.source !== "builtin"
-    )
     yield* tableSections("pluginPermissions", db.pluginPermissions, iterate, (row) =>
-      pluginPortable(row.pluginId)
+      portablePluginIds.has(row.pluginId)
     )
     yield* tableSections("pluginReviews", db.pluginReviews, iterate, (row) =>
-      pluginPortable(row.pluginId)
+      portablePluginIds.has(row.pluginId)
     )
     yield* tableSections("pluginAnalytics", db.pluginAnalytics, iterate, (row) =>
-      pluginPortable(row.pluginId)
+      portablePluginIds.has(row.pluginId)
     )
     yield* tableSections("pluginInstallOrigins", db.pluginInstallOrigins, iterate, (row) =>
-      pluginPortable(row.pluginId)
+      portablePluginIds.has(row.pluginId)
     )
     // Cogsets name built-ins too, so they travel whole, minus this host's
     // last activation result (ADR-0209).
@@ -333,13 +346,14 @@ async function* tableSections<T, TKey>(
   section: string,
   table: PagedReadable<T, TKey>,
   iterate: <TRow, TPrimaryKey>(source: PagedReadable<TRow, TPrimaryKey>) => AsyncIterable<TRow[]>,
-  filter?: RowFilter<T>
+  filter?: RowFilter<T>,
+  transform?: (row: T) => T
 ): AsyncIterable<BackupStreamSection> {
   let emitted = false
   for await (const page of iterate(table)) {
     const rows: T[] = []
     for (const row of page) {
-      if (!filter || (await filter(row))) rows.push(row)
+      if (!filter || (await filter(row))) rows.push(transform ? transform(row) : row)
     }
     if (rows.length > 0) {
       emitted = true
@@ -347,19 +361,4 @@ async function* tableSections<T, TKey>(
     }
   }
   if (!emitted) yield { section, rows: [] }
-}
-
-function createBoundedLookup<TKey, TValue>(
-  load: (key: TKey) => Promise<TValue>,
-  maxEntries = 1_024
-): (key: TKey) => Promise<TValue> {
-  const cache = new Map<TKey, TValue>()
-  return async (key) => {
-    const cached = cache.get(key)
-    if (cached !== undefined) return cached
-    const value = await load(key)
-    cache.set(key, value)
-    if (cache.size > maxEntries) cache.delete(cache.keys().next().value as TKey)
-    return value
-  }
 }

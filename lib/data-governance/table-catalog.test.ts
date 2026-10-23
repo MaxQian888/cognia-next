@@ -150,6 +150,25 @@ describe("DataTableCatalog", () => {
   })
 
   it("binds every portable table to a versioned backup field", () => {
+    expect(PORTABLE_BACKUP_BINDINGS).toMatchObject({
+      projects: "projects",
+      sessionFolders: "sessionFolders",
+      workflowFolders: "workflowFolders",
+      workflows: "workflows",
+      workflowVersions: "workflowVersions",
+      knowledgeBases: "knowledgeBases",
+      knowledgeBaseSources: "knowledgeBaseSources",
+      knowledgeNotes: "knowledgeNotes",
+      labels: "labels",
+      issueProjects: "issueProjects",
+      issueCycles: "issueCycles",
+      issues: "issues",
+      issueEvents: "issueEvents",
+      issueCounters: "issueCounters",
+      agentTeams: "agentTeams",
+      agentTeammates: "agentTeammates",
+      agentTeamTasks: "agentTeamTasks",
+    })
     expect(new Set(Object.keys(PORTABLE_BACKUP_BINDINGS))).toEqual(PORTABLE_BACKUP_TABLES)
     expect(PORTABLE_BACKUP_BINDINGS.contextComments).toBe("contextComments")
     expect(PORTABLE_BACKUP_BINDINGS.providerProfiles).toBe("providerProfileStore")

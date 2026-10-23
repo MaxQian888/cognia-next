@@ -10,12 +10,19 @@
 import { nanoid } from "nanoid"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { isTauri, transport } from "@/lib/tauri"
+import { withBackupLock } from "./backup-write-lock"
 
 const WEB_BACKUP_KEY_STORAGE = "cognia-backup-encryption-key-v1"
 const DESKTOP_STORE_FILE = "cognia-backup-key.json"
 const DESKTOP_STORE_KEY = "backup.encryption.key.v1"
 const SERVER_SECRET_NAMESPACE = "backup"
 const SERVER_SECRET_KEY = "encryption.key.v1"
+const INSTALL_STORE_FILE = "cognia-install-key.json"
+const INSTALL_KEY = "install.encryption.key.v1"
+const WEB_INSTALL_KEY_STORAGE = "cognia-install-encryption-key-v1"
+// A native cache entry alone is not evidence of a completed disk migration.
+const pendingInstallRoots = new Set<string>()
+const committedInstallRoots = new Set<string>()
 
 function generateKeyMaterial(): string {
   if (typeof globalThis.crypto?.randomUUID === "function") {
@@ -80,11 +87,95 @@ export async function getDefaultBackupPassphrase(): Promise<string | null> {
 }
 
 /**
+ * Stable root for existing local credentials. Adopt the pre-rotation backup
+ * key once so old plugin/vault ciphertext stays readable without rewriting it.
+ * This slot is never rotated or exported with backup data. Persisting it must
+ * succeed before backup rotation may replace the old shared material.
+ */
+async function installEncryptionPassphrase(allowDesktopFallback: boolean): Promise<string | null> {
+  return withBackupLock("install-encryption-key", async () => {
+    if (isHeadlessHost()) {
+      const input = { namespace: SERVER_SECRET_NAMESPACE, key: INSTALL_KEY }
+      const existing = await transport.call<string | null>("secret_store_get", { input })
+      if (existing) return existing
+      const original = await getDefaultBackupPassphrase()
+      if (!original) return null
+      await transport.call("secret_store_set", { input: { ...input, value: original } })
+      return original
+    }
+    if (typeof window === "undefined") return null
+    if (isTauri()) {
+      let legacyMaterial: string | undefined
+      let establishedRoot = false
+      try {
+        const { LazyStore } = await import("@tauri-apps/plugin-store")
+        // A failed save must not truncate the only copy of the legacy root.
+        const store = new LazyStore(INSTALL_STORE_FILE, { autoSave: false })
+        const existing = await store.get<string>(INSTALL_KEY)
+        if (existing && !pendingInstallRoots.has(existing)) {
+          establishedRoot = true
+          // Store.set mutates a shared native cache even when save fails.
+          // Only an explicit disk reload establishes that this root is durable.
+          try {
+            await store.reload({ ignoreDefaults: true })
+            const persisted = await store.get<string>(INSTALL_KEY)
+            if (!persisted) throw new Error("Install encryption key is missing from its store")
+            committedInstallRoots.add(persisted)
+            return persisted
+          } catch (error) {
+            // A transient disk error must never re-adopt the rotated backup key.
+            if (allowDesktopFallback && committedInstallRoots.has(existing)) return existing
+            throw error
+          }
+        }
+        const legacyStore = new LazyStore(DESKTOP_STORE_FILE)
+        // Never permanently pin a browser fallback after a native read error.
+        let nativeOriginal = await legacyStore.get<string>(DESKTOP_STORE_KEY)
+        if (nativeOriginal) {
+          await legacyStore.reload({ ignoreDefaults: true })
+          nativeOriginal = await legacyStore.get<string>(DESKTOP_STORE_KEY)
+        }
+        const durableOriginal =
+          nativeOriginal ??
+          localStorage.getItem(WEB_INSTALL_KEY_STORAGE) ??
+          localStorage.getItem(WEB_BACKUP_KEY_STORAGE) ??
+          undefined
+        const original = durableOriginal ?? generateKeyMaterial()
+        legacyMaterial = durableOriginal
+        pendingInstallRoots.add(original)
+        await store.set(INSTALL_KEY, original)
+        await store.save()
+        pendingInstallRoots.delete(original)
+        if (existing) pendingInstallRoots.delete(existing)
+        committedInstallRoots.add(original)
+        return original
+      } catch (error) {
+        if (!allowDesktopFallback || establishedRoot) throw error
+        if (legacyMaterial) return legacyMaterial
+        // Preserve the existing read/write fallback during plugin outages,
+        // without claiming a native migration or allowing backup rotation.
+      }
+    }
+    const existing = localStorage.getItem(WEB_INSTALL_KEY_STORAGE)
+    if (existing) return existing
+    const original = await getDefaultBackupPassphrase()
+    if (!original) return null
+    localStorage.setItem(WEB_INSTALL_KEY_STORAGE, original)
+    return original
+  })
+}
+
+export function getInstallEncryptionPassphrase(): Promise<string | null> {
+  return installEncryptionPassphrase(true)
+}
+
+/**
  * Replace the auto-key with a fresh value. Useful when the user wants to
  * "rotate" their backup encryption — old files become unreadable with the
  * new key (custom-passphrase files are unaffected).
  */
 export async function rotateBackupKey(): Promise<string | null> {
+  if (!(await installEncryptionPassphrase(false))) return null
   const generated = generateKeyMaterial()
   if (isHeadlessHost()) {
     await transport.call("secret_store_set", {
@@ -98,15 +189,11 @@ export async function rotateBackupKey(): Promise<string | null> {
   }
   if (typeof window === "undefined") return null
   if (isTauri()) {
-    try {
-      const { LazyStore } = await import("@tauri-apps/plugin-store")
-      const store = new LazyStore(DESKTOP_STORE_FILE)
-      await store.set(DESKTOP_STORE_KEY, generated)
-      await store.save()
-      return generated
-    } catch {
-      // Fall through to web behavior.
-    }
+    const { LazyStore } = await import("@tauri-apps/plugin-store")
+    const store = new LazyStore(DESKTOP_STORE_FILE)
+    await store.set(DESKTOP_STORE_KEY, generated)
+    await store.save()
+    return generated
   }
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(WEB_BACKUP_KEY_STORAGE, generated)
@@ -141,6 +228,9 @@ export async function clearBackupKey(): Promise<void> {
 
 export const __TESTING__ = {
   WEB_BACKUP_KEY_STORAGE,
+  WEB_INSTALL_KEY_STORAGE,
+  INSTALL_KEY,
+  INSTALL_STORE_FILE,
   DESKTOP_STORE_FILE,
   DESKTOP_STORE_KEY,
   SERVER_SECRET_NAMESPACE,

@@ -81,6 +81,7 @@ export async function restoreFromWebDav(opts: RestoreOptions): Promise<RestoreFr
     mergeStrategy: opts.mergeStrategy,
     includeSessions: opts.includeSessions ?? true,
     includeApiKey: opts.includeApiKey ?? false,
+    retrievalDekPassphrase: opts.passphrase,
   })
 
   // The passphrase just proved itself — cache it so auto-uploads can fire this

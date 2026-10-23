@@ -455,6 +455,24 @@ export type CoreTableName = (typeof CORE_TABLE_NAMES)[number]
  * validated/redacted document. Secret-bearing tables are deliberately absent;
  * legacy packages carrying their old optional fields remain importable. */
 export const PORTABLE_BACKUP_BINDINGS = {
+  projects: "projects",
+  sessionFolders: "sessionFolders",
+  workflowFolders: "workflowFolders",
+  knowledgeBases: "knowledgeBases",
+  knowledgeBaseSources: "knowledgeBaseSources",
+  knowledgeNotes: "knowledgeNotes",
+  labels: "labels",
+  issueProjects: "issueProjects",
+  issueCycles: "issueCycles",
+  issues: "issues",
+  issueEvents: "issueEvents",
+  issueCounters: "issueCounters",
+  agentTeams: "agentTeams",
+  agentTeammates: "agentTeammates",
+  agentTeamTasks: "agentTeamTasks",
+  workflows: "workflows",
+  workflowVersions: "workflowVersions",
+
   settings: "settings",
   characters: "characters",
   skills: "skills",
