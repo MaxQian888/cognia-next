@@ -33,6 +33,8 @@ export interface HostRuntimeSnapshot {
    * old to declare one.
    */
   hostStateScope?: { accountId: string; runtimeTargetId: string }
+  /** The Host is the caller's own person brain (P5d); see the manifest field. */
+  personPartition?: true
 }
 
 export interface RuntimeSnapshot {

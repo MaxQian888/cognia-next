@@ -868,6 +868,28 @@ describe("hostStateScope", () => {
   })
 })
 
+describe("personPartition", () => {
+  it("is declared only by a person brain and survives the wire", () => {
+    expect("personPartition" in buildLocalHostFeatureManifest({ platform: "headless" })).toBe(false)
+    const parsed = parseHostFeatureManifest(
+      JSON.parse(
+        JSON.stringify(
+          buildLocalHostFeatureManifest({ platform: "headless", personPartition: true })
+        )
+      )
+    )
+    expect(parsed?.schemaVersion === 2 ? parsed.personPartition : undefined).toBe(true)
+  })
+
+  it.each([false, "yes", 1])("rejects a manifest declaring personPartition %p", (value) => {
+    const wire = JSON.parse(
+      JSON.stringify(buildLocalHostFeatureManifest({ platform: "headless" }))
+    ) as Record<string, unknown>
+    wire.personPartition = value
+    expect(parseHostFeatureManifest(wire)).toBeNull()
+  })
+})
+
 describe("workspace.task-workspace", () => {
   // The plane had no descriptor at all. Both hosts dispatched every arm, and
   // `resolveOperationAvailability` still answered `operation-unavailable`, so a

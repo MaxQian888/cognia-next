@@ -2195,6 +2195,7 @@ async function hostFeatureManifest(
           ? payload.authoritativeHostId
           : `local-${platform}`,
       hostStateScope: { accountId: active.accountId, runtimeTargetId: active.targetId },
+      personPartition: true,
       deviceGrants,
     })
     // These are execution surfaces, unavailable in a data-only person brain.

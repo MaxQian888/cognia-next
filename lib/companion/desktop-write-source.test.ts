@@ -583,12 +583,14 @@ describe("P5d partition HostState adapter", () => {
       true
     )) as {
       hostStateScope: unknown
+      personPartition?: unknown
       operations: { name: string; feature: string; healthy: boolean; reason?: string }[]
     }
     expect(manifest.hostStateScope).toEqual({
       accountId: "local-default",
       runtimeTargetId: "target-a",
     })
+    expect(manifest.personPartition).toBe(true)
     const execution = manifest.operations.filter(
       (operation) =>
         operation.feature === "claude.host-tools" ||

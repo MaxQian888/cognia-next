@@ -417,12 +417,13 @@ async fn execute_admitted(state: &SharedState, request: ExecutionRequest,
         return Err(error);
     }
     authorize_approval(&request, descriptor)?;
+    let (input, plane) = partition_unleased_input(&request, descriptor);
     validate_contract_value(
         &request.request_id,
         &request.command,
-        &request.args,
+        input.as_ref().unwrap_or(&request.args),
         cognia_headless_contract::ContractDirection::Input,
-        contract_plane_for(&request.principal.scope),
+        plane,
     )?;
 
     if !crate::jwt::is_service_scope(Some(request.principal.scope.as_ref())) {
@@ -631,6 +632,28 @@ async fn execute_host_semantic_request(
 /// service-scope arguments untouched, so the two planes accept different — and
 /// both correct — request shapes. Validating everything against the service
 /// shape rejected every device `git_*` request with 422 before dispatch.
+/// The device plane requires `adminLease` on every interactive command, and a
+/// partitioned person-host-state submit is exempt from the lease
+/// (`authorize_approval`). Its body is validated as the un-leased shape the
+/// service plane publishes, without any lease a client still attached (the
+/// brain strips that field anyway). Every other request is unchanged.
+fn partition_unleased_input(
+    request: &ExecutionRequest,
+    descriptor: &CommandDescriptor,
+) -> (Option<Value>, cognia_headless_contract::ContractPlane) {
+    if descriptor.approval != CommandApproval::Interactive
+        || partition_host_state_capability(&descriptor.arm).is_none()
+    {
+        return (None, contract_plane_for(&request.principal.scope));
+    }
+    let mut input = request.args.clone();
+    if let Some(map) = input.as_object_mut() {
+        map.remove("adminLease");
+        map.remove("admin_lease");
+    }
+    (Some(input), cognia_headless_contract::ContractPlane::Service)
+}
+
 fn contract_plane_for(scope: &str) -> cognia_headless_contract::ContractPlane {
     if crate::jwt::is_service_scope(Some(scope.as_ref())) {
         cognia_headless_contract::ContractPlane::Service
@@ -1335,6 +1358,26 @@ mod tests {
                 assert_eq!(authorize_approval(&request, descriptor).unwrap_err().code, "interactive_approval_required");
             } else { assert!(authorize_approval(&request, descriptor).is_ok()); }
         }
+    }
+
+    #[tokio::test]
+    async fn p5d_partition_submit_validates_the_unleased_shape_only_in_a_partition() {
+        let descriptor = super::super::command_manifest::descriptor("host_state_submit").unwrap();
+        let mut request = execution_request("device", Some(vec!["client.write".into()]));
+        request.command = "host_state_submit".into();
+        request.args = json!({"accountId":"a", "adminLease":"lease"});
+        let (input, plane) = partition_unleased_input(&request, descriptor);
+        assert!(input.is_none());
+        assert_eq!(plane, cognia_headless_contract::ContractPlane::Device);
+        let partition = super::super::person_partition::PersonPartition::new("org".into(), "user".into());
+        super::super::person_partition::scope(Some(partition), async {
+            let (input, plane) = partition_unleased_input(&request, descriptor);
+            assert_eq!(input, Some(json!({"accountId":"a"})));
+            assert_eq!(plane, cognia_headless_contract::ContractPlane::Service);
+            // A non-interactive partition arm keeps its own plane.
+            let status = super::super::command_manifest::descriptor("host_state_status").unwrap();
+            assert!(partition_unleased_input(&request, status).0.is_none());
+        }).await;
     }
 
     #[test]

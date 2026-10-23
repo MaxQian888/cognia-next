@@ -211,6 +211,13 @@ export interface HostFeatureManifestV2 extends HostFeatureManifestBase {
     accountId: string
     runtimeTargetId: string
   }
+  /**
+   * Present (and only ever `true`) when this manifest is served by the
+   * caller's own person brain on a multi-tenant Host (plan §9a, P5d). Its
+   * HostState submits need no Host admin lease: they change only the
+   * caller's own data, and the Host exempts them from interactive approval.
+   */
+  personPartition?: true
   protocol: {
     min: number
     max: number
@@ -472,6 +479,7 @@ export function buildLocalHostFeatureManifest({
   platform,
   hostId = `local-${platform}`,
   hostStateScope,
+  personPartition,
   deviceGrants = [...DEFAULT_COMPANION_DEVICE_GRANTS],
   operationHealth = {},
 }: {
@@ -479,6 +487,7 @@ export function buildLocalHostFeatureManifest({
   platform: Platform
   hostId?: string
   hostStateScope?: { accountId: string; runtimeTargetId: string }
+  personPartition?: true
   deviceGrants?: string[]
   operationHealth?: Readonly<Record<string, HostOperationHealth>>
 }): HostFeatureManifestV2 {
@@ -935,6 +944,7 @@ export function buildLocalHostFeatureManifest({
       kind: platform === "headless" ? "cloud" : "desktop",
     },
     ...(hostStateScope ? { hostStateScope } : {}),
+    ...(personPartition ? { personPartition } : {}),
     protocol: {
       min: HOST_PROTOCOL_MIN_VERSION,
       max: HOST_PROTOCOL_MAX_VERSION,
@@ -1069,6 +1079,7 @@ export function parseHostFeatureManifest(value: unknown): HostFeatureManifest | 
           v2.hostStateScope.accountId.length === 0 ||
           typeof v2.hostStateScope.runtimeTargetId !== "string" ||
           v2.hostStateScope.runtimeTargetId.length === 0)) ||
+      (v2.personPartition !== undefined && v2.personPartition !== true) ||
       typeof protocolMin !== "number" ||
       typeof protocolMax !== "number" ||
       !Number.isSafeInteger(protocolMin) ||
