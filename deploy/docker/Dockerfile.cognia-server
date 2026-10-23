@@ -133,6 +133,7 @@ COPY sidecar/codeserver-agent-ext/tests/fixtures/session-key.vector sidecar/code
 COPY docs/api/mobile-companion-api.openapi.yaml docs/api/headless-service-api.openapi.yaml ./docs/api/
 COPY packages/plugin-contract/contract ./packages/plugin-contract/contract
 COPY packages/logging/src/schemas/observability-event-v1.schema.json ./packages/logging/src/schemas/observability-event-v1.schema.json
+COPY packages/companion-client/src/browser-agent-protocol.json ./packages/companion-client/src/browser-agent-protocol.json
 COPY protocol ./protocol
 COPY scripts/plugin/node-plugin-host.mjs ./scripts/plugin/node-plugin-host.mjs
 # cognia-github-runner embeds the runner definition it installs.
@@ -187,6 +188,7 @@ COPY sidecar/codeserver-agent-ext/tests/fixtures/session-key.vector sidecar/code
 COPY docs/api/mobile-companion-api.openapi.yaml docs/api/headless-service-api.openapi.yaml ./docs/api/
 COPY packages/plugin-contract/contract ./packages/plugin-contract/contract
 COPY packages/logging/src/schemas/observability-event-v1.schema.json ./packages/logging/src/schemas/observability-event-v1.schema.json
+COPY packages/companion-client/src/browser-agent-protocol.json ./packages/companion-client/src/browser-agent-protocol.json
 COPY protocol ./protocol
 COPY scripts/plugin/node-plugin-host.mjs ./scripts/plugin/node-plugin-host.mjs
 # cognia-github-runner embeds the runner definition it installs.
@@ -232,10 +234,7 @@ COPY mobile/package.json ./mobile/package.json
 COPY web/package.json ./web/package.json
 COPY cli/package.json ./cli/package.json
 COPY services/workspace-runtime/package.json ./services/workspace-runtime/package.json
-# WXT's workspace postinstall needs its configuration and entrypoints, and
-# its tsconfig extends the root one.
 COPY tsconfig.json ./
-COPY browser-extension ./browser-extension
 COPY scripts/postinstall.mjs ./scripts/postinstall.mjs
 RUN pnpm install --frozen-lockfile --offline
 COPY sidecar/package.json sidecar/pnpm-lock.yaml sidecar/pnpm-workspace.yaml ./sidecar/

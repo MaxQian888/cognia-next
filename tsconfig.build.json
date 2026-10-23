@@ -21,7 +21,7 @@
     "**/*.mts"
   ],
   "exclude": [
-    "browser-extension",
+    ".cache",
     "node_modules",
     "docs",
     "web",

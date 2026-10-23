@@ -205,7 +205,7 @@
     ".next\\dev/types/**/*.ts"
   ],
   "exclude": [
-    "browser-extension",
+    ".cache",
     "node_modules",
     "docs",
     "web",

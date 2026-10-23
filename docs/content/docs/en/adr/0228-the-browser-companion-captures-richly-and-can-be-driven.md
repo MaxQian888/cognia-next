@@ -5,6 +5,9 @@ description: "Supersedes ADR-0154 §1, §2 and §11. The extension captures read
 
 # ADR 0228 — The Browser Companion captures richly and can be driven
 
+Repository ownership (2026-10-23): the complete extension and its Chromium tests now live in [cognia-labs/cognia-browser-extension](https://github.com/cognia-labs/cognia-browser-extension). The Host and pinned consumer-compatibility CI remain in this product repository. Extension source paths below refer to that standalone checkout.
+
+
 **Status:** Accepted
 **Date:** 2026-10-16
 **Supersedes:** ADR-0154 §1 (hands over, never drives), §2 (two capabilities), §11 (polling only while visible)

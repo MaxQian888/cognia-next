@@ -113,6 +113,7 @@ if (process.env.CI || process.env.JEST_JUNIT_OUTPUT_NAME) {
 // built-in `--test` runner (see `pnpm sidecar:test`), not Jest. The two test
 // surfaces have different setup expectations and should not be run together.
 const baseTestPathIgnorePatterns = [
+  "<rootDir>/.cache/",
   "/node_modules/",
   "/.next/",
   "/out/",
@@ -222,9 +223,6 @@ const projectCommon: Config = {
     "^@cognia/security-findings(.*)$": "<rootDir>/packages/security-findings/src$1",
     "^@cognia/plugin-contract(.*)$": "<rootDir>/packages/plugin-contract/src$1",
     "^@cognia/companion-client(.*)$": "<rootDir>/packages/companion-client/src$1",
-    // The browser extension's own alias. `@ext/*`, never `@/*`: that
-    // workspace is built separately and cannot resolve the repo-root alias.
-    "^@ext/(.*)$": "<rootDir>/browser-extension/$1",
     "^@cognia/redact(.*)$": "<rootDir>/packages/redact/src$1",
     "^@cognia/web-search(.*)$": "<rootDir>/packages/web-search/src$1",
     "^@cognia/tts(.*)$": "<rootDir>/packages/tts/src$1",

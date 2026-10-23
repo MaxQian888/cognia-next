@@ -205,22 +205,22 @@ Major architecture decisions are recorded in [`docs/content/docs/en/adr/`](./doc
 
 Run development commands from the repository root. This table lists common commands; each inline code item is a separate command. Run one frontend launch path at a time: desktop development and `dev:web-headless` already start the app server.
 
-| Task                         | Commands                                                                                                |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------- |
-| App                          | `pnpm dev`, `pnpm build`, `pnpm start`, `pnpm lint`, `pnpm format`, `pnpm typecheck`                    |
-| Unit tests                   | `pnpm test`, `pnpm test:watch`; run `pnpm test:coverage` only when a coverage check is requested        |
-| Desktop                      | `pnpm tauri dev`, `pnpm tauri build`, `pnpm tauri info`                                                 |
-| Headless and browser hosts   | `pnpm dev:headless`, `pnpm dev:web-headless`, `pnpm dev:workspace-runtime`                              |
-| Standalone CLI               | `pnpm cli:dev chat`, `pnpm cli:build`, `pnpm cli:test`, `pnpm cli:api:check`                            |
-| Mobile build and sync        | `pnpm mobile:sync:ios`, `pnpm mobile:sync:android`                                                      |
-| Mobile IDE                   | `pnpm mobile:open:ios`, `pnpm mobile:open:android`                                                      |
-| Android development and APKs | `pnpm mobile:dev:android`, `pnpm mobile:build:android`, `pnpm mobile:deploy`, `pnpm mobile:deploy:fast` |
-| Docs, port 3001              | `pnpm docs:dev`, `pnpm docs:build`                                                                      |
-| Product website, port 3002   | `pnpm web:dev`, `pnpm web:build`                                                                        |
-| Chrome/Edge extension        | `pnpm browser-ext:build`                                                                                |
-| Sidecars                     | `pnpm sidecars:install`, `pnpm sidecar:start`, `pnpm sidecar:test`, `pnpm sidecars:build`               |
-| E2E                          | `pnpm test:e2e`, `pnpm test:e2e:workflows`, `pnpm test:e2e:mobile`, `pnpm test:e2e:tauri`               |
-| Repository checks            | `pnpm audit:slots`, `pnpm i18n:build:check`, `pnpm lint:i18n`, `pnpm webrtc:smoke`                      |
+| Task                         | Commands                                                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| App                          | `pnpm dev`, `pnpm build`, `pnpm start`, `pnpm lint`, `pnpm format`, `pnpm typecheck`                        |
+| Unit tests                   | `pnpm test`, `pnpm test:watch`; run `pnpm test:coverage` only when a coverage check is requested            |
+| Desktop                      | `pnpm tauri dev`, `pnpm tauri build`, `pnpm tauri info`                                                     |
+| Headless and browser hosts   | `pnpm dev:headless`, `pnpm dev:web-headless`, `pnpm dev:workspace-runtime`                                  |
+| Standalone CLI               | `pnpm cli:dev chat`, `pnpm cli:build`, `pnpm cli:test`, `pnpm cli:api:check`                                |
+| Mobile build and sync        | `pnpm mobile:sync:ios`, `pnpm mobile:sync:android`                                                          |
+| Mobile IDE                   | `pnpm mobile:open:ios`, `pnpm mobile:open:android`                                                          |
+| Android development and APKs | `pnpm mobile:dev:android`, `pnpm mobile:build:android`, `pnpm mobile:deploy`, `pnpm mobile:deploy:fast`     |
+| Docs, port 3001              | `pnpm docs:dev`, `pnpm docs:build`                                                                          |
+| Product website, port 3002   | `pnpm web:dev`, `pnpm web:build`                                                                            |
+| Chrome/Edge extension        | [Standalone extension commands](https://github.com/cognia-labs/cognia-browser-extension#develop-and-verify) |
+| Sidecars                     | `pnpm sidecars:install`, `pnpm sidecar:start`, `pnpm sidecar:test`, `pnpm sidecars:build`                   |
+| E2E                          | `pnpm test:e2e`, `pnpm test:e2e:workflows`, `pnpm test:e2e:mobile`, `pnpm test:e2e:tauri`                   |
+| Repository checks            | `pnpm audit:slots`, `pnpm i18n:build:check`, `pnpm lint:i18n`, `pnpm webrtc:smoke`                          |
 
 See [`package.json`](./package.json) for the complete script list.
 
@@ -248,7 +248,6 @@ cognia-next/
 ├── packages/             Shared SDKs and business packages (agent, plugin-sdk, provider-*)
 ├── crates/               Rust hosts, protocols, security, and runtimes
 ├── cli/                  cognia-agent standalone terminal / headless agent
-├── browser-extension/    Chrome/Edge page companion
 ├── web/                  Product website (workspace package, port 3002)
 ├── i18n/                  next-intl request + messages (en, zh-CN)
 ├── src-tauri/             Tauri 2 Rust core (axum HTTP, scheduler, automation, OCR, …)
@@ -337,7 +336,7 @@ Follow the project rules in [`AGENTS.md`](./AGENTS.md) and the development guida
 - **Standalone agent CLI**: [`cli/README.md`](./cli/README.md)
 - **Agent execution and recovery**: [`unified-agent-execution/`](./docs/content/docs/en/subsystems/unified-agent-execution/)
 - **Mobile workflows**: [`mobile/README.md`](./mobile/README.md)
-- **Browser companion extension**: [`browser-extension/`](./browser-extension/)
+- **Browser companion extension**: [cognia-labs/cognia-browser-extension](https://github.com/cognia-labs/cognia-browser-extension)
 - **Plugin SDK**: [`packages/plugin-sdk/`](./packages/plugin-sdk/)
 - **Working rules**: [`CLAUDE.md`](./CLAUDE.md)
 - **External docs**: [Tauri 2](https://tauri.app/) · [Next.js 16](https://nextjs.org/docs) · [shadcn/ui](https://ui.shadcn.com/) · [Capacitor](https://capacitorjs.com/docs) · [Fumadocs](https://fumadocs.dev/)

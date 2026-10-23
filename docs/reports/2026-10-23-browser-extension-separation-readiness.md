@@ -1,5 +1,7 @@
 # Browser Companion hardening and separation readiness
 
+Historical hardening receipt: the later authorized extraction is tracked in [repository ownership](../development/browser-extension-extraction.md) and its evidence ledger.
+
 Date: 2026-10-23. Scope: harden the existing workspace before a later repository extraction.
 
 ## Implemented boundaries

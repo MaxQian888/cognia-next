@@ -31,13 +31,6 @@ const eslintConfig = defineConfig([
     // not read .gitignore, so it must be listed explicitly like out/ & docs/out/.
     "storybook-static/**",
     "cli/dist/**",
-    // WXT build products: `.wxt/` is the generated type surface, `build/` and
-    // `.output/` the packed extension. Authored nothing, and `.wxt/` carries
-    // ambient declarations that the app's config has no reason to parse.
-    // (The bare `build/**` above matches only the repo root.)
-    "browser-extension/.wxt/**",
-    "browser-extension/build/**",
-    "browser-extension/.output/**",
     // Playwright emits self-contained HTML reports and trace viewers containing
     // minified third-party bundles. Flat ESLint does not read .gitignore, so a
     // local E2E run must not make the authored-source lint gate fail afterward.

@@ -131,11 +131,20 @@ describe("EntryPoints", () => {
     expect(zh.surfaces.entryPoints.channels).toHaveLength(adapters.length)
   })
 
-  it("quotes the resume command and the capture shortcut from their defining modules", () => {
+  it("quotes the resume command and the capture shortcut from their owning source contracts", () => {
     const args = readFileSync(join(__dirname, "../../../cli/src/cli/args.ts"), "utf8")
     expect(args).toContain('"continue"')
-    const wxt = readFileSync(join(__dirname, "../../../browser-extension/wxt.config.ts"), "utf8")
-    expect(wxt).toContain(CAPTURE_SHORTCUT)
+    // The extension now has its own repository. Keep its shipped manifest as a
+    // versioned product snapshot, matching the standalone website's approach.
+    const extension = JSON.parse(
+      readFileSync(join(__dirname, "../../content/browser-companion-manifest.json"), "utf8")
+    )
+    const pin = JSON.parse(
+      readFileSync(join(__dirname, "../../../integrations/browser-companion.json"), "utf8")
+    )
+    expect(extension.repository).toBe(pin.repository)
+    expect(extension.revision).toBe(pin.revision)
+    expect(extension.manifest.commands["capture-page"].suggested_key.default).toBe(CAPTURE_SHORTCUT)
   })
 
   it("sets the chat platform names in the reading face, not mono", () => {

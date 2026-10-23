@@ -30,7 +30,7 @@ export const HANDOFF_STEP_MS = 1100
 /** The terminal command that resumes the most recent session, from `cli/src/cli/args.ts`. */
 export const CLI_RESUME_COMMAND = "cognia-agent chat --continue"
 
-/** The extension's capture shortcut, from `browser-extension/wxt.config.ts`. */
+/** The extension's capture shortcut, from the pinned Browser Companion manifest snapshot. */
 export const CAPTURE_SHORTCUT = "Alt+Shift+C"
 
 /**

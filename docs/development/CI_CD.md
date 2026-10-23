@@ -125,7 +125,7 @@ that is neither registered nor exempted with a written reason.
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `lint`         | ESLint                                                                                                                                                                                                                                                              |
 | `format`       | Prettier                                                                                                                                                                                                                                                            |
-| `types`        | root `tsc`, Knip, browser-extension typecheck, web-site typecheck                                                                                                                                                                                                   |
+| `types`        | root `tsc`, Knip, web-site typecheck                                                                                                                                                                                                                                |
 | `i18n`         | key parity, hardcoded-string baseline, generated-bundle freshness, deterministic key ordering                                                                                                                                                                       |
 | `artifacts`    | generated files match their sources (`build:packages`, skills, plugin bundles, plugin contract)                                                                                                                                                                     |
 | `audit`        | repo-specific structural audits — slots, trusted publishers, silent-failure flags, PII boundaries, command parity, E2E governance, co-located tests, DB-fixture ratchet, static export, plugin-SDK WIT, plugin author imports, and repository instruction freshness |
@@ -364,7 +364,7 @@ and real-launcher smoke suites are excluded from Jest, not from CI.
 Compiled workspace packages and Webclone output are built once in the Jest
 planner, or restored there on PRs from an exact-source trunk cache entry. Its run-scoped artifact is restored before root installs by Jest shards,
 Linux docs/marketing/Android builds, sidecar tests, production/E2E exports and
-browser-extension E2E. Consumers download from the same workflow run and checkout;
+the app E2E lanes. The standalone browser-extension job installs its own checkout and has no product build prerequisites. Consumers download from the same workflow run and checkout;
 when the plan contains no Jest suites, they build their own prerequisites normally.
 The production and E2E static exports remain different artifacts because their
 build flags differ. Playwright consumers share the E2E export, and Windows Rust

@@ -19,7 +19,6 @@
  *   - mobile/android/version.properties (Android display and upgrade versions)
  *   - mobile/ios/App/App.xcodeproj/project.pbxproj (App target versions)
  *   - docs/package.json
- *   - browser-extension/package.json (WXT copies it into the manifest)
  *
  * Deliberately EXCLUDED (they version independently of the app): everything
  * under `services/`, the `crates/cognia-plugin-template*` scaffolds,
@@ -69,9 +68,6 @@ export const TARGETS = [
   { path: "mobile/android/version.properties", kind: "android-properties" },
   { path: "mobile/ios/App/App.xcodeproj/project.pbxproj", kind: "ios-project" },
   { path: "docs/package.json", kind: "json" },
-  // WXT reads the manifest version out of package.json, so the extension
-  // users see and the app it pairs with report the same number.
-  { path: "browser-extension/package.json", kind: "json" },
 ]
 
 const JSON_VERSION_RE = /"version":\s*"([^"]+)"/

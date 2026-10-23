@@ -35,8 +35,8 @@ test("editor selects the native SDK instead of the compatibility API", () => {
 test("workspace and sidecar scripts resolve native tsc instead of a shadowing TS6 binary", () => {
   const workspaces = [
     root,
-    ...["docs", "web", "browser-extension", "mobile", "cli", "services/workspace-runtime"].map(
-      (path) => join(root, path)
+    ...["docs", "web", "mobile", "cli", "services/workspace-runtime"].map((path) =>
+      join(root, path)
     ),
     ...readdirSync(join(root, "packages"), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
