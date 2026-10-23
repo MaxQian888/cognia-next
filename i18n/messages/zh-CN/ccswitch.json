@@ -12,7 +12,7 @@
     "providers": "服务商",
     "skills": "技能"
   },
-  "description": "从本地 CCSwitch 安装中读取服务商、MCP 服务器、提示词与技能。在这里切换服务商会更新 Cognia 自带的 SDK，并可（按需）同步到选中的外部代理。",
+  "description": "读取 CC Switch v4.0.18（schema 21）的供应商、MCP 服务器、提示词及已安装技能。Anthropic 供应商可更新 Cognia 内置 SDK；其他应用协议及托管登录仅供浏览。",
   "dialog": {
     "agentsSection": "同时写入",
     "apiKey": "API 密钥",
@@ -21,7 +21,7 @@
     "bodyFor": "切换至 {name}。请在确认前查看本次变更。",
     "cancel": "取消",
     "close": "关闭",
-    "codexBaseUrlNotPropagated": "不会应用 Base URL",
+    "baseUrlNotPropagated": "不会应用 Base URL",
     "cogniaApplied": "已更新 Cognia。",
     "cogniaSection": "Cognia-next",
     "confirm": "执行切换",
@@ -35,7 +35,9 @@
     "title": "切换服务商",
     "useSubscription": "官方 provider——cognia 将复用你的 Anthropic 订阅（已登录的订阅账号，或本机 Claude Code 登录），而不是 API key。",
     "willRestart": "将重启自带 SDK sidecar 以让新环境变量生效。",
-    "willWrite": "将写入 {count, plural, =1 {1 个代理文件} other {# 个代理文件}}。"
+    "willWrite": "将写入 {count, plural, =1 {1 个代理文件} other {# 个代理文件}}。",
+    "applyFailed": "无法应用切换：{error}",
+    "cogniaNotApplied": "未更新 Cognia。"
   },
   "mcp": {
     "emptyBody": "CCSwitch 的 mcp_servers 表为空。",
@@ -97,7 +99,7 @@
     "headerHint": "CCSwitch 是这些记录的唯一编辑入口 — 添加 / 改名 / 删除请回到 CCSwitch。",
     "importQuota": "导入额度",
     "model": "模型",
-    "officialEndpoint": "Anthropic 官方端点",
+    "officialEndpoint": "默认端点",
     "quotaImportErrorTitle": "未导入额度元数据",
     "quotaImportFailed": "无法保存导入的额度源：{error}",
     "quotaImportReason": {
@@ -111,14 +113,15 @@
     "quotaImportSuccessTitle": "已导入额度元数据",
     "refresh": "刷新",
     "useHere": "在此使用",
-    "useHereAndIn": "在此并同步至…"
+    "useHereAndIn": "在此并同步至…",
+    "unsupportedProtocol": "仅供浏览：此应用使用其他协议或由 CC Switch 管理认证，请在 CC Switch 中切换。"
   },
   "skills": {
     "emptyBody": "CCSwitch 的 skills 表为空。",
     "emptyTitle": "CCSwitch 中没有技能",
     "errorTitle": "无法列出技能",
     "externalBadge": "外部文件",
-    "headerHint": "带有内联内容的技能会成为新的 Cognia 技能；指向外部文件的行（已置灰）需通过「设置 → 技能」单独导入。",
+    "headerHint": "导入已安装的技能包，包括 frontmatter、脚本、参考资料、资源及 Codex 元数据。缺失或不安全的目录无法导入。",
     "importBtn": "导入 {count, plural, =0 {0 项} =1 {1 项} other {# 项}}",
     "importing": "正在导入…",
     "listTitle": "CCSwitch 中的技能",

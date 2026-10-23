@@ -1,8 +1,5 @@
 /**
- * External-agent wire, session and configuration contracts.
- *
- * Owned by `@cognia/agent-contracts` (ADR-0217) so integration packages, the
- * plugin SDK and every host share one definition. This path stays as the
- * compatibility entry for app importers.
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract types.
+ * This re-export keeps host imports of `@/types/agent/external-agent` working.
  */
-export * from "@cognia/agent-contracts/external-agent"
+export * from "@cognia/plugin-contract/types/agent/external-agent"

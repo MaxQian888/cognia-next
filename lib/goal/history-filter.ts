@@ -7,9 +7,8 @@
  */
 
 import type { Goal, GoalStatus } from "@/types/goal"
-
-export type GoalSortKey = "created" | "turns" | "tokens"
-export type SortDir = "asc" | "desc"
+import type { GoalSortKey, SortDir } from "@cognia/plugin-contract/lib/goal/history-filter"
+export type { GoalSortKey, SortDir } from "@cognia/plugin-contract/lib/goal/history-filter"
 
 export interface HistoryFilter {
   /** Case-insensitive substring match against `safeObjective`. */

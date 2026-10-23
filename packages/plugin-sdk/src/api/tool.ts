@@ -8,4 +8,8 @@
 
 export { defineTool } from "../define/define-tool"
 
-export type { PluginTool, PluginToolContext, PluginToolDef } from "@/types/plugin"
+export type {
+  PluginTool,
+  PluginToolContext,
+  PluginToolDef,
+} from "@cognia/plugin-contract/types/plugin/index"

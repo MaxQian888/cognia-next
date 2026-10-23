@@ -33,6 +33,7 @@ import { PassThrough, type Readable } from "node:stream"
 import { createMCPClient } from "@ai-sdk/mcp"
 import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio"
 
+import { mcpToolAllowlistDenies } from "../../policy/permission/ladder.ts"
 import { resolveForToolCall } from "../../policy/permission/resolver.ts"
 import { createLineBuffer, classifyMcpLogLine } from "./log.ts"
 import {
@@ -157,9 +158,11 @@ function isMcpToolPermitted(
   namespaced: string,
   server: string,
   allowSet: ReadonlySet<string> | null,
-  disallowedSet: ReadonlySet<string>
+  disallowedSet: ReadonlySet<string>,
+  serverAllowlist?: unknown
 ) {
   if (disallowedSet.has(namespaced) || disallowedSet.has(`mcp__${server}`)) return false
+  if (mcpToolAllowlistDenies(namespaced, serverAllowlist)) return false
   if (!allowSet || allowSet.size === 0) return true
   return allowSet.has(namespaced) || allowSet.has(`mcp__${server}`)
 }
@@ -202,6 +205,7 @@ export async function buildAiSdkMcpTools({
   reviewToolOutput,
   allowedTools,
   disallowedTools,
+  mcpToolAllowlist,
   log,
   emitMcpLog,
   createClient,
@@ -425,7 +429,8 @@ export async function buildAiSdkMcpTools({
     const collected: McpTools = {}
     for (const [toolName, toolDef] of Object.entries(serverTools ?? {})) {
       const namespaced = `mcp__${server}__${toolName}`
-      if (!isMcpToolPermitted(namespaced, server, allowSet, disallowedSet)) continue
+      if (!isMcpToolPermitted(namespaced, server, allowSet, disallowedSet, mcpToolAllowlist))
+        continue
       collected[namespaced] = wrapMcpToolWithGate(toolDef, namespaced, gate, reviewToolOutput)
     }
     diag(server, "info", `connected · ${Object.keys(collected).length} tool(s) exposed`)

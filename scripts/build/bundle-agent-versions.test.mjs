@@ -28,7 +28,9 @@ import {
   findExecutable,
   isElf,
   parseArgs,
+  prepareBundle,
   readRepoInputs,
+  selectRuntimes,
   shimFor,
   signatureVerdict,
   stage,
@@ -123,8 +125,8 @@ describe("check against the repository", () => {
     const inputs = readRepoInputs()
 
     const node = clone(inputs)
-    node.dockerfile = node.dockerfile.replace("ARG NODE_VERSION=26.8.2", "ARG NODE_VERSION=26.8.1")
-    assert.match(validatePins(node).join("\n"), /ARG NODE_VERSION=26\.8\.1 disagrees with the pin 26\.8\.2/)
+    node.dockerfile = node.dockerfile.replace(`ARG NODE_VERSION=${node.pins.node.version}`, "ARG NODE_VERSION=26.0.0")
+    assert.ok(validatePins(node).some((problem) => problem.includes(`ARG NODE_VERSION=26.0.0 disagrees with the pin ${node.pins.node.version}`)))
 
     const root = clone(inputs)
     root.layoutRs = root.layoutRs.replace('"/cognia"', '"/opt/cognia"')
@@ -208,6 +210,108 @@ describe("manifest and plans", () => {
     assert.ok(versionCommandsFor(pins, "glibc").includes("droid"))
     assert.ok(!versionCommandsFor(pins, "musl").includes("droid"))
     assert.ok(!versionCommandsFor(pins, "glibc").includes("claude-agent-acp"))
+  })
+})
+
+describe("runtime selection", () => {
+  const inputs = readRepoInputs()
+
+  it("selects canonical runtime IDs once in master order and preserves required command packages", () => {
+    const before = clone(inputs.pins)
+    const selected = selectRuntimes(inputs.pins, "pi, claude-agent-acp,pi")
+    assert.deepEqual(selected.runtimes.map(({ id }) => id), ["claude-agent-acp", "pi"])
+    assert.deepEqual(commandsFor(selected, "glibc").map(({ name }) => name), [
+      "claude-agent-acp", "claude", "pi", "pi-acp",
+    ])
+    assert.deepEqual(Object.keys(selected.installScripts), ["@anthropic-ai/claude-code"])
+    assert.deepEqual(inputs.pins, before, "selection does not mutate master pins")
+    assert.deepEqual(
+      buildManifest(selected, { arch: "amd64", releaseTag: "selected" }).runtimes.map(({ id }) => id),
+      ["claude-agent-acp", "pi"]
+    )
+  })
+
+  it("supports explicit full/all compatibility and empty Runner base selection", () => {
+    const available = inputs.pins.runtimes.filter((runtime) => !("unavailable" in runtime))
+    assert.deepEqual(selectRuntimes(inputs.pins, "full").runtimes, available)
+    assert.deepEqual(selectRuntimes(inputs.pins, "all"), selectRuntimes(inputs.pins, "full"))
+    assert.deepEqual(selectRuntimes(inputs.pins, "none").runtimes, [])
+    assert.deepEqual(selectRuntimes(inputs.pins, "none").installScripts, {})
+  })
+
+  it("rejects empty, unknown, unavailable, aliases and mixed reserved selections", () => {
+    for (const value of [undefined, "", " ", ",", "pi,", "all,pi", "none,pi", "full,all"]) {
+      assert.throws(() => selectRuntimes(inputs.pins, value), /selection|runtimes|reserved/)
+    }
+    assert.throws(() => selectRuntimes(inputs.pins, "codex"), /unknown runtime.*codex/)
+    assert.throws(() => selectRuntimes(inputs.pins, "cursor-agent"), /unavailable.*checksum/)
+  })
+
+  it("prepares an offline locked npm closure compatible with npm ci", () => {
+    const out = tempDir()
+    try {
+      const prepared = prepareBundle(inputs, { runtimes: "codex-app-server", out })
+      assert.deepEqual(Object.keys(prepared.packageJson.dependencies), ["@openai/codex"])
+      assert.ok(Object.keys(prepared.lock.packages).length < Object.keys(inputs.lock.packages).length)
+      assert.ok(prepared.lock.packages["node_modules/@openai/codex"])
+      assert.ok(!prepared.lock.packages["node_modules/@google/gemini-cli"])
+      for (const [path, entry] of Object.entries(prepared.lock.packages)) {
+        if (!path) continue
+        for (const field of ["version", "resolved", "integrity"]) {
+          assert.equal(entry[field], inputs.lock.packages[path][field], `${path}.${field}`)
+        }
+      }
+      assert.deepEqual(JSON.parse(readFileSync(join(out, "agent-versions.json"))), prepared.pins)
+      // A dry-run exercises npm ci's lock/package consistency without fetching tarballs.
+      const ci = spawnSync("npm", ["ci", "--dry-run", "--offline", "--ignore-scripts", "--no-audit", "--no-fund"], {
+        cwd: join(out, "npm"), encoding: "utf8",
+      })
+      assert.equal(ci.status, 0, ci.stderr)
+    } finally {
+      rmSync(out, { recursive: true, force: true })
+    }
+  })
+
+  it("includes dependency commands, filters scripts and supports archive-only and empty selections", () => {
+    for (const runtimes of ["claude-agent-acp", "pi", "pi,claude-agent-acp", "kiro-cli", "none", "full", "all"]) {
+      const out = tempDir()
+      try {
+        const prepared = prepareBundle(inputs, { runtimes, out })
+        const packages = new Set(prepared.pins.runtimes.flatMap((runtime) => (runtime.commands ?? []).map(({ package: name }) => name)))
+        assert.deepEqual(Object.keys(prepared.packageJson.dependencies).sort(), [...packages].sort())
+        assert.deepEqual(prepared.lock.packages[""].dependencies ?? {}, prepared.packageJson.dependencies)
+        assert.ok(Object.keys(prepared.pins.installScripts).every((name) => packages.has(name)))
+        if (runtimes === "none" || runtimes === "kiro-cli") {
+          assert.deepEqual(Object.keys(prepared.lock.packages), [""])
+        }
+      } finally {
+        rmSync(out, { recursive: true, force: true })
+      }
+    }
+  })
+
+  it("validates the full master before selection and refuses lock drift from the pruning command", () => {
+    const out = tempDir()
+    try {
+      const bad = clone(inputs)
+      delete bad.lock.packages["node_modules/pi-acp"].integrity
+      assert.throws(() => prepareBundle(bad, { runtimes: "codex-app-server", out }), /pi-acp has no sha512/)
+      for (const field of ["version", "resolved", "integrity"]) {
+        assert.throws(() => prepareBundle(inputs, {
+          runtimes: "codex-app-server", out,
+          run: (_command, _args, { cwd }) => {
+            const lockPath = join(cwd, "package-lock.json")
+            const lock = JSON.parse(readFileSync(lockPath))
+            lock.packages[""].dependencies = { "@openai/codex": inputs.packageJson.dependencies["@openai/codex"] }
+            lock.packages["node_modules/@openai/codex"][field] = "changed"
+            writeFileSync(lockPath, JSON.stringify(lock))
+            return { status: 0 }
+          },
+        }), /changed locked.*@openai\/codex/)
+      }
+    } finally {
+      rmSync(out, { recursive: true, force: true })
+    }
   })
 })
 
@@ -385,6 +489,11 @@ describe("stage", () => {
     const tree = join(root, "opt/cognia", libc)
     const agents = join(tree, "lib/agents/node_modules")
     mkdirSync(join(agents, "@scope/js-cli/dist"), { recursive: true })
+    writeFileSync(join(tree, "lib/agents/package.json"), JSON.stringify({
+      name: "fixture-agents", private: true,
+      dependencies: { "@scope/js-cli": "1.0.0", "native-cli": "2.0.0" },
+      allowScripts: { "unselected-cli": true },
+    }))
     writeFileSync(
       join(agents, "@scope/js-cli/package.json"),
       JSON.stringify({ name: "@scope/js-cli", bin: { js: "dist/cli.js", "js-acp": "dist/acp.js" } })
@@ -447,6 +556,9 @@ describe("stage", () => {
     const rebuild = calls.find((call) => call.command === "npm")
     assert.deepEqual(rebuild.args, ["rebuild", "--foreground-scripts", "native-cli"])
     assert.equal(rebuild.cwd, join(tree, "lib/agents"))
+    const npmManifest = JSON.parse(readFileSync(join(tree, "lib/agents/package.json")))
+    assert.deepEqual(npmManifest.allowScripts, { "native-cli": true })
+    assert.deepEqual(npmManifest.dependencies, { "@scope/js-cli": "1.0.0", "native-cli": "2.0.0" })
 
     assert.equal(
       readFileSync(join(tree, "bin/js"), "utf8"),
@@ -498,6 +610,7 @@ describe("stage", () => {
         const entry = externalNode ? "@github/copilot-linuxmusl-arm64/index.js" : "@github/copilot/npm-loader.js"
         assert.equal(readFileSync(join(tree, "bin/copilot"), "utf8"), `#!/bin/sh\nexec ${injection}/${libc}/node/bin/node ${injection}/${libc}/lib/agents/node_modules/${entry} "$@"\n`)
         assert.deepEqual(calls.at(-1), { command: `${injection}/${libc}/bin/copilot`, args: ["--version"] })
+        assert.ok(!calls.some(({ command }) => command === "npm"), "no rebuild for a selection without allowlisted scripts")
         if (externalNode) {
           rmSync(join(packages, "@github/copilot-linuxmusl-arm64/index.js"))
           await assert.rejects(stage(options), /ENOENT.*index\.js/)

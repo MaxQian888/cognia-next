@@ -43,6 +43,15 @@ beforeEach(() => {
 const engine = () => new LocalChromiumEngine("s1", "local-chromium")
 
 describe("LocalChromiumEngine", () => {
+  it("keeps recording controls page-scoped without evaluating scripts", async () => {
+    const e = new LocalChromiumEngine("s1", "local-chromium", { pageId: "p1" })
+    await e.recordingControl("start")
+    await e.resolveRecordedTarget("#save")
+    expect(mockRpc.mock.calls).toEqual([
+      ["browser.recording.control", { sessionId: "s1", pageId: "p1", action: "start" }],
+      ["browser.recording.ref", { sessionId: "s1", pageId: "p1", selector: "#save" }],
+    ])
+  })
   it("maps the shared BrowserEngine surface onto the runtime op vocabulary", async () => {
     const e = engine()
     await e.navigate("https://a.test")

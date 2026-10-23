@@ -9,6 +9,8 @@ import type { HostExternalAgentConfigsState } from "@/hooks/agent/use-host-exter
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
 
 import { HostAgentCreateForm } from "./host-agent-create-form"
+import { __setRemoteHostConfigDepsForTests } from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
+import type { HostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 
 const onCreated = jest.fn()
 const onCancel = jest.fn()
@@ -57,13 +59,19 @@ jest.mock("@/components/agent/external-agent/cognia-model-picker", () => ({
 jest.mock("@/components/agent/external-agent/role-model-fields", () => ({
   RoleModelFields: ({
     blocker,
+    spawnModelsSupported,
     onChange,
   }: {
     blocker?: string
+    spawnModelsSupported?: boolean
     onChange: (roles: unknown) => void
   }) => (
     <div>
-      <span role="status" aria-label="Role models">
+      <span
+        role="status"
+        aria-label="Role models"
+        data-spawn-supported={String(spawnModelsSupported)}
+      >
         {blocker}
       </span>
       <button
@@ -316,6 +324,50 @@ describe("HostAgentCreateForm", () => {
     expect(screen.queryByTestId("add-agent-name-taken")).toBeNull()
   })
 })
+
+it.each([true, false])(
+  "gates native configuration controls on the new Host markers (%s)",
+  async (supported) => {
+    const restore = __setRemoteHostConfigDepsForTests({
+      hasLocalAuthority: () => false,
+      isRemoteHostActive: () => true,
+      activeHostFeatureManifest: () =>
+        ({
+          schemaVersion: 1,
+          features: {
+            "external-agent.host-configs": {
+              version: 1,
+              operations: supported
+                ? ["external_agent_native_subagent_control", "external_agent_config_model_roles_v2"]
+                : [],
+            },
+          },
+        }) as HostFeatureManifest,
+    })
+    try {
+      renderForm("codex-app-server")
+      await userEvent.setup().click(screen.getByRole("button", { name: /Advanced/ }))
+      const toggle = screen.getByRole("switch", {
+        name: "Experimental current-turn model switching",
+      })
+      expect(toggle).toHaveProperty("disabled", !supported)
+      expect(screen.getByRole("status", { name: "Role models" })).toHaveAttribute(
+        "data-spawn-supported",
+        String(supported)
+      )
+      if (supported) {
+        await userEvent.setup().click(toggle)
+        fireEvent.submit(screen.getByTestId("add-external-agent-form"))
+        await waitFor(() => expect(hostState.current.create).toHaveBeenCalled())
+        expect((hostState.current.create as jest.Mock).mock.calls[0][0].codexOptions).toEqual({
+          stepModelSwitching: true,
+        })
+      }
+    } finally {
+      restore()
+    }
+  }
+)
 
 it.each([true, false])(
   "gates create-form role models and omits unsupported fields (%s)",

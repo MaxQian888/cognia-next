@@ -4,7 +4,7 @@
  * Pure typesafety pass-through for `manifest.messageRenderers[]` entries.
  */
 
-import type { PluginMessageRendererDef } from "@/types/plugin/plugin-message-renderer"
+import type { PluginMessageRendererDef } from "@cognia/plugin-contract/types/plugin/plugin-message-renderer"
 
 export function defineMessageRenderer(def: PluginMessageRendererDef): PluginMessageRendererDef {
   return def

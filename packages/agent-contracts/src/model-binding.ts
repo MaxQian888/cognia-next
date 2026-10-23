@@ -43,7 +43,11 @@ export type AgentModelSlotSelection =
  * slot absent from a layer inherits the next one, and a slot absent
  * everywhere keeps the runtime's historical single-model behaviour.
  */
-export interface AgentModelRoleOverrides {
-  version: 1
-  slots: Readonly<Record<string, AgentModelSlotSelection>>
-}
+export type AgentModelRoleOverrides =
+  | { version: 1; slots: Readonly<Record<string, AgentModelSlotSelection>> }
+  | {
+      version: 2
+      slots: Readonly<Record<string, AgentModelSlotSelection>>
+      /** Highest explicitly supplied layer replaces candidates; [] clears extras. */
+      allowedSpawnModels?: readonly ExternalAgentCogniaModelBinding[]
+    }

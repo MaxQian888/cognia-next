@@ -92,17 +92,21 @@ describe("daemon-bridge (Tauri mode)", () => {
     await Promise.resolve()
   })
 
-  it("swallows invoke errors so the renderer never hard-fails", async () => {
+  it("reports native invoke failures instead of pretending the alarm is armed", async () => {
     invokeMock.mockRejectedValueOnce(new Error("ipc down"))
-    await expect(armTask("task_1", 1)).resolves.toBeUndefined()
+    await expect(armTask("task_1", 1)).rejects.toMatchObject({
+      code: "TIMING_DRIVER_FAILED",
+      cause: { message: "ipc down" },
+    })
   })
 
-  it("returns a no-op unsubscribe when the event API throws", async () => {
+  it("reports event subscription failure so initialization can stop", async () => {
     listenMock.mockImplementation(() => {
       throw new Error("no event api")
     })
-    const stop = await listenTaskDue(() => {})
-    expect(typeof stop).toBe("function")
-    expect(() => stop()).not.toThrow()
+    await expect(listenTaskDue(() => {})).rejects.toMatchObject({
+      code: "TIMING_DRIVER_FAILED",
+      cause: { message: "no event api" },
+    })
   })
 })

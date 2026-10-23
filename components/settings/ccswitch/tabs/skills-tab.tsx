@@ -26,13 +26,13 @@ import { isTauri } from "@/lib/tauri"
 export function CcswitchSkillsTab() {
   const t = useTranslations("ccswitch")
   const tabReady = isTauri()
-  const { data: status } = useCcswitchStatus(tabReady)
+  const { data: status, error: statusError } = useCcswitchStatus(tabReady)
   const {
     data: skills,
     loading,
     error,
     refresh,
-  } = useCcswitchSkills(tabReady && status?.exists === true)
+  } = useCcswitchSkills(tabReady && status?.exists === true && !status.error)
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [importing, setImporting] = useState(false)
@@ -94,10 +94,10 @@ export function CcswitchSkillsTab() {
 
   if (loading) return <Skeleton className="h-32 w-full" />
 
-  if (error) {
+  if (error || statusError || status?.error) {
     return (
       <SettingsAlert variant="destructive" title={t("skills.errorTitle")}>
-        {error}
+        {error ?? statusError ?? status?.error}
       </SettingsAlert>
     )
   }

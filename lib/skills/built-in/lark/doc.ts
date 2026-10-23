@@ -24,8 +24,148 @@ const docTokenParam = z
   .string()
   .min(1)
   .describe(
-    'Doc token (looks like "doxcn…"). Obtain it from lark_doc_search, or a wiki node resolves to one via lark_wiki_read_node.'
+    "Document token or URL. Obtain it from lark_doc_search, or resolve a wiki node via lark_wiki_read_node. Tokens need not have a fixed prefix."
   )
+
+const revisionParam = z
+  .number()
+  .int()
+  .min(-1)
+  .optional()
+  .describe("Document revision; -1 means latest.")
+const fetchSchema = z
+  .object({
+    docToken: docTokenParam,
+    mode: z.enum(["full", "outline", "range", "keyword", "section"]).optional(),
+    format: z
+      .enum(["simple", "with-ids", "full"])
+      .optional()
+      .describe("Output detail; with-ids/full retain block ids."),
+    keyword: z.string().trim().min(1).optional().describe("Required for keyword mode."),
+    sectionId: z.string().trim().min(1).optional().describe("Compatible alias for startBlockId."),
+    startBlockId: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe("Required for section; at least one bound is required for range."),
+    endBlockId: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe("Range end block id; -1 reads through the end."),
+    contentFormat: z
+      .enum(["xml", "markdown", "im-markdown"])
+      .optional()
+      .describe("Body encoding, independent of output detail."),
+    revisionId: revisionParam,
+  })
+  .superRefine((args, ctx) => {
+    const start = args.startBlockId ?? args.sectionId
+    if (args.startBlockId && args.sectionId && args.startBlockId !== args.sectionId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["startBlockId"],
+        message: "startBlockId and sectionId must agree.",
+      })
+    }
+    if (args.mode === "section" && !start) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["startBlockId"],
+        message: "Section mode requires a start block.",
+      })
+    }
+    if (args.mode === "range" && !start && !args.endBlockId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["startBlockId"],
+        message: "Range mode requires at least one bound.",
+      })
+    }
+    if (args.mode === "keyword" && !args.keyword) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["keyword"],
+        message: "Keyword mode requires a keyword.",
+      })
+    }
+  })
+
+const updateSchema = z
+  .object({
+    docToken: docTokenParam,
+    operation: z.enum([
+      "append",
+      "overwrite",
+      "block_replace",
+      "block_insert_after",
+      "block_delete",
+      "str_replace",
+      "block_move_after",
+      "block_copy_insert_after",
+    ]),
+    payload: z
+      .string()
+      .optional()
+      .describe(
+        "Required for content edits; empty is allowed only for str_replace deletion. Not used for block deletion/move/copy."
+      ),
+    format: z
+      .enum(["docx-xml", "xml", "markdown"])
+      .optional()
+      .describe("Body format; defaults to XML."),
+    anchor: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Required existing text for str_replace, or target block id(s) for block operations."
+      ),
+    sourceBlockIds: z
+      .array(z.string().trim().min(1))
+      .min(1)
+      .optional()
+      .describe("Required source block ids for block move/copy."),
+    revisionId: revisionParam,
+  })
+  .superRefine((args, ctx) => {
+    const noContent = ["block_delete", "block_move_after", "block_copy_insert_after"].includes(
+      args.operation
+    )
+    if (
+      !noContent &&
+      (args.payload === undefined ||
+        (args.operation !== "str_replace" && args.payload.length === 0))
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["payload"],
+        message: "This operation requires content (only str_replace may be empty).",
+      })
+    }
+    if (
+      (args.operation === "str_replace" || args.operation.startsWith("block_")) &&
+      !args.anchor?.trim()
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["anchor"],
+        message: "This operation requires an anchor.",
+      })
+    }
+    if (
+      ["block_move_after", "block_copy_insert_after"].includes(args.operation) &&
+      !args.sourceBlockIds?.length
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sourceBlockIds"],
+        message: "Move/copy requires source block ids.",
+      })
+    }
+  })
 
 function mk<S extends z.ZodTypeAny>(input: {
   id: string
@@ -42,6 +182,7 @@ function mk<S extends z.ZodTypeAny>(input: {
     details?: { label: string; value: string }[]
   }
   buildArgs?: (args: z.infer<S>) => string[]
+  execute?: BuiltInSkill<S>["execute"]
 }): BuiltInSkill<S> {
   const skill: BuiltInSkill<S> = {
     id: input.id,
@@ -53,15 +194,21 @@ function mk<S extends z.ZodTypeAny>(input: {
     imAccess: input.imAccess,
     mcpToolName: input.mcpToolName,
     inputSchema: input.schema,
-    execute: async (args, ctx) =>
-      runLarkCli({
-        args: [
-          ...input.subcommand,
-          ...(input.buildArgs?.(args) ?? argsToFlags(args as Record<string, unknown>)),
-        ],
-        confirmed: ctx.hitlBypass === true,
-        adapterId: larkAdapterIdFromCtx(ctx),
-      }),
+    execute:
+      input.execute ??
+      (async (args, ctx) =>
+        runLarkCli({
+          args: [
+            ...input.subcommand,
+            ...(input.buildArgs?.(args) ?? argsToFlags(args as Record<string, unknown>)),
+          ],
+          // Only high-risk CLI commands define --yes. Ordinary writes are
+          // already approved by the dispatcher and reject that CLI flag.
+          confirmed:
+            input.mutation === "destructive" &&
+            (ctx.hitlBypass === true || ctx.humanConfirmed === true),
+          adapterId: larkAdapterIdFromCtx(ctx),
+        })),
   }
   if (input.mutation !== "read") {
     const title = input.confirmTitle ?? input.label.en
@@ -116,27 +263,7 @@ registerBuiltInSkill(
       "zh-CN":
         "按 token 读取 Lark 文档内容。大文档可用 outline / keyword / section 模式定位局部；format=with-ids 返回 block id，供 lark_doc_update 定点编辑。",
     },
-    schema: z.object({
-      docToken: docTokenParam,
-      mode: z
-        .enum(["full", "outline", "range", "keyword", "section"])
-        .optional()
-        .describe(
-          "How much to read: full body, outline only, a range, around a keyword, or one section (default full)."
-        ),
-      format: z
-        .enum(["simple", "with-ids", "full"])
-        .optional()
-        .describe('Output detail; use "with-ids" to get block ids for later block-targeted edits.'),
-      keyword: z
-        .string()
-        .optional()
-        .describe('Required when mode="keyword": the text to center on.'),
-      sectionId: z
-        .string()
-        .optional()
-        .describe('Required when mode="section": the section/block id.'),
-    }),
+    schema: fetchSchema,
     subcommand: ["docs", "+fetch"],
     buildArgs: (args) =>
       argsToFlags({
@@ -144,7 +271,10 @@ registerBuiltInSkill(
         scope: args.mode,
         detail: args.format,
         keyword: args.keyword,
-        startBlockId: args.sectionId,
+        startBlockId: args.startBlockId ?? args.sectionId,
+        endBlockId: args.endBlockId,
+        docFormat: args.contentFormat,
+        revisionId: args.revisionId,
       }),
     mutation: "read",
     imAccess: "always",
@@ -196,44 +326,30 @@ registerBuiltInSkill(
     mcpToolName: "lark_doc_update",
     label: { en: "Update doc", "zh-CN": "编辑文档" },
     description: {
-      en: "Apply an edit operation to a Lark doc. Supported ops: append, overwrite, str_replace, block_replace, block_insert_after, block_delete.",
+      en: "Edit a Lark doc: append/overwrite, str_replace, block_replace/insert_after/delete/move_after/copy_insert_after. Choose XML or Markdown content and optionally a base revision.",
       "zh-CN":
-        "对 Lark 文档应用编辑操作：append / overwrite / str_replace / block_replace / block_insert_after / block_delete。",
+        "编辑 Lark 文档：追加、覆盖、文本替换、块替换/插入/删除/移动/复制；支持 XML、Markdown 和基准版本。",
     },
-    schema: z.object({
-      docToken: docTokenParam,
-      operation: z
-        .enum([
-          "append",
-          "overwrite",
-          "block_replace",
-          "block_insert_after",
-          "block_delete",
-          "str_replace",
-        ])
-        .describe(
-          "Edit op: append/overwrite the whole doc, replace/insert-after/delete a block (by id anchor), or str_replace (by string anchor)."
-        ),
-      payload: z
-        .string()
-        .min(1)
-        .describe(
-          "New content — DocxXML, Markdown, or a plain string, depending on the operation."
-        ),
-      anchor: z
-        .string()
-        .optional()
-        .describe(
-          "Block id (block_* ops) or the existing string to match (str_replace). Get block ids via lark_doc_fetch with format=with-ids."
-        ),
-    }),
+    schema: updateSchema,
     subcommand: ["docs", "+update"],
     buildArgs: (args) =>
       argsToFlags({
         doc: args.docToken,
         command: args.operation,
-        content: args.payload,
-        ...(args.operation === "str_replace" ? { pattern: args.anchor } : { blockId: args.anchor }),
+        ...(!["block_delete", "block_move_after", "block_copy_insert_after"].includes(
+          args.operation
+        )
+          ? { content: args.payload, docFormat: args.format === "markdown" ? "markdown" : "xml" }
+          : {}),
+        ...(args.operation === "str_replace"
+          ? { pattern: args.anchor }
+          : args.operation.startsWith("block_")
+            ? { blockId: args.anchor }
+            : {}),
+        ...(["block_move_after", "block_copy_insert_after"].includes(args.operation)
+          ? { srcBlockIds: args.sourceBlockIds?.join(",") }
+          : {}),
+        revisionId: args.revisionId,
       }),
     mutation: "write",
     imAccess: "always",
@@ -259,17 +375,91 @@ registerBuiltInSkill(
       imagePath: z.string().min(1).describe("Absolute local path to the image file."),
       anchorBlockId: z
         .string()
+        .trim()
+        .min(1)
         .optional()
         .describe("Optional block id to insert the image after; omit to append at the end."),
     }),
     subcommand: ["docs", "+media-insert"],
-    buildArgs: (args) =>
-      argsToFlags({
-        doc: args.docToken,
-        file: args.imagePath,
-        selectionWithEllipsis: args.anchorBlockId,
-        type: "image",
-      }),
+    execute: async (args, ctx) => {
+      const run = (argv: string[]) =>
+        runLarkCli({
+          args: argv,
+          confirmed: false,
+          adapterId: larkAdapterIdFromCtx(ctx),
+        })
+      const anchor = args.anchorBlockId
+      if (anchor) {
+        // Resolve the exact target before creating anything. A block id is
+        // never a text selector, including when the target has duplicate text.
+        await run([
+          "docs",
+          "+fetch",
+          "--doc",
+          args.docToken,
+          "--scope",
+          "range",
+          "--start-block-id",
+          anchor,
+          "--end-block-id",
+          anchor,
+        ])
+      }
+      const inserted = await run([
+        "docs",
+        "+media-insert",
+        "--doc",
+        args.docToken,
+        "--file",
+        args.imagePath,
+        "--type",
+        "image",
+      ])
+      if (!anchor) return inserted
+      const envelope = z.object({ data: z.unknown().optional() }).passthrough().safeParse(inserted)
+      const body = envelope.success ? (envelope.data.data ?? envelope.data) : inserted
+      const parsed = z.object({ block_id: z.string().min(1) }).safeParse(body)
+      if (!parsed.success) {
+        throw new Error(
+          "Image uploaded, but the CLI response has no created block id; placement is unconfirmed. Inspect the document before retrying."
+        )
+      }
+      const blockId = parsed.data.block_id
+      try {
+        const placement = await run([
+          "docs",
+          "+update",
+          "--doc",
+          args.docToken,
+          "--command",
+          "block_move_after",
+          "--block-id",
+          anchor,
+          "--src-block-ids",
+          blockId,
+        ])
+        return { upload: inserted, placement }
+      } catch (error) {
+        // Compensate only our new block; never delete or rewrite the anchor.
+        try {
+          await run([
+            "docs",
+            "+update",
+            "--doc",
+            args.docToken,
+            "--command",
+            "block_delete",
+            "--block-id",
+            blockId,
+          ])
+        } catch (cleanupError) {
+          throw new Error(
+            `Image placement failed (${String(error)}); created block ${blockId} remains or has unknown state: ${String(cleanupError)}. Inspect the document before retrying.`
+          )
+        }
+        throw error
+      }
+    },
     mutation: "write",
     imAccess: "always",
     confirmTitle: "Upload image",

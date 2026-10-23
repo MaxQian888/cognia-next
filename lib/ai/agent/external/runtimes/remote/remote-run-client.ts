@@ -39,6 +39,9 @@ import {
 } from "./remote-run-service"
 import {
   HOST_CONFIG_COMMANDS,
+  HOST_CONFIG_CAPABILITIES,
+  HostNativeSubagentUpdateRequiredError,
+  hostConfigsAvailability,
   callApprovedHostConfigCommand,
   callHostConfigCommand,
 } from "./remote-host-configs"
@@ -306,6 +309,8 @@ async function resolve(payload: Record<string, unknown>): Promise<RemoteDecision
 
 export type RemoteSessionOperationsClient = Pick<
   ExternalAgentManager,
+  | "getNativeSubagents"
+  | "changeNativeSubagentModel"
   | "getSessionOperationCapabilities"
   | "getSessionRuntimeState"
   | "refreshSessionCommands"
@@ -334,7 +339,15 @@ export async function callRemoteSessionOperation<T>(
   action: RemoteSessionOperation,
   requestId = crypto.randomUUID()
 ): Promise<T> {
+  if (
+    (action.operation === "nativeSubagents" || action.operation === "nativeSubagentModel") &&
+    !hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.nativeSubagentControl).ok
+  ) {
+    if (action.operation === "nativeSubagents") return undefined as T
+    throw new HostNativeSubagentUpdateRequiredError()
+  }
   const reads = [
+    "nativeSubagents",
     "capabilities",
     "snapshot",
     "commands",
@@ -422,6 +435,9 @@ export function createRemoteSessionOperationsClient(
     return callRemoteSessionOperation<T>(target, action)
   }
   return {
+    getNativeSubagents: (a, s) => call(a, s, { operation: "nativeSubagents" }),
+    changeNativeSubagentModel: (a, s, change) =>
+      call(a, s, { operation: "nativeSubagentModel", change }),
     getSessionOperationCapabilities: (a, s) => call(a, s, { operation: "capabilities" }),
     getSessionRuntimeState: (a, s) => call(a, s, { operation: "runtimeState" }),
     refreshSessionCommands: (a, s) => call(a, s, { operation: "commands" }),

@@ -1,5 +1,5 @@
 import { GITHUB_DOT_COM, remoteHostname, type GithubHost } from "@/lib/github/host"
-import { publishGithubReview } from "@/plugins/github-delivery/src/review"
+import { publishGithubReview } from "@cognia/github-bot-kit"
 import { sha256Hex } from "@/lib/share/hash"
 import { gitPush } from "@/lib/git/commands"
 import { assertSingleRootBundle } from "./bundle"

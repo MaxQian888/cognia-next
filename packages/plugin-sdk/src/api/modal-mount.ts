@@ -10,12 +10,12 @@ export { defineModalMount } from "../define/define-modal-mount"
 export {
   registerModalMountsForPlugin,
   unregisterModalMountsForPlugin,
-} from "@/lib/plugin/bridge/modal-mount-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/modal-mount-bridge"
 
-export type { RegisterModalMountsOptions } from "@/lib/plugin/bridge/modal-mount-bridge"
+export type { RegisterModalMountsOptions } from "@cognia/plugin-contract/lib/plugin/bridge/modal-mount-bridge"
 
-export { createModalAPI } from "@/lib/plugin/api/modal-api"
-export type { PluginModalAPI } from "@/lib/plugin/api/modal-api"
+export { createModalAPI } from "@cognia/plugin-contract/lib/plugin/api/modal-api"
+export type { PluginModalAPI } from "@cognia/plugin-contract/lib/plugin/api/modal-api"
 
 export {
   clearModalsForPlugin,
@@ -27,9 +27,9 @@ export {
   selectTopModal,
   subscribeDeclaredModals,
   unregisterDeclaredModalsForPlugin,
-} from "@/stores/plugin-runtime/plugin-modal-store"
+} from "@cognia/plugin-contract/stores/plugin-runtime/plugin-modal-store"
 
-export type { DeclaredModalEntry } from "@/stores/plugin-runtime/plugin-modal-store"
+export type { DeclaredModalEntry } from "@cognia/plugin-contract/stores/plugin-runtime/plugin-modal-store"
 
 export type {
   PluginModalComponent,
@@ -37,4 +37,4 @@ export type {
   PluginModalHandle,
   PluginModalMountDef,
   PluginModalProps,
-} from "@/types/plugin/plugin-modal"
+} from "@cognia/plugin-contract/types/plugin/plugin-modal"

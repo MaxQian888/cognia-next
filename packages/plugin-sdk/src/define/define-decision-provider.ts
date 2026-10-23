@@ -4,7 +4,7 @@
  * Pure typesafety pass-through for `manifest.decisionProviders[]` entries.
  */
 
-import type { PluginDecisionProviderDef } from "@/types/plugin/plugin-decisions"
+import type { PluginDecisionProviderDef } from "@cognia/plugin-contract/types/plugin/plugin-decisions"
 
 export function defineDecisionProvider(def: PluginDecisionProviderDef): PluginDecisionProviderDef {
   return def

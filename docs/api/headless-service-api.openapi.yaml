@@ -19554,6 +19554,367 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/browser_recording_control:
+    post:
+      operationId: internalRpcBrowserRecordingControl
+      tags:
+        - headless-rpc
+      summary: browser_recording_control (agent.run)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                browserSessionId:
+                  type: string
+                  minLength: 1
+                action:
+                  type: string
+                  enum:
+                    - start
+                    - resume
+                    - stop
+                    - drain
+              required:
+                - browserSessionId
+                - action
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type:
+                  - object
+                  - array
+                  - string
+                  - number
+                  - boolean
+                  - "null"
+                x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
+                  command remains contract-covered at the JSON value boundary until its owning domain publishes a
+                  narrower stable wire type.
+                x-cognia-schema-owner: browser
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/browser_recording_ref:
+    post:
+      operationId: internalRpcBrowserRecordingRef
+      tags:
+        - headless-rpc
+      summary: browser_recording_ref (agent.run)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: zod-contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                browserSessionId:
+                  type: string
+                  minLength: 1
+                selector:
+                  type: string
+                  minLength: 1
+                  maxLength: 4096
+              required:
+                - browserSessionId
+                - selector
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: string
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/browser_reload:
     post:
       operationId: internalRpcBrowserReload
@@ -41357,6 +41718,415 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/connectors_google_docs_auth:
+    post:
+      operationId: internalRpcConnectorsGoogleDocsAuth
+      tags:
+        - headless-rpc
+      summary: connectors_google_docs_auth (service.internal)
+      description: "Loopback service-token command. Target: service; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  oneOf:
+                    - type: object
+                      properties:
+                        action:
+                          const: snapshot
+                      required:
+                        - action
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        action:
+                          const: begin
+                      required:
+                        - action
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        action:
+                          const: setPending
+                        authorization:
+                          type: string
+                        pending:
+                          type: object
+                          properties:
+                            state:
+                              type: string
+                            codeVerifier:
+                              type: string
+                            redirectUri:
+                              type: string
+                            ts:
+                              type: integer
+                              minimum: 0
+                          required:
+                            - state
+                            - codeVerifier
+                            - redirectUri
+                            - ts
+                          additionalProperties: false
+                      required:
+                        - action
+                        - authorization
+                        - pending
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        action:
+                          const: claim
+                        state:
+                          type: string
+                        now:
+                          type: integer
+                          minimum: 0
+                      required:
+                        - action
+                        - state
+                        - now
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        action:
+                          const: commit
+                        authorization:
+                          type: string
+                        tokens:
+                          type: object
+                          properties:
+                            accessToken:
+                              type: string
+                            refreshToken:
+                              type: string
+                            expiresAt:
+                              type: integer
+                              minimum: 0
+                            scope:
+                              type: string
+                            tokenType:
+                              type: string
+                          required:
+                            - accessToken
+                            - expiresAt
+                          additionalProperties: false
+                        accountEmail:
+                          anyOf:
+                            - type: string
+                            - type: "null"
+                      required:
+                        - action
+                        - authorization
+                        - tokens
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        action:
+                          const: refresh
+                        connection:
+                          type: string
+                        tokens:
+                          type: object
+                          properties:
+                            accessToken:
+                              type: string
+                            refreshToken:
+                              type: string
+                            expiresAt:
+                              type: integer
+                              minimum: 0
+                            scope:
+                              type: string
+                            tokenType:
+                              type: string
+                          required:
+                            - accessToken
+                            - expiresAt
+                          additionalProperties: false
+                      required:
+                        - action
+                        - connection
+                        - tokens
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        action:
+                          const: invalidate
+                        connection:
+                          type: string
+                      required:
+                        - action
+                        - connection
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        action:
+                          const: disconnect
+                      required:
+                        - action
+                      additionalProperties: false
+              required:
+                - input
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: object
+                    properties:
+                      version:
+                        const: 1
+                      connection:
+                        type: string
+                      authorization:
+                        type: string
+                      tokens:
+                        anyOf:
+                          - type: object
+                            properties:
+                              accessToken:
+                                type: string
+                              refreshToken:
+                                type: string
+                              expiresAt:
+                                type: integer
+                                minimum: 0
+                              scope:
+                                type: string
+                              tokenType:
+                                type: string
+                            required:
+                              - accessToken
+                              - expiresAt
+                            additionalProperties: false
+                          - type: "null"
+                      pending:
+                        anyOf:
+                          - type: object
+                            properties:
+                              state:
+                                type: string
+                              codeVerifier:
+                                type: string
+                              redirectUri:
+                                type: string
+                              ts:
+                                type: integer
+                                minimum: 0
+                            required:
+                              - state
+                              - codeVerifier
+                              - redirectUri
+                              - ts
+                            additionalProperties: false
+                          - type: "null"
+                      claimed:
+                        type: boolean
+                      accountEmail:
+                        anyOf:
+                          - type: string
+                          - type: "null"
+                      legacyMetadata:
+                        type: boolean
+                    required:
+                      - version
+                      - connection
+                      - authorization
+                      - tokens
+                      - pending
+                      - claimed
+                      - accountEmail
+                      - legacyMetadata
+                    additionalProperties: false
+                  pending:
+                    anyOf:
+                      - type: object
+                        properties:
+                          state:
+                            type: string
+                          codeVerifier:
+                            type: string
+                          redirectUri:
+                            type: string
+                          ts:
+                            type: integer
+                            minimum: 0
+                        required:
+                          - state
+                          - codeVerifier
+                          - redirectUri
+                          - ts
+                        additionalProperties: false
+                      - type: "null"
+                  outcome:
+                    anyOf:
+                      - type: object
+                        properties:
+                          revoked:
+                            type: boolean
+                          reason:
+                            type: string
+                        required:
+                          - revoked
+                        additionalProperties: false
+                      - type: "null"
+                required:
+                  - state
+                  - pending
+                  - outcome
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/connectors_health:
     post:
       operationId: internalRpcConnectorsHealth
@@ -54655,6 +55425,11 @@ paths:
                 - argv
                 - timeoutMs
               properties:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                  description: Required for multi-tenant creation. Host admission resolves the actor; this field never supplies placement
+                    identity or permissions.
                 placement:
                   type: object
                   description: "The task's runtime environment placement as the brain resolved it (prepareRunEnvironment). The spec is not
@@ -164078,6 +164853,10 @@ paths:
               required:
                 - config
               properties:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                  description: Required for multi-tenant creation. Later agent commands resolve this scope from the immutable Host record.
                 config:
                   type: object
                   required:
@@ -210812,6 +211591,8 @@ components:
           - browser_profile_delete
           - browser_read_console
           - browser_read_network
+          - browser_recording_control
+          - browser_recording_ref
           - browser_reload
           - browser_runtime_status
           - browser_screenshot
@@ -210924,6 +211705,7 @@ components:
           - connectors_attachment_list
           - connectors_attachment_read
           - connectors_discord_upload
+          - connectors_google_docs_auth
           - connectors_health
           - connectors_http_request
           - connectors_keyring_delete
@@ -211939,10 +212721,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 941
-  generatedRequestSchemaCount: 941
+  internalCommandCount: 944
+  generatedRequestSchemaCount: 944
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 941
+  contractRequestSchemaCount: 944
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 941
+  generatedResponseSchemaCount: 944
   loopbackOnly: true

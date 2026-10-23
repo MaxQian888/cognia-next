@@ -20,6 +20,8 @@
 
 import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connectors/event"
 import { LARK_PRIVATE_THREAD_REPLY } from "./private-threads"
+import { inboundA2UIBlockToPlainText } from "../_shared/inbound-a2ui-normalize"
+import { larkInboundToA2UI } from "./inbound-to-a2ui"
 import { buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { segmentsToPlainText } from "@/types/connectors/segment"
@@ -495,6 +497,21 @@ function buildSegments(message: LarkMessage): MessageSegment[] {
         break
       }
 
+      case "interactive": {
+        // A card carries no plain text of its own. Mirror its prose so every
+        // text consumer — the model's turn, search, previews, message import
+        // — reads the card instead of an empty message; the transcript shows
+        // the card itself from the rich projection.
+        const block = larkInboundToA2UI(parsed as never)
+        const md = block ? inboundA2UIBlockToPlainText(block, { markdown: true }).trim() : ""
+        segments.push(
+          md
+            ? { type: "markdown", md: md.slice(0, MAX_CARD_MIRROR_CHARS) }
+            : { type: "text", text: "[card]" }
+        )
+        break
+      }
+
       default:
         break
     }
@@ -504,6 +521,9 @@ function buildSegments(message: LarkMessage): MessageSegment[] {
 
   return segments
 }
+
+/** Cap on a card's text mirror; a long run card must not flood the prompt. */
+const MAX_CARD_MIRROR_CHARS = 4000
 
 /** Coerce an unknown JSON field to a trimmed string ("" when absent). */
 function str(v: unknown): string {

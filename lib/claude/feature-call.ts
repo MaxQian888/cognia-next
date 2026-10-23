@@ -13,6 +13,7 @@ import {
   type FeatureCallCredentials,
   type FeatureCallEvent,
   type FeatureCallRequest,
+  type McpCapabilityCacheRow,
   type McpServer,
   type ToolHostControl,
 } from "@cognia/agent-config-types"
@@ -317,9 +318,9 @@ export async function discoverOpenCodeV2ViaSidecar(
 export interface McpDiscoveryResult {
   ok: boolean
   toolCount: number
-  tools: Array<{ name: string; description?: string; inputSchema?: unknown }>
-  resources: Array<{ uri: string; name?: string; description?: string; mimeType?: string }>
-  prompts: Array<{ name: string; description?: string }>
+  tools: McpCapabilityCacheRow["tools"]
+  resources: McpCapabilityCacheRow["resources"]
+  prompts: McpCapabilityCacheRow["prompts"]
   durationMs: number
   error?: string
 }

@@ -32,7 +32,7 @@ import {
   type MermaidRenderStyle,
 } from "@cognia/mermaid"
 
-interface MermaidBlockProps {
+export interface MermaidBlockProps {
   content: string
   className?: string
 }

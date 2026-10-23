@@ -18,7 +18,7 @@
  * Part of the plugin-first Computer Use plan (M1·T6).
  */
 
-import type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
+import type { PluginMcpServerPresetDef } from "@cognia/plugin-contract/types/plugin/plugin-mcp-preset"
 
 export function defineMcpServerPreset(def: PluginMcpServerPresetDef): PluginMcpServerPresetDef {
   return def

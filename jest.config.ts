@@ -221,6 +221,7 @@ const projectCommon: Config = {
     // one thing a test most needs to do with a registry.
     "^@cognia/plugin-sdk/api/(.*)$": "<rootDir>/packages/plugin-sdk/src/api/$1.ts",
     "^@cognia/security-findings(.*)$": "<rootDir>/packages/security-findings/src$1",
+    "^@cognia/plugin-contract(.*)$": "<rootDir>/packages/plugin-contract/src$1",
     "^@cognia/companion-client(.*)$": "<rootDir>/packages/companion-client/src$1",
     "^@cognia/redact(.*)$": "<rootDir>/packages/redact/src$1",
     "^@cognia/web-search(.*)$": "<rootDir>/packages/web-search/src$1",

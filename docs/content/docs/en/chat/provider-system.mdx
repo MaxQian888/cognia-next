@@ -40,6 +40,24 @@ The Provider System covers five responsibilities:
 The OAuth subscription path has its own subsystem; see [Claude Subscription OAuth](./claude-subscription-oauth).
 Embedding-only providers are consumed through [Vector Store](../data/vector-store).
 
+## Magpie gateway
+
+Start Magpie, then open **Settings → AI Connections → Magpie → Connect** and choose
+**Discover local Magpie**. Desktop discovery reads the configured port from
+`$XDG_CONFIG_HOME/magpie/settings.json` or `~/.config/magpie/settings.json` (default
+`3425`), verifies `/api/hello`, and loads `/v1/models`. Browser discovery uses port
+`3425`; a custom endpoint can be entered in Base URL and refreshed from Models.
+
+Discovery saves the OpenAI-compatible endpoint and the application key
+`magpie-cognia`. It preserves opaque model IDs such as `provider/model` and
+`group/name`, context limits and supported modalities. Select a default model,
+test the connection, and set Magpie as the default provider to use it in new chats.
+Refresh Model List reloads the live catalog. Failed discovery leaves the saved
+configuration intact. Magpie forwards to its configured providers, so normal
+outbound privacy controls still apply. Cognia does not read Magpie's provider keys.
+
+See [Magpie's integration contract](https://github.com/yetone/magpie/blob/main/docs/integrating.md).
+
 ## Architecture Overview
 
 ```mermaid

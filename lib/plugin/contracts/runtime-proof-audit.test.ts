@@ -312,6 +312,20 @@ describe("plugin runtime proof audit", () => {
         it(`runtime point "${point}" (${fnName}) is fed by production code`, () => {
           if (productionSources.size === 0) return
           const refs = filesMatching(new RegExp(`\\b${fnName}\\b`), new Set([bindingFile]))
+          // A point bound to a `ctx.*` method is fed by plugins calling that
+          // method; the host's half of the wiring is the API factory that
+          // builds the namespace (`createExportAPI` → `ctx.export`). Accept a
+          // production reference to one of the binding file's `create*API`
+          // factories as that proof.
+          if (refs.length === 0 && /^lib\/plugin\/api\/[\w-]+-api\.ts$/.test(bindingFile)) {
+            const bindingSource = productionSources.get(bindingFile) ?? ""
+            const factories = [...bindingSource.matchAll(/export function (create\w*API)\b/g)].map(
+              (m) => m[1]
+            )
+            for (const factory of factories) {
+              refs.push(...filesMatching(new RegExp(`\\b${factory}\\b`), new Set([bindingFile])))
+            }
+          }
           if (refs.length === 0) {
             throw new Error(
               `Runtime point "${point}" binds ${binding}, but no production file references ` +

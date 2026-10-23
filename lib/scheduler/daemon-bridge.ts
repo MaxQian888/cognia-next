@@ -12,17 +12,17 @@
 
 import { isTauri } from "@/lib/platform/detect"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
+import { SchedulerError } from "./errors"
 
 import type { DaemonTaskDueEvent } from "@/types/scheduler"
 
 async function safeInvoke<T>(name: string, payload?: unknown): Promise<T | null> {
   if (!isTauri()) return null
   try {
-    const mod = await import("@tauri-apps/api/core").catch(() => null)
-    if (!mod) return null
+    const mod = await import("@tauri-apps/api/core")
     return (await mod.invoke(name, payload as Record<string, unknown>)) as T
-  } catch {
-    return null
+  } catch (error) {
+    throw SchedulerError.timingDriverFailed(name, error)
   }
 }
 
@@ -56,7 +56,7 @@ export async function listenTaskDue(
     // registration eval lost the StrictMode mount/unmount race — route through
     // safeUnlisten so the rejection never escapes as an unhandled error.
     return () => safeUnlisten(stop)
-  } catch {
-    return () => undefined
+  } catch (error) {
+    throw SchedulerError.timingDriverFailed("listen scheduler:task-due", error)
   }
 }

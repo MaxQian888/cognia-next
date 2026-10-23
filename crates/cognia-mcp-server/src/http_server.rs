@@ -490,6 +490,7 @@ mod tests {
     use super::*;
     use crate::proxy_common::token_matches;
     use crate::sidecar::spawn_echo_for_tests;
+    use std::time::Duration;
 
     /// An empty session registry backed by the echo spawner (tests).
     fn echo_sessions() -> Arc<SessionRegistry> {
@@ -749,6 +750,192 @@ mod tests {
             .await
             .expect("DELETE");
         assert_eq!(del.status().as_u16(), 204);
+
+        let _ = handle.shutdown.send(());
+    }
+
+    /// Read whatever arrives on an SSE response within `wait`, as text.
+    async fn sse_text_within(response: &mut reqwest::Response, wait: Duration) -> String {
+        let mut text = String::new();
+        let deadline = tokio::time::Instant::now() + wait;
+        while let Ok(Ok(Some(chunk))) = tokio::time::timeout_at(deadline, response.chunk()).await {
+            text.push_str(&String::from_utf8_lossy(&chunk));
+        }
+        text
+    }
+
+    #[tokio::test]
+    async fn mcp_stream_routes_each_message_to_exactly_one_stream() {
+        let Ok(sidecar) = spawn_echo_for_tests().await else {
+            return;
+        };
+        let handle = spawn_server(0, "tok".to_string(), Arc::new(sidecar), echo_sessions())
+            .await
+            .expect("bind");
+        let client = http_client();
+        let url = format!("http://127.0.0.1:{}/mcp/stream", handle.bound_port);
+        const ACCEPT: &str = "application/json, text/event-stream";
+
+        let init = client
+            .post(&url)
+            .header("Authorization", "Bearer tok")
+            .header("Accept", "application/json")
+            .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#)
+            .send()
+            .await
+            .expect("initialize");
+        assert_eq!(init.status().as_u16(), 200);
+        let sid = init
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+            .expect("session id")
+            .to_string();
+
+        let open_get = || {
+            client
+                .get(&url)
+                .header("Authorization", "Bearer tok")
+                .header("Accept", "text/event-stream")
+                .header("Mcp-Session-Id", &sid)
+                .header("MCP-Protocol-Version", "2025-11-25")
+                .send()
+        };
+        let mut get_a = open_get().await.expect("GET a");
+        let mut get_b = open_get().await.expect("GET b");
+        assert_eq!(get_a.status().as_u16(), 200);
+        assert_eq!(get_b.status().as_u16(), 200);
+        // Let both channels register before the sidecar emits anything.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // A streamed POST receives its own response; neither GET does.
+        let post = client
+            .post(&url)
+            .header("Authorization", "Bearer tok")
+            .header("Accept", ACCEPT)
+            .header("Mcp-Session-Id", &sid)
+            .header("MCP-Protocol-Version", "2025-11-25")
+            .body(r#"{"jsonrpc":"2.0","id":33,"method":"tools/list"}"#)
+            .send()
+            .await
+            .expect("streamed POST");
+        assert_eq!(post.status().as_u16(), 200);
+        let body = post.text().await.expect("SSE body ends after the response");
+        assert_eq!(body.matches(r#""id":33"#).count(), 1, "{body}");
+
+        // A server-initiated notification reaches exactly one GET channel.
+        let notify = client
+            .post(&url)
+            .header("Authorization", "Bearer tok")
+            .header("Accept", ACCEPT)
+            .header("Mcp-Session-Id", &sid)
+            .header("MCP-Protocol-Version", "2025-11-25")
+            .body(r#"{"jsonrpc":"2.0","method":"notifications/resources/list_changed"}"#)
+            .send()
+            .await
+            .expect("notification POST");
+        assert_eq!(notify.status().as_u16(), 202);
+
+        let wait = Duration::from_millis(400);
+        let (a, b) = tokio::join!(
+            sse_text_within(&mut get_a, wait),
+            sse_text_within(&mut get_b, wait)
+        );
+        assert!(
+            !a.contains(r#""id":33"#) && !b.contains(r#""id":33"#),
+            "{a}\n{b}"
+        );
+        let deliveries = [&a, &b]
+            .iter()
+            .filter(|text| text.contains("list_changed"))
+            .count();
+        assert_eq!(deliveries, 1, "a={a:?} b={b:?}");
+
+        // Concurrent streamed POSTs each receive only their own response.
+        let requests = (100..110).map(|id| {
+            client
+                .post(&url)
+                .header("Authorization", "Bearer tok")
+                .header("Accept", ACCEPT)
+                .header("Mcp-Session-Id", &sid)
+                .header("MCP-Protocol-Version", "2025-11-25")
+                .body(format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"ping"}}"#))
+                .send()
+        });
+        for (offset, response) in futures_util::future::join_all(requests)
+            .await
+            .into_iter()
+            .enumerate()
+        {
+            let text = response
+                .expect("concurrent POST")
+                .text()
+                .await
+                .expect("body");
+            let own = format!(r#""id":{}"#, 100 + offset);
+            assert!(text.contains(&own), "{text}");
+            assert_eq!(text.matches(r#""id":"#).count(), 1, "{text}");
+        }
+
+        let _ = handle.shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn mcp_stream_rejects_a_protocol_version_the_session_did_not_negotiate() {
+        let Ok(sidecar) = spawn_echo_for_tests().await else {
+            return;
+        };
+        let handle = spawn_server(0, "tok".to_string(), Arc::new(sidecar), echo_sessions())
+            .await
+            .expect("bind");
+        let client = http_client();
+        let url = format!("http://127.0.0.1:{}/mcp/stream", handle.bound_port);
+
+        let init = client
+            .post(&url)
+            .header("Authorization", "Bearer tok")
+            .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#)
+            .send()
+            .await
+            .expect("initialize");
+        let sid = init
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+            .expect("session id")
+            .to_string();
+
+        let send = |version: Option<&'static str>, id: u32| {
+            let mut request = client
+                .post(&url)
+                .header("Authorization", "Bearer tok")
+                .header("Mcp-Session-Id", &sid)
+                .body(format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"ping"}}"#));
+            if let Some(version) = version {
+                request = request.header("MCP-Protocol-Version", version);
+            }
+            request.send()
+        };
+        assert_eq!(
+            send(Some("1900-01-01"), 2).await.unwrap().status().as_u16(),
+            400
+        );
+        assert_eq!(
+            send(Some("2025-11-25"), 3).await.unwrap().status().as_u16(),
+            200
+        );
+        // Absent header: the spec has the server assume a default, not reject.
+        assert_eq!(send(None, 4).await.unwrap().status().as_u16(), 200);
+
+        let get = client
+            .get(&url)
+            .header("Authorization", "Bearer tok")
+            .header("Mcp-Session-Id", &sid)
+            .header("MCP-Protocol-Version", "1900-01-01")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(get.status().as_u16(), 400);
 
         let _ = handle.shutdown.send(());
     }

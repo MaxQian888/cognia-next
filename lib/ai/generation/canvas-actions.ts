@@ -14,9 +14,8 @@
  */
 
 import { generateText, streamText } from "ai"
-import { getProviderModel, type ProviderName } from "@cognia/provider-core/core/client"
-import type { ApiFlavor } from "@cognia/provider-types/provider"
-import type { CanvasActionAttachment, CanvasWorkbenchActionType } from "@/types/artifact/artifact"
+import { getProviderModel } from "@cognia/provider-core/core/client"
+import type { CanvasActionAttachment } from "@/types/artifact/artifact"
 import { webviewSafeTelemetry } from "@/lib/ai/webview-safe-telemetry"
 import { hasNoLeakingPii } from "@cognia/redact"
 import type { LanguageModel } from "ai"
@@ -26,37 +25,25 @@ import {
   type PromptDefinitionV1,
   type PromptResolutionContext,
 } from "@/lib/prompts/types"
+import type {
+  CanvasActionConfig,
+  CanvasActionExecutionOptions,
+  CanvasActionResult,
+  CanvasActionType,
+  StreamingCallbacks,
+} from "@cognia/plugin-contract/lib/ai/generation/canvas-actions"
+export type {
+  CanvasActionConfig,
+  CanvasActionExecutionOptions,
+  CanvasActionResult,
+  CanvasActionType,
+  StreamingCallbacks,
+} from "@cognia/plugin-contract/lib/ai/generation/canvas-actions"
 
 // The pure diff → hunk → apply engine was extracted to `canvas-review` (no
 // `ai`/provider imports) so persisted/widely-imported consumers (the artifact
 // store) can use it without pulling in the AI SDK. Import those functions from
 // `@/lib/ai/generation/canvas-review` directly.
-
-export type CanvasActionType = CanvasWorkbenchActionType
-
-export interface CanvasActionConfig {
-  provider: ProviderName
-  model: string
-  apiKey: string
-  baseURL?: string
-  apiFlavor?: ApiFlavor
-  headers?: Record<string, string>
-}
-
-export interface CanvasActionResult {
-  success: boolean
-  result?: string
-  explanation?: string
-  error?: string
-}
-
-export interface CanvasActionExecutionOptions {
-  language?: string
-  targetLanguage?: string
-  selection?: string
-  prompt?: string
-  attachments?: CanvasActionAttachment[]
-}
 
 /** What the app's own runs add: cancellation and the document's prompt context. */
 export interface CanvasActionRunOptions extends CanvasActionExecutionOptions {
@@ -474,15 +461,6 @@ export function getActionDescription(actionType: CanvasActionType): string {
     run: "Simulate code execution and show expected output",
   }
   return descriptions[actionType]
-}
-
-/**
- * Streaming callback for real-time AI action results
- */
-export interface StreamingCallbacks {
-  onToken: (token: string) => void
-  onComplete: (fullText: string) => void
-  onError: (error: string) => void
 }
 
 /**

@@ -34,6 +34,7 @@ import { composeSubagentSystemPrompt } from "@/lib/agent/prompts/subagent-frame"
 import {
   envelopeForBudgetExhausted,
   envelopeForRejection,
+  normalizeDispatchBudgetResult,
 } from "@/lib/claude/agents/dispatch-error"
 
 /** Generate a run id (app code — Date.now/randomUUID are allowed here). */
@@ -211,6 +212,22 @@ export async function dispatchSubagent(
     }
   }
 
+  const deadlineMs = options._deadlineMs
+  const timeoutMs = typeof deadlineMs === "number" ? deadlineMs - Date.now() : undefined
+  // Zero disables capture's wall-clock timer, so an elapsed explicit deadline
+  // must be refused rather than becoming an unlimited run.
+  if (timeoutMs !== undefined && timeoutMs <= 0) {
+    const message = "Dispatch incomplete: the configured execution deadline has already expired."
+    return {
+      text: message,
+      channel: "text",
+      toolsAvailable: false,
+      finishReason: "error",
+      runId,
+      errorEnvelope: envelopeForBudgetExhausted(message),
+    }
+  }
+
   // Thread A2: route to an external CLI agent when the def (or options) names a
   // preset. External agents run their own loop and do not nest back in, so the
   // depth/budget threading stops here.
@@ -238,10 +255,6 @@ export async function dispatchSubagent(
       ? Math.min(def.maxDepth, options._maxDepth)
       : (def.maxDepth ?? options._maxDepth)
   const childChain = [...parentChain, thisId]
-  const deadlineMs = options._deadlineMs
-  const timeoutMs =
-    typeof deadlineMs === "number" ? Math.max(0, deadlineMs - Date.now()) : undefined
-
   // Lifecycle hooks: a cognia-dispatched subagent runs as its OWN top-level
   // session, so the SDK never emits `SubagentStart` / `SubagentStop` for it —
   // only SDK-Task-dispatched agents get those. Without synthesizing them here a
@@ -343,8 +356,13 @@ export async function dispatchSubagent(
     }
   )
 
+  // Only host-managed runs have a journal row that dispatch_agent can resume.
+  const outcome = normalizeDispatchBudgetResult({
+    ...result,
+    ...(options._runId ? { runId } : {}),
+  })
   void fireAgentHook("SubagentStop", hookCtx, {
-    payload: { ...subagentHookPayload, success: true },
+    payload: { ...subagentHookPayload, success: outcome.finishReason !== "error" },
   })
 
   // Draw the run's usage down the shared subtree budget (best-effort — the
@@ -390,11 +408,12 @@ export async function dispatchSubagent(
   }
 
   return {
-    text: result.text,
+    text: outcome.text,
     channel: result.channel,
     toolsAvailable: result.toolsAvailable,
     runId,
-    ...(result.finishReason ? { finishReason: result.finishReason } : {}),
+    ...(outcome.finishReason ? { finishReason: outcome.finishReason } : {}),
+    ...(outcome.errorEnvelope ? { errorEnvelope: outcome.errorEnvelope } : {}),
     ...(result.usage ? { usage: result.usage } : {}),
     ...(result.runtime ? { runtime: result.runtime } : {}),
     ...(result.routeKind ? { routeKind: result.routeKind } : {}),

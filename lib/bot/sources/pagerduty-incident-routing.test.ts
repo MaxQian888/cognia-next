@@ -5,7 +5,8 @@
  *
  * Lives here, not under `plugins/pagerduty/`, because it is a test of the
  * HOST: it drives the bot-installation store, the bot registry and the
- * integration-event dispatcher against the plugin's real normalizer and Bot.
+ * integration-event dispatcher against the plugin's real normalizer and Bot,
+ * loaded from the built-in chunk the app ships.
  * A plugin's own suite must run against the published SDK surface alone
  * (ADR-0156 §5).
  */
@@ -17,11 +18,24 @@ import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { dispatchIntegrationEventToBots } from "@/lib/bot/sources/integration-event"
 import { __resetBotsForTesting, registerBot } from "@/lib/plugin/registries/bot-registry"
 
-import {
-  INCIDENT_RESPONDER_BOT,
-  incidentResponder,
-  normalizePagerDuty,
-} from "@/plugins/pagerduty/src/index"
+import { loadBuiltinArtifactExports } from "@/lib/plugin/core/builtin-artifact-fixture"
+import type { PluginHandlerBotDef } from "@/types/plugin/plugin-bot"
+import type { BotHandlerV1 } from "@/types/bot/run"
+
+// The plugin's real normalizer and Bot, from the chunk the app ships.
+let INCIDENT_RESPONDER_BOT: PluginHandlerBotDef
+let incidentResponder: BotHandlerV1
+let normalizePagerDuty: (
+  delivery: unknown,
+  context: { pluginId: string; integrationId: string; accountId: string }
+) => Parameters<typeof dispatchIntegrationEventToBots>[0]
+
+beforeAll(async () => {
+  const pagerduty = await loadBuiltinArtifactExports("pagerduty")
+  INCIDENT_RESPONDER_BOT = pagerduty.INCIDENT_RESPONDER_BOT as typeof INCIDENT_RESPONDER_BOT
+  incidentResponder = pagerduty.incidentResponder as typeof incidentResponder
+  normalizePagerDuty = pagerduty.normalizePagerDuty as typeof normalizePagerDuty
+})
 
 const CONTEXT = { pluginId: "pagerduty", integrationId: "pagerduty", accountId: "acct_pd" }
 

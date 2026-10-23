@@ -28,10 +28,28 @@ import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { canUseTauriInvoke } from "@/lib/native/utils"
 import type { ContextResource } from "@/types/context-workbench"
 import type { Plugin, PluginManifest } from "@/types/plugin"
-import { PANEL_ACTIVITY, PANEL_FULL_ID, PLUGIN_ID } from "@/plugins/sre-agent/src/ids"
+import { stagedBuiltinFetch } from "./builtin-artifact-fixture"
+
+// What the host observes once sre-agent is enabled: its manifest id, the
+// namespaced panel id the workbench registry stores, and the rail activity the
+// panel claims. The plugin is loaded from its shipped chunk, not its source.
+const PLUGIN_ID = "sre-agent"
+const PANEL_FULL_ID = `${PLUGIN_ID}:incidents`
+const PANEL_ACTIVITY = "sre-incidents"
 
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
-jest.mock("@/stores/plugin-runtime", () => ({ usePluginStore: { getState: jest.fn() } }))
+// The manager writes hydrated manifests back with `setState`; apply it to
+// whatever store the test handed `getState`.
+jest.mock("@/stores/plugin-runtime", () => {
+  const usePluginStore = {
+    getState: jest.fn(),
+    setState: jest.fn((update: unknown) => {
+      const state = usePluginStore.getState()
+      Object.assign(state, typeof update === "function" ? update(state) : update)
+    }),
+  }
+  return { usePluginStore }
+})
 jest.mock("@/lib/plugin/security/signature", () => ({ getPluginSignatureVerifier: jest.fn() }))
 jest.mock("@/lib/plugin/security/permission-guard", () => ({
   getPermissionGuard: jest.fn(),
@@ -111,15 +129,13 @@ describe("sre-agent in a browser tab", () => {
       verify: jest.fn().mockResolvedValue({ verified: true }),
       getConfig: jest.fn().mockReturnValue({ requireSignatures: false, allowUntrusted: true }),
     })
-    ;(getPermissionGuard as jest.Mock).mockReturnValue({
-      registerPlugin: jest.fn(),
-      unregisterPlugin: jest.fn(),
-      revokeAll: jest.fn(),
-      grant: jest.fn(),
-      revoke: jest.fn(),
-      check: jest.fn(() => true),
-      getPluginPermissions: jest.fn(() => [] as string[]),
-    })
+    // A real guard, so the manifest's declared permissions are what the
+    // plugin's API calls are checked against (and the mock cannot drift from
+    // the methods the manager calls).
+    const { PermissionGuard } = jest.requireActual<
+      typeof import("@/lib/plugin/security/permission-guard")
+    >("@/lib/plugin/security/permission-guard")
+    ;(getPermissionGuard as jest.Mock).mockReturnValue(new PermissionGuard())
     ;(canUseTauriInvoke as jest.Mock).mockReturnValue(false)
     mockInvoke.mockResolvedValue(undefined)
   })
@@ -128,7 +144,11 @@ describe("sre-agent in a browser tab", () => {
     const store = makeStore()
     mockGetState.mockReturnValue(store)
 
-    const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+    const manager = new PluginManager({
+      pluginDirectory: "",
+      runtimeProfile: "browser",
+      builtinAssetFetcher: stagedBuiltinFetch(),
+    })
     await manager.scanPlugins()
     await manager.enablePlugin(PLUGIN_ID)
 

@@ -1,4 +1,5 @@
 /** Bridges authenticated v4 records into the existing atomic restore pipeline. */
+import { AUTHORED_CONTENT_TABLES, type AuthoredContentTable } from "./authored-content"
 import { readBackupStream } from "./stream-format"
 import { BackupSourceCollector, type SessionAssetSourceChunk } from "./session-assets-backup"
 import type { ApplyBackupExtras } from "./apply-package"
@@ -9,6 +10,11 @@ const SHAPES: Record<
   keyof BackupPayloadV3,
   "rows" | "singleton" | "profiles" | "snapshots" | "binary"
 > = {
+  ...(Object.fromEntries(AUTHORED_CONTENT_TABLES.map((name) => [name, "rows"])) as Record<
+    AuthoredContentTable,
+    "rows"
+  >),
+  issueCounters: "rows",
   settings: "singleton",
   providerProfileStore: "profiles",
   ttsProviderKeys: "rows",

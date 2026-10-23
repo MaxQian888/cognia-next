@@ -2,10 +2,13 @@ import * as sdk from "./importer"
 import type { CustomImporter, ImportResult, ImportSource, PluginImportAPI } from "./importer"
 
 describe("plugin-sdk api/importer", () => {
-  it("exposes the authoring helper and plugin import API registry", () => {
+  it("exposes the authoring helper", () => {
     expect(typeof sdk.defineImporter).toBe("function")
-    expect(typeof sdk.createImportAPI).toBe("function")
-    expect(typeof sdk.clearCustomImporters).toBe("function")
+  })
+
+  it("keeps host wiring off the author surface (plugins reach it through ctx.import)", () => {
+    expect(sdk).not.toHaveProperty("createImportAPI")
+    expect(sdk).not.toHaveProperty("clearCustomImporters")
   })
 
   it("re-exports custom importer and import API contract types", () => {

@@ -48,6 +48,87 @@ const planOf = (result: ReturnType<typeof compileTaskModelPlan>) => {
 }
 
 describe("compileTaskModelPlan", () => {
+  it("admits and fingerprints individual native model bindings without a default slot", () => {
+    const native = (modelId: string, variant?: string) =>
+      planOf(
+        compileTaskModelPlan({
+          primary,
+          slots,
+          layers: [],
+          explicitModels: {
+            "opencode.agent.reviewer": { ...primary, modelId, variant },
+            "opencode.agent.explorer": { ...primary, modelId: "search" },
+          },
+        })
+      )
+    const plan = native("review")
+    expect(plan.models).toEqual(["primary", "search", "review"])
+    expect(plan.slots["opencode.agent.reviewer"]).toEqual({ modelId: "review", source: "config" })
+    expect(native("other").fingerprint).not.toBe(plan.fingerprint)
+    expect(native("review", "high").fingerprint).not.toBe(plan.fingerprint)
+  })
+
+  it.each([
+    [{ providerId: "elsewhere" }, "cross-provider-unsupported"],
+    [{ accountId: "elsewhere" }, "cross-account-unsupported"],
+  ])("refuses incompatible explicit native bindings: %j", (patch, reason) => {
+    expect(
+      compileTaskModelPlan({
+        primary,
+        slots,
+        layers: [],
+        explicitModels: { "opencode.agent.reviewer": { ...primary, modelId: "review", ...patch } },
+      })
+    ).toEqual({ ok: false, reason, slot: "opencode.agent.reviewer" })
+  })
+
+  it("counts explicit native models toward the task model limit", () => {
+    expect(
+      compileTaskModelPlan({
+        primary,
+        slots,
+        layers: [],
+        explicitModels: Object.fromEntries(
+          Array.from({ length: 32 }, (_, n) => [
+            `opencode.agent.worker${n}`,
+            { ...primary, modelId: `child${n}` },
+          ])
+        ),
+      })
+    ).toMatchObject({ ok: false, reason: "too-many-models" })
+  })
+
+  it("keeps finite spawn candidates without a default slot and replaces lower candidates", () => {
+    const candidatePolicy = (ids: string[]): AgentModelRoleOverrides => ({
+      version: 2,
+      slots: {},
+      allowedSpawnModels: ids.map((modelId) => ({ ...primary, modelId })),
+    })
+    const result = compileTaskModelPlan({
+      primary,
+      slots: [{ ...slots[0], supportsSpawnModelOverrides: true }],
+      layers: [
+        { source: "call", overrides: candidatePolicy(["primary", "fast"]) },
+        { source: "config", overrides: candidatePolicy(["primary", "large"]) },
+      ],
+    })
+    expect(planOf(result).models).toEqual(["primary", "fast"])
+    expect(planOf(result).allowedSpawnModels).toEqual(["fast", "primary"])
+    expect(
+      compileTaskModelPlan({
+        primary,
+        slots,
+        layers: [{ source: "call", overrides: candidatePolicy(["primary", "fast"]) }],
+      })
+    ).toMatchObject({ ok: false, reason: "spawn-models-unsupported" })
+    expect(
+      compileTaskModelPlan({
+        primary,
+        slots: [{ ...slots[0], supportsSpawnModelOverrides: true }],
+        layers: [{ source: "call", overrides: candidatePolicy(["fast"]) }],
+      })
+    ).toMatchObject({ ok: false, reason: "default-spawn-model-not-allowed" })
+  })
   it("leaves unnamed slots absent and keeps only the primary for legacy tasks", () => {
     expect(
       planOf(compileTaskModelPlan({ primary, slots, layers: [{ source: "call" }] }))

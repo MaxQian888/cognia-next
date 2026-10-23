@@ -255,7 +255,7 @@ import { invalidateConfigComponentForPlugin } from "@/lib/plugin/bridge/config-c
 import { unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
 import { refreshAllPackWarnings } from "@/lib/plugin/registries/character-pack-registry"
 import { assertPluginManifestParity, findPluginManifestParityIssues } from "./manifest-parity"
-import { PLUGIN_MANIFEST_CONTRIBUTIONS } from "@/packages/plugin-sdk/src/contracts/catalog"
+import { PLUGIN_MANIFEST_CONTRIBUTIONS } from "@cognia/plugin-contract/contracts/catalog"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { registerExtensionsForPlugin } from "@/lib/plugin/bridge/extension-bridge"
 import { clearCustomThemesForPluginContext } from "@/lib/plugin/api/theme-api"

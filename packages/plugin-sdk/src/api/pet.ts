@@ -23,7 +23,7 @@ export {
   PetEventKindNotAllowedError,
   PetItemKindMismatchError,
   PetItemNotOwnedError,
-} from "@/lib/plugin/api/pet-api-contract"
+} from "@cognia/plugin-contract/lib/plugin/api/pet-api-contract"
 
 export {
   buildPluginAchievementId,
@@ -32,7 +32,7 @@ export {
   listCompiledPluginAchievements,
   listPetAchievementEntries,
   unregisterPetAchievementsByPlugin,
-} from "@/lib/plugin/registries/pet-achievement-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/pet-achievement-registry"
 
 export {
   buildPluginItemId,
@@ -42,25 +42,25 @@ export {
   listProjectedPluginItems,
   projectPluginItem,
   unregisterPetItemsByPlugin,
-} from "@/lib/plugin/registries/pet-item-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/pet-item-registry"
 
 export type {
   PluginPetAchievementCondition,
   PluginPetAchievementDef,
   PluginPetItemDef,
-} from "@/types/plugin/plugin-pet"
+} from "@cognia/plugin-contract/types/plugin/plugin-pet"
 
-export type { PetEventKind, PetEventSource } from "@/types/pet"
+export type { PetEventKind, PetEventSource } from "@cognia/plugin-contract/types/pet/index"
 
 export type {
   PluginEmittablePetEventKind,
   PluginPetAvailability,
   PluginPetEvent,
   PluginPetUnavailableReason,
-} from "@/lib/plugin/api/pet-api-contract"
+} from "@cognia/plugin-contract/lib/plugin/api/pet-api-contract"
 
 export type {
   PluginPetAPI,
   PluginPetInteractionKind,
   PluginPetSummary,
-} from "@/lib/plugin/api/pet-api"
+} from "@cognia/plugin-contract/lib/plugin/api/pet-api"

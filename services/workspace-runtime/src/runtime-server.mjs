@@ -173,6 +173,8 @@ const PAGE_ADDRESSABLE_OPS = new Set([
   "browser.press-key",
   "browser.scroll",
   "browser.evaluate",
+  "browser.recording.control",
+  "browser.recording.ref",
   "browser.console",
   "browser.network",
   "browser.back",
@@ -224,6 +226,10 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
     "browser.press-key": ({ sessionId, key, ref }) => browser.pressKey(sessionId, key, ref),
     "browser.scroll": ({ sessionId, ...args }) => browser.scroll(sessionId, args),
     "browser.evaluate": ({ sessionId, expression }) => browser.evaluate(sessionId, expression),
+    "browser.recording.control": ({ sessionId, action }) =>
+      browser.recordingControl(sessionId, action),
+    "browser.recording.ref": ({ sessionId, selector }) =>
+      browser.resolveRecordedTarget(sessionId, selector),
     "browser.console": ({ sessionId }) => browser.readConsole(sessionId),
     "browser.network": ({ sessionId }) => browser.readNetwork(sessionId),
     "browser.back": ({ sessionId }) => browser.back(sessionId),

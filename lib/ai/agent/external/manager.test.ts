@@ -1,3 +1,8 @@
+import * as piSubagents from "./config/pi-subagents"
+jest.mock("./config/pi-subagents", () => {
+  const actual = jest.requireActual("./config/pi-subagents")
+  return { ...actual, resolvePiSubagents: jest.fn(actual.resolvePiSubagents) }
+})
 const mockModelFacts: {
   override?: import("./config/gateway-model-facts").GatewayModelFacts
 } = {}
@@ -468,6 +473,86 @@ describe("paired-web runtime readiness", () => {
 })
 
 describe("the session a model surface should describe", () => {
+  it("delegates gateway native controls to the task adapter and enforces the frozen model set", async () => {
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig(), { connect: false })
+    const child = new MockAdapter()
+    child.sessions.set("native-root", { id: "native-root", status: "idle" } as never)
+    const read = jest.fn(async () => ({
+      rootThreadId: "native-root",
+      models: [{ id: "allowed" }, { id: "denied" }],
+    }))
+    const change = jest.fn(async () => ({ status: "applied-awaiting-step" }))
+    Object.assign(child, { getNativeSubagents: read, changeNativeSubagentModel: change })
+    const internals = manager as unknown as {
+      adapters: Map<string, MockAdapter>
+      instances: Map<string, unknown>
+      gatewayTasks: Map<string, unknown>
+    }
+    internals.adapters.set("gateway-task-task-a", child)
+    internals.instances.set("gateway-task-task-a", { sessions: child.sessions })
+    internals.gatewayTasks.set("gateway-task-task-a", {
+      parentId: "agent-1",
+      taskId: "task-a",
+      allowedModels: ["allowed"],
+      planFingerprint: "frozen",
+      release: async () => {},
+    })
+    const publicId = "cognia-gateway:task-a:native-root"
+    expect(await manager.getNativeSubagents("agent-1", publicId)).toMatchObject({
+      rootThreadId: "native-root",
+      models: [{ id: "allowed" }],
+      planFingerprint: "frozen",
+    })
+    expect(read).toHaveBeenCalledWith("native-root")
+    const request = {
+      operationId: "op",
+      nativeChildThreadId: "child",
+      expectedProcessGeneration: 1,
+      expectedPlanFingerprint: "frozen",
+      scope: "future-turns" as const,
+      modelId: "denied",
+    }
+    await expect(manager.changeNativeSubagentModel("agent-1", publicId, request)).rejects.toThrow(
+      "model-not-allowed"
+    )
+    await expect(
+      manager.changeNativeSubagentModel("agent-1", publicId, {
+        ...request,
+        modelId: "allowed",
+        expectedPlanFingerprint: "stale",
+      })
+    ).rejects.toThrow("stale-model-plan")
+    expect(change).not.toHaveBeenCalled()
+    await manager.changeNativeSubagentModel("agent-1", publicId, { ...request, modelId: "allowed" })
+    expect(change).toHaveBeenCalledWith(
+      "native-root",
+      expect.objectContaining({ modelId: "allowed" })
+    )
+  })
+  it("routes native child operations only through an owned root session", async () => {
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig(), { connect: false })
+    currentMock.sessions.set("root", { id: "root", status: "idle" } as never)
+    const read = jest.fn(async () => undefined)
+    const change = jest.fn(async () => ({ status: "applied-awaiting-step" }))
+    Object.assign(currentMock, { getNativeSubagents: read, changeNativeSubagentModel: change })
+    await manager.getNativeSubagents("agent-1", "root")
+    const request = {
+      operationId: "op",
+      nativeChildThreadId: "child",
+      expectedProcessGeneration: 1,
+      scope: "future-turns" as const,
+      modelId: "model",
+    }
+    await manager.changeNativeSubagentModel("agent-1", "root", request)
+    expect(read).toHaveBeenCalledWith("root")
+    expect(change).toHaveBeenCalledWith("root", request)
+    await expect(manager.changeNativeSubagentModel("agent-1", "foreign", request)).rejects.toThrow(
+      "Session not found"
+    )
+    expect(change).toHaveBeenCalledTimes(1)
+  })
   it("has nothing to describe before the agent opens one", () => {
     // Connected with no session is ordinary right after connecting. Answering
     // with some other agent's session, or with an id that does not exist, is
@@ -3984,6 +4069,105 @@ describe("Cognia gateway task lifecycle", () => {
     }))
     return { manager, children, restorePlane }
   }
+
+  it.each(["workingDirectory", "cwd"])(
+    "detects Pi agents in context.custom.%s and admits explicit children before mint",
+    async (key) => {
+      const { manager, restorePlane } = prepare()
+      protocolAdapterRegistry.register("pi-rpc", () => new MockAdapter() as never)
+      const detect = jest
+        .mocked(piSubagents.resolvePiSubagents)
+        .mockImplementation(async (input) => ({
+          ...input,
+          metadata: {
+            ...input.metadata,
+            cogniaPiSubagents: {
+              family: "nico",
+              version: "0.80.0",
+              packageDir: "/plugins/nico",
+              extensions: ["/plugins/nico/index.js"],
+              agents: {
+                reviewer: {
+                  content: "---\nmodel: cognia/review\n---\nReview",
+                  model: "cognia/review",
+                  path: "/actual/.pi/agents/reviewer.md",
+                  digest: "snapshot",
+                },
+              },
+            },
+          },
+        }))
+      try {
+        const source = {
+          ...managedConfig(),
+          protocol: "pi-rpc" as const,
+          metadata: { preset: "pi-rpc" },
+          process: { command: "pi", cwd: "/wrong" },
+        }
+        await manager.addAgent(source)
+        await manager.execute("managed", "task", { context: { custom: { [key]: "/actual" } } })
+        expect(detect).toHaveBeenCalledWith(
+          expect.objectContaining({ process: expect.objectContaining({ cwd: "/actual" }) })
+        )
+        expect(mockGatewayMint.mock.calls[0][0].modelPlan.additionalModels).toContain("review")
+      } finally {
+        detect.mockImplementation(jest.requireActual("./config/pi-subagents").resolvePiSubagents)
+        restorePlane()
+      }
+    }
+  )
+
+  it("leases each explicit OpenCode child model before launching without a role override", async () => {
+    const { manager, restorePlane } = prepare()
+    const connected = jest.spyOn(MockAdapter.prototype, "connect")
+    try {
+      const source = managedConfig()
+      source.process!.env = {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          agent: {
+            reviewer: { mode: "subagent", model: "cognia/review" },
+            explorer: { mode: "all", model: "provider/search" },
+            fallback: { mode: "subagent" },
+          },
+        }),
+      }
+      await manager.addAgent(source)
+      await manager.execute("managed", "task")
+      expect(mockGatewayMint.mock.calls[0][0].modelPlan).toEqual({
+        additionalModels: ["search", "review"],
+        modelBindings: {},
+      })
+      const child = connected.mock.calls
+        .map(([config]) => config)
+        .find((config) => config.metadata?.cogniaGatewayTask)
+      const inline = JSON.parse(child!.process!.env!.OPENCODE_CONFIG_CONTENT!)
+      expect(inline.agent.reviewer.model).toBe("cognia/review")
+      expect(inline.agent.explorer.model).toBe("cognia/search")
+      expect(inline.agent.fallback.model).toBe("cognia/model")
+    } finally {
+      connected.mockRestore()
+      restorePlane()
+    }
+  })
+
+  it("refuses another provider's explicit child model before minting a lease", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      const source = managedConfig()
+      source.process!.env = {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          agent: { reviewer: { mode: "subagent", model: "elsewhere/review" } },
+        }),
+      }
+      await manager.addAgent(source)
+      await expect(manager.execute("managed", "task")).rejects.toThrow(
+        "cross-provider-unsupported (opencode.agent.reviewer)"
+      )
+      expect(mockGatewayMint).not.toHaveBeenCalled()
+    } finally {
+      restorePlane()
+    }
+  })
 
   it.each(["unsupported-slot", "cross-provider-unsupported", "effort-unsupported"])(
     "refuses %s before acquiring any lease",

@@ -1,4 +1,6 @@
 /**
+ * @cognia-host-integration-test
+ *
  * First-party plugin regression sweep — PR-A backlog item.
  *
  * Walks every `plugins/*\/plugin.json` and:

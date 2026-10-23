@@ -43,6 +43,22 @@ function memFs(seed: Record<string, string> = {}) {
 }
 
 describe("setConfigValue", () => {
+  it.each([
+    ["layout", "scrollback"],
+    ["mouse", "select"],
+    ["selection", "manual"],
+  ])("persists %s and preserves explicit provider and budget configuration", (key, value) => {
+    const existing = {
+      provider: "custom",
+      aiSdkMaxSteps: 37,
+      providers: { custom: { baseURL: "http://localhost:8787/v1", model: "custom-model" } },
+    }
+    const m = memFs({ [userConfigPath(HOME)]: JSON.stringify(existing) })
+    setConfigValue(HOME, key, value, m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)).toEqual({ ...existing, [key]: value })
+    expect(() => setConfigValue(HOME, key, "invalid-mode", m.fsx)).toThrow()
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!)[key]).toBe(value)
+  })
   it("writes a new config.json with the value", () => {
     const m = memFs()
     const target = setConfigValue(HOME, "provider", "openai", m.fsx)
@@ -85,6 +101,9 @@ describe("setConfigValue", () => {
       outputStyle: "concise",
       skillLoadMode: "name",
       locale: "zh-CN",
+      layout: "fullscreen",
+      mouse: "scroll",
+      selection: "off",
     }
     for (const key of SETTABLE_KEYS) {
       const value = valueFor[key] ?? "v"

@@ -138,6 +138,64 @@ beforeEach(() => {
 })
 
 describe("dispatchSubagent", () => {
+  it("returns a non-retryable incomplete result and reports hook failure at a budget stop", async () => {
+    mockRendererTurn.mockResolvedValueOnce({
+      text: "entrypoint found",
+      channel: "sidecar",
+      toolsAvailable: true,
+      finishReason: "error_max_turns",
+    })
+    const result = await dispatchSubagent(subagent, "trace callers", { _runId: "limited" })
+    expect(result).toMatchObject({
+      finishReason: "error",
+      errorEnvelope: { code: "budget-exhausted", retryable: false },
+    })
+    expect(result.text).toContain("entrypoint found")
+    expect(result.text).toContain('resume:"limited"')
+    expect(mockFireAgentHook).toHaveBeenCalledWith(
+      "SubagentStop",
+      expect.anything(),
+      expect.objectContaining({ payload: expect.objectContaining({ success: false }) })
+    )
+  })
+
+  it("leaves the unified budget untouched when a definition has no explicit cap", async () => {
+    const { maxTurns: _maxTurns, ...inherited } = subagent
+    await dispatchSubagent(inherited, "trace callers")
+    expect(mockExecute.mock.calls[0][1]).not.toHaveProperty("maxSteps")
+  })
+
+  it("preserves the remaining time of an explicit subtree deadline", async () => {
+    await dispatchSubagent(subagent, "research", { _deadlineMs: Date.now() + 30_000 })
+    const config = mockExecute.mock.calls[0][1]
+    expect(config!.timeoutMs).toBeGreaterThan(0)
+    expect(config!.timeoutMs).toBeLessThanOrEqual(30_000)
+  })
+
+  it("refuses an expired deadline instead of converting it to an unlimited run", async () => {
+    const result = await dispatchSubagent(subagent, "research", { _deadlineMs: Date.now() - 1 })
+    expect(result).toMatchObject({
+      finishReason: "error",
+      errorEnvelope: { code: "budget-exhausted", retryable: false },
+    })
+    expect(result.text).toMatch(/deadline.*expired/i)
+    expect(mockExecute).not.toHaveBeenCalled()
+    expect(mockFireAgentHook).not.toHaveBeenCalled()
+  })
+
+  it("refuses an expired external-agent deadline before readiness or execution", async () => {
+    const result = await dispatchSubagent(
+      { ...subagent, externalPresetId: "claude-code" },
+      "research",
+      { _deadlineMs: Date.now() - 1 }
+    )
+    expect(result).toMatchObject({
+      finishReason: "error",
+      errorEnvelope: { code: "budget-exhausted", retryable: false },
+    })
+    expect(externalEnsureReady).not.toHaveBeenCalled()
+    expect(externalExecute).not.toHaveBeenCalled()
+  })
   it.each([undefined, "claude-code"])(
     "rejects unsupported context policy before dispatch on %s",
     async (externalPresetId) => {

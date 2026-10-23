@@ -342,13 +342,24 @@ export async function ensureAppMounted(page: Page): Promise<void> {
   // Native fixtures own authentication and never receive a browser stub.
   const needsBrowserAccount = !state.native && existingAccounts.length === 0
   if (needsBrowserAccount) {
-    // At DOMContentLoaded the registry can appear before AccountStore.load has
-    // settled. Seeding in that window races its first-run read/provisioning;
-    // wait for the gate's settled empty-account form before changing storage.
-    await page.getByRole("form", { name: "Create local account", exact: true }).waitFor({
-      state: "visible",
-      timeout: 30_000,
-    })
+    // The first snapshot can precede AccountStore.load. Static exports settle
+    // at the creation form; next dev may instead finish provisioning its own
+    // disposable account. Let either owner finish before changing the registry.
+    const startup = await Promise.any([
+      page
+        .getByRole("form", { name: "Create local account", exact: true })
+        .waitFor({ state: "visible", timeout: 30_000 })
+        .then(() => "create" as const),
+      page
+        .waitForFunction(() => window.__cogniaPluginRuntimeReady === true, undefined, {
+          timeout: 30_000,
+        })
+        .then(() => "ready" as const),
+    ])
+    if (startup === "ready") {
+      await waitForTestGlobals(page, 30_000, true)
+      return
+    }
     await ensureCogniaAccount(page)
   }
   // Re-boot through about:blank instead of page.reload(): a reload can leave

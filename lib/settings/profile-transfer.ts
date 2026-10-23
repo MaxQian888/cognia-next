@@ -36,7 +36,8 @@ export const NON_TRANSFERABLE_KEYS = [
 ] as const satisfies readonly (keyof AppSettings)[]
 
 /** Nested object keys whose name marks them as a secret — scrubbed recursively. */
-const SECRET_KEY_RE = /(token|apikey|secret|password|passphrase|privatekey|credential)/i
+const SECRET_KEY_RE =
+  /(token|apikey|secret|password|passphrase|privatekey|credential|authorization|cookie)/i
 const SEARCH_LOCAL_FIELDS = new Set(["apiKey", "apiKeys", "cx", "baseUrl", "allowPrivateEndpoint"])
 
 export interface SettingsProfile {
@@ -58,7 +59,7 @@ function isSecretValue(value: unknown): boolean {
   // preference flags like `revealSecrets` / `rememberPassphrase` share the
   // secret-y name but are NOT secrets — keep them.
   if (typeof value === "string") return true
-  return Array.isArray(value) && value.every((v) => typeof v === "string")
+  return Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === "string")
 }
 
 /**
@@ -77,6 +78,18 @@ export function deepStripSecrets(value: unknown): unknown {
         isSecretValue(v)
       )
         continue
+      // Workflow HTTP nodes also accept headers/body as serialized JSON.
+      if (normalized.endsWith("json") && typeof v === "string") {
+        try {
+          const parsed: unknown = JSON.parse(v)
+          if (isPlainObject(parsed) || Array.isArray(parsed)) {
+            out[k] = JSON.stringify(deepStripSecrets(parsed))
+            continue
+          }
+        } catch {
+          // Preserve ordinary non-JSON authored text.
+        }
+      }
       out[k] = deepStripSecrets(v)
     }
     return out

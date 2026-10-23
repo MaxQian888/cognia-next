@@ -60,6 +60,12 @@ export interface TransportBinaryResponse {
 
 export interface Transport {
   /**
+   * Best-effort readiness for subscriptions already requested. An explicit
+   * timeout bounds the wait; return does not confer authority or guarantee
+   * readiness after registration failure, cancellation or a remote timeout.
+   */
+  whenSubscribed?(channels: readonly string[], timeoutMs?: number): Promise<void>
+  /**
    * Invoke a named command on the underlying runtime and wait for its result.
    *
    * Implementations MUST reject (not throw synchronously) so callers can rely

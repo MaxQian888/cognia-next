@@ -14,6 +14,6 @@
 
 export { defineGuardrail } from "../define/define-guardrail"
 
-export { createPiiOutputGuardrail } from "@/lib/plugin/agent-sdk/guardrails"
+export { createPiiOutputGuardrail } from "@cognia/plugin-contract/lib/plugin/agent-sdk/guardrails"
 
-export type { PluginGuardrail } from "@/types/plugin/plugin-agent-guardrails"
+export type { PluginGuardrail } from "@cognia/plugin-contract/types/plugin/plugin-agent-guardrails"

@@ -52,6 +52,7 @@ describe("registerTurnSubagentContext", () => {
     const controller = new AbortController()
     const resolveSubagentOptions = jest.fn(async () => ({}) as SendOptions)
     const resolveSubagentGate = jest.fn(() => gate)
+    const awaitApprovals = jest.fn(async () => {})
     const clear = registerTurnSubagentContext({
       session: s,
       config,
@@ -59,6 +60,7 @@ describe("registerTurnSubagentContext", () => {
       gate,
       resolveSubagentOptions,
       resolveSubagentGate,
+      awaitApprovals,
       signal: controller.signal,
       approvedTools: new Set(["write"]),
       disabledMcpTools: new Set(["mcp__alpha__x"]),
@@ -69,6 +71,7 @@ describe("registerTurnSubagentContext", () => {
     expect(ctx!.cwd).toBe("/work")
     expect(ctx!.home).toBe(HOME)
     expect(ctx!.gate).toBe(gate)
+    expect(ctx!.awaitApprovals).toBe(awaitApprovals)
     expect(ctx!.resolveSubagentOptions).toBe(resolveSubagentOptions)
     expect(ctx!.resolveSubagentGate).toBe(resolveSubagentGate)
     expect(ctx!.signal).toBe(controller.signal)

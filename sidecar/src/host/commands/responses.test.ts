@@ -1,5 +1,14 @@
 import test from "node:test"
 import assert from "node:assert/strict"
+
+test("explicit runtime consent accepts only a one-off allow decision", () => {
+  for (const decision of ["allow_always", "unknown", "", "deny"])
+    assert.equal(
+      buildPermissionResult(decision, { requiresExplicitConsent: true }).behavior,
+      "deny"
+    )
+  assert.equal(buildPermissionResult("allow", { requiresExplicitConsent: true }).behavior, "allow")
+})
 import {
   buildPermissionResult,
   persistableSuggestions,

@@ -17,13 +17,16 @@ import type {
 } from "./ai-provider"
 
 describe("plugin-sdk api/ai-provider", () => {
-  it("exposes the authoring helper, manifest bridge, and plugin AI provider API", () => {
+  it("exposes the authoring helper", () => {
     expect(typeof sdk.defineAiProvider).toBe("function")
-    expect(typeof sdk.registerAiProvidersForPlugin).toBe("function")
-    expect(typeof sdk.unregisterAiProvidersForPlugin).toBe("function")
-    expect(typeof sdk.createAIProviderAPI).toBe("function")
-    expect(typeof sdk.getCustomAIProviders).toBe("function")
-    expect(typeof sdk.clearCustomAIProviders).toBe("function")
+  })
+
+  it("keeps host wiring off the author surface (plugins reach it through ctx.ai)", () => {
+    expect(sdk).not.toHaveProperty("registerAiProvidersForPlugin")
+    expect(sdk).not.toHaveProperty("unregisterAiProvidersForPlugin")
+    expect(sdk).not.toHaveProperty("createAIProviderAPI")
+    expect(sdk).not.toHaveProperty("getCustomAIProviders")
+    expect(sdk).not.toHaveProperty("clearCustomAIProviders")
   })
 
   it("re-exports provider manifest, bridge, and runtime API types", () => {

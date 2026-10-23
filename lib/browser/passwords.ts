@@ -7,6 +7,8 @@
  * once, into Rust; filling asks Rust to put a stored password into the page.
  */
 import { transport } from "@/lib/tauri"
+import type { CredentialFillReason } from "@cognia/plugin-contract/lib/browser/passwords"
+export type { CredentialFillReason } from "@cognia/plugin-contract/lib/browser/passwords"
 
 export type PasswordSourceKind = "chromium" | "firefox"
 
@@ -79,9 +81,6 @@ export type CredentialFillArgs = {
   credentialId?: string | null
   url: string
 }
-
-export type CredentialFillReason =
-  "no_match" | "ambiguous" | "no_login_form" | "origin_mismatch" | "fill_failed"
 
 export type CredentialFillResult = {
   filled: boolean

@@ -165,6 +165,7 @@ pub mod shutdown;
 // resolves unchanged.
 pub use cognia_skills as skills;
 mod provider_diagnostics;
+mod magpie;
 mod subscription;
 pub mod task_workspace;
 // ADR-0067 Tier C — extracted alongside `logging`; re-aliased so
@@ -800,6 +801,7 @@ pub fn run() {
             provider_diagnostics::provider_diagnostics_migrate_balance_token,
             provider_diagnostics::provider_diagnostics_clear_balance_token,
             provider_diagnostics::provider_diagnostics_run_balance_script,
+            magpie::magpie_gateway_port,
             subscription::volcengine::subscription_volcengine_usage,
             // ADR-0028 — per-`query()` env injection (per-session multi-account).
             subscription::commands::claude_env_for_account,
@@ -1484,6 +1486,7 @@ pub fn run() {
             proxy_config::commands::network_interface_counters,
             proxy_config::commands::network_latency_probe,
             proxy_config::commands::proxy_http_request,
+            proxy_config::commands::proxy_http_prepare,
             proxy_config::commands::proxy_http_cancel,
             proxy_config::stream::proxy_http_stream_open,
             proxy_config::stream::proxy_http_stream_ack,
@@ -1505,6 +1508,7 @@ pub fn run() {
             connectors::commands::connectors_keyring_delete,
             connectors::commands::connectors_keyring_list,
             connectors::commands::connectors_http_request,
+            connectors::commands::connectors_google_docs_auth,
             connectors::commands::connectors_ws_open,
             connectors::commands::connectors_ws_send,
             connectors::commands::connectors_ws_close,
@@ -1752,6 +1756,7 @@ pub fn run() {
             automation::commands::automation_kill_switch_engaged,
             automation::commands::automation_kill_switch,
             automation::commands::automation_consent_respond,
+            automation::commands::automation_consent_pending,
             // ADR-0153 — the desktop operator answers a paired device's
             // escalation from their own screen. The `_rpc` arms in
             // rpc/native_tools.rs are invisible to the renderer, which

@@ -8,6 +8,7 @@ import type { RecordedFlow, RecordedStep, RecordedTarget } from "@/lib/browser/r
 import { replayFlow } from "@/lib/browser/recording/replayer"
 
 const refFor = browserClient.embedRefFor as jest.Mock
+const resolveRecordedTarget = jest.fn()
 
 type EngineMock = { [K in keyof BrowserEngine]: jest.Mock } & BrowserEngine
 
@@ -15,6 +16,7 @@ function engineMock(over: Partial<Record<keyof BrowserEngine, jest.Mock>> = {}):
   const ok = { ok: true, error: null, generation: 1 }
   return {
     navigate: jest.fn().mockResolvedValue(undefined),
+    resolveRecordedTarget,
     snapshot: jest.fn(),
     act: jest.fn().mockResolvedValue(ok),
     pressKey: jest.fn().mockResolvedValue(ok),
@@ -54,9 +56,33 @@ function flow(steps: RecordedStep[], over: Partial<RecordedFlow> = {}): Recorded
 
 beforeEach(() => {
   refFor.mockReset().mockResolvedValue("e7")
+  resolveRecordedTarget.mockReset().mockImplementation((selector) => refFor(selector))
 })
 
 describe("replayFlow", () => {
+  it("uses only the selected engine to resolve a recorded target", async () => {
+    refFor.mockRejectedValue(new Error("embedded transport is unavailable"))
+    const resolve = jest.fn().mockResolvedValue("remote-opaque-ref")
+    const engine = engineMock({ resolveRecordedTarget: resolve })
+
+    const result = await replayFlow(flow([{ act: "click", at: 1, target: target() }]), engine)
+
+    expect(result.ok).toBe(true)
+    expect(resolve).toHaveBeenCalledWith("#submit")
+    expect(engine.act).toHaveBeenCalledWith("remote-opaque-ref", "click", {})
+    expect(refFor).not.toHaveBeenCalled()
+  })
+
+  it("fails a required navigation when its destination never arrives", async () => {
+    const engine = engineMock({
+      waitForLoad: jest.fn().mockResolvedValue({ ok: false, timedOut: true }),
+    })
+
+    const result = await replayFlow(flow([{ act: "navigate", at: 1, url: "/missing" }]), engine)
+
+    expect(result.ok).toBe(false)
+    expect(result.steps[0]).toMatchObject({ ok: false, error: expect.stringMatching(/navigat/i) })
+  })
   it("navigates and waits for the document it asked for", async () => {
     const engine = engineMock()
     const res = await replayFlow(flow([{ act: "navigate", at: 1, url: "/login" }]), engine)

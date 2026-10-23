@@ -791,7 +791,7 @@ describe("normalizeIdeManifest", () => {
 // Host normalization belongs to the host suite; plugin tests use only the public SDK.
 describe("the pro-ide fixture manifest consumed by the host", () => {
   const manifest = JSON.parse(
-    readFileSync(join(__dirname, "../../../plugins/pro-ide-fixture/plugin.json"), "utf8")
+    readFileSync(join(__dirname, "pro-ide-fixture/plugin.json"), "utf8")
   ) as PluginManifest
 
   it("normalizes without an error or a warning", () => {

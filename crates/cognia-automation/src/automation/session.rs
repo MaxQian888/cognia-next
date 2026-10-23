@@ -334,6 +334,8 @@ pub struct ActionPolicyDecision {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ZoomedRegion {
+    /// Host-owned geometry used for action policy; never supplied by the caller.
+    pub surface: UiSurface,
     pub session_id: String,
     pub lineage_id: String,
     pub revision: u64,
@@ -824,6 +826,7 @@ impl UiSessionManager {
             .map_err(|_| SessionError::PixelSurfaceMismatch)?;
 
         Ok(ZoomedRegion {
+            surface: session.current.surface.clone(),
             session_id: session.current.session_id.clone(),
             lineage_id: session.lineage_id.clone(),
             revision: session.revision,
@@ -1287,6 +1290,7 @@ mod tests {
         assert_eq!((zoom.region.x, zoom.region.y), (200, 150));
         assert_eq!((zoom.region.width, zoom.region.height), (160, 120));
         assert_eq!(zoom.scale, 2.0);
+        assert_eq!(zoom.surface, revision.surface);
     }
 
     #[test]

@@ -38,6 +38,166 @@ import type { OutboundJobRow } from "./connector-types"
 import { emit, listen } from "@tauri-apps/api/event"
 import { isTauri } from "@/lib/platform/detect"
 
+describe("document database lifetime", () => {
+  it.each([false, true])(
+    "preserves pending writes and later exit saves (persisted=%s)",
+    async (persisted) => {
+      const name = `cognia-pagehide-writes-${persisted}`
+      const database = new CogniaDB(name, "pagehide-writer-regression")
+      let release!: () => void
+      const work = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let started!: () => void
+      const entered = new Promise<void>((resolve) => {
+        started = resolve
+      })
+      let native: IDBTransaction | undefined
+      let abort: jest.SpyInstance | undefined
+      let keepAlive = true
+      let outcome: Promise<unknown> | undefined
+      let saved: Promise<unknown> | undefined
+      const saveOnExit = () => {
+        saved = Dexie.ignoreTransaction(() =>
+          database.table("storageLayout").put({ id: "exit-save", value: "saved" })
+        )
+      }
+      try {
+        await database.open()
+        outcome = database
+          .transaction("rw", database.table("storageLayout"), (transaction) => {
+            native = transaction.idbtrans
+            abort = jest.spyOn(native, "abort")
+            const spin = () => {
+              if (keepAlive)
+                native!.objectStore("storageLayout").get("pending-save").onsuccess = spin
+            }
+            native
+              .objectStore("storageLayout")
+              .put({ id: "pending-save", value: "saved" }).onsuccess = () => {
+              spin()
+              started()
+            }
+            return work
+          })
+          .then(
+            () => null,
+            (error: unknown) => error
+          )
+        await entered
+        // Existing Canvas/Artifacts pagehide handlers run after capture cleanup.
+        window.addEventListener("pagehide", saveOnExit)
+        window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted }))
+        expect(abort).not.toHaveBeenCalled()
+        keepAlive = false
+        release()
+        await expect(outcome).resolves.toBeNull()
+        await expect(saved).resolves.toBe("exit-save")
+        expect(await database.table("storageLayout").toArray()).toEqual([
+          { id: "exit-save", value: "saved" },
+          { id: "pending-save", value: "saved" },
+        ])
+      } finally {
+        window.removeEventListener("pagehide", saveOnExit)
+        keepAlive = false
+        abort?.mockRestore()
+        try {
+          native?.abort()
+        } catch {
+          /* Already committed during fixture cleanup. */
+        }
+        release()
+        await outcome
+        await saved
+        database.close()
+        await Dexie.delete(name)
+      }
+    }
+  )
+
+  it.each([
+    { persisted: false, retired: false },
+    { persisted: true, retired: false },
+    { persisted: false, retired: true },
+    { persisted: true, retired: true },
+  ])(
+    "releases pagehide readers and preserves committed rows (persisted=$persisted, retired=$retired)",
+    async ({ persisted, retired }) => {
+      const name = `cognia-pagehide-transactions-${persisted}-${retired}`
+      const previous = new CogniaDB(name, "pagehide-regression")
+      let release!: () => void
+      const work = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let started!: () => void
+      const entered = new Promise<void>((resolve) => {
+        started = resolve
+      })
+      let outcome: Promise<unknown> | undefined
+      let native: IDBTransaction | undefined
+      let abort: jest.SpyInstance | undefined
+      let aborted: Promise<void> | undefined
+      let keepAlive = true
+      try {
+        await previous.open()
+        await previous.table("storageLayout").put({ id: "committed", value: "kept" })
+        outcome = previous
+          .transaction("r", previous.table("storageLayout"), (transaction) => {
+            native = transaction.idbtrans
+            abort = jest.spyOn(native, "abort")
+            aborted = new Promise<void>((resolve) =>
+              native!.addEventListener("abort", () => resolve(), { once: true })
+            )
+            const spin = () => {
+              if (!keepAlive) return
+              native!.objectStore("storageLayout").get("committed").onsuccess = spin
+            }
+            native.objectStore("storageLayout").get("committed").onsuccess = () => {
+              spin()
+              started()
+            }
+            return work
+          })
+          .then(
+            () => null,
+            (error: unknown) => error
+          )
+        await entered
+
+        window.dispatchEvent(new Event("visibilitychange"))
+        expect(previous.isOpen()).toBe(true)
+        if (retired) previous.close({ disableAutoOpen: false })
+        window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted }))
+        expect(abort).toHaveBeenCalledTimes(1)
+        expect(previous.isOpen()).toBe(false)
+        await aborted
+        keepAlive = false
+        release()
+        await expect(outcome).resolves.not.toBeNull()
+
+        // BFCache restoration may reuse the object; lazy reopening must work.
+        expect(await previous.table("storageLayout").get("committed")).toEqual({
+          id: "committed",
+          value: "kept",
+        })
+        await previous.table("storageLayout").put({ id: "next-document", value: "writable" })
+      } finally {
+        keepAlive = false
+        abort?.mockRestore()
+        try {
+          native?.abort()
+        } catch {
+          // A settled transaction cannot be aborted again during fixture cleanup.
+        }
+        release()
+        await outcome
+        previous.close()
+        await Dexie.delete(name)
+      }
+    }
+  )
+})
+
 // The cross-window yield handshake lazily imports the Tauri event API and gates
 // on isTauri(); stub both so the Tauri path is exercisable under jsdom. isTauri
 // defaults to the real (false) detection so every non-Tauri suite is unchanged.

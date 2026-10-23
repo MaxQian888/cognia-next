@@ -475,6 +475,34 @@ fn read_url_string(el: &AxElement) -> Option<String> {
 /// main window, then the first window that actually has children (skips
 /// empty helper windows), then the first window, then the application element
 /// itself.
+/// Prove window identity, including overlapping windows of the same process.
+pub fn belongs_to_focused_window(element: &AxElement, pid: u32) -> bool {
+    let Some(focused) = focused_window(&AxElement::application(pid)) else {
+        return false;
+    };
+    let mut current = element.clone();
+    for _ in 0..64 {
+        if objc2_core_foundation::CFEqual(
+            Some(AsRef::<CFType>::as_ref(&*current.0)),
+            Some(AsRef::<CFType>::as_ref(&*focused.0)),
+        ) {
+            return true;
+        }
+        let Some(parent) = current
+            .element_attribute("AXWindow")
+            .or_else(|| current.element_attribute("AXParent"))
+        else {
+            return false;
+        };
+        current = parent;
+    }
+    false
+}
+
+pub fn focused_window(app: &AxElement) -> Option<AxElement> {
+    app.element_attribute("AXFocusedWindow")
+}
+
 pub fn resolve_window_root(app: &AxElement) -> AxElement {
     if let Some(window) = app.element_attribute("AXFocusedWindow") {
         return window;

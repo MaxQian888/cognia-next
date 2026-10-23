@@ -78,15 +78,11 @@ function verifyPayload(directory, manifest) {
 function preparePlugins(root) {
   // The coding tools are generated plugins. A cold checkout must build them
   // before esbuild embeds their catalog and --js-only stages their chunks.
-  execFileSync(
-    process.execPath,
-    [path.join(root, "scripts/build/build-browser-builtin-plugins.mjs")],
-    {
-      cwd: root,
-      stdio: "inherit",
-      timeout: 200_000,
-    }
-  )
+  execFileSync(process.execPath, [path.join(root, "scripts/build/stage-plugin-artifacts.mjs")], {
+    cwd: root,
+    stdio: "inherit",
+    timeout: 200_000,
+  })
 }
 
 function build(root, outdir, inputsFile) {

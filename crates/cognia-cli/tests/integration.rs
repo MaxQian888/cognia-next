@@ -190,11 +190,11 @@ fn plugin_contract_json_returns_the_complete_canonical_inventory_without_writing
     assert_eq!(parsed["catalogSchemaVersion"], 2);
     assert_eq!(parsed["pluginPointSchemaVersion"], 1);
     let catalog: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../packages/plugin-sdk/contract/catalog.json"
+        "../../../packages/plugin-contract/contract/catalog.json"
     ))
     .expect("canonical authoring catalog");
     let points: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../packages/plugin-sdk/contract/plugin-points.json"
+        "../../../packages/plugin-contract/contract/plugin-points.json"
     ))
     .expect("canonical plugin points");
     for field in [
@@ -299,11 +299,11 @@ fn plugin_contract_filters_related_capabilities_contributions_and_runtime_entrie
     // Permissions and path contracts remain complete because the canonical
     // catalog does not claim a one-to-one permission/path mapping.
     let catalog: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../packages/plugin-sdk/contract/catalog.json"
+        "../../../packages/plugin-contract/contract/catalog.json"
     ))
     .expect("canonical authoring catalog");
     let points: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../packages/plugin-sdk/contract/plugin-points.json"
+        "../../../packages/plugin-contract/contract/plugin-points.json"
     ))
     .expect("canonical plugin points");
     for field in ["permissions", "pathFields"] {

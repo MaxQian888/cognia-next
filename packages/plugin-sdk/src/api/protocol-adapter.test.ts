@@ -11,10 +11,8 @@ import type {
 } from "./protocol-adapter"
 
 describe("plugin-sdk api/protocol-adapter", () => {
-  it("exposes the authoring helper, manifest bridge, registry, and code executors", () => {
+  it("exposes the authoring helper, registry, and code executors", () => {
     expect(typeof sdk.defineProtocolAdapter).toBe("function")
-    expect(typeof sdk.registerProtocolAdaptersForPlugin).toBe("function")
-    expect(typeof sdk.unregisterProtocolAdaptersForPlugin).toBe("function")
     expect(typeof sdk.registerProtocolAdapter).toBe("function")
     expect(typeof sdk.unregisterProtocolAdapter).toBe("function")
     expect(typeof sdk.unregisterProtocolAdaptersByPlugin).toBe("function")
@@ -24,6 +22,11 @@ describe("plugin-sdk api/protocol-adapter", () => {
     expect(typeof sdk.getCodeAdapterExecutor).toBe("function")
     expect(typeof sdk.unregisterCodeAdapterExecutor).toBe("function")
     expect(typeof sdk.unregisterCodeAdapterExecutorsByPlugin).toBe("function")
+  })
+
+  it("keeps host wiring off the author surface (plugins contribute through their manifest)", () => {
+    expect(sdk).not.toHaveProperty("registerProtocolAdaptersForPlugin")
+    expect(sdk).not.toHaveProperty("unregisterProtocolAdaptersForPlugin")
   })
 
   it("re-exports protocol adapter manifest, bridge, and executor types", () => {

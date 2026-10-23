@@ -11,6 +11,7 @@ import { getRecentErrorLogs } from "@/packages/logging/src/recent-errors"
 import {
   __resetCliDbForTesting,
   cliStoreMayHoldRows,
+  disposeOpenCliDb,
   ensureCliDb,
   flushOpenCliDb,
   hasSnapshotStore,
@@ -80,6 +81,90 @@ function makeOpts(over: Partial<Parameters<typeof ensureCliDb>[0]> = {}) {
 beforeEach(() => __resetCliDbForTesting())
 
 describe("ensureCliDb", () => {
+  it("drains writes made during final flush and cancels deferred flushes before releasing the lock", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-final-drain-"))
+    const goals = new FakeTable("goals", [{ id: "first" }])
+    const deferred = new Set<() => void | Promise<void>>()
+    const handle = await ensureCliDb({
+      home,
+      getDatabase: () => ({ name: "CogniaDB", verno: 82, tables: [goals] }),
+      installGlobals: async () => {},
+      whenReady: async () => {},
+      schedule: (fn) => {
+        deferred.add(fn)
+        return () => {
+          deferred.delete(fn)
+        }
+      },
+    })
+    const open = fs.promises.open.bind(fs.promises)
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const syncing = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const openSpy = jest.spyOn(fs.promises, "open").mockImplementationOnce(async (...args) => {
+      const descriptor = await open(...args)
+      const sync = descriptor.sync.bind(descriptor)
+      jest.spyOn(descriptor, "sync").mockImplementationOnce(async () => {
+        entered()
+        await gate
+        await sync()
+      })
+      return descriptor
+    })
+    const final = handle.dispose()
+    try {
+      await syncing
+      goals.rows = [{ id: "last" }]
+      handle.scheduleTableFlush("CogniaDB", "goals")
+      release()
+      await final
+      expect(deferred.size).toBe(0)
+      const table = path.join(home, "db.json.tables", "CogniaDB--goals.json")
+      expect(JSON.parse(fs.readFileSync(table, "utf8"))).toEqual([{ id: "last" }])
+      expect(fs.existsSync(path.join(home, "db.json.lock"))).toBe(false)
+      handle.scheduleTableFlush("CogniaDB", "goals")
+      handle.scheduleFlush()
+      expect(deferred.size).toBe(0)
+    } finally {
+      release()
+      await final.catch(() => {})
+      openSpy.mockRestore()
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("disposes only an already-open CLI store on exit", async () => {
+    await disposeOpenCliDb()
+    const { opts, h } = makeOpts()
+    const handle = await ensureCliDb(opts)
+    const dispose = jest.spyOn(handle, "dispose")
+    await disposeOpenCliDb()
+    expect(dispose).toHaveBeenCalledTimes(1)
+    expect(h.writes).toHaveLength(1)
+    await disposeOpenCliDb()
+    expect(dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it("retains the open store after failed disposal so a retry persists pending data", async () => {
+    const writeSnapshot = jest.fn().mockImplementationOnce(() => {
+      throw new Error("disk busy")
+    })
+    const { opts, goals } = makeOpts({ writeSnapshot })
+    const handle = await ensureCliDb(opts)
+    await expect(disposeOpenCliDb()).rejects.toThrow("disk busy")
+    expect(await ensureCliDb(opts)).toBe(handle)
+    goals.rows = [{ id: "retry evidence" }]
+    await disposeOpenCliDb()
+    expect(writeSnapshot).toHaveBeenCalledTimes(2)
+    expect(writeSnapshot.mock.calls[1][1]).toContain("retry evidence")
+  })
+
   it("installs globals once and is idempotent across calls", async () => {
     const { opts, h } = makeOpts()
     const a = await ensureCliDb(opts)

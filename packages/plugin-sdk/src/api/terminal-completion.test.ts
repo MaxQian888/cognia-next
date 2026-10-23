@@ -12,16 +12,19 @@ import type {
 } from "./terminal-completion"
 
 describe("plugin-sdk api/terminal-completion", () => {
-  it("exposes the authoring helper, manifest bridge, plugin adapter, and host registry aliases", () => {
+  it("exposes the authoring helper, provider registration, and host registry aliases", () => {
     expect(typeof sdk.defineTerminalCompletionProvider).toBe("function")
-    expect(typeof sdk.adaptPluginCompletionProvider).toBe("function")
     expect(typeof sdk.registerPluginCompletionProvider).toBe("function")
-    expect(typeof sdk.registerTerminalCompletionProvidersForPlugin).toBe("function")
-    expect(typeof sdk.unregisterTerminalCompletionProvidersForPlugin).toBe("function")
     expect(typeof sdk.registerTerminalCompletionProvider).toBe("function")
     expect(typeof sdk.listTerminalCompletionProviders).toBe("function")
     expect(typeof sdk.getTerminalCompletions).toBe("function")
     expect(typeof sdk.rankTerminalCompletionSuggestions).toBe("function")
+  })
+
+  it("keeps host wiring off the author surface (plugins contribute through their manifest)", () => {
+    expect(sdk).not.toHaveProperty("adaptPluginCompletionProvider")
+    expect(sdk).not.toHaveProperty("registerTerminalCompletionProvidersForPlugin")
+    expect(sdk).not.toHaveProperty("unregisterTerminalCompletionProvidersForPlugin")
   })
 
   it("re-exports terminal completion ranking metadata and contract types", () => {

@@ -174,7 +174,112 @@ async fn auth_middleware(
         .get("X-Cognia-Dev-Token")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if !constant_time_eq(header_value.as_bytes(), state.dev_token.as_bytes()) {
+    let owner = constant_time_eq(header_value.as_bytes(), state.dev_token.as_bytes());
+    #[cfg(all(feature = "agent-debug", desktop))]
+    if request.uri().path().starts_with("/api/dev/agent/") {
+        use crate::agent_debug::sessions::{self, Context, Identity, Writer};
+        let identity = if owner {
+            Some(Identity::Owner)
+        } else if sessions::shared() {
+            sessions::manager().authenticate(header_value, constant_time_eq)
+        } else {
+            None
+        };
+        if owner || identity.is_some() {
+            crate::agent_debug::flush_retired(&state.app_handle);
+        }
+        let Some(identity) = identity else {
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                "bad_dev_token",
+                "invalid owner or client-session credential",
+            );
+        };
+        let path = request.uri().path();
+        if sessions::shared() {
+            let owner_only = matches!(
+                path,
+                "/api/dev/agent/sessions"
+                    | "/api/dev/agent/shutdown"
+                    | "/api/dev/agent/logs"
+                    | "/api/dev/agent/recover"
+            ) || path.starts_with("/api/dev/agent/sessions/");
+            if owner_only && !matches!(identity, Identity::Owner) {
+                return error_response(
+                    StatusCode::FORBIDDEN,
+                    "owner_required",
+                    "operation requires the launcher owner",
+                );
+            }
+            if matches!(identity, Identity::Owner)
+                && !owner_only
+                && !matches!(path, "/api/dev/agent/health" | "/api/dev/agent/windows")
+            {
+                return error_response(
+                    StatusCode::FORBIDDEN,
+                    "client_session_required",
+                    "shared operations require an attached client session",
+                );
+            }
+            if path == "/api/dev/agent/evaluate" {
+                return error_response(
+                    StatusCode::FORBIDDEN,
+                    "unsafe_evaluate_disabled",
+                    "arbitrary evaluation is unavailable in shared mode",
+                );
+            }
+        }
+        let writer = {
+            let header = |name: &str| {
+                request
+                    .headers()
+                    .get(name)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_owned)
+            };
+            match (
+                header("X-Cognia-Writer-Token"),
+                header("X-Cognia-Writer-Fence"),
+                header("X-Cognia-Operation-Id"),
+            ) {
+                (Some(token), Some(fence), Some(operation_id)) => match fence.parse() {
+                    Ok(fence) => Some(Writer {
+                        token,
+                        fence,
+                        operation_id,
+                    }),
+                    Err(_) => {
+                        return error_response(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_writer_fence",
+                            "writer fence must be an integer",
+                        )
+                    }
+                },
+                _ => None,
+            }
+        };
+        let expected_document = request
+            .headers()
+            .get("X-Cognia-Document-Id")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let timeout_ms = request
+            .headers()
+            .get("X-Cognia-Timeout-Ms")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|ms| ms.clamp(1, 120_000));
+        let mut request = request;
+        request.extensions_mut().insert(Context {
+            identity,
+            writer,
+            expected_document,
+            timeout_ms,
+        });
+        return next.run(request).await;
+    }
+    if !owner {
         return error_response(
             StatusCode::UNAUTHORIZED,
             "bad_dev_token",

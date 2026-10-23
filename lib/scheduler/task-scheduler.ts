@@ -108,6 +108,8 @@ import type {
   CreateSystemTaskInput,
   TaskOperationResponse,
 } from "@/types/scheduler/system-scheduler"
+import type { CancelExecutionOutcome } from "@cognia/plugin-contract/lib/scheduler/task-scheduler"
+export type { CancelExecutionOutcome } from "@cognia/plugin-contract/lib/scheduler/task-scheduler"
 
 // Logger
 const log = loggers.scheduler
@@ -441,30 +443,6 @@ export type ExecutionCancelRequest = {
 
 type SchedulerChannelMessage = ExecutionStatusEvent | ExecutionCancelRequest
 
-/**
- * The answer to "stop this run", which is never just a boolean.
- *
- * Four outcomes that a boolean would flatten into one, and the difference is
- * what the user needs to be told. `already-settled` means they are looking at
- * stale rows. `not-owned-here` means the run is real but this context cannot
- * reach it, which on the web is the ordinary case of a second tab. `requested`
- * means it was handed to the owning context and the status broadcast will say
- * what happened.
- */
-export type CancelExecutionOutcome =
-  | { cancelled: true }
-  | { cancelled: false; reason: "not-found" }
-  | { cancelled: false; reason: "already-settled"; status: TaskExecution["status"] }
-  | { cancelled: false; reason: "requested" }
-  | { cancelled: false; reason: "not-owned-here" }
-  /**
-   * The schedule on screen belongs to a paired host whose build does not know
-   * the `scheduled_task_cancel_run` command. Named rather than folded into
-   * `not-owned-here` because the fix is different: this one is an out-of-date
-   * machine, not a run that moved.
-   */
-  | { cancelled: false; reason: "unsupported-on-remote" }
-
 interface ExecuteTaskContext {
   triggerSource?: TaskExecutionTriggerSource
   scheduledFor?: Date
@@ -511,7 +489,7 @@ class TaskSchedulerImpl {
   /** Ids currently armed in the timing driver (mirrors driver state for getStatus). */
   private armedTaskIds: Set<string> = new Set()
   /** Canonical (un-jittered) armed slot per task — `scheduledFor` always uses this. */
-  private armedCanonicalMs: Map<string, number> = new Map()
+  private armedSlots = new Map<string, { canonicalMs: number; fireAtMs: number }>()
   /** Prewarm alarms armed per task id (see `./prewarm`), mirroring driver state. */
   private armedPrewarms: Map<string, number> = new Map()
   /** Prewarms in flight, aborted when their task is unscheduled or the scheduler stops. */
@@ -529,6 +507,8 @@ class TaskSchedulerImpl {
    */
   private occurrenceClaims: Set<string> = new Set()
   private retryChains: Set<string> = new Set()
+  /** One replay pipeline per task and lifecycle; minute polls may overlap slow work. */
+  private catchupVersions = new Map<string, number>()
   /** Retry timers must not outlive pause/delete/stop lifecycle transitions. */
   private retryTimers: Map<string, Set<ReturnType<typeof setTimeout>>> = new Map()
   /** Invalidates async work from an older pause/delete lifecycle for one task. */
@@ -752,10 +732,14 @@ class TaskSchedulerImpl {
       driver.onDue((alarmId, firedAtMs) => {
         const prewarmTaskId = parsePrewarmAlarmId(alarmId)
         if (prewarmTaskId !== null && this.armedPrewarms.has(prewarmTaskId)) {
-          void this.handlePrewarmDue(prewarmTaskId, version)
+          void this.handlePrewarmDue(prewarmTaskId, version).catch((error) =>
+            log.error(`Error handling prewarm for ${prewarmTaskId}:`, error)
+          )
           return
         }
-        void this.handleTaskDue(alarmId, firedAtMs, version)
+        void this.handleTaskDue(alarmId, firedAtMs, version).catch((error) =>
+          log.error(`Error handling due task ${alarmId}:`, error)
+        )
       })
       await driver.start()
       if (version !== this.lifecycleVersion) {
@@ -852,8 +836,7 @@ class TaskSchedulerImpl {
         this.driver?.stop()
         return
       }
-      this.driverReady = false
-      this.driver?.stop()
+      this.stop()
       log.error("Failed to initialize task scheduler:", error)
       throw SchedulerError.initFailed(
         error instanceof Error ? error.message : String(error),
@@ -1017,14 +1000,19 @@ class TaskSchedulerImpl {
    * `firedAtMs` is the originally-armed slot so interval cadence stays stable.
    */
   private async handleTaskDue(taskId: string, firedAtMs: number, version: number): Promise<void> {
-    if (version !== this.lifecycleVersion) return
+    const taskVersion = this.getTaskLifecycleVersion(taskId)
+    const isCurrent = () =>
+      version === this.lifecycleVersion && taskVersion === this.getTaskLifecycleVersion(taskId)
+    if (!isCurrent()) return
+    const armed = this.armedSlots.get(taskId)
+    // A queued native event belongs to the arm that emitted it. Never let an
+    // old delivery consume or relabel a replacement arm (including jitter).
+    if (armed && armed.fireAtMs !== firedAtMs) return
     this.armedTaskIds.delete(taskId)
-    // Jitter only shifts the armed epoch; the canonical slot identity is
-    // preserved here so interval cadence and missed-run math stay stable.
-    const canonicalMs = this.armedCanonicalMs.get(taskId) ?? firedAtMs
-    this.armedCanonicalMs.delete(taskId)
+    const canonicalMs = armed?.canonicalMs ?? firedAtMs
+    this.armedSlots.delete(taskId)
     const task = await schedulerDb.getTask(taskId)
-    if (version !== this.lifecycleVersion) return
+    if (!isCurrent()) return
     if (!task || task.status !== "active") return
     // A slot armed before the operator handed timing to another host must not
     // fire here. The occurrence is not consumed and `nextRunAt` is not advanced:
@@ -1067,12 +1055,18 @@ class TaskSchedulerImpl {
       return
     }
     const claimedTask = await schedulerDb.claimTaskSlot(taskId, scheduledFor, nextRunAt)
-    if (version !== this.lifecycleVersion) return
+    if (!isCurrent()) return
     if (!claimedTask) return
     if (claimedTask.nextRunAt) {
-      await this.scheduleTask(claimedTask, version)
+      try {
+        await this.scheduleTask(claimedTask, version)
+      } catch (error) {
+        // The current slot is already reserved. A failed future alarm must
+        // not discard its work; the minute sweep can recover the next slot.
+        log.error(`Failed to arm next slot for ${claimedTask.name}:`, error)
+      }
     }
-    if (version !== this.lifecycleVersion) return
+    if (!isCurrent()) return
     this.executeTask(claimedTask, 0, {
       triggerSource: "schedule",
       scheduledFor,
@@ -1195,187 +1189,182 @@ class TaskSchedulerImpl {
    * Check and run any missed tasks
    */
   private async checkMissedTasks(): Promise<void> {
-    // The catch-up sweep both *runs* overdue slots and rewrites `nextRunAt`, so
-    // a host that stood down must not touch a task it does not fire: it would
-    // consume occurrences the authority owns and move the schedule out from
-    // under it. The authority runs the same sweep. Decided per task since
-    // ADR-0224, so a task pinned here still catches up.
+    const version = this.lifecycleVersion
     const now = new Date()
     const tasks = await schedulerDb.getOverdueActiveTasks(now)
-
     for (const task of tasks) {
-      if (!task.nextRunAt) {
-        continue
-      }
-      if (!this.isTimingAuthorityFor(task)) continue
-
+      if (version !== this.lifecycleVersion || !this.driverReady) return
+      if (!task.nextRunAt || task.promotion || !this.isTimingAuthorityFor(task)) continue
       if (task.trigger.type === "once") {
-        await this.expireMissedOneTimeTask(task, now)
-        continue
+        await this.expireMissedOneTimeTask(task)
+      } else if (task.trigger.type === "cron" || task.trigger.type === "interval") {
+        await this.reconcileMissedRecurringTask(task, now, version)
       }
-
-      if (task.trigger.type !== "cron" && task.trigger.type !== "interval") {
-        await this.updateNextRunTime(task, { fromDate: now })
-        continue
-      }
-
-      await this.reconcileMissedRecurringTask(task, now)
     }
   }
 
-  /**
-   * Collect due run slots up to task maxMissedRuns and compute first future slot.
-   */
+  /** Select fresh eligible slots before applying the bounded replay count. */
   private collectMissedRunSlots(
     task: ScheduledTask,
     now: Date
-  ): { dueSlots: Date[]; nextFutureSlot?: Date } {
+  ): { dueSlots: Date[]; expiredSlots: Date[]; nextFutureSlot?: Date } {
     const dueSlots: Date[] = []
+    const expiredSlots: Date[] = []
     const maxMissedRuns = Math.max(0, task.config.maxMissedRuns ?? 1)
     let cursor = task.nextRunAt
-
     if (!cursor) {
       return {
         dueSlots,
+        expiredSlots,
         nextFutureSlot: this.calculateNextRunTime(task, { fromDate: now }),
       }
     }
-
+    const windowMs = task.config.catchupWindowMs
+    if (
+      typeof windowMs === "number" &&
+      windowMs > 0 &&
+      isSlotOutsideCatchupWindow(cursor, now, windowMs)
+    ) {
+      // Retain bounded skip diagnostics, but expired slots never spend the
+      // replay allowance of a later occurrence that is still fresh.
+      let expired = cursor
+      while (
+        expired &&
+        isSlotOutsideCatchupWindow(expired, now, windowMs) &&
+        expiredSlots.length < maxMissedRuns
+      ) {
+        expiredSlots.push(expired)
+        const next = this.getNextRunAfter(task.trigger, expired)
+        if (!next) break
+        expired = next
+      }
+      const cutoffMs = now.getTime() - windowMs
+      if (task.trigger.type === "interval" && task.trigger.intervalMs) {
+        const steps = Math.ceil((cutoffMs - cursor.getTime()) / task.trigger.intervalMs)
+        cursor = new Date(cursor.getTime() + steps * task.trigger.intervalMs)
+      } else {
+        cursor = this.getNextRunAfter(task.trigger, new Date(cutoffMs - 1))
+      }
+    }
     while (cursor && cursor <= now && dueSlots.length < maxMissedRuns) {
       dueSlots.push(cursor)
       cursor = this.getNextRunAfter(task.trigger, cursor)
     }
-
-    // Always advance to a future slot so overdue windows are reconciled
-    // deterministically. Intervals jump in O(1): this is the only path that
-    // walks a long backlog now, and stepping period-by-period over a short
-    // interval times days of downtime would burn millions of iterations.
-    if (cursor && cursor <= now && task.trigger.type === "interval" && task.trigger.intervalMs) {
-      const intervalMs = task.trigger.intervalMs
-      const steps = Math.ceil((now.getTime() - cursor.getTime() + 1) / intervalMs)
-      cursor = new Date(cursor.getTime() + steps * intervalMs)
-    }
-    while (cursor && cursor <= now) {
-      cursor = this.getNextRunAfter(task.trigger, cursor)
-    }
-
-    return { dueSlots, nextFutureSlot: cursor }
-  }
-
-  private async persistNextFutureSlot(
-    task: ScheduledTask,
-    nextFutureSlot?: Date,
-    terminalReason?: string,
-    expectedVersion?: number
-  ): Promise<void> {
-    const now = new Date()
-    if (nextFutureSlot) {
-      const updatedTask: ScheduledTask = {
-        ...task,
-        nextRunAt: nextFutureSlot,
-        updatedAt: now,
-        ...(terminalReason
-          ? {
-              lastTerminalReason: terminalReason,
-              lastTerminalAt: now,
-            }
-          : {}),
+    if (cursor && cursor <= now) {
+      if (task.trigger.type === "interval" && task.trigger.intervalMs) {
+        const steps = Math.floor((now.getTime() - cursor.getTime()) / task.trigger.intervalMs) + 1
+        cursor = new Date(cursor.getTime() + steps * task.trigger.intervalMs)
+      } else {
+        cursor = this.getNextRunAfter(task.trigger, now)
       }
-      await schedulerDb.updateTask(updatedTask)
-      await this.scheduleTask(updatedTask, expectedVersion)
-      return
     }
-
-    await schedulerDb.updateTask({
-      ...task,
-      nextRunAt: undefined,
-      updatedAt: now,
-      ...(terminalReason
-        ? {
-            lastTerminalReason: terminalReason,
-            lastTerminalAt: now,
-          }
-        : {}),
-    })
+    return { dueSlots, expiredSlots, nextFutureSlot: cursor }
   }
 
   private async reconcileMissedRecurringTask(
     task: ScheduledTask,
     now: Date,
-    expectedVersion?: number
+    version: number = this.lifecycleVersion
   ): Promise<void> {
-    const { dueSlots: rawDueSlots, nextFutureSlot } = this.collectMissedRunSlots(task, now)
-
-    // Time-based catch-up window: slots older than catchupWindowMs are skipped
-    // with their own terminal reason instead of being re-run (Temporal
-    // CatchupWindow semantics). Applied after the count cap.
-    let dueSlots = rawDueSlots
-    const windowMs = task.config.catchupWindowMs
-    if (typeof windowMs === "number" && windowMs > 0 && rawDueSlots.length > 0) {
-      const expired = rawDueSlots.filter((slot) => isSlotOutsideCatchupWindow(slot, now, windowMs))
-      dueSlots = rawDueSlots.filter((slot) => !isSlotOutsideCatchupWindow(slot, now, windowMs))
-      for (const slot of expired) {
+    if (!task.nextRunAt || this.catchupVersions.get(task.id) === version) return
+    this.catchupVersions.set(task.id, version)
+    try {
+      const taskVersion = this.getTaskLifecycleVersion(task.id)
+      const isCurrent = () =>
+        version === this.lifecycleVersion &&
+        taskVersion === this.getTaskLifecycleVersion(task.id) &&
+        this.driverReady
+      const { dueSlots, expiredSlots, nextFutureSlot } = this.collectMissedRunSlots(task, now)
+      for (const slot of expiredSlots) {
+        if (!isCurrent()) return
         await this.createSkippedExecution(task, {
           triggerSource: "catch-up",
           scheduledFor: slot,
           terminalReason: "catchup-window-expired",
-          message: `Skipped: missed slot older than the catch-up window (${windowMs}ms)`,
+          message: `Skipped: missed slot older than the catch-up window (${task.config.catchupWindowMs}ms)`,
         })
       }
-      if (dueSlots.length === 0 && expired.length > 0) {
-        await this.persistNextFutureSlot(
-          task,
+      if (!isCurrent()) return
+      if (!task.config.runMissedOnStartup || dueSlots.length === 0) {
+        const terminalReason =
+          expiredSlots.length > 0 && dueSlots.length === 0
+            ? "catchup-window-expired"
+            : "missed-run-skipped"
+        if (terminalReason === "missed-run-skipped") {
+          await this.createSkippedExecution(task, {
+            triggerSource: "catch-up",
+            scheduledFor: task.nextRunAt,
+            terminalReason,
+            message: "Skipped missed run reconciliation by policy",
+          })
+        }
+        if (!isCurrent() || !this.isTimingAuthorityFor(task)) return
+        const advanced = await schedulerDb.advanceTaskSchedule(
+          task.id,
+          task.nextRunAt,
           nextFutureSlot,
-          "catchup-window-expired",
-          expectedVersion
+          terminalReason
         )
+        if (advanced && isCurrent() && this.isTimingAuthorityFor(advanced)) {
+          await this.scheduleTask(advanced, version)
+        }
         return
       }
-    }
-
-    if (dueSlots.length === 0) {
-      if (task.nextRunAt && task.nextRunAt <= now) {
-        await this.createSkippedExecution(task, {
-          triggerSource: "catch-up",
-          scheduledFor: task.nextRunAt,
-          terminalReason: "missed-run-skipped",
-          message: "Skipped missed run reconciliation by policy",
-        })
-        await this.persistNextFutureSlot(
-          task,
-          nextFutureSlot,
-          "missed-run-skipped",
-          expectedVersion
+      let expectedRunAt: Date | undefined = task.nextRunAt
+      for (let index = 0; index < dueSlots.length; index += 1) {
+        if (!isCurrent() || !expectedRunAt) return
+        const latest = await schedulerDb.getTask(task.id)
+        if (
+          !isCurrent() ||
+          !latest ||
+          latest.status !== "active" ||
+          latest.promotion ||
+          latest.nextRunAt?.getTime() !== expectedRunAt.getTime() ||
+          !this.isTimingAuthorityFor(latest)
         )
-        return
+          return
+        if (isPastEndAt(latest, new Date()) || isAtMaxRuns(latest)) {
+          await this.expireTask(latest, isAtMaxRuns(latest) ? "max-runs-reached" : "ended")
+          return
+        }
+        const nextRunAt = dueSlots[index + 1] ?? nextFutureSlot
+        const claimed = await schedulerDb.claimTaskSlot(task.id, expectedRunAt, nextRunAt)
+        if (!claimed || !isCurrent() || !this.isTimingAuthorityFor(claimed)) return
+        try {
+          await this.executeTask(claimed, 0, {
+            triggerSource: "catch-up",
+            scheduledFor: dueSlots[index],
+            deferNextRunUpdate: true,
+            scheduledSlotClaimed: true,
+          })
+        } catch (error) {
+          if (!isCurrent()) return
+          throw error
+        }
+        if (!isCurrent()) return
+        expectedRunAt = claimed.nextRunAt
       }
-      await this.persistNextFutureSlot(task, nextFutureSlot, undefined, expectedVersion)
-      return
+      const latest = await schedulerDb.getTask(task.id)
+      if (
+        latest &&
+        isCurrent() &&
+        latest.status === "active" &&
+        latest.nextRunAt?.getTime() === expectedRunAt?.getTime() &&
+        this.isTimingAuthorityFor(latest)
+      ) {
+        await this.scheduleTask(latest, version)
+      }
+    } finally {
+      if (this.catchupVersions.get(task.id) === version) this.catchupVersions.delete(task.id)
     }
-
-    if (!task.config.runMissedOnStartup) {
-      await this.createSkippedExecution(task, {
-        triggerSource: "catch-up",
-        scheduledFor: dueSlots[0],
-        terminalReason: "missed-run-skipped",
-        message: "Skipped missed run reconciliation by policy",
-      })
-      await this.persistNextFutureSlot(task, nextFutureSlot, "missed-run-skipped", expectedVersion)
-      return
-    }
-
-    for (const slot of dueSlots) {
-      await this.executeTask(task, 0, {
-        triggerSource: "catch-up",
-        scheduledFor: slot,
-        deferNextRunUpdate: true,
-      })
-    }
-
-    await this.persistNextFutureSlot(task, nextFutureSlot, undefined, expectedVersion)
   }
 
-  private async expireMissedOneTimeTask(task: ScheduledTask, now: Date): Promise<void> {
+  private async expireMissedOneTimeTask(task: ScheduledTask): Promise<void> {
+    if (!task.nextRunAt) return
+    const version = this.lifecycleVersion
+    const taskVersion = this.getTaskLifecycleVersion(task.id)
+    const isCurrent = () =>
+      version === this.lifecycleVersion && taskVersion === this.getTaskLifecycleVersion(task.id)
     await this.createSkippedExecution(task, {
       triggerSource: "catch-up",
       scheduledFor: task.nextRunAt,
@@ -1383,16 +1372,15 @@ class TaskSchedulerImpl {
       message: "One-time task expired before execution",
     })
 
-    await schedulerDb.updateTask({
-      ...task,
-      status: "expired",
-      nextRunAt: undefined,
-      lastTerminalReason: "once-expired",
-      lastTerminalAt: now,
-      updatedAt: now,
-    })
-
-    this.unscheduleTask(task.id)
+    if (!isCurrent()) return
+    const expired = await schedulerDb.advanceTaskSchedule(
+      task.id,
+      task.nextRunAt,
+      undefined,
+      "once-expired",
+      "expired"
+    )
+    if (expired && isCurrent()) this.unscheduleTask(task.id)
   }
 
   /**
@@ -1433,6 +1421,7 @@ class TaskSchedulerImpl {
     // event listener) and forget armed ids.
     this.driver?.stop()
     this.armedTaskIds.clear()
+    this.armedSlots.clear()
     this.armedPrewarms.clear()
 
     // Clear periodic check
@@ -1578,8 +1567,15 @@ class TaskSchedulerImpl {
    */
   async updateTask(taskId: string, input: UpdateScheduledTaskInput): Promise<ScheduledTask | null> {
     const version = this.lifecycleVersion
-    if (input.status !== undefined && input.status !== "active") {
+    if (
+      input.trigger ||
+      input.config ||
+      input.endAt !== undefined ||
+      (input.status !== undefined && input.status !== "active")
+    ) {
       this.invalidateTaskLifecycle(taskId)
+    }
+    if (input.status !== undefined && input.status !== "active") {
       this.unscheduleTask(taskId)
       this.clearTaskRetries(taskId)
       this.queues.delete(taskId)
@@ -1728,7 +1724,12 @@ class TaskSchedulerImpl {
     taskId: string,
     options: { platform?: SystemSchedulerPlatform; confirmed?: boolean; token?: string } = {}
   ): Promise<PromoteTaskResult> {
+    const version = this.lifecycleVersion
+    const taskVersion = this.getTaskLifecycleVersion(taskId)
+    const isCurrent = () =>
+      version === this.lifecycleVersion && taskVersion === this.getTaskLifecycleVersion(taskId)
     const task = await schedulerDb.getTask(taskId)
+    if (!isCurrent()) return { status: "error", reason: "Task changed during OS promotion" }
     if (!task) return { status: "error", reason: `Task not found: ${taskId}` }
     if (isOwnedElsewhere(task.owner)) {
       return { status: "error", reason: `This task runs on ${task.owner.hostLabel}` }
@@ -1758,6 +1759,7 @@ class TaskSchedulerImpl {
         reason: `The ${capabilities.backend} scheduler backend cannot open wake-up URLs.`,
       }
     }
+    if (!isCurrent()) return { status: "error", reason: "Task changed during OS promotion" }
     const mapped = promoteToSystemTask(task, options.platform, { token: options.token })
     if (!mapped.promotable || !mapped.input || !mapped.token) {
       return { status: "not_promotable", reason: mapped.reason ?? "Task cannot be promoted." }
@@ -1779,19 +1781,45 @@ class TaskSchedulerImpl {
     if (response.status !== "success") {
       return { status: "error", reason: response.message }
     }
-    const now = new Date()
-    const promoted: ScheduledTask = {
-      ...task,
-      promotion: {
-        systemTaskId: response.task.id,
-        token: mapped.token,
-        promotedAt: now,
-        backend: capabilities.backend,
-      },
-      nextRunAt: undefined,
-      updatedAt: now,
+    const promotion = {
+      systemTaskId: response.task.id,
+      token: mapped.token,
+      promotedAt: new Date(),
+      backend: capabilities.backend,
     }
-    await schedulerDb.updateTask(promoted)
+    let promoted: ScheduledTask | null
+    try {
+      promoted = await schedulerDb.setTaskPromotion(
+        taskId,
+        promotion,
+        (current) =>
+          isCurrent() &&
+          !current.promotion &&
+          current.status === task.status &&
+          current.updatedAt.getTime() === task.updatedAt.getTime()
+      )
+    } catch {
+      try {
+        await this.rollbackOsPromotion(taskId, promotion, port)
+      } catch {
+        return {
+          status: "error",
+          reason: `Promotion persistence failed; remove orphan OS task ${promotion.systemTaskId}`,
+        }
+      }
+      return { status: "error", reason: "Promotion persistence failed; OS task removed" }
+    }
+    if (!promoted || !isCurrent()) {
+      try {
+        await this.rollbackOsPromotion(taskId, promotion, port)
+      } catch {
+        return {
+          status: "error",
+          reason: `Task changed; remove orphan OS task ${promotion.systemTaskId}`,
+        }
+      }
+      return { status: "error", reason: "Task changed during OS promotion; OS task removed" }
+    }
     // The OS timer owns the cadence from here on.
     this.unscheduleTask(taskId)
     log.info(`Promoted task ${task.name} (${taskId}) to the OS scheduler as ${response.task.id}`)
@@ -1807,18 +1835,62 @@ class TaskSchedulerImpl {
     taskId: string,
     promotion: { systemTaskId: string; token: string; backend?: string }
   ): Promise<ScheduledTask | null> {
+    const version = this.lifecycleVersion
+    const taskVersion = this.getTaskLifecycleVersion(taskId)
+    const isCurrent = () =>
+      version === this.lifecycleVersion && taskVersion === this.getTaskLifecycleVersion(taskId)
     const task = await schedulerDb.getTask(taskId)
     if (!task) return null
-    const now = new Date()
-    const promoted: ScheduledTask = {
-      ...task,
-      promotion: { ...promotion, promotedAt: now },
-      nextRunAt: undefined,
-      updatedAt: now,
+    const record = { ...promotion, promotedAt: new Date() }
+    let promoted: ScheduledTask | null
+    try {
+      promoted = await schedulerDb.setTaskPromotion(
+        taskId,
+        record,
+        (current) =>
+          isCurrent() &&
+          !current.promotion &&
+          current.status === task.status &&
+          current.updatedAt.getTime() === task.updatedAt.getTime()
+      )
+    } catch (error) {
+      const port = this.systemSchedulerPort ?? (await loadNativeSystemScheduler())
+      await this.rollbackOsPromotion(taskId, record, port)
+      throw error
     }
-    await schedulerDb.updateTask(promoted)
+    if (!promoted || !isCurrent()) {
+      const port = this.systemSchedulerPort ?? (await loadNativeSystemScheduler())
+      await this.rollbackOsPromotion(taskId, record, port)
+      return null
+    }
     this.unscheduleTask(taskId)
     return promoted
+  }
+
+  private async rollbackOsPromotion(
+    taskId: string,
+    promotion: NonNullable<ScheduledTask["promotion"]>,
+    port: PromotionSystemSchedulerPort
+  ): Promise<void> {
+    let failure: unknown
+    try {
+      if (!(await port.deleteSystemTask(promotion.systemTaskId)))
+        throw new Error("OS task removal refused")
+    } catch (error) {
+      failure = error
+    }
+    try {
+      await schedulerDb.setTaskPromotion(
+        taskId,
+        undefined,
+        (current) =>
+          current.promotion?.systemTaskId === promotion.systemTaskId &&
+          current.promotion?.token === promotion.token
+      )
+    } catch (error) {
+      failure ??= error
+    }
+    if (failure) throw failure
   }
 
   /**
@@ -1859,7 +1931,11 @@ class TaskSchedulerImpl {
    * then only navigates.
    */
   async runPromotedTask(taskId: string, token: string | undefined): Promise<TaskExecution | null> {
+    const version = this.lifecycleVersion
+    const taskVersion = this.getTaskLifecycleVersion(taskId)
     const task = await schedulerDb.getTask(taskId)
+    if (version !== this.lifecycleVersion || taskVersion !== this.getTaskLifecycleVersion(taskId))
+      return null
     if (!task?.promotion) return null
     if (!promotionTokenMatches(task.promotion.token, token)) {
       log.warn(`Rejected promoted-task wake for ${taskId}: token mismatch`)
@@ -1872,11 +1948,13 @@ class TaskSchedulerImpl {
     // The OS timer fired for a slot; name the run after that slot, not the
     // moment the wake reached us (ADR-0224 A9). A wake late by hours, or a
     // second wake for the same slot, still belongs to the same occurrence.
-    // A wake with no elapsed slot (it came early, or the row has no
-    // `nextRunAt`) has nothing to anchor to and runs as itself.
+    // Promotion retains the canonical head even though the app timer is
+    // disarmed. Older one-shot rows lost it; their trigger is authoritative.
     const now = new Date()
+    const head = task.trigger.type === "once" ? task.trigger.runAt : task.nextRunAt
+    if (head && head.getTime() > now.getTime()) return null
     const slot = latestElapsedSlot({
-      nextRunAt: task.nextRunAt,
+      nextRunAt: head,
       now,
       next: (after) => this.getNextRunAfter(task.trigger, after),
     })
@@ -2206,7 +2284,11 @@ class TaskSchedulerImpl {
    * `handleTaskDue` when the instant elapses; overdue instants fire promptly.
    */
   private async scheduleTask(task: ScheduledTask, expectedVersion?: number): Promise<void> {
-    if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) return
+    const version = expectedVersion ?? this.lifecycleVersion
+    const taskVersion = this.getTaskLifecycleVersion(task.id)
+    const isCurrent = () =>
+      version === this.lifecycleVersion && taskVersion === this.getTaskLifecycleVersion(task.id)
+    if (!isCurrent()) return
     if (task.status !== "active") return
     if (isRetiredMaintenanceTask(task)) return
     // An event task has no slot to arm, but a bounded one has a deadline: arm
@@ -2232,30 +2314,34 @@ class TaskSchedulerImpl {
 
     let driver = this.driver
     if (!driver || !this.driverReady) {
-      if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) return
+      if (!isCurrent()) return
       // Lifecycle writes can legitimately arrive before React/headless startup
       // mounts the scheduler initializer (notably plugin activation). Start it
       // here. The boot sweep normally arms the persisted task; if its read view
       // missed the concurrent write, continue below and arm it directly.
       await this.initialize()
-      if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) return
+      if (!isCurrent()) return
       if (this.armedTaskIds.has(task.id)) return
       driver = this.driver
     }
-    if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) return
+    if (!isCurrent()) return
     if (!driver || !this.driverReady || !this.isTimingAuthorityFor(task)) return
 
-    this.armedTaskIds.add(task.id)
-    // Arm with optional jitter; remember the canonical slot for handleTaskDue.
     const canonicalMs = nextRun.getTime()
-    this.armedCanonicalMs.set(task.id, canonicalMs)
-    if (expectedVersion !== undefined && expectedVersion !== this.lifecycleVersion) {
-      this.armedTaskIds.delete(task.id)
-      this.armedCanonicalMs.delete(task.id)
-      return
-    }
     const armedAtMs = applyJitter(canonicalMs, task.trigger.jitterMs, this.rng)
-    await driver.arm(task.id, armedAtMs)
+    const arm = { canonicalMs, fireAtMs: armedAtMs }
+    this.armedTaskIds.add(task.id)
+    this.armedSlots.set(task.id, arm)
+    try {
+      await driver.arm(task.id, armedAtMs)
+    } catch (error) {
+      if (this.armedSlots.get(task.id) === arm) {
+        this.armedTaskIds.delete(task.id)
+        this.armedSlots.delete(task.id)
+      }
+      throw error
+    }
+    if (!isCurrent()) return
     // An event task's alarm is its deadline, not a run: nothing to warm.
     if (task.trigger.type !== "event") await this.armPrewarm(driver, task, armedAtMs)
 
@@ -2281,12 +2367,19 @@ class TaskSchedulerImpl {
       return
     }
     this.armedPrewarms.set(task.id, prewarmAt)
-    await driver.arm(prewarmAlarmId(task.id), prewarmAt)
+    try {
+      await driver.arm(prewarmAlarmId(task.id), prewarmAt)
+    } catch (error) {
+      if (this.armedPrewarms.get(task.id) === prewarmAt) this.armedPrewarms.delete(task.id)
+      log.warn(`Failed to arm optional prewarm for ${task.name}:`, { error })
+    }
   }
 
   private disarmPrewarm(taskId: string): void {
     if (this.armedPrewarms.delete(taskId)) {
-      void this.driver?.disarm(prewarmAlarmId(taskId))
+      void Promise.resolve(this.driver?.disarm(prewarmAlarmId(taskId))).catch((error) =>
+        log.error(`Failed to disarm prewarm for ${taskId}:`, error)
+      )
     }
     const inFlight = this.prewarmControllers.get(taskId)
     if (inFlight) {
@@ -2341,8 +2434,10 @@ class TaskSchedulerImpl {
     if (this.armedTaskIds.delete(taskId)) {
       log.debug(`Unscheduled task: ${taskId}`)
     }
-    this.armedCanonicalMs.delete(taskId)
-    void this.driver?.disarm(taskId)
+    this.armedSlots.delete(taskId)
+    void Promise.resolve(this.driver?.disarm(taskId)).catch((error) =>
+      log.error(`Failed to disarm task ${taskId}:`, error)
+    )
     this.disarmPrewarm(taskId)
   }
 
@@ -2389,6 +2484,8 @@ class TaskSchedulerImpl {
     // (ADR-0224 A9). Its row is named after the slot, so a second fire of the
     // same slot (the catch-up path and a late alarm, an OS wake and a
     // restart) finds the first one instead of running again.
+    const version = this.lifecycleVersion
+    const taskVersion = this.getTaskLifecycleVersion(task.id)
     const occurrenceId = context.executionId
       ? undefined
       : scheduledOccurrenceExecutionId({
@@ -2405,6 +2502,15 @@ class TaskSchedulerImpl {
     this.occurrenceClaims.add(occurrenceId)
     try {
       const recorded = await schedulerDb.getExecution(occurrenceId)
+      if (
+        version !== this.lifecycleVersion ||
+        taskVersion !== this.getTaskLifecycleVersion(task.id)
+      ) {
+        throw SchedulerError.executionCancelled(
+          task.name,
+          version !== this.lifecycleVersion ? "scheduler-stopped" : "user-cancelled"
+        )
+      }
       if (recorded?.id === occurrenceId && recorded.taskId === task.id) {
         log.info(`Task ${task.name}: slot already ran (${occurrenceId}); not running it again`)
         return recorded

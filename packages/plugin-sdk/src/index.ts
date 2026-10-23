@@ -50,12 +50,12 @@ export {
   isPluginWebFetchSuccess,
   isPluginWebSearchSuccess,
   pluginWebFetchText,
-} from "@/types/plugin/plugin-host-tools"
+} from "@cognia/plugin-contract/types/plugin/plugin-host-tools"
 export type {
   PluginWebCloneEnvelope,
   PluginWebCloneInput,
   PluginWebCloneResult,
-} from "@/types/plugin/plugin-host-tools"
+} from "@cognia/plugin-contract/types/plugin/plugin-host-tools"
 
 /**
  * The host's prompt-injection framing for third-party text. Re-exported (not
@@ -68,7 +68,7 @@ export {
   UNTRUSTED_CONTENT_NOTICE,
   unwrapUntrustedContent,
   wrapUntrustedContent,
-} from "@/lib/web/untrusted-content"
+} from "@cognia/plugin-contract/lib/web/untrusted-content"
 
 /**
  * The reasoning-tier vocabulary, re-exported (not re-declared) for the same
@@ -100,8 +100,12 @@ export {
   thinkingLevelPatch,
   thinkingLevelToEffort,
   visibleThinkingLevels,
-} from "@/lib/ai/thinking-level"
-export type { Effort, EffortTier, ThinkingLevel } from "@/lib/ai/thinking-level"
+} from "@cognia/plugin-contract/lib/ai/thinking-level"
+export type {
+  Effort,
+  EffortTier,
+  ThinkingLevel,
+} from "@cognia/plugin-contract/lib/ai/thinking-level"
 
 /**
  * The pure half of the composed answer, published alongside the vocabulary
@@ -120,7 +124,10 @@ export type { Effort, EffortTier, ThinkingLevel } from "@/lib/ai/thinking-level"
  * pulls the settings and agent-runtime stores into a plugin's module graph.
  */
 export { resolveEffortSurface } from "@/lib/ai/effort-surface"
-export type { EffortSurface, EffortSurfaceInput } from "@/lib/ai/effort-surface"
+export type {
+  EffortSurface,
+  EffortSurfaceInput,
+} from "@cognia/plugin-contract/lib/ai/effort-surface"
 
 export {
   AUTHOR_CAPABILITY_CONTRACTS,
@@ -217,8 +224,11 @@ export type {
   PluginSquadBotDef,
   PluginAgentTurnBotDef,
   PluginHandlerBotDef,
-} from "@/types/plugin/plugin-bot"
-export { PLUGIN_BOT_EXECUTORS, PLUGIN_BOT_TRIGGER_KINDS } from "@/types/plugin/plugin-bot"
+} from "@cognia/plugin-contract/types/plugin/plugin-bot"
+export {
+  PLUGIN_BOT_EXECUTORS,
+  PLUGIN_BOT_TRIGGER_KINDS,
+} from "@cognia/plugin-contract/types/plugin/plugin-bot"
 export type {
   PluginBotsAPI,
   BotCredentialSlotSnapshot,
@@ -233,13 +243,13 @@ export type {
   BotStepBeginResult,
   BotTriggerSnapshot,
   BotWaitOutcome,
-} from "@/types/bot/api"
+} from "@cognia/plugin-contract/types/bot/api"
 export type {
   BotEventEnvelopeV1,
   BotEventActor,
   BotEventResource,
   BotEventProvenanceV1,
-} from "@/types/bot/event"
+} from "@cognia/plugin-contract/types/bot/event"
 export type {
   BotHandlerV1,
   BotHandlerResultV1,
@@ -251,7 +261,7 @@ export type {
   BotWaitForEventInput,
   BotProgressUpdateV1,
   BotLogLevel,
-} from "@/types/bot/run"
+} from "@cognia/plugin-contract/types/bot/run"
 export { defineMode } from "./define/define-mode"
 export { defineOcrProvider } from "./define/define-ocr-provider"
 export { defineDecisionProvider } from "./define/define-decision-provider"
@@ -262,7 +272,7 @@ export {
   PI_PACKAGE_ENV_PREFIX,
   formatPiPackageRef,
   parsePiPackageRef,
-} from "@/types/plugin/plugin-pi-package"
+} from "@cognia/plugin-contract/types/plugin/plugin-pi-package"
 export { defineScheduledTask } from "./define/define-scheduled-task"
 export { defineWorkspaceBackend } from "./define/define-workspace-backend"
 export { defineMessageRenderer } from "./define/define-message-renderer"
@@ -271,7 +281,7 @@ export type {
   LinkMatcherProps,
   PluginLinkMatcherDef,
   PluginLinkMatcherRegistrationDef,
-} from "@/types/plugin/plugin-link-matcher"
+} from "@cognia/plugin-contract/types/plugin/plugin-link-matcher"
 export { defineToolRenderer } from "./define/define-tool-renderer"
 export { defineDensityPreset } from "./define/define-density-preset"
 export { defineChatMiddleware } from "./define/define-chat-middleware"
@@ -293,8 +303,8 @@ export type {
   InterceptorTransformHandler,
   PluginInterceptorContribution,
   PluginInterceptorPoint,
-} from "@/types/plugin/plugin-interceptors"
-export { PLUGIN_INTERCEPTOR_POINTS } from "@/types/plugin/plugin-interceptors"
+} from "@cognia/plugin-contract/types/plugin/plugin-interceptors"
+export { PLUGIN_INTERCEPTOR_POINTS } from "@cognia/plugin-contract/types/plugin/plugin-interceptors"
 export { defineModalMount } from "./define/define-modal-mount"
 export { defineTerminalCompletionProvider } from "./define/define-terminal-completion"
 export { defineRoutingStrategy } from "./define/define-routing-strategy"
@@ -304,8 +314,8 @@ export { defineToolRoute } from "./define/define-tool-route"
 export { defineViewContainer } from "./define/define-view-container"
 // `ctx.ui.openViewContainer` refusals. The guard is pure (no host state), so
 // it belongs on the root beside the types.
-export { isViewContainerOpenError } from "@/lib/plugin/api/view-container-errors"
-export type { ViewContainerOpenErrorCode } from "@/lib/plugin/api/view-container-errors"
+export { isViewContainerOpenError } from "@cognia/plugin-contract/lib/plugin/api/view-container-errors"
+export type { ViewContainerOpenErrorCode } from "@cognia/plugin-contract/lib/plugin/api/view-container-errors"
 export { defineTreeDataProvider, defineView } from "./define/define-view"
 export { defineWebview } from "./define/define-webview"
 export { defineAuthProvider } from "./define/define-auth-provider"
@@ -313,14 +323,16 @@ export { defineUriHandler } from "./define/define-uri-handler"
 export { defineRemoteDesktopProvider } from "./define/define-remote-desktop-provider"
 export type {
   RemoteDesktopConnection,
+  RemoteDesktopRawChannel,
+} from "@cognia/plugin-contract/lib/remote-desktop/stream"
+export type {
   RemoteDesktopIntegrationMode,
   RemoteDesktopProviderCapabilities,
   RemoteDesktopProviderDefinition,
-  RemoteDesktopRawChannel,
   RemoteDesktopViewer,
   RemoteDesktopViewerProps,
   RemoteDesktopViewerStatus,
-} from "@/lib/remote-desktop/provider-registry"
+} from "@cognia/plugin-contract/lib/remote-desktop/provider-registry"
 export { defineTheme } from "./define/define-theme"
 export { defineThemePack } from "./define/define-theme-pack"
 export { defineFontContribution } from "./define/define-font-contribution"
@@ -345,7 +357,7 @@ export type {
   SubscriptionModelApi,
   SubscriptionBillingMode,
   SubscriptionUsageDefinition,
-} from "@/types/subscription/provider-definition"
+} from "@cognia/plugin-contract/types/subscription/provider-definition"
 export type {
   DescriptorExtract,
   BalanceExtract,
@@ -353,7 +365,7 @@ export type {
   WindowSpec,
   WindowSelect,
   ResetUnit,
-} from "@/types/subscription/descriptor"
+} from "@cognia/plugin-contract/types/subscription/descriptor"
 export { defineBalanceAdapter } from "./define/define-balance-adapter"
 export { defineLimitsSource } from "./define/define-limits-source"
 export { defineProviderOperationAdapter } from "./define/define-provider-operation-adapter"
@@ -616,13 +628,13 @@ export type {
   PluginBotExternalAgentPermissionMode,
   PluginExternalAgentOptions,
   PluginExternalAgentResult,
-} from "@/lib/plugin/api/external-agent-api"
+} from "@cognia/plugin-contract/lib/plugin/api/external-agent-api"
 export type {
   BotRunWorkspaceSpec,
   BotWorkspaceFile,
   BotWorkspaceSnapshot,
   BotWorkspacePublishInput,
-} from "@/lib/plugin/workspace/bot-run"
+} from "@cognia/plugin-contract/lib/plugin/workspace/bot-run"
 
 export type {
   PluginLibrarySchema,
@@ -633,4 +645,4 @@ export type {
   PluginLibrariesAPI,
   PluginLibraryModuleInstance,
   PluginLibraryModuleFactory,
-} from "@/types/plugin/plugin-library"
+} from "@cognia/plugin-contract/types/plugin/plugin-library"

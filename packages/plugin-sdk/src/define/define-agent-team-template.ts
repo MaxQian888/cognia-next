@@ -22,7 +22,7 @@
  *   })
  */
 
-import type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
+import type { PluginAgentTeamTemplateDef } from "@cognia/plugin-contract/types/plugin/plugin-agent-team-template"
 
 export function defineAgentTeamTemplate(
   def: PluginAgentTeamTemplateDef

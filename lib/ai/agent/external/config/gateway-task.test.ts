@@ -7,6 +7,8 @@ import {
   gatewayRuntimeTraits,
   gatewaySessionId,
   normalizeCogniaModelBinding,
+  openCodeSubagentModelBindings,
+  nativeSubagentModelBindings,
   parseGatewaySessionId,
 } from "./gateway-task"
 import { getPresetConfig } from "./presets"
@@ -17,6 +19,7 @@ import { gatewayModelSlots } from "./model-slots"
 import type { AgentModelRoleOverrides } from "@cognia/agent-contracts/model-binding"
 import { parse as parseToml } from "smol-toml"
 import { cogniaModelReasoningFacts } from "./cognia-model-options"
+import { parseFrontmatter } from "@/lib/claude/subagent-importers/_parse-helpers"
 
 const config = (preset: string, protocol = "acp", transport = "stdio") =>
   ({
@@ -36,6 +39,134 @@ const config = (preset: string, protocol = "acp", transport = "stdio") =>
   }) as ExternalAgentConfig
 const binding = { providerId: "custom", modelId: "model", accountId: "account-one" }
 const settings = { providerSettings: {}, customProviders: [] }
+
+describe("plugin-gated Pi child models", () => {
+  function source(family: "nico" | "gotgenes" = "nico") {
+    return {
+      ...config("pi", "pi-rpc"),
+      process: { command: "pi", cwd: "/repo" },
+      metadata: {
+        preset: "pi",
+        cogniaPiSubagents: {
+          family,
+          version: family === "nico" ? "0.80.0" : "19.2.2",
+          packageDir: "/package",
+          extensions: ["/package/index.js"],
+          agents: {
+            reviewer: {
+              content: "---\nmodel: custom/review\n---\nReview",
+              path: "/repo/.pi/agents/reviewer.md",
+              digest: "review-sha",
+              model: "custom/review",
+            },
+            worker: {
+              content: "---\ndescription: Worker\ntools: [read, write]\n---\nWork",
+              path: "/repo/.pi/agents/worker.md",
+              digest: "worker-sha",
+            },
+            parent: {
+              content: "---\nmodel: inherit\n---\nInherit",
+              path: "/repo/.pi/agents/parent.md",
+              digest: "parent-sha",
+              model: "inherit",
+            },
+          },
+        },
+      },
+    } as ExternalAgentConfig
+  }
+  it.each(["nico", "gotgenes"] as const)(
+    "admits and projects explicit, omitted and inherited %s models",
+    (family) => {
+      const input = source(family)
+      const compiled = compileTaskModelPlan({
+        primary: binding,
+        slots: gatewayModelSlots(input),
+        explicitModels: nativeSubagentModelBindings(input, binding),
+        layers: [
+          {
+            source: "config",
+            overrides: {
+              version: 1,
+              slots: {
+                "subagent.default": { kind: "cognia", binding: { ...binding, modelId: "cheap" } },
+              },
+            },
+          },
+        ],
+      })
+      expect(compiled.ok).toBe(true)
+      if (!compiled.ok) return
+      expect(new Set(compiled.plan.models)).toEqual(new Set(["model", "cheap", "review"]))
+      const built = buildGatewayTaskConfig({
+        config: input,
+        binding,
+        taskId: "pi-task",
+        model: binding.modelId,
+        endpoint: "http://127.0.0.1:9000/v1",
+        secret: "lease-only",
+        settings,
+        ownerAccountId: null,
+        modelPlan: compiled.plan,
+        modelMetadataById: { review: { id: "review", contextLength: 8000, maxOutputTokens: 1000 } },
+      })
+      const env = built.config.process!.env!
+      const payload = JSON.parse(env.COGNIA_GATEWAY_TASK_CONFIG)
+      const catalog = JSON.parse(payload.files["pi/models.json"]).providers
+      expect(catalog.cognia.models.map((entry: { id: string }) => entry.id)).toEqual(
+        compiled.plan.models
+      )
+      expect(catalog.custom.baseUrl).toBe("http://127.0.0.1:9000/v1")
+      expect(
+        catalog.cognia.models.find((entry: { id: string }) => entry.id === "review").contextWindow
+      ).toBe(8000)
+      expect(parseFrontmatter(payload.files["pi/agents/reviewer.md"]).data.model).toBe(
+        "cognia/review"
+      )
+      expect(parseFrontmatter(payload.files["pi/agents/worker.md"]).data.model).toBeUndefined()
+      expect(payload.files["pi/agents/worker.md"]).toContain("tools: [ read, write ]")
+      expect(parseFrontmatter(payload.files["pi/agents/parent.md"]).data.model).toBe("inherit")
+      expect(JSON.parse(env.COGNIA_TOOLHOST_PI_SUBAGENT_MODELS).agents).toEqual({
+        reviewer: "cognia/review",
+        worker: null,
+        parent: "inherit",
+      })
+      expect(JSON.stringify(payload.files)).not.toContain("lease-only")
+    }
+  )
+  it("refuses explicit child models omitted from the lease", () => {
+    expect(() =>
+      buildGatewayTaskConfig({
+        config: source(),
+        binding,
+        taskId: "unadmitted",
+        model: binding.modelId,
+        endpoint: "http://127.0.0.1:9000/v1",
+        secret: "lease",
+        settings,
+        ownerAccountId: null,
+      })
+    ).toThrow(/not admitted/)
+  })
+  it("rejects cross-provider explicit models instead of projecting a fallback", () => {
+    const input = source()
+    input.metadata!.cogniaPiSubagents = {
+      ...(input.metadata!.cogniaPiSubagents as object),
+      agents: { reviewer: { content: "", model: "foreign/review" } },
+    }
+    const result = compileTaskModelPlan({
+      primary: binding,
+      slots: gatewayModelSlots(input),
+      explicitModels: nativeSubagentModelBindings(input, binding),
+      layers: [],
+    })
+    expect(result).toEqual({
+      ok: false,
+      reason: "cross-provider-unsupported",
+      slot: "pi.agent.reviewer",
+    })
+  })
+})
 
 describe("gateway model plan legacy bytes", () => {
   it("preserves every legacy projector's serialized output", () => {
@@ -91,6 +222,223 @@ describe("gateway model plan legacy bytes", () => {
 })
 
 describe("gateway model plan projectors", () => {
+  it.each([
+    ["opencode-server", "opencode", "sse"],
+    ["opencode-acp", "acp", "stdio"],
+    ["opencode-v2-service", "opencode-v2", "sse"],
+  ])("preserves native child command precedence for %s", (preset, protocol, transport) => {
+    const source = config(preset, protocol, transport)
+    const v2 = protocol === "opencode-v2"
+    source.process!.env = {
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        [v2 ? "agents" : "agent"]: { reviewer: { mode: "subagent", model: "cognia/review" } },
+        [v2 ? "commands" : "command"]: {
+          review: { template: "Review", agent: "reviewer", subtask: true },
+          override: {
+            template: "Review",
+            agent: "reviewer",
+            model: "cognia/command-model",
+            subtask: true,
+          },
+        },
+      }),
+    }
+    const result = compileTaskModelPlan({
+      primary: binding,
+      slots: gatewayModelSlots(source),
+      layers: [],
+      explicitModels: openCodeSubagentModelBindings(source, binding.providerId),
+    })
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.plan.models).toEqual(["model", "review", "command-model"])
+    const built = buildGatewayTaskConfig({
+      config: source,
+      binding,
+      taskId: "commands",
+      endpoint: "http://127.0.0.1:9000/v1",
+      secret: "lease-only",
+      model: "model",
+      settings,
+      ownerAccountId: null,
+      modelPlan: result.plan,
+    })
+    const commands = JSON.parse(built.config.process!.env!.OPENCODE_CONFIG_CONTENT)[
+      v2 ? "commands" : "command"
+    ]
+    expect(commands.review).not.toHaveProperty("model")
+    expect(commands.override.model).toBe("cognia/command-model")
+  })
+  it.each([
+    ["opencode-server", "opencode", "sse"],
+    ["opencode-acp", "acp", "stdio"],
+    ["opencode-v2-service", "opencode-v2", "sse"],
+  ])("preserves each explicit OpenCode child model for %s", (preset, protocol, transport) => {
+    const source = config(preset, protocol, transport)
+    const v2 = protocol === "opencode-v2"
+    const agentKey = v2 ? "agents" : "agent"
+    source.process!.env = {
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        [agentKey]: {
+          reviewer: { mode: "subagent", model: "cognia/review" },
+          general: { model: "cognia/review" },
+          researcher: { mode: "all" },
+          worker: { description: "Worker" },
+          build: {},
+        },
+      }),
+    }
+    const output = buildGatewayTaskConfig({
+      config: source,
+      binding,
+      taskId: "per-agent-models",
+      endpoint: "http://127.0.0.1:9000/v1",
+      secret: "lease-only",
+      model: "model",
+      settings,
+      ownerAccountId: null,
+      modelPlan: {
+        version: 2,
+        primaryModelId: "model",
+        slots: { "subagent.default": { modelId: "child", source: "config" } },
+        models: ["model", "child", "review"],
+        fingerprint: "per-agent-test",
+      },
+    })
+    const inline = JSON.parse(output.config.process!.env!.OPENCODE_CONFIG_CONTENT)
+    expect(inline[agentKey]).toEqual({
+      reviewer: { mode: "subagent", model: "cognia/review" },
+      general: { model: "cognia/review" },
+      researcher: { mode: "all", model: "cognia/child" },
+      worker: { description: "Worker", model: "cognia/child" },
+      build: { model: "cognia/model" },
+      explore: { model: "cognia/child" },
+    })
+    expect(Object.keys(inline[v2 ? "providers" : "provider"].cognia.models)).toEqual([
+      "model",
+      "child",
+      "review",
+    ])
+    if (v2) expect(inline).not.toHaveProperty("small_model")
+    else expect(inline.small_model).toBe("cognia/model")
+  })
+
+  it.each([
+    ["opencode-server", "opencode", "sse"],
+    ["opencode-acp", "acp", "stdio"],
+    ["opencode-v2-service", "opencode-v2", "sse"],
+  ])(
+    "admits distinct native model definitions and follows primary only when absent for %s",
+    (preset, protocol, transport) => {
+      const source = config(preset, protocol, transport)
+      const v2 = protocol === "opencode-v2"
+      const key = v2 ? "agents" : "agent"
+      source.process!.env = {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          [key]: {
+            reviewer: { mode: "subagent", model: "custom/review" },
+            general: { model: "cognia/search" },
+            fallback: { mode: "all" },
+            build: { model: "other/ignored" },
+          },
+        }),
+      }
+      const result = compileTaskModelPlan({
+        primary: binding,
+        slots: gatewayModelSlots(source),
+        layers: [],
+        explicitModels: openCodeSubagentModelBindings(source, binding.providerId),
+      })
+      if (!result.ok) throw new Error(result.reason)
+      expect(result.plan.models).toEqual(["model", "search", "review"])
+      const built = buildGatewayTaskConfig({
+        config: source,
+        binding,
+        taskId: "explicit-only",
+        endpoint: "http://127.0.0.1:9000/v1",
+        secret: "lease-only",
+        model: "model",
+        settings,
+        ownerAccountId: null,
+        modelPlan: result.plan,
+      })
+      const inline = JSON.parse(built.config.process!.env!.OPENCODE_CONFIG_CONTENT)
+      expect(inline[key].reviewer.model).toBe("cognia/review")
+      expect(inline[key].general.model).toBe("cognia/search")
+      expect(inline[key].fallback.model).toBe("cognia/model")
+      expect(Object.keys(inline[v2 ? "providers" : "provider"].cognia.models)).toEqual(
+        result.plan.models
+      )
+      expect(() =>
+        buildGatewayTaskConfig({
+          config: source,
+          binding,
+          taskId: "no-admission",
+          endpoint: "http://127.0.0.1:9000/v1",
+          secret: "lease-only",
+          model: "model",
+          settings,
+          ownerAccountId: null,
+        })
+      ).toThrow("not admitted")
+    }
+  )
+
+  it.each(["cognia/review#high", { providerID: "custom", model: "review", variant: "high" }])(
+    "preserves V2 explicit model form and variant %j",
+    (model) => {
+      const source = config("opencode-v2-service", "opencode-v2", "sse")
+      source.process!.env = {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          agents: { reviewer: { mode: "subagent", model } },
+        }),
+      }
+      const result = compileTaskModelPlan({
+        primary: binding,
+        slots: gatewayModelSlots(source),
+        layers: [],
+        explicitModels: openCodeSubagentModelBindings(source, binding.providerId),
+      })
+      if (!result.ok) throw new Error(result.reason)
+      expect(result.plan.models).toEqual(["model", "review"])
+      expect(result.plan.slots["opencode.agent.reviewer"].variant).toBe("high")
+      const built = buildGatewayTaskConfig({
+        config: source,
+        binding,
+        taskId: "variant",
+        endpoint: "http://127.0.0.1:9000/v1",
+        secret: "lease-only",
+        model: "model",
+        settings,
+        ownerAccountId: null,
+        modelPlan: result.plan,
+      })
+      expect(
+        JSON.parse(built.config.process!.env!.OPENCODE_CONFIG_CONTENT).agents.reviewer.model
+      ).toEqual(typeof model === "string" ? model : { ...model, providerID: "cognia" })
+    }
+  )
+
+  it.each([
+    "missing-provider",
+    "cognia/",
+    " cognia/review",
+    "cognia/#high",
+    "cognia/review#",
+    "cognia/ review",
+    "cognia/review# high",
+    { providerID: "cognia", model: " " },
+    { providerID: " cognia", model: "review" },
+    { providerID: "cognia", model: "review", variant: " " },
+  ])("refuses malformed explicit V2 model references without echoing %p", (model) => {
+    const source = config("opencode-v2-service", "opencode-v2", "sse")
+    source.process!.env = {
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({ agents: { reviewer: { model } } }),
+    }
+    expect(() => openCodeSubagentModelBindings(source, binding.providerId)).toThrow(
+      "Invalid Cognia model OpenCode subagent model reference"
+    )
+  })
+
   const catalogInput = () => ({
     config: config("codex-app-server", "codex-app-server"),
     binding,
@@ -150,6 +498,33 @@ describe("gateway model plan projectors", () => {
     })
     for (const index of [0, 2, 3]) expect(models[index]).not.toHaveProperty("reasoningEfforts")
     expect(JSON.stringify(payload).length).toBeLessThan(128 * 1024)
+  })
+
+  it("projects Codex candidate-only plans and the typed current-turn option", () => {
+    const input = catalogInput()
+    const output = buildGatewayTaskConfig({
+      ...input,
+      config: { ...input.config, codexOptions: { stepModelSwitching: true } },
+      modelPlan: {
+        ...input.modelPlan,
+        version: 3,
+        slots: {},
+        models: ["model", "child"],
+        allowedSpawnModels: ["child", "model"],
+      },
+    })
+    const payload = JSON.parse(output.config.process!.env!.COGNIA_GATEWAY_TASK_CONFIG)
+    expect(payload.codexModelCatalog.models.map((model: { slug: string }) => model.slug)).toEqual([
+      "model",
+      "child",
+    ])
+    const toml = parseToml(payload.files["codex/config.toml"])
+    expect(toml.features).toEqual({ step_model_switching: true })
+    expect(toml.developer_instructions).toContain('["model","child"]')
+    expect(output.config.metadata).toMatchObject({
+      cogniaAllowedTaskModels: ["model", "child"],
+      cogniaModelPlanFingerprint: "catalog-test",
+    })
   })
 
   it("uses Host metadata for headless reasoning without local model settings", () => {
@@ -273,6 +648,7 @@ describe("gateway model plan projectors", () => {
   const compile = (source: ExternalAgentConfig, selections: AgentModelRoleOverrides["slots"]) => {
     const result = compileTaskModelPlan({
       primary: binding,
+      explicitModels: openCodeSubagentModelBindings(source, binding.providerId),
       slots: gatewayModelSlots(source),
       layers: [{ source: "config", overrides: { version: 1, slots: selections } }],
     })
@@ -454,7 +830,7 @@ describe("gateway model plan projectors", () => {
       source.process!.env = {
         OPENCODE_CONFIG_CONTENT: JSON.stringify({
           [agentKey]: {
-            worker: { mode: "subagent", description: "Worker", model: "old/model" },
+            worker: { mode: "subagent", description: "Worker", model: "cognia/review" },
             leader: { mode: "primary", model: "old/model" },
             all: { mode: "all" },
             unspecified: { description: "No mode" },
@@ -462,7 +838,7 @@ describe("gateway model plan projectors", () => {
               description: "Custom general",
               steps: 4,
               mode: "subagent",
-              model: "old/model",
+              model: "cognia/general",
             },
           },
           [commandKey]: { review: { template: "Review", model: "old/model", subtask: true } },
@@ -477,15 +853,15 @@ describe("gateway model plan projectors", () => {
       )
       expect(inline.model).toBe("cognia/model")
       expect(inline[agentKey]).toEqual({
-        worker: { mode: "subagent", description: "Worker", model: "cognia/child" },
+        worker: { mode: "subagent", description: "Worker", model: "cognia/review" },
         leader: { mode: "primary", model: "cognia/model" },
-        all: { mode: "all", model: "cognia/model" },
-        unspecified: { description: "No mode", model: "cognia/model" },
+        all: { mode: "all", model: "cognia/child" },
+        unspecified: { description: "No mode", model: "cognia/child" },
         general: {
           description: "Custom general",
           steps: 4,
           mode: "subagent",
-          model: "cognia/child",
+          model: "cognia/general",
         },
         explore: { model: "cognia/child" },
       })
@@ -495,7 +871,9 @@ describe("gateway model plan projectors", () => {
         subtask: true,
       })
       expect(Object.keys(inline[v2 ? "providers" : "provider"].cognia.models)).toEqual(
-        v2 ? ["model", "child"] : ["model", "small", "child"]
+        v2
+          ? ["model", "child", "general", "review"]
+          : ["model", "small", "child", "general", "review"]
       )
       if (v2) expect(inline).not.toHaveProperty("small_model")
       else expect(inline.small_model).toBe("cognia/small")
@@ -518,7 +896,7 @@ describe("gateway model plan projectors", () => {
           prepare(source, compile(source, { "aux.small": child("small") })).config.process!.env!
             .OPENCODE_CONFIG_CONTENT
         )
-        expect(smallOnly[agentKey].worker.model).toBe("cognia/model")
+        expect(smallOnly[agentKey].worker.model).toBe("cognia/review")
         expect(smallOnly[agentKey]).not.toHaveProperty("explore")
       }
     }

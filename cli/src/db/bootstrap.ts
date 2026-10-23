@@ -808,6 +808,7 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
   let sources: readonly SnapshotSource[] = []
   let cancelTimer: (() => void) | null = null
   let disposed = false
+  let disposing: Promise<void> | null = null
   const dirtyTables = new Set<string>()
   let flushTail: Promise<void> = Promise.resolve()
 
@@ -1006,6 +1007,7 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
   }
 
   function scheduleFlush(): void {
+    if (disposed) return
     if (useTableStore && mode !== "writer") {
       if (!lockLost) warnReadOnly()
       return
@@ -1015,6 +1017,7 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
   }
 
   function scheduleTableFlush(databaseName: string, tableName: string): void {
+    if (disposed) return
     if (useTableStore && mode !== "writer") {
       if (!lockLost) warnReadOnly()
       return
@@ -1032,6 +1035,10 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
 
   function scheduleDebouncedFlush(): void {
     if (cancelTimer) cancelTimer()
+    cancelTimer = null
+    // Finalization drains dirty tables itself; no debounce may start a second
+    // snapshot after the final flush has released the store lock.
+    if (disposing) return
     cancelTimer = schedule(async () => {
       cancelTimer = null
       try {
@@ -1044,14 +1051,23 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
     }, debounceMs)
   }
 
-  async function dispose(): Promise<void> {
-    if (disposed) return
-    await flush()
-    disposed = true
-    if (defaultDbWriteSink === writeSink) defaultDbWriteSink = null
-    // Final flush has settled; release the store lock so a later process can
-    // take over as writer.
-    releaseStoreLockIfHeld()
+  function dispose(): Promise<void> {
+    if (disposed) return Promise.resolve()
+    return (disposing ??= (async () => {
+      try {
+        // A mutation can settle while an earlier snapshot is syncing. Keep it
+        // dirty and drain it before detaching the write sink and store lock.
+        do {
+          await flush()
+        } while (useTableStore && mode === "writer" && dirtyTables.size > 0)
+        disposed = true
+        if (defaultDbWriteSink === writeSink) defaultDbWriteSink = null
+        releaseStoreLockIfHeld()
+      } catch (error) {
+        disposing = null
+        throw error
+      }
+    })())
   }
 
   return {
@@ -1123,6 +1139,18 @@ export async function flushOpenCliDb(): Promise<void> {
     return
   }
   await handle.flush()
+}
+
+/** Drain the store and release its lock on process shutdown, without opening it. */
+export async function disposeOpenCliDb(): Promise<void> {
+  const handle = cached
+  if (!handle) return
+  try {
+    await handle.ready
+  } catch {
+    return
+  }
+  await handle.dispose()
 }
 
 /** Test-only: drop the cached handle. */

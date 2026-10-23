@@ -8,6 +8,7 @@ import {
   type DocsProvider,
   type RemoteDocContent,
 } from "@/lib/docs-providers"
+import { getMcpServer } from "@/lib/db/mcp-servers"
 import { resolveMcpSecrets } from "@/lib/mcp/credentials"
 import { defaultMcpRuntimeGateway } from "@/lib/mcp/runtime-gateway"
 import { registerSlashCommand, unregisterSlashCommand } from "@/lib/slash-commands/registry"
@@ -36,7 +37,15 @@ function providerPrefix(server: McpServer): string {
   return `${name}${suffix ? `-${suffix}` : ""}:`
 }
 
-async function resolvedServer(server: McpServer): Promise<McpServer> {
+/**
+ * The server as the Registry holds it NOW, credentials resolved. These entry
+ * points outlive the discovery that registered them, so the snapshot captured
+ * then may since have been disabled, blocked or deleted; the gateway's policy
+ * check can only judge the row it is given.
+ */
+async function resolvedServer(registered: McpServer): Promise<McpServer> {
+  const server = await getMcpServer(registered.id)
+  if (!server) throw new Error(`MCP server ${registered.name} is no longer configured`)
   return { ...server, config: (await resolveMcpSecrets(server.config)) as McpServer["config"] }
 }
 

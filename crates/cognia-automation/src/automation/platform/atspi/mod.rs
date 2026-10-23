@@ -42,6 +42,13 @@ impl AutomationBackend for AtspiBackend {
     fn capabilities(&self) -> Capabilities {
         let wayland_only = is_pure_wayland_without_xtools();
         Capabilities {
+            operations: OperationCapabilities {
+                app_sessions: false,
+                window_op: false,
+                element_click: false,
+                element_scroll: false,
+                invoke_patterns: vec![],
+            },
             platform: Platform::Linux,
             has_uia: false,
             has_input_sim: !wayland_only,
@@ -91,6 +98,9 @@ impl AutomationBackend for AtspiBackend {
     }
 
     fn click(&self, target: ClickTarget, opts: ClickOpts) -> Result<()> {
+        if opts.modifier.is_some() {
+            return Err(AutomationError::UnsupportedPlatform);
+        }
         match target {
             ClickTarget::Element { .. } => Err(AutomationError::UnsupportedPlatform),
             ClickTarget::Point { x, y } => {
@@ -153,26 +163,42 @@ impl AutomationBackend for AtspiBackend {
             .map_err(input_err("mouse_move"))
     }
 
-    fn drag(&self, from: Point, to: Point, _opts: DragOpts) -> Result<()> {
+    fn drag(&self, from: Point, to: Point, opts: DragOpts) -> Result<()> {
         let mut e = enigo_new()?;
-        e.move_mouse(from.x, from.y, enigo::Coordinate::Abs)
-            .map_err(input_err("drag.move_start"))?;
-        e.button(enigo::Button::Left, Direction::Press)
-            .map_err(input_err("drag.press"))?;
-        e.move_mouse(to.x, to.y, enigo::Coordinate::Abs)
-            .map_err(input_err("drag.move_end"))?;
-        e.button(enigo::Button::Left, Direction::Release)
-            .map_err(input_err("drag.release"))
+        crate::automation::platform::shared::pointer::drag(
+            &mut e,
+            from,
+            to,
+            opts,
+            |e, point| {
+                e.move_mouse(point.x, point.y, enigo::Coordinate::Abs)
+                    .map_err(input_err("drag.move"))
+            },
+            |e, button, transition| {
+                e.button(
+                    to_enigo_button(Some(button)),
+                    match transition {
+                        ButtonTransition::Down => Direction::Press,
+                        ButtonTransition::Up => Direction::Release,
+                    },
+                )
+                .map_err(input_err("drag.button"))
+            },
+            std::thread::sleep,
+        )
     }
 
     fn scroll(&self, target: ScrollTarget, opts: ScrollOpts) -> Result<()> {
+        if matches!(target, ScrollTarget::Element { .. }) {
+            return Err(AutomationError::UnsupportedPlatform);
+        }
         let mut e = enigo_new()?;
         if let ScrollTarget::Point { x, y } = target {
             e.move_mouse(x, y, enigo::Coordinate::Abs)
                 .map_err(input_err("scroll.move"))?;
         }
-        let notches_y = opts.dy / 120;
-        let notches_x = opts.dx / 120;
+        let notches_y = crate::automation::platform::shared::pointer::wheel_notches(opts.dy);
+        let notches_x = crate::automation::platform::shared::pointer::wheel_notches(opts.dx);
         if notches_y != 0 {
             e.scroll(notches_y, enigo::Axis::Vertical)
                 .map_err(input_err("scroll.vertical"))?;

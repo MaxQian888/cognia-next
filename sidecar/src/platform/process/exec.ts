@@ -125,6 +125,8 @@ export async function resolveProcessPortEnv(cwd?: string | URL): Promise<Record<
       if (value === null) return {}
       if (typeof value !== "object" || value === null || Array.isArray(value))
         throw new Error("workspace.portEnv returned an invalid environment")
+      // Standalone CLI has no allocator and deliberately returns an empty overlay.
+      if (Object.keys(value).length === 0) return {}
       const env: Record<string, string> = {}
       for (const key of ["COGNIA_PORT", "COGNIA_PORT_COUNT", "PORT"]) {
         const entry = (value as Record<string, unknown>)[key]

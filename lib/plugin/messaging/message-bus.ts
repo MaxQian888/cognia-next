@@ -14,6 +14,8 @@ import type {
   EventFilter,
   PluginEventAPI,
 } from "@/types/plugin/plugin-messaging"
+import type { EventSubscription } from "@cognia/plugin-contract/lib/plugin/messaging/message-bus"
+export type { EventSubscription } from "@cognia/plugin-contract/lib/plugin/messaging/message-bus"
 
 // Re-export the messaging type contracts (single source of truth in `types/`).
 export type { BusEvent, EventSource, EventFilter, PluginEventAPI }
@@ -21,16 +23,6 @@ export type { BusEvent, EventSource, EventFilter, PluginEventAPI }
 // =============================================================================
 // Types
 // =============================================================================
-
-export interface EventSubscription {
-  id: string
-  eventType: string | RegExp
-  handler: (event: BusEvent) => void
-  source: EventSource
-  filter?: EventFilter
-  priority: number
-  once: boolean
-}
 
 export interface MessageBusConfig {
   maxHistory: number

@@ -76,6 +76,8 @@ export function auditFile(file, source, allowlist) {
 function productionFiles(root) {
   const output = execFileSync("git", ["-C", root, "ls-files", ...SEARCH_ROOTS], {
     encoding: "utf8",
+    // The tracked file list passed execFileSync's 1 MiB default (ENOBUFS).
+    maxBuffer: 64 * 1024 * 1024,
   })
   return (
     output

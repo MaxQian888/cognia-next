@@ -12,20 +12,10 @@
 // be able to tell the same pet on a second device from a genuinely different
 // one. That is the user moving their own data, not a caller being given it.
 
-import type { PetCondition, PetMood, PetNeeds, PetProfile, PetStage } from "@/types/pet"
+import type { PetProfile } from "@/types/pet"
 import { computePetView } from "@/lib/pet/runtime/pet-view"
-
-export interface PetSummary {
-  hatched: boolean
-  name: string | null
-  level: number
-  stage: PetStage
-  xp: number
-  mood: PetMood
-  needs: Pick<PetNeeds, "energy" | "mood" | "bond">
-  condition: PetCondition
-  coins: number
-}
+import type { PetSummary } from "@cognia/plugin-contract/lib/pet/access/summary"
+export type { PetSummary } from "@cognia/plugin-contract/lib/pet/access/summary"
 
 /** Project a stored profile into the outside-facing summary. */
 export function projectPetSummary(profile: PetProfile, now: number): PetSummary {

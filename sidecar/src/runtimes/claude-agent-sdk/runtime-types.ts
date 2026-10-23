@@ -40,6 +40,8 @@ export interface DispatchParams extends BaseContext {
 export interface RuntimeDeps {
   query?: (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => RuntimeQuery
   pool?: Pick<ReturnType<typeof warmPool>, "claim" | "prewarm">
+  platform?: NodeJS.Platform
+  ensurePolicyCompatibility?(options: Options, signal: AbortSignal): Promise<void>
 }
 export interface SurfaceContext extends BaseContext {
   toolSession: ToolSessionContext
@@ -69,6 +71,7 @@ export interface SessionContext {
   pendingPluginToolCalls: PendingPluginToolCalls
   pendingPluginHookCalls: PendingPluginHooks
   sendOptions: SendOptions
+  finishRuntime?(): void
 }
 export interface PumpContext extends BaseContext {
   q: RuntimeQuery

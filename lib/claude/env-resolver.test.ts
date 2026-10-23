@@ -1,5 +1,5 @@
 jest.mock("@/stores/settings/settings-store", () => ({
-  useSettingsStore: { getState: () => ({ settings: { customProviders: [] } }) },
+  useSettingsStore: { getState: jest.fn(() => ({ settings: { customProviders: [] } })) },
 }))
 // ADR-0028 — env-resolver unit tests. The transport layer is mocked so the
 // tests run without a real Tauri host.
@@ -48,10 +48,14 @@ jest.mock("@/stores/account/account-store", () => ({
 }))
 
 import { transport } from "@/lib/tauri"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 
 const mockCall = transport.call as jest.MockedFunction<typeof transport.call>
 
 beforeEach(() => {
+  jest
+    .mocked(useSettingsStore.getState)
+    .mockReturnValue({ settings: { customProviders: [] } } as never)
   mockCall.mockReset()
   unlockedAccountId = "local_acct_a"
   standaloneRuntime = false
@@ -101,6 +105,17 @@ function settings(over: Partial<AppSettings> = {}): AppSettings {
 }
 
 describe("resolveAccountId — precedence chain", () => {
+  it("does not revive default subscription routing after selecting a CCSwitch API key", () => {
+    const selected = settings({
+      activeProviderId: "ccswitch:claude:native",
+      apiKey: "key",
+      defaultAccountIds: { anthropic: "old-account" },
+    })
+    expect(resolveAccountId("anthropic", null, null, selected)).toBeNull()
+    expect(
+      resolveAccountId("anthropic", chatSession({ accountId: "explicit" }), null, selected)
+    ).toBe("explicit")
+  })
   it("returns null when no layer sets it", () => {
     expect(resolveAccountId("anthropic", chatSession(), character(), settings())).toBeNull()
   })
@@ -156,6 +171,33 @@ describe("resolveAccountId — precedence chain", () => {
 })
 
 describe("resolveAccountEnv", () => {
+  it("keeps an explicit account authoritative over a CCSwitch relay", async () => {
+    jest.mocked(useSettingsStore.getState).mockReturnValue({
+      settings: { activeProviderId: "ccswitch:claude:native", apiKey: "native-key" },
+    } as never)
+    mockCall.mockResolvedValueOnce([{ key: "CLAUDE_CODE_OAUTH_TOKEN", value: "selected" }])
+    await expect(resolveAccountEnv("anthropic", "explicit")).resolves.toEqual({
+      CLAUDE_CODE_OAUTH_TOKEN: "selected",
+    })
+    expect(mockCall).toHaveBeenCalledWith(
+      "claude_env_for_account",
+      expect.objectContaining({ accountId: "explicit" })
+    )
+  })
+  it("uses the explicitly switched CCSwitch API key without requesting an OAuth account", async () => {
+    jest.mocked(useSettingsStore.getState).mockReturnValue({
+      settings: {
+        activeProviderId: "ccswitch:claude:native",
+        apiKey: "native-key",
+        apiBaseUrl: "http://127.0.0.1:18994/a",
+      },
+    } as never)
+    await expect(resolveAccountEnv("anthropic", null)).resolves.toMatchObject({
+      ANTHROPIC_API_KEY: "native-key",
+      ANTHROPIC_BASE_URL: "http://127.0.0.1:18994/a",
+    })
+    expect(mockCall).not.toHaveBeenCalled()
+  })
   it("does not call a host-only command in browser standalone mode", async () => {
     standaloneRuntime = true
 

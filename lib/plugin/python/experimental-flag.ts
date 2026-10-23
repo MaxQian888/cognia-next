@@ -4,7 +4,7 @@
  *
  * Three capabilities can be *declared* python-backed but are not yet proven on
  * the subprocess seam, each for a concrete reason recorded in
- * `packages/plugin-sdk/contract/catalog.json`:
+ * `packages/plugin-contract/contract/catalog.json`:
  *
  * - `connectors` — bidirectional: inbound arrives over the `plugin:python`
  *   push channel and `health()` is answered from wrapper-tracked state.
@@ -19,7 +19,7 @@
  * flag, exactly like `isChatMiddlewareExecutionEnabled`.
  */
 
-import { PLUGIN_MANIFEST_CONTRIBUTIONS } from "@/packages/plugin-sdk/src/contracts/catalog"
+import { PLUGIN_MANIFEST_CONTRIBUTIONS } from "@cognia/plugin-contract/contracts/catalog"
 
 let experimentalPythonBackedEnabled = false
 

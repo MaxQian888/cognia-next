@@ -164,6 +164,8 @@ export interface AgentSessionParams {
    * `toBuildContext` can route through Dexie. Defaults to {@link ensureCliDb};
    * injected in tests. */
   ensureDb?: () => Promise<unknown>
+  /** Prompt Center bootstrap; separate from skill DB initialization in tests. */
+  primePromptOverrides?: Parameters<typeof createCliContextAssembler>[0]["primePromptOverrides"]
   /** Resolve the user's persisted "Allow always" tool names. Defaults to the
    * `tool-approvals.json` store; injected in tests. */
   resolveApprovedTools?: () => Set<string>
@@ -265,6 +267,8 @@ export interface AgentSession {
   subscribeUiEvents?(listener: (event: AgentSessionUiEvent) => void): () => void
   readonly sessionId: string
   send(prompt: string, opts: SendTurnOptions): Promise<RunAndCaptureResult>
+  /** Prepare the shared transport for a manual child, without a parent model turn. */
+  prepareForSubagent?(): Promise<void>
   /** Drop the cached SendOptions so the next `send` re-resolves them — used
    * after `/mcp`, `/skill`, or `/plugin` toggle a server/skill mid-session.
    * Optional so lightweight test doubles need not implement it. */
@@ -467,6 +471,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     controller: AbortController
     awaitApprovals?: () => Promise<void>
   } | null = null
+  const hostCalls = new Set<Promise<unknown>>()
   const subscribePluginTools =
     params.subscribePluginTools ??
     (() => {
@@ -501,7 +506,13 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
             removeAbort()
           }
           if (activeInvocation !== active || active.controller.signal.aborted) return rejected()
-          return execute({ ...request, abortSignal: active.controller.signal })
+          const pending = execute({ ...request, abortSignal: active.controller.signal })
+          hostCalls.add(pending)
+          try {
+            return await pending
+          } finally {
+            hostCalls.delete(pending)
+          }
         },
       })
     })
@@ -522,6 +533,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       : {}),
     resolveDisabledMcpTools,
     ...(params.ensureDb ? { ensureDb: params.ensureDb } : {}),
+    ...(params.primePromptOverrides ? { primePromptOverrides: params.primePromptOverrides } : {}),
     resolveApprovedTools,
     ...(params.loadPluginRuntime ? { loadPluginRuntime: params.loadPluginRuntime } : {}),
     ...(params.resolveAgents ? { resolveAgents: params.resolveAgents } : {}),
@@ -534,6 +546,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   })
 
   let boot: SidecarBootstrap | null = null
+  let readyPromise: Promise<ResolvedCliSessionContext> | null = null
   /** Set by the first restore; shown once, on the turn that follows it. */
   let pendingRestoreNotice: string | undefined
   let pluginUnsub: UnlistenFn | null = null
@@ -561,9 +574,19 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     params.onToolHostStatus?.(snapshot)
   }
 
-  async function ensureReady() {
+  function ensureReady() {
+    if (!readyPromise) {
+      readyPromise = initializeReady().finally(() => {
+        readyPromise = null
+      })
+    }
+    return readyPromise
+  }
+
+  async function initializeReady() {
     if (closed) throw new Error("agent session is closed")
     const session = await assembler.resolveSession()
+    if (closed) throw new Error("agent session is closed")
     if (!boot) {
       // Only the tail of the transcript matters for a provider-runtime resume —
       // the latest assistant snapshot plus the last non-system role. Scanning
@@ -580,6 +603,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         publishStatus(session, "failed", error instanceof Error ? error.message : String(error))
         throw error
       }
+      if (closed) throw new Error("agent session is closed")
       // The transport is now live — subscribe the plugin-tool executor so the
       // model's plugin tool calls round-trip back here for execution. This MUST
       // be unconditional: `resolveSendOptions` always appends the `ask_user`
@@ -621,6 +645,9 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
 
   return {
     sessionId,
+    async prepareForSubagent() {
+      await ensureReady()
+    },
     async send(prompt, opts) {
       const session = await ensureReady()
       if (pendingRestoreNotice) {
@@ -722,6 +749,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         config: params.config,
         home,
         gate: opts.gate,
+        ...(opts.awaitApprovals ? { awaitApprovals: opts.awaitApprovals } : {}),
         ...(params.resolveSubagentOptions
           ? { resolveSubagentOptions: params.resolveSubagentOptions }
           : {}),
@@ -921,7 +949,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       // Before the sidecar has spawned there is no live session to mutate — the
       // mode is already in `params.config` and folds into the first
       // `startSession` via the resolver. Do nothing (and never respawn).
-      if (closed || boot === null) return true
+      if (closed || boot === null || turnSequence === 0) return true
       await setSessionMode(sessionId, mode)
       // Keep the cached options coherent so a later local read reflects the
       // live mode.
@@ -936,13 +964,19 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       return true
     },
     isLive() {
-      return boot !== null && !closed
+      return boot !== null && turnSequence > 0 && !closed
     },
     async close() {
       if (closed) return
       closed = true
+      // A cold manual dispatch may still be starting the owned transport.
+      // Wait for it before detaching subscribers and shutting that transport down.
+      await readyPromise?.catch(() => undefined)
       activeInvocation?.controller.abort()
       activeInvocation = null
+      // Bridge unsubscribe only removes the owner; accepted child calls must
+      // finish interruption and journal writes before transport/storage retire.
+      await Promise.allSettled([...hostCalls])
       clearToolHostStatus(sessionId)
       // Drop any lingering dispatch context (defensive — `send` clears it per
       // turn, but a close mid-turn must not leave a stale entry behind).

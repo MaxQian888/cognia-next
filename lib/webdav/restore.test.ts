@@ -131,3 +131,12 @@ describe("restoreFromWebDav", () => {
     )
   })
 })
+
+it("forwards the proven passphrase for nested retrieval-key restoration", async () => {
+  fakeClient = { getFile: jest.fn(async () => '{"version":"enc-v1"}'), propfindList: jest.fn() }
+  await restoreFromWebDav({ passphrase: "portable-regression", mergeStrategy: "overwrite" })
+  expect(applyMock).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ retrievalDekPassphrase: "portable-regression" })
+  )
+})

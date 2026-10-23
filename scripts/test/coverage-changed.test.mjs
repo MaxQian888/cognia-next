@@ -186,7 +186,7 @@ test("the Pro IDE E2E runs for its own pathway, and only for it", () => {
     "sidecar/vscode-ext-host/src/host.ts",
     "lib/codeserver/client.ts",
     "lib/plugin/ide/broker-runtime.ts",
-    "plugins/pro-ide-fixture/plugin.json",
+    "lib/plugin/ide/pro-ide-fixture/plugin.json",
     "scripts/gates/check-pro-ide-perf.mjs",
     "scripts/gates/pro-ide-perf-baseline.json",
     "scripts/test/run-pro-ide-e2e.mjs",
@@ -204,6 +204,15 @@ test("the Pro IDE E2E runs for its own pathway, and only for it", () => {
 })
 
 test("CI impact distinguishes an ordinary UI edit from native and independent workspace work", () => {
+  for (const file of [
+    "lib/browser/overlay.injected.js",
+    "lib/browser/extension-engine.ts",
+    "lib/browser-companion/service.ts",
+    "crates/cognia-companion/src/ws_browser_companion.rs",
+    "crates/cognia-companion-security/src/api.rs",
+    "src-tauri/src/companion_api/mod.rs",
+  ])
+    assert.equal(classifyCiImpact([file]).browserExtension, true, file)
   const ui = classifyCiImpact(["components/chat/message.tsx"])
   assert.equal(ui.frontend, true)
   for (const key of [

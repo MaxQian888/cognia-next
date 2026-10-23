@@ -21,7 +21,7 @@ use super::db::{
     CcswitchCounts, CcswitchError, CcswitchMcpServer, CcswitchPrompt, CcswitchProvider,
     CcswitchSkill,
 };
-use super::paths::{ccswitch_db_path, resolve_ccswitch_db, CcswitchResolutionSource};
+use super::paths::{resolve_ccswitch_db, CcswitchResolutionSource};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CcswitchStatus {
@@ -111,9 +111,10 @@ where
     F: FnOnce(&rusqlite::Connection) -> Result<T, CcswitchError>,
     T: Default,
 {
-    let Some(path) = ccswitch_db_path(manual_data_dir) else {
+    let Some(resolved) = resolve_ccswitch_db(manual_data_dir) else {
         return Err("could not resolve home directory".to_string());
     };
+    let path = resolved.path;
     if !path.exists() {
         // The DB hasn't been created yet — return the type's default rather
         // than an error so the UI can render an empty list cleanly. This

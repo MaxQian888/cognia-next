@@ -64,11 +64,33 @@ describe("MCP runtime credential resolver", () => {
       isDesktop: () => true,
       loadEntry: async () => ({ accessToken: "old" }),
       refresh,
+      getCurrent: async () => server(),
     })
     const retried = await resolved.refreshAuth?.()
     expect(retried?.server.credentialVersion).toBe(3)
     expect((retried?.server.config.headers as Record<string, string>).Authorization).toBe(
       "Bearer new"
     )
+  })
+
+  it("builds the retry from the Registry row as it is after the refresh", async () => {
+    const resolved = await resolveMcpRuntimeCredential(server(), {
+      isDesktop: () => true,
+      loadEntry: async () => ({ accessToken: "old" }),
+      refresh: async () => ({ accessToken: "new" }),
+      getCurrent: async () => ({ ...server(), enabled: false }),
+    })
+    const retried = await resolved.refreshAuth?.()
+    expect(retried?.server.enabled).toBe(false)
+  })
+
+  it("refuses the retry once the server has been deleted", async () => {
+    const resolved = await resolveMcpRuntimeCredential(server(), {
+      isDesktop: () => true,
+      loadEntry: async () => ({ accessToken: "old" }),
+      refresh: async () => ({ accessToken: "new" }),
+      getCurrent: async () => undefined,
+    })
+    await expect(resolved.refreshAuth?.()).rejects.toThrow(/no longer configured/)
   })
 })

@@ -100,7 +100,7 @@ fn runtime_contract() -> &'static RuntimeContract {
     static CONTRACT: OnceLock<RuntimeContract> = OnceLock::new();
     CONTRACT.get_or_init(|| {
         let catalog: Catalog = serde_json::from_str(include_str!(
-            "../../../packages/plugin-sdk/contract/catalog.json"
+            "../../../packages/plugin-contract/contract/catalog.json"
         ))
         .expect("canonical plugin contract must be valid JSON");
         let default_minimum = catalog.minimum_host_version.clone();

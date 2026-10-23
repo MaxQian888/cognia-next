@@ -31,6 +31,7 @@ export type NativeHookQueryInput = {
     | "maxBudgetUsd"
     | "settingSources"
     | "hooks"
+    | "sandbox"
   >
 }
 export interface NativeHookOptions {
@@ -209,7 +210,13 @@ export function createNativeHookExecutor({
         prompt,
         options: {
           cwd,
-          env,
+          // Direct callers can omit env, in which case SDK query would inherit
+          // ambient watchdog settings without an invocation deadline.
+          env: Object.fromEntries(
+            Object.entries(env ?? process.env).filter(
+              ([name]) => !/^CLAUDE_CODE_RETRY_WATCHDOG/i.test(name)
+            )
+          ),
           model: handler.model ?? model,
           fallbackModel,
           mcpServers,
@@ -217,6 +224,7 @@ export function createNativeHookExecutor({
           maxTurns: handler.type === "agent" ? 3 : handler.type === "mcp_tool" ? 2 : 1,
           maxBudgetUsd: budget.remaining(),
           settingSources: [],
+          sandbox: { allowNestedUserNamespaces: false },
           hooks: nestedPiiHooks(redact, piiGate) as Options["hooks"],
         },
       })

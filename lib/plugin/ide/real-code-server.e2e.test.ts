@@ -12,7 +12,7 @@
  * - `ManagedIdeBrokerRuntime` and `ManagedProtocolRuntime` playing the
  *   renderer, with protocol servers supervised by the real vscode-ext-host
  *   sidecar;
- * - `plugins/pro-ide-fixture`, which contributes one provider of every family
+ * - `lib/plugin/ide/pro-ide-fixture`, a host test fixture that contributes one provider of every family
  *   the platform claims for a stable release, built into a signed proxy VSIX
  *   and activated through the managed handshake.
  *
@@ -45,7 +45,7 @@ import type {
   CodeServerProxyArtifact,
 } from "@/lib/codeserver/client"
 import { TauriLspClientAdapter } from "@/lib/plugin/lsp/lsp-client-adapter-tauri"
-import fixtureHandlers from "@/plugins/pro-ide-fixture/src/index"
+import fixtureHandlers from "./pro-ide-fixture/src/index"
 import type { Plugin, PluginManifest } from "@/types/plugin"
 
 import { ManagedIdeBrokerRuntime, hashIdeManifest } from "./broker-runtime"
@@ -65,7 +65,7 @@ const BROKER_VSIX =
   join(REPO, "sidecar", "codeserver-agent-ext", "cognia-managed-broker.vsix")
 const SIDECAR_HOST = join(REPO, "sidecar", "vscode-ext-host", "dist", "host.js")
 const PERF_OUT = process.env.COGNIA_PRO_IDE_PERF_OUT ?? join(REPO, "target", "pro-ide-perf.json")
-const FIXTURE_ROOT = join(REPO, "plugins", "pro-ide-fixture")
+const FIXTURE_ROOT = join(__dirname, "pro-ide-fixture")
 const NS = "cognia.cognia-pro-ide-fixture"
 const PROXY_EXTENSION = "cognia-managed.proxy-cognia-pro-ide-fixture"
 /** Optional: append every host frame and stderr line here, for diagnosing a failure. */

@@ -37,12 +37,6 @@ jest.mock("../../agent/subagent-background-tasks", () => ({
   markCliBackgroundDelivery: jest.fn(async () => undefined),
 }))
 
-jest.mock("@/plugins/cognia-builtin-characters/src/index", () => ({
-  BUILTIN_LEGACY_ID_TO_LOCAL_ID: {},
-  BUILTIN_PACK: { id: "builtin", version: "1.0.0", characters: [] },
-  BUILTIN_PLUGIN_ID: "cognia-builtin-characters",
-}))
-
 // marked@18 is ESM-only; this suite exercises App orchestration rather than
 // markdown tokenization, which has its own focused tests.
 jest.mock("../render/cell-terminal-block", () => ({
@@ -87,6 +81,11 @@ jest.mock("../../handoff/host-state-client", () => ({
 }))
 
 import { App } from "./App"
+import { flushOpenCliDb } from "../../db/bootstrap"
+jest.mock("../../db/bootstrap", () => ({
+  ...jest.requireActual("../../db/bootstrap"),
+  flushOpenCliDb: jest.fn().mockResolvedValue(undefined),
+}))
 import { BUILTIN_HOOKS } from "@/lib/claude/hooks/builtin-hooks"
 import * as limitsData from "../runtime/limits-data"
 jest.mock("../runtime/limits-data", () => ({
@@ -891,6 +890,64 @@ describe("App", () => {
     expect(invalidate).toHaveBeenCalled()
   })
 
+  it("rejects a stale cancelled child approval before persisting or answering its sibling", async () => {
+    const controller = new AbortController(),
+      persistToolApproval = jest.fn()
+    let secondResolved = false,
+      firstDecision: unknown
+    const create: CreateSession = () => ({
+      sessionId: "permission-siblings",
+      close: jest.fn(),
+      async send(_prompt, opts) {
+        const first = opts
+          .gate(
+            { toolName: "child_first", input: {}, requestId: "a", sessionId: "child-a" } as never,
+            controller.signal
+          )
+          .then((d) => (firstDecision = d))
+        const second = opts
+          .gate({
+            toolName: "child_second",
+            input: {},
+            requestId: "b",
+            sessionId: "child-b",
+          } as never)
+          .then(() => (secondResolved = true))
+        await Promise.all([first, second])
+        return result("done")
+      },
+    })
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={create}
+        persistToolApproval={persistToolApproval}
+      />
+    )
+    type("go")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("Allow child_first"))
+    act(() => __fireInput("", { downArrow: true }))
+    await act(async () => {
+      controller.abort()
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    expect(firstDecision).toMatchObject({ decision: "deny" })
+    expect(persistToolApproval).not.toHaveBeenCalled()
+    expect(secondResolved).toBe(false)
+    await waitFor(() => expect(container.textContent).toContain("Allow child_second"))
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(secondResolved).toBe(true))
+  })
+
   it("Ctrl+T expands collapsed tool output", async () => {
     const create: CreateSession = () => ({
       sessionId: "ses-tool",
@@ -1009,6 +1066,54 @@ describe("App", () => {
     submit()
     await waitFor(() => expect(onExit).toHaveBeenCalled())
   })
+
+  it.each([false, true])(
+    "awaits session cleanup before exiting storage even when close rejects: %s",
+    async (rejectClose) => {
+      const { create, closed } = fakeSession()
+      let finish!: () => void
+      closed.mockImplementation(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            finish = rejectClose ? () => reject(new Error("backend stopped")) : resolve
+          })
+      )
+      let cleanup: Promise<void> | undefined
+      const onShutdown = jest.fn((pending: Promise<void>) => {
+        cleanup = pending
+      })
+      const onExit = jest.fn(() => {
+        expect(cleanup).toBeDefined()
+      })
+      render(
+        <App
+          config={config}
+          sessionId="s1"
+          createSession={create}
+          onExit={onExit}
+          onShutdown={onShutdown}
+        />
+      )
+      type("hello")
+      submit()
+      await waitFor(() => expect(document.body.textContent).toContain("the answer"))
+      type("/exit")
+      submit()
+      await waitFor(() => expect(onExit).toHaveBeenCalledTimes(1))
+      expect(closed).toHaveBeenCalledTimes(1)
+      let settled = false
+      void cleanup!.then(() => {
+        settled = true
+      })
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      await act(async () => {
+        finish()
+        await cleanup
+      })
+      expect(settled).toBe(true)
+    }
+  )
 
   it("exits on a double Ctrl+C", async () => {
     const { create } = fakeSession()
@@ -2151,6 +2256,17 @@ describe("App", () => {
       await Promise.resolve()
     })
     await waitFor(() => expect(container.textContent).toContain("No MCP servers"))
+  })
+
+  it("persists runtime results by flushing existing dirty tables", async () => {
+    jest.mocked(flushOpenCliDb).mockClear()
+    const { create } = fakeSession()
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} home="/nonexistent-home" />
+    )
+    runBareCommand("/mcp")
+    await waitFor(() => expect(container.textContent).toContain("No MCP servers"))
+    await waitFor(() => expect(flushOpenCliDb).toHaveBeenCalledTimes(1))
   })
 
   it("runs a !command shell-out and shows the output", async () => {

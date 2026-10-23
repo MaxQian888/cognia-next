@@ -234,6 +234,7 @@
     "undoSuccess": "Conversation restored"
   },
   "composer": {
+    "contextRegion": "Composer context and notices",
     "ariaAttachImage": "Attach files",
     "ariaMessage": "Message",
     "ariaSend": "Send",
@@ -544,6 +545,7 @@
       "confirmTitle": "Add large folder?"
     },
     "followUps": {
+      "dontShowAgain": "Don't show again",
       "unavailable": "Predictions need an assistance model or an enabled Agent fallback in Chat settings.",
       "error": "Could not generate a prediction.",
       "configure": "Configure",

@@ -1,32 +1,32 @@
 import type { PluginManifestDexieBlock } from "@/types/plugin"
-
-import sreAgentManifest from "@/plugins/sre-agent/plugin.json"
-import strixManifest from "@/plugins/strix-security/plugin.json"
-import zhihuManifest from "@/plugins/zhihu-content-pipeline/plugin.json"
-
-interface ManifestWithDexie {
-  id: string
-  dexie?: PluginManifestDexieBlock
-}
+import { listBuiltinPrebootManifests } from "@/lib/plugin/core/builtin-preboot-manifests"
 
 /**
- * Every bundled plugin that declares `dexie.tables`.
- *
- * Hand-maintained, and the failure mode is quiet: a plugin whose tables are
- * declared but whose manifest is missing here boots with no table applied to
- * the schema, and its first `ctx.dexie.table(...)` call throws a Dexie lookup
- * error at runtime rather than at boot. `builtin-manifests.test.ts` walks
- * `plugins/` to keep the two in step.
+ * Built-ins whose manifest declares `dexie.tables` but whose tables boot must
+ * NOT apply. Each entry is a reviewed decision with its reason; the plugin side
+ * documents the same dormancy and `builtin-manifests.test.ts` pins both.
  */
-const manifests = [sreAgentManifest, strixManifest, zhihuManifest] as ManifestWithDexie[]
+export const DORMANT_BUILTIN_DEXIE_DECLARATIONS: Readonly<Record<string, string>> = Object.freeze({
+  "github-delivery":
+    "Its four tables are the v2 plugin's storage, kept only so a rollback to the " +
+    "signed v2 bundle finds its rows. v3 never calls ctx.dexie, so applying the " +
+    "schema at boot would create four empty stores nothing reads or writes.",
+})
 
-/** Manifest-only registry used during database boot; imports no plugin code. */
+/**
+ * Every bundled plugin that declares `dexie.tables`, minus the dormant ones.
+ *
+ * Derived from the generated pre-boot snapshot rather than a hand-kept list of
+ * `plugins/<id>/plugin.json` imports: database boot runs before the plugin
+ * manager, and the snapshot is the one place the host reads built-in manifest
+ * data without depending on plugin source. Imports no plugin code.
+ */
 export function getBuiltinPluginDexieManifests(): Map<string, PluginManifestDexieBlock> {
-  return new Map(
-    manifests
-      .filter((manifest): manifest is ManifestWithDexie & { dexie: PluginManifestDexieBlock } =>
-        Boolean(manifest.dexie)
-      )
-      .map((manifest) => [manifest.id, manifest.dexie])
-  )
+  const manifests = new Map<string, PluginManifestDexieBlock>()
+  for (const [id, manifest] of listBuiltinPrebootManifests()) {
+    if (!manifest.dexie?.tables?.length) continue
+    if (Object.hasOwn(DORMANT_BUILTIN_DEXIE_DECLARATIONS, id)) continue
+    manifests.set(id, manifest.dexie)
+  }
+  return manifests
 }

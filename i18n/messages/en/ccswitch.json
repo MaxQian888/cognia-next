@@ -12,7 +12,7 @@
     "providers": "Providers",
     "skills": "Skills"
   },
-  "description": "Read providers, MCP servers, prompts and skills from your local CCSwitch installation. Switching a provider here updates Cognia's bundled SDK and (optionally) propagates to selected external agents.",
+  "description": "Read providers, MCP servers, prompts and installed skills from CC Switch v4.0.18 (schema 21). Anthropic providers can update Cognia’s bundled SDK; other app protocols and managed logins remain browse-only.",
   "dialog": {
     "agentsSection": "Also write to",
     "apiKey": "API key",
@@ -21,7 +21,7 @@
     "bodyFor": "Switch to {name}. Review what changes before confirming.",
     "cancel": "Cancel",
     "close": "Close",
-    "codexBaseUrlNotPropagated": "base URL not applied",
+    "baseUrlNotPropagated": "base URL not applied",
     "cogniaApplied": "Cognia-next updated.",
     "cogniaSection": "Cognia-next",
     "confirm": "Apply switch",
@@ -35,7 +35,9 @@
     "title": "Switch provider",
     "useSubscription": "Official provider — cognia will reuse your Anthropic subscription (existing signed-in account, or this machine's Claude Code login) instead of an API key.",
     "willRestart": "The bundled SDK sidecar will be restarted so the new env takes effect.",
-    "willWrite": "Will write to {count, plural, =1 {1 agent file} other {# agent files}}."
+    "willWrite": "Will write to {count, plural, =1 {1 agent file} other {# agent files}}.",
+    "applyFailed": "Could not apply the switch: {error}",
+    "cogniaNotApplied": "Cognia was not updated."
   },
   "mcp": {
     "emptyBody": "CCSwitch's mcp_servers table is empty.",
@@ -97,7 +99,7 @@
     "headerHint": "CCSwitch is the editor for these records — go back to CCSwitch to add, rename or delete.",
     "importQuota": "Import quota",
     "model": "Model",
-    "officialEndpoint": "Official Anthropic endpoint",
+    "officialEndpoint": "Default endpoint",
     "quotaImportErrorTitle": "Quota metadata wasn't imported",
     "quotaImportFailed": "Couldn't save the imported quota source: {error}",
     "quotaImportReason": {
@@ -111,14 +113,15 @@
     "quotaImportSuccessTitle": "Quota metadata imported",
     "refresh": "Refresh",
     "useHere": "Use here",
-    "useHereAndIn": "Use here & in…"
+    "useHereAndIn": "Use here & in…",
+    "unsupportedProtocol": "Browse only: this app uses another protocol or CC Switch-managed authentication. Switch it in CC Switch."
   },
   "skills": {
     "emptyBody": "CCSwitch's skills table is empty.",
     "emptyTitle": "No skills in CCSwitch",
     "errorTitle": "Could not list skills",
     "externalBadge": "external file",
-    "headerHint": "Skills with inline content become new Cognia skills. Rows pointing at an external file (greyed) need to be re-imported via Settings → Skills.",
+    "headerHint": "Import installed skill bundles, including frontmatter, scripts, references, assets and Codex metadata. Missing or unsafe directories cannot be imported.",
     "importBtn": "Import {count, plural, =0 {nothing} =1 {1 skill} other {# skills}}",
     "importing": "Importing…",
     "listTitle": "Skills in CCSwitch",

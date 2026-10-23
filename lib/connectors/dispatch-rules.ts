@@ -21,11 +21,8 @@ import type {
   DispatchRuleAction,
 } from "@/lib/db/connector-types"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
-
-export interface DispatchRuleHit {
-  rule: DispatchRule
-  action: DispatchRuleAction
-}
+import type { DispatchRuleHit } from "@cognia/plugin-contract/lib/connectors/dispatch-rules"
+export type { DispatchRuleHit } from "@cognia/plugin-contract/lib/connectors/dispatch-rules"
 
 /**
  * Compiled-regex cache keyed by pattern source. Invalid patterns are cached

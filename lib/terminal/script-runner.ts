@@ -15,18 +15,11 @@
 
 import { detectPlatform, type ShellPlatform } from "./shell-detect"
 import type { SpawnRequest } from "./types"
+import type { ScriptType } from "@cognia/plugin-contract/lib/terminal/script-runner"
+export type { ScriptType } from "@cognia/plugin-contract/lib/terminal/script-runner"
 
 const DEFAULT_ROWS = 24
 const DEFAULT_COLS = 80
-
-export interface ScriptType {
-  /** Logical language/kind label (drives UI + telemetry). */
-  kind: string
-  /** Interpreter binary to spawn. */
-  interpreter: string
-  /** Args inserted before the script path (e.g. `-NoLogo -File` for ps1). */
-  interpreterArgs: string[]
-}
 
 export interface DetectScriptOptions {
   /** First line of the file, if known — a `#!` shebang wins over the ext. */

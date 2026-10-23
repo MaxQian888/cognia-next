@@ -18,6 +18,101 @@ use reqwest::{ClientBuilder, Method, Request, RequestBuilder, Response, StatusCo
 const PRIVATE_ADDRESS_PREFIX: &str = "refusing to fetch a private/loopback address";
 const MAX_REDIRECTS: usize = 10;
 
+pub const MAX_DOWNLOAD_BYTES: usize = 20 * 1024 * 1024;
+
+/// Opt-in policy for public binary downloads. Callers own the origin grant;
+/// every destination still passes DNS pinning and private-address rejection.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DownloadPolicy {
+    pub allowed_origins: Vec<String>,
+    pub max_bytes: usize,
+}
+
+impl DownloadPolicy {
+    pub fn validate(&self, target: &Url) -> Result<(), String> {
+        if self.max_bytes == 0
+            || self.max_bytes > MAX_DOWNLOAD_BYTES
+            || self.allowed_origins.is_empty()
+            || self.allowed_origins.len() > 32
+        {
+            return Err("download_policy_invalid".into());
+        }
+        let mut allowed = false;
+        for origin in &self.allowed_origins {
+            let parsed = Url::parse(origin).map_err(|_| "download_policy_invalid".to_string())?;
+            if parsed.scheme() != "https"
+                || parsed.host_str().is_none()
+                || !parsed.username().is_empty()
+                || parsed.password().is_some()
+                || parsed.path() != "/"
+                || parsed.query().is_some()
+                || parsed.fragment().is_some()
+            {
+                return Err("download_policy_invalid".into());
+            }
+            allowed |= parsed.origin() == target.origin();
+        }
+        if target.scheme() != "https"
+            || target.host_str().is_none()
+            || !target.username().is_empty()
+            || target.password().is_some()
+            || !allowed
+            || host_is_private(target.as_str())
+        {
+            return Err("download_destination_denied".into());
+        }
+        Ok(())
+    }
+}
+
+/// The builder must preserve host proxy policy and reject proxy routes whose
+/// remote DNS cannot enforce the checked destination. Errors never expose URLs.
+pub async fn send_download<F>(
+    request: RequestBuilder,
+    policy: &DownloadPolicy,
+    make_builder: F,
+    dns_timeout: Duration,
+) -> Result<Response, String>
+where
+    F: Fn(&str) -> Result<ClientBuilder, String>,
+{
+    let mut request = request
+        .build()
+        .map_err(|_| "download_request_invalid".to_string())?;
+    if request.method() != Method::GET || request.body().is_some() {
+        return Err("download_request_invalid".into());
+    }
+    request.headers_mut().remove(HOST);
+    send_checked_with_policy(
+        request,
+        None,
+        make_builder,
+        |url| async move {
+            let checked =
+                resolve_before_timeout(&url, Some(dns_timeout), CheckedHost::resolve(&url))
+                    .await
+                    .map_err(|_| "download_destination_denied".to_string())?;
+            if checked
+                .addrs
+                .iter()
+                .any(|addr| crate::egress::is_forbidden_dest_ip(&addr.ip()))
+            {
+                return Err("download_destination_denied".into());
+            }
+            Ok(checked)
+        },
+        Some(policy),
+    )
+    .await
+    .map_err(|error| match error.as_str() {
+        "download_policy_invalid"
+        | "download_destination_denied"
+        | "download_proxy_unsupported" => error,
+        _ => "download_failed".to_string(),
+    })
+}
+
 fn refused(url: &Url, reason: &str) -> String {
     format!("{PRIVATE_ADDRESS_PREFIX}: {url} ({reason})")
 }
@@ -170,7 +265,7 @@ fn request_failed(error: reqwest::Error) -> String {
 }
 
 async fn send_checked<F, R, Fut>(
-    mut request: Request,
+    request: Request,
     redirect: Option<&str>,
     make_builder: F,
     resolve: R,
@@ -180,8 +275,28 @@ where
     R: Fn(Url) -> Fut,
     Fut: Future<Output = Result<CheckedHost, String>>,
 {
+    send_checked_with_policy(request, redirect, make_builder, resolve, None).await
+}
+
+async fn send_checked_with_policy<F, R, Fut>(
+    mut request: Request,
+    redirect: Option<&str>,
+    make_builder: F,
+    resolve: R,
+    download_policy: Option<&DownloadPolicy>,
+) -> Result<Response, String>
+where
+    F: Fn(&str) -> Result<ClientBuilder, String>,
+    R: Fn(Url) -> Fut,
+    Fut: Future<Output = Result<CheckedHost, String>>,
+{
     let follow = redirect.unwrap_or("follow") == "follow";
     for hop in 0..=MAX_REDIRECTS {
+        if let Some(policy) = download_policy {
+            policy.validate(request.url())?;
+            // A signed path/query is a credential too. Never synthesize Referer.
+            request.headers_mut().remove(REFERER);
+        }
         // Never rely on a proxy's DNS override support. Even a remote-DNS
         // HTTP/SOCKS route must pass this local check before it is sent.
         let checked = resolve(request.url().clone()).await?;
@@ -273,6 +388,203 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use wiremock::{matchers::path, Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn download_policy_rejects_ungranted_insecure_and_credentialed_urls() {
+        let policy = DownloadPolicy {
+            allowed_origins: vec!["https://public.test".into()],
+            max_bytes: 4,
+        };
+        assert!(policy
+            .validate(&Url::parse("https://public.test/signed?token=secret").unwrap())
+            .is_ok());
+        for url in [
+            "http://public.test/",
+            "https://other.test/",
+            "https://user:secret@public.test/",
+            "https://127.0.0.1/",
+            "https://public.test:8443/",
+        ] {
+            let error = policy.validate(&Url::parse(url).unwrap()).unwrap_err();
+            assert_eq!(error, "download_destination_denied");
+            assert!(!error.contains("secret"));
+        }
+        for max_bytes in [0, MAX_DOWNLOAD_BYTES + 1] {
+            assert_eq!(
+                DownloadPolicy {
+                    max_bytes,
+                    ..policy.clone()
+                }
+                .validate(&Url::parse("https://public.test/").unwrap())
+                .unwrap_err(),
+                "download_policy_invalid"
+            );
+        }
+    }
+
+    async fn tls_response(
+        response: Vec<u8>,
+    ) -> (
+        SocketAddr,
+        reqwest::Certificate,
+        tokio::task::JoinHandle<Vec<u8>>,
+    ) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        crate::proxy_config::ensure_crypto_provider();
+        let certified = rcgen::generate_simple_self_signed(vec!["public.test".into()]).unwrap();
+        let certificate = certified.cert.der().clone();
+        let root = reqwest::Certificate::from_der(certificate.as_ref()).unwrap();
+        let key =
+            rustls::pki_types::PrivatePkcs8KeyDer::from(certified.signing_key.serialize_der());
+        let config = rustls::ServerConfig::builder_with_provider(
+            rustls::crypto::ring::default_provider().into(),
+        )
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(vec![certificate], key.into())
+        .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut stream = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(config))
+                .accept(tcp)
+                .await
+                .unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 1024];
+            while !request.windows(4).any(|v| v == b"\r\n\r\n") {
+                let n = stream.read(&mut chunk).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..n]);
+            }
+            stream.write_all(&response).await.unwrap();
+            stream.shutdown().await.unwrap();
+            request
+        });
+        (addr, root, task)
+    }
+
+    #[tokio::test]
+    async fn strict_tls_redirect_preserves_bytes_without_forwarding_credentials_or_referer() {
+        let body = vec![0, 255, 128, b'P', b'K', 3, 4];
+        let mut wire = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        wire.extend_from_slice(&body);
+        let (second, second_cert, second_task) = tls_response(wire).await;
+        let redirect = format!("HTTP/1.1 302 Found\r\nLocation: https://public.test:{}/end\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", second.port());
+        let (first, first_cert, first_task) = tls_response(redirect.into_bytes()).await;
+        let first_origin = format!("https://public.test:{}", first.port());
+        let policy = DownloadPolicy {
+            allowed_origins: vec![
+                first_origin.clone(),
+                format!("https://public.test:{}", second.port()),
+            ],
+            max_bytes: body.len(),
+        };
+        let builder = |_: &str| {
+            Ok(reqwest::Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_secs(3))
+                .redirect(reqwest::redirect::Policy::none())
+                .add_root_certificate(first_cert.clone())
+                .add_root_certificate(second_cert.clone()))
+        };
+        let request = builder("")
+            .unwrap()
+            .build()
+            .unwrap()
+            .get(format!("{first_origin}/secret-path?token=secret"))
+            .header(AUTHORIZATION, "Bearer secret")
+            .header(COOKIE, "token=secret")
+            .header(REFERER, "https://secret.test/path?secret")
+            .build()
+            .unwrap();
+        let response = send_checked_with_policy(
+            request,
+            None,
+            builder,
+            |url| {
+                let addr = if url.port() == Some(first.port()) {
+                    first
+                } else {
+                    second
+                };
+                local_origin(url, addr)
+            },
+            Some(&policy),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            crate::http_download::read_bounded_response(response, policy.max_bytes)
+                .await
+                .unwrap(),
+            body
+        );
+        assert!(String::from_utf8_lossy(&first_task.await.unwrap()).contains("Bearer secret"));
+        let second_request = String::from_utf8(second_task.await.unwrap())
+            .unwrap()
+            .to_lowercase();
+        assert!(!second_request.contains("authorization:"));
+        assert!(!second_request.contains("cookie:"));
+        assert!(!second_request.contains("referer:"));
+        assert!(!second_request.contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn strict_tls_redirect_checks_policy_before_next_connection() {
+        for target in [
+            "http://public.test/end",
+            "https://other.test/secret?token=secret",
+            "https://user:secret@public.test/end",
+            "https://127.0.0.1/end",
+        ] {
+            let response = format!("HTTP/1.1 302 Found\r\nLocation: {target}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            let (addr, certificate, task) = tls_response(response.into_bytes()).await;
+            let origin = format!("https://public.test:{}", addr.port());
+            let policy = DownloadPolicy {
+                allowed_origins: vec![origin.clone()],
+                max_bytes: 4,
+            };
+            let builder = |_: &str| {
+                Ok(reqwest::Client::builder()
+                    .no_proxy()
+                    .timeout(Duration::from_secs(3))
+                    .redirect(reqwest::redirect::Policy::none())
+                    .add_root_certificate(certificate.clone()))
+            };
+            let request = builder("")
+                .unwrap()
+                .build()
+                .unwrap()
+                .get(format!("{origin}/start"))
+                .build()
+                .unwrap();
+            let calls = AtomicUsize::new(0);
+            let error = send_checked_with_policy(
+                request,
+                None,
+                builder,
+                |url| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    local_origin(url, addr)
+                },
+                Some(&policy),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error, "download_destination_denied");
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            task.await.unwrap();
+        }
+    }
 
     #[tokio::test]
     async fn stalled_dns_is_bounded_by_the_connection_timeout() {

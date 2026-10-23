@@ -5,6 +5,7 @@ import {
   consentPromptOf,
   getConsentRoutingVersion,
   isConsentRoutedElsewhere,
+  isConsentSettled,
   markConsentSettled,
   subscribeConsentRouting,
 } from "./consent-routing"
@@ -22,6 +23,16 @@ const event: ConsentRequestEvent = {
 beforeEach(() => __resetConsentRouting())
 
 describe("consent routing", () => {
+  it("distinguishes claimed prompts from settled prompts", () => {
+    expect(isConsentSettled(event.id)).toBe(false)
+    const release = claimConsentSurface(event.surface)
+    expect(isConsentSettled(event.id)).toBe(false)
+    release()
+    markConsentSettled(event.id)
+    expect(isConsentSettled(event.id)).toBe(true)
+    __resetConsentRouting()
+    expect(isConsentSettled(event.id)).toBe(false)
+  })
   it("hides a claimed surface's prompts until every claim is released", () => {
     expect(isConsentRoutedElsewhere(event)).toBe(false)
     const first = claimConsentSurface("chatCopilot")

@@ -4,6 +4,11 @@
 // default — they'd just be re-seeded on import — but `includeBuiltIns: true`
 // can override for "true full snapshot" use cases.
 
+import {
+  exportAuthoredContent,
+  portableSessionReferences,
+  type AuthoredIdMaps,
+} from "./authored-content"
 import { getDb } from "@/lib/db/schema"
 import { isPortableVideoJob } from "@/lib/db/media-generation-jobs"
 import { COGSET_STATE_ID } from "@/types/plugin/plugin-cogset"
@@ -340,8 +345,19 @@ export async function buildBackupPackage(
     libraryFolders,
     libraryAssets,
   }
+  const authoredMembership: AuthoredIdMaps = {}
+  for await (const section of exportAuthoredContent(db, opts, {
+    sessions,
+    membership: authoredMembership,
+  })) {
+    if (!Array.isArray(section.rows)) continue
+    const rows = ((payload as Record<string, unknown>)[section.section] ??= []) as unknown[]
+    rows.push(...section.rows)
+  }
   if (opts.includeSessions) {
-    const exportedSessions = filterExposedSessions(sessions, "standard-export")
+    const exportedSessions = filterExposedSessions(sessions, "standard-export").map((row) =>
+      portableSessionReferences(row, authoredMembership)
+    )
     const exportedSessionIds = new Set(exportedSessions.map((session) => session.id))
     payload.sessions = exportedSessions
     payload.messages = messages.filter((message) => exportedSessionIds.has(message.sessionId))

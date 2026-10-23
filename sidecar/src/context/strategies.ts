@@ -61,10 +61,15 @@ export interface PlanStrategyOptions {
   strategy?: CompressionStrategy | (string & {})
   conversation: readonly ConversationMessage[]
   keepRecent?: number
+  keepRecentTokens?: number
   preserveSystemMessages?: boolean
   recursiveChunkSize?: number
   importanceThreshold?: number
   retainedFraction?: unknown
+  /** Already excludes provider framing and the replacement summary budget. */
+  retainedTokenBudget?: number
+  /** The old checkpoint is replaced rather than retained beside the new one. */
+  replacesFrozen?: boolean
   contextWindow?: unknown
   modelId?: string | null
   scoreMessage?: (
@@ -85,15 +90,18 @@ export function planStrategy({
   strategy = "summary",
   conversation,
   keepRecent = 6,
+  keepRecentTokens,
   preserveSystemMessages = false,
   recursiveChunkSize = 20,
   importanceThreshold = 0.4,
   retainedFraction,
+  retainedTokenBudget,
+  replacesFrozen = false,
   contextWindow,
   modelId,
   scoreMessage = defaultScoreMessage,
 }: PlanStrategyOptions): StrategyPlan {
-  const base = planCompaction({ conversation, keepRecentMessages: keepRecent })
+  const base = planCompaction({ conversation, keepRecentMessages: keepRecent, keepRecentTokens })
   if (!base) return { kind: "none" }
   const { systemHead, frozen } = base
   const middle = [...base.middle]
@@ -110,7 +118,10 @@ export function planStrategy({
   // Drain-line: evict the oldest tail messages into the summarize region until
   // the RETAINED content (head + frozen + tail; the new summary is bounded
   // separately) fits under retainedFraction*window. Floors at MIN_TAIL.
-  if (typeof effectiveRetained === "number" && effectiveRetained > 0 && effectiveRetained < 1) {
+  if (
+    retainedTokenBudget !== undefined ||
+    (typeof effectiveRetained === "number" && effectiveRetained > 0 && effectiveRetained < 1)
+  ) {
     // Prefer the caller's authoritative (catalog-resolved) window — the regex
     // table in `getContextWindow` drifts and floors unknown models at 128k,
     // which over-evicts the tail on large-window models.
@@ -118,11 +129,11 @@ export function planStrategy({
       typeof contextWindow === "number" && contextWindow > 0
         ? contextWindow
         : getContextWindow(modelId)
-    const budget = effectiveRetained * windowTokens
+    const budget = retainedTokenBudget ?? (effectiveRetained as number) * windowTokens
     // Incremental accounting: the head+frozen cost is fixed; each eviction only
     // removes one message's tokens, so re-scanning the whole retained set per
     // iteration (O(n²)) is unnecessary.
-    const fixedCost = estimateTokens([...systemHead, ...frozen])
+    const fixedCost = estimateTokens([...systemHead, ...(replacesFrozen ? [] : frozen)])
     let tailCost = estimateTokens(tail)
     while (tail.length > MIN_TAIL && fixedCost + tailCost > budget) {
       const evicted = tail.shift()!

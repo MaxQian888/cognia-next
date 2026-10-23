@@ -130,6 +130,7 @@ export interface ApplyEffectDeps {
   syncAndRefreshModelOverlay: () => void
   takeSteer: () => string | null
   doExit: () => void
+  trackRuntimeWork?: (work: Promise<unknown>) => void
   /** Switch the session working directory (owned by App: trusts the folder,
    * dispatches `SET_CWD`, and re-resolves SendOptions). The effect handler
    * validates the path before calling this. */
@@ -213,6 +214,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     syncAndRefreshModelOverlay,
     takeSteer,
     doExit,
+    trackRuntimeWork,
     changeCwd,
     reclaimBackend,
     setRuntimeAbort,
@@ -1187,7 +1189,10 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           const controller = new AbortController()
           if (!getRuntimeAbort() || getRuntimeAbort()!.signal.aborted) setRuntimeAbort(controller)
           const roots = [state.config.cwd, home]
-          void runRuntimeRequest(effect.runtime, {
+          const work = runRuntimeRequest(effect.runtime, {
+            prepareForSubagent: agent.prepareForSubagent,
+            requestSubagentPermission: agent.requestSubagentPermission,
+            awaitSubagentApprovals: agent.awaitSubagentApprovals,
             dispatch,
             backendAgentId: getBackendAgentId?.(),
             config: state.config,
@@ -1248,6 +1253,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
               // Persist any db writes the runtime performed.
               persistDb()
             })
+          trackRuntimeWork?.(work)
           break
         }
         case "planRefine":
@@ -1290,6 +1296,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
       clearScreen,
       copyClipboard,
       doExit,
+      trackRuntimeWork,
       home,
       osHome,
       mintId,

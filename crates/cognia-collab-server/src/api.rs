@@ -241,7 +241,14 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/orgs/{org_id}/capabilities", get(crate::capabilities_api::capabilities))
         .route("/v1/orgs/{org_id}/ownership-transfer", axum::routing::post(transfer_org_ownership))
         .route("/internal/shared-chat-metrics", get(shared_chat_metrics))
-        .route("/internal/v1/orgs/{org_id}/access/{user_id}", get(internal_org_access))
+        .route(
+            "/internal/v1/orgs/{org_id}/access/{user_id}",
+            get(internal_org_access),
+        )
+        .route(
+            "/internal/v1/device-person",
+            axum::routing::post(internal_device_person),
+        )
         .route(
             "/internal/v1/orgs/{org_id}/workspaces/{workspace_id}/access/{user_id}",
             get(internal_workspace_access),
@@ -439,8 +446,117 @@ async fn internal_org_access(
     }))
 }
 
+// No Debug: the token proves the person, and must never appear in logs.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevicePersonRequest {
+    access_token: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevicePersonResponse {
+    user_id: String,
+    org_id: String,
+    subject: String,
+    organization_id: String,
+}
+
+/// Host-only identity resolution, independent of the bootstrap/invitation gate.
+async fn internal_device_person(
+    state: State<AppState>,
+    headers: HeaderMap,
+    body: Json<DevicePersonRequest>,
+) -> Result<Json<DevicePersonResponse>, Response> {
+    resolve_device_person(state, headers, body)
+        .await
+        .map_err(|error| {
+            let code = match &error {
+                Failure::ServiceCredentialInvalid => "host_service_credential_invalid",
+                Failure::CredentialScope => "host_service_credential_scope",
+                Failure::Oidc(_) => "oidc_authentication_failed",
+                Failure::UnlinkedIdentity => "oidc_identity_unlinked",
+                _ => "host_identity_unavailable",
+            };
+            let status = error.into_response().status();
+            (status, Json(serde_json::json!({"code":code,"error":code}))).into_response()
+        })
+}
+
+async fn resolve_device_person(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<DevicePersonRequest>,
+) -> Result<Json<DevicePersonResponse>, Failure> {
+    // Authenticate first. Scope follows once the canonical org is resolved:
+    // None would incorrectly require a deployment-wide credential here.
+    service_credential_hash(&state, &headers)?;
+    let claims = state
+        .oidc
+        .authenticate(&body.access_token)
+        .await
+        .map_err(Failure::Oidc)?;
+    let memberships = state
+        .store
+        .list_account_memberships(&SubjectRef {
+            provider: LOGTO_PROVIDER.into(),
+            tenant: Some(claims.tenant_id.clone()),
+            subject: claims.subject.clone(),
+        })
+        .await?;
+    let mut matching = memberships
+        .into_iter()
+        .filter(|row| row.logto_organization_id.as_deref() == Some(claims.tenant_id.as_str()));
+    let selected = matching.next().ok_or(Failure::UnlinkedIdentity)?;
+    if matching.next().is_some() {
+        return Err(Failure::UnlinkedIdentity);
+    }
+    require_service_credential(&state, &headers, Some(&selected.org_id))?;
+    let mut person_headers = headers.clone();
+    person_headers.insert(
+        axum::http::header::AUTHORIZATION,
+        format!("Bearer {}", body.access_token)
+            .parse()
+            .map_err(|_| Failure::UnlinkedIdentity)?,
+    );
+    // Reuse the complete authoritative exchange, including the exact external
+    // identity link, org mapping, membership/RLS checks and authorization audit.
+    let Json(identity) = mint_grant(
+        State(state),
+        Path(selected.org_id),
+        person_headers,
+        Json(MintGrantBody::default()),
+    )
+    .await?;
+    if identity.user_id != selected.user_id {
+        return Err(Failure::UnlinkedIdentity);
+    }
+    Ok(Json(DevicePersonResponse {
+        user_id: identity.user_id,
+        org_id: identity.org_id,
+        subject: claims.subject,
+        organization_id: claims.tenant_id,
+    }))
+}
+
 /// Prove the caller is the Host this deployment configured.
-fn require_service_credential(state: &AppState, headers: &HeaderMap, org: Option<&str>) -> Result<(), Failure> {
+fn require_service_credential(
+    state: &AppState,
+    headers: &HeaderMap,
+    org: Option<&str>,
+) -> Result<(), Failure> {
+    let hash = service_credential_hash(state, headers)?;
+    if !crate::service_credentials::allows(
+        state.internal_service_credential_scopes.as_ref(),
+        &hash,
+        org,
+    ) {
+        return Err(Failure::CredentialScope);
+    }
+    Ok(())
+}
+
+fn service_credential_hash(state: &AppState, headers: &HeaderMap) -> Result<String, Failure> {
     let Some(expected) = state.internal_service_credential_sha256.as_deref() else {
         return Err(Failure::ServiceCredentialInvalid);
     };
@@ -451,10 +567,7 @@ fn require_service_credential(state: &AppState, headers: &HeaderMap, org: Option
     if !matched {
         return Err(Failure::ServiceCredentialInvalid);
     }
-    if !crate::service_credentials::allows(state.internal_service_credential_scopes.as_ref(), &hash, org) {
-        return Err(Failure::CredentialScope);
-    }
-    Ok(())
+    Ok(hash)
 }
 
 // ── Error shape ──────────────────────────────────────────────────────────────
@@ -2973,6 +3086,89 @@ mod tests {
         store.link_org_to_logto(ORG, LOGTO_ORG);
         store.link_external_identity(ORG, "logto", Some(LOGTO_ORG), TEST_SUBJECT, ada().as_str());
         store
+    }
+
+    #[tokio::test]
+    async fn internal_device_person_works_with_bootstrap_disabled_and_an_org_scoped_host() {
+        let hash = sha256_hex("host-credential");
+        let mut state = AppState::new(
+            Arc::new(seeded_for_exchange()),
+            signer(),
+            Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+        );
+        assert!(!state.account_control.enabled);
+        state.internal_service_credential_sha256 = Some(hash.clone());
+        state.internal_service_credential_scopes = Some(std::collections::HashMap::from([(
+            hash,
+            vec![ORG.to_string()],
+        )]));
+        let app = router(state);
+        let (status, _) = call(
+            app.clone(),
+            get("/v1/account/memberships", &oidc_token(LOGTO_ORG)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, body) = call(
+            app,
+            post(
+                "/internal/v1/device-person",
+                "Bearer host-credential",
+                serde_json::json!({"accessToken": format!("{LOGTO_ORG}:collab:read")}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            body,
+            serde_json::json!({"userId":ada().as_str(), "orgId":ORG,
+            "subject":TEST_SUBJECT,"organizationId":LOGTO_ORG})
+        );
+        assert!(body.get("grant").is_none());
+    }
+
+    #[tokio::test]
+    async fn internal_device_person_refuses_invalid_credentials_scope_and_links() {
+        for (credential, scope, token, linked) in [
+            ("wrong", ORG, format!("{LOGTO_ORG}:collab:read"), true),
+            (
+                "host",
+                "org_other",
+                format!("{LOGTO_ORG}:collab:read"),
+                true,
+            ),
+            ("host", ORG, "wrong-org:collab:read".into(), true),
+            ("host", ORG, "invalid".into(), true),
+            ("host", ORG, format!("{LOGTO_ORG}:collab:read"), false),
+        ] {
+            let store = if linked {
+                seeded_for_exchange()
+            } else {
+                seeded()
+            };
+            let hash = sha256_hex("host");
+            let mut state = AppState::new(
+                Arc::new(store),
+                signer(),
+                Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+            );
+            state.internal_service_credential_sha256 = Some(hash.clone());
+            state.internal_service_credential_scopes = Some(std::collections::HashMap::from([(
+                hash,
+                vec![scope.to_string()],
+            )]));
+            let (status, body) = call(
+                router(state),
+                post(
+                    "/internal/v1/device-person",
+                    &format!("Bearer {credential}"),
+                    serde_json::json!({"accessToken":token}),
+                ),
+            )
+            .await;
+            assert!(!status.is_success(), "{body}");
+            assert!(body.get("userId").is_none());
+        }
     }
 
     async fn mint(

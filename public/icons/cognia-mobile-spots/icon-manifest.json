@@ -69,7 +69,8 @@
       "workspace-trust",
       "sandbox",
       "image-catalog",
-      "updates"
+      "updates",
+      "harness-evolution"
     ]
   },
   "icons": [
@@ -477,6 +478,11 @@
       "name": "updates",
       "metaphor": "UPDATES: lifts a small software package cube wrapped in a circular upward cyan arrow.",
       "source": "raw/expansion/updates.png"
+    },
+    {
+      "name": "harness-evolution",
+      "metaphor": "HARNESS EVOLUTION: holds a glowing cyan DNA double helix between her hands with two tiny sparkles.",
+      "source": "raw/expansion/harness-evolution.png"
     }
   ],
   "version": 3,
@@ -509,6 +515,7 @@
       "issue-projects": "issue-projects",
       "source-control": "source-control",
       "terminal": "terminal",
+      "pet": "pet",
       "command-history": "command-history",
       "instructions": "instructions",
       "plugins": "plugins",
@@ -521,7 +528,7 @@
       "squads": "agent-teams",
       "templates": "templates",
       "chat-templates": "chat-templates",
-      "characters": "characters",
+      "agents": "characters",
       "skills": "skills",
       "teams": "teams",
       "agent-modes": "agent-modes",
@@ -589,6 +596,7 @@
       "teams": "teams",
       "fleet": "fleet",
       "eval": "eval",
+      "harness-evolution": "harness-evolution",
       "tools": "tools",
       "search": "discover",
       "memory": "memory",

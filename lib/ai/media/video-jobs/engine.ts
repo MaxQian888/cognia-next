@@ -34,7 +34,7 @@ import {
   type VideoProviderId,
 } from "../video-generation-sdk"
 import { buildRemoteVideoCancel } from "./cancel"
-import { checkVideoJobParams, type VideoJobParams } from "./params"
+import { checkVideoJobParams } from "./params"
 import type { MediaJobStore } from "./store"
 import {
   canRecheckVideoJob,
@@ -47,6 +47,14 @@ import {
   type VideoJobResult,
   type VideoJobStartFrameRef,
 } from "./types"
+import type {
+  StartVideoJobInput,
+  VideoJobStartFrameInput,
+} from "@cognia/plugin-contract/lib/ai/media/video-jobs/engine"
+export type {
+  StartVideoJobInput,
+  VideoJobStartFrameInput,
+} from "@cognia/plugin-contract/lib/ai/media/video-jobs/engine"
 
 /** First status check after a start; providers rarely finish sooner. */
 export const FIRST_POLL_DELAY_MS = 5_000
@@ -62,12 +70,6 @@ export type VideoJobFetch = (
   input: RequestInfo | URL,
   init?: RequestInit & { timeout?: number; binaryResponse?: boolean }
 ) => Promise<Response>
-
-/** A start frame as a caller supplies it. */
-export type VideoJobStartFrameInput =
-  | { kind: "media"; ref: string }
-  | { kind: "session-asset"; assetId: string }
-  | { kind: "bytes"; data: Uint8Array; mediaType: string }
 
 export interface ResolvedStartFrame {
   data: Uint8Array
@@ -96,24 +98,6 @@ export interface VideoJobEngineDeps {
   getVideoStatus?: typeof experimental_getVideoStatus
   createModel?: typeof createProviderVideoModel
   newId?(now: number): string
-}
-
-export interface StartVideoJobInput {
-  prompt: string
-  startFrame?: VideoJobStartFrameInput
-  providerId?: string
-  model?: string
-  params?: VideoJobParams
-  /**
-   * Vendor options passed straight to the start call. Not persisted: they
-   * shape the generation, and a status check never needs them.
-   */
-  providerOptions?: Parameters<typeof experimental_startVideo>[0]["providerOptions"]
-  origin: VideoJobOrigin
-  projectId?: string
-  /** Use this snapshot instead of `deps.getSnapshot()` (executor requests). */
-  snapshot?: ProviderSettingsSnapshot
-  abortSignal?: AbortSignal
 }
 
 export type StartVideoJobResult =

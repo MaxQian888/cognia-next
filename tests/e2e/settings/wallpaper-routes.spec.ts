@@ -23,6 +23,8 @@ import {
   mountApp,
   showWallpaper,
   waitForCap,
+  waitForWallpaperRoute,
+  settleVisuals,
 } from "../helpers/wallpaper-legibility"
 
 const ROUTES = [
@@ -59,7 +61,7 @@ test.describe("wallpaper — legibility and surfaces across routes", () => {
         await showWallpaper(page, WALLPAPERS.busy, theme)
         await waitForCap(page)
         // Route content mounts lazily after onboarding completes.
-        await page.waitForTimeout(1500)
+        await waitForWallpaperRoute(page)
 
         const islands = await findOpaqueIslands(page)
         expect(
@@ -120,10 +122,10 @@ test.describe("wallpaper — legibility inside overlays", () => {
         await page.emulateMedia({ colorScheme: theme.colorScheme })
         await showWallpaper(page, WALLPAPERS.busy, theme)
         await waitForCap(page)
-        await page.waitForTimeout(1500)
+        await waitForWallpaperRoute(page)
         await overlay.open(page)
         // Let the open animation finish before the pixels are read.
-        await page.waitForTimeout(500)
+        await settleVisuals(page)
 
         const samples = await collectThemeText(page, overlay.within)
         expect(samples.length, `${overlay.name} should show theme text`).toBeGreaterThan(0)

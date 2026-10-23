@@ -36,6 +36,19 @@ export type RemoteDocKind = "doc" | "wiki" | "sheet" | "bitable" | "resource"
 /** Body formats a provider may return. Drives the staged attachment's extension. */
 export type RemoteDocFormat = "markdown" | "text" | "csv"
 
+/** Retrieval identity. An epoch is a non-secret fence, never an OAuth token. */
+export interface DocsProviderAccountBinding {
+  accountId: string
+  authorizationEpoch?: string
+}
+
+export type RemoteDocIncompleteReason =
+  "upstream-truncated" | "budget" | "inaccessible-block" | "unsupported-content" | "parse-degraded"
+
+export type RemoteDocCompleteness =
+  | { status: "complete"; reasons?: never }
+  | { status: "partial"; reasons: readonly RemoteDocIncompleteReason[] }
+
 /**
  * A pointer to one remote document. Cheap to produce — `search` and `matchRef`
  * both return these without fetching a body.
@@ -46,6 +59,8 @@ export interface RemoteDocRef {
   kind: RemoteDocKind
   /** Provider-stable identifier: Lark doc/wiki/app token, Google file id. */
   id: string
+  /** Original provider resource type, retained when `kind` folds several types together. */
+  sourceType?: string
   /** Display title. Falls back to the id when the provider cannot cheaply resolve one. */
   title: string
   /** Canonical web URL, when the provider can build one. */
@@ -54,6 +69,8 @@ export interface RemoteDocRef {
   sublabel?: string
   /** Last-modified time in ms since epoch, when known. */
   updatedAtMs?: number
+  /** Bound when a search/link becomes selectable; never reassigned on pick. */
+  accountBinding?: DocsProviderAccountBinding
 }
 
 /** A fetched body, ready to be staged as a composer attachment. */
@@ -70,6 +87,8 @@ export interface RemoteDocContent {
    * caller can silently ignore the loss.
    */
   truncated?: boolean
+  /** Semantic losses as well as byte/row limits. Legacy consumers use truncated. */
+  completeness?: RemoteDocCompleteness
 }
 
 /**
@@ -115,12 +134,15 @@ export interface DocsProviderAccount {
   id: string
   /** User-visible label (adapter display name, Google account email). */
   label: string
+  /** Stable across token refresh; changes when authorization is invalidated. */
+  authorizationEpoch?: string
 }
 
 /** Per-call options shared by `search` and `fetch`. */
 export interface DocsProviderCallOptions {
   /** Which `DocsProviderAccount.id` to act as. */
   accountId: string
+  expectedAuthorizationEpoch?: string
   signal?: AbortSignal
 }
 
@@ -152,6 +174,9 @@ export interface DocsProvider {
 
   /** Connected identities, newest-usable first. Empty ⇒ the provider is unconfigured. */
   listAccounts(): Promise<DocsProviderAccount[]>
+
+  /** Invalidation signal only: consumers reload the authoritative accounts. */
+  subscribeAccounts?(listener: () => void): () => void
 
   /**
    * Recognize a pasted URL or bare token. PURE — no network, no credentials,

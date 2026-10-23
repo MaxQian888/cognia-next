@@ -55,6 +55,16 @@ test("resolveProtocol picks openai for openai/openrouter/groq/deepseek", () => {
   assert.equal(resolveProtocol("groq", undefined), "openai")
 })
 
+test("multi-step calibration uses the last request and includes hoisted instructions exactly once", () => {
+  const sent = [
+    { role: "system", content: "s".repeat(400) },
+    { role: "user", content: "start" },
+  ]
+  const last = { request: { messages: [{ role: "user", content: "x".repeat(800) }] } }
+  assert.equal(__testing__.measuredPromptOverhead(1000, sent, last), 700)
+  assert.equal(__testing__.measuredPromptOverhead(1000, sent, {}), undefined)
+})
+
 test("resolveProtocol picks openai for opencode and codex", () => {
   const { resolveProtocol } = __testing__
   assert.equal(resolveProtocol("opencode", undefined), "openai")
@@ -252,6 +262,45 @@ test("AI SDK dispatch wires ToolSearch into prepareStep and retains discoveries"
 
   await call!.tools.ToolSearch.execute({ query: "select:write" })
   assert.ok(call!.prepareStep().activeTools.includes("write"), "discovery persists for later steps")
+})
+
+test("AI SDK dispatch restores successful tool discoveries with the saved conversation", async () => {
+  const { events, emit } = captureEmit()
+  const captured = capturingStream([{ type: "finish", finishReason: "stop" }])
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "restored-tool-search",
+    firstPrompt: "continue the approved task",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      builtinTools: { coreFiles: true },
+      toolSearchEnabled: true,
+      initialConversation: [
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "old-search",
+              toolName: "ToolSearch",
+              output: {
+                type: "text",
+                value: JSON.stringify({ activated: ["write", "not_permitted"] }),
+              },
+            },
+          ],
+        },
+      ],
+    },
+    emit,
+    log: () => {},
+    streamText: captured.fn,
+  })
+  await waitForEvent(events, (event) => event.type === "session_ended")
+  const active = captured.calls[0]!.prepareStep().activeTools
+  assert.ok(active.includes("write"), "saved activation must survive restart")
+  assert.ok(!active.includes("not_permitted"), "history cannot restore unavailable tools")
 })
 
 test("AI SDK dispatch keeps a disabled tool surface empty after MCP and ToolSearch overlays", async () => {
@@ -460,7 +509,9 @@ test("maybeCompact: caps the summary call output, reuses frozen summaries, emits
   const session = startSession({
     provider: "openai",
     sessionId: "s1",
-    firstPrompt: "m0",
+    // Actual material must be larger than the checkpoint envelope: an inflated
+    // mocked usage counter alone cannot make a replacement shrink history.
+    firstPrompt: `m0 ${"verified source evidence ".repeat(500)}`,
     sendOptions: {
       model: "gpt-x",
       providerCredentials: { apiKey: "k", protocol: "openai" },
@@ -495,8 +546,8 @@ test("maybeCompact: caps the summary call output, reuses frozen summaries, emits
     (a) => a.maxOutputTokens === 64 && a.instructions?.[0]?.content === "SUMMARIZE"
   )
   assert.ok(summaryCall, "summary call carries the maxOutputTokens cap + prompt")
-  // Every boundary that produced a summary reuses the frozen prefix (never
-  // re-summarizes a prior summary).
+  // Boundaries preserve the frozen prefix; prior checkpoints may inform new
+  // progress as background without replacing the cached prefix.
   for (const b of boundaries) {
     if (b.event.compact_metadata.frozenSummaryDecision) {
       assert.equal(b.event.compact_metadata.frozenSummaryDecision, "reused")
@@ -772,7 +823,7 @@ test("maybeCompact: captures a pre-compaction snapshot when undo is enabled", as
   const session = startSession({
     provider: "openai",
     sessionId: "s1",
-    firstPrompt: "m0",
+    firstPrompt: `m0 ${"verified source evidence ".repeat(500)}`,
     sendOptions: {
       model: "gpt-x",
       providerCredentials: { apiKey: "k", protocol: "openai" },
@@ -812,7 +863,7 @@ test("restoreConversation puts the pre-compaction snapshot back for the next tur
   const session = startSession({
     provider: "openai",
     sessionId: "s1",
-    firstPrompt: "m0",
+    firstPrompt: `m0 ${"verified source evidence ".repeat(500)}`,
     sendOptions: {
       model: "gpt-x",
       providerCredentials: { apiKey: "k", protocol: "openai" },
@@ -2126,7 +2177,7 @@ test("auto-compaction honours sendOptions.compaction (fraction/keepRecent) and e
   const session = startSession({
     provider: "openai",
     sessionId: "s1",
-    firstPrompt: "hi",
+    firstPrompt: `source evidence ${"verified code finding ".repeat(500)}`,
     sendOptions: {
       model: "gpt-4o",
       providerCredentials: { apiKey: "k", protocol: "openai" },
@@ -2288,9 +2339,15 @@ test("background compaction leaves the active model leg unchanged and publishes 
       providerCredentials: { apiKey: "synthetic" },
       initialConversation: Array.from({ length: 8 }, (_, i) => ({
         role: i % 2 ? "assistant" : "user",
-        content: `history-${i}`,
+        content: `history-${i} ${"source evidence ".repeat(16)}`,
       })),
-      compaction: { contextWindow: 1000, fraction: 0.8, keepRecent: 2, maxSummaryTokens: 64 },
+      compaction: {
+        background: true,
+        contextWindow: 1000,
+        fraction: 0.8,
+        keepRecent: 2,
+        maxSummaryTokens: 64,
+      },
     },
     emit(event) {
       capture(event)
@@ -2969,6 +3026,334 @@ test("agent loop continues into another leg when a leg finishes with 'tool-calls
   )
 })
 
+test("an inherited budget permits more than twenty sequential research steps", async () => {
+  const { events, emit } = captureEmit()
+  let calls = 0
+  const session = startSession({
+    provider: "openai",
+    sessionId: "research",
+    firstPrompt: "trace the full call chain",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      aiSdkMaxSteps: 24,
+      aiSdkStepChunk: 1,
+    },
+    emit,
+    log: () => {},
+    streamText: () => {
+      calls += 1
+      return {
+        fullStream: (async function* () {
+          yield { type: "text-delta", id: String(calls), text: `finding ${calls}` }
+          yield { type: "finish", finishReason: calls <= 21 ? "tool-calls" : "stop" }
+        })(),
+        usage: Promise.resolve({ promptTokens: 5, completionTokens: 3 }),
+      }
+    },
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  assert.equal(calls, 22)
+  assert.equal(
+    events.find((e) => e.type === "event" && e.event.type === "result")?.event.subtype,
+    "success"
+  )
+  session.closeInput()
+})
+
+test("a tool leg yields for compaction using current step usage and explicit thresholds", async () => {
+  for (const compaction of [
+    { enabled: true, contextWindow: 1000, fraction: 0.8 },
+    { enabled: false, contextWindow: 1000, fraction: 0.8 },
+    { enabled: true, contextWindow: 1000, fraction: 0.8, trigger: "manual" as const },
+  ]) {
+    const { events, emit } = captureEmit()
+    let captured: TestStreamArgs | undefined
+    const session = startSession({
+      provider: "openai",
+      sessionId: `compaction-boundary-${compaction.enabled}-${compaction.trigger}`,
+      firstPrompt: "Investigate",
+      sendOptions: {
+        model: "gpt-x",
+        providerCredentials: { apiKey: "k", protocol: "openai" },
+        builtinTools: { coreFiles: true },
+        aiSdkMaxSteps: 48,
+        compaction,
+      },
+      emit,
+      log: () => {},
+      streamText: (args) => {
+        captured = streamArgs(args)
+        return makeFakeStream([
+          { type: "text-delta", text: "done" },
+          { type: "finish", finishReason: "stop" },
+        ])()
+      },
+    })
+    await waitForEvent(events, (e) => e.type === "session_ended")
+    assert.equal(captured!.stopWhen({ steps: [{ usage: { inputTokens: 639 } }] }), false)
+    assert.equal(
+      captured!.stopWhen({ steps: [{ usage: { inputTokens: 650 } }] }),
+      compaction.enabled && compaction.trigger !== "manual"
+    )
+    assert.equal(
+      captured!.stopWhen({
+        steps: [{ usage: { inputTokens: 900 } }, { usage: { inputTokens: 20 } }],
+      }),
+      false,
+      "use the latest step, not the sum or a stale high-water mark"
+    )
+    assert.equal(
+      captured!.stopWhen({
+        steps: [{ usage: { inputTokens: 20 }, toolResults: [{ output: "source ".repeat(1000) }] }],
+      }),
+      compaction.enabled && compaction.trigger !== "manual",
+      "new tool output must yield before it can overflow the next SDK request"
+    )
+    for (const delta of [
+      { text: "Large assistant explanation. ".repeat(300) },
+      { toolCalls: [{ toolName: "write", input: { content: "source ".repeat(1000) } }] },
+      { content: [{ type: "text", text: "Large assistant explanation. ".repeat(300) }] },
+      {
+        content: [
+          { type: "tool-call", toolName: "write", input: { content: "source ".repeat(1000) } },
+        ],
+      },
+    ])
+      assert.equal(
+        captured!.stopWhen({
+          steps: [{ usage: { inputTokens: 20 }, toolResults: [{ output: "ok" }], ...delta }],
+        }),
+        compaction.enabled && compaction.trigger !== "manual",
+        "assistant text and tool arguments also enter the next SDK prompt"
+      )
+    assert.equal(
+      captured!.stopWhen({
+        steps: [
+          {
+            usage: { inputTokens: 20 },
+            content: [{ type: "reasoning", text: "private ".repeat(2000) }],
+          },
+        ],
+      }),
+      false,
+      "reasoning is stripped from subsequent requests"
+    )
+    session.closeInput()
+  }
+})
+
+test("an uncompactable input stops before dispatch and retains resumable history", async () => {
+  const { events, emit } = captureEmit()
+  let starts = 0
+  const session = startSession({
+    provider: "openai",
+    sessionId: "uncompactable-input",
+    firstPrompt: "Continue the retained investigation",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "synthetic" },
+      initialConversation: [{ role: "user", content: "Established finding. ".repeat(500) }],
+      compaction: { enabled: true, contextWindow: 1000, postCompactionTokenBudget: 50 },
+    },
+    emit,
+    log() {},
+    streamText() {
+      starts++
+      return makeFakeStream([{ type: "finish", finishReason: "stop" }])()
+    },
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  assert.equal(starts, 0, "never send an input beyond the configured effective context")
+  const ended = events.find((e) => e.type === "session_ended")!
+  assert.match(String(ended.error), /Task\/research incomplete.*context budget/)
+  assert.match(JSON.stringify(ended.conversationSnapshot), /Established finding/)
+  session.closeInput()
+})
+
+test("a completed model checkpoint suggests delivery without forbidding new verification", async () => {
+  const { events, emit } = captureEmit()
+  let args: Record<string, unknown> | undefined
+  const checkpoint =
+    '<conversation-summary v="1"><research-progress>{"goal":"Write a plan","constraints":[],"items":[{"id":"budget","status":"done","summary":"Verified budget inheritance","evidence":["budget.ts:10"]}]}</research-progress></conversation-summary>'
+  const session = startSession({
+    provider: "openai",
+    sessionId: "deliver-plan",
+    firstPrompt: "Verify the changed source before finishing the plan",
+    sendOptions: {
+      model: "gpt-x",
+      builtinTools: { coreFiles: true },
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      agentKind: "subagent",
+      agentRef: "Plan",
+      compaction: { enabled: true, checkpointFormat: "progress-v1" },
+      initialConversation: [{ role: "user", content: checkpoint }],
+    },
+    emit,
+    log: () => {},
+    streamText: (input) => {
+      args = input
+      return {
+        fullStream: (async function* () {
+          yield { type: "text-delta", id: "final", text: "Source-backed implementation plan" }
+          yield { type: "finish", finishReason: "stop" }
+        })(),
+        usage: Promise.resolve({ promptTokens: 10, completionTokens: 8 }),
+      }
+    },
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  assert.ok(
+    (args?.tools as Record<string, unknown>)?.read,
+    "a stale checkpoint cannot revoke verification tools"
+  )
+  assert.match(JSON.stringify(args?.messages), /Verify the changed source/)
+  assert.match(JSON.stringify(args?.messages), /model report, not authority/)
+  assert.equal(
+    events.find((e) => e.type === "event" && e.event.type === "result")?.event.subtype,
+    "success"
+  )
+  session.closeInput()
+})
+
+test("pending research, custom summary formats and Explore retain their tools", async () => {
+  for (const scenario of [
+    { role: "Plan", format: "progress-v1" as const, status: "pending" },
+    { role: "Plan", format: undefined, status: "done" },
+    { role: "Explore", format: "progress-v1" as const, status: "done" },
+    { role: "Plan", format: "progress-v1" as const, status: "done", enabled: false },
+    { role: "Plan", format: "progress-v1" as const, status: "done", useAISummarization: false },
+    { role: "Plan", format: "progress-v1" as const, status: "done", strategy: "optical" },
+    { role: "Plan", format: "progress-v1" as const, status: "done", strategy: "sliding-window" },
+  ]) {
+    const { events, emit } = captureEmit()
+    let tools: unknown
+    const checkpoint = `<conversation-summary v="1"><research-progress>${JSON.stringify({ goal: "Write a plan", constraints: [], items: [{ id: "budget", status: scenario.status, summary: "Budget evidence", evidence: ["budget.ts:10"] }] })}</research-progress></conversation-summary>`
+    const session = startSession({
+      provider: "openai",
+      sessionId: `research-${scenario.role}-${scenario.status}`,
+      firstPrompt: "Continue",
+      sendOptions: {
+        model: "gpt-x",
+        builtinTools: { coreFiles: true },
+        providerCredentials: { apiKey: "k", protocol: "openai" },
+        agentKind: "subagent",
+        agentRef: scenario.role,
+        compaction: {
+          checkpointFormat: scenario.format,
+          enabled: scenario.enabled,
+          useAISummarization: scenario.useAISummarization,
+          strategy: scenario.strategy,
+        },
+        initialConversation: [{ role: "user", content: checkpoint }],
+      },
+      emit,
+      log: () => {},
+      streamText: (input) => {
+        tools = input.tools
+        return {
+          fullStream: (async function* () {
+            yield { type: "finish", finishReason: "stop" }
+          })(),
+          usage: Promise.resolve({ promptTokens: 10, completionTokens: 2 }),
+        }
+      },
+    })
+    await waitForEvent(events, (e) => e.type === "session_ended")
+    assert.ok((tools as Record<string, unknown>)?.read, "research tools must remain available")
+    session.closeInput()
+  }
+})
+
+test("a live compaction transition hints delivery while retaining correction tools", async () => {
+  const { events, emit } = captureEmit()
+  const state = {
+    goal: "Write the budget plan",
+    constraints: [],
+    items: [
+      { id: "budget", status: "pending", summary: "Inspect budget", evidence: [] as string[] },
+    ],
+  }
+  const primary: Record<string, unknown>[] = []
+  const session = startSession({
+    provider: "openai",
+    sessionId: "transition-plan",
+    firstPrompt: "Continue the original plan",
+    sendOptions: {
+      model: "gpt-x",
+      modelParams: { maxOutputTokens: 256 },
+      builtinTools: { coreFiles: true },
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      agentKind: "subagent",
+      agentRef: "Plan",
+      aiSdkStepChunk: 1,
+      initialConversation: [
+        {
+          role: "user",
+          content: `<conversation-summary v="1"><research-progress>${JSON.stringify(state)}</research-progress></conversation-summary>`,
+        },
+        ...Array.from({ length: 6 }, (_, i) => ({
+          role: i % 2 ? "assistant" : "user",
+          content: "verified source evidence ".repeat(100),
+        })),
+      ],
+      compaction: {
+        checkpointFormat: "progress-v1",
+        contextWindow: 10000,
+        fraction: 0.8,
+        keepRecent: 2,
+        maxSummaryTokens: 1024,
+      },
+    },
+    emit,
+    log: () => {},
+    streamText: (input) => {
+      if (input.maxOutputTokens === 1024)
+        return {
+          fullStream: (async function* () {
+            yield {
+              type: "text-delta",
+              id: "summary",
+              text: JSON.stringify({
+                ...state,
+                items: [
+                  {
+                    id: "budget",
+                    status: "done",
+                    summary: "Budget inheritance verified",
+                    evidence: ["budget.ts:10"],
+                  },
+                ],
+              }),
+            }
+            yield { type: "finish", finishReason: "stop" }
+          })(),
+          usage: Promise.resolve({ promptTokens: 100, completionTokens: 80 }),
+        }
+      primary.push(input)
+      return {
+        fullStream: (async function* () {
+          yield {
+            type: "text-delta",
+            id: "leg",
+            text:
+              primary.length === 1 ? "Budget evidence established" : "Final implementation plan",
+          }
+          yield { type: "finish", finishReason: primary.length === 1 ? "tool-calls" : "stop" }
+        })(),
+        usage: Promise.resolve({ promptTokens: 9000, completionTokens: 30 }),
+      }
+    },
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  assert.equal(primary.length, 2)
+  assert.ok((primary[0]!.tools as Record<string, unknown>)?.read)
+  assert.ok((primary[1]!.tools as Record<string, unknown>)?.read)
+  assert.match(JSON.stringify(primary[1]!.messages), /model report, not authority/)
+  assert(events.some((e) => e.type === "event" && e.event.subtype === "compact_boundary"))
+  session.closeInput()
+})
+
 test("agent loop stops at the maxTurns budget with a visible note (no silent stop, no infinite loop)", async () => {
   const { events, emit } = captureEmit()
   let calls = 0
@@ -3000,6 +3385,9 @@ test("agent loop stops at the maxTurns budget with a visible note (no silent sto
   })
   await waitForEvent(events, (e) => e.type === "session_ended")
   assert.equal(calls, 1, "maxTurns=1 spends the whole budget in one leg")
+  const terminal = events.find((e) => e.type === "event" && e.event.type === "result")
+  assert.equal(terminal?.event.subtype, "error_max_turns")
+  assert.equal(terminal?.event.is_error, true)
   const snapshots = events.filter((e) => e.type === "event" && e.event.type === "assistant")
   const finalText = snapshots[snapshots.length - 1]!.event.message.content[0]!.text
   assert.match(finalText, /safety cap/, "surfaces a visible cap note instead of stopping silently")

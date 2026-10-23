@@ -6,6 +6,8 @@ import en from "@/i18n/messages/en.json"
 import { ExternalAgentSessionOperations } from "./session-operations"
 
 const mockManager = {
+  getNativeSubagents: jest.fn(),
+  changeNativeSubagentModel: jest.fn(),
   getSessionOperationCapabilities: jest.fn(),
   getSessionRuntimeState: jest.fn(),
   enqueueSessionInput: jest.fn(),
@@ -22,6 +24,17 @@ const mockManager = {
 }
 jest.mock("@/lib/ai/agent/external/manager", () => ({ getExternalAgentManager: () => mockManager }))
 const t = en.externalAgent.sessionOperations
+const nativeDiagnostics = {
+  spawnModelOverrides: "unknown",
+  settingsMethods: { currentTurn: "unknown", futureTurns: "unknown" },
+  features: {
+    multiAgent: null,
+    agentsEnabled: null,
+    multiAgentV2: null,
+    stepModelSwitching: null,
+    exposeSpawnModelOverrides: null,
+  },
+}
 
 function show(
   overrides: Partial<React.ComponentProps<typeof ExternalAgentSessionOperations>> = {}
@@ -48,12 +61,133 @@ function show(
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockManager.getNativeSubagents.mockResolvedValue(undefined)
   mockManager.getSessionOperationCapabilities.mockResolvedValue({
     inputQueue: "supported",
     clearQueue: "supported",
   })
   mockManager.enqueueSessionInput.mockResolvedValue({ disposition: "queued", mode: "follow_up" })
 })
+
+it("shows native identity and sends separate settings scopes without claiming observed inference", async () => {
+  mockManager.getNativeSubagents.mockResolvedValue({
+    ...nativeDiagnostics,
+    rootThreadId: "root",
+    processGeneration: 4,
+    backend: { value: "v1", evidence: "model-metadata", confidence: "inferred" },
+    stepModelSwitching: true,
+    children: [
+      {
+        nativeThreadId: "native-child",
+        parentThreadId: "root",
+        rootThreadId: "root",
+        modelId: "old",
+        activeTurnId: "turn",
+        canAcceptDirectInput: true,
+      },
+    ],
+    models: [{ id: "new", reasoningEfforts: ["high"] }],
+    truncated: false,
+  })
+  mockManager.changeNativeSubagentModel.mockResolvedValue({
+    operationId: "op",
+    status: "applied-awaiting-step",
+  })
+  show()
+  expect(await screen.findByText("native-child")).toBeInTheDocument()
+  await selectOption(screen.getByRole("combobox", { name: t.nativeTargetModel }), "new")
+  fireEvent.click(screen.getByRole("button", { name: t.nativeCurrentTurn }))
+  await waitFor(() =>
+    expect(mockManager.changeNativeSubagentModel).toHaveBeenCalledWith(
+      "agent",
+      "session",
+      expect.objectContaining({
+        nativeChildThreadId: "native-child",
+        expectedProcessGeneration: 4,
+        expectedTurnId: "turn",
+        modelId: "new",
+        scope: "current-turn",
+      })
+    )
+  )
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    t.nativeResults["applied-awaiting-step"]
+  )
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: t.nativeFutureTurns })).toBeEnabled()
+  )
+  fireEvent.click(screen.getByRole("button", { name: t.nativeFutureTurns }))
+  await waitFor(() =>
+    expect(mockManager.changeNativeSubagentModel).toHaveBeenLastCalledWith(
+      "agent",
+      "session",
+      expect.objectContaining({ scope: "future-turns", expectedTurnId: undefined })
+    )
+  )
+})
+
+it("disables direct controls for native V2 children", async () => {
+  mockManager.getNativeSubagents.mockResolvedValue({
+    ...nativeDiagnostics,
+    rootThreadId: "root",
+    processGeneration: 4,
+    backend: { value: "v2", evidence: "model-metadata", confidence: "inferred" },
+    stepModelSwitching: true,
+    children: [
+      {
+        nativeThreadId: "v2-child",
+        parentThreadId: "root",
+        rootThreadId: "root",
+        canAcceptDirectInput: false,
+      },
+    ],
+    models: [{ id: "new", reasoningEfforts: [] }],
+    truncated: false,
+  })
+  show()
+  expect(await screen.findByText(t.nativeDirectForbidden)).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: t.nativeCurrentTurn })).toBeDisabled()
+  expect(screen.getByRole("button", { name: t.nativeFutureTurns })).toBeDisabled()
+  expect(mockManager.changeNativeSubagentModel).not.toHaveBeenCalled()
+})
+
+it.each(["currentTurn", "futureTurns"])(
+  "disables only the unsupported settings scope: %s",
+  async (scope) => {
+    mockManager.getNativeSubagents.mockResolvedValue({
+      ...nativeDiagnostics,
+      rootThreadId: "root",
+      processGeneration: 4,
+      backend: { value: "v1", evidence: "child-thread", confidence: "observed" },
+      settingsMethods: { ...nativeDiagnostics.settingsMethods, [scope]: "unsupported" },
+      stepModelSwitching: true,
+      children: [
+        {
+          nativeThreadId: "child",
+          parentThreadId: "root",
+          rootThreadId: "root",
+          canAcceptDirectInput: true,
+          activeTurnId: "turn",
+        },
+      ],
+      models: [{ id: "new", reasoningEfforts: [] }],
+      truncated: false,
+    })
+    show()
+    await screen.findByText("child")
+    await selectOption(screen.getByRole("combobox", { name: t.nativeTargetModel }), "new")
+    expect(
+      screen.getByRole("button", {
+        name: scope === "currentTurn" ? t.nativeCurrentTurn : t.nativeFutureTurns,
+      })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole("button", {
+        name: scope === "currentTurn" ? t.nativeFutureTurns : t.nativeCurrentTurn,
+      })
+    ).toBeEnabled()
+  }
+)
 
 it("routes follow-up input through the common manager and clears only after acceptance", async () => {
   show()

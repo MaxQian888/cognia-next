@@ -21,10 +21,8 @@ import {
 
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import type { CcswitchAgentId } from "@/types/ccswitch"
+import { CCSWITCH_PROPAGATION_AGENTS } from "@/lib/ccswitch/provider"
 import { isTauri } from "@/lib/tauri"
-
-/** Agents we can actually write a provider env into (mirrors switch.ts). */
-const PROPAGATABLE_AGENTS: CcswitchAgentId[] = ["claude-code", "codex", "gemini", "opencode"]
 
 export function CcswitchSyncTab() {
   const t = useTranslations("ccswitch")
@@ -43,7 +41,9 @@ export function CcswitchSyncTab() {
 
       setEnabled(cfg?.enabled ?? true)
       setWatchDb(cfg?.watchDb ?? true)
-      setPropagation(cfg?.defaultPropagation ?? [])
+      setPropagation(
+        (cfg?.defaultPropagation ?? []).filter((id) => CCSWITCH_PROPAGATION_AGENTS.includes(id))
+      )
       setManualDataDir(cfg?.manualDataDir ?? "")
       setLoaded(true)
     })
@@ -104,7 +104,7 @@ export function CcswitchSyncTab() {
 
       <SettingsCard title={t("sync.propagationTitle")} description={t("sync.propagationBody")}>
         <div className="space-y-2">
-          {PROPAGATABLE_AGENTS.map((a) => (
+          {CCSWITCH_PROPAGATION_AGENTS.map((a) => (
             <label key={a} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted/50">
               <Checkbox
                 checked={propagation.includes(a)}

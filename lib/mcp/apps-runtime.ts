@@ -139,7 +139,12 @@ export async function readMcpDownloadResource(
   blob?: string
   _meta?: Record<string, unknown>
 }> {
-  const resolved = await resolveMcpRuntimeCredential(server)
+  // A loaded App (and its pending downloads) outlives the moment it was
+  // loaded; read the server as the Registry holds it now so a disabled,
+  // blocked or deleted server is refused instead of reconnected.
+  const current = await getMcpServer(server.id)
+  if (!current) throw new Error(`MCP server ${server.name} is no longer configured`)
+  const resolved = await resolveMcpRuntimeCredential(current)
   const result = await defaultMcpRuntimeGateway.readResource({
     scopeId,
     server: resolved.server,

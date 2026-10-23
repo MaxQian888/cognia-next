@@ -4,7 +4,7 @@
  */
 
 import { defineNativeAnthropicTool } from "./define-native-anthropic-tool"
-import type { PluginNativeAnthropicToolDef } from "@/types/plugin/plugin-native-tool"
+import type { PluginNativeAnthropicToolDef } from "@cognia/plugin-contract/types/plugin/plugin-native-tool"
 
 describe("defineNativeAnthropicTool", () => {
   it("returns the same object reference passed in", () => {

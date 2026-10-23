@@ -80,7 +80,9 @@ describe("selectedBackend", () => {
   it("shows an explicit choice over the fallback", () => {
     expect(selectedBackend(decision(), "local-chromium")).toBe("local-chromium")
     expect(selectedBackend(decision({ backend: "remote" }), null)).toBe("remote")
-    expect(selectedBackend(decision({ backend: "web-fallback" }), "web-fallback")).toBe("embedded")
+    expect(selectedBackend(decision({ backend: "web-fallback" }), "web-fallback")).toBe(
+      "web-fallback"
+    )
   })
 })
 
@@ -103,6 +105,18 @@ describe("pickUserChromeCandidate", () => {
 })
 
 describe("BrowserBackendSwitcher", () => {
+  it("selects the web fallback using its actual backend value", async () => {
+    const { onPreferenceChange } = renderSwitcher({
+      local: local({ supported: false }),
+      decision: decision({ backend: "web-fallback", remoteReachable: true }),
+    })
+    const select = screen.getByRole("combobox", { name: "Browser engine" })
+    expect(
+      Array.from(getNativeSelect(select as HTMLSelectElement).options).map((o) => o.value)
+    ).toEqual(["web-fallback", "remote"])
+    await selectOption(select, "remote")
+    expect(onPreferenceChange).toHaveBeenCalledWith("remote")
+  })
   it("lists the desktop engines and hides the cloud one when unreachable", () => {
     renderSwitcher()
     const select = screen.getByRole("combobox", { name: "Browser engine" })
@@ -123,7 +137,7 @@ describe("BrowserBackendSwitcher", () => {
     })
     const select = screen.getByRole("combobox", { name: "Browser engine" }) as HTMLSelectElement
     expect(Array.from(getNativeSelect(select).options).map((o) => o.value)).toEqual([
-      "embedded",
+      "web-fallback",
       "remote",
     ])
   })

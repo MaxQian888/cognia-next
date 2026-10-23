@@ -261,6 +261,7 @@ const REGISTRY = [
   { script: "lint:frozen-wasm-api", group: "audit" },
   { script: "lint:claude-md", group: "audit" },
   { script: "plugin:author-imports", group: "audit" },
+  { script: "plugin:sdk:standalone", group: "audit" },
 
   // Mirrored config / version files must agree across the tree.
   { script: "release:sync-keys:check", group: "sync" },
@@ -287,7 +288,7 @@ const REGISTRY = [
   // verification-shaped script in package.json wired to nothing, which is
   // exactly what gates:registry exists to catch: without it, a regression in
   // the stager is invisible until an installed build ships without RepoWiki.
-  { script: "plugin:bundled:stage:test", group: "gate-tests" },
+  { script: "plugin:artifacts:test", group: "gate-tests" },
   // Rust because the glob picks up scripts/dev/agent-proxy.test.mjs, which
   // drives the native sandbox launcher. The script builds that bin first; five
   // of its assertions are a usage error rather than a test without it.

@@ -20,32 +20,15 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 import { listAccounts, getActiveAccount } from "@/lib/subscription/core/transport"
 import { getDb } from "@/lib/db/schema"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
+import type { SubscriptionUsageRow, UsageSnapshot } from "@/types/subscription"
 import type {
-  AccountSummary,
-  ProviderId,
-  SubscriptionUsageRow,
-  UsageSnapshot,
-} from "@/types/subscription"
-
-/** Usage snapshot with sensitive raw headers + internal key stripped. */
-export type PluginUsageSnapshot = Omit<UsageSnapshot, "rawHeaders">
-
-export interface PluginSubscriptionAPI {
-  /** Provider ids the host supports. */
-  providers(): readonly ProviderId[]
-  /** Credential-free account summaries for a provider. */
-  listAccounts(provider: ProviderId): Promise<AccountSummary[]>
-  /** Active account id for a provider, or `null`. Never returns env/tokens. */
-  getActiveAccountId(provider: ProviderId): Promise<string | null>
-  /** Summary of the active account for a provider (plan/email), or `null`. */
-  getActiveAccountSummary(provider: ProviderId): Promise<AccountSummary | null>
-  /** Recent Anthropic usage snapshots (newest first), headers stripped. */
-  getUsage(limit?: number): Promise<PluginUsageSnapshot[]>
-  /** The most recent usage snapshot, or `null`. */
-  getLatestUsage(): Promise<PluginUsageSnapshot | null>
-  /** Subscribe to new usage samples. Returns a disposer. */
-  onUsageUpdate(handler: (snapshot: PluginUsageSnapshot) => void): () => void
-}
+  PluginSubscriptionAPI,
+  PluginUsageSnapshot,
+} from "@cognia/plugin-contract/lib/plugin/api/subscription-api"
+export type {
+  PluginSubscriptionAPI,
+  PluginUsageSnapshot,
+} from "@cognia/plugin-contract/lib/plugin/api/subscription-api"
 
 /** Drop the sensitive `rawHeaders` + internal `localId` from a usage row. */
 function sanitizeUsage(row: SubscriptionUsageRow | UsageSnapshot): PluginUsageSnapshot {

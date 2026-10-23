@@ -37,6 +37,7 @@ import {
   waitForCapacitorResult,
 } from "@/lib/connectivity/capacitor-http"
 import { createProxyFetch } from "@/lib/network/proxy-fetch"
+import type { BinaryDownloadPolicy } from "@/lib/network/proxy-fetch"
 import { detectPlatform } from "@/lib/platform/detect"
 import { measureOperation } from "@/lib/perf/operation-performance"
 
@@ -64,6 +65,8 @@ export interface PlatformRequestInit extends RequestInit {
    * enforce it; the caller still runs `assertFetchTargetAllowed` up front.
    */
   blockPrivateHosts?: boolean
+  /** Only a capability-checked desktop host can enforce this policy. */
+  downloadPolicy?: BinaryDownloadPolicy
 }
 
 /** A `fetch`-compatible function. Narrower than `typeof fetch` on purpose. */
@@ -115,6 +118,7 @@ async function capacitorFetch(
   input: RequestInfo | URL,
   init?: PlatformRequestInit
 ): Promise<Response> {
+  if (init?.downloadPolicy) throw new PlatformFetchUnavailableError("download_policy_unsupported")
   const plugin = getCapacitorHttp()
   if (!plugin) throw new PlatformFetchUnavailableError("CapacitorHttp is unavailable")
   const request = new Request(input, init)
@@ -201,10 +205,13 @@ function selectPlatformFetch(
         deps.browser ??
         ((input, init) => {
           if (!init) return fetch(input)
+          if (init.downloadPolicy)
+            return Promise.reject(new PlatformFetchUnavailableError("download_policy_unsupported"))
           const {
             timeout: _timeout,
             binaryResponse: _binary,
             blockPrivateHosts: _blockPrivate,
+            downloadPolicy: _downloadPolicy,
             ...rest
           } = init
           return fetch(input, rest)

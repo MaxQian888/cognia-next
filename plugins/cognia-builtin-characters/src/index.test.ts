@@ -1,10 +1,9 @@
 /**
  * First-party cognia-builtin-characters plugin smoke tests.
  *
- * Pins the contract between the plugin manifest, the BUILTIN_PACK
- * definition, and the legacy-id map consumed by Dexie v50 + the
- * post-boot `seedBuiltInCharacters` adapter. Changing any of these in
- * isolation breaks the migration path.
+ * Pins the contract between the plugin manifest and the BUILTIN_PACK
+ * definition. The host seeds the same pack before plugin boot from the
+ * generated pre-boot snapshot, so changing either in isolation breaks it.
  */
 
 import { isOverlayCharacterId } from "@cognia/plugin-sdk/api/character-pack"

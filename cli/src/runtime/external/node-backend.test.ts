@@ -44,6 +44,25 @@ function nextEvent<T>(
   })
 }
 
+describe("Pi capability root lookup", () => {
+  it("returns host vendor roots, including the relocated Pi directory", async () => {
+    const old = process.env.PI_CODING_AGENT_DIR
+    process.env.PI_CODING_AGENT_DIR = path.join(os.tmpdir(), "cognia-pi-root-probe")
+    const backend = new NodeExternalAgentBackend()
+    try {
+      const roots = await backend.invoke<{ piAgentDir: string; claudeConfigDir: string }>(
+        "agent_vendor_roots",
+        {}
+      )
+      expect(roots.piAgentDir).toBe(process.env.PI_CODING_AGENT_DIR)
+      expect(roots.claudeConfigDir).toBeTruthy()
+    } finally {
+      if (old === undefined) delete process.env.PI_CODING_AGENT_DIR
+      else process.env.PI_CODING_AGENT_DIR = old
+    }
+  })
+})
+
 describe("CLI spawn allowlist", () => {
   const root = os.tmpdir()
 

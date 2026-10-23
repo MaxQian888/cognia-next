@@ -20,9 +20,13 @@ const originalEnv = process.env.NEXT_PUBLIC_E2E
 const cleanWindowKeys: Array<keyof Window> = [
   "__cogniaResetDb",
   "__cogniaSeedWorkflow",
+  "__cogniaDeleteWorkflow",
   "__cogniaReadMessages",
   "__cogniaReadSessions",
   "__cogniaE2EOutbound",
+  "__cogniaE2EAutomation",
+  "__cogniaE2ERestartLocalTransport",
+  "__consentListenerGate",
   "__cogniaEnqueueOutbound",
   "__cogniaReadMobileOutbound",
   "__cogniaSeedCharacter",
@@ -84,7 +88,10 @@ describe("ExposeTestGlobals", () => {
     expect(window.__cogniaResetDb).toBeUndefined()
     expect(window.__cogniaReadSessions).toBeUndefined()
     expect(window.__cogniaE2EOutbound).toBeUndefined()
+    expect(window.__cogniaE2EAutomation).toBeUndefined()
+    expect(window.__cogniaE2ERestartLocalTransport).toBeUndefined()
     expect(window.__cogniaSeedWorkflow).toBeUndefined()
+    expect(window.__cogniaDeleteWorkflow).toBeUndefined()
     expect(window.__cogniaSeedCharacter).toBeUndefined()
     expect(window.__cogniaSeedTeam).toBeUndefined()
     expect(window.__cogniaSeedSkill).toBeUndefined()
@@ -104,8 +111,12 @@ describe("ExposeTestGlobals", () => {
     })
     expect(typeof window.__cogniaResetDb).toBe("function")
     expect(typeof window.__cogniaSeedWorkflow).toBe("function")
+    expect(typeof window.__cogniaDeleteWorkflow).toBe("function")
     expect(typeof window.__cogniaReadMessages).toBe("function")
     expect(typeof window.__cogniaReadSessions).toBe("function")
+    expect(typeof window.__cogniaE2EAutomation?.settingsGet).toBe("function")
+    expect(typeof window.__cogniaE2EAutomation?.click).toBe("function")
+    expect(typeof window.__cogniaE2ERestartLocalTransport).toBe("function")
     expect(typeof window.__cogniaE2EOutbound?.seed).toBe("function")
     expect(typeof window.__cogniaE2EOutbound?.read).toBe("function")
     expect(typeof window.__cogniaSeedCharacter).toBe("function")
@@ -132,6 +143,142 @@ describe("ExposeTestGlobals", () => {
     expect(typeof window.__cogniaE2EWebRtc?.connect).toBe("function")
     expect(typeof window.__cogniaE2EWebRtc?.reconnectNow).toBe("function")
     expect(window.__cogniaE2EWebRtcEvents).toEqual({})
+  })
+
+  it("deletes only the requested workflow and its run history", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    render(<ExposeTestGlobals />)
+    await waitFor(() => expect(window.__cogniaTestGlobalsReady).toBe(true))
+    const owned = await window.__cogniaSeedRawWorkflow!({ name: "Owned native fixture" })
+    const other = await window.__cogniaSeedRawWorkflow!({ name: "Other workflow" })
+    await window.__cogniaSeedRun!(owned, "failed")
+    await window.__cogniaSeedRun!(other, "succeeded")
+    const otherRuns = await window.__cogniaReadRuns!(other)
+    await window.__cogniaDeleteWorkflow!(owned)
+    expect(await getDb().workflows.get(owned)).toBeUndefined()
+    expect(await window.__cogniaReadRuns!(owned)).toEqual([])
+    expect(await getDb().workflows.get(other)).toBeDefined()
+    expect(await window.__cogniaReadRuns!(other)).toEqual(otherRuns)
+  })
+
+  it("restarts only a local desktop transport and preserves an active remote", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    render(<ExposeTestGlobals />)
+    await waitFor(() => expect(window.__cogniaE2ERestartLocalTransport).toBeDefined())
+    const instance = await import("@/lib/tauri/transport-instance")
+    const routing = await import("@/lib/tauri/transport-routing")
+    const originalTransport = instance.transport
+    const nativeDescriptor = Object.getOwnPropertyDescriptor(window, "__TAURI_INTERNALS__")
+    try {
+      delete window.__TAURI_INTERNALS__
+      await expect(window.__cogniaE2ERestartLocalTransport!()).resolves.toBe(false)
+      expect(instance.transport).toBe(originalTransport)
+      Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} })
+      await expect(window.__cogniaE2ERestartLocalTransport!()).resolves.toBe(true)
+      const rebound = instance.transport
+      expect(rebound).toBeInstanceOf(routing.RoutingTransport)
+      expect(rebound).not.toBe(originalTransport)
+      const remote = new routing.RoutingTransport(instance.localTransport)
+      routing.setActiveRemoteTransport(remote)
+      await expect(window.__cogniaE2ERestartLocalTransport!()).resolves.toBe(false)
+      expect(instance.transport).toBe(rebound)
+      expect(routing.getActiveRemoteTransport()).toBe(remote)
+    } finally {
+      routing.setActiveRemoteTransport(null)
+      instance.setTransport(originalTransport)
+      if (nativeDescriptor) Object.defineProperty(window, "__TAURI_INTERNALS__", nativeDescriptor)
+      else delete window.__TAURI_INTERNALS__
+    }
+  })
+
+  it("delays only the consent listener while leaving readonly native invoke untouched", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    render(<ExposeTestGlobals />)
+    await waitFor(() => expect(window.__cogniaE2ERestartLocalTransport).toBeDefined())
+    const instance = await import("@/lib/tauri/transport-instance")
+    const { listen } = await import("@tauri-apps/api/event")
+    const nativeListen = jest.mocked(listen)
+    const originalTransport = instance.transport
+    const nativeDescriptor = Object.getOwnPropertyDescriptor(window, "__TAURI_INTERNALS__")
+    const invoke = jest.fn()
+    const internals = Object.defineProperty({}, "invoke", { value: invoke, writable: false })
+    let off = () => {}
+    try {
+      Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: internals })
+      nativeListen.mockClear().mockResolvedValue(jest.fn())
+      await expect(
+        window.__cogniaE2ERestartLocalTransport!({ delayConsentListener: true })
+      ).resolves.toBe(true)
+      off = instance.transport.subscribe("automation:consent-request", jest.fn())
+      expect(window.__consentListenerGate?.held).toBe(true)
+      expect(nativeListen).not.toHaveBeenCalled()
+      let ready = false
+      const waiting = instance.transport.whenSubscribed!(["automation:consent-request"]).then(
+        () => {
+          ready = true
+        }
+      )
+      await Promise.resolve()
+      expect(ready).toBe(false)
+      window.__consentListenerGate!.release()
+      await waiting
+      expect(nativeListen).toHaveBeenCalledWith(
+        "automation:consent-request",
+        expect.any(Function),
+        undefined
+      )
+      expect(Object.getOwnPropertyDescriptor(internals, "invoke")).toMatchObject({
+        value: invoke,
+        writable: false,
+      })
+    } finally {
+      window.__consentListenerGate?.release()
+      off()
+      instance.setTransport(originalTransport)
+      if (nativeDescriptor) Object.defineProperty(window, "__TAURI_INTERNALS__", nativeDescriptor)
+      else delete window.__TAURI_INTERNALS__
+    }
+  })
+
+  it("refuses overlapping transport restarts", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    render(<ExposeTestGlobals />)
+    await waitFor(() => expect(window.__cogniaE2ERestartLocalTransport).toBeDefined())
+    const instance = await import("@/lib/tauri/transport-instance")
+    const originalTransport = instance.transport
+    const nativeDescriptor = Object.getOwnPropertyDescriptor(window, "__TAURI_INTERNALS__")
+    try {
+      Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} })
+      const restart = window.__cogniaE2ERestartLocalTransport!
+      const first = restart({ delayConsentListener: true })
+      await expect(restart({ delayConsentListener: true })).resolves.toBe(false)
+      await expect(first).resolves.toBe(true)
+    } finally {
+      instance.setTransport(originalTransport)
+      if (nativeDescriptor) Object.defineProperty(window, "__TAURI_INTERNALS__", nativeDescriptor)
+      else delete window.__TAURI_INTERNALS__
+    }
+  })
+
+  it("does not clear a newer gate when an unmounted restart resumes", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    const { unmount } = render(<ExposeTestGlobals />)
+    await waitFor(() => expect(window.__cogniaE2ERestartLocalTransport).toBeDefined())
+    const nativeDescriptor = Object.getOwnPropertyDescriptor(window, "__TAURI_INTERNALS__")
+    const newerGate = { held: true, release: jest.fn() }
+    try {
+      Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} })
+      const pending = window.__cogniaE2ERestartLocalTransport!({ delayConsentListener: true })
+      unmount()
+      window.__consentListenerGate = newerGate
+      await expect(pending).resolves.toBe(false)
+      expect(window.__consentListenerGate).toBe(newerGate)
+      expect(newerGate.release).not.toHaveBeenCalled()
+    } finally {
+      if (nativeDescriptor) Object.defineProperty(window, "__TAURI_INTERNALS__", nativeDescriptor)
+      else delete window.__TAURI_INTERNALS__
+      delete window.__consentListenerGate
+    }
   })
 
   it("waits for an in-progress plugin schema upgrade before opening the fixture bridge", async () => {

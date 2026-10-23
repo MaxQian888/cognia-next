@@ -2,6 +2,7 @@
 // `CallToolResult` and the kernel's `ToolResult` both carry it.
 
 import assert from "node:assert/strict"
+import type { ToolResult } from "../src/tools/kernel/result.ts"
 
 /** The text of a result's first content block; fails the test when it is not text. */
 export function firstText(result: { content: readonly unknown[] }): string {
@@ -19,7 +20,10 @@ export function firstJson<T = Record<string, unknown>>(result: { content: readon
 /** A tool definition as a test calls it: the handler with its context optional. */
 export interface CallableTool {
   name: string
-  handler(args: unknown, extra?: unknown): Promise<{ content: unknown[]; isError?: boolean }>
+  handler(
+    args: unknown,
+    extra?: unknown
+  ): Promise<{ content: unknown[]; isError?: boolean; _meta?: ToolResult["_meta"] }>
 }
 
 /** The tool named `name` in a list of definitions; fails the test when absent. */

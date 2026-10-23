@@ -700,6 +700,8 @@ const schemas = {
     amount: z.number().optional(),
   }),
   browser_evaluate: browserSession.extend({ expression: z.string().min(1) }),
+  browser_recording_control: browserSession.extend({ action: z.enum(["start", "resume", "stop", "drain"]) }),
+  browser_recording_ref: browserSession.extend({ selector: z.string().min(1).max(4096) }),
   browser_read_console: browserSession,
   browser_read_network: browserSession,
   browser_back: browserSession,

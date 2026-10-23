@@ -1,13 +1,11 @@
 /**
  * Plugin SDK - `exporter` capability surface.
  *
- * Re-exports the custom exporter authoring helper and runtime plugin export
- * API used by `ctx.export.registerExporter(...)`.
+ * Exports the custom exporter authoring helper and the types behind
+ * `ctx.export.registerExporter(...)`. The host builds `ctx.export`.
  */
 
 export { defineExporter } from "../define/define-exporter"
-
-export { clearCustomExporters, createExportAPI } from "@/lib/plugin/api/export-api"
 
 export type {
   CustomExporter,
@@ -16,4 +14,4 @@ export type {
   ExportOptions,
   ExportResult,
   PluginExportAPI,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"

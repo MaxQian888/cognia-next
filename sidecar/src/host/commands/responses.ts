@@ -6,6 +6,7 @@ export interface PermissionResponseOptions {
   suggestions?: unknown
   interrupt?: boolean
   suppressAlwaysAllowRule?: boolean
+  requiresExplicitConsent?: boolean
   rich?: boolean
 }
 
@@ -83,10 +84,11 @@ export function buildPermissionResult(
     suggestions,
     interrupt,
     suppressAlwaysAllowRule = false,
+    requiresExplicitConsent = false,
     rich = false,
   }: PermissionResponseOptions = {}
 ): AllowResult | DenyResult {
-  if (decision === "deny") {
+  if (decision === "deny" || (requiresExplicitConsent && decision !== "allow")) {
     return {
       behavior: "deny",
       message: message ?? "denied by user",

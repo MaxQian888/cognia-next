@@ -8,7 +8,7 @@
  * operation registry on enable with `support: "plugin"`.
  */
 
-import type { PluginProviderOperationAdapterDef } from "@/types/plugin/plugin-provider-operation-adapter"
+import type { PluginProviderOperationAdapterDef } from "@cognia/plugin-contract/types/plugin/plugin-provider-operation-adapter"
 
 export function defineProviderOperationAdapter(
   def: PluginProviderOperationAdapterDef

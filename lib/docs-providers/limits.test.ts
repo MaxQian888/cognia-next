@@ -7,9 +7,63 @@ import {
   MAX_SHEET_TABS,
   clampDocText,
   truncationMarker,
+  normalizeRemoteDocContent,
 } from "./limits"
 
 describe("docs-provider limits", () => {
+  it("rejects an empty partial body rather than attaching only a loss marker", () => {
+    expect(() =>
+      normalizeRemoteDocContent({
+        ref: { providerId: "test", id: "id", kind: "doc", title: "Doc" },
+        title: "Doc",
+        text: " \n",
+        format: "text",
+        completeness: { status: "partial", reasons: [] },
+      })
+    ).toThrow("empty")
+  })
+
+  it("normalizes empty partial reasons conservatively and remains stable across repeated boundaries", () => {
+    const normalized = normalizeRemoteDocContent({
+      ref: { providerId: "test", id: "id", kind: "doc", title: "Doc" },
+      title: "Doc",
+      text: "body",
+      format: "text",
+      completeness: { status: "partial", reasons: [] },
+    })
+    expect(normalized.completeness).toEqual({ status: "partial", reasons: ["unsupported-content"] })
+    expect(normalizeRemoteDocContent(normalized)).toEqual(normalized)
+    const large = normalizeRemoteDocContent({ ...normalized, text: "x".repeat(MAX_DOC_CHARS + 1) })
+    expect(normalizeRemoteDocContent(large)).toEqual(large)
+  })
+  it("keeps partial reasons and adds a model-visible loss marker and legacy flag", () => {
+    const content = normalizeRemoteDocContent({
+      ref: { providerId: "test", id: "id", kind: "doc", title: "Doc" },
+      title: "Doc",
+      text: "body",
+      format: "text",
+      completeness: { status: "partial", reasons: ["parse-degraded", "inaccessible-block"] },
+    })
+    expect(content.truncated).toBe(true)
+    expect(content.text).toContain("Incomplete by Cognia: parse-degraded, inaccessible-block")
+    expect(content.completeness).toEqual({
+      status: "partial",
+      reasons: ["parse-degraded", "inaccessible-block"],
+    })
+  })
+
+  it("does not let an explicit complete label override legacy truncation", () => {
+    const content = normalizeRemoteDocContent({
+      ref: { providerId: "test", id: "id", kind: "doc", title: "Doc" },
+      title: "Doc",
+      text: "body",
+      format: "text",
+      truncated: true,
+      completeness: { status: "complete" },
+    })
+    expect(content.completeness).toEqual({ status: "partial", reasons: ["upstream-truncated"] })
+    expect(content.text).toContain("Incomplete")
+  })
   it("keeps every cap positive and finite", () => {
     for (const cap of [
       MAX_SHEET_ROWS,

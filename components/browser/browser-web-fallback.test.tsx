@@ -1,7 +1,17 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render as renderReact,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import { toast } from "sonner"
 
 import { BrowserWebFallback } from "./browser-web-fallback"
+import { TooltipProvider } from "@/components/ui/tooltip"
+
+const render = (ui: React.ReactElement) => renderReact(ui, { wrapper: TooltipProvider })
 
 const openExternal = jest.fn().mockResolvedValue(undefined)
 let mockFrameViewportWidth = 1280
@@ -34,6 +44,36 @@ jest.mock("@/hooks/browser/use-recent-pages", () => ({
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
 describe("BrowserWebFallback", () => {
+  it("reports committed locations and reuses the supplied engine control", () => {
+    const onNavigated = jest.fn()
+    const onSwitch = jest.fn()
+    const { rerender } = render(
+      <BrowserWebFallback
+        initialUrl="https://example.com/start"
+        onNavigated={onNavigated}
+        backendSwitcher={<button onClick={onSwitch}>Switch engine</button>}
+      />
+    )
+    expect(onNavigated).toHaveBeenLastCalledWith("https://example.com/start")
+    const input = screen.getByRole("textbox", { name: "browser.url.placeholder" })
+    fireEvent.change(input, { target: { value: "https://example.com/submitted" } })
+    expect(onNavigated).toHaveBeenCalledTimes(1)
+    fireEvent.submit(input)
+    expect(onNavigated).toHaveBeenLastCalledWith("https://example.com/submitted")
+    rerender(
+      <BrowserWebFallback
+        requestedUrl="https://example.com/requested"
+        onNavigated={onNavigated}
+        backendSwitcher={<button onClick={onSwitch}>Switch engine</button>}
+      />
+    )
+    expect(onNavigated).toHaveBeenLastCalledWith("https://example.com/requested")
+    fireEvent.click(screen.getByRole("button", { name: "browser.actions.back" }))
+    expect(onNavigated).toHaveBeenLastCalledWith("https://example.com/submitted")
+    fireEvent.click(screen.getByRole("button", { name: "browser.actions.more" }))
+    fireEvent.click(screen.getByRole("button", { name: "Switch engine" }))
+    expect(onSwitch).toHaveBeenCalledTimes(1)
+  })
   it("offers recovery for an embed that is blank despite firing load", () => {
     render(<BrowserWebFallback initialUrl="https://blocked.example/" />)
     const frame = screen.getByTitle("browser.webFallback.frameTitle")

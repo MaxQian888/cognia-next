@@ -24,28 +24,12 @@ import {
   SESSION_ASSET_OWNER_PREFIX,
 } from "./message-media-refs"
 import { libraryItemKey, type LibraryItemRow } from "./files-library-types"
+import type { SessionAsset } from "@cognia/plugin-contract/lib/db/session-assets"
+export type { SessionAsset } from "@cognia/plugin-contract/lib/db/session-assets"
 
 export const SESSION_ASSET_MAX_BYTES = 500 * 1024 * 1024
 export const SESSION_ASSET_QUOTA_BYTES = 1024 * 1024 * 1024
 const MAX_ASSETS = 5_000
-
-export interface SessionAsset {
-  sessionId: string
-  assetId: string
-  contentHash: string
-  filename: string
-  mediaType: string
-  byteSize: number
-  extractedContent?: AttachmentExtractedContent
-  createdAt: number
-  updatedAt: number
-  revision: number
-  temporary: boolean
-  /** False for remote/imported derived text whose original never reached this host. */
-  sourceRetained?: boolean
-  /** Content-free tombstone prevents stale transcript snapshots resurrecting a deleted asset. */
-  deletedAt?: number
-}
 
 export interface StoredSessionAsset extends SessionAsset {
   /** Untouched local source; callers must separately authorize model delivery. */

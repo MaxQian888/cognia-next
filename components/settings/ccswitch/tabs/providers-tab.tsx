@@ -24,7 +24,7 @@ import {
 
 import { useCcswitchProviders, useCcswitchStatus } from "@/lib/ccswitch/hooks"
 import { fromCcswitchUsageScript } from "@/lib/ccswitch/import"
-import { detectActive } from "@/lib/ccswitch/switch"
+import { canSwitchProvider, ccswitchProviderRefId, detectActive } from "@/lib/ccswitch/switch"
 import { upsertCustomSource } from "@/lib/subscription/limits/custom/store"
 import type { ActiveProviderState, CcswitchAgentId, CcswitchProvider } from "@/types/ccswitch"
 import { getSettings } from "@/lib/db/settings"
@@ -49,13 +49,17 @@ export function CcswitchProvidersTab() {
     })
   }, [tabReady])
 
-  const { data: status } = useCcswitchStatus(tabReady, watchDb, manualDataDir)
+  const { data: status, error: statusError } = useCcswitchStatus(tabReady, watchDb, manualDataDir)
   const {
     data: providers,
     loading,
     error,
     refresh,
-  } = useCcswitchProviders(tabReady && status?.exists === true, watchDb, manualDataDir)
+  } = useCcswitchProviders(
+    tabReady && status?.exists === true && !status.error,
+    watchDb,
+    manualDataDir
+  )
 
   const [active, setActive] = useState<ActiveProviderState | null>(null)
   const [dialogProvider, setDialogProvider] = useState<CcswitchProvider | null>(null)
@@ -77,8 +81,8 @@ export function CcswitchProvidersTab() {
     // Active provider floats to the top, then alpha by name.
     const activeId = active?.cognia
     return [...providers].sort((a, b) => {
-      if (a.id === activeId) return -1
-      if (b.id === activeId) return 1
+      if (ccswitchProviderRefId(a) === activeId) return -1
+      if (ccswitchProviderRefId(b) === activeId) return 1
       return a.name.localeCompare(b.name)
     })
   }, [providers, active?.cognia])
@@ -108,10 +112,10 @@ export function CcswitchProvidersTab() {
     )
   }
 
-  if (error) {
+  if (error || statusError || status?.error) {
     return (
       <SettingsAlert variant="destructive" title={t("providers.errorTitle")}>
-        {error}
+        {error ?? statusError ?? status?.error}
       </SettingsAlert>
     )
   }
@@ -185,7 +189,7 @@ export function CcswitchProvidersTab() {
 
       <div className="space-y-2">
         {sorted.map((p) => {
-          const isActive = active?.cognia === p.id
+          const isActive = active?.cognia === ccswitchProviderRefId(p)
           return (
             <SettingsCard
               // CCSwitch keys providers by (id, app_type) — id alone repeats
@@ -209,20 +213,34 @@ export function CcswitchProvidersTab() {
                       {t("providers.importQuota")}
                     </Button>
                   )}
-                  <Button size="sm" variant="outline" onClick={() => onUseHere(p)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!canSwitchProvider(p)}
+                    onClick={() => onUseHere(p)}
+                  >
                     {t("providers.useHere")}
                   </Button>
-                  <Button size="sm" onClick={() => onUseHereAndIn(p)}>
+                  <Button
+                    size="sm"
+                    disabled={!canSwitchProvider(p)}
+                    onClick={() => onUseHereAndIn(p)}
+                  >
                     {t("providers.useHereAndIn")}
                   </Button>
                 </div>
               }
             >
+              {!canSwitchProvider(p) && (
+                <p className="text-xs text-muted-foreground">
+                  {t("providers.unsupportedProtocol")}
+                </p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 text-xs text-muted-foreground">
-                {p.model && (
+                {(p.model || p.models?.length) && (
                   <div>
                     <span className="text-foreground">{t("providers.model")}: </span>
-                    <span className="font-mono">{p.model}</span>
+                    <span className="font-mono">{p.models?.join(", ") || p.model}</span>
                   </div>
                 )}
                 {p.notes && <div>{p.notes}</div>}

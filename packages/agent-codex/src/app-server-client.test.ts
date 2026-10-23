@@ -196,6 +196,385 @@ function iterator(
 
 beforeEach(resetHarness)
 
+describe("native child identity and scoped model control", () => {
+  async function setup(canAcceptDirectInput = true) {
+    responders["turn/settings/update"] = () => ({ status: "applied" })
+    responders["model/list"] = () => ({
+      data: [
+        { id: "model-a", model: "model-a", multiAgentVersion: "v2" },
+        {
+          id: "model-b",
+          model: "model-b",
+          supportedReasoningEfforts: [{ reasoningEffort: "high" }],
+        },
+      ],
+    })
+    responders["thread/list"] = () => ({
+      data: [
+        { id: "child", parentThreadId: "thr_1", canAcceptDirectInput, model: "model-a" },
+        { id: "foreign", parentThreadId: "other-root", canAcceptDirectInput: true },
+      ],
+    })
+    responders["thread/loaded/list"] = () => ({ data: [] })
+    responders["thread/read"] = ({ params }) => ({
+      thread:
+        (params as { threadId: string }).threadId === "thr_1"
+          ? { id: "thr_1", model: "model-a", canAcceptDirectInput: true }
+          : { id: "child", parentThreadId: "thr_1", canAcceptDirectInput, model: "model-a" },
+    })
+    const adapter = await connectedAdapter({ codexOptions: { stepModelSwitching: true } })
+    await adapter.createSession()
+    const snapshot = await adapter.getNativeSubagents("thr_1")
+    return { adapter, snapshot }
+  }
+
+  it("keeps native children out of Cognia sessions and filters unrelated roots", async () => {
+    const { adapter, snapshot } = await setup()
+    expect(snapshot.children.map((child) => child.nativeThreadId)).toEqual(["child"])
+    expect(adapter.getSession("child")).toBeUndefined()
+    expect(snapshot.backend).toMatchObject({
+      value: "v2",
+      evidence: "model-metadata",
+      confidence: "inferred",
+    })
+    expect(snapshot.children[0].canAcceptDirectInput).toBe(true)
+    await adapter.disconnect()
+  })
+
+  it("reports effective flags and learns settings support separately by scope", async () => {
+    responders["config/read"] = () => ({
+      config: {
+        agents: { enabled: false },
+        features: { multi_agent_v2: { enabled: false }, step_model_switching: false },
+      },
+    })
+    const { adapter, snapshot } = await setup()
+    expect(snapshot.features).toMatchObject({
+      agentsEnabled: false,
+      multiAgentV2: false,
+      stepModelSwitching: false,
+    })
+    expect(snapshot.backend).toMatchObject({ value: "disabled", confidence: "inferred" })
+    expect(snapshot.settingsMethods).toEqual({ currentTurn: "unknown", futureTurns: "unknown" })
+    const request = {
+      operationId: "unsupported",
+      nativeChildThreadId: "child",
+      modelId: "model-b",
+      expectedProcessGeneration: snapshot.processGeneration,
+      scope: "future-turns" as const,
+    }
+    responders["thread/settings/update"] = () => ({
+      __error: { code: -32601, message: "Method not found" },
+    })
+    expect(await adapter.changeNativeSubagentModel("thr_1", request)).toMatchObject({
+      status: "rejected",
+    })
+    expect((await adapter.getNativeSubagents("thr_1")).settingsMethods).toEqual({
+      currentTurn: "unknown",
+      futureTurns: "unsupported",
+    })
+    await expect(
+      adapter.changeNativeSubagentModel("thr_1", { ...request, operationId: "retry" })
+    ).rejects.toThrow("native-settings-unsupported")
+    expect(
+      writes.map((line) => JSON.parse(line)).filter((m) => m.method === "thread/settings/update")
+    ).toHaveLength(1)
+    feed("turn/started", { threadId: "child", turn: { id: "turn" } })
+    await expect(
+      adapter.changeNativeSubagentModel("thr_1", {
+        ...request,
+        operationId: "disabled",
+        scope: "current-turn",
+        expectedTurnId: "turn",
+      })
+    ).rejects.toThrow("step-model-switching-disabled")
+    await adapter.disconnect()
+  })
+
+  it("keeps requested spawn settings distinct from resolution and certifies the parent from its own spawn", async () => {
+    responders.initialize = () => ({ userAgent: "codex-cli/0.159.2" })
+    const { adapter } = await setup(false)
+    const item = {
+      id: "spawn",
+      type: "collabAgentToolCall",
+      tool: "spawnAgent",
+      senderThreadId: "thr_1",
+    }
+    feed("item/started", {
+      threadId: "thr_1",
+      turnId: "parent-turn",
+      item: { ...item, receiverThreadIds: [], model: "requested", reasoningEffort: "low" },
+    })
+    feed("item/completed", {
+      threadId: "thr_1",
+      turnId: "parent-turn",
+      item: {
+        ...item,
+        receiverThreadIds: ["child"],
+        model: "model-a",
+        reasoningEffort: "high",
+        status: "completed",
+      },
+    })
+    const snapshot = await adapter.getNativeSubagents("thr_1")
+    expect(snapshot.children[0]).toMatchObject({
+      modelId: "model-a",
+      requestedModelId: "requested",
+      requestedReasoningEffort: "low",
+      canAcceptDirectInput: false,
+    })
+    expect(snapshot.backend).toEqual({
+      value: "v1",
+      evidence: "child-thread",
+      confidence: "observed",
+    })
+    expect(snapshot.spawnModelOverrides).toBe("supported")
+    await adapter.disconnect()
+  })
+
+  it("does not reinterpret a resolved spawn model as a request when the start was not observed", async () => {
+    const { adapter } = await setup()
+    feed("item/completed", {
+      threadId: "thr_1",
+      turnId: "turn",
+      item: {
+        id: "spawn",
+        type: "collabAgentToolCall",
+        tool: "spawnAgent",
+        senderThreadId: "thr_1",
+        receiverThreadIds: ["child"],
+        model: "resolved",
+        status: "completed",
+      },
+    })
+    const snapshot = await adapter.getNativeSubagents("thr_1")
+    expect(snapshot.children[0].requestedModelId).toBeUndefined()
+    expect(snapshot.spawnModelOverrides).toBe("unknown")
+    await adapter.disconnect()
+  })
+
+  it("removes a child that disappears between discovery and authoritative read", async () => {
+    const { adapter } = await setup()
+    const read = responders["thread/read"]
+    responders["thread/read"] = (request) =>
+      (request.params as { threadId: string }).threadId === "child"
+        ? { __error: { code: -32600, message: "thread not found: child" } }
+        : read(request)
+    expect((await adapter.getNativeSubagents("thr_1")).children).toEqual([])
+    await adapter.disconnect()
+  })
+
+  it("never treats message recipients as children or an inactive turn as live", async () => {
+    const { adapter, snapshot } = await setup()
+    feed("item/started", {
+      threadId: "thr_1",
+      item: {
+        id: "send",
+        type: "collabAgentToolCall",
+        tool: "sendInput",
+        senderThreadId: "thr_1",
+        receiverThreadIds: ["not-a-child"],
+      },
+    })
+    expect(
+      (await adapter.getNativeSubagents("thr_1")).children.map((child) => child.nativeThreadId)
+    ).not.toContain("not-a-child")
+    feed("turn/started", { threadId: "child", turn: { id: "ended-turn" } })
+    feed("turn/completed", { threadId: "child", turn: { id: "ended-turn", status: "completed" } })
+    await expect(
+      adapter.changeNativeSubagentModel("thr_1", {
+        operationId: "stale",
+        nativeChildThreadId: "child",
+        modelId: "model-b",
+        expectedProcessGeneration: snapshot.processGeneration,
+        scope: "current-turn",
+        expectedTurnId: "ended-turn",
+      })
+    ).rejects.toThrow("stale-child-turn")
+    expect(lastWritten((m) => m.method === "turn/settings/update")).toBeUndefined()
+    await adapter.disconnect()
+  })
+
+  it("clears a missed completion from authoritative history and rejects invalid targets", async () => {
+    const { adapter, snapshot } = await setup()
+    feed("turn/started", { threadId: "child", turn: { id: "stale" } })
+    const read = responders["thread/read"]
+    responders["thread/read"] = (request) => {
+      const result = read(request) as { thread: Record<string, unknown> }
+      result.thread.turns = [{ id: "stale", status: "completed" }]
+      return result
+    }
+    expect((await adapter.getNativeSubagents("thr_1")).children[0].activeTurnId).toBeUndefined()
+    const request = {
+      operationId: "invalid",
+      nativeChildThreadId: "child",
+      modelId: "missing",
+      expectedProcessGeneration: snapshot.processGeneration,
+      scope: "future-turns" as const,
+    }
+    await expect(adapter.changeNativeSubagentModel("thr_1", request)).rejects.toThrow(
+      "model-not-allowed"
+    )
+    await expect(
+      adapter.changeNativeSubagentModel("thr_1", {
+        ...request,
+        modelId: "model-b",
+        reasoningEffort: "minimal",
+      })
+    ).rejects.toThrow("reasoning-effort-not-supported")
+    await adapter.disconnect()
+  })
+
+  it("serializes a child's settings and never treats connection loss as acceptance", async () => {
+    const { adapter, snapshot } = await setup()
+    const original = native.sendToExternalAgent.getMockImplementation()!
+    native.sendToExternalAgent.mockImplementation(async (id, message) => {
+      if (JSON.parse(message).method === "thread/settings/update") {
+        writes.push(message)
+        return
+      }
+      await original(id, message)
+    })
+    try {
+      const request = {
+        operationId: "pending",
+        nativeChildThreadId: "child",
+        modelId: "model-b",
+        expectedProcessGeneration: snapshot.processGeneration,
+        scope: "future-turns" as const,
+      }
+      const pending = adapter.changeNativeSubagentModel("thr_1", request)
+      await expect(
+        adapter.changeNativeSubagentModel("thr_1", { ...request, operationId: "second" })
+      ).rejects.toThrow("child-settings-busy")
+      await adapter.disconnect()
+      expect(await pending).toMatchObject({ status: "outcome-unknown" })
+      expect(
+        writes
+          .map((line) => JSON.parse(line))
+          .filter((message) => message.method === "thread/settings/update")
+      ).toHaveLength(1)
+    } finally {
+      native.sendToExternalAgent.mockImplementation(original)
+    }
+  })
+
+  it("deduplicates operation IDs and distinguishes refusal, lost targets and unknown replies", async () => {
+    const { adapter, snapshot } = await setup()
+    const request = {
+      operationId: "once",
+      nativeChildThreadId: "child",
+      modelId: "model-b",
+      expectedProcessGeneration: snapshot.processGeneration,
+      scope: "future-turns" as const,
+    }
+    await adapter.changeNativeSubagentModel("thr_1", request)
+    await adapter.changeNativeSubagentModel("thr_1", request)
+    expect(
+      writes
+        .map((line) => JSON.parse(line))
+        .filter((message) => message.method === "thread/settings/update")
+    ).toHaveLength(1)
+    await expect(
+      adapter.changeNativeSubagentModel("thr_1", { ...request, modelId: "model-a" })
+    ).rejects.toThrow("operation-id-conflict")
+    responders["thread/settings/update"] = () => ({
+      __error: { code: -32600, message: "Incompatible model" },
+    })
+    expect(
+      await adapter.changeNativeSubagentModel("thr_1", { ...request, operationId: "refused" })
+    ).toMatchObject({ status: "rejected", reason: "-32600: Incompatible model" })
+    feed("turn/started", { threadId: "child", turn: { id: "turn" } })
+    responders["turn/settings/update"] = () => ({ status: "targetUnavailable" })
+    expect(
+      await adapter.changeNativeSubagentModel("thr_1", {
+        ...request,
+        operationId: "gone",
+        scope: "current-turn",
+        expectedTurnId: "turn",
+      })
+    ).toMatchObject({ status: "target-unavailable" })
+    responders["turn/settings/update"] = () => ({})
+    feed("turn/started", { threadId: "child", turn: { id: "next-turn" } })
+    expect(
+      await adapter.changeNativeSubagentModel("thr_1", {
+        ...request,
+        operationId: "unknown",
+        scope: "current-turn",
+        expectedTurnId: "next-turn",
+      })
+    ).toMatchObject({ status: "outcome-unknown" })
+    expect((await adapter.getNativeSubagents("thr_1")).children[0].modelChangeState).toBe(
+      "outcome-unknown"
+    )
+    await expect(
+      adapter.changeNativeSubagentModel("thr_1", { ...request, operationId: "after-unknown" })
+    ).rejects.toThrow("child-settings-busy")
+    await adapter.disconnect()
+  })
+
+  it("sends current and future settings to the native child without starting a turn", async () => {
+    const { adapter, snapshot } = await setup()
+    feed("turn/started", { threadId: "child", turn: { id: "child-turn" } })
+    const request = {
+      operationId: "change-current",
+      nativeChildThreadId: "child",
+      modelId: "model-b",
+      reasoningEffort: "high",
+      expectedProcessGeneration: snapshot.processGeneration,
+      scope: "current-turn" as const,
+      expectedTurnId: "child-turn",
+    }
+    expect(await adapter.changeNativeSubagentModel("thr_1", request)).toMatchObject({
+      status: "applied-awaiting-step",
+    })
+    expect(lastWritten((m) => m.method === "turn/settings/update")?.params).toEqual({
+      threadId: "child",
+      turnId: "child-turn",
+      model: "model-b",
+      effort: "high",
+    })
+    await adapter.changeNativeSubagentModel("thr_1", {
+      ...request,
+      operationId: "change-future",
+      scope: "future-turns",
+    })
+    expect(lastWritten((m) => m.method === "thread/settings/update")?.params).toEqual({
+      threadId: "child",
+      model: "model-b",
+      effort: "high",
+    })
+    expect(writes.map((line) => JSON.parse(line).method)).not.toContain("turn/start")
+    expect((await adapter.getNativeSubagents("thr_1")).settingsMethods).toEqual({
+      currentTurn: "supported",
+      futureTurns: "supported",
+    })
+    await adapter.disconnect()
+  })
+
+  it("rejects forbidden direct input, stale identities, stale turns and unknown models before RPC", async () => {
+    const { adapter, snapshot } = await setup(false)
+    const request = {
+      operationId: "blocked",
+      nativeChildThreadId: "child",
+      modelId: "model-b",
+      expectedProcessGeneration: snapshot.processGeneration,
+      scope: "future-turns" as const,
+    }
+    await expect(adapter.changeNativeSubagentModel("thr_1", request)).rejects.toThrow(
+      "direct-input-forbidden"
+    )
+    await expect(
+      adapter.changeNativeSubagentModel("thr_1", { ...request, nativeChildThreadId: "foreign" })
+    ).rejects.toThrow("child-not-owned")
+    await expect(
+      adapter.changeNativeSubagentModel("thr_1", { ...request, expectedProcessGeneration: -1 })
+    ).rejects.toThrow("stale-process-generation")
+    expect(lastWritten((m) => String(m.method).endsWith("settings/update"))).toBeUndefined()
+    await adapter.disconnect()
+  })
+})
+
 describe("explicit Codex writable roots", () => {
   it("normalizes, deduplicates and reports relative, system and app-data roots", () => {
     const report = jest.fn()
@@ -4745,7 +5124,7 @@ describe("native 0.154.0 request regressions", () => {
       // regression prevents admission, streaming or a terminal notification.
       await Promise.race([
         new Promise<never>((_, reject) => {
-          deadline = setTimeout(() => reject(new Error("Native Codex acceptance timed out")), 20000)
+          deadline = setTimeout(() => reject(new Error("Native Codex acceptance timed out")), 40000)
         }),
         (async () => {
           const schemaDir = path.join(dir, "schema")
@@ -4765,6 +5144,28 @@ describe("native 0.154.0 request regressions", () => {
           let credentialHeaderSeen = false
           let holdNextResponse = false
           let responseStarted: (() => void) | undefined
+          type FixtureTool = {
+            type?: string
+            name?: string
+            namespace?: string
+            tools?: FixtureTool[]
+            parameters?: { properties?: Record<string, unknown> }
+          }
+          let nativeScenario:
+            | {
+                backend: "v1" | "v2"
+                spawned: boolean
+                held?: (output: Record<string, unknown>[]) => void
+                childId?: string
+                steps: Array<{
+                  model?: string
+                  effort?: string
+                  threadId?: string
+                  turnId?: string
+                }>
+                feedback?: unknown[]
+              }
+            | undefined
           const fixtureServer = createServer(async (request, response) => {
             credentialHeaderSeen ||= Boolean(
               request.headers.authorization ||
@@ -4775,15 +5176,110 @@ describe("native 0.154.0 request regressions", () => {
               response.writeHead(404).end()
               return
             }
-            for await (const _chunk of request) {
-              /* Drain the fixture request. */
-            }
+            let raw = ""
+            for await (const chunk of request) raw += String(chunk)
             requestCount += 1
             response.writeHead(200, { "Content-Type": "text/event-stream" })
             const id = `response_${requestCount}`
             const event = (type: string, payload: Record<string, unknown>) =>
               response.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...payload })}\n\n`)
             event("response.created", { response: { id, status: "in_progress", output: [] } })
+            if (nativeScenario) {
+              const body = JSON.parse(raw) as {
+                model?: string
+                reasoning?: { effort?: string }
+                client_metadata?: Record<string, string>
+                tools?: FixtureTool[]
+                input?: Array<{ type?: string; tools?: FixtureTool[] }>
+              }
+              nativeScenario.feedback = body.input?.filter(
+                (item) => item.type === "function_call_output"
+              )
+              const metadata = JSON.parse(
+                body.client_metadata?.["x-codex-turn-metadata"] ?? "{}"
+              ) as { turn_id?: string }
+              nativeScenario.steps.push({
+                model: body.model,
+                effort: body.reasoning?.effort,
+                threadId: body.client_metadata?.thread_id,
+                turnId: metadata.turn_id,
+              })
+              const finish = (output: Record<string, unknown>[]) => {
+                output.forEach((item, output_index) => {
+                  event("response.output_item.added", { output_index, item })
+                  event("response.output_item.done", { output_index, item })
+                })
+                event("response.completed", {
+                  response: {
+                    id,
+                    status: "completed",
+                    output,
+                    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+                  },
+                })
+                response.end()
+              }
+              if (body.model === "native-parent" && !nativeScenario.spawned) {
+                nativeScenario.spawned = true
+                const flatten = (tools: FixtureTool[], namespace?: string): FixtureTool[] =>
+                  tools.flatMap((tool) =>
+                    tool.type === "namespace"
+                      ? flatten(tool.tools ?? [], tool.name)
+                      : [{ ...tool, namespace }]
+                  )
+                const tools = flatten([
+                  ...(body.tools ?? []),
+                  ...(body.input ?? []).flatMap((item) =>
+                    item.type === "additional_tools" ? (item.tools ?? []) : []
+                  ),
+                ])
+                const spawn = tools.find((tool) => tool.name === "spawn_agent") ?? {
+                  name: "spawn_agent",
+                  namespace: "multi_agent_v1",
+                }
+                if (nativeScenario.backend === "v2")
+                  expect(spawn.parameters?.properties).toHaveProperty("model")
+                const args =
+                  nativeScenario.backend === "v2"
+                    ? {
+                        task_name: "native_fixture",
+                        message: "Synthetic fixture only.",
+                        fork_turns: "none",
+                        model: "native-child",
+                        reasoning_effort: "low",
+                      }
+                    : {
+                        message: "Synthetic fixture only.",
+                        fork_context: false,
+                        model: "native-child",
+                        reasoning_effort: "low",
+                      }
+                finish([
+                  {
+                    type: "function_call",
+                    id: `${id}_spawn`,
+                    call_id: `${id}_spawn`,
+                    name: spawn.name,
+                    ...(spawn.namespace ? { namespace: spawn.namespace } : {}),
+                    arguments: JSON.stringify(args),
+                  },
+                ])
+              } else if (body.model === "native-child" && !nativeScenario.held) {
+                nativeScenario.childId = body.client_metadata?.thread_id
+                nativeScenario.held = finish
+                response.flushHeaders()
+              } else
+                finish([
+                  {
+                    type: "message",
+                    id: `${id}_done`,
+                    role: "assistant",
+                    phase: "final_answer",
+                    content: [{ type: "output_text", text: "Native fixture complete." }],
+                  },
+                ])
+              return
+            }
             responseStarted?.()
             if (holdNextResponse) {
               holdNextResponse = false
@@ -5068,6 +5564,124 @@ describe("native 0.154.0 request regressions", () => {
             )
           ).toBe(false)
           expect(fs.existsSync(path.join(dir, "auth.json"))).toBe(false)
+          const baseConfig = fs.readFileSync(path.join(dir, "config.toml"), "utf8")
+          const bundled = JSON.parse(
+            fs.readFileSync("cli/src/runtime/external/codex-catalog/codex-catalog.json", "utf8")
+          ) as { models: Array<Record<string, unknown>> }
+          const template = bundled.models.find((model) => model.slug === "gpt-6.1-sol")!
+          const until = async (check: () => boolean) => {
+            for (let attempt = 0; attempt < 100; attempt++) {
+              if (check()) return
+              await new Promise((resolve) => setTimeout(resolve, 50))
+            }
+            throw new Error(
+              `Native child fixture timed out: ${JSON.stringify({ steps: nativeScenario?.steps, feedback: nativeScenario?.feedback })}`
+            )
+          }
+          for (const [backend, codeMode] of [
+            ["v1", false],
+            ["v2", false],
+            ["v2", true],
+          ] as const) {
+            await adapter.disconnect()
+            fs.writeFileSync(
+              path.join(dir, "native-catalog.json"),
+              JSON.stringify({
+                models: ["native-parent", "native-child", "native-switched"].map((slug) => ({
+                  ...template,
+                  slug,
+                  display_name: slug,
+                  multi_agent_version: backend,
+                  tool_mode: codeMode ? template.tool_mode : null,
+                  use_responses_lite: false,
+                })),
+              })
+            )
+            fs.writeFileSync(
+              path.join(dir, "config.toml"),
+              `model_catalog_json = ${JSON.stringify(path.join(dir, "native-catalog.json"))}\n` +
+                baseConfig.replace('model = "gpt-6.1-sol"', 'model = "native-parent"') +
+                '\n[features]\nstep_model_switching = true\nmulti_agent_v2 = false\n[agents]\ndefault_subagent_model = "native-parent"\n'
+            )
+            nativeScenario = { backend, spawned: false, steps: [] }
+            await adapter.connect({
+              ...config,
+              codexOptions: { stepModelSwitching: true },
+              process: { command: binary, args: ["app-server"], cwd: dir },
+            })
+            const root = await adapter.createSession({ cwd: dir, permissionMode: "plan" })
+            const parent = adapter.execute(root.id, userMessage("Run the native fixture."))
+            await until(() => !!nativeScenario?.held)
+            const snapshot = await adapter.getNativeSubagents(root.id)
+            const nativeChild = snapshot.children.find(
+              (thread) => thread.nativeThreadId === nativeScenario?.childId
+            )
+            expect(nativeChild).toBeDefined()
+            expect(nativeChild!.parentThreadId).toBe(root.id)
+            // V1 emits requested model metadata. V2's public activity item has
+            // only path/thread identity; do not invent its requested settings.
+            expect(nativeChild!.requestedModelId).toBe(
+              backend === "v1" ? "native-child" : undefined
+            )
+            expect(nativeChild!.canAcceptDirectInput).toBe(backend === "v1")
+            expect(snapshot.backend).toMatchObject({
+              value: backend,
+              evidence: "child-thread",
+              confidence: "observed",
+            })
+            const patch = {
+              operationId: `live-${backend}`,
+              nativeChildThreadId: nativeChild!.nativeThreadId,
+              expectedProcessGeneration: snapshot.processGeneration,
+              scope: "current-turn" as const,
+              expectedTurnId: nativeChild!.activeTurnId,
+              modelId: "native-switched",
+              reasoningEffort: "high",
+            }
+            if (backend === "v1") {
+              expect(await adapter.changeNativeSubagentModel(root.id, patch)).toMatchObject({
+                status: "applied-awaiting-step",
+              })
+              expect(
+                await adapter.changeNativeSubagentModel(root.id, {
+                  ...patch,
+                  operationId: `future-${backend}`,
+                  scope: "future-turns",
+                })
+              ).toMatchObject({ status: "applied-awaiting-step" })
+            } else {
+              const count = writes.length
+              await expect(adapter.changeNativeSubagentModel(root.id, patch)).rejects.toThrow(
+                "direct-input-forbidden"
+              )
+              expect(writes.length).toBe(count)
+            }
+            nativeScenario.held!([
+              {
+                type: "function_call",
+                id: "next_step",
+                call_id: "next_step",
+                name: "get_goal",
+                arguments: "{}",
+              },
+            ])
+            await until(
+              () =>
+                (nativeScenario?.steps.filter(
+                  (step) => step.threadId === nativeChild!.nativeThreadId
+                ).length ?? 0) >= 2
+            )
+            const steps = nativeScenario.steps.filter(
+              (step) => step.threadId === nativeChild!.nativeThreadId
+            )
+            expect(steps[0]).toMatchObject({ model: "native-child" })
+            expect(steps[1]).toMatchObject({
+              model: backend === "v1" ? "native-switched" : "native-child",
+              turnId: steps[0].turnId,
+            })
+            if (backend === "v1") expect(steps[1].effort).toBe("high")
+            expect((await parent).success).toBe(true)
+          }
         })(),
       ])
     } finally {
@@ -5092,7 +5706,7 @@ describe("native 0.154.0 request regressions", () => {
       }
     }
   },
-  30000
+  45000
 )
 
 describe("parseCodexCliVersion", () => {

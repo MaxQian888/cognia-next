@@ -32,6 +32,8 @@ import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import { useUIStore } from "@/stores/ui"
 import { requestPluginNavigation } from "./navigation-request"
 import { ViewContainerOpenError } from "./view-container-errors"
+import type { PluginViewContainerAPI } from "@cognia/plugin-contract/lib/plugin/api/view-container-api"
+export type { PluginViewContainerAPI } from "@cognia/plugin-contract/lib/plugin/api/view-container-api"
 
 export {
   ViewContainerOpenError,
@@ -103,18 +105,6 @@ export function resolveOwnViewContainer(pluginId: string, containerId: string): 
     containerId,
     `Plugin "${pluginId}" has no registered view container "${containerId}"`
   )
-}
-
-export interface PluginViewContainerAPI {
-  /**
-   * Show one of this plugin's view containers — `rail` or `panel` — in the
-   * shell's middle column. Accepts the local id from `viewsContainers[].id` or
-   * the namespaced `<pluginId>:<id>`. Requires `extension:ui`. Rejects with a
-   * `PermissionError` without that grant, and with a `ViewContainerOpenError`
-   * for an empty id (`invalid-id`), an id nothing registered
-   * (`not-registered`), or another plugin's container (`foreign`).
-   */
-  openViewContainer: (containerId: string) => Promise<void>
 }
 
 export function createViewContainerAPI(pluginId: string): PluginViewContainerAPI {

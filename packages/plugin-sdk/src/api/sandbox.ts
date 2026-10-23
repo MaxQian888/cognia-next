@@ -185,7 +185,7 @@ export class SandboxRuntimeError extends Error {
 export const HOST_FALLBACK_RUNTIME_REF: SandboxRuntimeRef = "sandbox-runtime:host-default"
 
 export type { SandboxResourcePolicy } from "@cognia/agent-config-types"
-export type { E2BBackend, WorkspaceHandle } from "@/lib/github/workspace"
+export type { E2BBackend, WorkspaceHandle } from "@cognia/plugin-contract/lib/github/workspace"
 
 /** Runtime operations are mounted on `ctx.sandbox` for ownership and permission governance. */
-export type { PluginSandboxAPI } from "@/lib/plugin/api/sandbox-api"
+export type { PluginSandboxAPI } from "@cognia/plugin-contract/lib/plugin/api/sandbox-api"

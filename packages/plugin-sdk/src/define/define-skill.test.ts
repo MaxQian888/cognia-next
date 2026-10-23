@@ -6,7 +6,7 @@
  */
 
 import { defineSkill } from "./define-skill"
-import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
+import type { PluginSkillDef } from "@cognia/plugin-contract/types/plugin/plugin-skill"
 
 describe("defineSkill", () => {
   it("returns the same object reference passed in", () => {

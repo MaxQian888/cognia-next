@@ -85,6 +85,8 @@ export type HostConfigCommand = (typeof HOST_CONFIG_COMMANDS)[keyof typeof HOST_
  */
 export const HOST_CONFIG_CAPABILITIES = Object.freeze({
   configModelRoles: "external_agent_config_model_roles",
+  configModelRolesV2: "external_agent_config_model_roles_v2",
+  nativeSubagentControl: "external_agent_native_subagent_control",
   runTurnCogniaModel: "external_agent_run_turn_cognia_model",
   // `external_agent_run_turn` takes `attachments`: images staged through the
   // chunked upload plane, resolved and judged against the Host's own agent.
@@ -286,9 +288,23 @@ export class HostModelRolesUpdateRequiredError extends HostConfigsUnsupportedErr
   }
 }
 
+export class HostNativeSubagentUpdateRequiredError extends HostConfigsUnsupportedError {
+  readonly code = "host-update-required" as const
+  readonly i18nKey = "externalAgent.sessionOperations.nativeHostUpdateRequired" as const
+  constructor() {
+    super("unsupported", HOST_CONFIG_CAPABILITIES.nativeSubagentControl)
+    this.name = "HostNativeSubagentUpdateRequiredError"
+    this.message = this.i18nKey
+  }
+}
+
 /** Whether create/update can carry role overrides to the active Host. */
 export function hostSupportsModelRoles(): boolean {
   return hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.configModelRoles).ok
+}
+
+export function hostSupportsModelRolesV2(): boolean {
+  return hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.configModelRolesV2).ok
 }
 
 /**
@@ -361,6 +377,13 @@ export async function createRemoteHostConfig(
 ): Promise<ExternalAgentConfigRecord> {
   if (config.modelRoles !== undefined && !hostSupportsModelRoles())
     throw new HostModelRolesUpdateRequiredError()
+  if (config.modelRoles?.version === 2 && !hostSupportsModelRolesV2())
+    throw new HostModelRolesUpdateRequiredError()
+  if (
+    config.codexOptions?.stepModelSwitching !== undefined &&
+    !hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.nativeSubagentControl).ok
+  )
+    throw new HostNativeSubagentUpdateRequiredError()
   const result = await callApprovedHostConfigCommand<{ config: ExternalAgentConfigRecord }>(
     HOST_CONFIG_COMMANDS.create,
     {
@@ -380,6 +403,13 @@ export async function updateRemoteHostConfig(input: {
 }): Promise<ExternalAgentConfigRecord> {
   if (input.patch.modelRoles !== undefined && !hostSupportsModelRoles())
     throw new HostModelRolesUpdateRequiredError()
+  if (input.patch.modelRoles?.version === 2 && !hostSupportsModelRolesV2())
+    throw new HostModelRolesUpdateRequiredError()
+  if (
+    input.patch.codexOptions?.stepModelSwitching !== undefined &&
+    !hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.nativeSubagentControl).ok
+  )
+    throw new HostNativeSubagentUpdateRequiredError()
   const result = await callApprovedHostConfigCommand<{ config: ExternalAgentConfigRecord }>(
     HOST_CONFIG_COMMANDS.update,
     input as unknown as Record<string, unknown>

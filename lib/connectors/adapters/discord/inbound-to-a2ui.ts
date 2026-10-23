@@ -12,6 +12,7 @@
 
 import type { InboundA2UIBlock, InboundA2UINode } from "../_shared/inbound-a2ui-types"
 import { flatten } from "../_shared/inbound-a2ui-types"
+import { preserveLineBreaks } from "../_shared/inbound-markdown"
 
 interface DiscordEmbedField {
   name?: string
@@ -42,21 +43,30 @@ interface DiscordComponent {
   placeholder?: string
 }
 
+/**
+ * Discord's message Markdown is close enough to CommonMark to render as is;
+ * only its single-newline line breaks need preserving. Mention tokens
+ * (`<@id>`) are kept verbatim, exactly as the stored text parts hold them,
+ * so a message whose only content is its text compares equal to its parts.
+ */
+function discordMarkdown(text: string): Extract<InboundA2UINode, { kind: "text" }> {
+  return { kind: "text", text: preserveLineBreaks(text), format: "markdown" }
+}
+
 function mapEmbed(embed: DiscordEmbed): InboundA2UINode | null {
   const children: InboundA2UINode[] = []
   if (embed.author?.name) {
     children.push({ kind: "text", text: embed.author.name, emphasis: "muted" })
   }
-  if (embed.description) {
-    children.push({ kind: "text", text: embed.description })
+  if (typeof embed.description === "string" && embed.description) {
+    children.push(discordMarkdown(embed.description))
   }
   if (embed.fields && embed.fields.length > 0) {
     children.push({
       kind: "list",
-      children: embed.fields.map((f) => ({
-        kind: "text" as const,
-        text: `${f.name ?? ""}${f.name && f.value ? ": " : ""}${f.value ?? ""}`,
-      })),
+      children: embed.fields.map((f) =>
+        discordMarkdown(`${f.name ?? ""}${f.name && f.value ? ": " : ""}${f.value ?? ""}`)
+      ),
     })
   }
   if (embed.image?.url) {
@@ -123,23 +133,52 @@ function mapActionRow(row: DiscordComponent): InboundA2UINode | null {
   return { kind: "row", children }
 }
 
-export function discordInboundToA2UI(payload: {
+interface DiscordMessageLike {
   content?: string
   embeds?: DiscordEmbed[]
   components?: DiscordComponent[]
-}): InboundA2UIBlock | null {
-  const body: InboundA2UINode[] = []
-  if (payload.content) {
-    body.push({ kind: "text", text: payload.content })
+}
+
+/** Gateway dispatch the parser stores as `event.raw` (`discord/parse.ts`). */
+interface DiscordDispatchLike {
+  t?: string
+  d?: DiscordMessageLike
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Resolve the message from whatever `projectInboundToA2UI` handed us.
+ * Production passes the gateway dispatch (`{op, t, s, d}`, message under
+ * `d`); tests and legacy callers pass a bare message.
+ */
+function resolveDiscordMessage(payload: unknown): DiscordMessageLike | null {
+  if (!isRecord(payload)) return null
+  if (typeof payload.t === "string" || "op" in payload) {
+    return isRecord(payload.d) ? (payload.d as DiscordMessageLike) : null
   }
-  for (const embed of payload.embeds ?? []) {
-    const node = mapEmbed(embed)
+  return payload as DiscordMessageLike
+}
+
+export function discordInboundToA2UI(
+  payload: DiscordMessageLike | DiscordDispatchLike
+): InboundA2UIBlock | null {
+  const message = resolveDiscordMessage(payload)
+  if (!message) return null
+  const body: InboundA2UINode[] = []
+  if (typeof message.content === "string" && message.content) {
+    body.push(discordMarkdown(message.content))
+  }
+  for (const embed of Array.isArray(message.embeds) ? message.embeds : []) {
+    const node = isRecord(embed) ? mapEmbed(embed) : null
     if (node) body.push(node)
   }
-  for (const row of payload.components ?? []) {
-    const node = mapActionRow(row)
+  for (const row of Array.isArray(message.components) ? message.components : []) {
+    const node = isRecord(row) ? mapActionRow(row) : null
     if (node) body.push(node)
   }
   if (body.length === 0) return null
-  return { v: 1, source: "discord", body, raw: payload }
+  return { v: 1, source: "discord", body, raw: message }
 }

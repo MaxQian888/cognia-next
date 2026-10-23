@@ -44,7 +44,11 @@ import {
   registerSubagentCancellation,
   unregisterSubagentRun,
 } from "./subagent-cancel-registry"
-import { toDispatchErrorEnvelope, renderDispatchOutcomeForModel } from "./dispatch-error"
+import {
+  toDispatchErrorEnvelope,
+  renderDispatchOutcomeForModel,
+  normalizeDispatchBudgetResult,
+} from "./dispatch-error"
 import {
   DEFAULT_DISPATCH_RETRY,
   retryDelayMs,
@@ -336,20 +340,22 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
       // The child works where its parent works (P0 before this: an app-dispatched
       // child started with no cwd, so it never saw the project's CLAUDE.md).
       ...(effectiveCaller.cwd ? { cwd: effectiveCaller.cwd } : {}),
-    }).catch((err): PluginSubagentDispatchResult => {
-      const envelope = toDispatchErrorEnvelope(err, {
-        aborted: abort.signal.aborted,
-        partialText: tracker.partialText() || undefined,
-      })
-      return {
-        text: envelope.message,
-        channel: "text",
-        toolsAvailable: false,
-        runId: childRunId,
-        finishReason: envelope.code === "aborted" ? "cancelled" : "error",
-        errorEnvelope: envelope,
-      }
     })
+      .then((result) => normalizeDispatchBudgetResult({ ...result, runId: childRunId }))
+      .catch((err): PluginSubagentDispatchResult => {
+        const envelope = toDispatchErrorEnvelope(err, {
+          aborted: abort.signal.aborted,
+          partialText: tracker.partialText() || undefined,
+        })
+        return {
+          text: envelope.message,
+          channel: "text",
+          toolsAvailable: false,
+          runId: childRunId,
+          finishReason: envelope.code === "aborted" ? "cancelled" : "error",
+          errorEnvelope: envelope,
+        }
+      })
 
   // Terminal store recording happens exactly once, AFTER the retry loop
   // settles — a retried attempt must never record `failed` first.

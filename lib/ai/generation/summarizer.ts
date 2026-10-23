@@ -41,7 +41,11 @@ export const CONVERSATION_SUMMARY_PROMPT = definePrompt({
     "You summarize a chat conversation so it can seed a new branch of the same " +
     "discussion. Write a concise, neutral summary that preserves: the user's " +
     "goal, key facts and decisions, any constraints, and open / unresolved " +
-    "threads. Use short paragraphs or bullet points. Do not add a preamble like " +
+    "threads. For code research, preserve completed investigations, inspected " +
+    "file:line ranges and their verified findings, failed searches, remaining " +
+    "questions, and the next action. Clearly separate completed work from work " +
+    "still needed so the next agent does not restart the investigation. " +
+    "Use short paragraphs or bullet points. Do not add a preamble like " +
     "'Here is a summary'. Write in the same language as the conversation.",
   outputContract: "Free-text summary; it becomes the authoritative record after compaction.",
   maxChars: 8_000,

@@ -54,6 +54,8 @@ pub struct AutomationState {
     /// pending `oneshot::Receiver` via the `automation_consent_respond`
     /// command.
     pub consent: ConsentBroker,
+    /// Local IPC delivery identities are separate from approval/session trust.
+    pub invocations: super::invocation::InvocationHistory,
     /// ADR-0028 / T5 — per-action policy applied AFTER the permission
     /// gate resolves Allow for a `ComputerUse` surface call. Empty policy
     /// (the default) is a fast-path no-op so installs that never edit
@@ -111,6 +113,7 @@ impl AutomationState {
             gate,
             audit,
             consent,
+            invocations: super::invocation::InvocationHistory::default(),
             policy,
             virtual_display,
             cua,
@@ -329,6 +332,28 @@ pub(crate) fn record_policy_deny(
     (entry, err)
 }
 
+/// Refuse a repeated delivery before it can create another prompt or action.
+#[cfg(feature = "tauri-host")]
+pub(crate) fn reserve_local_invocation<'a>(
+    state: &'a AutomationState,
+    request: &tauri::ipc::Request<'_>,
+) -> std::result::Result<Option<super::invocation::InvocationLease<'a>>, String> {
+    let id = request
+        .headers()
+        .get(super::invocation::INVOCATION_HEADER)
+        .map(|value| value.to_str())
+        .transpose()
+        .map_err(|_| {
+            err_to_string(&AutomationError::PermissionDenied {
+                reason: "invalid automation invocation identity".into(),
+            })
+        })?;
+    state
+        .invocations
+        .reserve(id)
+        .map_err(|error| err_to_string(&error))
+}
+
 /// Thin shim over the shared `dispatcher::run_gated` pipeline. Kept as a macro
 /// so each `desktop_*` command can pass its `state.handle.METHOD(..).await`
 /// expression inline (the args are `.clone()`d, so the wrapping closure borrows
@@ -372,9 +397,11 @@ macro_rules! command_body {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_capture_frontmost_window(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
 ) -> std::result::Result<FrontmostWindowCapture, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     // Without the macOS Screen Recording grant a window capture comes back
     // blank; say so instead of OCR-ing an empty frame. Never request the
     // grant implicitly (ADR-0095): the renderer links to System Settings.
@@ -435,10 +462,12 @@ pub async fn desktop_capabilities(
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_get_focus(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     ctx: Option<CallContext>,
 ) -> std::result::Result<ElementInfo, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = ctx.unwrap_or_default();
     command_body!(
         app,
@@ -455,11 +484,13 @@ pub async fn desktop_get_focus(
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_subscribe_events(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     filter: EventFilter,
     ctx: Option<CallContext>,
 ) -> std::result::Result<SubscriptionId, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = ctx.unwrap_or_default();
     command_body!(
         app,
@@ -509,10 +540,12 @@ pub struct ReadTreeArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_list_apps(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     ctx: Option<CallContext>,
 ) -> std::result::Result<Vec<super::session::ResolvedApplication>, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = ctx.unwrap_or_default();
     command_body!(
         app,
@@ -540,10 +573,12 @@ pub struct GetAppStateArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_get_app_state(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: GetAppStateArgs,
 ) -> std::result::Result<UiStateRevision, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let session_id = args.session_id;
     let locator = args.locator;
@@ -634,10 +669,12 @@ fn default_query_limit() -> usize {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_query_elements(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: QueryElementsArgs,
 ) -> std::result::Result<Vec<UiTreeNode>, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let session_id = args.session_id;
     let lineage_id = args.lineage_id;
@@ -690,10 +727,12 @@ pub struct ZoomArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_zoom(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: ZoomArgs,
 ) -> std::result::Result<super::session::ZoomedRegion, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let session_id = args.session_id;
     let lineage_id = args.lineage_id;
@@ -738,10 +777,12 @@ fn default_expand_limit() -> usize {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_expand_element(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: ExpandElementArgs,
 ) -> std::result::Result<ExpandedElements, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let handle = args.handle;
     let continuation_token = args.continuation_token;
@@ -777,10 +818,12 @@ pub struct PerformActionArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_perform_action(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: PerformActionArgs,
 ) -> std::result::Result<ActionResult, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let request = args.request;
     let turn_binding = ctx.turn_key.clone().unwrap_or_default();
@@ -807,10 +850,12 @@ pub async fn desktop_perform_action(
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_read_tree(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: ReadTreeArgs,
 ) -> std::result::Result<Vec<ElementInfo>, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let root = args.root;
     let opts = args.opts;
@@ -841,10 +886,12 @@ pub struct FindArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_find(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: FindArgs,
 ) -> std::result::Result<Option<ElementRef>, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let locator = args.locator;
     command_body!(
@@ -874,10 +921,12 @@ pub struct ScreenshotArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_screenshot(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: ScreenshotArgs,
 ) -> std::result::Result<Screenshot, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let opts = args.opts;
     // ADR-0020 W1 — redact when the operator opted in AND a credential
@@ -939,10 +988,12 @@ pub struct ClickArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_click(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: ClickArgs,
 ) -> std::result::Result<(), String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let target = args.target;
     let opts = args.opts;
@@ -975,10 +1026,12 @@ pub struct TypeArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_type(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: TypeArgs,
 ) -> std::result::Result<(), String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let text = args.text;
     let opts = args.opts;
@@ -1102,10 +1155,12 @@ pub struct PasteArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_paste(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: PasteArgs,
 ) -> std::result::Result<(), String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let text = args.text;
     if ctx.remote_connection_id().is_some() {
@@ -1188,10 +1243,12 @@ fn shell_escape(s: &str) -> String {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_launch_app(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: LaunchAppArgs,
 ) -> std::result::Result<(), String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let target_app = args.app;
     let action = args.action;
@@ -1233,10 +1290,12 @@ pub struct KeysArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_keys(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: KeysArgs,
 ) -> std::result::Result<(), String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let chord = args.chord;
     command_body!(
@@ -1268,10 +1327,12 @@ pub struct InvokePatternArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_invoke_pattern(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: InvokePatternArgs,
 ) -> std::result::Result<serde_json::Value, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let target = args.target;
     let pattern = args.pattern;
@@ -1302,11 +1363,13 @@ pub async fn desktop_invoke_pattern(
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn automation_execute(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     action: Action,
     ctx: Option<CallContext>,
 ) -> std::result::Result<ActionOutput, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = ctx.unwrap_or_default();
     // Derive click coords from the action's target so the T5 policy's
     // forbidden-region check fires without the renderer passing them; fall
@@ -1620,10 +1683,12 @@ pub struct MouseMoveArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_mouse_move(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: MouseMoveArgs,
 ) -> std::result::Result<(), String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let point = args.point;
     command_body!(
@@ -1650,10 +1715,12 @@ pub struct DragArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_drag(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: DragArgs,
 ) -> std::result::Result<(), String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let from = args.from;
     let to = args.to;
@@ -1688,10 +1755,12 @@ pub struct ScrollArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_scroll(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: ScrollArgs,
 ) -> std::result::Result<(), String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let target = args.target;
     let opts = args.opts;
@@ -1723,10 +1792,12 @@ pub struct HoldKeyArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_hold_key(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: HoldKeyArgs,
 ) -> std::result::Result<(), String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let chord = args.chord;
     let duration_ms = args.duration_ms;
@@ -1758,10 +1829,12 @@ pub struct MouseButtonArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_mouse_button(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: MouseButtonArgs,
 ) -> std::result::Result<(), String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let button = args.button;
     let transition = args.transition;
@@ -1793,10 +1866,12 @@ pub struct WindowOpArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_window_op(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: WindowOpArgs,
 ) -> std::result::Result<(), String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let target = args.target;
     let op = args.op;
@@ -1819,10 +1894,12 @@ pub async fn desktop_window_op(
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_cursor_position(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     ctx: Option<CallContext>,
 ) -> std::result::Result<Point, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = ctx.unwrap_or_default();
     command_body!(
         app,
@@ -1845,10 +1922,12 @@ pub struct PickAtPointArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_pick_at_point(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: PickAtPointArgs,
 ) -> std::result::Result<ElementInfo, String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     let point = args.point;
     command_body!(
@@ -1887,6 +1966,21 @@ pub struct ConsentRespondArgs {
     /// broker also clamps the ceiling, so this is a request, not a mandate.
     #[serde(default)]
     pub grant_duration_ms: Option<u64>,
+}
+
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn automation_consent_pending(
+    state: State<'_, AutomationState>,
+) -> std::result::Result<Vec<super::consent::ConsentRequestEvent>, String> {
+    Ok(automation_consent_pending_for_broker(&state.consent))
+}
+
+/// Read-only recovery for a renderer whose listener missed the initial emit.
+pub fn automation_consent_pending_for_broker(
+    broker: &ConsentBroker,
+) -> Vec<super::consent::ConsentRequestEvent> {
+    broker.pending_requests()
 }
 
 #[cfg(feature = "tauri-host")]
@@ -1982,10 +2076,12 @@ pub struct PickSessionStartArgs {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn desktop_pick_session_start(
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, AutomationState>,
     args: PickSessionStartArgs,
 ) -> std::result::Result<(), String> {
+    let _invocation = reserve_local_invocation(state.inner(), &request)?;
     let ctx = args.ctx;
     command_body!(
         app,
@@ -2042,6 +2138,42 @@ pub async fn automation_drain_init_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn pending_snapshot_does_not_answer_or_grant_a_request() {
+        let broker = ConsentBroker::new();
+        let prompt = super::super::permission::ConsentPrompt {
+            command: "click".into(),
+            surface: Surface::ComputerUse,
+            plugin_id: None,
+            process_name: None,
+            window_title: None,
+            command_detail: None,
+            session_key: None,
+        };
+        let expected = prompt.clone();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let request_broker = broker.clone();
+        let task = tokio::spawn(async move {
+            request_broker
+                .request_with_emitter(prompt, 30_000, None, move |event| {
+                    tx.send(event.clone()).map_err(|error| error.to_string())
+                })
+                .await
+        });
+        let event = rx.recv().await.unwrap();
+        for _ in 0..2 {
+            let pending = automation_consent_pending_for_broker(&broker);
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].id, event.id);
+            assert!(pending[0].timeout_ms <= event.timeout_ms);
+            assert!(!task.is_finished());
+            assert!(!broker.has_session_grant(&expected));
+        }
+        broker.resolve_registered(&event.id, false, false, None);
+        assert!(!task.await.unwrap());
+        assert!(automation_consent_pending_for_broker(&broker).is_empty());
+    }
 
     fn ring() -> AuditRing {
         AuditRing::new()

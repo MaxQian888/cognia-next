@@ -11,7 +11,7 @@
  * and the phone's Glance drawer with its own components.
  */
 
-import type { PluginGlanceModuleInput } from "@/types/plugin/plugin-glance"
+import type { PluginGlanceModuleInput } from "@cognia/plugin-contract/types/plugin/plugin-glance"
 
 export function defineGlanceModule(module: PluginGlanceModuleInput): PluginGlanceModuleInput {
   return module

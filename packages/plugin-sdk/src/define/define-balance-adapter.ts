@@ -8,7 +8,7 @@
  * `subscription_authed_get` performs the HTTP.
  */
 
-import type { PluginBalanceAdapterDef } from "@/types/plugin/plugin-balance-adapter"
+import type { PluginBalanceAdapterDef } from "@cognia/plugin-contract/types/plugin/plugin-balance-adapter"
 
 export function defineBalanceAdapter(def: PluginBalanceAdapterDef): PluginBalanceAdapterDef {
   return def

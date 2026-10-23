@@ -135,6 +135,11 @@ jobs:
             pnpm build:packages
             pnpm sidecar:webclone:build
           fi
+      # Host suites that drive a real first-party plugin load its shipped
+      # built-in chunk (lib/plugin/core/builtin-artifact-fixture.ts), never
+      # plugin source, so the shards need the staged set.
+      - name: Stage plugin artifacts for Jest
+        run: node scripts/build/stage-plugin-artifacts.mjs --web-only
       - name: Save compiled workspace prerequisites cache
         if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master')
         uses: actions/cache/save@v6
@@ -211,6 +216,7 @@ jobs:
           path: |
             packages/*/dist/
             sidecar/webclone/dist/
+            public/_cognia/builtin-plugins/
             .cache/jest/native-helpers.tar
           if-no-files-found: error
           retention-days: 1

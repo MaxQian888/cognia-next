@@ -360,9 +360,11 @@ describe("materialize is deliberately dormant (Working Rule 7)", () => {
       .map((line) => line.replace(/^\.\//, ""))
 
     const ALLOWED = new Set([
-      // The definition, the two codecs that declare it, and `lib/claude/replay.ts`
+      // The definition (re-exported from the plugin contract, which declares the
+      // codec type), the two codecs that declare it, and `lib/claude/replay.ts`
       // which only mentions it in a comment to disambiguate its own helper.
       "lib/session-import/codec-types.ts",
+      "packages/plugin-contract/src/lib/session-import/codec-types.ts",
       "lib/session-import/codec-types.test.ts",
       "lib/session-import/codecs/claude-code-codec.ts",
       "lib/session-import/codecs/claude-code-codec.test.ts",

@@ -45,6 +45,7 @@ export const VENDOR_DOC = "VENDOR.md"
 export const VENDOR_EXACT_PATHS = Object.freeze([
   "package.json",
   "package-lock.json",
+  "prepare-plugin.mjs",
   "tsconfig.base.json",
   "tsconfig.json",
   "README.md",
@@ -286,8 +287,8 @@ Copied (exact files, then rules):
 
 ${rules}
 
-\`packages/contracts/schemas/contracts.schema.json\` is the one addition to the
-original selection: \`packages/contracts/src/validators.ts\` reads it at module
+\`prepare-plugin.mjs\` is required by the package's link-free dependency preparation
+command. \`packages/contracts/schemas/contracts.schema.json\` is also required: \`packages/contracts/src/validators.ts\` reads it at module
 initialization, so the CLI and the Pi extension cannot start without it.
 
 Never copied, even when a rule above would match: any path segment named

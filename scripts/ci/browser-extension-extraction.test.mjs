@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -10,6 +10,11 @@ import test from "node:test"
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), "utf8")
 
 test("the extracted extension is not a product workspace, version target or local runner", async () => {
+  for (const directory of ["browser-extension", "tests/e2e/browser-extension"]) {
+    await assert.rejects(access(new URL(`../../${directory}`, import.meta.url)), {
+      code: "ENOENT",
+    })
+  }
   const pkg = JSON.parse(await read("package.json"))
   assert.equal(pkg.scripts["browser-ext:build"], undefined)
   assert.equal(pkg.scripts["browser-ext:typecheck"], undefined)

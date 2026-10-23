@@ -295,3 +295,66 @@ describe("readGoogleSpreadsheet", () => {
     expect(scoped.urls.some((u) => u.includes("batchGet"))).toBe(false)
   })
 })
+
+describe("Drive error and cancellation regressions", () => {
+  it.each(["userRateLimitExceeded", "rateLimitExceeded", "dailyLimitExceeded"])(
+    "recognizes Drive quota reason %s",
+    (reason) => {
+      expect(
+        mapGoogleStatus({
+          status: 403,
+          headers: {},
+          body: JSON.stringify({
+            error: { errors: [{ reason }], message: "quota" },
+          }),
+        })
+      ).toMatchObject({ code: "rateLimited" })
+    }
+  )
+
+  it("keeps insufficient permissions classified as permissions", () => {
+    expect(
+      mapGoogleStatus({
+        status: 403,
+        headers: {},
+        body: JSON.stringify({
+          error: { errors: [{ reason: "insufficientFilePermissions" }] },
+        }),
+      })
+    ).toMatchObject({ code: "noPermission" })
+  })
+
+  it("does not send a pre-aborted search or export", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const http = jest.fn(async () => ({ status: 200, headers: {}, body: '{"files":[]}' }))
+    const ctx = { accessToken: "token", signal: controller.signal, http }
+    await expect(searchGoogleDocs(ctx, "q", 20)).rejects.toMatchObject({ name: "AbortError" })
+    await expect(exportGoogleDoc(ctx, ID)).rejects.toMatchObject({ name: "AbortError" })
+    expect(http).not.toHaveBeenCalled()
+  })
+
+  it("forwards cancellation and rejects a response arriving after cancellation", async () => {
+    const controller = new AbortController()
+    const http: GoogleHttpFn = jest.fn(async () => {
+      controller.abort()
+      return { status: 200, headers: {}, body: '{"files":[]}' }
+    })
+    await expect(
+      searchGoogleDocs({ http, accessToken: "token", signal: controller.signal }, "q", 20)
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(http).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }))
+  })
+})
+
+it.each([
+  ["invalid", "noPermission"],
+  [[null, { reason: "userRateLimitExceeded" }], "rateLimited"],
+])(
+  "handles malformed Drive error entries without losing HTTP classification: %j",
+  (errors, code) => {
+    expect(
+      mapGoogleStatus({ status: 403, headers: {}, body: JSON.stringify({ error: { errors } }) })
+    ).toMatchObject({ code })
+  }
+)

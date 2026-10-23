@@ -9,6 +9,7 @@ import {
   makeWrappedEmit,
   envelopeEmitterParams,
   restartReason,
+  createSessionSendQueue,
   routeSendIntoLiveLoop,
   routeRestore,
   routeClose,
@@ -144,7 +145,10 @@ export function createAgentHost({
   const featureCalls = createFeatureCallHandler({ emit, hostRpc })
 
   const sessions = new Map<string, HostSession>()
+  const closingSessions = new Set<Promise<void>>()
+  let sessionCleanupFailed = false
   const commandLedger = new Map<string, Map<string, boolean>>()
+  const prepareSessionSend = createSessionSendQueue()
 
   function startSession(sessionId: string, firstPrompt: Prompt, sendOptions: SendOptions = {}) {
     // Wired after `dispatch` returns so the wrapped emitter can verify it still
@@ -187,6 +191,29 @@ export function createAgentHost({
   }
 
   function handleSend(msg: HostMessage) {
+    if (!msg.sessionId) return handlePreparedSend(msg)
+    const sessionId = msg.sessionId
+    return prepareSessionSend(sessionId, async () => {
+      const owner = sessions.get(sessionId)
+      try {
+        await handlePreparedSend(msg)
+      } catch (error) {
+        // A close can replace the runtime during an awaited model switch.
+        // Report this send's error without retiring the replacement by id.
+        if (sessions.get(sessionId) === owner) handleClose({ sessionId })
+        const reason = errorMessage(error)
+        log("error", `send failed: ${reason}`)
+        emit({
+          type: "session_ended",
+          sessionId,
+          ...(msg.options?.turnId ? { turnId: msg.options.turnId } : {}),
+          error: `send failed: ${reason}`,
+        })
+      }
+    })
+  }
+
+  async function handlePreparedSend(msg: HostMessage) {
     const { sessionId, prompt, options } = msg
     if (!sessionId) {
       log("error", "send: sessionId required")
@@ -248,7 +275,24 @@ export function createAgentHost({
         startSession(sessionId, prompt, options)
         return
       }
-      routeSendIntoLiveLoop(existing, options, prompt)
+      const admitted = await routeSendIntoLiveLoop(
+        existing,
+        options,
+        prompt,
+        () => sessions.get(sessionId) === existing
+      )
+      if (!admitted) {
+        emit({
+          type: "session_ended",
+          sessionId,
+          errorCode: "RUNTIME_SESSION_NOT_RETAINED",
+          error: "runtime_session_not_retained: runtime changed while preparing the send.",
+          ...(options?.turnId ? { turnId: options.turnId } : {}),
+          ...(options?.transcriptInvalidationId
+            ? { transcriptInvalidationId: options.transcriptInvalidationId }
+            : {}),
+        })
+      }
     } else {
       startSession(sessionId, prompt, options)
     }
@@ -414,6 +458,7 @@ export function createAgentHost({
         // an unreviewed write into the permission store.
         suggestions: pending.suggestions,
         suppressAlwaysAllowRule: pending.suppressAlwaysAllowRule as boolean | undefined,
+        requiresExplicitConsent: pending.requiresExplicitConsent === true,
         interrupt,
         rich: Boolean(s.sendOptions?.execution),
       })
@@ -476,7 +521,16 @@ export function createAgentHost({
   }
 
   function handleClose(msg: { sessionId?: string }) {
+    const closed = sessions.get(msg.sessionId!)?.closed
     routeClose(sessions, msg, log)
+    if (closed) {
+      const cleanup = closed.catch((error) => {
+        sessionCleanupFailed = true
+        log("error", `session cleanup failed: ${errorMessage(error)}`)
+      })
+      closingSessions.add(cleanup)
+      void cleanup.finally(() => closingSessions.delete(cleanup))
+    }
   }
 
   async function smoke() {
@@ -622,8 +676,9 @@ export function createAgentHost({
       for (const id of Array.from(sessions.keys())) {
         handleClose({ sessionId: id })
       }
+      await Promise.allSettled([...closingSessions])
       await shutdownHostTelemetry()
-      process.exit(0)
+      process.exit(sessionCleanupFailed ? 1 : 0)
     })
 
     const { sdkVersion, sidecarVersion } = readVersionInfo()

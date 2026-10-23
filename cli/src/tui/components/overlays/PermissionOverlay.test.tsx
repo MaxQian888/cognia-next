@@ -118,6 +118,124 @@ describe("permissionDetail", () => {
 describe("PermissionOverlay", () => {
   beforeEach(() => __resetInk())
 
+  it.each(["/exit\r", "/exit\n", "/exit\r\n"])(
+    "consumes a raw combined exit/Enter packet %j",
+    (packet) => {
+      const onExit = jest.fn()
+      const onResolve = jest.fn()
+      render(
+        <TuiInputProvider>
+          <PermissionOverlay
+            req={req}
+            choices={DEFAULT_PERMISSION_CHOICES}
+            index={0}
+            onMove={() => {}}
+            onResolve={onResolve}
+            onExit={onExit}
+          />
+        </TuiInputProvider>
+      )
+      act(() => __fireInput(packet))
+      expect(onExit).toHaveBeenCalledTimes(1)
+      expect(onResolve).not.toHaveBeenCalled()
+    }
+  )
+
+  it("consumes an exit packet and Enter before React renders without approving", () => {
+    const onExit = jest.fn()
+    const onResolve = jest.fn()
+    render(
+      <TuiInputProvider>
+        <PermissionOverlay
+          req={req}
+          choices={DEFAULT_PERMISSION_CHOICES}
+          index={0}
+          onMove={() => {}}
+          onResolve={onResolve}
+          onExit={onExit}
+        />
+      </TuiInputProvider>
+    )
+    act(() => {
+      __fireInput("/exit")
+      __fireInput("", { return: true })
+    })
+    expect(onExit).toHaveBeenCalledTimes(1)
+    expect(onResolve).not.toHaveBeenCalled()
+  })
+
+  it("keeps an exit command safe when the pending approval is replaced", () => {
+    const onExit = jest.fn()
+    const onResolve = jest.fn()
+    const view = (request: PermissionRequestEvent) => (
+      <TuiInputProvider>
+        <PermissionOverlay
+          req={request}
+          choices={DEFAULT_PERMISSION_CHOICES}
+          index={0}
+          onMove={() => {}}
+          onResolve={onResolve}
+          onExit={onExit}
+        />
+      </TuiInputProvider>
+    )
+    const { rerender } = render(view(req))
+    act(() => __fireInput("/ex"))
+    rerender(view({ ...req, toolName: "write" }))
+    act(() => {
+      __fireInput("it")
+      __fireInput("", { return: true })
+    })
+    expect(onExit).toHaveBeenCalledTimes(1)
+    expect(onResolve).not.toHaveBeenCalled()
+  })
+
+  it("runs an explicit /exit command without approving the pending tool", () => {
+    const onExit = jest.fn()
+    const onResolve = jest.fn()
+    const { container } = render(
+      <TuiInputProvider>
+        <PermissionOverlay
+          req={req}
+          choices={DEFAULT_PERMISSION_CHOICES}
+          index={0}
+          onMove={() => {}}
+          onResolve={onResolve}
+          onExit={onExit}
+        />
+      </TuiInputProvider>
+    )
+    for (const char of "/exit") act(() => __fireInput(char))
+    expect(container.textContent).toContain("› /exit")
+    act(() => __fireInput("", { return: true }))
+    expect(onExit).toHaveBeenCalledTimes(1)
+    expect(onResolve).not.toHaveBeenCalled()
+  })
+
+  it("does not turn an unfinished or invalid slash command into approval", () => {
+    const onResolve = jest.fn()
+    const onExit = jest.fn()
+    render(
+      <TuiInputProvider>
+        <PermissionOverlay
+          req={req}
+          choices={DEFAULT_PERMISSION_CHOICES}
+          index={0}
+          onMove={() => {}}
+          onResolve={onResolve}
+          onExit={onExit}
+        />
+      </TuiInputProvider>
+    )
+    act(() => __fireInput("/ex"))
+    act(() => __fireInput("", { return: true }))
+    expect(onResolve).not.toHaveBeenCalled()
+    expect(onExit).not.toHaveBeenCalled()
+    act(() => __fireInput("", { escape: true }))
+    act(() => __fireInput("", { return: true }))
+    expect(onResolve).toHaveBeenCalledWith({ decision: "allow" })
+  })
+
   it("strips the namespace and shows the risk level", () => {
     const { container } = render(
       <PermissionOverlay

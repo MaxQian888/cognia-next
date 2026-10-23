@@ -15,7 +15,7 @@
  *   })
  */
 
-import type { PluginAgentToolInput } from "@/types/plugin/plugin-agent-sdk"
+import type { PluginAgentToolInput } from "@cognia/plugin-contract/types/plugin/plugin-agent-sdk"
 
 export function defineAgentTool(tool: PluginAgentToolInput): PluginAgentToolInput {
   return tool

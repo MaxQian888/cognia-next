@@ -38,6 +38,7 @@ describe("gatewayModelSlots", () => {
       const slots = gatewayModelSlots(source)
       expect(slots.map((slot) => slot.id)).toEqual(["subagent.default"])
       expect(slots[0].reasoningEfforts).toEqual(["minimal", "low", "medium", "high", "xhigh"])
+      expect(slots[0].supportsSpawnModelOverrides).toBe(true)
       expect(slots[0].evidence).toContain(">= 0.145")
       expect(slots[0].evidence).toContain("[agents]")
       expect(slots[0].evidence).toContain("model_catalog_json")
@@ -82,4 +83,23 @@ describe("gatewayModelSlots", () => {
     ])
       expect(slot.evidence).toMatch(/v\d|rust-v\d/)
   })
+})
+
+it("exposes Pi child defaults only for a detected compatible executor", () => {
+  const source = config("pi-rpc", "pi-rpc")
+  expect(ids(source)).toEqual([])
+  for (const [family, version] of [
+    ["nico", "0.80.0"],
+    ["gotgenes", "19.2.2"],
+  ]) {
+    const detected = {
+      ...source,
+      metadata: { ...source.metadata, cogniaPiSubagents: { family, version } },
+    }
+    expect(ids(detected)).toEqual(["subagent.default"])
+    expect(gatewayModelSlots(detected)[0].evidence).toContain(version)
+    expect(
+      ids({ ...detected, metadata: { cogniaPiSubagents: { family, version: "999.0.0" } } })
+    ).toEqual([])
+  }
 })

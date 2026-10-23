@@ -14,7 +14,7 @@
  *   })
  */
 
-import type { PluginWallpaperContribution } from "@/types/plugin"
+import type { PluginWallpaperContribution } from "@cognia/plugin-contract/types/plugin/index"
 
 export function defineWallpaper(
   wallpaper: PluginWallpaperContribution

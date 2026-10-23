@@ -10,6 +10,7 @@ jest.mock("sonner", () => ({
     warning: jest.fn(),
     message: jest.fn(),
     loading: jest.fn(),
+    dismiss: jest.fn(),
   },
 }))
 jest.mock("@cognia/logging", () => ({ loggers: { chat: { warn: jest.fn(), error: jest.fn() } } }))
@@ -32,7 +33,12 @@ jest.mock("@/stores/chat", () => ({
   useChatStore: { getState: () => ({ activeSessionId: null }) },
 }))
 jest.mock("@/hooks/chat/use-remote-doc-staging", () => ({
-  useRemoteDocStaging: () => async () => undefined,
+  useRemoteDocStaging: jest.fn(() => async () => undefined),
+}))
+jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
+jest.mock("@/lib/docs-providers", () => ({
+  ...jest.requireActual("@/lib/docs-providers/types"),
+  getDocsProvider: jest.fn(),
 }))
 
 import { toast } from "sonner"
@@ -44,6 +50,8 @@ import {
   getCommand,
 } from "@/lib/plugin/commands/registry"
 import { collectDroppedFiles } from "@/lib/chat/drop-entries"
+import { useRemoteDocStaging } from "@/hooks/chat/use-remote-doc-staging"
+import { getDocsProvider } from "@/lib/docs-providers"
 
 const prepared = prepareComposerAttachments as jest.Mock
 const snapshot = captureSmartSnapshotFiles as jest.Mock
@@ -114,6 +122,7 @@ function fileDrag(types: string[]) {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  jest.mocked(useRemoteDocStaging).mockImplementation(() => async () => null)
   __resetCommandRegistryForTesting()
   prepared.mockResolvedValue({
     files: [],
@@ -129,6 +138,133 @@ afterEach(() => {
 })
 
 describe("acceptFiles — the single gate", () => {
+  it("checks destination again after asynchronous identity validation, without announcing or adding", async () => {
+    const f = file("doc.md")
+    prepared.mockResolvedValue({
+      files: [f],
+      unsupportedCount: 0,
+      tooLargeCount: 0,
+      optimizedCount: 0,
+    })
+    let finish!: (valid: boolean) => void
+    let current = true
+    const beforeCommit = jest.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve
+        })
+    )
+    const { view, add, expectCitation } = mount()
+    let pending!: Promise<File[]>
+    act(() => {
+      pending = view.result.current.acceptFiles([f], {
+        isCurrent: () => current,
+        beforeCommit,
+        citations: new Map([[f, { kind: "doc", id: "doc" }]]),
+      })
+    })
+    await waitFor(() => expect(beforeCommit).toHaveBeenCalled())
+    current = false
+    await act(async () => {
+      finish(true)
+      expect(await pending).toEqual([])
+    })
+    expect(add).not.toHaveBeenCalled()
+    expect(expectCitation).not.toHaveBeenCalled()
+  })
+
+  it("real remote staging discards a fetch after changing conversations", async () => {
+    jest
+      .mocked(useRemoteDocStaging)
+      .mockImplementation(
+        jest.requireActual("@/hooks/chat/use-remote-doc-staging").useRemoteDocStaging
+      )
+    let finish!: (value: unknown) => void
+    jest.mocked(getDocsProvider).mockReturnValue({
+      id: "test",
+      fetch: () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    } as never)
+    const { view, root, add, expectCitation } = mount()
+    root.dataset.composerSession = "old"
+    let pending!: Promise<File | null>
+    act(() => {
+      pending = view.result.current.stageRemoteDoc({
+        providerId: "test",
+        accountId: "a",
+        doc: { providerId: "test", kind: "doc", id: "id", title: "Doc" },
+      })
+    })
+    root.dataset.composerSession = "new"
+    await act(async () => {
+      finish({
+        ref: { providerId: "test", id: "id", kind: "doc", title: "Doc" },
+        title: "Doc",
+        text: "body",
+        format: "text",
+      })
+      expect(await pending).toBeNull()
+    })
+    expect(add).not.toHaveBeenCalled()
+    expect(expectCitation).not.toHaveBeenCalled()
+  })
+
+  it("real remote staging rejects an epoch change during preparation and keeps a concurrent local attachment", async () => {
+    jest
+      .mocked(useRemoteDocStaging)
+      .mockImplementation(
+        jest.requireActual("@/hooks/chat/use-remote-doc-staging").useRemoteDocStaging
+      )
+    let epoch = "old"
+    jest.mocked(getDocsProvider).mockReturnValue({
+      id: "test",
+      listAccounts: async () => [{ id: "a", label: "A", authorizationEpoch: epoch }],
+      fetch: async (ref: unknown) => ({ ref, title: "Doc", text: "body", format: "text" }),
+    } as never)
+    let release!: (value: unknown) => void
+    prepared.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    const { view, add, expectCitation } = mount()
+    let pending!: Promise<File | null>
+    act(() => {
+      pending = view.result.current.stageRemoteDoc({
+        providerId: "test",
+        accountId: "a",
+        doc: {
+          providerId: "test",
+          kind: "doc",
+          id: "id",
+          title: "Doc",
+          accountBinding: { accountId: "a", authorizationEpoch: "old" },
+        },
+      })
+    })
+    await waitFor(() => expect(prepared).toHaveBeenCalledTimes(1))
+    const remote = prepared.mock.calls[0][0][0] as File
+    const local = file("local.txt")
+    prepared.mockResolvedValue({
+      files: [local],
+      unsupportedCount: 0,
+      tooLargeCount: 0,
+      optimizedCount: 0,
+    })
+    await act(async () => {
+      await view.result.current.acceptFiles([local])
+    })
+    epoch = "new"
+    await act(async () => {
+      release({ files: [remote], unsupportedCount: 0, tooLargeCount: 0, optimizedCount: 0 })
+      expect(await pending).toBeNull()
+    })
+    expect(add.mock.calls).toEqual([[[local]]])
+    expect(expectCitation).not.toHaveBeenCalled()
+  })
   it("does not prepare files for a destination that already left", async () => {
     const { view, add } = mount()
     await expect(

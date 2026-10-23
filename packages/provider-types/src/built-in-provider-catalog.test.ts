@@ -13,6 +13,16 @@ import {
 } from "./built-in-provider-catalog"
 
 describe("built-in provider catalog", () => {
+  it("exposes Magpie as a dynamic gateway without assuming a local inference engine", () => {
+    expect(getBuiltInProviderCatalogEntry("magpie")).toMatchObject({
+      type: "cloud",
+      category: "aggregator",
+      protocol: "openai",
+      defaultBaseURL: "http://127.0.0.1:3425/v1",
+      placeholderApiKey: "magpie-cognia",
+      models: [],
+    })
+  })
   it("keeps ids, entries, and lookup helpers aligned", () => {
     const catalog = getBuiltInProviderCatalog()
 

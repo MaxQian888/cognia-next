@@ -13,9 +13,10 @@
  * runner subscribes to that channel itself, sends the control message, and
  * resolves when the boundary arrives (re-using `compactBoundaryFromInner` so the
  * wire shape stays single-sourced), when the sidecar reports that no boundary
- * will follow (see {@link manualCompactOutcomeFromInner}), or after a timeout,
- * so a provider that never answers can't hang the UI. Pure + fully injected
- * for tests.
+ * will follow (see {@link manualCompactOutcomeFromInner}), or when its owner
+ * cancels observation. Only an explicit observation deadline ends this wait;
+ * the sidecar retains provider cancellation and idle protection. Pure + fully
+ * injected for tests.
  */
 import { compactBoundaryFromInner, type CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 
@@ -84,7 +85,7 @@ export interface RunManualCompactDeps {
   onNotice: (message: string) => void
   /** Stop waiting when the owning session is closed or replaced. */
   signal?: AbortSignal
-  /** How long to wait for the boundary before giving up. Default 30s. */
+  /** Explicit observation deadline. Default: keep observing; report status at 30s. */
   timeoutMs?: number
   /** Injectable timers (tests pass fakes; defaults to global timers). */
   setTimer?: (fn: () => void, ms: number) => unknown
@@ -93,7 +94,8 @@ export interface RunManualCompactDeps {
 
 /**
  * Drive one manual compaction. Resolves when the boundary is observed, the
- * timeout elapses, or sending the control message fails. Never rejects.
+ * explicit deadline elapses, the owner cancels, or sending the control message
+ * fails. Never rejects.
  */
 export function runManualCompact(deps: RunManualCompactDeps): Promise<void> {
   const {
@@ -130,6 +132,11 @@ export function runManualCompact(deps: RunManualCompactDeps): Promise<void> {
     unsubscribe = subscribe((payload) => {
       if (settled) return
       const env = payload as SidecarEnvelope | null
+      if (env?.type === "sidecar_exited") {
+        onNotice("Compaction interrupted: the agent backend stopped. Retry after it restarts.")
+        finish()
+        return
+      }
       if (!env || env.type !== "event" || env.sessionId !== sessionId) return
       const boundary = compactBoundaryFromInner(env.event)
       if (boundary) {
@@ -151,10 +158,16 @@ export function runManualCompact(deps: RunManualCompactDeps): Promise<void> {
       return
     }
 
-    // Silence means neither a boundary nor an outcome arrived in time — not
-    // that one is queued. Only a running turn defers a compaction, and the
-    // sidecar says so itself, so the timeout must not promise a later apply.
+    // The default timer reports status without losing the eventual boundary.
+    // Long multi-part summaries remain owned by the sidecar and its cancellation
+    // and provider protections. An explicit observation deadline still settles.
     timer = setTimer(() => {
+      if (deps.timeoutMs === undefined) {
+        onNotice(
+          "Compaction is still running. Waiting for its result; you can keep using the session or cancel by closing it."
+        )
+        return
+      }
       onNotice(
         `Compaction has not finished after ${Math.round(timeoutMs / 1000)}s — nothing has been compacted yet. Run /compact again if the context meter does not drop.`
       )

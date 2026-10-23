@@ -129,7 +129,7 @@ afterEach(() => stopSync())
 describe("dockPageEngineFor", () => {
   it("maps a requested backend onto a tab engine", () => {
     expect(dockPageEngineFor(undefined)).toBe("auto")
-    expect(dockPageEngineFor("web-fallback")).toBe("auto")
+    expect(dockPageEngineFor("web-fallback")).toBe("embedded")
     expect(dockPageEngineFor("embedded")).toBe("embedded")
     expect(dockPageEngineFor("user-chrome")).toBe("user-chrome")
   })

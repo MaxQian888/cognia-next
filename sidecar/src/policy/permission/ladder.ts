@@ -66,6 +66,7 @@ export interface PermissionSendOptions {
   suppressApprovalForTools?: unknown
   alwaysAllowTools?: unknown
   toolPermissionRules?: unknown
+  mcpToolAllowlist?: unknown
   confinement?: ConfinementPolicy | null
   /** The whole sandbox launch policy; the ladder reads only its scope. */
   builtinProcessSandbox?: (SandboxScopePolicy & { [field: string]: unknown }) | null
@@ -101,6 +102,8 @@ export interface LadderPolicy {
    */
   perCallApproval?: ReadonlySet<string> | null
   toolPermissionRules?: unknown
+  /** Per-server MCP tool allowlists; see {@link mcpToolAllowlistDenies}. */
+  mcpToolAllowlist?: unknown
   /** An unattended run's permission profile; absent on interactive turns. */
   profile?: ResolvedPermissionProfile | null
   /** Plugin tool classes and the first-party sandboxed tools, from `pluginTools`. */
@@ -369,6 +372,31 @@ export function toolPermissionDecision(
   return decision
 }
 
+/**
+ * Whether a per-server MCP allowlist rules out `toolName`. The allowlist maps
+ * an `mcpServers` key to the bare tool names it may expose; a tool of a listed
+ * server that is not named is denied, so a tool the server adds after its last
+ * discovery is covered too. Tools of unlisted servers and non-MCP tools are
+ * not this check's business. A malformed allowlist throws rather than
+ * silently allowing.
+ */
+export function mcpToolAllowlistDenies(toolName: string, allowlist: unknown): boolean {
+  if (allowlist === undefined || allowlist === null) return false
+  if (typeof allowlist !== "object" || Array.isArray(allowlist)) {
+    throw new Error("mcpToolAllowlist must be an object")
+  }
+  if (!toolName.startsWith("mcp__")) return false
+  for (const [server, tools] of Object.entries(allowlist as Record<string, unknown>)) {
+    if (!Array.isArray(tools) || tools.some((tool) => typeof tool !== "string")) {
+      throw new Error(`mcpToolAllowlist entry for ${server} must be a list of tool names`)
+    }
+    const prefix = `mcp__${server}__`
+    if (!toolName.startsWith(prefix)) continue
+    return !(tools as string[]).includes(toolName.slice(prefix.length))
+  }
+  return false
+}
+
 function deny(reason: DenyReason): LadderOutcome {
   return { kind: "deny", reason }
 }
@@ -384,7 +412,8 @@ function runStep(step: LadderStep, state: CallState): LadderOutcome | undefined 
       return hasNoLeakingPiiDeep(input) ? undefined : deny({ code: "input-pii" })
     case "ruleset":
       return state.rulesetVerdict() === "deny" ||
-        toolPermissionDecision(toolName, policy.toolPermissionRules) === "deny"
+        toolPermissionDecision(toolName, policy.toolPermissionRules) === "deny" ||
+        mcpToolAllowlistDenies(toolName, policy.mcpToolAllowlist)
         ? deny({ code: "ruleset" })
         : undefined
     case "sandbox-scope":

@@ -2,9 +2,8 @@ import {
   isModelLifecycleAllowed,
   resolveModelLifecycle,
 } from "@cognia/provider-types/model-catalog"
-
-export type VideoProviderId =
-  "google" | "xai" | "fal" | "replicate" | "doubao" | "volcengine" | "qwen"
+import type { VideoProviderId } from "@cognia/plugin-contract/lib/ai/media/video-generation-sdk"
+export type { VideoProviderId } from "@cognia/plugin-contract/lib/ai/media/video-generation-sdk"
 
 export interface VideoProviderDefinition {
   id: VideoProviderId

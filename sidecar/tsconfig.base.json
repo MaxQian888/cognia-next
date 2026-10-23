@@ -26,6 +26,8 @@
     "paths": {
       "@cognia/provider-routing": ["../packages/provider-routing/src/index.ts"],
       "@cognia/provider-routing/*": ["../packages/provider-routing/src/*"],
+      "@cognia/provider-types": ["../packages/provider-types/src/index.ts"],
+      "@cognia/provider-types/*": ["../packages/provider-types/src/*"],
       "@cognia/redact": ["../packages/redact/src/index.ts"],
       "@cognia/redact/*": ["../packages/redact/src/*"],
       "@cognia/agent-config-types": ["../packages/agent-config-types/src/index.ts"],

@@ -1,11 +1,15 @@
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 
-import { getBuiltinPluginDexieManifests } from "./builtin-manifests"
+import { listBuiltinPrebootManifests } from "@/lib/plugin/core/builtin-preboot-manifests"
+import {
+  DORMANT_BUILTIN_DEXIE_DECLARATIONS,
+  getBuiltinPluginDexieManifests,
+} from "./builtin-manifests"
 
 const PLUGINS_ROOT = join(__dirname, "..", "..", "..", "plugins")
 
-/** Every bundled plugin whose manifest declares Dexie tables, read from disk. */
+/** Every in-tree plugin whose plugin.json declares Dexie tables, read from disk. */
 function pluginsDeclaringTables(): string[] {
   return readdirSync(PLUGINS_ROOT)
     .filter((name) => {
@@ -44,32 +48,50 @@ it("exposes every built-in dynamic table without importing plugin implementation
   expect(manifests.get("sre-agent")?.tables.map((table) => table.name)).toEqual(["incidents"])
 })
 
-/**
- * Plugins that declare tables and are deliberately NOT in the boot registry.
- * Each needs a reason, so the exclusion is a reviewed decision rather than the
- * accident this test exists to catch.
- */
-const KNOWN_UNREGISTERED: Readonly<Record<string, string>> = Object.freeze({
-  "github-delivery":
-    "Declares four tables, but no code path in the plugin calls ctx.dexie — " +
-    "nothing reads or writes them. Applying the schema at boot would create " +
-    "four empty stores for a feature that is not wired yet. Pre-existing.",
+it("applies the same tables plugin.json declares", () => {
+  for (const [id, dexie] of getBuiltinPluginDexieManifests()) {
+    const dir = readdirSync(PLUGINS_ROOT).find((name) => {
+      try {
+        const raw = readFileSync(join(PLUGINS_ROOT, name, "plugin.json"), "utf-8")
+        return (JSON.parse(raw) as { id?: string }).id === id
+      } catch {
+        return false
+      }
+    })
+    expect(dir).toBeDefined()
+    const manifest = JSON.parse(readFileSync(join(PLUGINS_ROOT, dir!, "plugin.json"), "utf-8")) as {
+      dexie?: unknown
+    }
+    expect(dexie).toEqual(manifest.dexie)
+  }
 })
 
 /**
- * The registry is a hand-maintained list and the failure mode is quiet: a
- * plugin that declares tables but is missing here boots with no table applied,
- * and its first `ctx.dexie.table(...)` throws a lookup error at call time
- * instead of anything failing at boot.
+ * A plugin that declares tables but is missing from the snapshot boots with no
+ * table applied, and its first `ctx.dexie.table(...)` throws a lookup error at
+ * call time instead of anything failing at boot. That happens when a plugin
+ * that is not a browser built-in (and so is not in the generated snapshot)
+ * starts declaring tables, or when the snapshot was not regenerated.
  */
-it("covers every bundled plugin that declares tables", () => {
+it("covers every in-tree plugin that declares tables", () => {
   const declared = pluginsDeclaringTables()
   expect(declared.length).toBeGreaterThan(0)
 
-  const expected = declared.filter((id) => !(id in KNOWN_UNREGISTERED))
-  expect([...getBuiltinPluginDexieManifests().keys()].sort()).toEqual(expected)
+  const inSnapshot = [...listBuiltinPrebootManifests()]
+    .filter(([, manifest]) => manifest.dexie?.tables?.length)
+    .map(([id]) => id)
+    .sort()
+  expect(inSnapshot).toEqual(declared)
 
-  // A stale exclusion is its own drift: a plugin that stopped declaring tables
-  // should leave this list rather than sit here explaining nothing.
-  expect(Object.keys(KNOWN_UNREGISTERED).filter((id) => !declared.includes(id))).toEqual([])
+  const expected = declared.filter((id) => !(id in DORMANT_BUILTIN_DEXIE_DECLARATIONS))
+  expect([...getBuiltinPluginDexieManifests().keys()].sort()).toEqual(expected)
+})
+
+it("lists only dormant declarations that still exist, each with a reason", () => {
+  const declared = pluginsDeclaringTables()
+  for (const [id, reason] of Object.entries(DORMANT_BUILTIN_DEXIE_DECLARATIONS)) {
+    expect(declared).toContain(id)
+    expect(reason.length).toBeGreaterThan(20)
+  }
+  expect(getBuiltinPluginDexieManifests().has("github-delivery")).toBe(false)
 })

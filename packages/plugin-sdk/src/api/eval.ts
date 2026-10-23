@@ -4,5 +4,5 @@ export type {
   PluginEvalProjectArgs,
   PluginRunCalibrationArgs,
   PluginRunDatasetArgs,
-} from "@/lib/plugin/api/eval-api"
-export type { TargetSpec } from "@/types/eval/run-config"
+} from "@cognia/plugin-contract/lib/plugin/api/eval-api"
+export type { TargetSpec } from "@cognia/eval-core/domain/run-config"

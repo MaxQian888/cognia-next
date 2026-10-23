@@ -85,4 +85,38 @@ describe("telegramInboundToA2UI", () => {
     expect(row.children[0].url).toBe("https://example.com/wa")
     expect(row.children[1].url).toBe("https://example.com/login")
   })
+
+  it("unwraps the Update the parser stores as event.raw", () => {
+    for (const field of ["message", "edited_message", "channel_post", "guest_message"]) {
+      const out = telegramInboundToA2UI({
+        update_id: 9,
+        [field]: {
+          text: "hi",
+          reply_markup: { inline_keyboard: [[{ text: "Go", url: "https://x.test" }]] },
+        },
+      } as never)
+      expect(out?.body).toEqual([
+        { kind: "text", text: "hi" },
+        {
+          kind: "row",
+          children: [{ kind: "button", label: "Go", url: "https://x.test", actionId: undefined }],
+        },
+      ])
+    }
+  })
+
+  it("has nothing to project for an update without a message", () => {
+    expect(telegramInboundToA2UI({ update_id: 1, callback_query: { id: "q" } } as never)).toBeNull()
+  })
+
+  it("skips malformed keyboard rows", () => {
+    const out = telegramInboundToA2UI({
+      text: "hi",
+      reply_markup: { inline_keyboard: [null, "x", [null, { text: "Ok", callback_data: "ok" }]] },
+    } as never)
+    expect(out?.body).toEqual([
+      { kind: "text", text: "hi" },
+      { kind: "row", children: [{ kind: "button", label: "Ok", url: undefined, actionId: "ok" }] },
+    ])
+  })
 })

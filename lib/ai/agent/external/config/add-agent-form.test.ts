@@ -18,6 +18,26 @@ import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 
 const NO_ENV = { names: [], values: {} }
 
+it("round-trips experimental native model control without losing other Codex options", () => {
+  const config = {
+    id: "codex",
+    name: "Codex",
+    enabled: true,
+    protocol: "codex-app-server",
+    transport: "stdio",
+    process: { command: "codex", args: ["app-server"] },
+    codexOptions: { sandboxMode: "readOnly", stepModelSwitching: true },
+  } as ExternalAgentConfig
+  const seeded = addAgentFormFromConfig(config)
+  expect(seeded.data.codexStepModelSwitching).toBe(true)
+  const changed = { ...seeded.data, codexStepModelSwitching: false }
+  expect(buildCreateExternalAgentInput(changed).codexOptions).toEqual({ stepModelSwitching: false })
+  expect(addAgentFormPatch(config, changed).codexOptions).toEqual({
+    sandboxMode: "readOnly",
+    stepModelSwitching: false,
+  })
+})
+
 function form(patch: Partial<AddAgentFormData>): AddAgentFormData {
   return { ...DEFAULT_ADD_AGENT_FORM_DATA, ...patch }
 }

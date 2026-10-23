@@ -32,6 +32,26 @@ describe("compact-instructions", () => {
     })
   })
 
+  it("uses a token tail only when no message-count preference was supplied", () => {
+    expect(resolveCompaction({}).keepRecent).toBeUndefined()
+    expect(
+      resolveCompaction({ appComp: { preserveRecentMessages: 2 } }).keepRecentTokens
+    ).toBeUndefined()
+    expect(resolveCompaction({ sessOv: { preserveRecentMessages: 0 } }).keepRecent).toBe(0)
+    expect(
+      resolveCompaction({ sessOv: { preserveRecentMessages: 0 } }).keepRecentTokens
+    ).toBeUndefined()
+  })
+
+  it("preserves custom prompt, optical and sliding-window output contracts", () => {
+    expect(
+      resolveCompaction({ baseSummaryPrompt: "Custom JSON contract" }).checkpointFormat
+    ).toBeUndefined()
+    for (const strategy of ["optical", "sliding-window"] as const) {
+      expect(resolveCompaction({ appComp: { strategy } }).checkpointFormat).toBeUndefined()
+    }
+  })
+
   describe("resolveCompactInstructions", () => {
     it("returns the handoff snippet with no focus", () => {
       expect(resolveCompactInstructions()).toBe(COMPACT_HANDOFF_PROMPT.defaultBody)
@@ -71,13 +91,31 @@ describe("compact-instructions", () => {
   })
 
   describe("resolveCompaction", () => {
+    it("keeps fresh application defaults adaptive and preserves an explicitly persisted cap", () => {
+      expect(
+        resolveCompaction({ appComp: DEFAULT_COMPRESSION_SETTINGS }).summaryTokenBudgetIsDefault
+      ).toBe(true)
+      const explicit = resolveCompaction({
+        appComp: {
+          compressionModel: { maxSummaryTokens: 16384 },
+          checkpointTokenBudget: 12000,
+          postCompactionTokenBudget: 48000,
+        },
+      })
+      expect(explicit.summaryTokenBudgetIsDefault).toBeUndefined()
+      expect(explicit.requestedMaxSummaryTokens).toBe(16384)
+      expect(explicit.checkpointTokenBudget).toBe(12000)
+      expect(explicit.postCompactionTokenBudget).toBe(48000)
+    })
     it("defaults to enabled, AUTO_COMPACT_FRACTION, keep 6, canonical prompt", () => {
       const r = resolveCompaction({})
       expect(r.enabled).toBe(true)
       expect(r.fraction).toBe(AUTO_COMPACT_FRACTION)
-      expect(r.keepRecent).toBe(DEFAULT_KEEP_RECENT)
+      expect(r.keepRecent).toBeUndefined()
+      expect(DEFAULT_KEEP_RECENT).toBe(6) // legacy explicit-count default
       expect(r.focus).toBeUndefined()
       expect(r.summaryPrompt).toBe(CONVERSATION_SUMMARY_PROMPT.defaultBody)
+      expect(r.checkpointFormat).toBe("progress-v1")
     })
 
     it("converts the app token-threshold percentage to a fraction", () => {
@@ -114,6 +152,7 @@ describe("compact-instructions", () => {
       expect(r.fraction).toBe(0.75)
       expect(r.keepRecent).toBe(12)
       expect(r.summaryPrompt).toBe("Extract only key facts.\n\nFocus especially on: errors")
+      expect(r.checkpointFormat).toBeUndefined()
     })
 
     it("app threshold wins over strategy fraction", () => {
@@ -128,6 +167,7 @@ describe("compact-instructions", () => {
       const r = resolveCompaction({})
       const D = DEFAULT_COMPRESSION_SETTINGS
       expect(r.maxSummaryTokens).toBe(DEFAULT_MAX_SUMMARY_TOKENS)
+      expect(r.summaryTokenBudgetIsDefault).toBe(true)
       expect(r.strategy).toBe(D.strategy)
       expect(r.trigger).toBe(D.trigger)
       expect(r.messageCountThreshold).toBe(D.messageCountThreshold)
@@ -163,6 +203,7 @@ describe("compact-instructions", () => {
         },
       })
       expect(r.maxSummaryTokens).toBe(300)
+      expect(r.summaryTokenBudgetIsDefault).toBeUndefined()
       expect(r.summaryProvider).toBe("openai")
       expect(r.summaryModel).toBe("gpt-4o-mini")
     })
@@ -174,6 +215,14 @@ describe("compact-instructions", () => {
       ).toBe(DEFAULT_MAX_SUMMARY_TOKENS)
     })
 
+    it("does not infer default provenance from an explicitly stored default-valued cap", () => {
+      const r = resolveCompaction({
+        appComp: { compressionModel: { maxSummaryTokens: DEFAULT_MAX_SUMMARY_TOKENS } },
+      })
+      expect(r.maxSummaryTokens).toBe(DEFAULT_MAX_SUMMARY_TOKENS)
+      expect(r.summaryTokenBudgetIsDefault).toBeUndefined()
+    })
+
     it("threads the optical shape/budget knobs to the wire (app override then default)", () => {
       // App-level optical config wins.
       const r = resolveCompaction({
@@ -183,5 +232,24 @@ describe("compact-instructions", () => {
       // Absent → the documented default block.
       expect(resolveCompaction({}).optical).toBe(DEFAULT_COMPRESSION_SETTINGS.optical)
     })
+  })
+})
+
+it("keeps useful research progress by default without replacing explicit compaction settings", () => {
+  expect(resolveCompaction({}).maxSummaryTokens).toBe(16_384)
+  expect(resolveCompaction({}).maxToolResultTokens).toBe(0)
+  const explicit = resolveCompaction({
+    appComp: {
+      compressionModel: { maxSummaryTokens: 500 },
+      maxToolResultTokens: 123,
+      preserveRecentMessages: 2,
+      tokenThreshold: 70,
+    },
+  })
+  expect(explicit).toMatchObject({
+    maxSummaryTokens: 500,
+    maxToolResultTokens: 123,
+    keepRecent: 2,
+    fraction: 0.7,
   })
 })

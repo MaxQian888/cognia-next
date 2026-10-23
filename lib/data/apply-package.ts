@@ -7,6 +7,12 @@
 // Built-in rows (characters/skills/teams with `isBuiltIn === true`) are NEVER
 // overwritten regardless of strategy — they're managed by the seed.
 
+import {
+  applyAuthoredContent,
+  authoredContentTable,
+  AUTHORED_CONTENT_TABLES,
+  remapAuthoredReferences,
+} from "./authored-content"
 import { recordTombstones } from "@/lib/sync/tombstones"
 import type {
   AppSettings,
@@ -147,7 +153,7 @@ export async function applyBackupPackage(
 ): Promise<ImportSummary> {
   const summary = emptySummary()
   const db = getDb()
-  const env = pkg.payload
+  const env = { ...pkg.payload }
   const attachmentBackup = opts.includeSessions
     ? await prepareSessionAssetBackup(
         env.sessionAssets,
@@ -207,7 +213,6 @@ export async function applyBackupPackage(
   const tombstonedEntityKeys = new Set(
     retrievalTombstones.map((row) => `${row.entityType}:${row.entityId}`)
   )
-  const importableMemories = (env.memories ?? []).filter((row) => !tombstonedMemoryIds.has(row.id))
   const importableMemoryEvidence = (env.memoryEvidence ?? []).filter(
     (row) => !row.memoryId || !tombstonedMemoryIds.has(row.memoryId)
   )
@@ -229,9 +234,18 @@ export async function applyBackupPackage(
     ? readAllSnapshots(SNAPSHOT_MODULES, snapshotEnv).snapshots
     : {}
 
-  await db.transaction(
+  // Select the array overload before binding a deferred transaction scope.
+  const transaction: (
+    mode: "rw",
+    tables: typeof db.tables,
+    scope: () => Promise<void>
+  ) => Promise<void> = db.transaction
+  const restoreTransaction = transaction.bind(
+    db,
     "rw",
     [
+      ...AUTHORED_CONTENT_TABLES.map((name) => authoredContentTable(db, name)),
+      db.issueCounters,
       db.settings,
       db.characters,
       db.skills,
@@ -299,6 +313,44 @@ export async function applyBackupPackage(
       db.syncTombstones,
     ],
     async () => {
+      const sessionMapping = new Map<string, string>()
+      if (opts.includeSessions)
+        for (const session of env.sessions ?? []) {
+          const existing = await db.sessions.get(session.id)
+          sessionMapping.set(
+            session.id,
+            existing && opts.mergeStrategy === "duplicate" ? newId("s") : session.id
+          )
+        }
+      const authoredMaps = await applyAuthoredContent(
+        db,
+        env,
+        opts,
+        newId,
+        (name, rows) =>
+          applyCollection({
+            rows,
+            table: authoredContentTable(db, name),
+            kind: name,
+            opts,
+            summary,
+            idPrefix: name,
+          }),
+        sessionMapping
+      )
+      // Reuse the same authored-id plan in preexisting portable domains.
+      for (const name of [
+        "sessions",
+        "memories",
+        "memoryJobs",
+        "characters",
+        "skills",
+        "contextComments",
+        "scheduledTasks",
+      ] as const) {
+        if (env[name])
+          (env as Record<string, unknown>)[name] = remapAuthoredReferences(env[name], authoredMaps)
+      }
       // --- settings (singleton) -------------------------------------------
       if (env.settings) {
         const existing = await db.settings.get("singleton")
@@ -878,6 +930,9 @@ export async function applyBackupPackage(
       // These tables form one referential bundle. The duplicate strategy
       // remaps every colliding id and then rewrites child references so
       // evidence, durable jobs, and audit history remain connected.
+      const importableMemories = (env.memories ?? []).filter(
+        (row) => !tombstonedMemoryIds.has(row.id)
+      )
       const droppedMemories = (env.memories?.length ?? 0) - importableMemories.length
       if (droppedMemories > 0) {
         summary.skipped["memories"] = (summary.skipped["memories"] ?? 0) + droppedMemories
@@ -934,12 +989,9 @@ export async function applyBackupPackage(
       // --- sessions + messages + sessionState (off by default) -----------
       // Session ids are parents of both transcript rows and original-source
       // owners (and of kept Files items). Duplicate restore remaps them together.
-      const sessionMapping = new Map<string, string>()
       if (opts.includeSessions) {
         for (const session of env.sessions ?? []) {
-          const existing = await db.sessions.get(session.id)
-          const id = existing && opts.mergeStrategy === "duplicate" ? newId("s") : session.id
-          sessionMapping.set(session.id, id)
+          const id = sessionMapping.get(session.id) ?? session.id
           await applyCollection<ChatSession>({
             rows: [{ ...session, id }],
             table: db.sessions,
@@ -1042,6 +1094,12 @@ export async function applyBackupPackage(
       })
     }
   )
+
+  if (env.agentTeams?.length || env.agentTeammates?.length || env.agentTeamTasks?.length) {
+    const { withAgentTeamDefinitionRestore } =
+      await import("@/stores/agent/agent-team-store/dexie-bridge")
+    await withAgentTeamDefinitionRestore(restoreTransaction)
+  } else await restoreTransaction()
 
   // --- Stage 3: write the localStorage face --------------------------------
   // Dexie has committed. Anything that fails from here on triggers a

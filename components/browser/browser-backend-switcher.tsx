@@ -27,15 +27,12 @@ import { writeClipboardText } from "@/lib/tauri/clipboard"
 /** Where Chrome 144+ lets the user enable remote debugging for itself. */
 export const CHROME_REMOTE_DEBUGGING_URL = "chrome://inspect/#remote-debugging"
 
-type SelectableBackend = Exclude<BrowserBackend, "web-fallback">
-
 /** The option the switch shows: an explicit choice wins over the fallback. */
 export function selectedBackend(
   decision: BrowserBackendDecision,
   preference: BrowserBackend | null
-): SelectableBackend {
-  if (preference && preference !== "web-fallback") return preference
-  return decision.backend === "web-fallback" ? "embedded" : decision.backend
+): BrowserBackend {
+  return preference ?? decision.backend
 }
 
 /** The candidate to attach: the one asked for, else the first usable one. */
@@ -71,6 +68,7 @@ export function BrowserBackendSwitcher({
   const t = useTranslations("browserLocal.backend")
   const [copied, setCopied] = useState(false)
   const selected = selectedBackend(decision, preference)
+  const previewBackend = local.supported ? "embedded" : "web-fallback"
   const installed = local.status?.installed ?? false
   const installedCandidates = local.userChrome.filter(
     (candidate) => candidate.reason !== "not_installed"
@@ -92,14 +90,14 @@ export function BrowserBackendSwitcher({
       <div className="flex flex-col gap-1">
         <span className="text-xs text-muted-foreground">{t("label")}</span>
         <NativeSelect
-          value={selected}
+          value={!local.supported && selected === "embedded" ? "web-fallback" : selected}
           onChange={(event) => onPreferenceChange(event.target.value as BrowserBackend)}
           aria-label={t("label")}
           size="sm"
           wrapperClassName="w-full"
           className="h-7 text-xs"
         >
-          <NativeSelectOption value="embedded">{t("embedded")}</NativeSelectOption>
+          <NativeSelectOption value={previewBackend}>{t("embedded")}</NativeSelectOption>
           {local.supported && (
             <NativeSelectOption value="local-chromium">
               {installed ? t("localChromium") : t("localChromiumMissing")}

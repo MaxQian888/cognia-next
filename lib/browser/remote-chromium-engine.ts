@@ -14,6 +14,7 @@ import {
   type BrowserPageSummary,
 } from "@/lib/browser/session-types"
 import { transport } from "@/lib/tauri/transport-instance"
+import type { Transport } from "@/lib/tauri/transport-types"
 
 import type {
   BrowserCookieMeta,
@@ -58,6 +59,30 @@ export const REMOTE_UNSUPPORTED_FEATURES = {
 
 export type RemoteUnsupportedFeature = keyof typeof REMOTE_UNSUPPORTED_FEATURES
 
+/** Only the interactive operations exposed by this preview, including session lifecycle. */
+export const REMOTE_BROWSER_APPROVAL_OPERATIONS = [
+  "browser_session_ensure",
+  "browser_session_close",
+  "browser_navigate",
+  "browser_act",
+  "browser_press_key",
+  "browser_scroll",
+  "browser_evaluate",
+  "browser_back",
+  "browser_forward",
+  "browser_reload",
+  "browser_stop",
+  "browser_switch_page",
+  "browser_close_page",
+  "browser_new_page",
+  "browser_drag",
+  "browser_handle_dialog",
+  "browser_set_files",
+  "browser_set_zoom",
+  "browser_recording_control",
+  "browser_recording_ref",
+] as const
+
 function remoteUnsupported(feature: RemoteUnsupportedFeature): BrowserSessionError {
   return new BrowserSessionError(
     "browser_feature_unsupported",
@@ -68,14 +93,23 @@ function remoteUnsupported(feature: RemoteUnsupportedFeature): BrowserSessionErr
 /** Companion-RPC adapter; Playwright and CDP remain private to WorkspaceRuntime. */
 export class RemoteChromiumEngine implements BrowserEngine {
   readonly backend = "remote-chromium" as const
-  constructor(private readonly browserSessionId: string) {}
+  constructor(
+    private readonly browserSessionId: string,
+    private readonly caller: Pick<Transport, "call"> = transport
+  ) {}
 
   private call<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
-    return transport.call<T>(name, { browserSessionId: this.browserSessionId, ...args })
+    return this.caller.call<T>(name, { browserSessionId: this.browserSessionId, ...args })
   }
 
   navigate(url: string): Promise<void | BrowserMutationResult> {
     return this.call("browser_navigate", { url })
+  }
+  recordingControl(action: "start" | "resume" | "stop" | "drain"): Promise<unknown> {
+    return this.call("browser_recording_control", { action })
+  }
+  resolveRecordedTarget(selector: string): Promise<string> {
+    return this.call("browser_recording_ref", { selector })
   }
   snapshot(options?: SnapshotOptions): Promise<BrowserSnapshot> {
     return this.call("browser_snapshot", { options })

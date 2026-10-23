@@ -8,6 +8,12 @@ jest.mock("@/lib/mcp/sync-coordinator", () => ({
   scheduleMcpSyncDrain: scheduleMcpSyncDrainMock,
 }))
 
+const closeServerMock = jest.fn(async (_id: string) => undefined)
+jest.mock("@/lib/mcp/runtime-gateway", () => ({
+  __esModule: true,
+  defaultMcpRuntimeGateway: { closeServer: (id: string) => closeServerMock(id) },
+}))
+
 import type { Project } from "@/types"
 import {
   listMcpServers,
@@ -38,6 +44,7 @@ const dbFixture = createDbTestFixture()
 beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   scheduleMcpSyncDrainMock.mockClear()
+  closeServerMock.mockClear()
   await dbFixture.restore()
 })
 afterAll(dbFixture.dispose)
@@ -931,6 +938,23 @@ describe("bulkImportMcpServers", () => {
     return { name, transport: "stdio", config: { command: "x" } }
   }
 
+  it("preserves imported display labels independently of the wire namespace", async () => {
+    const result = await bulkImportMcpServers([
+      { ...draft("native-mcp"), displayName: "CCSwitch native MCP 中文" },
+    ])
+    expect(result.errored).toEqual([])
+    expect(await listMcpServers()).toEqual([
+      expect.objectContaining({ name: "native-mcp", displayName: "CCSwitch native MCP 中文" }),
+    ])
+    await bulkImportMcpServers(
+      [{ ...draft("native-mcp"), displayName: "Renamed 中文" }],
+      "overwrite"
+    )
+    expect((await listMcpServers())[0].displayName).toBe("Renamed 中文")
+    await bulkImportMcpServers([draft("native-mcp")], "overwrite")
+    expect((await listMcpServers())[0].displayName).toBe("Renamed 中文")
+  })
+
   it("creates rows on first import", async () => {
     const result = await bulkImportMcpServers([draft("foo"), draft("bar")])
     expect(result.created).toBe(2)
@@ -1015,5 +1039,27 @@ describe("parseClaudeMcpConfig", () => {
     })
     expect(drafts).toHaveLength(1)
     expect(drafts[0].transport).toBe("stdio")
+  })
+})
+
+describe("runtime lease release on revocation", () => {
+  const stdio = { name: "lease", transport: "stdio" as const, config: { command: "x" } }
+
+  it("closes warm connections when a runnable server is disabled", async () => {
+    const server = await createReviewed({ ...stdio, enabled: true })
+    await updateMcpServer(server.id, { displayName: "Renamed" })
+    expect(closeServerMock).not.toHaveBeenCalled()
+    await updateMcpServer(server.id, { enabled: false })
+    expect(closeServerMock).toHaveBeenCalledWith(server.id)
+  })
+
+  it("closes warm connections when trust is withdrawn or the server is deleted", async () => {
+    const blocked = await createReviewed({ ...stdio, name: "blocked", enabled: true })
+    await reviewMcpServer(blocked.id, false)
+    expect(closeServerMock).toHaveBeenCalledWith(blocked.id)
+
+    const deleted = await createReviewed({ ...stdio, name: "deleted", enabled: true })
+    await deleteMcpServer(deleted.id)
+    expect(closeServerMock).toHaveBeenCalledWith(deleted.id)
   })
 })

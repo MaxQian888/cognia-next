@@ -645,6 +645,9 @@ export function applyClaudeAgentSdkOptions<T extends Options>(
   } = {}
 ) {
   const warnings: string[] = []
+  // Explicit false overrides ambient user/project sandbox settings. Enabling
+  // this exception is admitted separately by the runtime's per-invocation gate.
+  options.sandbox = { ...options.sandbox, allowNestedUserNamespaces: false }
   if (nested === undefined) {
     // SDK omission is not isolation: the CLI would otherwise discover user,
     // project and local skills/plugins implicitly. Native discovery is opt-in
@@ -717,6 +720,13 @@ export function applyClaudeAgentSdkOptions<T extends Options>(
     warnings,
     true
   )
+  options.sandbox = {
+    ...options.sandbox,
+    allowNestedUserNamespaces: validated.sandbox?.allowNestedUserNamespaces === true,
+    ...(validated.sandbox?.allowNestedUserNamespaces === true
+      ? { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false }
+      : {}),
+  }
 
   // ---- permissions ----------------------------------------------------------
   // The boundary validator above already requires both host permission gates.

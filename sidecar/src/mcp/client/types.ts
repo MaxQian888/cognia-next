@@ -46,6 +46,8 @@ export interface McpToolsOptions {
   reviewToolOutput?: McpOutputReviewer
   allowedTools?: string[]
   disallowedTools?: string[]
+  /** Per-server allowlists (server key → bare tool names); see `SendOptions.mcpToolAllowlist`. */
+  mcpToolAllowlist?: Record<string, string[]>
   log?: (level: "info" | "warn" | "error", message: string) => void
   emitMcpLog?: (entry: McpLogEntry) => void
   createClient?: McpClientFactory

@@ -7,8 +7,6 @@ import type {
   KnowledgeBaseDocumentSnapshot,
   KnowledgeBaseSource,
 } from "@/types/knowledge-base"
-import type { WorkflowEntrypoint } from "@/types/workflow/deployment"
-import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import { authorizeKnowledgeSource } from "@/lib/workflow/knowledge/access"
 import {
   getKnowledgeBaseDocumentSnapshot,
@@ -17,14 +15,9 @@ import {
   listKnowledgeBaseSources,
 } from "@/lib/db/knowledge-bases"
 import { resolveKnowledgeReadingSettings, type KnowledgeReadingSettings } from "./reading-settings"
+import type { KnowledgeReadingAccess } from "@cognia/plugin-contract/lib/knowledge-base/runtime/progressive-reading"
+export type { KnowledgeReadingAccess } from "@cognia/plugin-contract/lib/knowledge-base/runtime/progressive-reading"
 
-export interface KnowledgeReadingAccess {
-  /** Parent execution ceiling; capabilities and child characters can only narrow it. */
-  allowedKnowledgeBaseIds?: readonly string[]
-  entrypoint?: WorkflowEntrypoint
-  triggeredBy?: WorkflowTriggeredFrom
-  revisionBindings?: Readonly<Record<string, readonly string[]>>
-}
 export interface KnowledgeDocumentIdentity {
   knowledgeBaseId: string
   sourceId: string

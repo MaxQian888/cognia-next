@@ -1,19 +1,18 @@
 /**
  * Plugin SDK - `canvas` capability runtime surface.
  *
- * Re-exports the host canvas API exposed as `ctx.canvas` and the companion
- * option/result types plugin authors need for document, action, comment, and
- * collaboration workflows.
+ * Exports the types of `ctx.canvas` and the companion option/result types
+ * plugin authors need for document, action, comment, and collaboration
+ * workflows. The host builds `ctx.canvas`; its factory is not on the author
+ * surface.
  */
-
-export { createCanvasAPI } from "@/lib/plugin/api/canvas-api"
 
 export type {
   CanvasSelection,
   CreateCanvasDocumentOptions,
   PluginCanvasAPI,
   PluginCanvasDocument,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"
 
 export type {
   CanvasActionConfig,
@@ -21,11 +20,18 @@ export type {
   CanvasActionResult,
   CanvasActionType,
   StreamingCallbacks,
-} from "@/lib/ai/generation/canvas-actions"
-export type { AddCommentInput, ReplyInput } from "@/lib/db/canvas-comments"
-export type { PythonExecResult } from "@/lib/tauri/canvas"
-export type { CanvasComment, CollaborativeSession } from "@/types/canvas/collaboration"
-export type { ArtifactLanguage, CanvasDocumentVersion, CanvasSuggestion } from "@/types/artifact"
+} from "@cognia/plugin-contract/lib/ai/generation/canvas-actions"
+export type { AddCommentInput, ReplyInput } from "@cognia/plugin-contract/lib/db/canvas-comments"
+export type { PythonExecResult } from "@cognia/plugin-contract/lib/tauri/canvas"
+export type {
+  CanvasComment,
+  CollaborativeSession,
+} from "@cognia/plugin-contract/types/canvas/collaboration"
+export type {
+  ArtifactLanguage,
+  CanvasDocumentVersion,
+  CanvasSuggestion,
+} from "@cognia/plugin-contract/types/artifact/index"
 
 /** The artifact row itself — what `ctx.artifacts` stores and renders. */
-export type { Artifact } from "@/types/artifact"
+export type { Artifact } from "@cognia/plugin-contract/types/artifact/index"

@@ -132,9 +132,12 @@ fn extract_zip_bundle_with_limits(
         let mut entry = archive
             .by_index(i)
             .map_err(|e| format!("read zip entry {i}: {e}"))?;
+        let entry_name = entry
+            .name()
+            .map_err(|e| format!("read zip entry {i} name: {e}"))?;
         let entry_path = entry
             .enclosed_name()
-            .ok_or_else(|| format!("unsafe zip entry path: {}", entry.name()))?
+            .ok_or_else(|| format!("unsafe zip entry path: {}", entry_name))?
             .to_path_buf();
         if entry
             .unix_mode()
@@ -142,7 +145,7 @@ fn extract_zip_bundle_with_limits(
         {
             return Err(format!(
                 "symbolic-link zip entries are not allowed: {}",
-                entry.name()
+                entry_name
             ));
         }
         let target = target_dir.join(&entry_path);

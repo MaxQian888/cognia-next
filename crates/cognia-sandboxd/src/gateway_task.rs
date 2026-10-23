@@ -69,6 +69,7 @@ fn payload(env: &HashMap<String, String>) -> Result<Option<TaskPayload>, String>
                 "qwen/settings.json",
             ]
             .contains(&name.as_str())
+                && !(value.runtime == "pi" && pi_agent_file(name))
                 || contents.len() > 262144
         })
     {
@@ -78,6 +79,19 @@ fn payload(env: &HashMap<String, String>) -> Result<Option<TaskPayload>, String>
         request.validate()?;
     }
     Ok(Some(value))
+}
+
+fn pi_agent_file(name: &str) -> bool {
+    name.strip_prefix("pi/agents/")
+        .and_then(|part| part.strip_suffix(".md"))
+        .is_some_and(|stem| {
+            !stem.is_empty()
+                && stem.len() <= 64
+                && stem.as_bytes()[0].is_ascii_alphanumeric()
+                && stem
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        })
 }
 
 pub fn task_home(env: &HashMap<String, String>, home: &Path) -> Result<Option<PathBuf>, String> {
@@ -729,6 +743,20 @@ pub fn delete_task_for_device(
 mod tests {
     use super::*;
     #[test]
+    fn pi_agent_paths_are_markdown_leaves_only() {
+        assert!(pi_agent_file("pi/agents/reviewer.md"));
+        assert!(pi_agent_file("pi/agents/code-review_2.md"));
+        for name in [
+            "pi/agents/../outside.md",
+            "pi/agents/nested/a.md",
+            "pi/agents/a.ts",
+            "pi/agents/.md",
+            "codex/agents/a.md",
+        ] {
+            assert!(!pi_agent_file(name), "{name}");
+        }
+    }
+    #[test]
     fn gateway_task_materializes_private_catalog_and_cleans_it() {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
             "../../../cli/src/runtime/external/codex-catalog/fixtures/catalog.json"
@@ -1022,7 +1050,12 @@ mod tests {
         assert!(prepare(&mut remote_env("device-a", "desktop-b"), dir.path()).is_err());
         assert!(authorize_task_deletion("remote-one", dir.path(), Some("device-b")).is_err());
         authorize_task_deletion("remote-one", dir.path(), Some("device-a")).unwrap();
-        assert!(dir.path().join(".local/share/cognia-agent-tasks/remote-one").exists(), "preflight must not remove retained history");
+        assert!(
+            dir.path()
+                .join(".local/share/cognia-agent-tasks/remote-one")
+                .exists(),
+            "preflight must not remove retained history"
+        );
         assert!(delete_task_for_device("remote-one", dir.path(), Some("device-b")).is_err());
         delete_task_for_device("remote-one", dir.path(), Some("device-a")).unwrap();
     }

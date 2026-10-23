@@ -55,6 +55,35 @@ describe("platformFetchKind", () => {
 })
 
 describe("createPlatformFetch", () => {
+  it("refuses strict policy on browser and Capacitor before invoking a network implementation", async () => {
+    const nativeRequest = jest.fn()
+    getCapacitorHttp.mockReturnValue({ request: nativeRequest })
+    const browserFetch = jest.spyOn(globalThis, "fetch")
+    try {
+      for (const kind of ["browser", "capacitor"] as const) {
+        await expect(
+          createPlatformFetch({ kind })("https://files.test/secret", {
+            downloadPolicy: { allowedOrigins: ["https://files.test"], maxBytes: 4 },
+          })
+        ).rejects.toThrow("download_policy_unsupported")
+      }
+      expect(nativeRequest).not.toHaveBeenCalled()
+      expect(browserFetch).not.toHaveBeenCalled()
+    } finally {
+      browserFetch.mockRestore()
+    }
+  })
+
+  it("passes strict policy through the desktop platform wrapper", async () => {
+    const proxied = jest.fn(async () => new Response("data"))
+    createProxyFetch.mockReturnValue(proxied)
+    const downloadPolicy = { allowedOrigins: ["https://files.test"], maxBytes: 4 }
+    await createPlatformFetch({ kind: "tauri" })("https://files.test/data", {
+      binaryResponse: true,
+      downloadPolicy,
+    })
+    expect(proxied).toHaveBeenCalledWith("https://files.test/data", { downloadPolicy })
+  })
   it("sends a JSON body through the Capacitor bridge as text", async () => {
     const request = jest.fn().mockResolvedValue({
       data: '{"ok":true}',

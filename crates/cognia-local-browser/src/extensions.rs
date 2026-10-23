@@ -488,7 +488,10 @@ pub fn extract_zip(archive: &[u8], dest: &Path) -> Result<()> {
         let mut entry = zip
             .by_index(index)
             .map_err(|error| crx_invalid(format!("unreadable archive entry: {error}")))?;
-        let name = entry.name().to_string();
+        let name = entry
+            .name()
+            .map_err(|error| crx_invalid(format!("unreadable archive entry name: {error}")))?
+            .into_owned();
         let Some(relative) = safe_relative_path(&name)? else {
             continue;
         };
@@ -1888,6 +1891,16 @@ mod tests {
         assert_eq!(
             extract_zip(b"not a zip", dir.path()).unwrap_err().code,
             ExtensionErrorCode::CrxInvalid
+        );
+    }
+
+    #[test]
+    fn zip_extraction_preserves_unicode_entry_names() {
+        let dir = tempfile::tempdir().unwrap();
+        extract_zip(&zip_of(&[("assets/说明.txt", b"notes")]), dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("assets/说明.txt")).unwrap(),
+            b"notes"
         );
     }
 

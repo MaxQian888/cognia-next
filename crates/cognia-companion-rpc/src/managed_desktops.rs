@@ -1146,6 +1146,10 @@ mod tests {
             .register_oidc_device(
                 tenant,
                 "test-actor",
+                &cognia_companion::security_store::VerifiedDevicePerson {
+                    user_id: "usr_managed_test".to_string().try_into().unwrap(),
+                    org_id: "org_managed_test".to_string().try_into().unwrap(),
+                },
                 &challenge.id,
                 &challenge.nonce,
                 device,

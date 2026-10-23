@@ -1680,6 +1680,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           config: params.config,
           home,
           gate: opts.gate,
+          ...(opts.awaitApprovals ? { awaitApprovals: opts.awaitApprovals } : {}),
           ...(opts.signal ? { signal: opts.signal } : {}),
           approvedTools: resolveApprovedTools(),
           disabledMcpTools: resolveDisabledMcpTools(),

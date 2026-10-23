@@ -15,6 +15,8 @@ import { filterCases, runConfiguredEval, type RunConfiguredDeps } from "./run-co
 import { buildConfiguredRunDeps } from "./browser-deps"
 import { loadEvalAppSettings } from "./runtime-context"
 import { resolveEvalSettings } from "./settings"
+import type { EvalDatasetSummary, EvalRunDetail } from "@cognia/plugin-contract/lib/ai/eval/service"
+export type { EvalDatasetSummary, EvalRunDetail } from "@cognia/plugin-contract/lib/ai/eval/service"
 
 export interface EvalProgress {
   done: number
@@ -101,15 +103,6 @@ export async function runEvalService(input: RunEvalServiceInput): Promise<RunEva
 
 // ── Read-side queries (browser/Dexie wired — thin, mirrors browser-deps) ─────
 
-export interface EvalDatasetSummary {
-  id: string
-  name: string
-  capability: string
-  version: number
-  caseCount: number
-  latestRun?: { runId: string; passAt1: number; createdAt: number; targetLabel: string }
-}
-
 export async function listDatasetSummaries(): Promise<EvalDatasetSummary[]> {
   const { listDatasets, listCases } = await import("@/lib/db/eval-datasets")
   const { listRunsByDataset } = await import("@/lib/db/eval-runs")
@@ -137,11 +130,6 @@ export async function listDatasetSummaries(): Promise<EvalDatasetSummary[]> {
       }
     })
   )
-}
-
-export interface EvalRunDetail {
-  report: import("@/lib/db/eval-runs").EvalRunRow
-  cases: import("@/lib/db/eval-run-cases").EvalRunCaseRow[]
 }
 
 export async function getRunDetail(runId: string): Promise<EvalRunDetail | undefined> {

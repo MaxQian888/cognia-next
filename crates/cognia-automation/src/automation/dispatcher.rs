@@ -372,6 +372,23 @@ where
                 },
             };
             if allow {
+                // Policy may change while consent is pending. In particular,
+                // an emergency stop must fence a late approval before input.
+                if let Decision::Deny(err) = gate.evaluate(&call) {
+                    let entry = record_deny(
+                        audit,
+                        command,
+                        surface,
+                        plugin_id.as_deref(),
+                        &target,
+                        &err,
+                        started,
+                    );
+                    if let Some(app) = app {
+                        emit_audit(app, &entry);
+                    }
+                    return Err(err);
+                }
                 // Explicit consent does not bypass the per-action allowlist.
                 if let Some(reason) = policy_check() {
                     let (entry, typed) = record_policy_deny(
@@ -619,6 +636,59 @@ mod tests {
         assert!(!wants_consent_thumbnail(Surface::ChatCopilot));
         assert!(wants_consent_thumbnail(Surface::ComputerUse));
         assert!(wants_consent_thumbnail(Surface::Plugin));
+    }
+
+    #[tokio::test]
+    async fn approval_after_kill_switch_never_runs_the_action() {
+        use crate::automation::permission::AutomationSettings;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let gate = PermissionGate::new(AutomationSettings::default());
+        gate.set_enabled(true);
+        gate.update(|s| s.per_surface.workflow.tier = Tier::PerCall);
+        let broker = ConsentBroker::new();
+        let sink_gate = gate.clone();
+        let sink_broker = broker.clone();
+        let sink: ConsentEventSink = Arc::new(move |event| {
+            sink_gate.engage_kill_switch();
+            sink_broker.resolve_registered(&event.id, true, false, None);
+            Ok(())
+        });
+        let audit = AuditRing::new();
+        let ran = AtomicBool::new(false);
+        let result = run_gated_impl(
+            None,
+            &gate,
+            &audit,
+            &broker,
+            &PolicyState::default(),
+            None,
+            Some(&sink),
+            GateContext {
+                surface: Surface::Workflow,
+                plugin_id: None,
+                process_name: None,
+                window_title: None,
+                target_url: None,
+                click_x: None,
+                click_y: None,
+                force_tier: None,
+                command_detail: None,
+                session_key: Some("test-kill".into()),
+            },
+            "click",
+            || async {
+                ran.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .await;
+        assert!(matches!(result, Err(AutomationError::KillSwitchActive)));
+        assert!(!ran.load(Ordering::SeqCst));
+        assert_eq!(
+            audit.snapshot().last().unwrap().decision,
+            AuditDecision::Deny
+        );
     }
 
     #[test]

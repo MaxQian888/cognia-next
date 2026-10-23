@@ -49,6 +49,7 @@ import type { AgentCapabilityId, AgentExecutionSendSpec } from "./agent-executio
 import type {
   AgentDefinition,
   ClaudeAgentSdkOptionsV1,
+  ClaudeCodeRuntimePreferences,
   McpServerWireConfig,
 } from "./claude-agent-sdk-options"
 import type { OnboardingProfile, OnboardingProgress } from "./onboarding"
@@ -91,18 +92,36 @@ export interface ResolvedCompaction {
    * to that table.
    */
   contextWindow?: number
-  /** Number of most-recent turns kept verbatim. Default 6. */
+  /** Explicit number of recent messages. Absent uses a token-sized suffix. */
   keepRecent?: number
+  /** Token-targeted recent suffix when no explicit message-count preference exists. */
+  keepRecentTokens?: number
   /** Free-form focus / compact instructions merged into the summary prompt. */
   focus?: string
   /** Full summarization system prompt (canonical prompt + strategy + focus). */
   summaryPrompt?: string
+  /** Built-in research agents use monotonic, bounded progress checkpoints. */
+  checkpointFormat?: "progress-v1"
   /**
    * Hard cap on the summary call's output tokens (generic path). Mirrors
-   * `CompressionModelConfig.maxSummaryTokens` (default 500). Without it the
+   * `CompressionModelConfig.maxSummaryTokens` (default 16384). Without it the
    * summary inherits the full turn's (potentially large) output budget.
    */
   maxSummaryTokens?: number
+  /** Original explicit output limit, retained across provider fallback attempts. */
+  requestedMaxSummaryTokens?: number
+  /** Retained structured state budget, independent of generated reasoning/output. */
+  checkpointTokenBudget?: number
+  checkpointTokenBudgetIsDefault?: boolean
+  /** Complete post-compaction input target, including fixed prompt/tool overhead. */
+  postCompactionTokenBudget?: number
+  postCompactionTokenBudgetIsDefault?: boolean
+  /** Unconfigured cap; resolve it against each summary model's context window. */
+  summaryTokenBudgetIsDefault?: boolean
+  /** Catalog-resolved input budget for the summary request, after output reservation. */
+  summaryInputBudget?: number
+  /** Override background preparation; absent requires at least 64K measured input. */
+  background?: boolean
   /**
    * Alternate cheap/fast model for the summary call ONLY (generic path). Absent
    * ⇒ the sidecar reuses the turn's model + credentials. `model` alone (no
@@ -509,6 +528,13 @@ export type SendOptions = {
   runtimeExtensions?: AgentLocalExtensionRef[]
   toolPermissionRules?: AgentQualifiedToolPermissionRule[]
   /**
+   * Per-server MCP tool allowlists, keyed by the `mcpServers` map key with
+   * bare tool names. A server listed here exposes only those tools, including
+   * against tools it adds after discovery; servers not listed are unaffected.
+   * Set from a custom mode's MCP tool selection (`lib/mcp/mode-selection.ts`).
+   */
+  mcpToolAllowlist?: Record<string, string[]>
+  /**
    * Run THIS turn's main thread AS the named subagent (its system prompt, tool
    * restrictions, and model). Must be a key present in {@link agents}. Equivalent
    * to Claude Code's `@agent` / `--agent`. Set by `resolveSendOptions` from the
@@ -776,7 +802,7 @@ export type SendOptions = {
    * defaults + permission mode + character + `agentPermissions.commandRules`.
    * The fine-grained layer that augments the coarse allow/deny tool union.
    */
-  permissionRuleset?: import("@/lib/claude/permissions/ruleset").Ruleset
+  permissionRuleset?: import("@cognia/plugin-contract/lib/claude/permissions/ruleset").Ruleset
 
   /**
    * Tool names that must ALWAYS reach the renderer as a `permission_request`,
@@ -936,8 +962,8 @@ export type SendOptions = {
    * SendOptions via its `#[serde(flatten)]` catch-all.
    */
   protocolAdapterSpec?:
-    | import("@/types/plugin/plugin-protocol-adapter").OpenAiCompatibleVariantSpec
-    | import("@/types/plugin/plugin-protocol-adapter").SidecarCodeAdapterSpec
+    | import("@cognia/plugin-contract/types/plugin/plugin-protocol-adapter").OpenAiCompatibleVariantSpec
+    | import("@cognia/plugin-contract/types/plugin/plugin-protocol-adapter").SidecarCodeAdapterSpec
 
   /**
    * Sampling/generation parameters (AI SDK v6 call-option names) assembled
@@ -1123,11 +1149,11 @@ export type SendOptions = {
   memoryContext?: {
     retrievedMemories: Array<{
       id: string
-      type: import("@/types/memory/memory").MemoryType
+      type: import("@cognia/memory/types/memory").MemoryType
       text: string
       score: number
-      evidenceState?: import("@/types/memory/memory").MemoryEvidenceState
-      reviewStatus?: import("@/types/memory/memory").MemoryReviewStatus
+      evidenceState?: import("@cognia/memory/types/memory").MemoryEvidenceState
+      reviewStatus?: import("@cognia/memory/types/memory").MemoryReviewStatus
     }>
     proceduralCount: number
     withheldCount?: number
@@ -1154,7 +1180,7 @@ export type SendOptions = {
   projectContinuityContext?: {
     claims: Array<{
       id: string
-      kind: import("@/types/memory/memory").ProjectMemoryKind
+      kind: import("@cognia/memory/types/memory").ProjectMemoryKind
       text: string
       relevance: number
       observedAt?: number
@@ -2528,7 +2554,7 @@ export interface ChatSession {
    */
   issueId?: string
   /** Durable Local/managed-worktree binding reused by subsequent turns. */
-  executionContext?: import("@/types/execution-context").SessionExecutionContext
+  executionContext?: import("@cognia/plugin-contract/types/execution-context").SessionExecutionContext
   title: string
   /** Monotonic lineage for timeline pages, turn details, and opaque cursors. */
   transcriptRevision?: number
@@ -2613,7 +2639,7 @@ export interface ChatSession {
   /** Per-chat automatic learned-memory write override. */
   memoryLearn?: boolean
   /** Per-session chat-message presentation override; absent means inherit app settings. */
-  messageDisplayOverride?: import("@/types/appearance").MessageDisplayPreferences
+  messageDisplayOverride?: import("@cognia/plugin-contract/types/appearance").MessageDisplayPreferences
   /** Per-session Agent execution overrides; values beat the bound Agent profile. */
   executionPolicy?: AgentExecutionPolicy
   pinned?: boolean
@@ -2685,14 +2711,14 @@ export interface ChatSession {
    * `undefined` inherits the character. Precedence: session → character →
    * local (`lib/automation/sandbox-target.ts`).
    */
-  computerUseTarget?: import("@/lib/automation/sandbox-target").ComputerUseTargetSetting
+  computerUseTarget?: import("@cognia/plugin-contract/lib/automation/sandbox-target").ComputerUseTargetSetting
   /**
    * Per-session override of the sandbox tier (Epic 5). Beats
    * `Character.sandboxTier`, which beats `AppSettings.sandboxTier`.
    * `undefined` inherits. Resolved together with `computerUseTarget` into a
    * single `SandboxSessionBinding` by `lib/sandbox/binding.ts`.
    */
-  sandboxTier?: import("@/types/sandbox").SandboxShellTier
+  sandboxTier?: import("@cognia/plugin-contract/types/sandbox").SandboxShellTier
   /**
    * The conversation was explicitly released from its pinned tier and must
    * follow the character / app default from here on.
@@ -3007,7 +3033,7 @@ export interface ChatSession {
    */
   thinkingLevel?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | "ultracode"
   /** Set when this session is bound to an external IM platform conversation. */
-  platformBinding?: import("@/types/connectors/binding").PlatformBinding
+  platformBinding?: import("@cognia/plugin-contract/types/connectors/binding").PlatformBinding
   /**
    * Denormalized copy of `platformBinding.conversationKey`, indexed in Dexie
    * v85 so the connector runtime can enumerate every session bound to one IM
@@ -3021,7 +3047,7 @@ export interface ChatSession {
    * Host-owned Inbox projection identity for service Integration events.
    * Kept separate from IM `platformBinding` and ConnectorBus routing.
    */
-  integrationBinding?: import("@/types/integrations/binding").IntegrationBinding
+  integrationBinding?: import("@cognia/plugin-contract/types/integrations/binding").IntegrationBinding
   /**
    * Per-session tool/MCP filter. Highest precedence — replaces the character
    * ({@link Character.toolFilter}) and global ({@link AppSettings.toolFilter})
@@ -3102,8 +3128,8 @@ export interface StoredMessage {
     /** Set on inbound messages from a platform connector. */
     platformMessage?: {
       messageId: string
-      platform: import("@/types/connectors/platform-kind").PlatformKind
-      sender: import("@/types/connectors/event").PlatformIdentity
+      platform: import("@cognia/plugin-contract/types/connectors/platform-kind").PlatformKind
+      sender: import("@cognia/plugin-contract/types/connectors/event").PlatformIdentity
       /**
        * Adapter-instance + conversation scoping for edit/delete lookups.
        * Per-chat message ids (Telegram `message_id`, Slack `ts`) collide
@@ -3122,13 +3148,13 @@ export interface StoredMessage {
      * renders this through the InboundA2UIRenderer to surface buttons
      * / cards / lists / images as structured UI rather than plaintext.
      */
-    inboundA2UI?: import("@/lib/connectors/adapters/_shared/inbound-a2ui-types").InboundA2UIBlock
+    inboundA2UI?: import("@cognia/plugin-contract/lib/connectors/adapters/_shared/inbound-a2ui-types").InboundA2UIBlock
     /**
      * Labels plugins attached to this inbound message via
      * `onConnectorInbound` → `annotate` (ADR-0194), validated and stamped by
      * the host. Cleared when the platform edits the message.
      */
-    inboundLabels?: import("@/types/connectors/inbound-label").InboundLabel[]
+    inboundLabels?: import("@cognia/plugin-contract/types/connectors/inbound-label").InboundLabel[]
     /** Set on outbound (assistant) messages once enqueued. */
     outboundJobId?: string
     /**
@@ -3985,7 +4011,7 @@ export interface AppSettings {
    * defaults without a schema migration. Defaults to `DEFAULT_OCR_SETTINGS`
    * from `lib/ocr/types.ts`.
    */
-  ocrSettings?: import("@/types/ocr").UserOcrSettings
+  ocrSettings?: import("@cognia/ocr/types").UserOcrSettings
   /**
    * Local-storage retention policy. `traceRetentionDays` bounds how long agent
    * trace spans (`agentTraces`, an otherwise unbounded table) are kept before
@@ -4035,7 +4061,7 @@ export interface AppSettings {
    * `DEFAULT_GIT_SETTINGS` in `types/git`, so older installs pick up new
    * defaults without a schema migration.
    */
-  gitSettings?: import("@/types/git").GitUiSettings
+  gitSettings?: import("@cognia/plugin-contract/types/git").GitUiSettings
   /**
    * External-agent session-history live sync (ADR-0062). When `enabled`, the
    * `SessionImportWatchInitializer` keeps the Rust fs-watcher running over
@@ -4385,7 +4411,7 @@ export interface AppSettings {
    * character via `Character.instructionsOverride`. Undefined → built-in
    * defaults (enabled, layered). See `lib/claude/instructions/`.
    */
-  instructions?: import("@/lib/claude/instructions/types").InstructionsConfig
+  instructions?: import("@cognia/plugin-contract/lib/claude/instructions/types").InstructionsConfig
   /**
    * Auto-generate a conversation title from the first turn using a
    * configurable background model. `enabled` defaults to true; the instant
@@ -4398,13 +4424,13 @@ export interface AppSettings {
    * captured items, surfaced in the pet console. See `lib/radar/` and
    * `types/radar`. Absent → defaults (disabled). Off by default.
    */
-  attentionRadar?: import("@/types/radar").RadarSettings
+  attentionRadar?: import("@cognia/plugin-contract/types/radar").RadarSettings
   /**
    * Content capture (confirm-bubble flow) — clipboard watching + save +
    * enrichment; captured items feed the Attention Radar. See `lib/capture/`
    * and `types/capture`. Absent → defaults (disabled). Desktop-only.
    */
-  capture?: import("@/types/capture").CaptureSettings
+  capture?: import("@cognia/plugin-contract/types/capture").CaptureSettings
   /**
    * LLM input assistance for the main chat composer: prompt enhancement
    * (rewrite / variants), inline ghost-text autocomplete, and AI starter /
@@ -4481,7 +4507,7 @@ export interface AppSettings {
    * keyring (`lib/decisions/config.ts`). Absent → no provider; features that
    * need one render an explicit "no judge" state.
    */
-  decisions?: import("@/types/decisions").DecisionSettings
+  decisions?: import("@cognia/plugin-contract/types/decisions").DecisionSettings
   /**
    * Non-LLM composer / send-box behavior toggles. Every field defaults to the
    * historical hard-coded behavior (treated as `true` via `!== false`), so an
@@ -4496,7 +4522,7 @@ export interface AppSettings {
      * four re-arrange the SAME roster of controls; none of them removes one.
      * See `lib/chat/composer-skin.ts` for the table and its invariants.
      */
-    skin?: import("@/lib/chat/composer-skin").ComposerSkinId
+    skin?: import("@cognia/plugin-contract/lib/chat/composer-skin").ComposerSkinId
     /**
      * Per-knob adjustments layered on the chosen skin (corner radius, padding,
      * monospace input, send-button shape, toolbar arrangement). Clamped on
@@ -4506,7 +4532,7 @@ export interface AppSettings {
      * composer, untouched", and honouring a radius knob there would break that
      * silently. Pick another skin to adjust anything.
      */
-    skinOverrides?: import("@/lib/chat/composer-skin").ComposerSkinOverrides
+    skinOverrides?: import("@cognia/plugin-contract/lib/chat/composer-skin").ComposerSkinOverrides
     /**
      * Render the message composer as a compact, vertically stacked control
      * surface. Default false.
@@ -4551,7 +4577,7 @@ export interface AppSettings {
      * See `lib/chat/link-display.ts`.
      */
     linkChips?: {
-      style?: import("@/lib/chat/link-display").LinkDisplayStyle
+      style?: import("@cognia/plugin-contract/lib/chat/link-display").LinkDisplayStyle
       rules?: Array<{ host: string; strip?: string }>
     }
     /**
@@ -4629,7 +4655,7 @@ export interface AppSettings {
      * agent's shell tool. Highest authority — an explicit match wins over
      * the classifier. Author with trailing globs, e.g. `"git push*": "ask"`.
      */
-    commandRules?: import("@/lib/claude/permissions/ruleset").ToolRules
+    commandRules?: import("@cognia/plugin-contract/lib/claude/permissions/ruleset").ToolRules
     /**
      * Per-TOOL permission rules (multi-tool generalization of
      * `commandRules`): `tool name → { input-glob → allow|ask|deny }`.
@@ -4639,7 +4665,7 @@ export interface AppSettings {
      * names (`bash`, `edit`), SDK names (`Bash`), namespaced MCP forms, or
      * globs (`mcp__github__*`).
      */
-    toolRules?: import("@/lib/claude/permissions/ruleset").Ruleset
+    toolRules?: import("@cognia/plugin-contract/lib/claude/permissions/ruleset").Ruleset
     /**
      * Where a dispatched subagent's permission asks go. `"surface"` (default)
      * re-buckets them into the parent chat session (Claude Code parity);
@@ -4653,7 +4679,7 @@ export interface AppSettings {
      * enum and are refused fail-closed at dispatch time. `ask` is reserved and
      * treated as `allow` in v1. Default allow when unset.
      */
-    subagentRules?: import("@/lib/claude/permissions/ruleset").ToolRules
+    subagentRules?: import("@cognia/plugin-contract/lib/claude/permissions/ruleset").ToolRules
   }
   /** Right-edge conversation-timeline minimap preferences. */
   conversationTimeline?: ConversationTimelineSettings
@@ -4734,7 +4760,7 @@ export interface AppSettings {
      * `AgentId` union plus `"opencode"` (an OpenCode-CLI write target that
      * isn't one of cognia's modeled agents). See `types/ccswitch/switch.ts`.
      */
-    defaultPropagation: import("@/types/ccswitch").CcswitchAgentId[]
+    defaultPropagation: import("@cognia/plugin-contract/types/ccswitch/switch").CcswitchAgentId[]
     /**
      * Optional manual cc-switch data-dir override (a directory containing
      * `cc-switch.db`). When set, it takes priority over cc-switch's own
@@ -4750,14 +4776,14 @@ export interface AppSettings {
    * stored here. See ADR-0025 and
    * `lib/subscription/core/types.ts:AnthropicSubscriptionSettings`.
    */
-  subscriptionSettings?: import("@/types/subscription").AnthropicSubscriptionSettings
+  subscriptionSettings?: import("@cognia/plugin-contract/types/subscription").AnthropicSubscriptionSettings
   /**
    * Codex (OpenAI) subscription preferences — discovery fallback + refresh
    * cadence. Credentials live in the OS keyring; only renderer-side toggles
    * are stored here. See ADR-0025 and
    * `lib/subscription/core/types.ts:CodexSubscriptionSettings`.
    */
-  codexSubscriptionSettings?: import("@/types/subscription").CodexSubscriptionSettings
+  codexSubscriptionSettings?: import("@cognia/plugin-contract/types/subscription").CodexSubscriptionSettings
   /**
    * User-defined limits/usage sources for arbitrary coding-plan / relay
    * providers (Settings → Subscription → Custom sources). Each is a
@@ -4766,7 +4792,7 @@ export interface AppSettings {
    * token is stored here in the renderer settings store (not the OS keyring),
    * mirroring the CLI's plaintext provider tokens — the UI surfaces a caveat.
    */
-  customLimitsSources?: import("@/types/subscription").CustomLimitsSource[]
+  customLimitsSources?: import("@cognia/plugin-contract/types/subscription").CustomLimitsSource[]
   /**
    * Account-scoped opt-ins for outbound quota/balance requests. Keys are
    * produced by `limitsQueryAccountKey(provider, providerAccountId)`; missing means no
@@ -4791,7 +4817,7 @@ export interface AppSettings {
    * picks the best tier from `prefers-reduced-motion` + workflow node count).
    * See `lib/workflow/editor/performance-tier.ts` for the resolution table.
    */
-  workflowEditorPerformanceTier?: import("@/lib/workflow/editor/performance-tier").PerformanceTier
+  workflowEditorPerformanceTier?: import("@cognia/plugin-contract/lib/workflow/editor/performance-tier").PerformanceTier
   /**
    * Tauri webview zoom level (1.0 = 100%). Persisted across launches and
    * applied at boot via `<WebviewZoomBootstrap />`. Range 0.5..2.0.
@@ -5032,7 +5058,7 @@ export interface AppSettings {
      * cwd + env + args the dock's profile picker can spawn directly. See
      * `lib/terminal/profiles.ts`.
      */
-    profiles?: import("@/lib/terminal/profiles").TerminalProfile[]
+    profiles?: import("@cognia/plugin-contract/lib/terminal/profiles").TerminalProfile[]
     /** Id of the profile the plain "+ New" affordance uses, if any. */
     defaultProfileId?: string
     /**
@@ -5217,7 +5243,7 @@ export interface AppSettings {
    * JSON (same pattern as `pinnedWorkflowIds`) so it persists without a Dexie
    * migration. See `@/types/shell/sidebar` for the model + default.
    */
-  sidebarLayout?: import("@/types/shell/sidebar").SidebarLayout
+  sidebarLayout?: import("@cognia/plugin-contract/types/shell/sidebar").SidebarLayout
   /**
    * Which window edge the desktop navigation rail (`GuildRail`) sits on.
    * Separate from `sidebarLayout` on purpose — that type's mutators rebuild
@@ -5225,7 +5251,7 @@ export interface AppSettings {
    * not move the rail. Desktop-only; the mobile shell keeps the rail in a
    * drawer. See `@/types/shell/sidebar` for the model + default.
    */
-  sidebarSide?: import("@/types/shell/sidebar").SidebarSide
+  sidebarSide?: import("@cognia/plugin-contract/types/shell/sidebar").SidebarSide
   /**
    * Customization of the Context Workbench's activity rail — the icon column
    * inside the right-hand workbench: the order of its activities plus the ones
@@ -5234,7 +5260,7 @@ export interface AppSettings {
    * panels declare. Lives in settings JSON (same pattern as `sidebarLayout`) —
    * no Dexie migration. See `@/types/shell/workbench-rail`.
    */
-  workbenchRail?: import("@/types/shell/workbench-rail").WorkbenchRailLayout
+  workbenchRail?: import("@cognia/plugin-contract/types/shell/workbench-rail").WorkbenchRailLayout
   /**
    * Whether the Context Workbench's activity rail stays on screen when the
    * panel body is closed — the persistent minibar. Default `true`.
@@ -5256,7 +5282,7 @@ export interface AppSettings {
    */
   workbenchRailPerProject?: Record<
     string,
-    import("@/types/shell/workbench-rail").WorkbenchRailLayout
+    import("@cognia/plugin-contract/types/shell/workbench-rail").WorkbenchRailLayout
   >
   /**
    * Customization of the Context Workbench's *panel tabs* — one level below
@@ -5269,13 +5295,13 @@ export interface AppSettings {
    * migration). See `@/types/shell/workbench-panels` for the model and
    * `@/lib/shell/workbench-panels` for the catalog + resolver.
    */
-  workbenchPanels?: import("@/types/shell/workbench-panels").WorkbenchPanelLayout
+  workbenchPanels?: import("@cognia/plugin-contract/types/shell/workbench-panels").WorkbenchPanelLayout
   /**
    * Which rows the session summary card shows: each row is `always`, `auto`
    * (only when it has content) or `never`. Edited from the card's own menu.
    * See `@/types/shell/session-summary-card` for the model and defaults.
    */
-  sessionSummaryCard?: import("@/types/shell/session-summary-card").SessionSummaryCardSettings
+  sessionSummaryCard?: import("@cognia/plugin-contract/types/shell/session-summary-card").SessionSummaryCardSettings
   /**
    * Customization of the desktop title bar (the top window bar): the order of
    * its segments plus the ones the user removed. Lives in settings JSON (same
@@ -5283,12 +5309,12 @@ export interface AppSettings {
    * syncs with the rest of the shell layout. See `@/types/shell/bars` for the
    * model + default, and `@/lib/shell/bar-items` for the resolver.
    */
-  titleBarLayout?: import("@/types/shell/bars").BarLayout
+  titleBarLayout?: import("@cognia/plugin-contract/types/shell/bars").BarLayout
   /**
    * Customization of the desktop status bar (the bottom window bar). Same
    * `{ order, hidden }` model and persistence path as `titleBarLayout`.
    */
-  statusBarLayout?: import("@/types/shell/bars").BarLayout
+  statusBarLayout?: import("@cognia/plugin-contract/types/shell/bars").BarLayout
   /**
    * Legacy (pre-ADR-0225) customization of the mobile home: the ordered
    * quick-action grid + which home sections are hidden. Superseded by
@@ -5296,7 +5322,7 @@ export interface AppSettings {
    * (`lib/glance/mobile-layout.ts`) until the phone first saves that field,
    * and never written again. See `@/types/shell/mobile-home` for the model.
    */
-  mobileHomeLayout?: import("@/types/shell/mobile-home").MobileHomeLayout
+  mobileHomeLayout?: import("@cognia/plugin-contract/types/shell/mobile-home").MobileHomeLayout
   /**
    * The desktop tray panel's glance layout (ADR-0225): module order, sizes and
    * visibility, the preset it came from, width step, max height, data scope
@@ -5304,7 +5330,7 @@ export interface AppSettings {
    * it is backed up and account-synced without a Dexie migration. Read through
    * `normalizeGlancePanelSettings` (`lib/glance/presets.ts`), never raw.
    */
-  trayPanelLayout?: import("@/types/glance/layout").GlancePanelSettings
+  trayPanelLayout?: import("@cognia/plugin-contract/types/glance/layout").GlancePanelSettings
   /**
    * The phone's glance layout (ADR-0225 §9, §10): the modules of its home
    * screen (entries pinned with `home`) and its Glance drawer (every visible
@@ -5315,7 +5341,7 @@ export interface AppSettings {
    * `welcomeStats.enabled`) into this model on every read. Read through
    * `normalizeGlanceMobileSettings` (`lib/glance/mobile-layout.ts`), never raw.
    */
-  mobileGlanceLayout?: import("@/types/glance/layout").GlanceMobileSettings
+  mobileGlanceLayout?: import("@cognia/plugin-contract/types/glance/layout").GlanceMobileSettings
   /**
    * The tray panel's action catalogue (quick actions and the delegate bar's
    * primary action). Imported once from the Tauri store pref
@@ -5324,13 +5350,13 @@ export interface AppSettings {
    * (`lib/tray-panel/catalogue.ts`), never raw. The panel window receives it
    * in the glance snapshot.
    */
-  trayPanelActions?: import("@/lib/tray-panel/types").TrayPanelAction[]
+  trayPanelActions?: import("@cognia/plugin-contract/lib/tray-panel/types").TrayPanelAction[]
   /**
    * Customization of the mobile bottom tab bar: tab order, hidden tabs, and the
    * launch landing tab. Lives in settings JSON (same pattern as `sidebarLayout`)
    * — no Dexie migration. See `@/types/shell/mobile-tabs` for the model.
    */
-  mobileTabLayout?: import("@/types/shell/mobile-tabs").MobileTabLayout
+  mobileTabLayout?: import("@cognia/plugin-contract/types/shell/mobile-tabs").MobileTabLayout
   /** Row density for the mobile workflow library list. Defaults to "comfortable". */
   mobileWorkflowView?: "compact" | "comfortable"
   /**
@@ -5340,7 +5366,7 @@ export interface AppSettings {
    * the discover page share one partition algorithm + customizer UI. Lives in
    * settings JSON (same pattern as `sidebarLayout`) — no Dexie migration.
    */
-  discoverLayout?: import("@/types/shell/sidebar").SidebarLayout
+  discoverLayout?: import("@cognia/plugin-contract/types/shell/sidebar").SidebarLayout
   /**
    * Per-category view mode for the `/discover` grid (`grid` | `list` |
    * `compact`). Keyed by `DiscoverCategoryId` (plus the `favorites`
@@ -5348,7 +5374,7 @@ export interface AppSettings {
    * workflow library toggle, which is localStorage-only.
    */
   discoverViewByCategory?: Partial<
-    Record<string, import("@/lib/discover/categories").DiscoverViewMode>
+    Record<string, import("@cognia/plugin-contract/lib/discover/categories").DiscoverViewMode>
   >
   /**
    * Favorited discover items, stored as `${kind}:${id}` keys (e.g.
@@ -5372,7 +5398,7 @@ export interface AppSettings {
    */
   discoverDefaults?: {
     landingCategory?: string
-    view?: import("@/lib/discover/categories").DiscoverViewMode
+    view?: import("@cognia/plugin-contract/lib/discover/categories").DiscoverViewMode
   }
   /**
    * Execution Monitor view preferences ("围观设置") — hidden kinds, row sort,
@@ -5381,7 +5407,7 @@ export interface AppSettings {
    * the chosen view follows the user across devices without a Dexie migration.
    * See `@/lib/execution/monitor-prefs` for the model + defaults.
    */
-  executionMonitorPrefs?: import("@/lib/execution/monitor-prefs").StoredExecutionMonitorPrefs
+  executionMonitorPrefs?: import("@cognia/plugin-contract/lib/execution/monitor-prefs").StoredExecutionMonitorPrefs
   /**
    * @deprecated Retired by ADR-0179: the `/scheduler` overview merged its
    * calendar and timeline into one agenda, so there is no view to choose. The
@@ -5403,7 +5429,7 @@ export interface AppSettings {
    * follows the user across devices without a Dexie migration. Partial — unset
    * fields fall back to `DEFAULT_GOAL_CONSOLE_PREFS`.
    */
-  goalConsolePrefs?: import("@/lib/goal/console-prefs").StoredGoalConsolePrefs
+  goalConsolePrefs?: import("@cognia/plugin-contract/lib/goal/console-prefs").StoredGoalConsolePrefs
   /**
    * Unified Notification Center preferences (ADR-0042): global default
    * channels, per-source overrides, OS/push level gates, DND/quiet-hours,
@@ -5413,7 +5439,7 @@ export interface AppSettings {
    * table (v68); only these preferences ride on the settings singleton.
    * See `@/types/notifications` for the model + `DEFAULT_NOTIFICATION_PREFERENCES`.
    */
-  notificationPreferences?: import("@/types/notifications").NotificationPreferences
+  notificationPreferences?: import("@cognia/plugin-contract/types/notifications").NotificationPreferences
   /**
    * Chat welcome page (`EmptyChatState`) personalization. All three live in
    * settings JSON (same pattern as `goalConsoleView`) so they persist without a
@@ -5436,7 +5462,7 @@ export interface AppSettings {
   userName?: string
   welcomeStyle?: "rich" | "minimal"
   welcomeHidden?: { tryPrompt?: boolean }
-  welcomeStats?: import("@/lib/chat/welcome-stats-prefs").StoredWelcomeStatsPrefs
+  welcomeStats?: import("@cognia/plugin-contract/lib/chat/welcome-stats-prefs").StoredWelcomeStatsPrefs
   /**
    * User-written example prompts for the hero composer's typewriter hints.
    * When at least one non-blank entry exists the carousel rotates through
@@ -5477,9 +5503,9 @@ export interface AppSettings {
    * `DEFAULT_MEMORY_CONFIG`. The `memories` rows themselves live in their own
    * Dexie table (schema v65). See `@/types/memory/memory`.
    */
-  memory?: Partial<import("@/types/memory/memory").MemoryConfig>
+  memory?: Partial<import("@cognia/memory/types/memory").MemoryConfig>
   /** View mode for the `/memory` management panel (`grid` | `list`). */
-  memoryView?: import("@/types/memory/memory").MemoryViewMode
+  memoryView?: import("@cognia/memory/types/memory").MemoryViewMode
   /**
    * Last time the user opened the Inbox tab (ms since epoch). Used by the
    * mobile bottom Tab Bar to compute an unread badge over the Chat tab —
@@ -5664,7 +5690,7 @@ export interface AppSettings {
     /** Minimum line count to auto-create code/document artifacts (3..50). */
     minLines?: number
     /** Subset of types eligible for auto-creation (defaults to all 9). */
-    enabledTypes?: import("@/types/artifact/artifact").ArtifactType[]
+    enabledTypes?: import("@cognia/plugin-contract/types/artifact/artifact").ArtifactType[]
     /** Show a sonner toast when an artifact is auto-created. */
     showNotification?: boolean
     /** Initial tab when the panel opens for a previewable artifact. */
@@ -5699,9 +5725,9 @@ export interface AppSettings {
   /**
    * Project-level Agent-Eval defaults (judge model, default k / scorers,
    * new-dataset gate template, cost guard). Consumed by the run-config dialog
-   * and `createDataset`; see {@link import("@/types/eval/settings").EvalSettings}.
+   * and `createDataset`; see {@link import("@cognia/eval-core/domain/settings").EvalSettings}.
    */
-  evalSettings?: import("@/types/eval/settings").EvalSettings
+  evalSettings?: import("@cognia/eval-core/domain/settings").EvalSettings
 
   // ---- Backup reminders & scheduling ----
   /**
@@ -5747,9 +5773,9 @@ export interface AppSettings {
   /** Default catalog id for new A2UI surfaces (academic / financial / general). */
   a2uiDefaultCatalogId?: string
   /** Default widget host strategy used when a surface omits the field. */
-  a2uiDefaultHostStrategy?: import("@/types/a2ui/schema").A2UIWidgetHostStrategy
+  a2uiDefaultHostStrategy?: import("@cognia/plugin-contract/types/a2ui/schema").A2UIWidgetHostStrategy
   /** Default widget theme. */
-  a2uiDefaultTheme?: import("@/types/a2ui/schema").A2UIWidgetTheme
+  a2uiDefaultTheme?: import("@cognia/plugin-contract/types/a2ui/schema").A2UIWidgetTheme
   /** LRU surface cap kept in zustand persist (default 20). */
   a2uiPersistenceLimit?: number
 
@@ -5762,9 +5788,9 @@ export interface AppSettings {
   // =============================================================================
 
   /** Active color preset. Plugin Theme API surfaces this as `colorTheme`. */
-  colorTheme?: import("@/types/plugin/plugin").ColorThemePreset
+  colorTheme?: import("@cognia/plugin-contract/types/plugin/plugin").ColorThemePreset
   /** User-defined custom theme palettes (UI colors, not export tokens). */
-  customThemes?: import("@/types/plugin/plugin").CustomTheme[]
+  customThemes?: import("@cognia/plugin-contract/types/plugin/plugin").CustomTheme[]
   /** Currently active custom theme id; null when a preset is in use. */
   activeCustomThemeId?: string | null
   /**
@@ -5827,6 +5853,8 @@ export interface AppSettings {
    * everywhere unless a specific session / character opts out.
    */
   sandboxDefaultEnabled?: boolean
+  /** Claude Code SDK capabilities. Namespace requests require separate per-run approval. */
+  claudeCodeRuntime?: ClaudeCodeRuntimePreferences
   /**
    * App-wide default for the always-on **workspace confinement** layer
    * (ADR-0028 "lite"). When true (the default), the sidecar built-in file/bash
@@ -5987,13 +6015,13 @@ export interface AppSettings {
    * matches for the current prompt plus pinned tools. Built-in tools are
    * never pruned. See `lib/ai/routing/semantic-tool-router.ts`.
    */
-  semanticToolRouting?: import("@/types/routing/tool-route").SemanticToolRoutingSettings
+  semanticToolRouting?: import("@cognia/plugin-contract/types/routing/tool-route").SemanticToolRoutingSettings
   /**
    * Opt-in heuristic strong/weak difficulty routing (default OFF) — a
    * registered routing strategy (`"difficulty"`) usable as the routing
    * strategy or per-request override once a model pair is configured.
    */
-  difficultyRouting?: import("@/types/routing/tool-route").DifficultyRoutingSettings
+  difficultyRouting?: import("@cognia/plugin-contract/types/routing/tool-route").DifficultyRoutingSettings
   /**
    * Opt-in automatic tier routing (default OFF). When enabled,
    * `resolveSendOptions` scores each non-alias prompt's difficulty and rewrites
@@ -6031,40 +6059,40 @@ export interface AppSettings {
   routingPresets?: import("@cognia/provider-types/routing-presets").RoutingPresetsState
 
   // ---- Appearance (background, wallpapers, custom CSS, VSCode imports) ----
-  lockScreen?: import("@/types/appearance").LockScreenSettings
-  background?: import("@/types/appearance").BackgroundSettings
-  wallpapers?: import("@/types/appearance").Wallpaper[]
+  lockScreen?: import("@cognia/plugin-contract/types/appearance").LockScreenSettings
+  background?: import("@cognia/plugin-contract/types/appearance").BackgroundSettings
+  wallpapers?: import("@cognia/plugin-contract/types/appearance").Wallpaper[]
   customCss?: string
   customCssEnabled?: boolean
-  importedVscodeThemes?: import("@/types/appearance").ImportedThemeRecord[]
+  importedVscodeThemes?: import("@cognia/plugin-contract/types/appearance").ImportedThemeRecord[]
   // ---- Appearance v47 (density / radius / motion / typography / a11y / auto-mode / monaco link) ----
-  density?: import("@/types/appearance").DensitySettings
-  radius?: import("@/types/appearance").RadiusSettings
-  motion?: import("@/types/appearance").MotionSettings
+  density?: import("@cognia/plugin-contract/types/appearance").DensitySettings
+  radius?: import("@cognia/plugin-contract/types/appearance").RadiusSettings
+  motion?: import("@cognia/plugin-contract/types/appearance").MotionSettings
   /** Agent invocation-flow display mode (simplified / standard / detailed). */
-  agentFlowMode?: import("@/types/appearance").AgentFlowSettings
+  agentFlowMode?: import("@cognia/plugin-contract/types/appearance").AgentFlowSettings
   /** Unified chat-message presentation preferences. */
-  messageDisplay?: import("@/types/appearance").MessageDisplayPreferences
+  messageDisplay?: import("@cognia/plugin-contract/types/appearance").MessageDisplayPreferences
   /** Usage / consumption statistics display mode (simplified / standard / detailed). */
-  usageDisplayMode?: import("@/types/appearance").UsageDisplaySettings
-  typographyExt?: import("@/types/appearance").TypographyExtSettings
-  a11y?: import("@/types/appearance").A11ySettings
-  autoMode?: import("@/types/appearance").AutoModeSettings
-  monacoLink?: import("@/types/appearance").MonacoLinkSettings
+  usageDisplayMode?: import("@cognia/plugin-contract/types/appearance").UsageDisplaySettings
+  typographyExt?: import("@cognia/plugin-contract/types/appearance").TypographyExtSettings
+  a11y?: import("@cognia/plugin-contract/types/appearance").A11ySettings
+  autoMode?: import("@cognia/plugin-contract/types/appearance").AutoModeSettings
+  monacoLink?: import("@cognia/plugin-contract/types/appearance").MonacoLinkSettings
   /** Active theme-pack id (from plugin manifest.themePacks). null when nothing applied. */
   activeThemePackId?: string | null
   /** Wraps user CSS in `@scope (#app) { ... }` when "app" (default), or applies globally. */
   customCssScope?: "app" | "global"
   /** Per-component surface customization (tonality / elevation / radius). */
-  componentStyles?: import("@/types/appearance").ComponentStyles
+  componentStyles?: import("@cognia/plugin-contract/types/appearance").ComponentStyles
   /** Mouse-pointer art (pack / size / tint) and the pointer effect layer. */
-  cursor?: import("@/types/appearance").CursorSettings
+  cursor?: import("@cognia/plugin-contract/types/appearance").CursorSettings
   /**
    * Style pack (ADR-0148) — the "shape" half of appearance: radius base, pill
    * shape, elevation ceiling, border tone, density, micro-label treatment.
    * Orthogonal to the colour half, so any pack composes with any theme.
    */
-  stylePack?: import("@/types/appearance").StylePackSettings
+  stylePack?: import("@cognia/plugin-contract/types/appearance").StylePackSettings
 
   // ---- WebRTC WAN transport (ADR-0021) ----
   /**
@@ -6189,7 +6217,7 @@ export interface AppSettings {
    * every MCP call; scopes not in the list are denied with MCP error -32602.
    * Default install ships with only `wiki:cognia` + `rag:cognia` enabled.
    */
-  externalBridge?: import("@/types/wiki").ExternalBridgeSettings
+  externalBridge?: import("@cognia/plugin-contract/types/wiki").ExternalBridgeSettings
 
   // ---- Network Proxy ----
   /**
@@ -6204,7 +6232,7 @@ export interface AppSettings {
    * every save so the in-memory config stays coherent without a Dexie
    * round-trip on the hot path.
    */
-  networkProxy?: import("@/types/network/proxy").NetworkProxySettings
+  networkProxy?: import("@cognia/plugin-contract/types/network/proxy").NetworkProxySettings
 
   /**
    * Who may put work on the user's schedule, and how much.
@@ -6217,7 +6245,7 @@ export interface AppSettings {
    *
    * Absent means `DEFAULT_PERMISSION_POLICY` (`types/scheduler`).
    */
-  schedulerPermissionPolicy?: import("@/types/scheduler").SchedulerPermissionPolicy
+  schedulerPermissionPolicy?: import("@cognia/plugin-contract/types/scheduler").SchedulerPermissionPolicy
 
   /**
    * Set once the pre-v219 machine-wide `CogniaSchedulerDB` has been drained
@@ -6870,8 +6898,8 @@ export interface AgentMemoryPolicy {
     update: boolean
     forget: boolean
   }
-  readableScopes: import("@/types/memory/memory").MemoryScope[]
-  writableScopes: import("@/types/memory/memory").MemoryScope[]
+  readableScopes: import("@cognia/memory/types/memory").MemoryScope[]
+  writableScopes: import("@cognia/memory/types/memory").MemoryScope[]
   autoLearn: boolean
 }
 
@@ -6945,7 +6973,7 @@ export interface Character {
    * onto that same connection. Only relevant when `sandboxEnabled` resolves
    * true. Beaten by `ChatSession.sandboxTier`.
    */
-  sandboxTier?: import("@/types/sandbox").SandboxShellTier
+  sandboxTier?: import("@cognia/plugin-contract/types/sandbox").SandboxShellTier
   /**
    * Per-character sandbox resource + network ceiling (ADR-0028). Beats
    * `AppSettings.sandboxPolicy`. Only relevant when `sandboxEnabled` is true.
@@ -6999,7 +7027,7 @@ export interface Character {
    * app default (`AppSettings.instructions`) wholesale when set. See
    * `lib/claude/instructions/`.
    */
-  instructionsOverride?: import("@/lib/claude/instructions/types").InstructionsConfig
+  instructionsOverride?: import("@cognia/plugin-contract/lib/claude/instructions/types").InstructionsConfig
   /**
    * Opt-out of the synthetic `cognia-plugin-tools` in-process MCP server.
    * When `true`, `resolveSendOptions` skips populating
@@ -7068,9 +7096,9 @@ export interface Character {
     enableCorrectiveFilter?: boolean
     correctiveMinKeep?: number
     enableCitations?: boolean
-    citationStyle?: import("@/types/twin").TwinCitationStyle
+    citationStyle?: import("@cognia/plugin-contract/types/twin").TwinCitationStyle
   }
-  platformDefaults?: import("@/types/connectors/binding").CharacterPlatformDefaults
+  platformDefaults?: import("@cognia/plugin-contract/types/connectors/binding").CharacterPlatformDefaults
   /**
    * Opt-in to the Anthropic Computer Use native tools (computer / bash /
    * text_editor) registered by the `cognia-computer-use` plugin or any
@@ -7161,7 +7189,7 @@ export interface Character {
    * tier reuses the same binding). Resolved with session precedence by
    * `resolveSendOptions` (`lib/automation/sandbox-target.ts`).
    */
-  computerUseTarget?: import("@/lib/automation/sandbox-target").ComputerUseTargetSetting
+  computerUseTarget?: import("@cognia/plugin-contract/lib/automation/sandbox-target").ComputerUseTargetSetting
   /**
    * Set ONLY when this row is a user-cloned copy of a plugin-overlay character
    * (ADR-0030). Never set on app-seeded built-ins or pure user-created rows.
@@ -7200,20 +7228,20 @@ export interface Character {
    * one. UI renders this in preference to `avatarEmoji + avatarColor`; if
    * neither branch resolves in the current shell, falls back to the emoji.
    */
-  avatarImage?: import("@/types/plugin/plugin-character-pack").PluginCharacterAvatarImage
+  avatarImage?: import("@cognia/plugin-contract/types/plugin/plugin-character-pack").PluginCharacterAvatarImage
   /** Personality / interaction metadata. Display-only this round. */
-  persona?: import("@/types/plugin/plugin-character-pack").PluginCharacterPersona
+  persona?: import("@cognia/plugin-contract/types/plugin/plugin-character-pack").PluginCharacterPersona
   /**
    * Voice profile riding `lib/tts/`. When set, `resolveCharacterVoice()`
    * projects this into a `SpeechSettings` overlay at speak time.
    */
-  voiceProfile?: import("@/types/plugin/plugin-character-pack").PluginCharacterVoiceProfile
+  voiceProfile?: import("@cognia/plugin-contract/types/plugin/plugin-character-pack").PluginCharacterVoiceProfile
   /**
    * Platform availability filter — when set, the overlay / picker suppresses
    * the character on platforms not listed. Inherited from the source pack
    * character at clone time; user may edit on cloned rows.
    */
-  availableOnPlatforms?: import("@/types/plugin").PluginRuntimeProfile[]
+  availableOnPlatforms?: import("@cognia/plugin-contract/types/plugin").PluginRuntimeProfile[]
 
   createdAt: number
   updatedAt: number
@@ -7309,10 +7337,10 @@ export interface PackPristineSnapshot {
   a2uiEnabled?: boolean
   a2uiCatalogId?: string
   platformDefaults?: Character["platformDefaults"]
-  availableOnPlatforms?: import("@/types/plugin").PluginRuntimeProfile[]
-  avatarImage?: import("@/types/plugin/plugin-character-pack").PluginCharacterAvatarImage
-  persona?: import("@/types/plugin/plugin-character-pack").PluginCharacterPersona
-  voiceProfile?: import("@/types/plugin/plugin-character-pack").PluginCharacterVoiceProfile
+  availableOnPlatforms?: import("@cognia/plugin-contract/types/plugin").PluginRuntimeProfile[]
+  avatarImage?: import("@cognia/plugin-contract/types/plugin/plugin-character-pack").PluginCharacterAvatarImage
+  persona?: import("@cognia/plugin-contract/types/plugin/plugin-character-pack").PluginCharacterPersona
+  voiceProfile?: import("@cognia/plugin-contract/types/plugin/plugin-character-pack").PluginCharacterVoiceProfile
 }
 
 /**

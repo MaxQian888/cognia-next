@@ -2,7 +2,7 @@
 
 import { EmailDelivery, SEND_TIMEOUT_MS, type DeliveryStorage, type StoredState } from "./delivery"
 import type { Env } from "./index"
-import { type EmailMessage } from "./template"
+import { type EmailMessage, type MailInput } from "./template"
 
 function fixture() {
   let data: StoredState | undefined
@@ -47,13 +47,13 @@ function fixture() {
     LOGTO_EMAIL_HASH_KEY: "test-only-hash-key-0123456789abcdef0123456789abcdef",
   }
   const actor = () => new EmailDelivery({ storage, waitUntil: () => undefined }, env)
-  const request = (digest = "a".repeat(64), code = "123456") =>
+  const request = (digest = "a".repeat(64), code = "123456", type: MailInput["type"] = "SignIn") =>
     new Request("https://internal/send", {
       method: "POST",
       body: JSON.stringify({
         digest,
         to: "person@example.com",
-        type: "SignIn",
+        type,
         code,
         locale: "en",
       }),
@@ -137,7 +137,7 @@ test("enforces cooldown across purposes, then admits another code", async () => 
   const f = fixture()
   const actor = f.actor()
   expect((await actor.fetch(f.request())).status).toBe(200)
-  const denied = await actor.fetch(f.request("b".repeat(64), "654321"))
+  const denied = await actor.fetch(f.request("b".repeat(64), "654321", "Register"))
   expect(denied.status).toBe(429)
   expect(denied.headers.get("retry-after")).toBe("60")
   jest.setSystemTime(Date.now() + 60_000)

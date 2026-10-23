@@ -3498,7 +3498,7 @@
         "minimaxCode": "MiniMax Code",
         "opencodeAcp": "OpenCode (ACP)",
         "opencodeRemote": "OpenCode (Remote)",
-        "opencodeServer": "OpenCode",
+        "opencodeServer": "OpenCode V1",
         "pi": "Pi",
         "piRpc": "Pi (native RPC)",
         "qoder": "Qoder",
@@ -6419,6 +6419,7 @@
     "record": {
       "addAssertion": "Expect text…",
       "assertionPlaceholder": "Text that should appear",
+      "captureFailed": "Recording failed: {error}",
       "delete": "Delete flow",
       "deleted": "Flow deleted",
       "downloadJson": "Save flow JSON…",
@@ -6474,6 +6475,12 @@
       "title": "Record actions"
     },
     "remote": {
+      "approval": {
+        "authorize": "Authorize browser access",
+        "failed": "Browser authorization was refused or could not be completed. You can request approval again.",
+        "pending": "Ask the host owner or another paired administrator to approve code {code}, then click Authorize browser access again.",
+        "required": "Browser access needs approval from this host. Authorization lasts up to 10 minutes."
+      },
       "canvas": "Remote browser canvas",
       "closePage": "Close page",
       "connection": {
@@ -6485,6 +6492,16 @@
       },
       "error": "Remote browser unavailable ({code})",
       "find": "Find in page",
+      "grants": {
+        "blocked": "Blocked domains: {domains}",
+        "cancel": "Keep current session",
+        "changed": "Domain permissions changed. Reconnect to apply them to this browser.",
+        "confirm": "Reconnect browser",
+        "ephemeralHint": "Open tabs will close and this page will reload. This temporary session may require you to sign in again. Unsaved changes will be lost.",
+        "manage": "Manage domains",
+        "persistentHint": "Saved site data is retained. Some websites may ask you to sign in again. Open tabs will close and this page will reload. Unsaved changes will be lost.",
+        "reconnect": "Apply permissions and reconnect"
+      },
       "humanControl": "You're controlling",
       "needsRemoteHost": "Connect a Cognia server to use the cloud browser",
       "runtimeUnavailable": "The cloud browser is not available ({reason})",
@@ -7431,17 +7448,19 @@
       "providers": "Providers",
       "skills": "Skills"
     },
-    "description": "Read providers, MCP servers, prompts and skills from your local CCSwitch installation. Switching a provider here updates Cognia's bundled SDK and (optionally) propagates to selected external agents.",
+    "description": "Read providers, MCP servers, prompts and installed skills from CC Switch v4.0.18 (schema 21). Anthropic providers can update Cognia’s bundled SDK; other app protocols and managed logins remain browse-only.",
     "dialog": {
       "agentsSection": "Also write to",
       "apiKey": "API key",
+      "applyFailed": "Could not apply the switch: {error}",
       "baseUrl": "Base URL",
+      "baseUrlNotPropagated": "base URL not applied",
       "body": "Review what the switch will change before confirming.",
       "bodyFor": "Switch to {name}. Review what changes before confirming.",
       "cancel": "Cancel",
       "close": "Close",
-      "codexBaseUrlNotPropagated": "base URL not applied",
       "cogniaApplied": "Cognia-next updated.",
+      "cogniaNotApplied": "Cognia was not updated.",
       "cogniaSection": "Cognia-next",
       "confirm": "Apply switch",
       "driftAbort": "The file changed on disk while switching, so nothing was written. Reopen this dialog and apply again.",
@@ -7516,7 +7535,7 @@
       "headerHint": "CCSwitch is the editor for these records — go back to CCSwitch to add, rename or delete.",
       "importQuota": "Import quota",
       "model": "Model",
-      "officialEndpoint": "Official Anthropic endpoint",
+      "officialEndpoint": "Default endpoint",
       "quotaImportErrorTitle": "Quota metadata wasn't imported",
       "quotaImportFailed": "Couldn't save the imported quota source: {error}",
       "quotaImportReason": {
@@ -7529,6 +7548,7 @@
       "quotaImportSuccess": "Imported {name} as a disabled custom quota source. Review it under Subscription settings, then enable it explicitly.",
       "quotaImportSuccessTitle": "Quota metadata imported",
       "refresh": "Refresh",
+      "unsupportedProtocol": "Browse only: this app uses another protocol or CC Switch-managed authentication. Switch it in CC Switch.",
       "useHere": "Use here",
       "useHereAndIn": "Use here & in…"
     },
@@ -7537,7 +7557,7 @@
       "emptyTitle": "No skills in CCSwitch",
       "errorTitle": "Could not list skills",
       "externalBadge": "external file",
-      "headerHint": "Skills with inline content become new Cognia skills. Rows pointing at an external file (greyed) need to be re-imported via Settings → Skills.",
+      "headerHint": "Import installed skill bundles, including frontmatter, scripts, references, assets and Codex metadata. Missing or unsafe directories cannot be imported.",
       "importBtn": "Import {count, plural, =0 {nothing} =1 {1 skill} other {# skills}}",
       "importing": "Importing…",
       "listTitle": "Skills in CCSwitch",
@@ -8039,6 +8059,7 @@
         "foldCollapseShort": "Less",
         "foldExpand": "Show {count} more"
       },
+      "contextRegion": "Composer context and notices",
       "draftRestore": {
         "dismiss": "Dismiss",
         "label": "Re-attach:",
@@ -8121,6 +8142,7 @@
         "acceptHint": "Tab or → to edit before sending",
         "configure": "Configure",
         "dismiss": "Dismiss suggestions",
+        "dontShowAgain": "Don't show again",
         "error": "Could not generate a prediction.",
         "label": "Follow-up suggestions",
         "retry": "Retry",
@@ -11645,6 +11667,7 @@
     "imagesAttached": "{count} attached · /images to manage",
     "language": "Interface language",
     "languageHint": "Language for startup, approvals, errors, help and review panels.",
+    "manualSubagentUnsupported": "This backend cannot host manual CLI subagents.",
     "mcp": {
       "agentInventory": "Agent inventory: {status} (session not confirmed)",
       "all": "(all)",
@@ -16582,6 +16605,7 @@
       "attached": "Attached “{title}”",
       "fetching": "Fetching “{title}”…",
       "hostUnsupported": "Remote documents are available on the desktop app only.",
+      "incomplete": "Some content in “{title}” could not be read. See the attachment for details.",
       "linkOnlyHint": "This provider has no search — paste a document link.",
       "noAccount": "Connect an account in Settings to use this.",
       "noMatches": "No document matches \"{query}\"",
@@ -16616,6 +16640,7 @@
       "description": "Reference Feishu and Google documents with @ in chat.",
       "desktopOnly": "Desktop app only.",
       "disconnect": "Disconnect",
+      "disconnectFailed": "Could not finish disconnecting: {reason}",
       "disconnectNotRevoked": "Disconnected locally, but revoking at Google failed ({reason}). Remove Cognia from your Google account's third-party access to finish.",
       "disconnectRevoked": "Disconnected. The Google authorization has been revoked.",
       "disconnecting": "Disconnecting…",
@@ -18372,7 +18397,9 @@
       }
     },
     "roleModels": {
+      "addSpawnModel": "Add spawn model",
       "choose": "Choose a model",
+      "clearSpawnModels": "Clear extra spawn models",
       "description": "Native subagents, model aliases and helper calls of this runtime can run on other models from the primary model's provider and account. Unset slots keep the primary model. A turn moved to another provider or account runs on its primary model alone.",
       "effort": "Reasoning effort",
       "effortDefault": "Model default",
@@ -18403,11 +18430,14 @@
       "refusals": {
         "crossAccount": "Sub-task models must use the primary model's account.",
         "crossProvider": "Choose a model from {provider}. Sub-task models must use the primary model's provider.",
+        "defaultSpawnModelNotAllowed": "Include the default child model in the candidate set.",
         "effortUnsupported": "This model does not accept the selected reasoning effort.",
+        "spawnModelsUnsupported": "This runtime does not support native spawn model candidates.",
         "tooManyModels": "Too many different models for one task. Use fewer sub-task models.",
         "unsupportedSlot": "This runtime does not support this sub-task model setting. Remove it to save."
       },
       "remove": "Remove",
+      "removeSpawnModel": "Remove {model}",
       "removeStale": "Remove the unsupported sub-task model setting",
       "sameAccount": "Uses the primary model's provider account.",
       "search": "Search {provider} models…",
@@ -18418,6 +18448,8 @@
         "tierOpus": "Opus alias",
         "tierSonnet": "Sonnet alias"
       },
+      "spawnModels": "Native spawn models",
+      "spawnModelsDescription": "Authorize a finite set on this task’s provider account. The task also authorizes its primary and default models. The parent selects the model when spawning; existing V2 children cannot be switched directly.",
       "title": "Sub-task models"
     },
     "runCommand": "Run /{name}",
@@ -18486,6 +18518,80 @@
       "loadEntries": "Inspect session history",
       "loadTree": "Browse branches",
       "loading": "Loading capabilities…",
+      "nativeBackend": "Backend: {backend} ({confidence}, {evidence}); runtime: {version}",
+      "nativeBackendValues": {
+        "disabled": "Disabled",
+        "unknown": "Unknown"
+      },
+      "nativeCapabilities": "Spawn model override capability: {spawn}. A disabled V2 feature flag does not prove this session uses V1.",
+      "nativeChangeOutcome": "{child} · {scope} · {model} ({effort}): {outcome}",
+      "nativeConfidence": {
+        "inferred": "Inferred",
+        "observed": "Observed",
+        "unknown": "Unknown"
+      },
+      "nativeCurrentTurn": "Apply to next steps of current turn",
+      "nativeDefaultEffort": "Keep native effort setting",
+      "nativeDirectForbidden": "Codex forbids direct input to this child. Existing V2 children cannot be switched directly.",
+      "nativeDirectUnknown": "Direct-input capability is unknown. Refresh thread facts before changing settings.",
+      "nativeEmpty": "No native child thread has been identified for this session.",
+      "nativeEvidence": {
+        "child-thread": "Native child thread",
+        "configuration": "Configuration",
+        "model-metadata": "Model metadata",
+        "unknown": "Unknown source"
+      },
+      "nativeFeatureFlags": "Effective flags: multi_agent_v2={v2}; step_model_switching={step}.",
+      "nativeFlags": {
+        "disabled": "Disabled",
+        "enabled": "Enabled",
+        "unknown": "Unknown"
+      },
+      "nativeFutureTurns": "Set future-turn defaults",
+      "nativeHostUpdateRequired": "Update the Host to configure or control native subagent models.",
+      "nativeIdentity": "Parent: {parent}; root: {root}",
+      "nativeModelEvidence": "Thread models describe settings. Accepted changes await a subsequent sampling step; they are not inference telemetry.",
+      "nativeReasons": {
+        "child-not-owned": "This child does not belong to the current root session.",
+        "child-settings-busy": "A settings change is already pending for this child.",
+        "connection-changed": "The connection changed; the result is unknown.",
+        "direct-input-forbidden": "Codex forbids direct input to this child.",
+        "direct-input-unknown": "Direct-input support is still unknown.",
+        "invalid-operation-id": "The operation identity is invalid.",
+        "invalid-settings-scope": "The requested settings scope is invalid.",
+        "model-change-operation-limit": "The runtime reached its settings operation limit.",
+        "model-not-allowed": "This model is not authorized for the task.",
+        "native-settings-unsupported": "This runtime does not support the requested settings method.",
+        "operation-id-conflict": "This operation identity was already used for another request.",
+        "reasoning-effort-not-supported": "The model does not support this reasoning effort.",
+        "stale-child-turn": "The child turn changed or ended. Refresh the native threads.",
+        "stale-model-plan": "The task model policy changed. Refresh the native threads.",
+        "stale-process-generation": "The runtime connection changed. Refresh the native threads.",
+        "step-model-switching-disabled": "Enable experimental current-turn model switching and reconnect first.",
+        "unknown-settings-response": "The runtime returned an unrecognized settings result."
+      },
+      "nativeRefresh": "Refresh native threads",
+      "nativeRequested": "Spawn request: {model}; effort: {effort}",
+      "nativeResults": {
+        "applied-awaiting-step": "Codex accepted the settings; execution is not yet observed.",
+        "outcome-unknown": "The result is unknown. Reconnect and refresh before submitting another change.",
+        "rejected": "Codex rejected the settings.",
+        "target-unavailable": "The native target is no longer available."
+      },
+      "nativeSelectModel": "Choose a model",
+      "nativeSettings": "Model setting: {model}; effort: {effort}; active turn: {turn}",
+      "nativeStepDisabled": "Current-turn changes require the experimental model-switching option and a known active child turn.",
+      "nativeSupport": {
+        "supported": "Observed support",
+        "unknown": "Not yet observed",
+        "unsupported": "Unsupported"
+      },
+      "nativeTargetEffort": "New reasoning effort",
+      "nativeTargetModel": "New child model",
+      "nativeTitle": "Native subagents",
+      "nativeTruncated": "Thread discovery reached its limit. Unseen threads cannot be controlled.",
+      "nativeUncertain": "This child has a settings change with an unknown outcome. Reconnect the runtime before sending another change.",
+      "nativeUnknown": "Unknown",
       "oneAtATime": "One at a time",
       "queued": "Instruction queued",
       "queuedInput": "Queued instruction",
@@ -18592,6 +18698,8 @@
       "codexSandboxWorkspaceWrite": "Workspace write",
       "codexServerDefault": "Server default",
       "codexSkillRootsBrowse": "Browse…",
+      "codexStepModelSwitching": "Experimental current-turn model switching",
+      "codexStepModelSwitchingDesc": "Allow changing subsequent sampling steps of an active V1 child. Restart the agent after changing this setting. V2 children remain controlled by their parent.",
       "codexSummaryAuto": "Auto",
       "codexSummaryConcise": "Concise",
       "codexSummaryDetailed": "Detailed",
@@ -22251,7 +22359,10 @@
       "sidebarSection": "Inbox sidebar section"
     },
     "inboundA2UI": {
-      "rawPayload": "Raw payload"
+      "actionUnavailable": "This action can only be used in {platform}",
+      "imageUnavailable": "Image available in {platform}",
+      "rawPayload": "Raw payload",
+      "untitledAction": "Action"
     },
     "inboundRecovery": {
       "continueSafely": "Continue safely",
@@ -38248,6 +38359,14 @@
     "localProvidersTitle": "Local Providers",
     "localai": "LocalAI",
     "localaiDescription": "Self-hosted OpenAI alternative",
+    "magpie": {
+      "connected": "Connected to Magpie {version} · {count} models",
+      "description": "Connect to the running Magpie gateway and load the models enabled there. Start Magpie before discovering.",
+      "discover": "Discover local Magpie",
+      "discovering": "Discovering…",
+      "failed": "Could not connect to Magpie",
+      "title": "Magpie gateway"
+    },
     "manageInstalledModels": "Manage installed models for {provider}",
     "manageModels": "Manage Models",
     "managementKey": "Management Key (Optional)",
@@ -43703,7 +43822,7 @@
         "workingDirPlaceholder": "/path/to/project",
         "workingDirTitle": "Default working directory"
       },
-      "description": "Configure defaults for the in-process Claude SDK sidecar — these flow into every new chat unless a character or session overrides them.",
+      "description": "Set defaults for the built-in agent, manage tool permissions and sessions, and check runtime health. Agents and conversations can override these defaults.",
       "nav": {
         "groups": {
           "behaviorGroup": "Behavior",
@@ -44037,7 +44156,7 @@
         "sessions": "Sessions",
         "sidecar": "Sidecar"
       },
-      "title": "Built-in agent runtime",
+      "title": "Agent runtime",
       "toolSearch": {
         "addAria": "Add",
         "description": "Load tools on demand to keep the system prompt small. Pin servers or tools below to keep them always available.",
@@ -46360,7 +46479,7 @@
       },
       "title": "Context compaction",
       "toolResultCap": {
-        "description": "Cap each tool result to this many tokens during compaction.",
+        "description": "Cap each tool result to this many tokens during compaction. Set 0 to preserve complete results.",
         "heading": "Tool-result cap",
         "label": "Max tool-result tokens"
       },
@@ -50212,7 +50331,7 @@
       "about": "Version, build, diagnostics, updates and credits.",
       "account": "Your identity, plan usage, profile, subscription and paired devices in one place.",
       "agentModes": "Built-in and custom agent modes — system prompt, tool list, output format and live preview presets.",
-      "agentRuntime": "Built-in Anthropic SDK sidecar — defaults, permission mode, always-allow tools, built-in tool categories, sidecar diagnostics, and the A2UI bridge.",
+      "agentRuntime": "Manage default behavior, tool permissions, sessions, and diagnostics for the built-in agent.",
       "agents": "External agents — Claude Code CLI, Codex, Gemini CLI, Cursor and any custom command speaking ACP / OpenCode / HTTP.",
       "aiConnections": "Configure AI accounts, endpoints, credentials, deployments, verification, health, and import or export.",
       "apiKey": "Anthropic API key (used by the local sidecar).",
@@ -55267,6 +55386,31 @@
         "note": "On by default. Disabling lets Canvas Python reach your filesystem and network — only turn it off on a machine you trust.",
         "title": "Canvas code sandbox"
       },
+      "claudeCodeRuntime": {
+        "description": "Sandbox capabilities and bounded unattended retry for the Claude Agent SDK runtime.",
+        "invalidMinutes": "Enter a whole number from 1 to 180.",
+        "maximum": {
+          "description": "Total elapsed time for the whole invocation, including normal work and all retries. The deadline is never reset for individual requests. Enter 1–180 minutes.",
+          "label": "Maximum invocation time (minutes)"
+        },
+        "namespaces": {
+          "description": "Off by default. Available on Linux and WSL2 hosts, including remote hosts. Requests support for tools such as Chromium; Cognia still requires explicit approval for each run.",
+          "label": "Request nested user namespaces",
+          "warning": "Nested user namespaces weaken the sandbox boundary. Commands may run outside the sandbox and access protected and credential files. Enable only for a workload you trust."
+        },
+        "recheck": {
+          "description": "How often to check whether a supported subscription usage limit has cleared. Enter 1–180 minutes.",
+          "label": "Usage-limit recheck interval (minutes)"
+        },
+        "retry": {
+          "availability": "Unavailable when Router + Fusion manages request budgets and retries.",
+          "cancellation": "Cancel stops the active invocation and its retry wait. Reaching the maximum invocation time also cancels it.",
+          "description": "Off by default. Applies only to unattended Claude Agent SDK turns; supported claude.ai subscription usage limits can be rechecked while waiting.",
+          "label": "Enable unattended retry"
+        },
+        "saveError": "Could not save Claude Code runtime preferences. Try again.",
+        "title": "Claude Code runtime"
+      },
       "description": "Per-platform OS sandbox for high-risk tools (Bash / Edit / Write / text_editor). When unavailable, strict mode refuses these tool calls instead of bypassing isolation.",
       "enable": {
         "description": "Run high-risk tools through the OS sandbox by default in every session. Individual sessions and characters can still override this.",
@@ -56267,7 +56411,7 @@
       "about": "About",
       "account": "Account",
       "agentModes": "Agent modes",
-      "agentRuntime": "Built-in agent runtime",
+      "agentRuntime": "Agent runtime",
       "agents": "Agents",
       "aiConnections": "AI Connections",
       "apiKey": "API key",
@@ -63101,6 +63245,7 @@
         "larkNoPermission": "The account {account} has no permission to read this document. Ask for access, or complete the user authorization in Settings → Connections.",
         "larkNotAuthorized": "The Feishu account {account} is missing credentials. Re-authorize it in Settings → Connections.",
         "larkNotFound": "Document not found — it may have been deleted, or the link is wrong.",
+        "larkOutputTruncated": "The document exceeded the lark-cli output limit. Partial content was discarded; use the API connection to read it.",
         "larkRateLimited": "Feishu rate limit hit — wait a moment and try again.",
         "larkUnsupportedType": "This link points to a {type} object; only docs and wiki pages are supported for now.",
         "noCommitsFound": "No commits found in the selected repository",

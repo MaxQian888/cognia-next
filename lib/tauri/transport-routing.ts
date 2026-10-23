@@ -161,6 +161,18 @@ export class RoutingTransport implements Transport {
     return activeRemote ?? this.local
   }
 
+  async whenSubscribed(channels: readonly string[], timeoutMs?: number): Promise<void> {
+    const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs
+    for (;;) {
+      const target = this.target()
+      await target.whenSubscribed?.(
+        channels,
+        deadline === undefined ? undefined : Math.max(0, deadline - Date.now())
+      )
+      if (this.target() === target || (deadline !== undefined && Date.now() >= deadline)) return
+    }
+  }
+
   call<T = unknown>(
     name: string,
     args?: Record<string, unknown>,

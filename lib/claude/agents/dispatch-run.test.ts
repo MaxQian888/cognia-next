@@ -145,6 +145,28 @@ function caller(over: Partial<ResolvedCaller> = {}): ResolvedCaller {
 
 const runs = () => Object.values(useSubagentRuntimeStore.getState().subAgents)
 
+it("records a budget stop as incomplete without retrying and preserves its resume handle", async () => {
+  nesting({ dispatchMaxRetries: 2 })
+  mockDispatch.mockResolvedValueOnce({
+    ...ok("partial findings"),
+    runId: "capped-run",
+    finishReason: "error_max_turns",
+  })
+  const result = await startDispatchRun({
+    runId: "capped-run",
+    subagentId: "coder",
+    prompt: "investigate",
+    toolsEnabled: true,
+    background: false,
+    parentSessionId: "parent",
+    caller: caller(),
+  })
+  expect(result.text).toContain("incomplete")
+  expect(result.text).toContain('resume:"capped-run"')
+  expect(mockDispatch).toHaveBeenCalledTimes(1)
+  expect(runs()).toEqual([expect.objectContaining({ id: "capped-run", status: "failed" })])
+})
+
 it("aborts an admitted background execution on ownership loss without cancelling the new owner", async () => {
   let dispatchedSignal: AbortSignal | undefined
   mockDispatch.mockImplementation(async (_target, _prompt, options) => {

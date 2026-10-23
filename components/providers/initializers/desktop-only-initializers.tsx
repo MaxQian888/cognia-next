@@ -245,6 +245,9 @@ export function DesktopOnlyInitializers() {
           profile. Their publisher and action listener must already be awake. */}
       <TrayPanelInitializer />
       <GlancePublisherInitializer />
+      {/* Consent must be reachable from chat/workflow calls before a desktop
+          tools route is opened. This only subscribes to the gated broker. */}
+      <ConsentOverlay />
       {requested ? (
         <>
           <CodexUsageSchedulerInitializer />
@@ -261,7 +264,6 @@ export function DesktopOnlyInitializers() {
           <BestOfNRecoveryInitializer />
           <HarnessEvolutionInitializer />
           <PluginDeepLinkRouter />
-          <ConsentOverlay />
           <CliBridgeEventsBridge />
           <CrashReportDialog />
           <DiagnosticAutoSubmitInitializer />

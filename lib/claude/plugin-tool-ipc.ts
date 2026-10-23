@@ -1052,7 +1052,10 @@ export async function handlePluginToolExec(
         return { ...baseResponse, result: assertSafePluginToolResult(result) }
       }
       const { runAskUser } = await import("@/stores/agent/ask-user-store")
-      const result = await runAskUser(request.args, { sessionId: request.sessionId })
+      const result = await runAskUser(request.args, {
+        sessionId: request.sessionId,
+        ...(request.abortSignal ? { signal: request.abortSignal } : {}),
+      })
       return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Nested dispatch — `dispatch_agent` ─────────────────────────────────

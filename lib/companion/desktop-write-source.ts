@@ -2177,6 +2177,8 @@ async function hostFeatureManifest(payload: Record<string, unknown>): Promise<un
       "browser_press_key",
       "browser_scroll",
       "browser_evaluate",
+      "browser_recording_control",
+      "browser_recording_ref",
       "browser_read_console",
       "browser_read_network",
       "browser_back",

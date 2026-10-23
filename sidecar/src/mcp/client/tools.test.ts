@@ -503,3 +503,24 @@ test("stdio transport has no stderr stream when no emitMcpLog sink is supplied",
   assert.ok(capture.cfg)
   assert.equal(capture.cfg.stderr, undefined, "no stderr stream spawned without a log sink")
 })
+
+test("buildAiSdkMcpTools exposes only allowlisted tools of an allowlisted server", async () => {
+  const fake = fakeClientFactory({
+    api: {
+      read: { description: "", execute: async () => "r" },
+      added_later: { description: "", execute: async () => "x" },
+    },
+    other: { any: { description: "", execute: async () => "o" } },
+  })
+  const { tools } = await buildAiSdkMcpTools({
+    mcpServers: {
+      api: { type: "http", url: "https://x" },
+      other: { type: "http", url: "https://y" },
+    },
+    mcpToolAllowlist: { api: ["read"] },
+    createClient: (cfg) => fake.create(cfg),
+  })
+  assert.ok(tools["mcp__api__read"])
+  assert.equal(tools["mcp__api__added_later"], undefined)
+  assert.ok(tools["mcp__other__any"], "unlisted servers are unaffected")
+})

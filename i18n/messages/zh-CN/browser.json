@@ -122,6 +122,7 @@
     "label": "元素审阅"
   },
   "record": {
+    "captureFailed": "录制失败：{error}",
     "addAssertion": "断言文本…",
     "assertionPlaceholder": "预期出现的文本",
     "delete": "删除流程",
@@ -179,6 +180,16 @@
     "title": "录制操作"
   },
   "remote": {
+    "grants": {
+      "changed": "域名权限已变更，重连后才会应用到当前浏览器。",
+      "blocked": "被阻止的域名：{domains}",
+      "manage": "管理域名",
+      "reconnect": "应用权限并重连",
+      "persistentHint": "已保存的站点数据会保留，部分网站仍可能要求重新登录。其他标签页会关闭，当前页面会重新加载，未保存的修改会丢失。",
+      "ephemeralHint": "其他标签页会关闭，当前页面会重新加载。临时会话可能需要重新登录，未保存的修改会丢失。",
+      "cancel": "保留当前会话",
+      "confirm": "重连浏览器"
+    },
     "canvas": "远程浏览器画布",
     "closePage": "关闭页面",
     "connection": {
@@ -195,7 +206,13 @@
     "runtimeUnavailable": "云端浏览器不可用（{reason}）",
     "takeover": "接管控制",
     "untitledPage": "未命名页面",
-    "waiting": "正在等待远程浏览器…"
+    "waiting": "正在等待远程浏览器…",
+    "approval": {
+      "authorize": "授权浏览器访问",
+      "required": "访问此主机上的浏览器需要审批，授权有效期最长为 10 分钟。",
+      "pending": "请主机所有者或另一台已配对的管理设备确认审批码 {code}，然后再次点击“授权浏览器访问”。",
+      "failed": "浏览器授权被拒绝或未能完成，可以重新申请审批。"
+    }
   },
   "screenshot": {
     "failed": "无法截取预览画面",

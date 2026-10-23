@@ -543,6 +543,8 @@ describe("buildBackupPackage", () => {
     expect(Object.keys(sessionsOnly.payload).sort()).toEqual([
       "mediaGenerationJobs",
       "messages",
+      "projects",
+      "sessionFolders",
       "sessionState",
       "sessions",
     ])
@@ -985,4 +987,48 @@ describe("recorded browser flows", () => {
     })
     expect(backup.payload).not.toHaveProperty("browserRecordings")
   })
+})
+
+it("round-trips workspace and conversation-folder parents with sessions", async () => {
+  const db = getDb()
+  const now = new Date("2026-10-21T00:00:00.000Z")
+  await db.projects.put({
+    id: "portable-project",
+    name: "Portable workspace",
+    roots: [],
+    knowledgeBase: [],
+    sessionIds: [],
+    sessionCount: 0,
+    messageCount: 0,
+    createdAt: now,
+    updatedAt: now,
+    lastAccessedAt: now,
+  })
+  await db.sessionFolders.put({
+    id: "portable-folder",
+    projectId: "portable-project",
+    name: "Research",
+    order: 0,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  await db.sessions.put({
+    id: "portable-session",
+    title: "Parent graph",
+    kind: "direct",
+    projectId: "portable-project",
+    folderId: "portable-folder",
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  const pkg = await buildBackupPackage(
+    { includeSessions: true, includeApiKey: false },
+    { storage: null }
+  )
+  expect(pkg.payload).toHaveProperty("projects", [
+    expect.objectContaining({ id: "portable-project", createdAt: now.toISOString() }),
+  ])
+  expect(pkg.payload).toHaveProperty("sessionFolders", [
+    expect.objectContaining({ id: "portable-folder", projectId: "portable-project" }),
+  ])
 })

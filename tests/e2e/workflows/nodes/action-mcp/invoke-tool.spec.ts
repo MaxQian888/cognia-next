@@ -1,5 +1,7 @@
 /**
- * E2E: action.mcp.invokeTool — Phase 6+ stub. Editor + form only.
+ * Editor contract for action.mcp.invokeTool: form fields and durable graph state.
+ * The executor is implemented in lib/workflow/nodes/integrations/index.ts.
+ * These assertions do not claim runtime or real-provider acceptance.
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
@@ -12,7 +14,7 @@ import {
   saveWorkflow,
 } from "../../../helpers/workflow-spec-helpers"
 
-test.describe("workflow node — action.mcp.invokeTool (stub)", () => {
+test.describe("workflow node — action.mcp.invokeTool — editor persistence", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/")
     await resetCogniaDb(page)

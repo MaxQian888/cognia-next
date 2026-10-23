@@ -3,7 +3,7 @@
   "about": "Version, build, diagnostics, updates and credits.",
   "account": "Your identity, plan usage, profile, subscription and paired devices in one place.",
   "agentModes": "Built-in and custom agent modes — system prompt, tool list, output format and live preview presets.",
-  "agentRuntime": "Built-in Anthropic SDK sidecar — defaults, permission mode, always-allow tools, built-in tool categories, sidecar diagnostics, and the A2UI bridge.",
+  "agentRuntime": "Manage default behavior, tool permissions, sessions, and diagnostics for the built-in agent.",
   "agents": "External agents — Claude Code CLI, Codex, Gemini CLI, Cursor and any custom command speaking ACP / OpenCode / HTTP.",
   "aiConnections": "Configure AI accounts, endpoints, credentials, deployments, verification, health, and import or export.",
   "apiKey": "Anthropic API key (used by the local sidecar).",

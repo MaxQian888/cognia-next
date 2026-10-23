@@ -3,6 +3,7 @@
 //! Authorization state is transactional SQLite data. UI databases may cache
 //! projections, but they are never consulted as an authority.
 
+use cognia_tenant_auth::{OrgId, UserId};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -69,6 +70,13 @@ pub struct DeviceChallenge {
 pub struct SocketIdentity {
     pub tenant_id: String,
     pub device_id: String,
+}
+
+/// Canonical ids resolved by the configured collaboration authority, not by a client.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifiedDevicePerson {
+    pub user_id: UserId,
+    pub org_id: OrgId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -934,6 +942,7 @@ impl SecurityStore {
         &self,
         tenant_id: &str,
         actor_id: &str,
+        person: &VerifiedDevicePerson,
         challenge_id: &str,
         challenge_nonce: &str,
         device_id: &str,
@@ -957,21 +966,28 @@ impl SecurityStore {
         if consumed_challenge != 1 {
             return Err(SecurityStoreError::InvalidChallenge);
         }
-        let owner = host_person_for_tenant(&tx, tenant_id)?;
-        // Enrol ACTIVE even when no person is bound. Quarantining on "nobody
-        // has signed in" is the same fleet-wide lockout `OWNER_PREDICATE_SQL`
-        // documents: identity is optional here, so on a local-only host that
-        // condition is permanent and every new pairing would enrol unusable
-        // with no un-quarantine path. Quarantine stays what it is elsewhere —
-        // a deliberate act (`assign_device_user` clearing or reassigning an
-        // owner), not the default outcome of an unconfigured host.
+        // OIDC devices belong to the authenticated person, independently of
+        // whichever local profile the operator uses to run the shared Host.
         let status = "active";
         refuse_retired_device_id(&tx, tenant_id, device_id)?;
         tx.execute(
             "INSERT INTO devices
              (id, tenant_id, display_name, role, status, user_id, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
-            params![device_id, tenant_id, display_name, role, status, owner, now],
+            params![
+                device_id,
+                tenant_id,
+                display_name,
+                role,
+                status,
+                person.user_id.as_str(),
+                now
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO device_person_bindings (tenant_id, device_id, user_id, org_id, verified_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![tenant_id, device_id, person.user_id.as_str(), person.org_id.as_str(), now],
         )?;
         tx.execute(
             "INSERT INTO device_keys
@@ -1018,7 +1034,16 @@ impl SecurityStore {
         user_id: Option<&str>,
         now: i64,
     ) -> Result<(), SecurityStoreError> {
-        let changed = self.conn.lock().execute(
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // A local attribution edit is not a new OIDC proof. Clearing or
+        // changing it permanently discards the old verified association.
+        tx.execute(
+            "DELETE FROM device_person_bindings
+             WHERE tenant_id = ?1 AND device_id = ?2 AND user_id IS NOT ?3",
+            params![tenant_id, device_id, user_id],
+        )?;
+        let changed = tx.execute(
             "UPDATE devices SET user_id = ?3,
                 -- Quarantine only on a PROVEN conflict: a person is bound to
                 -- this tenant and it is not the one being assigned. Anything
@@ -1044,6 +1069,7 @@ impl SecurityStore {
         if changed == 0 {
             return Err(SecurityStoreError::DeviceUnavailable);
         }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1112,7 +1138,39 @@ impl SecurityStore {
         let bindings = query.query_map(params![tenant_id, device_id], HostBinding::from_row)?
             .collect::<Result<Vec<_>, _>>()?;
         // No arbitrary first-row choice if a future schema permits aliases.
-        Ok(if bindings.len() == 1 { bindings.into_iter().next() } else { None })
+        Ok(if bindings.len() == 1 {
+            bindings.into_iter().next()
+        } else {
+            None
+        })
+    }
+
+    /// Multi-tenant admission uses only a server-verified device binding.
+    /// Legacy profile aliases and audit actors are never an identity backfill.
+    pub fn active_oidc_device_person(
+        &self,
+        tenant_id: &str,
+        device_id: &str,
+    ) -> Result<Option<VerifiedDevicePerson>, SecurityStoreError> {
+        let ids: Option<(String, String)> = self
+            .conn
+            .lock()
+            .query_row(
+                "SELECT b.user_id, b.org_id FROM device_person_bindings b
+             JOIN devices d ON d.tenant_id = b.tenant_id AND d.id = b.device_id
+             WHERE d.tenant_id = ?1 AND d.id = ?2 AND d.status = 'active'
+               AND d.user_id = b.user_id",
+                params![tenant_id, device_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        ids.map(|(user, org)| {
+            Ok(VerifiedDevicePerson {
+                user_id: UserId::parse(user).map_err(|_| SecurityStoreError::DeviceUnavailable)?,
+                org_id: OrgId::parse(org).map_err(|_| SecurityStoreError::DeviceUnavailable)?,
+            })
+        })
+        .transpose()
     }
 
     /// Whether this device is the tenant's Owner, i.e. the deployment's trust
@@ -3034,6 +3092,7 @@ const MIGRATION_HOST_BINDING_LEGACY: &str = "host-binding-legacy-v1";
 const MIGRATION_HOST_BINDING_PERSON: &str = "host-binding-person-v1";
 const MIGRATION_HOST_BINDING_CANONICAL: &str = "host-binding-canonical-v1";
 const MIGRATION_DEVICE_USER: &str = "device-user-v1";
+const MIGRATION_DEVICE_PERSON: &str = "device-person-binding-v1";
 const MIGRATION_DEVICE_QUARANTINE: &str = "device-quarantine-v1";
 const MIGRATION_CLIENT_PLANE_GRANTS: &str = "client-plane-grants-v1";
 const MIGRATION_SSH_FILES_GRANT: &str = "ssh-files-grant-v1";
@@ -3129,9 +3188,35 @@ fn apply_schema_migrations(
     migrate_host_binding_canonical(conn, now)?;
     migrate_device_user(conn, now)?;
     migrate_device_quarantine(conn, now, backup_target)?;
+    migrate_device_person_binding(conn, now)?;
     migrate_client_plane_grants(conn, now)?;
     migrate_ssh_files_grant(conn, now)?;
     migrate_host_execute_grant(conn, now)?;
+    Ok(())
+}
+
+fn migrate_device_person_binding(
+    conn: &mut Connection,
+    now: i64,
+) -> Result<(), SecurityStoreError> {
+    if migration_applied(conn, MIGRATION_DEVICE_PERSON)? {
+        return Ok(());
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    // Created after legacy device-table rebuilds; no inferred identity rows.
+    tx.execute_batch(
+        "CREATE TABLE device_person_bindings (
+            tenant_id TEXT NOT NULL,
+            device_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            org_id TEXT NOT NULL,
+            verified_at INTEGER NOT NULL,
+            PRIMARY KEY (tenant_id, device_id),
+            FOREIGN KEY (tenant_id, device_id) REFERENCES devices(tenant_id, id) ON DELETE CASCADE
+        );",
+    )?;
+    mark_migration(&tx, MIGRATION_DEVICE_PERSON, now)?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -3819,6 +3904,13 @@ CREATE INDEX IF NOT EXISTS idx_audit_device_authorization
 
 #[cfg(test)]
 mod tests {
+    fn oidc_test_person() -> VerifiedDevicePerson {
+        VerifiedDevicePerson {
+            user_id: UserId::parse(ADA).unwrap(),
+            org_id: OrgId::parse("org_canonical").unwrap(),
+        }
+    }
+
     use super::*;
 
     /// The two-state `devices` DDL every install before the suspend migration
@@ -4753,6 +4845,215 @@ CREATE TABLE devices (
     const BOB: &str = "usr_bbbbbbbbbbbbbbbbbbbbbbbb";
 
     #[test]
+    fn oidc_registration_attributes_the_authenticated_person_without_a_host_profile() {
+        let store = SecurityStore::in_memory().unwrap();
+        let challenge = store.issue_challenge("oidc-org", 100, 60).unwrap();
+        store
+            .register_oidc_device(
+                "oidc-org",
+                "oidc-subject",
+                &oidc_test_person(),
+                &challenge.id,
+                &challenge.nonce,
+                "oidc-device",
+                "Web",
+                "pem",
+                "thumb",
+                "member",
+                101,
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .device_user("oidc-org", "oidc-device")
+                .unwrap()
+                .as_deref(),
+            Some(ADA)
+        );
+        assert_eq!(
+            store
+                .active_oidc_device_person("oidc-org", "oidc-device")
+                .unwrap(),
+            Some(oidc_test_person())
+        );
+        assert!(store
+            .active_device_person("oidc-org", "oidc-device")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn oidc_people_share_an_org_without_sharing_a_profile_or_identity() {
+        let store = SecurityStore::in_memory().unwrap();
+        for (device, user) in [("ada", ADA), ("bob", BOB)] {
+            let challenge = store.issue_challenge("oidc-org", 100, 60).unwrap();
+            let person = VerifiedDevicePerson {
+                user_id: UserId::parse(user).unwrap(),
+                org_id: OrgId::parse("org_canonical").unwrap(),
+            };
+            store
+                .register_oidc_device(
+                    "oidc-org",
+                    device,
+                    &person,
+                    &challenge.id,
+                    &challenge.nonce,
+                    device,
+                    "Web",
+                    "pem",
+                    device,
+                    "member",
+                    101,
+                )
+                .unwrap();
+            assert_eq!(
+                store.active_oidc_device_person("oidc-org", device).unwrap(),
+                Some(person)
+            );
+            assert!(store
+                .active_oidc_device_person("other-org", device)
+                .unwrap()
+                .is_none());
+        }
+        for status in ["suspended", "quarantined", "revoked"] {
+            store
+                .conn
+                .lock()
+                .execute("UPDATE devices SET status = ?1 WHERE id = 'ada'", [status])
+                .unwrap();
+            assert!(store
+                .active_oidc_device_person("oidc-org", "ada")
+                .unwrap()
+                .is_none());
+        }
+        store
+            .conn
+            .lock()
+            .execute("UPDATE devices SET status = 'active' WHERE id = 'ada'", [])
+            .unwrap();
+        store
+            .assign_device_user("oidc-org", "ada", Some(BOB), 103)
+            .unwrap();
+        assert!(store
+            .active_oidc_device_person("oidc-org", "ada")
+            .unwrap()
+            .is_none());
+        store
+            .assign_device_user("oidc-org", "ada", Some(ADA), 104)
+            .unwrap();
+        assert!(store
+            .active_oidc_device_person("oidc-org", "ada")
+            .unwrap()
+            .is_none());
+        store
+            .assign_device_user("oidc-org", "ada", None, 104)
+            .unwrap();
+        assert!(store
+            .active_oidc_device_person("oidc-org", "ada")
+            .unwrap()
+            .is_none());
+        store.adopt_unowned_devices("oidc-org", ADA, 105).unwrap();
+        assert!(store
+            .active_oidc_device_person("oidc-org", "ada")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn device_person_migration_does_not_infer_legacy_identity_and_reopens_safely() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy-person.sqlite");
+        {
+            let store = SecurityStore::open(&path).unwrap();
+            register(&store, "legacy", "legacy-device", 100);
+            store
+                .assign_device_user("legacy", "legacy-device", Some(ADA), 101)
+                .unwrap();
+            let conn = store.conn.lock();
+            conn.execute_batch("DROP TABLE device_person_bindings")
+                .unwrap();
+            conn.execute(
+                "DELETE FROM security_migrations WHERE key = ?1",
+                [MIGRATION_DEVICE_PERSON],
+            )
+            .unwrap();
+        }
+        for _ in 0..2 {
+            let store = SecurityStore::open(&path).unwrap();
+            assert!(store
+                .active_oidc_device_person("legacy", "legacy-device")
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                store
+                    .device_user("legacy", "legacy-device")
+                    .unwrap()
+                    .as_deref(),
+                Some(ADA)
+            );
+            assert!(migration_applied(&store.conn.lock(), MIGRATION_DEVICE_PERSON).unwrap());
+        }
+    }
+
+    #[test]
+    fn failed_oidc_registration_rolls_back_person_device_and_challenge() {
+        let store = SecurityStore::in_memory().unwrap();
+        let person = oidc_test_person();
+        let first = store.issue_challenge("org", 100, 60).unwrap();
+        store
+            .register_oidc_device(
+                "org",
+                "subject",
+                &person,
+                &first.id,
+                &first.nonce,
+                "first",
+                "Web",
+                "pem",
+                "same-thumb",
+                "member",
+                101,
+            )
+            .unwrap();
+        let second = store.issue_challenge("org", 100, 60).unwrap();
+        assert!(store
+            .register_oidc_device(
+                "org",
+                "subject",
+                &person,
+                &second.id,
+                &second.nonce,
+                "second",
+                "Web",
+                "pem",
+                "same-thumb",
+                "member",
+                101
+            )
+            .is_err());
+        assert!(store.device_state("org", "second").unwrap().is_none());
+        assert!(store
+            .active_oidc_device_person("org", "second")
+            .unwrap()
+            .is_none());
+        store
+            .register_oidc_device(
+                "org",
+                "subject",
+                &person,
+                &second.id,
+                &second.nonce,
+                "second",
+                "Web",
+                "pem",
+                "new-thumb",
+                "member",
+                101,
+            )
+            .unwrap();
+    }
+
+    #[test]
     fn admission_person_is_tenant_local_and_requires_an_active_owned_device() {
         let store = SecurityStore::in_memory().unwrap();
         register(&store, "tenant-a", "device-a", 100);
@@ -5571,6 +5872,7 @@ CREATE TABLE devices (
             store.register_oidc_device(
                 "tenant-a",
                 "owner-a",
+                &oidc_test_person(),
                 &challenge.id,
                 &challenge.nonce,
                 "browser-a",
@@ -5899,6 +6201,7 @@ CREATE TABLE devices (
             .register_oidc_device(
                 "tenant-a",
                 "owner-a",
+                &oidc_test_person(),
                 &challenge.id,
                 &challenge.nonce,
                 "member-a",
@@ -6283,6 +6586,7 @@ CREATE TABLE devices (
             .register_oidc_device(
                 "tenant-a",
                 "oidc-admin",
+                &oidc_test_person(),
                 &challenge.id,
                 &challenge.nonce,
                 "device-a",
@@ -6303,6 +6607,7 @@ CREATE TABLE devices (
             store.register_oidc_device(
                 "tenant-a",
                 "oidc-admin",
+                &oidc_test_person(),
                 &challenge.id,
                 &challenge.nonce,
                 "device-b",
@@ -6324,6 +6629,7 @@ CREATE TABLE devices (
             .register_oidc_device(
                 "tenant-a",
                 "member-user",
+                &oidc_test_person(),
                 &challenge.id,
                 &challenge.nonce,
                 "member-device",

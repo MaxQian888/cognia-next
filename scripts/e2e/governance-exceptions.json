@@ -44,48 +44,6 @@
       "reviewAfter": "2026-12-31"
     },
     {
-      "file": "tests/e2e/workflows/nodes/action-character/send.spec.ts",
-      "rule": "stub-contract",
-      "occurrences": 1,
-      "reason": "The action.character.send executor is not implemented; the suite currently proves editor persistence only.",
-      "reviewAfter": "2026-09-30"
-    },
-    {
-      "file": "tests/e2e/workflows/nodes/action-mcp/invoke-tool.spec.ts",
-      "rule": "stub-contract",
-      "occurrences": 1,
-      "reason": "The action.mcp.invokeTool executor is not implemented; the suite currently proves editor persistence only.",
-      "reviewAfter": "2026-09-30"
-    },
-    {
-      "file": "tests/e2e/workflows/nodes/action-plugin/invoke.spec.ts",
-      "rule": "stub-contract",
-      "occurrences": 1,
-      "reason": "The action.plugin.invoke executor is not implemented; the suite currently proves editor persistence only.",
-      "reviewAfter": "2026-09-30"
-    },
-    {
-      "file": "tests/e2e/workflows/nodes/action-team/run.spec.ts",
-      "rule": "stub-contract",
-      "occurrences": 1,
-      "reason": "The action.team.run executor is not implemented; the suite currently proves editor persistence only.",
-      "reviewAfter": "2026-09-30"
-    },
-    {
-      "file": "tests/e2e/workflows/nodes/action-twin/ingest.spec.ts",
-      "rule": "stub-contract",
-      "occurrences": 1,
-      "reason": "The action.twin.ingest executor is not implemented; the suite currently proves editor persistence only.",
-      "reviewAfter": "2026-09-30"
-    },
-    {
-      "file": "tests/e2e/workflows/nodes/action-twin/rag.spec.ts",
-      "rule": "stub-contract",
-      "occurrences": 1,
-      "reason": "The action.twin.rag executor is not implemented; the suite currently proves editor persistence only.",
-      "reviewAfter": "2026-09-30"
-    },
-    {
       "file": "tests/e2e/mobile/remote-session-control.spec.ts",
       "rule": "runtime-skip",
       "occurrences": 1,

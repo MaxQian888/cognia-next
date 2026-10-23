@@ -2,7 +2,7 @@
 
 import { defineSubagent } from "./define-subagent"
 import { defineTool } from "./define-tool"
-import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+import type { PluginSubagentDef } from "@cognia/plugin-contract/types/plugin/plugin-subagent"
 
 describe("defineSubagent", () => {
   it("returns the same object reference passed in", () => {

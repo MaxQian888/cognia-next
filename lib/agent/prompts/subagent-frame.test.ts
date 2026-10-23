@@ -57,6 +57,8 @@ describe("buildSubagentContract", () => {
     const text = buildSubagentContract({})
     expect(text).toContain("reads ONLY your final message")
     expect(text).toContain("cannot ask the dispatcher questions")
+    expect(text).toContain("explicitly mark your report incomplete")
+    expect(text).toContain("list the remaining work")
     expect(text.startsWith(`<${SUBAGENT_CONTRACT_TAG}>`)).toBe(true)
     expect(text.endsWith(`</${SUBAGENT_CONTRACT_TAG}>`)).toBe(true)
   })

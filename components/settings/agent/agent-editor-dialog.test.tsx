@@ -159,6 +159,81 @@ async function withAgent(patch: Record<string, unknown>, body: () => Promise<voi
 }
 
 describe("AgentEditorDialog", () => {
+  it("preserves inline child models when saving a task-owned OpenCode V2 launch", async () => {
+    const env = {
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        agents: {
+          reviewer: { mode: "subagent", model: "cognia/review" },
+          researcher: { mode: "subagent", model: "cognia/search" },
+        },
+      }),
+    }
+    await withAgent(
+      {
+        protocol: "opencode-v2",
+        transport: "sse",
+        metadata: { preset: "opencode-v2-service" },
+        cogniaModel: { providerId: "gateway", modelId: "big" },
+        process: { command: "", args: [], env },
+        network: { endpoint: "" },
+      },
+      async () => {
+        const onSave = jest.fn().mockResolvedValue(true)
+        render(
+          <AgentEditorDialog
+            open
+            editingAgentId="agent-1"
+            onOpenChange={jest.fn()}
+            onSave={onSave}
+          />
+        )
+        expect(screen.getByRole("radio", { name: /^Own state/ })).not.toBeDisabled()
+        expect(
+          screen.getByRole("button", { name: "Process environment variables" })
+        ).toBeInTheDocument()
+        await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
+        expect(onSave).toHaveBeenCalledWith(
+          expect.objectContaining({ process: expect.objectContaining({ env }) })
+        )
+      }
+    )
+  })
+  it.each(["elsewhere/review", "malformed"])(
+    "refuses an explicit OpenCode child model without role overrides: %s",
+    async (model) => {
+      await withAgent(
+        {
+          protocol: "acp",
+          metadata: { preset: "opencode-acp" },
+          cogniaModel: { providerId: "gateway", modelId: "big" },
+          modelRoles: undefined,
+          process: {
+            command: "opencode",
+            args: ["acp"],
+            env: {
+              OPENCODE_CONFIG_CONTENT: JSON.stringify({
+                agent: { reviewer: { mode: "subagent", model } },
+              }),
+            },
+          },
+        },
+        async () => {
+          const onSave = jest.fn()
+          render(
+            <AgentEditorDialog
+              open
+              editingAgentId="agent-1"
+              onOpenChange={jest.fn()}
+              onSave={onSave}
+            />
+          )
+          await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
+          expect(onSave).not.toHaveBeenCalled()
+          expect(toastErrorMock).toHaveBeenCalledWith(messages.externalAgent.roleModels.invalid)
+        }
+      )
+    }
+  )
   it("edits SIWC Codex options while keeping native command and independent account binding", async () => {
     const metadata = {
       preset: "codex",
@@ -238,23 +313,44 @@ describe("AgentEditorDialog", () => {
     )
   })
 
-  it("refuses an invalid sandbox host before saving", async () => {
-    const onSave = jest.fn()
-    render(
-      <AgentEditorDialog open editingAgentId="agent-1" onOpenChange={jest.fn()} onSave={onSave} />
-    )
-    fireEvent.change(screen.getByRole("combobox", { name: "Sandbox network" }), {
-      target: { value: "allowlist" },
-    })
-    fireEvent.change(screen.getByRole("textbox", { name: "Allowed hosts" }), {
-      target: { value: "https://example.com" },
-    })
-    await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
-    expect(onSave).not.toHaveBeenCalled()
-    expect(toastErrorMock).toHaveBeenCalledWith(
-      externalAgentManage.editor.sandboxAllowedHostsInvalid
-    )
-  })
+  it.each([
+    ["opencode-server", "opencode", "sse"],
+    ["opencode-acp", "acp", "stdio"],
+    ["opencode-v2-service", "opencode-v2", "sse"],
+  ])(
+    "refuses an invalid sandbox host before saving OpenCode %s",
+    async (preset, protocol, transport) => {
+      await withAgent(
+        {
+          protocol,
+          transport,
+          process: { command: "opencode", args: [protocol === "acp" ? "acp" : "serve"] },
+          metadata: { preset, autoSpawnServer: true },
+          cogniaModel: { providerId: "gateway", modelId: "big" },
+        },
+        async () => {
+          const onSave = jest.fn()
+          render(
+            <AgentEditorDialog
+              open
+              editingAgentId="agent-1"
+              onOpenChange={jest.fn()}
+              onSave={onSave}
+            />
+          )
+          await selectOption(screen.getByRole("combobox", { name: "Sandbox network" }), "allowlist")
+          fireEvent.change(screen.getByRole("textbox", { name: "Allowed hosts" }), {
+            target: { value: "https://example.com" },
+          })
+          await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
+          expect(onSave).not.toHaveBeenCalled()
+          expect(toastErrorMock).toHaveBeenCalledWith(
+            externalAgentManage.editor.sandboxAllowedHostsInvalid
+          )
+        }
+      )
+    }
+  )
 
   it("does not show process sandbox controls for an existing network service", async () => {
     await withAgent(
@@ -279,6 +375,7 @@ describe("AgentEditorDialog", () => {
         protocol: "codex-app-server",
         defaultPermissionMode: "acceptEdits",
         codexOptions: {
+          stepModelSwitching: true,
           sandboxMode: "workspaceWrite",
           networkAccess: true,
           writableRoots: ["/projects/shared"],
@@ -303,6 +400,7 @@ describe("AgentEditorDialog", () => {
         await userEvent.click(screen.getByRole("switch", { name: "Network access" }))
         await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
         expect(onSave.mock.calls[0][0].codexOptions).toEqual({
+          stepModelSwitching: true,
           sandboxMode: "workspaceWrite",
           networkAccess: false,
           writableRoots: ["/projects/shared", "/opt/build-output"],
@@ -1409,3 +1507,4 @@ describe("new preset names", () => {
     expect(screen.getByLabelText(/agent name/i)).toHaveValue("My Codex")
   })
 })
+import { selectOption } from "@/lib/testing/select-option"

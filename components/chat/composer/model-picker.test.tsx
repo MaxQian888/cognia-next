@@ -15,8 +15,10 @@ import {
 } from "@/lib/ai/agent/external/capability/model-surface-cache"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
-import type { ChatSession } from "@cognia/agent-config-types"
-import { updateSession } from "@/lib/db/sessions"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
+import { DEFAULT_AUTO_ROUTING } from "@/types/routing/tool-route"
+import { getSession, updateSession } from "@/lib/db/sessions"
+import { waitForModelSelection } from "@/lib/chat/model-selection"
 import { detectHostProfile } from "@/lib/platform/capabilities"
 import { useSettingsStore } from "@/stores/settings"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
@@ -27,6 +29,7 @@ import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
 // irrelevant for trigger-rendering assertions.
 jest.mock("@/lib/db/sessions", () => ({
   updateSession: jest.fn(async () => undefined),
+  getSession: jest.fn(async () => undefined),
 }))
 
 const mockedUpdateSession = updateSession as unknown as jest.Mock
@@ -40,8 +43,8 @@ jest.mock("@/lib/platform/capabilities", () => {
   return { ...actual, detectHostProfile: jest.fn(() => "web-standalone") }
 })
 const mockHostProfile = detectHostProfile as jest.MockedFunction<typeof detectHostProfile>
-const mockSetSessionModel = jest.fn(async (..._a: unknown[]) => undefined)
-const mockCloseSession = jest.fn(async (..._a: unknown[]) => undefined)
+const mockSetSessionModel = jest.fn(async (..._a: unknown[]): Promise<void> => undefined)
+const mockCloseSession = jest.fn(async (..._a: unknown[]): Promise<void> => undefined)
 jest.mock("@/lib/claude/ipc", () => {
   const actual = jest.requireActual("@/lib/claude/ipc")
   return {
@@ -551,6 +554,9 @@ describe("active model positioning", () => {
   })
 
   it("positions the Auto row when Auto is selected", () => {
+    useSettingsStore.setState((state) => ({
+      settings: { ...state.settings!, autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true } },
+    }))
     const scrollIntoView = jest
       .spyOn(Element.prototype, "scrollIntoView")
       .mockImplementation(() => undefined)
@@ -658,7 +664,7 @@ describe("explicit Auto routing selection", () => {
     createdAt: 0,
     updatedAt: 0,
   }
-  const renderPicker = (value: ChatSession = session) =>
+  const renderPicker = (value: ChatSession | null = session) =>
     render(
       <NextIntlClientProvider locale="en" messages={enMessages}>
         <TooltipProvider>
@@ -675,6 +681,423 @@ describe("explicit Auto routing selection", () => {
 
   afterEach(() => {
     act(() => useSettingsStore.setState({ settings: undefined as never }))
+  })
+
+  it("releases an acknowledged Auto label when a preset replaces the model on the same session", async () => {
+    useSettingsStore.setState({
+      settings: { autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true } } as AppSettings,
+      save: jest.fn(async () => undefined),
+    })
+    const view = renderPicker(session)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const redraw = (value: ChatSession) =>
+      view.rerender(
+        <NextIntlClientProvider locale="en" messages={enMessages}>
+          <TooltipProvider>
+            <ModelPicker session={value} />
+          </TooltipProvider>
+        </NextIntlClientProvider>
+      )
+    redraw({ ...session, model: "auto", providerOverride: undefined })
+    expect(screen.getByRole("button")).toHaveTextContent("Auto")
+    redraw({ ...session, model: PROVIDERS.anthropic.defaultModel })
+    expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
+  })
+
+  it("rolls back the optimistic Auto label when session persistence fails", async () => {
+    useSettingsStore.setState({
+      settings: { autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true } } as AppSettings,
+      save: jest.fn(async () => undefined),
+    })
+    mockedUpdateSession.mockRejectedValueOnce(new Error("Session write failed"))
+    renderPicker(session)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't save the model choice: Session write failed"
+      )
+    )
+    expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
+  })
+
+  it("orders rapid session choices behind an unfinished runtime reset", async () => {
+    let finishReset!: () => void
+    const reset = new Promise<void>((resolve) => {
+      finishReset = resolve
+    })
+    mockHostProfile.mockReturnValue("desktop")
+    mockCloseSession.mockImplementationOnce(() => reset)
+    useSettingsStore.setState({
+      settings: { autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true } } as AppSettings,
+      save: jest.fn(async () => undefined),
+    })
+    renderPicker(session)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
+    await waitFor(() => expect(mockCloseSession).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole("button"))
+    const model = PROVIDERS.anthropic.models[0]
+    fireEvent.click(screen.getByRole("option", { name: new RegExp(model.id) }))
+    let ready = false
+    const send = waitForModelSelection(session.id).then(() => {
+      ready = true
+    })
+    try {
+      expect(mockedUpdateSession).toHaveBeenCalledTimes(1)
+      expect(ready).toBe(false)
+      expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
+    } finally {
+      await act(async () => {
+        finishReset()
+        await send
+      })
+    }
+    expect(mockedUpdateSession.mock.calls.map((call) => call[1].model)).toEqual(["auto", model.id])
+    expect(ready).toBe(true)
+  })
+
+  it("rolls back a concrete session choice when its save fails", async () => {
+    useSettingsStore.setState({
+      settings: { autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true } } as AppSettings,
+      save: jest.fn(async () => undefined),
+    })
+    mockedUpdateSession.mockRejectedValueOnce(new Error("Manual write failed"))
+    renderPicker({ ...session, model: "auto", providerOverride: undefined })
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(
+      screen.getByRole("option", { name: new RegExp(PROVIDERS.anthropic.models[0].id) })
+    )
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't save the model choice: Manual write failed"
+      )
+    )
+    expect(screen.getByRole("button")).toHaveTextContent("Auto")
+  })
+
+  it("keeps disabled inherited Auto disabled when the session write fails", async () => {
+    const save = jest.fn(async (patch: Partial<AppSettings>) => {
+      useSettingsStore.setState((state) => ({ settings: { ...state.settings!, ...patch } }))
+    })
+    useSettingsStore.setState({
+      settings: {
+        defaultModel: PROVIDERS.anthropic.defaultModel,
+        autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: false, defaultSelection: "auto" },
+      } as AppSettings,
+      save,
+    })
+    mockedUpdateSession.mockRejectedValueOnce(new Error("Session write failed"))
+    renderPicker({ ...session, model: undefined, providerOverride: undefined })
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't save the model choice: Session write failed"
+      )
+    )
+    expect(useSettingsStore.getState().settings?.autoRouting?.enabled).toBe(false)
+    expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
+  })
+
+  it("restores the previous session choice when enabling Auto fails after the row write", async () => {
+    const read = getSession as jest.Mock
+    read
+      .mockResolvedValueOnce(session)
+      .mockResolvedValueOnce({ ...session, model: "auto", providerOverride: undefined })
+    useSettingsStore.setState({
+      settings: {
+        defaultModel: session.model,
+        autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: false },
+      } as AppSettings,
+      save: jest.fn(async () => {
+        throw new Error("Settings write failed")
+      }),
+    })
+    renderPicker(session)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn't save the model choice: Settings write failed"
+      )
+    )
+    expect(mockedUpdateSession.mock.calls.map((call) => call[1])).toEqual([
+      { model: "auto", providerOverride: undefined },
+      { model: session.model, providerOverride: session.providerOverride },
+    ])
+    expect(useSettingsStore.getState().settings?.autoRouting?.enabled).toBe(false)
+    expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
+  })
+
+  it("honors a preset after row acknowledgement while the runtime reset is still pending", async () => {
+    let finishReset!: () => void
+    const reset = new Promise<void>((resolve) => {
+      finishReset = resolve
+    })
+    mockHostProfile.mockReturnValue("desktop")
+    mockCloseSession.mockImplementationOnce(() => reset)
+    useSettingsStore.setState({
+      settings: { autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true } } as AppSettings,
+      save: jest.fn(async () => undefined),
+    })
+    const view = renderPicker(session)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
+    await waitFor(() => expect(mockCloseSession).toHaveBeenCalledTimes(1))
+    const redraw = (value: ChatSession) =>
+      view.rerender(
+        <NextIntlClientProvider locale="en" messages={enMessages}>
+          <TooltipProvider>
+            <ModelPicker session={value} />
+          </TooltipProvider>
+        </NextIntlClientProvider>
+      )
+    try {
+      redraw({ ...session, model: "auto", providerOverride: undefined })
+      redraw(session)
+      expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
+    } finally {
+      await act(async () => {
+        finishReset()
+        await waitForModelSelection(session.id)
+      })
+    }
+    expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
+  })
+
+  it("shows Auto immediately while its asynchronous settings save is pending", async () => {
+    let finishSave!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finishSave = resolve
+    })
+    const save = jest.fn(async (patch: Partial<AppSettings>) => {
+      await pending
+      useSettingsStore.setState((state) => ({ settings: { ...state.settings!, ...patch } }))
+    })
+    useSettingsStore.setState({
+      settings: {
+        defaultModel: PROVIDERS.anthropic.defaultModel,
+        autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: false },
+      } as AppSettings,
+      save,
+    })
+    renderPicker(null)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
+    expect(useSettingsStore.getState().settings?.autoRouting?.enabled).toBe(false)
+    expect(screen.getByRole("button")).toHaveTextContent("Auto")
+    await act(async () => {
+      finishSave()
+      await save.mock.results[0].value
+    })
+    expect(screen.getByRole("button")).toHaveTextContent("Auto")
+    act(() => {
+      useSettingsStore.setState((state) => ({
+        settings: { ...state.settings!, autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: false } },
+      }))
+    })
+    expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
+  })
+
+  it("rolls back a failed asynchronous Auto save and allows a retry", async () => {
+    let rejectSave!: (error: Error) => void
+    const pending = new Promise<void>((_resolve, reject) => {
+      rejectSave = reject
+    })
+    const save = jest
+      .fn(async (patch: Partial<AppSettings>) => {
+        useSettingsStore.setState((state) => ({ settings: { ...state.settings!, ...patch } }))
+      })
+      .mockImplementationOnce(() => pending)
+    useSettingsStore.setState({
+      settings: {
+        defaultModel: PROVIDERS.anthropic.defaultModel,
+        autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: false },
+      } as AppSettings,
+      save,
+    })
+    renderPicker(null)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
+    expect(screen.getByRole("button")).toHaveTextContent("Auto")
+    await act(async () => {
+      rejectSave(new Error("Settings unavailable"))
+      await pending.catch(() => undefined)
+    })
+    expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
+    expect(toast.error).toHaveBeenCalledWith("Couldn't save the model choice: Settings unavailable")
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
+    await act(async () => {
+      await save.mock.results[1].value
+    })
+    expect(screen.getByRole("button")).toHaveTextContent("Auto")
+  })
+
+  it("persists the newer concrete choice after an older asynchronous Auto save succeeds", async () => {
+    let finishSave!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finishSave = resolve
+    })
+    let queue = Promise.resolve()
+    const save = jest.fn((patch: Partial<AppSettings>) => {
+      queue = queue.then(async () => {
+        if (patch.autoRouting?.defaultSelection === "auto") await pending
+        useSettingsStore.setState((state) => ({ settings: { ...state.settings!, ...patch } }))
+      })
+      return queue
+    })
+    useSettingsStore.setState({
+      settings: {
+        defaultModel: PROVIDERS.anthropic.defaultModel,
+        autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: false },
+      } as AppSettings,
+      save,
+    })
+    const first = renderPicker(null)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
+    fireEvent.click(screen.getByRole("button"))
+    const model = PROVIDERS.anthropic.models[0]
+    fireEvent.click(screen.getByRole("option", { name: new RegExp(model.id) }))
+    await act(async () => {
+      finishSave()
+      await queue
+    })
+    expect(useSettingsStore.getState().settings?.autoRouting).toMatchObject({
+      enabled: true,
+      defaultSelection: "manual",
+    })
+    expect(useSettingsStore.getState().settings?.defaultModel).toBe(model.id)
+    first.unmount()
+    renderPicker(null)
+    expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
+  })
+
+  it("keeps a newer concrete choice when an older Auto save rejects", async () => {
+    let rejectSave!: (error: Error) => void
+    const pending = new Promise<void>((_resolve, reject) => {
+      rejectSave = reject
+    })
+    const save = jest
+      .fn(async (patch: Partial<AppSettings>) => {
+        useSettingsStore.setState((state) => ({ settings: { ...state.settings!, ...patch } }))
+      })
+      .mockImplementationOnce(() => pending)
+    useSettingsStore.setState({
+      settings: {
+        defaultModel: PROVIDERS.anthropic.defaultModel,
+        autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: false },
+      } as AppSettings,
+      save,
+    })
+    renderPicker(null)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
+    fireEvent.click(screen.getByRole("button"))
+    const model = PROVIDERS.anthropic.models[0]
+    fireEvent.click(screen.getByRole("option", { name: new RegExp(model.id) }))
+    await act(async () => {
+      rejectSave(new Error("Older save failed"))
+      await pending.catch(() => undefined)
+    })
+    expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
+    expect(useSettingsStore.getState().settings?.defaultModel).toBe(model.id)
+    expect(toast.error).not.toHaveBeenCalledWith(
+      "Couldn't save the model choice: Older save failed"
+    )
+  })
+
+  it("persists Auto before a session exists and restores it after remount", () => {
+    const save = jest.fn(async (patch: Partial<AppSettings>) => {
+      useSettingsStore.setState((state) => ({ settings: { ...state.settings!, ...patch } }))
+    })
+    useSettingsStore.setState({
+      settings: {
+        defaultProvider: "anthropic",
+        defaultModel: PROVIDERS.anthropic.defaultModel,
+      } as AppSettings,
+      save,
+    })
+    const first = renderPicker(null)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
+    expect(save).toHaveBeenCalledWith({
+      autoRouting: expect.objectContaining({ enabled: true, defaultSelection: "auto" }),
+    })
+    expect(mockedUpdateSession).not.toHaveBeenCalled()
+    expect(useSettingsStore.getState().settings?.defaultModel).toBe(
+      PROVIDERS.anthropic.defaultModel
+    )
+    first.unmount()
+    renderPicker(null)
+    expect(screen.getByRole("button")).toHaveTextContent("Auto")
+  })
+
+  it("makes a pre-session concrete choice manual without disabling Auto", () => {
+    const save = jest.fn(async (patch: Partial<AppSettings>) => {
+      useSettingsStore.setState((state) => ({ settings: { ...state.settings!, ...patch } }))
+    })
+    useSettingsStore.setState({
+      settings: {
+        autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true, defaultSelection: "auto" },
+      } as AppSettings,
+      save,
+    })
+    const first = renderPicker(null)
+    fireEvent.click(screen.getByRole("button"))
+    const model = PROVIDERS.anthropic.models[0]
+    fireEvent.click(screen.getByRole("option", { name: new RegExp(model.id) }))
+    expect(save).toHaveBeenCalledWith({
+      defaultModel: model.id,
+      defaultProvider: "anthropic",
+      autoRouting: expect.objectContaining({ enabled: true, defaultSelection: "manual" }),
+    })
+    first.unmount()
+    renderPicker(null)
+    expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
+  })
+
+  it("shows the Auto default for an unpinned session but keeps concrete session choices", () => {
+    useSettingsStore.setState({
+      settings: {
+        autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true, defaultSelection: "auto" },
+      } as AppSettings,
+    })
+    const first = renderPicker({ ...session, model: undefined })
+    expect(screen.getByRole("button")).toHaveTextContent("Auto")
+    first.unmount()
+    renderPicker(session)
+    expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
+  })
+
+  it("stops displaying an optimistic Auto selection when routing is disabled", () => {
+    useSettingsStore.setState({
+      settings: {
+        defaultProvider: "anthropic",
+        defaultModel: PROVIDERS.anthropic.defaultModel,
+        autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true },
+      } as AppSettings,
+      save: jest.fn(async () => undefined),
+    })
+    renderPicker({ ...session, model: "auto" })
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
+    expect(screen.getByRole("button")).toHaveTextContent("Auto")
+    act(() => {
+      useSettingsStore.setState((state) => ({
+        settings: {
+          ...state.settings!,
+          autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: false },
+        },
+      }))
+    })
+    expect(screen.getByRole("button")).not.toHaveTextContent("Auto")
   })
 
   it("shows the Auto badge only when the session explicitly selects Auto", () => {
@@ -694,38 +1117,44 @@ describe("explicit Auto routing selection", () => {
     expect(container.querySelector(".text-primary")).toBeNull()
   })
 
-  it("selecting the Auto row enables routing and stores a session-level selection", () => {
+  it("selecting the Auto row enables routing and stores a session-level selection", async () => {
     const save = jest.fn(async () => undefined)
     useSettingsStore.setState({ settings: { autoRouting: { enabled: false } } as never, save })
     renderPicker()
     fireEvent.click(screen.getByRole("button")) // open the popover
     fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
-    expect(save).toHaveBeenCalledWith({
-      autoRouting: expect.objectContaining({ enabled: true }),
-    })
-    expect(mockedUpdateSession).toHaveBeenCalledWith(
-      "ses_1",
-      expect.objectContaining({ model: "auto", providerOverride: undefined })
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith({
+        autoRouting: expect.objectContaining({ enabled: true }),
+      })
+    )
+    await waitFor(() =>
+      expect(mockedUpdateSession).toHaveBeenCalledWith(
+        "ses_1",
+        expect.objectContaining({ model: "auto", providerOverride: undefined })
+      )
     )
   })
 
-  it("starts from the existing default Auto policy when no Auto block is stored", () => {
+  it("starts from the existing default Auto policy when no Auto block is stored", async () => {
     const save = jest.fn(async () => undefined)
     useSettingsStore.setState({ settings: {} as never, save })
     renderPicker()
     fireEvent.click(screen.getByRole("button"))
     fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
 
-    expect(save).toHaveBeenCalledWith({
-      autoRouting: expect.objectContaining({
-        enabled: true,
-        defaultSelection: "manual",
-        strategy: "reliability",
-      }),
-    })
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith({
+        autoRouting: expect.objectContaining({
+          enabled: true,
+          defaultSelection: "manual",
+          strategy: "reliability",
+        }),
+      })
+    )
   })
 
-  it("closes the live desktop session after selecting Auto and swallows close failures", () => {
+  it("closes the live desktop session after selecting Auto and swallows close failures", async () => {
     const save = jest.fn(async () => undefined)
     mockHostProfile.mockReturnValue("desktop")
     mockCloseSession.mockRejectedValueOnce(new Error("already closed"))
@@ -734,7 +1163,7 @@ describe("explicit Auto routing selection", () => {
     fireEvent.click(screen.getByRole("button"))
     fireEvent.click(screen.getByRole("option", { name: /^Auto/ }))
 
-    expect(mockCloseSession).toHaveBeenCalledWith("ses_1")
+    await waitFor(() => expect(mockCloseSession).toHaveBeenCalledWith("ses_1"))
     expect(mockedUpdateSession).toHaveBeenCalledWith(
       "ses_1",
       expect.objectContaining({ model: "auto", providerOverride: undefined })
@@ -810,7 +1239,7 @@ describe("live model switch", () => {
     })
   })
 
-  it("drives the live SDK setModel when staying on the Anthropic provider", () => {
+  it("drives the live SDK setModel when staying on the Anthropic provider", async () => {
     const target = PROVIDERS.anthropic.models.find((m) => m.id !== anthropicSession.model)?.id
     if (!target) return // catalog has a single model — nothing to switch to
     renderPicker(anthropicSession)
@@ -820,11 +1249,11 @@ describe("live model switch", () => {
       "ses_live",
       expect.objectContaining({ model: target, providerOverride: "anthropic" })
     )
-    expect(mockSetSessionModel).toHaveBeenCalledWith("ses_live", target)
+    await waitFor(() => expect(mockSetSessionModel).toHaveBeenCalledWith("ses_live", target))
     expect(mockCloseSession).not.toHaveBeenCalled()
   })
 
-  it("uses the pane-owned handle callbacks for model switches and runtime resets", () => {
+  it("uses the pane-owned handle callbacks for model switches and runtime resets", async () => {
     const setModel = jest.fn(async () => undefined)
     const resetRuntime = jest.fn(async () => undefined)
     const target = PROVIDERS.anthropic.models.find((m) => m.id !== anthropicSession.model)?.id
@@ -832,18 +1261,18 @@ describe("live model switch", () => {
     renderPicker(anthropicSession, { setModel, resetRuntime })
     fireEvent.click(screen.getByRole("button"))
     fireEvent.click(screen.getAllByText(target)[0])
-    expect(setModel).toHaveBeenCalledWith(target)
+    await waitFor(() => expect(setModel).toHaveBeenCalledWith(target))
     expect(mockSetSessionModel).not.toHaveBeenCalled()
 
     const openAiTarget = PROVIDERS.openai.models[0]?.id
     if (!openAiTarget) return
     fireEvent.click(screen.getByRole("button"))
     fireEvent.click(screen.getAllByText(openAiTarget)[0])
-    expect(resetRuntime).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(resetRuntime).toHaveBeenCalledTimes(1))
     expect(mockCloseSession).not.toHaveBeenCalled()
   })
 
-  it("closes the session (no in-place setModel) when changing provider", () => {
+  it("closes the session (no in-place setModel) when changing provider", async () => {
     const openaiModel = PROVIDERS.openai.defaultModel
     renderPicker(anthropicSession)
     fireEvent.click(screen.getByRole("button"))
@@ -855,10 +1284,10 @@ describe("live model switch", () => {
     // Provider change → the live session is on the wrong dispatch path, so we
     // close it (next send re-dispatches on openai) rather than an in-place swap.
     expect(mockSetSessionModel).not.toHaveBeenCalled()
-    expect(mockCloseSession).toHaveBeenCalledWith("ses_live")
+    await waitFor(() => expect(mockCloseSession).toHaveBeenCalledWith("ses_live"))
   })
 
-  it("live-switches (setModel, no close) when changing model within a non-Anthropic provider", () => {
+  it("live-switches (setModel, no close) when changing model within a non-Anthropic provider", async () => {
     const openaiSession: ChatSession = {
       ...anthropicSession,
       model: PROVIDERS.openai.defaultModel,
@@ -874,7 +1303,7 @@ describe("live model switch", () => {
       expect.objectContaining({ model: target, providerOverride: "openai" })
     )
     // Same provider → in-place live switch on the ai-sdk loop, session kept.
-    expect(mockSetSessionModel).toHaveBeenCalledWith("ses_live", target)
+    await waitFor(() => expect(mockSetSessionModel).toHaveBeenCalledWith("ses_live", target))
     expect(mockCloseSession).not.toHaveBeenCalled()
   })
 
@@ -901,7 +1330,9 @@ describe("live model switch", () => {
       renderPicker(anthropicSession)
       fireEvent.click(screen.getByRole("button"))
       fireEvent.click(screen.getAllByText(target)[0])
-      expect(mockSetSessionModel).toHaveBeenCalledWith(anthropicSession.id, target)
+      await waitFor(() =>
+        expect(mockSetSessionModel).toHaveBeenCalledWith(anthropicSession.id, target)
+      )
       expect(mockCloseSession).not.toHaveBeenCalled()
       await waitFor(() => expect(toast.success).toHaveBeenCalled())
     }
@@ -1489,5 +1920,14 @@ describe("an external agent's own models", () => {
       fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
       expect(mockCogniaModels.refresh).toHaveBeenCalled()
     })
+  })
+})
+
+// Picker persistence intentionally outlives a popover; settle it before resetting mocks.
+afterEach(async () => {
+  await act(async () => {
+    await Promise.all(
+      [null, "ses_1", "ses_live"].map((id) => waitForModelSelection(id).catch(() => undefined))
+    )
   })
 })

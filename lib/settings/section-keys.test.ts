@@ -60,6 +60,10 @@ describe("section-keys", () => {
       expect(keyToSection("webReader")).toBe("search")
       expect(resetKeysForSection("search")).toContain("webReader")
     })
+    it("owns the Claude Code runtime preferences in the sandbox section", () => {
+      expect(keyToSection("claudeCodeRuntime")).toBe("sandbox")
+      expect(resetKeysForSection("sandbox")).toContain("claudeCodeRuntime")
+    })
     it("returns the owned keys for a mapped section", () => {
       expect(resetKeysForSection("security")).toContain("biometricRequiredFor")
       expect(resetKeysForSection("sandbox")).toEqual(

@@ -9,6 +9,14 @@
 import type { z, ZodError, ZodIssue } from "zod"
 import { paramsSchemaFor } from "./params-schemas"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
+import type {
+  FieldError,
+  NodeValidationResult,
+} from "@cognia/plugin-contract/lib/workflow/nodes/validate-params"
+export type {
+  FieldError,
+  NodeValidationResult,
+} from "@cognia/plugin-contract/lib/workflow/nodes/validate-params"
 
 /**
  * Heuristic: a `message` string returned by a custom `.regex(_, key)`,
@@ -19,25 +27,6 @@ import type { WorkflowNodeKind } from "@/types/workflow/visual"
 function looksLikeI18nKey(s: string | undefined): boolean {
   if (!s) return false
   return /^[a-z][A-Za-z0-9]*$/.test(s)
-}
-
-/**
- * Per-field failure. The `key` is an i18n message key under
- * `workflows.validation.*`. The `params` carries any interpolation values
- * (e.g., `{ min: 1 }`) the message needs.
- */
-export interface FieldError {
-  key: string
-  params?: Record<string, string | number>
-}
-
-export interface NodeValidationResult {
-  /** Per-field errors, keyed by the dotted JSON path (e.g., `"cron"`). */
-  fields: Record<string, FieldError>
-  /** Flat list, useful for toast / save-blocked banner. */
-  summary: string[]
-  /** Convenience flag — `true` iff `fields` has any entry. */
-  hasErrors: boolean
 }
 
 /**

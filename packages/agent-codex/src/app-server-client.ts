@@ -48,6 +48,9 @@ import {
 } from "@cognia/agent-runtime-kit/session-extension-errors"
 import type {
   ExternalAgentCompactionCapability,
+  ExternalAgentNativeSubagents,
+  ExternalAgentNativeSubagentModelChange,
+  ExternalAgentNativeSubagentModelChangeResult,
   ExternalAgentCompactionOptions,
   ExternalAgentSessionEntry,
   ExternalAgentSessionOperationCapabilities,
@@ -299,6 +302,7 @@ export interface CodexSessionOptions {
 /** `model/list` entry (v2 `Model`). */
 export interface CodexModelInfo {
   id: string
+  multiAgentVersion?: "v1" | "v2" | "disabled"
   model?: string
   displayName?: string
   description?: string
@@ -348,6 +352,16 @@ export interface CodexRateLimitsInfo {
 /** A `thread/list` entry (v2 `Thread`, subset the session UI needs). */
 interface CodexThreadSummary {
   id?: string
+  parentThreadId?: string | null
+  model?: string | null
+  reasoningEffort?: string | null
+  canAcceptDirectInput?: boolean | null
+  source?: unknown
+  status?: unknown
+  turns?: Array<{ id?: string; status?: string }>
+  activeTurnId?: string
+  requestedModelId?: string
+  requestedReasoningEffort?: string
   name?: string | null
   preview?: string | null
   /** Unix timestamp in seconds. */
@@ -598,6 +612,23 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   private sessionListeners = new Map<string, Set<(event: ExternalAgentEvent) => void>>()
   // Active turn id per session, for `turn/interrupt`.
   private activeTurns = new Map<string, string>()
+  private nativeThreads = new Map<string, CodexThreadSummary>()
+  private nativeProcessGeneration = 0
+  private nativeChanges = new Map<
+    string,
+    {
+      payload: string
+      result: Promise<ExternalAgentNativeSubagentModelChangeResult>
+    }
+  >()
+  private nativeChangingChildren = new Set<string>()
+  private nativeUncertainChildren = new Set<string>()
+  private nativeStepModelSwitching: boolean | null = null
+  private nativeSettingsSupport = new Map<string, boolean>()
+  private nativeSpawnModelObserved = new Set<string>()
+  private nativeSpawnParents = new Map<string, string>()
+  private nativeSpawnRequests = new Map<string, { modelId?: string; reasoningEffort?: string }>()
+  private nativeNewRoots = new Set<string>()
   // Admission and completion notifications can race the turn/start reply.
   private startingTurns = new Map<string, PendingTurnStart>()
   // Keep revoked admissions until their replies identify the native turns.
@@ -682,6 +713,12 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     }
 
     this._config = config
+    if (
+      config.codexOptions?.stepModelSwitching !== undefined &&
+      typeof config.codexOptions.stepModelSwitching !== "boolean"
+    )
+      throw new Error("Invalid Codex stepModelSwitching option")
+    this.nativeProcessGeneration += 1
     this._connectionStatus = "connecting"
 
     try {
@@ -789,7 +826,14 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     const spawnConfig = {
       id: config.id,
       command: config.process!.command,
-      args: config.process!.args ?? [],
+      args:
+        config.codexOptions?.stepModelSwitching === undefined
+          ? (config.process!.args ?? [])
+          : [
+              "-c",
+              `features.step_model_switching=${config.codexOptions.stepModelSwitching}`,
+              ...(config.process!.args ?? []),
+            ],
       env,
       cwd: config.process!.cwd,
       sandboxPolicy: config.sandboxPolicy,
@@ -961,6 +1005,17 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     this._sessions.clear()
     this.sessionListeners.clear()
     this.activeTurns.clear()
+    this.nativeThreads.clear()
+    this.nativeChanges.clear()
+    this.nativeChangingChildren.clear()
+    this.nativeUncertainChildren.clear()
+    this.nativeStepModelSwitching = null
+    this.nativeSettingsSupport.clear()
+    this.nativeSpawnModelObserved.clear()
+    this.nativeSpawnParents.clear()
+    this.nativeSpawnRequests.clear()
+    this.nativeNewRoots.clear()
+    this.nativeProcessGeneration += 1
     this.startingTurns.clear()
     this.revokedTurnStarts.clear()
     this.revokedTurnIds.clear()
@@ -1097,6 +1152,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       metadata,
     }
     this._sessions.set(session.id, session)
+    this.nativeNewRoots.add(session.id)
     // The system prompt already rode in via developerInstructions.
     if (systemPrompt) this.sentSystemPrompt.add(threadId)
     this.log.info("Created Codex thread", { threadId })
@@ -2320,6 +2376,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       return
     }
 
+    this.captureNativeNotification(method, p)
     const sessionId = this.resolveSessionId(p)
     if (!sessionId) return
 
@@ -3637,6 +3694,442 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     return [...this.modelCache]
   }
 
+  private captureNativeThread(raw: CodexThreadSummary, authoritativeTurns = false): void {
+    if (!raw.id) return
+    if (!this.nativeThreads.has(raw.id) && this.nativeThreads.size >= 256) return
+    const previous = this.nativeThreads.get(raw.id)
+    const source = readObject(raw.source)
+    const spawn = readObject(readObject(source?.subAgent)?.thread_spawn)
+    const parentThreadId = raw.parentThreadId ?? readString(spawn?.parent_thread_id)
+    const active = raw.turns?.find((turn) => turn.status === "inProgress")
+    this.nativeThreads.set(raw.id, {
+      ...this.nativeThreads.get(raw.id),
+      ...raw,
+      ...(parentThreadId ? { parentThreadId } : {}),
+      ...(authoritativeTurns && Array.isArray(raw.turns)
+        ? { activeTurnId: active?.id }
+        : active?.id
+          ? { activeTurnId: active.id }
+          : {}),
+    })
+    if (parentThreadId && !previous?.parentThreadId) {
+      const childId = raw.id
+      const rootThreadId = [...this._sessions.keys()].find((root) =>
+        this.nativeChildBelongsTo(childId, root)
+      )
+      if (rootThreadId)
+        this.log.debug("codex.native_child_discovered", {
+          rootThreadId,
+          parentThreadId,
+          nativeChildThreadId: raw.id,
+          processGeneration: this.nativeProcessGeneration,
+        })
+    }
+  }
+
+  private captureNativeNotification(method: string, params: Record<string, unknown>): void {
+    const thread = readObject(params.thread)
+    if (method === "thread/started" && thread)
+      this.captureNativeThread(thread as CodexThreadSummary)
+    const id = readString(params.threadId)
+    const known = id ? this.nativeThreads.get(id) : undefined
+    if (known && (method === "turn/started" || method === "turn/completed")) {
+      const turn = readObject(params.turn)
+      if (method === "turn/started") known.activeTurnId = readString(turn?.id)
+      else if (known.activeTurnId === readString(turn?.id)) known.activeTurnId = undefined
+    }
+    // Native V1 collab items carry thread identities; a tool result alone is
+    // not a Cognia session and never receives a synthetic running lifecycle.
+    const item = readObject(params.item)
+    const parentId = readString(item?.senderThreadId)
+    if (
+      parentId &&
+      (this._sessions.has(parentId) || this.nativeThreads.has(parentId)) &&
+      item?.type === "collabAgentToolCall" &&
+      item.tool === "spawnAgent" &&
+      Array.isArray(item.receiverThreadIds)
+    ) {
+      const turnId = readString(params.turnId)
+      const callId = readString(item.id)
+      const key = turnId && callId ? `${parentId}:${turnId}:${callId}` : undefined
+      if (method === "item/started" && key && this.nativeSpawnRequests.size < 128)
+        this.nativeSpawnRequests.set(key, {
+          modelId: readString(item.model),
+          reasoningEffort: readString(item.reasoningEffort),
+        })
+      const requested = key ? this.nativeSpawnRequests.get(key) : undefined
+      if (
+        method === "item/completed" &&
+        requested?.modelId &&
+        item.receiverThreadIds.length &&
+        item.status !== "failed"
+      )
+        this.nativeSpawnModelObserved.add(parentId)
+      for (const childId of item.receiverThreadIds) {
+        if (typeof childId !== "string" || childId === parentId) continue
+        if (this.nativeSpawnParents.size < 256) this.nativeSpawnParents.set(childId, parentId)
+        this.captureNativeThread({
+          id: childId,
+          parentThreadId: this.nativeThreads.get(childId)?.parentThreadId ?? parentId,
+          ...(requested?.modelId ? { requestedModelId: requested.modelId } : {}),
+          ...(requested?.reasoningEffort
+            ? { requestedReasoningEffort: requested.reasoningEffort }
+            : {}),
+        })
+      }
+      if (method === "item/completed" && key) this.nativeSpawnRequests.delete(key)
+    }
+  }
+
+  private nativeChildBelongsTo(childId: string, rootId: string): boolean {
+    const seen = new Set<string>([childId])
+    let parent = this.nativeThreads.get(childId)?.parentThreadId
+    while (parent) {
+      if (parent === rootId) return true
+      if (seen.has(parent)) return false
+      seen.add(parent)
+      parent = this.nativeThreads.get(parent)?.parentThreadId
+    }
+    return false
+  }
+
+  async getNativeSubagents(sessionId: string): Promise<ExternalAgentNativeSubagents> {
+    if (!this._sessions.has(sessionId) || !this.peer) throw new Error("Session not found")
+    const generation = this.nativeProcessGeneration
+    const peer = this.peer
+    const readIds = new Set<string>()
+    const readThread = async (id: string) => {
+      if (readIds.has(id)) return
+      readIds.add(id)
+      let result: { thread?: CodexThreadSummary } | undefined
+      try {
+        result = await this.callOptional<{ thread?: CodexThreadSummary }>("thread/read", {
+          threadId: id,
+          includeTurns: true,
+        })
+      } catch (error) {
+        if (generation !== this.nativeProcessGeneration || peer !== this.peer)
+          throw new Error("stale-process-generation")
+        if (
+          id !== sessionId &&
+          (error as { code?: number })?.code === -32600 &&
+          /thread.*not found|no rollout found/i.test(error instanceof Error ? error.message : "")
+        ) {
+          this.nativeThreads.delete(id)
+          this.nativeSpawnParents.delete(id)
+          return
+        }
+        throw error
+      }
+      if (generation !== this.nativeProcessGeneration || peer !== this.peer)
+        throw new Error("stale-process-generation")
+      if (result?.thread?.id === id) this.captureNativeThread(result.thread, true)
+    }
+    await readThread(sessionId)
+    await this.listModels()
+    const configuration = await this.callOptional<{ config?: Record<string, unknown> }>(
+      "config/read",
+      { includeLayers: false }
+    )
+    const features = readObject(configuration?.config?.features)
+    const featureFlag = (key: string): boolean | null => {
+      const value = features?.[key]
+      if (typeof value === "boolean") return value
+      const enabled = readObject(value)?.enabled
+      return typeof enabled === "boolean" ? enabled : null
+    }
+    const v2Options = readObject(features?.multi_agent_v2)
+    const agents = readObject(configuration?.config?.agents)
+    if (generation !== this.nativeProcessGeneration || peer !== this.peer)
+      throw new Error("stale-process-generation")
+    this.nativeStepModelSwitching = featureFlag("step_model_switching")
+    let truncated = false
+    const discover = async (method: string, params: Record<string, unknown>) => {
+      let cursor: string | undefined
+      const cursors = new Set<string>()
+      for (let page = 0; page < 4; page++) {
+        const result = await this.callOptional<{ data?: unknown[]; nextCursor?: string | null }>(
+          method,
+          { ...params, limit: 50, ...(cursor ? { cursor } : {}) }
+        )
+        if (generation !== this.nativeProcessGeneration || peer !== this.peer)
+          throw new Error("stale-process-generation")
+        for (const entry of result?.data ?? []) {
+          if (typeof entry === "string") {
+            if (entry !== sessionId) await readThread(entry)
+          } else {
+            const raw = readObject(entry) as CodexThreadSummary | undefined
+            if (raw?.id) this.captureNativeThread(raw)
+          }
+        }
+        cursor = readString(result?.nextCursor)
+        if (!cursor) return
+        if (cursors.has(cursor)) {
+          truncated = true
+          return
+        }
+        cursors.add(cursor)
+      }
+      truncated = true
+    }
+    await discover("thread/list", {
+      ancestorThreadId: sessionId,
+      sourceKinds: ["subAgentThreadSpawn"],
+    })
+    // V2 children may be ephemeral and absent from the on-disk thread list.
+    await discover("thread/loaded/list", {})
+    const owned = [...this.nativeThreads.keys()].filter(
+      (id) => id !== sessionId && this.nativeChildBelongsTo(id, sessionId)
+    )
+    if (owned.length > 128) truncated = true
+    for (const id of owned.slice(0, 128)) await readThread(id)
+    const root = this.nativeThreads.get(sessionId)
+    const selected =
+      root?.model ?? readString(this._sessions.get(sessionId)?.metadata?.selectedModel)
+    const metadata = this.modelCache.find(
+      (model) => model.id === selected || model.model === selected
+    )
+    const children: ExternalAgentNativeSubagents["children"] = []
+    for (const [id, child] of this.nativeThreads) {
+      if (id === sessionId || !this.nativeChildBelongsTo(id, sessionId)) continue
+      if (children.length >= 128) break
+      children.push({
+        nativeThreadId: id,
+        parentThreadId: child.parentThreadId!,
+        rootThreadId: sessionId,
+        modelId: child.model ?? undefined,
+        reasoningEffort: child.reasoningEffort ?? undefined,
+        activeTurnId: child.activeTurnId,
+        modelChangeState: this.nativeUncertainChildren.has(id)
+          ? "outcome-unknown"
+          : this.nativeChangingChildren.has(id)
+            ? "pending"
+            : "idle",
+        requestedModelId: child.requestedModelId,
+        requestedReasoningEffort: child.requestedReasoningEffort,
+        status: readString(child.status) ?? readString(readObject(child.status)?.type),
+        canAcceptDirectInput:
+          typeof child.canAcceptDirectInput === "boolean" ? child.canAcceptDirectInput : null,
+        evidence: child.canAcceptDirectInput === undefined ? "collab-item" : "thread",
+      })
+    }
+    let backend: ExternalAgentNativeSubagents["backend"] = metadata?.multiAgentVersion
+      ? { value: metadata.multiAgentVersion, evidence: "model-metadata", confidence: "inferred" }
+      : { value: "unknown", evidence: "unknown", confidence: "unknown" }
+    if (featureFlag("multi_agent_v2") === true)
+      backend = { value: "v2", evidence: "configuration", confidence: "inferred" }
+    else if (agents?.enabled === false)
+      backend = { value: "disabled", evidence: "configuration", confidence: "inferred" }
+    // Certified against 0.159.2's native spawn handlers/common source builder:
+    // V1 emits public collab spawn items; V2 supplies the named agent_path.
+    // A child's direct-input permission governs control of that child, and
+    // does not prove its parent's backend (role configs may differ).
+    // Historical child sources alone cannot certify a resumed parent's state.
+    if (this.serverVersion?.join(".") === "0.159.2") {
+      const child = children.find(
+        (child) =>
+          child.parentThreadId === sessionId &&
+          (this.nativeSpawnParents.get(child.nativeThreadId) === sessionId ||
+            (this.nativeNewRoots.has(sessionId) &&
+              readString(
+                readObject(
+                  readObject(
+                    readObject(this.nativeThreads.get(child.nativeThreadId)?.source)?.subAgent
+                  )?.thread_spawn
+                )?.agent_path
+              )))
+      )
+      if (child)
+        backend = {
+          value: this.nativeSpawnParents.get(child.nativeThreadId) === sessionId ? "v1" : "v2",
+          evidence: "child-thread",
+          confidence: "observed",
+        }
+    }
+    return {
+      rootThreadId: sessionId,
+      processGeneration: generation,
+      runtimeVersion: this.serverInfo?.userAgent,
+      planFingerprint: readString(this._config?.metadata?.cogniaModelPlanFingerprint),
+      backend,
+      spawnModelOverrides: this.nativeSpawnModelObserved.has(sessionId) ? "supported" : "unknown",
+      settingsMethods: {
+        currentTurn: this.nativeSettingsSupport.has("turn/settings/update")
+          ? this.nativeSettingsSupport.get("turn/settings/update")
+            ? "supported"
+            : "unsupported"
+          : "unknown",
+        futureTurns: this.nativeSettingsSupport.has("thread/settings/update")
+          ? this.nativeSettingsSupport.get("thread/settings/update")
+            ? "supported"
+            : "unsupported"
+          : "unknown",
+      },
+      features: {
+        multiAgent: featureFlag("multi_agent"),
+        agentsEnabled: typeof agents?.enabled === "boolean" ? agents.enabled : null,
+        multiAgentV2: featureFlag("multi_agent_v2"),
+        stepModelSwitching: featureFlag("step_model_switching"),
+        exposeSpawnModelOverrides:
+          typeof v2Options?.expose_spawn_agent_model_overrides === "boolean"
+            ? v2Options.expose_spawn_agent_model_overrides
+            : null,
+      },
+      stepModelSwitching:
+        this._config?.codexOptions?.stepModelSwitching === true &&
+        this.nativeStepModelSwitching !== false,
+      children,
+      truncated: truncated || this.nativeThreads.size >= 256,
+      models: this.modelCache
+        .filter((model) => {
+          const allowed = this._config?.metadata?.cogniaAllowedTaskModels
+          return !Array.isArray(allowed) || allowed.includes(model.id)
+        })
+        .map((model) => ({
+          id: model.id,
+          reasoningEfforts: model.supportedReasoningEfforts.map((effort) => effort.reasoningEffort),
+        })),
+    }
+  }
+
+  async changeNativeSubagentModel(
+    sessionId: string,
+    request: ExternalAgentNativeSubagentModelChange
+  ): Promise<ExternalAgentNativeSubagentModelChangeResult> {
+    if (!this._sessions.has(sessionId) || !this.peer) throw new Error("Session not found")
+    if (request.expectedProcessGeneration !== this.nativeProcessGeneration)
+      throw new Error("stale-process-generation")
+    if (!request.operationId || request.operationId.length > 128)
+      throw new Error("invalid-operation-id")
+    const key = `${sessionId}:${request.operationId}`
+    const payload = JSON.stringify(request)
+    const previous = this.nativeChanges.get(key)
+    if (previous) {
+      if (previous.payload !== payload) throw new Error("operation-id-conflict")
+      return previous.result
+    }
+    const child = this.nativeThreads.get(request.nativeChildThreadId)
+    if (!child || !this.nativeChildBelongsTo(request.nativeChildThreadId, sessionId))
+      throw new Error("child-not-owned")
+    if (child.canAcceptDirectInput !== true)
+      throw new Error(
+        child.canAcceptDirectInput === false ? "direct-input-forbidden" : "direct-input-unknown"
+      )
+    const fingerprint = readString(this._config?.metadata?.cogniaModelPlanFingerprint)
+    if (fingerprint && fingerprint !== request.expectedPlanFingerprint)
+      throw new Error("stale-model-plan")
+    const allowed = this._config?.metadata?.cogniaAllowedTaskModels
+    if (Array.isArray(allowed) && !allowed.includes(request.modelId))
+      throw new Error("model-not-allowed")
+    const model = this.modelCache.find((model) => model.id === request.modelId)
+    if (!model) throw new Error("model-not-allowed")
+    if (
+      request.reasoningEffort &&
+      !model.supportedReasoningEfforts.some(
+        (effort) => effort.reasoningEffort === request.reasoningEffort
+      )
+    )
+      throw new Error("reasoning-effort-not-supported")
+    if (request.scope !== "current-turn" && request.scope !== "future-turns")
+      throw new Error("invalid-settings-scope")
+    const method =
+      request.scope === "current-turn" ? "turn/settings/update" : "thread/settings/update"
+    if (this.nativeSettingsSupport.get(method) === false)
+      throw new Error("native-settings-unsupported")
+    if (request.scope === "current-turn") {
+      if (
+        this._config?.codexOptions?.stepModelSwitching !== true ||
+        this.nativeStepModelSwitching === false
+      )
+        throw new Error("step-model-switching-disabled")
+      if (!request.expectedTurnId || child.activeTurnId !== request.expectedTurnId)
+        throw new Error("stale-child-turn")
+    }
+    if (this.nativeChangingChildren.has(request.nativeChildThreadId))
+      throw new Error("child-settings-busy")
+    if (this.nativeChanges.size >= 128) throw new Error("model-change-operation-limit")
+    const peer = this.peer
+    const generation = this.nativeProcessGeneration
+    this.nativeChangingChildren.add(request.nativeChildThreadId)
+    const diagnostic = {
+      rootThreadId: sessionId,
+      nativeChildThreadId: request.nativeChildThreadId,
+      operationId: request.operationId,
+      processGeneration: generation,
+      scope: request.scope,
+      turnId: request.expectedTurnId,
+      modelId: request.modelId,
+      planFingerprint: request.expectedPlanFingerprint,
+    }
+    this.log.info("codex.child_model_change_requested", diagnostic)
+    const result = (async (): Promise<ExternalAgentNativeSubagentModelChangeResult> => {
+      let uncertain = false
+      try {
+        const response = await peer.sendRequest<{ status?: string }>(
+          method,
+          {
+            threadId: request.nativeChildThreadId,
+            ...(request.scope === "current-turn" ? { turnId: request.expectedTurnId } : {}),
+            model: request.modelId,
+            ...(request.reasoningEffort ? { effort: request.reasoningEffort } : {}),
+          },
+          10_000
+        )
+        if (generation !== this.nativeProcessGeneration || peer !== this.peer)
+          return {
+            operationId: request.operationId,
+            status: "outcome-unknown",
+            reason: "connection-changed",
+          }
+        if (
+          request.scope === "future-turns" ||
+          response?.status === "applied" ||
+          response?.status === "targetUnavailable"
+        )
+          this.nativeSettingsSupport.set(method, true)
+        if (request.scope === "current-turn" && response?.status === "targetUnavailable") {
+          child.activeTurnId = undefined
+          return { operationId: request.operationId, status: "target-unavailable" }
+        }
+        if (request.scope === "current-turn" && response?.status !== "applied") {
+          uncertain = true
+          return {
+            operationId: request.operationId,
+            status: "outcome-unknown",
+            reason: "unknown-settings-response",
+          }
+        }
+        return { operationId: request.operationId, status: "applied-awaiting-step" }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        const rejected = typeof (error as { code?: unknown })?.code === "number"
+        if (
+          generation === this.nativeProcessGeneration &&
+          isExternalAgentMethodNotFoundError(error)
+        )
+          this.nativeSettingsSupport.set(method, false)
+        uncertain = !rejected
+        if (message.includes("direct app-server input is not allowed"))
+          child.canAcceptDirectInput = false
+        return {
+          operationId: request.operationId,
+          status: rejected ? "rejected" : "outcome-unknown",
+          reason: message,
+        }
+      } finally {
+        if (generation === this.nativeProcessGeneration) {
+          if (uncertain) this.nativeUncertainChildren.add(request.nativeChildThreadId)
+          else this.nativeChangingChildren.delete(request.nativeChildThreadId)
+        }
+      }
+    })().then((outcome) => {
+      this.log.info("codex.child_model_change_result", { ...diagnostic, outcome: outcome.status })
+      return outcome
+    })
+    this.nativeChanges.set(key, { payload, result })
+    return result
+  }
+
   getSessionModels(sessionId: string): AcpSessionModelState | undefined {
     const session = this._sessions.get(sessionId)
     if (!session || this.modelCache.length === 0) return undefined
@@ -4782,6 +5275,11 @@ function mapModelInfo(raw: Record<string, unknown>): CodexModelInfo {
   }
   return {
     id: readString(raw.id) ?? readString(raw.model) ?? "",
+    ...(raw.multiAgentVersion === "v1" ||
+    raw.multiAgentVersion === "v2" ||
+    raw.multiAgentVersion === "disabled"
+      ? { multiAgentVersion: raw.multiAgentVersion }
+      : {}),
     model: readString(raw.model),
     displayName: readString(raw.displayName) ?? readString(raw.name),
     description: readString(raw.description),

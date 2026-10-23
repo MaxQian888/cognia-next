@@ -13,24 +13,27 @@ import type {
 } from "./chat-middleware"
 
 describe("plugin-sdk api/chat-middleware", () => {
-  it("exposes the authoring helper, manifest bridge, runtime API, and registry", () => {
+  it("exposes the authoring helper and the chat-middleware registry", () => {
     expect(typeof sdk.defineChatMiddleware).toBe("function")
-    expect(typeof sdk.registerChatMiddlewaresForPlugin).toBe("function")
-    expect(typeof sdk.unregisterChatMiddlewaresForPlugin).toBe("function")
-    expect(typeof sdk.createChatAPI).toBe("function")
-    expect(typeof sdk.clearChatMiddlewaresForPluginContext).toBe("function")
     expect(typeof sdk.registerChatMiddleware).toBe("function")
     expect(typeof sdk.unregisterChatMiddleware).toBe("function")
     expect(typeof sdk.clearChatMiddlewaresForPlugin).toBe("function")
     expect(typeof sdk.listActiveChatMiddlewares).toBe("function")
     expect(typeof sdk.listAllChatMiddlewares).toBe("function")
     expect(typeof sdk.getChatMiddleware).toBe("function")
-    expect(typeof sdk.recordMiddlewareFailure).toBe("function")
-    expect(typeof sdk.recordMiddlewareSuccess).toBe("function")
-    expect(typeof sdk.resetChatMiddlewareBreaker).toBe("function")
     expect(typeof sdk.subscribeChatMiddlewareRegistry).toBe("function")
     expect(sdk.DEFAULT_MIDDLEWARE_TIMEOUT_MS).toBeGreaterThan(0)
     expect(sdk.MAX_MIDDLEWARE_TIMEOUT_MS).toBeGreaterThan(sdk.DEFAULT_MIDDLEWARE_TIMEOUT_MS)
+  })
+
+  it("keeps host wiring off the author surface (plugins reach it through ctx.chat)", () => {
+    expect(sdk).not.toHaveProperty("registerChatMiddlewaresForPlugin")
+    expect(sdk).not.toHaveProperty("unregisterChatMiddlewaresForPlugin")
+    expect(sdk).not.toHaveProperty("createChatAPI")
+    expect(sdk).not.toHaveProperty("clearChatMiddlewaresForPluginContext")
+    expect(sdk).not.toHaveProperty("recordMiddlewareFailure")
+    expect(sdk).not.toHaveProperty("recordMiddlewareSuccess")
+    expect(sdk).not.toHaveProperty("resetChatMiddlewareBreaker")
   })
 
   it("defineChatMiddleware is a typesafe identity function", () => {

@@ -13,10 +13,15 @@
  * the Templates tab.
  */
 
-import type { VisualWorkflow } from "@/types/workflow/visual"
 import type { WorkflowCopilotTemplate, CopilotSlotValues } from "./types"
 import { cronReportCopilotTemplate } from "./cron-report"
 import { webhookAiConnectorCopilotTemplate } from "./webhook-ai-connector"
+import type { MaterializeResult } from "@cognia/plugin-contract/lib/workflow/copilot-templates/index"
+export type {
+  MaterializeFailure,
+  MaterializeResult,
+  MaterializeSuccess,
+} from "@cognia/plugin-contract/lib/workflow/copilot-templates/index"
 
 export type {
   WorkflowCopilotTemplate,
@@ -43,21 +48,6 @@ export function listCopilotTemplates(): readonly WorkflowCopilotTemplate[] {
 export function getCopilotTemplate(id: string): WorkflowCopilotTemplate | undefined {
   return TEMPLATE_BY_ID.get(id)
 }
-
-export interface MaterializeFailure {
-  ok: false
-  code: "unknown-template" | "missing-required-slot"
-  message: string
-  missing?: string[]
-}
-
-export interface MaterializeSuccess {
-  ok: true
-  template: WorkflowCopilotTemplate
-  workflow: VisualWorkflow
-}
-
-export type MaterializeResult = MaterializeSuccess | MaterializeFailure
 
 /**
  * Build the graph for a template id + slot bag, after enforcing the

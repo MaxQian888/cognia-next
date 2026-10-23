@@ -7,7 +7,7 @@
 // namespace; `id` is the value matched against `PluginRow.capabilities`.
 
 import type { ComponentType } from "react"
-import { CANONICAL_PLUGIN_CAPABILITIES } from "@/packages/plugin-sdk/src/contracts/catalog"
+import { CANONICAL_PLUGIN_CAPABILITIES } from "@cognia/plugin-contract/contracts/catalog"
 import {
   WrenchIcon,
   PuzzleIcon,

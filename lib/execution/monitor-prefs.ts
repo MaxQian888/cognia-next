@@ -17,6 +17,8 @@ import {
   type UnifiedExecutionRow,
   type UnifiedExecutionStatus,
 } from "./monitor-model"
+import type { StoredExecutionMonitorPrefs } from "@cognia/plugin-contract/lib/execution/monitor-prefs"
+export type { StoredExecutionMonitorPrefs } from "@cognia/plugin-contract/lib/execution/monitor-prefs"
 
 export type ExecutionMonitorSort = "recent" | "kind" | "status"
 
@@ -46,14 +48,6 @@ export const DEFAULT_EXECUTION_MONITOR_PREFS: ExecutionMonitorPrefs = {
   groupByKind: false,
   showElapsed: true,
 }
-
-/** Shape stored on the settings singleton (every field optional / untrusted). */
-export type StoredExecutionMonitorPrefs = Partial<{
-  hiddenKinds: string[]
-  sort: string
-  groupByKind: boolean
-  showElapsed: boolean
-}>
 
 const FILTER_KIND_SET = new Set<string>(EXECUTION_FILTER_KINDS)
 const SORT_SET = new Set<string>(EXECUTION_MONITOR_SORTS)

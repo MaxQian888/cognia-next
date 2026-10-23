@@ -16,3 +16,7 @@ pub mod commands;
 pub mod db;
 pub mod paths;
 pub mod watcher;
+
+mod provider_config;
+mod skill_files;
+pub mod types;

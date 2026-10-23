@@ -90,6 +90,8 @@ export function warmFingerprint(sendOptions: SendOptions | undefined, options: O
  */
 export function unpoolableReason(sendOptions: SendOptions | undefined, options: Options = {}) {
   const nested = sendOptions?.claudeAgentSdk
+  if (nested?.sandbox?.allowNestedUserNamespaces === true || nested?.unattendedRetry !== undefined)
+    return "per-invocation namespace consent or retry deadline is required"
   if (!sendOptions?.execution) {
     // ADR-0090 constraint 6: the legacy queue keeps today's behaviour, and
     // today it spawns per send.

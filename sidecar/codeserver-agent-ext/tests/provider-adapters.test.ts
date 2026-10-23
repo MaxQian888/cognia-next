@@ -6,7 +6,7 @@ import { PROVIDER_ADAPTER_KINDS, registerManagedProviders } from "../src/provide
 
 const catalog = JSON.parse(
   (await readFile(
-    new URL("../../../packages/plugin-sdk/contract/code-1.128-ide.json", import.meta.url)
+    new URL("../../../packages/plugin-contract/contract/code-1.128-ide.json", import.meta.url)
   )) as unknown as string
 )
 

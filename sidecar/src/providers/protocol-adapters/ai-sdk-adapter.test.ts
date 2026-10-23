@@ -33,6 +33,22 @@ interface StreamArgs {
 /** A numeric leaf of a provider-options block, 0 when absent. */
 const numberAt = (obj: unknown, path: string) => Number(getPath(obj, path) ?? 0)
 
+test("context calibration opts into per-step request messages without enabling raw HTTP body capture", async () => {
+  let captured: Record<string, unknown> = {}
+  await makeAiSdkAdapter("openai").start({
+    model: "test-model",
+    messages: [],
+    credentials: { apiKey: "test-key" },
+    captureRequestMessages: true,
+    modelParams: { include: { responseBody: false } },
+    streamTextFn: (args) => {
+      captured = args
+      return { stream: (async function* () {})() }
+    },
+  })
+  assert.deepEqual(captured.include, { responseBody: false, requestMessages: true })
+})
+
 test("CommandCode selects the model protocol for chat and auxiliary requests", async () => {
   for (const [model, expected] of [
     ["claude-sonnet-5", "anthropic.messages"],

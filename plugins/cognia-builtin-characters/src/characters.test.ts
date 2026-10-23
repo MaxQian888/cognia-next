@@ -1,31 +1,24 @@
 /**
- * The built-in pack's authored definitions: seven personas that mirror the
- * legacy-id map the Dexie upgrade and `seedBuiltInCharacters` consume.
+ * The built-in pack's authored definitions: seven personas whose localIds are
+ * stable ids the host maps its legacy `char_builtin_*` rows onto.
  */
 
 import { parseLocalPackFile, serializeLocalPackFile } from "@cognia/plugin-sdk"
-import { BUILTIN_LEGACY_ID_TO_LOCAL_ID, BUILTIN_PACK } from "./characters"
+import { BUILTIN_PACK } from "./characters"
 
 describe("built-in character definitions", () => {
-  it("ships exactly seven characters that mirror the stable-id map", () => {
-    expect(BUILTIN_PACK.characters).toHaveLength(7)
-    const localIds = BUILTIN_PACK.characters.map((c) => c.localId).sort()
-    const mapLocalIds = Object.values(BUILTIN_LEGACY_ID_TO_LOCAL_ID).sort()
-    expect(localIds).toEqual(mapLocalIds)
-  })
-
-  it("stable-id map keys cover every canonical built-in row id", () => {
-    expect(Object.keys(BUILTIN_LEGACY_ID_TO_LOCAL_ID).sort()).toEqual(
-      [
-        "char_builtin_brainstorm",
-        "char_builtin_coding",
-        "char_builtin_goal_tracker",
-        "char_builtin_research",
-        "char_builtin_support",
-        "char_builtin_translator",
-        "char_builtin_writer",
-      ].sort()
-    )
+  it("ships exactly the seven stable localIds", () => {
+    // The host pins the same list against its legacy-id map; a rename here
+    // orphans user customisations of that persona.
+    expect(BUILTIN_PACK.characters.map((c) => c.localId).sort()).toEqual([
+      "brainstorm",
+      "coding",
+      "goal-tracker",
+      "research",
+      "support",
+      "translator",
+      "writer",
+    ])
   })
 
   it("each character has the required PluginCharacterDef shape", () => {

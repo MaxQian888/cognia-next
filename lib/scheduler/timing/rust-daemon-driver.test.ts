@@ -151,4 +151,44 @@ describe("RustDaemonTimingDriver", () => {
 
     expect(mockedListen).toHaveBeenCalledTimes(2)
   })
+  it("reports a failed arm without retaining a phantom daemon entry", async () => {
+    mockedArm.mockRejectedValueOnce(new Error("ipc down"))
+    await expect(driver.arm("failed", 1700000000000)).rejects.toThrow("ipc down")
+    driver.stop()
+    expect(mockedDisarm).not.toHaveBeenCalledWith("failed")
+  })
+
+  it("can retry native subscription after a visible initialization failure", async () => {
+    mockedListen.mockRejectedValueOnce(new Error("no event api"))
+    await expect(driver.start()).rejects.toThrow("no event api")
+    await driver.start()
+    expect(mockedListen).toHaveBeenCalledTimes(2)
+    driver.stop()
+  })
+
+  it("retains a successful same-time replacement after the earlier arm fails", async () => {
+    let rejectFirst!: (error: Error) => void
+    let started!: () => void
+    const pending = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    mockedArm.mockImplementationOnce(
+      () =>
+        new Promise<void>((_, reject) => {
+          rejectFirst = reject
+          started()
+        })
+    )
+    const first = driver.arm("same-slot", 1700000000000)
+    await pending
+    const second = driver.arm("same-slot", 1700000000000)
+    const rejected = expect(first).rejects.toThrow("first arm failed")
+    rejectFirst(new Error("first arm failed"))
+    await rejected
+    await second
+    driver.stop()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(mockedDisarm).toHaveBeenCalledWith("same-slot")
+  })
 })

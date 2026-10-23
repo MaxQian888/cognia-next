@@ -6,7 +6,9 @@ import path from "node:path"
 import process from "node:process"
 import { spawn } from "node:child_process"
 import { fileURLToPath } from "node:url"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
+import { createServer } from "node:net"
+import { setTimeout as delay } from "node:timers/promises"
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "../..")
@@ -15,6 +17,43 @@ const SESSION_FILE = path.join(CACHE_DIR, "session.json")
 const TOKEN_HEADER = "X-Cognia-Dev-Token"
 export const DEFAULT_LAUNCH_TIMEOUT_MS = 1_200_000
 export const AGENT_DEBUG_TAURI_CONFIG = "src-tauri/tauri.agent-debug.conf.json"
+
+/** The OS owns this mutex: a dead launcher cannot leave a stale file lock. */
+export async function withLifecycleLock(
+  callback,
+  { workspace = REPO_ROOT, timeout = DEFAULT_LAUNCH_TIMEOUT_MS, signal } = {}
+) {
+  const identity = fs.realpathSync(workspace)
+  const port = 40000 + (createHash("sha256").update(identity).digest().readUInt32BE(0) % 20000)
+  const deadline = performance.now() + launchTimeout(timeout)
+  while (true) {
+    signal?.throwIfAborted()
+    const server = createServer((socket) => socket.destroy())
+    try {
+      await new Promise((resolve, reject) => {
+        server.once("error", reject)
+        server.listen({ host: "127.0.0.1", port, exclusive: true }, resolve)
+      })
+    } catch (error) {
+      if (error.code !== "EADDRINUSE") throw error
+      const remaining = deadline - performance.now()
+      if (remaining <= 0)
+        throw Object.assign(new Error("another workspace lifecycle operation holds the mutex"), {
+          code: "debug_lifecycle_busy",
+        })
+      await delay(Math.min(100, remaining), undefined, { signal })
+      continue
+    }
+    try {
+      signal?.throwIfAborted()
+      return await callback(Math.max(1, deadline - performance.now()))
+    } finally {
+      await new Promise((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      )
+    }
+  }
+}
 
 export function tauriDevArgs(options = {}) {
   return [
@@ -37,6 +76,7 @@ export function agentDebugEnvironment(baseEnv = process.env, repoRoot = REPO_ROO
       ? {
           COGNIA_AGENT_DEBUG_SESSION_ID: session.sessionId,
           COGNIA_AGENT_DEBUG_ENDPOINT_FILE: session.endpointFile,
+          COGNIA_AGENT_DEBUG_SHARED: session.shared ? "1" : "0",
         }
       : {}),
     COGNIA_PLUGIN_NODE_PATH: path.join(
@@ -138,7 +178,7 @@ export function parseArgs(argv) {
       continue
     }
     const name = token.slice(2)
-    if (["include-text", "foreground", "no-watch"].includes(name)) {
+    if (["include-text", "foreground", "no-watch", "shared", "can-write"].includes(name)) {
       options[name] = true
       continue
     }
@@ -237,11 +277,16 @@ function saveSession(session, expected) {
     )
       throw new Error("the tracked debug session changed while updating its app instance")
   }
-  fs.mkdirSync(CACHE_DIR, { recursive: true })
-  const staged = `${SESSION_FILE}.${randomUUID()}.tmp`
+  writePrivateJson(SESSION_FILE, session)
+}
+
+export function writePrivateJson(file, value, { exclusive = false } = {}) {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  const staged = `${file}.${randomUUID()}.tmp`
   try {
-    fs.writeFileSync(staged, `${JSON.stringify(session, null, 2)}\n`, { mode: 0o600 })
-    fs.renameSync(staged, SESSION_FILE)
+    fs.writeFileSync(staged, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
+    if (exclusive) fs.linkSync(staged, file)
+    else fs.renameSync(staged, file)
   } finally {
     fs.rmSync(staged, { force: true })
   }
@@ -267,6 +312,7 @@ export async function request(
     endpoint = loadEndpoint(),
     fetchImpl = fetch,
     signal,
+    headers = {},
     timeout = 15_000,
   } = {}
 ) {
@@ -278,6 +324,7 @@ export async function request(
     method,
     redirect: "error",
     headers: {
+      ...headers,
       [TOKEN_HEADER]: endpoint.devToken,
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
@@ -352,6 +399,27 @@ function processAlive(pid) {
   }
 }
 
+function processTreeAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 1) return false
+  if (processAlive(pid)) return true
+  if (process.platform === "win32") return false
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch (error) {
+    return error.code !== "ESRCH"
+  }
+}
+export function assertResolvedStartup(session) {
+  if (session?.startupIntent && !session.pid)
+    throw Object.assign(
+      new Error(
+        `an interrupted startup has an unresolved child identity; inspect ${session.logFile} and ${SESSION_FILE} before changing lifecycle state`
+      ),
+      { code: "debug_startup_unresolved" }
+    )
+}
+
 function terminateProcessTree(pid, signal = "SIGTERM") {
   if (!Number.isSafeInteger(pid) || pid <= 1) return
   if (process.platform === "win32") {
@@ -362,6 +430,7 @@ function terminateProcessTree(pid, signal = "SIGTERM") {
     process.kill(-pid, signal)
   } catch (error) {
     if (error.code !== "ESRCH") throw error
+    if (processAlive(pid)) process.kill(pid, signal)
   }
 }
 
@@ -405,7 +474,12 @@ async function waitForAgent(startedAt, timeoutMs, childPid, logFile, session, re
 
 async function launch(options) {
   const existing = readJson(SESSION_FILE)
-  if (existing?.pid && processAlive(existing.pid)) {
+  assertResolvedStartup(existing)
+  if (existing && (processTreeAlive(existing.pid) || processAlive(existing.healthPid))) {
+    if (Boolean(options.shared) !== Boolean(existing.shared))
+      throw new Error(
+        "the existing run has a different shared-mode policy; stop that owned run before relaunching"
+      )
     if (options["no-watch"] && !existing.noWatch)
       throw new Error(
         "the existing debug run watches Rust changes; stop and relaunch to select --no-watch"
@@ -413,7 +487,7 @@ async function launch(options) {
     const ready = await waitForAgent(
       Date.parse(existing.startedAt),
       launchTimeout(options.timeout),
-      existing.pid,
+      processAlive(existing.pid) ? existing.pid : undefined,
       existing.logFile,
       existing,
       true
@@ -440,13 +514,19 @@ async function launch(options) {
     workspace: fs.realpathSync(REPO_ROOT),
     endpointFile: path.join(artifactDir, "cli-endpoint.json"),
     noWatch: options["no-watch"] === true,
+    shared: options.shared === true,
     startedAt: new Date(startedAt).toISOString(),
     artifactDir,
     logFile,
   }
+  // Persist intent before spawn: a launcher killed in the registration gap must
+  // never make a successor believe it is safe to create a second app.
+  session.startupIntent = true
+  session.launcherPid = process.pid
+  saveSession(session)
   const child = spawn("pnpm", tauriDevArgs(options), {
     cwd: REPO_ROOT,
-    detached: options.foreground !== true,
+    detached: true,
     env: agentDebugEnvironment(process.env, session.workspace, session),
     stdio: ["ignore", stdout, stderr],
     windowsHide: false,
@@ -455,6 +535,7 @@ async function launch(options) {
   fs.closeSync(stderr)
   if (!child.pid) throw new Error("failed to start pnpm tauri dev")
   session.pid = child.pid
+  session.startupIntent = false
   saveSession(session)
   if (options.foreground !== true) child.unref()
 
@@ -495,7 +576,16 @@ async function launch(options) {
   } catch (error) {
     child.off("exit", rejectOnExit)
     terminateProcessTree(child.pid)
-    removeSession(session)
+    for (let attempt = 0; attempt < 20 && processAlive(child.pid); attempt++) await delay(100)
+    if (processAlive(child.pid)) terminateProcessTree(child.pid, "SIGKILL")
+    for (let attempt = 0; attempt < 20 && processAlive(child.pid); attempt++) await delay(100)
+    // A failed startup may already have a native app. Keep its record unless
+    // both recorded processes are confirmed gone.
+    let nativePid = session.healthPid
+    try {
+      nativePid = loadEndpoint(session.endpointFile).debugSession?.pid || nativePid
+    } catch {}
+    if (!processTreeAlive(child.pid) && !processAlive(nativePid)) removeSession(session)
     throw new Error(`${error.message}; Tauri log: ${logFile}`)
   }
 }
@@ -546,22 +636,31 @@ export async function shutdownTrackedSession(
 
 async function stop() {
   const session = readJson(SESSION_FILE)
+  assertResolvedStartup(session)
   const endpoint =
     session && (processAlive(session.pid) || processAlive(session.healthPid))
       ? loadEndpoint(session.endpointFile || discoveryFile())
       : undefined
-  await shutdownTrackedSession(session, endpoint)
+  await shutdownTrackedSession(session, endpoint, { alive: processTreeAlive })
+  if (processTreeAlive(session?.pid))
+    throw Object.assign(
+      new Error("tracked startup process group still exists; preserving its session record"),
+      { code: "debug_shutdown_unconfirmed" }
+    )
   removeSession(session)
   output({ ok: true, stoppedPid: session?.pid || null })
 }
 
-async function run(parsed) {
+export async function run(parsed) {
+  if (parsed.options.client) return runScoped(parsed)
   const window = parsed.options.window || "main"
   switch (parsed.command) {
     case "launch":
-      return launch(parsed.options)
+      return withLifecycleLock((timeout) => launch({ ...parsed.options, timeout }), {
+        timeout: launchTimeout(parsed.options.timeout),
+      })
     case "stop":
-      return stop()
+      return withLifecycleLock(() => stop(), { timeout: launchTimeout(parsed.options.timeout) })
     case "status": {
       let session = readJson(SESSION_FILE)
       const paths = {
@@ -569,7 +668,7 @@ async function run(parsed) {
         session: SESSION_FILE,
         log: session?.logFile,
       }
-      if (session?.pid && !processAlive(session.pid))
+      if (session?.pid && !processAlive(session.pid) && !processAlive(session.healthPid))
         return output({ ok: false, status: "tracked_process_exited", session, paths })
       let endpoint
       try {
@@ -600,7 +699,6 @@ async function run(parsed) {
               endpoint,
               fs.realpathSync(REPO_ROOT)
             )
-            saveSession(updated, session)
             session = updated
           } catch (error) {
             return output({
@@ -645,6 +743,53 @@ async function run(parsed) {
         return output({ ok: false, status, error: message, session, paths })
       }
     }
+    case "attach": {
+      if (!parsed.options.output)
+        throw new Error("attach requires --output <private descriptor path>")
+      const { connectTauriSession } = await import("./agent-debug-client.mjs")
+      const session = await connectTauriSession({
+        windows: (parsed.options.windows || window).split(","),
+        canWrite: parsed.options["can-write"] === true,
+        idleTimeoutMs:
+          parsed.options["idle-timeout"] === undefined
+            ? undefined
+            : Number(parsed.options["idle-timeout"]),
+      })
+      const file = path.resolve(parsed.options.output)
+      if (fs.existsSync(file)) {
+        await session.detach()
+        throw new Error("descriptor already exists; choose a new --output path")
+      }
+      try {
+        writePrivateJson(file, session.toJSON(), { exclusive: true })
+      } catch (error) {
+        await session.detach().catch(() => {})
+        throw error
+      }
+      return output({
+        ok: true,
+        clientSessionId: session.clientSessionId,
+        windows: session.windows,
+        canWrite: session.canWrite,
+        path: file,
+      })
+    }
+    case "sessions":
+      return output(await request("/api/dev/agent/sessions"))
+    case "revoke": {
+      const [id] = parsed.positional
+      if (!id) throw new Error("revoke requires a clientSessionId")
+      return output(
+        await request(`/api/dev/agent/sessions/${encodeURIComponent(id)}`, { method: "DELETE" })
+      )
+    }
+    case "recover":
+      return output(
+        await request("/api/dev/agent/recover", { method: "POST", body: {}, timeout: 35_000 })
+      )
+    case "lease":
+    case "detach":
+      throw new Error("this command requires --client <descriptor>")
     case "capabilities": {
       const health = await request("/api/dev/agent/health")
       return output({ ok: true, capabilities: health.helper?.capabilities || {} })
@@ -763,6 +908,151 @@ async function run(parsed) {
     default:
       throw new Error(`unknown command: ${parsed.command}`)
   }
+}
+
+async function runScoped(parsed) {
+  const allowed = new Set([
+    "status",
+    "capabilities",
+    "windows",
+    "snapshot",
+    "page.snapshot",
+    "act",
+    "inspect",
+    "page.url",
+    "page.title",
+    "page.content",
+    "goto",
+    "page.goto",
+    "reload",
+    "page.reload",
+    "console",
+    "page.console",
+    "network",
+    "page.network",
+    "screenshot",
+    "page.screenshot",
+    "lease",
+    "detach",
+  ])
+  if (!allowed.has(parsed.command))
+    throw Object.assign(new Error("command is unavailable with a scoped client descriptor"), {
+      code: "owner_command_denied",
+    })
+  const file = fs.realpathSync(path.resolve(parsed.options.client))
+  return withLifecycleLock(
+    async () => {
+      const { TauriClientSession } = await import("./agent-debug-client.mjs")
+      const session = new TauriClientSession(readJson(file) || {})
+      const page = session.page(parsed.options.window || session.windows[0])
+      const options = { timeout: Number(parsed.options.timeout || 10_000) }
+      let result
+      try {
+        switch (parsed.command) {
+          case "status": {
+            const status = await session.status()
+            result = {
+              ok: status.ok,
+              control: status.control,
+              writerActive: Boolean(status.lease),
+              fence: status.lease?.fence,
+            }
+            break
+          }
+          case "windows":
+            result = { ok: true, windows: session.windows }
+            await session.verifyIdentity(options)
+            break
+          case "capabilities":
+            result = await page.capabilities()
+            break
+          case "snapshot":
+          case "page.snapshot":
+            result = await page.snapshot({
+              includeText: parsed.options["include-text"] === true,
+              ...options,
+            })
+            break
+          case "act": {
+            const [ref, action, positionalValue] = parsed.positional
+            const value = parsed.options.value ?? positionalValue
+            if (!ref || !action) throw new Error("act requires a ref and action")
+            result = await page.act(
+              ref,
+              action,
+              parsed.options.args
+                ? JSON.parse(parsed.options.args)
+                : {
+                    ...(value === undefined ? {} : { value }),
+                    ...(parsed.options.key ? { key: parsed.options.key } : {}),
+                  },
+              options
+            )
+            break
+          }
+          case "inspect":
+            result = await page.inspect(
+              parsed.positional[0],
+              parsed.positional[1],
+              parsed.options.args ? JSON.parse(parsed.options.args) : {},
+              options
+            )
+            break
+          case "page.url":
+            result = await page.url()
+            break
+          case "page.title":
+            result = await page.title()
+            break
+          case "page.content":
+            result = await page.content()
+            break
+          case "goto":
+          case "page.goto":
+            result = await page.goto(parsed.positional[0], options)
+            break
+          case "reload":
+          case "page.reload":
+            result = await page.reload(options)
+            break
+          case "console":
+          case "page.console":
+            result = await page.consoleMessages()
+            break
+          case "network":
+          case "page.network":
+            result = await page.networkEvents()
+            break
+          case "screenshot":
+          case "page.screenshot": {
+            const target = path.resolve(
+              parsed.positional[0] || path.join(CACHE_DIR, `screenshot-${Date.now()}.png`)
+            )
+            await page.screenshot({ path: target, ...options })
+            result = { ok: true, path: target }
+            break
+          }
+          case "lease": {
+            const [operation] = parsed.positional
+            if (!["acquire", "renew", "release"].includes(operation))
+              throw new Error("lease requires acquire, renew or release")
+            await session[`${operation}Writer`](options)
+            result = { ok: true, writerActive: Boolean(session.lease), fence: session.lease?.fence }
+            break
+          }
+          case "detach":
+            await session.detach()
+            result = { ok: true }
+            break
+        }
+      } finally {
+        if (session.closed) fs.rmSync(file, { force: true })
+        else writePrivateJson(file, session.toJSON())
+      }
+      output(result)
+    },
+    { workspace: file, timeout: launchTimeout(parsed.options.timeout) }
+  )
 }
 
 if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] || "")) {

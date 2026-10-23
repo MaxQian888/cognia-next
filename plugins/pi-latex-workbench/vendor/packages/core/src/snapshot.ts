@@ -29,7 +29,8 @@ import {
   type SnapshotManifest,
 } from "@latexwb/contracts";
 import { inTransaction, type BlobStore, type Row, type Scope, type WorkbenchStore } from "@latexwb/storage";
-import { classifyRole, type ImportAcceptance } from "./import.ts";
+import { classifyRole } from "@latexwb/latex-kit";
+import type { ImportAcceptance } from "./import.ts";
 import { isValidProjectPath, toProjectPath } from "./paths.ts";
 
 export interface SnapshotHooks {

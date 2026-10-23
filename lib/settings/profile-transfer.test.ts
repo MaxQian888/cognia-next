@@ -3,6 +3,7 @@ import {
   serializeSettingsProfile,
   importSettingsProfile,
   buildResetPatch,
+  deepStripSecrets,
   SETTINGS_PROFILE_SCHEMA,
   SETTINGS_PROFILE_VERSION,
 } from "./profile-transfer"
@@ -12,6 +13,22 @@ import { freshInstallWebReader } from "@/lib/web/reader/reader-settings"
 import { resetKeysForSection } from "./section-keys"
 
 const NOW = "2026-06-15T00:00:00.000Z"
+
+it("strips HTTP credentials in object and JSON headers while preserving required empty reference arrays", () => {
+  expect(
+    deepStripSecrets({
+      headers: { Authorization: "Bearer token", Cookie: "session=secret", Accept: "text/plain" },
+      headersJson: JSON.stringify({ Authorization: "Bearer token", Accept: "text/plain" }),
+      secretRefs: [],
+      credentials: [],
+    })
+  ).toEqual({
+    headers: { Accept: "text/plain" },
+    headersJson: JSON.stringify({ Accept: "text/plain" }),
+    secretRefs: [],
+    credentials: [],
+  })
+})
 
 function sampleSettings(): AppSettings {
   return {

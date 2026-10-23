@@ -1,2 +1,5 @@
-/** Compatibility entry point. Shared A2UI contracts live in types/a2ui/schema.ts. */
-export * from "@/types/a2ui/schema"
+/**
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract types.
+ * This re-export keeps host imports of `@/types/artifact/a2ui` working.
+ */
+export * from "@cognia/plugin-contract/types/artifact/a2ui"

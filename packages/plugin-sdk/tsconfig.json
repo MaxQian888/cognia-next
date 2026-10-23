@@ -91,6 +91,8 @@
       "@cognia/tts/*": ["../../packages/tts/src/*"],
       "@cognia/security-findings": ["../security-findings/src/index.ts"],
       "@cognia/security-findings/*": ["../../packages/security-findings/src/*"],
+      "@cognia/plugin-contract": ["../plugin-contract/src/index.ts"],
+      "@cognia/plugin-contract/*": ["../../packages/plugin-contract/src/*"],
       "@cognia/ocr": ["../ocr/src/index.ts"],
       "@cognia/ocr/*": ["../../packages/ocr/src/*"],
       // Reached INDIRECTLY: this package compiles `lib/plugin/api/memory-api.ts`,

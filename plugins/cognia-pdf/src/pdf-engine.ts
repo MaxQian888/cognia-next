@@ -94,7 +94,7 @@ export function disposePdfWorker(): void {
 
 /**
  * The worker asset is emitted under a content hash by
- * `scripts/build/build-browser-builtin-plugins.mjs`, so its URL is only knowable at build
+ * `scripts/plugin/artifacts/builtin-chunks.mjs`, so its URL is only knowable at build
  * time and is injected through the `__COGNIA_PDF_WORKER_URL__` define. There is no
  * derivable fallback: a bundle without the define has no worker to point at.
  */

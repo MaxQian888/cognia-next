@@ -44,6 +44,7 @@ export const SUPPORTED_EXTERNAL_AGENT_PROTOCOLS = [
   "pi-rpc",
   "aider-cli",
   "opencode-v2",
+  "opencode",
   "a2a",
 ] as const
 
@@ -489,9 +490,6 @@ export function isPluginContributedProtocol(protocol: ExternalAgentProtocol): bo
 export function getUnsupportedProtocolReason(protocol: ExternalAgentProtocol): string {
   if (isSupportedExternalAgentProtocol(protocol)) {
     return ""
-  }
-  if (protocol === "opencode") {
-    return "The legacy OpenCode protocol is no longer supported. Create an OpenCode V2 service configuration."
   }
   // A namespaced `${pluginId}:${id}` protocol is contributed by a plugin
   // adapter. Reaching here means it is not currently registered — almost

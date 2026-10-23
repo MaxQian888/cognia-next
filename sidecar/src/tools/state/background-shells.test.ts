@@ -98,7 +98,7 @@ test("waitForOutput long-polls until new output arrives", async () => {
   const result = expectOk(await reg.waitForOutput(entry.id, { waitMs: 2000 }))
   assert.match(result.data, /later/)
   assert.ok(Date.now() - started >= 50)
-  reg.killAll()
+  await reg.killAll()
 })
 
 test("waitForOutput returns after its deadline when a process stays quiet", async () => {
@@ -110,7 +110,7 @@ test("waitForOutput returns after its deadline when a process stays quiet", asyn
   assert.equal(result.data, "")
   assert.equal(result.status, "running")
   assert.ok(Date.now() - started >= 50)
-  reg.killAll()
+  await reg.killAll()
 })
 
 test("read maxChars preserves unread output for the next call", async () => {
@@ -125,7 +125,7 @@ test("read maxChars preserves unread output for the next call", async () => {
   assert.match(second.data, /^567890/)
 })
 
-test("list exposes command lifecycle details for inventory tools", () => {
+test("list exposes command lifecycle details for inventory tools", async () => {
   const reg = createBgShellRegistry()
   const entry = reg.spawnBackground(inv(isWin ? "ping -n 3 127.0.0.1 >nul" : "sleep 2"))
   const [listed] = reg.list()
@@ -135,7 +135,7 @@ test("list exposes command lifecycle details for inventory tools", () => {
   assert.equal(listed.status, "running")
   assert.equal(typeof listed.startedAt, "number")
   assert.equal(typeof listed.cwd, "string")
-  reg.killAll()
+  await reg.killAll()
 })
 
 test("kill terminates a long-running shell; idempotent", async () => {
@@ -163,9 +163,30 @@ test("killAll stops survivors and clears the registry", async () => {
   reg.spawnBackground(inv(longCmd))
   reg.spawnBackground(inv(longCmd))
   assert.equal(reg.list().length, 2)
-  reg.killAll()
+  await reg.killAll()
   assert.equal(reg.list().length, 0)
 })
+
+test(
+  "killAll waits for cooperative cleanup and reaps a SIGTERM-resistant writer",
+  { skip: process.platform === "win32" },
+  async () => {
+    for (const cooperative of [true, false]) {
+      const reg = createBgShellRegistry()
+      const script = `process.on('SIGTERM',()=>{${cooperative ? "setTimeout(()=>process.exit(0),120)" : ""}});console.log('READY');setInterval(()=>{},100);`
+      const command = `exec ${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`
+      const entry = reg.spawnBackground(inv(command))
+      await reg.waitForOutput(entry.id, { waitMs: 2_000 })
+      assert.match(entry.buffer, /READY/)
+      const started = Date.now()
+      await reg.killAll()
+      assert.equal(entry.status, "exited", "cleanup must await actual process closure")
+      assert.throws(() => process.kill(entry.pid!, 0), { code: "ESRCH" })
+      assert.ok(Date.now() - started >= (cooperative ? 100 : 900))
+      await reg.killAll()
+    }
+  }
+)
 
 test("ring buffer is bounded — a single read never exceeds the cap", async () => {
   const reg = createBgShellRegistry()

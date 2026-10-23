@@ -63,12 +63,15 @@ pub enum WorkspaceAccessError {
     Upstream { status: u16 },
     #[error("the collaboration plane's answer is not readable: {0}")]
     Malformed(String),
+    #[error("the authenticated identity is not linked to this organization")]
+    IdentityUnlinked,
 }
 
 impl WorkspaceAccessError {
     /// The stable code the RPC refuses with and the UI localizes.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::IdentityUnlinked => "oidc_identity_unlinked",
             Self::NotConfigured => "approval_authority_unconfigured",
             Self::InvalidTarget(_) => "approval_authority_invalid_target",
             Self::Unauthorized => "approval_authority_unauthorized",
@@ -77,6 +80,102 @@ impl WorkspaceAccessError {
             }
         }
     }
+}
+
+/// Resolve only ids asserted by the configured collaboration service. The
+/// access token is forwarded transiently and never stored or logged.
+pub async fn resolve_oidc_device_person(
+    token: &str,
+    organization: &str,
+    subject: &str,
+) -> Result<crate::security_store::VerifiedDevicePerson, WorkspaceAccessError> {
+    let config = CollabServiceConfig::from_env().ok_or(WorkspaceAccessError::NotConfigured)?;
+    resolve_oidc_device_person_with(&config, token, organization, subject).await
+}
+
+async fn resolve_oidc_device_person_with(
+    config: &CollabServiceConfig,
+    token: &str,
+    organization: &str,
+    subject: &str,
+) -> Result<crate::security_store::VerifiedDevicePerson, WorkspaceAccessError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Identity {
+        user_id: String,
+        org_id: String,
+        subject: String,
+        organization_id: String,
+    }
+    let identity: Identity = identity_request(config, token).await?;
+    if identity.subject != subject
+        || identity.organization_id != organization
+        || organization.is_empty()
+    {
+        return Err(WorkspaceAccessError::IdentityUnlinked);
+    }
+    Ok(crate::security_store::VerifiedDevicePerson {
+        user_id: UserId::parse(identity.user_id)
+            .map_err(|error| WorkspaceAccessError::Malformed(error.to_string()))?,
+        org_id: OrgId::parse(identity.org_id)
+            .map_err(|error| WorkspaceAccessError::Malformed(error.to_string()))?,
+    })
+}
+
+fn collab_client(endpoint: &str) -> Result<reqwest::Client, WorkspaceAccessError> {
+    cognia_net::proxy_config::managed_client(
+        reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none()),
+        endpoint,
+    )
+    .map_err(|error| WorkspaceAccessError::Unreachable(error.to_string()))
+}
+
+async fn identity_request<T: serde::de::DeserializeOwned>(
+    config: &CollabServiceConfig,
+    token: &str,
+) -> Result<T, WorkspaceAccessError> {
+    let endpoint = format!("{}/internal/v1/device-person", config.base_url);
+    let response = collab_client(&endpoint)?
+        .post(&endpoint)
+        .bearer_auth(&config.credential)
+        .json(&serde_json::json!({"accessToken": token}))
+        .send()
+        .await
+        .map_err(|error| WorkspaceAccessError::Unreachable(error.to_string()))?;
+    let status = response.status().as_u16();
+    // Identity responses contain ids, never an unbounded collaboration dump.
+    let mut response = response;
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| WorkspaceAccessError::Unreachable(error.to_string()))?
+    {
+        if body.len().saturating_add(chunk.len()) > 256 * 1024 {
+            return Err(WorkspaceAccessError::Malformed(
+                "identity response is too large".into(),
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    if matches!(status, 401 | 403) {
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+        return Err(
+            match error.get("code").and_then(serde_json::Value::as_str) {
+                Some("oidc_authentication_failed" | "oidc_identity_unlinked") => {
+                    WorkspaceAccessError::IdentityUnlinked
+                }
+                _ => WorkspaceAccessError::Unauthorized,
+            },
+        );
+    }
+    if !(200..300).contains(&status) {
+        return Err(WorkspaceAccessError::Upstream { status });
+    }
+    serde_json::from_slice(&body)
+        .map_err(|error| WorkspaceAccessError::Malformed(error.to_string()))
 }
 
 /// Where this Host's collaboration plane is, and what it presents to it.
@@ -141,17 +240,7 @@ pub async fn workspace_access_with(
     user_id: &str,
 ) -> Result<Option<EffectiveWorkspaceAccess>, WorkspaceAccessError> {
     let endpoint = access_endpoint(&config.base_url, org_id, workspace_id, user_id)?;
-    // Built per request: the proxy policy is per-URL and mutable, and a client
-    // cached in a struct keeps whatever was true when it was constructed.
-    let client = cognia_net::proxy_config::managed_client(
-        reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
-            // A collaboration plane that answers an authorization question with
-            // a redirect is not the plane the operator named.
-            .redirect(reqwest::redirect::Policy::none()),
-        &endpoint,
-    )
-    .map_err(|error| WorkspaceAccessError::Unreachable(error.to_string()))?;
+    let client = collab_client(&endpoint)?;
     let response = client
         .get(&endpoint)
         .header(
@@ -250,12 +339,9 @@ pub async fn standing_actions(
             format!("{}/internal/v1/orgs/{}/access/{}", config.base_url, org.as_str(), user.as_str())
         }
     };
-    let client = cognia_net::proxy_config::managed_client(
-        reqwest::Client::builder().timeout(REQUEST_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none()),
-        &endpoint,
-    ).map_err(|error| WorkspaceAccessError::Unreachable(error.to_string()))?;
-    let response = client.get(&endpoint)
+    let client = collab_client(&endpoint)?;
+    let response = client
+        .get(&endpoint)
         .bearer_auth(&config.credential)
         .header(reqwest::header::ACCEPT, "application/json")
         .send().await
@@ -427,6 +513,152 @@ mod tests {
 
     const ORG: &str = "org_acme";
     const USER: &str = "usr_alice";
+
+    #[tokio::test]
+    async fn resolved_identity_registers_a_device_without_a_local_profile() {
+        cognia_net::proxy_config::apply_current(cognia_net::proxy_config::ProxyConfig::default())
+            .unwrap();
+        use wiremock::{
+            matchers::{body_json, header, method, path},
+            Mock, MockServer, ResponseTemplate,
+        };
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/internal/v1/device-person"))
+            .and(header("authorization", "Bearer host-credential"))
+            .and(body_json(serde_json::json!({"accessToken":"person-token"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "userId": USER, "orgId": ORG, "subject":"oidc-person", "organizationId":"logto-org"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let config =
+            CollabServiceConfig::from_parts(Some(server.uri()), Some("host-credential".into()))
+                .unwrap();
+        let person =
+            resolve_oidc_device_person_with(&config, "person-token", "logto-org", "oidc-person")
+                .await
+                .unwrap();
+        let store = crate::security_store::SecurityStore::in_memory().unwrap();
+        let challenge = store.issue_challenge("logto-org", 100, 60).unwrap();
+        store
+            .register_oidc_device(
+                "logto-org",
+                "oidc-person",
+                &person,
+                &challenge.id,
+                &challenge.nonce,
+                "web",
+                "Web",
+                "pem",
+                "thumb",
+                "member",
+                101,
+            )
+            .unwrap();
+        assert_eq!(
+            store.active_oidc_device_person("logto-org", "web").unwrap(),
+            Some(person)
+        );
+        assert_eq!(
+            store.device_user("logto-org", "web").unwrap().as_deref(),
+            Some(USER)
+        );
+        assert!(!store
+            .has_capability("logto-org", "web", "host.admin")
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn identity_lookup_refuses_mismatch_malformed_status_and_redirect() {
+        cognia_net::proxy_config::apply_current(cognia_net::proxy_config::ProxyConfig::default())
+            .unwrap();
+        use wiremock::{matchers::path, Mock, MockServer, ResponseTemplate};
+        let good = serde_json::json!({"userId":USER,"orgId":ORG,"subject":"subject","organizationId":"lorg"});
+        let mut bodies = vec![
+            serde_json::json!({}),
+            good.clone(),
+            good.clone(),
+            good.clone(),
+        ];
+        bodies[1]["subject"] = "another".into();
+        bodies[2]["organizationId"] = "other-org".into();
+        bodies[3]["userId"] = "not-an-id".into();
+        for body in bodies {
+            let server = MockServer::start().await;
+            Mock::given(path("/internal/v1/device-person"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(body))
+                .mount(&server)
+                .await;
+            let config =
+                CollabServiceConfig::from_parts(Some(server.uri()), Some("host".into())).unwrap();
+            assert!(
+                resolve_oidc_device_person_with(&config, "token", "lorg", "subject")
+                    .await
+                    .is_err()
+            );
+        }
+        for status in [301, 401, 403, 404, 503] {
+            let server = MockServer::start().await;
+            Mock::given(path("/internal/v1/device-person"))
+                .respond_with(
+                    ResponseTemplate::new(status)
+                        .insert_header("location", format!("{}/redirected", server.uri())),
+                )
+                .mount(&server)
+                .await;
+            let config =
+                CollabServiceConfig::from_parts(Some(server.uri()), Some("host".into())).unwrap();
+            assert!(
+                resolve_oidc_device_person_with(&config, "token", "lorg", "subject")
+                    .await
+                    .is_err()
+            );
+            assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        }
+        let server = MockServer::start().await;
+        Mock::given(path("/internal/v1/device-person"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("x".repeat(256 * 1024 + 1)))
+            .mount(&server)
+            .await;
+        let config =
+            CollabServiceConfig::from_parts(Some(server.uri()), Some("host".into())).unwrap();
+        assert!(matches!(
+            resolve_oidc_device_person_with(&config, "token", "lorg", "subject").await,
+            Err(WorkspaceAccessError::Malformed(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn identity_lookup_distinguishes_host_credentials_from_person_denials() {
+        cognia_net::proxy_config::apply_current(cognia_net::proxy_config::ProxyConfig::default())
+            .unwrap();
+        use wiremock::{matchers::path, Mock, MockServer, ResponseTemplate};
+        for (status, code, unlinked) in [
+            (401, "host_service_credential_invalid", false),
+            (403, "host_service_credential_scope", false),
+            (401, "oidc_authentication_failed", true),
+            (403, "oidc_identity_unlinked", true),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(path("/internal/v1/device-person"))
+                .respond_with(
+                    ResponseTemplate::new(status).set_body_json(serde_json::json!({"code":code})),
+                )
+                .mount(&server)
+                .await;
+            let config =
+                CollabServiceConfig::from_parts(Some(server.uri()), Some("host".into())).unwrap();
+            let error = resolve_oidc_device_person_with(&config, "token", "lorg", "subject")
+                .await
+                .unwrap_err();
+            assert_eq!(
+                matches!(error, WorkspaceAccessError::IdentityUnlinked),
+                unlinked
+            );
+        }
+    }
 
     #[test]
     fn admission_actions_fail_closed_on_missing_or_malformed_standing() {

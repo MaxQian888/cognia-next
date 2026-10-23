@@ -28,6 +28,8 @@ const INGEST_TO_PROVIDER: Record<LarkIngestErrorCode, DocsProviderErrorCode> = {
   // The provider never uses the lark-cli channel; if one ever leaks through,
   // "the tool you rely on is missing" is a configuration problem, not a network one.
   larkCliUnavailable: "notConfigured",
+  // CLI-only ingestion fails closed; no partial body reaches provider consumers.
+  larkOutputTruncated: "network",
   larkNetwork: "network",
 }
 

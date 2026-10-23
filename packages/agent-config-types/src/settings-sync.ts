@@ -353,6 +353,7 @@ export const SETTINGS_SYNC = {
   petSettings: { category: "desktop-only" },
   installUuid: { category: "desktop-only" },
   sandboxDefaultEnabled: { category: "desktop-only" },
+  claudeCodeRuntime: { category: "desktop-only" },
   workspaceConfinementEnabled: { category: "desktop-only" },
   canvasCodeSandboxEnabled: { category: "desktop-only" },
   sandboxTier: { category: "desktop-only" },

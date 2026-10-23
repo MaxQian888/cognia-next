@@ -22,7 +22,10 @@
  *   })
  */
 
-import type { PluginViewDef, TreeDataProvider } from "@/types/plugin/plugin-view"
+import type {
+  PluginViewDef,
+  TreeDataProvider,
+} from "@cognia/plugin-contract/types/plugin/plugin-view"
 
 export function defineView(view: PluginViewDef): PluginViewDef {
   return view

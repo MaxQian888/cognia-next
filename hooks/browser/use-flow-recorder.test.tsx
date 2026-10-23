@@ -58,6 +58,19 @@ function emit(event: string, payload: unknown) {
 }
 
 describe("recording lifecycle", () => {
+  it("leaves recording state after a permanent stop failure", async () => {
+    const { result } = renderHook(() => useFlowRecorder({ now }))
+    await act(() => result.current.start(BASE))
+    drainRecord.mockRejectedValue(
+      Object.assign(new Error("invalid recording"), {
+        code: "browser_recording_invalid",
+      })
+    )
+    await act(async () => {
+      await expect(result.current.stop()).rejects.toThrow("invalid recording")
+    })
+    expect(result.current.recording).toBe(false)
+  })
   it("starts disarmed", () => {
     const { result } = renderHook(() => useFlowRecorder({ now }))
     expect(result.current.recording).toBe(false)

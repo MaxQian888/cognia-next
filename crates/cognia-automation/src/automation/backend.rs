@@ -19,6 +19,40 @@ pub struct ApplicationScreenshot {
     pub scale_factor: f64,
 }
 
+/// Capture candidates contain metadata only; selection never borrows focus
+/// from a different process or substitutes a different window for a hint.
+#[derive(Clone, Copy)]
+pub struct ApplicationWindow {
+    pub id: u32,
+    pub process_id: u32,
+    pub focused: bool,
+    pub minimized: bool,
+}
+
+pub fn select_application_window(
+    windows: &[ApplicationWindow],
+    process_id: u32,
+    hint: Option<u32>,
+) -> Result<u32> {
+    let eligible =
+        |window: &&ApplicationWindow| window.process_id == process_id && !window.minimized;
+    if let Some(id) = hint {
+        return windows
+            .iter()
+            .filter(eligible)
+            .find(|window| window.id == id)
+            .map(|window| window.id)
+            .ok_or(AutomationError::StaleElement);
+    }
+    windows
+        .iter()
+        .filter(eligible)
+        .find(|window| window.focused)
+        .or_else(|| windows.iter().filter(eligible).next())
+        .map(|window| window.id)
+        .ok_or(AutomationError::ElementNotFound)
+}
+
 pub trait AutomationBackend {
     fn capabilities(&self) -> Capabilities;
     fn get_focus(&self) -> Result<ElementInfo>;
@@ -37,17 +71,10 @@ pub trait AutomationBackend {
         app: &ResolvedApplication,
         opts: TreeOpts,
     ) -> Result<Vec<ElementInfo>> {
-        let focus = self.get_focus()?;
-        if focus.process_id != Some(app.process_id) {
-            return Err(AutomationError::BackendError {
-                message: format!(
-                    "application {} is not focused and this backend cannot read it in the background",
-                    app.display_name
-                ),
-            });
-        }
-        self.read_tree(None, opts)
+        let _ = (app, opts);
+        Err(AutomationError::UnsupportedPlatform)
     }
+
     fn find(&self, locator: &Locator) -> Result<Option<ElementRef>>;
     fn screenshot(&self, opts: ScreenshotOpts) -> Result<Screenshot>;
     fn screenshot_application(
@@ -56,66 +83,9 @@ pub trait AutomationBackend {
         window_hint: Option<&ElementInfo>,
         opts: ScreenshotOpts,
     ) -> Result<ApplicationScreenshot> {
-        let focus = self.get_focus()?;
-        if focus.process_id != Some(app.process_id) {
-            return Err(AutomationError::BackendError {
-                message: format!(
-                    "application {} is not foreground for screenshot capture",
-                    app.display_name
-                ),
-            });
-        }
-        let screenshot = self.screenshot(opts)?;
-
-        // `self.screenshot(..)` captures a whole monitor, not this
-        // application's window. Reporting the *window's* rect as
-        // `logical_bounds` while `pixel_width` / `pixel_height` describe the
-        // whole screen makes `session::pixel_to_global_point` rescale every
-        // model-supplied coordinate through the wrong rectangle: the model
-        // reads a point off a full-screen frame and the backend lands it
-        // somewhere inside the window's bounds instead. That is a silent,
-        // systematic click offset — no error, just the wrong place — so
-        // describe the surface actually captured and let the caller see that
-        // this platform has no per-window capture yet.
-        //
-        // macOS overrides this method with a real ScreenCaptureKit
-        // per-window stream; Windows and Linux land here.
-        let capabilities = self.capabilities();
-        let monitor = capabilities
-            .monitors
-            .iter()
-            .find(|candidate| candidate.is_primary)
-            .or_else(|| capabilities.monitors.first());
-        let scale_factor = monitor
-            .map(|candidate| f64::from(candidate.scale_factor))
-            .filter(|scale| *scale > 0.0)
-            .unwrap_or(1.0);
-        let to_logical = |value: f64| (value / scale_factor).round() as i32;
-        let logical_bounds = monitor.map_or(
-            Rect {
-                x: 0,
-                y: 0,
-                width: i32::try_from(screenshot.width).unwrap_or(i32::MAX),
-                height: i32::try_from(screenshot.height).unwrap_or(i32::MAX),
-            },
-            |candidate| Rect {
-                x: to_logical(f64::from(candidate.x)),
-                y: to_logical(f64::from(candidate.y)),
-                width: to_logical(f64::from(candidate.width)),
-                height: to_logical(f64::from(candidate.height)),
-            },
-        );
-        // The window rect is deliberately unused: keeping it would reintroduce
-        // the mismatch above. It stays in the signature because the macOS
-        // override uses it to pick which window to stream.
-        let _ = window_hint;
-        Ok(ApplicationScreenshot {
-            screenshot,
-            window_id: None,
-            display_id: monitor.map(|candidate| candidate.id.clone()),
-            logical_bounds,
-            scale_factor,
-        })
+        let _ = (app, window_hint, opts);
+        // An app-scoped capture must never widen to the whole monitor.
+        Err(AutomationError::UnsupportedPlatform)
     }
 
     /// Resolve and, when explicitly allowed, prepare the application whose
@@ -268,6 +238,7 @@ pub struct StubBackend {
 impl AutomationBackend for StubBackend {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
+            operations: OperationCapabilities::default(),
             platform: self.platform,
             has_uia: false,
             has_input_sim: false,
@@ -356,6 +327,7 @@ mod tests {
     impl AutomationBackend for FullScreenBackend {
         fn capabilities(&self) -> Capabilities {
             Capabilities {
+                operations: OperationCapabilities::default(),
                 platform: Platform::Windows,
                 has_uia: true,
                 has_input_sim: true,
@@ -470,12 +442,49 @@ mod tests {
     }
 
     #[test]
-    fn default_application_screenshot_describes_the_monitor_it_captured() {
-        // The capture is the whole monitor, so `logical_bounds` must be the
-        // monitor's logical rect. Reporting the focused *window's* rect here
-        // while the pixels cover the whole screen made
-        // `session::pixel_to_global_point` rescale every model coordinate
-        // through the wrong rectangle — a silent, systematic click offset.
+    fn window_selection_is_pid_scoped_and_hints_never_fall_back() {
+        let windows = [
+            ApplicationWindow {
+                id: 1,
+                process_id: 99,
+                focused: true,
+                minimized: false,
+            },
+            ApplicationWindow {
+                id: 2,
+                process_id: 42,
+                focused: false,
+                minimized: true,
+            },
+            ApplicationWindow {
+                id: 3,
+                process_id: 42,
+                focused: false,
+                minimized: false,
+            },
+            ApplicationWindow {
+                id: 4,
+                process_id: 42,
+                focused: true,
+                minimized: false,
+            },
+        ];
+        assert_eq!(select_application_window(&windows, 42, None).unwrap(), 4);
+        assert_eq!(select_application_window(&windows, 42, Some(3)).unwrap(), 3);
+        for hint in [1, 2, 9] {
+            assert!(matches!(
+                select_application_window(&windows, 42, Some(hint)),
+                Err(AutomationError::StaleElement)
+            ));
+        }
+        assert!(matches!(
+            select_application_window(&windows, 77, None),
+            Err(AutomationError::ElementNotFound)
+        ));
+    }
+
+    #[test]
+    fn app_session_never_falls_back_to_the_desktop() {
         let backend = FullScreenBackend {
             window: Rect {
                 x: 100,
@@ -484,73 +493,20 @@ mod tests {
                 height: 300,
             },
         };
-        let capture = backend
-            .screenshot_application(&app(), None, ScreenshotOpts::default())
-            .expect("capture");
-
+        for hint in [None, Some(element_info(Some(42), Some(backend.window)))] {
+            assert!(matches!(
+                backend.screenshot_application(&app(), hint.as_ref(), ScreenshotOpts::default()),
+                Err(AutomationError::UnsupportedPlatform)
+            ));
+        }
+        assert!(matches!(
+            backend.read_application_tree(&app(), TreeOpts::default()),
+            Err(AutomationError::UnsupportedPlatform)
+        ));
         assert_eq!(
-            capture.logical_bounds,
-            Rect {
-                x: 0,
-                y: 0,
-                width: 1920,
-                height: 1080,
-            },
-            "logical_bounds must describe the captured monitor, not the window"
+            backend.screenshot(ScreenshotOpts::default()).unwrap().width,
+            MONITOR_W
         );
-        assert_eq!(capture.scale_factor, f64::from(MONITOR_SCALE));
-        assert_eq!(capture.display_id.as_deref(), Some("monitor-1"));
-        assert_eq!(
-            capture.window_id, None,
-            "no per-window capture on this path"
-        );
-    }
-
-    #[test]
-    fn default_application_screenshot_ignores_the_window_hint() {
-        // Honouring the hint is exactly what produced the mismatch: the hint
-        // describes a window this path did not capture.
-        let backend = FullScreenBackend {
-            window: Rect {
-                x: 0,
-                y: 0,
-                width: 10,
-                height: 10,
-            },
-        };
-        let hint = element_info(
-            None,
-            Some(Rect {
-                x: 900,
-                y: 900,
-                width: 20,
-                height: 20,
-            }),
-        );
-        let capture = backend
-            .screenshot_application(&app(), Some(&hint), ScreenshotOpts::default())
-            .expect("capture");
-        assert_eq!(capture.logical_bounds.width, 1920);
-        assert_eq!(capture.logical_bounds.x, 0);
-    }
-
-    #[test]
-    fn default_application_screenshot_refuses_a_background_app() {
-        let backend = FullScreenBackend {
-            window: Rect {
-                x: 0,
-                y: 0,
-                width: 10,
-                height: 10,
-            },
-        };
-        let other = ResolvedApplication {
-            process_id: 7,
-            ..app()
-        };
-        assert!(backend
-            .screenshot_application(&other, None, ScreenshotOpts::default())
-            .is_err());
     }
 
     #[test]

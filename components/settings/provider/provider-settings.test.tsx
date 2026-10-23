@@ -23,6 +23,10 @@ jest.mock("next/navigation", () => ({
 
 const mockSubscriptionDefinition = jest.fn()
 const mockDiscoverSubscriptionModels = jest.fn()
+const mockDiscoverMagpieModels = jest.fn()
+jest.mock("@cognia/provider-core/providers/magpie", () => ({
+  discoverMagpieModels: (...args: unknown[]) => mockDiscoverMagpieModels(...args),
+}))
 jest.mock("@/lib/subscription/core/provider-registry", () => ({
   getSubscriptionProvider: (...args: unknown[]) => mockSubscriptionDefinition(...args),
 }))
@@ -1508,6 +1512,37 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     fireEvent.click(screen.getByTestId("mock-models-refresh"))
     expect(mockSyncModelsDev).toHaveBeenCalled()
     expect(mockHookState.testProvider).not.toHaveBeenCalled()
+  })
+
+  it("refreshes Magpie from its running gateway and preserves the selected model", async () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["magpie", { name: "Magpie", defaultModel: "native/coder" }]],
+      selectedProviderId: "magpie",
+    })
+    mockHookState.providerSettings.magpie = {
+      providerId: "magpie",
+      baseURL: "http://127.0.0.1:18995/v1",
+      apiKey: "magpie-cognia",
+      defaultModel: "native/coder",
+    }
+    mockDiscoverMagpieModels.mockResolvedValue({
+      models: [{ id: "native/coder" }, { id: "group/work" }],
+      version: "test",
+    })
+    render(<ProviderSettings />)
+    fireEvent.click(screen.getByRole("button", { name: "refresh" }))
+    await waitFor(() =>
+      expect(mockSetProviderConfig).toHaveBeenCalledWith(
+        "magpie",
+        expect.objectContaining({
+          discoveredModels: [{ id: "native/coder" }, { id: "group/work" }],
+          defaultModel: "native/coder",
+        })
+      )
+    )
+    expect(mockDiscoverMagpieModels).toHaveBeenCalledWith(
+      expect.objectContaining({ baseURL: "http://127.0.0.1:18995/v1", apiKey: "magpie-cognia" })
+    )
   })
 
   it("opens the custom-provider dialog from QuickAdd", async () => {

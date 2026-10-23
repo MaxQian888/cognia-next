@@ -6,7 +6,7 @@
  */
 
 import type { PluginPermission } from "@/types/plugin"
-import { CANONICAL_PLUGIN_PERMISSION_IDS } from "@/packages/plugin-sdk/src/contracts/generated"
+import { CANONICAL_PLUGIN_PERMISSION_IDS } from "@cognia/plugin-contract/contracts/generated"
 
 import { getPluginConsentBroker } from "./consent-broker"
 import { pluginRuntimeAccountAvailable } from "./account-runtime-gate"

@@ -13,7 +13,12 @@ export interface CustomModeConfig extends AgentModeConfig {
   modelOverride?: string
   temperatureOverride?: number
   maxTokensOverride?: number
-  // MCP Tools integration
+  /**
+   * MCP tools this mode is limited to. A non-empty list keeps only the servers
+   * it names attached to the run and denies their other known tools
+   * (`lib/mcp/mode-selection.ts`). Absent or empty does not restrict MCP: the
+   * editor saves `[]` for modes whose author never picked a tool.
+   */
   mcpTools?: McpToolReference[]
   // Categorization
   category?: CustomModeCategory

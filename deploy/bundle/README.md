@@ -2,6 +2,36 @@
 
 The agent CLIs and `cognia-sandboxd`, packaged to be injected into whatever image a project runs in (ADR-0183). It is never run as a sandbox itself. A driver copies its tree into the sandbox's `/cognia` volume, probes the user image, and starts the agent through `cognia-sandboxd init-agent`.
 
+## Selected Agent builds
+
+The default `AGENT_RUNTIMES=full` preserves the existing complete bundle.
+Build a subset from the repository root with canonical runtime IDs:
+
+```bash
+docker build -f deploy/bundle/Dockerfile \
+  --build-arg AGENT_RUNTIMES=codex-app-server,codex-acp \
+  --build-arg BUNDLE_RELEASE_TAG=my-codex-release \
+  -t cognia-agent-bundle:codex .
+sh deploy/bundle/smoke.sh cognia-agent-bundle:codex
+```
+
+One selection produces the npm dependency closure, install-script allowlist,
+verified vendor downloads, shims and manifest. npm prunes the master lock
+offline; retained package versions, URLs and integrity must not change.
+`all` aliases `full`; `none` retains core/tools and both Node trees, with no
+Agent commands. Unknown and unavailable runtime IDs fail the build.
+
+The manifest remains version 1 and advertises only the selected runtimes.
+Remote providers can still stage both libc trees; a glibc-only runtime does
+not become available on musl merely because its infrastructure was staged.
+Missing Agent commands are refused by the existing pool command resolver.
+
+Use the resulting digest as the deployment's offered bundle through
+`COGNIA_AGENT_BUNDLE_IMAGE` or its environment baseline. Custom project images
+continue through the existing catalog/approval/probe flow. See the
+[Runner profiles guide](../runner/README.md) for the distinct legacy Runner
+path, custom toolchain bases and Full compatibility limits.
+
 ## Layout
 
 ```

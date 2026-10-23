@@ -8,10 +8,14 @@ import type { AgentModelSlotDescriptor } from "./model-slots"
 type ModelPlanSource = "call" | "subagent" | "config"
 
 export interface TaskModelPlan {
-  version: 2
+  version: 2 | 3
   primaryModelId: string
-  slots: Record<string, { modelId: string; reasoningEffort?: string; source: ModelPlanSource }>
+  slots: Record<
+    string,
+    { modelId: string; reasoningEffort?: string; variant?: string; source: ModelPlanSource }
+  >
   models: string[]
+  allowedSpawnModels?: string[]
   fingerprint: string
 }
 
@@ -22,6 +26,8 @@ export type TaskModelPlanRefusal =
   | "cross-account-unsupported"
   | "effort-unsupported"
   | "too-many-models"
+  | "spawn-models-unsupported"
+  | "default-spawn-model-not-allowed"
 
 export type TaskModelPlanResult =
   { ok: true; plan: TaskModelPlan } | { ok: false; reason: TaskModelPlanRefusal; slot?: string }
@@ -58,7 +64,12 @@ export function mergeModelRoleLayers(
       if (!Object.hasOwn(slots, id)) slots[id] = structuredClone(selection)
     }
   }
-  return { version: 1, slots }
+  const policy = layers.find(
+    (layer) => layer?.version === 2 && layer.allowedSpawnModels !== undefined
+  )
+  return policy?.version === 2
+    ? { version: 2, slots, allowedSpawnModels: structuredClone(policy.allowedSpawnModels) }
+    : { version: 1, slots }
 }
 
 /**
@@ -72,6 +83,8 @@ export function compileTaskModelPlan(input: {
   primary: ExternalAgentCogniaModelBinding
   slots: readonly AgentModelSlotDescriptor[]
   layers: readonly { source: ModelPlanSource; overrides?: AgentModelRoleOverrides }[]
+  /** Explicit native agent definitions, validated before the gateway lease is minted. */
+  explicitModels?: Readonly<Record<string, ExternalAgentCogniaModelBinding & { variant?: string }>>
   modelSupportsReasoning?: (modelId: string) => boolean | undefined
   /**
    * The efforts a model itself accepts (e.g. GPT-6 rejects `minimal`), as the
@@ -126,22 +139,61 @@ export function compileTaskModelPlan(input: {
     }
   }
 
+  for (const id of Object.keys(input.explicitModels ?? {}).sort()) {
+    const binding = input.explicitModels![id]
+    if (binding.providerId !== primary.providerId)
+      return { ok: false, reason: "cross-provider-unsupported", slot: id }
+    if (binding.accountId !== undefined && binding.accountId !== primary.accountId)
+      return { ok: false, reason: "cross-account-unsupported", slot: id }
+    slots[id] = {
+      modelId: binding.modelId,
+      ...(binding.variant !== undefined ? { variant: binding.variant } : {}),
+      source: "config",
+    }
+    models.add(binding.modelId)
+    if (models.size > 32) return { ok: false, reason: "too-many-models", slot: id }
+  }
+
+  const policy = layers.find(
+    (layer) => layer.overrides?.version === 2 && layer.overrides.allowedSpawnModels !== undefined
+  )?.overrides
+  let allowedSpawnModels: string[] | undefined
+  if (policy?.version === 2 && policy.allowedSpawnModels !== undefined) {
+    if (!input.slots.some((slot) => slot.supportsSpawnModelOverrides))
+      return { ok: false, reason: "spawn-models-unsupported" }
+    const candidates = new Set<string>()
+    for (const binding of policy.allowedSpawnModels) {
+      if (binding.providerId !== primary.providerId)
+        return { ok: false, reason: "cross-provider-unsupported" }
+      if (binding.accountId !== undefined && binding.accountId !== primary.accountId)
+        return { ok: false, reason: "cross-account-unsupported" }
+      candidates.add(binding.modelId)
+      models.add(binding.modelId)
+    }
+    if (models.size > 32) return { ok: false, reason: "too-many-models" }
+    if (candidates.size && !candidates.has(slots["subagent.default"]?.modelId ?? primary.modelId))
+      return { ok: false, reason: "default-spawn-model-not-allowed" }
+    allowedSpawnModels = [...candidates].sort()
+  }
+  const version = allowedSpawnModels !== undefined ? 3 : 2
   return {
     ok: true,
     plan: {
-      version: 2,
+      version,
       primaryModelId: primary.modelId,
       slots,
       models: [...models],
+      ...(allowedSpawnModels !== undefined ? { allowedSpawnModels } : {}),
       fingerprint: contentDigest({
-        version: 2,
+        version,
+        ...(allowedSpawnModels !== undefined ? { allowedSpawnModels } : {}),
         primaryModelId: primary.modelId,
         providerId: primary.providerId,
         accountId: primary.accountId,
         slots: Object.fromEntries(
-          Object.entries(slots).map(([id, { modelId, reasoningEffort }]) => [
+          Object.entries(slots).map(([id, { modelId, reasoningEffort, variant }]) => [
             id,
-            { modelId, reasoningEffort },
+            { modelId, reasoningEffort, ...(variant !== undefined ? { variant } : {}) },
           ])
         ),
       }),

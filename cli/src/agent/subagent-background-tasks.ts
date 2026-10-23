@@ -179,6 +179,28 @@ export function hasCliBackgroundRun(runId: string): boolean {
   return registry.has(runId)
 }
 
+/** Save an incomplete foreground result for explicit resume, without background delivery. */
+export async function recordCliIncompleteForegroundRun(
+  runId: string,
+  meta: CliBackgroundTaskMeta,
+  text: string,
+  status: "error" | "interrupted" = "error"
+): Promise<void> {
+  const { home, ...record } = meta
+  await enqueueJournal(home, async (handle) => {
+    await dexieJournal.recordStart({ ...record, runId, mode: "foreground", status: "running" })
+    await dexieJournal.recordSettle(runId, {
+      status,
+      settledAt: Date.now(),
+      resultText: text,
+      error: text,
+      deliveryState: "delivered",
+      deliveredAt: Date.now(),
+    })
+    await handle.flush()
+  })
+}
+
 /**
  * Collect a background run's result. IDEMPOTENT: after the live entry is
  * consumed, every later collect answers from the journal (results stay
@@ -244,9 +266,8 @@ export async function getCliBackgroundRecord(
 
 /** Best-effort collect bookkeeping through the serialized journal queue. */
 function markCliCollected(runId: string, home?: string): void {
-  void enqueueJournal(home ?? runHomes.get(runId), async (handle) => {
+  void enqueueJournal(home ?? runHomes.get(runId), async () => {
     await dexieJournal.update(runId, { collectedAt: Date.now() })
-    handle.scheduleFlush()
   }).catch(() => undefined)
 }
 
@@ -285,9 +306,8 @@ export function markCliBackgroundDelivery(
     deliveryState,
     ...(deliveryState === "delivered" ? { deliveredAt: Date.now() } : {}),
   }
-  return enqueueJournal(home ?? runHomes.get(runIds[0]), async (handle) => {
+  return enqueueJournal(home ?? runHomes.get(runIds[0]), async () => {
     await Promise.all(runIds.map((runId) => dexieJournal.update(runId, patch)))
-    handle.scheduleFlush()
   }).catch(() => undefined)
 }
 
@@ -355,11 +375,9 @@ function enqueueJournalWrite<T>(
   runId: string | undefined,
   write: () => T | Promise<T>
 ): Promise<T> {
-  return enqueueJournal(runHomes.get(runId ?? ""), async (handle) => {
-    const result = await write()
-    handle.scheduleFlush()
-    return result
-  })
+  // The journal's Dexie mutations already dirty exactly backgroundTasks through
+  // the write middleware. A whole-store schedule rewrites every unrelated table.
+  return enqueueJournal(runHomes.get(runId ?? ""), write)
 }
 
 function readJournalRecord(runId: string, home?: string) {

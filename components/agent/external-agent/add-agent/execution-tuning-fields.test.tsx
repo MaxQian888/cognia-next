@@ -7,7 +7,10 @@ import userEvent from "@testing-library/user-event"
 
 import en from "@/i18n/messages/en.json"
 import { useAddAgentForm, type AddAgentFormState } from "@/hooks/agent/use-add-agent-form"
-import { DEFAULT_TIMEOUT_MS } from "@/lib/ai/agent/external/config/add-agent-form"
+import {
+  DEFAULT_TIMEOUT_MS,
+  buildCreateExternalAgentInput,
+} from "@/lib/ai/agent/external/config/add-agent-form"
 
 import { AddAgentCogniaModelField, ExecutionTuningFields } from "./execution-tuning-fields"
 
@@ -95,6 +98,13 @@ beforeEach(() => {
   latestForm = null
   pickerMock.mockClear()
   roleFieldsMock.mockClear()
+})
+
+it("writes the native Codex experimental option through the shared form", async () => {
+  render(<Harness presetId="codex-app-server" withModel />)
+  await userEvent.click(screen.getByRole("switch", { name: settings.codexStepModelSwitching }))
+  expect(form().data.codexStepModelSwitching).toBe(true)
+  expect(buildCreateExternalAgentInput(form().data).codexOptions?.stepModelSwitching).toBe(true)
 })
 
 describe("ExecutionTuningFields", () => {

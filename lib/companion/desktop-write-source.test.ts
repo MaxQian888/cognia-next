@@ -2874,6 +2874,23 @@ describe("dispatchCommand: unknown command", () => {
     })
   })
 
+  it("publishes recording operations on the headless host manifest", async () => {
+    const globals = globalThis as Record<string, unknown>
+    const original = globals.__COGNIA_HEADLESS__
+    globals.__COGNIA_HEADLESS__ = true
+    try {
+      const manifest = (await dispatchCommand("host_feature_manifest", {})) as {
+        features: Record<string, { operations: string[] }>
+      }
+      expect(manifest.features["browser.remote"].operations).toEqual(
+        expect.arrayContaining(["browser_recording_control", "browser_recording_ref"])
+      )
+    } finally {
+      if (original === undefined) delete globals.__COGNIA_HEADLESS__
+      else globals.__COGNIA_HEADLESS__ = original
+    }
+  })
+
   it("declares the scope its own host-state lives under, not the paired id", async () => {
     // The device knows this Host as `host-a`; the Host writes its channels
     // under `target-a`. A client that guesses the former is refused, so the

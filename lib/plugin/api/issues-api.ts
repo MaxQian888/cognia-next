@@ -15,7 +15,7 @@
  */
 
 import { listIssueEvents } from "@/lib/db/issue-events"
-import { onIssueEvent, type IssueEventListener } from "@/lib/issues/event-bus"
+import { onIssueEvent } from "@/lib/issues/event-bus"
 import {
   applyIssueAction,
   createIssueRecord,
@@ -26,68 +26,21 @@ import {
   queryIssues,
   resolveIssue,
   toIssueWire,
-  type CreateIssueRequest,
   type IssueBulkAction,
   type IssueBulkOutcome,
-  type IssueQuery,
-  type IssueWire,
 } from "@/lib/issues/service"
 import { registerIssueSyncProvider } from "@/lib/issues/sync/registry"
-import type { IssueSyncProvider } from "@/lib/issues/sync/types"
 import { ensureIssueLabels } from "@/lib/issues/sync/apply"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
-import {
-  ISSUE_STAGE_MAX,
-  type IssueActor,
-  type IssueEvent,
-  type IssueEventKind,
-  type IssueTriageState,
-} from "@/types/issues"
-
-export type PluginIssueCreateInput = Omit<CreateIssueRequest, "by" | "origin">
-export type PluginIssueQuery = IssueQuery
-
-export interface PluginIssueUpdatePatch {
-  title?: string
-  description?: string
-  status?: string
-  priority?: string
-  /** `null` clears. */
-  dueDate?: number | null
-  estimate?: number | null
-  cycleId?: string | null
-  /** Sub-issue stage, 1 to `ISSUE_STAGE_MAX`. `null` unstages. */
-  stage?: number | null
-  /** `"pending"` sends it into triage, `null` accepts it out. */
-  triage?: IssueTriageState | null
-}
-
-export interface PluginIssueEventOptions {
-  kinds?: readonly IssueEventKind[]
-  issueId?: string
-}
-
-export interface PluginIssuesAPI {
-  /** By row id or printed identifier (`MERC-12`). `null` when nothing matches. */
-  get(ref: string): Promise<IssueWire | null>
-  list(query?: PluginIssueQuery): Promise<IssueWire[]>
-  /** The trail, newest first. */
-  listEvents(ref: string, limit?: number): Promise<IssueEvent[]>
-  create(input: PluginIssueCreateInput): Promise<IssueWire>
-  /** Each given field becomes one board action. The outcome counts them. */
-  update(ref: string, patch: PluginIssueUpdatePatch): Promise<IssueBulkOutcome>
-  assign(ref: string, assignee: IssueActor | null): Promise<IssueBulkOutcome>
-  comment(ref: string, body: string): Promise<IssueBulkOutcome>
-  /** Label NAMES. Adds create missing labels, removes never do. */
-  label(
-    ref: string,
-    change: { add?: readonly string[]; remove?: readonly string[] }
-  ): Promise<IssueBulkOutcome>
-  /** Subscribe to committed trail entries. Returns the disposer. */
-  onEvent(handler: IssueEventListener, options?: PluginIssueEventOptions): () => void
-  /** Register an external tracker as a sync source. Returns the disposer. */
-  registerSyncProvider(provider: IssueSyncProvider): () => void
-}
+import { ISSUE_STAGE_MAX, type IssueActor } from "@/types/issues"
+import type { PluginIssuesAPI } from "@cognia/plugin-contract/lib/plugin/api/issues-api"
+export type {
+  PluginIssueCreateInput,
+  PluginIssueEventOptions,
+  PluginIssueQuery,
+  PluginIssueUpdatePatch,
+  PluginIssuesAPI,
+} from "@cognia/plugin-contract/lib/plugin/api/issues-api"
 
 /** The actor stamped on everything a plugin writes. */
 export function pluginIssueActor(pluginId: string): IssueActor {

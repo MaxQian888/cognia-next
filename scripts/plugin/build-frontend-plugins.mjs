@@ -24,7 +24,7 @@ export const NODE_RUNTIME_SOURCE_MAX_BYTES = 1024 * 1024
 register()
 const requireSource = createRequire(import.meta.url)
 const catalog = JSON.parse(
-  await readFile(path.join(repository, "packages/plugin-sdk/contract/catalog.json"), "utf8")
+  await readFile(path.join(repository, "packages/plugin-contract/contract/catalog.json"), "utf8")
 )
 export const SHARED_MODULES = [
   "react",
@@ -171,15 +171,25 @@ async function sourceEntry(pluginRoot, manifest) {
   throw new Error(`No frontend source entry in ${pluginRoot}`)
 }
 
+/**
+ * Build one frontend plugin package. `root` is the toolchain root (esbuild's
+ * working directory, `node_modules`, the SDK contract catalog and the
+ * `public/plugins/<id>` mirror); `pluginsRoot` is where plugin sources live,
+ * `<root>/plugins` by default.
+ */
 export async function buildFrontendPlugin({
   root = repository,
+  pluginsRoot,
   directory,
   bundle = build,
   pdfWorkerUrl,
   moduleManifest,
 } = {}) {
   root = path.resolve(root)
-  const pluginRoot = path.join(root, "plugins", relativePath(directory))
+  const pluginRoot = path.join(
+    path.resolve(pluginsRoot ?? path.join(root, "plugins")),
+    relativePath(directory)
+  )
   const base = JSON.parse(await readFile(path.join(pluginRoot, "plugin.json"), "utf8"))
   validateIdentity(base)
   const source = await sourceEntry(pluginRoot, base)

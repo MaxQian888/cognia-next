@@ -14,10 +14,7 @@
  * naming another webview attaches a nested server for that frame.
  */
 
-import {
-  createContextPanelAPI,
-  type PluginContextPanelRegistration,
-} from "@/lib/plugin/api/context-panel-api"
+import { createContextPanelAPI } from "@/lib/plugin/api/context-panel-api"
 import { createContextPanelWebviewRenderer } from "@/components/plugins/plugin-context-panel-webview"
 import {
   contextPanelWebviewEvent,
@@ -28,20 +25,12 @@ import {
 import { onWebviewMessage, postMessageToWebview } from "@/lib/plugin/registries/webview-registry"
 import { loggers } from "@/lib/plugin/core/logger"
 import type { ContextPanelMode, ContextWorkbenchMode } from "@/types/context-workbench"
+import type { ContextPanelWebviewRpcRegistration } from "@cognia/plugin-contract/lib/plugin/bridge/context-panel-webview-rpc"
+export type { ContextPanelWebviewRpcRegistration } from "@cognia/plugin-contract/lib/plugin/bridge/context-panel-webview-rpc"
 
 export interface ContextPanelWebviewRpcOptions {
   hasPermission: (permission: string) => boolean
 }
-
-/**
- * `register` over the wire: the imperative registration minus every function
- * field, plus a `webview` naming another of the plugin's declared webviews to
- * render the new panel's body.
- */
-export type ContextPanelWebviewRpcRegistration = Omit<
-  PluginContextPanelRegistration,
-  "renderer" | "getBadge" | "onFirstActivate" | "onRestore"
-> & { webview: string }
 
 interface Attachment {
   refs: number

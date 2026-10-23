@@ -44,7 +44,9 @@ public/cognia-workflow-app.js
 # 1.6k icons, read only by the bundler — so Prettier reformatting either file
 # would make its check report drift on a clean tree.
 lib/icons/lucide-catalog.generated.json
+packages/plugin-contract/src/lib/icons/lucide-icon-names.generated.json
 lib/plugin/core/browser-builtin-assets.generated.json
+lib/plugin/core/builtin-preboot-manifests.generated.json
 # Companion API specs and CLI catalog are canonical generator output. Prettier
 # rewrites compact schema arrays and makes `companion-api:check` report drift.
 docs/api/mobile-companion-api.openapi.yaml

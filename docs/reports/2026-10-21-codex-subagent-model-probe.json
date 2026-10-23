@@ -1,0 +1,154 @@
+{
+  "date": "2026-10-21",
+  "cliVersion": "0.159.2",
+  "scope": "Real local Codex CLI, synthetic model metadata and loopback Responses fixture; no authenticated supplier inference or Cognia UI acceptance. V1 uses a fixture-injected deferred native spawn tool call.",
+  "scenarios": [
+    {
+      "scenario": "v1",
+      "assertions": "passed",
+      "nativeChildConfirmed": true,
+      "selection": {
+        "catalogBackend": "v1",
+        "forcedV2": false,
+        "spawnExposureExplicitlyConfigured": false
+      },
+      "livePatch": {
+        "ok": true,
+        "response": {
+          "status": "applied"
+        }
+      },
+      "futurePatch": {
+        "ok": true,
+        "response": {}
+      },
+      "nextTurnAccepted": true,
+      "nextTurnError": null,
+      "spawnModelFieldObserved": false,
+      "childSteps": [
+        {
+          "model": "probe-child",
+          "effort": "low",
+          "sameActiveTurn": true
+        },
+        {
+          "model": "probe-switched",
+          "effort": "high",
+          "sameActiveTurn": true
+        },
+        {
+          "model": "probe-switched",
+          "effort": "high",
+          "sameActiveTurn": false
+        }
+      ]
+    },
+    {
+      "scenario": "v2",
+      "assertions": "passed",
+      "nativeChildConfirmed": true,
+      "selection": {
+        "catalogBackend": "v2",
+        "forcedV2": true,
+        "spawnExposureExplicitlyConfigured": true
+      },
+      "livePatch": {
+        "ok": false,
+        "error": {
+          "code": -32600,
+          "message": "direct app-server input is not allowed for multi-agent v2 sub-agents"
+        }
+      },
+      "futurePatch": {
+        "ok": false,
+        "error": {
+          "code": -32600,
+          "message": "direct app-server input is not allowed for multi-agent v2 sub-agents"
+        }
+      },
+      "nextTurnAccepted": false,
+      "nextTurnError": {
+        "code": -32600,
+        "message": "direct app-server input is not allowed for multi-agent v2 sub-agents"
+      },
+      "spawnModelFieldObserved": true,
+      "childSteps": [
+        {
+          "model": "probe-child",
+          "effort": "low",
+          "sameActiveTurn": true
+        },
+        {
+          "model": "probe-child",
+          "effort": "low",
+          "sameActiveTurn": true
+        }
+      ]
+    },
+    {
+      "scenario": "auto-v2",
+      "assertions": "passed",
+      "nativeChildConfirmed": true,
+      "selection": {
+        "catalogBackend": "v2",
+        "forcedV2": false,
+        "spawnExposureExplicitlyConfigured": false
+      },
+      "livePatch": {
+        "ok": false,
+        "error": {
+          "code": -32600,
+          "message": "direct app-server input is not allowed for multi-agent v2 sub-agents"
+        }
+      },
+      "futurePatch": {
+        "ok": false,
+        "error": {
+          "code": -32600,
+          "message": "direct app-server input is not allowed for multi-agent v2 sub-agents"
+        }
+      },
+      "nextTurnAccepted": false,
+      "nextTurnError": {
+        "code": -32600,
+        "message": "direct app-server input is not allowed for multi-agent v2 sub-agents"
+      },
+      "spawnModelFieldObserved": true,
+      "childSteps": [
+        {
+          "model": "probe-child",
+          "effort": "low",
+          "sameActiveTurn": true
+        },
+        {
+          "model": "probe-child",
+          "effort": "low",
+          "sameActiveTurn": true
+        }
+      ]
+    }
+  ],
+  "currentCogniaState": {
+    "runningDesktopObserved": false,
+    "debugBridge": "bridge_unavailable",
+    "legacySavedCodexConfigs": {
+      "count": 2,
+      "protocol": "codex-app-server",
+      "command": "codex app-server",
+      "cogniaModelBinding": false,
+      "authoritativeCurrentAccountConfig": false
+    },
+    "sharedNativeConfig": {
+      "model": "gpt-6.1-sol",
+      "explicitMultiAgentFeatures": false
+    },
+    "modelCatalog": {
+      "gpt-6.1-sol": "v2",
+      "gpt-6-luna": "v2",
+      "gpt-5.6-luna": "v1",
+      "customFallback": null
+    },
+    "conclusion": "New shared-native sessions using the observed default are inferred V2. No claim is made about a currently running Cognia session or an account-bound configuration whose current head was not inspected."
+  },
+  "correction": "The complete 0.159.2 MultiAgentV2Config default exposes spawn model overrides; the standalone SpawnAgentToolOptions default is not the effective runtime default."
+}

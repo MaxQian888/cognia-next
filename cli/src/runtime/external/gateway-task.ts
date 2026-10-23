@@ -102,7 +102,13 @@ export function prepareGatewayTask(
     (payload.codexModelCatalog !== undefined && payload.runtime !== "codex") ||
     Object.entries(payload.files).some(
       ([name, value]) =>
-        !ALLOWED_FILES.has(name) || typeof value !== "string" || value.length > 262144
+        (!ALLOWED_FILES.has(name) &&
+          !(
+            payload.runtime === "pi" &&
+            /^pi\/agents\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.md$/.test(name)
+          )) ||
+        typeof value !== "string" ||
+        value.length > 262144
     )
   ) {
     throw new Error("Invalid gateway task configuration")

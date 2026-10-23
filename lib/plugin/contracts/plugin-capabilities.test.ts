@@ -6,7 +6,7 @@ import {
   capabilityPythonExecution,
   validatePluginCapabilities,
 } from "./plugin-capabilities"
-import { AUTHOR_CAPABILITY_CONTRACTS } from "@/packages/plugin-sdk/src/contracts/catalog"
+import { AUTHOR_CAPABILITY_CONTRACTS } from "@cognia/plugin-contract/contracts/catalog"
 
 describe("plugin capability contracts", () => {
   it("keeps the LSP capability's required test evidence reachable after sidecar migrations", () => {

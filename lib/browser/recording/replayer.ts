@@ -7,7 +7,6 @@
  * `generation` and cannot be recorded ahead of time.
  */
 import type { BrowserEngine } from "@/lib/browser/agent-engine"
-import { browserClient } from "@/lib/browser/client"
 import {
   resolveStepUrl,
   secretKey,
@@ -50,8 +49,11 @@ const SETTLE_MS = 3000
 
 class StepError extends Error {}
 
-async function resolveRef(target: RecordedTarget): Promise<string> {
-  const ref = await browserClient.embedRefFor(target.selector)
+async function resolveRef(engine: BrowserEngine, target: RecordedTarget): Promise<string> {
+  if (!engine.resolveRecordedTarget) {
+    throw new StepError("Recorded-target resolution is unavailable on this browser engine")
+  }
+  const ref = await engine.resolveRecordedTarget(target.selector)
   if (!ref) throw new StepError(`no element matches ${target.selector}`)
   return ref
 }
@@ -62,7 +64,7 @@ async function act(
   action: string,
   args: Record<string, unknown> = {}
 ): Promise<void> {
-  const ref = await resolveRef(target)
+  const ref = await resolveRef(engine, target)
   const result = await engine.act(ref, action, args)
   if (!result.ok) throw new StepError(result.error ?? `${action} failed`)
 }
@@ -86,7 +88,8 @@ async function runStep(
     case "navigate": {
       const url = resolveStepUrl(flow, step.url)
       await engine.navigate(url)
-      await engine.waitForLoad({ targetUrl: url })
+      const arrived = await engine.waitForLoad({ targetUrl: url })
+      if (!arrived.ok) throw new StepError(`navigation did not reach ${url}`)
       return
     }
     case "click": {
@@ -143,7 +146,7 @@ async function runStep(
       return
     }
     case "press_key": {
-      const ref = step.target ? await resolveRef(step.target) : undefined
+      const ref = step.target ? await resolveRef(engine, step.target) : undefined
       const result = await engine.pressKey(step.key, ref)
       if (!result.ok) throw new StepError(result.error ?? `press ${step.key} failed`)
       await engine.waitForLoad({ timeoutMs: SETTLE_MS })

@@ -4,7 +4,7 @@
  * Pure typesafety pass-through for `manifest.commands[]` entries.
  */
 
-import type { PluginManifestCommandDef } from "@/types/plugin/plugin"
+import type { PluginManifestCommandDef } from "@cognia/plugin-contract/types/plugin/plugin"
 
 export function defineCommand(def: PluginManifestCommandDef): PluginManifestCommandDef {
   return def

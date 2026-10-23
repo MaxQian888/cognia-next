@@ -15,6 +15,62 @@ const execution = {
   hostRef: "desktop-sidecar",
 }
 
+test("ambient and raw-overlay retry watchdog controls never reach Claude", () => {
+  for (const frozen of [false, true]) {
+    const env = buildSubprocessEnv(
+      {
+        ...(frozen ? { execution } : {}),
+        env: {
+          CLAUDE_CODE_RETRY_WATCHDOG: "1",
+          CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS: "99999999",
+        },
+      },
+      {
+        PATH: "/usr/bin",
+        CLAUDE_CODE_RETRY_WATCHDOG: "1",
+        CLAUDE_CODE_RETRY_WATCHDOG_USAGE_LIMIT_RECHECK_MS: "60000",
+      }
+    )
+    assert.equal(env.CLAUDE_CODE_RETRY_WATCHDOG, undefined)
+    assert.equal(env.CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS, undefined)
+    assert.equal(env.CLAUDE_CODE_RETRY_WATCHDOG_USAGE_LIMIT_RECHECK_MS, undefined)
+  }
+})
+
+test("only validated unattended retry policy reconstructs watchdog controls", () => {
+  const env = buildSubprocessEnv(
+    {
+      claudeAgentSdk: {
+        version: 1,
+        unattendedRetry: { maxWaitMs: 120000, usageLimitRecheckMs: 60000 },
+      },
+    },
+    {}
+  )
+  assert.equal(env.CLAUDE_CODE_RETRY_WATCHDOG, "1")
+  assert.equal(env.CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS, "120000")
+  assert.equal(env.CLAUDE_CODE_RETRY_WATCHDOG_USAGE_LIMIT_RECHECK_MS, "60000")
+  assert.throws(
+    () =>
+      buildSubprocessEnv(
+        { claudeAgentSdk: { version: 1, unattendedRetry: { maxWaitMs: Infinity } } },
+        {}
+      ),
+    /maxWaitMs/
+  )
+  assert.throws(
+    () =>
+      buildSubprocessEnv(
+        {
+          ledger: { mode: "envelope" },
+          claudeAgentSdk: { version: 1, unattendedRetry: { maxWaitMs: 60000 } },
+        },
+        {}
+      ),
+    /ledger/
+  )
+})
+
 const hostileParent = {
   PATH: "/usr/bin",
   HOME: "/Users/dev",

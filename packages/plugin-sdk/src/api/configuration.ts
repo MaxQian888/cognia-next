@@ -9,5 +9,8 @@
 
 export { defineConfiguration } from "../define/define-configuration"
 
-export type { PluginConfigAPI } from "@/types/plugin/plugin"
-export type { PluginConfigProperty, PluginConfigSchema } from "@/types/plugin"
+export type { PluginConfigAPI } from "@cognia/plugin-contract/types/plugin/plugin"
+export type {
+  PluginConfigProperty,
+  PluginConfigSchema,
+} from "@cognia/plugin-contract/types/plugin/index"

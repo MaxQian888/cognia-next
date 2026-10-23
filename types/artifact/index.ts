@@ -1,8 +1,5 @@
 /**
- * Artifact and A2UI types
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract types.
+ * This re-export keeps host imports of `@/types/artifact` working.
  */
-
-export * from "./artifact"
-export * from "./a2ui"
-export * from "./preview"
-export * from "./diff"
+export * from "@cognia/plugin-contract/types/artifact/index"

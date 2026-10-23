@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import { selectOption } from "@/lib/testing/select-option"
+import userEvent from "@testing-library/user-event"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 // The remote toolbar used to be a flat row of ten controls with no responsive
@@ -8,6 +9,9 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 let mockToolbarWidth = 0
 jest.mock("@/hooks/use-element-width", () => ({ useElementWidth: () => mockToolbarWidth }))
 jest.mock("@/components/ui/popover")
+let mockConfiguredGrants = [{ domain: "example.com" }]
+let mockProfiles: Array<{ id: string; selected: boolean }> = []
+jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => mockConfiguredGrants }))
 
 jest.mock("next-intl", () => ({
   useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
@@ -22,7 +26,12 @@ jest.mock("@/lib/tauri/transport-instance", () => ({
   transport: { call: (...args: unknown[]) => transportCall(...args) },
 }))
 jest.mock("@/lib/tauri/transport-companion", () => ({
+  getCompanionConfigGeneration: () => 0,
   issueCompanionSocketTicket: (...args: unknown[]) => issueCompanionSocketTicket(...args),
+}))
+jest.mock("@/lib/tauri/admin-lease", () => ({
+  ...jest.requireActual("@/lib/tauri/admin-lease"),
+  issueHostAdminLease: jest.fn(),
 }))
 // Where the frame stream connects and who signs its ticket. A desktop driving a
 // remote host resolves here rather than through the companion cache.
@@ -47,8 +56,8 @@ jest.mock("@/lib/platform/web-companion", () => ({
   buildTimeServerUrl: () => null,
 }))
 jest.mock("@/lib/db/browser-profiles", () => ({
-  listBrowserDomainGrants: () => Promise.resolve([{ domain: "example.com" }]),
-  listBrowserProfiles: () => Promise.resolve([]),
+  listBrowserDomainGrants: () => Promise.resolve(mockConfiguredGrants),
+  listBrowserProfiles: () => Promise.resolve(mockProfiles),
   touchBrowserProfile: jest.fn().mockResolvedValue(undefined),
 }))
 const sendScreenshotBytes = jest.fn().mockResolvedValue(true)
@@ -118,6 +127,11 @@ const listPages = jest
   .fn()
   .mockResolvedValue([{ id: "page-1", url: "https://example.com", title: "Example", active: true }])
 jest.mock("@/lib/browser/remote-chromium-engine", () => ({
+  REMOTE_BROWSER_APPROVAL_OPERATIONS: [
+    "browser_session_ensure",
+    "browser_session_close",
+    "browser_navigate",
+  ],
   RemoteChromiumEngine: jest.fn().mockImplementation(() => ({
     navigate,
     back,
@@ -169,6 +183,17 @@ jest.mock("@/hooks/browser/use-browser-devtools", () => ({
 import { toast } from "sonner"
 import type { RemoteBrowserStreamOptions } from "@/lib/browser/remote-stream"
 import { RemoteBrowserPreview } from "./remote-browser-preview"
+import { RemoteChromiumEngine } from "@/lib/browser/remote-chromium-engine"
+import { HostConsentRequiredError, issueHostAdminLease } from "@/lib/tauri/admin-lease"
+import {
+  __resetRuntimeSnapshotForTesting,
+  setRuntimeSnapshot,
+} from "@/lib/runtime/runtime-snapshot-store"
+
+jest.mock("@/lib/browser/remote-stream", () => ({
+  ...jest.requireActual("@/lib/browser/remote-stream"),
+  RemoteBrowserStream: jest.fn((options: RemoteBrowserStreamOptions) => createStream(options)),
+}))
 
 let streamOptions: RemoteBrowserStreamOptions | null = null
 const takeover = jest.fn()
@@ -188,6 +213,7 @@ beforeAll(() => {
 })
 
 beforeEach(() => {
+  __resetRuntimeSnapshotForTesting()
   jest.clearAllMocks()
   mockDevtoolsPoll = undefined
   mockVisited = []
@@ -195,6 +221,8 @@ beforeEach(() => {
   streamOptions = null
   mockStreamEndpoint = { baseUrl: "https://cloud.example.com" }
   mockRuntimeStatus = { compiled: true, enabled: true, configured: true, healthy: true }
+  mockConfiguredGrants = [{ domain: "example.com" }]
+  mockProfiles = []
   transportCall.mockImplementation((name: string) => {
     if (name === "browser_capability") {
       return Promise.resolve({ capabilities: ["browser"] })
@@ -212,6 +240,62 @@ beforeEach(() => {
     }
     return Promise.resolve(undefined)
   })
+})
+
+it("requires an explicit authorization gesture and exposes host consent before creating a session", async () => {
+  setRuntimeSnapshot({
+    target: { id: "host-1", kind: "companion", hostKind: "desktop", platform: "web" },
+    connectionState: "online",
+    vaultState: "unlocked",
+  })
+  const issue = jest.mocked(issueHostAdminLease)
+  issue.mockRejectedValueOnce(
+    new HostConsentRequiredError("REMOTE_CONSENT_REQUIRED (code K7Q2)", "K7Q2")
+  )
+  issue.mockResolvedValueOnce({
+    token: "browser-lease",
+    operations: ["browser_session_ensure", "browser_session_close", "browser_navigate"],
+    expiresAt: Date.now() + 600_000,
+  })
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-approval"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  const authorize = await screen.findByRole("button", { name: "browser.remote.approval.authorize" })
+  expect(issue).not.toHaveBeenCalled()
+  expect(transportCall).not.toHaveBeenCalledWith("browser_session_ensure", expect.anything())
+  fireEvent.click(authorize)
+  await screen.findByText("browser.remote.approval.pending")
+  expect(connect).not.toHaveBeenCalled()
+  fireEvent.click(authorize)
+  await waitFor(() => expect(connect).toHaveBeenCalled())
+  expect(issue).toHaveBeenLastCalledWith(
+    ["browser_session_ensure", "browser_session_close", "browser_navigate"],
+    600,
+    expect.anything()
+  )
+  expect(transportCall).toHaveBeenCalledWith(
+    "browser_session_ensure",
+    expect.objectContaining({ adminLease: "browser-lease" })
+  )
+  expect(transportCall).toHaveBeenCalledWith("browser_runtime_status", {
+    workspaceId: "workspace-1",
+  })
+  act(() => streamOptions?.onState?.("connected"))
+  const caller = jest.mocked(RemoteChromiumEngine).mock.calls.at(-1)?.[1]
+  transportCall.mockRejectedValueOnce(
+    Object.assign(new Error("expired lease"), { code: "interactive_approval_required" })
+  )
+  await act(async () => {
+    await expect(
+      caller!.call("browser_navigate", { url: "https://example.com" })
+    ).rejects.toMatchObject({ code: "interactive_approval_required" })
+  })
+  expect(screen.getByRole("status")).toHaveTextContent("browser.remote.approval.required")
+  expect(issue).toHaveBeenCalledTimes(2)
 })
 
 it("ensures a user-gated session and connects through a one-time ticket", async () => {
@@ -264,6 +348,25 @@ it("shows failed navigation while connected and retries the same address", async
   fireEvent.click(screen.getByRole("button", { name: "browser.loadError.retry" }))
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
   expect(navigate).toHaveBeenLastCalledWith("https://failed.example/")
+})
+
+it("keeps a failed startup address when the runtime remains on a blank page", async () => {
+  navigate.mockRejectedValueOnce(new Error("domain_blocked"))
+  listPages.mockResolvedValueOnce([{ id: "page-1", url: "about:blank", title: "", active: true }])
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      initialUrl="https://failed.example/"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(connect).toHaveBeenCalled())
+  act(() => streamOptions?.onState?.("connected"))
+  expect(screen.getByRole("textbox", { name: "browser.url.placeholder" })).toHaveValue(
+    "https://failed.example/"
+  )
+  expect(screen.getByRole("alert")).toHaveTextContent("https://failed.example/")
 })
 
 it("follows an address the host states after connecting", async () => {
@@ -334,6 +437,8 @@ it("does not replay a delivered request when the stream reconnects", async () =>
     />
   )
   await waitFor(() => expect(navigate).toHaveBeenCalledWith("https://example.com/clicked"))
+  await waitFor(() => expect(connect).toHaveBeenCalledTimes(1))
+  const oldStream = streamOptions
   navigate.mockClear()
 
   // `profileId` is a dependency of the connect effect, so changing it tears the
@@ -348,7 +453,20 @@ it("does not replay a delivered request when the stream reconnects", async () =>
       createStream={createStream}
     />
   )
-  await waitFor(() => expect(streamOptions).not.toBeNull())
+  await waitFor(() => expect(connect).toHaveBeenCalledTimes(2))
+  expect(streamOptions).not.toBe(oldStream)
+  act(() => {
+    oldStream?.onEvent?.({
+      kind: "pages.changed",
+      pages: [
+        { id: "stale", url: "https://stale.example/", title: "Closed session page", active: true },
+      ],
+      activePageId: "stale",
+    })
+    oldStream?.onLease?.({ epoch: 1, controller: { kind: "human", id: "old-controller" } })
+  })
+  expect(screen.queryByRole("button", { name: "Closed session page" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "browser.remote.humanControl" })).toBeNull()
 
   expect(navigate).not.toHaveBeenCalledWith("https://example.com/clicked")
 })
@@ -743,6 +861,157 @@ it("reports why the runtime is unusable instead of assuming health", async () =>
   // And it stopped there rather than collecting a second, worse failure from
   // the calls that cannot succeed without the runtime.
   expect(transportCall).not.toHaveBeenCalledWith("browser_session_ensure", expect.anything())
+})
+
+it("keeps the requested address recoverable before a remote session exists", async () => {
+  mockRuntimeStatus = { compiled: false, enabled: false, configured: false, healthy: false }
+  const onBackendChange = jest.fn()
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      requestedUrl="https://example.com/requested"
+      onBackendChange={onBackendChange}
+      createStream={createStream}
+    />
+  )
+  const alert = await screen.findByRole("alert")
+  expect(alert).toHaveTextContent("https://example.com/requested")
+  fireEvent.click(within(alert).getByRole("button", { name: "browser.actions.openExternal" }))
+  expect(openExternal).toHaveBeenCalledWith("https://example.com/requested")
+  fireEvent.click(within(alert).getByRole("button", { name: "browser.backend.embedded" }))
+  expect(onBackendChange).toHaveBeenCalledWith("embedded")
+  mockRuntimeStatus = { compiled: true, enabled: true, configured: true, healthy: true }
+  fireEvent.click(within(alert).getByRole("button", { name: "browser.loadError.retry" }))
+  await waitFor(() => expect(connect).toHaveBeenCalled())
+  expect(navigate).toHaveBeenCalledWith("https://example.com/requested")
+})
+
+it("retains one connection with the default stream factory across ordinary renders", async () => {
+  const { rerender } = render(
+    <RemoteBrowserPreview chatSessionId="chat-1" workspaceId="workspace-1" />
+  )
+  await waitFor(() => expect(connect).toHaveBeenCalledTimes(1))
+  act(() => streamOptions?.onState?.("connected"))
+  rerender(<RemoteBrowserPreview chatSessionId="chat-1" workspaceId="workspace-1" />)
+  fireEvent.change(screen.getByRole("textbox", { name: "browser.url.placeholder" }), {
+    target: { value: "https://example.com/draft" },
+  })
+  expect(
+    transportCall.mock.calls.filter(([name]) => name === "browser_session_ensure")
+  ).toHaveLength(1)
+})
+
+it.each([false, true])(
+  "applies changed grants after confirmation and restores the committed address (navigation failure: %s)",
+  async (navigationFails) => {
+    const user = userEvent.setup()
+    const props = {
+      chatSessionId: "chat-1",
+      workspaceId: "workspace-1",
+      requestedUrl: "https://example.com/original",
+      createStream,
+    }
+    const { rerender } = render(<RemoteBrowserPreview {...props} />)
+    await waitFor(() => expect(connect).toHaveBeenCalled())
+    act(() => streamOptions?.onState?.("connected"))
+    mockConfiguredGrants = [{ domain: "example.com" }, { domain: "cdn.example.com" }]
+    rerender(<RemoteBrowserPreview {...props} />)
+    expect(
+      transportCall.mock.calls.filter(([name]) => name === "browser_session_ensure")
+    ).toHaveLength(1)
+    await user.click(screen.getByRole("button", { name: "browser.remote.grants.reconnect" }))
+    const dialog = screen.getByRole("alertdialog")
+    expect(dialog).toHaveTextContent("browser.remote.grants.ephemeralHint")
+    await user.click(within(dialog).getByRole("button", { name: "browser.remote.grants.cancel" }))
+    expect(transportCall).not.toHaveBeenCalledWith("browser_session_close", expect.anything())
+    let finishClose: () => void = () => {}
+    fireEvent.change(screen.getByRole("textbox", { name: "browser.url.placeholder" }), {
+      target: { value: "https://unsubmitted.example/" },
+    })
+    transportCall.mockImplementation((name: string) => {
+      if (name === "browser_session_close")
+        return new Promise<void>((resolve) => {
+          finishClose = resolve
+        })
+      if (name === "browser_runtime_status") return Promise.resolve(mockRuntimeStatus)
+      if (name === "browser_capability") return Promise.resolve({ capabilities: ["browser"] })
+      if (name === "browser_session_ensure")
+        return Promise.resolve({ id: "browser-2", state: "ready", pages: [], activePageId: null })
+      return Promise.resolve(undefined)
+    })
+    await user.click(screen.getByRole("button", { name: "browser.remote.grants.reconnect" }))
+    await user.click(screen.getByRole("button", { name: "browser.remote.grants.confirm" }))
+    expect(transportCall).toHaveBeenCalledWith("browser_session_close", {
+      browserSessionId: "browser-1",
+    })
+    expect(
+      transportCall.mock.calls.filter(([name]) => name === "browser_session_ensure")
+    ).toHaveLength(1)
+    if (navigationFails) navigate.mockRejectedValueOnce(new Error("domain_blocked"))
+    await act(async () => finishClose())
+    await waitFor(() =>
+      expect(
+        transportCall.mock.calls.filter(([name]) => name === "browser_session_ensure")
+      ).toHaveLength(2)
+    )
+    await waitFor(() => expect(connect).toHaveBeenCalledTimes(2))
+    expect(transportCall).toHaveBeenLastCalledWith(
+      "browser_session_ensure",
+      expect.objectContaining({
+        domainGrants: ["example.com", "cdn.example.com"],
+      })
+    )
+    expect(navigate).toHaveBeenLastCalledWith("https://example.com/")
+    expect(screen.getByRole("textbox", { name: "browser.url.placeholder" })).toHaveValue(
+      navigationFails ? "https://example.com/" : "https://example.com"
+    )
+  }
+)
+
+it("keeps the running profile when permission reconnect follows a changed default profile", async () => {
+  mockProfiles = [{ id: "signed-in", selected: true }]
+  const user = userEvent.setup()
+  const props = { chatSessionId: "chat-1", workspaceId: "workspace-1", createStream }
+  const { rerender } = render(<RemoteBrowserPreview {...props} />)
+  await waitFor(() => expect(connect).toHaveBeenCalled())
+  act(() => streamOptions?.onState?.("connected"))
+  mockProfiles = [{ id: "another-profile", selected: true }]
+  mockConfiguredGrants = [{ domain: "example.com" }, { domain: "cdn.example.com" }]
+  rerender(<RemoteBrowserPreview {...props} />)
+  await user.click(screen.getByRole("button", { name: "browser.remote.grants.reconnect" }))
+  const dialog = screen.getByRole("alertdialog")
+  expect(dialog).toHaveTextContent("browser.remote.grants.persistentHint")
+  await user.click(within(dialog).getByRole("button", { name: "browser.remote.grants.confirm" }))
+  await waitFor(() => expect(connect).toHaveBeenCalledTimes(2))
+  expect(transportCall).toHaveBeenCalledWith(
+    "browser_session_ensure",
+    expect.objectContaining({
+      profileId: "signed-in",
+      domainGrants: ["example.com", "cdn.example.com"],
+    })
+  )
+  mockProfiles = []
+})
+
+it("does not publish an unsubmitted address draft as the page location", async () => {
+  const onNavigated = jest.fn()
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      initialUrl="https://example.com/"
+      onNavigated={onNavigated}
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(connect).toHaveBeenCalled())
+  act(() => streamOptions?.onState?.("connected"))
+  onNavigated.mockClear()
+  fireEvent.change(screen.getByRole("textbox", { name: "browser.url.placeholder" }), {
+    target: { value: "https://draft.example/" },
+  })
+  expect(onNavigated).not.toHaveBeenCalled()
 })
 
 // The remote preview used to carry a bare recorder section and no console or

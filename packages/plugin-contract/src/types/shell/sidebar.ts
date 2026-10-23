@@ -1,0 +1,377 @@
+/**
+ * Pure (icon-free) catalog + layout model for the desktop left navigation rail
+ * (`components/shell/guild-rail.tsx`).
+ *
+ * Kept free of React / lucide imports so `lib/claude/types.ts` (`AppSettings`)
+ * and the persistence layer can import `SidebarLayout` / `DEFAULT_SIDEBAR_LAYOUT`
+ * without pulling the icon set into their module graph. The icon mapping and the
+ * resolver live in `lib/shell/sidebar-nav.ts`.
+ */
+
+/**
+ * Display grouping for the "More" overflow menu — the sections a 20-item
+ * flat list becomes. `explore` is where new capabilities come from,
+ * `agents` is the workforce, `spaces` are work surfaces, `insights` look
+ * back at what happened, `system` is infrastructure, `you` is personal.
+ */
+export type SidebarNavCategory = "explore" | "agents" | "spaces" | "insights" | "system" | "you"
+
+/** Canonical display order of the More-menu sections. */
+export const SIDEBAR_NAV_CATEGORIES: readonly SidebarNavCategory[] = [
+  "explore",
+  "agents",
+  "spaces",
+  "insights",
+  "system",
+  "you",
+]
+
+/** A customizable top-level nav destination on the rail. */
+export interface SidebarNavMeta {
+  /** Stable key — persisted in `SidebarLayout`, also the i18n key. */
+  id: string
+  /** Top-level route under `app/`. */
+  route: string
+  /**
+   * i18n key under `desktop.guildRail.*`. Equal to `id` for every current
+   * item; kept as a separate field so an id can diverge from its label key.
+   */
+  i18nKey: string
+  /** Primary feature vs. auxiliary/utility — drives the default pinned set. */
+  group: "feature" | "auxiliary"
+  /**
+   * Which "More"-menu section the item renders under (label key
+   * `desktop.guildRail.categories.{category}`). Presentation metadata —
+   * unlike `group` it affects nothing but how the overflow list reads.
+   */
+  category: SidebarNavCategory
+  /**
+   * i18n key under `desktop.guildRail.aliases.*` holding a comma-separated list
+   * of extra ⌘K search terms. Set it when a surface absorbs another one whose
+   * name people still type — searching the retired name has to land somewhere.
+   */
+  aliasKey?: string
+  /**
+   * Hidden off the desktop shell: always on mobile (Capacitor), and on the
+   * web unless a paired host advertises the surface's `operation` (see
+   * `getSidebarCatalog`). A desktop-only surface with no host operation is a
+   * constraint of the desktop shell no companion can lift, so it never
+   * appears off desktop.
+   */
+  desktopOnly?: boolean
+  /**
+   * Off the desktop shell (mobile AND web), shown only while the paired host
+   * advertises the surface contract's `operation`. For a surface that is
+   * remote control of something only a host runs: the pet console
+   * (ADR-0219) cares for the DESKTOP's pet, so a phone or browser paired to a
+   * host without `pet_get`, or not paired at all, has nothing to open. Unlike
+   * `desktopOnly` this does not drop the entry on mobile.
+   */
+  hostOperationGated?: boolean
+}
+
+/**
+ * The full customizable catalog, in canonical order. The chat guilds (DM,
+ * Canvas, plugin view containers), the dynamic team list, and the footer
+ * Settings button are NOT here. DM and Settings are fixed; Canvas and the
+ * plugin containers are ordered and hidden through `SidebarLayout.modes`; the
+ * teams follow `conversationSidebar.teamOrder`.
+ */
+export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
+  // === Features (pinned by default) ===
+  {
+    id: "workflows",
+    route: "/workflows",
+    i18nKey: "workflows",
+    group: "feature",
+    category: "agents",
+  },
+  { id: "inbox", route: "/inbox", i18nKey: "inbox", group: "feature", category: "you" },
+  { id: "twin", route: "/twin", i18nKey: "twin", group: "feature", category: "agents" },
+  {
+    id: "discover",
+    route: "/discover",
+    i18nKey: "discover",
+    group: "feature",
+    category: "explore",
+  },
+  {
+    id: "templates",
+    route: "/templates",
+    i18nKey: "templates",
+    group: "feature",
+    category: "explore",
+  },
+  { id: "issues", route: "/issues", i18nKey: "issues", group: "feature", category: "agents" },
+  { id: "skills", route: "/skills", i18nKey: "skills", group: "feature", category: "explore" },
+  { id: "plugins", route: "/plugins", i18nKey: "plugins", group: "feature", category: "explore" },
+  // Custom agents (ADR-0220): the list, each agent's detail, and the blank /
+  // conversational create flows.
+  { id: "agents", route: "/agents", i18nKey: "agents", group: "feature", category: "agents" },
+  { id: "squads", route: "/squads", i18nKey: "squads", group: "feature", category: "agents" },
+  {
+    id: "scheduler",
+    route: "/scheduler",
+    i18nKey: "scheduler",
+    group: "feature",
+    category: "agents",
+  },
+  { id: "goals", route: "/goals", i18nKey: "goals", group: "feature", category: "agents" },
+  // The pet runs on the desktop (ADR-0058 D9); a paired phone or browser
+  // cares for it remotely (ADR-0219), so off desktop the entry appears only
+  // while the paired host advertises remote pet care.
+  {
+    id: "pet",
+    route: "/pet",
+    i18nKey: "pet",
+    group: "feature",
+    category: "agents",
+    hostOperationGated: true,
+  },
+  {
+    id: "browser",
+    route: "/browser",
+    i18nKey: "browser",
+    group: "feature",
+    category: "spaces",
+  },
+  // === Auxiliary (overflow → "More" by default) ===
+  {
+    id: "source-control",
+    route: "/source-control",
+    i18nKey: "sourceControl",
+    group: "auxiliary",
+    category: "spaces",
+  },
+  {
+    id: "agent-runs",
+    route: "/agent-runs",
+    i18nKey: "agentRuns",
+    group: "auxiliary",
+    category: "agents",
+  },
+  // The tracker's low-frequency management surface. `issues` is the daily
+  // entry point and is pinned by default; this one lives in "More" until the
+  // user pins it, rather than doubling the rail for everyone.
+  {
+    id: "workspace",
+    route: "/workspace",
+    i18nKey: "workspace",
+    group: "auxiliary",
+    category: "spaces",
+  },
+  // Reachable from the Go menu (`src-tauri/src/menu.rs`) long before they were
+  // reachable from the navigation — the menubar could go somewhere the rail
+  // could not. In "More" by default, like every other auxiliary surface.
+  { id: "sites", route: "/sites", i18nKey: "sites", group: "auxiliary", category: "spaces" },
+  // Files (ADR-0200, ADR-0223): artifacts, canvas documents, images and
+  // uploads from every conversation, on every client that owns its database —
+  // the phone included, in its own layout.
+  {
+    id: "files",
+    route: "/files",
+    i18nKey: "files",
+    group: "auxiliary",
+    category: "spaces",
+    aliasKey: "files",
+  },
+  // The conversation manager (ADR-0213): every conversation in every
+  // workspace, active and archived, in one table. The chat sidebar stays where
+  // conversations are used; this is where their history is looked after.
+  {
+    id: "conversations",
+    route: "/conversations",
+    i18nKey: "conversations",
+    group: "auxiliary",
+    category: "spaces",
+    aliasKey: "conversations",
+  },
+  { id: "a2ui", route: "/a2ui", i18nKey: "a2ui", group: "auxiliary", category: "spaces" },
+  { id: "memory", route: "/memory", i18nKey: "memory", group: "auxiliary", category: "insights" },
+  // No "observability" entry: the tracing dashboard is a sub-view of `/logs`
+  // → Traces now, not a route of its own, and two rail items pointing at the
+  // same page would both light up as the active destination.
+  { id: "servers", route: "/servers", i18nKey: "servers", group: "auxiliary", category: "system" },
+  // Marketplace integrations (GitHub app installs, webhook subscriptions, the
+  // action approval queue). The route and its surface contract already
+  // existed, but nothing listed it here, so the only way in was one <Link> at
+  // the bottom of Settings > Plugins. Absent from the catalog it was also
+  // absent from the rail, the customizer and the navigation search.
+  {
+    id: "integrations",
+    route: "/integrations",
+    i18nKey: "integrations",
+    group: "auxiliary",
+    category: "explore",
+  },
+  // Absorbed the paired-devices table from Settings → Companion and the host
+  // list from Settings → Remote hosts, so both retired names have to resolve
+  // here in ⌘K — someone who learned "paired devices" will keep typing it.
+  {
+    id: "devices",
+    route: "/devices",
+    i18nKey: "devices",
+    group: "auxiliary",
+    category: "system",
+    aliasKey: "devices",
+  },
+  // The Bot control plane's console. Auxiliary rather than a feature: a Bot is
+  // installed once and then runs unattended, so this is the page you open when
+  // something needs deciding, not one you live in.
+  { id: "bots", route: "/bots", i18nKey: "bots", group: "auxiliary", category: "agents" },
+  { id: "eval", route: "/eval", i18nKey: "eval", group: "auxiliary", category: "insights" },
+  // Not `desktopOnly` (ADR-0035, 2026-08-13): every shell measures its own
+  // Renderer and records captures, and the mobile safe-area capture chip's
+  // "Open" lands here. Host sections appear only when a host is attached.
+  {
+    id: "performance",
+    route: "/performance",
+    i18nKey: "performance",
+    group: "auxiliary",
+    category: "insights",
+  },
+  // The tracing dashboard folded into this route's Traces channel, taking its
+  // own rail entry with it — so "observability" has to resolve here in ⌘K.
+  {
+    id: "logs",
+    route: "/logs",
+    i18nKey: "logs",
+    group: "auxiliary",
+    category: "insights",
+    aliasKey: "logs",
+  },
+  { id: "me", route: "/me", i18nKey: "me", group: "auxiliary", category: "you" },
+] as const
+
+/**
+ * Section `items` for the "More" menu: `SIDEBAR_NAV_CATEGORIES` order,
+ * empty sections dropped. Callers render `category` via
+ * `desktop.guildRail.categories.{category}`.
+ */
+export function groupSidebarNavByCategory<T extends { category: SidebarNavCategory }>(
+  items: readonly T[]
+): { category: SidebarNavCategory; items: T[] }[] {
+  return SIDEBAR_NAV_CATEGORIES.map((category) => ({
+    category,
+    items: items.filter((i) => i.category === category),
+  })).filter((g) => g.items.length > 0)
+}
+
+/**
+ * The ordered, hideable part of the rail's workspace-mode block: Canvas and
+ * the plugin view containers. Unlike the feature catalog these have no "More"
+ * home — a mode is on the rail or it is not — so they take the ordered
+ * two-bucket shape (`lib/shell/layout-partition.ts:resolveOrderedLayout`)
+ * rather than pinned / overflow / hidden.
+ *
+ * Ids: {@link CANVAS_MODE_ID} for Canvas, a container's `fullId`
+ * (`<pluginId>:<containerId>`) for a plugin view container.
+ */
+export interface SidebarModesLayout {
+  /** Every mode id the user has placed, in render order. */
+  order: string[]
+  /** Mode ids taken off the rail. They keep their slot in `order`. */
+  hidden: string[]
+}
+
+/** The workspace-mode id Canvas persists under in {@link SidebarModesLayout}. */
+export const CANVAS_MODE_ID = "canvas"
+
+/**
+ * User customization of the rail. `overflow` is NOT stored — it is derived as
+ * `catalog − pinned − hidden` (in catalog order) by `resolveSidebarLayout`, so
+ * a future catalog addition auto-lands in "More" with no layout edit.
+ */
+export interface SidebarLayout {
+  /** Ordered ids shown directly on the rail. */
+  pinned: string[]
+  /** Ids hidden everywhere (not on the rail, not in "More"). */
+  hidden: string[]
+  /**
+   * Order and visibility of the workspace modes (Canvas, plugin view
+   * containers). Optional and additive: a layout saved before modes were
+   * customizable has no such field and reads as the default — Canvas first,
+   * then the plugin containers by their declared `order`, nothing hidden. The
+   * mutators in `components/shell/use-sidebar-layout.ts` spread the current
+   * layout, so a pin or hide never drops it.
+   */
+  modes?: SidebarModesLayout
+}
+
+/**
+ * Which window edge the rail occupies.
+ *
+ * Deliberately NOT a field on {@link SidebarLayout}: three of that type's
+ * mutators in `components/shell/use-sidebar-layout.ts` build a fresh object
+ * rather than spreading the current one, so an extra field would be dropped on
+ * the next pin/hide; and `reset()` — "restore my pinned icons" — would teleport
+ * the rail across the screen as a side effect. Placement is not content.
+ */
+export type SidebarSide = "left" | "right"
+
+/**
+ * The rail's shipped edge.
+ *
+ * Left — the Discord/Slack arrangement this app has always used, and the one
+ * every muscle memory built against. Moving it to the right shipped briefly as
+ * the default (the chat pane would own the leading edge, the navigation would
+ * cluster with the context workbench) and read as disorienting rather than
+ * tidy, so the right edge stays available in the customizer but is no longer
+ * where the rail lands out of the box. Desktop-only — on the mobile shell the
+ * rail lives inside a drawer, where "which edge" has no meaning.
+ */
+export const DEFAULT_SIDEBAR_SIDE: SidebarSide = "left"
+
+/**
+ * The nav rail's width in px — the `w-14` `guild-rail.tsx` draws.
+ *
+ * The title bar still reads the rail's *measured* width from
+ * `useShellColumnsStore` rather than this number: the rail collapses to zero
+ * while the expanded sidebar hosts the navigation, and the bar has to track
+ * that animation frame for frame. But the rail itself now takes this as a
+ * layout input — a CSS transition cannot interpolate out of the `auto` a `w-14`
+ * class resolves to, so the collapsing box needs the number. The class still
+ * sizes the rail's inner column, and `guild-rail.test.tsx` pins the two
+ * together. Same home as `WORKBENCH_RAIL_WIDTH_PX` in
+ * `@/types/shell/workbench-rail`, for the same reason.
+ */
+export const GUILD_RAIL_WIDTH_PX = 56
+
+/**
+ * Ids that changed name after a layout was already persisted.
+ *
+ * The id doubles as the persistence key, so renaming one silently drops it
+ * from every saved rail — the item does not move, it disappears. Mapped on
+ * read instead, which costs one lookup and keeps the rename invisible.
+ */
+export const LEGACY_SIDEBAR_NAV_IDS: Readonly<Record<string, string>> = {
+  "agent-teams": "squads",
+}
+
+/**
+ * The rail's shipped pins.
+ *
+ * This used to be "every `feature` item", which put eleven icons on the rail
+ * before counting the workspace switcher, DM, Canvas, teams, More and Settings.
+ * Most of them were places you configure once and rarely revisit; these four
+ * are the ones work arrives in — issues you pick up, an inbox that fills up,
+ * workflows you re-run, squads you hand tasks to. The rest are one "More"
+ * click away and any of them can be pinned back from the customizer or a rail
+ * right-click.
+ *
+ * Order matters: it is the render order on the rail.
+ */
+export const DEFAULT_PINNED_IDS = ["issues", "inbox", "workflows", "squads"] as const
+
+/**
+ * Default: the four ids above pinned, everything else in "More", nothing
+ * hidden. `modes` is absent on purpose — no stored order means Canvas first,
+ * then the plugin view containers by their declared `order`, all shown. The
+ * two blocks reset separately (`reset` / `resetModes` in
+ * `components/shell/use-sidebar-layout.ts`), so restoring the pins never
+ * undoes a mode arrangement.
+ */
+export const DEFAULT_SIDEBAR_LAYOUT: SidebarLayout = {
+  pinned: [...DEFAULT_PINNED_IDS],
+  hidden: [],
+}

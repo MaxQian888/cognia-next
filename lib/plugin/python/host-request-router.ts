@@ -16,7 +16,7 @@
  * recorded when the contract started lying about python capabilities.
  */
 
-import { PLUGIN_API_NAMESPACE_CONTRACTS } from "@/packages/plugin-sdk/src/contracts/catalog"
+import { PLUGIN_API_NAMESPACE_CONTRACTS } from "@cognia/plugin-contract/contracts/catalog"
 import type { PluginContext } from "@/types/plugin/plugin"
 
 /** One plugin → host RPC frame, as it arrives from the Rust runtime. */

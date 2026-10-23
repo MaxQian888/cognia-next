@@ -6,7 +6,7 @@
  * caller-supplied `pluginId`; the activated context owns that identity.
  */
 
-import type { PluginToolRegistration } from "@/types/plugin/plugin"
+import type { PluginToolRegistration } from "@cognia/plugin-contract/types/plugin/plugin"
 
 export function definePluginTool(tool: PluginToolRegistration): PluginToolRegistration {
   return tool

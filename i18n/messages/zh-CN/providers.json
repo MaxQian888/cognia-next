@@ -1594,5 +1594,13 @@
     "subscriptionCredentials": "订阅凭据和套餐端点统一在订阅页面管理。可在此配置模型并测试所选账户。",
     "credentialReady": "此连接使用当前订阅账户提供的凭据。",
     "credentialMissing": "请先选择订阅账户，再测试此连接。"
+  },
+  "magpie": {
+    "title": "Magpie 网关",
+    "description": "连接正在运行的 Magpie 网关，加载其中已启用的模型。请先启动 Magpie。",
+    "discover": "发现本机 Magpie",
+    "discovering": "正在发现…",
+    "connected": "已连接 Magpie {version} · {count} 个模型",
+    "failed": "无法连接 Magpie"
   }
 }

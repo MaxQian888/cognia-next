@@ -72,7 +72,7 @@ export type ExternalAgentProtocol =
   | "dsh-sdk" // DeepSeek Harness stdio JSON-RPC SDK runtime (observation-rich, no mid-turn approval)
   | "pi-rpc" // Pi native `pi --mode rpc` JSONL command/event protocol (NOT JSON-RPC, NOT ACP)
   | "aider-cli" // Official one-shot CLI; Cognia-owned history, no per-tool approval wire
-  | "opencode" // Retired OpenCode V1 value retained for saved configurations
+  | "opencode" // Explicit OpenCode V1 server API; independent of V2
   | "opencode-v2" // Current OpenCode V2 native API
   | "a2a" // Agent-to-Agent Protocol (Google)
   | "http" // HTTP/REST API
@@ -1589,8 +1589,13 @@ export function normalizeAgentModelRoleOverrides(
     throw new Error("Invalid model role overrides")
   const record = value as Record<string, unknown>
   if (
-    Object.keys(record).some((key) => key !== "version" && key !== "slots") ||
-    record.version !== 1 ||
+    Object.keys(record).some(
+      (key) =>
+        key !== "version" &&
+        key !== "slots" &&
+        !(record.version === 2 && key === "allowedSpawnModels")
+    ) ||
+    (record.version !== 1 && record.version !== 2) ||
     typeof record.slots !== "object" ||
     record.slots === null ||
     Array.isArray(record.slots)
@@ -1628,6 +1633,23 @@ export function normalizeAgentModelRoleOverrides(
       ...(selection.reasoningEffort !== undefined
         ? { reasoningEffort: selection.reasoningEffort as string }
         : {}),
+    }
+  }
+  if (record.version === 2) {
+    if (
+      record.allowedSpawnModels !== undefined &&
+      (!Array.isArray(record.allowedSpawnModels) || record.allowedSpawnModels.length > 32)
+    )
+      throw new Error("Invalid allowed spawn models")
+    const allowedSpawnModels = (record.allowedSpawnModels as unknown[] | undefined)?.map((raw) => {
+      const binding = normalizeCogniaModelBinding(raw)
+      if (!binding) throw new Error("Invalid allowed spawn model")
+      return binding
+    })
+    return {
+      version: 2,
+      slots,
+      ...(allowedSpawnModels !== undefined ? { allowedSpawnModels } : {}),
     }
   }
   return { version: 1, slots }
@@ -1924,6 +1946,8 @@ export interface UpdateExternalAgentInput {
  * and adjustable per session via synthesized config options.
  */
 export interface CodexAgentOptions {
+  /** Explicit experimental opt-in for current-turn native model settings. */
+  stepModelSwitching?: boolean
   /** Sandbox mode for command execution (`SandboxPolicy` tag). */
   sandboxMode?: "readOnly" | "workspaceWrite" | "dangerFullAccess"
   /** Explicit Cognia per-agent network grant, editable in Settings and the plugin API.

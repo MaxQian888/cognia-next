@@ -9,7 +9,8 @@
  * there. `plugins/` was not in `bundle.resources` either, so RepoWiki
  * (ADR-0146, a whole subsystem with its own 213-case gate suite) was present
  * in the repository and absent from every installed build.
- * `scripts/build/stage-bundled-plugins.mjs` stages the shipping files into the
+ * The plugin artifact set's `desktop-plugins` section carries the shipping
+ * files, and `scripts/build/stage-plugin-artifacts.mjs` stages them into the
  * resource tree. This is the other half, run once at plugin-runtime boot.
  *
  * It deliberately owns no copying of its own. `plugin_install_from_directory`

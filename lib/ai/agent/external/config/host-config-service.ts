@@ -38,6 +38,7 @@
  * chain decision, and it belongs to an operator.
  */
 
+import { resolvePiSubagents } from "./pi-subagents"
 import {
   normalizeAgentModelRoleOverrides,
   normalizeCogniaModelBinding,
@@ -45,6 +46,7 @@ import {
 } from "@cognia/agent-contracts/external-agent"
 import { resolveGatewayModelFacts } from "./gateway-model-facts"
 import { compileTaskModelPlan } from "./model-plan"
+import { nativeSubagentModelBindings } from "./gateway-task"
 import { gatewayModelSlots } from "./model-slots"
 import {
   ExternalAgentConfigConflictError,
@@ -641,11 +643,13 @@ async function normalizeHostModelRoles(
 ): Promise<StoredExternalAgentConfig> {
   const primary = normalizeCogniaModelBinding(config.cogniaModel)
   const overrides = normalizeAgentModelRoleOverrides(config.modelRoles) ?? undefined
-  if (primary && overrides) {
+  if (primary) {
     const facts = await resolveGatewayModelFacts(primary.providerId)
+    const detected = await resolvePiSubagents(config as unknown as ExternalAgentConfig)
     const result = compileTaskModelPlan({
       primary,
-      slots: gatewayModelSlots(config as unknown as ExternalAgentConfig),
+      explicitModels: nativeSubagentModelBindings(detected, primary),
+      slots: gatewayModelSlots(detected),
       layers: [{ source: "config", overrides }],
       modelSupportsReasoning: facts.modelSupportsReasoning,
       ...(facts.modelEffortValues ? { modelEffortValues: facts.modelEffortValues } : {}),
@@ -656,6 +660,10 @@ async function normalizeHostModelRoles(
       )
   }
   const next: StoredExternalAgentConfig = { ...config, cogniaModel: primary, modelRoles: undefined }
+  if (next.metadata?.cogniaPiSubagents !== undefined) {
+    next.metadata = { ...next.metadata }
+    delete next.metadata.cogniaPiSubagents
+  }
   if (primary && overrides) next.modelRoles = overrides
   else delete next.modelRoles
   return next

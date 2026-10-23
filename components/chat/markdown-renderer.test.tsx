@@ -252,6 +252,14 @@ describe("MarkdownRenderer", () => {
     expect(withoutMath?.[2]).toBe("cjkAfter")
   })
 
+  it("drops the raw-HTML stage only for untrusted (third-party) Markdown", () => {
+    const { rerender } = render(<MarkdownRenderer content="x" />)
+    const count = () => Number(screen.getByTestId("react-markdown-config").dataset.rehypeCount)
+    const withRaw = count()
+    rerender(<MarkdownRenderer content="x" untrusted />)
+    expect(count()).toBe(withRaw - 1)
+  })
+
   it("normalizes both LaTeX delimiter styles only when math is enabled", () => {
     const { rerender } = render(<MarkdownRenderer content={"\\(x^2\\) and \\[y^2\\]"} />)
     expect(screen.getByText("$x^2$ and $$y^2$$")).toBeInTheDocument()
@@ -449,6 +457,22 @@ describe("MarkdownRenderer", () => {
   it("renders A2UI fences through the dedicated renderer", () => {
     render(<MarkdownRenderer content={'```a2ui\n{"type":"Text"}\n```'} />)
     expect(document.querySelector("[data-test='a2ui-block']")).toBeTruthy()
+  })
+
+  it("does not run LaTeX preprocessing or file links on untrusted text", () => {
+    render(<MarkdownRenderer untrusted content={"\\[Approve\\] costs $5 and $10"} />)
+    expect(screen.queryByText(/\$\$Approve\$\$/)).toBeNull()
+  })
+
+  it("shows an A2UI fence from a third party as code, never as a live surface", () => {
+    render(
+      <MarkdownRenderer
+        untrusted
+        content={'```a2ui\n{"type":"deleteSurface","surfaceId":"victim"}\n```'}
+      />
+    )
+    expect(document.querySelector("[data-test='a2ui-block']")).toBeNull()
+    expect(screen.getByText(/deleteSurface/)).toBeInTheDocument()
   })
 
   // ── media ─────────────────────────────────────────────────────────────────

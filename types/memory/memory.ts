@@ -1,6 +1,5 @@
 /**
- * Boundary shim — these type contracts moved into `@cognia/memory` so the
- * memory core has zero app imports. Kept so the ~80 existing
- * `@/types/memory/memory` importers stay unchanged.
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract types.
+ * This re-export keeps host imports of `@/types/memory/memory` working.
  */
-export * from "@cognia/memory/types/memory"
+export * from "@cognia/plugin-contract/types/memory/memory"

@@ -16,18 +16,10 @@ import {
   registerRemoteDesktopProvider,
   type RemoteDesktopProviderDefinition,
 } from "@/lib/remote-desktop/provider-registry"
+import type { PluginRemoteDesktopAPI } from "@cognia/plugin-contract/lib/plugin/api/remote-desktop-api"
+export type { PluginRemoteDesktopAPI } from "@cognia/plugin-contract/lib/plugin/api/remote-desktop-api"
 
 export type { RemoteDesktopProviderDefinition }
-
-export interface PluginRemoteDesktopAPI {
-  /**
-   * Register a provider (`remote-desktop:provide`). Returns a disposer.
-   * Throws a `RemoteDesktopProviderError` naming why a definition is refused
-   * (for example `remote_desktop_integration_unavailable` for a mode this
-   * version does not implement).
-   */
-  registerProvider(definition: RemoteDesktopProviderDefinition): () => void
-}
 
 export interface CreateRemoteDesktopAPIOptions {
   hasPermission: (permission: string) => boolean

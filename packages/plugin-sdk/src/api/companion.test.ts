@@ -2,8 +2,8 @@ import * as sdk from "./companion"
 import type { CompanionServerStatus, PluginCompanionAPI } from "./companion"
 
 describe("plugin-sdk api/companion", () => {
-  it("exposes the companion runtime API factory", () => {
-    expect(typeof sdk.createCompanionAPI).toBe("function")
+  it("keeps host wiring off the author surface (plugins reach it through ctx.companion)", () => {
+    expect(sdk).not.toHaveProperty("createCompanionAPI")
   })
 
   it("re-exports companion runtime API and status types", () => {

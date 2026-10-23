@@ -25,7 +25,7 @@ import { EFFORT_SLIDER_LEVELS, THINKING_LEVELS, type ThinkingLevel } from "@/lib
 import { BUILTIN_TOOL_CONFIG_KEYS } from "@/lib/settings/builtin-tools"
 
 /** AI SDK protocol families the sidecar's dispatch table understands. Mirrors
- *  BUILTIN_PROTOCOL_NAMES in sidecar/src/providers/provider-protocol.ts. */
+ *  BUILTIN_PROTOCOL_NAMES in packages/provider-types/src/provider-protocol.ts. */
 export const RESOLVER_PROTOCOLS = [
   "openai",
   "anthropic",

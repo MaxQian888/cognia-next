@@ -20,6 +20,11 @@ jest.mock("@/lib/browser/client", () => ({
     embedSetZoom: jest.fn(async (zoom: number) => ({ ok: true, zoom })),
     embedFind: jest.fn(async () => ({ matches: 2, index: 0 })),
     embedFindClear: jest.fn(async () => {}),
+    embedStartRecord: jest.fn(async () => "1"),
+    embedResumeRecord: jest.fn(async () => "1"),
+    embedStopRecord: jest.fn(async () => "1"),
+    embedDrainRecord: jest.fn(async () => []),
+    embedRefFor: jest.fn(async () => "e1"),
   },
 }))
 
@@ -394,6 +399,16 @@ describe("EmbeddedEngine snapshot cache (ADR-0127)", () => {
 })
 
 describe("EmbeddedEngine", () => {
+  it("uses the embedded recording and ref commands without arbitrary evaluate", async () => {
+    const engine = new EmbeddedEngine()
+    await engine.recordingControl("start")
+    await engine.recordingControl("resume")
+    await engine.recordingControl("drain")
+    await engine.recordingControl("stop")
+    await expect(engine.resolveRecordedTarget("#save")).resolves.toBe("e1")
+    expect(mockClient.embedRefFor).toHaveBeenCalledWith("#save")
+    expect(mockClient.embedStartRecord).toHaveBeenCalled()
+  })
   it("exposes the embedded webview as one activatable page", async () => {
     const engine = new EmbeddedEngine()
     await expect(engine.listPages()).resolves.toEqual([

@@ -7,7 +7,7 @@ import {
   PLUGIN_CHARACTER_AVATAR_WEB_DATA_URL_SOFT_BYTES,
   PLUGIN_CHARACTER_PACK_SOFT_LIMIT,
 } from "./define-character-pack"
-import type { PluginCharacterDef } from "@/types/plugin/plugin-character-pack"
+import type { PluginCharacterDef } from "@cognia/plugin-contract/types/plugin/plugin-character-pack"
 
 function makeCharacter(overrides: Partial<PluginCharacterDef> = {}): PluginCharacterDef {
   return {

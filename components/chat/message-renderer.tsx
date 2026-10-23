@@ -26,6 +26,11 @@ import {
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
 import { AsyncQuestionsCard } from "@/components/chat/message-parts/async-questions-card"
 import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
+import {
+  inboundA2UIBlockCoversParts,
+  sanitizeInboundA2UIBlock,
+} from "@/lib/connectors/adapters/_shared/inbound-a2ui-normalize"
+import { preserveLineBreaks } from "@/lib/connectors/adapters/_shared/inbound-markdown"
 import { InboundLabelChips } from "@/components/chat/message-parts/inbound-label-chips"
 import { SubagentTree } from "@/components/chat/message-parts/subagent-tree"
 import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
@@ -599,6 +604,30 @@ function MessageRendererInner({
     [message.role, message.parts]
   )
 
+  // Text of an inbound IM message was written by a third party.
+  const isInboundIM =
+    message.role === "user" &&
+    Boolean((message as { metadata?: { platformMessage?: unknown } }).metadata?.platformMessage)
+
+  // An inbound IM message's platform-native projection (ADR-0009). Shape-
+  // checked here as well as at projection time: rows written before that
+  // guard existed must not be able to throw inside the transcript. A
+  // withdrawn message shows none of its former content.
+  const inboundA2UI = useMemo(() => {
+    const metadata = (message as { metadata?: Record<string, unknown> }).metadata
+    if (!metadata?.inboundA2UI || metadata.deletedAt !== undefined) return null
+    return sanitizeInboundA2UIBlock(metadata.inboundA2UI)
+  }, [message])
+  // The plain-text parts are the same message's fallback; when the block
+  // already shows all of it, rendering both would print the body twice.
+  const inboundA2UICoversParts = useMemo(
+    () =>
+      inboundA2UI !== null &&
+      message.role === "user" &&
+      inboundA2UIBlockCoversParts(inboundA2UI, message.parts),
+    [inboundA2UI, message.role, message.parts]
+  )
+
   // Mention highlighting pattern over known character names. Honor longest
   // match first so e.g. `@Alice Smith` wins over `@Alice`.
   const mentionPattern = useMemo(() => {
@@ -940,6 +969,7 @@ function MessageRendererInner({
         display={display}
         t={t}
         projectRoot={projectRoot}
+        untrusted={isInboundIM}
       />
     )
     // Give tool cards/rows and dispatch banners a one-shot entrance;
@@ -1056,17 +1086,7 @@ function MessageRendererInner({
                     summary={promptPreambleSummary}
                   />
                 ) : null}
-                {(() => {
-                  const inboundA2UI = (
-                    message as {
-                      metadata?: {
-                        inboundA2UI?: import("@/lib/connectors/adapters/_shared/inbound-a2ui-types").InboundA2UIBlock
-                      }
-                    }
-                  ).metadata?.inboundA2UI
-                  if (!inboundA2UI) return null
-                  return <InboundA2UIRenderer block={inboundA2UI} className="mb-2" />
-                })()}
+                {inboundA2UI ? <InboundA2UIRenderer block={inboundA2UI} className="mb-2" /> : null}
                 {/* ADR-0194: labels plugins attached to an inbound IM message
                     (e.g. laya observe-mode moderation scores). */}
                 <InboundLabelChips
@@ -1078,10 +1098,12 @@ function MessageRendererInner({
                 {/* render once below as a dispatch tree. A finished turn draws its */}
                 {/* process segments (and the tree) inside the fold, the rest after it. */}
                 {message.role === "user" ? (
-                  <UserMessageBody key={message.id} previewText={messageText}>
-                    {segments.map((segment, si) => renderSegment(segment, si))}
-                    <SubagentTree parts={message.parts} mode={agentFlowMode} />
-                  </UserMessageBody>
+                  inboundA2UICoversParts ? null : (
+                    <UserMessageBody key={message.id} previewText={messageText}>
+                      {segments.map((segment, si) => renderSegment(segment, si))}
+                      <SubagentTree parts={message.parts} mode={agentFlowMode} />
+                    </UserMessageBody>
+                  )
                 ) : (
                   <>
                     {turnFold ? (
@@ -1872,6 +1894,13 @@ export const MessageRenderer = memo(
 
 MessageRenderer.displayName = "MessageRenderer"
 
+function containsMention(text: string, pattern: RegExp): boolean {
+  pattern.lastIndex = 0
+  const found = pattern.test(text)
+  pattern.lastIndex = 0
+  return found
+}
+
 function highlightMentions(
   text: string,
   pattern: RegExp,
@@ -1965,6 +1994,7 @@ const MessagePart = memo(function MessagePart({
   display,
   t,
   projectRoot,
+  untrusted,
 }: {
   part: UIMessage["parts"][number]
   partKey: string
@@ -1977,6 +2007,7 @@ const MessagePart = memo(function MessagePart({
   display: ResolvedMessageDisplayOptions
   t: ReturnType<typeof useTranslations>
   projectRoot?: string | null
+  untrusted: boolean
 }) {
   return renderPart(
     part,
@@ -1989,7 +2020,8 @@ const MessagePart = memo(function MessagePart({
     mode,
     display,
     t,
-    projectRoot
+    projectRoot,
+    untrusted
   )
 })
 MessagePart.displayName = "MessagePart"
@@ -2108,7 +2140,8 @@ function renderPart(
   mode: AgentFlowMode,
   display: ResolvedMessageDisplayOptions,
   t: ReturnType<typeof useTranslations>,
-  projectRoot?: string | null
+  projectRoot?: string | null,
+  untrusted = false
 ) {
   const type = (part as { type?: string }).type
   if (!type) return null
@@ -2199,12 +2232,30 @@ function renderPart(
     // tool calls. Rendering it would add a zero-height box that still eats a
     // `gap-2` from `MessageContent`'s flex column.
     if (!text.trim()) return null
-    if (mentionPattern && characterById) {
+    // Only text that actually names a character loses Markdown for the
+    // highlighted spans; everything else renders as Markdown below.
+    if (mentionPattern && characterById && containsMention(text, mentionPattern)) {
       const segments = highlightMentions(text, mentionPattern, characterById)
       return (
         <span key={key} className="whitespace-pre-wrap">
           {segments}
         </span>
+      )
+    }
+
+    // Text a third party sent through an IM platform: no raw HTML, no live
+    // A2UI fences, no project links, and the sender's line breaks kept
+    // (every IM dialect treats a newline as a break).
+    if (untrusted) {
+      return (
+        <MarkdownRenderer
+          key={key}
+          content={preserveLineBreaks(text)}
+          untrusted
+          messageId={messageId}
+          markdown={display.markdown}
+          className="size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+        />
       )
     }
 

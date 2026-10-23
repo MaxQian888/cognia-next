@@ -234,6 +234,7 @@
     "undoSuccess": "对话已恢复"
   },
   "composer": {
+    "contextRegion": "输入框上下文与提示",
     "ariaAttachImage": "添加文件",
     "ariaMessage": "消息",
     "ariaSend": "发送",
@@ -544,6 +545,7 @@
       "confirmTitle": "添加大文件夹？"
     },
     "followUps": {
+      "dontShowAgain": "不再显示",
       "unavailable": "预测需要配置辅助模型，或在聊天设置中启用 Agent 回退。",
       "error": "无法生成预测内容。",
       "configure": "配置",

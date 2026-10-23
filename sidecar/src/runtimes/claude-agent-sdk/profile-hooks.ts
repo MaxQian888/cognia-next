@@ -21,7 +21,7 @@ import type { HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk"
 
 import type { ApprovalAnswer } from "../../policy/permission/approval.ts"
 import type { PermissionSendOptions } from "../../policy/permission/ladder.ts"
-import { toolPermissionDecision } from "../../policy/permission/ladder.ts"
+import { mcpToolAllowlistDenies, toolPermissionDecision } from "../../policy/permission/ladder.ts"
 import {
   buildPluginClassIndex,
   profileDenialMessage,
@@ -60,7 +60,8 @@ export function buildProfileToolHooks({
   profileApprovals,
 }: ProfileToolHookOptions): { PreToolUse: HookCallbackMatcher[] } | undefined {
   const profile = readPermissionProfile(sendOptions.permissionProfile)
-  if (!profile && !sendOptions.toolPermissionRules) return undefined
+  if (!profile && !sendOptions.toolPermissionRules && !sendOptions.mcpToolAllowlist)
+    return undefined
   const pluginClasses = buildPluginClassIndex(sendOptions.pluginTools)
   return {
     PreToolUse: [
@@ -76,6 +77,13 @@ export function buildProfileToolHooks({
             )
             const verdict = profileVerdict(profile, toolName, pluginClasses)
             const toolPolicy = toolPermissionDecision(toolName, sendOptions.toolPermissionRules)
+            // The CLI connects MCP servers itself, so a tool a mode did not
+            // pick can only be stopped here, before it runs.
+            if (mcpToolAllowlistDenies(toolName, sendOptions.mcpToolAllowlist)) {
+              return decision("deny", {
+                permissionDecisionReason: "not in this mode's MCP tool selection",
+              })
+            }
             if (toolPolicy === "deny") {
               return decision("deny", {
                 permissionDecisionReason: "denied by tool permission policy",

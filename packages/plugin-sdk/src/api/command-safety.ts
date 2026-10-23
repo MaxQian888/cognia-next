@@ -9,15 +9,15 @@ export {
   getPluginCommandRulesets,
   registerPluginCommandRules,
   unregisterPluginCommandRules,
-} from "@/lib/plugin/registries/command-safety-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/command-safety-registry"
 
-export { classifyCommand as classifyCommandSafety } from "@/lib/claude/permissions/command-safety"
+export { classifyCommand as classifyCommandSafety } from "@cognia/plugin-contract/lib/claude/permissions/command-safety"
 
 export type {
   CommandClassification,
   CommandVerdict,
   SegmentClassification,
-} from "@/lib/claude/permissions/command-safety"
+} from "@cognia/plugin-contract/lib/claude/permissions/command-safety"
 
 export type {
   PermissionVerdict,
@@ -25,6 +25,9 @@ export type {
   ResolveOptions,
   Ruleset,
   ToolRules,
-} from "@/lib/claude/permissions/ruleset"
+} from "@cognia/plugin-contract/lib/claude/permissions/ruleset"
 
-export type { PluginCommandClassification, PluginCommandRule } from "@/lib/plugin/api/terminal-api"
+export type {
+  PluginCommandClassification,
+  PluginCommandRule,
+} from "@cognia/plugin-contract/lib/plugin/api/terminal-api"

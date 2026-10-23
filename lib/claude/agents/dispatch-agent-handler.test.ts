@@ -390,31 +390,79 @@ describe("runDispatchAgentTool — call modes", () => {
         ...over,
       }) as never
 
-    it("re-dispatches the same subagent with the prior prompt + outcome framed as context", async () => {
-      mockGetRecord.mockResolvedValue(finishedRecord())
-      mockGetDef.mockReturnValue({ id: "coder", name: "coder", description: "d" } as never)
-      mockDispatch.mockResolvedValue(ok("follow-up outcome"))
+    it.each(["error_max_turns", "error_max_budget_usd"])(
+      "collects and resumes budget-exhausted background work (%s)",
+      async (finishReason) => {
+        mockGetDef.mockReturnValue({
+          id: "coder",
+          name: "coder",
+          description: "d",
+          prompt: "investigate",
+        } as never)
+        mockDispatch.mockImplementationOnce(async (_target, _prompt, opts) => ({
+          ...ok("verified entrypoint; callers unchecked", opts?._runId),
+          finishReason,
+        }))
+        const started = await runDispatchAgentTool({
+          sessionId: "chat-1",
+          args: { subagentId: "coder", prompt: "trace callers", background: true },
+        })
+        const runId = started.match(/runId: ([^)]+)/)?.[1]
+        expect(runId).toBeDefined()
+        const collected = await runDispatchAgentTool({
+          sessionId: "chat-1",
+          args: { collect: runId },
+        })
+        expect(collected).toContain("incomplete")
+        expect(collected).toContain(`resume:${JSON.stringify(runId)}`)
+        expect(Object.values(useSubagentRuntimeStore.getState().subAgents)).toEqual([
+          expect.objectContaining({
+            id: runId,
+            status: "failed",
+            errorEnvelope: expect.objectContaining({ code: "budget-exhausted" }),
+          }),
+        ])
+        mockGetRecord.mockResolvedValue(
+          finishedRecord({ runId, status: "error", prompt: "trace callers", resultText: collected })
+        )
+        const resumed = await runDispatchAgentTool({
+          sessionId: "chat-1",
+          args: { resume: runId, prompt: "continue checking callers" },
+        })
+        expect(resumed).toContain("done")
+        expect(mockDispatch.mock.calls[1][1]).toContain("verified entrypoint; callers unchecked")
+        expect(mockDispatch.mock.calls[1][1]).toContain("trace callers")
+      }
+    )
 
-      const out = await runDispatchAgentTool({
-        sessionId: "chat-1",
-        args: { resume: "orig-1", prompt: "fix issue 2" },
-      })
+    it.each(["done", "error"])(
+      "resumes a %s run with the prior prompt + partial findings",
+      async (status) => {
+        mockGetRecord.mockResolvedValue(finishedRecord({ status, mode: "foreground" }))
+        mockGetDef.mockReturnValue({ id: "coder", name: "coder", description: "d" } as never)
+        mockDispatch.mockResolvedValue(ok("follow-up outcome"))
 
-      expect(out).toContain("follow-up outcome")
-      expect(out).toContain("[coder (resumed)]")
-      const [, framedPrompt, opts] = mockDispatch.mock.calls[0]
-      expect(framedPrompt).toContain("You previously worked on this task:")
-      expect(framedPrompt).toContain("audit the auth flow")
-      expect(framedPrompt).toContain("found 3 issues")
-      expect(framedPrompt).toContain("fix issue 2")
-      // The original run's tool flag is inherited when not overridden.
-      expect(opts).toMatchObject({ toolsEnabled: false })
-      // Provenance: original row linked to the continuation.
-      expect(mockUpdateRecord).toHaveBeenCalledWith(
-        "orig-1",
-        expect.objectContaining({ resumedByRunId: expect.any(String) })
-      )
-    })
+        const out = await runDispatchAgentTool({
+          sessionId: "chat-1",
+          args: { resume: "orig-1", prompt: "fix issue 2" },
+        })
+
+        expect(out).toContain("follow-up outcome")
+        expect(out).toContain("[coder (resumed)]")
+        const [, framedPrompt, opts] = mockDispatch.mock.calls[0]
+        expect(framedPrompt).toContain("You previously worked on this task:")
+        expect(framedPrompt).toContain("audit the auth flow")
+        expect(framedPrompt).toContain("found 3 issues")
+        expect(framedPrompt).toContain("fix issue 2")
+        // The original run's tool flag is inherited when not overridden.
+        expect(opts).toMatchObject({ toolsEnabled: false })
+        // Provenance: original row linked to the continuation.
+        expect(mockUpdateRecord).toHaveBeenCalledWith(
+          "orig-1",
+          expect.objectContaining({ resumedByRunId: expect.any(String) })
+        )
+      }
+    )
 
     it("refuses to resume unknown / running / def-less runs with readable messages", async () => {
       mockGetRecord.mockResolvedValue(undefined)

@@ -1,10 +1,5 @@
-/** Host-owned Inbox binding for a conversation projected from Integration events. */
-export interface IntegrationBinding {
-  pluginId: string
-  integrationId: string
-  accountId: string
-  projectionId: string
-  threadKey: string
-  resourceKind?: string
-  resourceId?: string
-}
+/**
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract types.
+ * This re-export keeps host imports of `@/types/integrations/binding` working.
+ */
+export * from "@cognia/plugin-contract/types/integrations/binding"

@@ -404,8 +404,12 @@ export function BrowserRecorderPanel({
   const start = useCallback(async () => {
     if (!pageUrl) return
     setFlow(null)
-    await recorder.start(pageUrl)
-  }, [pageUrl, recorder])
+    try {
+      await recorder.start(pageUrl)
+    } catch (error) {
+      toast.error(t("record.captureFailed", { error: String(error) }))
+    }
+  }, [pageUrl, recorder, t])
 
   /** Load a saved flow into the same state `stop()` fills, so it can replay. */
   const select = useCallback((row: BrowserRecordingRow) => {
@@ -432,12 +436,16 @@ export function BrowserRecorderPanel({
   )
 
   const stop = useCallback(async () => {
-    const finished = await recorder.stop()
-    if (finished) {
-      setFlow(finished)
-      setName(finished.name)
+    try {
+      const finished = await recorder.stop()
+      if (finished) {
+        setFlow(finished)
+        setName(finished.name)
+      }
+    } catch (error) {
+      toast.error(t("record.captureFailed", { error: String(error) }))
     }
-  }, [recorder])
+  }, [recorder, t])
 
   const addAssertion = useCallback(() => {
     const text = assertion.trim()

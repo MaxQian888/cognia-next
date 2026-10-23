@@ -6,7 +6,7 @@
  * (an `ExternalAgentPresetConfig` plus a stable registry `id`) at authoring time.
  */
 
-import type { PluginExternalAgentPresetDef } from "@/types/plugin"
+import type { PluginExternalAgentPresetDef } from "@cognia/plugin-contract/types/plugin/index"
 
 export function defineExternalAgentPreset(
   def: PluginExternalAgentPresetDef

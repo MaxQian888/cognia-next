@@ -1167,6 +1167,57 @@ describe("owned remote session operations", () => {
     }
     expect(h.manager.renameSession).not.toHaveBeenCalled()
   })
+  it("dispatches narrow native-child operations under the existing root stamp", async () => {
+    const change = {
+      operationId: "native-change",
+      nativeChildThreadId: "child",
+      modelId: "model",
+      expectedProcessGeneration: 2,
+      scope: "future-turns" as const,
+    }
+    h.manager.getNativeSubagents = jest.fn(async () => undefined)
+    h.manager.changeNativeSubagentModel = jest.fn(async () => ({
+      operationId: "native-change",
+      status: "applied-awaiting-step" as const,
+    }))
+    await executeRemoteSessionOperation(
+      { ...target, requestId: "native-read", action: { operation: "nativeSubagents" } },
+      true
+    )
+    expect(h.manager.getNativeSubagents).toHaveBeenCalledWith("eac_1", "native-1")
+    await executeRemoteSessionOperation(
+      {
+        ...target,
+        requestId: "native-write",
+        action: { operation: "nativeSubagentModel", change },
+      },
+      false
+    )
+    expect(h.manager.changeNativeSubagentModel).toHaveBeenCalledWith("eac_1", "native-1", change)
+    await expect(
+      executeRemoteSessionOperation(
+        {
+          ...target,
+          requestId: "native-read-mutation",
+          action: { operation: "nativeSubagentModel", change },
+        },
+        true
+      )
+    ).rejects.toThrow("interactive")
+    await expect(
+      executeRemoteSessionOperation(
+        {
+          ...target,
+          requestId: "native-arbitrary",
+          action: {
+            operation: "nativeSubagentModel",
+            change: { ...change, method: "turn/start" },
+          } as never,
+        },
+        false
+      )
+    ).rejects.toThrow()
+  })
   it("requires the mutation channel, rejects arbitrary arguments and preserves typed fork boundaries", async () => {
     await expect(
       executeRemoteSessionOperation(

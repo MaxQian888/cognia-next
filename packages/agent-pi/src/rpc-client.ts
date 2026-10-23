@@ -22,6 +22,7 @@
  */
 
 import { defineAdapterExtension } from "@cognia/agent-contracts/adapter-extension"
+import { withPiSubagentExtensions } from "./subagent-models"
 import type {
   ExternalAgentCompactionCapability,
   ExternalAgentCompactionOptions,
@@ -914,10 +915,31 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     // No references → not even an `await`, so an agent that never opted in
     // takes exactly the pre-ADR-0210 path.
     const packageRefs = piPackageRefsFromMetadata(this._config.metadata)
-    const packages =
+    let packages =
       packageRefs.length > 0
         ? await this.resolveSessionPackages(packageRefs, options.cwd ?? this._config.process?.cwd)
         : EMPTY_SESSION_PACKAGES
+
+    const managed = this._config.metadata?.cogniaPiSubagents as
+      { family: string; version: string; extensions: string[]; packageDir: string } | undefined
+    if (managed && this._config.metadata?.cogniaGatewayTask) {
+      if (
+        !(
+          (managed.family === "nico" && managed.version === "0.80.0") ||
+          (managed.family === "gotgenes" && managed.version === "19.2.2")
+        ) ||
+        !Array.isArray(managed.extensions)
+      )
+        throw new Error("Unsupported Pi subagent package")
+      packages = {
+        ...packages,
+        extensions: [...new Set([...packages.extensions, ...managed.extensions])],
+        tools: [
+          ...new Set([...packages.tools, "subagent", "get_subagent_result", "steer_subagent"]),
+        ],
+        readableRoots: [...new Set([...packages.readableRoots, managed.packageDir])],
+      }
+    }
 
     await this.reclaimCapacity()
 
@@ -1048,7 +1070,11 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
           env: {
             // The package-roots request is set ONLY from resolved packages
             // below — a value typed into the agent's own env is discarded.
-            ...withoutKey(this._config.process?.env, PI_PACKAGE_ROOTS_ENV),
+            ...withPiSubagentExtensions(
+              withoutKey(this._config.process?.env, PI_PACKAGE_ROOTS_ENV),
+              managed?.extensions ?? [],
+              extension
+            ),
             // Plugin package values (`COGNIA_PIPKG_*`) go before every
             // Cognia-owned key, so nothing a package declares can shadow one.
             ...packages.env,

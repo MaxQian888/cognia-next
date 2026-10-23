@@ -1,6 +1,7 @@
 /**
  * E2E: canonical revision-bound desktop nodes render in the editor and survive
- * persistence. Native execution is covered by the co-located executor tests.
+ * persistence. Executor contracts have co-located unit tests; native admission
+ * and persisted run failures live in tauri/automation/workflow-execution.spec.ts.
  */
 
 import { test } from "@/tests/e2e/fixtures/test"

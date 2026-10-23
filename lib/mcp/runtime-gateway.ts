@@ -7,7 +7,7 @@ import type {
 import { getDb } from "@/lib/db/schema"
 import { fingerprintMcpDefinition } from "./server-definition"
 import { openMcpClient, type McpClientInfo, type OpenedMcp } from "./transport"
-import type { McpExecutionGrant, McpExecutionSurface } from "./policy"
+import { gatewayDenial, type McpExecutionGrant, type McpExecutionSurface } from "./policy"
 import { appendMcpAuditLog } from "@/lib/db/mcp-audit-log"
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 15_000
@@ -20,6 +20,12 @@ interface Lease {
   serverId: string
   fingerprint: string
   opened: OpenedMcp
+}
+
+interface LeaseEntry {
+  scopeId: string
+  serverId: string
+  lease: Promise<Lease>
 }
 
 interface CircuitState {
@@ -138,7 +144,7 @@ export class McpRuntimeGateway {
   private readonly connectAttempts: number
   private readonly retryDelayMs: number
   private readonly semaphore: Semaphore
-  private readonly leases = new Map<string, Promise<Lease>>()
+  private readonly leases = new Map<string, LeaseEntry>()
   private readonly circuits = new Map<string, CircuitState>()
   private readonly statuses = new Map<string, McpRuntimeStatusSnapshot>()
   private readonly listeners = new Set<StatusListener>()
@@ -183,14 +189,17 @@ export class McpRuntimeGateway {
     this.bumpMetric("toolCalls")
     try {
       const timeoutMs = Math.min(input.deadlineMs ?? this.toolTimeoutMs, this.toolTimeoutMs)
-      const result = await this.withAuthRefreshRetry(input, (lease, activeInput) =>
-        callToolWithTimeout(
-          lease.opened.client,
-          { name: activeInput.toolName, arguments: activeInput.args ?? {} },
-          timeoutMs,
-          activeInput.signal,
-          "MCP tool call timed out"
-        )
+      const result = await this.withAuthRefreshRetry(
+        input,
+        (lease, activeInput) =>
+          callToolWithTimeout(
+            lease.opened.client,
+            { name: activeInput.toolName, arguments: activeInput.args ?? {} },
+            timeoutMs,
+            activeInput.signal,
+            "MCP tool call timed out"
+          ),
+        true
       )
       void auditOutbound(input, startedAt, this.now(), result.isError ? "tool-error" : undefined)
       return {
@@ -280,6 +289,7 @@ export class McpRuntimeGateway {
   ): Promise<RuntimeDiscoveryResult> {
     const startedAt = this.now()
     try {
+      await this.authorize({ ...input, toolName: "tools/list" }, false)
       const fingerprint = runtimeFingerprint(input.server)
       const cacheId = `${input.server.id}:${fingerprint}`
       const cached = await readCapabilityCache(cacheId, this.now())
@@ -338,12 +348,12 @@ export class McpRuntimeGateway {
   }
 
   async closeScope(scopeId: string): Promise<void> {
-    const entries = [...this.leases.entries()].filter(([key]) => key.startsWith(`${scopeId}:`))
+    const entries = [...this.leases.entries()].filter(([, entry]) => entry.scopeId === scopeId)
     await Promise.all(
-      entries.map(async ([key, leasePromise]) => {
+      entries.map(async ([key, entry]) => {
         this.leases.delete(key)
         try {
-          const lease = await leasePromise
+          const lease = await entry.lease
           this.emit(scopeId, lease.serverId, "closing")
           await lease.opened.close()
           this.emit(scopeId, lease.serverId, "idle")
@@ -356,16 +366,44 @@ export class McpRuntimeGateway {
 
   async reconnect(scopeId: string, serverId: string): Promise<void> {
     this.circuits.delete(serverId)
-    const matching = [...this.leases.keys()].filter((key) =>
-      key.startsWith(`${scopeId}:${serverId}:`)
-    )
+    await this.closeLeases((entry) => entry.scopeId === scopeId && entry.serverId === serverId)
+  }
+
+  /** Close every warm lease for `serverId`, in all scopes (trust revoked or server disabled). */
+  async closeServer(serverId: string): Promise<void> {
+    await this.closeLeases((entry) => entry.serverId === serverId)
+  }
+
+  private async closeLeases(matches: (entry: LeaseEntry) => boolean): Promise<void> {
+    const matching = [...this.leases.entries()].filter(([, entry]) => matches(entry))
     await Promise.all(
-      matching.map(async (key) => {
-        const lease = this.leases.get(key)
-        this.leases.delete(key)
-        if (lease) await lease.then((value) => value.opened.close()).catch(() => undefined)
+      matching.map(async ([key, entry]) => {
+        if (this.leases.get(key) === entry) this.leases.delete(key)
+        await entry.lease.then((value) => value.opened.close()).catch(() => undefined)
       })
     )
+  }
+
+  /**
+   * Policy for every operation, not only when a lease is opened. A warm lease
+   * is keyed by the definition fingerprint, which disabling, blocking or
+   * narrowing a grant does not change, so without this a revoked server kept
+   * executing through its existing connection. Saved per-tool deny rules
+   * (exact, glob and portable deny policies) are enforced here as well; the
+   * transport only sees the server, never which tool is being called.
+   */
+  private async authorize(input: RuntimeInvokeInput, toolCall: boolean): Promise<void> {
+    const denial = gatewayDenial(input, toolCall, this.now())
+    if (!denial) return
+    if (denial.revoke === "server") await this.closeServer(input.server.id)
+    else if (denial.revoke === "scope") {
+      // Not `reconnect`: a policy refusal says nothing about server health,
+      // so it must not reset the circuit breaker.
+      await this.closeLeases(
+        (entry) => entry.scopeId === input.scopeId && entry.serverId === input.server.id
+      )
+    }
+    throw new Error(denial.message)
   }
 
   async invalidateCapabilities(serverId: string): Promise<void> {
@@ -382,23 +420,26 @@ export class McpRuntimeGateway {
     const existing = this.leases.get(key)
     if (existing) {
       this.bumpMetric("warmReuses")
-      return existing
+      return existing.lease
     }
 
     const pending = this.connect(input, key, fingerprint)
-    this.leases.set(key, pending)
+    const entry: LeaseEntry = { scopeId: input.scopeId, serverId: input.server.id, lease: pending }
+    this.leases.set(key, entry)
     try {
       return await pending
     } catch (error) {
-      if (this.leases.get(key) === pending) this.leases.delete(key)
+      if (this.leases.get(key) === entry) this.leases.delete(key)
       throw error
     }
   }
 
   private async withAuthRefreshRetry<T>(
     input: RuntimeInvokeInput,
-    operation: (lease: Lease, activeInput: RuntimeInvokeInput) => Promise<T>
+    operation: (lease: Lease, activeInput: RuntimeInvokeInput) => Promise<T>,
+    toolCall = false
   ): Promise<T> {
+    await this.authorize(input, toolCall)
     try {
       return await operation(await this.getLease(input), input)
     } catch (error) {
@@ -413,6 +454,7 @@ export class McpRuntimeGateway {
           : {}),
       }
       this.bumpMetric("retries")
+      await this.authorize(retryInput, toolCall)
       return operation(await this.getLease(retryInput), retryInput)
     }
   }

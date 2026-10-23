@@ -176,7 +176,7 @@ export function buildDispatchAgentSchema(available: DispatchAgentAvailableSubage
       resume: {
         type: "string",
         description:
-          "runId of a FINISHED run to continue: re-dispatches the same subagent with its prior " +
+          "runId of a FINISHED or budget-exhausted incomplete run to continue: re-dispatches the same subagent with its prior " +
           "prompt + outcome as context. Requires `prompt` (the follow-up).",
       },
     },
@@ -194,7 +194,7 @@ function buildDescription(available: DispatchAgentAvailableSubagent[]): string {
     "`{subagentId, prompt}` for a lone subagent. Add `background:true` to detach a run and get a " +
     'runId back immediately; `{collect:"<runId>"}` (or `{collect:["<a>","<b>"], timeoutMs}`) awaits ' +
     'detached runs, `{cancel:"<runId>"}` stops one, and `{resume:"<runId>", prompt:"<follow-up>"}` ' +
-    "continues a finished run with its prior prompt + outcome as context. `model` overrides the " +
+    "continues a finished or budget-exhausted incomplete run with its prior prompt + partial findings as context. `model` overrides the " +
     "model for one dispatch. Write prompts that are self-contained: the subagent sees none of this " +
     "conversation, and only its final report comes back to you. Subagents cannot ask you questions, " +
     "so state assumptions and the exact deliverable (paths, identifiers, format) in the prompt."

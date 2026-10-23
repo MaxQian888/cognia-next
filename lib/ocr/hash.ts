@@ -1,7 +1,5 @@
 /**
- * Boundary shim — the implementation moved into `@cognia/ocr` (the pure,
- * dependency-injected OCR core). Kept so existing `@/lib/ocr/hash` importers and
- * the app-side composition roots (runtime.ts, deps.ts, cache.ts, credentials.ts)
- * stay unchanged.
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract.
+ * This re-export keeps host imports of `@/lib/ocr/hash` working.
  */
-export * from "@cognia/ocr/hash"
+export * from "@cognia/plugin-contract/lib/ocr/hash"

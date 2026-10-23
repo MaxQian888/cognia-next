@@ -24,6 +24,7 @@
  * a header or a base URL — because it crosses the wire to a paired device.
  */
 
+import { piSubagentSupport } from "./pi-subagents"
 import { getAllProviders } from "@cognia/provider-types/provider"
 import type { CustomProviderSettings, UserProviderSettings } from "@cognia/provider-types/provider"
 import type { AppSettings } from "@cognia/agent-config-types"
@@ -36,6 +37,7 @@ import type {
 } from "@/types/agent/external-agent"
 import { gatewayModelSlots } from "./model-slots"
 import { compileTaskModelPlan, type TaskModelPlanResult } from "./model-plan"
+import { nativeSubagentModelBindings } from "./gateway-task"
 import { overlayHostProviderKeys } from "@/lib/host-secrets/provider-key-store"
 import { listSubscriptionProviders } from "@/lib/subscription/core/provider-registry"
 import type { SubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
@@ -407,7 +409,14 @@ export function compileEditorModelPlan(input: {
 }): TaskModelPlanResult {
   return compileTaskModelPlan({
     primary: input.primary,
-    slots: gatewayModelSlots(input.config),
+    explicitModels: nativeSubagentModelBindings(input.config, input.primary),
+    // Editor checks are synchronous. Pi discovery is host I/O, repeated by
+    // host-config-service before save and manager before minting a task.
+    // Validate the role shape here; only a detected plugin exposes the UI row.
+    slots:
+      input.config.protocol === "pi-rpc" && !piSubagentSupport(input.config)
+        ? [{ id: "subagent.default", kind: "child-default", evidence: "pending host Pi discovery" }]
+        : gatewayModelSlots(input.config),
     layers: input.layers,
     ...cogniaModelReasoningFacts(input.primary.providerId, input),
   })

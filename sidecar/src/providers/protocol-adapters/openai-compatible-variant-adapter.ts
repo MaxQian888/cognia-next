@@ -9,7 +9,7 @@
 // renderer round-trip path is the planned phase-2 escape hatch).
 
 import { getPath } from "./json-path-lite.ts"
-import { GENERIC_REASONING_EFFORT } from "../reasoning-effort-tables.ts"
+import { GENERIC_REASONING_EFFORT } from "@cognia/provider-types/reasoning-effort-tables"
 import type {
   AdapterUsage,
   FetchLike,

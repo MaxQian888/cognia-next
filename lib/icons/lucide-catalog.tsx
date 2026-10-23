@@ -31,7 +31,24 @@ import { createElement, forwardRef } from "react"
 import type { LucideIcon, LucideProps } from "lucide-react"
 
 import catalog from "./lucide-catalog.generated.json"
-import { toLucideIconName } from "./lucide-icon-name"
+import {
+  getLucideExportNames,
+  getLucideIconNames,
+  hasLucideExport,
+  hasLucideIcon,
+  lucideExportCatalogName,
+  toCatalogIconName,
+} from "@cognia/plugin-contract/lib/icons/lucide-icon-names"
+
+// Name lookups live with the plugin contract, which validates manifest icons
+// against the same generated name spaces.
+export {
+  getLucideExportNames,
+  getLucideIconNames,
+  hasLucideExport,
+  hasLucideIcon,
+  toCatalogIconName,
+}
 
 type IconNode = Array<[string, Record<string, string | number>]>
 
@@ -41,13 +58,7 @@ interface CatalogEntry {
 }
 
 // JSON inference loses the generated SVG node tuples; catalog parity tests validate them.
-const generated = catalog as unknown as {
-  entries: Record<string, CatalogEntry>
-  iconNames: string[]
-  exportNames: Record<string, string>
-}
-const entries = generated.entries
-const iconNames = new Set(generated.iconNames)
+const entries = (catalog as unknown as { entries: Record<string, CatalogEntry> }).entries
 const componentCache = new Map<string, LucideIcon>()
 
 function hasAccessibilityProp(props: Record<string, unknown>): boolean {
@@ -103,10 +114,6 @@ function createCatalogIcon(name: string, entry: CatalogEntry): LucideIcon {
   return CatalogIcon
 }
 
-export function hasLucideIcon(name: string): boolean {
-  return iconNames.has(name)
-}
-
 export function getLucideIcon(name: string): LucideIcon | null {
   const entry = entries[name]
   if (!entry) return null
@@ -117,47 +124,9 @@ export function getLucideIcon(name: string): LucideIcon | null {
   return component
 }
 
-export function getLucideIconNames(): readonly string[] {
-  return generated.iconNames
-}
-
 export function getLucideExport(name: string): LucideIcon | null {
-  const catalogName = generated.exportNames[name]
+  const catalogName = lucideExportCatalogName(name)
   return catalogName ? getLucideIcon(catalogName) : null
-}
-
-export function getLucideExportNames(): readonly string[] {
-  return Object.keys(generated.exportNames)
-}
-
-export function hasLucideExport(name: string): boolean {
-  return Object.prototype.hasOwnProperty.call(generated.exportNames, name)
-}
-
-/**
- * The catalog entry a caller-written name refers to, or null.
- *
- * There are two name spaces, and a name can be valid in either. `iconNames`
- * holds lucide's canonical icons; `exportNames` holds what the package
- * exports, which is where its own renames survive as aliases — the `history`
- * icon is exported as `History` and `HistoryIcon` but keyed `RotateCcwClock`
- * in the record, so a caller naming `History` is naming a real icon that a
- * `hasLucideIcon` check alone answers "no" to.
- *
- * The kebab-case form is tried after both, because it is the spelling the
- * retired `PLUGIN_CONTEXT_PANEL_ICONS` allowlist published: an installed
- * plugin pinned to `"file-text"` — or `"history"` — is following the
- * documentation it was written against. Exact matches win, so no already-valid
- * name changes meaning.
- */
-export function toCatalogIconName(name: string): string | null {
-  if (hasLucideIcon(name)) return name
-  const exported = generated.exportNames[name]
-  if (exported) return exported
-  const pascal = toLucideIconName(name)
-  if (pascal === name) return null
-  if (hasLucideIcon(pascal)) return pascal
-  return generated.exportNames[pascal] ?? null
 }
 
 /**
@@ -193,7 +162,7 @@ export const lucideIcons: Record<string, LucideIcon | undefined> = new Proxy(
     get: (_target, property) =>
       typeof property === "string" ? (getLucideIcon(property) ?? undefined) : undefined,
     has: (_target, property) => typeof property === "string" && hasLucideIcon(property),
-    ownKeys: () => [...generated.iconNames],
+    ownKeys: () => [...getLucideIconNames()],
     getOwnPropertyDescriptor: (_target, property) =>
       typeof property === "string" && hasLucideIcon(property)
         ? { configurable: true, enumerable: true }

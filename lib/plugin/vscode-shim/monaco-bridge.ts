@@ -94,6 +94,14 @@ import {
   type MonacoRuntime,
   type WireCodeAction,
 } from "./monaco-results"
+import type {
+  MonacoMarker,
+  MonacoRange,
+} from "@cognia/plugin-contract/lib/plugin/vscode-shim/monaco-bridge"
+export type {
+  MonacoRange,
+  MonacoMarker,
+} from "@cognia/plugin-contract/lib/plugin/vscode-shim/monaco-bridge"
 
 // ────────────────────────────────────────────────────────────────────────
 // Type aliases (Monaco-shaped, intentionally minimal)
@@ -102,13 +110,6 @@ import {
 export interface MonacoPosition {
   lineNumber: number
   column: number
-}
-
-export interface MonacoRange {
-  startLineNumber: number
-  startColumn: number
-  endLineNumber: number
-  endColumn: number
 }
 
 export interface MonacoTextModel {
@@ -223,13 +224,6 @@ export interface MonacoCodeLens {
 export interface MonacoLocation {
   uri: string
   range: MonacoRange
-}
-
-export interface MonacoMarker {
-  severity: "error" | "warning" | "info" | "hint"
-  message: string
-  range: MonacoRange
-  source?: string
 }
 
 // ────────────────────────────────────────────────────────────────────────

@@ -11,17 +11,23 @@ export function BrowserLoadError({
   message,
   timedOut = false,
   onRetry,
+  retryLabel,
+  retryDisabled = false,
   onEditAddress,
   onOpenExternal,
   onContinue,
+  continueLabel,
 }: {
   url: string
   message?: string | null
   timedOut?: boolean
   onRetry: () => void
+  retryLabel?: string
+  retryDisabled?: boolean
   onEditAddress?: () => void
   onOpenExternal?: () => void
   onContinue?: () => void
+  continueLabel?: string
 }) {
   const t = useTranslations("browser.loadError")
   const actionsT = useTranslations("browser.actions")
@@ -47,9 +53,10 @@ export function BrowserLoadError({
             size="sm"
             className="h-auto min-h-8 max-w-full whitespace-normal py-1.5"
             onClick={onRetry}
+            disabled={retryDisabled}
           >
             <RotateCwIcon aria-hidden />
-            {t("retry")}
+            {retryLabel ?? t("retry")}
           </Button>
           {onEditAddress && (
             <Button
@@ -82,7 +89,7 @@ export function BrowserLoadError({
                 className="h-auto min-h-8 max-w-full whitespace-normal py-1.5"
                 onClick={onContinue}
               >
-                {t("continue")}
+                {continueLabel ?? t("continue")}
               </Button>
             )}
           </div>

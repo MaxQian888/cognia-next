@@ -20,32 +20,14 @@ import type { TrustedMemoryCaller } from "@cognia/memory/types/caller"
 import { memoryRowWithinNamespaces } from "@cognia/memory/types/caller"
 import { clampImportance } from "./store-memory"
 import { localUserCaller, resolveMemoryCaller } from "./caller"
-
-export interface UpdateExternalMemoryPatch {
-  text?: string
-  importance?: number
-  tags?: string[]
-  key?: string
-  pinned?: boolean
-}
-
-export type MutateExternalMemoryResult =
-  | { ok: true; version: number }
-  | {
-      ok: false
-      reason:
-        | "disabled"
-        | "temporary"
-        | "pii_blocked"
-        | "not_found"
-        | "policy_denied"
-        | "scope_denied"
-        | "unauthorized_namespace"
-        | "version_conflict"
-        | "idempotency_key_reused"
-      /** Present on `version_conflict` — the row's version at commit time. */
-      currentVersion?: number
-    }
+import type {
+  MutateExternalMemoryResult,
+  UpdateExternalMemoryPatch,
+} from "@cognia/plugin-contract/lib/memory/api/mutate-memory"
+export type {
+  MutateExternalMemoryResult,
+  UpdateExternalMemoryPatch,
+} from "@cognia/plugin-contract/lib/memory/api/mutate-memory"
 
 export interface ExternalMutationContext {
   /**

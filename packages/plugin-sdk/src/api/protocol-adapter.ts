@@ -1,22 +1,18 @@
 /**
  * Plugin SDK — `protocol-adapter` capability surface.
  *
- * Re-exports the authoring helper, manifest bridge, and provider protocol
- * adapter registries used for declarative and renderer-side code adapters.
+ * Exports the authoring helper and the provider protocol adapter registries
+ * used for declarative and renderer-side code adapters. The host registers
+ * manifest-declared adapters itself.
  */
 
 export { defineProtocolAdapter } from "../define/define-protocol-adapter"
-
-export {
-  registerProtocolAdaptersForPlugin,
-  unregisterProtocolAdaptersForPlugin,
-} from "@/lib/plugin/bridge/protocol-adapters-bridge"
 
 export type {
   ProtocolAdaptersBridgeError,
   ProtocolAdaptersBridgeOptions,
   ProtocolAdaptersBridgeResult,
-} from "@/lib/plugin/bridge/protocol-adapters-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/protocol-adapters-bridge"
 
 export {
   getCodeAdapterExecutor,
@@ -41,4 +37,4 @@ export type {
   PluginProtocolAdapterDef,
   ProtocolAdapterSpec,
   SidecarCodeAdapterSpec,
-} from "@/types/plugin/plugin-protocol-adapter"
+} from "@cognia/plugin-contract/types/plugin/plugin-protocol-adapter"

@@ -97,10 +97,16 @@ import {
   renderHarnessSections,
 } from "@/lib/harness/render"
 import {
-  buildMcpServerMapResolved,
   listEnabledMcpServers,
+  loadMcpServerToolNames,
   resolveMcpDisallowedToolNames,
 } from "@/lib/db/mcp-servers"
+import {
+  filterServersByModeSelection,
+  buildModeMcpToolAllowlist,
+  modeMcpSelection,
+  resolveModeMcpDeniedToolNames,
+} from "@/lib/mcp/mode-selection"
 import { normalizeToolPermissionRules } from "@/lib/mcp/tool-rules"
 import { getTeam } from "@/lib/db/teams"
 import type { ConversationOverrideRow, AdapterInstanceRow } from "@/lib/db/connector-types"
@@ -203,7 +209,10 @@ import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_PROMPT } from "@/lib/agent/prompts/plan-mode"
 import { BRIEF_MODE_PROMPT } from "@/lib/agent/prompts/brief-mode"
-import { resolveProviderAttemptOptions } from "./provider-attempt-options"
+import {
+  resolveProviderAttemptOptions,
+  applyProviderAttemptLimits,
+} from "./provider-attempt-options"
 import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
 import {
   applyCapabilityIdDelta,
@@ -1778,7 +1787,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const sessionModelMatchesAgent =
     sessionModelAgentId !== null && sessionModelAgentId === ctx.externalRuntimeId
   const sessionModel =
-    sessionModelBelongsToAgent && !sessionModelMatchesAgent ? undefined : session?.model
+    (sessionModelBelongsToAgent && !sessionModelMatchesAgent) ||
+    // Auto is a routing request, not a provider model. Keep the stored choice
+    // for re-enabling Auto, but inherit the normal model chain while it is off.
+    (session?.model === "auto" && !appSettings?.autoRouting?.enabled && !ctx.externalRuntimeId)
+      ? undefined
+      : session?.model
   const sessionProviderOverride = sessionModelBelongsToAgent ? undefined : session?.providerOverride
   let model: string | undefined =
     grant?.model ??
@@ -3441,6 +3455,8 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   //   2. character.mcpServerIds (if defined) → intersect with enabled
   //   3. team.mcpServerIds      (if team session, neither override nor char)
   //   4. fall back to all enabled servers
+  // then a grant adjusts it, and a custom mode's MCP tool picks and the tool
+  // filter narrow it.
   try {
     // CLI / headless callers inject `preloadedMcpServers` (incl. `[]`) so the
     // resolver never touches Dexie; desktop leaves it undefined → Dexie lookup.
@@ -3482,6 +3498,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       chosen = enabled.filter((srv) => wanted.has(srv.id))
     }
 
+    // A custom mode's MCP tool picks narrow the final subset to the servers
+    // they name, after the grant so a grant cannot re-attach a server the mode
+    // left out. The tool-level half is applied with the deny lists below.
+    const modeMcp = modeMcpSelection(activeMode)
+    if (modeMcp) chosen = filterServersByModeSelection(chosen, modeMcp)
+
     // Apply the configurable filter's MCP-server subset on top of the
     // character/team/member resolution above (deny wins, allow intersects).
     if (toolFilter && toolFilter.mode !== "all" && toolFilter.mcpServerIds?.length) {
@@ -3505,40 +3527,24 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // a pattern the user saved has to keep covering tools the server grew
       // after they saved it.
       for (const tool of await resolveMcpDisallowedToolNames(chosen)) denied.add(tool)
+      if (modeMcp) {
+        // The allowlist is what the runtime enforces, including tools a
+        // server adds after discovery. The expanded deny list repeats it for
+        // the tools already known, so the model is never offered them.
+        opts.mcpToolAllowlist = buildModeMcpToolAllowlist(chosen, modeMcp)
+        for (const tool of await resolveModeMcpDeniedToolNames(
+          chosen,
+          modeMcp,
+          loadMcpServerToolNames
+        ))
+          denied.add(tool)
+      }
       if (denied.size > 0) opts.disallowedTools = [...denied]
 
       // Desktop injects send-time OAuth bearer headers for remote (sse/http)
       // servers from the keyring; web / CLI stay header-only (no keyring).
-      const { isTauri } = await import("@/lib/tauri")
-      if (isTauri()) {
-        // Inject the endpoint/scope-partitioned token and refresh near-expiry
-        // credentials before handing a static header to the Anthropic/AI SDK
-        // relays. The governed renderer runtime additionally handles explicit
-        // 401s through its reconnect-once credential resolver.
-        const [{ buildMcpServerMapWithAuth }, { mcpOAuthLoadEntry, mcpOAuthRefresh }] =
-          await Promise.all([import("@/lib/db/mcp-servers"), import("@/lib/mcp/oauth-tauri")])
-        opts.mcpServers = await buildMcpServerMapWithAuth(chosen, {
-          loadEntry: (serverId, legacyName) => {
-            const server = chosen.find((candidate) => candidate.id === serverId)
-            return mcpOAuthLoadEntry(
-              serverId,
-              legacyName,
-              server ? { transport: server.transport, config: server.config } : undefined
-            )
-          },
-          refresh: (serverName) => {
-            const server = chosen.find((candidate) => candidate.name === serverName)
-            return server
-              ? mcpOAuthRefresh(server.id, {
-                  transport: server.transport,
-                  config: server.config,
-                })
-              : Promise.resolve(undefined)
-          },
-        })
-      } else {
-        opts.mcpServers = await buildMcpServerMapResolved(chosen)
-      }
+      const { buildRunMcpServerMap } = await import("@/lib/mcp/run-server-map")
+      opts.mcpServers = await buildRunMcpServerMap(chosen)
 
       // `declared_by` locators for hook tool_provenance — same keys as the
       // wire map above. File-loaded rows carry `declaredBy` from the loader;
@@ -6219,6 +6225,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // Recompute after reasoning controls are resolved: some adapters add their
+  // thinking budget to the text output cap rather than including it in that cap.
+  if (opts.compaction?.enabled) {
+    opts.compaction = applyProviderAttemptLimits(opts, appSettings ?? undefined).compaction
+  }
+
   // --- Router + Fusion seal (ADR-0188) --------------------------------------
   // Last, so the route is fixed for the provider, model and credentials the
   // send really carries. The run itself is created right before dispatch.
@@ -6342,6 +6354,22 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     applyUnattendedPermissionProfile(opts, grant, {
       pluginPermissions: (pluginId) => plugins[pluginId]?.manifest.permissions ?? [],
       attestSandbox: (ref) => sandboxSessionRuntime.attest(ref),
+    })
+  }
+
+  const claudeRuntimeAdapter =
+    opts.execution?.runtimeAdapter ??
+    ((opts.provider ?? "anthropic") === "anthropic" ? "claude-agent-sdk" : "ai-sdk")
+  if (
+    claudeRuntimeAdapter === "claude-agent-sdk" &&
+    !supportAgent &&
+    !readOnlyAside &&
+    appSettings?.claudeCodeRuntime
+  ) {
+    const { claudeCodeRuntimeOptions } = await import("./claude-sdk-rollout")
+    opts.claudeAgentSdk = claudeCodeRuntimeOptions(appSettings.claudeCodeRuntime, {
+      unattended: opts.permissionProfile !== undefined,
+      current: opts.claudeAgentSdk,
     })
   }
 

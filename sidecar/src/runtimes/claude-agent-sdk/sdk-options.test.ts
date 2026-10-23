@@ -24,6 +24,15 @@ const apply = (
   base: Options & Record<string, unknown> = {}
 ) => applyClaudeAgentSdkOptions({ ...base }, nested, ctx)
 
+test("nested user namespaces are explicitly off even when SDK configuration is omitted", () => {
+  assert.equal(apply(undefined).options.sandbox?.allowNestedUserNamespaces, false)
+  assert.equal(apply({ version: 1 }).options.sandbox?.allowNestedUserNamespaces, false)
+  assert.equal(
+    apply({ version: 1, sandbox: { enabled: true } }).options.sandbox?.allowNestedUserNamespaces,
+    false
+  )
+})
+
 test("native content validation handles missing roots, file links, directory cycles, and malformed roots", () => {
   assert.throws(() => validateNativeSkillPaths("/missing-cognia-sdk-root", []), /cwd must resolve/)
   withTempWorkspace((root) => {
@@ -206,7 +215,7 @@ function withTempWorkspace(run: (root: string) => void) {
 
 test("a missing block isolates native discovery, while malformed blocks throw", () => {
   assert.deepEqual(apply(undefined, {}), {
-    options: { settingSources: [], skills: [] },
+    options: { settingSources: [], skills: [], sandbox: { allowNestedUserNamespaces: false } },
     warnings: [],
   })
   for (const nested of [null, "nope", 7]) {

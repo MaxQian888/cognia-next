@@ -43,4 +43,4 @@ export type {
   IntegrationVerifiedDelivery,
   PluginIntegrationDef,
   PluginIntegrationsAPI,
-} from "@/types/plugin/plugin-integration"
+} from "@cognia/plugin-contract/types/plugin/plugin-integration"

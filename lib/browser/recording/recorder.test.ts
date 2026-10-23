@@ -46,6 +46,13 @@ afterEach(() => {
 })
 
 describe("start", () => {
+  it("rolls back an unsuccessful start instead of retaining an armed take", async () => {
+    startRecord.mockRejectedValueOnce(new Error("start failed"))
+    const rec = recorder()
+    await expect(rec.start(BASE)).rejects.toThrow("start failed")
+    expect(rec.recording).toBe(false)
+    expect(rec.current()).toEqual([])
+  })
   it("arms the page and seeds the flow with the base url", async () => {
     const rec = recorder()
     await rec.start(BASE)
@@ -230,6 +237,19 @@ describe("editing", () => {
 })
 
 describe("stop", () => {
+  it("does not return a partial flow after a permanent drain failure", async () => {
+    const rec = recorder()
+    await rec.start(BASE)
+    drainRecord.mockRejectedValue(
+      Object.assign(new Error("recording is unavailable"), {
+        code: "browser_recording_unavailable",
+      })
+    )
+    await rec.poll()
+    await expect(rec.stop()).rejects.toThrow("recording is unavailable")
+    expect(stopRecord).toHaveBeenCalled()
+    expect(rec.recording).toBe(false)
+  })
   it("takes a final drain, disarms the page, and returns the flow", async () => {
     drainRecord.mockResolvedValueOnce([clickStep("#go")])
     now.mockReturnValueOnce(1000).mockReturnValueOnce(2000)

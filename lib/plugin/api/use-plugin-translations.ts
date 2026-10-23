@@ -24,8 +24,8 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { TranslationParams } from "@/types/plugin/plugin"
 
 import { translatePluginMessage } from "./i18n-api"
-
-export type PluginTranslate = (key: string, params?: TranslationParams) => string
+import type { PluginTranslate } from "@cognia/plugin-contract/lib/plugin/api/use-plugin-translations"
+export type { PluginTranslate } from "@cognia/plugin-contract/lib/plugin/api/use-plugin-translations"
 
 /**
  * Translate this plugin's keys inside a React component.

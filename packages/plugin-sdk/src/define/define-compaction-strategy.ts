@@ -7,7 +7,7 @@
  * fraction tuning a custom context-compaction strategy declares).
  */
 
-import type { PluginCompactionStrategyDef } from "@/types/plugin/plugin-compaction-strategy"
+import type { PluginCompactionStrategyDef } from "@cognia/plugin-contract/types/plugin/plugin-compaction-strategy"
 
 export function defineCompactionStrategy(
   def: PluginCompactionStrategyDef

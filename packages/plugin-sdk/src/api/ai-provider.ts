@@ -1,28 +1,18 @@
 /**
  * Plugin SDK - `ai-provider` capability surface.
  *
- * Re-exports the declarative authoring helper, manifest bridge, and runtime
- * plugin AI provider API that backs `ctx.ai.registerProvider(...)`.
+ * Exports the declarative authoring helper and the types behind
+ * `ctx.ai.registerProvider(...)`. The host builds `ctx.ai` and registers
+ * manifest-declared providers itself; neither is on the author surface.
  */
 
 export { defineAiProvider } from "../define/define-ai-provider"
-
-export {
-  clearCustomAIProviders,
-  createAIProviderAPI,
-  getCustomAIProviders,
-} from "@/lib/plugin/api/ai-provider-api"
-
-export {
-  registerAiProvidersForPlugin,
-  unregisterAiProvidersForPlugin,
-} from "@/lib/plugin/bridge/ai-providers-bridge"
 
 export type {
   AiProvidersBridgeError,
   AiProvidersBridgeOptions,
   AiProvidersBridgeResult,
-} from "@/lib/plugin/bridge/ai-providers-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/ai-providers-bridge"
 
 export type {
   AiCompletionRequest,
@@ -39,7 +29,7 @@ export type {
   PluginEmbeddingProviderDef,
   PluginLlmProvider,
   PluginLlmProviderDef,
-} from "@/types/plugin/plugin-ai-provider"
+} from "@cognia/plugin-contract/types/plugin/plugin-ai-provider"
 
 export type {
   AIChatChunk,
@@ -48,4 +38,4 @@ export type {
   AIModel,
   AIProviderDefinition,
   PluginAIProviderAPI,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"

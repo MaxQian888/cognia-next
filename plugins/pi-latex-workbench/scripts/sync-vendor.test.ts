@@ -155,9 +155,9 @@ describe("the in-tree snapshot", () => {
     expect(checkVendor({ pluginRoot })).toEqual([])
   })
 
-  it("is pinned to upstream commit 95e8a6d", () => {
+  it("is pinned to the Pi 1.3.0 security upgrade source commit", () => {
     const lock = JSON.parse(readFileSync(join(pluginRoot, LOCK_FILE), "utf8"))
-    expect(lock.commit).toBe("95e8a6d2838e38bd66766edf677fedfe4db53cac")
+    expect(lock.commit).toBe("76567ee5deaaf279e6f3945e9ca3aecb880e45ac")
     expect(lock.upstream).toBe(UPSTREAM_URL)
     expect(Object.keys(lock.files).every((path) => isVendorPath(path))).toBe(true)
   })

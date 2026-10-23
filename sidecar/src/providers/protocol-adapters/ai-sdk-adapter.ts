@@ -16,9 +16,12 @@ import {
   decideOpenAiEndpointFlavor,
   RESPONSES_ONLY_PROVIDERS,
   resolveProviderProtocol,
-} from "../provider-protocol.ts"
+} from "@cognia/provider-types/provider-protocol"
 import { buildBedrockProviderOptions } from "../bedrock.ts"
-import { resolvePerplexityEndpoint, withPerplexityAgentFetch } from "../perplexity-agent.ts"
+import {
+  resolvePerplexityEndpoint,
+  withPerplexityAgentFetch,
+} from "@cognia/provider-types/perplexity-agent"
 import { withSiwcStreamingGeneration } from "../siwc-language-model.ts"
 import {
   createSiwcFetch,
@@ -38,7 +41,7 @@ import {
   claude55CapabilitiesForModel,
   compatibleEffortValuesForModel,
   normalizeCompatibleEffort,
-} from "../reasoning-effort-tables.ts"
+} from "@cognia/provider-types/reasoning-effort-tables"
 import type { JSONValue, LanguageModelMiddleware, ProviderMetadata } from "ai"
 import type {
   AdapterResult,
@@ -657,6 +660,11 @@ export function makeAiSdkAdapter(protocol: string, nativeCall?: SiwcNativeCall):
       // run to completion and keep billing).
       if (req.abortSignal) streamArgs.abortSignal = req.abortSignal
       if (req.prepareStep) streamArgs.prepareStep = req.prepareStep
+      if (req.captureRequestMessages)
+        streamArgs.include = {
+          ...(streamArgs.include as Record<string, unknown> | undefined),
+          requestMessages: true,
+        }
       // Router + Fusion ledgered call (ADR-0188): one reservation, one request.
       // Only set by the dispatcher for a reserved call, so it overrides a
       // provider-configured `modelParams.maxRetries` exactly then and never else.

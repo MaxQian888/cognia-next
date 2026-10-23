@@ -864,17 +864,19 @@ describe("handlePluginToolExec — ask_user elicitation", () => {
       await import("./plugin-tool-ipc")
     freshSet({ getTool: () => undefined })
 
+    const controller = new AbortController()
     const response = await freshHandle({
       type: "plugin_tool_exec",
       sessionId: "sess-A",
       toolUseId: "use-A",
       name: "ask_user",
+      abortSignal: controller.signal,
       args: { question: "Pick", options: [{ value: "a", label: "Apple" }] },
     })
 
     expect(runAskUser).toHaveBeenCalledWith(
       { question: "Pick", options: [{ value: "a", label: "Apple" }] },
-      { sessionId: "sess-A" }
+      { sessionId: "sess-A", signal: controller.signal }
     )
     expect(response.result).toBe("Selected: Apple")
     expect(response.error).toBeUndefined()
@@ -1253,7 +1255,11 @@ describe("handlePluginToolExec — Task alias for dispatch_agent", () => {
     const runDispatchAgentTool = jest.fn().mockResolvedValue("subagent result")
     jest.doMock("@/lib/claude/agents/dispatch-agent-handler", () => ({ runDispatchAgentTool }))
 
-    const { handlePluginToolExec: freshHandle } = await import("./plugin-tool-ipc")
+    const { handlePluginToolExec: freshHandle, __setPluginToolResolverForTesting: freshSet } =
+      await import("./plugin-tool-ipc")
+    // This routing fixture has no live PluginManager. Resolve an empty plugin
+    // registry so its absence does not throw before the Task fallback is reached.
+    freshSet({ getTool: () => undefined })
     const response = await freshHandle({
       type: "plugin_tool_exec",
       sessionId: "sess-T",
@@ -1261,6 +1267,7 @@ describe("handlePluginToolExec — Task alias for dispatch_agent", () => {
       name: "Task",
       args: { subagent_type: "researcher", prompt: "go" },
     })
+    freshSet(null)
 
     expect(runDispatchAgentTool).toHaveBeenCalledWith({
       sessionId: "sess-T",

@@ -11,6 +11,59 @@ const base: ClaudeAgentSdkOptionsV1 = { version: 1 }
 const errorsOf = (v: unknown, flat = {}) => validateClaudeAgentSdkOptions(v, flat).errors.join("\n")
 
 describe("validateClaudeAgentSdkOptions", () => {
+  describe("Linux namespaces and bounded unattended retries", () => {
+    it("accepts an explicitly enabled sandbox namespace request", () => {
+      expect(
+        validateClaudeAgentSdkOptions({
+          ...base,
+          sandbox: { enabled: true, allowNestedUserNamespaces: true },
+        }).ok
+      ).toBe(true)
+    })
+
+    it.each([
+      { allowNestedUserNamespaces: true },
+      { enabled: false, allowNestedUserNamespaces: true },
+      { enabled: true, allowNestedUserNamespaces: true, failIfUnavailable: false },
+      { enabled: true, allowNestedUserNamespaces: true, allowUnsandboxedCommands: true },
+    ])("refuses a namespace request without a fail-closed sandbox: %j", (sandbox) => {
+      expect(validateClaudeAgentSdkOptions({ ...base, sandbox }).ok).toBe(false)
+    })
+
+    it.each([60_000, 1_800_000, 10_800_000])(
+      "accepts a finite retry budget of %s ms",
+      (maxWaitMs) => {
+        expect(
+          validateClaudeAgentSdkOptions({
+            ...base,
+            unattendedRetry: { maxWaitMs, usageLimitRecheckMs: 60_000 },
+          }).ok
+        ).toBe(true)
+      }
+    )
+
+    it.each([undefined, 0, -1, 59_999, 10_800_001, 60_000.5, NaN, Infinity, "60000"])(
+      "rejects an absent, unbounded or malformed retry budget: %s",
+      (maxWaitMs) => {
+        expect(validateClaudeAgentSdkOptions({ ...base, unattendedRetry: { maxWaitMs } }).ok).toBe(
+          false
+        )
+      }
+    )
+
+    it.each([0, 59_999, 10_800_001, 60_000.5, NaN, Infinity, "60000"])(
+      "rejects a malformed usage-limit check interval: %s",
+      (usageLimitRecheckMs) => {
+        expect(
+          validateClaudeAgentSdkOptions({
+            ...base,
+            unattendedRetry: { maxWaitMs: 60_000, usageLimitRecheckMs },
+          }).ok
+        ).toBe(false)
+      }
+    )
+  })
+
   it("rejects unknown fields and invalid latest option subtypes before launch", () => {
     expect(errorsOf({ ...base, unsupportedOption: true })).toMatch(/unsupportedOption/)
     expect(errorsOf({ ...base, thinking: { type: "disabled", budgetTokens: 10 } })).toMatch(

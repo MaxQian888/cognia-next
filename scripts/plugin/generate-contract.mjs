@@ -9,23 +9,26 @@ import writeFileAtomic from "write-file-atomic"
 import { z } from "zod"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
-const catalogPath = resolve(repoRoot, "packages/plugin-sdk/contract/catalog.json")
-const catalogSchemaPath = resolve(repoRoot, "packages/plugin-sdk/contract/catalog.schema.json")
-const pluginPointCatalogPath = resolve(repoRoot, "packages/plugin-sdk/contract/plugin-points.json")
+const catalogPath = resolve(repoRoot, "packages/plugin-contract/contract/catalog.json")
+const catalogSchemaPath = resolve(repoRoot, "packages/plugin-contract/contract/catalog.schema.json")
+const pluginPointCatalogPath = resolve(
+  repoRoot,
+  "packages/plugin-contract/contract/plugin-points.json"
+)
 const pluginPointSchemaPath = resolve(
   repoRoot,
-  "packages/plugin-sdk/contract/plugin-points.schema.json"
+  "packages/plugin-contract/contract/plugin-points.schema.json"
 )
 const pluginPointExporterPath = resolve(repoRoot, "scripts/plugin/export-plugin-points.mts")
 const tsxCliPath = resolve(repoRoot, "node_modules/tsx/dist/cli.mjs")
 const prettierCliPath = resolve(repoRoot, "node_modules/prettier/bin/prettier.cjs")
 const rustPath = resolve(repoRoot, "crates/cognia-cli/src/engine/contract.rs")
 const pythonPath = resolve(repoRoot, "plugin-sdk/python/src/cognia/_generated_contract.py")
-const typescriptPath = resolve(repoRoot, "packages/plugin-sdk/src/contracts/generated.ts")
+const typescriptPath = resolve(repoRoot, "packages/plugin-contract/src/contracts/generated.ts")
 const apiDocsPath = resolve(repoRoot, "docs/content/docs/plugin-dev/api-reference.generated.mdx")
 const apiSurfaceBaselinePath = resolve(
   repoRoot,
-  "packages/plugin-sdk/contract/api-surface-baseline.json"
+  "packages/plugin-contract/contract/api-surface-baseline.json"
 )
 
 export function validateApiSurfaceCompatibility(catalog, baseline) {
