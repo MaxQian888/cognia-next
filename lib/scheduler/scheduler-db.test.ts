@@ -81,6 +81,57 @@ describe("SchedulerDatabase", () => {
       expect(retrieved!.type).toBe("workflow")
     })
 
+    it("does not upsert a deleted task from an in-flight update", async () => {
+      const task = createMockTask({ id: "deleted-update" })
+      await schedulerDb.createTask(task)
+      await schedulerDb.deleteTask(task.id)
+      await schedulerDb.updateTask({ ...task, runCount: 1 })
+      expect(await schedulerDb.getTask(task.id)).toBeNull()
+    })
+
+    it("patches promotion atomically without replacing live task fields", async () => {
+      const task = createMockTask({
+        id: "promotion-patch",
+        status: "paused",
+        runCount: 3,
+        nextRunAt: new Date(Date.now() + 60_000),
+      })
+      await schedulerDb.createTask(task)
+      const promotion = { systemTaskId: "os-1", token: "token", promotedAt: new Date() }
+      expect(await schedulerDb.setTaskPromotion(task.id, promotion, () => true)).toMatchObject({
+        status: "paused",
+        runCount: 3,
+        nextRunAt: task.nextRunAt,
+        promotion,
+      })
+      expect(await schedulerDb.setTaskPromotion(task.id, undefined, () => false)).toBeNull()
+      expect((await schedulerDb.getTask(task.id))?.promotion).toEqual(promotion)
+      await schedulerDb.deleteTask(task.id)
+      expect(await schedulerDb.setTaskPromotion(task.id, promotion, () => true)).toBeNull()
+      expect(await schedulerDb.getTask(task.id)).toBeNull()
+    })
+
+    it("admits only one competing promotion and preserves a replacement during cleanup", async () => {
+      const task = createMockTask({ id: "promotion-compete" })
+      await schedulerDb.createTask(task)
+      const a = { systemTaskId: "os-a", token: "a", promotedAt: new Date() }
+      const b = { systemTaskId: "os-b", token: "b", promotedAt: new Date() }
+      const results = await Promise.all([
+        schedulerDb.setTaskPromotion(task.id, a, (t) => !t.promotion),
+        schedulerDb.setTaskPromotion(task.id, b, (t) => !t.promotion),
+      ])
+      expect(results.filter(Boolean)).toHaveLength(1)
+      const winner = (await schedulerDb.getTask(task.id))!.promotion!
+      expect(
+        await schedulerDb.setTaskPromotion(
+          task.id,
+          undefined,
+          (t) => t.promotion?.systemTaskId !== winner.systemTaskId
+        )
+      ).toBeNull()
+      expect((await schedulerDb.getTask(task.id))?.promotion).toEqual(winner)
+    })
+
     it("should update a task", async () => {
       const task = createMockTask({ id: "test-task-2" })
       await schedulerDb.createTask(task)
@@ -144,6 +195,75 @@ describe("SchedulerDatabase", () => {
       await expect(
         schedulerDb.claimTaskSlot("paused-claim", new Date("2026-07-25T08:00:00.000Z"))
       ).resolves.toBeNull()
+    })
+
+    it("advances a skipped backlog atomically while preserving current task state", async () => {
+      const slot = new Date("2026-10-22T09:00:00Z")
+      const future = new Date("2026-10-22T10:00:00Z")
+      const task = createMockTask({
+        id: "advance-current",
+        nextRunAt: slot,
+        runCount: 7,
+        name: "User edit",
+      })
+      await schedulerDb.createTask(task)
+      await expect(
+        schedulerDb.advanceTaskSchedule(task.id, slot, future, "missed-run-skipped")
+      ).resolves.toMatchObject({
+        name: "User edit",
+        runCount: 7,
+        nextRunAt: future,
+        lastTerminalReason: "missed-run-skipped",
+      })
+      await expect(schedulerDb.advanceTaskSchedule(task.id, slot, future)).resolves.toBeNull()
+    })
+
+    it("never recreates a deleted task or advances a paused task", async () => {
+      const slot = new Date("2026-10-22T09:00:00Z")
+      const future = new Date("2026-10-22T10:00:00Z")
+      await expect(schedulerDb.advanceTaskSchedule("gone", slot, future)).resolves.toBeNull()
+      const task = createMockTask({
+        id: "paused-advance",
+        status: "paused",
+        nextRunAt: slot,
+        runCount: 3,
+      })
+      await schedulerDb.createTask(task)
+      await expect(schedulerDb.advanceTaskSchedule(task.id, slot, future)).resolves.toBeNull()
+      expect(await schedulerDb.getTask(task.id)).toMatchObject({
+        status: "paused",
+        nextRunAt: slot,
+        runCount: 3,
+      })
+    })
+
+    it("expires only the current active slot and retains current task metadata", async () => {
+      const slot = new Date("2026-10-22T09:00:00Z")
+      const replacement = new Date("2026-10-22T10:00:00Z")
+      const task = createMockTask({
+        id: "expire-current",
+        nextRunAt: slot,
+        runCount: 4,
+        name: "Latest title",
+      })
+      await schedulerDb.createTask(task)
+      await expect(
+        schedulerDb.advanceTaskSchedule(task.id, slot, undefined, "once-expired", "expired")
+      ).resolves.toMatchObject({
+        name: "Latest title",
+        runCount: 4,
+        status: "expired",
+        nextRunAt: undefined,
+        lastTerminalReason: "once-expired",
+      })
+      await schedulerDb.updateTask({ ...task, status: "active", nextRunAt: replacement })
+      await expect(
+        schedulerDb.advanceTaskSchedule(task.id, slot, undefined, "once-expired", "expired")
+      ).resolves.toBeNull()
+      expect(await schedulerDb.getTask(task.id)).toMatchObject({
+        status: "active",
+        nextRunAt: replacement,
+      })
     })
 
     it("should delete a task and its executions", async () => {

@@ -62,8 +62,8 @@ export async function handlePromotedTaskWake(
   try {
     await store.initialize()
     const run = await (deps.loadRunner ?? defaultLoadRunner)()
-    await run(taskId, runToken)
-    return { ran: true }
+    const execution = await run(taskId, runToken)
+    return { ran: execution != null }
   } catch (err) {
     ;(deps.warn ?? ((message, data) => console.warn(message, data)))(
       "promoted task wake-up failed",
