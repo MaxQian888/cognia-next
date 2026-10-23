@@ -1,5 +1,7 @@
+import type { NativeSkillResource } from "@/lib/claude/ipc"
+
 // CCSwitch interop types — importable content (MCP servers, prompts, skills).
-// Mirrors the structs serialized by `src-tauri/src/ccswitch/db.rs`.
+// Mirrors the structs serialized by `crates/cognia-ccswitch/src/types.rs`.
 
 export interface CcswitchMcpServer {
   id: string
@@ -24,8 +26,10 @@ export interface CcswitchSkill {
   id: string
   name: string
   description?: string
-  /** Markdown body. Empty when CCSwitch references the skill by external path. */
+  /** Installed SKILL.md, including frontmatter. Empty when the bundle cannot be read. */
   content: string
   /** Filesystem path when the skill is stored outside the DB. */
   sourcePath?: string
+  resources?: NativeSkillResource[]
+  openaiYaml?: string
 }

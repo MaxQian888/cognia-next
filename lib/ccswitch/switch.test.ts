@@ -17,8 +17,6 @@ jest.mock("@/lib/db/settings", () => ({
 
 jest.mock("./client", () => ({
   writeClaudeSettingsEnv: jest.fn(),
-  writeCodexAuthEnv: jest.fn(),
-  writeGeminiSettingsEnv: jest.fn(),
   writeOpencodeAuthEnv: jest.fn(),
 }))
 
@@ -39,20 +37,22 @@ import { restartSidecar, setProviderEnv } from "@/lib/claude/ipc"
 import { saveSettings, getSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"
 
-import {
-  writeClaudeSettingsEnv,
-  writeCodexAuthEnv,
-  writeGeminiSettingsEnv,
-  writeOpencodeAuthEnv,
-} from "./client"
+import { writeClaudeSettingsEnv, writeOpencodeAuthEnv } from "./client"
 import { listAccounts, getActiveAccount, setActiveAccount } from "@/lib/subscription/core/transport"
 import {
   discoverAnthropicAuth,
   adoptAndActivateDiscoveredAuth,
 } from "@/lib/subscription/anthropic/discovery"
-import { applySwitch, ccswitchProviderRefId, detectActive, planSwitch, _internals } from "./switch"
+import {
+  applySwitch,
+  ccswitchProviderRefId,
+  detectActive,
+  isOfficialClaudeProvider,
+  planSwitch,
+} from "./switch"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import type { CcswitchProvider, SwitchScope } from "@/types/ccswitch"
+import type { CcswitchProvider } from "@/types/ccswitch"
+import { ANTHROPIC_FALLBACK_MODEL_ID } from "@cognia/provider-types/built-in-provider-catalog"
 
 const mIsTauri = isTauri as jest.Mock
 const mSetProviderEnv = setProviderEnv as jest.Mock
@@ -60,8 +60,6 @@ const mRestart = restartSidecar as jest.Mock
 const mSave = saveSettings as jest.Mock
 const mGet = getSettings as jest.Mock
 const mWriteClaude = writeClaudeSettingsEnv as jest.Mock
-const mWriteCodex = writeCodexAuthEnv as jest.Mock
-const mWriteGemini = writeGeminiSettingsEnv as jest.Mock
 const mWriteOpencode = writeOpencodeAuthEnv as jest.Mock
 const mListAccounts = listAccounts as jest.Mock
 const mGetActive = getActiveAccount as jest.Mock
@@ -72,6 +70,7 @@ const mAdoptActivate = adoptAndActivateDiscoveredAuth as jest.Mock
 function provider(overrides: Partial<CcswitchProvider>): CcswitchProvider {
   return {
     id: "p1",
+    kind: "claude",
     name: "Anthropic Official",
     apiKey: "sk-ant-x",
     baseUrl: "https://api.anthropic.com",
@@ -82,138 +81,6 @@ function provider(overrides: Partial<CcswitchProvider>): CcswitchProvider {
 beforeEach(() => {
   jest.resetAllMocks()
   mIsTauri.mockReturnValue(true)
-})
-
-describe("ccswitchProviderRefId", () => {
-  it("prefixes the id", () => {
-    expect(ccswitchProviderRefId(provider({ id: "abc" }))).toBe("ccswitch:abc")
-  })
-})
-
-describe("planSwitch", () => {
-  it("targets cognia-next and a supported agent", () => {
-    const p = provider({})
-    const scope: SwitchScope = { cognia: true, agents: ["claude-code"] }
-    const plan = planSwitch(p, scope, {
-      apiKey: "old-key",
-      apiBaseUrl: "https://old",
-      activeProviderId: "ccswitch:other",
-    })
-
-    expect(plan.cogniaChanges.apiKeyAfter).toBe("sk-ant-x")
-    expect(plan.cogniaChanges.baseUrlAfter).toBe("https://api.anthropic.com")
-    expect(plan.cogniaChanges.activeProviderIdAfter).toBe("ccswitch:p1")
-    expect(plan.cogniaChanges.restartSidecar).toBe(true)
-
-    expect(plan.agentChanges).toHaveLength(1)
-    const ac = plan.agentChanges[0]
-    expect(ac.agentId).toBe("claude-code")
-    expect(ac.unsupported).toBe(false)
-    expect(ac.envUpdates).toEqual([
-      { key: "ANTHROPIC_API_KEY", value: "sk-ant-x" },
-      { key: "ANTHROPIC_BASE_URL", value: "https://api.anthropic.com" },
-    ])
-  })
-
-  it("marks unsupported agents (claude-desktop)", () => {
-    const plan = planSwitch(provider({}), { cognia: true, agents: ["claude-desktop"] }, {})
-    expect(plan.agentChanges[0].unsupported).toBe(true)
-    expect(plan.agentChanges[0].envUpdates).toEqual([])
-  })
-
-  it("emits gemini-specific env updates for the gemini agent", () => {
-    const p = provider({ apiKey: "g-key", baseUrl: "https://proxy" })
-    const plan = planSwitch(p, { cognia: true, agents: ["gemini"] }, {})
-    const ac = plan.agentChanges[0]
-    expect(ac.agentId).toBe("gemini")
-    expect(ac.unsupported).toBe(false)
-    expect(ac.targetPath).toBe("~/.gemini/settings.json")
-    expect(ac.envUpdates).toEqual([
-      { key: "GEMINI_API_KEY", value: "g-key" },
-      { key: "GOOGLE_GEMINI_BASE_URL", value: "https://proxy" },
-    ])
-  })
-
-  it("emits opencode env updates with a derived __provider for the opencode agent", () => {
-    const p = provider({ apiKey: "sk-ant-x", kind: "claude" })
-    const plan = planSwitch(p, { cognia: true, agents: ["opencode"] }, {})
-    const ac = plan.agentChanges[0]
-    expect(ac.agentId).toBe("opencode")
-    expect(ac.unsupported).toBe(false)
-    expect(ac.targetPath).toBe("~/.local/share/opencode/auth.json")
-    expect(ac.envUpdates).toEqual([
-      { key: "OPENCODE_API_KEY", value: "sk-ant-x" },
-      { key: "__provider", value: "anthropic" },
-    ])
-  })
-
-  it("maps codex-kind providers to the openai opencode entry", () => {
-    const p = provider({ apiKey: "sk-oa", kind: "codex" })
-    const plan = planSwitch(p, { cognia: true, agents: ["opencode"] }, {})
-    expect(plan.agentChanges[0].envUpdates).toContainEqual({ key: "__provider", value: "openai" })
-  })
-
-  it("emits codex-specific env updates for the codex agent", () => {
-    const p = provider({ apiKey: "sk-openai-x", baseUrl: "https://api.openai.com" })
-    const plan = planSwitch(p, { cognia: true, agents: ["codex"] }, {})
-    const ac = plan.agentChanges[0]
-    expect(ac.agentId).toBe("codex")
-    expect(ac.unsupported).toBe(false)
-    expect(ac.targetPath).toBe("~/.codex/auth.json")
-    expect(ac.envUpdates).toEqual([{ key: "OPENAI_API_KEY", value: "sk-openai-x" }])
-  })
-
-  it("codex agent emits null when provider has no api key", () => {
-    const plan = planSwitch(
-      provider({ apiKey: undefined }),
-      { cognia: true, agents: ["codex"] },
-      {}
-    )
-    expect(plan.agentChanges[0].envUpdates).toEqual([{ key: "OPENAI_API_KEY", value: null }])
-  })
-
-  it("emits null env values when the provider has no key/url", () => {
-    const plan = planSwitch(
-      provider({ apiKey: undefined, baseUrl: undefined }),
-      { cognia: true, agents: ["claude-code"] },
-      {}
-    )
-    expect(plan.agentChanges[0].envUpdates).toEqual([
-      { key: "ANTHROPIC_API_KEY", value: null },
-      { key: "ANTHROPIC_BASE_URL", value: null },
-    ])
-  })
-
-  it("flags restartSidecar=false when nothing changes", () => {
-    const p = provider({})
-    const plan = planSwitch(
-      p,
-      { cognia: true, agents: [] },
-      {
-        apiKey: p.apiKey,
-        apiBaseUrl: p.baseUrl,
-      }
-    )
-    expect(plan.cogniaChanges.restartSidecar).toBe(false)
-  })
-
-  it("flags an official claude provider (no key) as a subscription switch", () => {
-    const p = provider({ apiKey: undefined, baseUrl: undefined, kind: "claude" })
-    const plan = planSwitch(p, { cognia: true, agents: [] }, {})
-    expect(plan.cogniaChanges.useSubscription).toBe(true)
-    // The bearer is read at spawn — a subscription switch always restarts.
-    expect(plan.cogniaChanges.restartSidecar).toBe(true)
-  })
-
-  it("keyed claude providers and keyless non-claude kinds are not subscription switches", () => {
-    expect(
-      planSwitch(provider({}), { cognia: true, agents: [] }, {}).cogniaChanges.useSubscription
-    ).toBe(false)
-    expect(
-      planSwitch(provider({ apiKey: undefined, kind: "gemini" }), { cognia: true, agents: [] }, {})
-        .cogniaChanges.useSubscription
-    ).toBe(false)
-  })
 })
 
 describe("applySwitch", () => {
@@ -233,11 +100,27 @@ describe("applySwitch", () => {
     expect(mSave).toHaveBeenCalledWith({
       apiKey: "sk-ant-x",
       apiBaseUrl: "https://api.anthropic.com",
-      activeProviderId: "ccswitch:p1",
+      activeProviderId: "ccswitch:claude:p1",
+      defaultProvider: "anthropic",
+      defaultModel: ANTHROPIC_FALLBACK_MODEL_ID,
+      providerSettings: {
+        anthropic: {
+          providerId: "anthropic",
+          enabled: true,
+          apiKey: "sk-ant-x",
+          baseURL: "https://api.anthropic.com",
+          customHeaders: {},
+          defaultModel: ANTHROPIC_FALLBACK_MODEL_ID,
+          enabledModels: undefined,
+          discoveredModels: [],
+          discoveredModelsLastFetched: expect.any(Number),
+        },
+      },
     })
     expect(mSetProviderEnv).toHaveBeenCalledWith("sk-ant-x", "https://api.anthropic.com", {})
     expect(mRestart).toHaveBeenCalled()
     expect(mWriteClaude).toHaveBeenCalledWith({
+      ANTHROPIC_AUTH_TOKEN: null,
       ANTHROPIC_API_KEY: "sk-ant-x",
       ANTHROPIC_BASE_URL: "https://api.anthropic.com",
     })
@@ -296,7 +179,7 @@ describe("applySwitch", () => {
       ok: false,
     })
     expect(mWriteClaude).not.toHaveBeenCalled()
-    expect(mWriteCodex).not.toHaveBeenCalled()
+    expect(mWriteOpencode).not.toHaveBeenCalled()
   })
 
   it("official provider: re-activates the vault's active anthropic account", async () => {
@@ -320,7 +203,7 @@ describe("applySwitch", () => {
     mListAccounts.mockResolvedValue([{ id: "acc-1" }, { id: "acc-2" }])
     mGetActive.mockResolvedValue({ activeAccountId: undefined, env: [] })
     const plan = planSwitch(
-      provider({ apiKey: undefined, kind: "claude" }),
+      provider({ apiKey: undefined, baseUrl: undefined, kind: "claude" }),
       { cognia: true, agents: [] },
       {}
     )
@@ -334,7 +217,7 @@ describe("applySwitch", () => {
     mDiscover.mockResolvedValue({ accessToken: "oat", refreshToken: "ort" })
     mAdoptActivate.mockResolvedValue({ id: "acc-new" })
     const plan = planSwitch(
-      provider({ apiKey: undefined, kind: "claude" }),
+      provider({ apiKey: undefined, baseUrl: undefined, kind: "claude" }),
       { cognia: true, agents: [] },
       {}
     )
@@ -348,26 +231,29 @@ describe("applySwitch", () => {
     mListAccounts.mockResolvedValue([])
     mDiscover.mockResolvedValue(null)
     const plan = planSwitch(
-      provider({ apiKey: undefined, kind: "claude" }),
+      provider({ apiKey: undefined, baseUrl: undefined, kind: "claude" }),
       { cognia: true, agents: [] },
       {}
     )
     const result = await applySwitch(plan)
     expect(result.subscription).toEqual({ activated: false, error: "none-found" })
-    // The switch itself still commits — the user just gets the hint.
-    expect(result.cogniaApplied).toBe(true)
+    // Failed activation must preserve current credentials.
+    expect(result.cogniaApplied).toBe(false)
+    expect(mSave).not.toHaveBeenCalled()
+    expect(mSetProviderEnv).not.toHaveBeenCalled()
   })
 
   it("official provider: activation errors are captured, not thrown", async () => {
     mListAccounts.mockRejectedValue(new Error("vault sealed"))
     const plan = planSwitch(
-      provider({ apiKey: undefined, kind: "claude" }),
+      provider({ apiKey: undefined, baseUrl: undefined, kind: "claude" }),
       { cognia: true, agents: [] },
       {}
     )
     const result = await applySwitch(plan)
     expect(result.subscription).toEqual({ activated: false, error: "vault sealed" })
-    expect(result.cogniaApplied).toBe(true)
+    expect(result.cogniaApplied).toBe(false)
+    expect(mSave).not.toHaveBeenCalled()
   })
 
   it("keyed provider switch never touches the subscription module", async () => {
@@ -380,7 +266,7 @@ describe("applySwitch", () => {
   it("official provider outside Tauri skips subscription activation", async () => {
     mIsTauri.mockReturnValue(false)
     const plan = planSwitch(
-      provider({ apiKey: undefined, kind: "claude" }),
+      provider({ apiKey: undefined, baseUrl: undefined, kind: "claude" }),
       { cognia: true, agents: [] },
       {}
     )
@@ -389,27 +275,16 @@ describe("applySwitch", () => {
     expect(mListAccounts).not.toHaveBeenCalled()
   })
 
-  it("commits to ~/.gemini/settings.json when gemini is selected", async () => {
-    mWriteGemini.mockResolvedValue({
-      path: "/u/.gemini/settings.json",
-      backupPath: "/u/.gemini/settings.json.bak.1",
-    })
-    const p = provider({ apiKey: "g-key", baseUrl: "https://proxy" })
-    const plan = planSwitch(p, { cognia: true, agents: ["gemini"] }, {})
-    const result = await applySwitch(plan)
-
-    expect(mWriteGemini).toHaveBeenCalledWith({
-      GEMINI_API_KEY: "g-key",
-      GOOGLE_GEMINI_BASE_URL: "https://proxy",
-    })
-    expect(mWriteClaude).not.toHaveBeenCalled()
-    expect(result.agentResults[0]).toEqual({
-      agentId: "gemini",
-      ok: true,
-      path: "/u/.gemini/settings.json",
-      backupPath: "/u/.gemini/settings.json.bak.1",
-    })
-  })
+  it.each(["gemini", "codex"] as const)(
+    "rejects incompatible %s propagation without writing credentials",
+    async (agentId) => {
+      const plan = planSwitch(provider({}), { cognia: true, agents: [agentId] }, {})
+      const result = await applySwitch(plan)
+      expect(result.agentResults).toEqual([expect.objectContaining({ agentId, ok: false })])
+      expect(mWriteClaude).not.toHaveBeenCalled()
+      expect(mWriteOpencode).not.toHaveBeenCalled()
+    }
+  )
 
   it("commits to opencode auth.json with the derived provider", async () => {
     mWriteOpencode.mockResolvedValue({
@@ -426,154 +301,16 @@ describe("applySwitch", () => {
     expect(result.agentResults[0]).toMatchObject({ agentId: "opencode", ok: true })
   })
 
-  it("surfaces drift_detected from the gemini write as an error", async () => {
-    mWriteGemini.mockRejectedValue(new Error("drift_detected"))
-    const plan = planSwitch(provider({}), { cognia: true, agents: ["gemini"] }, {})
-    const result = await applySwitch(plan)
-    expect(result.agentResults[0]).toMatchObject({
-      agentId: "gemini",
-      ok: false,
-      error: "drift_detected",
-    })
-  })
-
-  it("commits to ~/.codex/auth.json when codex is selected", async () => {
-    mWriteCodex.mockResolvedValue({
-      path: "/u/.codex/auth.json",
-      backupPath: "/u/.codex/auth.json.bak.1",
-    })
-    const p = provider({ apiKey: "sk-openai-x", baseUrl: "https://api.openai.com" })
-    const plan = planSwitch(p, { cognia: true, agents: ["codex"] }, {})
-    const result = await applySwitch(plan)
-
-    expect(mWriteCodex).toHaveBeenCalledWith({ OPENAI_API_KEY: "sk-openai-x" })
-    expect(mWriteClaude).not.toHaveBeenCalled()
-    expect(result.agentResults[0]).toEqual({
-      agentId: "codex",
-      ok: true,
-      path: "/u/.codex/auth.json",
-      backupPath: "/u/.codex/auth.json.bak.1",
-    })
-  })
-
-  it("surfaces drift_detected from the codex write as an error", async () => {
-    mWriteCodex.mockRejectedValue(new Error("drift_detected"))
-    const plan = planSwitch(provider({}), { cognia: true, agents: ["codex"] }, {})
-    const result = await applySwitch(plan)
-    expect(result.agentResults[0]).toMatchObject({
-      agentId: "codex",
-      ok: false,
-      error: "drift_detected",
-    })
-  })
-})
-
-describe("buildProviderRegistration", () => {
-  const kimi = (): CcswitchProvider =>
-    provider({
-      id: "kimi",
-      name: "Kimi",
-      kind: "claude",
-      apiKey: "sk-moon",
-      baseUrl: "https://api.moonshot.cn/anthropic",
-      model: "kimi-k2-0905",
-      opusModel: "kimi-k2-thinking",
-      sonnetModel: "kimi-k2-0905",
-      haikuModel: "kimi-k2-turbo",
-      smallFastModel: "kimi-k2-turbo",
-      customHeaders: { "anthropic-beta": "context-1m-2025-08-07" },
-    })
-
-  it("registers the relay's tier models under the anthropic provider", () => {
-    const reg = _internals.buildProviderRegistration(kimi(), {})
-    expect(reg).not.toBeNull()
-    const a = reg!.providerSettings.anthropic
-    expect(a.enabled).toBe(true)
-    expect(a.apiKey).toBe("sk-moon")
-    // Deduped by id, priority order preserved (opus, sonnet(dupe id dropped),
-    // haiku, small-fast(dupe id dropped), primary(dupe id dropped)).
-    expect(a.enabledModels).toEqual(["kimi-k2-thinking", "kimi-k2-0905", "kimi-k2-turbo"])
-    expect(reg!.defaultProvider).toBe("anthropic")
-    // Primary = ANTHROPIC_MODEL.
-    expect(reg!.defaultModel).toBe("kimi-k2-0905")
-  })
-
-  it("stamps a 1M context window on every tier when the beta header is present", () => {
-    const reg = _internals.buildProviderRegistration(kimi(), {})
-    const models = reg!.providerSettings.anthropic.discoveredModels ?? []
-    expect(models).toHaveLength(3)
-    expect(models.every((m) => m.contextLength === 1_000_000)).toBe(true)
-    expect(models[0]).toMatchObject({ id: "kimi-k2-thinking", name: "Kimi · Opus" })
-    expect(reg!.customHeaders).toEqual({ "anthropic-beta": "context-1m-2025-08-07" })
-  })
-
-  it("does not stamp 1M without a context-1m header", () => {
-    const reg = _internals.buildProviderRegistration({ ...kimi(), customHeaders: undefined }, {})
-    const models = reg!.providerSettings.anthropic.discoveredModels ?? []
-    expect(models.every((m) => m.contextLength === undefined)).toBe(true)
-    expect(reg!.customHeaders).toEqual({})
-  })
-
-  it("preserves other providers when merging the anthropic slot", () => {
-    const reg = _internals.buildProviderRegistration(kimi(), {
-      providerSettings: {
-        openai: { providerId: "openai", defaultModel: "gpt-4o", enabled: true },
-      },
-    })
-    expect(reg!.providerSettings.openai).toBeDefined()
-    expect(reg!.providerSettings.anthropic).toBeDefined()
-  })
-
-  it("is provider-agnostic — a GLM coding-plan relay registers identically", () => {
-    // Same code path as Kimi, keyed off env shape not provider identity: GLM's
-    // Anthropic-compatible coding endpoint declares its own tier models + 1M
-    // header and must surface with zero provider-specific handling.
-    const glm = provider({
-      id: "glm",
-      name: "GLM Coding",
-      kind: "claude",
-      apiKey: "glm-key",
-      baseUrl: "https://open.bigmodel.cn/api/anthropic",
-      model: "glm-4.6",
-      sonnetModel: "glm-4.6",
-      haikuModel: "glm-4.5-air",
-      customHeaders: { "anthropic-beta": "context-1m-2025-08-07" },
-    })
-    const reg = _internals.buildProviderRegistration(glm, {})
-    expect(reg).not.toBeNull()
-    expect(reg!.providerSettings.anthropic.enabledModels).toEqual(["glm-4.6", "glm-4.5-air"])
-    expect(reg!.defaultModel).toBe("glm-4.6")
-    const models = reg!.providerSettings.anthropic.discoveredModels ?? []
-    expect(models.every((m) => m.contextLength === 1_000_000)).toBe(true)
-    expect(models.map((m) => m.name)).toEqual(["GLM Coding · Sonnet", "GLM Coding · Haiku"])
-  })
-
-  it("registers a single-model relay that only declares ANTHROPIC_MODEL", () => {
-    // Many coding plans set just ANTHROPIC_MODEL (no tier overrides) — still
-    // must produce a one-model registration, not an empty group.
-    const reg = _internals.buildProviderRegistration(
-      provider({ id: "solo", name: "Solo Plan", kind: "claude", model: "some-coder-model" }),
-      {}
+  it("surfaces drift_detected from a supported OpenCode write", async () => {
+    mWriteOpencode.mockRejectedValue(new Error("drift_detected"))
+    const result = await applySwitch(
+      planSwitch(provider({}), { cognia: true, agents: ["opencode"] }, {})
     )
-    expect(reg!.providerSettings.anthropic.enabledModels).toEqual(["some-coder-model"])
-    expect(reg!.defaultModel).toBe("some-coder-model")
-  })
-
-  it("returns null for non-claude kinds", () => {
-    expect(_internals.buildProviderRegistration(provider({ kind: "codex" }), {})).toBeNull()
-    expect(_internals.buildProviderRegistration(provider({ kind: "gemini" }), {})).toBeNull()
-  })
-
-  it("returns null when the relay declares no models", () => {
-    expect(
-      _internals.buildProviderRegistration(provider({ kind: "claude", model: undefined }), {})
-    ).toBeNull()
-  })
-
-  it("treats an absent kind as a claude relay", () => {
-    expect(_internals.isClaudeRelayKind(undefined)).toBe(true)
-    expect(_internals.isClaudeRelayKind("claude")).toBe(true)
-    expect(_internals.isClaudeRelayKind("codex")).toBe(false)
+    expect(result.agentResults[0]).toMatchObject({
+      agentId: "opencode",
+      ok: false,
+      error: "drift_detected",
+    })
   })
 })
 
@@ -659,123 +396,62 @@ describe("applySwitch — relay model registration", () => {
   })
 })
 
-describe("detectActive", () => {
-  it("matches cognia by (apiKey, baseUrl) tuple", async () => {
-    mGet.mockResolvedValue({
-      id: "singleton",
-      apiKey: "sk-ant-x",
-      apiBaseUrl: "https://api.anthropic.com",
-      alwaysAllowTools: [],
-      builtinTools: {},
-    })
-    const providers = [provider({ id: "a" }), provider({ id: "b", apiKey: "other" })]
-    const state = await detectActive(providers)
-    expect(state.cognia).toBe("a")
-    expect(state.drift).toBe(false)
+describe("current CC Switch identities and protocol boundaries", () => {
+  it("qualifies provider references by app type", () => {
+    expect(ccswitchProviderRefId(provider({ id: "default", kind: "claude" }))).toBe(
+      "ccswitch:claude:default"
+    )
+    expect(ccswitchProviderRefId(provider({ id: "default", kind: "codex" }))).toBe(
+      "ccswitch:codex:default"
+    )
   })
 
-  it("returns undefined cognia when no provider matches", async () => {
-    mGet.mockResolvedValue({
-      id: "singleton",
-      apiKey: "unknown",
-      apiBaseUrl: undefined,
-      alwaysAllowTools: [],
-      builtinTools: {},
-    })
-    const state = await detectActive([provider({ id: "a" })])
-    expect(state.cognia).toBeUndefined()
+  it("never treats a keyless managed OAuth card as Anthropic official", () => {
+    expect(
+      isOfficialClaudeProvider(
+        provider({ kind: "claude", apiKey: undefined, providerType: "github_copilot" })
+      )
+    ).toBe(false)
+    expect(
+      isOfficialClaudeProvider(
+        provider({ kind: "claude", apiKey: undefined, baseUrl: "https://relay.test" })
+      )
+    ).toBe(false)
   })
 
-  it("flags drift when cognia and an agent disagree", async () => {
-    mGet.mockResolvedValue({
-      id: "singleton",
-      apiKey: "sk-ant-x",
-      apiBaseUrl: "https://api.anthropic.com",
-      alwaysAllowTools: [],
-      builtinTools: {},
-    })
-    const providers = [
-      provider({ id: "a" }),
-      provider({ id: "b", apiKey: "sk-moon", baseUrl: "https://moon" }),
-    ]
-    const state = await detectActive(providers, {
-      agentReaders: {
-        "claude-code": async () => ({ apiKey: "sk-moon", baseUrl: "https://moon" }),
-      },
-    })
-    expect(state.cognia).toBe("a")
-    expect(state.agents["claude-code"]).toBe("b")
-    expect(state.drift).toBe(true)
+  it("blocks a non-Anthropic provider before any settings or credential writes", async () => {
+    const plan = planSwitch(provider({ kind: "agy" }), { cognia: true, agents: [] }, {})
+    await expect(applySwitch(plan)).rejects.toThrow(/protocol/i)
+    expect(mSave).not.toHaveBeenCalled()
+    expect(mSetProviderEnv).not.toHaveBeenCalled()
   })
 
-  it("treats unreadable agents as having no active provider", async () => {
-    mGet.mockResolvedValue({
-      id: "singleton",
-      apiKey: undefined,
-      alwaysAllowTools: [],
-      builtinTools: {},
+  it("clears the competing Claude auth token during explicit API-key propagation", () => {
+    const plan = planSwitch(
+      provider({ kind: "claude" }),
+      { cognia: true, agents: ["claude-code"] },
+      {}
+    )
+    expect(plan.agentChanges[0].envUpdates).toContainEqual({
+      key: "ANTHROPIC_AUTH_TOKEN",
+      value: null,
     })
-    const state = await detectActive([provider({ id: "a" })], {
-      agentReaders: {
-        "claude-code": async () => {
-          throw new Error("permission denied")
-        },
-      },
-    })
-    expect(state.agents["claude-code"]).toBeUndefined()
-    expect(state.drift).toBe(false)
+  })
+
+  it("does not mark another app with the same id as active", async () => {
+    mGet.mockResolvedValue({ apiKey: "sk-ant-x", apiBaseUrl: "https://api.anthropic.com" })
+    const state = await detectActive([provider({ kind: "codex" }), provider({ kind: "claude" })])
+    expect(state.cognia).toBe("ccswitch:claude:p1")
   })
 })
 
-describe("internals", () => {
-  it("matchProvider trims whitespace", () => {
-    const p = provider({ apiKey: "sk-x", baseUrl: "https://e" })
-    expect(_internals.matchProvider([p], { apiKey: "  sk-x ", baseUrl: " https://e" })).toBe(p)
-  })
-
-  it("matchProvider returns undefined when both fields empty", () => {
-    expect(_internals.matchProvider([provider({})], {})).toBeUndefined()
-  })
-
-  it("detectDrift treats undefined-cognia as non-drift when all agents also undefined", () => {
-    expect(_internals.detectDrift(undefined, { "claude-code": undefined })).toBe(false)
-  })
-
-  it("envUpdatesForProvider strips whitespace-only fields to null (claude-code)", () => {
-    const updates = _internals.envUpdatesForProvider(
-      "claude-code",
-      provider({ apiKey: "  ", baseUrl: "" })
-    )
-    expect(updates).toEqual([
-      { key: "ANTHROPIC_API_KEY", value: null },
-      { key: "ANTHROPIC_BASE_URL", value: null },
-    ])
-  })
-
-  it("envUpdatesForProvider emits OPENAI_API_KEY only for codex", () => {
-    const updates = _internals.envUpdatesForProvider(
-      "codex",
-      provider({ apiKey: "sk-openai", baseUrl: "https://api.openai.com" })
-    )
-    expect(updates).toEqual([{ key: "OPENAI_API_KEY", value: "sk-openai" }])
-  })
-
-  it("envUpdatesForProvider emits opencode key + derived provider", () => {
-    const updates = _internals.envUpdatesForProvider(
-      "opencode",
-      provider({ apiKey: "sk-x", kind: "gemini" })
-    )
-    expect(updates).toEqual([
-      { key: "OPENCODE_API_KEY", value: "sk-x" },
-      { key: "__provider", value: "google" },
-    ])
-  })
-
-  it("SUPPORTED_AGENTS contains claude-code, codex, gemini, opencode in v3", () => {
-    expect(_internals.SUPPORTED_AGENTS.has("claude-code")).toBe(true)
-    expect(_internals.SUPPORTED_AGENTS.has("codex")).toBe(true)
-    expect(_internals.SUPPORTED_AGENTS.has("gemini")).toBe(true)
-    expect(_internals.SUPPORTED_AGENTS.has("opencode")).toBe(true)
-    expect(_internals.SUPPORTED_AGENTS.has("claude-desktop")).toBe(false)
-  })
+it("rejects managed OAuth cards even when they carry placeholder API keys", async () => {
+  const plan = planSwitch(
+    provider({ providerType: "github_copilot" }),
+    { cognia: true, agents: ["claude-code"] },
+    {}
+  )
+  await expect(applySwitch(plan)).rejects.toThrow(/managed authentication/)
+  expect(mSetProviderEnv).not.toHaveBeenCalled()
+  expect(mWriteClaude).not.toHaveBeenCalled()
 })

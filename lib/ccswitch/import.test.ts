@@ -219,6 +219,16 @@ describe("fromCcswitchUsageScript", () => {
 })
 
 describe("fromCcswitchMcp", () => {
+  it("uses the source id as namespace while preserving a human-readable label", () => {
+    expect(
+      fromCcswitchMcp({
+        id: "native-mcp",
+        name: "CCSwitch native MCP 中文",
+        config: { type: "http", url: "http://127.0.0.1:18994/mcp" },
+      })
+    ).toMatchObject({ name: "native-mcp", displayName: "CCSwitch native MCP 中文" })
+  })
+
   it("normalizes transport and strips duplicate hint", () => {
     const draft = fromCcswitchMcp({
       id: "m1",
@@ -369,4 +379,64 @@ describe("importCcswitchSkills", () => {
     expect(summary.imported).toBe(0)
     expect(summary.errored[0]).toEqual({ name: "ok", error: "dexie boom" })
   })
+})
+
+describe("current CC Switch import contracts", () => {
+  it("infers HTTP for URL-only server_config and retains headers", () => {
+    expect(
+      fromCcswitchMcp({
+        id: "remote",
+        name: "Remote",
+        config: { url: "https://mcp.test", headers: { Authorization: "fixture" } },
+      })
+    ).toEqual({
+      name: "Remote",
+      transport: "http",
+      config: { url: "https://mcp.test", headers: { Authorization: "fixture" } },
+    })
+  })
+
+  it("imports installed skill frontmatter, Codex policy, and resources together", async () => {
+    const resources = [
+      {
+        kind: "script" as const,
+        name: "run.py",
+        path: "scripts/run.py",
+        content: "print('fixture')",
+        encoding: "utf-8" as const,
+        size: 16,
+      },
+    ]
+    const result = await importCcswitchSkills([
+      {
+        id: "bundle",
+        name: "review",
+        content:
+          "---\nname: review\ndescription: Review changes\nallowed-tools: Read\n---\nReview the diff.",
+        openaiYaml: "policy:\n  allow_implicit_invocation: false",
+        resources,
+      },
+    ])
+    expect(result.imported).toBe(1)
+    expect(mCreateSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "review",
+        content: "Review the diff.",
+        description: "Review changes",
+        invocationPolicy: "explicit",
+        resources,
+        source: "imported",
+      })
+    )
+  })
+})
+
+it("normalizes streamable HTTP through the shared MCP parser", () => {
+  expect(
+    fromCcswitchMcp({
+      id: "remote",
+      name: "remote",
+      config: { type: "streamable-http", url: "https://mcp.test" },
+    })
+  ).toEqual({ name: "remote", transport: "http", config: { url: "https://mcp.test" } })
 })

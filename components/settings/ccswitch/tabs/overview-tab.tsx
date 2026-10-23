@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button"
 import { invoke } from "@tauri-apps/api/core"
 
 import { useCcswitchProviders, useCcswitchStatus } from "@/lib/ccswitch/hooks"
-import { detectActive } from "@/lib/ccswitch/switch"
+import { ccswitchProviderRefId, detectActive } from "@/lib/ccswitch/switch"
 import type { ActiveProviderState, CcswitchProvider } from "@/types/ccswitch"
 import type { ClaudeSettings } from "@/lib/claude/settings"
 import { getSettings } from "@/lib/db/settings"
@@ -42,7 +42,12 @@ async function readClaudeCodeProviderEnv(): Promise<{
   const settings = await invoke<ClaudeSettings | null>("read_claude_user_settings")
   if (!settings) return null
   const env = (settings.extra?.env ?? {}) as Record<string, unknown>
-  const apiKey = typeof env.ANTHROPIC_API_KEY === "string" ? env.ANTHROPIC_API_KEY : undefined
+  const apiKey =
+    typeof env.ANTHROPIC_AUTH_TOKEN === "string" && env.ANTHROPIC_AUTH_TOKEN.trim()
+      ? env.ANTHROPIC_AUTH_TOKEN
+      : typeof env.ANTHROPIC_API_KEY === "string"
+        ? env.ANTHROPIC_API_KEY
+        : undefined
   const baseUrl = typeof env.ANTHROPIC_BASE_URL === "string" ? env.ANTHROPIC_BASE_URL : undefined
   if (!apiKey && !baseUrl) return null
   return { apiKey, baseUrl }
@@ -113,10 +118,10 @@ export function CcswitchOverviewTab() {
     )
   }
 
-  if (statusError) {
+  if (statusError || status?.error) {
     return (
       <SettingsAlert variant="destructive" title={t("overview.errorTitle")}>
-        {statusError}
+        {statusError ?? status?.error}
       </SettingsAlert>
     )
   }
@@ -140,7 +145,9 @@ export function CcswitchOverviewTab() {
     )
   }
 
-  const activeProvider = active?.cognia ? providers?.find((p) => p.id === active.cognia) : undefined
+  const activeProvider = active?.cognia
+    ? providers?.find((p) => ccswitchProviderRefId(p) === active.cognia)
+    : undefined
 
   return (
     <div className="space-y-4">

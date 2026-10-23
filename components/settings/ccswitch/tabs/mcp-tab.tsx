@@ -29,18 +29,19 @@ import { isTauri } from "@/lib/tauri"
 export function CcswitchMcpTab() {
   const t = useTranslations("ccswitch")
   const tabReady = isTauri()
-  const { data: status } = useCcswitchStatus(tabReady)
+  const { data: status, error: statusError } = useCcswitchStatus(tabReady)
   const {
     data: servers,
     loading,
     error,
     refresh,
-  } = useCcswitchMcpServers(tabReady && status?.exists === true)
+  } = useCcswitchMcpServers(tabReady && status?.exists === true && !status.error)
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [strategy, setStrategy] = useState<McpImportStrategy>("skip")
   const [importing, setImporting] = useState(false)
   const [resultText, setResultText] = useState<string | null>(null)
+  const [importErrors, setImportErrors] = useState<Array<{ name: string; error: string }>>([])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- default-select all rows whenever the source data refreshes
@@ -61,8 +62,10 @@ export function CcswitchMcpTab() {
     const picks = servers.filter((s) => selected.has(s.id))
     setImporting(true)
     setResultText(null)
+    setImportErrors([])
     try {
       const r = await importCcswitchMcp(picks, strategy)
+      setImportErrors(r.errored)
       setResultText(
         t("mcp.resultSummary", {
           imported: r.imported,
@@ -97,10 +100,10 @@ export function CcswitchMcpTab() {
     return <Skeleton className="h-32 w-full" />
   }
 
-  if (error) {
+  if (error || statusError || status?.error) {
     return (
       <SettingsAlert variant="destructive" title={t("mcp.errorTitle")}>
-        {error}
+        {error ?? statusError ?? status?.error}
       </SettingsAlert>
     )
   }
@@ -111,6 +114,16 @@ export function CcswitchMcpTab() {
 
   return (
     <div className="space-y-3">
+      {importErrors.length > 0 && (
+        <SettingsAlert variant="destructive" title={t("mcp.errorTitle")}>
+          <ul>
+            {importErrors.map(({ name, error }, index) => (
+              <li key={`${name}:${index}`}>{`${name}: ${error}`}</li>
+            ))}
+          </ul>
+        </SettingsAlert>
+      )}
+
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">{t("mcp.headerHint")}</p>
         <Button variant="ghost" size="sm" onClick={refresh}>

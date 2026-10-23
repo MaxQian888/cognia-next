@@ -1,3 +1,6 @@
+jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn(async () => ({})) }))
+import { getSettings } from "@/lib/db/settings"
+
 // IPC wrappers are thin — the only behaviour worth testing is that each
 // function (a) gates on isTauri(), and (b) forwards through invoke() with
 // the right command name and args.
@@ -23,8 +26,6 @@ import {
   ccswitchWatchStart,
   ccswitchWatchStop,
   writeClaudeSettingsEnv,
-  writeCodexAuthEnv,
-  writeGeminiSettingsEnv,
   writeOpencodeAuthEnv,
 } from "./client"
 
@@ -34,6 +35,7 @@ const mIsTauri = isTauri as jest.Mock
 beforeEach(() => {
   jest.resetAllMocks()
   mIsTauri.mockReturnValue(true)
+  ;(getSettings as jest.Mock).mockResolvedValue({})
 })
 
 describe("ccswitch IPC wrappers", () => {
@@ -115,29 +117,6 @@ describe("ccswitch IPC wrappers", () => {
     expect(out.path).toBe("/u/.claude/settings.json")
   })
 
-  it("writeCodexAuthEnv forwards the env-updates payload to write_codex_auth_env", async () => {
-    mInvoke.mockResolvedValue({ path: "/u/.codex/auth.json" })
-    const out = await writeCodexAuthEnv({
-      OPENAI_API_KEY: "sk-openai",
-    })
-    expect(mInvoke).toHaveBeenCalledWith("write_codex_auth_env", {
-      envUpdates: { OPENAI_API_KEY: "sk-openai" },
-    })
-    expect(out.path).toBe("/u/.codex/auth.json")
-  })
-
-  it("writeGeminiSettingsEnv forwards the env-updates payload to write_gemini_settings_env", async () => {
-    mInvoke.mockResolvedValue({ path: "/u/.gemini/settings.json" })
-    const out = await writeGeminiSettingsEnv({
-      GEMINI_API_KEY: "g-key",
-      GOOGLE_GEMINI_BASE_URL: null,
-    })
-    expect(mInvoke).toHaveBeenCalledWith("write_gemini_settings_env", {
-      envUpdates: { GEMINI_API_KEY: "g-key", GOOGLE_GEMINI_BASE_URL: null },
-    })
-    expect(out.path).toBe("/u/.gemini/settings.json")
-  })
-
   it("writeOpencodeAuthEnv forwards the env-updates payload to write_opencode_auth_env", async () => {
     mInvoke.mockResolvedValue({ path: "/u/.local/share/opencode/auth.json" })
     const out = await writeOpencodeAuthEnv({
@@ -160,9 +139,22 @@ describe("ccswitch IPC wrappers", () => {
     await expect(ccswitchWatchStart()).rejects.toThrow(/Tauri/)
     await expect(ccswitchWatchStop()).rejects.toThrow(/Tauri/)
     await expect(writeClaudeSettingsEnv({})).rejects.toThrow(/Tauri/)
-    await expect(writeCodexAuthEnv({})).rejects.toThrow(/Tauri/)
-    await expect(writeGeminiSettingsEnv({})).rejects.toThrow(/Tauri/)
     await expect(writeOpencodeAuthEnv({})).rejects.toThrow(/Tauri/)
     expect(mInvoke).not.toHaveBeenCalled()
   })
+})
+
+it("applies the saved manual data directory to every reader and watcher", async () => {
+  ;(getSettings as jest.Mock).mockResolvedValue({ ccswitchSync: { manualDataDir: "~/synced" } })
+  for (const read of [
+    ccswitchStatus,
+    ccswitchListProviders,
+    ccswitchListMcpServers,
+    ccswitchListPrompts,
+    ccswitchListSkills,
+    ccswitchWatchStart,
+  ])
+    await read()
+  expect(mInvoke).toHaveBeenCalledTimes(6)
+  for (const call of mInvoke.mock.calls) expect(call[1]).toEqual({ manualDataDir: "~/synced" })
 })

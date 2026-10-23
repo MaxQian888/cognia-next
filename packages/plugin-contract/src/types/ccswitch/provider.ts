@@ -1,5 +1,5 @@
 // CCSwitch interop types — provider records + DB status. Mirrors the structs
-// serialized by `src-tauri/src/ccswitch/db.rs`. Field names follow the Rust
+// serialized by `crates/cognia-ccswitch/src/types.rs`. Field names follow the Rust
 // struct's `serde(rename = "...")` attributes; everything not marked optional
 // is always present (the Rust side fills empty strings before dropping rows).
 
@@ -32,6 +32,9 @@ export interface CcswitchProvider {
   name: string
   /** "claude" | "codex" | "gemini" | "opencode" | "openclaw" | other */
   kind?: string
+  category?: string
+  /** Managed OAuth cards require CC Switch's proxy, not direct API-key switching. */
+  providerType?: string
   /**
    * The API key. Treat as a secret — don't log, don't preview in plaintext
    * outside the dialog where the user explicitly asks for "Show key".
@@ -39,6 +42,9 @@ export interface CcswitchProvider {
   apiKey?: string
   baseUrl?: string
   model?: string
+  models?: string[]
+  /** Name only; Cognia never executes or resolves an arbitrary environment reference. */
+  credentialEnv?: string
   /**
    * Per-tier alias → concrete model mappings the Rust reader extracts from the
    * provider's `settings_config` env block (`ANTHROPIC_DEFAULT_{OPUS,SONNET,

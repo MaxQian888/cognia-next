@@ -51,6 +51,17 @@ beforeEach(() => {
 })
 
 describe("CcswitchPromptsTab", () => {
+  it("shows database schema errors instead of an empty successful list", async () => {
+    useStatusMock.mockReturnValue({
+      data: undefined,
+      loading: false,
+      error: "unsupported CC Switch schema 22",
+      refresh: jest.fn(),
+    })
+    render(<CcswitchPromptsTab />)
+    expect(await screen.findByText("unsupported CC Switch schema 22")).toBeInTheDocument()
+  })
+
   it("renders prompt rows", async () => {
     render(<CcswitchPromptsTab />)
     expect(await screen.findByText("Code review")).toBeInTheDocument()
@@ -111,4 +122,14 @@ describe("CcswitchPromptsTab", () => {
     render(<CcswitchPromptsTab />)
     expect(screen.getByText("prompts.emptyTitle")).toBeInTheDocument()
   })
+})
+
+it("shows errors returned inside a successful native status response", () => {
+  useStatusMock.mockReturnValue({
+    data: { exists: true, error: "missing table: skills" },
+    loading: false,
+    refresh: jest.fn(),
+  })
+  render(<CcswitchPromptsTab />)
+  expect(screen.getByText("missing table: skills")).toBeInTheDocument()
 })

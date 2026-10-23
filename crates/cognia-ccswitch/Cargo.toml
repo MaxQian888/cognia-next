@@ -23,6 +23,7 @@ default = []
 tauri-host = ["dep:tauri"]
 
 [dependencies]
+cognia-skills = { path = "../cognia-skills" }
 cognia-core = { path = "../cognia-core" }
 cognia-subscription = { path = "../cognia-subscription" }
 tauri = { workspace = true, optional = true }
