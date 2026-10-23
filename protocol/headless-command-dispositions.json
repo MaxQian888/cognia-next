@@ -718,6 +718,7 @@
         "proxy_detect",
         "proxy_get_active",
         "proxy_http_cancel",
+        "proxy_http_prepare",
         "proxy_http_request",
         "proxy_identify_clash",
         "proxy_test",
