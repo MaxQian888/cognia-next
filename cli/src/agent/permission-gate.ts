@@ -26,7 +26,8 @@ import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import { commandIsAutoApprovable } from "./command-approval"
 
 export type PermissionResponder = (
-  req: PermissionRequestEvent
+  req: PermissionRequestEvent,
+  signal?: AbortSignal
 ) => Promise<CapturePermissionDecision>
 
 export interface PermissionGateOptions {

@@ -277,6 +277,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
     <>
       {state.overlay.kind === "permission" && (
         <PermissionOverlay
+          onExit={() => runCommandLine("/exit")}
           req={state.overlay.req}
           choices={state.overlay.choices}
           index={state.overlay.index}
@@ -1186,9 +1187,15 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
       )}
       {state.overlay.kind === "askUser" && (
         <AskUserDialog
+          key={state.overlay.requestId}
           request={state.overlay.request}
           maxRows={viewportRows}
-          onResolve={askUser.resolve}
+          onResolve={(answer) =>
+            askUser.resolve(
+              answer,
+              state.overlay.kind === "askUser" ? state.overlay.requestId : undefined
+            )
+          }
         />
       )}
       {state.overlay.kind === "form" && (

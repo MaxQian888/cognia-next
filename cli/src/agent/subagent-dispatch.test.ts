@@ -9,6 +9,14 @@ import path from "node:path"
 jest.mock("@/lib/db/seed", () => ({
   seedBuiltIns: jest.fn().mockResolvedValue(undefined),
 }))
+// This suite drives capture through an in-memory sidecar, so the new child
+// bridge also subscribes to that fake boundary instead of a desktop transport.
+jest.mock("../plugin/plugin-tool-dispatch", () => ({
+  subscribePluginToolDispatch: jest.fn(async () => () => {}),
+}))
+jest.mock("../plugin/plugin-runtime", () => ({
+  ensurePluginRuntime: jest.fn(async () => ({ ok: true })),
+}))
 
 jest.mock("../db/bootstrap", () => ({
   ...jest.requireActual("../db/bootstrap"),
@@ -65,6 +73,7 @@ jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: jest.fn(async () => ({ provider: "opencode-go" })),
 }))
 jest.mock("@/lib/claude/run-and-capture", () => ({
+  RunAndCaptureError: jest.requireActual("@/lib/claude/run-and-capture").RunAndCaptureError,
   runAndCaptureAssistantReply: jest.fn(async (sessionId: string) => ({
     text: `subagent reply for ${sessionId}`,
     messageId: "m",
@@ -250,7 +259,7 @@ describe("handleCliDispatchAgent", () => {
     const run = jest.fn().mockResolvedValue({
       text: "looks good",
       usage: { inputTokens: 10, outputTokens: 4 },
-      finishReason: "error_max_turns",
+      finishReason: "success",
     })
     registerCliSubagentContext("s1", makeCtx({ run }))
     const resp = await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "check" }))
@@ -262,7 +271,48 @@ describe("handleCliDispatchAgent", () => {
     )
     expect(resp.result).toContain("looks good")
     expect(resp.result).toContain("14 tok")
-    expect(resp.result).toContain("error_max_turns")
+    expect(resp.result).not.toContain("error_max_turns")
+  })
+
+  it("marks a budget-limited foreground run incomplete and resumes its recorded findings", async () => {
+    const run = jest
+      .fn()
+      .mockResolvedValueOnce({
+        text: "located entrypoint; callers unchecked",
+        finishReason: "error_max_turns",
+      })
+      .mockResolvedValueOnce({ text: "callers verified", finishReason: "success" })
+    registerCliSubagentContext("s1", makeCtx({ run, mintRunId: () => "research-limit" }))
+    const first = await handleCliDispatchAgent(
+      req({ subagentId: "reviewer", prompt: "trace callers" })
+    )
+    expect(first.error).toContain("incomplete")
+    expect(first.error).toContain("located entrypoint")
+    expect(first.error).toContain('resume:"research-limit"')
+    const record = await getCliBackgroundRecord("research-limit", { home: testHome, owner: "s1" })
+    expect(record).toMatchObject({ mode: "foreground", status: "error" })
+    const resumed = await handleCliDispatchAgent(
+      req({ resume: "research-limit", prompt: "continue checking callers" })
+    )
+    expect(resumed.result).toContain("callers verified")
+    expect(run.mock.calls[1][1]).toContain("located entrypoint; callers unchecked")
+    expect(run.mock.calls[1][1]).toContain("trace callers")
+  })
+
+  it("keeps partial findings when continuation persistence fails", async () => {
+    jest.mocked(ensureCliDb).mockRejectedValueOnce(new Error("disk full"))
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({
+        run: async () => ({ text: "verified entrypoint", finishReason: "error_max_turns" }),
+        mintRunId: () => "unsaved",
+      })
+    )
+    const result = await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "research" }))
+    expect(result.error).toContain("verified entrypoint")
+    expect(result.error).toContain("incomplete")
+    expect(result.error).toContain("Could not save continuation: disk full")
+    expect(result.error).not.toContain('resume:"unsaved"')
   })
 
   it("binds child-specific options and permission gates before dispatch", async () => {
@@ -417,28 +467,41 @@ describe("handleCliDispatchAgent", () => {
     expect(again.result).toContain("async finished")
   })
 
-  it("resumes a finished background run with the prior prompt + outcome as context", async () => {
-    const home = testHome
-    const prompts: string[] = []
-    const run = jest.fn(async (_def: unknown, prompt: string) => {
-      prompts.push(prompt)
-      return { text: prompts.length === 1 ? "first outcome" : "follow-up outcome" }
-    })
-    registerCliSubagentContext("s1", makeCtx({ run, mintRunId: () => "bg-resume", home }))
-    await handleCliDispatchAgent(
-      req({ subagentId: "reviewer", prompt: "audit auth", background: true })
-    )
-    await handleCliDispatchAgent(req({ collect: "bg-resume" }))
+  it.each(["success", "error_max_turns", "error_max_budget_usd"])(
+    "resumes a %s background run with the prior findings",
+    async (finishReason) => {
+      const home = testHome
+      const prompts: string[] = []
+      const run = jest.fn(async (_def: unknown, prompt: string) => {
+        prompts.push(prompt)
+        return {
+          text: prompts.length === 1 ? "first outcome" : "follow-up outcome",
+          finishReason: prompts.length === 1 ? finishReason : "success",
+        }
+      })
+      registerCliSubagentContext("s1", makeCtx({ run, mintRunId: () => "bg-resume", home }))
+      await handleCliDispatchAgent(
+        req({ subagentId: "reviewer", prompt: "audit auth", background: true })
+      )
+      const collected = await handleCliDispatchAgent(req({ collect: "bg-resume" }))
+      if (finishReason !== "success") {
+        expect(collected.result).toContain("incomplete")
+        expect(collected.result).toContain('resume:"bg-resume"')
+        expect(await getCliBackgroundRecord("bg-resume", { home, owner: "s1" })).toMatchObject({
+          status: "error",
+        })
+      }
 
-    const resp = await handleCliDispatchAgent(req({ resume: "bg-resume", prompt: "fix issue 2" }))
+      const resp = await handleCliDispatchAgent(req({ resume: "bg-resume", prompt: "fix issue 2" }))
 
-    expect(resp.result).toContain("follow-up outcome")
-    expect(run).toHaveBeenCalledTimes(2)
-    expect(prompts[1]).toContain("You previously worked on this task:")
-    expect(prompts[1]).toContain("audit auth")
-    expect(prompts[1]).toContain("first outcome")
-    expect(prompts[1]).toContain("fix issue 2")
-  })
+      expect(resp.result).toContain("follow-up outcome")
+      expect(run).toHaveBeenCalledTimes(2)
+      expect(prompts[1]).toContain("You previously worked on this task:")
+      expect(prompts[1]).toContain("audit auth")
+      expect(prompts[1]).toContain("first outcome")
+      expect(prompts[1]).toContain("fix issue 2")
+    }
+  )
 
   it("refuses to resume an unknown or still-running run", async () => {
     const home = testHome
@@ -517,6 +580,48 @@ describe("handleCliDispatchAgent", () => {
     const resp = await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
     expect(resp.result).toContain("[reviewer] interrupted.")
     expect(resp.result).not.toContain("failed")
+  })
+
+  it("journals interrupted foreground evidence for owner-scoped resume", async () => {
+    const controller = new AbortController()
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({
+        signal: controller.signal,
+        run: async () => {
+          controller.abort()
+          return { text: "DONE_FACT; NEXT_FILE=/remaining.ts", finishReason: "interrupted" }
+        },
+      })
+    )
+    const response = await handleCliDispatchAgent(
+      req({ subagentId: "reviewer", prompt: "original task" })
+    )
+    const id = /resume:"([^"]+)"/.exec(String(response.result))?.[1]
+    expect(id).toBeDefined()
+    expect(await getCliBackgroundRecord(id!, { owner: "s1", home: testHome })).toMatchObject({
+      status: "interrupted",
+      mode: "foreground",
+      prompt: "original task",
+      resultText: expect.stringContaining("DONE_FACT"),
+      deliveryState: "delivered",
+    })
+    expect(await getCliBackgroundRecord(id!, { owner: "other", home: testHome })).toBeUndefined()
+  })
+
+  it("does not publish an interrupted resume handle when persistence fails", async () => {
+    jest.mocked(ensureCliDb).mockRejectedValueOnce(new Error("disk unavailable"))
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({
+        run: async () => ({ text: "DONE_FACT", finishReason: "interrupted" }),
+      })
+    )
+    const response = await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "task" }))
+    const text = String(response.error ?? response.result)
+    expect(text).toContain("DONE_FACT")
+    expect(text).toContain("Could not save continuation")
+    expect(text).not.toContain("resume:")
   })
 })
 

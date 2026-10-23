@@ -42,6 +42,13 @@ export type InboundMessage =
       error?: string
     }
   | {
+      type: "plugin_hook_response"
+      sessionId: string
+      execId: string
+      result?: unknown
+      error?: string
+    }
+  | {
       type: "tool_result_decision"
       sessionId: string
       reviewId: string
@@ -104,6 +111,7 @@ export const COMMAND = {
   CLOSE: "claude_close_session",
   AGENT_CLOSE: "agent_close_session",
   TOOL_RESULT_DECISION: "claude_tool_result_decision",
+  PLUGIN_HOOK_RESPONSE: "claude_plugin_hook_response",
   PLUGIN_TOOL_RESPONSE: "claude_plugin_tool_response",
   SESSION_CONTROL: "claude_session_control",
   SESSION_API: "agent_session_api",
@@ -197,6 +205,14 @@ export function commandToInbound(
         type: "plugin_tool_response",
         sessionId: String(args.sessionId),
         toolUseId: String(args.toolUseId),
+        result: args.result,
+        error: args.error as string | undefined,
+      }
+    case COMMAND.PLUGIN_HOOK_RESPONSE:
+      return {
+        type: "plugin_hook_response",
+        sessionId: String(args.sessionId),
+        execId: String(args.execId),
         result: args.result,
         error: args.error as string | undefined,
       }

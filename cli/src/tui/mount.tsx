@@ -12,7 +12,7 @@ import { AppErrorBoundary } from "./components/AppErrorBoundary"
 import { defaultCrashLogger } from "./crash-log"
 import { installProcessCrashGuards } from "./process-guards"
 import { flushWithin, installTuiExitSignals, type SignalProcess } from "./exit-signals"
-import { flushOpenCliDb } from "../db/bootstrap"
+import { disposeOpenCliDb } from "../db/bootstrap"
 import { loadHistory } from "./input/history-store"
 import { TuiInputProvider } from "./input/input-router"
 import { mintSessionId } from "../agent/run"
@@ -46,7 +46,7 @@ export interface RenderTuiDeps {
   initialCommand?: string
   /** Launch-only mode overlay (for example `--bypass`) that must not be persisted. */
   sessionOnlyPermissionMode?: ResolvedConfig["permissionMode"]
-  /** Persist the CLI database on exit. Defaults to {@link flushOpenCliDb}. */
+  /** Persist and release the CLI database on exit. Defaults to {@link disposeOpenCliDb}. */
   flushDb?: () => Promise<void>
   /** Signal source for the exit handlers (tests inject a fake process). */
   signalProcess?: SignalProcess
@@ -116,6 +116,7 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
       drag: (config.selection ?? DEFAULT_SELECTION_MODE) !== "off",
     })
   }
+  let sessionCleanup = Promise.resolve()
   const instance = render(
     <TuiInputProvider>
       <AppErrorBoundary
@@ -125,6 +126,9 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
         <App
           config={config}
           sessionId={sessionId}
+          onShutdown={(cleanup) => {
+            sessionCleanup = cleanup
+          }}
           createSession={deps.createSession}
           {...(deps.createExternalSession
             ? { createExternalSession: deps.createExternalSession }
@@ -180,12 +184,23 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
       exitAltScreen()
     }
   }
-  const flushDb = deps.flushDb ?? flushOpenCliDb
+  const flushDb = deps.flushDb ?? disposeOpenCliDb
   const onFlushError = (error: unknown) => crashLogger("database-flush", error)
+  let finalFlush: Promise<void> | undefined
+  const finalize = () =>
+    (finalFlush ??= (async () => {
+      await sessionCleanup
+      // An incomplete/background run can lazily initialize the renderer scheduler.
+      // Its task and prewarm timers belong to this CLI process, not Ink's tree.
+      // Stop them before persisting their final state; unmount alone leaves them alive.
+      const { stopTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+      stopTaskScheduler()
+      await flushDb()
+    })())
   // A killed TUI (SIGTERM, SIGHUP, an external SIGINT) persists the database
   // before it goes, instead of dropping whatever the debounce still held.
   const uninstallExitSignals = installTuiExitSignals({
-    flush: flushDb,
+    flush: finalize,
     restore: () => {
       instance.unmount()
       restoreTerminal()
@@ -197,7 +212,7 @@ export async function renderTui(deps: RenderTuiDeps): Promise<number> {
     await instance.waitUntilExit()
     // A clean exit waits for the last write too: the debounce timer is not a
     // promise that the process will still be alive when it fires.
-    await flushWithin(flushDb, EXIT_FLUSH_TIMEOUT_MS).catch(onFlushError)
+    await flushWithin(finalize, EXIT_FLUSH_TIMEOUT_MS).catch(onFlushError)
   } finally {
     uninstallExitSignals()
     uninstallCrashGuards()

@@ -113,7 +113,7 @@ import { resolveModelMeta, type ModelMeta } from "../runtime/model-meta"
 import { initOpenRouterCatalog as defaultInitOpenRouterCatalog } from "../runtime/openrouter-catalog-controller"
 import { registerCustomCommands as defaultRegisterCustomCommands } from "../commands/custom-commands"
 import { shouldAutoCompact } from "../../agent/auto-compact"
-import { ensureCliDb } from "../../db/bootstrap"
+import { flushOpenCliDb } from "../../db/bootstrap"
 import { formSubmit } from "../state/form"
 import { createInitialState } from "../state/initial"
 import { requiresAcknowledgement } from "../state/permission-mode-meta"
@@ -308,6 +308,8 @@ export interface AppProps {
   pushHandoff?: (sessionId: string) => boolean | Promise<boolean>
   /** Override the exit + clock for tests. */
   onExit?: () => void
+  /** Give the process owner the backend cleanup to await before closing storage. */
+  onShutdown?: (cleanup: Promise<void>) => void
   now?: () => number
   mintId?: () => string
   /** Directory lister for `@` completion; defaults to the real filesystem. */
@@ -480,6 +482,7 @@ export function App({
   runInstallFn,
   pushHandoff,
   onExit,
+  onShutdown,
   now = Date.now,
   mintId = () => mintSessionId(),
   listDir,
@@ -495,9 +498,9 @@ export function App({
   persistCredential,
   clearScreen = clearTerminal,
   persistDb = () => {
-    void ensureCliDb()
-      .then((handle) => handle.scheduleFlush())
-      .catch(() => {})
+    // Runtime mutations already dirty their own tables through the database
+    // middleware. A read-only command must neither open nor dirty the store.
+    void flushOpenCliDb().catch(() => {})
   },
   runShell = defaultRunShell,
   runInteractiveShell = defaultRunInteractiveShell,
@@ -1105,6 +1108,11 @@ export function App({
   // Exposed to `useApplyEffect` through stable accessors (not the raw ref) so the
   // hook never mutates a prop.
   const runtimeAbort = useRef<AbortController | null>(null)
+  const runtimeWork = useRef(new Set<Promise<unknown>>())
+  const trackRuntimeWork = useCallback((work: Promise<unknown>) => {
+    runtimeWork.current.add(work)
+    void work.finally(() => runtimeWork.current.delete(work)).catch(() => {})
+  }, [])
   const setRuntimeAbort = useCallback((c: AbortController | null) => {
     runtimeAbort.current = c
   }, [])
@@ -1665,25 +1673,27 @@ export function App({
     dispatch({ type: "EXIT" })
     agent.abort()
     getRuntimeAbort()?.abort()
-    // Unmount Ink immediately. Session/backend cleanup is best-effort and may
-    // wait on an unresponsive child process; keeping the TUI mounted until it
-    // settles makes a successful exit look hung and invites another Ctrl+C,
-    // which kills the pnpm process and surfaces as ELIFECYCLE.
-    if (onExit) onExit()
-    else exit()
-    void (async () => {
+    const cleanup = (async () => {
       try {
+        // Cancellation must finish journaling a manual child before its shared
+        // sidecar and database are retired.
+        await Promise.allSettled([...runtimeWork.current])
         await agent.close()
+      } finally {
         const lifecycle = lifecycleRef.current
         if (lifecycle) await lifecycle.dispose()
         else await disconnectBackend(connectionRef.current)
         connectionRef.current = null
-      } catch {
-        // Exiting must not be converted into an unhandled rejection when a
-        // backend has already stopped or refuses to acknowledge shutdown.
       }
-    })()
-  }, [agent, dispatch, exit, getRuntimeAbort, onExit])
+    })().catch(() => {
+      // A stopped backend must not turn teardown into an unhandled rejection.
+    })
+    // Restore Ink immediately, but hand the owner the actual cleanup promise.
+    // Storage must remain writable until session/backend cleanup has settled.
+    onShutdown?.(cleanup)
+    if (onExit) onExit()
+    else exit()
+  }, [agent, dispatch, exit, getRuntimeAbort, onExit, onShutdown])
 
   // Startup trust gate: "Yes, proceed" trusts the current cwd and enters chat.
   const trustCwd = useCallback(() => {
@@ -2115,6 +2125,7 @@ export function App({
     syncAndRefreshModelOverlay,
     takeSteer,
     doExit,
+    trackRuntimeWork,
     changeCwd,
     reclaimBackend,
     setRuntimeAbort,
@@ -2845,6 +2856,15 @@ export function App({
   // invalidate the cached SendOptions so the next turn re-resolves with it.
   const resolvePermission = useCallback(
     (decision: CapturePermissionDecision) => {
+      // A cancelled child may have promoted a sibling before React replaced
+      // the displayed overlay. Its stale callback cannot approve or persist a
+      // rule for the new request.
+      if (
+        !attachedHostConnectionRef.current &&
+        state.overlay.kind === "permission" &&
+        agent.isCurrentPermission?.(state.overlay.req) === false
+      )
+        return
       if (
         state.overlay.kind === "permission" &&
         state.overlay.req.suppressAlwaysAllowRule &&

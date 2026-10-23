@@ -851,7 +851,7 @@ export type Overlay =
   // App mirrors the active prompt into this overlay, and the AskUserDialog's
   // submission resolves the blocked tool call. `request` is the parsed prompt
   // (question + options + flags); the dialog owns its draft (selection + text).
-  | { kind: "askUser"; request: AskUserRequest }
+  | { kind: "askUser"; request: AskUserRequest; requestId?: string }
   // `/menu` command center — a searchable, clickable index over the curated
   // quick actions PLUS every visible registry command (see
   // `build-command-palette`). Each row carries the slash command it runs when
@@ -1336,7 +1336,7 @@ export type TuiAction =
   // Overlays
   | { type: "OVERLAY_OPEN"; overlay: Overlay }
   | { type: "LIMITS_LOADED"; requestId: number; snapshots: ProviderLimits[] }
-  | { type: "OVERLAY_CLOSE" }
+  | { type: "OVERLAY_CLOSE"; ifKind?: Overlay["kind"] }
   | {
       type: "GIT_DIFF_RESULT"
       requestId: number

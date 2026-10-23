@@ -100,6 +100,25 @@ function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
 const run = (deps: ApplyEffectDeps) => renderHook(() => useApplyEffect(deps)).result.current
 
 describe("useApplyEffect", () => {
+  it("passes the owning session preparation into manual agent runtime commands", async () => {
+    const deps = buildDeps()
+    deps.agent.prepareForSubagent = jest.fn(async () => {})
+    deps.agent.awaitSubagentApprovals = jest.fn(async () => {})
+    deps.agent.requestSubagentPermission = jest.fn(async () => ({ decision: "allow" as const }))
+    run(deps)({
+      kind: "runtime",
+      runtime: { feature: "agents", action: "run", arg: "Explore research" },
+    })
+    await flush()
+    expect(runRuntimeRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({ feature: "agents" }),
+      expect.objectContaining({
+        prepareForSubagent: deps.agent.prepareForSubagent,
+        requestSubagentPermission: deps.agent.requestSubagentPermission,
+        awaitSubagentApprovals: deps.agent.awaitSubagentApprovals,
+      })
+    )
+  })
   it("does not send refinement if the backend cannot enter read-only plan mode", async () => {
     const deps = buildDeps()
     jest.mocked(deps.agent.switchMode).mockRejectedValueOnce(new Error("mode unavailable"))
@@ -238,6 +257,33 @@ describe("useApplyEffect", () => {
       { feature: "limits", action: "show" },
       expect.objectContaining({ backendAgentId: "original-connected-agent" })
     )
+  })
+
+  it("hands the owner a runtime promise that includes final persistence", async () => {
+    let finish!: () => void
+    runRuntimeRequestMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    const tracked = jest.fn()
+    const deps = buildDeps({ trackRuntimeWork: tracked })
+    run(deps)({
+      kind: "runtime",
+      runtime: { feature: "agents", action: "run", arg: "Explore task" },
+    })
+    expect(tracked).toHaveBeenCalledTimes(1)
+    let settled = false
+    void tracked.mock.calls[0][0].then(() => {
+      settled = true
+    })
+    await flush()
+    expect(settled).toBe(false)
+    finish()
+    await tracked.mock.calls[0][0]
+    expect(deps.persistDb).toHaveBeenCalled()
+    expect(settled).toBe(true)
   })
 
   it("does NOT invalidate the session for a read-only /mcp action (panel open)", async () => {

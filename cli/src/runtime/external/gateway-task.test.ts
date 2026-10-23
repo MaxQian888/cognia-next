@@ -25,6 +25,28 @@ describe("gateway task host state", () => {
     },
   })
 
+  it("writes only bounded Pi agent Markdown paths and cleans them", () => {
+    const input = config()
+    const payload = JSON.parse(input.env.COGNIA_GATEWAY_TASK_CONFIG)
+    payload.files["pi/agents/reviewer.md"] = "---\nmodel: cognia/review\n---\nReview"
+    input.env.COGNIA_GATEWAY_TASK_CONFIG = JSON.stringify(payload)
+    const staged = prepareGatewayTask(input, home)
+    const filename = path.join(staged.config.env!.PI_CODING_AGENT_DIR, "agents/reviewer.md")
+    expect(fs.readFileSync(filename, "utf8")).toContain("cognia/review")
+    staged.cleanup()
+    expect(fs.existsSync(filename)).toBe(false)
+    for (const name of [
+      "pi/agents/../outside.md",
+      "pi/agents/nested/agent.md",
+      "pi/agents/code.ts",
+      "pi/agents/.md",
+    ]) {
+      payload.files = { [name]: "unsafe" }
+      input.env.COGNIA_GATEWAY_TASK_CONFIG = JSON.stringify(payload)
+      expect(() => prepareGatewayTask(input, home)).toThrow(/Invalid gateway/)
+    }
+  })
+
   it("materializes a private catalog from a small request and cleans it with config files", () => {
     const input = config()
     const payload = JSON.parse(input.env.COGNIA_GATEWAY_TASK_CONFIG)

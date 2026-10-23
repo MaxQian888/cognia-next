@@ -1,13 +1,90 @@
 /**
  * @jest-environment node
  */
+import { spawnSync } from "node:child_process"
+import { pathToFileURL } from "node:url"
+import path from "node:path"
 import {
   fatalExitCode,
+  withCliProductionEnvironment,
   installClosedPipeHandler,
   normalizeProcessExitCode,
   runProcessEntrypoint,
   type EntrypointProcess,
 } from "./entry-runtime"
+
+describe("withCliProductionEnvironment", () => {
+  it("loads in production and restores an unset ambient mode before user commands", async () => {
+    const env: Record<string, string | undefined> = {}
+    const value = await withCliProductionEnvironment(async () => {
+      expect(env.NODE_ENV).toBe("production")
+      return "loaded"
+    }, env)
+    expect(value).toBe("loaded")
+    expect(env).not.toHaveProperty("NODE_ENV")
+  })
+
+  it.each(["development", "test", "production", ""])(
+    "preserves explicit NODE_ENV=%s",
+    async (value) => {
+      const env = { NODE_ENV: value }
+      await withCliProductionEnvironment(async () => {
+        expect(env.NODE_ENV).toBe(value)
+      }, env)
+      expect(env.NODE_ENV).toBe(value)
+    }
+  )
+
+  it("restores the ambient environment when dependency loading fails", async () => {
+    const env: Record<string, string | undefined> = {}
+    await expect(
+      withCliProductionEnvironment(async () => {
+        throw Error("load failed")
+      }, env)
+    ).rejects.toThrow("load failed")
+    expect(env).not.toHaveProperty("NODE_ENV")
+  })
+
+  it("does not retain React development performance entries during real Ink rerenders", () => {
+    const env = { ...process.env }
+    Reflect.deleteProperty(env, "NODE_ENV")
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import {withCliProductionEnvironment} from ${JSON.stringify(pathToFileURL(path.join(__dirname, "entry-runtime.ts")).href)};
+      const {createRequire} = await import("node:module");
+      const nativeRequire = createRequire(${JSON.stringify(path.join(__dirname, "../../package.json"))});
+      const {React, render, Text} = await withCliProductionEnvironment(async () => {
+        const {default: React} = await import(nativeRequire.resolve("react"));
+        const {render, Text} = await import(nativeRequire.resolve("ink"));
+        return {React, render, Text};
+      });
+      const {PassThrough} = await import("node:stream");
+      const stdout = new PassThrough(); stdout.columns = 80; stdout.rows = 24; stdout.resume();
+      const instance = render(React.createElement(Text, null, "start"), {
+        stdout, stderr: stdout, stdin: new PassThrough(), exitOnCtrlC: false, patchConsole: false,
+      });
+      for (let i = 0; i < 200; i++) {
+        instance.rerender(React.createElement(Text, null, "stream " + i));
+        await new Promise(resolve => setImmediate(resolve));
+      }
+      instance.unmount(); await instance.waitUntilExit();
+      const {execFileSync} = await import("node:child_process");
+      const childMode = execFileSync(process.execPath, ["-p", "String(process.env.NODE_ENV)"], {encoding:"utf8"}).trim();
+      console.log(JSON.stringify({childMode, measures: performance.getEntriesByType("measure").length}));
+    `,
+      ],
+      { env, encoding: "utf8", timeout: 15000 }
+    )
+    expect(result.error).toBeUndefined()
+    if (result.status !== 0) throw new Error(result.stderr)
+    expect(result.status).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual({ childMode: "undefined", measures: 0 })
+  })
+})
 
 describe("normalizeProcessExitCode", () => {
   it("normalizes Node's numeric-string exit code without hiding invalid values", () => {

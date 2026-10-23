@@ -13,6 +13,7 @@
 
 import { selectRole } from "./role"
 import {
+  withCliProductionEnvironment,
   installClosedPipeHandler,
   normalizeProcessExitCode,
   runProcessEntrypoint,
@@ -70,30 +71,32 @@ async function boot(): Promise<number> {
     return ok ? 0 : 1
   }
 
-  // Public CLI only: `run … | head` closes stdout mid-stream, and an
-  // unhandled EPIPE would crash the turn with a stack dump. Sidecar roles
-  // keep Node's default — their stdout IS a protocol wire, so a dead consumer
-  // SHOULD surface as a process failure to the supervisor.
-  installClosedPipeHandler(process)
+  const main = await withCliProductionEnvironment(async () => {
+    // Public CLI only: `run … | head` closes stdout mid-stream, and an
+    // unhandled EPIPE would crash the turn with a stack dump. Sidecar roles
+    // keep Node's default — their stdout IS a protocol wire, so a dead consumer
+    // SHOULD surface as a process failure to the supervisor.
+    installClosedPipeHandler(process)
 
-  // Before the preamble, and before anything from `@/lib`: this process owns a
-  // process table and nothing in the shared graph can tell by looking. Without
-  // the marker the external-agent process plane refuses every stdio agent with
-  // "the desktop app, or a paired Host". See ../runtime/cli-host-marker.
-  const { markCliHostProcess } = await import("../runtime/cli-host-marker")
-  markCliHostProcess()
+    // Before the preamble, and before anything from `@/lib`: this process owns a
+    // process table and nothing in the shared graph can tell by looking. Without
+    // the marker the external-agent process plane refuses every stdio agent with
+    // "the desktop app, or a paired Host". See ../runtime/cli-host-marker.
+    const { markCliHostProcess } = await import("../runtime/cli-host-marker")
+    markCliHostProcess()
 
-  // MUST be first on the CLI path: installs a synchronous IndexedDB on the
-  // global before any `@/lib` module (and the eager Dexie databases they
-  // construct at import) is evaluated. See ../db/install-indexeddb.
-  await import("../db/install-indexeddb")
-  const { installVectorRuntimeAdapters } = await import("@/lib/vector/runtime-adapters")
-  installVectorRuntimeAdapters()
-  // The shared external-agent code reaches this process's own process table,
-  // PTY terminals and hook policy through the host installed here (ADR-0217).
-  const { installCliExternalAgentHost } = await import("../runtime/external/host-branch")
-  installCliExternalAgentHost()
-  const { main } = await import("./index")
+    // MUST be first on the CLI path: installs a synchronous IndexedDB on the
+    // global before any `@/lib` module (and the eager Dexie databases they
+    // construct at import) is evaluated. See ../db/install-indexeddb.
+    await import("../db/install-indexeddb")
+    const { installVectorRuntimeAdapters } = await import("@/lib/vector/runtime-adapters")
+    installVectorRuntimeAdapters()
+    // The shared external-agent code reaches this process's own process table,
+    // PTY terminals and hook policy through the host installed here (ADR-0217).
+    const { installCliExternalAgentHost } = await import("../runtime/external/host-branch")
+    installCliExternalAgentHost()
+    return (await import("./index")).main
+  })
   return main(process.argv.slice(2))
 }
 

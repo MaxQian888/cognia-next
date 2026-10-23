@@ -77,6 +77,19 @@ describe("useTerminalChrome — alt screen", () => {
     expect(screenMod.enterAltScreen).not.toHaveBeenCalled()
   })
 
+  it("enters and leaves alternate buffers when the layout changes", () => {
+    const { rerender, unmount } = renderHook(
+      ({ fullscreen }) => useTerminalChrome(baseOpts({ fullscreen })),
+      { initialProps: { fullscreen: false } }
+    )
+    expect(screenMod.enterAltScreen).not.toHaveBeenCalled()
+    rerender({ fullscreen: true })
+    expect(screenMod.enterAltScreen).toHaveBeenCalledTimes(1)
+    rerender({ fullscreen: false })
+    expect(screenMod.exitAltScreen).toHaveBeenCalledTimes(1)
+    unmount()
+    expect(screenMod.exitAltScreen).toHaveBeenCalledTimes(1)
+  })
   it("does nothing in scrollback (non-fullscreen) mode", () => {
     renderHook(() => useTerminalChrome(baseOpts({ fullscreen: false })))
     expect(screenMod.enterAltScreen).not.toHaveBeenCalled()

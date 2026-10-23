@@ -16,12 +16,20 @@ import {
   subscribePluginToolDispatchBridge,
   type PluginToolDispatchBridgeDeps,
 } from "@/lib/claude/plugin-tool-dispatch-bridge"
+import { subscribePluginHookExec, sendPluginHookResponse } from "@/lib/claude/ipc"
+import { handlePluginHookExec } from "@/lib/claude/plugin-hook-ipc"
+import { loggers } from "@cognia/logging"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 
 export interface PluginToolDispatchDeps extends PluginToolDispatchBridgeDeps {
   /** Override the session → sandbox placement lookup. Tests inject here. */
   runtimeRef?: (sessionId: string) => string | undefined
+  hooks?: {
+    subscribe?: typeof subscribePluginHookExec
+    handle?: typeof handlePluginHookExec
+    send?: typeof sendPluginHookResponse
+  }
 }
 
 /**
@@ -30,12 +38,12 @@ export interface PluginToolDispatchDeps extends PluginToolDispatchBridgeDeps {
  * throws (errors are collapsed onto the response), so one bad tool call can't
  * break the subscription.
  */
-export function subscribePluginToolDispatch(
+export async function subscribePluginToolDispatch(
   deps: PluginToolDispatchDeps = {}
 ): Promise<UnlistenFn> {
   const runtimeRefFor =
     deps.runtimeRef ?? ((sessionId: string) => sandboxSessionRuntime.activeRefForSession(sessionId))
-  return subscribePluginToolDispatchBridge({
+  const stopTools = await subscribePluginToolDispatchBridge({
     ...deps,
     prepareRequest: (request) => {
       // The CLI rail has no send envelope to carry the placement, so the frame
@@ -53,4 +61,104 @@ export function subscribePluginToolDispatch(
       return bound ? { ...request, sandboxRuntimeRef: bound } : request
     },
   })
+  try {
+    const stopHooks = await subscribeLifecycleHooks(deps)
+    return () => {
+      stopHooks()
+      stopTools()
+    }
+  } catch (error) {
+    stopTools()
+    throw error
+  }
+}
+
+// Share one listener across the parent and its child sessions. The owning
+// session answers once; a global owner only handles otherwise unclaimed events.
+const hookSubscriptions = new Map<
+  typeof subscribePluginHookExec,
+  {
+    owners: Set<PluginToolDispatchDeps>
+    ready?: Promise<() => void>
+    calls: Map<string, boolean>
+    pending: number
+  }
+>()
+
+async function subscribeLifecycleHooks(deps: PluginToolDispatchDeps): Promise<UnlistenFn> {
+  const subscribe = deps.hooks?.subscribe ?? subscribePluginHookExec
+  let state = hookSubscriptions.get(subscribe)
+  if (!state) {
+    state = { owners: new Set(), calls: new Map(), pending: 0 }
+    hookSubscriptions.set(subscribe, state)
+  }
+  const shared = state
+  const forgetIfIdle = () => {
+    if (!shared.owners.size && !shared.pending && hookSubscriptions.get(subscribe) === shared)
+      hookSubscriptions.delete(subscribe)
+  }
+  const owner = { ...deps }
+  shared.owners.add(owner)
+  if (!shared.ready)
+    shared.ready = subscribe((request) => {
+      const owners = [...shared.owners]
+      const selected =
+        owners.find((candidate) => candidate.sessionId === request.sessionId) ??
+        owners.find((candidate) => !candidate.sessionId)
+      if (!selected) return
+      const key = JSON.stringify([request.sessionId, request.execId])
+      if (shared.calls.has(key)) return
+      shared.calls.set(key, false)
+      shared.pending++
+      void (async () => {
+        let outcome
+        try {
+          outcome = await (selected.hooks?.handle ?? handlePluginHookExec)(request)
+        } catch {
+          outcome = { error: "Plugin lifecycle hook executor failed" }
+        }
+        try {
+          await (selected.hooks?.send ?? sendPluginHookResponse)({
+            sessionId: request.sessionId,
+            execId: request.execId,
+            ...outcome,
+          })
+        } catch {
+          loggers.app.error("plugin_hook_response write failed", { execId: request.execId })
+        } finally {
+          shared.pending--
+          shared.calls.set(key, true)
+          // Match the tool bridge's bounded completed-call retention. In-flight
+          // claims cannot be evicted by a burst of completed hooks.
+          let completed = [...shared.calls.values()].filter(Boolean).length
+          for (const [id, done] of shared.calls) {
+            if (completed <= 2048) break
+            if (done) {
+              shared.calls.delete(id)
+              completed--
+            }
+          }
+          forgetIfIdle()
+        }
+      })()
+    })
+  let stop: UnlistenFn
+  try {
+    stop = await shared.ready
+  } catch (error) {
+    shared.owners.delete(owner)
+    shared.ready = undefined
+    forgetIfIdle()
+    throw error
+  }
+  let stopped = false
+  return () => {
+    if (stopped) return
+    stopped = true
+    shared.owners.delete(owner)
+    if (shared.owners.size) return
+    stop()
+    shared.ready = undefined
+    forgetIfIdle()
+  }
 }

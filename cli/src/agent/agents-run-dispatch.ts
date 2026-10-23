@@ -21,7 +21,7 @@ import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import { type ResolvedConfig } from "../config/schema"
 import { loadMcpServers } from "../mcp/load-mcp-config"
 import { applyDisabled, readDisabled, readDisabledTools } from "../mcp/mcp-state"
-import { createPermissionGate } from "./permission-gate"
+import { createPermissionGate, type PermissionResponder } from "./permission-gate"
 import { readToolApprovals } from "./tool-approvals"
 import { runCliSubagent } from "./subagent-runner"
 
@@ -47,6 +47,10 @@ export interface AgentsRunDispatchCtx {
   sessionId: string
   /** Abort signal for the command (interrupts the subagent run). */
   signal?: AbortSignal
+  /** Start/reuse the owning TUI session's transport without sending a chat turn. */
+  prepare?: (signal?: AbortSignal) => Promise<void>
+  gate?: PermissionResponder
+  awaitApprovals?: () => Promise<void>
 }
 
 /**
@@ -66,14 +70,19 @@ export function buildAgentsRunDispatch(ctx: AgentsRunDispatchCtx) {
     }
   ): Promise<AgentsRunResult> => {
     const { config, home } = ctx
-    const gate = createPermissionGate({ yes: config.permissionMode === "bypassPermissions" })
-    const mcpServers = applyDisabled(loadMcpServers([config.cwd, home]), readDisabled(home))
     const signal = opts.abortSignal ?? ctx.signal
+    signal?.throwIfAborted()
+    await ctx.prepare?.(signal)
+    signal?.throwIfAborted()
+    const gate =
+      ctx.gate ?? createPermissionGate({ yes: config.permissionMode === "bypassPermissions" })
+    const mcpServers = applyDisabled(loadMcpServers([config.cwd, home]), readDisabled(home))
     const r = await runCliSubagent(def, prompt, ctx.sessionId, {
       config,
       home,
       cwd: opts.cwd ?? config.cwd,
       gate,
+      awaitApprovals: ctx.awaitApprovals,
       ...(signal ? { signal } : {}),
       mcpServers,
       approvedTools: readToolApprovals(home, undefined, opts.cwd ?? config.cwd),

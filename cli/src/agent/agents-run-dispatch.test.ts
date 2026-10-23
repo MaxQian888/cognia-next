@@ -35,6 +35,55 @@ const def: PluginSubagentDef = { id: "reviewer", name: "reviewer", description: 
 beforeEach(() => jest.clearAllMocks())
 
 describe("buildAgentsRunDispatch", () => {
+  it("uses the owning TUI approval gate instead of a headless denial", async () => {
+    const awaitApprovals = jest.fn(async () => {})
+    const gate = jest.fn(async () => ({ decision: "allow" as const }))
+    mockRun.mockImplementationOnce(async (_def, _prompt, _parent, deps) => {
+      expect(deps.gate).toBe(gate)
+      expect(deps.awaitApprovals).toBe(awaitApprovals)
+      await expect(deps.gate({ toolName: "plugin_probe" } as never)).resolves.toEqual({
+        decision: "allow",
+      })
+      return { text: "approved" }
+    })
+    await expect(
+      buildAgentsRunDispatch({ config: cfg(), home: "/h", sessionId: "s", gate, awaitApprovals })(
+        def,
+        "go",
+        {}
+      )
+    ).resolves.toEqual({ text: "approved" })
+    expect(gate).toHaveBeenCalledTimes(1)
+  })
+  it("prepares the owning session transport before a cold manual dispatch", async () => {
+    let release!: () => void
+    const ready = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const prepare = jest.fn(() => ready)
+    mockRun.mockResolvedValue({ text: "ready" })
+    const dispatch = buildAgentsRunDispatch({ config: cfg(), home: "/h", sessionId: "s", prepare })
+    const pending = dispatch(def, "research", {})
+    await Promise.resolve()
+    expect(prepare).toHaveBeenCalledTimes(1)
+    expect(mockRun).not.toHaveBeenCalled()
+    release()
+    await expect(pending).resolves.toEqual({ text: "ready" })
+  })
+
+  it("does not dispatch after cancellation while the sidecar starts", async () => {
+    const controller = new AbortController()
+    const dispatch = buildAgentsRunDispatch({
+      config: cfg(),
+      home: "/h",
+      sessionId: "s",
+      prepare: async () => {
+        controller.abort()
+      },
+    })
+    await expect(dispatch(def, "research", { abortSignal: controller.signal })).rejects.toThrow()
+    expect(mockRun).not.toHaveBeenCalled()
+  })
   it("runs the subagent over the live sidecar with file-resolved deps + a config gate", async () => {
     mockRun.mockResolvedValue({
       text: "looks good",

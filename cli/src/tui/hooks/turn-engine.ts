@@ -156,9 +156,30 @@ export function createGateController(
     else notifySettled()
   }
 
-  const responder: PermissionResponder = (req) =>
-    new Promise<CapturePermissionDecision>((resolve) => {
+  const responder: PermissionResponder = (req, signal) =>
+    new Promise<CapturePermissionDecision>((settle) => {
+      let finished = false
+      const resolve = (decision: CapturePermissionDecision) => {
+        if (finished) return
+        finished = true
+        signal?.removeEventListener("abort", onAbort)
+        settle(decision)
+      }
+      const onAbort = () => {
+        const index = queue.findIndex((entry) => entry.resolve === resolve)
+        if (index >= 0) queue.splice(index, 1)
+        preChecks.delete(resolve)
+        resolve({ decision: "deny", message: "permission request cancelled" })
+        if (index === 0) advance()
+        else notifySettled()
+      }
+      signal?.addEventListener("abort", onAbort, { once: true })
+      if (signal?.aborted) {
+        onAbort()
+        return
+      }
       const proceed = () => {
+        if (finished) return
         // A silent auto-approve (the live "Allow always" set) still takes its
         // place in the queue. Resolving it on the spot let a pre-approved tool
         // run while the user was still deciding about the one in front of it.

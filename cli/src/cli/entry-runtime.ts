@@ -4,6 +4,23 @@ export interface EntrypointProcess {
   exitCode: number | string | null | undefined
 }
 
+/** Load runtime dependencies in production by default: React development
+ * tracks retain streamed props in Node's unbounded User Timing buffer.
+ * Restore the ambient environment before user commands can spawn children. */
+export async function withCliProductionEnvironment<T>(
+  load: () => Promise<T>,
+  env: Record<string, string | undefined> = process.env
+): Promise<T> {
+  const original = env.NODE_ENV
+  env.NODE_ENV ??= "production"
+  try {
+    return await load()
+  } finally {
+    if (original === undefined) delete env.NODE_ENV
+    else env.NODE_ENV = original
+  }
+}
+
 /** Convert Node's permissive exit-code property into the CLI's numeric contract. */
 export function normalizeProcessExitCode(exitCode: EntrypointProcess["exitCode"]): number {
   if (exitCode == null) return 0

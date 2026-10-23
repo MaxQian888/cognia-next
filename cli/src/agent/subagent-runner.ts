@@ -28,8 +28,8 @@ import {
 } from "@/lib/claude/build-options"
 import {
   runAndCaptureAssistantReply as defaultCapture,
+  RunAndCaptureError,
   type CaptureStreamEvent,
-  type RunAndCaptureResult,
 } from "@/lib/claude/run-and-capture"
 import { closeSession as defaultCloseSession } from "@/lib/claude/ipc"
 import type { UsageInfo } from "@/lib/claude/adapter"
@@ -41,12 +41,15 @@ import { composeSubagentSystemPrompt } from "@/lib/agent/prompts/subagent-frame"
 
 import { buildCliOperatingRules } from "../config/default-system-prompt"
 import { type ResolvedConfig } from "../config/schema"
-import { toBuildContext } from "../config/to-build-context"
-import { hasAnyHookGroup, resolveCliHooksConfig } from "../hooks/resolve-hooks-config"
 import { type PermissionResponder } from "./permission-gate"
 import { approvalKey } from "./command-approval"
-import { withCliAutoApprovedTools, withCliDisabledMcpTools } from "./tool-suppression"
-import { primeCliPromptOverrides, type PrimedCliPromptOverrides } from "./prompt-overrides"
+import { type PrimedCliPromptOverrides } from "./prompt-overrides"
+import { createCliContextAssembler, type CliContextAssemblerParams } from "./session-context"
+import { bindCliSessionHostRuntime } from "./cli-host-runtime"
+import { makeConfiguredCliPluginToolHandle } from "./configured-plugin-tool-handle"
+import { subscribePluginToolDispatch } from "../plugin/plugin-tool-dispatch"
+import { registerCliSkillLoadContext, releaseCliSkillLoadContext } from "./skill-load-tool"
+import { DISPATCH_AGENT_TOOL_NAME, TASK_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
 
 /**
  * Nesting seam handed down by the dispatch handler when the child is allowed to
@@ -75,6 +78,8 @@ export interface RunCliSubagentDeps {
   /** The parent turn's permission responder — the subagent's tool approvals
    * round-trip through the SAME gate (so the user approves them in the TUI). */
   gate: PermissionResponder
+  /** Shared UI approval barrier: host tools wait while any approval is open. */
+  awaitApprovals?: () => Promise<void>
   /** Abort signal shared with the parent turn (interrupt cancels children too). */
   signal?: AbortSignal
   /** MCP servers to expose to the subagent (the parent's resolved set). */
@@ -98,6 +103,10 @@ export interface RunCliSubagentDeps {
   resolveOptions?: (ctx: BuildOptionsContext) => Promise<SendOptions>
   /** Load Prompt Center overrides for the child's cwd (see `primeCliPromptOverrides`). */
   primePromptOverrides?: (cwd: string) => Promise<PrimedCliPromptOverrides>
+  resolveSkillIds?: CliContextAssemblerParams["resolveSkillIds"]
+  resolveLoadableSkills?: CliContextAssemblerParams["resolveLoadableSkills"]
+  ensureDb?: CliContextAssemblerParams["ensureDb"]
+  loadPluginRuntime?: CliContextAssemblerParams["loadPluginRuntime"]
   capture?: typeof defaultCapture
   closeSession?: (sessionId: string) => Promise<void>
   now?: () => number
@@ -217,78 +226,136 @@ export async function runCliSubagent(
     ].join("\n\n"),
   }
 
-  const primedPrompts = await (
-    deps.primePromptOverrides ??
-    ((cwd: string) => primeCliPromptOverrides(cwd, { home: deps.home }))
-  )(deps.cwd)
-  deps.signal?.throwIfAborted()
-  const ctx = toBuildContext({
-    sessionId: childSessionId,
-    config: childConfig,
-    mcpServers: deps.mcpServers,
-    ...(primedPrompts.workspaceId ? { promptWorkspaceId: primedPrompts.workspaceId } : {}),
-    now: turnNow,
-  })
-  let sendOptions = await resolveOptions(ctx)
-  deps.signal?.throwIfAborted()
-  // The definition's own restrictions and dial, which the parsed frontmatter
-  // carried and this runner used to drop on the floor.
-  if (def.disallowedTools?.length) {
-    sendOptions.disallowedTools = [
-      ...new Set([...(sendOptions.disallowedTools ?? []), ...def.disallowedTools]),
-    ]
-  }
-  if (def.effort) sendOptions.effort = def.effort
-  // Bound the subagent: an explicit `maxTurns` from its definition wins as the
-  // ai-sdk step budget; otherwise it inherits the parent's configured cap.
-  if (typeof def.maxTurns === "number" && def.maxTurns > 0) {
-    sendOptions.maxTurns = def.maxTurns
-  }
-  if (sendOptions.aiSdkMaxSteps === undefined && childConfig.aiSdkMaxSteps !== undefined) {
-    sendOptions.aiSdkMaxSteps = childConfig.aiSdkMaxSteps
-  }
-  // Inherit the parent's read-only built-in tool execution deadline so a hung
-  // file-walk tool can't stall the subagent turn until the wall-clock either.
-  if (
-    sendOptions.toolExecutionTimeoutMs === undefined &&
-    childConfig.toolExecutionTimeoutMs !== undefined
-  ) {
-    sendOptions.toolExecutionTimeoutMs = childConfig.toolExecutionTimeoutMs
-  }
-  sendOptions = withCliDisabledMcpTools(
-    withCliAutoApprovedTools(sendOptions, deps.approvedTools),
-    // The parent's `/mcp` overlay AND the user's config `disabledTools` list —
-    // a child inherits both (the config deny-list is user-level policy, not
-    // something a subagent definition may waive).
-    [...deps.disabledMcpTools, ...(deps.config.disabledTools ?? [])]
-  )
-  // Hand the child the same hook engine the parent turn gets. Without this a
-  // CLI subagent ran completely hook-blind: the CLI transport bypasses the
-  // desktop's host-side injection, and the CLI's own `hook-runner` is wired
-  // into the TUI only. Identity marks it a subagent so an `agents: "subagent"`
-  // selector scopes to exactly these turns.
-  const hooks = (
-    deps.resolveHooks ?? (() => resolveCliHooksConfig({ home: deps.home, cwd: deps.cwd }))
-  )()
-  if (hasAnyHookGroup(hooks)) sendOptions.hooks = hooks
-  sendOptions.agentKind = "subagent"
-  sendOptions.agentRef = def.id
-  // Nested delegation (depth-gated by the dispatcher): advertise the
-  // `dispatch_agent` tool to the child and publish its dispatch context under
-  // the child session id so a mid-run dispatch resolves its depth/chain/gate.
-  if (deps.nesting) {
-    if (deps.nesting.manifest) {
-      sendOptions.pluginTools = [...(sendOptions.pluginTools ?? []), deps.nesting.manifest]
-    }
-  }
-
-  let result: RunAndCaptureResult
+  const controller = new AbortController()
+  const cancel = () => controller.abort(deps.signal?.reason)
+  const hostCalls = new Set<Promise<unknown>>()
+  deps.signal?.addEventListener("abort", cancel, { once: true })
+  if (deps.signal?.aborted) cancel()
+  const releaseHostRuntime = bindCliSessionHostRuntime(childConfig, childSessionId)
+  let unsubscribe: (() => void) | undefined
   try {
+    const assembler = createCliContextAssembler({
+      config: childConfig,
+      sessionId: childSessionId,
+      home: deps.home,
+      now: () => turnNow,
+      resolveOptions,
+      resolveMcpServers: () => deps.mcpServers,
+      resolveApprovedTools: () => deps.approvedTools,
+      resolveDisabledMcpTools: () => deps.disabledMcpTools,
+      resolveHooks: deps.resolveHooks,
+      primePromptOverrides: deps.primePromptOverrides,
+      resolveSkillIds: deps.resolveSkillIds,
+      resolveLoadableSkills: deps.resolveLoadableSkills,
+      ensureDb: deps.ensureDb,
+      loadPluginRuntime: deps.loadPluginRuntime,
+      agentKind: "subagent",
+      agentRef: def.id,
+    })
+    const session = await assembler.resolveSession()
+    const sendOptions = session.sendOptions
+    // The shared resolver adds delegation for parent chats. Children only get
+    // the depth-gated manifest supplied by their dispatcher below.
+    sendOptions.pluginTools = sendOptions.pluginTools?.filter(
+      (tool) => tool.name !== DISPATCH_AGENT_TOOL_NAME && tool.name !== TASK_TOOL_NAME
+    )
+    if (!sendOptions.pluginTools?.length) delete sendOptions.pluginTools
+    const turnId = `${childSessionId}:t0`
+    const attemptId = `${turnId}:a0`
+    sendOptions.turnId = turnId
+    if (sendOptions.execution) {
+      sendOptions.execution = {
+        ...sendOptions.execution,
+        identity: { ...sendOptions.execution.identity, runId: `${childSessionId}:r0`, attemptId },
+      }
+    }
+    registerCliSkillLoadContext(childSessionId, {
+      allowedSkillIds: session.skillLoadScope?.allowedSkillIds ?? session.activeSkillIds,
+      explicitSkillIds: session.skillLoadScope?.explicitSkillIds,
+      allowDisabledSkillIds: session.skillLoadScope?.allowDisabledSkillIds,
+      turnId,
+      attemptId,
+    })
+    const execute = makeConfiguredCliPluginToolHandle(childConfig)
+    unsubscribe = await subscribePluginToolDispatch({
+      sessionId: childSessionId,
+      handle: async (request) => {
+        const inactive = () =>
+          request.sessionId !== childSessionId ||
+          controller.signal.aborted ||
+          Boolean(request.turnId && request.turnId !== turnId) ||
+          Boolean(request.attemptId && request.attemptId !== attemptId)
+        const rejected = () => ({
+          type: "plugin_tool_response" as const,
+          sessionId: request.sessionId,
+          toolUseId: request.toolUseId,
+          error: "Tool invocation cancelled or belongs to an inactive turn",
+        })
+        if (inactive()) return rejected()
+        if (deps.awaitApprovals) {
+          let removeAbort = () => {}
+          const cancelled = new Promise<void>((resolve) => {
+            const onAbort = () => resolve()
+            controller.signal.addEventListener("abort", onAbort, { once: true })
+            removeAbort = () => controller.signal.removeEventListener("abort", onAbort)
+          })
+          try {
+            await Promise.race([deps.awaitApprovals(), cancelled])
+          } catch {
+            return rejected()
+          } finally {
+            removeAbort()
+          }
+        }
+        if (inactive()) return rejected()
+        const pending = execute({ ...request, abortSignal: controller.signal })
+        hostCalls.add(pending)
+        try {
+          return await pending
+        } finally {
+          hostCalls.delete(pending)
+        }
+      },
+    })
     deps.signal?.throwIfAborted()
+    // The definition's own restrictions and dial, which the parsed frontmatter
+    // carried and this runner used to drop on the floor.
+    if (def.disallowedTools?.length) {
+      sendOptions.disallowedTools = [
+        ...new Set([...(sendOptions.disallowedTools ?? []), ...def.disallowedTools]),
+      ]
+    }
+    if (def.effort) sendOptions.effort = def.effort
+    // Bound the subagent: an explicit `maxTurns` from its definition wins as the
+    // ai-sdk step budget; otherwise it inherits the parent's configured cap.
+    if (typeof def.maxTurns === "number" && def.maxTurns > 0) {
+      sendOptions.maxTurns = def.maxTurns
+    }
+    if (sendOptions.aiSdkMaxSteps === undefined && childConfig.aiSdkMaxSteps !== undefined) {
+      sendOptions.aiSdkMaxSteps = childConfig.aiSdkMaxSteps
+    }
+    // Inherit the parent's read-only built-in tool execution deadline so a hung
+    // file-walk tool can't stall the subagent turn until the wall-clock either.
+    if (
+      sendOptions.toolExecutionTimeoutMs === undefined &&
+      childConfig.toolExecutionTimeoutMs !== undefined
+    ) {
+      sendOptions.toolExecutionTimeoutMs = childConfig.toolExecutionTimeoutMs
+    }
+    // Nested delegation (depth-gated by the dispatcher): advertise the
+    // `dispatch_agent` tool to the child and publish its dispatch context under
+    // the child session id so a mid-run dispatch resolves its depth/chain/gate.
+    if (deps.nesting) {
+      if (deps.nesting.manifest) {
+        sendOptions.pluginTools = [...(sendOptions.pluginTools ?? []), deps.nesting.manifest]
+      }
+    }
+
+    controller.signal.throwIfAborted()
     deps.nesting?.register(childSessionId)
     deps.signal?.throwIfAborted()
-    result = await capture(childSessionId, prompt, sendOptions, {
-      ...(deps.signal ? { signal: deps.signal } : {}),
+    const result = await capture(childSessionId, prompt, sendOptions, {
+      signal: controller.signal,
       // No hard wall-clock: a dispatched subagent is autonomous and may
       // legitimately run for many minutes (deep analysis, many tool legs),
       // exactly like the interactive parent turn (which passes `timeoutMs: 0`).
@@ -297,6 +364,7 @@ export async function runCliSubagent(
       // subagents. It is bounded instead by the idle watchdog below, the
       // per-tool execution deadline, and the step/turn budget.
       timeoutMs: 0,
+      preserveBudgetEvidence: true,
       // Use the generous SUBAGENT idle window, not the interactive 60s. Several
       // subagents fan out concurrently over the one sidecar, so the provider gap
       // between a tool result and the next token routinely exceeds 60s under
@@ -311,13 +379,43 @@ export async function runCliSubagent(
           deps.approvedTools.has(approvalKey(request.toolName, request.input))
         )
           return { decision: "allow" }
-        const decision = await deps.gate(request)
+        const decision = await deps.gate(request, controller.signal)
         deps.signal?.throwIfAborted()
         return decision
       },
       ...(deps.onEvent ? { onEvent: deps.onEvent } : {}),
     })
+    return {
+      text: [result.text, result.budgetContinuationContext].filter(Boolean).join("\n\n"),
+      ...(result.usage ? { usage: result.usage } : {}),
+      ...(result.resultSubtype ? { finishReason: result.resultSubtype } : {}),
+    }
+  } catch (error) {
+    if (
+      controller.signal.aborted &&
+      error instanceof RunAndCaptureError &&
+      error.code === "aborted"
+    ) {
+      return {
+        text: [error.partial?.text, error.partial?.continuationContext]
+          .filter(Boolean)
+          .join("\n\n"),
+        finishReason: "interrupted",
+      }
+    }
+    throw error
   } finally {
+    controller.abort()
+    await Promise.allSettled([...hostCalls])
+    deps.signal?.removeEventListener("abort", cancel)
+    try {
+      unsubscribe?.()
+    } catch {
+      // A failed detach must not skip the child's remaining teardown.
+    } finally {
+      releaseCliSkillLoadContext(childSessionId)
+      releaseHostRuntime()
+    }
     // Retire the child's dispatch context (if nesting was granted) BEFORE the
     // session, so a stale tool-call arriving after settle finds no context.
     try {
@@ -327,11 +425,5 @@ export async function runCliSubagent(
     }
     // Retire the child session's sidecar loop regardless of outcome.
     await closeSession(childSessionId).catch(() => undefined)
-  }
-
-  return {
-    text: result.text,
-    ...(result.usage ? { usage: result.usage } : {}),
-    ...(result.resultSubtype ? { finishReason: result.resultSubtype } : {}),
   }
 }

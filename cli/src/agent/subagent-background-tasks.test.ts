@@ -27,6 +27,8 @@ import {
   startCliBackgroundRun,
   subscribeCliBackgroundSettle,
   cancelCliBackgroundRun,
+  recordCliIncompleteForegroundRun,
+  getCliBackgroundRecord,
   type CliBackgroundSettleEvent,
 } from "./subagent-background-tasks"
 
@@ -47,6 +49,48 @@ function deferred<T>(): {
 function makeHome(): string {
   return path.join(os.tmpdir(), "cognia-bg-unit")
 }
+
+it("persists incomplete foreground findings for the owner without background redelivery", async () => {
+  const home = makeHome()
+  const listener = jest.fn()
+  subscribeCliBackgroundSettle(listener)
+  await recordCliIncompleteForegroundRun(
+    "limited",
+    meta(home),
+    "Research incomplete: entrypoint found"
+  )
+  expect(await getCliBackgroundRecord("limited", { home, owner: "ses_1" })).toMatchObject({
+    mode: "foreground",
+    status: "error",
+    resultText: "Research incomplete: entrypoint found",
+    deliveryState: "delivered",
+  })
+  expect(await getCliBackgroundRecord("limited", { home, owner: "other" })).toBeUndefined()
+  expect(await listPendingCliBackgroundDeliveries({ home, owner: "ses_1" })).toEqual([])
+  expect(listener).not.toHaveBeenCalled()
+})
+
+it("persists journal updates without marking unrelated tables dirty", async () => {
+  const handle = await ensureCliDb()
+  const fullFlush = jest.spyOn(handle, "scheduleFlush")
+  const flush = jest.spyOn(handle, "flush")
+  try {
+    await recordCliIncompleteForegroundRun("scoped", meta(makeHome()), "partial evidence")
+    await markCliBackgroundDelivery(["scoped"], "delivered", makeHome())
+    await collectCliBackgroundResult("scoped", { home: makeHome(), owner: "ses_1" })
+    await __waitForCliBackgroundJournalForTesting()
+    expect(fullFlush).not.toHaveBeenCalled()
+    expect(flush).toHaveBeenCalled()
+    expect(await getDb().backgroundTasks.get("scoped")).toMatchObject({
+      resultText: "partial evidence",
+      deliveryState: "delivered",
+      collectedAt: expect.any(Number),
+    })
+  } finally {
+    fullFlush.mockRestore()
+    flush.mockRestore()
+  }
+})
 
 function meta(home?: string, overrides: Partial<Parameters<typeof startCliBackgroundRun>[1]> = {}) {
   return {

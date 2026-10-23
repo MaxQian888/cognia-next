@@ -45,6 +45,10 @@ describe("generalPurposeAgent", () => {
 })
 
 describe("exploreAgent / planAgent", () => {
+  it("inherits the unified execution budget on the CLI surface", () => {
+    expect(exploreAgent().def.maxTurns).toBeUndefined()
+    expect(planAgent().def.maxTurns).toBeUndefined()
+  })
   it("Explore is a read-only leaf whitelisted to the read-only tool surface", () => {
     const a = exploreAgent()
     expect(a.id).toBe(EXPLORE_AGENT_ID)

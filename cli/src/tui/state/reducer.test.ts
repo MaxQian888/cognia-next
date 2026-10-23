@@ -30,6 +30,19 @@ const result = (usage?: RunAndCaptureResult["usage"]): RunAndCaptureResult => ({
 })
 
 describe("tuiReducer — startup", () => {
+  it("does not close a sibling question when a child permission finishes cancelling", () => {
+    const state = {
+      ...base(),
+      overlay: {
+        kind: "askUser" as const,
+        request: { question: "sibling", options: [], multiSelect: false, allowText: true },
+      },
+    }
+    expect(tuiReducer(state, { type: "OVERLAY_CLOSE", ifKind: "permission" })).toBe(state)
+    expect(tuiReducer(state, { type: "OVERLAY_CLOSE", ifKind: "askUser" }).overlay.kind).toBe(
+      "none"
+    )
+  })
   it("updates an open quota panel from pushes and rejects an older loaded snapshot", () => {
     let state = reduce(base(), { type: "SET_BACKEND", backend: "claude-code" })
     state = reduce(state, {
