@@ -1,5 +1,5 @@
 // Core `apply_patch` tool — apply a unified diff spanning ONE OR MORE files in a
-// single atomic operation. Fills the multi-file-edit gap (`multi_edit` is
+// validated operation. Commit I/O failures can leave partial changes. Fills the multi-file-edit gap (`multi_edit` is
 // single-file only, mirroring OpenCode's `apply_patch` / Codex-style agents):
 // it parses a git-style unified diff (the same format `file_diff` emits), plans
 // every file change in memory, and writes ALL files only when every hunk applies
@@ -145,7 +145,7 @@ async function planFilePatch(
   // file unchanged while the tool reported success. A deletion needs no hunk
   // (git emits none for an empty file); every other change does.
   if (!deletion && (fp.hunks?.length ?? 0) === 0) {
-    throw new Error(
+    throw new SyntaxError(
       `patch for ${rel} has no hunk — each change needs a header like "@@ -1,3 +1,4 @@" ` +
         `(use "@@ -0,0 +1,N @@" to create a file)`
     )
@@ -219,15 +219,19 @@ export function createApplyPatchTool({ cwd, readTracker, lspResolver }: CoreFile
     } catch (err) {
       return toolError(
         `could not parse patch: ${err instanceof Error ? err.message : String(err)}`,
-        "apply_patch"
+        "apply_patch",
+        { kind: "invalid-args", effects: "none" }
       )
     }
     if (!Array.isArray(parsed) || parsed.length === 0) {
-      return toolError("no file patches found in the input", "apply_patch")
+      return toolError("no file patches found in the input", "apply_patch", {
+        kind: "invalid-args",
+        effects: "none",
+      })
     }
 
     // Plan phase — resolve and validate every file change in memory. Nothing is
-    // written until all hunks across all files apply cleanly (atomic).
+    // written until all hunks across all files apply cleanly in memory.
     const plans: PlannedFileChange[] = []
     try {
       for (const fp of parsed) {
@@ -235,32 +239,51 @@ export function createApplyPatchTool({ cwd, readTracker, lspResolver }: CoreFile
       }
     } catch (err) {
       return toolError(
-        `${err instanceof Error ? err.message : String(err)}. No changes were written.`,
-        "apply_patch"
+        new Error(`${err instanceof Error ? err.message : String(err)}. No changes were written.`, {
+          cause: err,
+        }),
+        "apply_patch",
+        {
+          effects: "none",
+          ...(err instanceof SyntaxError ? { kind: "invalid-args" as const } : {}),
+        }
       )
     }
 
     // Commit phase — apply each planned change under its own file lock.
     const summary: string[] = []
     const touched: string[] = []
-    for (const p of plans) {
-      await withFileLock(canonicalKey(p.abs), async () => {
-        if (p.action === "delete") {
-          await fsp.rm(p.abs)
-          summary.push(`deleted ${p.abs}`)
-          return
-        }
-        if (p.action === "create") {
-          await fsp.mkdir(path.dirname(p.abs), { recursive: true })
-          await fsp.writeFile(p.abs, p.content, "utf-8")
-        } else {
-          await fsp.writeFile(p.abs, encodeText(p.content, p.traits), "utf-8")
-        }
-        const st = await fsp.stat(p.abs)
-        readTracker?.record(p.abs, st)
-        summary.push(`${p.action === "create" ? "created" : "updated"} ${p.abs}`)
-        touched.push(p.abs)
-      })
+    let target = ""
+    try {
+      for (const p of plans) {
+        target = p.abs
+        await withFileLock(canonicalKey(p.abs), async () => {
+          if (p.action === "delete") {
+            await fsp.rm(p.abs)
+            summary.push(`deleted ${p.abs}`)
+            return
+          }
+          if (p.action === "create") {
+            await fsp.mkdir(path.dirname(p.abs), { recursive: true })
+            await fsp.writeFile(p.abs, p.content, "utf-8")
+          } else {
+            await fsp.writeFile(p.abs, encodeText(p.content, p.traits), "utf-8")
+          }
+          const st = await fsp.stat(p.abs)
+          readTracker?.record(p.abs, st)
+          summary.push(`${p.action === "create" ? "created" : "updated"} ${p.abs}`)
+          touched.push(p.abs)
+        })
+      }
+    } catch (error) {
+      return toolError(
+        new Error(
+          `Patch commit failed at ${target}: ${error instanceof Error ? error.message : String(error)}.\nCompleted changes:\n${summary.join("\n") || "None confirmed"}`,
+          { cause: error }
+        ),
+        "apply_patch",
+        { effects: summary.length ? "partial" : "unknown" }
+      )
     }
 
     // Best-effort LSP diagnostics across every created/modified file.
@@ -277,9 +300,10 @@ export function createApplyPatchTool({ cwd, readTracker, lspResolver }: CoreFile
 
   return tool(
     "apply_patch",
-    "Apply a unified diff (git-style) spanning one or more files in a single atomic operation. " +
+    "Apply a unified diff (git-style) spanning one or more files after validating every hunk. " +
       "Supports creating files (`--- /dev/null`) and deleting them (`+++ /dev/null`). " +
       "Existing files must have been read this session; if any hunk fails to apply, nothing is written. " +
+      "A commit I/O failure can leave partial changes; inspect the reported effects before retrying. " +
       "Prefer this over multiple edit calls when one change touches several files.",
     applyPatchShape,
     execApplyPatch

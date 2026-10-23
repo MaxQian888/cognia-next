@@ -81,6 +81,8 @@ export interface NormalizedRequest extends AdapterTelemetryContext {
   repairToolCall?: unknown
   /** Set only for a ledger-reserved call: one reservation, one request. */
   maxRetries?: number
+  /** Keep standardized step prompts in memory for context-budget calibration. */
+  captureRequestMessages?: boolean
   reasoning?: ReasoningControls
   credentials?: AdapterCredentials
   abortSignal?: AbortSignal

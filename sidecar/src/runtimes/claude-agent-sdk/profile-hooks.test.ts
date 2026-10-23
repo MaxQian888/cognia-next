@@ -159,3 +159,22 @@ test("canUseTool honours a hook approval once and then asks again", async () => 
   waiter.resolve({ behavior: "deny", message: "no" })
   assert.deepEqual(await second, { behavior: "deny", message: "no" })
 })
+
+test("a mode's MCP allowlist installs the hook and refuses unpicked tools under bypass", async () => {
+  const { hook, asked } = setup(
+    { permissionMode: "bypassPermissions", mcpToolAllowlist: { search: ["query"] } },
+    { behavior: "allow" }
+  )
+  const out = await hook({ tool_name: "mcp__search__added_later", tool_input: {} }, "m-1", {
+    signal,
+  })
+  assert.equal(
+    (out.hookSpecificOutput as { permissionDecision: string }).permissionDecision,
+    "deny"
+  )
+  assert.deepEqual(
+    await hook({ tool_name: "mcp__search__query", tool_input: {} }, "m-2", { signal }),
+    {}
+  )
+  assert.deepEqual(asked, [])
+})

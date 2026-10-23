@@ -267,7 +267,10 @@ export function createEventAdapter(ctx: EventAdapterContext) {
   const handleReasoning: EventHandler = (event, out) => {
     // Raw chain-of-thought is provider-internal state. Provenance-aware
     // middleware marks it before this persistence/rendering boundary.
-    if (isRawAnalysis(event)) return out
+    if (isRawAnalysis(event)) {
+      if (event.text || event.textDelta || event.delta) out.push(streamEnvelope({ type: "ping" }))
+      return out
+    }
     if (activeBlockKind === "tool_use") {
       // Same boundary split the text-delta case does: reasoning after a
       // sealed tool_use starts a fresh message. Without it, interleaved-
@@ -391,8 +394,12 @@ export function createEventAdapter(ctx: EventAdapterContext) {
       // those snapshots carried `input: {}` over stdio for nothing. The
       // buffer is parsed exactly once, at tool-input-end (or by the
       // tool-call / tool-input-available finalizers).
-      prior.text += event.delta ?? event.inputTextDelta ?? ""
+      const chunk = event.delta ?? event.inputTextDelta ?? ""
+      prior.text += chunk
       streamedToolInputs.set(id, prior)
+      // Preserve activity without re-parsing/re-emitting the growing input.
+      // The outer capture watchdog also needs to see real provider chunks.
+      if (chunk) out.push(streamEnvelope({ type: "ping" }))
       return out
     },
     "tool-input-end": (event, out) => {
@@ -667,15 +674,15 @@ export function createEventAdapter(ctx: EventAdapterContext) {
      * renderer can attach metadata to the final assistant message.
      *
      */
-    finish(info?: { totalCostUsd?: number; usage?: unknown }) {
+    finish(info?: { totalCostUsd?: number; usage?: unknown; budgetExhausted?: boolean }) {
       const out: TranslatedEvent[] = []
       emitInitIfNeeded(out)
       const usage = info?.usage ?? lastUsage ?? {}
       const result = {
         type: "result",
-        subtype: "success",
+        subtype: info?.budgetExhausted ? "error_max_turns" : "success",
         session_id: ctx.sdkSessionId,
-        is_error: false,
+        is_error: info?.budgetExhausted === true,
         duration_ms: Date.now() - startedAt,
         duration_api_ms: Date.now() - startedAt,
         num_turns: 1,

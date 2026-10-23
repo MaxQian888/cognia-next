@@ -41,3 +41,14 @@ minimumReleaseAgeExclude:
   - "@ai-sdk/openai@4.0.84"
   - "@ai-sdk/provider-utils@5.0.54"
   - "@ai-sdk/provider@4.0.22"
+
+# Security floors retain Undici 8 for direct consumers and patch nested 7.x.
+overrides:
+  "@grpc/grpc-js": "^1.14.5"
+  "@modelcontextprotocol/sdk": "^1.32.1"
+  fast-uri: "^3.1.8"
+  hono: "^4.13.11"
+  ip-address: "^10.7.1"
+  proxy-addr: "^2.0.8"
+  qs: "^6.16.0"
+  "undici@^7": "^7.29.1"

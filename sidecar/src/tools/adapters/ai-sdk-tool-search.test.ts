@@ -325,6 +325,36 @@ test("setMaxActiveTools only tightens, demoting resident tools and unloading dis
   assert.equal(controller!.maxActiveTools(), 6, "a looser limit never widens the cap")
 })
 
+test("restored discoveries obey unloads, current permissions and the current cap", () => {
+  const controller = createAiSdkToolSearchController({
+    tools: Object.fromEntries(["a", "b", "c", "d", "e"].map((name) => [name, fakeTool(name)])),
+    sendOptions: { toolSearchEnabled: true },
+    maxActiveTools: 3,
+  })!
+  const result = (value: string) => ({
+    role: "tool" as const,
+    content: [
+      {
+        type: "tool-result" as const,
+        toolCallId: "search",
+        toolName: "ToolSearch",
+        output: { type: "text" as const, value },
+      },
+    ],
+  })
+  controller.restoreConversation([
+    result(JSON.stringify({ activated: ["a", "b", "denied"] })),
+    result("invalid JSON"),
+    result("null"),
+    result(JSON.stringify({ activated: ["c"], unloaded: ["b"] })),
+  ])
+  assert.deepEqual(controller.activeToolNames(), ["ToolSearch", "a", "c"])
+  controller.restoreConversation([result(JSON.stringify({ activated: ["a", "b", "c", "d"] }))])
+  assert.deepEqual(controller.activeToolNames(), ["ToolSearch", "c", "d"])
+  controller.restoreConversation([])
+  assert.deepEqual(controller.activeToolNames(), ["ToolSearch"])
+})
+
 test("deferredToolsPrompt names every deferred tool and the cap", () => {
   const controller = createAiSdkToolSearchController({
     tools: manyTools(3, { write: fakeTool("Write") }),

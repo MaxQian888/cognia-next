@@ -104,7 +104,11 @@ export function buildAnthropicOptions({
 
   const executeNativeHook = createNativeHookExecutor({
     cwd: sendOptions.cwd,
-    env: baseEnv,
+    // Native model hooks are separate invocations. They must not inherit the
+    // root query's retry policy without its total deadline and cancellation.
+    env: Object.fromEntries(
+      Object.entries(baseEnv).filter(([name]) => !/^CLAUDE_CODE_RETRY_WATCHDOG/i.test(name))
+    ),
     model:
       sendOptions.execution?.modelBindings?.primary &&
       sendOptions.execution.modelBindings.primary !== "inherit"

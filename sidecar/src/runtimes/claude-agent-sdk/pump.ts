@@ -105,6 +105,8 @@ export function startAnthropicPump({
         ...extractHttpErrorMeta(err),
       })
     } finally {
+      session.finishRuntime?.()
+      session.drainPending("Claude invocation ended")
       session._ended = true
       // Flush any trailing partial stderr line so the last unterminated MCP log
       // isn't dropped at session end.

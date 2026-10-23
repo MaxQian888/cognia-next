@@ -11,6 +11,64 @@ export interface ExecutableResolverOptions {
 
 import fs from "node:fs"
 import path from "node:path"
+import { createRequire } from "node:module"
+import { execFile } from "node:child_process"
+
+const MIN_POLICY_CLI_VERSION = [2, 1, 305]
+
+export function supportsClaudeRuntimePolicies(version: string) {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:\s|$)/.exec(version.trim())
+  if (!match) return false
+  const parts = match.slice(1).map(Number)
+  for (let i = 0; i < MIN_POLICY_CLI_VERSION.length; i++) {
+    if (parts[i]! > MIN_POLICY_CLI_VERSION[i]!) return true
+    if (parts[i]! < MIN_POLICY_CLI_VERSION[i]!) return false
+  }
+  return true
+}
+
+/** Verify the actual host executable; source SDKs pin their bundled CLI. */
+export async function ensureClaudeRuntimePolicyCompatibility(
+  options: Options,
+  signal: AbortSignal
+) {
+  let version: string
+  if (options.pathToClaudeCodeExecutable) {
+    version = await new Promise<string>((resolve, reject) => {
+      execFile(
+        options.pathToClaudeCodeExecutable!,
+        ["--version"],
+        {
+          env: options.env as NodeJS.ProcessEnv,
+          encoding: "utf8",
+          signal,
+          timeout: 5_000,
+          maxBuffer: 4096,
+        },
+        (error, stdout) =>
+          error
+            ? // A configured executable can echo credential-bearing env values
+              // into stderr, which execFile includes in error.message.
+              reject(new Error("Cannot verify Claude Code runtime version"))
+            : resolve(stdout)
+      )
+    })
+  } else {
+    const require = createRequire(import.meta.url)
+    const sdkPackage = JSON.parse(
+      fs.readFileSync(
+        path.join(path.dirname(require.resolve("@anthropic-ai/claude-agent-sdk")), "package.json"),
+        "utf8"
+      )
+    )
+    version =
+      typeof sdkPackage.claudeCodeVersion === "string" ? sdkPackage.claudeCodeVersion : "unknown"
+  }
+  if (!supportsClaudeRuntimePolicies(version))
+    throw new Error(
+      `Claude Code >=2.1.305 is required for namespace and unattended retry policies (found ${/^(\d+\.\d+\.\d+)(?:\s|$)/.exec(version.trim())?.[1] ?? "unknown"})`
+    )
+}
 
 const MISSING_CLAUDE_MESSAGE =
   "Claude runtime is unavailable. Use the full Cognia distribution, set " +

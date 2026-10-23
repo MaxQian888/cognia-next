@@ -561,7 +561,18 @@ export function createBashTool({
         Boolean(result.spawnError) ||
         Boolean(result.signal) ||
         (result.code !== 0 && result.code !== null)
-      return failed ? toolText(body, { isError: true }) : toolText(body || "(no output)")
+      return failed
+        ? toolError(Object.assign(new Error(body), { code: result.spawnError?.code }), "bash", {
+            kind: result.interrupted
+              ? "aborted"
+              : result.timedOut
+                ? "timeout"
+                : result.spawnError
+                  ? undefined
+                  : "execution-failed",
+            effects: result.spawnError ? "none" : "unknown",
+          })
+        : toolText(body || "(no output)")
     } catch (err) {
       return toolError(err, "bash")
     }

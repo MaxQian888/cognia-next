@@ -75,6 +75,8 @@ test("bash surfaces non-zero exit codes as errors", async () => {
   const res = await tool.handler({ command: "exit 3" }, {})
   assert.equal(res.isError, true)
   assert.match(textOf(res), /exit code 3/)
+  assert.equal(res._meta?.["cognia/failure"]?.kind, "execution-failed")
+  assert.equal(res._meta?.["cognia/failure"]?.effects, "unknown")
 })
 
 test("bash kills on timeout and says so", async () => {
@@ -83,6 +85,8 @@ test("bash kills on timeout and says so", async () => {
   const res = await tool.handler({ command: sleepCmd, timeout: 500 }, {})
   assert.equal(res.isError, true)
   assert.match(textOf(res), /timed out after 500 ms/)
+  assert.equal(res._meta?.["cognia/failure"]?.kind, "timeout")
+  assert.match(textOf(res), /Inspect.*before retrying/i)
 })
 
 test("bash hard-rejects destructive chaining patterns", async () => {
@@ -321,7 +325,7 @@ test("bash run_in_background returns a shellId and does not block", async () => 
   const id = extractShellId(textOf(res))
   assert.ok(id, "expected a shellId in the output")
   // Clean up the long-running shell.
-  bgShells.killAll()
+  await bgShells.killAll()
 })
 
 test("bash run_in_background errors without a registry", async () => {
@@ -369,7 +373,7 @@ test("list_shells inventories running and completed background commands", async 
   const payload = JSON.parse(textOf(result))
   assert.equal(payload.shells[0].id, id)
   assert.equal(payload.shells[0].status, "running")
-  bgShells.killAll()
+  await bgShells.killAll()
 })
 
 test("bash_output reports no-new-output and unknown ids", async () => {

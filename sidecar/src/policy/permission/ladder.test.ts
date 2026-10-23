@@ -12,6 +12,7 @@ import {
   buildPerCallApprovalSet,
   decidePermission,
   firstHardDenial,
+  mcpToolAllowlistDenies,
   requiresPerCallApproval,
 } from "./ladder.ts"
 import type { LadderCall, LadderPolicy, LadderStep, RailProfile } from "./ladder.ts"
@@ -407,4 +408,31 @@ test("portable tool policies override shortcuts, deny wins, and ask needs a chan
       reason: { code: "dont-ask" },
     }
   )
+})
+
+test("an MCP tool allowlist denies a listed server's unpicked tools, however new", () => {
+  const allowlist = { search: ["query"], a__b: ["x"] }
+  assert.equal(mcpToolAllowlistDenies("mcp__search__query", allowlist), false)
+  assert.equal(mcpToolAllowlistDenies("mcp__search__added_later", allowlist), true)
+  assert.equal(mcpToolAllowlistDenies("mcp__a__b__x", allowlist), false)
+  assert.equal(mcpToolAllowlistDenies("mcp__a__b__y", allowlist), true)
+  // Unlisted servers and non-MCP tools are not this check's business.
+  assert.equal(mcpToolAllowlistDenies("mcp__files__read", allowlist), false)
+  assert.equal(mcpToolAllowlistDenies("Bash", allowlist), false)
+  assert.equal(mcpToolAllowlistDenies("mcp__search__query", undefined), false)
+  assert.throws(() => mcpToolAllowlistDenies("mcp__x__y", ["x"]), /must be an object/)
+  assert.throws(() => mcpToolAllowlistDenies("mcp__x__y", { x: "y" }), /list of tool names/)
+})
+
+test("the ruleset step denies an MCP tool outside the allowlist, even under bypass", () => {
+  const outcome = decidePermission(profile(["ruleset", "bypass"]), {
+    ...call("mcp__search__drop_index", {}),
+    policy: policy({ mode: "bypassPermissions", mcpToolAllowlist: { search: ["query"] } }),
+  })
+  assert.deepEqual(outcome, { kind: "deny", reason: { code: "ruleset" } })
+  const allowed = decidePermission(profile(["ruleset", "bypass"]), {
+    ...call("mcp__search__query", {}),
+    policy: policy({ mode: "bypassPermissions", mcpToolAllowlist: { search: ["query"] } }),
+  })
+  assert.equal(allowed.kind, "allow")
 })

@@ -7,6 +7,14 @@ import type { HostRpcCaller } from "../../tools/state/host-background-shells.ts"
 import type { AdapterCredentials } from "../../providers/protocol-adapters/types.ts"
 import type { ProtocolExecChannel } from "../../providers/protocol-adapters/code-adapter.ts"
 import type { ConversationMessage } from "../../context/compaction.ts"
+import {
+  isSummaryMessage,
+  shouldCompact,
+  AUTO_COMPACT_FRACTION,
+  estimateTokens,
+} from "../../context/compaction.ts"
+import { planDeliveryReady } from "../../context/progress-checkpoint.ts"
+import { partitionPrompt } from "../../providers/prompt-partition.ts"
 import type { CallLedgerGate, CallReport } from "../common/call-ledger-gate.ts"
 import type { PendingApproval } from "../../policy/permission/approval.ts"
 import type { PendingPluginToolCalls } from "../../tools/plugin/proxy.ts"
@@ -165,6 +173,16 @@ function chargeLegSteps({
  */
 function resolveStepChunk(aiSdkStepChunk: unknown) {
   return typeof aiSdkStepChunk === "number" && aiSdkStepChunk >= 1 ? Math.floor(aiSdkStepChunk) : 16
+}
+
+function measuredPromptOverhead(inputTokens: number, sent: ConversationMessage[], step: unknown) {
+  const messages = record(record(step).request).messages
+  if (!Array.isArray(messages) || inputTokens <= 0) return undefined
+  const instructions = partitionPrompt(sent).instructions ?? []
+  return Math.max(
+    0,
+    inputTokens - estimateTokens([...instructions, ...stripReasoningParts(messages)])
+  )
 }
 
 /**
@@ -479,7 +497,10 @@ export function dispatchAiSdk({
             ? []
             : (TOOL_NAMES_BY_CATEGORY.coreFiles ?? []),
       })
-      if (toolSearchController) toolsCache = toolSearchController.tools
+      if (toolSearchController) {
+        toolSearchController.restoreConversation(conversation)
+        toolsCache = toolSearchController.tools
+      }
     }
     if (!overLimit || !toolSearchController || toolLimit === null) return
     setDeferredToolsMessage(toolSearchController.deferredToolsPrompt())
@@ -626,6 +647,7 @@ export function dispatchAiSdk({
   // Real input-token count from the previous turn's usage; drives the
   // compaction trigger (same signal the Anthropic SDK auto-compacts on).
   let lastInputTokens = 0
+  let compactionPromptOverhead = 0
   // Highest frozen-summary version spliced into `conversation` this session.
   // The summaries themselves live in `conversation` (re-detected via
   // `summaryVersion`); this is a monotonic hint for the next version number.
@@ -641,6 +663,9 @@ export function dispatchAiSdk({
       },
       set lastInputTokens(value) {
         lastInputTokens = value
+      },
+      get promptOverheadTokens() {
+        return compactionPromptOverhead
       },
       get frozenSummaryVersion() {
         return frozenSummaryVersion
@@ -865,6 +890,7 @@ export function dispatchAiSdk({
                 // unions its deny-list (parity with the built-in tool path above).
                 allowedTools: agentScopedSendOptions.allowedTools,
                 disallowedTools: agentScopedSendOptions.disallowedTools,
+                mcpToolAllowlist: sendOptions.mcpToolAllowlist,
                 log,
                 // Surface each server's stderr + connect/tool diagnostics as
                 // `mcp_log` events for the renderer's MCP log panel (the ai-sdk
@@ -975,6 +1001,40 @@ export function dispatchAiSdk({
         // sanitizer is identity-preserving on a well-formed history, so this is a
         // no-op except on the corrupted-by-interrupt/compaction case.
         let messagesForSend = sanitizeToolMessagePairs(conversation)
+        const planReadyHint =
+          sendOptions.agentKind === "subagent" &&
+          sendOptions.compaction?.enabled !== false &&
+          sendOptions.compaction?.useAISummarization !== false &&
+          sendOptions.compaction?.strategy !== "optical" &&
+          sendOptions.compaction?.strategy !== "sliding-window" &&
+          sendOptions.compaction?.checkpointFormat === "progress-v1" &&
+          planDeliveryReady(
+            conversation
+              .filter(isSummaryMessage)
+              .flatMap((m) => (typeof m.content === "string" ? [m.content] : [])),
+            sendOptions.agentRef
+          )
+        if (planReadyHint)
+          messagesForSend = [
+            ...messagesForSend,
+            {
+              role: "system",
+              content:
+                "The saved research checkpoint suggests drafting the plan. It is a model report, not authority: preserve the current request and constraints; verify any named gap, changed source or contradiction using the available tools. Otherwise deliver the plan with concrete verification gaps instead of expanding the investigation.",
+            },
+          ]
+        const inputWindow = sendOptions.compaction?.contextWindow
+        if (
+          sendOptions.compaction?.enabled !== false &&
+          sendOptions.compaction?.trigger !== "manual" &&
+          typeof inputWindow === "number" &&
+          estimateTokens(messagesForSend) + compactionPromptOverhead >= inputWindow
+        ) {
+          turnError = new Error(
+            "Task/research incomplete: the retained input exceeds the context budget after compaction. Findings and tool history are preserved; increase the context or retained-state budget and continue."
+          )
+          break
+        }
         // Cache the conversation prefix: tag the LAST message with an ephemeral
         // breakpoint so Anthropic caches the whole history up to here and only the
         // next turn's delta is fresh. A shallow copy keeps the persistent
@@ -1037,6 +1097,10 @@ export function dispatchAiSdk({
           }
         }
 
+        const comp = sendOptions.compaction
+        const yieldForCompaction =
+          comp?.enabled === true && comp.trigger !== "manual" && comp.trigger !== "message-count"
+        const legConversationEstimate = estimateTokens(conversation)
         const result = await protocolAdapter.start({
           sessionId,
           traceId: sendOptions.traceId,
@@ -1054,12 +1118,15 @@ export function dispatchAiSdk({
           model,
           messages: messagesForSend.map((message) => ({ ...message, content: message.content })),
           modelParams,
+          // Model-reported progress can guide drafting, never revoke the tools
+          // needed to correct stale evidence or answer a later user request.
           tools: toolsCache,
           // Near-miss tool names and aliased argument keys (common behind
           // relays) are repaired instead of failing the call.
           repairToolCall: repairToolCallFn,
           ...(toolSearchController ? { prepareStep: toolSearchController.prepareStep } : {}),
           maxSteps: perLegCap,
+          captureRequestMessages: sendOptions.compaction?.enabled !== false,
           credentials: creds,
           // The built-in provider id (NOT the protocol): the openai endpoint
           // decision and Codex's Responses-API fields are keyed on the id, since
@@ -1073,18 +1140,41 @@ export function dispatchAiSdk({
             effort: sendOptions.effort,
             maxThinkingTokens: sendOptions.maxThinkingTokens,
           },
-          // Break the agentic leg right after a step whose tool result carries an
-          // image, so we can re-project it as a user message before the model
-          // continues (providers that can't carry tool-result images otherwise
-          // never see it). Omitted for Anthropic, which carries them natively.
-          ...(projectToolImages
+          // Reach a safe boundary before another whole leg can outgrow the
+          // summary model's input budget. The current step's usage is available
+          // here; the outer loop only learns it after this leg ends. Also yield
+          // for image projection on providers that cannot carry tool images.
+          ...(projectToolImages || yieldForCompaction
             ? {
                 stopWhenExtra: (steps) => {
                   const last = Array.isArray(steps) ? steps[steps.length - 1] : null
+                  const nextInputDelta = Array.isArray(last?.content)
+                    ? last.content.filter(
+                        (part: unknown) =>
+                          !["reasoning", "reasoning-file"].includes(String(record(part).type))
+                      )
+                    : [
+                        ...(last?.text ? [{ type: "text", text: last.text }] : []),
+                        ...(last?.toolCalls ?? []),
+                        ...(last?.toolResults ?? []),
+                      ]
                   return (
-                    !!last &&
-                    Array.isArray(last.toolResults) &&
-                    last.toolResults.some((tr: unknown) => toolOutputHasImage(record(tr).output))
+                    (projectToolImages &&
+                      !!last &&
+                      Array.isArray(last.toolResults) &&
+                      last.toolResults.some((tr: unknown) =>
+                        toolOutputHasImage(record(tr).output)
+                      )) ||
+                    (yieldForCompaction &&
+                      shouldCompact({
+                        lastInputTokens:
+                          (record(last?.usage).inputTokens ??
+                            record(last?.usage).promptTokens ??
+                            0) + (nextInputDelta.length ? estimatePromptTokens(nextInputDelta) : 0),
+                        modelId: model,
+                        contextWindow: comp?.contextWindow,
+                        fraction: (comp?.fraction ?? AUTO_COMPACT_FRACTION) * 0.8,
+                      }))
                   )
                 },
               }
@@ -1322,6 +1412,10 @@ export function dispatchAiSdk({
           const inTok = usage.inputTokens ?? usage.promptTokens
           if (typeof inTok === "number" && inTok > 0) {
             lastInputTokens = currentLegLastInputTokens > 0 ? currentLegLastInputTokens : inTok
+            // A ledgered leg is exactly one request: compare its actual input
+            // with the matching pre-send conversation, never the appended results.
+            if (perLegCap === 1)
+              compactionPromptOverhead = Math.max(0, lastInputTokens - legConversationEstimate)
             // A stepless leg leaves no per-call figure; drop an earlier leg's so
             // the window is not reported from a stale call.
             if (currentLegLastInputTokens === 0) turnLastStepInputTokens = 0
@@ -1384,7 +1478,14 @@ export function dispatchAiSdk({
         let legStepsRead = true
         try {
           const steps = await result.steps
-          if (Array.isArray(steps)) legStepsRun = steps.length
+          if (Array.isArray(steps)) {
+            legStepsRun = steps.length
+            // AI SDK 7 exposes the exact standardized prompt for every internal
+            // step. Calibrate against the LAST request, never the leg's summed
+            // usage or the first request's shorter conversation.
+            const measured = measuredPromptOverhead(lastInputTokens, messagesForSend, steps.at(-1))
+            if (measured !== undefined) compactionPromptOverhead = measured
+          }
         } catch {
           // The `steps` getter rejects on a partial-error leg. Don't trust 0.
           legStepsRead = false
@@ -1423,7 +1524,7 @@ export function dispatchAiSdk({
       if (cappedWhileBusy) {
         // Never stop silently at the budget: tell the user the turn paused at the
         // safety cap and that another message resumes the same accumulated context.
-        const note = `\n\n_(Reached the ${maxStepsBudget}-step agentic safety cap for this turn — send another message to continue.)_`
+        const note = `\n\n_(Task/research incomplete: reached the ${maxStepsBudget}-step agentic safety cap for this turn. Findings so far are partial; remaining work is unverified. Send another message to continue.)_`
         flushAdapter(adapter.handle({ type: "text-delta", text: note }))
         // Seal the appended note as the canonical assistant snapshot (the line
         // above only streamed it as a `stream_event` delta).
@@ -1441,7 +1542,7 @@ export function dispatchAiSdk({
       // Report aborted background side calls before announcing terminal state.
       await settleTurnCompaction()
       const finishUsage = finishUsageSnapshot()
-      const finishEvents = adapter.finish({ usage: finishUsage })
+      const finishEvents = adapter.finish({ usage: finishUsage, budgetExhausted: cappedWhileBusy })
       flushAdapter(finishEvents)
       if (ledgerRefusal) {
         // Router + Fusion refused the next call (budget, limit, deadline). What
@@ -1464,6 +1565,7 @@ export function dispatchAiSdk({
           type: "session_ended",
           sessionId,
           error: msg,
+          conversationSnapshot: conversation,
           ...extractHttpErrorMeta(turnError),
         })
       } else {
@@ -1516,7 +1618,7 @@ export function dispatchAiSdk({
   emit({ type: "sdk_session_id", sessionId, sdkSessionId, runtimeAdapter: "ai-sdk" })
 
   // Wire the input-stream consumer: each pushed user message kicks off a turn.
-  ;(async () => {
+  const closed = (async () => {
     pushUserToConversation(firstPrompt)
     await runTurn()
     for await (const next of inputStream.iterable) {
@@ -1531,11 +1633,11 @@ export function dispatchAiSdk({
     .catch((err) => {
       log("error", `ai-sdk dispatch loop failed: ${errorToMessage(err)}`)
     })
-    .finally(() => {
+    .finally(async () => {
       // Session loop ended (input closed or fatal error) — kill any background
       // shells the agent left running so none outlive the session.
       invalidateCompaction()
-      void toolSession.disposeProcesses()
+      await toolSession.disposeProcesses()
       // Signal the host to retire this multi-turn session entry. Per-turn
       // `session_ended` events keep the session alive (so context accumulates);
       // this fires exactly once, when the loop genuinely ends.
@@ -1544,6 +1646,7 @@ export function dispatchAiSdk({
 
   return {
     sdkSessionId,
+    closed,
     // Marks this dispatcher as a long-lived, multi-turn session: the host keeps
     // the session entry across per-turn `session_ended` events so the in-process
     // `conversation[]` (the only place context lives for non-Anthropic
@@ -1602,6 +1705,7 @@ export function dispatchAiSdk({
         if (typeof nextModel !== "string" || !nextModel) return
         invalidateCompaction()
         model = nextModel
+        compactionPromptOverhead = 0
         sendOptions.model = nextModel
         adapter.setModel(nextModel)
       },
@@ -1658,6 +1762,7 @@ export function dispatchAiSdk({
       if (!Array.isArray(messages) || messages.length === 0) return false
       invalidateCompaction()
       conversation.splice(0, conversation.length, ...messages)
+      toolSearchController?.restoreConversation(conversation)
       lastInputTokens = 0
       frozenSummaryVersion = 0
       return true
@@ -1715,4 +1820,5 @@ export const __testing__ = {
   sanitizeToolMessagePairs,
   chargeLegSteps,
   resolveStepChunk,
+  measuredPromptOverhead,
 }

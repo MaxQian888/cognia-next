@@ -660,6 +660,11 @@ export function makeAiSdkAdapter(protocol: string, nativeCall?: SiwcNativeCall):
       // run to completion and keep billing).
       if (req.abortSignal) streamArgs.abortSignal = req.abortSignal
       if (req.prepareStep) streamArgs.prepareStep = req.prepareStep
+      if (req.captureRequestMessages)
+        streamArgs.include = {
+          ...(streamArgs.include as Record<string, unknown> | undefined),
+          requestMessages: true,
+        }
       // Router + Fusion ledgered call (ADR-0188): one reservation, one request.
       // Only set by the dispatcher for a reserved call, so it overrides a
       // provider-configured `modelParams.maxRetries` exactly then and never else.

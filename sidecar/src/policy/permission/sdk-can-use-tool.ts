@@ -104,6 +104,7 @@ function livePolicy(sendOptions: PermissionSendOptions): LadderPolicy {
     pluginAccess: buildPluginAccessMap(sendOptions.pluginTools),
     perCallApproval: buildPerCallApprovalSet(sendOptions.pluginTools),
     toolPermissionRules: sendOptions.toolPermissionRules,
+    mcpToolAllowlist: sendOptions.mcpToolAllowlist,
     profile: readPermissionProfile(sendOptions.permissionProfile),
     pluginClasses: buildPluginClassIndex(sendOptions.pluginTools),
     sandboxAttested: readSandboxAttested(sendOptions.sandboxAttestation),

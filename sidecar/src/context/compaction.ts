@@ -275,9 +275,11 @@ export interface CompactionPlan {
 export function planCompaction({
   conversation,
   keepRecentMessages,
+  keepRecentTokens,
 }: {
   conversation: readonly ConversationMessage[]
-  keepRecentMessages: number
+  keepRecentMessages?: number
+  keepRecentTokens?: number
 }): CompactionPlan | null {
   let i = 0
   while (i < conversation.length && conversation[i]!.role === "system") i++
@@ -287,7 +289,15 @@ export function planCompaction({
   const frozen = conversation.slice(i, j)
   const head = conversation.slice(0, j)
   const rest = conversation.slice(j)
-  const keep = Math.max(0, keepRecentMessages)
+  let keep = Math.max(0, keepRecentMessages ?? 6)
+  if (keepRecentTokens !== undefined && keepRecentTokens >= 0) {
+    keep = 0
+    let tokens = 0
+    while (keep < rest.length && tokens < keepRecentTokens) {
+      tokens += Math.max(1, estimateTokens([rest[rest.length - 1 - keep]]))
+      keep++
+    }
+  }
   if (rest.length <= keep) return null
   // Never cut between a tool call and its result: the tail starts early enough
   // to keep each pair whole, or the saved history would carry an orphan.

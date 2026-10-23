@@ -34,6 +34,14 @@ import { buildAnthropicOptions } from "./options.ts"
 import { createAnthropicSession } from "./session.ts"
 import { createClaudeExtensionReloader } from "./sdk-options.ts"
 import { startAnthropicPump } from "./pump.ts"
+import { ensureClaudeRuntimePolicyCompatibility } from "./executable.ts"
+import { readApprovalTtlMs } from "../../policy/permission/permission-classes.ts"
+import {
+  createProtectedClaudeQuery,
+  nestedNamespaceRequested,
+  requestNestedNamespaceConsent,
+  unattendedRetryPolicy,
+} from "./runtime-policy.ts"
 export { enforceAnthropicToolSurface } from "./tool-surface.ts"
 export { anthropicPluginToolBridgeOptions } from "./plugin-bridge.ts"
 export { drainPendingRoundTrips } from "./session.ts"
@@ -41,6 +49,8 @@ export function dispatchAnthropic(
   { sessionId, firstPrompt, sendOptions, emit, log, hostRpc }: DispatchParams,
   runtime: RuntimeDeps = {}
 ) {
+  const namespaceRequested = nestedNamespaceRequested(sendOptions, runtime.platform)
+  const retryPolicy = unattendedRetryPolicy(sendOptions)
   const inputStream = makeInputStream<SDKUserMessage>()
   // MCP server output capture. The Agent SDK forwards the spawned claude-code
   // subprocess's stderr — which carries every stdio MCP server's diagnostic
@@ -121,11 +131,51 @@ export function dispatchAnthropic(
   // matches — `warmFingerprint` is what decides that, and it declines rather
   // than guesses. A miss is an ordinary cold spawn.
   const pool = runtime.pool ?? warmPool({ log })
-  const prewarmEnabled = sendOptions.claudeAgentSdk?.prewarm?.enabled === true
-  const claimed = prewarmEnabled ? pool.claim(sendOptions, options) : null
-  const rawQuery = claimed
-    ? claimed.query(inputStream.iterable)
-    : (runtime.query ?? query)({ prompt: inputStream.iterable, options })
+  const protectedInvocation = namespaceRequested || retryPolicy !== undefined
+  let drainRuntimePending = (_reason: string) => {}
+  const prewarmEnabled =
+    !protectedInvocation && sendOptions.claudeAgentSdk?.prewarm?.enabled === true
+  const spawnQuery = () => {
+    const claimed = prewarmEnabled ? pool.claim(sendOptions, options) : null
+    return claimed
+      ? claimed.query(inputStream.iterable)
+      : (runtime.query ?? query)({ prompt: inputStream.iterable, options })
+  }
+  // Consent cannot run inside dispatch's synchronous registration window. The
+  // lazy query starts after the host stores this returned session, and neither
+  // a warm claim nor any Claude subprocess exists until consent is granted.
+  const protectedQuery = protectedInvocation
+    ? createProtectedClaudeQuery({
+        beforeStart: namespaceRequested
+          ? (signal) =>
+              requestNestedNamespaceConsent({
+                pendingApprovals,
+                sessionId,
+                emit,
+                signal,
+                ttlMs: readApprovalTtlMs(sendOptions.approvalTtlMs),
+                remoteExecutionContext: sendOptions.remoteExecutionContext,
+              })
+          : undefined,
+        maxWaitMs: retryPolicy?.maxWaitMs,
+        create: async (controller) => {
+          await (runtime.ensurePolicyCompatibility ?? ensureClaudeRuntimePolicyCompatibility)(
+            options,
+            controller.signal
+          )
+          if (controller.signal.aborted) throw controller.signal.reason
+          options.abortController = controller
+          return spawnQuery()
+        },
+        onAbort: (reason) => {
+          inputStream.close()
+          // The host can be waiting on a wedged interrupt RPC. Abort all local
+          // renderer round trips without waiting for that subprocess to answer.
+          drainRuntimePending(reason)
+        },
+      })
+    : undefined
+  const rawQuery = protectedQuery?.q ?? spawnQuery()
   // Warm the NEXT subprocess of this shape. Deliberately after the claim and
   // fire-and-forget: the options are only fully known at send time, so a pool
   // entry can only ever be built from a previous send just like this one.
@@ -188,7 +238,9 @@ export function dispatchAnthropic(
     pendingPluginToolCalls,
     pendingPluginHookCalls,
     sendOptions,
+    finishRuntime: protectedQuery?.finish,
   })
+  drainRuntimePending = (reason) => session.drainPending(reason)
   session.pushUserMessage(firstPrompt)
   let loadedPlugins: readonly { path: string; name?: string; source?: string }[] | undefined
   startAnthropicPump({

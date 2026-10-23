@@ -1,7 +1,70 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import { applyEmbeddedClaudeExecutable, resolveStandaloneClaudeExecutable } from "./executable.ts"
+import {
+  applyEmbeddedClaudeExecutable,
+  resolveStandaloneClaudeExecutable,
+  ensureClaudeRuntimePolicyCompatibility,
+  supportsClaudeRuntimePolicies,
+} from "./executable.ts"
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+test("runtime version diagnostics never expose executable stdout or stderr", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cognia-claude-version-private-"))
+  const executable = join(root, "claude")
+  try {
+    for (const source of [
+      "#!/bin/sh\necho 'private-version-output' >&2\nexit 1\n",
+      "#!/bin/sh\necho '2.1.304 private-version-output'\n",
+      "#!/bin/sh\necho 'private-version-output'\n",
+    ]) {
+      writeFileSync(executable, source)
+      chmodSync(executable, 0o700)
+      await assert.rejects(
+        ensureClaudeRuntimePolicyCompatibility(
+          { pathToClaudeCodeExecutable: executable, env: {} },
+          new AbortController().signal
+        ),
+        (error: Error) => {
+          assert.doesNotMatch(error.message, /private-version-output/)
+          assert.match(error.message, /Claude Code runtime version|Claude Code >=2.1.305/)
+          return true
+        }
+      )
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("runtime policy compatibility refuses older, prerelease and unproven CLI versions", async () => {
+  for (const version of ["2.1.304", "2.0.999", "unknown", "2.1.305-beta.1"])
+    assert.equal(supportsClaudeRuntimePolicies(version), false)
+  for (const version of ["2.1.305", "2.1.305 (Claude Code)", "2.1.306", "3.0.0"])
+    assert.equal(supportsClaudeRuntimePolicies(version), true)
+  const root = mkdtempSync(join(tmpdir(), "cognia-claude-version-"))
+  const executable = join(root, "claude")
+  try {
+    writeFileSync(executable, "#!/bin/sh\necho '2.1.304 (Claude Code)'\n")
+    chmodSync(executable, 0o700)
+    await assert.rejects(
+      ensureClaudeRuntimePolicyCompatibility(
+        { pathToClaudeCodeExecutable: executable, env: {} },
+        new AbortController().signal
+      ),
+      />=2.1.305.*2.1.304/
+    )
+    writeFileSync(executable, "#!/bin/sh\necho '2.1.305 (Claude Code)'\n")
+    await ensureClaudeRuntimePolicyCompatibility(
+      { pathToClaudeCodeExecutable: executable, env: {} },
+      new AbortController().signal
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 test("resolves standalone Claude by environment, then adjacent, then PATH precedence", () => {
   const existing = new Set(["/dist/claude", "/configured/claude", "/usr/local/bin/claude"])
