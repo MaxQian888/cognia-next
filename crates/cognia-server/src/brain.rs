@@ -18,8 +18,11 @@
 //! pointed at the companion `tls.pem` (the self-signed cert's SANs include
 //! `127.0.0.1` / `localhost` — verified in `companion_api/tls.rs`).
 //! Optional `COGNIA_COLLAB_URL` / `COGNIA_COLLAB_ORG_ID` are inherited by the
-//! child; credentials are never forwarded and come from the CLI's 0600 Logto
-//! session file.
+//! child as a pair; credentials are never forwarded and come from the CLI's
+//! 0600 Logto session file. A multi-tenant server sets `COGNIA_COLLAB_URL`
+//! alone for its own standing checks, which is not a brain collaboration
+//! config, so the URL is withheld from the child unless the org id is set too
+//! (see [`withhold_unpaired_collab_url`]).
 
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -164,6 +167,17 @@ pub fn build_brain_env(config: &BrainConfig, service_token: &str) -> Vec<(String
         env.push(("NODE_EXTRA_CA_CERTS".to_string(), pem.display().to_string()));
     }
     env
+}
+
+/// Whether to withhold `COGNIA_COLLAB_URL` from the brain child.
+///
+/// `cognia serve` refuses a URL without an org id (half a collaboration
+/// endpoint), and a multi-tenant server always sets the URL for its own
+/// collab standing checks. Inherited as is, that refusal crash-looped the
+/// brain on every multi-tenant deploy that had no single collaboration org.
+pub fn withhold_unpaired_collab_url(url: Option<&str>, org_id: Option<&str>) -> bool {
+    let set = |value: Option<&str>| value.is_some_and(|value| !value.trim().is_empty());
+    set(url) && !set(org_id)
 }
 
 /// Snapshot for `/healthz` — see [`brain_status`]. Defined by the companion
@@ -502,6 +516,12 @@ impl BrainSupervisor {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         cmd.env_remove("COGNIA_BRAIN_PROFILE");
+        if withhold_unpaired_collab_url(
+            std::env::var("COGNIA_COLLAB_URL").ok().as_deref(),
+            std::env::var("COGNIA_COLLAB_ORG_ID").ok().as_deref(),
+        ) {
+            cmd.env_remove("COGNIA_COLLAB_URL");
+        }
         for (k, v) in self.child_env(&token) {
             cmd.env(k, v);
         }
@@ -703,6 +723,17 @@ pub(crate) mod tests {
             ready_timeout,
             parked_entry_poll: Duration::from_millis(50),
         }
+    }
+
+    #[test]
+    fn a_collab_url_reaches_the_brain_only_with_its_org_id() {
+        assert!(withhold_unpaired_collab_url(Some("http://collab:8080"), None));
+        assert!(withhold_unpaired_collab_url(Some("http://collab:8080"), Some("  ")));
+        assert!(!withhold_unpaired_collab_url(Some("http://collab:8080"), Some("org_acme")));
+        assert!(!withhold_unpaired_collab_url(None, None));
+        assert!(!withhold_unpaired_collab_url(Some(""), None));
+        // An org id alone stays: `cognia serve` names that misconfiguration.
+        assert!(!withhold_unpaired_collab_url(None, Some("org_acme")));
     }
 
     #[tokio::test]

@@ -469,6 +469,9 @@ pub(super) async fn dispatch(
         // (Phase D). The return shape is identical so the rest of the RPC
         // pipeline stays unchanged.
 
+        // The four session-scoped message arms answer in the transcript
+        // vocabulary: a session this Host does not hold is `SESSION_NOT_FOUND`
+        // (400), not an `internal_error` (500) a client can only print.
         "message_update" => {
             let session_id: String = required(&args, "session_id")?;
             let message_id: String = required(&args, "message_id")?;
@@ -477,7 +480,7 @@ pub(super) async fn dispatch(
             let result = dp
                 .update_message(session_id.clone(), message_id, updates)
                 .await
-                .map_err(RpcError::internal)?;
+                .map_err(RpcError::transcript)?;
             publish_direct_transcript_revision(state, &dp, &session_id).await;
             Ok(result)
         }
@@ -489,7 +492,7 @@ pub(super) async fn dispatch(
             let result = dp
                 .delete_message(session_id.clone(), message_id)
                 .await
-                .map_err(RpcError::internal)?;
+                .map_err(RpcError::transcript)?;
             publish_direct_transcript_revision(state, &dp, &session_id).await;
             Ok(result)
         }
@@ -526,7 +529,7 @@ pub(super) async fn dispatch(
             let legacy = dp
                 .get_messages_by_session(session_id, Some(limit), Some(wire_offset(offset)?))
                 .await
-                .map_err(RpcError::internal)?;
+                .map_err(RpcError::transcript)?;
             let (page, extras) = cognia_companion::paging::Page::from_legacy_offset_page(
                 legacy,
                 "rows",
@@ -591,7 +594,7 @@ pub(super) async fn dispatch(
             let result = dp
                 .send_message(session_id.clone(), content, role)
                 .await
-                .map_err(RpcError::internal)?;
+                .map_err(RpcError::transcript)?;
             publish_direct_transcript_revision(state, &dp, &session_id).await;
             Ok(result)
         }
