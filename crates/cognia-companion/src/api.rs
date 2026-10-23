@@ -1777,7 +1777,17 @@ async fn register_handler(
             unix_time_secs(),
         )
     } else {
-        security.register_oidc_device(
+        // A multi-tenant Host serves every member's client data plane from
+        // that member's own partition (plan §9a), so the member can write
+        // it. A single-user Host has one data plane, the owner's, and keeps
+        // member writes an explicit elevation.
+        let register = if deployment_mode() == DeploymentMode::MultiTenant {
+            SecurityStore::register_oidc_partition_device
+        } else {
+            SecurityStore::register_oidc_device
+        };
+        register(
+            &security,
             &authority.tenant_id,
             &authority.actor_id,
             person

@@ -967,6 +967,73 @@ impl SecurityStore {
         role: &str,
         now: i64,
     ) -> Result<(), SecurityStoreError> {
+        self.register_oidc_device_inner(
+            tenant_id,
+            actor_id,
+            person,
+            challenge_id,
+            challenge_nonce,
+            device_id,
+            display_name,
+            public_key_pem,
+            public_key_thumbprint,
+            role,
+            false,
+            now,
+        )
+    }
+
+    /// Register a device whose client data plane is its person's OWN
+    /// partition (multi-tenant Host, plan §9a). A member device then also
+    /// gets `client.write`: on a single-user Host that write would reach the
+    /// owner's data, here it can only reach the caller's own partition.
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_oidc_partition_device(
+        &self,
+        tenant_id: &str,
+        actor_id: &str,
+        person: &VerifiedDevicePerson,
+        challenge_id: &str,
+        challenge_nonce: &str,
+        device_id: &str,
+        display_name: &str,
+        public_key_pem: &str,
+        public_key_thumbprint: &str,
+        role: &str,
+        now: i64,
+    ) -> Result<(), SecurityStoreError> {
+        self.register_oidc_device_inner(
+            tenant_id,
+            actor_id,
+            person,
+            challenge_id,
+            challenge_nonce,
+            device_id,
+            display_name,
+            public_key_pem,
+            public_key_thumbprint,
+            role,
+            true,
+            now,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn register_oidc_device_inner(
+        &self,
+        tenant_id: &str,
+        actor_id: &str,
+        person: &VerifiedDevicePerson,
+        challenge_id: &str,
+        challenge_nonce: &str,
+        device_id: &str,
+        display_name: &str,
+        public_key_pem: &str,
+        public_key_thumbprint: &str,
+        role: &str,
+        partition_writes: bool,
+        now: i64,
+    ) -> Result<(), SecurityStoreError> {
         if !matches!(role, "owner" | "member") {
             return Err(SecurityStoreError::DeviceUnavailable);
         }
@@ -1018,6 +1085,14 @@ impl SecurityStore {
             ],
         )?;
         insert_default_grants(&tx, tenant_id, device_id, role, now)?;
+        if partition_writes && !default_capabilities_for_role(role).contains(&"client.write") {
+            tx.execute(
+                "INSERT INTO capability_grants
+                 (id, tenant_id, device_id, capability, created_at)
+                 VALUES (?1, ?2, ?3, 'client.write', ?4)",
+                params![uuid::Uuid::new_v4().to_string(), tenant_id, device_id, now],
+            )?;
+        }
         insert_audit(
             &tx,
             tenant_id,
@@ -6781,6 +6856,65 @@ CREATE TABLE devices (
         assert!(!store
             .has_capability("tenant-a", "member-device", "workspace.write")
             .unwrap());
+    }
+
+    #[test]
+    fn oidc_partition_member_writes_its_own_partition_but_a_plain_member_does_not() {
+        let store = SecurityStore::in_memory().unwrap();
+        let register = |device: &str, partition: bool, role: &str, now: i64| {
+            let challenge = store.issue_challenge("tenant-a", now, 60).unwrap();
+            let call = if partition {
+                SecurityStore::register_oidc_partition_device
+            } else {
+                SecurityStore::register_oidc_device
+            };
+            call(
+                &store,
+                "tenant-a",
+                device,
+                &oidc_test_person(),
+                &challenge.id,
+                &challenge.nonce,
+                device,
+                device,
+                "pem",
+                &format!("thumb-{device}"),
+                role,
+                now,
+            )
+            .unwrap();
+        };
+        register("plain-member", false, "member", 100);
+        register("partition-member", true, "member", 101);
+        register("partition-owner", true, "owner", 102);
+        assert!(!store
+            .has_capability("tenant-a", "plain-member", "client.write")
+            .unwrap());
+        assert_eq!(
+            store
+                .capability_snapshot("tenant-a", "partition-member")
+                .unwrap()
+                .unwrap(),
+            vec![
+                "agent.run",
+                "client.read",
+                "client.write",
+                "host.observe",
+                "workspace.read"
+            ]
+        );
+        // The owner preset already decides `client.write`; the partition
+        // variant adds nothing on top of it.
+        assert_eq!(
+            store
+                .capability_snapshot("tenant-a", "partition-owner")
+                .unwrap()
+                .unwrap()
+                .iter()
+                .filter(|capability| capability.as_str() == "client.write")
+                .count(),
+            usize::from(default_capabilities_for_role("owner").contains(&"client.write"))
+        );
     }
 
     #[test]
