@@ -9,11 +9,480 @@ import {
   TauriDebugDocumentReplacedError,
   TauriDebugSessionError,
   TauriPage,
+  TauriClientSession,
+  connectTauriSession,
 } from "./agent-debug-client.mjs"
 
 const endpoint = { baseUrl: "http://127.0.0.1:4317", devToken: "a".repeat(64) }
 
+const scopedIdentity = { sessionId: "run", workspace: "/repo", appInstanceId: "app", pid: 77 }
+const scopedHealth = { agentDebug: true, pid: 77, debugSession: scopedIdentity }
+
+test("scoped descriptors reject a wrong authenticated run before sending an operation", async () => {
+  const calls = []
+  const session = new TauriClientSession({
+    endpoint: {
+      ...endpoint,
+      file: "/owner/discovery",
+      debugSession: { ...scopedIdentity, appInstanceId: "foreign" },
+    },
+    clientSessionId: "a",
+    windows: ["main"],
+    canWrite: true,
+    fetchImpl: async (url) => {
+      calls.push(url)
+      return jsonResponse(scopedHealth)
+    },
+  })
+  await assert.rejects(session.page().snapshot(), { code: "debug_session_mismatch" })
+  assert.equal(calls.length, 1)
+  assert.ok(calls[0].includes("nativeOnly=true"))
+  assert.equal(session.toJSON().endpoint.file, undefined)
+  assert.throws(
+    () =>
+      new TauriClientSession({
+        endpoint: { ...endpoint, baseUrl: "https://foreign.example", debugSession: scopedIdentity },
+        clientSessionId: "a",
+        windows: ["main"],
+        canWrite: true,
+      }),
+    { code: "invalid_client_descriptor" }
+  )
+})
+
+test("a lost on-disk lease proof is recovered only through its scoped session before release", async () => {
+  const calls = []
+  const session = new TauriClientSession({
+    endpoint: {
+      baseUrl: "http://127.0.0.1:1",
+      devToken: "c".repeat(64),
+      debugSession: scopedIdentity,
+    },
+    clientSessionId: "client",
+    windows: ["main"],
+    canWrite: true,
+    fetchImpl: async (url, options) => {
+      calls.push({ url, body: options.body && JSON.parse(options.body) })
+      if (url.includes("nativeOnly=true")) return jsonResponse(scopedHealth)
+      if (url.endsWith("/session"))
+        return jsonResponse({ ok: true, lease: { token: "own-proof", fence: 9 } })
+      assert.deepEqual(JSON.parse(options.body), {
+        operation: "release",
+        token: "own-proof",
+        fence: 9,
+      })
+      return jsonResponse({ ok: true, lease: null })
+    },
+  })
+  await session.releaseWriter()
+  assert.equal(session.lease, null)
+  assert.equal(calls.length, 3)
+})
+
+test("scoped lease descriptors restore and renew through the existing session API", async () => {
+  const calls = []
+  const descriptor = {
+    endpoint: { ...endpoint, debugSession: scopedIdentity },
+    clientSessionId: "a",
+    windows: ["main"],
+    canWrite: true,
+    lease: { token: "lease", fence: 2, expiresAt: 100 },
+  }
+  const session = new TauriClientSession({
+    ...descriptor,
+    fetchImpl: async (url, init) => {
+      if (url.includes("nativeOnly=true")) return jsonResponse(scopedHealth)
+      calls.push(JSON.parse(init.body))
+      return jsonResponse({ lease: { token: "lease", fence: 2, expiresAt: 200 } })
+    },
+  })
+  await session.renewWriter()
+  assert.equal(session.toJSON().lease.expiresAt, 200)
+  assert.deepEqual(calls, [{ operation: "renew", token: "lease", fence: 2 }])
+})
+
+test("shared attachments keep root credentials out of pages and preserve typed navigation waits", async () => {
+  const calls = []
+  let url = "http://localhost/"
+  const fetchImpl = async (target, init) => {
+    if (target.includes("nativeOnly=true")) return jsonResponse(scopedHealth)
+    const body = init.body ? JSON.parse(init.body) : undefined
+    calls.push({ target, body, headers: init.headers, method: init.method })
+    if (target.endsWith("/sessions")) {
+      assert.equal(init.headers["X-Cognia-Dev-Token"], endpoint.devToken)
+      return jsonResponse({
+        ok: true,
+        session: {
+          clientSessionId: "agent-a",
+          token: "b".repeat(64),
+          windows: ["main"],
+          canWrite: true,
+        },
+      })
+    }
+    assert.equal(init.headers["X-Cognia-Dev-Token"], "b".repeat(64))
+    if (target.endsWith("/lease"))
+      return jsonResponse({
+        ok: true,
+        lease: body.operation === "acquire" ? { token: "writer", fence: 7 } : null,
+      })
+    if (target.includes("/health"))
+      return jsonResponse({ ok: true, helper: { capabilities: { locatorActionControl: 1 } } })
+    if (target.endsWith("/helper"))
+      return jsonResponse({
+        ok: true,
+        value:
+          body.method === "url"
+            ? url
+            : { documentId: "doc", url, readyState: "complete", pendingRequests: 0 },
+      })
+    if (target.endsWith("/locator")) {
+      assert.equal(init.headers["X-Cognia-Writer-Token"], "writer")
+      assert.equal(init.headers["X-Cognia-Writer-Fence"], "7")
+      url = "http://localhost/done"
+      return jsonResponse({ ok: true, locator: { ok: true, value: null, navigation: false } })
+    }
+    if (target.endsWith("/session")) return jsonResponse({ ok: true })
+    throw new Error(`unexpected route ${target}`)
+  }
+  const session = await connectTauriSession({ endpoint, fetchImpl, canWrite: true })
+  const page = session.page()
+  assert.equal(page.window("main")._clientSession, session)
+  assert.equal(page._endpointLoader, null)
+  assert.throws(() => session.page("foreign"), /outside its scope/)
+  await page.getByRole("button", { name: "Run" }).click({ waitForURL: /done$/ })
+  assert.equal(await page.url(), "http://localhost/done")
+  await assert.rejects(page.evaluate("location.href"), TauriDebugUnsupportedError)
+  await session.detach()
+  assert.equal(
+    calls.some((call) => call.target.endsWith("/evaluate") || call.target.endsWith("/shutdown")),
+    false
+  )
+  assert.equal(calls.filter((call) => call.body?.operation === "release").length, 1)
+})
+
+test("shared writer failures release their own reservation and never replay a mutation", async () => {
+  let mutations = 0
+  let releases = 0
+  const fetchImpl = async (url, init) => {
+    if (url.includes("nativeOnly=true")) return jsonResponse(scopedHealth)
+    const body = init.body ? JSON.parse(init.body) : {}
+    if (url.endsWith("/sessions"))
+      return jsonResponse({
+        session: { clientSessionId: "a", token: "b".repeat(64), windows: ["main"], canWrite: true },
+      })
+    if (url.endsWith("/lease")) {
+      if (body.operation === "release") releases++
+      return jsonResponse({
+        lease: body.operation === "acquire" ? { token: "lease", fence: 1 } : null,
+      })
+    }
+    if (url.endsWith("/act")) {
+      mutations++
+      throw new TypeError("fetch failed")
+    }
+    throw new Error(url)
+  }
+  const session = await connectTauriSession({ endpoint, fetchImpl, canWrite: true })
+  await assert.rejects(
+    session.page().act("g1e1", "click"),
+    (error) => error.code === "debug_connection_lost" && error.cause?.message === "fetch failed"
+  )
+  assert.equal(mutations, 1)
+  assert.equal(releases, 1)
+  assert.equal(session.lease, null)
+})
+
+test("failed writer release retains its proof so cleanup can be retried", async () => {
+  let releases = 0
+  const session = await connectTauriSession({
+    endpoint,
+    canWrite: true,
+    fetchImpl: async (url, init) => {
+      if (url.includes("nativeOnly=true")) return jsonResponse(scopedHealth)
+      const body = init.body ? JSON.parse(init.body) : {}
+      if (url.endsWith("/sessions"))
+        return jsonResponse({
+          session: {
+            clientSessionId: "a",
+            token: "b".repeat(64),
+            windows: ["main"],
+            canWrite: true,
+          },
+        })
+      if (body.operation === "acquire") return jsonResponse({ lease: { token: "lease", fence: 1 } })
+      if (++releases === 1)
+        return jsonResponse({ error: "operation still active", code: "concurrent_operation" }, 409)
+      return jsonResponse({ ok: true })
+    },
+  })
+  await session.acquireWriter()
+  await assert.rejects(session.releaseWriter(), (error) => error.code === "concurrent_operation")
+  assert.equal(session.lease.token, "lease")
+  await session.releaseWriter()
+  assert.equal(session.lease, null)
+  assert.equal(releases, 2)
+})
+
+test("shared atomic keyboard input propagates abort and releases its writer", async () => {
+  const controller = new AbortController()
+  const typed = []
+  const session = await connectTauriSession({
+    endpoint,
+    canWrite: true,
+    fetchImpl: async (url, init) => {
+      if (url.includes("nativeOnly=true")) return jsonResponse(scopedHealth)
+      const body = init.body ? JSON.parse(init.body) : {}
+      if (url.endsWith("/sessions"))
+        return jsonResponse({
+          session: {
+            clientSessionId: "a",
+            token: "b".repeat(64),
+            windows: ["main"],
+            canWrite: true,
+          },
+        })
+      if (url.includes("/health"))
+        return jsonResponse({
+          helper: { capabilities: { locatorActionControl: 1, atomicInput: 1 } },
+        })
+      if (url.endsWith("/lease"))
+        return jsonResponse({
+          lease: body.operation === "acquire" ? { token: "lease", fence: 1 } : null,
+        })
+      if (body.method === "health")
+        return jsonResponse({ value: { documentId: "doc", readyState: "complete" } })
+      if (body.operation === "cancel") return jsonResponse({ locator: { ok: true } })
+      if (body.name === "keyboard") {
+        assert.equal(init.headers["X-Cognia-Document-Id"], "doc")
+        typed.push(body.args.args.text)
+        controller.abort(new Error("stop typing"))
+        return jsonResponse({ value: null })
+      }
+      throw new Error(url)
+    },
+  })
+  await assert.rejects(
+    session.page().keyboard.type("ab", { delay: 2, signal: controller.signal }),
+    /stop typing/
+  )
+  assert.deepEqual(typed, ["ab"])
+  assert.equal(session.lease, null)
+})
+
+test("outer writer cancellation fences later child mutations and preserves cleanup", async () => {
+  const outer = new AbortController()
+  const inner = new AbortController()
+  const calls = []
+  let resume, entered
+  const gate = new Promise((resolve) => {
+    resume = resolve
+  })
+  const started = new Promise((resolve) => {
+    entered = resolve
+  })
+  const session = new TauriClientSession({
+    endpoint: { ...endpoint, debugSession: scopedIdentity },
+    clientSessionId: "a",
+    windows: ["main"],
+    canWrite: true,
+    fetchImpl: async (url, init) => {
+      init.signal.throwIfAborted()
+      const body = init.body ? JSON.parse(init.body) : {}
+      if (url.includes("nativeOnly=true")) return jsonResponse(scopedHealth)
+      if (url.endsWith("/lease")) {
+        calls.push(body.operation)
+        return jsonResponse({
+          lease: body.operation === "acquire" ? { token: "lease", fence: 1 } : null,
+        })
+      }
+      calls.push("mutation")
+      return jsonResponse({ value: true })
+    },
+  })
+  const work = session.withWriter(
+    async () => {
+      entered()
+      await gate
+      return session
+        .page()
+        ._typedHelper("keyboard", ["insertText", { text: "cancelled" }], { signal: inner.signal })
+    },
+    { signal: outer.signal }
+  )
+  await started
+  outer.abort(new Error("cancel workflow"))
+  resume()
+  await assert.rejects(work, /cancel workflow/)
+  assert.deepEqual(calls, ["acquire", "release"])
+  assert.equal(session.lease, null)
+})
+
+test("overlapping nested writer scopes cannot erase a live sibling cancellation", async () => {
+  const calls = []
+  const session = new TauriClientSession({
+    endpoint: { ...endpoint, debugSession: scopedIdentity },
+    clientSessionId: "a",
+    windows: ["main"],
+    canWrite: true,
+    fetchImpl: async (url, init) => {
+      init.signal.throwIfAborted()
+      if (url.includes("nativeOnly=true")) return jsonResponse(scopedHealth)
+      const body = init.body ? JSON.parse(init.body) : {}
+      if (url.endsWith("/lease")) {
+        calls.push(body.operation)
+        return jsonResponse({
+          lease: body.operation === "acquire" ? { token: "lease", fence: 1 } : null,
+        })
+      }
+      calls.push("input")
+      return jsonResponse({ value: true })
+    },
+  })
+  const outer = new AbortController(),
+    inner = new AbortController()
+  await session
+    .withWriter(
+      async () => {
+        let resumeFirst, resumeSecond
+        const gateFirst = new Promise((resolve) => {
+          resumeFirst = resolve
+        })
+        const gateSecond = new Promise((resolve) => {
+          resumeSecond = resolve
+        })
+        const first = session.withWriter(() => gateFirst)
+        const second = session.withWriter(
+          async () => {
+            await gateSecond
+            await session.page().keyboard.insertText("must-not-write")
+          },
+          { signal: inner.signal }
+        )
+        const rejected = assert.rejects(second, /inner cancelled/)
+        resumeFirst()
+        await first
+        inner.abort(new Error("inner cancelled"))
+        resumeSecond()
+        await rejected
+        assert.equal(calls.filter((call) => call === "release").length, 0)
+        await session.page().keyboard.insertText("outer still valid")
+        outer.abort(new Error("outer cancelled"))
+        await assert.rejects(
+          session.page().keyboard.insertText("must-not-write"),
+          /outer cancelled/
+        )
+      },
+      { signal: outer.signal }
+    )
+    .then(
+      () => assert.fail("outer abort must reject"),
+      (error) => assert.match(error.message, /outer cancelled/)
+    )
+  assert.deepEqual(calls, ["acquire", "input", "release"])
+  assert.equal(session.lease, null)
+})
+
+test("scoped composite typing and chords reserve one complete semantic mutation", async () => {
+  const writes = []
+  const session = new TauriClientSession({
+    endpoint: { ...endpoint, debugSession: scopedIdentity },
+    clientSessionId: "a",
+    windows: ["main"],
+    canWrite: true,
+    fetchImpl: async (url, init) => {
+      const body = init.body ? JSON.parse(init.body) : {}
+      if (url.includes("nativeOnly=true")) return jsonResponse(scopedHealth)
+      if (url.endsWith("/lease"))
+        return jsonResponse({
+          lease: body.operation === "acquire" ? { token: "lease", fence: 1 } : null,
+        })
+      if (url.includes("/health"))
+        return jsonResponse({
+          helper: { capabilities: { locatorActionControl: 1, atomicInput: 1 } },
+        })
+      if (body.method === "health")
+        return jsonResponse({ value: { documentId: "doc", readyState: "complete" } })
+      writes.push({ body, id: init.headers["X-Cognia-Operation-Id"] })
+      return jsonResponse(
+        url.endsWith("/locator") ? { locator: { ok: true, value: true } } : { value: true }
+      )
+    },
+  })
+  const page = session.page()
+  await page.getByRole("textbox").pressSequentially("aa", { delay: 1, operationId: "locator-text" })
+  await page.keyboard.type("ab", { delay: 1, operationId: "keyboard-text" })
+  await page.keyboard.press("Control+a", { operationId: "chord" })
+  assert.equal(writes.length, 3)
+  assert.deepEqual(
+    writes.map((write) => write.id),
+    ["locator-text", "keyboard-text", "chord"]
+  )
+  assert.deepEqual(writes[0].body.args, { value: "aa", delay: 1 })
+  assert.deepEqual(writes[1].body.args, { operation: "type", args: { text: "ab", delay: 1 } })
+  assert.deepEqual(writes[2].body.args, { operation: "chord", args: { key: "Control+a" } })
+})
+
+test("writer cleanup waits for an outstanding renewal before release", async (t) => {
+  let tick
+  let resolveRenewal
+  let finishCallback
+  let callbackStarted
+  let releases = 0
+  const started = new Promise((resolve) => {
+    callbackStarted = resolve
+  })
+  const originalInterval = globalThis.setInterval
+  t.mock.method(globalThis, "setInterval", (callback) => {
+    tick = callback
+    return originalInterval(() => {}, 60_000)
+  })
+  const session = await connectTauriSession({
+    endpoint,
+    canWrite: true,
+    fetchImpl: async (url, init) => {
+      if (url.includes("nativeOnly=true")) return jsonResponse(scopedHealth)
+      const body = init.body ? JSON.parse(init.body) : {}
+      if (url.endsWith("/sessions"))
+        return jsonResponse({
+          session: {
+            clientSessionId: "a",
+            token: "b".repeat(64),
+            windows: ["main"],
+            canWrite: true,
+          },
+        })
+      if (body.operation === "acquire") return jsonResponse({ lease: { token: "lease", fence: 1 } })
+      if (body.operation === "renew")
+        return new Promise((resolve) => {
+          resolveRenewal = () => resolve(jsonResponse({ lease: { token: "lease", fence: 1 } }))
+        })
+      releases++
+      return jsonResponse({ ok: true })
+    },
+  })
+  const work = session.withWriter(async () => {
+    callbackStarted()
+    await new Promise((resolve) => {
+      finishCallback = resolve
+    })
+  })
+  await started
+  tick()
+  finishCallback()
+  await new Promise(setImmediate)
+  const releasedBeforeRenewal = releases
+  resolveRenewal()
+  await work
+  await new Promise(setImmediate)
+  assert.equal(releasedBeforeRenewal, 0)
+  assert.equal(releases, 1)
+  assert.equal(session.lease, null)
+})
+
 function jsonResponse(value, status = 200) {
+  if (value.session)
+    value = { ...value, session: { debugSession: scopedIdentity, ...value.session } }
   return new Response(JSON.stringify(value), {
     status,
     headers: { "Content-Type": "application/json" },

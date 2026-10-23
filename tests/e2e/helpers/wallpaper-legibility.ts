@@ -209,8 +209,8 @@ export async function measureTextBackdrops(
       nextjs-portal { display: none !important; }`,
   })
   // Let transitions on colour settle before the pixels are read.
-  await page.waitForTimeout(400)
-  const png = await page.screenshot()
+  await settleVisuals(page)
+  const png = await page.screenshot({ animations: "disabled" })
   const viewportWidth = page.viewportSize()?.width ?? 0
   // Decoded by the browser's own PNG decoder and percentiled in the page: a
   // canvas hands back the raw sRGB pixels with no image library to depend on,
@@ -477,4 +477,27 @@ export async function waitForCap(page: Page): Promise<number> {
     })
     .not.toBe("")
   return Number(await page.evaluate(() => document.body.style.getPropertyValue("--wp-max-weight")))
+}
+
+/** Wait on rendered route state and finite browser animations before sampling pixels. */
+export async function settleVisuals(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await document.fonts.ready
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => {
+          const end = animation.effect?.getComputedTiming().endTime
+          return (
+            typeof end === "number" && Number.isFinite(end) && animation.playState === "running"
+          )
+        })
+        .map((animation) => animation.finished.catch(() => undefined))
+    )
+  })
+}
+
+export async function waitForWallpaperRoute(page: Page): Promise<void> {
+  await page.locator("[data-bg-target]:not(#app)").first().waitFor({ state: "visible" })
+  await settleVisuals(page)
 }

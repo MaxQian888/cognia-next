@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import path from "node:path"
+import fs from "node:fs"
 
 import {
   cliEsbuildOptions,
@@ -9,6 +10,15 @@ import {
 } from "./esbuild-shared.mjs"
 
 const root = path.resolve(import.meta.dirname, "../..")
+
+test("shipped CLI declares the legacy and current OpenCode SDK runtime imports", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, "cli/package.json"), "utf8"))
+  const metafile = { outputs: { "cli.mjs": { imports: [
+    { path: "@opencode-ai/sdk/client", external: true },
+    { path: "@opencode/client", external: true },
+  ] } } }
+  assert.deepEqual(undeclaredCliRuntimeDependencies(metafile, manifest), [])
+})
 
 test("CLI runtime checks require an own declaration for prototype-named packages", () => {
   const metafile = {

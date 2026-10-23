@@ -392,6 +392,7 @@ export class TauriLocator {
   }
 
   async _atomic(operation, name, args = {}, options = {}, requirements = {}) {
+    if (this.page._clientSession) options = this.page._clientSession._scopeOptions(options)
     if (options.signal?.aborted) throw options.signal.reason || new Error("operation aborted")
     await this.page._ensureLocatorQuery(this.query, this.predicates, options)
     if (operation === "action")
@@ -401,6 +402,8 @@ export class TauriLocator {
         "cancellable locator actions",
         options
       )
+    if (this.page._clientSession && ((name === "type" && args.delay) || name === "keyboard"))
+      await this.page._requireCapability("atomicInput", 1, "atomic delayed input", options)
     if (name === "dragTo") await this.page._ensureLocatorQuery(args.targetQuery, [], options)
     if (operation === "action" && name === "dispatchEvent")
       await this.page._requireCapability(
@@ -619,13 +622,23 @@ export class TauriLocator {
   }
 
   async pressSequentially(text, options = {}) {
+    if (this.page._clientSession && !options._pinnedFlow)
+      return this.page.withPinnedDocument(
+        () => this.pressSequentially(text, { ...options, _pinnedFlow: true }),
+        options
+      )
     options = budget(options, this.page.defaultTimeout)
-    if (!options.delay)
-      return this._act("type", { value: String(text) }, options, {
-        visible: true,
-        enabled: true,
-        editable: true,
-      })
+    if (!options.delay || this.page._clientSession)
+      return this._act(
+        "type",
+        { value: String(text), ...(options.delay ? { delay: options.delay } : {}) },
+        options,
+        {
+          visible: true,
+          enabled: true,
+          editable: true,
+        }
+      )
     for (const character of String(text)) {
       await this._act("type", { value: character }, options, {
         visible: true,
@@ -836,16 +849,40 @@ class TauriKeyboard {
   constructor(page) {
     this.page = page
   }
-  _call(operation, args = {}) {
+  _call(operation, args = {}, options = {}) {
+    if (this.page._clientSession) {
+      // Composite inputs reuse locator cancellation and one native reservation.
+      if (operation === "chord" || args.delay)
+        return this.page.locator("html")._act("keyboard", { operation, args }, options)
+      return this.page._typedHelper("keyboard", [operation, args], options)
+    }
     return this.page._helperCall("keyboard", operation, args)
   }
   async press(key, options = {}) {
+    if (this.page._clientSession && !options._pinnedFlow)
+      return this.page.withPinnedDocument(
+        () => this.press(key, { ...options, _pinnedFlow: true }),
+        options
+      )
+    options = budget(options, this.page.defaultTimeout)
+    if (this.page._clientSession) {
+      await this.page._requireCapability("atomicInput", 1, "atomic keyboard input", options)
+      return this._call(
+        "chord",
+        { key: String(key), ...(options.delay ? { delay: options.delay } : {}) },
+        options
+      )
+    }
     const parts = String(key).split("+")
     const main = parts.pop()
-    for (const modifier of parts) await this.down(modifier)
-    await this._call("press", { key: main })
-    for (const modifier of parts.reverse()) await this.up(modifier)
-    if (options.delay) await sleep(options.delay)
+    for (const modifier of parts) await this._call("down", { key: modifier }, options)
+    await this._call("press", { key: main }, options)
+    for (const modifier of parts.reverse()) await this._call("up", { key: modifier }, options)
+    if (options.delay)
+      await sleep(
+        Math.min(options.delay, remaining(options, this.page.defaultTimeout)),
+        options.signal
+      )
   }
   down(key) {
     return this._call("down", { key })
@@ -854,10 +891,28 @@ class TauriKeyboard {
     return this._call("up", { key })
   }
   async type(text, options = {}) {
-    if (!options.delay) return this._call("type", { text })
+    if (this.page._clientSession && !options._pinnedFlow)
+      return this.page.withPinnedDocument(
+        () => this.type(text, { ...options, _pinnedFlow: true }),
+        options
+      )
+    options = budget(options, this.page.defaultTimeout)
+    if (this.page._clientSession) {
+      if (options.delay)
+        await this.page._requireCapability("atomicInput", 1, "atomic delayed input", options)
+      return this._call(
+        "type",
+        { text, ...(options.delay ? { delay: options.delay } : {}) },
+        options
+      )
+    }
+    if (!options.delay) return this._call("type", { text }, options)
     for (const character of String(text)) {
-      await this._call("type", { text: character })
-      await sleep(options.delay)
+      await this._call("type", { text: character }, options)
+      await sleep(
+        Math.min(options.delay, remaining(options, this.page.defaultTimeout)),
+        options.signal
+      )
     }
   }
   insertText(text) {
@@ -898,18 +953,22 @@ class TauriMouse {
 
 export class TauriPage {
   constructor({
-    endpoint = loadEndpoint(),
+    endpoint,
     window = "main",
     fetchImpl = fetch,
     defaultTimeout = 10_000,
     endpointLoader,
+    clientSession,
   } = {}) {
+    endpoint = clientSession?.endpoint ?? endpoint ?? loadEndpoint()
     this.endpoint = endpoint
+    this._clientSession = clientSession || null
     this.windowLabel = window
     this.fetchImpl = fetchImpl
     this.defaultTimeout = defaultTimeout
-    this._endpointLoader =
-      endpointLoader || (endpoint.file ? () => loadEndpoint(endpoint.file) : null)
+    this._endpointLoader = clientSession
+      ? null
+      : endpointLoader || (endpoint.file ? () => loadEndpoint(endpoint.file) : null)
     this._debugSession =
       endpoint.debugSession?.sessionId && endpoint.debugSession?.workspace
         ? { sessionId: endpoint.debugSession.sessionId, workspace: endpoint.debugSession.workspace }
@@ -927,8 +986,20 @@ export class TauriPage {
   }
 
   _transport(route, options = {}) {
+    const lease = this._clientSession?.lease
     return request(route, {
       ...options,
+      headers: lease
+        ? {
+            "X-Cognia-Writer-Token": lease.token,
+            "X-Cognia-Writer-Fence": String(lease.fence),
+            "X-Cognia-Operation-Id": options.operationId || randomUUID(),
+            ...(this._pinnedDocument ? { "X-Cognia-Document-Id": this._pinnedDocument } : {}),
+            "X-Cognia-Timeout-Ms": String(
+              Math.max(1, Math.ceil(remaining(options, this.defaultTimeout)))
+            ),
+          }
+        : undefined,
       endpoint: options.endpoint || this.endpoint,
       fetchImpl: this.fetchImpl,
     })
@@ -1041,6 +1112,20 @@ export class TauriPage {
   }
 
   async _request(route, options = {}) {
+    if (this._clientSession) {
+      options = this._clientSession._scopeOptions(options)
+      options.signal?.throwIfAborted()
+      await this._clientSession.verifyIdentity(options)
+    }
+    if (this._clientSession && route === "/api/dev/agent/health")
+      route += `?window=${encodeURIComponent(this.windowLabel)}`
+    const mutation =
+      ["/api/dev/agent/act", "/api/dev/agent/navigate", "/api/dev/agent/reload"].includes(route) ||
+      (route.endsWith("/locator") && options.body?.operation === "action") ||
+      (route.endsWith("/helper") &&
+        ["keyboard", "mouse", "historyBack", "historyForward"].includes(options.body?.method))
+    if (mutation && this._clientSession && !this._clientSession.lease)
+      return this.withWriter(() => this._request(route, options), options)
     if (this._endpointLoader && this._debugSession) options = budget(options, this.defaultTimeout)
     if (options.signal?.aborted) throw options.signal.reason || new Error("operation aborted")
     await this._refreshConnection(options)
@@ -1136,8 +1221,51 @@ export class TauriPage {
     return this._request(route, { ...options, method: "POST", body })
   }
   _helperCall(method, ...args) {
+    if (this._clientSession) return this._typedHelper(method, args)
     const serializedArgs = args.map((arg) => JSON.stringify(arg)).join(",")
     return this.evaluate(`window.__cogniaAgentDebug.${method}(${serializedArgs})`)
+  }
+  async _typedHelper(method, args = [], options = {}) {
+    return (
+      await this._post("/api/dev/agent/helper", { window: this.windowLabel, method, args }, options)
+    ).value
+  }
+  withWriter(callback, options = {}) {
+    if (!this._clientSession)
+      throw new TauriDebugUnsupportedError(
+        "app writer lease",
+        "attach a shared client session first"
+      )
+    return this._clientSession.withWriter(() => callback(this), options)
+  }
+  withPinnedDocument(callback, options = {}) {
+    return this.withWriter(async () => {
+      const previous = this._pinnedDocument
+      this._pinnedDocument = (await this._pageState(options)).documentId
+      try {
+        return await callback()
+      } finally {
+        this._pinnedDocument = previous
+      }
+    }, options)
+  }
+  async act(reference, action, args = {}, options = {}) {
+    return (
+      await this._post(
+        "/api/dev/agent/act",
+        { window: this.windowLabel, reference, action, args },
+        options
+      )
+    ).act
+  }
+  async inspect(reference, operation, args = {}, options = {}) {
+    return (
+      await this._post(
+        "/api/dev/agent/inspect",
+        { window: this.windowLabel, reference, operation, args },
+        options
+      )
+    ).value
   }
 
   async _ensureLocatorQuery(query, filters = [], options = {}) {
@@ -1312,6 +1440,11 @@ export class TauriPage {
   }
 
   async evaluate(pageFunction, arg, options = {}) {
+    if (this._clientSession)
+      throw new TauriDebugUnsupportedError(
+        "arbitrary evaluate in shared mode",
+        "use typed reads and locators"
+      )
     const payload = await this._post(
       "/api/dev/agent/evaluate",
       {
@@ -1327,20 +1460,26 @@ export class TauriPage {
   }
 
   url() {
+    if (this._clientSession) return this._typedHelper("url")
     return this.evaluate(() => location.href)
   }
   title() {
+    if (this._clientSession) return this._typedHelper("title")
     return this.evaluate(() => document.title)
   }
   content() {
+    if (this._clientSession) return this._typedHelper("content")
     return this.evaluate(() => document.documentElement.outerHTML)
   }
 
   _pageState(options) {
+    if (this._clientSession) return this._typedHelper("health", [], options)
     return this.evaluate(() => window.__cogniaAgentDebug.health(), undefined, options)
   }
 
   async reload(options = {}) {
+    if (this._clientSession && !options._writerFlow)
+      return this.withWriter(() => this.reload({ ...options, _writerFlow: true }), options)
     options = budget(options, this.defaultTimeout)
     const before = await this._pageState(options)
     await this._post("/api/dev/agent/reload", { window: this.windowLabel }, options)
@@ -1351,6 +1490,8 @@ export class TauriPage {
     })
   }
   async goto(url, options = {}) {
+    if (this._clientSession && !options._writerFlow)
+      return this.withWriter(() => this.goto(url, { ...options, _writerFlow: true }), options)
     options = budget(options, this.defaultTimeout)
     const before = await this._pageState(options)
     await this._post("/api/dev/agent/navigate", { window: this.windowLabel, url }, options)
@@ -1360,9 +1501,24 @@ export class TauriPage {
       previousUrl: before.url,
       requireNavigation: true,
     })
-    return { url: await this.evaluate(() => location.href, undefined, options) }
+    return {
+      url: this._clientSession
+        ? await this._typedHelper("url", [], options)
+        : await this.evaluate(() => location.href, undefined, options),
+    }
   }
   async goBack(options = {}) {
+    if (this._clientSession)
+      return this.withWriter(async () => {
+        const before = await this._pageState(options)
+        await this._typedHelper("historyBack", [], options)
+        await this.waitForLoadState(options.waitUntil || "load", {
+          ...options,
+          previousDocumentId: before.documentId,
+          previousUrl: before.url,
+          requireNavigation: true,
+        })
+      }, options)
     options = budget(options, this.defaultTimeout)
     const before = await this._pageState(options)
     await this.evaluate(
@@ -1381,6 +1537,17 @@ export class TauriPage {
     })
   }
   async goForward(options = {}) {
+    if (this._clientSession)
+      return this.withWriter(async () => {
+        const before = await this._pageState(options)
+        await this._typedHelper("historyForward", [], options)
+        await this.waitForLoadState(options.waitUntil || "load", {
+          ...options,
+          previousDocumentId: before.documentId,
+          previousUrl: before.url,
+          requireNavigation: true,
+        })
+      }, options)
     options = budget(options, this.defaultTimeout)
     const before = await this._pageState(options)
     await this.evaluate(
@@ -1410,6 +1577,18 @@ export class TauriPage {
     if (typeof pattern !== "string" && !(pattern instanceof RegExp))
       throw new TypeError("waitForURL expects an exact URL string or RegExp")
     options = budget(options, this.defaultTimeout)
+    if (this._clientSession) {
+      do {
+        const url = await this._typedHelper("url", [], options)
+        if (typeof pattern === "string" ? url === pattern : cleanRegex(pattern).test(url)) {
+          await this.waitForLoadState(options.waitUntil || "load", options)
+          return
+        }
+        if (remaining(options, this.defaultTimeout) <= 0) break
+        await sleep(Math.min(100, remaining(options, this.defaultTimeout)), options.signal)
+      } while (true)
+      throw new TauriDebugTimeoutError(`page.waitForURL timed out: ${pattern}`)
+    }
     // Strings are exact URLs. Use a RegExp for partial matching.
     await this.waitForFunction(
       (matcher) => {
@@ -1669,6 +1848,7 @@ export class TauriPage {
       fetchImpl: this.fetchImpl,
       defaultTimeout: this.defaultTimeout,
       endpointLoader: this._endpointLoader,
+      clientSession: this._clientSession,
     })
   }
   get targetWindow() {
@@ -1689,6 +1869,7 @@ export class TauriPage {
     throw new Error(`waitForWindow: no matching window within ${timeout}ms`)
   }
   async close() {
+    if (this._clientSession) return this._clientSession.detach()
     return this._post("/api/dev/agent/shutdown", {})
   }
 }
@@ -1850,4 +2031,262 @@ export const tauriExpect = (subject) => assertionApi(subject)
 export const expect = tauriExpect
 export function connectTauriPage(options) {
   return new TauriPage(options)
+}
+
+/** Owns only a scoped attachment; never retains the launcher's credential. */
+export class TauriClientSession {
+  constructor({
+    endpoint,
+    clientSessionId,
+    windows,
+    canWrite,
+    lease = null,
+    fetchImpl = fetch,
+    defaultTimeout = 10_000,
+  }) {
+    const parsed = parseEndpoint(JSON.stringify(endpoint))
+    const identity = parsed?.debugSession
+    if (
+      !parsed ||
+      typeof identity?.sessionId !== "string" ||
+      !identity.sessionId ||
+      typeof identity.workspace !== "string" ||
+      !identity.workspace ||
+      typeof identity.appInstanceId !== "string" ||
+      !identity.appInstanceId ||
+      !Number.isSafeInteger(identity.pid) ||
+      identity.pid <= 1 ||
+      typeof clientSessionId !== "string" ||
+      !clientSessionId ||
+      clientSessionId.length > 128 ||
+      !Array.isArray(windows) ||
+      !windows.length ||
+      windows.length > 16 ||
+      windows.some((window) => typeof window !== "string" || !window || window.length > 128) ||
+      typeof canWrite !== "boolean" ||
+      (lease !== null &&
+        (typeof lease?.token !== "string" ||
+          !lease.token ||
+          !Number.isSafeInteger(lease.fence) ||
+          lease.fence < 1))
+    ) {
+      throw new TauriDebugSessionError(
+        "invalid_client_descriptor",
+        "a scoped descriptor requires a loopback endpoint, complete run identity, session ID, window scope and valid lease proof"
+      )
+    }
+    this.endpoint = {
+      baseUrl: parsed.baseUrl,
+      devToken: parsed.devToken,
+      debugSession: { ...identity },
+    }
+    this.clientSessionId = clientSessionId
+    this.windows = [...windows]
+    this.canWrite = canWrite
+    this.fetchImpl = fetchImpl
+    this.defaultTimeout = defaultTimeout
+    this.lease = lease && { ...lease }
+    this.closed = false
+    this._identityCheck = null
+    this._workflowScopes = new Set()
+  }
+  toJSON() {
+    return {
+      endpoint: this.endpoint,
+      clientSessionId: this.clientSessionId,
+      windows: this.windows,
+      canWrite: this.canWrite,
+      lease: this.lease,
+    }
+  }
+  async verifyIdentity(options = {}) {
+    if (this.closed) throw new TauriDebugSessionError("session_closed", "session is closed")
+    if (!this._identityCheck) {
+      this._identityCheck = request(
+        `/api/dev/agent/health?nativeOnly=true&window=${encodeURIComponent(this.windows[0])}`,
+        {
+          endpoint: this.endpoint,
+          fetchImpl: this.fetchImpl,
+          timeout: options.timeout ?? this.defaultTimeout,
+          signal: options.signal,
+        }
+      )
+        .then((health) => {
+          try {
+            reconcileDebugSession(this.endpoint.debugSession, health, this.endpoint)
+          } catch (error) {
+            throw new TauriDebugSessionError("debug_session_mismatch", error.message, error)
+          }
+          return health
+        })
+        .catch((error) => {
+          this._identityCheck = null
+          throw error
+        })
+    }
+    return this._identityCheck
+  }
+  page(window = this.windows[0]) {
+    if (this.closed || !this.windows.includes(window))
+      throw new TauriDebugSessionError(
+        "window_scope_denied",
+        "session is closed or window is outside its scope"
+      )
+    return new TauriPage({
+      endpoint: this.endpoint,
+      clientSession: this,
+      window,
+      fetchImpl: this.fetchImpl,
+      defaultTimeout: this.defaultTimeout,
+    })
+  }
+  async _send(route, options = {}) {
+    await this.verifyIdentity(options)
+    return request(`/api/dev/agent/${route}`, {
+      ...options,
+      endpoint: this.endpoint,
+      fetchImpl: this.fetchImpl,
+    })
+  }
+  async status() {
+    const lease = this.lease
+    const result = await this._send("session")
+    if (Object.hasOwn(result, "lease") && this.lease === lease) this.lease = result.lease
+    return result
+  }
+  async acquireWriter(options = {}) {
+    if (this.closed) throw new TauriDebugSessionError("session_closed", "session is closed")
+    if (this.lease)
+      throw new TauriDebugSessionError("writer_busy", "this session already holds a writer lease")
+    this.lease = (
+      await this._send("lease", { ...options, method: "POST", body: { operation: "acquire" } })
+    ).lease
+    return this.lease
+  }
+  async releaseWriter(options = {}) {
+    if (!this.lease) await this.status()
+    const lease = this.lease
+    if (!lease) return
+    try {
+      await this._send("lease", {
+        ...options,
+        method: "POST",
+        body: { operation: "release", token: lease.token, fence: lease.fence },
+      })
+      if (this.lease === lease) this.lease = null
+    } catch (error) {
+      if (error.code === "lease_lost" && this.lease === lease) this.lease = null
+      throw error
+    }
+  }
+  async renewWriter(options = {}) {
+    const lease = this.lease
+    if (!lease)
+      throw new TauriDebugSessionError("writer_required", "acquire a writer lease before renewing")
+    const result = await this._send("lease", {
+      ...options,
+      method: "POST",
+      body: { operation: "renew", token: lease.token, fence: lease.fence },
+    })
+    if (this.lease === lease) this.lease = result.lease
+    return result.lease
+  }
+  _scopeOptions(options = {}) {
+    const scopes = [...this._workflowScopes, options]
+    const signals = [...new Set(scopes.map((scope) => scope.signal).filter(Boolean))]
+    const deadline = Math.min(...scopes.map((scope) => scope._deadline ?? Infinity))
+    return {
+      ...options,
+      ...(signals.length
+        ? { signal: signals.length === 1 ? signals[0] : AbortSignal.any(signals) }
+        : {}),
+      ...(Number.isFinite(deadline) ? { _deadline: deadline } : {}),
+    }
+  }
+  async withWriter(callback, options = {}) {
+    const scope = budget(options, this.defaultTimeout)
+    options = this._scopeOptions(scope)
+    options.signal?.throwIfAborted()
+    const ownsLease = !this.lease
+    if (ownsLease)
+      await this.acquireWriter({
+        timeout: remaining(options, this.defaultTimeout),
+        signal: options.signal,
+      })
+    this._workflowScopes.add(scope)
+    let renewalError
+    let renewal
+    const timer = ownsLease
+      ? setInterval(() => {
+          if (
+            renewal ||
+            !this.lease ||
+            options.signal?.aborted ||
+            remaining(options, this.defaultTimeout) <= 0
+          )
+            return
+          renewal = this.renewWriter({ timeout: 3000 })
+            .catch((error) => {
+              renewalError = error
+            })
+            .finally(() => {
+              renewal = null
+            })
+        }, 5000)
+      : null
+    let failed = false
+    try {
+      options.signal?.throwIfAborted()
+      const value = await callback(this)
+      options.signal?.throwIfAborted()
+      if (renewalError) throw renewalError
+      return value
+    } catch (error) {
+      failed = true
+      throw error
+    } finally {
+      clearInterval(timer)
+      await renewal
+      this._workflowScopes.delete(scope)
+      // Cleanup has its own budget and must survive the workflow's abort.
+      if (ownsLease)
+        try {
+          await this.releaseWriter({ timeout: 3000 })
+        } catch (error) {
+          if (!failed && error.code !== "lease_lost") throw error
+        }
+    }
+  }
+  async detach() {
+    await this.releaseWriter()
+    await this._send("session", { method: "DELETE" })
+    this.closed = true
+  }
+}
+
+export async function connectTauriSession({
+  endpoint = loadEndpoint(),
+  windows = ["main"],
+  canWrite = false,
+  fetchImpl = fetch,
+  defaultTimeout = 10_000,
+  idleTimeoutMs,
+} = {}) {
+  const result = await request("/api/dev/agent/sessions", {
+    endpoint,
+    fetchImpl,
+    method: "POST",
+    body: { windows, canWrite, ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }) },
+  })
+  const session = result.session
+  return new TauriClientSession({
+    ...session,
+    fetchImpl,
+    defaultTimeout,
+    endpoint: {
+      baseUrl: endpoint.baseUrl,
+      devToken: session.token,
+      debugSession: session.debugSession,
+    },
+  })
 }

@@ -1,11 +1,12 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs"
+import { cpSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import { computeSidecarClosure, resourceMatcher } from "../sidecar-bundle-resources.mjs"
 
 import {
   PI_EXTENSION_FILE,
@@ -35,6 +36,47 @@ test("desktop resource bundle includes the raw extension's declared runtime depe
   const pkg = JSON.parse(readFileSync(new URL("../../../sidecar/package.json", import.meta.url), "utf8"))
   assert.ok(pkg.dependencies["@modelcontextprotocol/sdk"])
   assert.ok(pkg.dependencies["@cognia/redact"])
+})
+
+test("desktop Pi extension loads and announces readiness from staged resources", (t) => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url))
+  const cache = join(root, ".cache", "pi-desktop-test")
+  mkdirSync(cache, { recursive: true })
+  const out = mkdtempSync(join(cache, "resources-"))
+  t.after(() => rmSync(out, { recursive: true, force: true }))
+  const config = JSON.parse(readFileSync(join(root, "src-tauri/tauri.conf.json"), "utf8"))
+  const covered = config.bundle.resources.map(resourceMatcher)
+  const entry = "sidecar/pi-extension/cognia-pi-extension.ts"
+  for (const file of computeSidecarClosure(root, [entry])) {
+    if (!covered.some((matches) => matches(file))) continue
+    const dest = join(out, file)
+    mkdirSync(join(dest, ".."), { recursive: true })
+    cpSync(join(root, file), dest)
+  }
+  // Reuse the declared dependency installation; first-party files must come
+  // exclusively from bundle.resources, with no checkout fallback.
+  cpSync(join(root, "sidecar/package.json"), join(out, "sidecar/package.json"))
+  symlinkSync(join(root, "sidecar/node_modules"), join(out, "sidecar/node_modules"), "dir")
+  const run = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import assert from "node:assert/strict"
+    const { default: extension } = await import(${JSON.stringify(join(out, entry))})
+    const handlers = new Map()
+    extension({ on: (name, handler) => handlers.set(name, handler), registerTool() {} })
+    let status
+    await handlers.get("session_start")({}, { ui: { setStatus: (_key, value) => { status = value } } })
+    assert.match(status, /^cognia-ready /)
+    await handlers.get("session_shutdown")()
+  `], {
+    cwd: out,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      COGNIA_TOOLHOST_PI_SUBAGENT_MODELS: undefined,
+      COGNIA_TOOLHOST_PI_MCP_SERVERS: undefined,
+      COGNIA_TOOLHOST_PI_SYSTEM_PROMPT: undefined,
+    },
+  })
+  assert.equal(run.status, 0, run.stderr)
 })
 
 /** A throwaway repo root with `sidecar/pi-extension/` populated. */

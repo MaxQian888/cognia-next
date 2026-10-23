@@ -16,32 +16,32 @@ import { Command, CommanderError } from "commander"
 import { execaSync } from "execa"
 import { z } from "zod"
 
-export const PLUGIN_NODE_VERSION = "26.3.1"
+export const PLUGIN_NODE_VERSION = "26.12.1"
 
 export const PLUGIN_NODE_ARCHIVES = Object.freeze({
   "darwin-arm64": {
     file: `node-v${PLUGIN_NODE_VERSION}-darwin-arm64.tar.xz`,
-    sha256: "49aca22a8c2992c16688baa512a7b00c41a4608e9675fcaa81534767bf1116ce",
+    sha256: "18830bf448fe187c650dc28c98aa8c968ed1d40b6dd032c081e70a384a1bf660",
   },
   "darwin-x64": {
     file: `node-v${PLUGIN_NODE_VERSION}-darwin-x64.tar.xz`,
-    sha256: "dac58e340c721332d331a44c9ee2e126b26632c42d3028eb2ceb5c3f218798fa",
+    sha256: "69316aaafb4dfcb25ac7b9a460f5c60928a37580284fde410144d0e6c8672d0f",
   },
   "linux-arm64": {
     file: `node-v${PLUGIN_NODE_VERSION}-linux-arm64.tar.xz`,
-    sha256: "c021380e64d1314d1218ab1f31e0f5b0f28f1f54ac779ef72a16c2bda0ca5c30",
+    sha256: "42aa04922591ee5d4dbc7740d452621acf28508239daa512f5ee8c47ee224fdb",
   },
   "linux-x64": {
     file: `node-v${PLUGIN_NODE_VERSION}-linux-x64.tar.xz`,
-    sha256: "55647180e4ae58ffeaa3294e89aa4abda7c371dfbd64b44cbdb022980177aae0",
+    sha256: "6170b2d474e1c626f43cff3adc118df9fe3b573258a4fc3d850c8dbc6b079bbd",
   },
   "win32-arm64": {
     file: `node-v${PLUGIN_NODE_VERSION}-win-arm64.zip`,
-    sha256: "021eb7de1d5257b24765f292dfcb469ff1528c29d88f48c875befb28114fb0fb",
+    sha256: "34567581ee63967b37afb6b7a0cc63a2d550a43d5d838adb75982d7e356f2e2c",
   },
   "win32-x64": {
     file: `node-v${PLUGIN_NODE_VERSION}-win-x64.zip`,
-    sha256: "45001b289ebffe7b22260898f3750059183d8246042b88e8ffa4337e65e6763e",
+    sha256: "b3efd5c70cba3308ed46e7e699a9b8aac075bbc6b027fcb39c84c31acc25e2b4",
   },
 })
 
