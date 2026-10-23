@@ -1258,7 +1258,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Check standalone extension
         working-directory: .cache/browser-companion
-        run: pnpm format:check && pnpm check
+        run: pnpm format:check && pnpm run check
       - name: Install Playwright browsers
         working-directory: .cache/browser-companion
         run: pnpm exec playwright install --with-deps chromium

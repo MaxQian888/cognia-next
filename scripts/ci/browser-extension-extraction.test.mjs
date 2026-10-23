@@ -1,5 +1,10 @@
 import assert from "node:assert/strict"
-import { readFile } from "node:fs/promises"
+import { spawnSync } from "node:child_process"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { fileURLToPath } from "node:url"
+import { parse } from "yaml"
 import test from "node:test"
 
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), "utf8")
@@ -38,4 +43,44 @@ test("Host changes validate an immutable standalone extension revision", async (
   const guide = await read("docs/development/browser-extension-extraction.md")
   assert.match(guide, /cognia-labs\/cognia-browser-extension/)
   assert.match(guide, /agent-safe-v1/)
+})
+
+test("external consumer checks remain package scripts rather than unlisted Host binaries", async () => {
+  const workflow = parse(await read(".github/workflows/test.yml"))
+  const step = workflow.jobs["e2e-browser-extension"].steps.find(
+    (step) => step.name === "Check standalone extension"
+  )
+  const root = await mkdtemp(join(tmpdir(), "cognia-consumer-knip-"))
+  try {
+    await mkdir(join(root, ".github/workflows"), { recursive: true })
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({
+        name: "host-fixture",
+        private: true,
+        scripts: { "format:check": "node --version" },
+      })
+    )
+    await writeFile(join(root, "index.ts"), "export {}")
+    await writeFile(
+      join(root, "knip.json"),
+      JSON.stringify({ entry: ["index.ts"], project: ["index.ts"] })
+    )
+    await writeFile(
+      join(root, ".github/workflows/test.yml"),
+      JSON.stringify({
+        on: "workflow_dispatch",
+        jobs: { consumer: { "runs-on": "ubuntu-latest", steps: [step] } },
+      })
+    )
+    const runner = fileURLToPath(new URL("../../node_modules/knip/bin/knip.js", import.meta.url))
+    const result = spawnSync(
+      process.execPath,
+      [runner, "--include", "binaries", "--reporter", "json", "--no-config-hints"],
+      { cwd: root, encoding: "utf8", env: { ...process.env, CI: "true" } }
+    )
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
