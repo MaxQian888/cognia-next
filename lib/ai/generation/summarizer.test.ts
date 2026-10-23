@@ -1,9 +1,15 @@
-import { structuralSummary, renderConversation } from "./summarizer"
+import { structuralSummary, renderConversation, CONVERSATION_SUMMARY_PROMPT } from "./summarizer"
 import type { UIMessage } from "ai"
 
 function msg(role: UIMessage["role"], text: string): UIMessage {
   return { id: `${role}-${text}`, role, parts: [{ type: "text", text }] } as UIMessage
 }
+
+it("preserves completed research and pending actions in the default summary contract", () => {
+  expect(CONVERSATION_SUMMARY_PROMPT.defaultBody).toContain("inspected file:line ranges")
+  expect(CONVERSATION_SUMMARY_PROMPT.defaultBody).toContain("verified findings")
+  expect(CONVERSATION_SUMMARY_PROMPT.defaultBody).toContain("next action")
+})
 
 describe("renderConversation", () => {
   it("renders role-labelled lines and skips empty turns", () => {

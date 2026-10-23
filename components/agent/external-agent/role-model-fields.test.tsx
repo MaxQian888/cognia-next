@@ -1,9 +1,14 @@
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import en from "@/i18n/messages/en.json"
 import type { AgentModelRoleOverrides, ExternalAgentConfig } from "@/types/agent/external-agent"
 import { getPresetConfig } from "@/lib/ai/agent/external/config/presets"
 import { RoleModelFields } from "./role-model-fields"
+import { resolvePiSubagents } from "@/lib/ai/agent/external/config/pi-subagents"
+jest.mock("@/lib/ai/agent/external/config/pi-subagents", () => ({
+  ...jest.requireActual("@/lib/ai/agent/external/config/pi-subagents"),
+  resolvePiSubagents: jest.fn(async (config) => config),
+}))
 
 const settings = { providerSettings: {}, customProviders: [] }
 jest.mock("@/stores/settings", () => ({
@@ -131,6 +136,50 @@ function renderFields(props: Partial<Parameters<typeof RoleModelFields>[0]> = {}
 }
 
 describe("RoleModelFields", () => {
+  it("shows Pi child controls only after a supported package is detected", async () => {
+    const input = config("pi-rpc", "pi-rpc")
+    let finish!: (value: typeof input) => void
+    jest.mocked(resolvePiSubagents).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    renderFields({ config: input })
+    expect(screen.queryByRole("heading", { name: en.externalAgent.roleModels.title })).toBeNull()
+    finish({
+      ...input,
+      metadata: {
+        ...input.metadata,
+        cogniaPiSubagents: { family: "nico", version: "0.80.0", agents: {} },
+      },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: en.externalAgent.roleModels.title })).toBeVisible()
+    )
+    expect(screen.getByText(en.externalAgent.roleModels.slots.subagentDefault)).toBeVisible()
+  })
+  it("keeps Pi controls hidden when no package is detected", async () => {
+    renderFields({ config: config("pi-rpc", "pi-rpc") })
+    await waitFor(() => expect(resolvePiSubagents).toHaveBeenCalled())
+    expect(screen.queryByRole("heading", { name: en.externalAgent.roleModels.title })).toBeNull()
+  })
+  it("retains v2 candidates when changing a slot and reuses the provider picker", () => {
+    const value: AgentModelRoleOverrides = {
+      version: 2,
+      slots: { "subagent.default": { kind: "cognia", binding: primary } },
+      allowedSpawnModels: [primary],
+    }
+    const { onChange } = renderFields({ value })
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "__unset__" } })
+    expect(onChange).toHaveBeenLastCalledWith({ ...value, slots: {} })
+    const picks = screen.getAllByRole("button", { name: "pick gateway/small" })
+    fireEvent.click(picks[picks.length - 1])
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...value,
+      allowedSpawnModels: [primary, { ...primary, modelId: "small" }],
+    })
+  })
   it("renders nothing for a runtime without slots and no stored overrides", () => {
     const { container } = renderFields({ config: config("kimi") })
     expect(container).toBeEmptyDOMElement()

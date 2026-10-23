@@ -12,6 +12,8 @@ import manageMessages from "@/i18n/messages/en/externalAgentManage.json"
 import mobileMessages from "@/i18n/messages/en/mobile/externalAgents.json"
 
 import { HostAgentEditor, type HostAgentEditorProps } from "./host-agent-editor"
+import { __setRemoteHostConfigDepsForTests } from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
+import type { HostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 
 // Resolve complete namespaces from split sources; aggregates are rebuilt by the orchestrator.
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
@@ -31,8 +33,14 @@ jest.mock("@/components/agent/external-agent/cognia-model-picker", () => ({
   ),
 }))
 jest.mock("@/components/agent/external-agent/role-model-fields", () => ({
-  RoleModelFields: ({ blocker }: { blocker?: string }) => (
-    <div role="status" aria-label="Role models">
+  RoleModelFields: ({
+    blocker,
+    spawnModelsSupported,
+  }: {
+    blocker?: string
+    spawnModelsSupported?: boolean
+  }) => (
+    <div role="status" aria-label="Role models" data-spawn-supported={String(spawnModelsSupported)}>
       {blocker}
     </div>
   ),
@@ -812,6 +820,62 @@ describe("HostAgentEditor: siblings and actions", () => {
     expect(onDuplicated).not.toHaveBeenCalled()
   })
 })
+
+it.each([true, false])(
+  "keeps native model controls gated and preserves other Codex options (%s)",
+  async (supported) => {
+    const restore = __setRemoteHostConfigDepsForTests({
+      hasLocalAuthority: () => false,
+      isRemoteHostActive: () => true,
+      activeHostFeatureManifest: () =>
+        ({
+          schemaVersion: 1,
+          features: {
+            "external-agent.host-configs": {
+              version: 1,
+              operations: supported
+                ? ["external_agent_native_subagent_control", "external_agent_config_model_roles_v2"]
+                : [],
+            },
+          },
+        }) as HostFeatureManifest,
+    })
+    try {
+      setHost({
+        configs: [
+          record({
+            config: {
+              protocol: "codex-app-server",
+              metadata: { preset: "codex-app-server" },
+              codexOptions: { sandboxMode: "readOnly", stepModelSwitching: false },
+            },
+          }),
+        ],
+      })
+      render(editor())
+      open(messages.cogniaModel.model)
+      const toggle = within(drawer()).getByRole("switch", {
+        name: "Experimental current-turn model switching",
+      })
+      expect(toggle).toHaveProperty("disabled", !supported)
+      expect(within(drawer()).getByRole("status", { name: "Role models" })).toHaveAttribute(
+        "data-spawn-supported",
+        String(supported)
+      )
+      if (supported) {
+        await userEvent.setup().click(toggle)
+        save()
+        await waitFor(() => expect(hostState.current.update).toHaveBeenCalled())
+        expect((hostState.current.update as jest.Mock).mock.calls[0][1].codexOptions).toEqual({
+          sandboxMode: "readOnly",
+          stepModelSwitching: true,
+        })
+      }
+    } finally {
+      restore()
+    }
+  }
+)
 
 it.each([true, false])(
   "gates Host editor role models on capability support (%s)",

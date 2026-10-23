@@ -1,5 +1,11 @@
 /** @jest-environment jsdom */
 
+import * as piSubagents from "./pi-subagents"
+jest.mock("./pi-subagents", () => {
+  const actual = jest.requireActual("./pi-subagents")
+  return { ...actual, resolvePiSubagents: jest.fn(actual.resolvePiSubagents) }
+})
+
 import { hostConfigOriginAgentId } from "@/lib/ai/agent/runtime-catalog/pairing"
 import "fake-indexeddb/auto"
 
@@ -958,6 +964,83 @@ describe("getHostCogniaModelCatalog", () => {
 })
 
 describe("Host model role persistence", () => {
+  it.each([
+    ["opencode-server", "opencode", "sse"],
+    ["opencode-acp", "acp", "stdio"],
+    ["opencode-v2-service", "opencode-v2", "sse"],
+  ] as const)(
+    "validates supported model-role versions for OpenCode %s",
+    async (preset, protocol, transport) => {
+      const source = config({
+        protocol,
+        transport,
+        process: { command: "opencode", args: [protocol === "acp" ? "acp" : "serve"] },
+        metadata: { preset, autoSpawnServer: true },
+        cogniaModel: { providerId: "p", modelId: "m" },
+        modelRoles: { version: 2, slots: {} },
+      })
+      const created = await createHostExternalAgentConfig({ config: source }, ready)
+      expect(created.config.modelRoles).toEqual({ version: 2, slots: {} })
+      const patched = await updateHostExternalAgentConfig(
+        {
+          configId: created.configId,
+          expectedRevision: created.revision,
+          patch: { modelRoles: { version: 1, slots: {} } },
+        },
+        ready
+      )
+      expect(patched.config.modelRoles).toEqual({ version: 1, slots: {} })
+      const invalid = { version: 999, slots: {} } as never
+      await expect(
+        createHostExternalAgentConfig({ config: { ...source, modelRoles: invalid } }, ready)
+      ).rejects.toThrow(/model role/)
+      await expect(
+        updateHostExternalAgentConfig(
+          {
+            configId: created.configId,
+            expectedRevision: patched.revision,
+            patch: { modelRoles: invalid },
+          },
+          ready
+        )
+      ).rejects.toThrow(/model role/)
+      expect((await getHostExternalAgentConfig(created.configId))?.revision).toBe(patched.revision)
+    }
+  )
+  it("validates explicit OpenCode child bindings on create and patch without modelRoles", async () => {
+    const inline = (provider: string) => ({
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        agent: { reviewer: { mode: "subagent", model: `${provider}/review` } },
+      }),
+    })
+    const source = config({
+      protocol: "acp",
+      transport: "stdio",
+      process: { command: "opencode", args: ["acp"], env: inline("cognia") },
+      metadata: { preset: "opencode-acp" },
+      cogniaModel: { providerId: "p", modelId: "m" },
+    })
+    const created = await createHostExternalAgentConfig({ config: source }, ready)
+    expect(created.config.process?.env).toEqual(inline("cognia"))
+    expect(created.config.modelRoles).toBeUndefined()
+    await expect(
+      createHostExternalAgentConfig(
+        { config: { ...source, process: { ...source.process!, env: inline("other") } } },
+        ready
+      )
+    ).rejects.toThrow("cross-provider-unsupported")
+    await expect(
+      updateHostExternalAgentConfig(
+        {
+          configId: created.configId,
+          expectedRevision: created.revision,
+          patch: { process: { ...source.process!, env: inline("other") } },
+        },
+        ready
+      )
+    ).rejects.toThrow("cross-provider-unsupported")
+    expect((await getHostExternalAgentConfig(created.configId))?.revision).toBe(created.revision)
+  })
   const modelRoles = {
     version: 1 as const,
     slots: { "subagent.default": { kind: "inherit-primary" as const } },
@@ -1009,7 +1092,7 @@ describe("Host model role persistence", () => {
   it("refuses malformed, unsupported, cross-provider and cross-account selections before writing", async () => {
     const created = await createHostExternalAgentConfig({ config: bound() }, ready)
     for (const invalid of [
-      { version: 2, slots: {} },
+      { version: 999, slots: {} },
       { version: 1, slots: { "aux.small": { kind: "inherit-primary" } } },
       {
         version: 1,
@@ -1086,4 +1169,57 @@ describe("Host model role persistence", () => {
       mockTransportCall.mockReset()
     }
   })
+})
+
+it("rechecks Pi plugin availability and explicit models on save and rejects removal on patch", async () => {
+  const detect = jest.mocked(piSubagents.resolvePiSubagents).mockImplementation(async (source) => ({
+    ...source,
+    metadata: {
+      ...source.metadata,
+      cogniaPiSubagents: {
+        family: "nico",
+        version: "0.80.0",
+        agents: { reviewer: { model: "cognia/review" } },
+      },
+    },
+  }))
+  const source = config({
+    protocol: "pi-rpc",
+    process: { command: "pi" },
+    cogniaModel: { providerId: "p", modelId: "main" },
+    modelRoles: { version: 1, slots: { "subagent.default": { kind: "inherit-primary" } } },
+  })
+  try {
+    const created = await createHostExternalAgentConfig({ config: source }, ready)
+    expect(detect).toHaveBeenCalled()
+    expect(created.config.modelRoles).toEqual(source.modelRoles)
+    expect(created.config.metadata?.cogniaPiSubagents).toBeUndefined()
+    detect.mockImplementation(async (input) => input)
+    await expect(
+      updateHostExternalAgentConfig(
+        {
+          configId: created.configId,
+          expectedRevision: created.revision,
+          patch: { name: "Changed" },
+        },
+        ready
+      )
+    ).rejects.toThrow(/unsupported-slot/)
+    detect.mockImplementation(async (input) => ({
+      ...input,
+      metadata: {
+        cogniaPiSubagents: {
+          family: "nico",
+          version: "0.80.0",
+          agents: { reviewer: { model: "other/review" } },
+        },
+      },
+    }))
+    await expect(createHostExternalAgentConfig({ config: source }, ready)).rejects.toThrow(
+      /cross-provider/
+    )
+    expect((await getHostExternalAgentConfig(created.configId))?.revision).toBe(created.revision)
+  } finally {
+    detect.mockImplementation(jest.requireActual("./pi-subagents").resolvePiSubagents)
+  }
 })

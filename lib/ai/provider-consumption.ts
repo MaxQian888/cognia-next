@@ -317,15 +317,17 @@ function resolveOne(
   // (the Settings UI writes custom credentials to `customProviders`); the
   // `providerSettings` entry is only a fallback shadow. Built-ins keep the
   // `providerSettings`-first order. Blank strings never win (see pickNonEmpty).
-  // An unset override means the catalog's fixed protocol for the id. The
-  // shared id table only covers the ids the sidecar derives on its own, so
-  // reading it first sent every Claude-protocol relay (DeepSeek, Kimi, GLM,
-  // MiniMax, … "(Claude)") out as "openai".
+  // Azure's OpenAI wire compatibility still requires its SDK's auth and URL
+  // handling. Other catalog entries keep their configured wire adapter (e.g.
+  // Cohere's default URL is its OpenAI compatibility endpoint, not native v2).
+  const catalogProtocol = getBuiltInProviderCatalogEntry(providerId)?.protocol
+  const sdkProtocol = resolveProviderProtocol(providerId)
+  const defaultProtocol =
+    catalogProtocol === "openai" && sdkProtocol === "azure"
+      ? sdkProtocol
+      : (catalogProtocol ?? sdkProtocol ?? "openai")
   const protocol: ResolvedProvider["protocol"] = normalizeProtocol(
-    (custom ? (custom.protocol ?? builtin?.apiProtocol) : builtin?.apiProtocol) ??
-      getBuiltInProviderCatalogEntry(providerId)?.protocol ??
-      resolveProviderProtocol(providerId) ??
-      "openai"
+    (custom ? (custom.protocol ?? builtin?.apiProtocol) : builtin?.apiProtocol) ?? defaultProtocol
   ) as ResolvedProvider["protocol"]
 
   const apiKey = custom

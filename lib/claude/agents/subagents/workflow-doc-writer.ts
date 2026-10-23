@@ -31,5 +31,4 @@ export const workflowDocWriterAgent: AgentDefinition = {
     "mcp__cognia-plugin-tools__wf_configure_node",
     "mcp__cognia-plugin-tools__wf_focus_viewport",
   ],
-  maxTurns: 15,
 }

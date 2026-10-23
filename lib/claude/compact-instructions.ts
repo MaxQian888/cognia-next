@@ -32,7 +32,7 @@ import { definePrompt } from "@/lib/prompts/types"
 export const DEFAULT_KEEP_RECENT = 6
 
 /** Default cap on summary output tokens (mirrors `CompressionModelConfig.maxSummaryTokens`). */
-export const DEFAULT_MAX_SUMMARY_TOKENS = 500
+export const DEFAULT_MAX_SUMMARY_TOKENS = 16_384
 
 /**
  * `resolveCompaction`'s output, plus the two draft fields the (async, registry-
@@ -193,12 +193,11 @@ export function resolveCompaction(input: ResolveCompactionInput): ResolvedCompac
     strategy?.fraction ??
     AUTO_COMPACT_FRACTION
 
-  const keepRecent =
+  const explicitRecent =
     sessOv?.preserveRecentMessages ??
     charOv?.preserveRecentMessages ??
     appComp?.preserveRecentMessages ??
-    strategy?.keepRecent ??
-    DEFAULT_KEEP_RECENT
+    strategy?.keepRecent
 
   const summaryPrompt = strategy?.summaryPrompt
     ? focus
@@ -230,10 +229,10 @@ export function resolveCompaction(input: ResolveCompactionInput): ResolvedCompac
 
   // --- Summary model / cap (cheap-model path; creds resolved downstream) ---
   const cfgMaxSummary = appComp?.compressionModel?.maxSummaryTokens
-  const maxSummaryTokens =
-    typeof cfgMaxSummary === "number" && cfgMaxSummary > 0
-      ? cfgMaxSummary
-      : (D.compressionModel.maxSummaryTokens ?? DEFAULT_MAX_SUMMARY_TOKENS)
+  const hasExplicitSummaryCap = typeof cfgMaxSummary === "number" && cfgMaxSummary > 0
+  const maxSummaryTokens = hasExplicitSummaryCap
+    ? cfgMaxSummary
+    : (D.compressionModel.maxSummaryTokens ?? DEFAULT_MAX_SUMMARY_TOKENS)
   const summaryProvider = appComp?.compressionModel?.provider?.trim() || undefined
   const summaryModel = appComp?.compressionModel?.model?.trim() || undefined
 
@@ -246,10 +245,28 @@ export function resolveCompaction(input: ResolveCompactionInput): ResolvedCompac
     optical,
     enabled,
     fraction,
-    keepRecent,
+    keepRecent: explicitRecent,
     focus,
     summaryPrompt,
+    ...(compStrategy !== "optical" &&
+    compStrategy !== "sliding-window" &&
+    !strategy?.summaryPrompt &&
+    (!baseSummaryPrompt || baseSummaryPrompt === CONVERSATION_SUMMARY_PROMPT.defaultBody)
+      ? { checkpointFormat: "progress-v1" as const }
+      : {}),
     maxSummaryTokens,
+    ...(appComp?.backgroundSummarization !== undefined
+      ? { background: appComp.backgroundSummarization }
+      : {}),
+    ...(hasExplicitSummaryCap ? { requestedMaxSummaryTokens: cfgMaxSummary } : {}),
+    ...(typeof appComp?.checkpointTokenBudget === "number" && appComp.checkpointTokenBudget > 0
+      ? { checkpointTokenBudget: appComp.checkpointTokenBudget }
+      : { checkpointTokenBudgetIsDefault: true }),
+    ...(typeof appComp?.postCompactionTokenBudget === "number" &&
+    appComp.postCompactionTokenBudget > 0
+      ? { postCompactionTokenBudget: appComp.postCompactionTokenBudget }
+      : { postCompactionTokenBudgetIsDefault: true }),
+    ...(hasExplicitSummaryCap ? {} : { summaryTokenBudgetIsDefault: true }),
     strategy: compStrategy,
     trigger,
     messageCountThreshold,

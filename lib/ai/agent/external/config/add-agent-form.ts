@@ -14,6 +14,7 @@
 
 import { shellQuote, tokenizeShellCommand } from "@/lib/mcp/config-transfer"
 import { protocolAdapterRegistry } from "@/lib/ai/agent/external/protocol-adapter"
+import { isCodexAppServerProtocol } from "@/lib/ai/agent/external/protocol-options"
 import { isSupportedExternalAgentProtocol } from "@/lib/ai/agent/external/config/config-normalizer"
 import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
 import { compileEditorModelPlan } from "@/lib/ai/agent/external/config/cognia-model-options"
@@ -290,6 +291,9 @@ export function buildCreateExternalAgentInput(
       : {}),
     name: data.name,
     cogniaModel: data.cogniaModel ?? null,
+    ...(isCodexAppServerProtocol(data.protocol) && data.codexStepModelSwitching !== undefined
+      ? { codexOptions: { stepModelSwitching: data.codexStepModelSwitching } }
+      : {}),
     ...(data.cogniaModel && data.modelRoles ? { modelRoles: data.modelRoles } : {}),
     protocol: data.protocol,
     ...(options.defaultPermissionMode
@@ -437,6 +441,7 @@ export function addAgentFormFromConfig(config: ExternalAgentConfig): AddAgentFor
       transport: config.transport,
       cogniaModel: config.cogniaModel ?? null,
       modelRoles: config.modelRoles,
+      codexStepModelSwitching: config.codexOptions?.stepModelSwitching,
       command: managedRuntime ? "" : (process?.command ?? ""),
       args: managedRuntime ? "" : (process?.args ?? []).map(shellQuote).join(" "),
       bare: process?.bare === true,
@@ -495,6 +500,9 @@ export function addAgentFormPatch(
     transport: built.transport,
     cogniaModel: built.cogniaModel ?? null,
     modelRoles: built.modelRoles,
+    ...(built.codexOptions
+      ? { codexOptions: { ...config.codexOptions, ...built.codexOptions } }
+      : {}),
     timeout: built.timeout,
     // `buildCreateExternalAgentInput` fills every retry field from the form.
     retryConfig: built.retryConfig as ExternalAgentConfig["retryConfig"],

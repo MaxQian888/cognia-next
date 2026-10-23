@@ -10,6 +10,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import type { SessionCreateOptions } from "@/lib/ai/agent/external/protocol-adapter"
 import type {
+  ExternalAgentNativeSubagents,
+  ExternalAgentNativeSubagentModelChange,
   ExternalAgentSessionInput,
   ExternalAgentSessionEntry,
   ExternalAgentSessionOperationCapabilities,
@@ -36,6 +38,8 @@ export type SessionOperationsManager = Pick<
   | "exportSessionHtml"
   | "getSessionTree"
   | "getSessionEntries"
+  | "getNativeSubagents"
+  | "changeNativeSubagentModel"
 >
 interface Props {
   manager?: SessionOperationsManager
@@ -48,6 +52,128 @@ interface Props {
     command: string,
     options: { excludeFromContext: boolean }
   ) => Promise<ExternalAgentSessionShellResult>
+}
+
+function NativeSubagentModelControls({
+  child,
+  snapshot,
+  pending,
+  onChange,
+}: {
+  child: ExternalAgentNativeSubagents["children"][number]
+  snapshot: ExternalAgentNativeSubagents
+  pending: boolean
+  onChange: (change: ExternalAgentNativeSubagentModelChange) => void
+}) {
+  const t = useTranslations("externalAgent.sessionOperations")
+  const [selectedModel, setSelectedModel] = useState("")
+  const [effort, setEffort] = useState("")
+  const model = snapshot.models.find((candidate) => candidate.id === selectedModel)
+  const canChange =
+    child.canAcceptDirectInput === true &&
+    !!model &&
+    !pending &&
+    child.modelChangeState !== "outcome-unknown" &&
+    child.modelChangeState !== "pending"
+  const change = (scope: ExternalAgentNativeSubagentModelChange["scope"]) =>
+    onChange({
+      operationId: crypto.randomUUID(),
+      nativeChildThreadId: child.nativeThreadId,
+      expectedProcessGeneration: snapshot.processGeneration,
+      expectedPlanFingerprint: snapshot.planFingerprint,
+      scope,
+      expectedTurnId: scope === "current-turn" ? child.activeTurnId : undefined,
+      modelId: selectedModel,
+      ...(effort ? { reasoningEffort: effort } : {}),
+    })
+  return (
+    <fieldset className="space-y-2 rounded-md border p-2" disabled={pending}>
+      <legend className="max-w-full break-all text-xs">{child.nativeThreadId}</legend>
+      <p className="break-all text-xs">
+        {t("nativeIdentity", { parent: child.parentThreadId, root: child.rootThreadId })}
+      </p>
+      <p className="break-all text-xs">
+        {t("nativeSettings", {
+          model: child.modelId ?? t("nativeUnknown"),
+          effort: child.reasoningEffort ?? t("nativeUnknown"),
+          turn: child.activeTurnId ?? t("nativeUnknown"),
+        })}
+      </p>
+      <p className="break-all text-xs">
+        {t("nativeRequested", {
+          model: child.requestedModelId ?? t("nativeUnknown"),
+          effort: child.requestedReasoningEffort ?? t("nativeUnknown"),
+        })}
+      </p>
+      {child.canAcceptDirectInput !== true && (
+        <p className="text-xs text-muted-foreground">
+          {t(
+            child.canAcceptDirectInput === false ? "nativeDirectForbidden" : "nativeDirectUnknown"
+          )}
+        </p>
+      )}
+      <NativeSelect
+        aria-label={t("nativeTargetModel")}
+        value={selectedModel}
+        onChange={(event) => {
+          setSelectedModel(event.target.value)
+          setEffort("")
+        }}
+        disabled={child.canAcceptDirectInput !== true}
+      >
+        <option value="">{t("nativeSelectModel")}</option>
+        {snapshot.models.map((model) => (
+          <option key={model.id} value={model.id}>
+            {model.id}
+          </option>
+        ))}
+      </NativeSelect>
+      <NativeSelect
+        aria-label={t("nativeTargetEffort")}
+        value={effort}
+        onChange={(event) => setEffort(event.target.value)}
+        disabled={!canChange}
+      >
+        <option value="">{t("nativeDefaultEffort")}</option>
+        {model?.reasoningEfforts.map((value) => (
+          <option key={value} value={value}>
+            {value}
+          </option>
+        ))}
+      </NativeSelect>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={
+            !canChange ||
+            !snapshot.stepModelSwitching ||
+            !child.activeTurnId ||
+            snapshot.settingsMethods?.currentTurn === "unsupported"
+          }
+          onClick={() => change("current-turn")}
+        >
+          {t("nativeCurrentTurn")}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!canChange || snapshot.settingsMethods?.futureTurns === "unsupported"}
+          onClick={() => change("future-turns")}
+        >
+          {t("nativeFutureTurns")}
+        </Button>
+      </div>
+      {!snapshot.stepModelSwitching && (
+        <p className="text-xs text-muted-foreground">{t("nativeStepDisabled")}</p>
+      )}
+      {child.modelChangeState === "outcome-unknown" && (
+        <p role="alert" className="text-xs">
+          {t("nativeUncertain")}
+        </p>
+      )}
+    </fieldset>
+  )
 }
 
 /** Shared optional operations, independent of the concrete runtime protocol. */
@@ -66,6 +192,10 @@ export function ExternalAgentSessionOperations(props: Props) {
   const [shellOutput, setShellOutput] = useState<ExternalAgentSessionShellResult>()
   const [tree, setTree] = useState<ExternalAgentSessionTree>()
   const [entries, setEntries] = useState<ExternalAgentSessionEntry[]>()
+  const [nativeSnapshot, setNativeSnapshot] = useState<{
+    owner: string
+    data: ExternalAgentNativeSubagents
+  }>()
   const entryText = useMemo(
     () => (entries === undefined ? undefined : JSON.stringify(entries, null, 2)),
     [entries]
@@ -74,9 +204,19 @@ export function ExternalAgentSessionOperations(props: Props) {
   const busy = useRef(false)
   const manager = props.manager ?? getExternalAgentManager()
   const { agentId, sessionId } = props
+  const owner = `${agentId}:${sessionId}`
+  const native = nativeSnapshot?.owner === owner ? nativeSnapshot.data : undefined
   const args = [agentId, sessionId] as const
   const can = (key: keyof ExternalAgentSessionOperationCapabilities) =>
     capabilities?.[key] === "supported"
+  const reasonText = (reason: string) => {
+    const key = reason.replace(/^externalAgent\.sessionOperations\./, "")
+    return t.has(key)
+      ? t(key)
+      : t.has(`nativeReasons.${reason}`)
+        ? t(`nativeReasons.${reason}`)
+        : reason
+  }
 
   useEffect(() => {
     alive.current = true
@@ -93,6 +233,10 @@ export function ExternalAgentSessionOperations(props: Props) {
       .then(async (caps) => {
         if (cancelled) return
         setCapabilities(caps)
+        if (manager.getNativeSubagents) {
+          const data = await manager.getNativeSubagents(agentId, sessionId)
+          if (data && !cancelled) setNativeSnapshot({ owner: `${agentId}:${sessionId}`, data })
+        }
         if (caps.runtimeState === "supported") {
           const next = await manager.getSessionRuntimeState(agentId, sessionId)
           if (!cancelled) setState(next)
@@ -114,12 +258,16 @@ export function ExternalAgentSessionOperations(props: Props) {
     setNotice(undefined)
     try {
       await work()
+      if (alive.current && manager.getNativeSubagents) {
+        const data = await manager.getNativeSubagents(...args)
+        if (alive.current && data) setNativeSnapshot({ owner, data })
+      }
       if (alive.current && can("runtimeState")) {
         const next = await manager.getSessionRuntimeState(...args)
         if (alive.current) setState(next)
       }
     } catch (err) {
-      if (alive.current) setError(err instanceof Error ? err.message : String(err))
+      if (alive.current) setError(reasonText(err instanceof Error ? err.message : String(err)))
     } finally {
       busy.current = false
       if (alive.current) setPending(false)
@@ -222,7 +370,79 @@ export function ExternalAgentSessionOperations(props: Props) {
             </p>
           )}
           {!capabilities && !error && <p>{t("loading")}</p>}
+          {native && (
+            <section className="space-y-3 rounded-md border p-3" aria-label={t("nativeTitle")}>
+              <h4 className="font-medium">{t("nativeTitle")}</h4>
+              <p className="break-all text-xs text-muted-foreground">
+                {t("nativeBackend", {
+                  backend:
+                    native.backend.value === "unknown" || native.backend.value === "disabled"
+                      ? t(`nativeBackendValues.${native.backend.value}`)
+                      : native.backend.value,
+                  confidence: t(`nativeConfidence.${native.backend.confidence}`),
+                  evidence: t(`nativeEvidence.${native.backend.evidence}`),
+                  version: native.runtimeVersion ?? t("nativeUnknown"),
+                })}
+              </p>
+              <p className="text-xs text-muted-foreground">{t("nativeModelEvidence")}</p>
+              <p className="text-xs text-muted-foreground">
+                {t("nativeCapabilities", {
+                  spawn: t(`nativeSupport.${native.spawnModelOverrides}`),
+                })}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t("nativeFeatureFlags", {
+                  v2: t(
+                    `nativeFlags.${native.features?.multiAgentV2 === undefined || native.features.multiAgentV2 === null ? "unknown" : native.features.multiAgentV2 ? "enabled" : "disabled"}`
+                  ),
+                  step: t(
+                    `nativeFlags.${native.features?.stepModelSwitching === undefined || native.features.stepModelSwitching === null ? "unknown" : native.features.stepModelSwitching ? "enabled" : "disabled"}`
+                  ),
+                })}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={pending}
+                onClick={() => void run(async () => {})}
+              >
+                {t("nativeRefresh")}
+              </Button>
+              {native.truncated && <p role="alert">{t("nativeTruncated")}</p>}
+              {!native.children.length && <p className="text-xs">{t("nativeEmpty")}</p>}
+              {native.children.map((child) => (
+                <NativeSubagentModelControls
+                  key={`${native.processGeneration}:${child.nativeThreadId}`}
+                  child={child}
+                  snapshot={native}
+                  pending={pending}
+                  onChange={(change) =>
+                    void run(async () => {
+                      const result = await manager.changeNativeSubagentModel(...args, change)
+                      if (alive.current)
+                        setNotice(
+                          t("nativeChangeOutcome", {
+                            child: change.nativeChildThreadId,
+                            scope: t(
+                              change.scope === "current-turn"
+                                ? "nativeCurrentTurn"
+                                : "nativeFutureTurns"
+                            ),
+                            model: change.modelId,
+                            effort: change.reasoningEffort ?? t("nativeDefaultEffort"),
+                            outcome:
+                              t(`nativeResults.${result.status}`) +
+                              (result.reason ? `: ${reasonText(result.reason)}` : ""),
+                          })
+                        )
+                    })
+                  }
+                />
+              ))}
+            </section>
+          )}
           {capabilities &&
+            !native &&
             !Object.entries(capabilities).some(
               ([key, value]) => key !== "backgroundTurns" && value === "supported"
             ) && <p>{t("unsupported")}</p>}

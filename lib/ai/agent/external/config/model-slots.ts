@@ -1,5 +1,6 @@
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import { cogniaGatewaySupport } from "./gateway-task"
+import { piSubagentSupport } from "./pi-subagents"
 
 /**
  * The model slots a gateway runtime can run on a model other than the task's
@@ -23,6 +24,7 @@ export interface AgentModelSlotDescriptor {
   kind: "child-default" | "tier" | "auxiliary"
   /** Reasoning efforts this slot accepts; absent means effort is not projected. */
   reasoningEfforts?: readonly string[]
+  supportsSpawnModelOverrides?: boolean
   evidence: string
 }
 
@@ -51,6 +53,7 @@ const CODEX_SLOTS: readonly AgentModelSlotDescriptor[] = [
     id: "subagent.default",
     kind: "child-default",
     reasoningEfforts: CODEX_REASONING_EFFORTS,
+    supportsSpawnModelOverrides: true,
     evidence: CODEX_EVIDENCE,
   },
 ]
@@ -80,6 +83,18 @@ export function gatewayModelSlots(config: SlotRuntimeConfig): readonly AgentMode
       return CODEX_SLOTS
     case "opencode":
       return config.protocol === "opencode-v2" ? OPENCODE_V2_SLOTS : OPENCODE_V1_SLOTS
+    case "pi": {
+      const plugin = piSubagentSupport(config)
+      return plugin
+        ? [
+            {
+              id: "subagent.default",
+              kind: "child-default",
+              evidence: `${plugin.family} v${plugin.version}`,
+            },
+          ]
+        : []
+    }
     default:
       return []
   }

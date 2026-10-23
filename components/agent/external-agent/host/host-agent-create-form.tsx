@@ -70,6 +70,11 @@ import {
 } from "@/lib/ai/agent/external/config/add-agent-form"
 import { getPresetConfig } from "@/lib/ai/agent/external/config/presets"
 import type { HostConfigsUnavailableReason } from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
+import {
+  HOST_CONFIG_CAPABILITIES,
+  hostConfigsAvailability,
+  hostSupportsModelRolesV2,
+} from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
 import type { StoredExternalAgentConfig } from "@/stores/agent/external-agent-store/types"
 import type { AcpPermissionMode, ExternalAgentStateIsolation } from "@/types/agent/external-agent"
 
@@ -338,6 +343,10 @@ function HostAgentCreateFormBody({ presetId, onCreated, onCancel }: HostAgentCre
           <AddAgentCogniaModelField
             form={form}
             roleModelsBlocker={supportsModelRoles ? undefined : "host-outdated"}
+            spawnModelsSupported={hostSupportsModelRolesV2()}
+            nativeModelControlSupported={
+              hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.nativeSubagentControl).ok
+            }
           />
         </CollapsibleContent>
       </Collapsible>

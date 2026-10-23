@@ -65,9 +65,10 @@ const OPENCODE_SERVER_PRESET: ExternalAgentPresetConfig = {
   // positional "serve" argument.
   process: { command: "opencode", args: [] },
   metadata: { autoSpawnServer: true },
-  setupHint: "Requires the OpenCode CLI on PATH and the Cognia desktop app.",
+  setupHint:
+    "Requires an OpenCode V1 CLI and a Cognia process host. Use OpenCode V2 for the current service API.",
   docsUrl: "https://opencode.ai/docs/server/",
-  supportTier: "documented-only",
+  supportTier: "executable",
   defaultPermissionMode: "default",
   tags: ["opencode", "sdk", "local"],
 }

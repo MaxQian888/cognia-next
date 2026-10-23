@@ -116,6 +116,7 @@ export interface ReplayEvent {
  * Form data for adding a new external agent
  */
 export interface AddAgentFormData {
+  codexStepModelSwitching?: boolean
   processCwd?: string
   processEnv?: Record<string, string>
   preset?: string

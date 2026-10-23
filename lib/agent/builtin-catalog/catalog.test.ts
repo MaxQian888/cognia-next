@@ -18,6 +18,12 @@ import {
 } from "@/lib/prompts/snapshot"
 
 describe("the built-in catalog", () => {
+  it("lets every built-in inherit the unified execution budget", () => {
+    for (const entry of builtinAgents()) {
+      expect(entry.maxTurns).toBeUndefined()
+      expect(builtinAgentDefinition(entry).maxTurns).toBeUndefined()
+    }
+  })
   it("ships one entry per id, with no duplicates", () => {
     expect(new Set(BUILTIN_AGENT_IDS).size).toBe(BUILTIN_AGENT_IDS.length)
     expect(BUILTIN_AGENT_IDS).toEqual(builtinAgents().map((entry) => entry.id))

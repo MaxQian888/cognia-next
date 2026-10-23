@@ -54,6 +54,7 @@ describe("SUPPORTED_EXTERNAL_AGENT_PROTOCOLS", () => {
       "pi-rpc",
       "aider-cli",
       "opencode-v2",
+      "opencode",
       "a2a",
     ])
   })
@@ -62,7 +63,7 @@ describe("SUPPORTED_EXTERNAL_AGENT_PROTOCOLS", () => {
 describe("isSupportedExternalAgentProtocol", () => {
   it("returns true for the built-in protocols", () => {
     expect(isSupportedExternalAgentProtocol("acp")).toBe(true)
-    expect(isSupportedExternalAgentProtocol("opencode")).toBe(false)
+    expect(isSupportedExternalAgentProtocol("opencode")).toBe(true)
     expect(isSupportedExternalAgentProtocol("opencode-v2")).toBe(true)
     expect(isSupportedExternalAgentProtocol("codex-app-server")).toBe(true)
     expect(isSupportedExternalAgentProtocol("codex-siwc-app-server")).toBe(true)
@@ -209,9 +210,9 @@ describe("getExternalAgentExecutionBlock", () => {
     __resetPluginProtocolAdaptersForTesting()
   })
 
-  it("blocks the retired OpenCode protocol", () => {
+  it("admits the registered OpenCode V1 protocol", () => {
     const cfg = baseConfig({ protocol: "opencode", transport: "sse", metadata: {} })
-    expect(getExternalAgentExecutionBlock(cfg, true)?.code).toBe("protocol_unsupported")
+    expect(getExternalAgentExecutionBlock(cfg, true)).toBeNull()
   })
 
   it("requires a service bridge for OpenCode local discovery", () => {

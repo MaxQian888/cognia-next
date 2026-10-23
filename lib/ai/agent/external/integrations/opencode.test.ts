@@ -1,6 +1,6 @@
 import type { AgentProcessHost } from "@cognia/agent-contracts/host"
 import { OPENCODE_V2_EXECUTION_SEMANTICS } from "@cognia/agent-opencode/manifest"
-import { openCodeServerExtension } from "@cognia/agent-opencode/client"
+import { OpenCodeClientAdapter, openCodeServerExtension } from "@cognia/agent-opencode/client"
 import { OpenCodeV2ClientAdapter, openCodeV2Extension } from "@cognia/agent-opencode/v2-client"
 
 const mockSidecarDiscover = jest.fn()
@@ -27,6 +27,7 @@ import {
   appOpenCodeV2Placement,
   canProjectOpenCodeV2McpOnThisHost,
   createOpenCodeV2Adapter,
+  createOpenCodeV1AdapterFactory,
   createOpenCodeV2AdapterFactory,
   discoverOpenCodeV2Service,
 } from "./opencode"
@@ -44,6 +45,13 @@ const processHost: AgentProcessHost = {
 }
 
 describe("OpenCode host wiring", () => {
+  it("builds a separate V1 adapter over the host ports", () => {
+    const adapter = createOpenCodeV1AdapterFactory(processHost)()
+    expect(adapter).toBeInstanceOf(OpenCodeClientAdapter)
+    expect(adapter.protocol).toBe("opencode")
+    expect(openCodeServerExtension.resolve(adapter)).toBe(adapter)
+    expect(openCodeV2Extension.resolve(adapter)).toBeUndefined()
+  })
   afterEach(() => {
     __resetSpawnPlacementsForTests()
     jest.clearAllMocks()

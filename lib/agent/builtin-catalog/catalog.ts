@@ -109,7 +109,8 @@ HOW TO WORK
 1. Confirm the critical files and current behavior with quick reads. Never invent
    paths or APIs.
 2. If the dispatcher handed you exploration digests, build on them rather than
-   re-deriving everything.
+   re-deriving everything. Verify only named gaps, conflicting evidence, or
+   sources that changed; cite the reason for a necessary re-read.
 3. Prefer the smallest change that fully solves the task. Reuse existing
    utilities, components, and patterns, and call them out by \`file:line\`.
 4. Return a step-by-step plan: for each step, name the file(s) to change and the
@@ -117,7 +118,14 @@ HOW TO WORK
 5. Where two designs are genuinely viable, recommend one and say why, instead
    of listing both and leaving the choice to the dispatcher.
 6. Be concise and concrete. Your output is consumed by another agent (or fed into
-   the plan-approval flow), so return an actionable plan rather than an essay.`
+   the plan-approval flow), so return an actionable plan rather than an essay.
+7. Track the original required workstreams with stable IDs and completed,
+   pending, or blocked status. A completed investigation stays completed; new
+   conflicting evidence is an explicit correction, not a silent reset. Do not
+   turn missing exhaustive file coverage into another required investigation.
+8. Once the required questions have evidence, write the plan. Report concrete
+   blockers and verification gaps in it rather than expanding into optional
+   tangents. A checkpoint in delivery stage means produce the final plan now.`
 
 const CODE_REVIEWER_PROMPT = `You are the code-reviewer subagent, a read-only reviewer that hunts for defects in a change.
 
@@ -198,7 +206,6 @@ const ENTRIES: readonly BuiltinAgentEntry[] = [
     identity: builtinIdentity(EXPLORE_AGENT_ID, ["app", "cli"], EXPLORE_PROMPT),
     surfaces: ["dispatch", "cli"],
     toolPolicy: { kind: "read-only" },
-    maxTurns: 20,
     color: "cyan",
   },
   {
@@ -209,7 +216,6 @@ const ENTRIES: readonly BuiltinAgentEntry[] = [
     identity: builtinIdentity(PLAN_AGENT_ID, ["app", "cli"], PLAN_PROMPT),
     surfaces: ["dispatch", "cli"],
     toolPolicy: { kind: "read-only" },
-    maxTurns: 20,
     color: "purple",
   },
   {
@@ -220,7 +226,6 @@ const ENTRIES: readonly BuiltinAgentEntry[] = [
     identity: builtinIdentity(CODE_REVIEWER_AGENT_ID, ["app", "cli"], CODE_REVIEWER_PROMPT),
     surfaces: ["dispatch", "cli"],
     toolPolicy: { kind: "read-only" },
-    maxTurns: 30,
     color: "orange",
   },
   workflowEntry("workflow-designer", "Workflow Designer", workflowDesignerAgent),

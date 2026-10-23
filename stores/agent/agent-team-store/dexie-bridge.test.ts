@@ -13,8 +13,24 @@ import {
   setAgentTeamBindingCandidateResolver,
   startAgentTeamDexieBridge,
   whenAgentTeamDexieBridgeHydrated,
+  withAgentTeamDefinitionRestore,
+  getAgentTeamDexieBridgeDiagnostics,
 } from "./dexie-bridge"
 import { useAgentTeamStore } from "./store"
+import { applyBackupPackage } from "@/lib/data/apply-package"
+import { agentTeamToRow } from "@/lib/db/agent-team-definitions"
+import type { BackupPackageV3 } from "@/lib/data/types"
+const mockDefinitionFault = { failLoad: false }
+jest.mock("@/lib/db/agent-team-definitions", () => {
+  const actual = jest.requireActual("@/lib/db/agent-team-definitions")
+  return {
+    ...actual,
+    loadAgentTeamDefinitions: async () => {
+      if (mockDefinitionFault.failLoad) throw new Error("reload unavailable")
+      return actual.loadAgentTeamDefinitions()
+    },
+  }
+})
 
 function team(id: string, over: Partial<AgentTeam> = {}): AgentTeam {
   return {
@@ -65,6 +81,98 @@ describe("agent-team dexie bridge", () => {
   afterEach(() => {
     stop()
     __resetAgentTeamDexieBridgeForTesting()
+  })
+
+  it("preserves concurrent edits to unrelated squads during a deferred restore", async () => {
+    useAgentTeamStore.setState({ teams: { a: team("a"), b: team("b") } })
+    stop = startAgentTeamDexieBridge()
+    await settle()
+    let enter!: () => void
+    let release!: () => void
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const restoration = withAgentTeamDefinitionRestore(async () => {
+      enter()
+      await gate
+      await writeAgentTeamDefinitions({
+        teams: [team("a", { name: "Imported" })],
+        teammates: [],
+        tasks: [],
+      })
+    })
+    await entered
+    useAgentTeamStore.setState((state) => ({
+      teams: { ...state.teams, b: { ...state.teams.b, name: "Concurrent edit" } },
+    }))
+    release()
+    await restoration
+    expect(useAgentTeamStore.getState().teams.a.name).toBe("Imported")
+    expect(useAgentTeamStore.getState().teams.b.name).toBe("Concurrent edit")
+    expect((await loadAgentTeamDefinitions()).teams.find((row) => row.id === "b")?.name).toBe(
+      "Concurrent edit"
+    )
+  })
+
+  it("disables projection after a committed restore cannot refresh its cache", async () => {
+    useAgentTeamStore.setState({ teams: { a: team("a", { name: "Before" }) } })
+    stop = startAgentTeamDexieBridge()
+    await settle()
+    try {
+      await expect(
+        withAgentTeamDefinitionRestore(async () => {
+          await writeAgentTeamDefinitions({
+            teams: [team("a", { name: "Imported" })],
+            teammates: [],
+            tasks: [],
+          })
+          mockDefinitionFault.failLoad = true
+        })
+      ).rejects.toThrow()
+    } finally {
+      mockDefinitionFault.failLoad = false
+    }
+    expect(getAgentTeamDexieBridgeDiagnostics().hydrated).toBe(false)
+    useAgentTeamStore.setState({ teams: { a: team("a", { name: "Stale memory edit" }) } })
+    await settle()
+    expect((await loadAgentTeamDefinitions()).teams.find((row) => row.id === "a")?.name).toBe(
+      "Imported"
+    )
+  })
+
+  it("refreshes a running store after portable restore and cancels its stale queued projection", async () => {
+    useAgentTeamStore.setState({ teams: { restored: team("restored", { name: "Before" }) } })
+    stop = startAgentTeamDexieBridge()
+    await settle()
+    useAgentTeamStore.setState({
+      teams: { restored: team("restored", { name: "Queued before restore" }) },
+    })
+    const pkg: BackupPackageV3 = {
+      version: "3.0",
+      manifest: {
+        version: "3.0",
+        schemaVersion: 3,
+        traceId: "restore-store",
+        exportedAt: "2026-10-21T00:00:00.000Z",
+        appVersion: "test",
+        backend: "web-dexie",
+        integrity: { algorithm: "SHA-256", checksum: "" },
+      },
+      payload: { agentTeams: [{ ...agentTeamToRow(team("restored", { name: "Imported" })) }] },
+    }
+    await applyBackupPackage(
+      pkg,
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    expect(useAgentTeamStore.getState().teams.restored.name).toBe("Imported")
+    await settle()
+    expect(
+      (await loadAgentTeamDefinitions()).teams.find((row) => row.id === "restored")?.name
+    ).toBe("Imported")
   })
 
   /**

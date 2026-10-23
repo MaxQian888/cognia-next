@@ -29,6 +29,7 @@ describe("workflow subagent definitions", () => {
       expect(agent.prompt.length).toBeGreaterThan(200)
       expect(Array.isArray(agent.tools)).toBe(true)
       expect(agent.tools!.length).toBeGreaterThan(0)
+      expect(agent.maxTurns).toBeUndefined()
     }
   })
 

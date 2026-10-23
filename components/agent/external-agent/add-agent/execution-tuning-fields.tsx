@@ -14,6 +14,8 @@ import { ChevronDown } from "lucide-react"
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
+import { isCodexAppServerProtocol } from "@/lib/ai/agent/external/protocol-options"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -156,15 +158,32 @@ export function ExecutionTuningFields({ form, collapsible = true }: ExecutionTun
 export function AddAgentCogniaModelField({
   form,
   roleModelsBlocker,
+  spawnModelsSupported,
+  nativeModelControlSupported = true,
 }: {
   form: AddAgentFormState
   /** Set when the target (a paired Host) cannot store sub-task models yet. */
   roleModelsBlocker?: RoleModelFieldsBlocker
+  spawnModelsSupported?: boolean
+  nativeModelControlSupported?: boolean
 }) {
   const { data, setField, shape } = form
   const config = addAgentFormGatewayConfig(data, shape)
+  const t = useTranslations("externalAgent.settings")
   return (
     <div className="space-y-3">
+      {isCodexAppServerProtocol(data.protocol) && (
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="codex-native-step-model-switching">{t("codexStepModelSwitching")}</Label>
+          <Switch
+            id="codex-native-step-model-switching"
+            checked={data.codexStepModelSwitching === true}
+            disabled={!nativeModelControlSupported}
+            onCheckedChange={(checked) => setField("codexStepModelSwitching", checked)}
+          />
+          <p className="text-xs text-muted-foreground">{t("codexStepModelSwitchingDesc")}</p>
+        </div>
+      )}
       <CogniaModelPicker
         config={config}
         value={data.cogniaModel}
@@ -175,6 +194,7 @@ export function AddAgentCogniaModelField({
         primary={data.cogniaModel}
         value={data.modelRoles}
         blocker={roleModelsBlocker}
+        spawnModelsSupported={spawnModelsSupported}
         onChange={(modelRoles) => setField("modelRoles", modelRoles)}
       />
     </div>

@@ -6,6 +6,7 @@ import type {
   ExternalAgentCogniaModelBinding,
 } from "@/types/agent/external-agent"
 import { parse as parseToml } from "smol-toml"
+import { isMap, parseDocument } from "yaml"
 import { z } from "zod"
 import { resolveModelMeta } from "@/lib/ai/model-options"
 import { reasoningTiersFor } from "@cognia/provider-core/providers/reasoning-tiers"
@@ -15,6 +16,8 @@ import type { AppSettings } from "@cognia/agent-config-types"
 import type { GatewayModelMetadata } from "@/types/gateway"
 import { findRuntimeForConfig } from "./install-catalog"
 import type { TaskModelPlan } from "./model-plan"
+import { piSubagentSupport, piSubagentModelBindings, piModelBinding } from "./pi-subagents"
+import { parseFrontmatter } from "@/lib/claude/subagent-importers/_parse-helpers"
 
 export const GATEWAY_TASK_ENV = "COGNIA_GATEWAY_TASK_CONFIG"
 /** Placeholder GitHub token for Copilot BYOK tasks; never a credential. */
@@ -670,6 +673,18 @@ const openCodeV2Customization = z
         z
           .object({
             ...openCodeAgentFields,
+            model: z
+              .union([
+                z.string().min(1),
+                z
+                  .object({
+                    providerID: z.string().min(1),
+                    model: z.string().min(1),
+                    variant: z.string().min(1).optional(),
+                  })
+                  .strict(),
+              ])
+              .optional(),
             system: z.string().optional(),
             disabled: z.boolean().optional(),
             permissions: openCodePermissions.optional(),
@@ -684,11 +699,9 @@ const openCodeV2Customization = z
   })
   .strict()
 
-/** Explicit inline customization is separate from task-owned provider routing. */
-function openCodeCustomization(
-  config: ExternalAgentConfig,
-  selectedModel: string,
-  subagentModel?: string
+/** Parse once with the same schema at admission and launch. */
+function readOpenCodeCustomization(
+  config: Pick<ExternalAgentConfig, "process" | "protocol">
 ): Record<string, unknown> {
   const source = config.process?.env
   if (source?.OPENCODE_CONFIG || source?.OPENCODE_CONFIG_DIR)
@@ -719,29 +732,156 @@ function openCodeCustomization(
   const v2 = config.protocol === "opencode-v2"
   const result = (v2 ? openCodeV2Customization : openCodeV1Customization).safeParse(input)
   if (!result.success) throw invalid()
-  const output: Record<string, unknown> = { ...result.data }
-  // Commands stay on the primary; only native subagents get the child default.
+  return { ...result.data }
+}
+
+/** Implicit built-in primary agents must not receive a child default. */
+function isOpenCodeSubagent(name: string, entry: Record<string, unknown>): boolean {
+  if (entry.mode !== undefined) return entry.mode !== "primary"
+  return !["build", "plan", "compaction", "title", "summary"].includes(name)
+}
+
+function isOpenCodeChildCommand(
+  entry: Record<string, unknown>,
+  agents: Record<string, Record<string, unknown>>
+): boolean {
+  const name = entry.agent
+  return (
+    typeof name === "string" &&
+    (Object.hasOwn(agents, name) || name === "general" || name === "explore") &&
+    isOpenCodeSubagent(name, agents[name] ?? {})
+  )
+}
+
+function openCodeModelBinding(
+  value: unknown,
+  providerId: string,
+  v2: boolean
+): ExternalAgentCogniaModelBinding & { variant?: string } {
+  let provider: string
+  let modelId: string
+  let variant: string | undefined
+  if (typeof value === "string") {
+    const slash = value.indexOf("/")
+    provider = value.slice(0, slash)
+    modelId = value.slice(slash + 1)
+    if (slash <= 0) throw new Error("Invalid Cognia model OpenCode subagent model reference")
+    if (v2 && modelId.includes("#")) {
+      const hash = modelId.indexOf("#")
+      variant = modelId.slice(hash + 1)
+      modelId = modelId.slice(0, hash)
+    }
+  } else {
+    const selection = value as { providerID: string; model: string; variant?: string }
+    provider = selection.providerID
+    modelId = selection.model
+    variant = selection.variant
+  }
+  if (
+    [provider, modelId, ...(variant !== undefined ? [variant] : [])].some(
+      (part) => !part.trim() || part !== part.trim()
+    )
+  )
+    throw new Error("Invalid Cognia model OpenCode subagent model reference")
+  return {
+    providerId: provider === "cognia" ? providerId : provider,
+    modelId,
+    ...(variant !== undefined ? { variant } : {}),
+  }
+}
+
+/** Models declared by individual children must enter the lease, not only the launch JSON. */
+export function openCodeSubagentModelBindings(
+  config: Pick<ExternalAgentConfig, "protocol" | "transport" | "process" | "metadata" | "network">,
+  providerId: string
+): Record<string, ExternalAgentCogniaModelBinding & { variant?: string }> {
+  if (cogniaGatewayRuntime(config) !== "opencode") return {}
+  const custom = readOpenCodeCustomization(config)
+  const v2 = config.protocol === "opencode-v2"
+  const agents = custom[v2 ? "agents" : "agent"] as
+    Record<string, Record<string, unknown>> | undefined
+  const commands = custom[v2 ? "commands" : "command"] as
+    Record<string, Record<string, unknown>> | undefined
+  return Object.fromEntries([
+    ...Object.entries(agents ?? {})
+      .filter(([name, entry]) => isOpenCodeSubagent(name, entry) && entry.model !== undefined)
+      .map(([name, entry]) => [
+        `opencode.agent.${name}`,
+        openCodeModelBinding(entry.model, providerId, v2),
+      ]),
+    ...Object.entries(commands ?? {})
+      .filter(
+        ([, entry]) => isOpenCodeChildCommand(entry, agents ?? {}) && entry.model !== undefined
+      )
+      .map(([name, entry]) => [
+        `opencode.command.${name}`,
+        openCodeModelBinding(entry.model, providerId, v2),
+      ]),
+  ])
+}
+
+/** Native explicit selections join the same admitted model plan as the shared defaults. */
+export function nativeSubagentModelBindings(
+  config: GatewayRuntimeConfig,
+  primary: ExternalAgentCogniaModelBinding
+) {
+  return {
+    ...openCodeSubagentModelBindings(config, primary.providerId),
+    ...piSubagentModelBindings(config, primary),
+  }
+}
+
+/** Explicit inline customization is separate from task-owned provider routing. */
+function openCodeCustomization(
+  config: ExternalAgentConfig,
+  selectedModel: string,
+  subagentModel: string | undefined,
+  providerId: string,
+  allowedModels: readonly string[]
+): Record<string, unknown> {
+  const output = readOpenCodeCustomization(config)
+  const v2 = config.protocol === "opencode-v2"
   const agentKey = v2 ? "agents" : "agent"
+  const agentDefinitions = (output[agentKey] ?? {}) as Record<string, Record<string, unknown>>
   for (const key of [agentKey, v2 ? "commands" : "command"]) {
     const entries = output[key] as Record<string, Record<string, unknown>> | undefined
     if (entries)
       output[key] = Object.fromEntries(
-        Object.entries(entries).map(([name, entry]) => [
-          name,
-          {
-            ...entry,
-            model:
-              key === agentKey && entry.mode === "subagent"
-                ? (subagentModel ?? selectedModel)
-                : selectedModel,
-          },
-        ])
+        Object.entries(entries).map(([name, entry]) => {
+          const childCommand = key !== agentKey && isOpenCodeChildCommand(entry, agentDefinitions)
+          // An omitted command model must let the named agent's own model win.
+          if (childCommand && entry.model === undefined) return [name, entry]
+          let model: unknown = selectedModel
+          if ((key === agentKey && isOpenCodeSubagent(name, entry)) || childCommand) {
+            model = subagentModel ?? selectedModel
+            if (entry.model !== undefined) {
+              const binding = openCodeModelBinding(entry.model, providerId, v2)
+              if (binding.providerId !== providerId || !allowedModels.includes(binding.modelId))
+                throw new Error("OpenCode subagent model is not admitted by this Cognia task")
+              model =
+                typeof entry.model === "string"
+                  ? `cognia/${binding.modelId}${binding.variant !== undefined ? `#${binding.variant}` : ""}`
+                  : {
+                      providerID: "cognia",
+                      model: binding.modelId,
+                      ...(binding.variant !== undefined ? { variant: binding.variant } : {}),
+                    }
+            }
+          }
+          return [
+            name,
+            {
+              ...entry,
+              model,
+            },
+          ]
+        })
       )
   }
   if (subagentModel !== undefined) {
     const agents = (output[agentKey] ?? {}) as Record<string, Record<string, unknown>>
     for (const name of ["general", "explore"]) {
-      agents[name] = { ...agents[name], model: subagentModel }
+      if (!Object.hasOwn(agents, name)) agents[name] = { model: subagentModel }
     }
     output[agentKey] = agents
   }
@@ -775,7 +915,10 @@ export function buildGatewayTaskConfig(input: {
 } {
   const { config, binding, taskId, endpoint, secret, settings } = input
   const modelPlan =
-    input.modelPlan && Object.keys(input.modelPlan.slots).length ? input.modelPlan : undefined
+    input.modelPlan &&
+    (Object.keys(input.modelPlan.slots).length || input.modelPlan.allowedSpawnModels !== undefined)
+      ? input.modelPlan
+      : undefined
   if (input.modelPlan && input.model !== input.modelPlan.primaryModelId)
     throw new Error("Gateway model and model plan primary model differ")
   const model = modelPlan?.primaryModelId ?? input.model
@@ -798,7 +941,7 @@ export function buildGatewayTaskConfig(input: {
     )
   }
   let codexModelCatalog: GatewayTaskPayload["codexModelCatalog"]
-  if (runtime === "codex" && subagent) {
+  if (runtime === "codex" && modelPlan) {
     const ids = [...new Set([model, ...modelPlan!.models])]
     const localFacts = isHeadlessHost()
       ? undefined
@@ -934,6 +1077,17 @@ export function buildGatewayTaskConfig(input: {
     })
   } else if (runtime === "codex") {
     const custom = codexCustomization(config)
+    if (
+      config.codexOptions?.stepModelSwitching !== undefined &&
+      typeof config.codexOptions.stepModelSwitching !== "boolean"
+    )
+      throw new Error("Invalid Codex stepModelSwitching option")
+    if (modelPlan?.allowedSpawnModels?.length) {
+      const instructions = `When spawning native subagents, choose a model from this task's authorized model set: ${JSON.stringify(modelPlan.models)}. The default child model is ${JSON.stringify(subagent?.modelId ?? model)}. Use the native spawn tool's model and reasoning_effort fields when available. Existing V2 children cannot be directly switched.`
+      custom.developer_instructions = [custom.developer_instructions, instructions]
+        .filter(Boolean)
+        .join("\n\n")
+    }
     const agents = subagent
       ? {
           default_subagent_model: subagent.modelId,
@@ -954,6 +1108,9 @@ export function buildGatewayTaskConfig(input: {
           : []),
         ...(!codexModelCatalog && meta.contextLength
           ? [`model_auto_compact_token_limit = ${codexAutoCompactTokenLimit(meta)}`]
+          : []),
+        ...(config.codexOptions?.stepModelSwitching !== undefined
+          ? [`[features]`, `step_model_switching = ${config.codexOptions.stepModelSwitching}`]
           : []),
         "[model_providers.cognia]",
         'name = "Cognia"',
@@ -977,6 +1134,9 @@ export function buildGatewayTaskConfig(input: {
         model,
         review_model: model,
         model_provider: "cognia",
+        ...(config.codexOptions?.stepModelSwitching !== undefined
+          ? { features: { step_model_switching: config.codexOptions.stepModelSwitching } }
+          : {}),
         ...(agents ? { agents } : {}),
         ...(!codexModelCatalog && meta.contextLength
           ? {
@@ -1000,7 +1160,9 @@ export function buildGatewayTaskConfig(input: {
     const custom = openCodeCustomization(
       config,
       selectedModel,
-      subagent ? `cognia/${subagent.modelId}` : undefined
+      subagent ? `cognia/${subagent.modelId}` : undefined,
+      binding.providerId,
+      modelPlan?.models ?? [model]
     )
     const modelEntry = (id: string, v2: boolean) => {
       const facts =
@@ -1121,39 +1283,115 @@ export function buildGatewayTaskConfig(input: {
     })
   } else if (runtime === "pi") {
     selectedModel = `cognia/${model}`
+    const plugin = piSubagentSupport(config)
+    const ids = [...new Set([model, ...(modelPlan?.models ?? [])])]
+    if (subagent && !plugin)
+      throw new Error("Pi child models require a supported installed subagent package")
+    const provider = {
+      baseUrl: endpoint,
+      api: "openai-completions",
+      apiKey: `$${GATEWAY_TOKEN_ENV}`,
+      models: ids.map((id) => {
+        const facts =
+          input.modelMetadataById?.[id] ??
+          (id === model
+            ? meta
+            : resolveModelMeta(
+                binding.providerId,
+                id,
+                settings.providerSettings,
+                settings.customProviders
+              ))
+        return {
+          id,
+          name: id,
+          ...(facts.contextLength
+            ? {
+                contextWindow: Math.min(
+                  facts.contextLength,
+                  facts.maxInputTokens ?? facts.contextLength
+                ),
+              }
+            : {}),
+          ...(facts.maxOutputTokens ? { maxTokens: facts.maxOutputTokens } : {}),
+          ...(facts.supportsReasoning !== undefined ? { reasoning: facts.supportsReasoning } : {}),
+          input: facts.supportsVision ? ["text", "image"] : ["text"],
+        }
+      }),
+    }
     files["pi/models.json"] = JSON.stringify({
-      providers: {
-        cognia: {
-          baseUrl: endpoint,
-          api: "openai-completions",
-          apiKey: `$${GATEWAY_TOKEN_ENV}`,
-          models: [
-            {
-              id: model,
-              name: model,
-              ...(meta.contextLength
-                ? {
-                    contextWindow: Math.min(
-                      meta.contextLength,
-                      meta.maxInputTokens ?? meta.contextLength
-                    ),
-                  }
-                : {}),
-              ...(meta.maxOutputTokens ? { maxTokens: meta.maxOutputTokens } : {}),
-              ...(meta.supportsReasoning !== undefined
-                ? { reasoning: meta.supportsReasoning }
-                : {}),
-              input: meta.supportsVision ? ["text", "image"] : ["text"],
-            },
-          ],
-        },
-      },
+      providers: { cognia: provider, ...(plugin ? { [binding.providerId]: provider } : {}) },
     })
+    const childDefault = `cognia/${subagent?.modelId ?? modelPlan?.slots["pi.default"]?.modelId ?? model}`
+    const overridden: Record<string, string> = {}
+    for (const [name, selection] of Object.entries(plugin?.modelOverrides ?? {})) {
+      const explicit = piModelBinding(selection, binding)
+      if (explicit.providerId !== binding.providerId || !ids.includes(explicit.modelId))
+        throw new Error("Pi subagent model is not admitted by this Cognia task")
+      overridden[name] = selection === "inherit" ? "inherit" : `cognia/${explicit.modelId}`
+    }
     files["pi/settings.json"] = JSON.stringify({
       defaultProvider: "cognia",
       defaultModel: model,
-      enabledModels: [`cognia/${model}`],
+      enabledModels: ids.map((id) => `cognia/${id}`),
+      ...(plugin?.family === "nico"
+        ? {
+            subagents: {
+              defaultModel: childDefault,
+              agentOverrides: Object.fromEntries(
+                Object.entries(overridden).map(([name, selection]) => [name, { model: selection }])
+              ),
+              modelScope: {
+                enforce: true,
+                strict: true,
+                allow: ids
+                  .map((id) => `cognia/${id}`)
+                  .concat(ids.map((id) => `${binding.providerId}/${id}`)),
+              },
+            },
+          }
+        : {}),
     })
+    if (plugin) {
+      const agents: Record<string, string | null> = { ...overridden }
+      const sources: Record<string, string> = {}
+      for (const [name, definition] of Object.entries(plugin.agents)) {
+        agents[name] = null
+        const { data, body } = parseFrontmatter(definition.content)
+        let selected: string | undefined
+        if (definition.model !== undefined) {
+          const explicit = piModelBinding(definition.model, binding)
+          if (explicit.providerId !== binding.providerId || !ids.includes(explicit.modelId))
+            throw new Error("Pi subagent model is not admitted by this Cognia task")
+          selected = `cognia/${explicit.modelId}`
+          if (definition.model === "inherit") selected = "inherit"
+          agents[name] = selected
+        }
+        sources[definition.path] = definition.digest
+        // Retain scalar/flow styles: Nico's native parser reads flat header
+        // lines, so reserializing unrelated lists as block YAML changes tools.
+        const header =
+          /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(definition.content)?.[1] ?? ""
+        const document = parseDocument(header)
+        if (isMap(document.contents)) document.contents.flow = false
+        if (plugin.family === "nico") {
+          document.set("name", name)
+          document.set("description", data.description ?? name)
+        }
+        if (selected !== undefined) document.set("model", selected)
+        files[`pi/agents/${name}.md`] = `---\n${document.toString()}---\n${body}\n`
+      }
+      env.COGNIA_TOOLHOST_PI_SUBAGENT_MODELS = JSON.stringify({
+        family: plugin.family,
+        packageDir: plugin.packageDir,
+        agents,
+        sources,
+        defaultModel: childDefault,
+        allowedModels: ids.map((id) => `cognia/${id}`),
+        providerId: binding.providerId,
+        cwd: config.process?.cwd,
+      })
+    }
   } else if (runtime === "kimi") {
     // Kimi Code's env-model provider (2.1.1 `applyEnvModelConfig`): an
     // OpenAI-compatible provider type speaks Chat Completions, the alias it
@@ -1287,6 +1525,12 @@ export function buildGatewayTaskConfig(input: {
       metadata: {
         ...config.metadata,
         cogniaGatewayTask: taskId,
+        ...(runtime === "codex" && modelPlan
+          ? {
+              cogniaModelPlanFingerprint: modelPlan.fingerprint,
+              cogniaAllowedTaskModels: modelPlan.models,
+            }
+          : {}),
         piExtensionPolicy: "isolated",
         port: 0,
       },

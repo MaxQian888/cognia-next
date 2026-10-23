@@ -537,6 +537,48 @@ describe("remote native session facade", () => {
     chatSessionId: "chat",
     externalSessionId: "native",
   }
+  it("separates native inspection from mutation and refuses old Hosts before transport", async () => {
+    const client = createRemoteSessionOperationsClient(target)
+    reply = { value: { children: [] } }
+    await expect(client.getNativeSubagents("host", "native")).resolves.toEqual({ children: [] })
+    expect(calls.at(-1)).toMatchObject({
+      command: "external_agent_session_query",
+      payload: { action: { operation: "nativeSubagents" } },
+    })
+    const change = {
+      operationId: "change",
+      nativeChildThreadId: "child",
+      expectedProcessGeneration: 1,
+      scope: "future-turns" as const,
+      modelId: "model",
+    }
+    await client.changeNativeSubagentModel("host", "native", change)
+    expect(calls.at(-1)).toMatchObject({
+      command: "external_agent_session_mutate",
+      payload: { action: { operation: "nativeSubagentModel", change } },
+    })
+    restoreDeps?.()
+    restoreDeps = __setRemoteHostConfigDepsForTests({
+      hasLocalAuthority: () => false,
+      isRemoteHostActive: () => true,
+      activeHostFeatureManifest: () =>
+        ({
+          schemaVersion: 1,
+          features: {
+            "external-agent.host-configs": {
+              version: 1,
+              operations: ["external_agent_session_query", "external_agent_session_mutate"],
+            },
+          },
+        }) as HostFeatureManifest,
+    })
+    calls.length = 0
+    await expect(client.getNativeSubagents("host", "native")).resolves.toBeUndefined()
+    await expect(client.changeNativeSubagentModel("host", "native", change)).rejects.toMatchObject({
+      code: "host-update-required",
+    })
+    expect(calls).toHaveLength(0)
+  })
   it("uses the same exact session and preserves turn fork boundaries through the mutation command", async () => {
     reply = { value: { id: "fork" } }
     const client = createRemoteSessionOperationsClient(target)

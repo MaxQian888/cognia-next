@@ -1,6 +1,7 @@
 "use client"
 
-import { useId, useMemo, useState } from "react"
+import { useEffect, useId, useMemo, useState } from "react"
+import { resolvePiSubagents, piSubagentSupport } from "@/lib/ai/agent/external/config/pi-subagents"
 import { useTranslations } from "next-intl"
 import { groupByProvider } from "@cognia/provider-routing/model-option-source"
 import { useSettingsStore } from "@/stores/settings"
@@ -69,6 +70,8 @@ const REFUSAL_KEYS = {
   "cross-account-unsupported": "refusals.crossAccount",
   "effort-unsupported": "refusals.effortUnsupported",
   "too-many-models": "refusals.tooManyModels",
+  "spawn-models-unsupported": "refusals.spawnModelsUnsupported",
+  "default-spawn-model-not-allowed": "refusals.defaultSpawnModelNotAllowed",
 } as const satisfies Record<TaskModelPlanRefusal, string>
 
 const EFFORT_LABEL_KEYS: Record<string, string> = {
@@ -92,6 +95,7 @@ function withSlot(
   const slots = { ...value?.slots }
   if (selection) slots[slot] = selection
   else delete slots[slot]
+  if (value?.version === 2) return { ...value, slots }
   return Object.keys(slots).length ? { version: 1, slots } : undefined
 }
 
@@ -112,6 +116,7 @@ export function RoleModelFields({
   layer = "config",
   inherited,
   blocker,
+  spawnModelsSupported = true,
 }: {
   config: RuntimeConfig
   /** The primary Cognia binding; `null`/absent means the native lane. */
@@ -125,13 +130,62 @@ export function RoleModelFields({
    */
   inherited?: AgentModelRoleOverrides
   blocker?: RoleModelFieldsBlocker
+  spawnModelsSupported?: boolean
 }) {
   const t = useTranslations("externalAgent.roleModels")
   const headingId = useId()
+  const [candidatesOpen, setCandidatesOpen] = useState(false)
   const providerSettings = useSettingsStore((state) => state.settings?.providerSettings)
   const customProviders = useSettingsStore((state) => state.settings?.customProviders)
   const subscriptions = useSubscriptionProviders()
-  const descriptors = gatewayModelSlots(config)
+  const protocol = config.protocol
+  const cwd = config.process?.cwd
+  const agentDir = config.process?.env?.PI_CODING_AGENT_DIR
+  const detectionKey = JSON.stringify([protocol, cwd, agentDir])
+  const [detected, setDetected] = useState<{
+    key: string
+    snapshot?: ReturnType<typeof piSubagentSupport>
+  } | null>(null)
+  useEffect(() => {
+    if (protocol !== "pi-rpc") return
+    let cancelled = false
+    const refresh = () => {
+      void resolvePiSubagents({
+        protocol,
+        process: {
+          command: "pi",
+          cwd,
+          env: agentDir ? { PI_CODING_AGENT_DIR: agentDir } : undefined,
+        },
+      })
+        .then((resolved) => {
+          if (!cancelled) setDetected({ key: detectionKey, snapshot: piSubagentSupport(resolved) })
+        })
+        .catch(() => {
+          if (!cancelled) setDetected({ key: detectionKey })
+        })
+    }
+    refresh()
+    window.addEventListener("focus", refresh)
+    return () => {
+      cancelled = true
+      window.removeEventListener("focus", refresh)
+    }
+  }, [protocol, cwd, agentDir, detectionKey])
+  const effectiveConfig = useMemo(
+    () =>
+      protocol === "pi-rpc"
+        ? {
+            ...config,
+            metadata: {
+              ...config.metadata,
+              cogniaPiSubagents: detected?.key === detectionKey ? detected.snapshot : undefined,
+            },
+          }
+        : config,
+    [protocol, config, detected, detectionKey]
+  )
+  const descriptors = gatewayModelSlots(effectiveConfig)
   const ready = !!primary?.providerId && !!primary.modelId
   const providerId = ready ? primary.providerId : undefined
   const options = useMemo(
@@ -158,7 +212,7 @@ export function RoleModelFields({
   const refusal = useMemo(() => {
     if (!ready || (!value && !inherited)) return undefined
     const result = compileEditorModelPlan({
-      config,
+      config: effectiveConfig,
       primary,
       layers: [
         { source: layer, overrides: value },
@@ -173,7 +227,7 @@ export function RoleModelFields({
     return result.ok ? undefined : result
   }, [
     ready,
-    config,
+    effectiveConfig,
     primary,
     layer,
     value,
@@ -222,6 +276,86 @@ export function RoleModelFields({
             onChange={(selection) => onChange(withSlot(value, descriptor.id, selection))}
           />
         ))}
+      {ready &&
+        blocker === undefined &&
+        descriptors.some((slot) => slot.supportsSpawnModelOverrides) && (
+          <div className="space-y-2 border-t pt-3">
+            <Label>{t("spawnModels")}</Label>
+            <p className="text-xs text-muted-foreground">{t("spawnModelsDescription")}</p>
+            {spawnModelsSupported ? (
+              <>
+                <ResponsivePicker
+                  open={candidatesOpen}
+                  onOpenChange={setCandidatesOpen}
+                  title={t("spawnModels")}
+                  trigger={
+                    <Button type="button" variant="outline">
+                      {t("addSpawnModel")}
+                    </Button>
+                  }
+                >
+                  <ProviderModelList
+                    groups={groups}
+                    searchPlaceholder={t("search", { provider: primary.providerId })}
+                    emptyLabel={t("empty")}
+                    onSelect={(_provider, modelId) => {
+                      const current = value?.version === 2 ? (value.allowedSpawnModels ?? []) : []
+                      const defaultModel =
+                        value?.slots["subagent.default"] ?? inherited?.slots["subagent.default"]
+                      const defaultBinding =
+                        defaultModel?.kind === "cognia" ? defaultModel.binding : primary
+                      const bindings = current.length ? [...current] : [defaultBinding]
+                      if (!bindings.some((binding) => binding.modelId === modelId))
+                        bindings.push({ ...primary, modelId })
+                      onChange({
+                        version: 2,
+                        slots: value?.slots ?? {},
+                        allowedSpawnModels: bindings,
+                      })
+                      setCandidatesOpen(false)
+                    }}
+                  />
+                </ResponsivePicker>
+                {value?.version === 2 &&
+                  value.allowedSpawnModels?.map((binding) => (
+                    <div key={binding.modelId} className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 break-all text-xs">{binding.modelId}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={t("removeSpawnModel", { model: binding.modelId })}
+                        onClick={() =>
+                          onChange({
+                            ...value,
+                            allowedSpawnModels: value.allowedSpawnModels!.filter(
+                              (item) => item.modelId !== binding.modelId
+                            ),
+                          })
+                        }
+                      >
+                        {t("remove")}
+                      </Button>
+                    </div>
+                  ))}
+                {value?.version === 2 && value.allowedSpawnModels !== undefined && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      onChange({ version: 2, slots: value.slots, allowedSpawnModels: [] })
+                    }
+                  >
+                    {t("clearSpawnModels")}
+                  </Button>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">{t("hostOutdated")}</p>
+            )}
+          </div>
+        )}
       {stale.map((slot) => (
         <div
           key={slot}

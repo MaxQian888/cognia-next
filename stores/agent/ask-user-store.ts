@@ -24,7 +24,11 @@ interface AskUserState {
   active: PendingAsk | null
   queue: PendingAsk[]
   /** Enqueue a prompt; returns the promise the tool call awaits. */
-  enqueue: (request: AskUserRequest, sessionId?: string) => Promise<AskUserAnswer>
+  enqueue: (
+    request: AskUserRequest,
+    sessionId?: string,
+    signal?: AbortSignal
+  ) => Promise<AskUserAnswer>
   /** Resolve the active prompt and promote the next queued one. */
   resolveActive: (answer: AskUserAnswer) => void
 }
@@ -32,9 +36,33 @@ interface AskUserState {
 export const useAskUserStore = create<AskUserState>((set, get) => ({
   active: null,
   queue: [],
-  enqueue: (request, sessionId) =>
+  enqueue: (request, sessionId, signal) =>
     new Promise<AskUserAnswer>((resolve) => {
-      const pending: PendingAsk = { id: crypto.randomUUID(), request, sessionId, resolve }
+      const cancelled = { selected: [], text: "", cancelled: true }
+      if (signal?.aborted) {
+        resolve(cancelled)
+        return
+      }
+      const pending: PendingAsk = {
+        id: crypto.randomUUID(),
+        request,
+        sessionId,
+        resolve: (answer) => {
+          signal?.removeEventListener("abort", onAbort)
+          resolve(answer)
+        },
+      }
+      const onAbort = () => {
+        pending.resolve(cancelled)
+        set((state) => {
+          if (state.active === pending) {
+            const [next, ...rest] = state.queue
+            return { active: next ?? null, queue: rest }
+          }
+          return { queue: state.queue.filter((item) => item !== pending) }
+        })
+      }
+      signal?.addEventListener("abort", onAbort, { once: true })
       set((s) => (s.active ? { queue: [...s.queue, pending] } : { active: pending }))
     }),
   resolveActive: (answer) => {
@@ -52,9 +80,9 @@ export const useAskUserStore = create<AskUserState>((set, get) => ({
  */
 export async function runAskUser(
   args: Record<string, unknown>,
-  ctx: { sessionId?: string } = {}
+  ctx: { sessionId?: string; signal?: AbortSignal } = {}
 ): Promise<string> {
   const request = parseAskUserArgs(args)
-  const answer = await useAskUserStore.getState().enqueue(request, ctx.sessionId)
+  const answer = await useAskUserStore.getState().enqueue(request, ctx.sessionId, ctx.signal)
   return formatAskUserAnswer(request, answer)
 }

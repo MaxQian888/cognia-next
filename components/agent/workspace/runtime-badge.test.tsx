@@ -17,6 +17,7 @@ const messages = {
         geminiCli: "Gemini",
         cursorCli: "Cursor",
         opencodeAcp: "OpenCode (ACP)",
+        opencodeServer: "OpenCode V1",
       },
     },
   },
@@ -31,6 +32,10 @@ function renderBadge(runtime: TeammateRuntime, iconOnly = false) {
 }
 
 describe("RuntimeBadge", () => {
+  it("renders the local OpenCode V1 runtime label", () => {
+    renderBadge("opencode-server")
+    expect(screen.getByText("OpenCode V1")).toBeInTheDocument()
+  })
   it("renders Kimi Code's runtime identity", () => {
     renderBadge("kimi")
     expect(screen.getByTestId("runtime-badge-kimi")).toHaveAttribute("title", "Kimi Code")

@@ -3,7 +3,79 @@ import {
   sdkSessionApiOptions,
   sdkOptionsForStorage,
   sdkSessionStorageFromOptions,
+  claudeCodeRuntimeOptions,
 } from "./claude-sdk-rollout"
+
+describe("Claude Code runtime preferences", () => {
+  it("keeps both capabilities off when no preference is saved", () => {
+    expect(claudeCodeRuntimeOptions(undefined, { unattended: true })).toBeUndefined()
+    expect(claudeCodeRuntimeOptions({}, { unattended: true })).toEqual({
+      version: 1,
+      sandbox: { allowNestedUserNamespaces: false },
+    })
+  })
+
+  it("requests namespaces with a fail-closed sandbox and preserves unrelated SDK fields", () => {
+    expect(
+      claudeCodeRuntimeOptions(
+        { allowNestedUserNamespaces: true },
+        {
+          unattended: false,
+          current: {
+            version: 1,
+            persistSession: true,
+            sandbox: { network: { allowedDomains: ["example.test"] } },
+          },
+        }
+      )
+    ).toEqual({
+      version: 1,
+      persistSession: true,
+      sandbox: {
+        enabled: true,
+        failIfUnavailable: true,
+        allowUnsandboxedCommands: false,
+        allowNestedUserNamespaces: true,
+        network: { allowedDomains: ["example.test"] },
+      },
+    })
+  })
+
+  it("only enables watchdog retries for unattended turns, with finite defaults", () => {
+    const preferences = { unattendedRetry: { enabled: true } }
+    expect(
+      claudeCodeRuntimeOptions(preferences, { unattended: false })?.unattendedRetry
+    ).toBeUndefined()
+    expect(claudeCodeRuntimeOptions(preferences, { unattended: true })?.unattendedRetry).toEqual({
+      maxWaitMs: 1_800_000,
+      usageLimitRecheckMs: 60_000,
+    })
+    expect(
+      claudeCodeRuntimeOptions(
+        { unattendedRetry: { enabled: true, maxWaitMs: 120_000, usageLimitRecheckMs: 90_000 } },
+        { unattended: true }
+      )?.unattendedRetry
+    ).toEqual({ maxWaitMs: 120_000, usageLimitRecheckMs: 90_000 })
+  })
+
+  it("does not retain stale retry requests after disabling the preference", () => {
+    expect(
+      claudeCodeRuntimeOptions(
+        { unattendedRetry: { enabled: false } },
+        { unattended: true, current: { version: 1, unattendedRetry: { maxWaitMs: 60_000 } } }
+      )?.unattendedRetry
+    ).toBeUndefined()
+  })
+
+  it("rejects invalid saved bounds before sending to the sidecar", () => {
+    expect(() =>
+      claudeCodeRuntimeOptions(
+        { unattendedRetry: { enabled: true, maxWaitMs: 0 } },
+        { unattended: true }
+      )
+    ).toThrow(/maxWaitMs/)
+  })
+})
 
 describe("claudeSdkRolloutOptions", () => {
   it("returns no nested block while the master rollout is disabled", () => {

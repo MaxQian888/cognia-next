@@ -184,7 +184,11 @@ export interface ExecuteAgentConfig {
   grantSource?: { kind: CapabilityGrantSourceKind; id?: string }
   /** Reasoning-effort dial for this run, ahead of the session/character chain. */
   effort?: "low" | "medium" | "high" | "xhigh" | "max"
-  /** Wall-clock timeout (ms) for the tool-enabled run. Defaults to the runner's own default. */
+  /**
+   * Wall-clock timeout (ms) for the tool-enabled run; 0 disables it. Dispatched
+   * subagents default to 0; other callers retain the capture runner's default.
+   * Stream-idle protection remains independent of this wall-clock limit.
+   */
   timeoutMs?: number
   /**
    * Live text deltas (text channel only — the sidecar stream is not
@@ -517,7 +521,7 @@ export async function buildAgentBoundContext(
 async function runToolEnabledStandalone(
   prompt: string,
   config: ExecuteAgentConfig
-): Promise<{ text: string; usage?: ExecuteAgentResult["usage"] }> {
+): Promise<{ text: string; usage?: ExecuteAgentResult["usage"]; finishReason?: string }> {
   const [
     { resolveCharacterById },
     sessionsDb,
@@ -610,6 +614,10 @@ async function runToolEnabledStandalone(
       routingSurface: "agent",
       routingContextHint: { promptText: prompt },
     })
+    if (config.isDispatchedSubagent) {
+      sendOptions.agentKind = "subagent"
+      if (config.approvalRoute) sendOptions.agentRef = config.approvalRoute.subagentId
+    }
     // The structured-output instruction rides `appendSystemPrompt` after the
     // grant's fragments so the resolved character/skill blocks survive.
     const appended = composeSystem(
@@ -697,7 +705,10 @@ async function runToolEnabledStandalone(
       try {
         result = await runner.runAndCaptureAssistantReply(session.id, prompt, attemptOptions, {
           signal: config.abortSignal,
-          ...(typeof config.timeoutMs === "number" ? { timeoutMs: config.timeoutMs } : {}),
+          preserveBudgetEvidence: config.isDispatchedSubagent === true,
+          ...(typeof config.timeoutMs === "number" || config.isDispatchedSubagent
+            ? { timeoutMs: config.timeoutMs ?? 0 }
+            : {}),
           onEvent: (event) => {
             const commits =
               (event.type === "text-delta" && event.delta.length > 0) || event.type === "tool-call"
@@ -804,7 +815,13 @@ async function runToolEnabledStandalone(
           totalTokens: (result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0),
         }
       : undefined
-    return { text: result.text ?? "", ...(usage ? { usage } : {}) }
+    return {
+      text: [result.text, result.budgetContinuationContext].filter(Boolean).join("\n\n"),
+      ...(usage ? { usage } : {}),
+      ...(result.resultSubtype
+        ? { finishReason: result.resultSubtype === "success" ? "stop" : result.resultSubtype }
+        : {}),
+    }
   } finally {
     if (config.dispatchContext) clearDispatchContext(session.id)
     if (config.approvalRoute) {
@@ -835,10 +852,10 @@ export async function runAgentRail(
   prompt: string,
   config: ExecuteAgentConfig
 ): Promise<ExecuteAgentResult> {
-  const { text, usage } = await runToolEnabledStandalone(prompt, config)
+  const { text, usage, finishReason } = await runToolEnabledStandalone(prompt, config)
   return {
     text,
-    finishReason: "stop",
+    finishReason: finishReason ?? "stop",
     channel: "sidecar",
     toolsAvailable: true,
     ...(usage ? { usage } : {}),

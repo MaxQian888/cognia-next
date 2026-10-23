@@ -40,6 +40,7 @@ export const RUNTIME_LABEL_KEYS: Record<TeammateRuntime, string> = {
   droid: "droid",
   devin: "devin",
   "opencode-acp": "opencodeAcp",
+  "opencode-server": "opencodeServer",
 }
 
 export function runtimeLabelKey(runtime: TeammateRuntime): string {

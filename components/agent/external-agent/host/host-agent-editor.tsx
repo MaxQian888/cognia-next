@@ -1,4 +1,9 @@
 "use client"
+import {
+  HOST_CONFIG_CAPABILITIES,
+  hostConfigsAvailability,
+  hostSupportsModelRolesV2,
+} from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
 
 import { useRef, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
@@ -673,6 +678,14 @@ function HostFieldDrawer({
           .filter(Boolean),
       }
     if (item === "model") {
+      if (
+        form.data.codexStepModelSwitching !== undefined &&
+        form.data.codexStepModelSwitching !== config.codexOptions?.stepModelSwitching
+      )
+        patch.codexOptions = {
+          ...config.codexOptions,
+          stepModelSwitching: form.data.codexStepModelSwitching,
+        }
       const binding = form.data.cogniaModel
       if (binding && (!binding.providerId || !binding.modelId || !canUseCogniaModels(config))) {
         setProblem(problemMessage("cogniaModelInvalid"))
@@ -775,6 +788,10 @@ function HostFieldDrawer({
       <AddAgentCogniaModelField
         form={form}
         roleModelsBlocker={supportsModelRoles ? undefined : "host-outdated"}
+        spawnModelsSupported={hostSupportsModelRolesV2()}
+        nativeModelControlSupported={
+          hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.nativeSubagentControl).ok
+        }
       />
     ),
   }

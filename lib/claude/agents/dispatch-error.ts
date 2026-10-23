@@ -78,6 +78,29 @@ export function envelopeForBudgetExhausted(message: string): PluginDispatchError
   return { code: "budget-exhausted", retryable: false, message }
 }
 
+/** Keep SDK budget stops out of the success/retry paths in both dispatch hosts. */
+export function normalizeDispatchBudgetResult(
+  result: PluginSubagentDispatchResult
+): PluginSubagentDispatchResult {
+  if (result.finishReason !== "error_max_turns" && result.finishReason !== "error_max_budget_usd")
+    return result
+
+  const message = `Task/research incomplete: execution budget exhausted (${result.finishReason}). Findings are partial; remaining work is unverified.`
+  const continuation = result.runId
+    ? `Continue with dispatch_agent({resume:${JSON.stringify(result.runId)}, prompt:"Continue the unfinished work from the recorded findings."}).`
+    : "Continue by dispatching the same agent with the original task and these partial findings."
+  const text = [result.text, `[${message} ${continuation}]`].filter(Boolean).join("\n\n")
+  return {
+    ...result,
+    text,
+    finishReason: "error",
+    errorEnvelope: {
+      ...envelopeForBudgetExhausted(message),
+      partialText: text,
+    },
+  }
+}
+
 /**
  * Model-facing rendering of a dispatch outcome (Claude Code v2.1.199
  * semantics): a run that streamed text before dying returns that partial
@@ -90,9 +113,11 @@ export function renderDispatchOutcomeForModel(
   label: string,
   r: PluginSubagentDispatchResult
 ): string {
+  r = normalizeDispatchBudgetResult(r)
   if (r.rejection) return `[${label}] ${r.text}`
   if (r.finishReason === "cancelled") return `[${label}] cancelled.`
   const envelope = r.errorEnvelope
+  if (envelope?.code === "budget-exhausted") return `[${label}]\n${r.text}`
   if (r.finishReason === "error" && envelope) {
     if (envelope.partialText) {
       return `[${label}]\n${envelope.partialText}\n\n[Subagent was cut off by an error and did not finish: ${envelope.message}]`
