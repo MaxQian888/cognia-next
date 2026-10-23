@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import messages from "@/i18n/messages/en.json"
@@ -23,6 +23,7 @@ jest.mock("@/lib/docs-providers/providers/google/config", () => ({
   saveGoogleClientSecret: jest.fn(async () => undefined),
   updateGoogleDocsSettings: jest.fn(async () => ({})),
   clearGoogleConnection: jest.fn(async () => undefined),
+  subscribeGoogleDocsSettings: jest.fn(() => () => undefined),
 }))
 jest.mock("@/lib/docs-providers/providers/google/auth", () => ({
   beginGoogleDocsAuth: jest.fn(async () => ({
@@ -39,6 +40,7 @@ import { DocsProviderError } from "@/lib/docs-providers"
 import { useHostProfile } from "@/hooks/use-host-profile"
 import {
   getGoogleDocsSettings,
+  subscribeGoogleDocsSettings,
   saveGoogleClientSecret,
   updateGoogleDocsSettings,
 } from "@/lib/docs-providers/providers/google/config"
@@ -67,6 +69,7 @@ beforeEach(() => {
   hostProfileMock.mockReturnValue("desktop")
   listAdaptersMock.mockResolvedValue([])
   getSettingsMock.mockResolvedValue({})
+  ;(subscribeGoogleDocsSettings as jest.Mock).mockImplementation(() => () => undefined)
 })
 
 describe("DocsProvidersCard — host gating", () => {
@@ -219,4 +222,77 @@ describe("DocsProvidersCard — Google row", () => {
     )
     expect(toast.warning).toHaveBeenCalledWith(expect.stringContaining("backend error"))
   })
+})
+
+it("updates connection state after OAuth completes and after credentials are invalidated", async () => {
+  let notify: ((settings: { connected?: boolean; accountEmail?: string }) => void) | undefined
+  const unsubscribe = jest.fn()
+  ;(subscribeGoogleDocsSettings as jest.Mock).mockImplementation((listener) => {
+    notify = listener
+    return unsubscribe
+  })
+  const view = renderCard()
+  await waitFor(() => expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument())
+  act(() => notify?.({ connected: true, accountEmail: "user@example.test" }))
+  expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument()
+  expect(screen.getByText(/user@example.test/)).toBeInTheDocument()
+  act(() => notify?.({ connected: false }))
+  expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument()
+  expect(screen.queryByText(/user@example.test/)).not.toBeInTheDocument()
+  view.unmount()
+  expect(unsubscribe).toHaveBeenCalledTimes(1)
+})
+
+it("keeps a newer connection notification when the initial read resolves late", async () => {
+  let resolve!: (settings: { connected: boolean }) => void
+  getSettingsMock.mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done
+    })
+  )
+  let notify: ((settings: { connected: boolean; accountEmail?: string }) => void) | undefined
+  ;(subscribeGoogleDocsSettings as jest.Mock).mockImplementation((listener) => {
+    notify = listener
+    return () => undefined
+  })
+  renderCard()
+  act(() => notify?.({ connected: true, accountEmail: "fresh@example.test" }))
+  await act(async () => resolve({ connected: false }))
+  expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument()
+  expect(screen.getByText(/fresh@example.test/)).toBeInTheDocument()
+})
+
+it("reports disconnect storage failures without an unhandled rejection or success toast", async () => {
+  getSettingsMock.mockResolvedValue({ clientId: "cid", connected: true })
+  disconnectMock.mockRejectedValueOnce(new Error("keyring unavailable"))
+  const user = userEvent.setup()
+  renderCard()
+  await user.click(await screen.findByRole("button", { name: "Disconnect" }))
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("keyring unavailable"))
+  )
+  expect(toast.success).not.toHaveBeenCalled()
+  expect(screen.getByRole("button", { name: "Disconnect" })).toBeEnabled()
+})
+
+it("keeps the disconnecting label while remote revocation is pending after local clear", async () => {
+  getSettingsMock.mockResolvedValue({ clientId: "cid", connected: true })
+  let notify: ((settings: { clientId?: string; connected: boolean }) => void) | undefined
+  ;(subscribeGoogleDocsSettings as jest.Mock).mockImplementation((listener) => {
+    notify = listener
+    return () => undefined
+  })
+  let finish!: (outcome: { revoked: true }) => void
+  disconnectMock.mockImplementationOnce(() => {
+    notify?.({ clientId: "cid", connected: false })
+    return new Promise((resolve) => {
+      finish = resolve
+    })
+  })
+  const user = userEvent.setup()
+  renderCard()
+  await user.click(await screen.findByRole("button", { name: "Disconnect" }))
+  expect(screen.getByRole("button", { name: "Disconnecting…" })).toBeDisabled()
+  await act(async () => finish({ revoked: true }))
+  expect(screen.getByRole("button", { name: "Connect" })).toBeEnabled()
 })

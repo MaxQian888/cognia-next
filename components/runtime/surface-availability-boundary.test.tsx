@@ -7,7 +7,7 @@ import {
 } from "@/lib/runtime/connection-notice-claim"
 import { SurfaceAvailabilityBoundary, exitFor } from "./surface-availability-boundary"
 
-let pathname = "/browser"
+let pathname = "/remote-sessions"
 let snapshot: Record<string, unknown>
 
 jest.mock("next/navigation", () => ({
@@ -38,7 +38,7 @@ jest.mock("next-intl", () => ({
 
 beforeEach(() => {
   compact = false
-  pathname = "/browser"
+  pathname = "/remote-sessions"
   snapshot = {
     target: { id: "web-standalone", kind: "standalone", platform: "web" },
     vaultState: "unlocked",
@@ -56,6 +56,17 @@ it("returns an explanatory recovery page for a host-only standalone deep link", 
   expect(screen.queryByText("browser implementation")).not.toBeInTheDocument()
   expect(screen.getByText("states.unsupported")).toBeInTheDocument()
   expect(screen.getByRole("link", { name: "pairHost" })).toHaveAttribute("href", "/pair")
+})
+
+it("renders the lightweight browser without a paired host", () => {
+  pathname = "/browser"
+  render(
+    <SurfaceAvailabilityBoundary>
+      <div>Lightweight preview</div>
+    </SurfaceAvailabilityBoundary>
+  )
+  expect(screen.getByText("Lightweight preview")).toBeVisible()
+  expect(screen.queryByRole("link", { name: "pairHost" })).not.toBeInTheDocument()
 })
 
 it("names the page it is standing in for", () => {

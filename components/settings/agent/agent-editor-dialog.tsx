@@ -73,6 +73,7 @@ import {
   SIWC_APP_SERVER_PROTOCOL,
 } from "@/lib/ai/agent/external/protocol-options"
 import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
+import { resolvePiSubagents } from "@/lib/ai/agent/external/config/pi-subagents"
 import { compileEditorModelPlan } from "@/lib/ai/agent/external/config/cognia-model-options"
 import { useSettingsStore } from "@/stores/settings"
 import { uniqueDuplicateName } from "@/lib/ai/agent/external/config/duplicate-config"
@@ -187,6 +188,7 @@ interface AgentFormData {
   // Codex app-server options (shown only for protocol === "codex-app-server")
   codexSandboxMode: "readOnly" | "workspaceWrite" | "dangerFullAccess"
   codexNetworkAccess: boolean
+  codexStepModelSwitching: boolean
   /** Newline-separated extra writable folders; active only in workspaceWrite. */
   codexWritableRoots: string
   /** Empty string = model default */
@@ -313,6 +315,7 @@ const DEFAULT_FORM_DATA: AgentFormData = {
   clearApiKey: false,
   codexSandboxMode: "workspaceWrite",
   codexNetworkAccess: false,
+  codexStepModelSwitching: false,
   codexWritableRoots: "",
   codexDefaultEffort: "",
   codexReasoningSummary: "",
@@ -700,6 +703,7 @@ export function AgentEditorDialog({
       autoApprovePatterns: agent.autoApprovePatterns ?? [],
       codexSandboxMode: agent.codexOptions?.sandboxMode ?? "workspaceWrite",
       codexNetworkAccess: agent.codexOptions?.networkAccess ?? false,
+      codexStepModelSwitching: agent.codexOptions?.stepModelSwitching ?? false,
       codexWritableRoots: agent.codexOptions?.writableRoots?.join("\n") ?? "",
       codexDefaultEffort: agent.codexOptions?.defaultReasoningEffort ?? "",
       codexReasoningSummary: agent.codexOptions?.reasoningSummary ?? "",
@@ -717,15 +721,18 @@ export function AgentEditorDialog({
   const [processEnvRows, setProcessEnvRows] = useState(() => objectToKvRows(formData.processEnv))
   const [submitting, setSubmitting] = useState(false)
 
-  // The launch target the state-isolation rule is decided on. A managed or
-  // network agent has no local command, and the field says so.
+  // Gateway-owned V2 tasks launch a private service even without a saved command.
   const launchesProcess =
     formData.transport === "stdio" ||
-    (formData.protocol === "opencode" && formData.opencodeAutoSpawn)
+    (formData.protocol === "opencode" && formData.opencodeAutoSpawn) ||
+    (formData.protocol === "opencode-v2" &&
+      Boolean(formData.cogniaModel) &&
+      !formData.networkEndpoint.trim())
   const isolationCommand =
     managedDsh || !launchesProcess
       ? undefined
-      : formData.processCommand.trim() || (formData.protocol === "opencode" ? "opencode" : "")
+      : formData.processCommand.trim() ||
+        (formData.protocol === "opencode" || formData.protocol === "opencode-v2" ? "opencode" : "")
   const isolationArgs = tokenizeShellCommand(formData.processArgs) ?? []
   // A runtime with no home variable cannot be given its own state: whatever was
   // chosen, it runs on the shared one, and the saved value must say so.
@@ -758,9 +765,7 @@ export function AgentEditorDialog({
   )
 
   const handleSave = useCallback(async () => {
-    const usesProcess =
-      formData.transport === "stdio" ||
-      (formData.protocol === "opencode" && formData.opencodeAutoSpawn)
+    const usesProcess = launchesProcess
     const allowedHosts = formData.sandboxPolicy?.allowedHosts
       ?.map((host) => host.trim())
       .filter(Boolean)
@@ -899,7 +904,12 @@ export function AgentEditorDialog({
         endpoint,
         apiKey: formData.networkApiKey || undefined,
       }
-      input.process = { command: "", args: [], cwd: formData.processCwd.trim() || undefined }
+      input.process = {
+        command: "",
+        args: [],
+        cwd: formData.processCwd.trim() || undefined,
+        env: environment,
+      }
     } else if (formData.protocol === "opencode") {
       // OpenCode auto-spawns a local `opencode serve` when the toggle is on
       // (seeded from the preset); otherwise it connects to a server endpoint.
@@ -951,6 +961,10 @@ export function AgentEditorDialog({
       input.codexOptions = {
         sandboxMode: formData.codexSandboxMode,
         networkAccess: formData.codexNetworkAccess,
+        ...(formData.codexStepModelSwitching ||
+        editingAgent?.codexOptions?.stepModelSwitching !== undefined
+          ? { stepModelSwitching: formData.codexStepModelSwitching }
+          : {}),
         ...(parseSkillRootLines(formData.codexWritableRoots).length
           ? { writableRoots: parseSkillRootLines(formData.codexWritableRoots) }
           : {}),
@@ -1053,16 +1067,21 @@ export function AgentEditorDialog({
       toast.error(tGateway("invalid"))
       return
     }
-    if (input.cogniaModel && input.modelRoles) {
+    if (input.cogniaModel) {
       const { settings } = useSettingsStore.getState()
-      const plan = compileEditorModelPlan({
-        config: input as CreateExternalAgentInput,
-        primary: input.cogniaModel,
-        layers: [{ source: "config", overrides: input.modelRoles }],
-        providerSettings: settings?.providerSettings ?? {},
-        customProviders: settings?.customProviders,
-      })
-      if (!plan.ok) {
+      try {
+        const plan = compileEditorModelPlan({
+          config: await resolvePiSubagents(input as CreateExternalAgentInput),
+          primary: input.cogniaModel,
+          layers: [{ source: "config", overrides: input.modelRoles ?? undefined }],
+          providerSettings: settings?.providerSettings ?? {},
+          customProviders: settings?.customProviders,
+        })
+        if (!plan.ok) {
+          toast.error(tRoleModels("invalid"))
+          return
+        }
+      } catch {
         toast.error(tRoleModels("invalid"))
         return
       }
@@ -1993,6 +2012,23 @@ export function AgentEditorDialog({
                   disabled={!codexWorkspaceAccessActive}
                   onCheckedChange={(checked) =>
                     setFormData({ ...formData, codexNetworkAccess: checked })
+                  }
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 space-y-0.5">
+                  <Label htmlFor={fid("codex-step-model-switching")}>
+                    {t("codexStepModelSwitching")}
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t("codexStepModelSwitchingDesc")}
+                  </p>
+                </div>
+                <Switch
+                  id={fid("codex-step-model-switching")}
+                  checked={formData.codexStepModelSwitching}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, codexStepModelSwitching: checked })
                   }
                 />
               </div>

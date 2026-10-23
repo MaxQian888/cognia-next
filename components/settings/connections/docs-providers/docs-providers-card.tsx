@@ -44,6 +44,7 @@ import { DocsProviderError, larkDocsProvider, googleDocsProvider } from "@/lib/d
 import {
   GOOGLE_DOCS_SCOPES,
   getGoogleDocsSettings,
+  subscribeGoogleDocsSettings,
   saveGoogleClientSecret,
   updateGoogleDocsSettings,
 } from "@/lib/docs-providers/providers/google/config"
@@ -172,7 +173,8 @@ function GoogleDocsRow() {
   const [clientSecret, setClientSecret] = useState("")
   const [connected, setConnected] = useState(false)
   const [email, setEmail] = useState<string | undefined>(undefined)
-  const [busy, setBusy] = useState(false)
+  const [operation, setOperation] = useState<"connect" | "disconnect" | null>(null)
+  const busy = operation !== null
   // Every control below talks to the Rust loopback listener or to Google with
   // a credential only the desktop shell can complete a round trip for. Inert
   // rather than absent, with the reason above it.
@@ -180,19 +182,30 @@ function GoogleDocsRow() {
 
   useEffect(() => {
     let cancelled = false
-    void getGoogleDocsSettings().then((settings) => {
+    let revision = 0
+    const apply = (settings: Awaited<ReturnType<typeof getGoogleDocsSettings>>) => {
       if (cancelled) return
       setClientId(settings.clientId ?? "")
       setConnected(Boolean(settings.connected))
       setEmail(settings.accountEmail)
+    }
+    const unsubscribe = subscribeGoogleDocsSettings((settings) => {
+      ++revision
+      apply(settings)
+    })
+    const initialRevision = revision
+    void getGoogleDocsSettings().then((settings) => {
+      // A slow initial read must not overwrite a newer OAuth notification.
+      if (revision === initialRevision) apply(settings)
     })
     return () => {
       cancelled = true
+      unsubscribe()
     }
   }, [])
 
   const connect = useCallback(async () => {
-    setBusy(true)
+    setOperation("connect")
     try {
       await updateGoogleDocsSettings({ clientId: clientId.trim() })
       if (clientSecret.trim()) await saveGoogleClientSecret(clientSecret.trim())
@@ -212,17 +225,15 @@ function GoogleDocsRow() {
             : String(err)
       toast.error(t("settings.connectFailed", { reason }))
     } finally {
-      setBusy(false)
+      setOperation(null)
     }
   }, [clientId, clientSecret, t])
 
   const disconnect = useCallback(async () => {
-    setBusy(true)
+    setOperation("disconnect")
     try {
-      // Revokes at Google first, then clears local state. See
-      // `disconnectGoogleDocs`. Local state is cleared either way, so the UI
-      // always ends up disconnected. The toast is how the user learns that the
-      // grant may still stand on Google's side and needs finishing there.
+      // Local invalidation happens before revocation. Report any storage failure
+      // rather than claiming the connection was cleared successfully.
       const outcome = await disconnectGoogleDocs()
       setConnected(false)
       setEmail(undefined)
@@ -231,8 +242,16 @@ function GoogleDocsRow() {
       } else if (outcome.reason !== "not-connected") {
         toast.warning(t("settings.disconnectNotRevoked", { reason: outcome.reason }))
       }
+    } catch (err) {
+      const reason =
+        err instanceof DocsProviderError
+          ? t(`errors.${err.code}`, err.params ?? {})
+          : err instanceof Error
+            ? err.message
+            : String(err)
+      toast.error(t("settings.disconnectFailed", { reason }))
     } finally {
-      setBusy(false)
+      setOperation(null)
     }
   }, [t])
 
@@ -304,7 +323,11 @@ function GoogleDocsRow() {
             onClick={() => void connect()}
             data-testid="docs-provider-google-connect"
           >
-            {busy ? t("settings.connecting") : t("settings.connect")}
+            {operation === "disconnect"
+              ? t("settings.disconnecting")
+              : busy
+                ? t("settings.connecting")
+                : t("settings.connect")}
           </Button>
         </div>
       )}

@@ -22,6 +22,9 @@ jest.mock("./sandbox-enable-card", () => ({
 jest.mock("./canvas-code-sandbox-card", () => ({
   CanvasCodeSandboxCard: () => <div data-testid="canvas-code-sandbox-card-stub" />,
 }))
+jest.mock("./claude-code-runtime-card", () => ({
+  ClaudeCodeRuntimeCard: () => <div role="region" aria-label="Claude Code runtime" />,
+}))
 jest.mock("./sandbox-tier-card", () => ({
   SandboxTierCard: () => <div data-testid="sandbox-tier-card-stub" />,
 }))
@@ -80,6 +83,13 @@ beforeEach(() => {
 })
 
 describe("SandboxSection", () => {
+  it("mounts the Claude Code runtime settings", async () => {
+    mockCall.mockResolvedValue({ available: true, backend: "linux-bwrap", version: "system" })
+    renderWithIntl(<SandboxSection />)
+    expect(screen.getByRole("region", { name: "Claude Code runtime" })).toBeInTheDocument()
+    await waitFor(() => expect(mockCall).toHaveBeenCalled())
+  })
+
   it("renders 'Setup required' when health.available is false", async () => {
     mockCall.mockResolvedValue({
       available: false,

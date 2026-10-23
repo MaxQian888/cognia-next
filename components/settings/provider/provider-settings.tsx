@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
 import { discoverSubscriptionModels } from "@/lib/subscription/core/model-discovery"
+import { discoverMagpieModels } from "@cognia/provider-core/providers/magpie"
 import { useProviderSettings } from "@/hooks/settings/use-provider-settings"
 import { PROVIDER_SETTINGS_PARAM as PROVIDER_PARAM } from "@/lib/settings/deep-link"
 import { useProviderManager } from "@/hooks/ai/use-provider-manager"
@@ -622,6 +623,25 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
         await s.testProvider(selectedId)
       } else if (selectedId === "openrouter") {
         await syncOpenRouterCatalog(selectedSettings?.apiKey)
+      } else if (selectedId === "magpie") {
+        const before = useSettingsStore.getState().settings?.providerSettings?.magpie
+        const result = await discoverMagpieModels({
+          baseURL: selectedSettings?.baseURL,
+          apiKey: selectedSettings?.apiKey,
+          signal: controller.signal,
+        })
+        if (
+          controller.signal.aborted ||
+          useSettingsStore.getState().settings?.providerSettings?.magpie !== before
+        )
+          return
+        await setProviderConfig("magpie", {
+          discoveredModels: result.models,
+          discoveredModelsLastFetched: Date.now(),
+          defaultModel: result.models.some((m) => m.id === before?.defaultModel)
+            ? before?.defaultModel
+            : result.models[0]?.id,
+        })
       } else {
         await syncModelsDevCatalog()
       }

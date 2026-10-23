@@ -5,8 +5,11 @@ import { DesktopOnlyInitializers } from "./desktop-only-initializers"
 // Replace every `next/dynamic(...)` call with the same lightweight stub so we
 // can assert how many gated children get rendered without pulling the real
 // desktop subsystem graphs into the test.
-jest.mock("next/dynamic", () => () => {
-  const Stub = () => <span data-testid="desktop-child" />
+jest.mock("next/dynamic", () => (loader: () => unknown) => {
+  const consent = String(loader).includes("consent-overlay")
+  const Stub = () => (
+    <span data-testid="desktop-child" data-consent-overlay={consent || undefined} />
+  )
   Stub.displayName = "MockDesktopChild"
   return Stub
 })
@@ -48,6 +51,7 @@ jest.mock("@/lib/pet/window-role", () => ({
 describe("DesktopOnlyInitializers", () => {
   beforeEach(() => {
     isTauriMock.mockReset()
+    mockMarkDesktopReady.mockClear()
     mockPetRole = "main"
     mockDesktopRequested = true
   })
@@ -88,7 +92,18 @@ describe("DesktopOnlyInitializers", () => {
     await act(async () => {
       container = render(<DesktopOnlyInitializers />).container
     })
-    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(2)
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(3)
+  })
+
+  it("can receive consent before any desktop-tools route has been opened", async () => {
+    isTauriMock.mockReturnValue(true)
+    mockDesktopRequested = false
+    let container!: HTMLElement
+    await act(async () => {
+      container = render(<DesktopOnlyInitializers />).container
+    })
+    expect(container.querySelector('[data-consent-overlay="true"]')).not.toBeNull()
+    expect(mockMarkDesktopReady).not.toHaveBeenCalled()
   })
 
   it.each([

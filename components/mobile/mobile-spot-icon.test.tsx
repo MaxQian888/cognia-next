@@ -45,7 +45,7 @@ describe("<MobileSpotIcon />", () => {
 
   it("selects exactly the verified WebP inventory with PNG fallback for the remaining icons", () => {
     expect(manifest.runtimeFormats.default).toBe("png")
-    expect(new Set(manifest.runtimeFormats.webp).size).toBe(65)
+    expect(new Set(manifest.runtimeFormats.webp).size).toBe(66)
     expect(
       MOBILE_SPOT_ICON_NAMES.filter((name) => !manifest.runtimeFormats.webp.includes(name))
     ).toHaveLength(16)
