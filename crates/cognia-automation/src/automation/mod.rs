@@ -24,6 +24,7 @@ pub mod events;
 pub mod host;
 pub mod input_monitor;
 pub mod instruction_pack;
+pub mod invocation;
 pub mod kill_switch;
 pub mod locked_use;
 pub mod permission;

@@ -81,6 +81,20 @@ pub struct AxBackend {
 }
 
 impl AxBackend {
+    fn foreground_element_center(&self, element: &AxElement) -> Result<Point> {
+        let pid = raw::element_pid(element).ok_or(AutomationError::StaleElement)?;
+        let target = raw::read_rect(element).ok_or(AutomationError::StaleElement)?;
+        let focused = raw::focused_window(&AxElement::application(pid))
+            .and_then(|window| raw::read_rect(&window));
+        crate::automation::platform::shared::pointer::foreground_center(
+            pid,
+            raw::system_wide_focused_pid(),
+            raw::belongs_to_focused_window(element, pid),
+            target,
+            focused,
+        )
+    }
+
     pub fn new() -> std::result::Result<Self, String> {
         Ok(Self::default())
     }
@@ -176,6 +190,24 @@ impl Drop for AxBackend {
 impl AutomationBackend for AxBackend {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
+            operations: OperationCapabilities {
+                app_sessions: true,
+                window_op: false,
+                element_click: true,
+                element_scroll: true,
+                invoke_patterns: vec![
+                    "invoke",
+                    "toggle",
+                    "selectionItem",
+                    "value",
+                    "text",
+                    "expandCollapse",
+                    "scrollItem",
+                ]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            },
             platform: Platform::Macos,
             has_uia: false,
             has_input_sim: true,
@@ -331,14 +363,25 @@ impl AutomationBackend for AxBackend {
     }
 
     fn click(&self, target: ClickTarget, opts: ClickOpts) -> Result<()> {
+        if opts.modifier.is_some() {
+            return Err(AutomationError::UnsupportedPlatform);
+        }
         match target {
             ClickTarget::Element { element_ref } => {
                 let element = self.resolve_element(&element_ref)?;
-                raw::perform_action(&element, "AXPress").map_err(|error| {
-                    AutomationError::BackendError {
-                        message: format!("AXPress failed with AXError {error}"),
-                    }
-                })
+                if crate::automation::platform::shared::pointer::native_click_eligible(&opts)
+                    && raw::perform_action(&element, "AXPress").is_ok()
+                {
+                    return Ok(());
+                }
+                let center = self.foreground_element_center(&element)?;
+                self.click(
+                    ClickTarget::Point {
+                        x: center.x,
+                        y: center.y,
+                    },
+                    opts,
+                )
             }
             ClickTarget::Point { x, y } => {
                 let mut e = enigo_new()?;
@@ -470,28 +513,46 @@ impl AutomationBackend for AxBackend {
             .map_err(input_err("mouse_move"))
     }
 
-    fn drag(&self, from: Point, to: Point, _opts: DragOpts) -> Result<()> {
+    fn drag(&self, from: Point, to: Point, opts: DragOpts) -> Result<()> {
         let mut e = enigo_new()?;
-        e.move_mouse(from.x, from.y, enigo::Coordinate::Abs)
-            .map_err(input_err("drag.move_start"))?;
-        e.button(enigo::Button::Left, Direction::Press)
-            .map_err(input_err("drag.press"))?;
-        e.move_mouse(to.x, to.y, enigo::Coordinate::Abs)
-            .map_err(input_err("drag.move_end"))?;
-        e.button(enigo::Button::Left, Direction::Release)
-            .map_err(input_err("drag.release"))
+        crate::automation::platform::shared::pointer::drag(
+            &mut e,
+            from,
+            to,
+            opts,
+            |e, point| {
+                e.move_mouse(point.x, point.y, enigo::Coordinate::Abs)
+                    .map_err(input_err("drag.move"))
+            },
+            |e, button, transition| {
+                e.button(
+                    to_enigo_button(Some(button)),
+                    match transition {
+                        ButtonTransition::Down => Direction::Press,
+                        ButtonTransition::Up => Direction::Release,
+                    },
+                )
+                .map_err(input_err("drag.button"))
+            },
+            std::thread::sleep,
+        )
     }
 
     fn scroll(&self, target: ScrollTarget, opts: ScrollOpts) -> Result<()> {
         let mut e = enigo_new()?;
-        if let ScrollTarget::Point { x, y } = target {
-            e.move_mouse(x, y, enigo::Coordinate::Abs)
-                .map_err(input_err("scroll.move"))?;
-        }
+        let point = match target {
+            ScrollTarget::Point { x, y } => Point { x, y },
+            ScrollTarget::Element { element_ref } => {
+                let element = self.resolve_element(&element_ref)?;
+                self.foreground_element_center(&element)?
+            }
+        };
+        e.move_mouse(point.x, point.y, enigo::Coordinate::Abs)
+            .map_err(input_err("scroll.move"))?;
         // enigo's `scroll(amount, axis)` uses notch-sized increments (positive
         // = forward / down). Our wire format is wheel units (120 per notch).
-        let notches_y = opts.dy / 120;
-        let notches_x = opts.dx / 120;
+        let notches_y = crate::automation::platform::shared::pointer::wheel_notches(opts.dy);
+        let notches_x = crate::automation::platform::shared::pointer::wheel_notches(opts.dx);
         if notches_y != 0 {
             e.scroll(notches_y, enigo::Axis::Vertical)
                 .map_err(input_err("scroll.vertical"))?;

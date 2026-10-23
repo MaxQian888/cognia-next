@@ -25,6 +25,7 @@ const mockSubscribe = jest.fn()
 jest.mock("@/lib/automation/client", () => ({
   desktop: {
     consentRespond: jest.fn().mockResolvedValue(undefined),
+    consentPending: jest.fn().mockResolvedValue([]),
   },
 }))
 

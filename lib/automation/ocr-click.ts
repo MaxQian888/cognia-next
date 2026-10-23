@@ -30,10 +30,12 @@ import {
   suppressComputerUsePipForCapture,
 } from "./computer-use-pip"
 import type {
+  AppOcrState,
   FindScreenTextResult,
   ScreenTextMatch,
 } from "@cognia/plugin-contract/lib/automation/ocr-click"
 export type {
+  AppOcrState,
   FindScreenTextResult,
   ScreenTextMatch,
 } from "@cognia/plugin-contract/lib/automation/ocr-click"
@@ -43,9 +45,13 @@ export interface OcrClickDeps {
   extract: (input: OcrInput, deps: ExtractDeps) => Promise<OcrResult>
   click: (point: Point, ctx: CallContext) => Promise<void>
   ocrDeps: ExtractDeps
+  zoom?: typeof desktop.zoom
+  performAction?: typeof desktop.performAction
 }
 
 export interface FindScreenTextArgs {
+  /** App-bound OCR uses the host-held revision frame and canonical pixel actions. */
+  state?: AppOcrState
   /** Substring to locate (case-insensitive, whitespace-collapsed). Omit to list all blocks. */
   query?: string
   ctx?: CallContext
@@ -137,7 +143,57 @@ export async function findScreenTextWith(
   args: FindScreenTextArgs = {}
 ): Promise<FindScreenTextResult> {
   const ctx = args.ctx ?? { surface: "computerUse" as const }
-  const shot = await deps.screenshot(args.opts ?? {}, ctx)
+  let shot: Screenshot
+  let frame: Awaited<ReturnType<typeof desktop.zoom>> | undefined
+  if (args.state) {
+    if (!deps.zoom || args.opts?.region || args.opts?.monitorId) {
+      throw new OcrError(
+        "invalid_input",
+        "ocr-click",
+        "App OCR requires a revision frame without monitor/crop overrides"
+      )
+    }
+    const state = args.state
+    const zoomed = await deps.zoom(
+      state,
+      { x: 0, y: 0, width: state.surface.pixelWidth, height: state.surface.pixelHeight },
+      ctx
+    )
+    if (
+      zoomed.sessionId !== state.sessionId ||
+      zoomed.lineageId !== state.lineageId ||
+      zoomed.revision !== state.revision ||
+      !Number.isFinite(zoomed.scale) ||
+      zoomed.scale <= 0
+    ) {
+      throw new OcrError(
+        "invalid_input",
+        "ocr-click",
+        "OCR frame does not match the requested app revision"
+      )
+    }
+    if (
+      !zoomed.surface ||
+      zoomed.surface.pixelWidth !== state.surface.pixelWidth ||
+      zoomed.surface.pixelHeight !== state.surface.pixelHeight ||
+      zoomed.region.x !== 0 ||
+      zoomed.region.y !== 0 ||
+      zoomed.region.width !== zoomed.surface.pixelWidth ||
+      zoomed.region.height !== zoomed.surface.pixelHeight
+    ) {
+      throw new OcrError(
+        "invalid_input",
+        "ocr-click",
+        "Host OCR frame geometry is missing or mismatched"
+      )
+    }
+    frame = zoomed
+    shot = { ...zoomed.screenshot, sourceWidth: undefined, sourceHeight: undefined }
+  } else {
+    // Compatibility path for explicit legacy API callers. Model-facing tools
+    // require state and never enter whole-monitor capture.
+    shot = await deps.screenshot(args.opts ?? {}, ctx)
+  }
   const mimeType = mimeForFormat(shot.format)
   const result = await deps.extract(
     {
@@ -146,7 +202,47 @@ export async function findScreenTextWith(
     },
     deps.ocrDeps
   )
-  const all = blocksToScreenMatches(result, shot)
+  const all = blocksToScreenMatches(result, shot).map((match) => {
+    if (!frame?.surface) return match
+    const surface = frame.surface
+    // Axes can have slightly different scale after aspect-ratio rounding.
+    const sx = surface.pixelWidth / shot.width
+    const sy = surface.pixelHeight / shot.height
+    const center = { x: Math.round(match.center.x * sx), y: Math.round(match.center.y * sy) }
+    if (
+      center.x < 0 ||
+      center.y < 0 ||
+      center.x >= surface.pixelWidth ||
+      center.y >= surface.pixelHeight
+    ) {
+      throw new OcrError("invalid_input", "ocr-click", "OCR match is outside the app frame")
+    }
+    // Match session::pixel_to_global_point exactly, including negative display
+    // origins, ties-away-from-zero rounding and Rust's saturating i32 cast.
+    const desktopCoordinate = (value: number) =>
+      Math.min(
+        2147483647,
+        Math.max(-2147483648, value < 0 ? -Math.round(-value) : Math.round(value))
+      )
+    return {
+      ...match,
+      bbox: {
+        x: Math.round(match.bbox.x * sx),
+        y: Math.round(match.bbox.y * sy),
+        width: Math.round(match.bbox.width * sx),
+        height: Math.round(match.bbox.height * sy),
+      },
+      center,
+      desktopCenter: {
+        x: desktopCoordinate(
+          surface.logicalBounds.x + (center.x * surface.logicalBounds.width) / surface.pixelWidth
+        ),
+        y: desktopCoordinate(
+          surface.logicalBounds.y + (center.y * surface.logicalBounds.height) / surface.pixelHeight
+        ),
+      },
+    }
+  })
   if (all.length === 0) {
     throw new OcrError(
       "provider_failed",
@@ -159,7 +255,11 @@ export async function findScreenTextWith(
     ok: true,
     providerId: result.providerId,
     matches,
-    capture: { width: shot.width, height: shot.height },
+    capture: {
+      width: args.state?.surface.pixelWidth ?? shot.width,
+      height: args.state?.surface.pixelHeight ?? shot.height,
+      coordinateSpace: args.state ? "screenshotPixels" : "desktop",
+    },
   }
 }
 
@@ -171,6 +271,7 @@ export async function clickScreenTextWith(
   const ctx = args.ctx ?? { surface: "computerUse" as const }
   const found = await findScreenTextWith(deps, {
     query: args.query,
+    state: args.state,
     ctx,
     languages: args.languages,
     opts: args.opts,
@@ -186,7 +287,34 @@ export async function clickScreenTextWith(
   }
   // Stamp the resolved coordinate into the CallContext so the per-action policy
   // (ADR-0028 / T5 `clickX`/`clickY`) and audit can see where the click landed.
-  await deps.click(target.center, { ...ctx, clickX: target.center.x, clickY: target.center.y })
+  if (args.state) {
+    if (!deps.performAction)
+      throw new OcrError("invalid_input", "ocr-click", "App OCR requires canonical action delivery")
+    const state = args.state
+    const result = await deps.performAction(
+      {
+        turnToken: state.turnToken,
+        strategy: "pixel",
+        target: {
+          kind: "pixel",
+          target: {
+            sessionId: state.sessionId,
+            lineageId: state.lineageId,
+            revision: state.revision,
+            point: target.center,
+            screenshotWidth: state.surface.pixelWidth,
+            screenshotHeight: state.surface.pixelHeight,
+          },
+        },
+        action: { kind: "click", button: args.button, count: args.doubleClick ? 2 : 1 },
+      },
+      { ...ctx, clickX: target.desktopCenter!.x, clickY: target.desktopCenter!.y }
+    )
+    if (result.status !== "delivered")
+      throw new OcrError("provider_failed", "ocr-click", `App OCR click ${result.status}`)
+  } else {
+    await deps.click(target.center, { ...ctx, clickX: target.center.x, clickY: target.center.y })
+  }
   return { ok: true, clicked: target }
 }
 
@@ -195,6 +323,8 @@ const productionDeps = (): OcrClickDeps => ({
   extract: defaultExtract,
   click: (point, ctx) => desktop.click({ kind: "point", x: point.x, y: point.y }, {}, ctx),
   ocrDeps: buildOcrDeps(),
+  zoom: (state, region, ctx) => desktop.zoom(state, region, ctx),
+  performAction: (request, ctx) => desktop.performAction(request, ctx),
 })
 
 function errorMessage(error: unknown): string {

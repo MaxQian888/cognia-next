@@ -393,6 +393,11 @@ export const desktop = {
     return transport.call<void>("desktop_pick_session_cancel", { args: { ctx } })
   },
 
+  /** Pending broker prompts with their remaining time; does not answer them. */
+  consentPending(): Promise<ConsentRequestEvent[]> {
+    return transport.call<ConsentRequestEvent[]>("automation_consent_pending", {})
+  },
+
   /**
    * Reply to a consent-request event raised by `automation:consent-request`.
    * `persist == true` means "always allow this kind of call for the rest of

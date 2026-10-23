@@ -38,9 +38,9 @@ pub fn click_point(x: i32, y: i32) -> Result<()> {
 /// to fall within `GetDoubleClickTime` so the OS recognises the sequence as
 /// a real double / triple click instead of independent single clicks. A
 /// `count` of 0 or 1 is treated as a single click.
-pub fn click_point_multi(x: i32, y: i32, count: u32) -> Result<()> {
+pub fn click_point_multi(x: i32, y: i32, count: u32, selected: MouseButton) -> Result<()> {
     let n = count.max(1);
-    if n == 1 {
+    if n == 1 && selected == MouseButton::Left {
         return click_point(x, y);
     }
     // GetDoubleClickTime is the *maximum* gap that still registers as a
@@ -50,7 +50,9 @@ pub fn click_point_multi(x: i32, y: i32, count: u32) -> Result<()> {
     let gap_ms = u64::from(dct).max(1) / 2;
     let gap = Duration::from_millis(gap_ms);
     for i in 0..n {
-        click_point(x, y)?;
+        move_to(x, y)?;
+        button(selected, ButtonTransition::Down)?;
+        button(selected, ButtonTransition::Up)?;
         if i + 1 < n {
             thread::sleep(gap);
         }
@@ -140,25 +142,15 @@ pub fn button(button: MouseButton, transition: ButtonTransition) -> Result<()> {
 }
 
 pub fn drag(from: Point, to: Point, opts: DragOpts) -> Result<()> {
-    let button = opts.button.unwrap_or(MouseButton::Left);
-    let steps = opts.steps.unwrap_or(12).max(2);
-    let duration_ms = opts.duration_ms.unwrap_or(150);
-    let step_delay = Duration::from_millis(u64::from(duration_ms) / u64::from(steps));
-
-    move_to(from.x, from.y)?;
-    self::button(button, ButtonTransition::Down)?;
-
-    for i in 1..=steps {
-        let t = f64::from(i) / f64::from(steps);
-        let x = from.x as f64 + (to.x - from.x) as f64 * t;
-        let y = from.y as f64 + (to.y - from.y) as f64 * t;
-        move_to(x as i32, y as i32)?;
-        if step_delay > Duration::from_millis(0) {
-            thread::sleep(step_delay);
-        }
-    }
-
-    self::button(button, ButtonTransition::Up)
+    crate::automation::platform::shared::pointer::drag(
+        &mut (),
+        from,
+        to,
+        opts,
+        |_, point| move_to(point.x, point.y),
+        |_, selected, transition| button(selected, transition),
+        thread::sleep,
+    )
 }
 
 pub fn scroll_at(point: Point, opts: ScrollOpts) -> Result<()> {

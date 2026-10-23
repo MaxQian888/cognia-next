@@ -114,7 +114,7 @@ describe("findScreenTextWith", () => {
     const res = await findScreenTextWith(d, { query: "submit" })
     expect(res.ok).toBe(true)
     expect(res.matches[0].center).toEqual({ x: 30, y: 25 })
-    expect(res.capture).toEqual({ width: 1920, height: 1080 })
+    expect(res.capture).toEqual({ width: 1920, height: 1080, coordinateSpace: "desktop" })
     expect(d.screenshot).toHaveBeenCalled()
   })
 
@@ -245,3 +245,118 @@ describe("production entries (findScreenText / clickScreenText)", () => {
 function sessionContext() {
   return { surface: "computerUse" as const, sessionKey: "session-1" }
 }
+
+describe("revision-bound app OCR", () => {
+  const state = {
+    sessionId: "app",
+    lineageId: "line",
+    revision: 7,
+    turnToken: "single-use",
+    surface: { pixelWidth: 800, pixelHeight: 600 },
+  }
+  const zoomed = {
+    ...state,
+    surface: {
+      ...state.surface,
+      windowId: 1,
+      displayId: "main",
+      logicalBounds: { x: 0, y: 0, width: 800, height: 600 },
+      scaleFactor: 2,
+      coordinateSpace: "screenshotPixels" as const,
+    },
+    screenshot: shot({ width: 1600, height: 1200 }),
+    region: { x: 0, y: 0, width: 800, height: 600 },
+    scale: 2,
+  }
+  it("reads the host-held frame and maps OCR pixels back to the shown app frame", async () => {
+    const d = deps({ zoom: jest.fn(async () => zoomed) })
+    const found = await findScreenTextWith(d, { state, query: "Submit" })
+    expect(d.screenshot).not.toHaveBeenCalled()
+    expect(d.zoom).toHaveBeenCalledWith(
+      state,
+      { x: 0, y: 0, width: 800, height: 600 },
+      { surface: "computerUse" }
+    )
+    expect(found.matches[0].center).toEqual({ x: 15, y: 13 })
+    expect(found.capture.coordinateSpace).toBe("screenshotPixels")
+  })
+  it("delivers through the canonical revision/token gate and preserves button/count", async () => {
+    const performAction = jest.fn(async () => ({ status: "delivered" })) as unknown as NonNullable<
+      OcrClickDeps["performAction"]
+    >
+    const d = deps({ zoom: jest.fn(async () => zoomed), performAction })
+    await clickScreenTextWith(d, { state, query: "Submit", button: "right", doubleClick: true })
+    expect(d.click).not.toHaveBeenCalled()
+    expect(performAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnToken: "single-use",
+        strategy: "pixel",
+        action: { kind: "click", button: "right", count: 2 },
+        target: {
+          kind: "pixel",
+          target: {
+            sessionId: "app",
+            lineageId: "line",
+            revision: 7,
+            point: { x: 15, y: 13 },
+            screenshotWidth: 800,
+            screenshotHeight: 600,
+          },
+        },
+      }),
+      { surface: "computerUse", clickX: 15, clickY: 13 }
+    )
+  })
+  it("matches native negative-origin rounding for forbidden-region policy", async () => {
+    const small = { ...state, surface: { pixelWidth: 1280, pixelHeight: 800 } }
+    const zoom = {
+      ...zoomed,
+      surface: {
+        ...zoomed.surface,
+        ...small.surface,
+        logicalBounds: { x: -1920, y: 0, width: 1920, height: 1200 },
+      },
+      screenshot: shot({ width: 1280, height: 800 }),
+      region: { x: 0, y: 0, width: 1280, height: 800 },
+      scale: 1,
+    }
+    const performAction = jest.fn(async () => ({ status: "delivered" })) as unknown as NonNullable<
+      OcrClickDeps["performAction"]
+    >
+    const d = deps({
+      zoom: jest.fn(async () => zoom),
+      performAction,
+      extract: jest.fn(async () =>
+        ocrResult([{ text: "X", bbox: { x: 0, y: 0, width: 2, height: 2 } }])
+      ),
+    })
+    await clickScreenTextWith(d, { state: small, query: "X" })
+    expect(performAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: expect.objectContaining({
+          target: expect.objectContaining({ point: { x: 1, y: 1 } }),
+        }),
+      }),
+      expect.objectContaining({ clickX: -1919, clickY: 2 })
+    )
+    const missing = deps({ zoom: jest.fn(async () => ({ ...zoomed, surface: undefined })) })
+    await expect(findScreenTextWith(missing, { state })).rejects.toThrow(/geometry is missing/)
+    expect(missing.screenshot).not.toHaveBeenCalled()
+  })
+
+  it("never falls back to a monitor after a stale frame or canonical action refusal", async () => {
+    const d = deps({ zoom: jest.fn(async () => ({ ...zoomed, revision: 6 })) })
+    await expect(findScreenTextWith(d, { state })).rejects.toThrow(/does not match/)
+    expect(d.screenshot).not.toHaveBeenCalled()
+    const refused = deps({
+      zoom: jest.fn(async () => zoomed),
+      performAction: jest.fn(async () => {
+        throw new Error("stale revision")
+      }),
+    })
+    await expect(clickScreenTextWith(refused, { state, query: "Submit" })).rejects.toThrow(
+      "stale revision"
+    )
+    expect(refused.click).not.toHaveBeenCalled()
+  })
+})

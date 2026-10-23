@@ -22,17 +22,37 @@
  * device that may not resolve consent).
  */
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 
 import { transport } from "@/lib/tauri"
+import { onTransportChange } from "@/lib/tauri/transport-instance"
+import {
+  getActiveRemoteTransport,
+  subscribeActiveRemoteTransport,
+} from "@/lib/tauri/transport-routing"
 import { desktop, type ConsentRequestEvent } from "@/lib/automation/client"
 import {
   CONSENT_REQUEST_EVENT,
   consentPromptOf,
   getConsentRoutingVersion,
   isConsentRoutedElsewhere,
+  isConsentSettled,
+  markConsentSettled,
   subscribeConsentRouting,
 } from "@/lib/automation/consent-routing"
+
+function consentSource() {
+  return getActiveRemoteTransport() ?? transport
+}
+
+function subscribeConsentSource(listener: () => void) {
+  const offTransport = onTransportChange(listener)
+  const offRemote = subscribeActiveRemoteTransport(listener)
+  return () => {
+    offTransport()
+    offRemote()
+  }
+}
 
 export interface PendingConsent extends ConsentRequestEvent {
   /** Wall-clock deadline for the renderer-side countdown. */
@@ -69,7 +89,14 @@ export function useAutomationConsent({
    */
   honorRouting?: boolean
 }): AutomationConsentStream {
-  const [queue, setQueue] = useState<PendingConsent[]>([])
+  const source = useSyncExternalStore(subscribeConsentSource, consentSource, consentSource)
+  const binding = useMemo(() => ({ source, enabled }), [source, enabled])
+  const activeBinding = useRef<typeof binding | null>(null)
+  const [state, setState] = useState<{ binding: typeof binding | null; queue: PendingConsent[] }>({
+    binding: null,
+    queue: [],
+  })
+  const queue = enabled && state.binding === binding ? state.queue : []
   const routingVersion = useSyncExternalStore(
     subscribeConsentRouting,
     getConsentRoutingVersion,
@@ -79,15 +106,57 @@ export function useAutomationConsent({
 
   useEffect(() => {
     if (!enabled) return
-    const unsub = transport.subscribe<ConsentRequestEvent>(CONSENT_REQUEST_EVENT, (payload) => {
-      setQueue((prev) => {
-        // Dedupe by id — a WS reconnect replays frames since the last cursor.
-        if (prev.some((p) => p.id === payload.id)) return prev
-        return [...prev, { ...payload, expiresAt: Date.now() + payload.timeoutMs }]
+    activeBinding.current = binding
+    let disposed = false
+    const current = () => !disposed && consentSource() === source
+    const receive = (events: ConsentRequestEvent[], budgetStartedAt: number) => {
+      if (!current() || events.length === 0) return
+      const receivedAt = Date.now()
+      setNow(receivedAt)
+      setState((prev) => {
+        const next = prev.binding === binding ? [...prev.queue] : []
+        for (const payload of events) {
+          if (isConsentSettled(payload.id)) continue
+          const expiresAt = budgetStartedAt + payload.timeoutMs
+          const index = next.findIndex((prompt) => prompt.id === payload.id)
+          if (index >= 0) {
+            next[index] = { ...next[index], expiresAt: Math.min(next[index].expiresAt, expiresAt) }
+          } else if (expiresAt > receivedAt) {
+            next.push({ ...payload, expiresAt })
+          }
+        }
+        return {
+          binding,
+          queue: next.filter(
+            (prompt) => prompt.expiresAt > receivedAt && !isConsentSettled(prompt.id)
+          ),
+        }
       })
-    })
-    return unsub
-  }, [enabled])
+    }
+    // Subscribe before reading the snapshot: neither side of the async listen
+    // boundary can lose the first request. This reads; it never retries actions.
+    const unsub = source.subscribe<ConsentRequestEvent>(CONSENT_REQUEST_EVENT, (payload) =>
+      receive([payload], Date.now())
+    )
+    void (async () => {
+      try {
+        await source.whenSubscribed?.([CONSENT_REQUEST_EVENT])
+        if (!current()) return
+        const startedAt = Date.now()
+        const pending = await desktop.consentPending()
+        // The broker returns remaining time. Anchor before the RPC so transit
+        // time cannot extend its deadline.
+        receive(pending, startedAt)
+      } catch (err) {
+        if (current()) console.warn("automation_consent_pending failed", err)
+      }
+    })()
+    return () => {
+      disposed = true
+      if (activeBinding.current === binding) activeBinding.current = null
+      unsub()
+    }
+  }, [enabled, source, binding])
 
   // 0.5s tick drives the countdown + drops expired prompts inline. The Rust
   // broker enforces the real timeout (`AutomationSettings.consentTimeoutMs`,
@@ -97,15 +166,32 @@ export function useAutomationConsent({
     const id = window.setInterval(() => {
       const ts = Date.now()
       setNow(ts)
-      setQueue((prev) => prev.filter((p) => p.expiresAt > ts - 1000))
+      setState((prev) =>
+        prev.binding === binding
+          ? { binding, queue: prev.queue.filter((p) => p.expiresAt > ts - 1000) }
+          : prev
+      )
     }, 500)
     return () => window.clearInterval(id)
-  }, [queue.length])
+  }, [queue.length, binding])
 
   const respond = useCallback(
     async (event: PendingConsent, allow: boolean, persist: boolean, grantDurationMs?: number) => {
+      if (
+        !enabled ||
+        activeBinding.current !== binding ||
+        consentSource() !== source ||
+        isConsentSettled(event.id) ||
+        event.expiresAt <= Date.now()
+      )
+        return
       // Optimistically dequeue so the user can't double-tap a decision.
-      setQueue((prev) => prev.filter((p) => p.id !== event.id))
+      markConsentSettled(event.id)
+      setState((prev) =>
+        prev.binding === binding
+          ? { binding, queue: prev.queue.filter((p) => p.id !== event.id) }
+          : prev
+      )
       try {
         await desktop.consentRespond({
           id: event.id,
@@ -119,7 +205,7 @@ export function useAutomationConsent({
         console.warn("automation_consent_respond failed", err)
       }
     },
-    []
+    [enabled, binding, source]
   )
 
   const visible = useMemo(
