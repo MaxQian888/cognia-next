@@ -196,9 +196,14 @@ import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-cont
 import {
   createAgentRpcHostStateDispatcher,
   createHostStateService,
+  type HostStateAuthorizationStrategy,
   type HostStateService,
 } from "@/lib/sync/host-state-service"
-import { permittedHostStateIntentKinds } from "@cognia/agent-config-types/host-state"
+import {
+  HOST_STATE_INTENT_KINDS,
+  permittedHostStateIntentKinds,
+  personPartitionIntentDecision,
+} from "@cognia/agent-config-types/host-state"
 import type {
   HostStateAction,
   HostStateSnapshotRequest,
@@ -230,6 +235,8 @@ const hostStateOwnerId = `brain-${crypto.randomUUID()}`
 const hostStateRuntimeDispatcher = createAgentRpcHostStateDispatcher()
 
 export interface InstallOptions extends SharedInstallOptions {
+  /** Trusted local profile: a person brain never uses operator device grants. */
+  partition?: boolean
   bridge?: TauriBridge
 }
 
@@ -250,7 +257,7 @@ export const installDesktopWriteSource = createSharedInstall<InstallOptions>(asy
   }
 
   const unlisten = await bridge.listen<DesktopWriteRequestEvent>(REQUEST_EVENT, (event) => {
-    void respond(event.payload, bridge)
+    void respond(event.payload, bridge, opts.partition ?? false)
   })
   const unsubscribeAgentEvents = transport.subscribe<{ envelope?: unknown }>(
     "agent://message",
@@ -271,10 +278,14 @@ export const installDesktopWriteSource = createSharedInstall<InstallOptions>(asy
   }
 })
 
-async function respond(req: DesktopWriteRequestEvent, bridge: TauriBridge): Promise<void> {
+async function respond(
+  req: DesktopWriteRequestEvent,
+  bridge: TauriBridge,
+  partition: boolean
+): Promise<void> {
   const { requestId, command, payload } = req
   try {
-    const result = await dispatchCommand(command, payload, bridge)
+    const result = await dispatchCommand(command, payload, bridge, partition)
     await bridge.invoke(RESPONSE_COMMAND, { requestId, result: result ?? null, error: null })
   } catch (err: unknown) {
     await bridge.invoke(RESPONSE_COMMAND, {
@@ -289,8 +300,31 @@ async function respond(req: DesktopWriteRequestEvent, bridge: TauriBridge): Prom
 export async function dispatchCommand(
   command: string,
   payload: Record<string, unknown>,
-  bridge?: TauriBridge
+  bridge?: TauriBridge,
+  partition = false
 ): Promise<unknown> {
+  // The profile and the Rust-bound authority marker must agree. Presence on a
+  // legacy brain is refused even when false; it cannot select a new strategy.
+  if (
+    command.startsWith("host_state_") ||
+    command === "host_feature_manifest" ||
+    command === "session_attach" ||
+    command === "session_detach"
+  ) {
+    if (partition ? payload.callerPartition !== true : "callerPartition" in payload) {
+      throw new Error("host_state_partition_mismatch")
+    }
+    if (
+      partition &&
+      (command === "session_attach" || command === "session_detach") &&
+      getActiveRuntimeTargetContext()?.accountId !== payload.callerAccountId
+    ) {
+      throw new Error("host_state_scope_mismatch")
+    }
+  }
+  const authorization: HostStateAuthorizationStrategy = partition
+    ? "person-partition"
+    : "device-grants"
   const { isPerformanceHostCommand, dispatchPerformanceHostCommand } =
     await import("@/lib/perf/host-dispatch")
   if (isPerformanceHostCommand(command)) {
@@ -486,13 +520,13 @@ export async function dispatchCommand(
     case "host_capabilities":
       return hostCapabilities()
     case "host_feature_manifest":
-      return hostFeatureManifest(payload)
+      return hostFeatureManifest(payload, partition)
     case "host_state_snapshot":
-      return hostStateSnapshot(payload, bridge)
+      return hostStateSnapshot(payload, bridge, authorization)
     case "host_state_submit":
-      return hostStateSubmit(payload, bridge)
+      return hostStateSubmit(payload, bridge, authorization)
     case "host_state_status":
-      return hostStateStatus(payload, bridge)
+      return hostStateStatus(payload, bridge, authorization)
     case "provider_diagnostics_status": {
       const { getRemoteProviderDiagnosticsStatus } =
         await import("@/lib/provider-diagnostics/companion")
@@ -626,7 +660,7 @@ export async function dispatchCommand(
       return null
     }
     case "session_attach":
-      return sessionAttach(payload)
+      return sessionAttach(payload, partition)
     case "session_detach":
       return sessionDetach(payload)
     // Team rooms (ADR-0177). A companion never orchestrates a room; it asks
@@ -917,7 +951,8 @@ async function importThreadHandoffSession(
 
 async function resolveHostStateService(
   payload: Record<string, unknown>,
-  bridge?: TauriBridge
+  bridge?: TauriBridge,
+  authorization: HostStateAuthorizationStrategy = "device-grants"
 ): Promise<HostStateService> {
   const active = getActiveRuntimeTargetContext()
   const callerAccountId = payload.callerAccountId
@@ -946,10 +981,11 @@ async function resolveHostStateService(
       `host_state_scope_mismatch: runtime target ${runtimeTargetId} is not the host's active target ${active.targetId}; read hostStateScope from host_feature_manifest`
     )
   }
-  const key = `${active.accountId}:${active.targetId}:${authoritativeHostId}`
+  const key = `${active.accountId}:${active.targetId}:${authoritativeHostId}:${authorization}`
   if (hostStateAuthority?.key === key) return hostStateAuthority.service
   if (hostStateAuthority) await hostStateAuthority.service.stop()
   const service = createHostStateService({
+    ...(authorization === "person-partition" ? { authorization } : {}),
     accountId: active.accountId,
     runtimeTargetId: active.targetId,
     hostId: authoritativeHostId,
@@ -977,17 +1013,19 @@ async function resolveHostStateService(
 
 async function hostStateSnapshot(
   payload: Record<string, unknown>,
-  bridge?: TauriBridge
+  bridge?: TauriBridge,
+  authorization: HostStateAuthorizationStrategy = "device-grants"
 ): Promise<unknown> {
-  const service = await resolveHostStateService(payload, bridge)
+  const service = await resolveHostStateService(payload, bridge, authorization)
   return service.snapshot(stripHostStateInternal(payload) as unknown as HostStateSnapshotRequest)
 }
 
 async function hostStateSubmit(
   payload: Record<string, unknown>,
-  bridge?: TauriBridge
+  bridge?: TauriBridge,
+  authorization: HostStateAuthorizationStrategy = "device-grants"
 ): Promise<unknown> {
-  const service = await resolveHostStateService(payload, bridge)
+  const service = await resolveHostStateService(payload, bridge, authorization)
   return service.submit(
     stripHostStateInternal(payload) as unknown as HostStateSubmitRequest,
     hostStateCaller(payload)
@@ -1022,9 +1060,10 @@ function hostStateCaller(payload: Record<string, unknown>): HostStateSubmitCalle
 
 async function hostStateStatus(
   payload: Record<string, unknown>,
-  bridge?: TauriBridge
+  bridge?: TauriBridge,
+  authorization: HostStateAuthorizationStrategy = "device-grants"
 ): Promise<unknown> {
-  const service = await resolveHostStateService(payload, bridge)
+  const service = await resolveHostStateService(payload, bridge, authorization)
   return service.status()
 }
 
@@ -1040,6 +1079,7 @@ function stripHostStateInternal(payload: Record<string, unknown>): Record<string
     callerAccountId: _accountId,
     callerDeviceId: _deviceId,
     callerDeviceGrants: _grants,
+    callerPartition: _partition,
     // The approval token, not part of the protocol body. `host_state_submit`
     // is `approval: "interactive"`, so a paired client has to send one and the
     // RPC layer forwards it untouched; left in, it fails the closed-shape
@@ -1078,7 +1118,10 @@ function callerDeviceIdFor(command: string, payload: Record<string, unknown>): s
  * (so it cannot claim Remote Control it was never given). Only `mode` and
  * `attention` come from the caller, and both can only ever narrow what happens.
  */
-function sessionAttach(payload: Record<string, unknown>): {
+function sessionAttach(
+  payload: Record<string, unknown>,
+  partition = false
+): {
   mode: string
   downgradeReason: string | null
   eventPlane: string
@@ -1092,6 +1135,7 @@ function sessionAttach(payload: Record<string, unknown>): {
   const result = attachSession(sessionId, callerDeviceIdFor("session_attach", payload), {
     requestedMode: readAttachMode(payload.mode),
     eventStreams: readEventStreams(payload.callerEventStreams),
+    ...(partition ? { partition: true } : {}),
     grants,
     attention: readAttention(payload.attention),
   })
@@ -1112,7 +1156,12 @@ function sessionAttach(payload: Record<string, unknown>): {
     eventPlane: result.eventPlane,
     leaseTtlMs: ATTACH_LEASE_TTL_MS,
     renewIntervalMs: ATTACH_LEASE_RENEW_INTERVAL_MS,
-    supportedActions: result.mode === "control" ? permittedHostStateIntentKinds(grants) : [],
+    supportedActions:
+      result.mode === "control"
+        ? partition
+          ? HOST_STATE_INTENT_KINDS.filter((kind) => personPartitionIntentDecision(kind).allowed)
+          : permittedHostStateIntentKinds(grants)
+        : [],
   }
 }
 
@@ -2119,7 +2168,10 @@ async function hostCapabilities(): Promise<unknown> {
   return { platform: detectPlatform(), capabilities: detectLocalCapabilities() }
 }
 
-async function hostFeatureManifest(payload: Record<string, unknown>): Promise<unknown> {
+async function hostFeatureManifest(
+  payload: Record<string, unknown>,
+  partition = false
+): Promise<unknown> {
   const [{ buildLocalHostFeatureManifest }, { detectPlatform }] = await Promise.all([
     import("@/lib/platform/host-feature-manifest"),
     import("@/lib/platform/detect"),
@@ -2131,6 +2183,35 @@ async function hostFeatureManifest(payload: Record<string, unknown>): Promise<un
       ? callerDeviceGrants
       : undefined
   const platform = detectPlatform()
+  if (partition) {
+    const active = getActiveRuntimeTargetContext()
+    if (!active || active.accountId !== payload.callerAccountId) {
+      throw new Error("host_state_scope_mismatch")
+    }
+    const manifest = buildLocalHostFeatureManifest({
+      platform,
+      hostId:
+        typeof payload.authoritativeHostId === "string"
+          ? payload.authoritativeHostId
+          : `local-${platform}`,
+      hostStateScope: { accountId: active.accountId, runtimeTargetId: active.targetId },
+      deviceGrants,
+    })
+    // These are execution surfaces, unavailable in a data-only person brain.
+    // Do not probe the operator's runtimes or make their health look inherited.
+    for (const operation of manifest.operations) {
+      if (
+        operation.feature === "claude.host-tools" ||
+        operation.feature.startsWith("external-agent.") ||
+        operation.feature === "workflow.execution" ||
+        operation.feature === "router-fusion.companion"
+      ) {
+        operation.healthy = false
+        operation.reason = "execution_isolation_unavailable"
+      }
+    }
+    return manifest
+  }
   const operationHealth: Record<string, boolean | { healthy: boolean; reason?: string }> = {}
   const ocrOperations = [
     "ocr_list_native_backends",

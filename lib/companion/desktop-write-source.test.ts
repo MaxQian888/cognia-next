@@ -448,6 +448,163 @@ describe("dispatchCommand: run approvals (ADR-0224 A7)", () => {
   })
 })
 
+describe("P5d partition HostState adapter", () => {
+  const authority = {
+    callerAccountId: "local-default",
+    authoritativeHostId: "host-person-p5d",
+    runtimeTargetId: "target-a",
+    callerDeviceId: "member",
+    callerDeviceGrants: ["client.write"],
+  }
+
+  it.each([
+    "host_state_status",
+    "host_state_snapshot",
+    "host_state_submit",
+    "host_feature_manifest",
+    "session_attach",
+    "session_detach",
+  ])("refuses a profile/authority mismatch for %s in both directions", async (command) => {
+    await expect(dispatchCommand(command, { ...authority, callerPartition: true })).rejects.toThrow(
+      "host_state_partition_mismatch"
+    )
+    await expect(
+      dispatchCommand(command, { ...authority, callerPartition: false })
+    ).rejects.toThrow("host_state_partition_mismatch")
+    await expect(dispatchCommand(command, authority, undefined, true)).rejects.toThrow(
+      "host_state_partition_mismatch"
+    )
+  })
+
+  it("uses the trusted partition strategy and strips its marker before submitting", async () => {
+    await dispatchCommand(
+      "host_state_submit",
+      {
+        ...authority,
+        callerPartition: true,
+        accountId: "local-default",
+        actions: [],
+      },
+      undefined,
+      true
+    )
+    expect(mockCreateHostStateService).toHaveBeenLastCalledWith(
+      expect.objectContaining({ authorization: "person-partition" })
+    )
+    expect(mockHostStateService.submit).toHaveBeenCalledWith(
+      { accountId: "local-default", runtimeTargetId: "target-a", actions: [] },
+      { deviceId: "member", grants: ["client.write"] }
+    )
+  })
+
+  it("negotiates only partition data intents for control and preserves legacy attach grants", async () => {
+    const { __resetRemoteAttachForTests, isSessionAttached } =
+      await import("./remote-attach-registry")
+    const {
+      HOST_STATE_INTENT_KINDS,
+      personPartitionIntentDecision,
+      permittedHostStateIntentKinds,
+    } = await import("@cognia/agent-config-types/host-state")
+    __resetRemoteAttachForTests()
+    const payload = {
+      ...authority,
+      callerPartition: true,
+      sessionId: "p5d-attach",
+      mode: "control",
+      callerEventStreams: [{ leaseId: "p5d-stream", transport: "ws", state: "ready", openedAt: 1 }],
+    }
+    try {
+      const attached = await dispatchCommand("session_attach", payload, undefined, true)
+      expect(attached).toMatchObject({
+        mode: "control",
+        downgradeReason: null,
+        eventPlane: "ready",
+        supportedActions: HOST_STATE_INTENT_KINDS.filter(
+          (kind) => personPartitionIntentDecision(kind).allowed
+        ),
+      })
+      expect(isSessionAttached(payload.sessionId)).toBe(true)
+      await expect(
+        dispatchCommand("session_attach", { ...payload, mode: "observe" }, undefined, true)
+      ).resolves.toMatchObject({ mode: "observe", supportedActions: [] })
+      await expect(
+        dispatchCommand(
+          "session_attach",
+          { ...payload, callerDeviceId: "no-stream", callerEventStreams: [] },
+          undefined,
+          true
+        )
+      ).resolves.toMatchObject({
+        mode: "observe",
+        downgradeReason: "event-plane-not-ready",
+        supportedActions: [],
+      })
+      await expect(dispatchCommand("session_detach", payload, undefined, true)).resolves.toBeNull()
+      expect(isSessionAttached(payload.sessionId)).toBe(false)
+
+      // The same device grants on an ordinary Host still confer no control.
+      const { callerPartition: _partition, ...legacyPayload } = payload
+      await expect(dispatchCommand("session_attach", legacyPayload)).resolves.toMatchObject({
+        mode: "observe",
+        downgradeReason: "missing-capability",
+        supportedActions: [],
+      })
+      const grants = ["workspace.write"]
+      await expect(
+        dispatchCommand("session_attach", { ...legacyPayload, callerDeviceGrants: grants })
+      ).resolves.toMatchObject({
+        mode: "control",
+        supportedActions: permittedHostStateIntentKinds(grants),
+      })
+    } finally {
+      __resetRemoteAttachForTests()
+    }
+  })
+
+  it.each(["session_attach", "session_detach"])(
+    "refuses a different partition account on %s",
+    async (command) => {
+      await expect(
+        dispatchCommand(
+          command,
+          { ...authority, callerPartition: true, callerAccountId: "other-person", sessionId: "s" },
+          undefined,
+          true
+        )
+      ).rejects.toThrow("host_state_scope_mismatch")
+    }
+  )
+
+  it("advertises the partition scope and unavailable agent execution", async () => {
+    const manifest = (await dispatchCommand(
+      "host_feature_manifest",
+      { ...authority, callerPartition: true },
+      undefined,
+      true
+    )) as {
+      hostStateScope: unknown
+      operations: { name: string; feature: string; healthy: boolean; reason?: string }[]
+    }
+    expect(manifest.hostStateScope).toEqual({
+      accountId: "local-default",
+      runtimeTargetId: "target-a",
+    })
+    const execution = manifest.operations.filter(
+      (operation) =>
+        operation.feature === "claude.host-tools" ||
+        operation.feature.startsWith("external-agent.") ||
+        operation.feature === "workflow.execution" ||
+        operation.feature === "router-fusion.companion"
+    )
+    expect(execution.length).toBeGreaterThan(0)
+    expect(
+      execution.every(
+        (operation) => !operation.healthy && operation.reason === "execution_isolation_unavailable"
+      )
+    ).toBe(true)
+  })
+})
+
 describe("dispatchCommand: HostState authority", () => {
   it("validates the caller scope and reuses the authoritative service", async () => {
     const payload = {

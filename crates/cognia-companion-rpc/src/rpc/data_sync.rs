@@ -1135,6 +1135,8 @@ pub(super) async fn dispatch(
             // submits. The binding OVERWRITES whatever the client sent, which is
             // the whole point — a browser must not be able to name an account.
             let args = if super::host_state::COMMANDS.contains(&name)
+                || (matches!(name, "host_feature_manifest" | "session_attach" | "session_detach")
+                    && cognia_companion::person_partition::current().is_some())
                 || super::BROWSER_COMPANION_COMMANDS.contains(&name)
             {
                 super::host_state::bind_authority(args, state, tenant_id, device_id)?
@@ -1721,6 +1723,59 @@ mod tests {
 mod p5_tests {
     use super::*;
     use cognia_companion::{person_partition::{scope, PersonPartition}, sync_registry::SyncTableDescriptor};
+    #[tokio::test]
+    async fn p5d_dispatch_binds_partition_manifest_and_attach_without_changing_legacy() {
+        use cognia_companion::ws_bridge::{self, test_support};
+        let _slot = test_support::lock_slot().await;
+        test_support::clear_socket_for_testing();
+        struct Cleanup;
+        impl Drop for Cleanup { fn drop(&mut self) { test_support::clear_socket_for_testing(); } }
+        let _cleanup = Cleanup;
+        let state = super::super::tests::test_state();
+        let host = crate::headless::HeadlessServices::stub_for_tests();
+        let person = PersonPartition::new("org-p5d".into(), "user-p5d".into());
+        let mut operator = test_support::install_socket_for_testing(&state);
+        let mut personal = test_support::install_person_socket_for_testing(&state, &person.account_id);
+        for partitioned in [false, true] {
+            for command in ["host_feature_manifest", "session_attach", "session_detach"] {
+                scope(partitioned.then_some(person.clone()), async {
+                    let args = json!({"sessionId":"s-p5d", "callerDeviceId":"spoofed-device",
+                        "callerDeviceGrants":["host.admin"], "callerEventStreams":[{"leaseId":"spoofed-stream"}]});
+                    let receive = async {
+                        let socket = if partitioned { &mut personal } else { &mut operator };
+                        let frame = tokio::time::timeout(std::time::Duration::from_secs(2), socket.recv()).await.unwrap().unwrap();
+                        let axum::extract::ws::Message::Text(text) = frame else { panic!("expected event"); };
+                        let frame: Value = serde_json::from_str(text.as_str()).unwrap();
+                        let request = &frame["payload"];
+                        assert_eq!(request["command"], command);
+                        let payload = &request["payload"];
+                        if partitioned {
+                            assert_eq!(payload["callerAccountId"], person.account_id);
+                            assert_eq!(payload["callerPartition"], true);
+                            assert_eq!(payload["callerDeviceId"], "p5d-dispatch-device");
+                            assert_eq!(payload["callerDeviceGrants"], json!([]));
+                        } else {
+                            assert!(payload.get("callerAccountId").is_none());
+                            assert!(payload.get("callerPartition").is_none());
+                        }
+                        if command == "session_attach" {
+                            assert_eq!(payload["callerEventStreams"], json!([]));
+                            assert_eq!(payload["callerDeviceId"], "p5d-dispatch-device");
+                            assert_eq!(payload["callerDeviceGrants"], json!([]));
+                        }
+                        ws_bridge::writes_bridge(&state).resolve(cognia_companion::desktop_writes_bridge::DesktopWriteResponse {
+                            request_id: request["requestId"].as_str().unwrap().to_string(), result: Some(json!({"ok":true})), error: None,
+                        });
+                    };
+                    let (result, _) = tokio::join!(dispatch(command, args, &state, &host, "p5d-dispatch-device", Some("tenant-p5d"), Some("device")), receive);
+                    assert_eq!(result.unwrap(), json!({"ok":true}));
+                }).await;
+            }
+        }
+        assert!(personal.try_recv().is_err());
+        assert!(operator.try_recv().is_err());
+    }
+
     #[tokio::test]
     async fn p5_rust_data_arms_partition_tokens_and_use_static_sync_tables() {
         let state = super::super::tests::test_state();

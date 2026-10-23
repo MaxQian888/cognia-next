@@ -656,14 +656,23 @@ export async function getHostStateAction(
  * through plugin overlay packs outside Dexie.
  */
 export async function ownedSessionSeed(
-  seed: HostStateSessionSeed | undefined
+  seed: HostStateSessionSeed | undefined,
+  options: { partition?: boolean } = {}
 ): Promise<HostStateSessionSeed | undefined> {
   if (!seed) return undefined
-  const projectOwned = seed.projectId ? Boolean(await getDb().projects.get(seed.projectId)) : false
+  const projectOwned =
+    !options.partition && seed.projectId
+      ? Boolean(await getDb().projects.get(seed.projectId))
+      : false
   let characterOwned = false
   if (seed.characterId) {
-    const { resolveCharacterById } = await import("@/lib/db/characters")
-    characterOwned = Boolean(await resolveCharacterById(seed.characterId))
+    if (options.partition) {
+      // Plugin overlays belong to the operator profile, not this person's DB.
+      characterOwned = Boolean(await getDb().characters.get(seed.characterId))
+    } else {
+      const { resolveCharacterById } = await import("@/lib/db/characters")
+      characterOwned = Boolean(await resolveCharacterById(seed.characterId))
+    }
   }
   const owned: HostStateSessionSeed = {
     ...(projectOwned ? { projectId: seed.projectId } : {}),

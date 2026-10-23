@@ -22,6 +22,7 @@ import {
   isHostStateStatus,
   isHostStateSubmitResponse,
   permittedHostStateIntentKinds,
+  personPartitionIntentDecision,
   reconcileHostStateReplica,
   reduceHostStateIntent,
   reduceHostStateMutation,
@@ -37,6 +38,52 @@ import {
   type HostStateSessionIndexChannel,
   type HostStateSessionSummary,
 } from "./host-state"
+
+describe("P5d person partition intent policy", () => {
+  it("pins every allowed data intent and dormant runtime/workspace intent", () => {
+    const allowed = [
+      "session.create",
+      "session.rename",
+      "session.archive",
+      "session.pin",
+      "session.folder",
+      "session.order",
+      "session.delete",
+      "folder.create",
+      "folder.rename",
+      "folder.reorder",
+      "folder.delete",
+      "draft.replace",
+      "transcript.edit",
+      "transcript.truncate",
+      "session.import",
+    ]
+    const execution = [
+      "message.enqueue",
+      "turn.steer",
+      "turn.followup",
+      "turn.abort",
+      "approval.respond",
+      "elicitation.respond",
+    ]
+    expect(new Set([...allowed, ...execution, "session.workspace"])).toEqual(
+      new Set(HOST_STATE_INTENT_KINDS)
+    )
+    for (const kind of HOST_STATE_INTENT_KINDS) {
+      expect(personPartitionIntentDecision(kind)).toEqual(
+        allowed.includes(kind)
+          ? { allowed: true }
+          : {
+              allowed: false,
+              code:
+                kind === "session.workspace"
+                  ? "workspace_unavailable"
+                  : "execution_isolation_unavailable",
+            }
+      )
+    }
+  })
+})
 
 const TARGET = "target-a"
 const SESSION = "session-1"

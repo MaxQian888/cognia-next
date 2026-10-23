@@ -797,9 +797,16 @@ fn authorize_capability(
     if crate::jwt::is_service_scope(Some(request.principal.scope.as_ref())) {
         return Ok(());
     }
+    let partition = partition_host_state_capability(&descriptor.arm);
+    let payload = super::payload_capability::payload_required_capability(&request.command, &request.args);
     let required = [
-        Some(descriptor.capability.as_str()),
-        super::payload_capability::payload_required_capability(&request.command, &request.args),
+        Some(partition.unwrap_or(descriptor.capability.as_str())),
+        // A control attach in a partition drives only its owner's own data:
+        // the Remote Control grant (`workspace.write`) is the owner writing it.
+        match (partition, payload) {
+            (Some(_), Some("workspace.write")) => Some("client.write"),
+            (_, payload) => payload,
+        },
     ];
     for capability in required.into_iter().flatten() {
         let granted = capability_granted(&request.principal, capability, &request.request_id)?;
@@ -815,6 +822,13 @@ fn authorize_capability(
         }
     }
     Ok(())
+}
+
+/// Only the gate's typed, admitted partition can select this capability.
+/// Request arguments (including callerPartition) cannot weaken device grants.
+fn partition_host_state_capability(arm: &str) -> Option<&'static str> {
+    super::person_partition::current()?;
+    super::host_surface_policy::POLICY.as_ref().ok()?.person_host_state_capability(arm)
 }
 
 fn snapshot_capability_decision(principal: &DeviceContext, capability: &str) -> Option<bool> {
@@ -835,6 +849,9 @@ fn authorize_approval(
     if crate::jwt::is_service_scope(Some(request.principal.scope.as_ref())) && request.transport == ExecutionTransport::Internal {
         return Ok(());
     }
+    // P5d submits mutate only the partition owner's data. Dormant execution
+    // intents are refused per action by that brain; no Host admin lease applies.
+    if partition_host_state_capability(&descriptor.arm).is_some() { return Ok(()); }
     match descriptor.approval {
         CommandApproval::None => Ok(()),
         // The command that MINTS a lease cannot be asked to present one. Its
@@ -1287,6 +1304,37 @@ mod tests {
             request_rate_limit_class(send, &json!({ "method": "getContextUsage" })),
             rate_limit_class(send)
         );
+    }
+
+    #[tokio::test]
+    async fn p5d_partition_capability_and_approval_do_not_change_legacy_calls() {
+        for arm in ["host_state_status", "host_state_snapshot", "host_state_submit", "host_feature_manifest", "session_attach", "session_detach"] {
+            let descriptor = super::super::command_manifest::descriptor(arm).unwrap();
+            let mut request = execution_request("device", Some(vec!["client.read".into(), "client.write".into()]));
+            request.command = arm.into();
+            request.args = json!({"callerPartition":true});
+            assert_eq!(authorize_capability(&request, descriptor).unwrap_err().code, "missing_capability");
+            let partition = super::super::person_partition::PersonPartition::new("org".into(), "user".into());
+            super::super::person_partition::scope(Some(partition), async {
+                assert!(authorize_capability(&request, descriptor).is_ok());
+                assert!(authorize_approval(&request, descriptor).is_ok());
+                if arm == "session_attach" {
+                    // A control attach (the absent mode) needs the owner's write grant.
+                    request.principal.authorization_capabilities = Some(vec!["client.read".into()]);
+                    assert_eq!(authorize_capability(&request, descriptor).unwrap_err().code, "missing_capability");
+                    request.args = json!({"callerPartition":true, "mode":"observe"});
+                    assert!(authorize_capability(&request, descriptor).is_ok());
+                }
+                request.principal.authorization_capabilities = Some(vec![]);
+                assert_eq!(authorize_capability(&request, descriptor).unwrap_err().code, "missing_capability");
+                assert!(partition_host_state_capability("shell_exec").is_none());
+            }).await;
+            request.principal.authorization_capabilities = Some(vec![descriptor.capability.clone()]);
+            assert!(authorize_capability(&request, descriptor).is_ok());
+            if arm == "host_state_submit" {
+                assert_eq!(authorize_approval(&request, descriptor).unwrap_err().code, "interactive_approval_required");
+            } else { assert!(authorize_approval(&request, descriptor).is_ok()); }
+        }
     }
 
     #[test]

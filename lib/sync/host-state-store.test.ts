@@ -558,6 +558,21 @@ describe("HostState durable store", () => {
       ).resolves.toBeUndefined()
     })
 
+    it("P5d drops even an owned workspace and keeps only a partition-owned character", async () => {
+      await expect(
+        ownedSessionSeed(
+          { projectId: "project-host", characterId: "agent-host", model: "m" },
+          { partition: true }
+        )
+      ).resolves.toEqual({ characterId: "agent-host", model: "m" })
+      await expect(
+        ownedSessionSeed(
+          { projectId: "project-host", characterId: "agent-elsewhere" },
+          { partition: true }
+        )
+      ).resolves.toBeUndefined()
+    })
+
     it("writes the seeded choices onto the Host's session row", async () => {
       await acquireWritableLease()
       await commitHostStateAction({

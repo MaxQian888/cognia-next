@@ -503,6 +503,51 @@ export function hostStateIntentKindCapability(
   }
 }
 
+/**
+ * P5d data-only authority for the owner of a person partition. No runtime,
+ * workspace, or provider is installed there: execution intents intentionally
+ * remain dormant with execution_isolation_unavailable, and workspace moves
+ * with workspace_unavailable. Use this same exhaustive decision for submit
+ * receipts and session-attach negotiation; device operator grants cannot widen it.
+ */
+export function personPartitionIntentDecision(
+  kind: HostStateIntentKind
+):
+  | { allowed: true }
+  | { allowed: false; code: "execution_isolation_unavailable" | "workspace_unavailable" } {
+  switch (kind) {
+    case "session.create":
+    case "session.rename":
+    case "session.archive":
+    case "session.pin":
+    case "session.folder":
+    case "session.order":
+    case "session.delete":
+    case "folder.create":
+    case "folder.rename":
+    case "folder.reorder":
+    case "folder.delete":
+    case "draft.replace":
+    case "transcript.edit":
+    case "transcript.truncate":
+    case "session.import":
+      return { allowed: true }
+    case "message.enqueue":
+    case "turn.steer":
+    case "turn.followup":
+    case "turn.abort":
+    case "approval.respond":
+    case "elicitation.respond":
+      return { allowed: false, code: "execution_isolation_unavailable" }
+    case "session.workspace":
+      return { allowed: false, code: "workspace_unavailable" }
+    default: {
+      const exhaustive: never = kind
+      throw new Error(`host_state_unknown_intent:${JSON.stringify(exhaustive)}`)
+    }
+  }
+}
+
 /** Every intent kind, in submission order. */
 export const HOST_STATE_INTENT_KINDS: readonly HostStateIntentKind[] = INTENT_KINDS
 

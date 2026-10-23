@@ -54,7 +54,17 @@ jest.mock("@/lib/headless/bootstrap", () => {
       now: () => number,
       onChange: (statuses: unknown[]) => void
     ) => {
-      expect(context.collab).toBe(mockCollabAdapter)
+      if (context.host === "person-brain") {
+        expect(context.collab).toBeUndefined()
+        const { getActiveRuntimeTargetContext } =
+          await import("@/lib/runtime/runtime-target-context")
+        expect(getActiveRuntimeTargetContext()).toMatchObject({
+          accountId: context.localAccountId,
+          targetId: "local-host",
+        })
+      } else {
+        expect(context.collab).toBe(mockCollabAdapter)
+      }
       mockBootOrder.push("runtimes-started")
       const result = await actual.bootstrapHeadlessRuntimes(context, now, onChange)
       // One runtime that cannot start, so the boot reports it degraded.
@@ -279,6 +289,61 @@ describe("serveCommand", () => {
     expect(out.logs.join("")).not.toContain("unlocked")
     expect(started).not.toHaveBeenCalled()
   })
+
+  it("P5d activates the partition account runtime target before exposing HostState", async () => {
+    __resetCliDbForTesting()
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-p5d-serve-"))
+    const accountId = "pb_693259bd42dbe0fbdd073e21"
+    const fetchMock = jest
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response("{}", { status: 403 }))
+    const out = sink()
+    let verified = false
+    try {
+      expect(
+        await serveCommand(parseArgv(["serve", "--home", home]), {
+          out,
+          env: env({
+            COGNIA_SERVER_URL: "http://127.0.0.1:7999",
+            COGNIA_SERVICE_TOKEN: "p5d-token",
+            COGNIA_BRAIN_PROFILE: "person",
+            COGNIA_LOCAL_ACCOUNT_ID: accountId,
+          }),
+          wsFactory: (url) => new FakeServerSocket(url),
+          shutdown: Promise.resolve(),
+          onStarted: async () => {
+            const { getActiveRuntimeTargetContext } =
+              await import("@/lib/runtime/runtime-target-context")
+            expect(getActiveRuntimeTargetContext()).toMatchObject({
+              accountId,
+              targetId: "local-host",
+            })
+            const { dispatchCommand } = await import("@/lib/companion/desktop-write-source")
+            const manifest = (await dispatchCommand(
+              "host_feature_manifest",
+              {
+                callerPartition: true,
+                callerAccountId: accountId,
+                authoritativeHostId: "host-p5d",
+                callerDeviceGrants: ["client.read"],
+              },
+              undefined,
+              true
+            )) as { hostStateScope: unknown }
+            expect(manifest.hostStateScope).toEqual({ accountId, runtimeTargetId: "local-host" })
+            verified = true
+          },
+        })
+      ).toBe(0)
+      expect(verified).toBe(true)
+    } finally {
+      fetchMock.mockRestore()
+      const { __resetDbForTesting } = await import("@/lib/db/schema")
+      __resetDbForTesting()
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  }, 30_000)
 
   it("boots, answers a sync-pull from Dexie, and flushes on shutdown", async () => {
     mockBootOrder.length = 0

@@ -187,6 +187,13 @@ async fn decide_with_person_fleet(mode: DeploymentMode, execution: bool, sandbox
         return Err(unavailable("execution_isolation_unavailable"));
     }
     if mode == DeploymentMode::SingleUser { return Ok(()); }
+    // P5d is deliberately separate from commandOverrides: this data standing
+    // applies only to tenant devices on a Host that can actually partition it.
+    if person_fleet && !crate::jwt::is_service_scope(Some(principal.scope.as_ref()))
+        && arm.is_some_and(|arm| policy.person_host_state_capability(arm).is_some()) {
+        person_data_standing(provider, principal).await?;
+        return Ok(());
+    }
     let entry = arm.and_then(|arm| policy.command_overrides.get(arm)).unwrap_or(entry);
     let (action, workspace) = match entry.class {
         SurfaceClass::Client => return Ok(()),
@@ -239,8 +246,10 @@ pub async fn person_partition(capability: &str, command: &str, principal: &Devic
     -> Result<Option<crate::person_partition::PersonPartition>, Problem> {
     if deployment_mode() == DeploymentMode::SingleUser || crate::jwt::is_service_scope(Some(principal.scope.as_ref())) { return Ok(None); }
     let policy = POLICY.as_ref().map_err(|_| Problem::with_status(StatusCode::FORBIDDEN, "host_surface_forbidden", "invalid Host policy"))?;
+    let partition_host_state = crate::person_partition::fleet().is_some()
+        && policy.person_host_state_capability(command).is_some();
     if policy.command_overrides.contains_key(command)
-        || !policy.get(capability).is_some_and(|entry| entry.class == SurfaceClass::HostData) { return Ok(None); }
+        || (!partition_host_state && !policy.get(capability).is_some_and(|entry| entry.class == SurfaceClass::HostData)) { return Ok(None); }
     // The normal gate already checked standing. Reuse its bounded cache and
     // derive authority only from the verified binding, never from args.
     let person = person_data_standing(LIVE.as_ref(), principal).await
@@ -777,6 +786,30 @@ mod tests {
             assert_eq!(resolve_execution_admission(&provider, &store, "spawn_external_agent", &args, &device("device")).await.unwrap_err().code, "placement_binding_client_supplied");
         }
     }
+    #[tokio::test]
+    async fn p5d_host_state_gate_requires_fleet_person_and_standing_only_in_multi_tenant() {
+        for arm in ["host_state_status", "host_state_snapshot", "host_state_submit", "host_feature_manifest", "session_attach", "session_detach"] {
+            let capability = if arm == "host_state_submit" { "workspace.write" } else { "host.observe" };
+            let member = Fake { result: 1, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+            for execution in [false, true] {
+                assert!(decide_with_person_fleet(DeploymentMode::MultiTenant, execution, false, &member,
+                    capability, Some(arm), &device("device"), None, true).await.is_ok(), "{arm}");
+                assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, execution, false, &member,
+                    capability, Some(arm), &device("device"), None, false).await.unwrap_err().code, "host_surface_forbidden");
+                assert!(decide_with_person_fleet(DeploymentMode::SingleUser, execution, false, &member,
+                    capability, Some(arm), &device("device"), None, true).await.is_ok());
+            }
+            let unbound = Fake { result: 3, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+            assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, true, false, &unbound,
+                capability, Some(arm), &device("device"), None, true).await.unwrap_err().code, "host_principal_unbound");
+            let revoked = Fake { result: 4, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+            assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, true, false, &revoked,
+                capability, Some(arm), &device("device"), None, true).await.unwrap_err().code, "host_surface_forbidden");
+            assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, true, false, &member,
+                capability, Some(arm), &device("service"), None, true).await.unwrap_err().code, "host_surface_forbidden");
+        }
+    }
+
     struct Fake { result: u8, calls: AtomicUsize, workspaces: Mutex<Vec<Option<String>>> }
     #[async_trait::async_trait]
     impl StandingProvider for Fake {

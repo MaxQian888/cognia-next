@@ -456,6 +456,10 @@
     "modelAccessUnavailable": {
       "label": "No model access on this shared Host",
       "hint": "Your data on a shared Host has no AI model configured, so this can't generate a reply here yet. It will work once the organization's model access is available to members."
+    },
+    "partitionWorkspaceUnavailable": {
+      "label": "No workspaces in your personal space",
+      "hint": "On a shared Host, your conversations live in your own personal space, which isn't linked to the Host's workspaces, so this one can't be moved into a workspace here."
     }
   },
   "detail": {

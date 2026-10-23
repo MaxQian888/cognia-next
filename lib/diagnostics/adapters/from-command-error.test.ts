@@ -130,6 +130,9 @@ describe("multi-tenant Host refusals", () => {
     expect(diagnose("person_brain_capacity")).toBe("resourceLimit")
     expect(diagnose("person_brain_unavailable")).toBe("serviceUnavailable")
     expect(isHostRefusalCode("person_brain_capacity")).toBe(true)
+    // P5d: a partition has no workspaces to move a conversation into.
+    expect(diagnose("workspace_unavailable")).toBe("partitionWorkspaceUnavailable")
+    expect(DIAGNOSTIC_CODES.partitionWorkspaceUnavailable.retryable).toBe(false)
   })
 
   it("recognises only Host refusal codes", () => {

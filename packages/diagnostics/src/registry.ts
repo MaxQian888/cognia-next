@@ -909,6 +909,13 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "dismiss" }],
     icon: "key",
   },
+  partitionWorkspaceUnavailable: {
+    severity: "info",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "dismiss" }],
+    icon: "settings",
+  },
 
   // -------------------------------------------------------------- fallback
   unknown: {

@@ -39,6 +39,14 @@ pub struct NonExecutionCommand {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersonHostStateCommand {
+    pub arm: String,
+    pub capability: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HostSurfacePolicy {
     #[serde(rename = "$comment")]
@@ -54,6 +62,8 @@ pub struct HostSurfacePolicy {
     pub non_execution_commands: Vec<NonExecutionCommand>,
     /// P6 credential-broker dormancy; storage-only message arms remain routed.
     pub person_model_commands: Vec<NonExecutionCommand>,
+    /// P5d tenant-only data arms, enabled only with an installed person fleet.
+    pub person_host_state_commands: Vec<PersonHostStateCommand>,
     /// Host-global arms hidden behind mixed client capabilities. Applied only
     /// in multi-tenant mode, before the capability's standing classification.
     #[serde(deserialize_with = "unique_map")]
@@ -94,6 +104,11 @@ where
 }
 
 impl HostSurfacePolicy {
+    pub fn person_host_state_capability(&self, arm: &str) -> Option<&str> {
+        self.person_host_state_commands.iter().find(|entry| entry.arm == arm)
+            .map(|entry| entry.capability.as_str())
+    }
+
     pub fn executes(&self, capability: &str) -> bool {
         self.execution_capabilities.iter().any(|value| value == capability)
     }
@@ -116,6 +131,27 @@ pub static POLICY: Lazy<Result<HostSurfacePolicy, serde_json::Error>> =
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn p5d_host_state_inventory_is_real_unique_and_partition_only() {
+        let policy = POLICY.as_ref().unwrap();
+        let manifest = manifest();
+        let expected = BTreeMap::from([
+            ("host_state_status", "client.read"), ("host_state_snapshot", "client.read"),
+            ("host_state_submit", "client.write"), ("host_feature_manifest", "client.read"),
+            ("session_attach", "client.read"), ("session_detach", "client.read"),
+        ]);
+        assert_eq!(policy.person_host_state_commands.len(), expected.len());
+        for entry in &policy.person_host_state_commands {
+            assert_eq!(expected.get(entry.arm.as_str()).copied(), Some(entry.capability.as_str()));
+            assert!(!entry.reason.trim().is_empty());
+            assert!(!policy.command_overrides.contains_key(&entry.arm));
+            let command = manifest["commands"].as_array().unwrap().iter()
+                .find(|command| command["arm"].as_str() == Some(entry.arm.as_str())).unwrap();
+            assert_eq!(policy.get(command["capability"].as_str().unwrap()).unwrap().class, SurfaceClass::WorkspaceAction);
+        }
+        assert_eq!(policy.person_host_state_commands.iter().map(|entry| entry.arm.as_str()).collect::<BTreeSet<_>>(), expected.keys().copied().collect());
+    }
 
     #[test]
     fn p5_model_dormancy_is_labeled_without_changing_global_overrides() {

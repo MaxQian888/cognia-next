@@ -1289,6 +1289,18 @@ Intentional dormancy and per-arm routing:
   the P6 credential broker supplies person-scoped providers.
 - Message/session/transcript arms: storage and history only. Replies require
   agent runs, which remain `execution_isolation_unavailable` on the Host brain.
+- `host_state_status`, `host_state_snapshot`, `host_state_submit` and
+  `host_feature_manifest`: routed to the person's brain. Reads require
+  `client.read`, submit requires `client.write`; the owner's data-only intents
+  need no Host admin lease. `session_attach` / `session_detach` also route to
+  the person's brain with `client.read`. A control attachment advertises exactly
+  the accepted data intents in `supportedActions`; an observer gets none.
+  `message.enqueue`, `turn.steer`, `turn.followup`, `turn.abort`,
+  `approval.respond` and `elicitation.respond` are refused per action with
+  `execution_isolation_unavailable`; `session.workspace` with
+  `workspace_unavailable`. A mixed batch still applies its allowed data intents.
+  Session seeds drop `projectId` and keep only a partition-owned `characterId`.
+  The feature manifest reports this partition's scope and unavailable execution.
 - Files, characters, issues, pet storage, glance and twin profile data: only
   the caller's person brain, with no operator/WebView/AppStore fallback.
 - `register_push_token` / `revoke_push_token`: registry namespace is the person

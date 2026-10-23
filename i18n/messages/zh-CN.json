@@ -15965,6 +15965,10 @@
         "hint": "你当前似乎处于离线状态——恢复联网后 Cognia 会自动重试。",
         "label": "离线"
       },
+      "partitionWorkspaceUnavailable": {
+        "hint": "在共享主机上，你的对话保存在自己的个人空间中，它不关联主机的工作区，因此无法在这里把对话移入工作区。",
+        "label": "个人空间中没有工作区"
+      },
       "payloadTooLarge": {
         "hint": "请求超出大小限制——请缩减输入内容。",
         "label": "请求过大"

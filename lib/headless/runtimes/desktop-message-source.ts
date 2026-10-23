@@ -18,7 +18,10 @@ registerHeadlessRuntime({
   hosts: ["brain", "person-brain"],
   start: async (ctx) => {
     const unsubMessages = await installDesktopMessageSource({ bridge: ctx.bridge })
-    const unsubWrites = await installDesktopWriteSource({ bridge: ctx.bridge })
+    const unsubWrites = await installDesktopWriteSource({
+      bridge: ctx.bridge,
+      ...(ctx.host === "person-brain" ? { partition: true } : {}),
+    })
     // A person brain is data-only (plan §9a): it never proxies orchestration.
     const unsubOrchestration =
       ctx.host === "person-brain"

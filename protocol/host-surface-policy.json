@@ -1,5 +1,5 @@
 {
-  "$comment": "Multi-tenant Host surface policy (docs/plans/2026-10-20-multi-user-organizations-permissions-and-rollout.md \u00a78). Maps every CommandDescriptor capability in protocol/companion-commands.json to the collaboration action a tenant principal must hold before the Host dispatches the command. A test fails when the manifest gains a capability this file does not classify; an unclassified capability is denied in multi-tenant mode. Single-user mode skips Host standing checks; executionCapabilities and executionCommands still apply when execution is explicitly disabled. Actions come from protocol/collab-capabilities-v1.json. commandOverrides correct capability-level client standing for Host-global arms; client is not a claim about where code executes. Stream adapters have explicit execution flags when no descriptor exists. P5 routes host-data to an OIDC-bound person brain only when a server fleet is installed; personModelCommands label the P6 model-access dormancy. Message data arms are storage-only; agent replies remain refused.",
+  "$comment": "Multi-tenant Host surface policy (docs/plans/2026-10-20-multi-user-organizations-permissions-and-rollout.md \u00a78). Maps every CommandDescriptor capability in protocol/companion-commands.json to the collaboration action a tenant principal must hold before the Host dispatches the command. A test fails when the manifest gains a capability this file does not classify; an unclassified capability is denied in multi-tenant mode. Single-user mode skips Host standing checks; executionCapabilities and executionCommands still apply when execution is explicitly disabled. Actions come from protocol/collab-capabilities-v1.json. commandOverrides correct capability-level client standing for Host-global arms; client is not a claim about where code executes. Stream adapters have explicit execution flags when no descriptor exists. P5 routes host-data to an OIDC-bound person brain only when a server fleet is installed; personModelCommands label the P6 model-access dormancy. personHostStateCommands apply only to tenant devices on multi-tenant Hosts with a person fleet, using client.read/client.write and the partition intent policy. Message data arms are storage-only; agent replies remain refused.",
   "schemaVersion": 1,
   "workspaceResolution": "container-record-bindings;workspace-actions-fallback;host-brain-execution-unavailable",
   "executionCapabilities": ["agent.worker"],
@@ -1049,6 +1049,38 @@
   "socketChannels": {
     "agent.worker": { "class": "operator-only" }
   },
+  "personHostStateCommands": [
+    {
+      "arm": "session_attach",
+      "capability": "client.read",
+      "reason": "P5d: attach to the caller's person brain and negotiate its data-only supportedActions; live event leases still govern control, and host.observe applies outside a partitioned Host."
+    },
+    {
+      "arm": "session_detach",
+      "capability": "client.read",
+      "reason": "P5d: release only the caller's attachment in their person brain; retain host.observe and workspace standing outside a partitioned Host."
+    },
+    {
+      "arm": "host_state_status",
+      "capability": "client.read",
+      "reason": "P5d: read HostState readiness in the caller's person partition; retain host.observe and workspace standing outside a partitioned Host."
+    },
+    {
+      "arm": "host_state_snapshot",
+      "capability": "client.read",
+      "reason": "P5d: read the caller's partition snapshot; retain host.observe and workspace standing outside a partitioned Host."
+    },
+    {
+      "arm": "host_state_submit",
+      "capability": "client.write",
+      "reason": "P5d: submit the owner's data intents without a Host admin lease; runtime intents refuse execution_isolation_unavailable and workspace moves refuse workspace_unavailable per action. Legacy workspace.write and interactive approval remain outside a partition."
+    },
+    {
+      "arm": "host_feature_manifest",
+      "capability": "client.read",
+      "reason": "P5d: discover the caller's partition hostStateScope and unavailable agent execution; retain host.observe and workspace standing outside a partitioned Host."
+    }
+  ],
   "personModelCommands": [
     {
       "arm": "pet_chat_send",

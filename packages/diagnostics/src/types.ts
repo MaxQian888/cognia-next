@@ -405,6 +405,12 @@ export type DiagnosticCode =
    * not available yet (plan §9a, Q11). Inert by design until then.
    */
   | "modelAccessUnavailable"
+  /**
+   * A member's data partition on a multi-tenant Host has no Host workspaces,
+   * so a conversation there cannot be moved into one (plan §9a, P5d). Inert
+   * by design: the partition holds the member's own data only.
+   */
+  | "partitionWorkspaceUnavailable"
   | "routingNoCandidates"
   // --- Cognia internals ---
   | "settingsLoadFailed"

@@ -36,6 +36,8 @@ const HOST_REFUSAL_TO_DIAGNOSTIC: Readonly<Record<string, DiagnosticCode>> = {
   // A member's own data partition (plan §9a). Model access is dormant there;
   // the other two are transient, and the Host marks them retryable.
   model_access_unavailable: "modelAccessUnavailable",
+  // HostState `session.workspace` in a partition (P5d): it has no workspaces.
+  workspace_unavailable: "partitionWorkspaceUnavailable",
   person_brain_capacity: "resourceLimit",
   person_brain_unavailable: "serviceUnavailable",
 }
