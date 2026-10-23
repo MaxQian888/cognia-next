@@ -119,6 +119,39 @@ pub fn issue_service_jwt(secret: &[u8], account_id: &str) -> Result<(String, i64
     Ok((token, exp))
 }
 
+/// Exact service trust predicate. A person child must remain false at every
+/// service bypass, even though its transport is local and its JWT is valid.
+pub fn is_service_scope(scope: Option<&str>) -> bool { scope == Some("service") }
+
+/// Internal-only claims. Keeping these separate preserves the legacy Claims
+/// wire shape. The generation belongs to one live child, independently of
+/// its persisted encryption key; it is never sent in hello or supplied by a device.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersonBrainClaims {
+    #[serde(flatten)]
+    pub identity: Claims,
+    pub generation: String,
+}
+
+/// A person child has no service authority. Its token is bound to both its
+/// account and a fresh, in-memory generation minted for that child start.
+/// Refreshes reuse that generation; a restart never does.
+pub fn issue_person_brain_jwt(secret: &[u8], account_id: &str, generation: &str) -> Result<(String, i64), JwtError> {
+    validate_account_id(account_id)?;
+    let now = now_secs();
+    let exp = now + SERVICE_TTL_SECS;
+    let claims = PersonBrainClaims { identity: Claims { scope: "person-brain".into(), iat: now, exp,
+        device_id: Some(format!("brain-{account_id}")), account_id: Some(account_id.into()) }, generation: generation.into() };
+    Ok((encode(&Header::new(Algorithm::HS256), &claims, &EncodingKey::from_secret(secret))?, exp))
+}
+
+pub fn verify_person_brain(secret: &[u8], token: &str) -> Result<PersonBrainClaims, JwtError> {
+    verify(secret, token, "person-brain")?;
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.leeway = 0;
+    Ok(decode::<PersonBrainClaims>(token, &DecodingKey::from_secret(secret), &validation)?.claims)
+}
+
 /// Verify a JWT and return its claims.
 ///
 /// Validates signature, expiry, and that `scope == expected_scope`.
@@ -203,6 +236,69 @@ mod tests {
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
     const ACCOUNT_ID: &str = "local_acct_a";
+
+    #[test]
+    fn p5_all_audited_service_bypasses_use_exact_service_trust() {
+        assert!(is_service_scope(Some("service")));
+        for scope in [None, Some("person-brain"), Some("device"), Some("owner"), Some("Service")] {
+            assert!(!is_service_scope(scope));
+        }
+        let sites = [
+            ("crates/cognia-companion/src/remote_execution.rs", include_str!("../../cognia-companion/src/remote_execution.rs"), 6),
+            ("crates/cognia-companion/src/ws_bridge.rs", include_str!("../../cognia-companion/src/ws_bridge.rs"), 1),
+            ("crates/cognia-companion/src/paired_turn.rs", include_str!("../../cognia-companion/src/paired_turn.rs"), 1),
+            ("crates/cognia-companion/src/catalog.rs", include_str!("../../cognia-companion/src/catalog.rs"), 1),
+            ("crates/cognia-companion/src/host_surface_gate.rs", include_str!("../../cognia-companion/src/host_surface_gate.rs"), 5),
+            ("crates/cognia-companion/src/ws.rs", include_str!("../../cognia-companion/src/ws.rs"), 1),
+            ("crates/cognia-companion-rpc/src/managed_desktops.rs", include_str!("../../cognia-companion-rpc/src/managed_desktops.rs"), 1),
+            ("crates/cognia-companion-rpc/src/remote_desktops.rs", include_str!("../../cognia-companion-rpc/src/remote_desktops.rs"), 1),
+            ("crates/cognia-companion-rpc/src/rpc.rs", include_str!("../../cognia-companion-rpc/src/rpc.rs"), 7),
+            ("crates/cognia-companion-rpc/src/rpc/service_plane.rs", include_str!("../../cognia-companion-rpc/src/rpc/service_plane.rs"), 8),
+            ("crates/cognia-companion-rpc/src/rpc/source_control.rs", include_str!("../../cognia-companion-rpc/src/rpc/source_control.rs"), 2),
+            ("crates/cognia-companion-rpc/src/rpc/native_tools.rs", include_str!("../../cognia-companion-rpc/src/rpc/native_tools.rs"), 1),
+            ("crates/cognia-companion-rpc/src/rpc/environment.rs", include_str!("../../cognia-companion-rpc/src/rpc/environment.rs"), 1),
+            ("crates/cognia-companion-rpc/src/rpc/file_share.rs", include_str!("../../cognia-companion-rpc/src/rpc/file_share.rs"), 2),
+            ("crates/cognia-companion-rpc/src/rpc/gateway_plane.rs", include_str!("../../cognia-companion-rpc/src/rpc/gateway_plane.rs"), 3),
+            ("crates/cognia-companion-rpc/src/rpc/chat.rs", include_str!("../../cognia-companion-rpc/src/rpc/chat.rs"), 2),
+        ];
+        for (path, source, count) in sites {
+            assert_eq!(source.matches("jwt::is_service_scope(").count(), count, "review service trust changes in {path}");
+            for direct in ["scope == Some(\"service\")", "scope != Some(\"service\")", "scope == \"service\"", "scope != \"service\""] {
+                assert!(!source.contains(direct), "unreviewed service check in {path}");
+            }
+        }
+        // Independent guards below this dependency boundary retain exact
+        // literal comparison; pin their equivalence to the shared helper.
+        let content = include_str!("../../cognia-codeserver/src/content_bridge.rs");
+        assert!(content.contains("if identity.scope == \"service\" {"));
+        let channels = include_str!("../../cognia-companion-bus/src/event_channels.rs");
+        assert!(channels.contains("if scope == \"service\" {"));
+        for scope in ["service", "person-brain"] {
+            assert_eq!(is_service_scope(Some(scope)), scope == "service");
+        }
+        assert!(include_str!("../../cognia-companion-rpc/src/managed_desktops.rs").contains("matches!(caller.scope, Some(\"owner\" | \"service\"))"));
+        assert!(include_str!("../../cognia-companion-rpc/src/rpc/native_tools.rs").contains("Some(\"service\") | Some(\"owner\")"));
+        assert!(!matches!(Some("person-brain"), Some("owner" | "service")));
+        assert!(!matches!(Some("person-brain"), Some("service") | Some("owner")));
+    }
+
+    #[test]
+    fn p5_person_brain_token_is_account_bound_and_never_service() {
+        let (token, _) = issue_person_brain_jwt(SECRET, "pb_0123456789abcdef01234567", &"11".repeat(32)).unwrap();
+        let person = verify_person_brain(SECRET, &token).unwrap();
+        assert_eq!(person.identity.account_id.as_deref(), Some("pb_0123456789abcdef01234567"));
+        assert_eq!(person.generation, "11".repeat(32));
+        assert!(verify(SECRET, &token, "service").is_err());
+        assert!(verify(SECRET, &token, "device").is_err());
+        assert!(verify_for_account(SECRET, &token, "person-brain", "pb_0123456789abcdef01234567").is_ok());
+        assert!(verify_for_account(SECRET, &token, "person-brain", "pb_1123456789abcdef01234567").is_err());
+        // The legacy wire shape retains exactly its existing five fields.
+        let (legacy, _) = issue_service_jwt(SECRET, ACCOUNT_ID).unwrap();
+        let claims = serde_json::to_value(verify(SECRET, &legacy, "service").unwrap()).unwrap();
+        assert_eq!(claims.as_object().unwrap().len(), 5);
+        assert_eq!(claims["scope"], "service");
+        assert_eq!(claims["device_id"], SERVICE_DEVICE_ID);
+    }
 
     #[test]
     fn issue_and_verify_device_jwt() {

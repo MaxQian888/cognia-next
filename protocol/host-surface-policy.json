@@ -1,5 +1,5 @@
 {
-  "$comment": "Multi-tenant Host surface policy (docs/plans/2026-10-20-multi-user-organizations-permissions-and-rollout.md \u00a78). Maps every CommandDescriptor capability in protocol/companion-commands.json to the collaboration action a tenant principal must hold before the Host dispatches the command. A test fails when the manifest gains a capability this file does not classify; an unclassified capability is denied in multi-tenant mode. Single-user mode skips Host standing checks; executionCapabilities and executionCommands still apply when execution is explicitly disabled. Actions come from protocol/collab-capabilities-v1.json. commandOverrides correct capability-level client standing for Host-global arms; client is not a claim about where code executes. Stream adapters have explicit execution flags when no descriptor exists.",
+  "$comment": "Multi-tenant Host surface policy (docs/plans/2026-10-20-multi-user-organizations-permissions-and-rollout.md \u00a78). Maps every CommandDescriptor capability in protocol/companion-commands.json to the collaboration action a tenant principal must hold before the Host dispatches the command. A test fails when the manifest gains a capability this file does not classify; an unclassified capability is denied in multi-tenant mode. Single-user mode skips Host standing checks; executionCapabilities and executionCommands still apply when execution is explicitly disabled. Actions come from protocol/collab-capabilities-v1.json. commandOverrides correct capability-level client standing for Host-global arms; client is not a claim about where code executes. Stream adapters have explicit execution flags when no descriptor exists. P5 routes host-data to an OIDC-bound person brain only when a server fleet is installed; personModelCommands label the P6 model-access dormancy. Message data arms are storage-only; agent replies remain refused.",
   "schemaVersion": 1,
   "workspaceResolution": "container-record-bindings;workspace-actions-fallback;host-brain-execution-unavailable",
   "executionCapabilities": ["agent.worker"],
@@ -1049,9 +1049,19 @@
   "socketChannels": {
     "agent.worker": { "class": "operator-only" }
   },
+  "personModelCommands": [
+    {
+      "arm": "pet_chat_send",
+      "reason": "P5 intentional dormancy: no provider in a person partition until the P6 credential broker; 503 model_access_unavailable."
+    },
+    {
+      "arm": "pet_soul_generate",
+      "reason": "P5 intentional dormancy: no provider in a person partition until the P6 credential broker; 503 model_access_unavailable."
+    }
+  ],
   "classes": {
     "client": "Client-local bridge plumbing; no additional Host standing check. Host-stored data uses host-data instead.",
-    "host-data": "Host-side per-user data whose store is not partitioned by person until P5; refused to tenant devices and owners in multi-tenant mode (Rule 7). Host service principals retain existing data access; commandOverrides take precedence.",
+    "host-data": "Person-partitioned data on multi-tenant cognia-server: OIDC-bound person and live non-guest org standing; no workspace. No installed fleet: 403 host_data_unpartitioned. Message arms store/read history only; agent replies stay execution_isolation_unavailable. Single-user unchanged.",
     "operator-only": "Never served to a tenant principal in multi-tenant mode.",
     "org-action": "Requires the named org-scope action for the tenant org.",
     "workspace-action": "Requires the named workspace-scope action in the workspace the Host resolves for the target (never a renderer-supplied id). When the Host cannot resolve a workspace, the fallback org action applies.",

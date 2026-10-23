@@ -1032,6 +1032,12 @@ mod tests {
     // ── catalog shape ────────────────────────────────────────────────────────
 
     #[test]
+    fn p5_person_brain_never_receives_service_event_visibility() {
+        assert_eq!(ConnectionScope::from_claim("person-brain"), ConnectionScope::Device);
+        assert_eq!(ConnectionScope::from_claim("service"), ConnectionScope::Service);
+    }
+
+    #[test]
     fn catalog_patterns_are_unique() {
         let mut seen = BTreeSet::new();
         for spec in EVENT_CHANNELS {

@@ -423,6 +423,7 @@ async fn run(
                                                 .into_iter()
                                                 .filter(|frame| {
                                                     frame.visible_to(&device_id)
+                                                        && crate::person_partition::event_visible(frame, &device_id, None)
                                                         && subscription.allows(&frame.event_type)
                                                 })
                                                 .collect();
@@ -525,6 +526,7 @@ async fn run(
                 match recv_result {
                     Ok(frame) => {
                         if !frame.visible_to(&device_id)
+                            || !crate::person_partition::event_visible(&frame, &device_id, None)
                             || !subscription.allows(&frame.event_type)
                         {
                             continue;
@@ -625,9 +627,10 @@ async fn handle_inbound(
         return send_outbound(peer, &frame).await.map_err(|e| e.to_string());
     }
 
-    let tenant_id = security_store()
-        .ok_or_else(|| "security store unavailable".to_string())?
-        .active_device_tenant(device_id)
+    let security = security_store().ok_or_else(|| "security store unavailable".to_string())?;
+    let tenant_id = if crate::deployment::deployment_mode() == crate::deployment::DeploymentMode::MultiTenant {
+        security.unambiguous_device_tenant(device_id)
+    } else { security.active_device_tenant(device_id) }
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "registered device principal unavailable".to_string())?;
     let principal = DeviceContext {
@@ -1044,6 +1047,7 @@ mod tests {
             payload: json!({ "seq": seq }),
             ts_ms: 0,
             target_device_id: None,
+            partition_account_id: None,
         };
         assert!(outbound_for_batch(vec![]).is_none());
 

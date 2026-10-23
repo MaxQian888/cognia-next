@@ -88,7 +88,7 @@ pub(super) fn admitted_commands(
 
 /// The strong validator for one answer.
 fn etag(plane: &str, commands: &[&CommandDescriptor]) -> String {
-    if plane == "service" {
+    if crate::jwt::is_service_scope(Some(plane.as_ref())) {
         return format!("\"{CATALOG_HASH}\"");
     }
     let mut digest = Sha256::new();

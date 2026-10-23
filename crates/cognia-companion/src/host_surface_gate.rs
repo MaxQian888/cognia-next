@@ -171,6 +171,15 @@ pub async fn decide(mode: DeploymentMode, execution: bool, sandboxes: bool, prov
     capability: &str, arm: Option<&str>, principal: &DeviceContext, workspace: Option<&str>) -> Result<(), Refusal> {
     // No policy parse, identity/store read or provider call on the legacy path.
     if mode == DeploymentMode::SingleUser && execution { return Ok(()); }
+    decide_with_person_fleet(mode, execution, sandboxes, provider, capability, arm, principal, workspace,
+        crate::person_partition::fleet().is_some()).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn decide_with_person_fleet(mode: DeploymentMode, execution: bool, sandboxes: bool, provider: &dyn StandingProvider,
+    capability: &str, arm: Option<&str>, principal: &DeviceContext, workspace: Option<&str>, person_fleet: bool) -> Result<(), Refusal> {
+    // No policy parse, identity/store read or provider call on the legacy path.
+    if mode == DeploymentMode::SingleUser && execution { return Ok(()); }
     let policy = POLICY.as_ref().map_err(|_| forbidden("host_surface_forbidden"))?;
     let entry = policy.get(capability)
         .ok_or_else(|| forbidden("host_surface_forbidden"))?;
@@ -181,8 +190,16 @@ pub async fn decide(mode: DeploymentMode, execution: bool, sandboxes: bool, prov
     let entry = arm.and_then(|arm| policy.command_overrides.get(arm)).unwrap_or(entry);
     let (action, workspace) = match entry.class {
         SurfaceClass::Client => return Ok(()),
-        SurfaceClass::HostData => return if principal.scope == "service" { Ok(()) } else { Err(forbidden("host_data_unpartitioned")) },
-        SurfaceClass::OperatorOnly => return if principal.scope == "service" { Ok(()) } else { Err(forbidden("host_surface_forbidden")) },
+        SurfaceClass::HostData => {
+            if crate::jwt::is_service_scope(Some(principal.scope.as_ref())) { return Ok(()); }
+            if !person_fleet { return Err(forbidden("host_data_unpartitioned")); }
+            person_data_standing(provider, principal).await?;
+            if arm.is_some_and(|arm| policy.person_model_commands.iter().any(|entry| entry.arm == arm)) {
+                return Err(unavailable("model_access_unavailable"));
+            }
+            return Ok(());
+        },
+        SurfaceClass::OperatorOnly => return if crate::jwt::is_service_scope(Some(principal.scope.as_ref())) { Ok(()) } else { Err(forbidden("host_surface_forbidden")) },
         SurfaceClass::OrgAction => (entry.action.as_deref(), None),
         // Raw workspace actions retain their org fallback; never use a renderer id here.
         SurfaceClass::WorkspaceAction => (entry.fallback_org_action.as_deref(), None),
@@ -198,6 +215,37 @@ pub async fn decide(mode: DeploymentMode, execution: bool, sandboxes: bool, prov
     let person = provider.person(principal)?;
     let actions = provider.actions(&person, workspace).await?;
     if actions.iter().any(|value| value == action) { Ok(()) } else { Err(forbidden("host_surface_forbidden")) }
+}
+
+/// A successful org-only lookup is live non-guest standing: the collaboration
+/// authority refuses workspace/session-only guests. Members may have zero org
+/// management actions; requiring an action here would exclude ordinary members.
+async fn person_data_standing(provider: &dyn StandingProvider, principal: &DeviceContext) -> Result<Person, Refusal> {
+    let person = provider.person(principal)?;
+    provider.actions(&person, None).await?;
+    Ok(person)
+}
+
+/// Operation reads have no command args. Re-resolve the current verified
+/// person and standing rather than trusting the receipt's historical device.
+pub(crate) async fn operation_person(principal: &DeviceContext) -> Result<Option<crate::person_partition::PersonPartition>, Problem> {
+    if deployment_mode() == DeploymentMode::SingleUser || crate::jwt::is_service_scope(Some(principal.scope.as_ref())) { return Ok(None); }
+    let person = person_data_standing(LIVE.as_ref(), principal).await
+        .map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))?;
+    Ok(Some(crate::person_partition::PersonPartition::new(person.org, person.user)))
+}
+
+pub async fn person_partition(capability: &str, command: &str, principal: &DeviceContext)
+    -> Result<Option<crate::person_partition::PersonPartition>, Problem> {
+    if deployment_mode() == DeploymentMode::SingleUser || crate::jwt::is_service_scope(Some(principal.scope.as_ref())) { return Ok(None); }
+    let policy = POLICY.as_ref().map_err(|_| Problem::with_status(StatusCode::FORBIDDEN, "host_surface_forbidden", "invalid Host policy"))?;
+    if policy.command_overrides.contains_key(command)
+        || !policy.get(capability).is_some_and(|entry| entry.class == SurfaceClass::HostData) { return Ok(None); }
+    // The normal gate already checked standing. Reuse its bounded cache and
+    // derive authority only from the verified binding, never from args.
+    let person = person_data_standing(LIVE.as_ref(), principal).await
+        .map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))?;
+    Ok(Some(crate::person_partition::PersonPartition::new(person.org, person.user)))
 }
 
 /// Legacy explicit browser scopes, retained for single-user compatibility.
@@ -510,7 +558,7 @@ pub async fn authorize_execution(state: &crate::SharedState, capability: &str, c
         // Pool availability never makes Host JS/sidecar code isolated. These
         // arms remain intentionally unavailable; no client id can lift this.
         if (brain && POLICY.as_ref().is_ok_and(|policy| policy.command_executes(capability, Some(command))))
-            || (command == "environment_task_shell_exec" && principal.scope == "service") {
+            || (command == "environment_task_shell_exec" && crate::jwt::is_service_scope(Some(principal.scope.as_ref()))) {
             return Err(unavailable("execution_isolation_unavailable"));
         }
         if brain { return Err(forbidden("workspace_unresolved")); }
@@ -542,6 +590,42 @@ pub async fn authorize_execution(state: &crate::SharedState, capability: &str, c
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn p5_single_user_admission_retains_all_manifest_paths() {
+        host_data_single_user_keeps_zero_policy_and_provider_calls();
+        admission_reads_only_the_current_devices_verified_person();
+    }
+
+    #[tokio::test]
+    async fn p5_data_admission_requires_org_standing_and_preserves_overrides_and_legacy() {
+        for result in [0, 1] { // A member can legitimately have no org-admin actions.
+            let provider = Fake { result, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+            for arm in ["message_send", "session_list", "issue_create", "register_push_token", "sync_list_tables"] {
+                decide_with_person_fleet(DeploymentMode::MultiTenant, true, false, &provider,
+                    "client.write", Some(arm), &device("device"), Some("forged"), true).await.unwrap();
+            }
+            assert!(provider.workspaces.lock().iter().all(Option::is_none));
+            for arm in ["pet_chat_send", "pet_soul_generate"] {
+                assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, true, false, &provider,
+                    "client.write", Some(arm), &device("device"), None, true).await.unwrap_err().code, "model_access_unavailable");
+            }
+            if result == 1 {
+                assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, true, false, &provider,
+                    "client.write", Some("app_settings_update"), &device("device"), None, true).await.unwrap_err().code, "host_surface_forbidden");
+            }
+        }
+        assert_eq!(map_authority_error(crate::workspace_access::WorkspaceAccessError::Upstream { status: 404 }).code, "host_surface_forbidden");
+        for (result, expected) in [(2, "host_authority_unavailable"), (3, "host_principal_unbound"), (4, "host_surface_forbidden")] {
+            let provider = Fake { result, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+            assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, true, false, &provider,
+                "client.read", Some("session_list"), &device("device"), None, true).await.unwrap_err().code, expected);
+            decide_with_person_fleet(DeploymentMode::SingleUser, true, false, &provider,
+                "client.read", Some("session_list"), &device("device"), None, true).await.unwrap();
+            assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, true, false, &provider,
+                "client.read", Some("session_list"), &device("device"), None, false).await.unwrap_err().code, "host_data_unpartitioned");
+        }
+    }
 
     #[test]
     fn p4_direct_execution_channels_stay_inert_and_single_user_keeps_its_behavior() {
@@ -707,6 +791,7 @@ mod tests {
             match self.result {
                 0 => Ok(vec!["host.global-surfaces".into(), "execution.request".into(), "workspace.read".into()]),
                 1 => Ok(vec![]),
+                4 => Err(map_authority_error(crate::workspace_access::WorkspaceAccessError::Upstream { status: 404 })),
                 _ => Err(unavailable("host_authority_unavailable")),
             }
         }

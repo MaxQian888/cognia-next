@@ -342,7 +342,7 @@ fn authority(
     if local {
         return ManagedDesktopAuthority::Administrator;
     }
-    if worker || scope == Some("service") {
+    if worker || cognia_companion::jwt::is_service_scope(scope) {
         return ManagedDesktopAuthority::Agent;
     }
     if scope == Some("owner") || owner {

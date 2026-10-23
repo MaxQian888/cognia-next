@@ -40,7 +40,7 @@ pub fn admission_args(
     message_id: Option<&str>,
     request_id: &str,
 ) -> Option<Value> {
-    if scope == Some("service") || tenant_id.is_none() {
+    if crate::jwt::is_service_scope(scope) || tenant_id.is_none() {
         return None;
     }
     let mut args = serde_json::json!({

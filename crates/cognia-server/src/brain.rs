@@ -198,6 +198,8 @@ impl cognia_companion::runtime::BrainProbe for BrainSupervisor {
 
 pub struct BrainSupervisor {
     config: BrainConfig,
+    person: bool,
+    person_authority: Option<Arc<cognia_companion::person_partition::PersonBrainAuthority>>,
     /// Signing secret source for token minting (rotations picked up on the
     /// next spawn / refresh).
     state: SharedState,
@@ -323,9 +325,19 @@ fn classify_brain_line(line: &str, default_level: log::Level) -> (log::Level, Co
 
 impl BrainSupervisor {
     pub fn new(config: BrainConfig, state: SharedState) -> Arc<Self> {
+        Self::with_profile(config, state, false)
+    }
+
+    pub fn new_person(config: BrainConfig, state: SharedState) -> Arc<Self> {
+        Self::with_profile(config, state, true)
+    }
+
+    fn with_profile(config: BrainConfig, state: SharedState, person: bool) -> Arc<Self> {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         Arc::new(Self {
+            person_authority: person.then(|| cognia_companion::person_partition::PersonBrainAuthority::new(config.account_id.clone())),
             config,
+            person,
             state,
             backoff: Mutex::new(CrashBackoff::default()),
             running: AtomicBool::new(false),
@@ -339,25 +351,47 @@ impl BrainSupervisor {
     pub fn status(&self) -> BrainStatus {
         BrainStatus {
             running: self.running.load(Ordering::SeqCst),
-            ready: ws_bridge::bridge_connected(),
+            ready: self.ready(),
             restart_count: self.restart_count.load(Ordering::SeqCst),
-            rss_bytes: ws_bridge::brain_rss_bytes(),
-            version: ws_bridge::brain_hello().map(|h| h.brain_version),
-            refusal: ws_bridge::brain_refusal(),
+            rss_bytes: if self.person { ws_bridge::account_rss_bytes(&self.config.account_id) } else { ws_bridge::brain_rss_bytes() },
+            version: if self.person { None } else { ws_bridge::brain_hello().map(|h| h.brain_version) },
+            refusal: if self.person { None } else { ws_bridge::brain_refusal() },
             parked: self.parked.load(Ordering::SeqCst),
         }
     }
 
     /// Signal the supervision loop to kill the child and stop respawning.
     pub fn shutdown(&self) {
+        if let Some(authority) = &self.person_authority { authority.stop(); }
         let _ = self.shutdown_tx.send(true);
+    }
+
+    pub(crate) fn person_authority(&self) -> Option<Arc<cognia_companion::person_partition::PersonBrainAuthority>> {
+        self.person_authority.clone()
+    }
+
+    fn child_env(&self, token: &str) -> Vec<(String, String)> {
+        let mut env = build_brain_env(&self.config, token);
+        if self.person { env.push(("COGNIA_BRAIN_PROFILE".into(), "person".into())); }
+        env
     }
 
     fn mint_token(&self) -> Result<String, String> {
         let secret = self.state.secret.read().clone();
-        issue_service_jwt(&secret, &self.config.account_id)
+        let issued = if self.person {
+            let generation = self.person_authority.as_ref().and_then(|authority| authority.current())
+                .ok_or_else(|| "person child is not active".to_string())?;
+            cognia_companion::jwt::issue_person_brain_jwt(&secret, &self.config.account_id, &generation)
+        } else { issue_service_jwt(&secret, &self.config.account_id) };
+        issued
             .map(|(token, _exp)| token)
             .map_err(|e| format!("failed to mint brain service token: {e}"))
+    }
+
+    pub fn is_stopping(&self) -> bool { *self.shutdown_rx.borrow() }
+
+    fn ready(&self) -> bool {
+        if self.person { ws_bridge::account_connected(&self.config.account_id) } else { ws_bridge::bridge_connected() }
     }
 
     /// Start the supervision loop. Runs until [`BrainSupervisor::shutdown`].
@@ -387,8 +421,9 @@ impl BrainSupervisor {
             }
 
             match self.spawn_once().await {
-                Ok(child) => {
-                    if self.supervise_child(child, &mut shutdown).await == ChildOutcome::Refused {
+                Ok((child, generation)) => {
+                    let outcome = self.supervise_child(child, generation, &mut shutdown).await;
+                    if outcome == ChildOutcome::Refused {
                         self.park(&mut shutdown).await;
                     }
                 }
@@ -448,17 +483,17 @@ impl BrainSupervisor {
         self.backoff.lock().await.reset();
     }
 
-    async fn spawn_once(&self) -> Result<tokio::process::Child, String> {
+    async fn spawn_once(&self) -> Result<(tokio::process::Child, Option<cognia_companion::person_partition::PersonChildGeneration>), String> {
         if !self.config.entry.exists() {
             return Err(format!(
                 "brain entry not found at {} (check {BRAIN_ENTRY_ENV})",
                 self.config.entry.display()
             ));
         }
-        let token = self.mint_token()?;
-
         let node =
             cognia_core::node_runtime::node_executable().map_err(|error| error.to_string())?;
+        let generation = self.person_authority.as_ref().and_then(|authority| authority.begin_child());
+        let token = self.mint_token()?;
         let mut cmd = Command::new(&node);
         cmd.arg(&self.config.entry)
             .arg("serve")
@@ -466,7 +501,8 @@ impl BrainSupervisor {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        for (k, v) in build_brain_env(&self.config, &token) {
+        cmd.env_remove("COGNIA_BRAIN_PROFILE");
+        for (k, v) in self.child_env(&token) {
             cmd.env(k, v);
         }
         #[cfg(target_os = "windows")]
@@ -475,7 +511,7 @@ impl BrainSupervisor {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
-        cmd.spawn().map_err(|e| {
+        cmd.spawn().map(|child| (child, generation)).map_err(|e| {
             format!(
                 "failed to spawn brain with Node.js at {}: {e}",
                 node.display()
@@ -486,6 +522,9 @@ impl BrainSupervisor {
     async fn supervise_child(
         &self,
         mut child: tokio::process::Child,
+        // Owned by this future: exit and cancellation invalidate authority
+        // before run() can park, back off or start a successor.
+        mut generation: Option<cognia_companion::person_partition::PersonChildGeneration>,
         shutdown: &mut watch::Receiver<bool>,
     ) -> ChildOutcome {
         self.running.store(true, Ordering::SeqCst);
@@ -519,7 +558,8 @@ impl BrainSupervisor {
         }
 
         let mut ready_rx = ws_bridge::subscribe_bridge_ready();
-        let mut was_ready = *ready_rx.borrow();
+        let mut was_ready = self.ready();
+        let mut person_ready_tick = tokio::time::interval(Duration::from_millis(50));
         let ready_deadline = tokio::time::sleep(self.config.ready_timeout);
         tokio::pin!(ready_deadline);
         let mut ready_watchdog = ReadyWatchdog::default();
@@ -529,6 +569,9 @@ impl BrainSupervisor {
         loop {
             tokio::select! {
                 status = child.wait() => {
+                    // Revoke as soon as exit is observed, before any await
+                    // while updating backoff or preparing the successor.
+                    drop(generation.take());
                     match &status {
                         Ok(s) => log::warn!("brain exited: {s}"),
                         Err(e) => log::error!("brain wait error: {e}"),
@@ -552,7 +595,7 @@ impl BrainSupervisor {
                 // read `hello_refused` keeps reconnecting into the same
                 // refusal, so stop it here instead of waiting out the
                 // watchdog.
-                changed = refusals.changed(), if !refused && !was_ready => {
+                changed = refusals.changed(), if !self.person && !refused && !was_ready => {
                     if changed.is_err() || ws_bridge::brain_refusal().is_none() {
                         continue;
                     }
@@ -561,7 +604,7 @@ impl BrainSupervisor {
                     // Loop continues; child.wait() observes the kill.
                 }
 
-                changed = ready_rx.changed(), if !was_ready => {
+                changed = ready_rx.changed(), if !self.person && !was_ready => {
                     if changed.is_err() {
                         continue;
                     }
@@ -572,7 +615,12 @@ impl BrainSupervisor {
                     }
                 }
 
+                _ = person_ready_tick.tick(), if self.person && !was_ready => {
+                    if self.ready() { was_ready = true; self.backoff.lock().await.reset(); }
+                }
+
                 _ = &mut ready_deadline, if ready_watchdog.is_armed(was_ready) => {
+                    drop(generation.take());
                     ready_watchdog.mark_fired();
                     log::error!(
                         "brain did not complete the bridge hello within {}s; killing",
@@ -585,7 +633,9 @@ impl BrainSupervisor {
                 _ = refresh_ticker.tick() => {
                     match self.mint_token() {
                         Ok(token) => {
-                            if let Err(e) = ws_bridge::send_token_refresh(token) {
+                            let refreshed = if self.person { ws_bridge::send_account_token_refresh(&self.config.account_id, token) }
+                                else { ws_bridge::send_token_refresh(token) };
+                            if let Err(e) = refreshed {
                                 log::warn!("brain supervisor: token refresh not delivered: {e}");
                             }
                         }
@@ -595,6 +645,7 @@ impl BrainSupervisor {
 
                 _ = shutdown.changed() => {
                     if *shutdown.borrow() {
+                        drop(generation.take());
                         log::info!("brain supervisor: shutdown — killing brain");
                         let _ = child.start_kill();
                         let _ = child.wait().await;
@@ -611,7 +662,7 @@ impl BrainSupervisor {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use cognia_companion::{
         deny_list::DenyList, desktop_messages_bridge::DesktopMessagesBridge,
@@ -621,7 +672,7 @@ mod tests {
     };
     use parking_lot::RwLock;
 
-    fn test_state() -> SharedState {
+    pub(crate) fn test_state() -> SharedState {
         Arc::new(CompanionState {
             secret: RwLock::new(b"test-secret-32-bytes-exactly____".to_vec()),
             deny_list: Arc::new(DenyList::new()),
@@ -638,7 +689,7 @@ mod tests {
         })
     }
 
-    fn test_config(entry: PathBuf, ready_timeout: Duration) -> BrainConfig {
+    pub(crate) fn test_config(entry: PathBuf, ready_timeout: Duration) -> BrainConfig {
         BrainConfig {
             entry,
             server_url: "https://127.0.0.1:7890".into(),
@@ -652,6 +703,72 @@ mod tests {
             ready_timeout,
             parked_entry_poll: Duration::from_millis(50),
         }
+    }
+
+    #[tokio::test]
+    async fn p5_person_supervisor_reuses_env_contract_with_distinct_scope_and_profile() {
+        let _slot = ws_bridge::test_support::lock_slot().await;
+        let config = test_config(PathBuf::from("brain.mjs"), Duration::from_secs(1));
+        let state = test_state();
+        let operator = BrainSupervisor::new(config.clone(), state.clone());
+        assert_eq!(operator.child_env("token"), build_brain_env(&config, "token"));
+        let person = BrainSupervisor::new_person(config.clone(), state);
+        let _generation = person.person_authority().unwrap().begin_child().unwrap();
+        let mut expected = build_brain_env(&config, "token");
+        expected.push(("COGNIA_BRAIN_PROFILE".into(), "person".into()));
+        assert_eq!(person.child_env("token"), expected);
+        let token = person.mint_token().unwrap();
+        assert!(cognia_companion::jwt::verify(&person.state.secret.read(), &token, "service").is_err());
+        assert_eq!(cognia_companion::jwt::verify(&person.state.secret.read(), &token, "person-brain").unwrap().account_id, Some(config.account_id));
+    }
+
+    #[tokio::test]
+    async fn p5_child_tokens_and_refresh_are_fenced_per_start_and_crash_respawn() {
+        let _slot = ws_bridge::test_support::lock_slot().await;
+        let config = test_config(PathBuf::from("missing-brain.mjs"), Duration::from_secs(1));
+        let supervisor = BrainSupervisor::new_person(config.clone(), test_state());
+        let authority = supervisor.person_authority().unwrap();
+        let first_child = authority.begin_child().unwrap();
+        let decode = |token: &str| cognia_companion::jwt::verify_person_brain(&supervisor.state.secret.read(), token).unwrap();
+        let first = decode(&supervisor.mint_token().unwrap());
+        let refresh = decode(&supervisor.mint_token().unwrap());
+        assert_eq!(first.generation, refresh.generation);
+        assert!(authority.accepts(&first.generation));
+        // This guard is also dropped by run() on crash, watchdog kill and
+        // cancelled supervision, before the backoff/respawn path.
+        drop(first_child);
+        assert!(!authority.accepts(&first.generation));
+        assert!(supervisor.mint_token().is_err());
+        let _second_child = authority.begin_child().unwrap();
+        let second = decode(&supervisor.mint_token().unwrap());
+        assert_ne!(second.generation, first.generation);
+        assert!(!authority.accepts(&first.generation));
+        assert_eq!(second.generation, decode(&supervisor.mint_token().unwrap()).generation);
+        supervisor.shutdown();
+        assert!(!authority.accepts(&second.generation));
+        assert!(authority.begin_child().is_none(), "shutdown cannot race a new spawn into authority");
+        let restarted = BrainSupervisor::new_person(config, test_state());
+        let _new_child = restarted.person_authority().unwrap().begin_child().unwrap();
+        let token = cognia_companion::jwt::verify_person_brain(&restarted.state.secret.read(), &restarted.mint_token().unwrap()).unwrap();
+        assert_ne!(token.generation, second.generation, "persisted content key cannot revive a token on server restart");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn p5_exited_child_invalidates_auth_before_crash_respawn() {
+        let _slot = ws_bridge::test_support::lock_slot().await;
+        let supervisor = BrainSupervisor::new_person(test_config(PathBuf::from("unused"), Duration::from_secs(1)), test_state());
+        let authority = supervisor.person_authority().unwrap();
+        let child_generation = authority.begin_child().unwrap();
+        let token = cognia_companion::jwt::verify_person_brain(&supervisor.state.secret.read(), &supervisor.mint_token().unwrap()).unwrap();
+        let child = Command::new("/bin/sh").arg("-c").arg("exit 7").kill_on_drop(true).spawn().unwrap();
+        let mut shutdown = supervisor.shutdown_rx.clone();
+        assert_eq!(supervisor.supervise_child(child, Some(child_generation), &mut shutdown).await, ChildOutcome::Exited);
+        assert!(!authority.accepts(&token.generation));
+        let _respawn = authority.begin_child().unwrap();
+        assert!(!authority.accepts(&token.generation));
+        let refresh = cognia_companion::jwt::verify_person_brain(&supervisor.state.secret.read(), &supervisor.mint_token().unwrap()).unwrap();
+        assert_ne!(refresh.generation, token.generation);
     }
 
     #[test]

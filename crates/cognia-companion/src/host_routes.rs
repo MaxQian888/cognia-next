@@ -106,6 +106,8 @@ pub const HOST_ROUTES: &[HostRoute] = &[
     HostRoute { path: "/internal/events", class: GatedByDispatch, capability: Some("service.internal"), execution: false },
     HostRoute { path: "/internal/_rpc/{name}", class: GatedByDispatch, capability: None, execution: false },
     HostRoute { path: "/internal/operations/{operation_id}", class: GatedByDispatch, capability: Some("service.internal"), execution: false },
+    HostRoute { path: "/internal/persons", class: GatedByDispatch, capability: Some("service.internal"), execution: false },
+    HostRoute { path: "/internal/persons/purge", class: GatedByDispatch, capability: Some("service.internal"), execution: false },
     HostRoute { path: "/internal/catalog", class: GatedByDispatch, capability: Some("service.internal"), execution: false },
     HostRoute { path: "/operator/lark/admin", class: GatedByDispatch, capability: Some("service.internal"), execution: false },
     HostRoute { path: "/operator/lark/admin/{request_id}", class: GatedByDispatch, capability: Some("service.internal"), execution: false },
@@ -191,6 +193,10 @@ pub async fn boundary(State(mode): State<DeploymentMode>, request: Request, next
 pub async fn admission(request: Request, next: Next) -> Response {
     if crate::deployment::deployment_mode() == DeploymentMode::SingleUser { return next.run(request).await; }
     let path = request.extensions().get::<MatchedPath>().map(MatchedPath::as_str).unwrap_or("");
+    // The person socket authenticates separately; it is never admitted as a
+    // service principal by the Host policy or any other internal route.
+    if path == "/internal/bridge" && request.extensions().get::<DeviceContext>()
+        .is_some_and(|principal| principal.scope == "person-brain") { return next.run(request).await; }
     if let Some(capability) = lookup(path).and_then(|route| route.capability) {
         let Some(principal) = request.extensions().get::<DeviceContext>() else {
             return cognia_problem::Problem::with_status(StatusCode::FORBIDDEN, "host_principal_unbound", "route authentication supplied no principal").into_response();

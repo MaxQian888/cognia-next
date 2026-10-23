@@ -643,7 +643,7 @@ pub(super) async fn dispatch(
 /// which is what keeps a multi-tenant member device out of the escalation path
 /// entirely (decision L23).
 fn host_admin_authorized(device_id: &str, tenant_id: Option<&str>, scope: Option<&str>) -> bool {
-    if scope == Some("owner") || scope == Some("service") {
+    if scope == Some("owner") || cognia_companion::jwt::is_service_scope(scope) {
         return true;
     }
     tenant_id

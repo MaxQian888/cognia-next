@@ -12,9 +12,10 @@ use serde::{Deserialize, Deserializer};
 #[serde(rename_all = "kebab-case")]
 pub enum SurfaceClass {
     Client,
-    /// Host-side per-user stores lack person partitions until P5 (Rule 7).
-    /// Multi-tenant devices/owners are refused; the Host brain's service
-    /// principal retains existing access, after command override resolution.
+    /// Host-side per-user stores require a server-installed person fleet (P5).
+    /// Bound multi-tenant people route only to their own partition; without
+    /// a fleet they are refused. The operator service retains existing access
+    /// after command override resolution.
     HostData,
     OperatorOnly,
     OrgAction,
@@ -51,6 +52,8 @@ pub struct HostSurfacePolicy {
     pub execution_capabilities: Vec<String>,
     pub execution_commands: Vec<String>,
     pub non_execution_commands: Vec<NonExecutionCommand>,
+    /// P6 credential-broker dormancy; storage-only message arms remain routed.
+    pub person_model_commands: Vec<NonExecutionCommand>,
     /// Host-global arms hidden behind mixed client capabilities. Applied only
     /// in multi-tenant mode, before the capability's standing classification.
     #[serde(deserialize_with = "unique_map")]
@@ -113,6 +116,15 @@ pub static POLICY: Lazy<Result<HostSurfacePolicy, serde_json::Error>> =
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn p5_model_dormancy_is_labeled_without_changing_global_overrides() {
+        let policy = POLICY.as_ref().unwrap();
+        assert_eq!(policy.person_model_commands.iter().map(|entry| entry.arm.as_str()).collect::<Vec<_>>(), vec!["pet_chat_send", "pet_soul_generate"]);
+        assert!(policy.person_model_commands.iter().all(|entry| entry.reason.contains("P6") && entry.reason.contains("model_access_unavailable")));
+        assert_eq!(policy.command_overrides.len(), 8);
+        assert!(policy.command_overrides.values().all(|entry| entry.action.as_deref() == Some("host.global-surfaces")));
+    }
 
     #[test]
     fn every_manifest_capability_has_exactly_one_policy() {
@@ -213,8 +225,12 @@ mod tests {
     fn host_data_policy_pins_dormant_capabilities_and_loads_the_new_class() {
         let policy: HostSurfacePolicy = serde_json::from_str(POLICY_JSON).unwrap();
         assert_eq!(policy.classes.len(), 6);
-        assert!(policy.classes[&SurfaceClass::HostData].contains("until P5"));
-        assert!(policy.classes[&SurfaceClass::HostData].contains("Rule 7"));
+        // P5: served from the caller's own partition; without a fleet (desktop,
+        // or a server that failed to install one) the class stays inert.
+        let description = &policy.classes[&SurfaceClass::HostData];
+        assert!(description.contains("Person-partitioned"));
+        assert!(description.contains("403 host_data_unpartitioned"));
+        assert!(description.contains("execution_isolation_unavailable"));
         assert_eq!(policy.capabilities.iter().filter(|(_, entry)| entry.class == SurfaceClass::HostData)
             .map(|(name, _)| name.as_str()).collect::<BTreeSet<_>>(),
             BTreeSet::from(["client.read", "client.write"]));

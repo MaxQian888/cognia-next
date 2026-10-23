@@ -267,6 +267,11 @@ fn waitpoint_command_needs_ts_authority(name: &str, headless: bool) -> bool {
     headless && matches!(name, "workflow_approval_list" | "workflow_approval_respond")
 }
 
+fn person_push_registry(state: &SharedState) -> std::sync::Arc<cognia_companion::push::PushTokenRegistry> {
+    cognia_companion::person_partition::current().map(|person| state.push_tokens.for_account(&person.account_id))
+        .unwrap_or_else(|| state.push_tokens.clone())
+}
+
 pub(super) async fn dispatch(
     name: &str,
     args: Value,
@@ -299,9 +304,8 @@ pub(super) async fn dispatch(
             };
             let app_version: Option<String> = optional(&args, "app_version")?;
             let device_locale: Option<String> = optional(&args, "device_locale")?;
-            state
-                .push_tokens
-                .register(cognia_companion::push::PushTokenRecord {
+            let registry = person_push_registry(state);
+            registry.register(cognia_companion::push::PushTokenRecord {
                     device_id: device_id.to_string(),
                     provider,
                     token,
@@ -314,7 +318,7 @@ pub(super) async fn dispatch(
 
         "revoke_push_token" => {
             // Phone explicitly clears its token (sign-out / token rotation).
-            state.push_tokens.revoke(device_id);
+            person_push_registry(state).revoke(device_id);
             Ok(Value::Null)
         }
 
@@ -390,7 +394,9 @@ pub(super) async fn dispatch(
             // Wave 3.5 introspection — surface every registered Dexie
             // table the phone is allowed to mirror. Used by the mobile
             // shell to discover plugin-added tables without a release.
-            let descriptors = state.sync_registry.list();
+            let descriptors = if cognia_companion::person_partition::current().is_some() {
+                cognia_companion::sync_registry::SyncTableRegistry::with_defaults().list()
+            } else { state.sync_registry.list() };
             let payload: Vec<serde_json::Value> = descriptors
                 .into_iter()
                 .map(|d| {
@@ -420,12 +426,14 @@ pub(super) async fn dispatch(
             // `SyncTableRegistry` (`sync_registry.rs`) so plugins can
             // register new tables at boot without a code edit here.
             // The `with_defaults()` factory seeds the 9 Wave 1+2 tables.
-            if !state.sync_registry.contains(&table) {
+            if !(if cognia_companion::person_partition::current().is_some() {
+                cognia_companion::sync_registry::SyncTableRegistry::with_defaults().contains(&table)
+            } else { state.sync_registry.contains(&table) }) {
                 return Err(RpcError::malformed(format!(
                     "table '{table}' is not exposed to mobile sync"
                 )));
             }
-            let bridge = std::sync::Arc::clone(&state.sync_bridge);
+            let bridge = cognia_companion::ws_bridge::sync_bridge(state);
             // Connected brain first, desktop WebView second (ADR-0059 R4/R5);
             // 503 while a headless server's brain is down — sync has no
             // degraded-store path.
@@ -437,7 +445,8 @@ pub(super) async fn dispatch(
             // same fix applied to `companion://device-paired`: two id spaces
             // that only matched while the tenant was a hardcoded literal.
             let account_namespace =
-                cognia_companion::host_identity::event_namespace_for_tenant(tenant_id);
+                cognia_companion::person_partition::current().map(|person| person.account_id)
+                    .unwrap_or_else(|| cognia_companion::host_identity::event_namespace_for_tenant(tenant_id));
             bridge
                 .pull(
                     transport.as_ref(),
@@ -663,7 +672,7 @@ pub(super) async fn dispatch(
             ) =>
         {
             let args = inject_caller_device_id(name, args, device_id);
-            let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
+            let bridge = cognia_companion::ws_bridge::writes_bridge(state);
             let transport = cognia_companion::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
             bridge
@@ -1133,7 +1142,7 @@ pub(super) async fn dispatch(
             // {items, nextPageToken}. The TS arms behind the bridge still take
             // limit/offset, so the translation lives here, on the host.
             let (args, paging) = bridged_page_args(name, args)?;
-            let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
+            let bridge = cognia_companion::ws_bridge::writes_bridge(state);
             // Connected brain first, desktop WebView second (ADR-0059 R4/R5).
             let transport = cognia_companion::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
@@ -1163,7 +1172,7 @@ pub(super) async fn dispatch(
         | "thread_handoff_abort"
         | "thread_handoff_status" => {
             let args = super::host_state::bind_authority(args, state, tenant_id, device_id)?;
-            let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
+            let bridge = cognia_companion::ws_bridge::writes_bridge(state);
             let transport = cognia_companion::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
             bridge
@@ -1211,7 +1220,7 @@ pub(super) async fn dispatch(
                 Err(reason) => return Ok(reservation_answer_refusal(reason)),
             };
             let args = bind_reservation_origin(inject_caller_device_id(name, args, device_id), &origin);
-            let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
+            let bridge = cognia_companion::ws_bridge::writes_bridge(state);
             let transport = cognia_companion::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
             let verdict = bridge
@@ -1702,5 +1711,32 @@ mod tests {
         assert!(error.message.contains("protocol v1"));
         assert!(validate_content_protocol("memories", Some(1)).is_ok());
         assert!(validate_content_protocol("sessions", None).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod p5_tests {
+    use super::*;
+    use cognia_companion::{person_partition::{scope, PersonPartition}, sync_registry::SyncTableDescriptor};
+    #[tokio::test]
+    async fn p5_rust_data_arms_partition_tokens_and_use_static_sync_tables() {
+        let state = super::super::tests::test_state();
+        let services = crate::headless::HeadlessServices::stub_for_tests();
+        let host = services;
+        state.sync_registry.register(SyncTableDescriptor { name: "operator-only".into(), description: "operator table".into(), has_tombstones: false });
+        let a = PersonPartition::new("org".into(), "a".into());
+        let b = PersonPartition::new("org".into(), "b".into());
+        for (person, token) in [(a.clone(), "a-token"), (b.clone(), "b-token")] {
+            scope(Some(person), async {
+                dispatch("register_push_token", json!({"provider":"fcm", "token":token}), &state, &host, "same-device", Some("org"), Some("device")).await.unwrap();
+                let tables = dispatch("sync_list_tables", json!({}), &state, &host, "same-device", Some("org"), Some("device")).await.unwrap();
+                assert!(!tables.to_string().contains("operator-only"));
+            }).await;
+        }
+        assert_eq!(state.push_tokens.for_account(&a.account_id).get("same-device").unwrap().token, "a-token");
+        assert_eq!(state.push_tokens.for_account(&b.account_id).get("same-device").unwrap().token, "b-token");
+        assert!(state.push_tokens.get("same-device").is_none());
+        let legacy = dispatch("sync_list_tables", json!({}), &state, &host, "device", Some("org"), Some("device")).await.unwrap();
+        assert!(legacy.to_string().contains("operator-only"));
     }
 }

@@ -379,7 +379,17 @@ async fn execute_inner(
     let admission = super::host_surface_gate::authorize_execution(
         state, &descriptor.capability, &descriptor.arm, &request.principal, &request.args,
     ).await?;
-    execute_with_admission(state, request, descriptor, admission).await
+    let partition = super::host_surface_gate::person_partition(
+        &descriptor.capability, &descriptor.arm, &request.principal,
+    ).await?;
+    let _person_request = if let Some(person) = partition.as_ref() {
+        let fleet = super::person_partition::fleet().ok_or_else(|| super::person_partition::unavailable("person_brain_unavailable"))?;
+        Some(fleet.acquire(person).await.map_err(super::person_partition::unavailable)?)
+    } else { None };
+    let receipt_scope = _person_request.as_ref().map(|lease| lease.receipt_scope());
+    super::person_partition::scope_receipts(receipt_scope, super::person_partition::scope(partition,
+        execute_with_admission(state, request, descriptor, admission),
+    )).await
 }
 
 async fn execute_with_admission(state: &SharedState, request: ExecutionRequest, descriptor: &CommandDescriptor,
@@ -415,7 +425,7 @@ async fn execute_admitted(state: &SharedState, request: ExecutionRequest,
         contract_plane_for(&request.principal.scope),
     )?;
 
-    if request.principal.scope != "service" {
+    if !crate::jwt::is_service_scope(Some(request.principal.scope.as_ref())) {
         // Which bucket this call is charged to is the same question as whether
         // it can change anything, and the manifest already answers it. Reads go
         // to the wide bucket (`RateLimitConfig::read_only_default`), which was
@@ -484,20 +494,40 @@ async fn execute_admitted(state: &SharedState, request: ExecutionRequest,
             &store, &request, &request_hash, now, dispatch(state, &request),
         ).await;
     }
+    execute_receipted_request(&store, &request, &request_hash, now, dispatch(state, &request)).await
+}
+
+fn receipt_idempotency_key(request: &ExecutionRequest) -> Result<String, Problem> {
+    let key = request.idempotency_key.as_deref().expect("validated UUID key");
+    if let Some(person) = super::person_partition::current() {
+        let scope = super::person_partition::receipt_scope()
+            .filter(|scope| scope.account_id == person.account_id)
+            .ok_or_else(|| store_unavailable(&request.request_id))?;
+        return Ok(scope.key(key));
+    }
+    Ok(key.to_owned())
+}
+
+async fn execute_receipted_request(
+    store: &crate::security_store::SecurityStore, request: &ExecutionRequest,
+    request_hash: &str, now: i64,
+    dispatch: impl std::future::Future<Output = Result<Value, Problem>>,
+) -> Result<ExecutionOutcome, Problem> {
+    let idempotency_key = receipt_idempotency_key(request)?;
     let operation_id = match store
         .begin_idempotent_operation(
             &request.principal.tenant_id,
             &request.principal.device_id,
             &local_host_id(),
-            idempotency_key,
-            &request_hash,
+            &idempotency_key,
+            request_hash,
             now,
         )
         .map_err(|error| map_store_error(&request.request_id, error))?
     {
         IdempotencyDecision::InProgress { operation_id } => {
             return Ok(ExecutionOutcome::Accepted {
-                request_id: request.request_id,
+                request_id: request.request_id.clone(),
                 operation_id,
             });
         }
@@ -511,7 +541,7 @@ async fn execute_admitted(state: &SharedState, request: ExecutionRequest,
         .mark_operation_running(&request.principal.tenant_id, &operation_id, now)
         .map_err(|error| map_store_error(&request.request_id, error))?;
 
-    match dispatch(state, &request).await {
+    match dispatch.await {
         Ok(result) => {
             if let Err(mut error) = validate_contract_value(
                 &request.request_id,
@@ -525,7 +555,7 @@ async fn execute_admitted(state: &SharedState, request: ExecutionRequest,
                     .complete_idempotent_operation(
                         &request.principal.tenant_id,
                         &request.principal.device_id,
-                        idempotency_key,
+                        &idempotency_key,
                         &receipt.to_string(),
                         false,
                         unix_time_secs(),
@@ -539,14 +569,14 @@ async fn execute_admitted(state: &SharedState, request: ExecutionRequest,
                 .complete_idempotent_operation(
                     &request.principal.tenant_id,
                     &request.principal.device_id,
-                    idempotency_key,
+                    &idempotency_key,
                     &receipt.to_string(),
                     true,
                     unix_time_secs(),
                 )
                 .map_err(|error| map_store_error(&request.request_id, error))?;
             Ok(ExecutionOutcome::Completed {
-                request_id: request.request_id,
+                request_id: request.request_id.clone(),
                 operation_id: Some(operation_id),
                 result,
                 replayed: false,
@@ -558,7 +588,7 @@ async fn execute_admitted(state: &SharedState, request: ExecutionRequest,
                 .complete_idempotent_operation(
                     &request.principal.tenant_id,
                     &request.principal.device_id,
-                    idempotency_key,
+                    &idempotency_key,
                     &receipt.to_string(),
                     false,
                     unix_time_secs(),
@@ -602,7 +632,7 @@ async fn execute_host_semantic_request(
 /// both correct — request shapes. Validating everything against the service
 /// shape rejected every device `git_*` request with 422 before dispatch.
 fn contract_plane_for(scope: &str) -> cognia_headless_contract::ContractPlane {
-    if scope == "service" {
+    if crate::jwt::is_service_scope(Some(scope.as_ref())) {
         cognia_headless_contract::ContractPlane::Service
     } else {
         cognia_headless_contract::ContractPlane::Device
@@ -728,7 +758,7 @@ pub(super) fn command_admitted(
     descriptor: &CommandDescriptor,
     request_id: &str,
 ) -> Result<bool, Problem> {
-    let service_principal = principal.scope == "service";
+    let service_principal = crate::jwt::is_service_scope(Some(principal.scope.as_ref()));
     if !transport_admits(service_principal, transport, descriptor) {
         return Ok(false);
     }
@@ -744,7 +774,7 @@ fn authorize_transport(
     descriptor: &CommandDescriptor,
 ) -> Result<(), Problem> {
     let allowed = transport_admits(
-        request.principal.scope == "service",
+        crate::jwt::is_service_scope(Some(request.principal.scope.as_ref())),
         request.transport,
         descriptor,
     );
@@ -764,7 +794,7 @@ fn authorize_capability(
     request: &ExecutionRequest,
     descriptor: &CommandDescriptor,
 ) -> Result<(), Problem> {
-    if request.principal.scope == "service" {
+    if crate::jwt::is_service_scope(Some(request.principal.scope.as_ref())) {
         return Ok(());
     }
     let required = [
@@ -802,7 +832,7 @@ fn authorize_approval(
     // The loopback-only service principal is the policy authority for the
     // internal Brain plane. Device transports must still present interactive
     // leases or signed host policies according to the manifest.
-    if request.principal.scope == "service" && request.transport == ExecutionTransport::Internal {
+    if crate::jwt::is_service_scope(Some(request.principal.scope.as_ref())) && request.transport == ExecutionTransport::Internal {
         return Ok(());
     }
     match descriptor.approval {
@@ -988,6 +1018,51 @@ fn local_host_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn p5_partition_receipts_execute_again_after_purge_and_never_replay_for_another_person() {
+        use crate::person_partition::{scope, scope_receipts, PersonPartition, PersonReceiptScope};
+        let store = SecurityStore::in_memory().unwrap();
+        let mut request = execution_request("device", None);
+        request.command = "register_push_token".into();
+        request.idempotency_key = Some(Uuid::new_v4().to_string());
+        let person = PersonPartition::new("org_a".into(), "usr_aaa".into());
+        let first = PersonReceiptScope { account_id: person.account_id.clone(), data_generation: Uuid::new_v4().to_string() };
+        let executions = std::sync::atomic::AtomicUsize::new(0);
+        let run = |person, receipt| scope_receipts(Some(receipt), scope(Some(person), async {
+            execute_receipted_request(&store, &request, "same-hash", unix_time_secs(), async {
+                executions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Value::Null)
+            }).await.unwrap()
+        }));
+        let old_id = match run(person.clone(), first.clone()).await {
+            ExecutionOutcome::Completed { operation_id: Some(id), replayed: false, .. } => id,
+            other => panic!("unexpected {other:?}"),
+        };
+        assert!(matches!(run(person.clone(), first.clone()).await, ExecutionOutcome::Completed { replayed: true, .. }));
+        let b = PersonPartition::new("org_a".into(), "usr_bbb".into());
+        let b_scope = PersonReceiptScope { account_id: b.account_id.clone(), data_generation: Uuid::new_v4().to_string() };
+        assert!(matches!(run(b, b_scope.clone()).await, ExecutionOutcome::Completed { replayed: false, .. }));
+        assert!(store.person_operation("tenant-a", "device-a", &old_id, &b_scope).unwrap().is_none());
+        assert_eq!(store.purge_person_receipts(&person.account_id).unwrap(), 1);
+        let fresh = PersonReceiptScope { data_generation: Uuid::new_v4().to_string(), ..first };
+        assert!(matches!(run(person, fresh).await, ExecutionOutcome::Completed { operation_id: Some(id), replayed: false, .. } if id != old_id));
+        assert_eq!(executions.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn p5_single_user_receipt_key_result_and_replay_remain_legacy() {
+        let store = SecurityStore::in_memory().unwrap();
+        let mut request = execution_request("device", None);
+        request.command = "register_push_token".into(); request.idempotency_key = Some(Uuid::new_v4().to_string());
+        assert_eq!(receipt_idempotency_key(&request).unwrap(), request.idempotency_key.clone().unwrap());
+        let first = execute_receipted_request(&store, &request, "hash", unix_time_secs(), async { Ok(Value::Null) }).await.unwrap();
+        let ExecutionOutcome::Completed { operation_id: Some(id), result, replayed: false, .. } = first else { panic!("first execution"); };
+        assert_eq!(result, Value::Null);
+        let replay = execute_receipted_request(&store, &request, "hash", unix_time_secs(), async { panic!("legacy receipt must replay") }).await.unwrap();
+        assert!(matches!(replay, ExecutionOutcome::Completed { operation_id: Some(replayed_id), result: Value::Null, replayed: true, .. } if replayed_id == id));
+        assert!(store.operation_person_account("tenant-a", "device-a", &id).unwrap().is_none());
+    }
 
     #[tokio::test]
     async fn p4_runtime_dispatch_receives_typed_admission_and_clears_it_after_the_request() {

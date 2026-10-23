@@ -273,7 +273,7 @@ fn preview_error(name: &str, error: String) -> (StatusCode, Json<RpcError>) {
 }
 
 fn require_preview_service_scope(scope: Option<&str>) -> Result<(), (StatusCode, Json<RpcError>)> {
-    if scope == Some("service") {
+    if cognia_companion::jwt::is_service_scope(scope) {
         Ok(())
     } else {
         Err(RpcError::forbidden("preview commands require local owner IPC or the loopback service principal; paired devices are inert until phase 2"))

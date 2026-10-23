@@ -279,6 +279,21 @@ pub enum IdempotencyDecision {
     },
 }
 
+/// Host-derived receipt namespace for one encrypted partition lifetime.
+/// Not deserializable from request arguments. Legacy ledger keys and schema
+/// remain unchanged; only partitioned requests use this reserved prefix.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PersonReceiptScope {
+    pub account_id: String,
+    pub data_generation: String,
+}
+const PERSON_RECEIPT_PREFIX: &str = "person/v1/";
+impl PersonReceiptScope {
+    fn account_prefix(account_id: &str) -> String { format!("{PERSON_RECEIPT_PREFIX}{account_id}/") }
+    fn prefix(&self) -> String { format!("{}{}/", Self::account_prefix(&self.account_id), self.data_generation) }
+    pub fn key(&self, key: &str) -> String { format!("{}{key}", self.prefix()) }
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostPolicySummary {
@@ -1173,6 +1188,34 @@ impl SecurityStore {
         .transpose()
     }
 
+    /// Active OIDC-bound devices of exactly one person; used for partitioned
+    /// event delivery, never an audience supplied by a brain payload.
+    pub fn person_devices(&self, org_id: &str, user_id: &str) -> Result<Vec<String>, SecurityStoreError> {
+        let conn = self.conn.lock();
+        let mut query = conn.prepare(
+            "SELECT d.id FROM devices d JOIN device_person_bindings b
+             ON d.tenant_id = b.tenant_id AND d.id = b.device_id
+             WHERE b.org_id = ?1 AND b.user_id = ?2 AND d.user_id = b.user_id AND d.status = 'active'")?;
+        let ids = query.query_map(params![org_id, user_id], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(ids)
+    }
+
+    /// Legacy carriers identify a device by id alone. Ambiguous ids cannot
+    /// resolve a tenant or a person; HTTP remains explicitly tenant-bound.
+    pub fn unambiguous_device_tenant(&self, device_id: &str) -> Result<Option<String>, SecurityStoreError> {
+        let conn = self.conn.lock();
+        let mut query = conn.prepare("SELECT tenant_id FROM devices WHERE id = ?1 AND status = 'active'")?;
+        let mut rows = query.query_map(params![device_id], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(if rows.len() == 1 { rows.pop() } else { None })
+    }
+
+    pub fn person_for_account_device(&self, device_id: &str) -> Result<Option<VerifiedDevicePerson>, SecurityStoreError> {
+        let Some(tenant) = self.unambiguous_device_tenant(device_id)? else { return Ok(None); };
+        self.active_oidc_device_person(&tenant, device_id)
+    }
+
     /// Whether this device is the tenant's Owner, i.e. the deployment's trust
     /// root rather than a member acting under it.
     ///
@@ -1841,6 +1884,44 @@ impl SecurityStore {
             },
         )
         .transpose()
+    }
+
+    /// Inspect only the routing tag, never the receipt, before resolving the
+    /// current device/person standing at the HTTP boundary.
+    pub fn operation_person_account(&self, tenant_id: &str, device_id: &str, operation_id: &str)
+        -> Result<Option<String>, SecurityStoreError> {
+        let key: Option<String> = self.conn.lock().query_row(
+            "SELECT idempotency_key FROM idempotency_records WHERE tenant_id = ?1 AND device_id = ?2 AND operation_id = ?3",
+            params![tenant_id, device_id, operation_id], |row| row.get(0),
+        ).optional()?;
+        Ok(key.and_then(|key| key.strip_prefix(PERSON_RECEIPT_PREFIX).and_then(|rest| rest.split('/').next()).map(str::to_owned)))
+    }
+
+    pub fn person_operation(&self, tenant_id: &str, device_id: &str, operation_id: &str, scope: &PersonReceiptScope)
+        -> Result<Option<OperationSummary>, SecurityStoreError> {
+        // Purge between this check and lookup can only remove the operation;
+        // a new generation allocates a fresh operation UUID, never reuses it.
+        let prefix = scope.prefix();
+        let matches: bool = self.conn.lock().query_row(
+            "SELECT EXISTS(SELECT 1 FROM idempotency_records WHERE tenant_id = ?1 AND device_id = ?2 AND operation_id = ?3 AND substr(idempotency_key, 1, length(?4)) = ?4)",
+            params![tenant_id, device_id, operation_id, prefix], |row| row.get(0),
+        )?;
+        if matches { self.operation(tenant_id, device_id, operation_id) } else { Ok(None) }
+    }
+
+    /// Purge every generation of this account's receipts and their operation
+    /// documents atomically. Kept separate from legacy retention/receipts.
+    pub fn purge_person_receipts(&self, account_id: &str) -> Result<usize, SecurityStoreError> {
+        let prefix = PersonReceiptScope::account_prefix(account_id);
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for table in ["artifacts", "run_events"] {
+            tx.execute(&format!("DELETE FROM {table} WHERE run_id IN (SELECT operation_id FROM idempotency_records WHERE substr(idempotency_key, 1, length(?1)) = ?1)"), [&prefix])?;
+        }
+        tx.execute("DELETE FROM runs WHERE id IN (SELECT operation_id FROM idempotency_records WHERE substr(idempotency_key, 1, length(?1)) = ?1)", [&prefix])?;
+        let count = tx.execute("DELETE FROM idempotency_records WHERE substr(idempotency_key, 1, length(?1)) = ?1", [&prefix])?;
+        tx.commit()?;
+        Ok(count)
     }
 
     pub fn complete_idempotent_operation(
@@ -3904,6 +3985,37 @@ CREATE INDEX IF NOT EXISTS idx_audit_device_authorization
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn p5_receipts_are_partition_lifetime_scoped_and_purge_keeps_legacy_storage() {
+        let store = SecurityStore::in_memory().unwrap();
+        let schema = || store.conn.lock().query_row("SELECT sql FROM sqlite_master WHERE name = 'idempotency_records'", [], |row| row.get::<_, String>(0)).unwrap();
+        let original_schema = schema();
+        let a = PersonReceiptScope { account_id: "pb_aaaaaaaaaaaaaaaaaaaaaaaa".into(), data_generation: uuid::Uuid::new_v4().to_string() };
+        let b = PersonReceiptScope { account_id: "pb_bbbbbbbbbbbbbbbbbbbbbbbb".into(), data_generation: uuid::Uuid::new_v4().to_string() };
+        let create = |key: &str| {
+            let IdempotencyDecision::Started { operation_id } = store.begin_idempotent_operation("tenant", "device", "host", key, "hash", 100).unwrap() else { panic!("must execute anew"); };
+            store.mark_operation_running("tenant", &operation_id, 101).unwrap();
+            store.complete_idempotent_operation("tenant", "device", key, "{\"httpStatus\":200,\"result\":\"old\"}", true, 102).unwrap();
+            operation_id
+        };
+        let legacy = create("legacy-key");
+        let old = create(&a.key("same-key"));
+        assert_eq!(store.operation_person_account("tenant", "device", &old).unwrap().as_deref(), Some(a.account_id.as_str()));
+        assert!(store.person_operation("tenant", "device", &old, &a).unwrap().is_some());
+        assert!(store.person_operation("tenant", "device", &old, &b).unwrap().is_none());
+        let b_operation = create(&b.key("same-key"));
+        assert_eq!(store.purge_person_receipts(&a.account_id).unwrap(), 1);
+        assert_eq!(store.purge_person_receipts(&a.account_id).unwrap(), 0);
+        assert!(store.operation("tenant", "device", &old).unwrap().is_none());
+        let fresh = PersonReceiptScope { data_generation: uuid::Uuid::new_v4().to_string(), ..a.clone() };
+        assert_ne!(create(&fresh.key("same-key")), old);
+        assert!(store.person_operation("tenant", "device", &old, &fresh).unwrap().is_none());
+        assert!(store.person_operation("tenant", "device", &b_operation, &b).unwrap().is_some());
+        assert_eq!(schema(), original_schema);
+        assert!(store.operation_person_account("tenant", "device", &legacy).unwrap().is_none());
+        assert!(matches!(store.begin_idempotent_operation("tenant", "device", "host", "legacy-key", "hash", 103).unwrap(), IdempotencyDecision::Completed { receipt_json, .. } if receipt_json == "{\"httpStatus\":200,\"result\":\"old\"}"));
+    }
+
     fn oidc_test_person() -> VerifiedDevicePerson {
         VerifiedDevicePerson {
             user_id: UserId::parse(ADA).unwrap(),
@@ -3974,6 +4086,23 @@ CREATE TABLE devices (
             [],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn p5_person_event_destinations_require_active_verified_binding() {
+        let store = SecurityStore::in_memory().unwrap();
+        let person = oidc_test_person();
+        for device in ["p5-device-a", "p5-device-b"] {
+            let challenge = store.issue_challenge("oidc-org", 100, 60).unwrap();
+            store.register_oidc_device("oidc-org", "subject", &person, &challenge.id, &challenge.nonce,
+                device, "Web", "pem", &format!("thumb-{device}"), "member", 101).unwrap();
+        }
+        assert_eq!(store.person_devices(person.org_id.as_str(), person.user_id.as_str()).unwrap().len(), 2);
+        assert!(store.person_devices(person.org_id.as_str(), "usr_bbbbbbbbbbbbbbbbbbbbbbbb").unwrap().is_empty());
+        store.suspend_device("oidc-org", "p5-device-a", "p5-device-b", false, 110).unwrap();
+        assert_eq!(store.person_devices(person.org_id.as_str(), person.user_id.as_str()).unwrap(), vec!["p5-device-a"]);
+        assert_eq!(store.person_for_account_device("p5-device-a").unwrap(), Some(person));
+        assert!(store.person_for_account_device("p5-device-b").unwrap().is_none());
     }
 
     #[test]

@@ -904,15 +904,34 @@ fn lifecycle_error(error: super::device_lifecycle::LifecycleError) -> Problem {
     }
 }
 
+async fn authorized_operation(
+    ledger: Result<std::sync::Arc<SecurityStore>, Problem>, context: &DeviceContext, operation_id: &str,
+) -> Result<Option<super::security_store::OperationSummary>, Problem> {
+    authorized_operation_with_scope(ledger, context, operation_id, async {
+        let Some(person) = super::host_surface_gate::operation_person(context).await? else { return Ok(None); };
+        Ok(super::person_partition::fleet().and_then(|fleet| fleet.receipt_scope(&person.account_id)))
+    }).await
+}
+
+async fn authorized_operation_with_scope(
+    ledger: Result<std::sync::Arc<SecurityStore>, Problem>, context: &DeviceContext, operation_id: &str,
+    resolve: impl std::future::Future<Output = Result<Option<super::person_partition::PersonReceiptScope>, Problem>>,
+) -> Result<Option<super::security_store::OperationSummary>, Problem> {
+    let ledger = ledger?;
+    let account = ledger.operation_person_account(&context.tenant_id, &context.device_id, operation_id).map_err(store_error)?;
+    let Some(account) = account else {
+        return ledger.operation(&context.tenant_id, &context.device_id, operation_id).map_err(store_error);
+    };
+    let Some(scope) = resolve.await? else { return Ok(None); };
+    if scope.account_id != account { return Ok(None); }
+    ledger.person_operation(&context.tenant_id, &context.device_id, operation_id, &scope).map_err(store_error)
+}
+
 pub(crate) async fn operation_handler(
     Path(operation_id): Path<String>,
     Extension(context): Extension<DeviceContext>,
 ) -> Response {
-    match store().and_then(|store| {
-        store
-            .operation(&context.tenant_id, &context.device_id, &operation_id)
-            .map_err(store_error)
-    }) {
+    match authorized_operation(store(), &context, &operation_id).await {
         Ok(Some(operation)) => (
             StatusCode::OK,
             Json(super::operations::Operation::from(operation)),
@@ -933,20 +952,16 @@ pub(crate) async fn internal_operation_handler(
     Extension(context): Extension<DeviceContext>,
 ) -> Response {
     let request_id = uuid::Uuid::new_v4().to_string();
-    internal_operation_response(store(), &context, operation_id, request_id)
+    internal_operation_response(store(), &context, operation_id, request_id).await
 }
 
-fn internal_operation_response(
+async fn internal_operation_response(
     store: Result<std::sync::Arc<SecurityStore>, Problem>,
     context: &DeviceContext,
     operation_id: String,
     request_id: String,
 ) -> Response {
-    match store.and_then(|store| {
-        store
-            .operation(&context.tenant_id, &context.device_id, &operation_id)
-            .map_err(store_error)
-    }) {
+    match authorized_operation(store, context, &operation_id).await {
         Ok(Some(operation)) => (
             StatusCode::OK,
             Json(super::operations::Operation::from(operation)),
@@ -3422,6 +3437,33 @@ mod tests {
         assert!(after > before);
     }
 
+    #[test]
+    fn p5_legacy_operation_document_keeps_its_principal_scope_and_wire() {
+        internal_operation_lookup_is_principal_scoped_and_returns_receipts();
+    }
+
+    #[tokio::test]
+    async fn p5_operation_reads_refuse_reassigned_person_and_old_data_generation() {
+        use crate::person_partition::{PersonPartition, PersonReceiptScope};
+        let ledger = SecurityStore::in_memory().unwrap();
+        let person = PersonPartition::new("org_aaa".into(), "usr_aaa".into());
+        let a = PersonReceiptScope { account_id: person.account_id, data_generation: uuid::Uuid::new_v4().to_string() };
+        let key = a.key("same-key");
+        let super::super::security_store::IdempotencyDecision::Started { operation_id } =
+            ledger.begin_idempotent_operation("tenant", "device", "host", &key, "hash", 100).unwrap() else { panic!("started"); };
+        ledger.mark_operation_running("tenant", &operation_id, 101).unwrap();
+        ledger.complete_idempotent_operation("tenant", "device", &key, "{\"result\":\"private-a\"}", true, 102).unwrap();
+        let context = DeviceContext { device_id: "device".into(), tenant_id: "tenant".into(), scope: "device".into(), granted_scopes: vec![], authorization_capabilities: None };
+        assert!(authorized_operation_with_scope(Ok(ledger.clone()), &context, &operation_id, async { Ok(Some(a.clone())) }).await.unwrap().is_some());
+        // Same tenant and device, but the authority resolver now binds it to B.
+        let b = PersonPartition::new("org_aaa".into(), "usr_bbb".into());
+        let b_scope = PersonReceiptScope { account_id: b.account_id, data_generation: uuid::Uuid::new_v4().to_string() };
+        assert!(authorized_operation_with_scope(Ok(ledger.clone()), &context, &operation_id, async { Ok(Some(b_scope)) }).await.unwrap().is_none());
+        let rejoined = PersonReceiptScope { data_generation: uuid::Uuid::new_v4().to_string(), ..a };
+        assert!(authorized_operation_with_scope(Ok(ledger.clone()), &context, &operation_id, async { Ok(Some(rejoined)) }).await.unwrap().is_none());
+        assert!(authorized_operation_with_scope(Ok(ledger), &context, &operation_id, async { Ok(None) }).await.unwrap().is_none());
+    }
+
     #[tokio::test]
     async fn internal_operation_lookup_is_principal_scoped_and_returns_receipts() {
         let store = SecurityStore::in_memory().unwrap();
@@ -3476,7 +3518,7 @@ mod tests {
             &context,
             operation_id.clone(),
             "request-found".into(),
-        );
+        ).await;
         assert_eq!(found.status(), StatusCode::OK);
         let found_body = response_json(found).await;
         // The answer is the one Operation document (ADR-0175 B3): the
@@ -3501,7 +3543,7 @@ mod tests {
             &other_principal,
             operation_id.clone(),
             "request-hidden".into(),
-        );
+        ).await;
         assert_eq!(hidden.status(), StatusCode::NOT_FOUND);
         let hidden_body = response_json(hidden).await;
         assert_eq!(hidden_body["code"], "operation_not_found");

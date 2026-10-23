@@ -2273,7 +2273,7 @@ fn is_control_command(name: &str) -> bool {
 #[cfg(test)]
 fn is_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bool {
     !is_control_command(name)
-        || (scope == Some("service")
+        || (cognia_companion::jwt::is_service_scope(scope)
             && matches!(
                 name,
                 "terminal_exec"
@@ -2903,7 +2903,7 @@ fn is_agent_control_authorized(name: &str, device_id: &str, scope: Option<&str>)
     if !is_agent_control_command(name) {
         return true;
     }
-    if scope == Some("service") {
+    if cognia_companion::jwt::is_service_scope(scope) {
         return true;
     }
     canonical_device_capability(device_id, name)
@@ -3155,7 +3155,7 @@ pub async fn rpc_handler(
     // SERVICE_ONLY_COMMANDS", which stopped being true two waves ago and is
     // exactly the kind of stale claim a reader trusts. The `signaling::dispatch`
     // path threads the scope and carries the mirrored gate.
-    if is_service_only_command(&name) && ctx.scope != "service" {
+    if is_service_only_command(&name) && !cognia_companion::jwt::is_service_scope(Some(ctx.scope.as_ref())) {
         return Err(RpcError::forbidden(
             "this command requires the headless service token",
         ));
@@ -3171,7 +3171,7 @@ pub async fn rpc_handler(
     // same question as whether it can change anything.
     let is_read_only = READ_ONLY_COMMANDS_SET.contains(name.as_str());
 
-    if ctx.scope != "service" {
+    if !cognia_companion::jwt::is_service_scope(Some(ctx.scope.as_ref())) {
         let class = if matches!(
             name.as_str(),
             "plugin_media_read_chunk" | "plugin_media_close_transfer"
@@ -3424,7 +3424,7 @@ fn authorize_workspace_root(
 /// remote control (`workspace.write`), which could reach the same bytes
 /// through a terminal or a write anyway. A chat-only paired device cannot.
 fn sensitive_reads_allowed(device_id: &str, scope: Option<&str>) -> bool {
-    scope == Some("service") || canonical_device_has_capability(device_id, "workspace.write")
+    cognia_companion::jwt::is_service_scope(scope) || canonical_device_has_capability(device_id, "workspace.write")
 }
 
 fn authorize_sensitive_resource(
@@ -3732,7 +3732,7 @@ pub(super) async fn dispatch(
     // the WebRTC `signaling::dispatch` path (both funnel through here), so the
     // elevated capability is enforced regardless of transport. Baseline chat
     // and read-only sync are not in `CONTROL_COMMANDS`, so they pass through.
-    if STEP_UP_COMMANDS.contains(&name) && scope != Some("service") {
+    if STEP_UP_COMMANDS.contains(&name) && !cognia_companion::jwt::is_service_scope(scope) {
         let admin_lease = args
             .get("adminLease")
             .or_else(|| args.get("admin_lease"))
@@ -3744,7 +3744,7 @@ pub(super) async fn dispatch(
     // Service-scope gate, mirrored from `rpc_handler` so the WebRTC
     // `signaling::dispatch` path (which is always device-scoped — it passes
     // `scope: None`) can never reach the RCE-grade arms either.
-    if is_service_only_command(name) && scope != Some("service") {
+    if is_service_only_command(name) && !cognia_companion::jwt::is_service_scope(scope) {
         return Err(RpcError::forbidden(
             "this command requires the headless service token",
         ));

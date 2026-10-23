@@ -859,6 +859,8 @@ fn build_router_for_mode(
     // same command execution authority.
     let internal_routes = Router::new()
         .route("/internal/bridge", any(ws_bridge::ws_bridge_handler))
+        .route("/internal/persons", get(super::person_partition::list_handler))
+        .route("/internal/persons/purge", post(super::person_partition::purge_handler))
         .route("/internal/events", any(ws::internal_ws_handler))
         .route(
             "/internal/_rpc/{name}",

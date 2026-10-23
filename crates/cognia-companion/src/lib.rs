@@ -102,6 +102,7 @@ pub use cognia_companion_security::oidc;
 /// The one long-running operation document (ADR-0175 B3).
 pub use cognia_companion_security::operations;
 pub mod paired_turn;
+pub mod person_partition;
 mod problem_surface;
 pub use cognia_companion_bus::push;
 pub use cognia_companion_bus::push_creds;

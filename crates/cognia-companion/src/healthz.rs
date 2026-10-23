@@ -146,7 +146,13 @@ pub async fn healthz_handler(State(state): State<SharedState>) -> Response {
     } else {
         payload["headlessContract"] = json!({ "available": false });
     }
+    if let Some(fleet) = super::person_partition::fleet() {
+        let persons = fleet.statuses();
+        payload["personBrains"] = json!({ "configured": true, "count": persons.iter().filter(|person| person.running).count(), "persons": persons });
+    }
     if let Some(services) = super::runtime::headless() {
+        if super::deployment::deployment_mode() == super::deployment::DeploymentMode::MultiTenant
+            && super::person_partition::fleet().is_none() { payload["personBrains"] = json!({ "configured": false }); }
         let obj = payload.as_object_mut().expect("payload is an object");
         // `brain` reports the supervisor when one is installed; a headless
         // server booted without a brain entry reports `configured: false`.

@@ -102,6 +102,13 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
+    /// Inspect or irreversibly purge person data through the running Host.
+    Persons {
+        #[command(subcommand)]
+        command: PersonsCommand,
+        #[arg(long)]
+        port: Option<u16>,
+    },
     /// Run only the durable integrated-terminal host. No brain, AI sidecar,
     /// gateway, browser, or general companion services are started.
     DesktopHost {
@@ -313,6 +320,12 @@ enum CliCommand {
         #[command(subcommand)]
         command: TunnelIngressCommand,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum PersonsCommand {
+    List,
+    Purge { #[arg(long)] org: String, #[arg(long)] user: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -612,6 +625,32 @@ fn spawn_headless_push_triggers(shared: cognia_companion::SharedState) {
             else {
                 continue;
             };
+            if frame.partition_account_id.is_some() {
+                if let Some(device) = frame.target_device_id.as_deref() {
+                    if !cognia_companion::person_partition::event_visible(&frame, device, None) { continue; }
+                    let person = cognia_companion::security_store::security_store()
+                        .and_then(|store| store.person_for_account_device(device).ok().flatten());
+                    if let Some(person) = person {
+                        let person = cognia_companion::person_partition::PersonPartition::new(person.org_id.to_string(), person.user_id.to_string());
+                        let registry = shared.push_tokens.for_account(&person.account_id);
+                        let data = frame.payload.as_object().cloned().unwrap_or_default();
+                        let payload = cognia_companion::push::PushPayload {
+                            title: Some("cognia".into()), body: Some(cognia_companion::push_triggers::push_body_for_channel(channel, &data)),
+                            data: cognia_companion::push_triggers::push_data_for_channel(channel, &data),
+                        };
+                        for provider in [cognia_companion::push::PushProvider::Fcm, cognia_companion::push::PushProvider::Apns, cognia_companion::push::PushProvider::Hms] {
+                            if let Some(dispatcher) = cognia_companion::push_dispatchers().for_provider(provider) {
+                                if registry.get(device).is_some_and(|record| record.provider == provider) {
+                                    registry.dispatch_to_device(device, &payload, dispatcher.as_ref()).await;
+                                }
+                            }
+                        }
+                    }
+                }
+                // A partition event without a destination is never a Host
+                // broadcast, even if a future producer forgets its audience.
+                continue;
+            }
             let raw = frame.payload.to_string();
             fan_out_push(
                 Arc::clone(&shared.push_tokens),
@@ -1414,6 +1453,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tls_material = tls::ensure_certificate(&dir)?;
 
     match cli.command {
+        CliCommand::Persons { command, port } => {
+            run_persons(command, resolve_pair_port(port, std::env::var("COGNIA_PORT").ok().as_deref())).await
+        }
         CliCommand::Pair {
             device_name,
             advertise_url,
@@ -2272,6 +2314,27 @@ enum RunningPair {
     Failed(String),
 }
 
+async fn run_persons(command: PersonsCommand, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let signing_secret = secret::load_or_generate()?;
+    let tenant = cognia_companion::host_identity::current_tenant_or_unbound();
+    let (token, _) = cognia_companion::jwt::issue_service_jwt(&signing_secret, &tenant)?;
+    // Match pairing's authenticated loopback client: the signing secret
+    // establishes Host identity; bypass the deployment's public proxy.
+    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).no_proxy()
+        .timeout(std::time::Duration::from_secs(120)).build()?;
+    let base = format!("https://127.0.0.1:{port}/internal/persons");
+    let response = match command {
+        PersonsCommand::List => client.get(base).bearer_auth(token).send().await?,
+        PersonsCommand::Purge { org, user } => client.post(format!("{base}/purge")).bearer_auth(token)
+            .json(&serde_json::json!({ "org": org, "user": user })).send().await?,
+    };
+    let status = response.status();
+    let body: serde_json::Value = response.json().await?;
+    if !status.is_success() { return Err(format!("persons: {status}: {body}").into()); }
+    println!("{}", serde_json::to_string_pretty(&body)?);
+    Ok(())
+}
+
 /// Ask a running `cognia-server serve` on this machine for an invitation
 /// through `companion_create_owner_invitation` on the loopback service plane
 /// (ADR-0170) on `port`.
@@ -3101,6 +3164,7 @@ async fn run_serve(
     // runs — the degraded store serves reads and /healthz reports
     // `brain.configured: false`.
     let mut brain_supervisor: Option<Arc<brain::BrainSupervisor>> = None;
+    let mut person_fleet: Option<Arc<cognia_server::persons::Fleet>> = None;
     match resolve_brain_entry() {
         Some(entry) => {
             let brain_local_account_id = local_account_id.clone();
@@ -3126,6 +3190,16 @@ async fn run_serve(
                 tls_material.fingerprint_sha256.clone(),
                 Some(tls_material.cert_pem_path.clone()),
             );
+            if cognia_companion::deployment::deployment_mode() == cognia_companion::deployment::DeploymentMode::MultiTenant {
+                match cognia_server::persons::Fleet::new(config.clone(), Arc::clone(&shared)) {
+                    Ok(fleet) => {
+                        cognia_companion::person_partition::install(Some(fleet.clone()));
+                        fleet.start_idle_reaper();
+                        person_fleet = Some(fleet);
+                    }
+                    Err(error) => log::error!("person-brain fleet unavailable; Host data remains refused: {error}"),
+                }
+            }
             let supervisor = brain::BrainSupervisor::new(config, Arc::clone(&shared));
             brain::install_brain(Some(Arc::clone(&supervisor)));
             supervisor.start();
@@ -3178,6 +3252,10 @@ async fn run_serve(
         std::process::exit(cognia_core::shutdown_signal::SIGNAL_EXIT_CODE);
     });
     cognia_companion::server::begin_draining();
+    if let Some(fleet) = person_fleet {
+        fleet.shutdown().await;
+        cognia_companion::person_partition::install(None);
+    }
     if let Some(supervisor) = brain_supervisor {
         supervisor.shutdown();
     }
@@ -3259,6 +3337,16 @@ async fn run_serve(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn p5_persons_cli_has_explicit_identity_and_port_selection() {
+        use super::PersonsCommand;
+        let list = Cli::try_parse_from(["cognia-server", "persons", "list"]).unwrap();
+        assert!(matches!(list.command, CliCommand::Persons { command: PersonsCommand::List, .. }));
+        let purge = Cli::try_parse_from(["cognia-server", "persons", "--port", "27891", "purge", "--org", "org_a", "--user", "usr_a"]).unwrap();
+        assert!(matches!(purge.command, CliCommand::Persons { command: PersonsCommand::Purge { org, user }, port: Some(27891) } if org == "org_a" && user == "usr_a"));
+        assert!(Cli::try_parse_from(["cognia-server", "persons", "purge", "--org", "org_a"]).is_err());
+    }
+
     #[test]
     fn local_namespace_uses_operator_configuration_without_a_request_tenant() {
         use super::configured_local_account_id;

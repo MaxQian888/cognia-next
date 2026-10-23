@@ -640,43 +640,34 @@ standing fails closed.
 The `client` class remains for `client.local` bridge plumbing; Host-stored data
 has its own class and must not be treated as client-local.
 
-### Host data unavailable to tenants until P5 (Rule 7)
+### Host data admission and routing (P5)
 
-The 17 `client.read` and 44 `client.write` arms are execution targets over
-HTTP/WebSocket/WebRTC. In multi-tenant mode, the policy's `host-data` class
-refuses every one of these commands to tenant devices and owners with HTTP
-**403** and error code **`host_data_unpartitioned`**, except the eight
-Host-global overrides above. This includes messages, sessions, transcripts and
-history references; sync discovery/pull; the files library (including uploads);
-pet data/chat; issues; characters; glance; push tokens; and twin profiles.
-Account-selected storage does not authorize access by the requesting person.
-These families remain intentionally dormant until P5 adds per-person Host
-store partitions. Use the collaboration server for member collaboration data.
+On a multi-tenant `cognia-server` with the person fleet installed, `host-data`
+commands resolve only the authenticated device's OIDC-verified person binding
+and require current non-guest organization standing. They execute in that
+person's brain/account; request arguments cannot select another partition.
+Desktop Hosts and servers without a fleet retain `403 host_data_unpartitioned`.
+The eight Host-global overrides above still require `host.global-surfaces` and
+use the operator brain. Single-user admission and routing are unchanged.
 
-Host `service` principals retain their previous access to these data commands:
-the Host's own brain still needs its active-account store. This is not a new
-service-wide bypass. The eight overrides still require person/org standing
-(an unbound service identity is refused), unknown capabilities still fail
-closed, and the independent execution switch still applies. Tenant devices,
-including owners, cannot obtain this exception through standing grants.
-Single-user mode keeps its existing early return without any policy or
-standing-provider call on the execution-enabled fast path; explicit execution
-disabling retains its existing behavior. No TypeScript export is added; the
-frontend can map HTTP `403` / `host_data_unpartitioned`.
+The operator brain retains its existing `service` token. Person children use
+`person-brain`, which cannot pass service-trust checks or call service RPCs.
+See [person lifecycle, sizing and purge](#multi-tenant-person-data-p5) below.
 
-The existing storage boundaries motivating this refusal are recorded below:
+| Family                                                 | Multi-tenant Rust admission and route                                                                                                                                                        |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Messages, sessions, transcripts and history references | Person-specific messages/writes bridge. Storage/history only; agent-run replies remain refused. No degraded `SqliteAppStore`, operator or WebView fallback.                                  |
+| `sync_list_tables` / `sync_pull`                       | Static registry for discovery; the person's bridge and account id for pulls. Operator/plugin-added table descriptors cannot widen a person partition's registry.                             |
+| `files_library_*`                                      | The person's writes bridge and data root; upload handle rules remain in the TS data adapter.                                                                                                 |
+| `pet_*`                                                | Pet storage uses the person's writes bridge. `pet_chat_send` and `pet_soul_generate` remain intentionally dormant with `503 model_access_unavailable` until P6.                              |
+| Push registration/revocation                           | Registry namespace is `(person account, authenticated device id)` under the person's data root. Person event delivery selects only that registry. Legacy single-user JSON remains unchanged. |
+| Issues and characters                                  | The person's writes bridge; the brain's process-local database supplies the partition boundary.                                                                                              |
+| Glance / `glance_quota_enable`                         | The person's writes bridge; provider access is not granted by partition admission.                                                                                                           |
+| `twin_profile_get`                                     | The person's writes bridge and account-local profile store.                                                                                                                                  |
 
-| Family                                                                         | Current partition and evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Messages, sessions, transcript capabilities/timeline/turns, history references | Desktop/brain use the Host's active account/runtime-target Dexie (`lib/db/schema.ts:2372`, `:2434`; `lib/companion/desktop-message-source.ts:396`, `:446`; `lib/chat/mentions/host-reference-rpc.ts:140`). RPC does not select that database from the caller's person (`crates/cognia-companion-rpc/src/rpc/data_sync.rs:463`). Degraded `SqliteAppStore` is explicitly single-tenant; session/message tables lack tenant/user columns (`crates/cognia-companion-bus/src/store.rs:165`, `:190`, `:239`). No per-caller user partition is established here. |
-| Sync table discovery / `sync_pull`                                             | Discovery lists the Host registry; pull requires the authenticated tenant, maps it to a local account namespace and checks the active account (`rpc/data_sync.rs:407`, `lib/sync/desktop-sync-source.ts:146`). This is an account/tenant boundary, not separate users within the same account.                                                                                                                                                                                                                                                             |
-| `files_library_*`                                                              | Uses the active-account library without a caller-person selector (`lib/files-library/remote/host-dispatch.ts:170`, `:215`). Upload handles are bound to authenticated device IDs (`:527`); that does not partition persisted library rows or listing by tenant/user.                                                                                                                                                                                                                                                                                       |
-| `pet_*`                                                                        | Uses active Host pet/profile/character binding and conversation tables (`lib/pet/remote/host-dispatch.ts:126`, `:147`, `:402`). Device-scoped idempotency (`:486`) is not content authorization; no per-caller user partition. Headless writes are refused.                                                                                                                                                                                                                                                                                                |
-| Push token registration/revocation                                             | Partitioned by server-authenticated device ID (`rpc/data_sync.rs:283`; `crates/cognia-companion-bus/src/push.rs:103`, `:146`). One persisted Host map keyed by device, not independent tenant/user stores.                                                                                                                                                                                                                                                                                                                                                 |
-| Issues                                                                         | Active-account DB with project/container consistency checks (`lib/db/issues.ts:132`). Remote calls use a generic human actor and client-supplied project IDs (`desktop-write-source.ts:2001`, `:2039`); no caller tenant/user membership check in this path.                                                                                                                                                                                                                                                                                               |
-| Characters                                                                     | Active-account `characters` table keyed by character ID (`lib/db/characters.ts:382`, `:402`; `desktop-write-source.ts:1790`). No caller tenant/user row selector.                                                                                                                                                                                                                                                                                                                                                                                          |
-| Glance / `glance_quota_enable`                                                 | Desktop Host publisher/settings; headless refuses. Consumer leases are device-prefixed, but quota-enable forwards provider/account IDs from the payload to the shared executor (`lib/glance/remote/host-dispatch.ts:45`, `:95`). No per-caller tenant/user partition at this boundary.                                                                                                                                                                                                                                                                     |
-| `twin_profile_get`                                                             | Reads a twin ID from the active account's `twinProfile` table (`desktop-write-source.ts:2093`), without a caller-person selector.                                                                                                                                                                                                                                                                                                                                                                                                                          |
+The Rust boundary and Node `person` data profile must be deployed together.
+Two-person real-server acceptance is a separate P5c check; account-keyed fake
+bridge tests establish Rust routing and response ownership only.
 
 ### Exact execution and exception inventories
 
@@ -1246,3 +1237,85 @@ placement identity to trust. No binding is fabricated for those records.
 | `room_send`                        | Host brain record via rpc/data_sync.rs                            | No persisted P4 placement identity; later workspaceId ignored              | No P4-bound sandbox dispatch                                  | Refused: 503 execution_isolation_unavailable                                                                                                |
 | `room_stop`                        | Host brain record via rpc/data_sync.rs                            | No persisted P4 placement identity; later workspaceId ignored              | No P4-bound sandbox dispatch                                  | Refused: 403 workspace_unresolved                                                                                                           |
 | `environment_task_shell_exec`      | Task-shell runtime; owner is a caller label, not tenant authority | No person-bearing service delegation; workspaceId alone is insufficient    | Local runtime exists; service principal has no admitted actor | Refused: 503 execution_isolation_unavailable                                                                                                |
+
+## Multi-tenant person data (P5)
+
+On a multi-tenant `cognia-server`, Host data commands use one lazy brain per
+OIDC-bound person with current non-guest organization standing. No workspace
+or request argument selects the partition. Its account id is `pb_` followed by
+the first 24 lowercase hex digits of SHA-256(`org_id` NUL `user_id`). Data lives
+under `<data_dir>/persons/<account_id>/`; each account has its own random
+256-bit content key in the encrypted server secret store. Departed members
+lose admission, while their data and key remain until an operator purges them.
+
+Set these environment variables on the `cognia-server` container (for example,
+with a local Compose override's `environment` map):
+
+| Variable                        | Default | Meaning                                                                            |
+| ------------------------------- | ------- | ---------------------------------------------------------------------------------- |
+| `COGNIA_PERSON_BRAIN_IDLE_SECS` | `900`   | Stop a person brain after this many idle seconds.                                  |
+| `COGNIA_PERSON_BRAINS_MAX`      | `8`     | Maximum active person supervisors; evict the least recently used idle brain first. |
+
+Both values must be positive integers; invalid configuration leaves the fleet
+uninstalled and Host data refused. In-flight requests prevent eviction and
+purge. If every slot is busy, another person receives retryable
+`503 person_brain_capacity`; if hello does not arrive within the brain ready
+timeout, the request receives retryable `503 person_brain_unavailable`.
+Reserve memory for the operator brain, sidecar and Rust Host in addition to
+person brains. Size the cap from measured idle/peak RSS of the built person
+profile and the container memory limit; `8` is the rollout default, not an RSS
+measurement. `/healthz` reports hashed account ids, running/ready/parked state,
+restart count, last use, in-flight requests and RSS. `/metrics` exposes fleet
+count and per-account running, ready, in-flight and RSS gauges; neither exposes
+organization or user ids.
+
+The following commands contact the running Host over authenticated loopback
+HTTPS (`--port` under `persons`, or `COGNIA_PORT`, selects the port):
+
+```bash
+cognia-server persons list
+cognia-server persons --port 27890 purge --org org_example --user usr_example
+```
+
+`list` includes current standing when the collaboration authority can resolve
+it. `purge` refuses with retryable `503 person_brain_busy` while a request is in
+flight. It stops and joins the child, destroys the content key, deletes the
+partition root and writes an audit record. Repeating purge is safe. Rejoining
+and using the Host afterwards creates an empty partition and a fresh key.
+
+Intentional dormancy and per-arm routing:
+
+- `pet_chat_send` and `pet_soul_generate`: `503 model_access_unavailable` until
+  the P6 credential broker supplies person-scoped providers.
+- Message/session/transcript arms: storage and history only. Replies require
+  agent runs, which remain `execution_isolation_unavailable` on the Host brain.
+- Files, characters, issues, pet storage, glance and twin profile data: only
+  the caller's person brain, with no operator/WebView/AppStore fallback.
+- `register_push_token` / `revoke_push_token`: registry namespace is the person
+  account plus device; push delivery uses that person's tokens only.
+- `sync_list_tables`: static sync table registry; `sync_pull`: the person's
+  account id and bridge, never the operator's account namespace.
+- The eight Host-global `commandOverrides` retain `host.global-surfaces` and
+  the operator brain. Desktop Hosts and servers without an installed fleet
+  retain `host_data_unpartitioned`. Single-user routing and wire formats stay
+  unchanged.
+
+Person children receive `COGNIA_BRAIN_PROFILE=person`, `COGNIA_DATA_DIR`,
+`COGNIA_LOCAL_ACCOUNT_ID`, `COGNIA_ACCOUNT_CONTENT_KEY` and an account-bound
+`person-brain` JWT in `COGNIA_SERVICE_TOKEN`. Each child start has a fresh random,
+in-memory authentication generation; refreshes keep it, and exit/idle stop,
+eviction, purge and server shutdown invalidate it. It is independent of the
+persisted encryption key. That JWT can open only its own
+`/internal/bridge` slot. The profile must not connect to `/internal/events`,
+`/internal/catalog` or `/internal/_rpc`; its sync replies and event publishing
+use bridge `respond` frames. Only sync invalidations and transcript revisions
+may be published by a person brain. Live and replayed frames are checked against
+the receiving device's current person binding; routing metadata is not serialized.
+
+Idempotent person-data receipts are scoped to the account and a separate random
+data generation stored in encrypted partition metadata. That generation survives
+child and server restarts. Purge deletes every generation of the account's
+receipts and operation documents, then destroys the key and metadata; rejoining
+creates a new data generation. Operation reads check the device's current verified
+person and organization standing before reading a partitioned receipt. Legacy
+single-user and non-partitioned receipt keys, storage schema and wire stay unchanged.

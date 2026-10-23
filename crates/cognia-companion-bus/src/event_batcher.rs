@@ -219,6 +219,7 @@ mod tests {
             payload: json!({ "seq": seq }),
             ts_ms: 0,
             target_device_id: None,
+            partition_account_id: None,
         }
     }
 
@@ -240,6 +241,7 @@ mod tests {
                 }),
                 ts_ms: 1_700_000_000_000 + index as i64 * 10,
                 target_device_id: Some("private-device".into()),
+                partition_account_id: None,
             })
             .collect()
     }
@@ -420,6 +422,7 @@ mod tests {
             payload: json!({ "blob": "x".repeat(100 * 1024) }),
             ts_ms: 0,
             target_device_id: None,
+            partition_account_id: None,
         };
         let mut b = EventBatcher::new();
         let t0 = Instant::now();

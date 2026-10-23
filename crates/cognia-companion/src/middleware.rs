@@ -66,6 +66,10 @@ pub(crate) fn listener_kind(request: &Request) -> ListenerKind {
         .unwrap_or_default()
 }
 
+fn person_brain_route_allowed(loopback: bool, path: &str, fleet_installed: bool) -> bool {
+    loopback && fleet_installed && path == "/internal/bridge"
+}
+
 const LOCAL_DEBUG_TOKEN_ENV: &str = "COGNIA_LOCAL_DEBUG_TOKEN";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -319,6 +323,24 @@ async fn authenticate_request(
             granted_scopes: Vec::new(),
             authorization_capabilities: None,
         });
+        return next.run(request).await;
+    }
+
+    // Person children have a separate, closed endpoint allowance. Never
+    // reinterpret this credential as service, device, owner, or OIDC.
+    let person_claims = { crate::jwt::verify_person_brain(&state.secret.read(), &token) };
+    if let Ok(claims) = person_claims {
+        if !person_brain_route_allowed(peer_is_loopback, request.uri().path(), crate::person_partition::fleet().is_some()) {
+            return error_response("wrong_scope", "person brain token is restricted to its loopback bridge");
+        }
+        let Some(account_id) = claims.identity.account_id.clone().filter(|id| id.starts_with("pb_") && id.len() == 27
+            && id[3..].bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))) else {
+            return error_response("malformed_token", "person brain account is malformed");
+        };
+        let ctx = DeviceContext { device_id: claims.identity.device_id.clone().unwrap_or_default(), tenant_id: account_id,
+            scope: "person-brain".into(), granted_scopes: Vec::new(), authorization_capabilities: None };
+        request.extensions_mut().insert(ctx);
+        request.extensions_mut().insert(claims);
         return next.run(request).await;
     }
 
@@ -577,6 +599,30 @@ mod tests {
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tower::ServiceExt as _;
+
+    #[test]
+    fn p5_person_scope_has_one_endpoint_and_no_service_bypass() {
+        for path in ["/internal/events", "/internal/catalog", "/internal/persons", "/internal/persons/purge",
+            "/internal/_rpc/app_settings_update", "/internal/_rpc/sync_pull", "/api/commands/execute",
+            "/ide/content", "/ide/content/value", "/metrics", "/internal/operations/id"] {
+            assert!(!person_brain_route_allowed(true, path, true), "{path}");
+        }
+        assert!(person_brain_route_allowed(true, "/internal/bridge", true));
+        assert!(!person_brain_route_allowed(false, "/internal/bridge", true));
+        assert!(!person_brain_route_allowed(true, "/internal/bridge", false));
+    }
+
+    #[tokio::test]
+    async fn p5_valid_person_jwt_cannot_authenticate_a_service_route() {
+        let state = test_state();
+        let (token, _) = crate::jwt::issue_person_brain_jwt(SECRET, "pb_000000000000000000000001", &"11".repeat(32)).unwrap();
+        let mut request = Request::builder().uri("/protected").header("Authorization", format!("Bearer {token}"))
+            .body(Body::empty()).unwrap();
+        request.extensions_mut().insert(ConnectInfo("127.0.0.1:12345".parse::<SocketAddr>().unwrap()));
+        let response = build_service_router(state).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(body_json(response).await["code"], "wrong_scope");
+    }
 
     #[test]
     fn operator_bearer_tokens_are_exact_trimmed_and_constant_time_compared() {

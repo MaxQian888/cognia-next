@@ -109,7 +109,7 @@ pub(super) fn authorize_task_spawn(
     if !config.env.contains_key("COGNIA_GATEWAY_TASK_CONFIG") {
         return Ok(None);
     }
-    if scope == Some("service") {
+    if cognia_companion::jwt::is_service_scope(scope) {
         return authorize_host_task_spawn(state, host, config);
     }
     let mut payload: Value = serde_json::from_str(&config.env["COGNIA_GATEWAY_TASK_CONFIG"])
@@ -438,7 +438,7 @@ pub(super) async fn dispatch(
         // the RPC in either direction. Service scope only (rpc.rs), and
         // checked again here because the lease spends the Host's credential.
         "agent_gateway_host_task_prepare" => {
-            if scope != Some("service") {
+            if !cognia_companion::jwt::is_service_scope(scope) {
                 return Err(RpcError::forbidden(
                     "Host gateway tasks are prepared by the Host itself",
                 ));
@@ -476,7 +476,7 @@ pub(super) async fn dispatch(
             Ok(result)
         }
         "agent_gateway_host_task_renew" | "agent_gateway_host_task_revoke" => {
-            if scope != Some("service") {
+            if !cognia_companion::jwt::is_service_scope(scope) {
                 return Err(RpcError::forbidden(
                     "Host gateway tasks are controlled by the Host itself",
                 ));

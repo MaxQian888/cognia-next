@@ -647,7 +647,7 @@ fn authorize_approval(
     if registry.is_remote_scoped(session_id, request_id) {
         return Err(remote_context_error("REMOTE_SCOPE_DENIED"));
     }
-    if scope == Some("service") || super::device_can_control(device_id) {
+    if cognia_companion::jwt::is_service_scope(scope) || super::device_can_control(device_id) {
         return Ok(());
     }
     Err(RpcError::forbidden(
@@ -734,7 +734,7 @@ async fn abandon_paired_turn(state: &SharedState, submission_id: &str, error_cod
 /// owner's key. The Host's own service principal already resolved its keys.
 fn fill_host_provider_key(options: &mut claude_commands::SendOptions, caller: SendCaller<'_>) {
     options.fill_missing_provider_key(|provider| {
-        if caller.scope == Some("service")
+        if cognia_companion::jwt::is_service_scope(caller.scope)
             || !super::canonical_device_has_capability(caller.device_id, "secret.manage")
         {
             return None;

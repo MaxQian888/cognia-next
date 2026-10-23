@@ -194,6 +194,18 @@
     { "path": "/internal/events", "method": "get", "document": "headless" },
     { "path": "/internal/bridge", "method": "get", "document": "headless" },
     {
+      "path": "/internal/persons",
+      "method": "get",
+      "document": "none",
+      "reason": "Loopback operator surface behind `cognia-server persons list`; service token only, never a person brain or a device."
+    },
+    {
+      "path": "/internal/persons/purge",
+      "method": "post",
+      "document": "none",
+      "reason": "Loopback operator surface behind `cognia-server persons purge`; service token only, never a person brain or a device."
+    },
+    {
       "path": "/integrations/mcp/oauth/callback",
       "runtimePath": "/oauth/callback",
       "method": "get",

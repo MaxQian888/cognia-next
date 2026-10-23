@@ -662,6 +662,16 @@ pub fn render_prometheus() -> String {
             services.sidecar_restart_count(),
         );
     }
+    if let Some(fleet) = super::person_partition::fleet() {
+        let statuses = fleet.statuses();
+        out.push_str(&format!("cognia_person_brains_running {}\n", statuses.iter().filter(|person| person.running).count()));
+        for person in statuses {
+            out.push_str(&format!("cognia_person_brain_running{{account=\"{}\"}} {}\n", person.account_id, u8::from(person.running)));
+            out.push_str(&format!("cognia_person_brain_ready{{account=\"{}\"}} {}\n", person.account_id, u8::from(person.ready)));
+            out.push_str(&format!("cognia_person_brain_in_flight{{account=\"{}\"}} {}\n", person.account_id, person.in_flight));
+            out.push_str(&format!("cognia_person_brain_rss_bytes{{account=\"{}\"}} {}\n", person.account_id, person.rss_bytes));
+        }
+    }
     push_sandbox_metrics(&mut out);
     out
 }

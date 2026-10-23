@@ -552,7 +552,7 @@ pub(super) async fn dispatch(
                         })?;
                         let owner = if let Some(tenant) = tenant_id {
                             cognia_companion::host_identity::namespace_for_tenant(tenant)
-                        } else if scope == Some("service") {
+                        } else if cognia_companion::jwt::is_service_scope(scope) {
                             cognia_companion::host_identity::current()
                                 .ok()
                                 .and_then(|binding| {
@@ -717,7 +717,7 @@ pub(super) async fn dispatch(
                     cognia_external_agent::gateway_task::authorize_gateway_task_deletion(
                         &task_id,
                         backend.as_ref(),
-                        (scope != Some("service")).then_some(device_id),
+                        (!cognia_companion::jwt::is_service_scope(scope)).then_some(device_id),
                     )
                     .await
                     .map_err(RpcError::internal)
@@ -737,7 +737,7 @@ pub(super) async fn dispatch(
                     }
                     let owner = if let Some(tenant) = tenant_id {
                         cognia_companion::host_identity::namespace_for_tenant(tenant)
-                    } else if scope == Some("service") {
+                    } else if cognia_companion::jwt::is_service_scope(scope) {
                         cognia_companion::host_identity::current()
                             .ok()
                             .and_then(|binding| {
@@ -750,7 +750,7 @@ pub(super) async fn dispatch(
                     }
                     .ok_or_else(|| RpcError::forbidden("delivery_source_account_required"))?;
                     let task = task_id.clone();
-                    let device = (scope != Some("service")).then(|| device_id.to_owned());
+                    let device = (!cognia_companion::jwt::is_service_scope(scope)).then(|| device_id.to_owned());
                     tokio::task::spawn_blocking(move || {
                         let host_id = crate::deployment_id::resolve(&directory)?;
                         source_store.revoke_owned_task(&owner, &host_id, &task, device.as_deref())
@@ -764,7 +764,7 @@ pub(super) async fn dispatch(
                     let owner = tenant_id
                         .and_then(cognia_companion::host_identity::namespace_for_tenant)
                         .or_else(|| {
-                            (scope == Some("service"))
+                            (cognia_companion::jwt::is_service_scope(scope))
                                 .then(|| {
                                     cognia_companion::host_identity::current()
                                         .ok()
@@ -797,12 +797,12 @@ pub(super) async fn dispatch(
                         owner,
                         host_id,
                         task_id.clone(),
-                        (scope != Some("service")).then(|| device_id.to_owned()),
+                        (!cognia_companion::jwt::is_service_scope(scope)).then(|| device_id.to_owned()),
                         admission,
                         cognia_external_agent::gateway_task::delete_gateway_task_for_device(
                             &task_id,
                             backend.as_ref(),
-                            (scope != Some("service")).then_some(device_id),
+                            (!cognia_companion::jwt::is_service_scope(scope)).then_some(device_id),
                         ),
                     )
                     .await
@@ -2379,7 +2379,7 @@ fn secret_writer(
     tenant_id: Option<&str>,
     scope: Option<&str>,
 ) -> Option<SecretWriter> {
-    if scope == Some("service") || device_id.is_empty() {
+    if cognia_companion::jwt::is_service_scope(scope) || device_id.is_empty() {
         return None;
     }
     let label = tenant_id.and_then(|tenant| {
