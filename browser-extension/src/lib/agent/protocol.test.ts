@@ -1,27 +1,29 @@
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
+import contract from "@cognia/companion-client/browser-agent-protocol.json"
 
 import {
   AGENT_OPERATIONS,
+  AGENT_PROFILE,
+  HELLO_VERSION,
   AgentOperationError,
   isAgentOperation,
   parseHostFrame,
   serializeFrame,
   toFailure,
+  operationBudgetMs,
 } from "./protocol"
 
 describe("device socket protocol", () => {
-  it("lists exactly the operations the Rust socket forwards", () => {
-    const rust = readFileSync(
-      join(__dirname, "../../../../crates/cognia-companion/src/ws_browser_companion.rs"),
-      "utf8"
-    )
-    const block = rust.slice(
-      rust.indexOf("pub const OPERATIONS"),
-      rust.indexOf("];", rust.indexOf("pub const OPERATIONS"))
-    )
-    const names = [...block.matchAll(/"([a-z_]+)"/g)].map((match) => match[1])
-    expect([...names].sort()).toEqual([...AGENT_OPERATIONS].sort())
+  it("normalizes finite positive operation budgets and enforces the Host ceiling", () => {
+    expect(operationBudgetMs(0.5)).toBe(1)
+    expect(operationBudgetMs(1_000)).toBe(1_000)
+    expect(operationBudgetMs(1_000_000)).toBe(120_000)
+    for (const value of [Infinity, NaN, -1, 0, "1000", undefined])
+      expect(operationBudgetMs(value)).toBe(30_000)
+  })
+  it("matches the published contract without reading the Host checkout", () => {
+    expect(contract.operations).toEqual([...AGENT_OPERATIONS])
+    expect(HELLO_VERSION).toBe(1)
+    expect(AGENT_PROFILE).toBe("agent-safe-v1")
   })
 
   it("parses the frames the Host sends", () => {
@@ -30,6 +32,7 @@ describe("device socket protocol", () => {
       v: 1,
       connectionId: "c",
       driveAllowed: true,
+      agentProfile: null,
     })
     expect(
       parseHostFrame('{"t":"op","id":"1","op":"snapshot","args":{"session":"s"},"deadlineMs":5000}')

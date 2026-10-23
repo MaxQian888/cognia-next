@@ -29,6 +29,8 @@ test.describe("the shipped extension", () => {
       "activeTab",
       "scripting",
       "contextMenus",
+      "alarms",
+      "tabGroups",
     ])
     // The absences are the point, and each is a specific decision:
     // `<all_urls>` would make "read and change all your data on all websites"
@@ -36,9 +38,10 @@ test.describe("the shipped extension", () => {
     // asked about; `debugger` cannot be requested optionally at all.
     expect(manifest.host_permissions ?? []).toEqual([])
     expect(manifest.content_scripts ?? []).toEqual([])
-    expect(manifest.optional_host_permissions).toEqual(["http://127.0.0.1/*"])
+    expect(manifest.optional_host_permissions).toEqual(["http://127.0.0.1/*", "<all_urls>"])
+    expect(manifest.optional_permissions).toEqual(["tabs", "notifications", "downloads", "cookies"])
     expect(manifest.incognito).toBe("not_allowed")
-    expect(JSON.stringify(manifest)).not.toContain("<all_urls>")
+    expect(manifest.permissions).not.toContain("<all_urls>")
   })
 
   test("holds no host permission until somebody grants one", async ({ serviceWorker }) => {
@@ -144,8 +147,8 @@ test.describe("the shipped extension", () => {
     expect(changed).toEqual(["host_permissions", "optional_host_permissions"])
 
     expect(granted.host_permissions).toEqual([LOOPBACK_PATTERN])
-    // Gone, not emptied: the whole point is that Chrome grants it at install.
-    expect(granted.optional_host_permissions).toBeUndefined()
+    // Agent access stays optional; only the loopback test grant moves.
+    expect(granted.optional_host_permissions).toEqual(["<all_urls>"])
     // And the permission set itself is untouched — a widened `permissions`
     // array would let the loop specs pass against an extension nobody could
     // ship.

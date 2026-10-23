@@ -21,6 +21,9 @@ class FakeSocket implements SocketLike {
     this.sent.push(JSON.parse(data))
   }
   close(code?: number, reason?: string) {
+    if (code !== undefined && code !== 1000 && (code < 3000 || code > 4999)) {
+      throw new Error("InvalidAccessError: invalid WebSocket close code")
+    }
     this.closed = [code, reason]
     this.readyState = 3
   }
@@ -42,7 +45,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 function harness(
   options: {
     ticket?: () => Promise<string>
-    execute?: (op: string, args: Record<string, unknown>) => Promise<unknown>
+    execute?: (op: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>
   } = {}
 ) {
   const sockets: FakeSocket[] = []
@@ -61,9 +64,10 @@ function harness(
       sockets.push(socket)
       return socket
     },
-    execute: async (op, args) => (options.execute ? options.execute(op, args) : { op, args }),
+    execute: async (op, args, _deadline, signal) =>
+      options.execute ? options.execute(op, args, signal) : { op, args },
     extensionVersion: "1.2.3",
-    features: ["agent"],
+    features: ["agent-safe-v1"],
     onStatusHint: () => {
       hints += 1
     },
@@ -130,6 +134,168 @@ describe("browserCompanionSocketUrl", () => {
 })
 
 describe("createSocketClient", () => {
+  it("aborts a pending operation at its deadline and refuses a late success", async () => {
+    let signal: AbortSignal | undefined
+    let release!: () => void
+    const h = harness({
+      execute: async (_op, _args, received) => {
+        signal = received
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+        return true
+      },
+    })
+    h.client.start()
+    await flush()
+    const socket = h.sockets[0]!
+    socket.open()
+    socket.receive({
+      t: "welcome",
+      v: 1,
+      agentProfile: "agent-safe-v1",
+      connectionId: "c",
+      driveAllowed: true,
+    })
+    socket.receive({
+      t: "op",
+      id: "timeout",
+      op: "create_page",
+      args: { session: "s" },
+      deadlineMs: 1_000,
+    })
+    await flush()
+    await h.advance(1_000)
+    expect(signal?.aborted).toBe(true)
+    release()
+    await flush()
+    expect(socket.sent).toContainEqual(
+      expect.objectContaining({
+        id: "timeout",
+        ok: false,
+        error: expect.objectContaining({ code: "browser_operation_timeout" }),
+      })
+    )
+    h.client.stop()
+  })
+
+  it("ignores a queued open callback from a stopped socket", async () => {
+    const h = harness()
+    h.client.start()
+    await flush()
+    const stale = h.sockets[0]!
+    h.client.stop()
+    stale.open()
+    expect(h.intervals.size).toBe(0)
+    expect(stale.sent).toEqual([])
+  })
+  it.each([999, undefined, "1", 1.5])(
+    "refuses welcome version %s instead of entering connected state",
+    async (version) => {
+      const h = harness()
+      h.client.start()
+      await flush()
+      const socket = h.sockets[0]!
+      socket.open()
+      socket.receive({ t: "welcome", v: version, connectionId: "c", driveAllowed: true })
+      expect(h.client.state()).toMatchObject({ kind: "incompatible" })
+      expect(socket.closed?.[0]).toBe(4002)
+      expect(h.intervals.size).toBe(0)
+      socket.drop(1002)
+      await h.advance(60_000)
+      expect(h.sockets).toHaveLength(1)
+    }
+  )
+
+  it("does not execute before welcome or after driving is revoked", async () => {
+    const execute = jest.fn(async () => null)
+    const h = harness({ execute })
+    h.client.start()
+    await flush()
+    const socket = h.sockets[0]!
+    socket.open()
+    const op = { t: "op", id: "early", op: "act", args: { session: "s" } }
+    socket.receive(op)
+    socket.receive({
+      t: "welcome",
+      v: 1,
+      agentProfile: "agent-safe-v1",
+      connectionId: "c",
+      driveAllowed: false,
+    })
+    socket.receive({ ...op, id: "revoked" })
+    await flush()
+    expect(execute).not.toHaveBeenCalled()
+    expect(socket.sent).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "early", ok: false }),
+        expect.objectContaining({ id: "revoked", ok: false }),
+      ])
+    )
+  })
+
+  it.each(["revoke", "disconnect", "stop"])("aborts pending execution on %s", async (event) => {
+    let signal: AbortSignal | undefined
+    let complete: () => void = () => undefined
+    const h = harness({
+      execute: async (_op, _args, received) => {
+        signal = received
+        await new Promise<void>((resolve) => {
+          complete = resolve
+        })
+        return null
+      },
+    })
+    h.client.start()
+    await flush()
+    const socket = h.sockets[0]!
+    socket.open()
+    socket.receive({
+      t: "welcome",
+      v: 1,
+      agentProfile: "agent-safe-v1",
+      connectionId: "c",
+      driveAllowed: true,
+    })
+    socket.receive({ t: "op", id: "pending", op: "act", args: { session: "s" } })
+    await flush()
+    if (event === "revoke") socket.receive({ t: "drive", allowed: false })
+    else if (event === "disconnect") socket.drop()
+    else h.client.stop()
+    expect(signal?.aborted).toBe(true)
+    complete()
+    await flush()
+    expect(socket.sent).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "pending", ok: true })])
+    )
+    h.client.stop()
+  })
+
+  it.each([undefined, "agent-safe-v2"])(
+    "keeps Host profile %s status-only and refuses its agent operations",
+    async (profile) => {
+      const execute = jest.fn(async () => null)
+      const h = harness({ execute })
+      h.client.start()
+      await flush()
+      const socket = h.sockets[0]!
+      socket.open()
+      socket.receive({
+        t: "welcome",
+        v: 1,
+        agentProfile: profile,
+        connectionId: "legacy",
+        driveAllowed: true,
+      })
+      socket.receive({ t: "status", at: 1 })
+      socket.receive({ t: "op", id: "legacy-op", op: "act", args: {} })
+      await flush()
+      expect(h.client.state()).toMatchObject({ kind: "status-only" })
+      expect(h.hints()).toBe(2)
+      expect(execute).not.toHaveBeenCalled()
+    }
+  )
+
   it("says hello, heartbeats as text, and reports the welcome", async () => {
     const h = harness()
     h.client.start()
@@ -138,13 +304,19 @@ describe("createSocketClient", () => {
     expect(socket.url).toBe("ws://host/ws?ticket=t1")
     socket.open()
     expect(socket.sent).toEqual([
-      { t: "hello", v: 1, extensionVersion: "1.2.3", features: ["agent"] },
+      { t: "hello", v: 1, extensionVersion: "1.2.3", features: ["agent-safe-v1"] },
     ])
     expect([...h.intervals.values()][0]?.every).toBe(HEARTBEAT_MS)
     ;[...h.intervals.values()][0]?.callback()
     expect(socket.sent.at(-1)).toEqual({ t: "heartbeat" })
 
-    socket.receive({ t: "welcome", v: 1, connectionId: "c1", driveAllowed: true })
+    socket.receive({
+      t: "welcome",
+      v: 1,
+      agentProfile: "agent-safe-v1",
+      connectionId: "c1",
+      driveAllowed: true,
+    })
     expect(h.client.state()).toEqual({ kind: "connected", connectionId: "c1", driveAllowed: true })
     expect(h.drive).toEqual([true])
     expect(h.hints()).toBe(1)
@@ -167,6 +339,13 @@ describe("createSocketClient", () => {
     await flush()
     const socket = h.sockets[0]!
     socket.open()
+    socket.receive({
+      t: "welcome",
+      v: 1,
+      agentProfile: "agent-safe-v1",
+      connectionId: "c",
+      driveAllowed: true,
+    })
     socket.receive({ t: "op", id: "1", op: "snapshot", args: { session: "s" }, deadlineMs: 5_000 })
     socket.receive({ t: "op", id: "2", op: "act", args: {}, deadlineMs: 5_000 })
     socket.receive({ t: "op", id: "3", op: "format_disk", args: {} })
@@ -194,6 +373,13 @@ describe("createSocketClient", () => {
     await flush()
     const socket = h.sockets[0]!
     socket.open()
+    socket.receive({
+      t: "welcome",
+      v: 1,
+      agentProfile: "agent-safe-v1",
+      connectionId: "c",
+      driveAllowed: true,
+    })
     socket.receive({ t: "op", id: "1", op: "screenshot", args: {} })
     await flush()
     expect(socket.sent.at(-1)).toMatchObject({
@@ -209,6 +395,13 @@ describe("createSocketClient", () => {
     await flush()
     const first = h.sockets[0]!
     first.open()
+    first.receive({
+      t: "welcome",
+      v: 1,
+      agentProfile: "agent-safe-v1",
+      connectionId: "c",
+      driveAllowed: true,
+    })
     first.receive({ t: "op", id: "1", op: "snapshot", args: {} })
     first.drop()
     release({ late: true })
@@ -228,7 +421,13 @@ describe("createSocketClient", () => {
     expect(h.client.state()).toMatchObject({ retryAt: 3_000 })
     await h.advance(2_000)
     h.sockets[2]!.open()
-    h.sockets[2]!.receive({ t: "welcome", connectionId: "c", driveAllowed: false })
+    h.sockets[2]!.receive({
+      t: "welcome",
+      v: 1,
+      agentProfile: "agent-safe-v1",
+      connectionId: "c",
+      driveAllowed: false,
+    })
     h.sockets[2]!.drop()
     expect(h.client.state()).toMatchObject({ retryAt: 4_000 })
   })

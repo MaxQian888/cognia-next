@@ -10,7 +10,10 @@ import {
   createChromeAgentBrowser,
 } from "@ext/src/lib/agent/chrome-agent-browser"
 import type { SocketLike } from "@ext/src/lib/agent/socket-client"
-import { PENDING_SITE_QUESTIONS_KEY } from "@ext/src/lib/agent/site-permissions"
+import {
+  PENDING_SITE_QUESTIONS_KEY,
+  isAgentPermissionMessage,
+} from "@ext/src/lib/agent/site-permissions"
 import { BADGE_COLORS } from "@ext/src/lib/background/status-tracker"
 import { PANEL_PORT, createWorker } from "@ext/src/lib/background/worker"
 import {
@@ -77,6 +80,7 @@ export default defineBackground(() => {
       await chrome.alarms.clear(name)
     },
     extensionVersion: chrome.runtime.getManifest().version,
+    panelUrl: chrome.runtime.getURL("/sidepanel.html"),
     message: (key, substitutions) => chrome.i18n.getMessage(key, substitutions) || key,
     now: () => Date.now(),
     random: () => Math.random(),
@@ -199,6 +203,12 @@ export default defineBackground(() => {
 
   chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
     if (sender.id !== chrome.runtime.id) return false
+    if (isAgentPermissionMessage(message)) {
+      void ready
+        .then(() => worker.onPermissionMessage(message, sender.url))
+        .then(sendResponse, () => sendResponse(false))
+      return true
+    }
     if (isAgentControlMessage(message)) {
       void ready
         .then(() => worker.runtime.control(message, sender.tab?.id))

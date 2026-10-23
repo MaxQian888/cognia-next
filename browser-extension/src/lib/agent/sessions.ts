@@ -88,13 +88,13 @@ export function sessionForTab(sessions: AgentSessions, tabId: number): AgentSess
   return Object.values(sessions).find((session) => session.tabIds.includes(tabId)) ?? null
 }
 
-/** Sessions idle longer than this are forgotten on the next sweep. */
+/** Unpaused sessions idle longer than this are forgotten on the next sweep. */
 export const SESSION_IDLE_TTL_MS = 6 * 60 * 60 * 1000
 
 export function sweepSessions(sessions: AgentSessions, now: number): AgentSessions {
   return Object.fromEntries(
     Object.entries(sessions).filter(
-      ([, session]) => now - session.lastActivityAt < SESSION_IDLE_TTL_MS
+      ([, session]) => session.takeover || now - session.lastActivityAt < SESSION_IDLE_TTL_MS
     )
   )
 }
@@ -119,10 +119,13 @@ export class SessionStore {
   }
 
   update<T>(
-    mutate: (sessions: AgentSessions) => { sessions: AgentSessions; result: T }
+    mutate: (sessions: AgentSessions) => { sessions: AgentSessions; result: T },
+    checkActive?: () => void
   ): Promise<T> {
     const run = this.queue.then(async () => {
-      const { sessions, result } = mutate(await this.all())
+      const current = await this.all()
+      checkActive?.()
+      const { sessions, result } = mutate(current)
       await this.area.set(AGENT_SESSIONS_KEY, sessions)
       return result
     })
@@ -134,19 +137,20 @@ export class SessionStore {
   updateSession(
     id: string,
     now: number,
-    change: (session: AgentSession) => AgentSession
+    change: (session: AgentSession) => AgentSession,
+    checkActive?: () => void
   ): Promise<AgentSession> {
     return this.update((sessions) => {
       const next = { ...change(sessions[id] ?? newSession(id, now)), lastActivityAt: now }
       return { sessions: { ...sweepSessions(sessions, now), [id]: next }, result: next }
-    })
+    }, checkActive)
   }
 
-  remove(id: string): Promise<void> {
+  remove(id: string, checkActive?: () => void): Promise<void> {
     return this.update((sessions) => {
       const { [id]: _removed, ...rest } = sessions
       return { sessions: rest, result: undefined }
-    })
+    }, checkActive)
   }
 
   onChange(listener: (sessions: AgentSessions) => void): () => void {

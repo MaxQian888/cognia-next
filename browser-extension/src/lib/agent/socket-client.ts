@@ -14,6 +14,8 @@
  */
 import {
   HELLO_VERSION,
+  AGENT_PROFILE,
+  AgentOperationError,
   parseHostFrame,
   serializeFrame,
   toFailure,
@@ -38,6 +40,8 @@ export type SocketState =
   | { kind: "stopped" }
   | { kind: "connecting"; attempt: number }
   | { kind: "connected"; connectionId: string; driveAllowed: boolean }
+  | { kind: "status-only"; connectionId: string }
+  | { kind: "incompatible"; code: "browser_protocol_incompatible" }
   /** Waiting to retry; `code` names a refusal the person can act on, if any. */
   | { kind: "waiting"; retryAt: number; code: string | null }
 
@@ -49,8 +53,10 @@ export interface SocketClientDeps {
   execute(
     operation: AgentOperation,
     args: Record<string, unknown>,
-    deadlineMs: number
+    deadlineMs: number,
+    signal: AbortSignal
   ): Promise<unknown>
+  canExecute?(): boolean
   extensionVersion: string
   features: string[]
   onStatusHint(): void
@@ -107,6 +113,24 @@ export function createSocketClient(deps: SocketClientDeps) {
   let reconnect: unknown = null
   let heartbeat: unknown = null
   let state: SocketState = { kind: "stopped" }
+  const pending = new Map<string, AbortController>()
+
+  function cancelOperations(code = "browser_operation_cancelled") {
+    for (const controller of pending.values()) {
+      controller.abort(new AgentOperationError(code, "Browser operation authorization ended"))
+    }
+    pending.clear()
+  }
+
+  function incompatible(target: SocketLike) {
+    cancelOperations("browser_protocol_incompatible")
+    deps.onDrive(false)
+    clearHeartbeat()
+    socket = null
+    setState({ kind: "incompatible", code: "browser_protocol_incompatible" })
+    // Browser WebSocket.close only permits 1000 or application codes 3000–4999.
+    target.close(4002, "browser_protocol_incompatible")
+  }
 
   function setState(next: SocketState) {
     state = next
@@ -142,8 +166,21 @@ export function createSocketClient(deps: SocketClientDeps) {
     deadlineMs: number
   ) {
     let frame: ExtensionFrame
+    const controller = new AbortController()
+    pending.set(id, controller)
+    const expiresAt = deps.now() + deadlineMs
+    const expire = () =>
+      controller.abort(
+        new AgentOperationError(
+          "browser_operation_timeout",
+          "The browser operation deadline expired"
+        )
+      )
+    const timeout = deps.setTimeout(expire, deadlineMs)
     try {
-      const value = await deps.execute(operation, args, deadlineMs)
+      const value = await deps.execute(operation, args, deadlineMs, controller.signal)
+      if (deps.now() >= expiresAt) expire()
+      controller.signal.throwIfAborted()
       frame = { t: "result", id, ok: true, value: value ?? null }
       if (serializeFrame(frame).length > MAX_RESULT_BYTES) {
         frame = {
@@ -158,6 +195,9 @@ export function createSocketClient(deps: SocketClientDeps) {
       }
     } catch (error) {
       frame = { t: "result", id, ok: false, error: toFailure(error) }
+    } finally {
+      deps.clearTimeout(timeout)
+      if (pending.get(id) === controller) pending.delete(id)
     }
     // A socket replaced while the operation ran is gone; the Host already
     // failed the call when that connection closed.
@@ -165,12 +205,23 @@ export function createSocketClient(deps: SocketClientDeps) {
   }
 
   function handleMessage(target: SocketLike, data: unknown) {
+    if (target !== socket) return
     if (typeof data !== "string") return
     const frame = parseHostFrame(data)
     if (!frame) return
     switch (frame.t) {
       case "welcome":
+        if (frame.v !== HELLO_VERSION || state.kind !== "connecting") {
+          incompatible(target)
+          return
+        }
         attempt = 0
+        if (frame.agentProfile !== AGENT_PROFILE) {
+          setState({ kind: "status-only", connectionId: frame.connectionId })
+          deps.onDrive(false)
+          deps.onStatusHint()
+          return
+        }
         setState({
           kind: "connected",
           connectionId: frame.connectionId,
@@ -180,7 +231,9 @@ export function createSocketClient(deps: SocketClientDeps) {
         deps.onStatusHint()
         return
       case "drive":
-        if (state.kind === "connected") setState({ ...state, driveAllowed: frame.allowed })
+        if (state.kind !== "connected") return
+        if (!frame.allowed) cancelOperations("browser_drive_revoked")
+        setState({ ...state, driveAllowed: frame.allowed })
         deps.onDrive(frame.allowed)
         return
       case "status":
@@ -189,6 +242,26 @@ export function createSocketClient(deps: SocketClientDeps) {
       case "heartbeat":
         return
       case "op":
+        if (
+          state.kind !== "connected" ||
+          !state.driveAllowed ||
+          deps.canExecute?.() === false ||
+          pending.has(frame.id)
+        ) {
+          send(target, {
+            t: "result",
+            id: frame.id,
+            ok: false,
+            error: {
+              code:
+                state.kind === "status-only"
+                  ? "browser_protocol_incompatible"
+                  : "browser_drive_forbidden",
+              message: "A compatible handshake and current driving permission are required",
+            },
+          })
+          return
+        }
         if ((frame.op as string) === "__unknown__") {
           send(target, {
             t: "result",
@@ -234,6 +307,7 @@ export function createSocketClient(deps: SocketClientDeps) {
     }
     socket = target
     target.onopen = () => {
+      if (target !== socket || !desired) return
       send(target, {
         t: "hello",
         v: HELLO_VERSION,
@@ -247,10 +321,16 @@ export function createSocketClient(deps: SocketClientDeps) {
     }
     target.onmessage = (event) => handleMessage(target, event.data)
     target.onerror = () => undefined
-    target.onclose = () => {
+    target.onclose = (event) => {
       if (socket !== target) return
       socket = null
+      cancelOperations("browser_extension_disconnected")
+      deps.onDrive(false)
       clearHeartbeat()
+      if (event.code === 1002) {
+        setState({ kind: "incompatible", code: "browser_protocol_incompatible" })
+        return
+      }
       if (!desired) {
         setState({ kind: "stopped" })
         return
@@ -268,6 +348,7 @@ export function createSocketClient(deps: SocketClientDeps) {
     /** Keep a socket open from now on; a no-op when one is open or pending. */
     start() {
       desired = true
+      if (state.kind === "incompatible") return
       if (socket || state.kind === "connecting") return
       if (reconnect !== null) {
         // Something woke the worker for a reason that wants the socket now —
@@ -281,6 +362,8 @@ export function createSocketClient(deps: SocketClientDeps) {
     /** Close the socket and stop retrying. */
     stop() {
       desired = false
+      cancelOperations()
+      deps.onDrive(false)
       generation++
       if (reconnect !== null) deps.clearTimeout(reconnect)
       reconnect = null
@@ -299,6 +382,7 @@ export function createSocketClient(deps: SocketClientDeps) {
       if (!socket) void connect()
     },
     state: () => state,
+    cancelOperations,
   }
 }
 

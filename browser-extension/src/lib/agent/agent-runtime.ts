@@ -12,7 +12,7 @@
  */
 import { createAgentExecutor, GROUP_TITLE, type AgentBrowser } from "./executor"
 import { pageActingBar } from "./page-functions"
-import { type AgentOperation } from "./protocol"
+import { AgentOperationError, operationBudgetMs, type AgentOperation } from "./protocol"
 import { SessionStore, sessionForTab, withTab, withoutTab, type AgentSession } from "./sessions"
 import { SitePermissions, type SiteQuestion } from "./site-permissions"
 import type { StorageArea } from "./storage-area"
@@ -62,8 +62,8 @@ export function isAgentOpenTabMessage(value: unknown): value is AgentOpenTabMess
 
 /**
  * The conversations and the site decisions over two storage areas, wired so a
- * once-grant is recorded on the conversation. Shared by the worker (which
- * asks) and the side panel (which answers, inside the person's click).
+ * once-grant is recorded on the conversation. The worker is the sole writer;
+ * the panel sends its permission decisions back to that worker.
  */
 export function createAgentStores(deps: {
   local: StorageArea
@@ -97,7 +97,17 @@ export function createAgentStores(deps: {
 export function createAgentRuntime(deps: AgentRuntimeDeps) {
   const { browser, now } = deps
   const { sessions, permissions } = createAgentStores(deps)
-  const executor = createAgentExecutor({ browser, sessions, permissions, now, sleep: deps.sleep })
+  const pending = new Map<AbortController, string>()
+  // Close the gap between the control click and its asynchronous storage write.
+  const pausing = new Set<string>()
+  const controls = new Map<string, Promise<unknown>>()
+  const pauseRequests = new Map<string, number>()
+  function cancelSession(sessionId: string, code: string) {
+    for (const [controller, session] of pending) {
+      if (session === sessionId)
+        controller.abort(new AgentOperationError(code, "The person stopped browser execution"))
+    }
+  }
 
   function barState(current: AgentSession) {
     return {
@@ -132,44 +142,127 @@ export function createAgentRuntime(deps: AgentRuntimeDeps) {
     sessions,
     permissions,
 
-    execute(operation: AgentOperation, args: Record<string, unknown>, deadlineMs: number) {
-      return executor.execute(operation, args, deadlineMs)
+    async execute(
+      operation: AgentOperation,
+      args: Record<string, unknown>,
+      deadlineMs: number,
+      signal?: AbortSignal
+    ) {
+      signal?.throwIfAborted()
+      if (typeof args.session === "string" && pausing.has(args.session)) {
+        throw new AgentOperationError(
+          "browser_user_takeover",
+          "The person paused browser execution"
+        )
+      }
+      const controller = new AbortController()
+      const budget = operationBudgetMs(deadlineMs)
+      const expiresAt = now() + budget
+      const checkActive = () => {
+        if (now() >= expiresAt)
+          controller.abort(
+            new AgentOperationError(
+              "browser_operation_timeout",
+              "The browser operation deadline expired"
+            )
+          )
+        controller.signal.throwIfAborted()
+      }
+      const abort = () => controller.abort(signal?.reason)
+      signal?.addEventListener("abort", abort, { once: true })
+      pending.set(controller, typeof args.session === "string" ? args.session : "")
+      try {
+        const executor = createAgentExecutor({
+          browser,
+          sessions,
+          permissions,
+          now,
+          sleep: deps.sleep,
+          signal: controller.signal,
+          checkActive,
+        })
+        const value = await executor.execute(operation, args, budget)
+        checkActive()
+        return value
+      } finally {
+        signal?.removeEventListener("abort", abort)
+        pending.delete(controller)
+      }
     },
 
     /** The in-page bar's buttons. Answers whether the message was honoured. */
-    async control(message: AgentControlMessage, senderTabId: number | undefined): Promise<boolean> {
-      const current = await owns(message.session, senderTabId)
-      if (!current) return false
-      switch (message.action) {
-        case "stop": {
-          // Stop cancels the turn; the tabs stay where they are for the
-          // person to look at, and the bar goes because nothing is acting.
-          await paintBars(current, false)
-          await permissions.dropQuestions(current.id)
-          await sessions.updateSession(current.id, now(), (s) => ({ ...s, takeover: false }))
-          await deps.cancelConversation(current.id)
-          return true
+    control(message: AgentControlMessage, senderTabId: number | undefined): Promise<boolean> {
+      let registeredPause = false
+      let persistedPause = false
+      const verified = owns(message.session, senderTabId).then((current) => {
+        if (current && message.action !== "resume") {
+          registeredPause = true
+          pauseRequests.set(current.id, (pauseRequests.get(current.id) ?? 0) + 1)
+          pausing.add(current.id)
+          cancelSession(
+            current.id,
+            message.action === "stop" ? "browser_operation_cancelled" : "browser_user_takeover"
+          )
         }
-        case "takeover": {
-          const next = await sessions.updateSession(current.id, now(), (s) => ({
-            ...s,
-            takeover: true,
-          }))
-          // Nothing will act until the person resumes, so nothing should be
-          // waiting on their answer either.
-          await permissions.dropQuestions(current.id)
-          await paintBars(next, true)
-          return true
-        }
-        case "resume": {
-          const next = await sessions.updateSession(current.id, now(), (s) => ({
-            ...s,
-            takeover: false,
-          }))
-          await paintBars(next, true)
-          return true
-        }
-      }
+        return current
+      })
+      // Preserve click order through storage, bar painting and Stop cleanup.
+      // A newer Resume must not expose work to an older Stop's cleanup.
+      const run = (controls.get(message.session) ?? Promise.resolve())
+        .then(async () => {
+          const current = await verified
+          if (!current) return false
+          switch (message.action) {
+            case "stop": {
+              const next = await sessions.updateSession(current.id, now(), (s) => ({
+                ...s,
+                takeover: true,
+              }))
+              persistedPause = true
+              // Keep Resume available; delayed Host frames cannot restart a stopped turn.
+              await paintBars(next, true)
+              await permissions.dropQuestions(current.id)
+              await deps.cancelConversation(current.id)
+              return true
+            }
+            case "takeover": {
+              const next = await sessions.updateSession(current.id, now(), (s) => ({
+                ...s,
+                takeover: true,
+              }))
+              persistedPause = true
+              // Nothing will act until the person resumes, so nothing should be
+              // waiting on their answer either.
+              await permissions.dropQuestions(current.id)
+              await paintBars(next, true)
+              return true
+            }
+            case "resume": {
+              const next = await sessions.updateSession(current.id, now(), (s) => ({
+                ...s,
+                takeover: false,
+              }))
+              if (!pauseRequests.has(current.id)) pausing.delete(current.id)
+              await paintBars(next, true)
+              return true
+            }
+          }
+        })
+        .finally(() => {
+          if (!registeredPause) return
+          const remaining = (pauseRequests.get(message.session) ?? 1) - 1
+          if (remaining > 0) pauseRequests.set(message.session, remaining)
+          else {
+            pauseRequests.delete(message.session)
+            if (persistedPause) pausing.delete(message.session)
+          }
+        })
+      const tail = run.catch(() => undefined)
+      controls.set(message.session, tail)
+      void tail.then(() => {
+        if (controls.get(message.session) === tail) controls.delete(message.session)
+      })
+      return run
     },
 
     /**

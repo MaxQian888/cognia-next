@@ -19,10 +19,15 @@ import {
   isTerminalBrowserSubmissionStatus,
   type BrowserContextSubmissionSummaryV1,
 } from "@cognia/companion-client"
+import { AGENT_PROFILE } from "../agent/protocol"
 
 import { createAgentRuntime, type AgentRuntime } from "../agent/agent-runtime"
 import type { AgentBrowser } from "../agent/executor"
-import { PENDING_SITE_QUESTIONS_KEY, type SiteQuestion } from "../agent/site-permissions"
+import {
+  PENDING_SITE_QUESTIONS_KEY,
+  type SiteQuestion,
+  type AgentPermissionMessage,
+} from "../agent/site-permissions"
 import {
   browserCompanionSocketUrl,
   createSocketClient,
@@ -68,6 +73,7 @@ export interface WorkerDeps {
   ensureAlarm(name: string, periodMinutes: number): Promise<void>
   clearAlarm(name: string): Promise<void>
   extensionVersion: string
+  panelUrl: string
   message(key: string, substitutions?: string[]): string
   now(): number
   random(): number
@@ -80,7 +86,7 @@ export interface WorkerDeps {
 }
 
 /** What the hello tells the Host this build implements. */
-export const EXTENSION_FEATURES = ["agent-v1", "status-hints-v1"]
+export const EXTENSION_FEATURES = [AGENT_PROFILE, "status-hints-v1"]
 
 export function createWorker(deps: WorkerDeps) {
   let pairing: PairingRecord | null = null
@@ -90,6 +96,7 @@ export function createWorker(deps: WorkerDeps) {
   let keepPolling = false
   let refreshing: Promise<void> | null = null
   let refreshAgain = false
+  let permissionChanges: Promise<unknown> = Promise.resolve()
 
   const runtime: AgentRuntime = createAgentRuntime({
     browser: deps.browser,
@@ -109,7 +116,9 @@ export function createWorker(deps: WorkerDeps) {
     },
     socketUrl: (ticket) => browserCompanionSocketUrl(pairing?.baseUrl ?? "", ticket),
     createSocket: deps.createSocket,
-    execute: (operation, args, deadlineMs) => runtime.execute(operation, args, deadlineMs),
+    execute: (operation, args, deadlineMs, signal) =>
+      runtime.execute(operation, args, deadlineMs, signal),
+    canExecute: () => preferences.agentMode,
     extensionVersion: deps.extensionVersion,
     features: EXTENSION_FEATURES,
     onStatusHint: () => {
@@ -275,6 +284,22 @@ export function createWorker(deps: WorkerDeps) {
     runtime,
     socket,
 
+    onPermissionMessage(
+      message: AgentPermissionMessage,
+      senderUrl: string | undefined
+    ): Promise<boolean> {
+      // Extension content scripts share runtime.id, so require the actual panel URL.
+      if (senderUrl?.split(/[?#]/)[0] !== deps.panelUrl) return Promise.resolve(false)
+      const run = permissionChanges.then(async () => {
+        if (message.action === "answer")
+          await runtime.permissions.answer(message.questionId, message.answer)
+        else await runtime.permissions.setDecision(message.origin, null)
+        return true
+      })
+      permissionChanges = run.catch(() => undefined)
+      return run
+    },
+
     /** Every wake-up: rebuild the cache from storage, then reconcile. */
     async start(): Promise<void> {
       preferences = parsePreferences(await deps.local.get(STORAGE_KEYS.preferences))
@@ -292,6 +317,7 @@ export function createWorker(deps: WorkerDeps) {
       if (key === STORAGE_KEYS.preferences) {
         const before = preferences
         preferences = parsePreferences(value)
+        if (!preferences.agentMode) socket.cancelOperations("browser_agent_mode_disabled")
         if (before.agentMode !== preferences.agentMode && preferences.agentMode) socket.retryNow()
         await reconcile()
       } else if (key === STORAGE_KEYS.pairing) {

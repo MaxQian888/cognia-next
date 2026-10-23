@@ -4,6 +4,7 @@ import {
   mainHooksCall,
   mainSetDialogPolicy,
   pageAct,
+  pageOverlayAbi,
   pageActingBar,
   pageDrag,
   pageElementRect,
@@ -19,6 +20,15 @@ import {
 
 type OverlayGlobals = Record<string, unknown>
 const globals = window as unknown as OverlayGlobals
+
+it("reports only an explicit integer overlay ABI", () => {
+  delete globals.__cogniaOverlay
+  expect(pageOverlayAbi()).toBeNull()
+  globals.__cogniaOverlay = { abi: 1 }
+  expect(pageOverlayAbi()).toBe(1)
+  globals.__cogniaOverlay = { abi: "1" }
+  expect(pageOverlayAbi()).toBeNull()
+})
 
 function withOverlay(refs: Record<string, Element>) {
   globals.__cogniaSnapshot = (opts: string) =>

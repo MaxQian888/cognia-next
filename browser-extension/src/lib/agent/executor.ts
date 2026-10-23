@@ -17,6 +17,7 @@ import {
   mainHooksCall,
   mainSetDialogPolicy,
   pageAct,
+  pageOverlayAbi,
   pageActingBar,
   pageDrag,
   pageElementRect,
@@ -30,7 +31,7 @@ import {
   pageStorage,
 } from "./page-functions"
 import { MAX_CANVAS_SIDE } from "./image-ops"
-import { AgentOperationError, type AgentOperation } from "./protocol"
+import { AgentOperationError, OVERLAY_ABI, type AgentOperation } from "./protocol"
 import { withTab, withoutTab, type AgentSession, type SessionStore } from "./sessions"
 import { originOf, type SitePermissions } from "./site-permissions"
 
@@ -82,7 +83,12 @@ export interface AgentBrowser {
   goForward(tabId: number): Promise<void>
   reload(tabId: number): Promise<void>
   /** Group tabs (into `groupId` when given) and return the group id. */
-  group(tabIds: number[], groupId: number | null, windowId: number | null): Promise<number>
+  group(
+    tabIds: number[],
+    groupId: number | null,
+    windowId: number | null,
+    checkActive?: () => void
+  ): Promise<number>
   /** Title and colour a group as Cognia's. */
   styleGroup(groupId: number, title: string): Promise<void>
   ungroup(tabIds: number[]): Promise<void>
@@ -100,7 +106,7 @@ export interface AgentBrowser {
   hasPermission(request: { permissions?: string[]; origins?: string[] }): Promise<boolean>
   searchDownloads(startedAfter: number): Promise<DownloadRecord[]>
   cancelDownload(id: number): Promise<void>
-  deleteDownload(id: number): Promise<void>
+  deleteDownload(id: number, checkActive?: () => void): Promise<void>
   getCookies(domain: string): Promise<CookieRecord[]>
   removeCookie(cookie: CookieRecord): Promise<void>
   image: {
@@ -123,6 +129,8 @@ export interface ExecutorDeps {
   permissions: SitePermissions
   now: () => number
   sleep: (ms: number) => Promise<void>
+  signal?: AbortSignal
+  checkActive?: () => void
 }
 
 /** The overlay bundle and the main-world hooks, as WXT emits them. */
@@ -133,12 +141,7 @@ export const PAGE_HOOKS_FILE = "/page-hooks.js"
 export const GROUP_TITLE = "Cognia"
 
 /** Operations allowed while the person has taken over: reads of what is open. */
-const ALLOWED_DURING_TAKEOVER: readonly AgentOperation[] = [
-  "get_page",
-  "list_pages",
-  "release",
-  "finalize_tabs",
-]
+const ALLOWED_DURING_TAKEOVER: readonly AgentOperation[] = ["get_page", "list_pages"]
 
 /** Chrome refuses more than two visible-tab captures a second. */
 const CAPTURE_SPACING_MS = 550
@@ -180,10 +183,44 @@ function isWebUrl(url: string): boolean {
 }
 
 export function createAgentExecutor(deps: ExecutorDeps) {
-  const { browser, sessions, permissions, now, sleep } = deps
+  const { sessions, permissions, now, signal } = deps
+  const checkActive = () => {
+    signal?.throwIfAborted()
+    deps.checkActive?.()
+  }
+  // Every browser boundary is guarded, including calls reached after an await
+  // in helpers (permissions, injection, polling, captures and cookie loops).
+  // An API call already sent to Chrome cannot be recalled; no later call may
+  // start after revocation, and its result must not cross the revoked socket.
+  const browser =
+    signal || deps.checkActive
+      ? new Proxy(deps.browser, {
+          get(target, key, receiver) {
+            const member = Reflect.get(target, key, receiver)
+            if (typeof member !== "function") return member
+            return (...args: unknown[]) => {
+              checkActive()
+              const result = Reflect.apply(member, target, args)
+              if (result instanceof Promise)
+                return result.then((value: unknown) => {
+                  checkActive()
+                  return value
+                })
+              return result
+            }
+          },
+        })
+      : deps.browser
+  const sleep = async (ms: number) => {
+    checkActive()
+    await deps.sleep(ms)
+    checkActive()
+  }
 
   async function session(id: string): Promise<AgentSession> {
-    return (await sessions.get(id)) ?? (await sessions.updateSession(id, now(), (s) => s))
+    return (
+      (await sessions.get(id)) ?? (await sessions.updateSession(id, now(), (s) => s, checkActive))
+    )
   }
 
   /** Bring the tab into the conversation's group, creating the group once. */
@@ -192,10 +229,16 @@ export function createAgentExecutor(deps: ExecutorDeps) {
       const groupId = await browser.group(
         [tab.id],
         current.groupId,
-        current.windowId ?? tab.windowId
+        current.windowId ?? tab.windowId,
+        checkActive
       )
       if (current.groupId !== groupId) await browser.styleGroup(groupId, GROUP_TITLE)
-      return await sessions.updateSession(current.id, now(), (s) => ({ ...s, groupId }))
+      return await sessions.updateSession(
+        current.id,
+        now(),
+        (s) => ({ ...s, groupId }),
+        checkActive
+      )
     } catch {
       // A tab in another window cannot join the group; it still belongs to the
       // conversation, just ungrouped.
@@ -208,8 +251,11 @@ export function createAgentExecutor(deps: ExecutorDeps) {
     if (current.tabIds.length > 0 || typeof startTabId !== "number") return current
     const tab = await browser.getTab(startTabId)
     if (!tab || !isWebUrl(tab.url)) return current
-    const claimed = await sessions.updateSession(current.id, now(), (s) =>
-      withTab(s, tab.id, { owned: false, windowId: tab.windowId })
+    const claimed = await sessions.updateSession(
+      current.id,
+      now(),
+      (s) => withTab(s, tab.id, { owned: false, windowId: tab.windowId }),
+      checkActive
     )
     return groupTab(claimed, tab)
   }
@@ -218,7 +264,12 @@ export function createAgentExecutor(deps: ExecutorDeps) {
     if (current.activeTabId !== null) {
       const tab = await browser.getTab(current.activeTabId)
       if (tab) return tab
-      await sessions.updateSession(current.id, now(), (s) => withoutTab(s, current.activeTabId!))
+      await sessions.updateSession(
+        current.id,
+        now(),
+        (s) => withoutTab(s, current.activeTabId!),
+        checkActive
+      )
     }
     throw new AgentOperationError(
       "browser_page_not_found",
@@ -234,8 +285,11 @@ export function createAgentExecutor(deps: ExecutorDeps) {
       // The first tab is shown so the person can watch; later ones open quietly.
       active: first,
     })
-    const updated = await sessions.updateSession(current.id, now(), (s) =>
-      withTab(s, tab.id, { owned: true, windowId: tab.windowId })
+    const updated = await sessions.updateSession(
+      current.id,
+      now(),
+      (s) => withTab(s, tab.id, { owned: true, windowId: tab.windowId }),
+      checkActive
     )
     await groupTab(updated, tab)
     return tab
@@ -261,8 +315,17 @@ export function createAgentExecutor(deps: ExecutorDeps) {
     }
     try {
       await browser.injectFile(tab.id, OVERLAY_FILE, "ISOLATED")
+      const abi = await browser.run(tab.id, "ISOLATED", pageOverlayAbi, [])
+      if (abi !== OVERLAY_ABI) {
+        throw new AgentOperationError(
+          "browser_overlay_incompatible",
+          "Reload this page before allowing browser actions: its overlay ABI is incompatible"
+        )
+      }
       await browser.injectFile(tab.id, PAGE_HOOKS_FILE, "MAIN")
     } catch (error) {
+      signal?.throwIfAborted()
+      if (error instanceof AgentOperationError) throw error
       throw new AgentOperationError(
         "browser_page_unreachable",
         `The extension could not reach this page: ${error instanceof Error ? error.message : String(error)}`
@@ -296,7 +359,7 @@ export function createAgentExecutor(deps: ExecutorDeps) {
     deadline: number
   ): Promise<AgentTab> {
     const tab = await activeTab(current)
-    await permissions.ensureAllowed(current.id, tab.url, operation, deadline)
+    await permissions.ensureAllowed(current.id, tab.url, operation, deadline, signal)
     await prepare(current, tab)
     return tab
   }
@@ -475,8 +538,8 @@ export function createAgentExecutor(deps: ExecutorDeps) {
     }
     const kept = current.tabIds.filter((id) => !current.ownedTabIds.includes(id))
     if (kept.length > 0) await browser.ungroup(kept).catch(() => undefined)
-    await permissions.dropQuestions(current.id)
-    await sessions.remove(current.id)
+    await permissions.dropQuestions(current.id, checkActive)
+    await sessions.remove(current.id, checkActive)
   }
 
   async function execute(
@@ -484,15 +547,19 @@ export function createAgentExecutor(deps: ExecutorDeps) {
     args: Record<string, unknown>,
     deadlineMs: number
   ): Promise<unknown> {
+    signal?.throwIfAborted()
     const sessionId = stringArg(args, "session")
     const deadline = now() + Math.max(1_000, deadlineMs) - 250
-    let current = await claimStartTab(await session(sessionId), args.startTabId)
+    let current = await session(sessionId)
     if (current.takeover && !ALLOWED_DURING_TAKEOVER.includes(operation)) {
       throw new AgentOperationError(
         "browser_user_takeover",
         "The person has taken control of this conversation's tabs. Wait until they hand it back."
       )
     }
+    // Even reads cannot claim/group a fresh tab while the person holds control.
+    // Cleanup also waits for Resume: deleting the session would erase its pause.
+    if (!current.takeover) current = await claimStartTab(current, args.startTabId)
 
     switch (operation) {
       case "bind": {
@@ -518,7 +585,7 @@ export function createAgentExecutor(deps: ExecutorDeps) {
       case "navigate": {
         const url = stringArg(args, "url")
         originOf(url)
-        await permissions.ensureAllowed(sessionId, url, operation, deadline)
+        await permissions.ensureAllowed(sessionId, url, operation, deadline, signal)
         let tab: AgentTab
         if (current.activeTabId === null) {
           tab = await openTab(current, url)
@@ -536,7 +603,7 @@ export function createAgentExecutor(deps: ExecutorDeps) {
         const url = optionalString(args, "url") ?? "about:blank"
         if (url !== "about:blank") {
           originOf(url)
-          await permissions.ensureAllowed(sessionId, url, operation, deadline)
+          await permissions.ensureAllowed(sessionId, url, operation, deadline, signal)
         }
         const tab = await openTab(current, url)
         const landed = (await waitForComplete(tab.id, deadline)) ?? tab
@@ -569,7 +636,12 @@ export function createAgentExecutor(deps: ExecutorDeps) {
             `no page ${tabId} in this conversation`
           )
         }
-        await sessions.updateSession(sessionId, now(), (s) => ({ ...s, activeTabId: tabId }))
+        await sessions.updateSession(
+          sessionId,
+          now(),
+          (s) => ({ ...s, activeTabId: tabId }),
+          checkActive
+        )
         return null
       }
       case "close_page": {
@@ -588,7 +660,7 @@ export function createAgentExecutor(deps: ExecutorDeps) {
           await browser.run(tabId, "ISOLATED", pageActingBar, [null]).catch(() => undefined)
           await browser.ungroup([tabId]).catch(() => undefined)
         }
-        await sessions.updateSession(sessionId, now(), (s) => withoutTab(s, tabId))
+        await sessions.updateSession(sessionId, now(), (s) => withoutTab(s, tabId), checkActive)
         return null
       }
       case "back":
@@ -832,7 +904,7 @@ export function createAgentExecutor(deps: ExecutorDeps) {
       case "delete_download": {
         await requirePermission("downloads")
         const item = await sessionDownload(current, stringArg(args, "downloadId"))
-        await browser.deleteDownload(item.id)
+        await browser.deleteDownload(item.id, checkActive)
         return { deleted: true, id: String(item.id) }
       }
       default: {

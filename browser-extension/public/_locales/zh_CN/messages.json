@@ -737,5 +737,11 @@
   },
   "transcriptFailed": {
     "message": "无法读取字幕"
+  },
+  "agentSocketStatusOnly": {
+    "message": "已连接，仅同步状态。请更新 Cognia 和扩展以启用浏览器操作。"
+  },
+  "agentSocketIncompatible": {
+    "message": "协议不兼容。请更新 Cognia 和扩展后重新连接。"
   }
 }

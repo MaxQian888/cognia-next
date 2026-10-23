@@ -89,7 +89,8 @@ export function createChromeAgentBrowser(): AgentBrowser {
     goForward: (tabId) => chrome.tabs.goForward(tabId),
     reload: (tabId) => chrome.tabs.reload(tabId),
 
-    async group(tabIds, groupId, windowId) {
+    async group(tabIds, groupId, windowId, checkActive) {
+      checkActive?.()
       const [first, ...rest] = tabIds
       if (first === undefined) throw new Error("no tabs to group")
       const ids: [number, ...number[]] = [first, ...rest]
@@ -99,6 +100,7 @@ export function createChromeAgentBrowser(): AgentBrowser {
           () => true,
           () => false
         )
+        checkActive?.()
         if (exists) return chrome.tabs.group({ tabIds: ids, groupId })
       }
       return chrome.tabs.group({
@@ -151,13 +153,17 @@ export function createChromeAgentBrowser(): AgentBrowser {
 
     cancelDownload: (id) => chrome.downloads.cancel(id),
 
-    async deleteDownload(id) {
+    async deleteDownload(id, checkActive) {
+      checkActive?.()
       const [item] = await chrome.downloads.search({ id })
+      checkActive?.()
       if (item?.state === "in_progress") await chrome.downloads.cancel(id)
+      checkActive?.()
       // The file first, then the history entry; removing a file that is
       // already gone is not an error worth reporting.
       if (item?.exists && item.state === "complete")
         await chrome.downloads.removeFile(id).catch(() => undefined)
+      checkActive?.()
       await chrome.downloads.erase({ id })
     },
 

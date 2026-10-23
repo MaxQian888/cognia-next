@@ -737,5 +737,11 @@
   },
   "transcriptFailed": {
     "message": "The transcript could not be read"
+  },
+  "agentSocketStatusOnly": {
+    "message": "Connected for status only. Update Cognia and the extension to enable browser actions."
+  },
+  "agentSocketIncompatible": {
+    "message": "Protocol incompatible. Update Cognia and the extension, then reconnect."
   }
 }

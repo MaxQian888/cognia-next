@@ -52,6 +52,7 @@
 import { createHash, createPublicKey, randomUUID, verify as verifySignature } from "node:crypto"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { AddressInfo } from "node:net"
+import type { Duplex } from "node:stream"
 
 import {
   BROWSER_CONTEXT_LIMITS,
@@ -123,6 +124,10 @@ export interface MockHostOptions {
 }
 
 export interface MockHost {
+  /** Device-socket controls for the agent safety specs; HTTP auth is still verified. */
+  agentFrames(): Record<string, unknown>[]
+  sendAgentFrame(frame: Record<string, unknown>): void
+  disconnectAgent(): void
   /** `http://127.0.0.1:<port>` — the plaintext plane, as the real code emits. */
   readonly baseUrl: string
   /** A fresh single-use `cgnb1|…` code. */
@@ -214,12 +219,97 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
   const pages = new Map<string, string>()
   const seenProofIds = new Set<string>()
   let unreachable = false
+  const tickets = new Set<string>()
+  const agentFrames: Record<string, unknown>[] = []
+  const sockets = new Set<Duplex>()
+  const writeFrame = (socket: Duplex, frame: Record<string, unknown>) => {
+    const body = Buffer.from(JSON.stringify(frame))
+    const header = Buffer.alloc(body.length < 126 ? 2 : 4)
+    header[0] = 0x81
+    if (body.length < 126) header[1] = body.length
+    else {
+      header[1] = 126
+      header.writeUInt16BE(body.length, 2)
+    }
+    socket.write(Buffer.concat([header, body]))
+  }
 
   const server = createServer((request, response) => {
     void handle(request, response).catch(() => {
       response.writeHead(500, { "Content-Type": "application/json" })
       response.end(JSON.stringify(errorBody("internal", "the mock host threw")))
     })
+  })
+  // Minimal uncompressed text framing for this test Host. Chrome supplies real
+  // masked client frames; no production WebSocket implementation is replaced.
+  server.on("upgrade", (request, socket, head) => {
+    const url = new URL(request.url ?? "/", "http://127.0.0.1")
+    const ticket = url.searchParams.get("ticket") ?? ""
+    const key = request.headers["sec-websocket-key"]
+    if (
+      url.pathname !== "/ws/browser-companion" ||
+      request.headers.origin !== options.extensionOrigin ||
+      !tickets.delete(ticket) ||
+      typeof key !== "string"
+    ) {
+      socket.destroy()
+      return
+    }
+    const accept = createHash("sha1")
+      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64")
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`
+    )
+    sockets.add(socket)
+    socket.on("close", () => sockets.delete(socket))
+    socket.on("error", () => sockets.delete(socket))
+    let buffered = head
+    const read = (chunk: Buffer) => {
+      buffered = Buffer.concat([buffered, chunk])
+      while (buffered.length >= 2) {
+        const opcode = buffered[0]! & 0x0f
+        let length = buffered[1]! & 0x7f
+        let offset = 2
+        if (length === 126) {
+          if (buffered.length < 4) return
+          length = buffered.readUInt16BE(2)
+          offset = 4
+        } else if (length === 127) {
+          socket.destroy()
+          return
+        }
+        if (!(buffered[1]! & 0x80)) {
+          socket.destroy()
+          return
+        }
+        if (buffered.length < offset + 4 + length) return
+        const mask = buffered.subarray(offset, offset + 4)
+        offset += 4
+        const body = Buffer.from(buffered.subarray(offset, offset + length))
+        for (let i = 0; i < body.length; i++) body[i] = body[i]! ^ mask[i % 4]!
+        buffered = buffered.subarray(offset + length)
+        if (opcode === 8) {
+          socket.end(Buffer.from([0x88, 0]))
+          return
+        }
+        if (opcode !== 1) {
+          socket.destroy()
+          return
+        }
+        try {
+          agentFrames.push(JSON.parse(body.toString()) as Record<string, unknown>)
+        } catch {
+          socket.destroy()
+          return
+        }
+      }
+    }
+    socket.on("data", read)
+    if (head.length) {
+      buffered = Buffer.alloc(0)
+      read(head)
+    }
   })
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
   const port = (server.address() as AddressInfo).port
@@ -288,6 +378,8 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
     if (path === "/api/auth/device/challenge") return challengeRoute(send)
     if (path === "/api/auth/browser/register") return registerRoute(request, body, send)
     if (path === "/api/auth/token") return tokenRoute(body, send)
+    if (path === "/api/auth/socket-ticket")
+      return rpcRoute(request, "socket-ticket", body, send, path)
     if (path.startsWith("/api/_rpc/")) {
       return rpcRoute(request, path.slice("/api/_rpc/".length), body, send)
     }
@@ -389,7 +481,8 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
     request: IncomingMessage,
     command: string,
     body: Record<string, unknown>,
-    send: (status: number, payload: unknown) => void
+    send: (status: number, payload: unknown) => void,
+    requestPath = `/api/_rpc/${command}`
   ): void {
     const bearer = header(request, "authorization")?.replace(/^Bearer\s+/i, "")
     const jti = bearer ? readJwtId(bearer) : null
@@ -413,7 +506,7 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
     const proof = verifyProof(device.publicKeyPem, header(request, "dpop") ?? "", {
       nonce: token.jti,
       method: "POST",
-      path: `/api/_rpc/${command}`,
+      path: requestPath,
     })
     if (!proof.ok) {
       send(proof.status, errorBody(proof.code, proof.message))
@@ -438,6 +531,11 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
     const ok = (result: unknown) => send(200, { requestId, result })
 
     switch (command) {
+      case "socket-ticket": {
+        const ticket = randomUUID()
+        tickets.add(ticket)
+        return send(200, { ticket, expiresIn: 30 })
+      }
       case "browser_companion_capability":
         return ok({
           schemaVersion,
@@ -678,6 +776,14 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
       enrollments.set(enrollment, { expiresAt, spent: false })
       return encodeBrowserEnrollmentPayload({ baseUrl, tenantId, enrollment, expiresAt })
     },
+    agentFrames: () => [...agentFrames],
+    sendAgentFrame(frame) {
+      if (!sockets.size) throw new Error("no device socket is connected")
+      for (const socket of sockets) writeFrame(socket, frame)
+    },
+    disconnectAgent() {
+      for (const socket of sockets) socket.destroy()
+    },
     requests: () => [...requests],
     submissions: () => [...submissions],
     sessionIds: () => [...new Set(submissions.map((row) => row.sessionId))],
@@ -718,6 +824,7 @@ export async function startMockHost(options: MockHostOptions): Promise<MockHost>
     },
     close: () =>
       new Promise<void>((resolve, reject) => {
+        for (const socket of sockets) socket.destroy()
         server.closeAllConnections()
         server.close((error) => (error ? reject(error) : resolve()))
       }),

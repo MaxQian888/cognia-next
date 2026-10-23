@@ -47,6 +47,10 @@ export function socketStateMessage(state: SocketState, message: (key: string) =>
       return message("agentSocketConnected")
     case "connecting":
       return message("agentSocketConnecting")
+    case "status-only":
+      return message("agentSocketStatusOnly")
+    case "incompatible":
+      return message("agentSocketIncompatible")
     case "waiting":
       return state.code ? message("agentSocketRefused") : message("agentSocketRetrying")
     default:

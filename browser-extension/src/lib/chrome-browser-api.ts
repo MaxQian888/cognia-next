@@ -11,8 +11,8 @@
  * `runtime.getURL` into signatures generated from `_locales`, which is a build
  * step this module has no reason to depend on.
  */
-import { createAgentStores } from "./agent/agent-runtime"
 import { chromeStorageArea } from "./agent/chrome-agent-browser"
+import type { AgentPermissionMessage } from "./agent/site-permissions"
 import { browserImageOps } from "./agent/image-ops"
 import { pageScrollMetrics, pageScrollTo } from "./agent/page-functions"
 import { PANEL_PORT, type BrowserApi, type PermissionRequest, type TabRef } from "./browser-api"
@@ -37,18 +37,12 @@ function permissions(request: PermissionRequest): chrome.permissions.Permissions
 
 export function createChromeBrowserApi(): BrowserApi {
   const session = chromeStorageArea("session")
-  // Built on first use: the panel only needs the agent stores to answer a
-  // question or forget a decision, and both touch `chrome.storage` only then.
-  let stores: ReturnType<typeof createAgentStores> | null = null
-  const agentStores = () =>
-    (stores ??= createAgentStores({
-      local: chromeStorageArea("local"),
-      session,
-      now: () => Date.now(),
-      newId: () => crypto.randomUUID(),
-      // The panel answers questions; it never asks one.
-      onQuestion: () => undefined,
-    }))
+  // One writer owns agent state; a panel must not overwrite a newer pause
+  // with its own read-modify-write of a stale session map.
+  const mutatePermission = async (message: AgentPermissionMessage): Promise<void> => {
+    if ((await chrome.runtime.sendMessage(message)) !== true)
+      throw new Error("browser_permission_request_failed")
+  }
   const image = browserImageOps()
 
   return {
@@ -206,7 +200,8 @@ export function createChromeBrowserApi(): BrowserApi {
     },
 
     answerSiteQuestion: (questionId, answer) =>
-      agentStores().permissions.answer(questionId, answer),
-    forgetSiteDecision: (origin) => agentStores().permissions.setDecision(origin, null),
+      mutatePermission({ kind: "cognia-agent-permission", action: "answer", questionId, answer }),
+    forgetSiteDecision: (origin) =>
+      mutatePermission({ kind: "cognia-agent-permission", action: "forget", origin }),
   }
 }

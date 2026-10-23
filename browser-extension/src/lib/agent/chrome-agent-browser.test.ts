@@ -113,6 +113,47 @@ function stub() {
 }
 
 describe("createChromeAgentBrowser", () => {
+  it("does not group tabs after revocation during the group lookup", async () => {
+    const { chromeStub } = stub()
+    let resolve: (value: { id: number }) => void = () => undefined
+    chromeStub.tabGroups.get.mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    const controller = new AbortController()
+    const pending = createChromeAgentBrowser().group([1], 12, 3, () =>
+      controller.signal.throwIfAborted()
+    )
+    const error = new Error("revoked")
+    controller.abort(error)
+    resolve({ id: 12 })
+    await expect(pending).rejects.toBe(error)
+    expect(chromeStub.tabs.group).not.toHaveBeenCalled()
+  })
+
+  it("does not remove or erase downloads after revocation during search", async () => {
+    const { chromeStub } = stub()
+    const items = await chromeStub.downloads.search()
+    let resolve: (value: typeof items) => void = () => undefined
+    chromeStub.downloads.search.mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    const controller = new AbortController()
+    const pending = createChromeAgentBrowser().deleteDownload(4, () =>
+      controller.signal.throwIfAborted()
+    )
+    const error = new Error("revoked")
+    controller.abort(error)
+    resolve(items)
+    await expect(pending).rejects.toBe(error)
+    expect(chromeStub.downloads.removeFile).not.toHaveBeenCalled()
+    expect(chromeStub.downloads.erase).not.toHaveBeenCalled()
+  })
   it("reads tabs, using the pending URL of a tab still loading, and null for a closed one", async () => {
     stub()
     const browser = createChromeAgentBrowser()

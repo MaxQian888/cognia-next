@@ -59,4 +59,17 @@ describe("agent sessions", () => {
       Object.keys((await area.get<Record<string, unknown>>(AGENT_SESSIONS_KEY)) ?? {})
     ).toEqual(["b"])
   })
+
+  it("keeps a paused session through unrelated idle sweeps until an explicit resume", async () => {
+    const store = new SessionStore(memoryStorageArea())
+    await store.updateSession("paused", 0, (session) => ({ ...session, takeover: true }))
+    await store.updateSession("other", SESSION_IDLE_TTL_MS + 1, (session) => session)
+    expect(await store.get("paused")).toMatchObject({ takeover: true })
+    await store.updateSession("paused", SESSION_IDLE_TTL_MS + 2, (session) => ({
+      ...session,
+      takeover: false,
+    }))
+    await store.updateSession("other", 2 * SESSION_IDLE_TTL_MS + 3, (session) => session)
+    expect(await store.get("paused")).toBeNull()
+  })
 })

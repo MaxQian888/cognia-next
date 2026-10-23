@@ -57,6 +57,17 @@ function fakeApi(options: { grant?: boolean; preferences?: unknown } = {}) {
 }
 
 describe("AgentSettings", () => {
+  it("names protocol incompatibility separately from a network retry", () => {
+    expect(
+      socketStateMessage(
+        { kind: "incompatible", code: "browser_protocol_incompatible" },
+        (key) => key
+      )
+    ).toBe("agentSocketIncompatible")
+    expect(socketStateMessage({ kind: "status-only", connectionId: "legacy" }, (key) => key)).toBe(
+      "agentSocketStatusOnly"
+    )
+  })
   it("turns agent mode on by asking for all sites, then shows the socket and the Owner's grant", async () => {
     const fake = fakeApi()
     fake.session.set(SESSION_KEYS.socketState, {

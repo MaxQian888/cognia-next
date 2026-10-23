@@ -2,9 +2,10 @@
  * The device-socket frames between this extension and its Host (ADR-0228 §5).
  *
  * The Rust side is `crates/cognia-companion/src/ws_browser_companion.rs`; the
- * operation vocabulary below is its `OPERATIONS`, and a test reads that file so
- * the two lists cannot drift apart. Every frame is one JSON text message.
+ * operation vocabulary and safety profile are pinned to the published JSON
+ * contract by both TypeScript and Rust tests. Every frame is one JSON message.
  */
+import contract from "@cognia/companion-client/browser-agent-protocol.json"
 
 /** Operations the Host may ask for. Anything else is refused unread. */
 export const AGENT_OPERATIONS = [
@@ -55,10 +56,25 @@ export function isAgentOperation(value: unknown): value is AgentOperation {
   return typeof value === "string" && (AGENT_OPERATIONS as readonly string[]).includes(value)
 }
 
-export const HELLO_VERSION = 1
+export const HELLO_VERSION = contract.envelopeVersion
+export const AGENT_PROFILE = contract.agentProfile
+export const OVERLAY_ABI = contract.overlayAbi
+export const MAX_OPERATION_TIMEOUT_MS = 120_000
+
+export function operationBudgetMs(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.min(MAX_OPERATION_TIMEOUT_MS, Math.max(1, Math.floor(value)))
+    : 30_000
+}
 
 export type HostFrame =
-  | { t: "welcome"; v: number; connectionId: string; driveAllowed: boolean }
+  | {
+      t: "welcome"
+      v: number
+      connectionId: string
+      driveAllowed: boolean
+      agentProfile: string | null
+    }
   | {
       t: "op"
       id: string
@@ -103,9 +119,10 @@ export function parseHostFrame(text: string): HostFrame | null {
       return typeof value.connectionId === "string"
         ? {
             t: "welcome",
-            v: typeof value.v === "number" ? value.v : HELLO_VERSION,
+            v: Number.isSafeInteger(value.v) ? (value.v as number) : -1,
             connectionId: value.connectionId,
             driveAllowed: value.driveAllowed === true,
+            agentProfile: typeof value.agentProfile === "string" ? value.agentProfile : null,
           }
         : null
     case "op":
@@ -125,8 +142,7 @@ export function parseHostFrame(text: string): HostFrame | null {
         id: value.id,
         op: value.op,
         args: isRecord(value.args) ? value.args : {},
-        deadlineMs:
-          typeof value.deadlineMs === "number" && value.deadlineMs > 0 ? value.deadlineMs : 30_000,
+        deadlineMs: operationBudgetMs(value.deadlineMs),
       }
     case "status":
       return { t: "status", at: typeof value.at === "number" ? value.at : 0 }

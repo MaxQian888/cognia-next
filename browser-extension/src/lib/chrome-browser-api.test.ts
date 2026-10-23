@@ -207,7 +207,10 @@ describe("createChromeBrowserApi — ADR-0228 surface", () => {
       update: jest.fn(async () => undefined),
     })
     Object.assign(base.permissions!, { remove: jest.fn(async () => true) })
-    Object.assign(base.runtime!, { connect: jest.fn(() => port) })
+    Object.assign(base.runtime!, {
+      connect: jest.fn(() => port),
+      sendMessage: jest.fn(async () => true),
+    })
     Object.assign(base.storage!, {
       session: {
         get: jest.fn(async () => ({ "s.key": { draft: true } })),
@@ -306,5 +309,21 @@ describe("createChromeBrowserApi — ADR-0228 surface", () => {
     handle.disconnect()
     expect(port.postMessage).toHaveBeenCalledWith({ kind: "refresh-status" })
     expect(port.disconnect).toHaveBeenCalled()
+  })
+
+  it("sends permission mutations to the worker instead of writing a second session store", async () => {
+    const { raw } = wideStub()
+    const api = createChromeBrowserApi()
+    await api.answerSiteQuestion("q1", "once")
+    await api.forgetSiteDecision("https://a.test")
+    const runtime = raw.runtime as { sendMessage: jest.Mock }
+    expect(runtime.sendMessage.mock.calls).toEqual([
+      [{ kind: "cognia-agent-permission", action: "answer", questionId: "q1", answer: "once" }],
+      [{ kind: "cognia-agent-permission", action: "forget", origin: "https://a.test" }],
+    ])
+    expect((raw.storage as { local: { set: jest.Mock } }).local.set).not.toHaveBeenCalled()
+    expect((raw.storage as { session: { set: jest.Mock } }).session.set).not.toHaveBeenCalled()
+    runtime.sendMessage.mockResolvedValueOnce(false)
+    await expect(api.answerSiteQuestion("q1", "once")).rejects.toThrow()
   })
 })

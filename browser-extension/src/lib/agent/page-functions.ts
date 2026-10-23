@@ -16,7 +16,13 @@ interface OverlayWindow {
   __cogniaHasSelector?: (selector: string) => boolean
   __cogniaFind?: (query: string, options?: unknown) => unknown
   __cogniaFindClear?: () => unknown
-  __cogniaOverlay?: { resolveRef: (ref: string) => Element | null }
+  __cogniaOverlay?: { abi?: number; resolveRef: (ref: string) => Element | null }
+}
+
+/** Read the ABI in the isolated world; serialized by chrome.scripting. */
+export function pageOverlayAbi(): number | null {
+  const abi = (window as unknown as OverlayWindow).__cogniaOverlay?.abi
+  return typeof abi === "number" && Number.isSafeInteger(abi) ? abi : null
 }
 
 /** `buildSnapshot` through the overlay, or the overlay's own error. */

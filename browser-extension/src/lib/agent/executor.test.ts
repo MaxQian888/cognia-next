@@ -13,6 +13,7 @@ import {
   mainHooksCall,
   mainSetDialogPolicy,
   pageAct,
+  pageOverlayAbi,
   pageActingBar,
   pageElementRect,
   pageHas,
@@ -28,7 +29,11 @@ import { memoryStorageArea } from "./storage-area"
 type Handler = (tabId: number, args: unknown[]) => unknown
 
 function harness(
-  options: { decisions?: Record<string, "always" | "never">; permissions?: string[] } = {}
+  options: {
+    decisions?: Record<string, "always" | "never">
+    permissions?: string[]
+    signal?: AbortSignal
+  } = {}
 ) {
   let clock = 10_000
   let nextTab = 100
@@ -39,6 +44,7 @@ function harness(
   const styled: [number, string][] = []
   const captures: number[] = []
   const handlers = new Map<unknown, Handler>()
+  handlers.set(pageOverlayAbi, () => 1)
   const ran: { func: unknown; tabId: number; world: string; args: unknown[] }[] = []
   const downloads: DownloadRecord[] = []
   const cookies: CookieRecord[] = []
@@ -150,6 +156,7 @@ function harness(
     browser,
     sessions,
     permissions,
+    signal: options.signal,
     now: () => clock,
     sleep: async (ms) => {
       clock += ms
@@ -186,6 +193,37 @@ function harness(
 const ALWAYS = { "https://example.com": "always" as const }
 
 describe("createAgentExecutor", () => {
+  it.each([null, 2])("refuses overlay ABI %s before executing a page action", async (abi) => {
+    const h = harness({ decisions: ALWAYS })
+    h.addTab({ id: 5, url: "https://example.com" })
+    h.handlers.set(pageOverlayAbi, () => abi)
+    await expect(h.run("act", { startTabId: 5, ref: "e1", action: "click" })).rejects.toMatchObject(
+      { code: "browser_overlay_incompatible" }
+    )
+    expect(h.ran.some((entry) => entry.func === pageAct)).toBe(false)
+    expect(h.injected.some(([, file]) => file === PAGE_HOOKS_FILE)).toBe(false)
+  })
+
+  it("does not continue from an async overlay check after revocation", async () => {
+    const controller = new AbortController()
+    const h = harness({ decisions: ALWAYS, signal: controller.signal })
+    h.addTab({ id: 5, url: "https://example.com" })
+    let release!: (abi: number) => void
+    const held = new Promise<number>((resolve) => {
+      release = resolve
+    })
+    h.handlers.set(pageOverlayAbi, () => held)
+    const pending = h
+      .run("act", { startTabId: 5, ref: "e1", action: "click" })
+      .catch((error: unknown) => error)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    controller.abort()
+    release(1)
+    expect(await pending).toMatchObject({ name: "AbortError" })
+    expect(h.ran.some((entry) => entry.func === pageAct)).toBe(false)
+    expect(h.injected.some(([, file]) => file === PAGE_HOOKS_FILE)).toBe(false)
+  })
+
   it("opens the first page in a new, shown tab inside the Cognia group, and prepares it", async () => {
     const h = harness({ decisions: ALWAYS })
     await expect(h.run("navigate", { url: "https://example.com/a" })).resolves.toEqual({
@@ -265,6 +303,33 @@ describe("createAgentExecutor", () => {
       code: "browser_user_takeover",
     })
     await expect(h.run("get_page")).resolves.toMatchObject({ url: "https://example.com/" })
+  })
+
+  it.each(["release", "finalize_tabs"])(
+    "refuses %s while paused so cleanup cannot erase the pause",
+    async (operation) => {
+      const h = harness({ decisions: ALWAYS })
+      await h.run("navigate", { url: "https://example.com/" })
+      await h.sessions.updateSession("s1", 0, (s) => ({ ...s, takeover: true }))
+      await expect(h.run(operation)).rejects.toMatchObject({ code: "browser_user_takeover" })
+      expect(h.removed).toEqual([])
+      expect(await h.sessions.get("s1")).toMatchObject({ takeover: true })
+      await expect(h.run("navigate", { url: "https://example.com/late" })).rejects.toMatchObject({
+        code: "browser_user_takeover",
+      })
+      await h.sessions.updateSession("s1", 0, (s) => ({ ...s, takeover: false }))
+      await expect(h.run(operation)).resolves.toBeDefined()
+      expect(await h.sessions.get("s1")).toBeNull()
+    }
+  )
+
+  it("does not claim a new start tab even for reads of a paused session", async () => {
+    const h = harness({ decisions: ALWAYS })
+    const tab = h.addTab({ id: 5, url: "https://example.com" })
+    await h.sessions.updateSession("s1", 0, (s) => ({ ...s, takeover: true }))
+    await expect(h.run("list_pages", { startTabId: tab.id })).resolves.toEqual([])
+    expect(h.tabs.get(5)?.groupId).toBe(-1)
+    expect(await h.sessions.get("s1")).toMatchObject({ takeover: true, tabIds: [] })
   })
 
   it("reports a dialog the action raised, answered without blocking", async () => {
