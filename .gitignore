@@ -49,6 +49,10 @@ junit.xml
 /web/video/.thumbnails/
 /web/video/.hyperframes/
 
+# Cloud-document P0 native fixture output (scripts/smoke/fixtures/cloud-docs-p0/build.mjs --public).
+# Generated, and must not ship in the static export: delete after the run.
+/public/.p0-native-fixture/
+
 # Live2D Cubism Core — proprietary, fetched at build time by
 # scripts/download-cubism-core.mjs (predev/prebuild). Never committed.
 /public/live2d/
