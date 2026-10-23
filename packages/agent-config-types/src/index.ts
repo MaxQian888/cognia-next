@@ -49,6 +49,7 @@ import type { AgentCapabilityId, AgentExecutionSendSpec } from "./agent-executio
 import type {
   AgentDefinition,
   ClaudeAgentSdkOptionsV1,
+  ClaudeCodeRuntimePreferences,
   McpServerWireConfig,
 } from "./claude-agent-sdk-options"
 import type { OnboardingProfile, OnboardingProgress } from "./onboarding"
@@ -91,18 +92,36 @@ export interface ResolvedCompaction {
    * to that table.
    */
   contextWindow?: number
-  /** Number of most-recent turns kept verbatim. Default 6. */
+  /** Explicit number of recent messages. Absent uses a token-sized suffix. */
   keepRecent?: number
+  /** Token-targeted recent suffix when no explicit message-count preference exists. */
+  keepRecentTokens?: number
   /** Free-form focus / compact instructions merged into the summary prompt. */
   focus?: string
   /** Full summarization system prompt (canonical prompt + strategy + focus). */
   summaryPrompt?: string
+  /** Built-in research agents use monotonic, bounded progress checkpoints. */
+  checkpointFormat?: "progress-v1"
   /**
    * Hard cap on the summary call's output tokens (generic path). Mirrors
-   * `CompressionModelConfig.maxSummaryTokens` (default 500). Without it the
+   * `CompressionModelConfig.maxSummaryTokens` (default 16384). Without it the
    * summary inherits the full turn's (potentially large) output budget.
    */
   maxSummaryTokens?: number
+  /** Original explicit output limit, retained across provider fallback attempts. */
+  requestedMaxSummaryTokens?: number
+  /** Retained structured state budget, independent of generated reasoning/output. */
+  checkpointTokenBudget?: number
+  checkpointTokenBudgetIsDefault?: boolean
+  /** Complete post-compaction input target, including fixed prompt/tool overhead. */
+  postCompactionTokenBudget?: number
+  postCompactionTokenBudgetIsDefault?: boolean
+  /** Unconfigured cap; resolve it against each summary model's context window. */
+  summaryTokenBudgetIsDefault?: boolean
+  /** Catalog-resolved input budget for the summary request, after output reservation. */
+  summaryInputBudget?: number
+  /** Override background preparation; absent requires at least 64K measured input. */
+  background?: boolean
   /**
    * Alternate cheap/fast model for the summary call ONLY (generic path). Absent
    * ⇒ the sidecar reuses the turn's model + credentials. `model` alone (no
@@ -508,6 +527,13 @@ export type SendOptions = {
   subagentRuntime?: AgentSubagentRuntimeOptions
   runtimeExtensions?: AgentLocalExtensionRef[]
   toolPermissionRules?: AgentQualifiedToolPermissionRule[]
+  /**
+   * Per-server MCP tool allowlists, keyed by the `mcpServers` map key with
+   * bare tool names. A server listed here exposes only those tools, including
+   * against tools it adds after discovery; servers not listed are unaffected.
+   * Set from a custom mode's MCP tool selection (`lib/mcp/mode-selection.ts`).
+   */
+  mcpToolAllowlist?: Record<string, string[]>
   /**
    * Run THIS turn's main thread AS the named subagent (its system prompt, tool
    * restrictions, and model). Must be a key present in {@link agents}. Equivalent
@@ -5827,6 +5853,8 @@ export interface AppSettings {
    * everywhere unless a specific session / character opts out.
    */
   sandboxDefaultEnabled?: boolean
+  /** Claude Code SDK capabilities. Namespace requests require separate per-run approval. */
+  claudeCodeRuntime?: ClaudeCodeRuntimePreferences
   /**
    * App-wide default for the always-on **workspace confinement** layer
    * (ADR-0028 "lite"). When true (the default), the sidecar built-in file/bash

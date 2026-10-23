@@ -18,7 +18,14 @@
  */
 
 export type InboundA2UINode =
-  | { kind: "text"; text: string; emphasis?: "muted" | "bold" | "italic" | "code" }
+  | {
+      kind: "text"
+      text: string
+      emphasis?: "muted" | "bold" | "italic" | "code"
+      /** `"markdown"`: `text` is CommonMark (converted by the mapper from the
+       *  platform's dialect) and is rendered formatted. Absent: plain text. */
+      format?: "markdown"
+    }
   | { kind: "heading"; level: 1 | 2 | 3; text: string }
   | { kind: "image"; url: string; alt?: string; width?: number; height?: number }
   | { kind: "link"; href: string; label: string }

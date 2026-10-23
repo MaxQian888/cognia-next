@@ -46,6 +46,14 @@ export type Platform = "windows" | "macos" | "linux" | "unsupported"
 
 export interface Capabilities {
   platform: Platform
+  /** Explicit support. Missing on an older host is unknown, not supported. */
+  operations?: {
+    appSessions: boolean
+    windowOp: boolean
+    elementClick: boolean
+    elementScroll: boolean
+    invokePatterns: string[]
+  }
   hasUia: boolean
   hasInputSim: boolean
   hasScreenshot: boolean
@@ -238,6 +246,8 @@ export interface UiStateRevision {
  * and `scale` converts a point measured in the crop back into that space.
  */
 export interface ZoomedRegion {
+  /** Host-owned revision geometry. Older hosts omit it; app OCR then refuses. */
+  surface?: UiSurface
   sessionId: string
   lineageId: string
   revision: number

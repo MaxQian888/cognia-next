@@ -74,6 +74,8 @@ export interface PluginBrowserAPI {
  * gates each behind an approval / trust check; any other plugin would not.
  */
 export const PRIVILEGED_BROWSER_ENGINE_METHODS = [
+  "recordingControl",
+  "resolveRecordedTarget",
   "fillCredential",
   "getStorage",
   "networkRequest",

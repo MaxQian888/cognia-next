@@ -62,6 +62,9 @@ import type {
 } from "./external-agent"
 import type { AgentExecutionSemantics } from "./semantics"
 import type {
+  ExternalAgentNativeSubagents,
+  ExternalAgentNativeSubagentModelChange,
+  ExternalAgentNativeSubagentModelChangeResult,
   ExternalAgentCompactionCapability,
   ExternalAgentCompactionOptions,
   ExternalAgentProviderUndoCapability,
@@ -81,6 +84,15 @@ import type {
   ExternalAgentSessionShellResult,
   ExternalAgentSessionTree,
 } from "./session-operations"
+
+/** Optional native-thread inspection and narrowly scoped model settings. */
+export interface NativeSubagentCapability {
+  getNativeSubagents(sessionId: string): Promise<ExternalAgentNativeSubagents>
+  changeNativeSubagentModel(
+    sessionId: string,
+    request: ExternalAgentNativeSubagentModelChange
+  ): Promise<ExternalAgentNativeSubagentModelChangeResult>
+}
 
 /** Optional filters for protocol-backed session discovery. */
 export interface SessionListOptions {
@@ -439,7 +451,8 @@ export interface ModelCatalogCapability {
 
 /** Every optional capability, each member optional. */
 export type ExternalAgentAdapterOptionalCapabilities = Partial<
-  SessionRegistryCapability &
+  NativeSubagentCapability &
+    SessionRegistryCapability &
     ElicitationCapability &
     RequestCancellationCapability &
     SessionModeCapability &

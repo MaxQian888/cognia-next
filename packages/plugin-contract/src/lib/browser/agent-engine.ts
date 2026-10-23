@@ -17,6 +17,10 @@ import type { Screenshot } from "../automation/types"
 
 export interface BrowserEngine {
   navigate(url: string): Promise<void | BrowserMutationResult>
+  /** Host UI recording only: fixed helpers, never arbitrary page evaluation. */
+  recordingControl?(action: "start" | "resume" | "stop" | "drain"): Promise<unknown>
+  /** Resolve one top-document recorded selector in this engine's ref namespace. */
+  resolveRecordedTarget?(selector: string): Promise<string>
   snapshot(opts?: SnapshotOptions): Promise<BrowserSnapshot>
   act(
     reference: string,

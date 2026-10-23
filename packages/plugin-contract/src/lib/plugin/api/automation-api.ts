@@ -34,7 +34,7 @@ import type {
   WindowOp,
   ZoomedRegion,
 } from "../../automation/types"
-import type { FindScreenTextResult, ScreenTextMatch } from "../../automation/ocr-click"
+import type { AppOcrState, FindScreenTextResult, ScreenTextMatch } from "../../automation/ocr-click"
 
 /** Desktop automation surface exposed to plugins (ADR-0020). */
 export interface PluginAutomationAPI {
@@ -104,7 +104,7 @@ export interface PluginAutomationAPI {
    * is why the element-handle path alone is not sufficient coverage.
    */
   findText(
-    args: { query?: string; languages?: string[]; opts?: ScreenshotOpts },
+    args: { query?: string; languages?: string[]; opts?: ScreenshotOpts; state?: AppOcrState },
     origin?: PluginComputerUseOrigin
   ): Promise<FindScreenTextResult>
   /** Locate on-screen text by OCR and click the best match. */
@@ -112,6 +112,7 @@ export interface PluginAutomationAPI {
     args: {
       query: string
       occurrence?: number
+      state?: AppOcrState
       button?: MouseButton
       doubleClick?: boolean
       languages?: string[]

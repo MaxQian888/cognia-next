@@ -134,7 +134,6 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
     i18nKey: "browser",
     group: "feature",
     category: "spaces",
-    desktopOnly: true,
   },
   // === Auxiliary (overflow → "More" by default) ===
   {

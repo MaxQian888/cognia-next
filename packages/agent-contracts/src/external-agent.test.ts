@@ -119,6 +119,19 @@ describe("external agent sandbox policy", () => {
 
 describe("normalizeAgentModelRoleOverrides", () => {
   const binding = { providerId: "openai", modelId: "gpt-5-mini" }
+  it("preserves v2 candidates and refuses malformed or legacy candidate policies", () => {
+    const value = { version: 2, slots: {}, allowedSpawnModels: [binding] }
+    expect(normalizeAgentModelRoleOverrides(value)).toEqual(value)
+    for (const allowedSpawnModels of [
+      null,
+      {},
+      [null],
+      [{ modelId: "x" }],
+      Array(33).fill(binding),
+    ])
+      expect(() => normalizeAgentModelRoleOverrides({ ...value, allowedSpawnModels })).toThrow()
+    expect(() => normalizeAgentModelRoleOverrides({ ...value, version: 1 })).toThrow()
+  })
 
   it("passes omitted and cleared values through", () => {
     expect(normalizeAgentModelRoleOverrides(undefined)).toBeUndefined()
@@ -159,7 +172,7 @@ describe("normalizeAgentModelRoleOverrides", () => {
 
   it.each([
     ["a non-object", "subagent.default"],
-    ["an unknown version", { version: 2, slots: {} }],
+    ["an unknown version", { version: 3, slots: {} }],
     ["an extra top-level key", { version: 1, slots: {}, allowedModels: [] }],
     ["array slots", { version: 1, slots: [] }],
     [

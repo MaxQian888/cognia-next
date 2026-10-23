@@ -20,7 +20,6 @@ import { reportRegistryConflict } from "../../../../plugin/contracts/conflict-re
  */
 export const NON_EXECUTABLE_PRESET_IDS = [
   "custom",
-  "opencode-server",
   "opencode-remote",
   "opencode-v2-service",
   "deepseek-harness-readonly",

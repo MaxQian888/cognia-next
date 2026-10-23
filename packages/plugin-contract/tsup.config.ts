@@ -10,5 +10,6 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   target: "es2017",
-  external: [/^@cognia\//],
+  // Hooks and modal stores must use the consumer's React dispatcher and state runtime.
+  external: [/^@cognia\//, /^react(?:\/|$)/, /^zustand(?:\/|$)/],
 })

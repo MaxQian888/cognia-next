@@ -292,7 +292,11 @@ export class JsonRpcPeer {
     clearTimeout(pending.timeout)
     this.pending.delete(response.id!)
     if (response.error) {
-      pending.reject(new Error(`${response.error.code}: ${response.error.message}`))
+      pending.reject(
+        Object.assign(new Error(`${response.error.code}: ${response.error.message}`), {
+          code: response.error.code,
+        })
+      )
     } else {
       pending.resolve(response.result)
     }

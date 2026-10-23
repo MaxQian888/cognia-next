@@ -157,6 +157,69 @@ export function runtimeFeatureValidationError(request: AgentRuntimeFeatureReques
 
 export type ExternalAgentCapabilityStatus = "supported" | "unsupported" | "unknown"
 
+/** Native runtime threads, distinct from Cognia-dispatched subagent jobs. */
+export interface ExternalAgentNativeSubagent {
+  nativeThreadId: string
+  parentThreadId: string
+  rootThreadId: string
+  modelId?: string
+  reasoningEffort?: string
+  activeTurnId?: string
+  requestedModelId?: string
+  requestedReasoningEffort?: string
+  modelChangeState?: "idle" | "pending" | "outcome-unknown"
+  status?: string
+  canAcceptDirectInput: boolean | null
+  evidence: "thread" | "collab-item"
+}
+
+export interface ExternalAgentNativeSubagents {
+  rootThreadId: string
+  processGeneration: number
+  runtimeVersion?: string
+  planFingerprint?: string
+  backend: {
+    value: "disabled" | "v1" | "v2" | "unknown"
+    evidence: "model-metadata" | "configuration" | "child-thread" | "unknown"
+    confidence: "inferred" | "observed" | "unknown"
+  }
+  spawnModelOverrides: ExternalAgentCapabilityStatus
+  settingsMethods: {
+    currentTurn: ExternalAgentCapabilityStatus
+    futureTurns: ExternalAgentCapabilityStatus
+  }
+  features: {
+    multiAgent: boolean | null
+    agentsEnabled: boolean | null
+    multiAgentV2: boolean | null
+    stepModelSwitching: boolean | null
+    exposeSpawnModelOverrides: boolean | null
+  }
+  stepModelSwitching: boolean
+  children: ExternalAgentNativeSubagent[]
+  models: Array<{ id: string; reasoningEfforts: string[] }>
+  /** Discovery is bounded; a partial result never authorizes unseen children. */
+  truncated: boolean
+}
+
+export interface ExternalAgentNativeSubagentModelChange {
+  operationId: string
+  nativeChildThreadId: string
+  expectedProcessGeneration: number
+  expectedPlanFingerprint?: string
+  scope: "current-turn" | "future-turns"
+  expectedTurnId?: string
+  modelId: string
+  reasoningEffort?: string
+}
+
+export interface ExternalAgentNativeSubagentModelChangeResult {
+  operationId: string
+  /** Acceptance is not proof that a subsequent inference used the model. */
+  status: "applied-awaiting-step" | "rejected" | "target-unavailable" | "outcome-unknown"
+  reason?: string
+}
+
 export interface ExternalAgentNativeCompactionRoute {
   kind: "native"
   supportsFocus: boolean
