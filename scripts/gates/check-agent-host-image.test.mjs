@@ -349,7 +349,6 @@ for (const [file, stage] of [
       "mobile/package.json",
       "web/package.json",
       "cli/package.json",
-      "browser-extension",
       "services/workspace-runtime/package.json",
       "scripts/postinstall.mjs",
     ]) {
@@ -358,6 +357,7 @@ for (const [file, stage] of [
         `${input} must be available for linking/lifecycle scripts`
       )
     }
+    assert.doesNotMatch(linkingInputs, /^COPY browser-extension\b/m)
     assert.doesNotMatch(
       source.slice(fetchAt, installAt + "RUN pnpm install --frozen-lockfile --offline".length),
       /--ignore-scripts|--mount=type=cache/

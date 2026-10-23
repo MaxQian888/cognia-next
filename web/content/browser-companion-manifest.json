@@ -1,0 +1,74 @@
+{
+  "repository": "cognia-labs/cognia-browser-extension",
+  "revision": "e8d4c5f9f63ca7bc1f22d35871bc21f65540b735",
+  "manifest": {
+    "manifest_version": 3,
+    "name": "__MSG_extensionName__",
+    "description": "__MSG_extensionDescription__",
+    "version": "0.1.0",
+    "icons": {
+      "16": "/icon-16.png",
+      "32": "/icon-32.png",
+      "48": "/icon-48.png",
+      "128": "/icon-128.png"
+    },
+    "default_locale": "en",
+    "minimum_chrome_version": "116",
+    "permissions": [
+      "sidePanel",
+      "storage",
+      "activeTab",
+      "scripting",
+      "contextMenus",
+      "alarms",
+      "tabGroups"
+    ],
+    "optional_permissions": ["tabs", "notifications", "downloads", "cookies"],
+    "optional_host_permissions": ["http://127.0.0.1/*", "<all_urls>"],
+    "incognito": "not_allowed",
+    "action": {
+      "default_title": "__MSG_actionTitle__",
+      "default_icon": {
+        "16": "/icon-16.png",
+        "32": "/icon-32.png",
+        "48": "/icon-48.png",
+        "128": "/icon-128.png"
+      }
+    },
+    "commands": {
+      "_execute_action": {
+        "suggested_key": {
+          "default": "Alt+Shift+O"
+        },
+        "description": "__MSG_openPanelCommand__"
+      },
+      "capture-page": {
+        "suggested_key": {
+          "default": "Alt+Shift+C"
+        },
+        "description": "__MSG_captureCommand__"
+      },
+      "capture-selection": {
+        "suggested_key": {
+          "default": "Alt+Shift+S"
+        },
+        "description": "__MSG_captureSelectionCommand__"
+      },
+      "capture-article": {
+        "suggested_key": {
+          "default": "Alt+Shift+A"
+        },
+        "description": "__MSG_captureArticleCommand__"
+      }
+    },
+    "omnibox": {
+      "keyword": "cog"
+    },
+    "background": {
+      "service_worker": "background.js"
+    },
+    "side_panel": {
+      "default_path": "sidepanel.html"
+    }
+  }
+}

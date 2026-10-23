@@ -19,6 +19,12 @@ test("the extracted extension is not a product workspace, version target or loca
   assert.doesNotMatch(await read("playwright.config.ts"), /name: "browser-extension"/)
   assert.doesNotMatch(await read("knip.jsonc"), /"browser-extension"\s*:/)
   assert.doesNotMatch(await read("eslint.config.mjs"), /"browser-extension\//)
+  for (const dockerfile of [
+    "deploy/compose/Dockerfile.web",
+    "deploy/docker/Dockerfile.cognia-server",
+  ]) {
+    assert.doesNotMatch(await read(dockerfile), /^COPY browser-extension\b/m)
+  }
 })
 
 test("Host changes validate an immutable standalone extension revision", async () => {
