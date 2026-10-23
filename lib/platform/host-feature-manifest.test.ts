@@ -586,6 +586,8 @@ describe("external-agent.host-configs", () => {
       "external_agent_config_create",
       "external_agent_config_update",
       "external_agent_config_model_roles",
+      "external_agent_config_model_roles_v2",
+      "external_agent_native_subagent_control",
       "external_agent_config_delete",
       "external_agent_config_duplicate",
       "external_agent_config_reconcile",
@@ -1027,4 +1029,11 @@ describe("external agent task model plan negotiation", () => {
     ]!.operations.filter((op) => op !== EXTERNAL_AGENT_MODEL_PLAN_OPERATION)
     expect(hostSupportsExternalAgentModelPlans(manifest)).toBe(false)
   })
+})
+
+it("advertises fixed browser recording controls and refs on headless browser hosts", () => {
+  const manifest = buildLocalHostFeatureManifest({ platform: "headless" })
+  for (const command of ["browser_recording_control", "browser_recording_ref"]) {
+    expect(supportsHostFeatureOperation(manifest, "browser.remote", command)).toBe(true)
+  }
 })

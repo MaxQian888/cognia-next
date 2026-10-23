@@ -7839,15 +7839,15 @@
       "path": "builtin://cognia-computer-use",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-computer-use/78976c81738ee10572167d1dc458e57a06b728314e325ffe8d4e2a1a7ccb922b.cjs",
-        "sha256": "78976c81738ee10572167d1dc458e57a06b728314e325ffe8d4e2a1a7ccb922b",
+        "url": "/_cognia/builtin-plugins/cognia-computer-use/6e018f5ca485d59c825593b3a63de7aabbc1b1cfff6c080c6b55522fbc40a17f.cjs",
+        "sha256": "6e018f5ca485d59c825593b3a63de7aabbc1b1cfff6c080c6b55522fbc40a17f",
         "sharedModules": [
           "@cognia/plugin-sdk",
           "@cognia/plugin-sdk/api/automation"
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/cognia-computer-use/resources/",
         "entryHashes": {
-          "dist/index.js": "78976c81738ee10572167d1dc458e57a06b728314e325ffe8d4e2a1a7ccb922b"
+          "dist/index.js": "6e018f5ca485d59c825593b3a63de7aabbc1b1cfff6c080c6b55522fbc40a17f"
         }
       }
     },

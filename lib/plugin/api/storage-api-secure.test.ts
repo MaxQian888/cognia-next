@@ -21,7 +21,7 @@ if (typeof globalThis.TextDecoder === "undefined") {
 
 const mockPassphrase = jest.fn<Promise<string | null>, []>()
 jest.mock("@/lib/data/backup-key", () => ({
-  getDefaultBackupPassphrase: () => mockPassphrase(),
+  getInstallEncryptionPassphrase: () => mockPassphrase(),
 }))
 
 import { createStorageAPI } from "./storage-api"

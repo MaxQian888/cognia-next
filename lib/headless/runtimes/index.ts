@@ -81,6 +81,9 @@
  *
  * ## Deliberately NOT registered (lifecycle owned elsewhere or UI-only)
  *
+ * - `document-database-lifetime` — browser/mobile renderer-only pagehide
+ *   cleanup, installed by CogniaDB construction. Abandoned readonly snapshot
+ *   transactions belong to the document; a headless host has no document.
  * - `startup-recovery` — pre-hydration browser error listeners, watchdog and
  *   DOM reload panel. The root renderer layout owns installation and the
  *   account initializer owns its React handoff; a headless host has no document.

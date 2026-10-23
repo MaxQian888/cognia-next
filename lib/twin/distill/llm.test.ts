@@ -18,6 +18,8 @@ import {
   type LlmConfig,
 } from "./llm"
 import { generateText, streamText } from "ai"
+import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
+jest.mock("@/lib/network/platform-streaming-fetch", () => ({ platformStreamingFetch: jest.fn() }))
 import { createAzure } from "@ai-sdk/azure"
 import { createOpenAI } from "@ai-sdk/openai"
 
@@ -215,6 +217,30 @@ describe("createLlmClient", () => {
     expect(client.getUsageSnapshot!()).toMatchObject({ inputTokens: 5, outputTokens: 8 })
   })
 
+  it.each(["complete", "stream"] as const)(
+    "routes %s through the platform streaming transport",
+    async (mode) => {
+      const client = createLlmClient({
+        provider: "openai",
+        model: "ark-deepseek-v4.1-flash",
+        apiKey: "proxy-test-key",
+        baseURL: "http://127.0.0.1:8787/v1",
+        apiFlavor: "chat",
+      })
+      if (mode === "complete") await client.complete("synthetic")
+      else
+        for await (const _delta of client.stream!("synthetic")) {
+          /* consume */
+        }
+      const call =
+        mode === "complete"
+          ? (generateText as jest.Mock).mock.calls.at(-1)?.[0]
+          : (streamText as jest.Mock).mock.calls.at(-1)?.[0]
+      expect(call.model.settings.fetch).toBe(platformStreamingFetch)
+      expect(call.model.settings.baseURL).toBe("http://127.0.0.1:8787/v1")
+    }
+  )
+
   it("createAnthropicLlmClient is the same factory for back-compat", () => {
     expect(createAnthropicLlmClient).toBe(createLlmClient)
   })
@@ -239,6 +265,36 @@ describe("createLlmClient", () => {
         expect(built).toMatchObject({ __provider: family, id: model, settings: { baseURL } })
       }
     )
+    it("composes Perplexity Responses normalization with the platform transport", async () => {
+      const browser = jest
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(new Error("Browser transport must not run"))
+      const native = platformStreamingFetch as jest.Mock
+      native.mockResolvedValueOnce(
+        new Response("{}", { headers: { "content-type": "application/json" } })
+      )
+      try {
+        const model = (await createTwinLanguageModel({
+          provider: "perplexity",
+          model: "preset/fast",
+          apiKey: "test-key",
+        })) as unknown as { settings: { fetch: typeof fetch } }
+        await model.settings.fetch("https://api.perplexity.ai/v1/responses", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: "Bearer synthetic" },
+          body: JSON.stringify({ model: "preset/fast", input: "synthetic" }),
+        })
+        expect(native).toHaveBeenCalledTimes(1)
+        const request = native.mock.calls[0][0] as Request
+        expect(request.url).toBe("https://api.perplexity.ai/v1/responses")
+        expect(request.headers.get("authorization")).toBe("Bearer synthetic")
+        expect(await request.json()).toEqual({ preset: "fast", input: "synthetic" })
+        expect(browser).not.toHaveBeenCalled()
+      } finally {
+        browser.mockRestore()
+        native.mockReset()
+      }
+    })
     it.each([
       [undefined, "https://api.perplexity.ai/v1"],
       ["https://relay.example/custom/v1", "https://relay.example/custom/v1"],
@@ -276,6 +332,7 @@ describe("createLlmClient", () => {
       await expect(client.complete("hi")).resolves.toBe("ok:openai.chat")
 
       expect(createOpenAI).toHaveBeenCalledWith({
+        fetch: platformStreamingFetch,
         apiKey: "sk-or-v1-test",
         baseURL: "https://openrouter.ai/api/v1",
       })
@@ -295,6 +352,7 @@ describe("createLlmClient", () => {
       await expect(client.complete("hi")).resolves.toBe("ok:openai.chat")
 
       expect(createOpenAI).toHaveBeenCalledWith({
+        fetch: platformStreamingFetch,
         apiKey: "sk-or-v1-test",
         baseURL: "https://openrouter.ai/api/v1",
       })
@@ -349,6 +407,7 @@ describe("createLlmClient", () => {
       await expect(client.complete("hi")).resolves.toBe("ok:openai.responses")
 
       expect(createOpenAI).toHaveBeenCalledWith({
+        fetch: platformStreamingFetch,
         apiKey: "chatgpt-bearer",
         baseURL: "https://chatgpt.com/backend-api/codex",
         headers,

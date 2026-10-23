@@ -80,10 +80,14 @@ function isKnownLarkHost(hostname: string): boolean {
  * unsupported object types are rejected here rather than at fetch time so
  * the UI never suggests the Lark path for them).
  */
-export function parseLarkDocUrl(input: string): LarkDocRef | null {
+export function parseLarkDocUrl(input: string, knownKind?: LarkDocRefKind): LarkDocRef | null {
+  // Search already knows the resource type. Opaque tokens need not carry
+  // historic prefixes; do not broaden untyped URL detection to arbitrary text.
+  const token = input.trim()
   const ref = parseLarkResourceUrl(input)
-  if (!ref || !DOC_KINDS.has(ref.kind)) return null
-  return ref as LarkDocRef
+  if (ref) return DOC_KINDS.has(ref.kind) ? (ref as LarkDocRef) : null
+  if (knownKind && TOKEN_RE.test(token)) return { kind: knownKind, token }
+  return null
 }
 
 /**

@@ -28,6 +28,7 @@ import {
   withPerplexityAgentFetch,
 } from "@cognia/provider-types/perplexity-agent"
 import { webviewSafeTelemetry } from "../../ai/webview-safe-telemetry"
+import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
 
 export interface LlmClientCallOptions {
   /** System / role-priming prompt. Defaults to a generic distiller voice. */
@@ -203,6 +204,7 @@ function buildProviderSettings(
   apiKey?: string
   baseURL?: string
   headers?: Record<string, string>
+  fetch: typeof globalThis.fetch
 } {
   const baseURL =
     config.baseURL ??
@@ -211,6 +213,7 @@ function buildProviderSettings(
       : undefined)
   return {
     apiKey: config.apiKey,
+    fetch: platformStreamingFetch,
     ...(baseURL ? { baseURL } : {}),
     ...(config.headers ? { headers: config.headers } : {}),
   }
@@ -261,7 +264,9 @@ async function buildLanguageModel(config: LlmConfig): Promise<LanguageModel> {
         const client = createOpenAI({
           ...buildProviderSettings(config),
           baseURL: endpoint.baseURL,
-          ...(endpoint.flavor === "responses" ? { fetch: withPerplexityAgentFetch() } : {}),
+          ...(endpoint.flavor === "responses"
+            ? { fetch: withPerplexityAgentFetch(platformStreamingFetch) }
+            : {}),
         })
         return endpoint.flavor === "responses"
           ? client.responses(config.model)

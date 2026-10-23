@@ -65,22 +65,32 @@ it("classifies every app page or names it in the internal-route exemption list",
   expect(unclassified).toEqual([])
 })
 
-it("hides host-only surfaces in standalone while keeping their deep-link contract", () => {
+it("keeps the lightweight browser available without a host", () => {
   const browser = getSurfaceContract("browser")
   expect(browser).not.toBeNull()
-  expect(shouldShowSurface(browser!, snapshot())).toBe(false)
+  expect(shouldShowSurface(browser!, snapshot())).toBe(true)
   expect(browser?.route).toBe("/browser")
-  expect(browser?.standalone).toBe("hidden")
+  expect(resolveSurfaceAvailability(browser!, snapshot()).state).toBe("available")
+  expect(
+    resolveSurfaceAvailability(
+      browser!,
+      snapshot({
+        target: { id: "host", kind: "companion", hostKind: "desktop", platform: "web" },
+        connectionState: "offline",
+        vaultState: "locked",
+      })
+    ).state
+  ).toBe("available")
 })
 
 it("shows a host surface only when the Companion advertises the operation", () => {
-  const browser = getSurfaceContract("browser")!
+  const browser = getSurfaceContract("files")!
   const companion = snapshot({
     target: { id: "desktop", kind: "companion", hostKind: "desktop", platform: "web" },
     host: {
       compatible: true,
-      operations: ["browser_session_ensure"],
-      grants: ["agent.run"],
+      operations: ["files_library_list"],
+      grants: ["client.read"],
     },
   })
 

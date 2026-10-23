@@ -85,6 +85,7 @@ export type LarkCliResult =
         | "hitl_required"
         | "timeout"
         | "json_parse_failed"
+        | "output_truncated"
       message: string
       exitCode?: number
       stderr?: string
@@ -127,6 +128,15 @@ export async function execLarkCli(input: ExecLarkCliInput): Promise<LarkCliResul
     timeoutMs,
     maxOutputBytes: MAX_STDOUT_BYTES,
   })
+  if (result.truncated) {
+    return {
+      status: "error",
+      reason: "output_truncated",
+      message: `lark-cli output exceeded the ${MAX_STDOUT_BYTES}-byte limit; partial output was discarded.`,
+      adapterId: auth.adapterId,
+      exitCode: result.exitCode,
+    }
+  }
   if (
     !result.notFound &&
     !result.timedOut &&

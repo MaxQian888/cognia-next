@@ -37,6 +37,34 @@ function fakeTransport(tag: string) {
 }
 
 describe("RoutingTransport", () => {
+  it("waits on the replacement host if routing changes during registration", async () => {
+    const local = fakeTransport("local")
+    const remote = fakeTransport("remote")
+    let release!: () => void
+    local.transport.whenSubscribed = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    remote.transport.whenSubscribed = jest.fn().mockResolvedValue(undefined)
+    const routing = new RoutingTransport(local.transport)
+    const ready = routing.whenSubscribed(["automation:consent-request"])
+    setActiveRemoteTransport(remote.transport)
+    release()
+    await ready
+    expect(remote.transport.whenSubscribed).toHaveBeenCalledWith(
+      ["automation:consent-request"],
+      undefined
+    )
+  })
+
+  it("supports legacy transports without a readiness method", async () => {
+    const local = fakeTransport("local")
+    await expect(
+      new RoutingTransport(local.transport).whenSubscribed(["event"])
+    ).resolves.toBeUndefined()
+  })
   beforeEach(() => {
     __resetRoutingForTests()
     jest.mocked(measureOperation).mockClear()
