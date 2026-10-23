@@ -2088,7 +2088,13 @@ const _reportedConnectionOwners = new Map<string, Set<string>>()
 let _stopBlockedRetry: (() => void) | null = null
 
 function registerKnownConnection(database: CogniaDB): void {
-  if (!_pageHideListening && typeof window !== "undefined") {
+  // The headless brain shims `window` as Node's global, which has no event
+  // target and never sees `pagehide`; only a real document registers.
+  if (
+    !_pageHideListening &&
+    typeof window !== "undefined" &&
+    typeof window.addEventListener === "function"
+  ) {
     // Capture runs before Dexie's BFCache close listener unregisters handles.
     window.addEventListener("pagehide", closeDocumentConnections, true)
     _pageHideListening = true
