@@ -50,6 +50,15 @@ test("Host changes validate an immutable standalone extension revision", async (
   assert.match(guide, /agent-safe-v1/)
 })
 
+test("consumer checks still run when unrelated product test planning fails", async () => {
+  const workflow = parse(await read(".github/workflows/test.yml"))
+  const consumer = workflow.jobs["e2e-browser-extension"]
+  assert.match(consumer.if, /!cancelled\(\)/)
+  assert.match(consumer.if, /needs\.jest-plan\.result != 'success' \|\|/)
+  assert.match(consumer.if, /fromJSON\(needs\.jest-plan\.outputs\.impacts\)\.browserExtension/)
+  assert.ok(!consumer.steps.some((step) => step.uses?.startsWith("actions/download-artifact@")))
+})
+
 test("external consumer checks remain package scripts rather than unlisted Host binaries", async () => {
   const workflow = parse(await read(".github/workflows/test.yml"))
   const step = workflow.jobs["e2e-browser-extension"].steps.find(

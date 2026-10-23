@@ -1222,7 +1222,9 @@ jobs:
   # still exercise the exact pinned consumer and its actual Chromium flows.
   e2e-browser-extension:
     needs: jest-plan
-    if: fromJSON(needs.jest-plan.outputs.impacts).browserExtension
+    # The independent consumer needs no Jest artifacts. A planner failure must
+    # conservatively select this lane while the failed planner still reports red.
+    if: ${{ !cancelled() && (needs.jest-plan.result != 'success' || fromJSON(needs.jest-plan.outputs.impacts).browserExtension) }}
     name: E2E browser extension
     runs-on: ubuntu-latest
     timeout-minutes: 20
