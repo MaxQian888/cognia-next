@@ -63,6 +63,7 @@ pub struct IdempotencyCache {
     inner: Mutex<LedgerInner>,
     capacity: usize,
     ttl: Duration,
+    retain_pending: bool,
 }
 
 impl IdempotencyCache {
@@ -80,7 +81,17 @@ impl IdempotencyCache {
             }),
             capacity,
             ttl,
+            retain_pending: false,
         }
+    }
+
+    /// Keep unresolved reservations until this short-lived ledger is dropped.
+    /// A debug operation can outlive its transport deadline; TTL must not
+    /// authorize a second dispatch while the first outcome is unknown.
+    pub fn retaining_pending(capacity: usize, ttl: Duration) -> Self {
+        let mut cache = Self::with_capacity(capacity, ttl);
+        cache.retain_pending = true;
+        cache
     }
 
     /// Open a persistent ledger. Schema creation is additive and idempotent.
@@ -125,6 +136,7 @@ impl IdempotencyCache {
             }),
             capacity,
             ttl,
+            retain_pending: false,
         })
     }
 
@@ -136,6 +148,30 @@ impl IdempotencyCache {
         key: &str,
         params: &Value,
     ) -> Result<IdempotencyDecision, IdempotencyError> {
+        self.decide(device_id, method, key, params, true)
+            .map(|decision| decision.expect("reserving a command always returns a decision"))
+    }
+
+    /// Inspect a retained outcome without reserving a new command. Callers
+    /// still use `begin` to atomically authorize dispatch after preconditions.
+    pub fn lookup(
+        &self,
+        device_id: &str,
+        method: &str,
+        key: &str,
+        params: &Value,
+    ) -> Result<Option<IdempotencyDecision>, IdempotencyError> {
+        self.decide(device_id, method, key, params, false)
+    }
+
+    fn decide(
+        &self,
+        device_id: &str,
+        method: &str,
+        key: &str,
+        params: &Value,
+        reserve: bool,
+    ) -> Result<Option<IdempotencyDecision>, IdempotencyError> {
         let digest = params_digest(params);
         let now_ms = unix_time_ms();
         let expires_before = now_ms.saturating_sub(duration_ms(self.ttl));
@@ -163,14 +199,18 @@ impl IdempotencyCache {
                 .optional()?;
             if let Some((stored_digest, status, response_json)) = stored {
                 if stored_digest != digest {
-                    return Ok(IdempotencyDecision::Conflict);
+                    return Ok(Some(IdempotencyDecision::Conflict));
                 }
                 if status == "complete" {
                     let response =
                         serde_json::from_str(response_json.as_deref().unwrap_or("null"))?;
-                    return Ok(IdempotencyDecision::Cached(response));
+                    return Ok(Some(IdempotencyDecision::Cached(response)));
                 }
-                return Ok(IdempotencyDecision::Indeterminate);
+                return Ok(Some(IdempotencyDecision::Indeterminate));
+            }
+
+            if !reserve {
+                return Ok(None);
             }
 
             enforce_database_capacity(database, self.capacity)?;
@@ -181,21 +221,25 @@ impl IdempotencyCache {
                  VALUES (?1, ?2, ?3, ?4, 'pending', NULL, ?5, ?5)",
                 params![device_id, method, key, digest, now_ms],
             )?;
-            return Ok(IdempotencyDecision::Execute);
+            return Ok(Some(IdempotencyDecision::Execute));
         }
 
-        purge_memory_expired(&mut inner, expires_before);
+        purge_memory_expired(&mut inner, expires_before, self.retain_pending);
         let map_key = (device_id.to_owned(), method.to_owned(), key.to_owned());
         if let Some(entry) = inner.memory.get(&map_key) {
             if entry.params_digest != digest {
-                return Ok(IdempotencyDecision::Conflict);
+                return Ok(Some(IdempotencyDecision::Conflict));
             }
-            return Ok(match entry.status {
+            return Ok(Some(match entry.status {
                 EntryStatus::Pending => IdempotencyDecision::Indeterminate,
                 EntryStatus::Complete => {
                     IdempotencyDecision::Cached(entry.response.clone().unwrap_or(Value::Null))
                 }
-            });
+            }));
+        }
+
+        if !reserve {
+            return Ok(None);
         }
 
         while inner.memory.len() >= self.capacity {
@@ -221,7 +265,7 @@ impl IdempotencyCache {
                 updated_at_ms: now_ms,
             },
         );
-        Ok(IdempotencyDecision::Execute)
+        Ok(Some(IdempotencyDecision::Execute))
     }
 
     /// Commit the successful result for a previously reserved command.
@@ -344,10 +388,11 @@ fn duration_ms(duration: Duration) -> i64 {
     duration.as_millis().try_into().unwrap_or(i64::MAX)
 }
 
-fn purge_memory_expired(inner: &mut LedgerInner, expires_before: i64) {
-    inner
-        .memory
-        .retain(|_, entry| entry.updated_at_ms > expires_before);
+fn purge_memory_expired(inner: &mut LedgerInner, expires_before: i64, retain_pending: bool) {
+    inner.memory.retain(|_, entry| {
+        (retain_pending && entry.status == EntryStatus::Pending)
+            || entry.updated_at_ms > expires_before
+    });
     inner.order.retain(|key| inner.memory.contains_key(key));
 }
 
@@ -387,6 +432,41 @@ fn enforce_database_capacity(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn lookup_uses_the_same_decisions_without_reserving_absent_commands() {
+        for cache in [
+            IdempotencyCache::new(),
+            IdempotencyCache::in_memory_persistent().unwrap(),
+        ] {
+            let params = json!({"click":1});
+            assert_eq!(
+                cache.lookup("client", "method", "one", &params).unwrap(),
+                None
+            );
+            assert_eq!(
+                cache.begin("client", "method", "one", &params).unwrap(),
+                IdempotencyDecision::Execute
+            );
+            assert_eq!(
+                cache.lookup("client", "method", "one", &params).unwrap(),
+                Some(IdempotencyDecision::Indeterminate)
+            );
+            cache
+                .complete("client", "method", "one", &json!(true))
+                .unwrap();
+            assert_eq!(
+                cache.lookup("client", "method", "one", &params).unwrap(),
+                Some(IdempotencyDecision::Cached(json!(true)))
+            );
+            assert_eq!(
+                cache
+                    .lookup("client", "method", "one", &json!({"click":2}))
+                    .unwrap(),
+                Some(IdempotencyDecision::Conflict)
+            );
+        }
+    }
 
     #[test]
     fn reserves_then_replays_completed_result() {
@@ -588,6 +668,24 @@ mod tests {
             cache.begin("dev", "write", "k1", &json!({})).unwrap(),
             IdempotencyDecision::Execute
         );
+    }
+
+    #[test]
+    fn retained_pending_cannot_expire_or_be_evicted() {
+        let cache = IdempotencyCache::retaining_pending(1, Duration::ZERO);
+        cache
+            .begin("agent", "operation", "one", &json!({}))
+            .unwrap();
+        assert_eq!(
+            cache
+                .begin("agent", "operation", "one", &json!({}))
+                .unwrap(),
+            IdempotencyDecision::Indeterminate
+        );
+        assert!(matches!(
+            cache.begin("agent", "operation", "two", &json!({})),
+            Err(IdempotencyError::Capacity)
+        ));
     }
 
     #[test]

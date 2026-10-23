@@ -69,6 +69,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "host_git_credential_delete",
     "host_provider_credentials_load",
     "connectors_http_request",
+    "connectors_google_docs_auth",
     "connectors_ws_open",
     "connectors_ws_send",
     "connectors_ws_close",
@@ -148,17 +149,27 @@ fn task_shell_error(
 
 fn tenant_execution_status(code: &str) -> Option<StatusCode> {
     match code {
-        "execution_isolation_unavailable" | "placement_binding_required" | "execution_binding_store_unavailable"
+        "execution_isolation_unavailable"
+        | "placement_binding_required"
+        | "execution_binding_store_unavailable"
         | "execution_binding_store_full" => Some(StatusCode::SERVICE_UNAVAILABLE),
-        "placement_binding_client_supplied" | "credential_use_forbidden" | "workspace_read_forbidden"
-        | "execution_request_forbidden" | "workspace_mount_forbidden" | "workspace_unresolved"
-        | "workspace_root_claimed" | "workspace_root_unconfigured" => Some(StatusCode::FORBIDDEN),
+        "placement_binding_client_supplied"
+        | "credential_use_forbidden"
+        | "workspace_read_forbidden"
+        | "execution_request_forbidden"
+        | "workspace_mount_forbidden"
+        | "workspace_unresolved"
+        | "workspace_root_claimed"
+        | "workspace_root_unconfigured" => Some(StatusCode::FORBIDDEN),
         _ => None,
     }
 }
 
 fn tenant_execution_refusal(code: &str) -> (StatusCode, Json<RpcError>) {
-    (tenant_execution_status(code).unwrap_or(StatusCode::FORBIDDEN), Json(RpcError::new(code, code)))
+    (
+        tenant_execution_status(code).unwrap_or(StatusCode::FORBIDDEN),
+        Json(RpcError::new(code, code)),
+    )
 }
 
 fn spawn_execution_error(message: String) -> (StatusCode, Json<RpcError>) {
@@ -170,7 +181,10 @@ fn spawn_execution_error(message: String) -> (StatusCode, Json<RpcError>) {
     RpcError::internal(message)
 }
 
-fn placement_matches_binding(info: &Value, binding: &cognia_external_agent::spawn_authority::PlacementBinding) -> bool {
+fn placement_matches_binding(
+    info: &Value,
+    binding: &cognia_external_agent::spawn_authority::PlacementBinding,
+) -> bool {
     info.pointer("/placement/kind").and_then(Value::as_str) == Some("sandbox")
         && info.pointer("/placement/binding") == Some(&serde_json::json!(binding))
 }
@@ -190,21 +204,36 @@ struct BindingEmitter {
 // binding validation through control/creation/rollback, so an old request
 // cannot act on a replacement. Weak entries are pruned on every acquisition.
 fn execution_lifecycle_lock(id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
-    static LOCKS: std::sync::OnceLock<parking_lot::Mutex<std::collections::HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>> = std::sync::OnceLock::new();
+    static LOCKS: std::sync::OnceLock<
+        parking_lot::Mutex<
+            std::collections::HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>,
+        >,
+    > = std::sync::OnceLock::new();
     let mut locks = LOCKS.get_or_init(Default::default).lock();
     locks.retain(|_, lock| lock.strong_count() != 0);
-    let lock = locks.get(id).and_then(std::sync::Weak::upgrade).unwrap_or_else(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
+    let lock = locks
+        .get(id)
+        .and_then(std::sync::Weak::upgrade)
+        .unwrap_or_else(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
     locks.insert(id.to_owned(), std::sync::Arc::downgrade(&lock));
     lock
 }
 impl cognia_external_agent::exec_backend::AgentEventEmitter for BindingEmitter {
     fn emit(&self, channel: &str, payload: Value) {
         if channel == cognia_external_agent::exec_backend::EXIT_CHANNEL
-            && payload.get("agentId").and_then(Value::as_str) == Some(self.agent_id.as_str()) {
+            && payload.get("agentId").and_then(Value::as_str) == Some(self.agent_id.as_str())
+        {
             self.exited.store(true, std::sync::atomic::Ordering::SeqCst);
-            let directory = self.directory.clone(); let binding = self.binding.clone(); let id = self.agent_id.clone();
+            let directory = self.directory.clone();
+            let binding = self.binding.clone();
+            let id = self.agent_id.clone();
             self.runtime.spawn_blocking(move || {
-                if let Err(problem) = cognia_companion::host_surface_gate::forget_execution_record(&directory, "spawn_external_agent", &id, &binding) {
+                if let Err(problem) = cognia_companion::host_surface_gate::forget_execution_record(
+                    &directory,
+                    "spawn_external_agent",
+                    &id,
+                    &binding,
+                ) {
                     log::warn!("execution binding exit cleanup failed: {}", problem.code);
                 }
             });
@@ -271,28 +300,68 @@ pub(super) async fn dispatch(
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let _ = (state, host, device_id, tenant_id, scope);
-    let _execution_lifecycle = if cognia_external_agent::spawn_authority::execution_admission().is_some() {
-        let id = if name == "spawn_external_agent" { args.pointer("/config/id").and_then(Value::as_str).map(str::to_owned) }
-            else if matches!(name, "send_to_external_agent" | "kill_external_agent" | "get_external_agent_status") {
+    let _execution_lifecycle =
+        if cognia_external_agent::spawn_authority::execution_admission().is_some() {
+            let id = if name == "spawn_external_agent" {
+                args.pointer("/config/id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            } else if matches!(
+                name,
+                "send_to_external_agent" | "kill_external_agent" | "get_external_agent_status"
+            ) {
                 Some(required_aliased::<String>(&args, "agent_id", "agentId")?)
-            } else { None };
-        match id { Some(id) => Some(execution_lifecycle_lock(&id).lock_owned().await), None => None }
-    } else { None };
-    if matches!(name, "send_to_external_agent" | "kill_external_agent" | "get_external_agent_status") {
+            } else {
+                None
+            };
+            match id {
+                Some(id) => Some(execution_lifecycle_lock(&id).lock_owned().await),
+                None => None,
+            }
+        } else {
+            None
+        };
+    if matches!(
+        name,
+        "send_to_external_agent" | "kill_external_agent" | "get_external_agent_status"
+    ) {
         if let Some(decision) = cognia_external_agent::spawn_authority::execution_admission() {
             let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
-            if matches!(host.exec_backend().status(&agent_id).await, None | Some(cognia_external_agent::process::ExternalAgentProcessState::Stopped | cognia_external_agent::process::ExternalAgentProcessState::Failed)) {
-                cognia_companion::host_surface_gate::forget_execution_binding(state, name, &agent_id).await
-                    .map_err(|problem| (problem.status_code(), Json(RpcError::new(problem.code, problem.detail))))?;
+            if matches!(
+                host.exec_backend().status(&agent_id).await,
+                None | Some(
+                    cognia_external_agent::process::ExternalAgentProcessState::Stopped
+                        | cognia_external_agent::process::ExternalAgentProcessState::Failed
+                )
+            ) {
+                cognia_companion::host_surface_gate::forget_execution_binding(
+                    state, name, &agent_id,
+                )
+                .await
+                .map_err(|problem| {
+                    (
+                        problem.status_code(),
+                        Json(RpcError::new(problem.code, problem.detail)),
+                    )
+                })?;
                 return Err(tenant_execution_refusal("workspace_unresolved"));
             }
-            let info = host.exec_backend().get_info(&agent_id).await
+            let info = host
+                .exec_backend()
+                .get_info(&agent_id)
+                .await
                 .map_err(|_| tenant_execution_refusal("placement_binding_required"))?;
             if !placement_matches_binding(&info, &decision.binding) {
                 return Err(tenant_execution_refusal("execution_isolation_unavailable"));
             }
-            if decision.workspace_read_only().map_err(tenant_execution_refusal)?
-                && info.pointer("/placement/workspaceReadOnly").and_then(Value::as_bool) != Some(true) {
+            if decision
+                .workspace_read_only()
+                .map_err(tenant_execution_refusal)?
+                && info
+                    .pointer("/placement/workspaceReadOnly")
+                    .and_then(Value::as_bool)
+                    != Some(true)
+            {
                 return Err(tenant_execution_refusal("workspace_mount_forbidden"));
             }
         }
@@ -300,7 +369,8 @@ pub(super) async fn dispatch(
     if matches!(
         name,
         "send_to_external_agent" | "kill_external_agent" | "get_external_agent_status"
-    ) && cognia_external_agent::spawn_authority::execution_admission().is_none() {
+    ) && cognia_external_agent::spawn_authority::execution_admission().is_none()
+    {
         let agent_id: String = required_aliased(&args, "agent_id", "agentId")?;
         super::gateway_plane::authorize_task_agent_control(host, device_id, &agent_id).await?;
         if cognia_companion::environment_pool::installed()
@@ -321,7 +391,9 @@ pub(super) async fn dispatch(
         // checked again inside `call` for every operation.
         "companion_browser_extension_status" => {
             let browser: String = required_aliased(&args, "device_id", "deviceId")?;
-            to_json(cognia_companion::ws_browser_companion::rpc_device_status(&browser))
+            to_json(cognia_companion::ws_browser_companion::rpc_device_status(
+                &browser,
+            ))
         }
 
         // Split by effect (`ws_browser_companion::READ_OPERATIONS`): a look
@@ -367,13 +439,31 @@ pub(super) async fn dispatch(
             let mut config: cognia_external_agent::process::ExternalAgentSpawnConfig =
                 required(&args, "config")?;
             if let Some(decision) = cognia_external_agent::spawn_authority::execution_admission() {
-                decision.authorize_inputs(config.env.keys().map(String::as_str), config.args.iter().map(String::as_str), false).map_err(tenant_execution_refusal)?;
-                if config.sandbox.as_ref().and_then(|placement| placement.workspace()).is_some_and(|workspace| workspace.credential.is_some()) && !decision.has("credential.use") {
+                decision
+                    .authorize_inputs(
+                        config.env.keys().map(String::as_str),
+                        config.args.iter().map(String::as_str),
+                        false,
+                    )
+                    .map_err(tenant_execution_refusal)?;
+                if config
+                    .sandbox
+                    .as_ref()
+                    .and_then(|placement| placement.workspace())
+                    .is_some_and(|workspace| workspace.credential.is_some())
+                    && !decision.has("credential.use")
+                {
                     return Err(tenant_execution_refusal("credential_use_forbidden"));
                 }
-                config.sandbox.as_mut().ok_or_else(|| tenant_execution_refusal("execution_isolation_unavailable"))?
-                    .stamp(decision).map_err(tenant_execution_refusal)?;
-            } else if cognia_companion::deployment::deployment_mode() == cognia_companion::deployment::DeploymentMode::MultiTenant {
+                config
+                    .sandbox
+                    .as_mut()
+                    .ok_or_else(|| tenant_execution_refusal("execution_isolation_unavailable"))?
+                    .stamp(decision)
+                    .map_err(tenant_execution_refusal)?;
+            } else if cognia_companion::deployment::deployment_mode()
+                == cognia_companion::deployment::DeploymentMode::MultiTenant
+            {
                 return Err(tenant_execution_refusal("execution_isolation_unavailable"));
             }
             let mut gateway_authority = super::gateway_plane::authorize_task_spawn(
@@ -384,7 +474,9 @@ pub(super) async fn dispatch(
                 scope,
                 &mut config,
             )?;
-            let delivery_source_declaration = config.env.remove(cognia_external_agent::spawn_authority::DELIVERY_SOURCE_ENV);
+            let delivery_source_declaration = config
+                .env
+                .remove(cognia_external_agent::spawn_authority::DELIVERY_SOURCE_ENV);
             let mut summary = serde_json::json!({
                 "agent_id": config.id,
                 "command": config.command,
@@ -434,41 +526,92 @@ pub(super) async fn dispatch(
                         .harden_spawn_config(validated.config, backend.as_ref())
                         .map_err(RpcError::internal)?;
                     let admitted_cwd = hardened.cwd.clone().unwrap_or_default();
-                    if cognia_external_agent::spawn_authority::execution_admission().is_some() && admitted_cwd.is_empty() {
+                    if cognia_external_agent::spawn_authority::execution_admission().is_some()
+                        && admitted_cwd.is_empty()
+                    {
                         return Err(tenant_execution_refusal("workspace_unresolved"));
                     }
-                    cognia_companion::host_surface_gate::authorize_execution_mount(state, &admitted_cwd)
-                        .await
-                        .map_err(|problem| (problem.status_code(), Json(RpcError::new(problem.code, problem.detail))))?;
+                    cognia_companion::host_surface_gate::authorize_execution_mount(
+                        state,
+                        &admitted_cwd,
+                    )
+                    .await
+                    .map_err(|problem| {
+                        (
+                            problem.status_code(),
+                            Json(RpcError::new(problem.code, problem.detail)),
+                        )
+                    })?;
                     if let Some(declaration) = delivery_source_declaration {
-                        hardened.env.insert(cognia_external_agent::spawn_authority::DELIVERY_SOURCE_ENV.into(), declaration);
-                        let authority = gateway_authority.as_mut().ok_or_else(|| RpcError::forbidden("delivery_source_gateway_required"))?;
+                        hardened.env.insert(
+                            cognia_external_agent::spawn_authority::DELIVERY_SOURCE_ENV.into(),
+                            declaration,
+                        );
+                        let authority = gateway_authority.as_mut().ok_or_else(|| {
+                            RpcError::forbidden("delivery_source_gateway_required")
+                        })?;
                         let owner = if let Some(tenant) = tenant_id {
                             cognia_companion::host_identity::namespace_for_tenant(tenant)
                         } else if scope == Some("service") {
-                            cognia_companion::host_identity::current().ok().and_then(|binding| cognia_companion::host_identity::namespace_for_tenant(&binding.remote_tenant_id))
-                        } else { None }.ok_or_else(|| RpcError::forbidden("delivery_source_account_required"))?;
+                            cognia_companion::host_identity::current()
+                                .ok()
+                                .and_then(|binding| {
+                                    cognia_companion::host_identity::namespace_for_tenant(
+                                        &binding.remote_tenant_id,
+                                    )
+                                })
+                        } else {
+                            None
+                        }
+                        .ok_or_else(|| RpcError::forbidden("delivery_source_account_required"))?;
                         let directory = host.cognia_data_dir().map_err(RpcError::internal)?;
                         let task = authority.task_id.clone();
-                        let device = authority.device_id.clone().unwrap_or_else(|| device_id.to_owned());
+                        let device = authority
+                            .device_id
+                            .clone()
+                            .unwrap_or_else(|| device_id.to_owned());
                         let (config, source) = tokio::task::spawn_blocking(move || {
                             let host_id = crate::deployment_id::resolve(&directory)?;
                             let source = crate::delivery_admission::consume(
-                                &directory, &owner, &host_id, &device, &task, &mut hardened)?;
+                                &directory,
+                                &owner,
+                                &host_id,
+                                &device,
+                                &task,
+                                &mut hardened,
+                            )?;
                             Ok::<_, String>((hardened, source))
-                        }).await.map_err(|_| RpcError::internal("delivery_source_admission_failed".into()))?.map_err(RpcError::forbidden)?;
+                        })
+                        .await
+                        .map_err(|_| RpcError::internal("delivery_source_admission_failed".into()))?
+                        .map_err(RpcError::forbidden)?;
                         hardened = config;
                         authority.delivery_source = source;
-                        if !(authority.authorized)() { return Err(RpcError::forbidden("delivery_source_authority_revoked")); }
+                        if !(authority.authorized)() {
+                            return Err(RpcError::forbidden("delivery_source_authority_revoked"));
+                        }
                     }
                     let mut emitter = host.agent_event_emitter();
-                    let exited = if let Some(decision) = cognia_external_agent::spawn_authority::execution_admission() {
+                    let exited = if let Some(decision) =
+                        cognia_external_agent::spawn_authority::execution_admission()
+                    {
                         let exited = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-                        let directory = state.runtime.execution_binding_root(state).ok_or_else(|| tenant_execution_refusal("execution_binding_store_unavailable"))?;
-                        emitter = std::sync::Arc::new(BindingEmitter { inner: emitter, directory, binding: decision.binding,
-                            agent_id: hardened.id.clone(), exited: exited.clone(), runtime: tokio::runtime::Handle::current() });
+                        let directory =
+                            state.runtime.execution_binding_root(state).ok_or_else(|| {
+                                tenant_execution_refusal("execution_binding_store_unavailable")
+                            })?;
+                        emitter = std::sync::Arc::new(BindingEmitter {
+                            inner: emitter,
+                            directory,
+                            binding: decision.binding,
+                            agent_id: hardened.id.clone(),
+                            exited: exited.clone(),
+                            runtime: tokio::runtime::Handle::current(),
+                        });
                         Some(exited)
-                    } else { None };
+                    } else {
+                        None
+                    };
                     let spawned = cognia_external_agent::spawn_authority::with_remote_origin(
                         device_id,
                         cognia_external_agent::spawn_authority::with_gateway(
@@ -482,19 +625,41 @@ pub(super) async fn dispatch(
                     )
                     .await
                     .map_err(spawn_execution_error)?;
-                    if let Err(problem) = cognia_companion::host_surface_gate::persist_execution_binding(state, name, &args, &admitted_cwd).await {
+                    if let Err(problem) =
+                        cognia_companion::host_surface_gate::persist_execution_binding(
+                            state,
+                            name,
+                            &args,
+                            &admitted_cwd,
+                        )
+                        .await
+                    {
                         let cleanup = backend.kill(&spawned).await;
                         let detail = match cleanup {
                             Ok(()) => problem.detail.clone(),
-                            Err(error) => format!("{}; sandbox cleanup failed: {error}", problem.detail),
+                            Err(error) => {
+                                format!("{}; sandbox cleanup failed: {error}", problem.detail)
+                            }
                         };
-                        return Err((problem.status_code(), Json(RpcError::new(problem.code, detail))));
+                        return Err((
+                            problem.status_code(),
+                            Json(RpcError::new(problem.code, detail)),
+                        ));
                     }
                     // A short-lived process may exit before its create call
                     // persists the record. Its early callback then had no row.
-                    if exited.is_some_and(|exited| exited.load(std::sync::atomic::Ordering::SeqCst)) {
-                        cognia_companion::host_surface_gate::forget_execution_binding(state, name, &spawned).await
-                            .map_err(|problem| (problem.status_code(), Json(RpcError::new(problem.code, problem.detail))))?;
+                    if exited.is_some_and(|exited| exited.load(std::sync::atomic::Ordering::SeqCst))
+                    {
+                        cognia_companion::host_surface_gate::forget_execution_binding(
+                            state, name, &spawned,
+                        )
+                        .await
+                        .map_err(|problem| {
+                            (
+                                problem.status_code(),
+                                Json(RpcError::new(problem.code, problem.detail)),
+                            )
+                        })?;
                     }
                     Ok(Value::String(spawned))
                 }
@@ -529,9 +694,18 @@ pub(super) async fn dispatch(
                 serde_json::json!({ "agent_id": agent_id }),
             )
             .await;
-            host.exec_backend().kill(&agent_id).await.map_err(RpcError::internal)?;
-            cognia_companion::host_surface_gate::forget_execution_binding(state, name, &agent_id).await
-                .map_err(|problem| (problem.status_code(), Json(RpcError::new(problem.code, problem.detail))))?;
+            host.exec_backend()
+                .kill(&agent_id)
+                .await
+                .map_err(RpcError::internal)?;
+            cognia_companion::host_surface_gate::forget_execution_binding(state, name, &agent_id)
+                .await
+                .map_err(|problem| {
+                    (
+                        problem.status_code(),
+                        Json(RpcError::new(problem.code, problem.detail)),
+                    )
+                })?;
             Ok(Value::Null)
         }
 
@@ -541,49 +715,101 @@ pub(super) async fn dispatch(
             crate::delivery_admission::delete_with_source_fence(
                 async {
                     cognia_external_agent::gateway_task::authorize_gateway_task_deletion(
-                        &task_id, backend.as_ref(), (scope != Some("service")).then_some(device_id),
-                    ).await.map_err(RpcError::internal)
+                        &task_id,
+                        backend.as_ref(),
+                        (scope != Some("service")).then_some(device_id),
+                    )
+                    .await
+                    .map_err(RpcError::internal)
                 },
                 async {
                     let directory = host.cognia_data_dir().map_err(RpcError::internal)?;
-                    let source_store = cognia_sandbox_pool::provenance::SourceStore::new(&directory);
+                    let source_store =
+                        cognia_sandbox_pool::provenance::SourceStore::new(&directory);
                     let reader = source_store.clone();
                     let task = task_id.clone();
                     let has_source = tokio::task::spawn_blocking(move || reader.has_task(&task))
-                        .await.map_err(|_| RpcError::internal("delivery_source_unavailable".into()))?
+                        .await
+                        .map_err(|_| RpcError::internal("delivery_source_unavailable".into()))?
                         .map_err(RpcError::internal)?;
-                    if !has_source { return Ok(()); }
+                    if !has_source {
+                        return Ok(());
+                    }
                     let owner = if let Some(tenant) = tenant_id {
                         cognia_companion::host_identity::namespace_for_tenant(tenant)
                     } else if scope == Some("service") {
-                        cognia_companion::host_identity::current().ok().and_then(|binding| cognia_companion::host_identity::namespace_for_tenant(&binding.remote_tenant_id))
-                    } else { None }.ok_or_else(|| RpcError::forbidden("delivery_source_account_required"))?;
+                        cognia_companion::host_identity::current()
+                            .ok()
+                            .and_then(|binding| {
+                                cognia_companion::host_identity::namespace_for_tenant(
+                                    &binding.remote_tenant_id,
+                                )
+                            })
+                    } else {
+                        None
+                    }
+                    .ok_or_else(|| RpcError::forbidden("delivery_source_account_required"))?;
                     let task = task_id.clone();
                     let device = (scope != Some("service")).then(|| device_id.to_owned());
                     tokio::task::spawn_blocking(move || {
                         let host_id = crate::deployment_id::resolve(&directory)?;
                         source_store.revoke_owned_task(&owner, &host_id, &task, device.as_deref())
-                    }).await.map_err(|_| RpcError::internal("delivery_source_revocation_failed".into()))?
-                        .map_err(RpcError::forbidden)
+                    })
+                    .await
+                    .map_err(|_| RpcError::internal("delivery_source_revocation_failed".into()))?
+                    .map_err(RpcError::forbidden)
                 },
                 async {
                     let directory = host.cognia_data_dir().map_err(RpcError::internal)?;
-                    let owner = tenant_id.and_then(cognia_companion::host_identity::namespace_for_tenant)
-                        .or_else(|| (scope == Some("service")).then(|| cognia_companion::host_identity::current().ok()
-                            .and_then(|b| cognia_companion::host_identity::namespace_for_tenant(&b.remote_tenant_id))).flatten());
+                    let owner = tenant_id
+                        .and_then(cognia_companion::host_identity::namespace_for_tenant)
+                        .or_else(|| {
+                            (scope == Some("service"))
+                                .then(|| {
+                                    cognia_companion::host_identity::current()
+                                        .ok()
+                                        .and_then(|b| {
+                                            cognia_companion::host_identity::namespace_for_tenant(
+                                                &b.remote_tenant_id,
+                                            )
+                                        })
+                                })
+                                .flatten()
+                        });
                     let root = directory.clone();
-                    let host_id = tokio::task::spawn_blocking(move || crate::deployment_id::resolve(&root))
-                        .await.map_err(|_| RpcError::internal("delivery_source_unavailable".into()))?.map_err(RpcError::internal)?;
+                    let host_id =
+                        tokio::task::spawn_blocking(move || crate::deployment_id::resolve(&root))
+                            .await
+                            .map_err(|_| RpcError::internal("delivery_source_unavailable".into()))?
+                            .map_err(RpcError::internal)?;
                     let admission = crate::managed_desktops::task_deletion_admission(
-                        crate::managed_desktops::Caller { device_id,tenant_id,scope,local:false },
-                        host_id.clone(),owner.clone());
-                    crate::managed_desktop_results::delete_task_history(&directory, owner, host_id, task_id.clone(),
-                        (scope != Some("service")).then(|| device_id.to_owned()), admission,
+                        crate::managed_desktops::Caller {
+                            device_id,
+                            tenant_id,
+                            scope,
+                            local: false,
+                        },
+                        host_id.clone(),
+                        owner.clone(),
+                    );
+                    crate::managed_desktop_results::delete_task_history(
+                        &directory,
+                        owner,
+                        host_id,
+                        task_id.clone(),
+                        (scope != Some("service")).then(|| device_id.to_owned()),
+                        admission,
                         cognia_external_agent::gateway_task::delete_gateway_task_for_device(
-                            &task_id, backend.as_ref(), (scope != Some("service")).then_some(device_id),
-                        )).await.map_err(RpcError::internal)
+                            &task_id,
+                            backend.as_ref(),
+                            (scope != Some("service")).then_some(device_id),
+                        ),
+                    )
+                    .await
+                    .map_err(RpcError::internal)
                 },
-            ).await?;
+            )
+            .await?;
             cognia_companion::audit::record_async(
                 "external_agent_gateway_task_deleted",
                 device_id,
@@ -622,9 +848,19 @@ pub(super) async fn dispatch(
             let env: std::collections::BTreeMap<String, String> =
                 optional(&args, "env")?.unwrap_or_default();
             if let Some(decision) = cognia_external_agent::spawn_authority::execution_admission() {
-                decision.authorize_inputs(env.keys().map(String::as_str), argv.iter().map(String::as_str), false).map_err(tenant_execution_refusal)?;
-                placement.stamp(decision).map_err(tenant_execution_refusal)?;
-            } else if cognia_companion::deployment::deployment_mode() == cognia_companion::deployment::DeploymentMode::MultiTenant {
+                decision
+                    .authorize_inputs(
+                        env.keys().map(String::as_str),
+                        argv.iter().map(String::as_str),
+                        false,
+                    )
+                    .map_err(tenant_execution_refusal)?;
+                placement
+                    .stamp(decision)
+                    .map_err(tenant_execution_refusal)?;
+            } else if cognia_companion::deployment::deployment_mode()
+                == cognia_companion::deployment::DeploymentMode::MultiTenant
+            {
                 return Err(tenant_execution_refusal("execution_isolation_unavailable"));
             }
             let stdin: Option<String> = optional(&args, "stdin")?;
@@ -810,7 +1046,8 @@ pub(super) async fn dispatch(
         // Tauri command's, so `lib/workflow/runtime/tauri-bridge.ts` sends one
         // payload shape to both hosts.
         "workflow_register_trigger" => {
-            let input: cognia_scheduling::workflow::types::RegisterTriggerInput = required(&args, "input")?;
+            let input: cognia_scheduling::workflow::types::RegisterTriggerInput =
+                required(&args, "input")?;
             cognia_scheduling::workflow::commands::workflow_register_trigger_for_state(
                 workflow_state(host)?,
                 input,
@@ -858,18 +1095,20 @@ pub(super) async fn dispatch(
             let body: String = required(&args, "body")?;
             let headers: Option<std::collections::BTreeMap<String, String>> =
                 optional(&args, "headers")?;
-            let answered = cognia_scheduling::workflow::commands::workflow_webhook_respond_for_state(
-                workflow_state(host)?,
-                correlation_id,
-                status,
-                body,
-                headers,
-            )
-            .map_err(RpcError::internal)?;
+            let answered =
+                cognia_scheduling::workflow::commands::workflow_webhook_respond_for_state(
+                    workflow_state(host)?,
+                    correlation_id,
+                    status,
+                    body,
+                    headers,
+                )
+                .map_err(RpcError::internal)?;
             Ok(Value::Bool(answered))
         }
         "workflow_persist_run_state" => {
-            let input: cognia_scheduling::workflow::types::PersistRunStateInput = required(&args, "input")?;
+            let input: cognia_scheduling::workflow::types::PersistRunStateInput =
+                required(&args, "input")?;
             cognia_scheduling::workflow::commands::workflow_persist_run_state_for_state(
                 workflow_state(host)?,
                 input,
@@ -878,10 +1117,11 @@ pub(super) async fn dispatch(
             .map_err(RpcError::internal)
         }
         "workflow_reload_in_flight_runs" => {
-            let rows = cognia_scheduling::workflow::commands::workflow_reload_in_flight_runs_for_state(
-                workflow_state(host)?,
-            )
-            .map_err(RpcError::internal)?;
+            let rows =
+                cognia_scheduling::workflow::commands::workflow_reload_in_flight_runs_for_state(
+                    workflow_state(host)?,
+                )
+                .map_err(RpcError::internal)?;
             to_json(rows)
         }
         "workflow_ack_completed" => {
@@ -913,24 +1153,27 @@ pub(super) async fn dispatch(
             to_json(row)
         }
         "workflow_waitpoint_list_pending" => {
-            let rows = cognia_scheduling::workflow::commands::workflow_waitpoint_list_pending_for_state(
-                workflow_state(host)?,
-            )
-            .map_err(RpcError::internal)?;
+            let rows =
+                cognia_scheduling::workflow::commands::workflow_waitpoint_list_pending_for_state(
+                    workflow_state(host)?,
+                )
+                .map_err(RpcError::internal)?;
             to_json(rows)
         }
         "workflow_waitpoint_decide" => {
             let input: cognia_scheduling::workflow::types::WorkflowWaitpointDecisionInput =
                 required(&args, "input")?;
-            let changed = cognia_scheduling::workflow::commands::workflow_waitpoint_decide_for_state(
-                workflow_state(host)?,
-                input,
-            )
-            .map_err(RpcError::internal)?;
+            let changed =
+                cognia_scheduling::workflow::commands::workflow_waitpoint_decide_for_state(
+                    workflow_state(host)?,
+                    input,
+                )
+                .map_err(RpcError::internal)?;
             Ok(Value::Bool(changed))
         }
         "workflow_wait_event_persist" => {
-            let event: cognia_scheduling::workflow::types::WorkflowWaitEventRow = required(&args, "event")?;
+            let event: cognia_scheduling::workflow::types::WorkflowWaitEventRow =
+                required(&args, "event")?;
             cognia_scheduling::workflow::commands::workflow_wait_event_persist_for_state(
                 workflow_state(host)?,
                 event,
@@ -940,11 +1183,12 @@ pub(super) async fn dispatch(
         }
         "workflow_wait_event_prune" => {
             let now: i64 = required(&args, "now")?;
-            let pruned = cognia_scheduling::workflow::commands::workflow_wait_event_prune_for_state(
-                workflow_state(host)?,
-                now,
-            )
-            .map_err(RpcError::internal)?;
+            let pruned =
+                cognia_scheduling::workflow::commands::workflow_wait_event_prune_for_state(
+                    workflow_state(host)?,
+                    now,
+                )
+                .map_err(RpcError::internal)?;
             to_json(pruned)
         }
 
@@ -957,7 +1201,9 @@ pub(super) async fn dispatch(
                 required(&args, "input")?;
             let result = {
                 let workflow = workflow_state(host)?;
-                cognia_scheduling::workflow::commands::integration_ingress_register_for_state(workflow, input)
+                cognia_scheduling::workflow::commands::integration_ingress_register_for_state(
+                    workflow, input,
+                )
             }
             .map_err(RpcError::internal)?;
             to_json(result)
@@ -979,7 +1225,9 @@ pub(super) async fn dispatch(
             let route_id: String = required_aliased(&args, "route_id", "routeId")?;
             let result = {
                 let workflow = workflow_state(host)?;
-                cognia_scheduling::workflow::commands::integration_ingress_get_url_for_state(workflow, route_id)
+                cognia_scheduling::workflow::commands::integration_ingress_get_url_for_state(
+                    workflow, route_id,
+                )
             }
             .map_err(RpcError::internal)?;
             to_json(result)
@@ -989,7 +1237,9 @@ pub(super) async fn dispatch(
             let limit: Option<usize> = optional(&args, "limit")?;
             let result = {
                 let workflow = workflow_state(host)?;
-                cognia_scheduling::workflow::commands::integration_ingress_poll_for_state(workflow, limit)
+                cognia_scheduling::workflow::commands::integration_ingress_poll_for_state(
+                    workflow, limit,
+                )
             }
             .map_err(RpcError::internal)?;
             to_json(result)
@@ -1402,10 +1652,12 @@ pub(super) async fn dispatch(
         "host_provider_credential_delete" | "host_git_credential_delete" => {
             let (kind, name) = host_secret_target(name, &args)?;
             let removed = name.clone();
-            tokio::task::spawn_blocking(move || cognia_secrets::host_secrets::delete(kind, &removed))
-                .await
-                .map_err(|error| RpcError::internal(error.to_string()))?
-                .map_err(RpcError::internal)?;
+            tokio::task::spawn_blocking(move || {
+                cognia_secrets::host_secrets::delete(kind, &removed)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
             host.publish_host_event(
                 SECRETS_CHANGED_EVENT,
                 json!({ "kind": kind.as_str(), "name": name, "action": "deleted" }),
@@ -1428,6 +1680,22 @@ pub(super) async fn dispatch(
                     .map(|(provider_id, api_key)| json!({ "providerId": provider_id, "apiKey": api_key }))
                     .collect::<Vec<_>>()
             }))
+        }
+
+        "connectors_google_docs_auth" => {
+            let input: cognia_connectors::google_docs_auth::Input = required(&args, "input")?;
+            let event_host = host.to_shared();
+            let notify = std::sync::Arc::new(move || {
+                event_host.publish_host_event(
+                    cognia_connectors::google_docs_auth::CHANGED_EVENT,
+                    Value::Null,
+                );
+            });
+            to_json(
+                cognia_connectors::google_docs_auth::execute_with_notify(input, notify)
+                    .await
+                    .map_err(RpcError::internal)?,
+            )
         }
 
         "connectors_http_request" => {
@@ -1887,10 +2155,10 @@ pub(super) async fn dispatch(
             if host.headless().is_some() {
                 return Err(RpcError::headless_unsupported(name));
             }
-            let pending = host_automation(host, name)?
-                .state
-                .consent
-                .pending_requests();
+            let pending =
+                cognia_automation::automation::commands::automation_consent_pending_for_broker(
+                    &host_automation(host, name)?.state.consent,
+                );
             to_json(pending)
         }
 
@@ -2022,21 +2290,18 @@ pub(super) async fn dispatch(
 
         "langfuse_credentials_status" => {
             let account = langfuse_account(tenant_id)?;
-            let status = cognia_sidecar::langfuse::credentials_status_for_account_async(
-                account.to_string(),
-            )
-            .await
-            .map_err(RpcError::internal)?;
+            let status =
+                cognia_sidecar::langfuse::credentials_status_for_account_async(account.to_string())
+                    .await
+                    .map_err(RpcError::internal)?;
             to_json(status)
         }
 
         "langfuse_credentials_clear" => {
             let account = langfuse_account(tenant_id)?;
-            cognia_sidecar::langfuse::credentials_clear_for_account_async(
-                account.to_string(),
-            )
-            .await
-            .map_err(RpcError::internal)?;
+            cognia_sidecar::langfuse::credentials_clear_for_account_async(account.to_string())
+                .await
+                .map_err(RpcError::internal)?;
             cognia_sidecar::supervisor::restart_sidecar_for_config(host.sidecar_state())
                 .await
                 .map_err(RpcError::internal)?;
@@ -2053,8 +2318,7 @@ pub(super) async fn dispatch(
 
         "langfuse_trace_ingest" => {
             let account = langfuse_account(tenant_id)?;
-            let batch: cognia_sidecar::langfuse::AgentTraceBatchV1 =
-                required(&args, "batch")?;
+            let batch: cognia_sidecar::langfuse::AgentTraceBatchV1 = required(&args, "batch")?;
             let result = cognia_sidecar::langfuse::trace_ingest_for_account(account, batch)
                 .await
                 .map_err(map_langfuse_ingest_error)?;
@@ -2173,11 +2437,21 @@ mod tests {
 
     #[derive(Default)]
     struct BoundBackend {
-        agents: parking_lot::Mutex<std::collections::HashMap<String, cognia_external_agent::process::ExternalAgentSpawnConfig>>,
+        agents: parking_lot::Mutex<
+            std::collections::HashMap<
+                String,
+                cognia_external_agent::process::ExternalAgentSpawnConfig,
+            >,
+        >,
         killed: parking_lot::Mutex<Vec<String>>,
         fail_store: parking_lot::Mutex<Option<std::path::PathBuf>>,
         writable_mount: std::sync::atomic::AtomicBool,
-        sinks: parking_lot::Mutex<std::collections::HashMap<String, std::sync::Arc<dyn cognia_external_agent::process::ExternalAgentEventSink>>>,
+        sinks: parking_lot::Mutex<
+            std::collections::HashMap<
+                String,
+                std::sync::Arc<dyn cognia_external_agent::process::ExternalAgentEventSink>,
+            >,
+        >,
         pause_send: std::sync::atomic::AtomicBool,
         fail_kill: std::sync::atomic::AtomicBool,
         send_started: tokio::sync::Notify,
@@ -2185,38 +2459,84 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl cognia_external_agent::exec_backend::ExecBackend for BoundBackend {
-        async fn spawn(&self, config: cognia_external_agent::process::ExternalAgentSpawnConfig, sink: std::sync::Arc<dyn cognia_external_agent::process::ExternalAgentEventSink>) -> Result<String, String> {
-            if config.id == "failed" { return Err("fixture_spawn_failed".into()); }
-            if config.id == "early" { sink.exited(&config.id, Some(0), None); }
+        async fn spawn(
+            &self,
+            config: cognia_external_agent::process::ExternalAgentSpawnConfig,
+            sink: std::sync::Arc<dyn cognia_external_agent::process::ExternalAgentEventSink>,
+        ) -> Result<String, String> {
+            if config.id == "failed" {
+                return Err("fixture_spawn_failed".into());
+            }
+            if config.id == "early" {
+                sink.exited(&config.id, Some(0), None);
+            }
             if let Some(root) = self.fail_store.lock().take() {
                 std::fs::create_dir_all(root.join("companion/execution-bindings.json")).unwrap();
             }
-            let id = config.id.clone(); self.sinks.lock().insert(id.clone(), sink); self.agents.lock().insert(id.clone(), config); Ok(id)
+            let id = config.id.clone();
+            self.sinks.lock().insert(id.clone(), sink);
+            self.agents.lock().insert(id.clone(), config);
+            Ok(id)
         }
         async fn send(&self, _: &str, _: &str) -> Result<(), String> {
-            if self.pause_send.swap(false, std::sync::atomic::Ordering::SeqCst) {
-                self.send_started.notify_one(); self.send_resume.notified().await;
+            if self
+                .pause_send
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                self.send_started.notify_one();
+                self.send_resume.notified().await;
             }
             Ok(())
         }
         async fn kill(&self, id: &str) -> Result<(), String> {
-            if self.fail_kill.swap(false, std::sync::atomic::Ordering::SeqCst) { return Err("fixture_kill_failed".into()); }
-            self.agents.lock().remove(id); self.killed.lock().push(id.into()); Ok(())
+            if self
+                .fail_kill
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err("fixture_kill_failed".into());
+            }
+            self.agents.lock().remove(id);
+            self.killed.lock().push(id.into());
+            Ok(())
         }
-        async fn kill_all(&self) -> Result<(), String> { self.agents.lock().clear(); Ok(()) }
-        async fn status(&self, id: &str) -> Option<cognia_external_agent::process::ExternalAgentProcessState> {
-            self.agents.lock().contains_key(id).then_some(cognia_external_agent::process::ExternalAgentProcessState::Running)
+        async fn kill_all(&self) -> Result<(), String> {
+            self.agents.lock().clear();
+            Ok(())
         }
-        async fn list(&self) -> Vec<String> { self.agents.lock().keys().cloned().collect() }
-        async fn is_running(&self, id: &str) -> Result<bool, String> { Ok(self.agents.lock().contains_key(id)) }
+        async fn status(
+            &self,
+            id: &str,
+        ) -> Option<cognia_external_agent::process::ExternalAgentProcessState> {
+            self.agents
+                .lock()
+                .contains_key(id)
+                .then_some(cognia_external_agent::process::ExternalAgentProcessState::Running)
+        }
+        async fn list(&self) -> Vec<String> {
+            self.agents.lock().keys().cloned().collect()
+        }
+        async fn is_running(&self, id: &str) -> Result<bool, String> {
+            Ok(self.agents.lock().contains_key(id))
+        }
         async fn get_info(&self, id: &str) -> Result<Value, String> {
-            let agents = self.agents.lock(); let config = agents.get(id).ok_or("missing fixture agent")?;
-            Ok(serde_json::json!({"placement":{"kind":"sandbox", "workspaceReadOnly":!self.writable_mount.load(std::sync::atomic::Ordering::SeqCst), "binding":config.sandbox.as_ref().and_then(|placement| placement.binding())}}))
+            let agents = self.agents.lock();
+            let config = agents.get(id).ok_or("missing fixture agent")?;
+            Ok(
+                serde_json::json!({"placement":{"kind":"sandbox", "workspaceReadOnly":!self.writable_mount.load(std::sync::atomic::Ordering::SeqCst), "binding":config.sandbox.as_ref().and_then(|placement| placement.binding())}}),
+            )
         }
-        async fn set_running(&self, _: &str) -> Result<(), String> { Ok(()) }
-        async fn set_failed(&self, _: &str) -> Result<(), String> { Ok(()) }
-        fn kind(&self) -> &'static str { "container" }
-        fn routes_sandboxes(&self) -> bool { true }
+        async fn set_running(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn set_failed(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn kind(&self) -> &'static str {
+            "container"
+        }
+        fn routes_sandboxes(&self) -> bool {
+            true
+        }
     }
 
     fn bound_state(root: std::path::PathBuf) -> SharedState {
@@ -2225,139 +2545,545 @@ mod tests {
         struct Runtime(std::path::PathBuf);
         #[async_trait::async_trait]
         impl runtime::CompanionRuntime for Runtime {
-            fn execution_binding_root(&self, _: &SharedState) -> Option<std::path::PathBuf> { Some(self.0.clone()) }
-            fn execution_workspace_base(&self, _: &SharedState) -> Option<std::path::PathBuf> { self.0.parent().map(|parent| parent.join("workspaces")) }
-            fn ide_relay_routes(&self) -> axum::Router<SharedState> { axum::Router::new() }
-            fn can_dispatch(&self, _: &SharedState) -> bool { true }
-            async fn dispatch(&self, _: &str, _: Value, _: &SharedState, _: &middleware::DeviceContext, _: remote_execution::ExecutionPlane) -> runtime::DispatchResult { unreachable!("test calls the actual service-plane arm directly") }
+            fn execution_binding_root(&self, _: &SharedState) -> Option<std::path::PathBuf> {
+                Some(self.0.clone())
+            }
+            fn execution_workspace_base(&self, _: &SharedState) -> Option<std::path::PathBuf> {
+                self.0.parent().map(|parent| parent.join("workspaces"))
+            }
+            fn ide_relay_routes(&self) -> axum::Router<SharedState> {
+                axum::Router::new()
+            }
+            fn can_dispatch(&self, _: &SharedState) -> bool {
+                true
+            }
+            async fn dispatch(
+                &self,
+                _: &str,
+                _: Value,
+                _: &SharedState,
+                _: &middleware::DeviceContext,
+                _: remote_execution::ExecutionPlane,
+            ) -> runtime::DispatchResult {
+                unreachable!("test calls the actual service-plane arm directly")
+            }
         }
         Arc::new(CompanionState {
-            secret: parking_lot::RwLock::new(vec![0;32]), deny_list: Arc::new(deny_list::DenyList::new()), renderer: None, runtime: Arc::new(Runtime(root)),
-            idempotency: Arc::new(idempotency::IdempotencyCache::new()), event_bus: event_bus::EventBus::new(), sync_bridge: sync_bridge::SyncBridge::new(),
-            desktop_messages_bridge: desktop_messages_bridge::DesktopMessagesBridge::new(), desktop_writes_bridge: desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry: sync_registry::SyncTableRegistry::with_defaults(), rate_limiter: rate_limit::RateLimiter::with_defaults(), push_tokens: push::PushTokenRegistry::new(),
+            secret: parking_lot::RwLock::new(vec![0; 32]),
+            deny_list: Arc::new(deny_list::DenyList::new()),
+            renderer: None,
+            runtime: Arc::new(Runtime(root)),
+            idempotency: Arc::new(idempotency::IdempotencyCache::new()),
+            event_bus: event_bus::EventBus::new(),
+            sync_bridge: sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge: desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge: desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry: sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: rate_limit::RateLimiter::with_defaults(),
+            push_tokens: push::PushTokenRegistry::new(),
         })
     }
 
     #[tokio::test]
     async fn p4_service_dispatch_stamps_persists_after_success_and_kills_on_store_failure() {
-        use cognia_external_agent::spawn_authority::{with_execution_admission, ExecutionAdmission, PlacementBinding};
+        use cognia_external_agent::spawn_authority::{
+            with_execution_admission, ExecutionAdmission, PlacementBinding,
+        };
         use std::sync::Arc;
         let temp = tempfile::tempdir().unwrap();
         let workspace_root = temp.path().join("workspaces");
-        let workspace = workspace_root.join("project-a"); std::fs::create_dir_all(&workspace).unwrap();
+        let workspace = workspace_root.join("project-a");
+        std::fs::create_dir_all(&workspace).unwrap();
         let backend = Arc::new(BoundBackend::default());
         let mut host = crate::headless::HeadlessServices::stub_for_tests();
         let services = Arc::get_mut(&mut host).unwrap();
-        services.exec = backend.clone(); services.spawn_policy = cognia_external_agent::presets::SpawnPolicy::new(workspace_root.clone(), false);
+        services.exec = backend.clone();
+        services.spawn_policy =
+            cognia_external_agent::presets::SpawnPolicy::new(workspace_root.clone(), false);
         let state = bound_state(temp.path().join("data"));
-        let decision = ExecutionAdmission { binding: PlacementBinding { org_id: "org_a".into(), workspace_id: "w".into(), actor_user_id: "usr_a".into(), run_id: "host-run".into() }, actions: vec!["execution.request".into(), "workspace.read".into(), "host.global-surfaces".into()] };
+        let decision = ExecutionAdmission {
+            binding: PlacementBinding {
+                org_id: "org_a".into(),
+                workspace_id: "w".into(),
+                actor_user_id: "usr_a".into(),
+                run_id: "host-run".into(),
+            },
+            actions: vec![
+                "execution.request".into(),
+                "workspace.read".into(),
+                "host.global-surfaces".into(),
+            ],
+        };
         let args = |id: &str| serde_json::json!({"workspaceId":"w", "config":{"id":id, "command":"codex-acp", "cwd":workspace.to_string_lossy(), "sandbox":{"kind":"container", "spec":{}, "isolationMandatory":false}}});
         for channel in ["OPENCODE_CONFIG_CONTENT", "COGNIA_DEVIN_MCP_SERVERS"] {
-            let mut injection = args("injected"); injection["config"]["env"] = serde_json::json!({(channel):r#"{"provider":{"options":{"apiKey":"fixture"}}}"#});
-            let error = with_execution_admission(Some(decision.clone()), dispatch("spawn_external_agent", injection, &state, &host, "device-a", Some("tenant"), Some("device"))).await.unwrap_err();
-            assert_eq!(error.0, StatusCode::FORBIDDEN); assert_eq!(error.1.code, "credential_use_forbidden");
+            let mut injection = args("injected");
+            injection["config"]["env"] =
+                serde_json::json!({(channel):r#"{"provider":{"options":{"apiKey":"fixture"}}}"#});
+            let error = with_execution_admission(
+                Some(decision.clone()),
+                dispatch(
+                    "spawn_external_agent",
+                    injection,
+                    &state,
+                    &host,
+                    "device-a",
+                    Some("tenant"),
+                    Some("device"),
+                ),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.0, StatusCode::FORBIDDEN);
+            assert_eq!(error.1.code, "credential_use_forbidden");
         }
-        let output = with_execution_admission(Some(decision.clone()), dispatch("spawn_external_agent", args("agent"), &state, &host, "device-a", Some("tenant"), Some("device"))).await.unwrap();
+        let output = with_execution_admission(
+            Some(decision.clone()),
+            dispatch(
+                "spawn_external_agent",
+                args("agent"),
+                &state,
+                &host,
+                "device-a",
+                Some("tenant"),
+                Some("device"),
+            ),
+        )
+        .await
+        .unwrap();
         assert_eq!(output, "agent");
-        assert_eq!(backend.agents.lock()["agent"].sandbox.as_ref().unwrap().binding(), Some(&decision.binding));
-        let ledger: Value = serde_json::from_slice(&std::fs::read(temp.path().join("data/companion/execution-bindings.json")).unwrap()).unwrap();
-        assert_eq!(ledger["external-agent:agent"], serde_json::json!(decision.binding));
-        let status = with_execution_admission(Some(decision.clone()), dispatch("get_external_agent_status", serde_json::json!({"agentId":"agent", "workspaceId":"forged"}), &state, &host, "device-b", Some("tenant"), Some("device"))).await.unwrap();
+        assert_eq!(
+            backend.agents.lock()["agent"]
+                .sandbox
+                .as_ref()
+                .unwrap()
+                .binding(),
+            Some(&decision.binding)
+        );
+        let ledger: Value = serde_json::from_slice(
+            &std::fs::read(temp.path().join("data/companion/execution-bindings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            ledger["external-agent:agent"],
+            serde_json::json!(decision.binding)
+        );
+        let status = with_execution_admission(
+            Some(decision.clone()),
+            dispatch(
+                "get_external_agent_status",
+                serde_json::json!({"agentId":"agent", "workspaceId":"forged"}),
+                &state,
+                &host,
+                "device-b",
+                Some("tenant"),
+                Some("device"),
+            ),
+        )
+        .await
+        .unwrap();
         assert_eq!(status, "Running");
-        backend.writable_mount.store(true, std::sync::atomic::Ordering::SeqCst);
-        let error = with_execution_admission(Some(decision.clone()), dispatch("get_external_agent_status", serde_json::json!({"agentId":"agent"}), &state, &host, "device-b", Some("tenant"), Some("device"))).await.unwrap_err();
-        assert_eq!(error.1.code, "workspace_mount_forbidden", "a read-only caller cannot reuse a writable container");
-        backend.writable_mount.store(false, std::sync::atomic::Ordering::SeqCst);
-        let foreign = workspace_root.join("project-b"); std::fs::create_dir_all(&foreign).unwrap();
-        let mut forged = args("foreign"); forged["config"]["cwd"] = serde_json::json!(foreign.to_string_lossy());
-        let mut member = decision.clone(); member.actions.retain(|action| action != "host.global-surfaces");
-        let error = with_execution_admission(Some(member), dispatch("spawn_external_agent", forged, &state, &host, "device-a", Some("tenant"), Some("device"))).await.unwrap_err();
+        backend
+            .writable_mount
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let error = with_execution_admission(
+            Some(decision.clone()),
+            dispatch(
+                "get_external_agent_status",
+                serde_json::json!({"agentId":"agent"}),
+                &state,
+                &host,
+                "device-b",
+                Some("tenant"),
+                Some("device"),
+            ),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.1.code, "workspace_mount_forbidden",
+            "a read-only caller cannot reuse a writable container"
+        );
+        backend
+            .writable_mount
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        let foreign = workspace_root.join("project-b");
+        std::fs::create_dir_all(&foreign).unwrap();
+        let mut forged = args("foreign");
+        forged["config"]["cwd"] = serde_json::json!(foreign.to_string_lossy());
+        let mut member = decision.clone();
+        member
+            .actions
+            .retain(|action| action != "host.global-surfaces");
+        let error = with_execution_admission(
+            Some(member),
+            dispatch(
+                "spawn_external_agent",
+                forged,
+                &state,
+                &host,
+                "device-a",
+                Some("tenant"),
+                Some("device"),
+            ),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error.1.code, "workspace_mount_forbidden");
         assert!(!backend.agents.lock().contains_key("foreign"));
-        assert!(with_execution_admission(Some(decision.clone()), dispatch("spawn_external_agent", args("failed"), &state, &host, "device-a", Some("tenant"), Some("device"))).await.is_err());
-        let ledger: Value = serde_json::from_slice(&std::fs::read(temp.path().join("data/companion/execution-bindings.json")).unwrap()).unwrap();
+        assert!(with_execution_admission(
+            Some(decision.clone()),
+            dispatch(
+                "spawn_external_agent",
+                args("failed"),
+                &state,
+                &host,
+                "device-a",
+                Some("tenant"),
+                Some("device")
+            )
+        )
+        .await
+        .is_err());
+        let ledger: Value = serde_json::from_slice(
+            &std::fs::read(temp.path().join("data/companion/execution-bindings.json")).unwrap(),
+        )
+        .unwrap();
         assert!(ledger.get("external-agent:failed").is_none());
         let blocked = temp.path().join("blocked");
         *backend.fail_store.lock() = Some(blocked.clone());
         let blocked_state = bound_state(blocked);
-        let error = with_execution_admission(Some(decision), dispatch("spawn_external_agent", args("cleanup"), &blocked_state, &host, "device-a", Some("tenant"), Some("device"))).await.unwrap_err();
+        let error = with_execution_admission(
+            Some(decision),
+            dispatch(
+                "spawn_external_agent",
+                args("cleanup"),
+                &blocked_state,
+                &host,
+                "device-a",
+                Some("tenant"),
+                Some("device"),
+            ),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error.1.code, "execution_binding_store_unavailable");
         assert!(backend.killed.lock().contains(&"cleanup".to_string()));
         assert!(!backend.agents.lock().contains_key("cleanup"));
     }
 
     #[tokio::test]
-    async fn p4_review_kill_exit_early_exit_and_orphan_reaping_remove_only_the_matching_generation() {
-        use cognia_external_agent::spawn_authority::{with_execution_admission, ExecutionAdmission, PlacementBinding};
+    async fn p4_review_kill_exit_early_exit_and_orphan_reaping_remove_only_the_matching_generation()
+    {
+        use cognia_external_agent::spawn_authority::{
+            with_execution_admission, ExecutionAdmission, PlacementBinding,
+        };
         use std::sync::Arc;
-        let temp = tempfile::tempdir().unwrap(); let base = temp.path().join("workspaces");
-        let workspace = base.join("project"); std::fs::create_dir_all(&workspace).unwrap();
-        let backend = Arc::new(BoundBackend::default()); let mut host = crate::headless::HeadlessServices::stub_for_tests();
-        let services = Arc::get_mut(&mut host).unwrap(); services.exec = backend.clone();
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().join("workspaces");
+        let workspace = base.join("project");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let backend = Arc::new(BoundBackend::default());
+        let mut host = crate::headless::HeadlessServices::stub_for_tests();
+        let services = Arc::get_mut(&mut host).unwrap();
+        services.exec = backend.clone();
         services.spawn_policy = cognia_external_agent::presets::SpawnPolicy::new(base, false);
-        let directory = temp.path().join("data"); let state = bound_state(directory.clone());
-        let first = ExecutionAdmission { binding: PlacementBinding { org_id: "org_a".into(), workspace_id: "w".into(), actor_user_id: "usr_a".into(), run_id: "generation-1".into() }, actions: vec!["execution.request".into(), "workspace.read".into(), "host.global-surfaces".into()] };
+        let directory = temp.path().join("data");
+        let state = bound_state(directory.clone());
+        let first = ExecutionAdmission {
+            binding: PlacementBinding {
+                org_id: "org_a".into(),
+                workspace_id: "w".into(),
+                actor_user_id: "usr_a".into(),
+                run_id: "generation-1".into(),
+            },
+            actions: vec![
+                "execution.request".into(),
+                "workspace.read".into(),
+                "host.global-surfaces".into(),
+            ],
+        };
         let args = |id: &str| serde_json::json!({"workspaceId":"w", "config":{"id":id,"command":"codex-acp","cwd":workspace.to_string_lossy(),"sandbox":{"kind":"container","spec":{},"isolationMandatory":false}}});
-        let ledger = || -> Value { serde_json::from_slice(&std::fs::read(directory.join("companion/execution-bindings.json")).unwrap()).unwrap() };
-        with_execution_admission(Some(first.clone()), dispatch("spawn_external_agent", args("same"), &state, &host, "device", Some("tenant"), Some("device"))).await.unwrap();
+        let ledger = || -> Value {
+            serde_json::from_slice(
+                &std::fs::read(directory.join("companion/execution-bindings.json")).unwrap(),
+            )
+            .unwrap()
+        };
+        with_execution_admission(
+            Some(first.clone()),
+            dispatch(
+                "spawn_external_agent",
+                args("same"),
+                &state,
+                &host,
+                "device",
+                Some("tenant"),
+                Some("device"),
+            ),
+        )
+        .await
+        .unwrap();
         let old_sink = backend.sinks.lock().get("same").unwrap().clone();
-        backend.fail_kill.store(true, std::sync::atomic::Ordering::SeqCst);
-        assert!(with_execution_admission(Some(first.clone()), dispatch("kill_external_agent", serde_json::json!({"agentId":"same"}), &state, &host, "device", Some("tenant"), Some("device"))).await.is_err());
-        assert_eq!(ledger()["external-agent:same"]["runId"], "generation-1", "failed kill keeps its binding");
-        with_execution_admission(Some(first.clone()), dispatch("kill_external_agent", serde_json::json!({"agentId":"same"}), &state, &host, "device", Some("tenant"), Some("device"))).await.unwrap();
+        backend
+            .fail_kill
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(with_execution_admission(
+            Some(first.clone()),
+            dispatch(
+                "kill_external_agent",
+                serde_json::json!({"agentId":"same"}),
+                &state,
+                &host,
+                "device",
+                Some("tenant"),
+                Some("device")
+            )
+        )
+        .await
+        .is_err());
+        assert_eq!(
+            ledger()["external-agent:same"]["runId"],
+            "generation-1",
+            "failed kill keeps its binding"
+        );
+        with_execution_admission(
+            Some(first.clone()),
+            dispatch(
+                "kill_external_agent",
+                serde_json::json!({"agentId":"same"}),
+                &state,
+                &host,
+                "device",
+                Some("tenant"),
+                Some("device"),
+            ),
+        )
+        .await
+        .unwrap();
         assert!(ledger().get("external-agent:same").is_none());
-        let mut second = first.clone(); second.binding.run_id = "generation-2".into();
-        with_execution_admission(Some(second.clone()), dispatch("spawn_external_agent", args("same"), &state, &host, "device", Some("tenant"), Some("device"))).await.unwrap();
+        let mut second = first.clone();
+        second.binding.run_id = "generation-2".into();
+        with_execution_admission(
+            Some(second.clone()),
+            dispatch(
+                "spawn_external_agent",
+                args("same"),
+                &state,
+                &host,
+                "device",
+                Some("tenant"),
+                Some("device"),
+            ),
+        )
+        .await
+        .unwrap();
         old_sink.exited("same", Some(0), None);
         // Wait for an explicitly queued blocking barrier, then inspect the
         // generation comparison directly as well (worker ordering is free).
         tokio::task::spawn_blocking(|| ()).await.unwrap();
         assert_eq!(ledger()["external-agent:same"]["runId"], "generation-2");
-        cognia_companion::host_surface_gate::forget_execution_record(&directory, "spawn_external_agent", "same", &first.binding).unwrap();
+        cognia_companion::host_surface_gate::forget_execution_record(
+            &directory,
+            "spawn_external_agent",
+            "same",
+            &first.binding,
+        )
+        .unwrap();
         assert_eq!(ledger()["external-agent:same"]["runId"], "generation-2");
-        let sink = backend.sinks.lock().get("same").unwrap().clone(); backend.agents.lock().remove("same");
+        let sink = backend.sinks.lock().get("same").unwrap().clone();
+        backend.agents.lock().remove("same");
         sink.exited("same", Some(0), None);
-        tokio::time::timeout(std::time::Duration::from_secs(2), async { while ledger().get("external-agent:same").is_some() { tokio::task::yield_now().await; } }).await.unwrap();
-        with_execution_admission(Some(first.clone()), dispatch("spawn_external_agent", args("orphan"), &state, &host, "device", Some("tenant"), Some("device"))).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while ledger().get("external-agent:same").is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        with_execution_admission(
+            Some(first.clone()),
+            dispatch(
+                "spawn_external_agent",
+                args("orphan"),
+                &state,
+                &host,
+                "device",
+                Some("tenant"),
+                Some("device"),
+            ),
+        )
+        .await
+        .unwrap();
         backend.agents.lock().remove("orphan"); // Reaped by a restarted backend, no exit callback survives.
-        cognia_companion::host_surface_gate::prune_execution_records(directory.clone(), backend.clone()).await.unwrap();
+        cognia_companion::host_surface_gate::prune_execution_records(
+            directory.clone(),
+            backend.clone(),
+        )
+        .await
+        .unwrap();
         assert!(ledger().get("external-agent:orphan").is_none());
-        with_execution_admission(Some(first.clone()), dispatch("spawn_external_agent", args("early"), &state, &host, "device", Some("tenant"), Some("device"))).await.unwrap();
-        assert!(ledger().get("external-agent:early").is_none(), "an exit before create persistence cannot leave a row");
-        with_execution_admission(Some(first.clone()), dispatch("spawn_external_agent", args("unknown"), &state, &host, "device", Some("tenant"), Some("device"))).await.unwrap();
+        with_execution_admission(
+            Some(first.clone()),
+            dispatch(
+                "spawn_external_agent",
+                args("early"),
+                &state,
+                &host,
+                "device",
+                Some("tenant"),
+                Some("device"),
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(
+            ledger().get("external-agent:early").is_none(),
+            "an exit before create persistence cannot leave a row"
+        );
+        with_execution_admission(
+            Some(first.clone()),
+            dispatch(
+                "spawn_external_agent",
+                args("unknown"),
+                &state,
+                &host,
+                "device",
+                Some("tenant"),
+                Some("device"),
+            ),
+        )
+        .await
+        .unwrap();
         backend.agents.lock().remove("unknown");
-        let error = with_execution_admission(Some(first.clone()), dispatch("get_external_agent_status", serde_json::json!({"agentId":"unknown","workspaceId":"forged"}), &state, &host, "device", Some("tenant"), Some("device"))).await.unwrap_err();
-        assert_eq!(error.1.code, "workspace_unresolved"); assert!(ledger().get("external-agent:unknown").is_none());
-        with_execution_admission(Some(first.clone()), dispatch("spawn_external_agent", args("race"), &state, &host, "device", Some("tenant"), Some("device"))).await.unwrap();
-        backend.pause_send.store(true, std::sync::atomic::Ordering::SeqCst);
+        let error = with_execution_admission(
+            Some(first.clone()),
+            dispatch(
+                "get_external_agent_status",
+                serde_json::json!({"agentId":"unknown","workspaceId":"forged"}),
+                &state,
+                &host,
+                "device",
+                Some("tenant"),
+                Some("device"),
+            ),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.1.code, "workspace_unresolved");
+        assert!(ledger().get("external-agent:unknown").is_none());
+        with_execution_admission(
+            Some(first.clone()),
+            dispatch(
+                "spawn_external_agent",
+                args("race"),
+                &state,
+                &host,
+                "device",
+                Some("tenant"),
+                Some("device"),
+            ),
+        )
+        .await
+        .unwrap();
+        backend
+            .pause_send
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         let sending = {
-            let state = state.clone(); let host = host.clone(); let first = first.clone();
-            tokio::spawn(async move { with_execution_admission(Some(first), dispatch("send_to_external_agent", serde_json::json!({"agentId":"race","message":"old generation"}), &state, &host, "device", Some("tenant"), Some("device"))).await })
+            let state = state.clone();
+            let host = host.clone();
+            let first = first.clone();
+            tokio::spawn(async move {
+                with_execution_admission(
+                    Some(first),
+                    dispatch(
+                        "send_to_external_agent",
+                        serde_json::json!({"agentId":"race","message":"old generation"}),
+                        &state,
+                        &host,
+                        "device",
+                        Some("tenant"),
+                        Some("device"),
+                    ),
+                )
+                .await
+            })
         };
         backend.send_started.notified().await;
         backend.agents.lock().remove("race");
-        backend.sinks.lock().get("race").unwrap().exited("race", Some(0), None);
-        tokio::time::timeout(std::time::Duration::from_secs(2), async { while ledger().get("external-agent:race").is_some() { tokio::task::yield_now().await; } }).await.unwrap();
-        let mut replacement = first; replacement.binding.actor_user_id = "usr_b".into(); replacement.binding.run_id = "new-actor-generation".into();
+        backend
+            .sinks
+            .lock()
+            .get("race")
+            .unwrap()
+            .exited("race", Some(0), None);
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while ledger().get("external-agent:race").is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let mut replacement = first;
+        replacement.binding.actor_user_id = "usr_b".into();
+        replacement.binding.run_id = "new-actor-generation".into();
         let mut creating = {
-            let state = state.clone(); let host = host.clone(); let args = args("race");
-            tokio::spawn(async move { with_execution_admission(Some(replacement), dispatch("spawn_external_agent", args, &state, &host, "device-b", Some("tenant"), Some("device"))).await })
+            let state = state.clone();
+            let host = host.clone();
+            let args = args("race");
+            tokio::spawn(async move {
+                with_execution_admission(
+                    Some(replacement),
+                    dispatch(
+                        "spawn_external_agent",
+                        args,
+                        &state,
+                        &host,
+                        "device-b",
+                        Some("tenant"),
+                        Some("device"),
+                    ),
+                )
+                .await
+            })
         };
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(25), &mut creating).await.is_err(), "replacement must wait for the old control operation");
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), &mut creating)
+                .await
+                .is_err(),
+            "replacement must wait for the old control operation"
+        );
         assert!(!backend.agents.lock().contains_key("race"));
-        backend.send_resume.notify_one(); sending.await.unwrap().unwrap(); creating.await.unwrap().unwrap();
-        assert_eq!(backend.agents.lock()["race"].sandbox.as_ref().unwrap().binding().unwrap().actor_user_id, "usr_b");
+        backend.send_resume.notify_one();
+        sending.await.unwrap().unwrap();
+        creating.await.unwrap().unwrap();
+        assert_eq!(
+            backend.agents.lock()["race"]
+                .sandbox
+                .as_ref()
+                .unwrap()
+                .binding()
+                .unwrap()
+                .actor_user_id,
+            "usr_b"
+        );
     }
 
     #[test]
     fn p4_execution_refusals_keep_their_status_code_and_are_not_retryable() {
-        for (code, status) in [("credential_use_forbidden", StatusCode::FORBIDDEN),
+        for (code, status) in [
+            ("credential_use_forbidden", StatusCode::FORBIDDEN),
             ("placement_binding_client_supplied", StatusCode::FORBIDDEN),
             ("workspace_root_unconfigured", StatusCode::FORBIDDEN),
             ("workspace_root_claimed", StatusCode::FORBIDDEN),
-            ("execution_binding_store_full", StatusCode::SERVICE_UNAVAILABLE),
-            ("execution_isolation_unavailable", StatusCode::SERVICE_UNAVAILABLE)] {
+            (
+                "execution_binding_store_full",
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (
+                "execution_isolation_unavailable",
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+        ] {
             let (actual, error) = tenant_execution_refusal(code);
             assert_eq!(actual, status);
             assert_eq!(error.code, code);
@@ -2371,12 +3097,32 @@ mod tests {
     #[test]
     fn p4_a_stale_record_cannot_authorize_a_legacy_or_replacement_process() {
         use cognia_external_agent::spawn_authority::PlacementBinding;
-        let binding = PlacementBinding { org_id: "org_a".into(), workspace_id: "w".into(), actor_user_id: "usr_a".into(), run_id: "run".into() };
-        assert!(!placement_matches_binding(&serde_json::json!({"id":"agent", "pid":42}), &binding));
-        assert!(!placement_matches_binding(&serde_json::json!({"placement":{"kind":"fallback", "binding":binding}}), &binding));
-        assert!(placement_matches_binding(&serde_json::json!({"placement":{"kind":"sandbox", "binding":binding}}), &binding));
-        let other = PlacementBinding { run_id: "replacement".into(), ..binding.clone() };
-        assert!(!placement_matches_binding(&serde_json::json!({"placement":{"kind":"sandbox", "binding":other}}), &binding));
+        let binding = PlacementBinding {
+            org_id: "org_a".into(),
+            workspace_id: "w".into(),
+            actor_user_id: "usr_a".into(),
+            run_id: "run".into(),
+        };
+        assert!(!placement_matches_binding(
+            &serde_json::json!({"id":"agent", "pid":42}),
+            &binding
+        ));
+        assert!(!placement_matches_binding(
+            &serde_json::json!({"placement":{"kind":"fallback", "binding":binding}}),
+            &binding
+        ));
+        assert!(placement_matches_binding(
+            &serde_json::json!({"placement":{"kind":"sandbox", "binding":binding}}),
+            &binding
+        ));
+        let other = PlacementBinding {
+            run_id: "replacement".into(),
+            ..binding.clone()
+        };
+        assert!(!placement_matches_binding(
+            &serde_json::json!({"placement":{"kind":"sandbox", "binding":other}}),
+            &binding
+        ));
     }
 
     #[test]

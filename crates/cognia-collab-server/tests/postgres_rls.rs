@@ -1282,6 +1282,118 @@ fn bootstrap(suffix: &str) -> OperatorBootstrap {
 }
 
 #[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance with role creation privileges"]
+async fn device_person_resolution_preserves_rls_exact_links_and_host_org_scope() {
+    use axum::{
+        body::{to_bytes, Body},
+        http::{Request, StatusCode},
+    };
+    use cognia_collab_server::{router, AppState};
+    use cognia_tenant_auth::{grant::GrantSigner, oidc::TestAuthenticator};
+    use sha2::Digest;
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    let database = TestDatabase::create().await;
+    let admin = PgStore::connect_admin(&database.url, 2).await.unwrap();
+    let owner = bootstrap("device_person_a");
+    let mut other = bootstrap("device_person_b");
+    other.user_id = owner.user_id.clone();
+    admin.bootstrap_operator(&owner).await.unwrap();
+    admin.bootstrap_operator(&other).await.unwrap();
+    let role = format!("identity_app_{}", uuid::Uuid::new_v4().simple());
+    let app_url = format!(
+        "{}&user={role}&password=identity-test-password",
+        database.url
+    );
+    let store = PgStore::connect_with_options(
+        &app_url,
+        2,
+        PgConnectOptions {
+            migration_database_url: Some(&database.url),
+            app_db_role: Some(&role),
+            app_db_password: Some("identity-test-password"),
+            ..PgConnectOptions::default()
+        },
+    )
+    .await
+    .unwrap();
+    let hash = hex::encode(sha2::Sha256::digest(b"host-identity-test"));
+    let mut state = AppState::new(
+        Arc::new(store),
+        GrantSigner::new(&[9; 32]).unwrap(),
+        Arc::new(TestAuthenticator),
+    );
+    assert!(!state.account_control.enabled);
+    state.internal_service_credential_sha256 = Some(hash.clone());
+    state.internal_service_credential_scopes = Some(std::collections::HashMap::from([(
+        hash,
+        vec![owner.org_id.clone()],
+    )]));
+    let app = router(state);
+    for (organization, subject, credential, expected, code) in [
+        (
+            &owner.logto_organization_id,
+            &owner.identity_subject,
+            "host-identity-test",
+            StatusCode::OK,
+            None,
+        ),
+        (
+            &other.logto_organization_id,
+            &owner.identity_subject,
+            "host-identity-test",
+            StatusCode::FORBIDDEN,
+            Some("oidc_identity_unlinked"),
+        ),
+        (
+            &other.logto_organization_id,
+            &other.identity_subject,
+            "host-identity-test",
+            StatusCode::FORBIDDEN,
+            Some("host_service_credential_scope"),
+        ),
+        (
+            &owner.logto_organization_id,
+            &owner.identity_subject,
+            "wrong-host",
+            StatusCode::UNAUTHORIZED,
+            Some("host_service_credential_invalid"),
+        ),
+    ] {
+        let token = format!("{organization}:collab:read@{subject}");
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/internal/v1/device-person")
+                    .header("authorization", format!("Bearer {credential}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"accessToken":token}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 8192).await.unwrap()).unwrap();
+        assert_eq!(status, expected, "{body}");
+        if let Some(code) = code {
+            assert_eq!(body["code"], code);
+        } else {
+            assert_eq!(body["userId"], owner.user_id);
+            assert_eq!(body["orgId"], owner.org_id);
+            assert!(body.get("grant").is_none());
+        }
+    }
+    drop((app, admin));
+    database.cleanup_with_role(Some(&role)).await;
+}
+
+#[tokio::test]
 #[ignore = "requires an isolated PostgreSQL instance"]
 async fn session_files_flow_through_postgres_under_rls() {
     use cognia_collab_server::chat::{SessionRole, SessionStatus};

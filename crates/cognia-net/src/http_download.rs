@@ -16,6 +16,32 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
+/// Read raw bytes with a declared-size precheck and an actual per-chunk cap.
+/// Cancellation/total deadlines belong to the caller enclosing this future.
+pub async fn read_bounded_response(
+    response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, String> {
+    use futures_util::StreamExt as _;
+    if max_bytes == 0
+        || response
+            .content_length()
+            .is_some_and(|n| n > max_bytes as u64)
+    {
+        return Err("download_body_too_large".into());
+    }
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| "download_body_failed".to_string())?;
+        if chunk.len() > max_bytes.saturating_sub(body.len()) {
+            return Err("download_body_too_large".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
 /// What a completed download produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadOutcome {
@@ -114,6 +140,40 @@ mod tests {
     use std::net::SocketAddr;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn bounded_response_preserves_binary_and_enforces_declared_and_stream_caps() {
+        crate::proxy_config::ensure_crypto_provider();
+        let bytes = vec![0, 255, 128, b'P', b'K', 3, 4];
+        let mut response =
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", bytes.len()).into_bytes();
+        response.extend_from_slice(&bytes);
+        let addr = serve_once(response).await;
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let response = client.get(format!("http://{addr}/")).send().await.unwrap();
+        assert_eq!(
+            read_bounded_response(response, bytes.len()).await.unwrap(),
+            bytes
+        );
+
+        let addr = serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n".to_vec()).await;
+        let response = client.get(format!("http://{addr}/")).send().await.unwrap();
+        assert_eq!(
+            read_bounded_response(response, 4).await.unwrap_err(),
+            "download_body_too_large"
+        );
+
+        let addr = serve_once(
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nabcde\r\n0\r\n\r\n"
+                .to_vec(),
+        )
+        .await;
+        let response = client.get(format!("http://{addr}/")).send().await.unwrap();
+        assert_eq!(
+            read_bounded_response(response, 4).await.unwrap_err(),
+            "download_body_too_large"
+        );
+    }
 
     /// SHA-256 of `b"hello"`.
     const HELLO_SHA256: &str = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";

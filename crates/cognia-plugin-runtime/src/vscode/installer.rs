@@ -233,6 +233,9 @@ fn unpack_extension<R: Read + std::io::Seek>(
         let mut entry = archive
             .by_index(i)
             .map_err(|e| InstallError::InvalidZip(format!("entry {i}: {e}")))?;
+        let entry_name = entry
+            .name()
+            .map_err(|e| InstallError::InvalidZip(format!("entry {i} name: {e}")))?;
 
         if entry
             .unix_mode()
@@ -240,7 +243,7 @@ fn unpack_extension<R: Read + std::io::Seek>(
         {
             return Err(InstallError::UnsafeEntryPath(format!(
                 "{} (symbolic link)",
-                entry.name()
+                entry_name
             )));
         }
 
@@ -249,7 +252,7 @@ fn unpack_extension<R: Read + std::io::Seek>(
         // `extension//etc/passwd` — `rel` became `/etc/passwd`, and
         // `Path::join` *replaces* the base when given an absolute path.
         let Some(entry_path) = entry.enclosed_name() else {
-            return Err(InstallError::UnsafeEntryPath(entry.name().to_string()));
+            return Err(InstallError::UnsafeEntryPath(entry_name.into_owned()));
         };
         let Ok(rel) = entry_path.strip_prefix(EXTENSION_DIR) else {
             continue; // `[Content_Types].xml`, `extension.vsixmanifest`, …

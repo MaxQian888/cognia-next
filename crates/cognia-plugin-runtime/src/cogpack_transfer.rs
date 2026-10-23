@@ -452,6 +452,9 @@ pub fn install_transfer(
         let entry = archive
             .by_index(index)
             .map_err(|error| format!("cogpack_archive_invalid: {error}"))?;
+        let entry_name = entry
+            .name()
+            .map_err(|error| format!("cogpack_archive_invalid: entry name: {error}"))?;
         if entry.enclosed_name().is_none()
             || entry
                 .unix_mode()
@@ -459,16 +462,16 @@ pub fn install_transfer(
         {
             return Err(format!(
                 "cogpack_archive_invalid: unsafe entry {}",
-                entry.name()
+                entry_name
             ));
         }
         if entry.is_dir() {
             continue;
         }
-        if !known.contains(entry.name()) {
+        if !known.contains(entry_name.as_ref()) {
             return Err(format!(
                 "cogpack_archive_invalid: {} is not declared by the manifest",
-                entry.name()
+                entry_name
             ));
         }
     }

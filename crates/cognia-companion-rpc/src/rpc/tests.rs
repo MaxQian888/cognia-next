@@ -1463,6 +1463,7 @@ fn service_only_commands_are_known_and_not_control_gated() {
         // `connector_keyring_arms_are_step_up_not_service_only`.
         "connectors_health",
         "connectors_http_request",
+        "connectors_google_docs_auth",
         "connectors_ws_open",
         "connectors_ws_send",
         "connectors_ws_close",
@@ -5548,4 +5549,27 @@ fn goal_lifecycle_commands_are_bridged_and_control_gated_like_goal_pause() {
     assert!(data_sync::COMMANDS.contains(&read));
     assert!(READ_ONLY_COMMANDS_SET.contains(read));
     assert!(!is_control_command(read), "a catalog read is not remote control");
+}
+
+#[test]
+fn google_docs_auth_is_registered_as_internal_service_state() {
+    let descriptor = cognia_companion::command_manifest::descriptor("connectors_google_docs_auth");
+    assert!(descriptor.is_some(), "generated admission table must include Google auth");
+    assert!(is_service_only_command("connectors_google_docs_auth"));
+    assert!(super::service_plane::COMMANDS.contains(&"connectors_google_docs_auth"));
+}
+
+#[tokio::test]
+async fn google_docs_auth_service_dispatch_emits_a_signal_without_secret_payload() {
+    let state = test_state();
+    let host = headless_host();
+    let before = dispatch("connectors_google_docs_auth", json!({"input":{"action":"snapshot"}}), &state, &host, "brain-local", Some(ACCOUNT_ID), Some("service")).await.expect("actual host snapshot");
+    assert!(before.is_object());
+    assert_eq!(before["state"]["version"], 1);
+    let refused = dispatch("connectors_google_docs_auth", json!({"input":{"action":"claim","state":"google:deliberate-mismatch","now":0}}), &state, &host, "brain-local", Some(ACCOUNT_ID), Some("service")).await;
+    assert!(refused.is_err());
+    let cognia_companion::event_bus::SubscribeResult::Ok { replay, .. } = host.event_bus.subscribe(Some(0), 0) else { panic!("signal retained") };
+    let signals: Vec<_> = replay.iter().filter(|event| event.event_type == "google-docs-connection-changed").collect();
+    assert_eq!(signals.len(), 1);
+    assert_eq!(signals[0].payload, Value::Null);
 }

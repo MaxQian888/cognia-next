@@ -644,15 +644,21 @@ pub(crate) async fn replace_device_capabilities_handler(
     body: Result<Json<ReplaceCapabilitiesRequest>, JsonRejection>,
 ) -> ApiResult<ReplaceCapabilitiesResponse> {
     let request = parse_public_json(body)?;
-    let capabilities = store()?
-        .replace_device_capabilities(
-            &context.tenant_id,
-            &context.device_id,
-            &device_id,
-            &request.capabilities,
-            unix_time_secs(),
-        )
-        .map_err(store_error)?;
+    let capabilities = super::ws_browser_companion::update_device_authorization(
+        &context.tenant_id,
+        &device_id,
+        || {
+            store()?
+                .replace_device_capabilities(
+                    &context.tenant_id,
+                    &context.device_id,
+                    &device_id,
+                    &request.capabilities,
+                    unix_time_secs(),
+                )
+                .map_err(store_error)
+        },
+    )?;
     Ok(Json(ReplaceCapabilitiesResponse {
         device_id,
         capabilities,
@@ -1729,6 +1735,19 @@ async fn register_handler(
         }
         (false, None) => None,
     };
+    let person = if authority.requires_invitation {
+        None
+    } else {
+        Some(
+            super::workspace_access::resolve_oidc_device_person(
+                bearer_token(&headers)?,
+                &authority.tenant_id,
+                &authority.actor_id,
+            )
+            .await
+            .map_err(registration_identity_error)?,
+        )
+    };
     let signaling = provision_signaling(&request.device_id, &request.signaling_public_key)?;
     let registration_result = if authority.requires_invitation {
         security.register_owner_device(
@@ -1746,6 +1765,9 @@ async fn register_handler(
         security.register_oidc_device(
             &authority.tenant_id,
             &authority.actor_id,
+            person
+                .as_ref()
+                .expect("OIDC identity resolved before registration"),
             &request.challenge_id,
             &request.challenge_nonce,
             &request.device_id,
@@ -2528,6 +2550,23 @@ struct RegistrationAuthority {
     requires_invitation: bool,
 }
 
+fn registration_identity_error(error: super::workspace_access::WorkspaceAccessError) -> Problem {
+    use super::workspace_access::WorkspaceAccessError;
+    if matches!(error, WorkspaceAccessError::IdentityUnlinked) {
+        api_error(
+            StatusCode::FORBIDDEN,
+            "oidc_identity_unlinked",
+            "the authenticated person is not linked to this organization",
+        )
+    } else {
+        api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "host_identity_unavailable",
+            "the configured collaboration service could not verify this device's person",
+        )
+    }
+}
+
 async fn registration_authority(
     headers: &HeaderMap,
     requested_tenant: Option<&str>,
@@ -2553,10 +2592,13 @@ async fn registration_authority(
                         "the identity provider could not authenticate this request",
                     )
                 })?;
-            let tenant = claims
-                .organization_id
-                .clone()
-                .unwrap_or_else(|| claims.sub.clone());
+            let tenant = claims.organization_id.clone().ok_or_else(|| {
+                api_error(
+                    StatusCode::FORBIDDEN,
+                    "oidc_organization_required",
+                    "device registration requires an organization-scoped access token",
+                )
+            })?;
             if requested_tenant.is_some_and(|requested| requested != tenant) {
                 return Err(api_error(
                     StatusCode::FORBIDDEN,
@@ -2701,6 +2743,16 @@ mod tests {
     use super::*;
     use parking_lot::RwLock;
     use std::sync::Arc;
+
+    #[test]
+    fn device_registration_distinguishes_unlinked_identity_from_authority_outage() {
+        use super::super::workspace_access::WorkspaceAccessError;
+        let unlinked = registration_identity_error(WorkspaceAccessError::IdentityUnlinked);
+        assert_eq!(unlinked.code, "oidc_identity_unlinked");
+        let unavailable = registration_identity_error(WorkspaceAccessError::NotConfigured);
+        assert_eq!(unavailable.code, "host_identity_unavailable");
+        assert_ne!(unlinked.status, unavailable.status);
+    }
 
     fn test_state() -> SharedState {
         Arc::new(super::super::CompanionState {

@@ -10740,6 +10740,95 @@
       "outputTyped": true
     },
     {
+      "name": "browser_recording_control",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "browser_recording_control (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browserSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "resume",
+              "stop",
+              "drain"
+            ]
+          }
+        },
+        "required": [
+          "browserSessionId",
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
+        "x-cognia-schema-owner": "browser"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "browser_recording_ref",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "browser_recording_ref (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browserSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "browserSessionId",
+          "selector"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "string"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "browser_reload",
       "category": "development",
       "resource": "browser",
@@ -18472,6 +18561,417 @@
       "outputTyped": true
     },
     {
+      "name": "connectors_google_docs_auth",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_google_docs_auth (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "const": "snapshot"
+                  }
+                },
+                "required": [
+                  "action"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "const": "begin"
+                  }
+                },
+                "required": [
+                  "action"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "const": "setPending"
+                  },
+                  "authorization": {
+                    "type": "string"
+                  },
+                  "pending": {
+                    "type": "object",
+                    "properties": {
+                      "state": {
+                        "type": "string"
+                      },
+                      "codeVerifier": {
+                        "type": "string"
+                      },
+                      "redirectUri": {
+                        "type": "string"
+                      },
+                      "ts": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "codeVerifier",
+                      "redirectUri",
+                      "ts"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "authorization",
+                  "pending"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "const": "claim"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "now": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "action",
+                  "state",
+                  "now"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "const": "commit"
+                  },
+                  "authorization": {
+                    "type": "string"
+                  },
+                  "tokens": {
+                    "type": "object",
+                    "properties": {
+                      "accessToken": {
+                        "type": "string"
+                      },
+                      "refreshToken": {
+                        "type": "string"
+                      },
+                      "expiresAt": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "scope": {
+                        "type": "string"
+                      },
+                      "tokenType": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "accessToken",
+                      "expiresAt"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "accountEmail": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "action",
+                  "authorization",
+                  "tokens"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "const": "refresh"
+                  },
+                  "connection": {
+                    "type": "string"
+                  },
+                  "tokens": {
+                    "type": "object",
+                    "properties": {
+                      "accessToken": {
+                        "type": "string"
+                      },
+                      "refreshToken": {
+                        "type": "string"
+                      },
+                      "expiresAt": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "scope": {
+                        "type": "string"
+                      },
+                      "tokenType": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "accessToken",
+                      "expiresAt"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "connection",
+                  "tokens"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "const": "invalidate"
+                  },
+                  "connection": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action",
+                  "connection"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "const": "disconnect"
+                  }
+                },
+                "required": [
+                  "action"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "const": 1
+              },
+              "connection": {
+                "type": "string"
+              },
+              "authorization": {
+                "type": "string"
+              },
+              "tokens": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "accessToken": {
+                        "type": "string"
+                      },
+                      "refreshToken": {
+                        "type": "string"
+                      },
+                      "expiresAt": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "scope": {
+                        "type": "string"
+                      },
+                      "tokenType": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "accessToken",
+                      "expiresAt"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "pending": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "state": {
+                        "type": "string"
+                      },
+                      "codeVerifier": {
+                        "type": "string"
+                      },
+                      "redirectUri": {
+                        "type": "string"
+                      },
+                      "ts": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "codeVerifier",
+                      "redirectUri",
+                      "ts"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "claimed": {
+                "type": "boolean"
+              },
+              "accountEmail": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "legacyMetadata": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "version",
+              "connection",
+              "authorization",
+              "tokens",
+              "pending",
+              "claimed",
+              "accountEmail",
+              "legacyMetadata"
+            ],
+            "additionalProperties": false
+          },
+          "pending": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string"
+                  },
+                  "codeVerifier": {
+                    "type": "string"
+                  },
+                  "redirectUri": {
+                    "type": "string"
+                  },
+                  "ts": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "state",
+                  "codeVerifier",
+                  "redirectUri",
+                  "ts"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "revoked": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "revoked"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state",
+          "pending",
+          "outcome"
+        ],
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "connectors_health",
       "category": "connectors",
       "resource": "connectors",
@@ -24233,6 +24733,11 @@
           "timeoutMs"
         ],
         "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Required for multi-tenant creation. Host admission resolves the actor; this field never supplies placement identity or permissions."
+          },
           "placement": {
             "type": "object",
             "description": "The task's runtime environment placement as the brain resolved it (prepareRunEnvironment). The spec is not described here: the host re-admits it against its own baseline, catalog and approvals and answers with a typed refusal code.",
@@ -72517,6 +73022,11 @@
           "config"
         ],
         "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Required for multi-tenant creation. Later agent commands resolve this scope from the immutable Host record."
+          },
           "config": {
             "type": "object",
             "required": [
@@ -100984,5 +101494,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "86f5dfdfc2b800717ca09efd7827efb5f0574c10427a7215bb319652f06218db"
+  "catalogHash": "b126827726772d9eb1fc39d87ad0dc7a368c29182e5850f10ceecf2662228f4e"
 }

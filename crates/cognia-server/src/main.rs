@@ -1076,6 +1076,11 @@ fn store_data_dir() -> PathBuf {
     data_dir()
 }
 
+/// Resolve the operator's local namespace independently of request tenant identity.
+fn configured_local_account_id(cli: Option<String>, environment: Option<String>) -> Option<String> {
+    cli.or(environment).filter(|id| !id.trim().is_empty())
+}
+
 /// Minimal stderr logger. Without an installed `log` backend every
 /// supervisor line — including the piped brain/sidecar output — is silently
 /// dropped, which makes a headless install undebuggable. `COGNIA_LOG`
@@ -1252,11 +1257,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let CliCommand::Service { command } = &cli.command {
         // The installed service serves the account named here, if any.
-        let local_account_id = cli
-            .local_account_id
-            .clone()
-            .or_else(|| std::env::var("COGNIA_LOCAL_ACCOUNT_ID").ok())
-            .filter(|id| !id.trim().is_empty());
+        let local_account_id = configured_local_account_id(
+            cli.local_account_id.clone(),
+            std::env::var("COGNIA_LOCAL_ACCOUNT_ID").ok(),
+        );
         return run_service_command(command, local_account_id)
             .await
             .map_err(Into::into);
@@ -1370,12 +1374,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // no-op-to-sentinel until this runs, so ordering it after
     // `install_security_store` and before the first command is what makes the
     // headless host serve a real account instead of the unclaimed bucket.
-    let local_account_id = cli
-        .local_account_id
-        .clone()
-        .or_else(|| std::env::var("COGNIA_LOCAL_ACCOUNT_ID").ok())
-        .filter(|id| !id.trim().is_empty())
-        .unwrap_or_else(|| HEADLESS_LOCAL_ACCOUNT_ID.to_string());
+    let local_account_id = configured_local_account_id(
+        cli.local_account_id.clone(),
+        std::env::var("COGNIA_LOCAL_ACCOUNT_ID").ok(),
+    )
+    .unwrap_or_else(|| HEADLESS_LOCAL_ACCOUNT_ID.to_string());
     if let Err(error) =
         cognia_companion::host_identity::bind_local_account_from_operator(&local_account_id)
     {
@@ -1456,6 +1459,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             run_serve(
                 &store,
                 &tls_material,
+                local_account_id,
                 port,
                 advertise_url,
                 bind_loopback,
@@ -2589,9 +2593,12 @@ fn configured_exec_backend(
     }
 }
 
+// Keep the validated boot context and existing independent Serve flags explicit.
+#[allow(clippy::too_many_arguments)]
 async fn run_serve(
     store: &std::sync::Arc<SqliteAppStore>,
     tls_material: &tls::TlsMaterial,
+    local_account_id: String,
     port: u16,
     advertise_url: Option<String>,
     bind_loopback: bool,
@@ -2864,9 +2871,6 @@ async fn run_serve(
         serde_json::to_string(&remote_browser)
             .unwrap_or_else(|error| format!("{{\"serializationError\":\"{error}\"}}"))
     );
-    let local_account_id = cognia_companion::host_identity::current()
-        .map(|context| context.local_account_namespace)
-        .map_err(|error| format!("resolve headless local account: {error}"))?;
     let services = HeadlessServices::new_with_exec(
         sidecar_host,
         api_keys,
@@ -3111,9 +3115,9 @@ async fn run_serve(
                 data_dir.clone(),
                 // The brain creates this id in its own account registry
                 // (`cli/src/serve/account.ts`), so it must be the local account
-                // *namespace* — deliberately not the tenant. Read back from the
-                // binding rather than threaded through, so there is one answer
-                // to "which account does this host serve".
+                // *namespace* — deliberately not the request tenant. Reuse the
+                // operator value resolved and bound before entering `run_serve`;
+                // multi-tenant Hosts have no process-wide current tenant.
                 brain_local_account_id,
                 account_content_key,
                 headless_services()
@@ -3255,6 +3259,26 @@ async fn run_serve(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn local_namespace_uses_operator_configuration_without_a_request_tenant() {
+        use super::configured_local_account_id;
+
+        assert_eq!(
+            configured_local_account_id(Some("acct_cli".into()), Some("acct_env".into())),
+            Some("acct_cli".into())
+        );
+        assert_eq!(
+            configured_local_account_id(None, Some("acct_env".into())),
+            Some("acct_env".into())
+        );
+        assert_eq!(configured_local_account_id(None, None), None);
+        assert_eq!(configured_local_account_id(None, Some("  ".into())), None);
+        assert_eq!(
+            configured_local_account_id(Some("".into()), Some("acct_env".into())),
+            None
+        );
+    }
+
     #[tokio::test]
     async fn control_plane_boot_selects_a_refusing_backend_without_runtime_configuration() {
         let backend = super::configured_exec_backend(cognia_sandbox_pool::boot::ExecutionSetting::Disabled, "control-plane").unwrap();

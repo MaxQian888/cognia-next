@@ -149,6 +149,8 @@ struct BrowserSessionRecord {
     frame_tx: watch::Sender<Option<Arc<Vec<u8>>>>,
     input_tx: broadcast::Sender<BrowserInputCommand>,
     event_tx: broadcast::Sender<Value>,
+    #[cfg(feature = "workspace-runtime-exec")]
+    initialization: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -294,6 +296,8 @@ impl BrowserGateway {
                 frame_tx,
                 input_tx,
                 event_tx,
+                #[cfg(feature = "workspace-runtime-exec")]
+                initialization: Arc::new(tokio::sync::Mutex::new(())),
             },
         );
         self.session_ids_by_chat.lock().insert(chat_key, id.clone());
@@ -328,6 +332,15 @@ impl BrowserGateway {
         let record = sessions.get_mut(session_id).ok_or_else(|| {
             BrowserGatewayError::new("browser_session_not_found", "browser session not found")
         })?;
+        if !matches!(
+            record.summary.state.as_str(),
+            "creating" | "ready" | "recovering"
+        ) {
+            return Err(BrowserGatewayError::new(
+                "browser_session_not_ready",
+                "browser session is no longer active",
+            ));
+        }
         record.summary.state = "ready".into();
         record.summary.pages = pages;
         record.summary.active_page_id = active_page_id;
@@ -350,6 +363,9 @@ impl BrowserGateway {
         let record = sessions.get_mut(session_id).ok_or_else(|| {
             BrowserGatewayError::new("browser_session_not_found", "browser session not found")
         })?;
+        if record.summary.pages == pages {
+            return Ok(());
+        }
         record.summary.active_page_id = pages
             .iter()
             .find(|page| page.active)
@@ -653,7 +669,15 @@ impl BrowserGateway {
         self.sessions
             .lock()
             .get(session_id)
-            .map(|record| record.frame_tx.subscribe())
+            .map(|record| {
+                let mut receiver = record.frame_tx.subscribe();
+                let has_frame = receiver.borrow().is_some();
+                if has_frame {
+                    // A watch subscription otherwise waits for another paint on an idle page.
+                    receiver.mark_changed();
+                }
+                receiver
+            })
             .ok_or_else(|| {
                 BrowserGatewayError::new("browser_session_not_found", "browser session not found")
             })
@@ -722,6 +746,8 @@ pub const BROWSER_RPC_COMMANDS: &[&str] = &[
     "browser_press_key",
     "browser_scroll",
     "browser_evaluate",
+    "browser_recording_control",
+    "browser_recording_ref",
     "browser_read_console",
     "browser_read_network",
     "browser_back",
@@ -757,6 +783,25 @@ struct WorkspaceRuntimeBrowserControl {
 
 #[cfg(feature = "workspace-runtime-exec")]
 impl WorkspaceRuntimeBrowserControl {
+    async fn refresh_pages(
+        client: &dyn WorkspaceRuntimeClient,
+        endpoint: &WorkspaceRuntimeEndpoint,
+        session_id: &str,
+    ) {
+        if let Ok(value) = client
+            .control(
+                endpoint,
+                "browser.pages",
+                json!({ "sessionId": session_id }),
+            )
+            .await
+        {
+            if let Ok(pages) = serde_json::from_value::<Vec<BrowserPageSummary>>(value) {
+                let _ = gateway().update_pages(session_id, pages);
+            }
+        }
+    }
+
     async fn located_endpoint(
         &self,
         workspace_id: &str,
@@ -821,6 +866,93 @@ impl WorkspaceRuntimeBrowserControl {
             })
     }
 
+    async fn ensure_runtime_session(
+        &self,
+        summary: BrowserSessionSummary,
+        tenant_id: &str,
+        device_id: &str,
+        grants: Vec<&str>,
+    ) -> Result<Value, BrowserGatewayError> {
+        let initialization = gateway()
+            .sessions
+            .lock()
+            .get(&summary.id)
+            .map(|record| Arc::clone(&record.initialization))
+            .ok_or_else(|| {
+                BrowserGatewayError::new("browser_session_not_found", "browser session not found")
+            })?;
+        let _initialization = initialization.lock().await;
+        let summary = gateway().session_for_principal(tenant_id, device_id, &summary.id)?;
+        if !matches!(summary.state.as_str(), "creating" | "ready") {
+            return Err(BrowserGatewayError::new(
+                "browser_session_not_ready",
+                "browser session is no longer active",
+            ));
+        }
+        let already_ready = summary.state == "ready";
+        let created = self
+            .call(
+                &summary.workspace_id,
+                "browser.session.create",
+                json!({
+                    "id": summary.id,
+                    "profileId": summary.profile_id,
+                    "grants": grants,
+                    "reuseExisting": true,
+                }),
+            )
+            .await;
+        let created = match created {
+            Ok(value) => value,
+            Err(error) => {
+                if !already_ready {
+                    gateway().mark_failed(&summary.id);
+                }
+                return Err(error);
+            }
+        };
+        if already_ready {
+            let current = gateway().session_for_principal(tenant_id, device_id, &summary.id)?;
+            if current.state != "ready" {
+                return Err(BrowserGatewayError::new(
+                    "browser_session_not_ready",
+                    "browser session is no longer active",
+                ));
+            }
+            return runtime_session_response(current, &created);
+        }
+        let pages: Vec<BrowserPageSummary> =
+            serde_json::from_value(created.get("pages").cloned().unwrap_or_else(|| json!([])))
+                .map_err(|error| {
+                    BrowserGatewayError::new("browser_runtime_error", error.to_string())
+                })?;
+        let ready = gateway().set_ready(
+            &summary.id,
+            pages,
+            created
+                .get("activePageId")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        )?;
+        if !already_ready {
+            if let Err(error) = self
+                .start_streams(ready.workspace_id.clone(), ready.id.clone())
+                .await
+            {
+                let _ = self
+                    .call(
+                        &ready.workspace_id,
+                        "browser.session.close",
+                        json!({ "sessionId": ready.id }),
+                    )
+                    .await;
+                gateway().mark_failed(&ready.id);
+                return Err(error);
+            }
+        }
+        runtime_session_response(ready, &created)
+    }
+
     async fn start_streams(
         &self,
         workspace_id: String,
@@ -883,8 +1015,20 @@ impl WorkspaceRuntimeBrowserControl {
         let input_client = Arc::clone(&self.client);
         let input_session = session_id;
         tokio::spawn(async move {
+            // Poll metadata beside input forwarding, so a stalled page cannot block control.
+            let refresh = async {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    if !gateway().is_stream_active(&input_session) {
+                        break;
+                    }
+                    Self::refresh_pages(input_client.as_ref(), &endpoint, &input_session).await;
+                }
+            };
+            tokio::pin!(refresh);
             loop {
                 tokio::select! {
+                    _ = &mut refresh => break,
                     received = input.recv() => {
                         let Ok(command) = received else { break };
                         let operation =
@@ -1068,6 +1212,9 @@ fn browser_operation(
         "browser_press_key" => Ok(("browser.press-key", true)),
         "browser_scroll" => Ok(("browser.scroll", true)),
         "browser_evaluate" => Ok(("browser.evaluate", true)),
+        // Recording observes human actions; it must not acquire the agent lease.
+        "browser_recording_control" => Ok(("browser.recording.control", false)),
+        "browser_recording_ref" => Ok(("browser.recording.ref", false)),
         "browser_read_console" => Ok(("browser.console", false)),
         "browser_read_network" => Ok(("browser.network", false)),
         "browser_back" => Ok(("browser.back", true)),
@@ -1119,6 +1266,19 @@ fn browser_operation_refreshes_pages(name: &str) -> bool {
             | "browser_new_page"
             | "browser_handle_dialog"
     )
+}
+
+#[cfg(any(feature = "workspace-runtime-exec", test))]
+fn runtime_session_response(
+    summary: BrowserSessionSummary,
+    runtime: &Value,
+) -> Result<Value, BrowserGatewayError> {
+    let mut response = serde_json::to_value(summary)
+        .map_err(|error| BrowserGatewayError::new("browser_runtime_error", error.to_string()))?;
+    if let Some(grants) = runtime.get("domainGrants").and_then(Value::as_array) {
+        response["domainGrants"] = json!(grants);
+    }
+    Ok(response)
 }
 
 #[cfg(feature = "workspace-runtime-exec")]
@@ -1189,53 +1349,9 @@ pub async fn dispatch_browser_rpc(
                 .and_then(Value::as_str)
                 .map(str::to_string),
         })?;
-        let created = control
-            .call(
-                &summary.workspace_id,
-                "browser.session.create",
-                json!({
-                    "id": summary.id,
-                    "profileId": summary.profile_id,
-                    "grants": grants,
-                }),
-            )
+        return control
+            .ensure_runtime_session(summary, tenant_id, device_id, grants)
             .await;
-        let created = match created {
-            Ok(value) => value,
-            Err(error) => {
-                gateway().mark_failed(&summary.id);
-                return Err(error);
-            }
-        };
-        let pages: Vec<BrowserPageSummary> =
-            serde_json::from_value(created.get("pages").cloned().unwrap_or_else(|| json!([])))
-                .map_err(|error| {
-                    BrowserGatewayError::new("browser_runtime_error", error.to_string())
-                })?;
-        let ready = gateway().set_ready(
-            &summary.id,
-            pages,
-            created
-                .get("activePageId")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-        )?;
-        if let Err(error) = control
-            .start_streams(ready.workspace_id.clone(), ready.id.clone())
-            .await
-        {
-            let _ = control
-                .call(
-                    &ready.workspace_id,
-                    "browser.session.close",
-                    json!({ "sessionId": ready.id }),
-                )
-                .await;
-            gateway().mark_failed(&ready.id);
-            return Err(error);
-        }
-        return serde_json::to_value(ready)
-            .map_err(|error| BrowserGatewayError::new("browser_runtime_error", error.to_string()));
     }
 
     if name == "browser_profile_delete" {
@@ -1272,15 +1388,23 @@ pub async fn dispatch_browser_rpc(
         .map_err(|error| BrowserGatewayError::new("browser_runtime_error", error.to_string()));
     }
     if name == "browser_session_close" {
-        let runtime_close = control
+        let initialization = gateway()
+            .sessions
+            .lock()
+            .get(&session_id)
+            .map(|record| Arc::clone(&record.initialization))
+            .ok_or_else(|| {
+                BrowserGatewayError::new("browser_session_not_found", "browser session not found")
+            })?;
+        let _initialization = initialization.lock().await;
+        control
             .call(
                 &summary.workspace_id,
                 "browser.session.close",
                 json!({ "sessionId": session_id }),
             )
-            .await;
+            .await?;
         gateway().close_session(tenant_id, device_id, &session_id)?;
-        runtime_close?;
         return Ok(json!({ "closed": true }));
     }
 
@@ -1297,17 +1421,13 @@ pub async fn dispatch_browser_rpc(
         .call(&summary.workspace_id, operation, payload)
         .await?;
     if browser_operation_refreshes_pages(name) {
-        if let Ok(value) = control
-            .call(
-                &summary.workspace_id,
-                "browser.pages",
-                json!({ "sessionId": session_id }),
+        if let Ok(endpoint) = control.endpoint(&summary.workspace_id).await {
+            WorkspaceRuntimeBrowserControl::refresh_pages(
+                control.client.as_ref(),
+                &endpoint,
+                &session_id,
             )
-            .await
-        {
-            if let Ok(pages) = serde_json::from_value::<Vec<BrowserPageSummary>>(value) {
-                let _ = gateway().update_pages(&session_id, pages);
-            }
+            .await;
         }
     }
     Ok(result)
@@ -1526,6 +1646,17 @@ mod tests {
     #[test]
     fn browser_rpc_catalog_includes_advanced_control_commands() {
         for (command, operation) in [
+            ("browser_recording_control", "browser.recording.control"),
+            ("browser_recording_ref", "browser.recording.ref"),
+        ] {
+            assert!(is_browser_rpc(command));
+            // Human recording must not steal or wait for the agent lease.
+            assert_eq!(
+                browser_operation(command, &Value::Null).unwrap(),
+                (operation, false)
+            );
+        }
+        for (command, operation) in [
             ("browser_new_page", "browser.page.create"),
             ("browser_drag", "browser.drag"),
             ("browser_handle_dialog", "browser.dialog.handle"),
@@ -1558,8 +1689,348 @@ mod tests {
         )
     }
 
+    #[tokio::test]
+    async fn late_frame_subscriber_receives_the_cached_frame() {
+        let (gateway, _) = fixture();
+        let session = gateway
+            .ensure_session(EnsureBrowserSession {
+                tenant_id: "account".into(),
+                device_id: "device".into(),
+                chat_session_id: "chat".into(),
+                parent_chat_session_id: None,
+                workspace_id: "workspace".into(),
+                backend: BrowserBackend::RemoteChromium,
+                profile_id: None,
+            })
+            .unwrap();
+        let mut early = gateway.subscribe_frames(&session.id).unwrap();
+        assert!(!early.has_changed().unwrap());
+        gateway.publish_frame(&session.id, vec![1, 2, 3]).unwrap();
+        early.changed().await.unwrap();
+        let mut late = gateway.subscribe_frames(&session.id).unwrap();
+        tokio::time::timeout(std::time::Duration::from_millis(100), late.changed())
+            .await
+            .expect("an idle page must replay its current frame to a new viewer")
+            .unwrap();
+        assert_eq!(
+            late.borrow_and_update().as_ref().unwrap().as_slice(),
+            &[1, 2, 3]
+        );
+        assert!(!late.has_changed().unwrap());
+        gateway.publish_frame(&session.id, vec![4]).unwrap();
+        late.changed().await.unwrap();
+        assert_eq!(late.borrow_and_update().as_ref().unwrap().as_slice(), &[4]);
+    }
+
+    #[test]
+    fn runtime_session_response_reports_applied_grants() {
+        let (gateway, _) = fixture();
+        let summary = gateway
+            .ensure_session(EnsureBrowserSession {
+                tenant_id: "account".into(),
+                device_id: "device".into(),
+                chat_session_id: "chat".into(),
+                parent_chat_session_id: None,
+                workspace_id: "workspace".into(),
+                backend: BrowserBackend::RemoteChromium,
+                profile_id: Some("saved-login".into()),
+            })
+            .unwrap();
+        let response = runtime_session_response(
+            summary,
+            &json!({ "domainGrants": ["original.example.com"] }),
+        )
+        .unwrap();
+        assert_eq!(response["domainGrants"], json!(["original.example.com"]));
+        assert_eq!(response["profileId"], "saved-login");
+    }
+
     #[cfg(feature = "workspace-runtime-exec")]
     struct MockRuntimeLocator;
+
+    #[cfg(feature = "workspace-runtime-exec")]
+    #[derive(Default)]
+    struct EnsureRuntimeClient {
+        operations: Mutex<Vec<(String, Value)>>,
+        pages: Mutex<Vec<BrowserPageSummary>>,
+        stall_pages: std::sync::atomic::AtomicBool,
+        pages_started: tokio::sync::Notify,
+        pages_cancelled: Arc<tokio::sync::Notify>,
+        input_forwarded: tokio::sync::Notify,
+        reject: std::sync::atomic::AtomicBool,
+        fail_during_reuse: std::sync::atomic::AtomicBool,
+    }
+
+    #[cfg(feature = "workspace-runtime-exec")]
+    struct PendingPageRead(Arc<tokio::sync::Notify>);
+
+    #[cfg(feature = "workspace-runtime-exec")]
+    impl Drop for PendingPageRead {
+        fn drop(&mut self) {
+            self.0.notify_one();
+        }
+    }
+
+    #[cfg(feature = "workspace-runtime-exec")]
+    #[async_trait::async_trait]
+    impl WorkspaceRuntimeClient for EnsureRuntimeClient {
+        async fn control(
+            &self,
+            _endpoint: &WorkspaceRuntimeEndpoint,
+            operation: &str,
+            payload: Value,
+        ) -> Result<Value, String> {
+            self.operations
+                .lock()
+                .push((operation.to_string(), payload.clone()));
+            tokio::task::yield_now().await;
+            if operation == "browser.session.create" {
+                assert_eq!(payload["reuseExisting"], true);
+                if self.reject.load(Ordering::SeqCst) {
+                    return Err("unavailable".into());
+                }
+                if self.fail_during_reuse.load(Ordering::SeqCst) {
+                    gateway().mark_failed(payload["id"].as_str().unwrap());
+                }
+                return Ok(
+                    json!({ "pages": [], "activePageId": null, "domainGrants": ["original.example.com"] }),
+                );
+            }
+            if operation == "browser.pages" {
+                if self.stall_pages.load(Ordering::SeqCst) {
+                    let _pending = PendingPageRead(self.pages_cancelled.clone());
+                    self.pages_started.notify_one();
+                    std::future::pending::<()>().await;
+                }
+                return serde_json::to_value(self.pages.lock().clone())
+                    .map_err(|error| error.to_string());
+            }
+            if operation == "browser.input" {
+                self.input_forwarded.notify_one();
+            }
+            Ok(Value::Null)
+        }
+        async fn events(
+            &self,
+            _endpoint: &WorkspaceRuntimeEndpoint,
+            _after: u64,
+        ) -> Result<
+            Vec<cognia_external_agent::workspace_runtime_backend::WorkspaceRuntimeEvent>,
+            String,
+        > {
+            Ok(Vec::new())
+        }
+        async fn media(
+            &self,
+            _endpoint: &WorkspaceRuntimeEndpoint,
+            _session_id: &str,
+            _after: u64,
+        ) -> Result<Option<(u64, Vec<u8>)>, String> {
+            Ok(None)
+        }
+    }
+
+    #[cfg(feature = "workspace-runtime-exec")]
+    #[tokio::test]
+    async fn stalled_page_refresh_does_not_block_input_or_session_shutdown() {
+        let unique = uuid::Uuid::new_v4().to_string();
+        let session = gateway()
+            .ensure_session(EnsureBrowserSession {
+                tenant_id: unique.clone(),
+                device_id: unique.clone(),
+                chat_session_id: unique.clone(),
+                parent_chat_session_id: None,
+                workspace_id: unique.clone(),
+                backend: BrowserBackend::RemoteChromium,
+                profile_id: None,
+            })
+            .unwrap();
+        let client = Arc::new(EnsureRuntimeClient::default());
+        client.stall_pages.store(true, Ordering::SeqCst);
+        let control = WorkspaceRuntimeBrowserControl {
+            locator: Arc::new(MockRuntimeLocator),
+            client: client.clone(),
+            endpoints: Mutex::new(HashMap::new()),
+        };
+        control
+            .ensure_runtime_session(session.clone(), &unique, &unique, vec![])
+            .await
+            .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            client.pages_started.notified(),
+        )
+        .await
+        .unwrap();
+        gateway()
+            .publish_input(BrowserInputCommand {
+                session_id: session.id.clone(),
+                device_id: unique.clone(),
+                epoch: 1,
+                input: json!({ "kind": "mouse", "payload": { "type": "mousePressed" } }),
+            })
+            .unwrap();
+        let forwarded = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            client.input_forwarded.notified(),
+        )
+        .await;
+        gateway().mark_failed(&session.id);
+        let cancelled = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            client.pages_cancelled.notified(),
+        )
+        .await;
+        gateway()
+            .close_session(&unique, &unique, &session.id)
+            .unwrap();
+        assert!(
+            forwarded.is_ok(),
+            "metadata reads must not block human input"
+        );
+        assert!(
+            cancelled.is_ok(),
+            "session failure must cancel pending metadata reads"
+        );
+    }
+
+    #[cfg(feature = "workspace-runtime-exec")]
+    #[tokio::test]
+    async fn streamed_navigation_refreshes_pages_without_a_browser_rpc() {
+        let unique = uuid::Uuid::new_v4().to_string();
+        let session = gateway()
+            .ensure_session(EnsureBrowserSession {
+                tenant_id: unique.clone(),
+                device_id: unique.clone(),
+                chat_session_id: unique.clone(),
+                parent_chat_session_id: None,
+                workspace_id: unique.clone(),
+                backend: BrowserBackend::RemoteChromium,
+                profile_id: None,
+            })
+            .unwrap();
+        let client = Arc::new(EnsureRuntimeClient::default());
+        let control = WorkspaceRuntimeBrowserControl {
+            locator: Arc::new(MockRuntimeLocator),
+            client: client.clone(),
+            endpoints: Mutex::new(HashMap::new()),
+        };
+        control
+            .ensure_runtime_session(session.clone(), &unique, &unique, vec![])
+            .await
+            .unwrap();
+        let mut events = gateway().subscribe_events(&session.id).unwrap();
+        *client.pages.lock() = vec![BrowserPageSummary {
+            id: "page".into(),
+            url: "https://example.com/dashboard".into(),
+            title: "Dashboard".into(),
+            active: true,
+        }];
+        let changed = tokio::time::timeout(std::time::Duration::from_secs(1), events.recv()).await;
+        let unchanged =
+            tokio::time::timeout(std::time::Duration::from_millis(600), events.recv()).await;
+        gateway()
+            .close_session(&unique, &unique, &session.id)
+            .unwrap();
+        let event = changed
+            .expect("streamed navigation must publish its pages")
+            .unwrap();
+        assert_eq!(event["kind"], "pages.changed");
+        assert_eq!(event["pages"][0]["url"], "https://example.com/dashboard");
+        assert_eq!(event["activePageId"], "page");
+        assert!(
+            unchanged.is_err(),
+            "unchanged pages must not be broadcast repeatedly"
+        );
+    }
+
+    #[cfg(feature = "workspace-runtime-exec")]
+    #[tokio::test]
+    async fn concurrent_runtime_ensures_start_one_stream_and_never_revive_failed_sessions() {
+        let unique = uuid::Uuid::new_v4().to_string();
+        let tenant = format!("ensure-account-{unique}");
+        let device = format!("ensure-device-{unique}");
+        let session = gateway()
+            .ensure_session(EnsureBrowserSession {
+                tenant_id: tenant.clone(),
+                device_id: device.clone(),
+                chat_session_id: unique.clone(),
+                parent_chat_session_id: None,
+                workspace_id: unique.clone(),
+                backend: BrowserBackend::RemoteChromium,
+                profile_id: Some("saved-login".into()),
+            })
+            .unwrap();
+        let client = Arc::new(EnsureRuntimeClient::default());
+        let control = WorkspaceRuntimeBrowserControl {
+            locator: Arc::new(MockRuntimeLocator),
+            client: client.clone(),
+            endpoints: Mutex::new(HashMap::new()),
+        };
+        let (first, second) = tokio::join!(
+            control.ensure_runtime_session(
+                session.clone(),
+                &tenant,
+                &device,
+                vec!["original.example.com"]
+            ),
+            control.ensure_runtime_session(
+                session.clone(),
+                &tenant,
+                &device,
+                vec!["new.example.com"]
+            ),
+        );
+        assert_eq!(first.unwrap()["id"], second.unwrap()["id"]);
+        assert_eq!(
+            client
+                .operations
+                .lock()
+                .iter()
+                .filter(|(name, _)| name == "browser.screencast.start")
+                .count(),
+            1
+        );
+        client.reject.store(true, Ordering::SeqCst);
+        assert!(control
+            .ensure_runtime_session(session.clone(), &tenant, &device, vec![])
+            .await
+            .is_err());
+        assert_eq!(
+            gateway()
+                .session_for_account(&tenant, &session.id)
+                .unwrap()
+                .state,
+            "ready"
+        );
+        client.reject.store(false, Ordering::SeqCst);
+        client.fail_during_reuse.store(true, Ordering::SeqCst);
+        assert_eq!(
+            control
+                .ensure_runtime_session(session.clone(), &tenant, &device, vec![])
+                .await
+                .unwrap_err()
+                .code,
+            "browser_session_not_ready"
+        );
+        assert_eq!(
+            gateway()
+                .session_for_account(&tenant, &session.id)
+                .unwrap()
+                .state,
+            "failed"
+        );
+        gateway()
+            .close_session(&tenant, &device, &session.id)
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while Arc::strong_count(&client) != 2 {
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("stream pumps terminate after failure");
+    }
 
     #[cfg(feature = "workspace-runtime-exec")]
     #[async_trait::async_trait]

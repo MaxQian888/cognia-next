@@ -124,9 +124,29 @@ pub async fn proxy_apply(input: ProxyApplyInput) -> Result<(), ProxyError> {
 }
 
 /// Sanitized runtime diagnostics. Credentials are represented by presence only.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyActiveStatus {
+    #[serde(flatten)]
+    runtime: ProxyRuntimeStatus,
+    download_policy_version: u8,
+    request_admission_version: u8,
+}
+
+impl std::ops::Deref for ProxyActiveStatus {
+    type Target = ProxyRuntimeStatus;
+    fn deref(&self) -> &Self::Target {
+        &self.runtime
+    }
+}
+
 #[tauri::command]
-pub async fn proxy_get_active() -> Result<ProxyRuntimeStatus, String> {
-    Ok(runtime_status())
+pub async fn proxy_get_active() -> Result<ProxyActiveStatus, String> {
+    Ok(ProxyActiveStatus {
+        runtime: runtime_status(),
+        download_policy_version: 2,
+        request_admission_version: 1,
+    })
 }
 
 /// Probe local ports + Clash controller; return the candidate list.
@@ -238,6 +258,8 @@ pub async fn network_latency_probe(
 #[serde(rename_all = "camelCase")]
 pub struct ProxyHttpRequestInput {
     pub request_id: String,
+    #[serde(default)]
+    pub admission_token: Option<String>,
     pub url: String,
     #[serde(default)]
     pub method: Option<String>,
@@ -256,6 +278,8 @@ pub struct ProxyHttpRequestInput {
     /// sets it based on the user's "allow private hosts" setting.
     #[serde(default, rename = "blockPrivate")]
     pub block_private: Option<bool>,
+    #[serde(default)]
+    pub download_policy: Option<cognia_net::guarded_http::DownloadPolicy>,
 }
 
 pub(super) use cognia_net::guarded_http::host_is_private;
@@ -270,6 +294,11 @@ pub struct ProxyHttpRequestOutput {
 
 const MAX_PROXY_HTTP_BODY_BYTES: usize = 64 * 1024 * 1024;
 
+fn download_slots() -> &'static tokio::sync::Semaphore {
+    static SLOTS: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SLOTS.get_or_init(|| tokio::sync::Semaphore::new(2))
+}
+
 fn proxy_http_cancellations(
 ) -> &'static cognia_net::request_cancellation::RequestCancellationRegistry {
     static CANCELLATIONS: std::sync::OnceLock<
@@ -278,15 +307,59 @@ fn proxy_http_cancellations(
     CANCELLATIONS.get_or_init(Default::default)
 }
 
+fn proxy_http_admissions() -> &'static cognia_net::request_cancellation::RequestAdmissionRegistry {
+    static ADMISSIONS: std::sync::OnceLock<
+        cognia_net::request_cancellation::RequestAdmissionRegistry,
+    > = std::sync::OnceLock::new();
+    ADMISSIONS.get_or_init(Default::default)
+}
+
+/// Reserve a bounded cancellation owner before the caller dispatches any HTTP.
 #[tauri::command]
-pub fn proxy_http_cancel(request_id: String) -> bool {
-    proxy_http_cancellations().cancel(&request_id)
+pub fn proxy_http_prepare(request_id: String) -> Result<String, String> {
+    let token = uuid::Uuid::new_v4().to_string();
+    proxy_http_admissions()
+        .prepare(&request_id, &token)
+        .map_err(|error| error.to_string())?;
+    Ok(token)
+}
+
+#[tauri::command]
+pub fn proxy_http_cancel(request_id: String, admission_token: Option<String>) -> bool {
+    if let Some(token) = admission_token {
+        proxy_http_admissions().cancel(&request_id, &token)
+    } else {
+        proxy_http_cancellations().cancel(&request_id)
+    }
 }
 
 #[tauri::command]
 pub async fn proxy_http_request(
     input: ProxyHttpRequestInput,
 ) -> Result<ProxyHttpRequestOutput, String> {
+    let (admission_guard, admitted_cancelled) = if let Some(token) = &input.admission_token {
+        let (guard, cancelled) = proxy_http_admissions()
+            .claim(&input.request_id, token)
+            .map_err(|_| "request cancelled".to_string())?;
+        (Some(guard), Some(cancelled))
+    } else {
+        (None, None)
+    };
+    let strict = input.download_policy.is_some();
+    if let Some(policy) = &input.download_policy {
+        let url = reqwest::Url::parse(&input.url)
+            .map_err(|_| "download_destination_denied".to_string())?;
+        policy.validate(&url)?;
+        if input.method.as_deref().unwrap_or("GET") != "GET"
+            || input.body_base64.is_some()
+            || input
+                .redirect
+                .as_deref()
+                .is_some_and(|mode| mode != "follow")
+        {
+            return Err("download_request_invalid".into());
+        }
+    }
     if input.block_private == Some(true) && host_is_private(&input.url) {
         return Err(format!(
             "refusing to fetch a private/loopback address: {}",
@@ -295,18 +368,26 @@ pub async fn proxy_http_request(
     }
 
     use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-    use futures_util::StreamExt as _;
-
-    let timeout = Duration::from_millis(input.timeout_ms.unwrap_or(30_000));
+    let timeout = Duration::from_millis(if strict {
+        input.timeout_ms.unwrap_or(60_000).clamp(1, 60_000)
+    } else {
+        input.timeout_ms.unwrap_or(30_000)
+    });
     let make_builder = |url: &str| {
-        let builder = reqwest::Client::builder()
-            .timeout(timeout)
-            .redirect(cognia_net::guarded_http::redirect_policy(
-                input.redirect.as_deref(),
-            )?);
-        super::apply_reqwest_policy(builder, url)
-            .map(|(builder, _route)| builder)
-            .map_err(|error| serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))
+        let builder = reqwest::Client::builder().timeout(timeout).redirect(
+            cognia_net::guarded_http::redirect_policy(input.redirect.as_deref())?,
+        );
+        let (builder, route) = super::apply_reqwest_policy(builder, url).map_err(|error| {
+            if strict {
+                "download_proxy_policy_failed".to_string()
+            } else {
+                serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
+            }
+        })?;
+        if strict && matches!(route, ProxyRouteSummary::Proxy { .. }) {
+            return Err("download_proxy_unsupported".into());
+        }
+        Ok(builder)
     };
     let builder = make_builder(&input.url)?;
     let client = builder
@@ -341,38 +422,69 @@ pub async fn proxy_http_request(
         req = req.body(bytes);
     }
 
-    let (generation, cancelled) = proxy_http_cancellations().register(&input.request_id);
+    if strict && input.admission_token.is_none() {
+        return Err("request_admission_required".into());
+    }
+    let (generation, cancelled) = if let Some(cancelled) = admitted_cancelled {
+        (None, cancelled)
+    } else {
+        let (generation, cancelled) = proxy_http_cancellations().register(&input.request_id);
+        (Some(generation), cancelled)
+    };
     let request_id = input.request_id.clone();
     let operation = async {
-        let resp = cognia_net::guarded_http::send(
-            req,
-            input.block_private,
-            input.redirect.as_deref(),
-            make_builder,
-            Some(timeout),
-        )
-        .await?;
-        if resp
-            .content_length()
-            .is_some_and(|length| length > MAX_PROXY_HTTP_BODY_BYTES as u64)
-        {
-            return Err("response body exceeds proxy bridge byte limit".to_string());
+        let _slot = if strict {
+            Some(
+                download_slots()
+                    .acquire()
+                    .await
+                    .map_err(|_| "download_unavailable".to_string())?,
+            )
+        } else {
+            None
+        };
+        let resp = if let Some(policy) = &input.download_policy {
+            cognia_net::guarded_http::send_download(req, policy, make_builder, timeout).await?
+        } else {
+            cognia_net::guarded_http::send(
+                req,
+                input.block_private,
+                input.redirect.as_deref(),
+                make_builder,
+                Some(timeout),
+            )
+            .await?
+        };
+        if strict && !resp.status().is_success() {
+            return Err("download_http_error".into());
         }
         let status = resp.status().as_u16();
         let headers: HashMap<String, String> = resp
             .headers()
             .iter()
+            .filter(|(k, _)| {
+                !strict
+                    || matches!(
+                        k.as_str(),
+                        "content-type" | "content-length" | "etag" | "last-modified"
+                    )
+            })
             .filter_map(|(k, v)| Some((k.as_str().to_string(), v.to_str().ok()?.to_string())))
             .collect();
-        let mut stream = resp.bytes_stream();
-        let mut body = Vec::new();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|error| format!("read body failed: {error}"))?;
-            if body.len().saturating_add(chunk.len()) > MAX_PROXY_HTTP_BODY_BYTES {
-                return Err("response body exceeds proxy bridge byte limit".to_string());
-            }
-            body.extend_from_slice(&chunk);
-        }
+        let max_bytes = input
+            .download_policy
+            .as_ref()
+            .map_or(MAX_PROXY_HTTP_BODY_BYTES, |policy| policy.max_bytes);
+        let body = cognia_net::http_download::read_bounded_response(resp, max_bytes)
+            .await
+            .map_err(|error| {
+                // Existing video callers classify this as a non-retryable size failure.
+                if !strict && error == "download_body_too_large" {
+                    "response body exceeds proxy bridge byte limit".to_string()
+                } else {
+                    error
+                }
+            })?;
         Ok(ProxyHttpRequestOutput {
             status,
             headers,
@@ -381,8 +493,10 @@ pub async fn proxy_http_request(
     };
 
     let result = tokio::select! {
+        biased;
+        _ = cancelled => Err("request cancelled".to_string()),
         result = async {
-            if input.block_private == Some(true) {
+            if strict || input.block_private == Some(true) {
                 // Bound DNS, every redirect and the body by the original budget.
                 tokio::time::timeout(timeout, operation)
                     .await
@@ -391,9 +505,11 @@ pub async fn proxy_http_request(
                 operation.await
             }
         } => result,
-        _ = cancelled => Err("request cancelled".to_string()),
     };
-    proxy_http_cancellations().finish(&request_id, generation);
+    if let Some(generation) = generation {
+        proxy_http_cancellations().finish(&request_id, generation);
+    }
+    drop(admission_guard);
 
     result
 }
@@ -402,6 +518,230 @@ pub async fn proxy_http_request(
 mod tests {
     use super::*;
     use crate::proxy_config::{ProxyMode, ProxyProtocol};
+
+    #[tokio::test]
+    async fn pre_entry_cancel_and_stale_tokens_cannot_start_http_or_cancel_a_replacement() {
+        apply_current(ProxyConfig::default()).unwrap();
+        let server = wiremock::MockServer::start().await;
+        let bytes = vec![0, 255, 128, 80, 75];
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_bytes(bytes.clone()))
+            .mount(&server)
+            .await;
+        let id = "pre-entry-generation".to_string();
+        let old = proxy_http_prepare(id.clone()).unwrap();
+        assert!(proxy_http_cancel(id.clone(), Some(old.clone())));
+        let make_input = |token: String| {
+            serde_json::from_value(serde_json::json!({
+                "requestId": id, "admissionToken": token, "url": server.uri(), "timeoutMs": 1000
+            }))
+            .unwrap()
+        };
+        assert_eq!(
+            proxy_http_request(make_input(old.clone()))
+                .await
+                .unwrap_err(),
+            "request cancelled"
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+        let current = proxy_http_prepare(id.clone()).unwrap();
+        assert!(!proxy_http_cancel(id.clone(), Some(old.clone())));
+        assert_eq!(
+            proxy_http_request(make_input(old.clone()))
+                .await
+                .unwrap_err(),
+            "request cancelled"
+        );
+        assert!(server.received_requests().await.unwrap().is_empty());
+        let response = proxy_http_request(make_input(current.clone()))
+            .await
+            .unwrap();
+        use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+        assert_eq!(B64.decode(response.body_base64).unwrap(), bytes);
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        assert!(!proxy_http_cancel(id.clone(), Some(current)));
+        let invalid_token = proxy_http_prepare(id.clone()).unwrap();
+        let mut invalid = make_input(invalid_token.clone());
+        invalid.url = "https://files.example/binary".into();
+        invalid.method = Some("POST".into());
+        invalid.download_policy = Some(cognia_net::guarded_http::DownloadPolicy {
+            allowed_origins: vec!["https://files.example".into()],
+            max_bytes: 1024,
+        });
+        assert_eq!(
+            proxy_http_request(invalid).await.unwrap_err(),
+            "download_request_invalid"
+        );
+        assert!(!proxy_http_cancel(id, Some(invalid_token)));
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn active_proxy_body_read_can_be_cancelled_without_a_late_result() {
+        for admitted in [false, true] {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            apply_current(ProxyConfig::default()).unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let (started, receiving) = tokio::sync::oneshot::channel();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buffer = [0; 4096];
+                socket.read(&mut buffer).await.unwrap();
+                socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\n\0",
+                    )
+                    .await
+                    .unwrap();
+                started.send(()).unwrap();
+                tokio::time::timeout(Duration::from_secs(2), socket.read(&mut buffer))
+                    .await
+                    .unwrap()
+            });
+            let token = if admitted {
+                Some(proxy_http_prepare("active-body-cancel".into()).unwrap())
+            } else {
+                None
+            };
+            let input = serde_json::from_value(serde_json::json!({
+            "requestId": "active-body-cancel", "url": format!("http://{addr}/binary"), "timeoutMs": 5000
+            , "admissionToken": token
+        })).unwrap();
+            let request = tokio::spawn(proxy_http_request(input));
+            tokio::time::timeout(Duration::from_secs(2), receiving)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(proxy_http_cancel(
+                "active-body-cancel".into(),
+                token.clone()
+            ));
+            assert_eq!(request.await.unwrap().unwrap_err(), "request cancelled");
+            match server.await.unwrap() {
+                Ok(0) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+                    ) => {}
+                result => panic!("cancel must close the unfinished body socket: {result:?}"),
+            }
+            assert!(!proxy_http_cancel("active-body-cancel".into(), token));
+        }
+    }
+
+    #[tokio::test]
+    async fn ordinary_download_retains_the_video_body_limit_error_contract() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        apply_current(ProxyConfig::default()).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            socket.read(&mut request).await.unwrap();
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        MAX_PROXY_HTTP_BODY_BYTES + 1
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        });
+        let input = serde_json::from_value(serde_json::json!({
+            "requestId": "ordinary-limit-compat", "url": format!("http://{addr}/video"), "timeoutMs": 1000
+        })).unwrap();
+        let error = proxy_http_request(input).await.unwrap_err();
+        server.await.unwrap();
+        assert_eq!(error, "response body exceeds proxy bridge byte limit");
+    }
+
+    fn strict_fixture_input(id: &str, timeout: u64) -> ProxyHttpRequestInput {
+        let token = proxy_http_prepare(id.to_string()).unwrap();
+        serde_json::from_value(serde_json::json!({
+            "requestId": id, "url": "https://public.test/opaque?token=secret",
+            "admissionToken": token,
+            "timeoutMs": timeout,
+            "downloadPolicy": { "allowedOrigins": ["https://public.test"], "maxBytes": 4 }
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn strict_download_cancellation_and_deadline_include_slot_wait() {
+        apply_current(ProxyConfig::default()).unwrap();
+        let first = download_slots().acquire().await.unwrap();
+        let second = download_slots().acquire().await.unwrap();
+        let input = strict_fixture_input("strict-slot-cancel", 1000);
+        let token = input.admission_token.clone();
+        let mut request = Box::pin(proxy_http_request(input));
+        // Poll through claim into the blocked slot acquire before cancelling.
+        assert!(futures_util::poll!(&mut request).is_pending());
+        assert!(proxy_http_cancel("strict-slot-cancel".into(), token));
+        let error = tokio::time::timeout(Duration::from_secs(2), request)
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error, "request cancelled");
+        let input = strict_fixture_input("strict-slot-timeout", 1);
+        let timeout_token = input.admission_token.clone();
+        let error = proxy_http_request(input).await.unwrap_err();
+        assert_eq!(error, "request failed: operation timed out");
+        drop(first);
+        drop(second);
+        assert_eq!(download_slots().available_permits(), 2);
+        assert!(!proxy_http_cancel(
+            "strict-slot-timeout".into(),
+            timeout_token
+        ));
+    }
+
+    #[tokio::test]
+    async fn strict_download_does_not_bypass_a_configured_proxy() {
+        apply_current(ProxyConfig {
+            mode: ProxyMode::Manual,
+            protocol: ProxyProtocol::Http,
+            host: "127.0.0.1".into(),
+            port: 1,
+            bypass: vec![],
+            ..ProxyConfig::default()
+        })
+        .unwrap();
+        let result = proxy_http_request(strict_fixture_input("strict-proxy", 1000)).await;
+        apply_current(ProxyConfig::default()).unwrap();
+        assert_eq!(result.unwrap_err(), "download_proxy_unsupported");
+    }
+
+    #[tokio::test]
+    async fn download_capability_is_explicit_without_changing_status_shape() {
+        let status = serde_json::to_value(proxy_get_active().await.unwrap()).unwrap();
+        assert_eq!(status["downloadPolicyVersion"], 2);
+        assert_eq!(status["requestAdmissionVersion"], 1);
+        assert!(status.get("state").is_some());
+        assert!(status.get("credentialConfigured").is_some());
+    }
+
+    #[tokio::test]
+    async fn strict_download_rejects_insecure_private_destination_without_leaking_url() {
+        apply_current(ProxyConfig::default()).unwrap();
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_bytes(vec![0, 255, 80, 75]))
+            .mount(&server)
+            .await;
+        let input: ProxyHttpRequestInput = serde_json::from_value(serde_json::json!({
+            "requestId": "strict-reject", "url": format!("{}/secret-path?token=secret", server.uri()),
+            "timeoutMs": 1000,
+            "downloadPolicy": { "allowedOrigins": ["https://public.test"], "maxBytes": 4 }
+        })).unwrap();
+        let error = proxy_http_request(input).await.unwrap_err();
+        assert_eq!(error, "download_destination_denied");
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
 
     #[tokio::test]
     async fn proxy_apply_and_get_roundtrip_is_sanitized() {
@@ -519,6 +859,7 @@ mod tests {
         apply_current(ProxyConfig::default()).unwrap();
         let res = proxy_http_request(ProxyHttpRequestInput {
             request_id: "invalid-url".into(),
+            admission_token: None,
             url: "not a url".to_string(),
             method: None,
             body_base64: None,
@@ -526,6 +867,7 @@ mod tests {
             timeout_ms: Some(1_000),
             redirect: None,
             block_private: None,
+            download_policy: None,
         })
         .await;
         assert!(res.is_err());
@@ -535,6 +877,7 @@ mod tests {
     async fn proxy_http_request_rejects_invalid_method() {
         let res = proxy_http_request(ProxyHttpRequestInput {
             request_id: "invalid-method".into(),
+            admission_token: None,
             url: "http://127.0.0.1:1/".to_string(),
             method: Some("@@@bad".to_string()),
             body_base64: None,
@@ -542,6 +885,7 @@ mod tests {
             timeout_ms: Some(1_000),
             redirect: None,
             block_private: None,
+            download_policy: None,
         })
         .await;
         assert!(res.is_err());
@@ -557,6 +901,7 @@ mod tests {
             let request_id = format!("blocked-private-{url}");
             let error = proxy_http_request(ProxyHttpRequestInput {
                 request_id: request_id.clone(),
+                admission_token: None,
                 url: url.into(),
                 method: None,
                 body_base64: None,
@@ -564,11 +909,12 @@ mod tests {
                 timeout_ms: Some(1_000),
                 redirect: None,
                 block_private: Some(true),
+                download_policy: None,
             })
             .await
             .unwrap_err();
             assert!(error.starts_with("refusing to fetch a private/loopback address"));
-            assert!(!proxy_http_cancel(request_id));
+            assert!(!proxy_http_cancel(request_id, None));
         }
     }
 

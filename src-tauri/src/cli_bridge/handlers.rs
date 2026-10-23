@@ -1501,18 +1501,16 @@ fn extract_zip_into(bytes: &[u8], target_dir: &Path) -> anyhow::Result<()> {
     let mut archive = zip::ZipArchive::new(reader)?;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
+        let entry_name = entry.name()?;
         let entry_path = entry
             .enclosed_name()
-            .ok_or_else(|| anyhow::anyhow!("unsafe zip entry path: {}", entry.name()))?
+            .ok_or_else(|| anyhow::anyhow!("unsafe zip entry path: {}", entry_name))?
             .to_path_buf();
         if entry
             .unix_mode()
             .is_some_and(|mode| mode & 0o170000 == 0o120000)
         {
-            anyhow::bail!(
-                "symbolic-link zip entries are not allowed: {}",
-                entry.name()
-            );
+            anyhow::bail!("symbolic-link zip entries are not allowed: {}", entry_name);
         }
         let dest = target_dir.join(&entry_path);
         if entry.is_dir() {
@@ -1875,12 +1873,20 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let bundle = make_test_bundle(
             r#"{"id":"x","version":"0.1.0"}"#,
-            &[("dist/index.js", b"console.log(1)"), ("README.md", b"hi")],
+            &[
+                ("dist/index.js", b"console.log(1)"),
+                ("README.md", b"hi"),
+                ("assets/说明.txt", b"notes"),
+            ],
         );
         extract_zip_into(&bundle, tmp.path()).unwrap();
         assert!(tmp.path().join("plugin.json").exists());
         assert!(tmp.path().join("dist/index.js").exists());
         assert!(tmp.path().join("README.md").exists());
+        assert_eq!(
+            std::fs::read(tmp.path().join("assets/说明.txt")).unwrap(),
+            b"notes"
+        );
         let content = std::fs::read_to_string(tmp.path().join("dist/index.js")).unwrap();
         assert!(content.contains("console.log"));
     }

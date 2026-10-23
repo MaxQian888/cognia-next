@@ -351,6 +351,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // keyring names are deprecated compatibility aliases.
     "secret_store_get",
     "secret_store_set",
+    "connectors_google_docs_auth",
     "secret_store_delete",
     "keyring_secret_get",
     "keyring_secret_set",
@@ -1329,6 +1330,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     "browser_press_key",
     "browser_scroll",
     "browser_evaluate",
+    "browser_recording_control",
+    "browser_recording_ref",
     "browser_read_console",
     "browser_read_network",
     "browser_back",
@@ -1843,6 +1846,8 @@ const CONTROL_COMMANDS: &[&str] = &[
     "browser_press_key",
     "browser_scroll",
     "browser_evaluate",
+    "browser_recording_control",
+    "browser_recording_ref",
     "browser_back",
     "browser_forward",
     "browser_reload",
@@ -2710,6 +2715,7 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     // future runtime credentials) in the already-installed server store.
     "secret_store_get",
     "secret_store_set",
+    "connectors_google_docs_auth",
     "secret_store_delete",
     "keyring_secret_get",
     "keyring_secret_set",

@@ -258,7 +258,10 @@ pub fn inspect(bundle_path: &Path, bundle_bytes: &[u8]) -> Result<InfoReport> {
                 continue;
             }
             files.push(EntryInfo {
-                name: entry.name().to_string(),
+                name: entry
+                    .name()
+                    .context("decode bundle entry name")?
+                    .into_owned(),
                 size_bytes: entry.size(),
             });
         }
@@ -661,13 +664,20 @@ mod tests {
     #[test]
     fn inspect_reads_manifest_and_files() {
         let manifest = r#"{"id":"x","name":"X","version":"0.1.0","type":"frontend","capabilities":["tools"],"main":"dist/index.js"}"#;
-        let bundle = make_bundle(manifest, &[("dist/index.js", b"console.log(1)")]);
+        let bundle = make_bundle(
+            manifest,
+            &[
+                ("dist/index.js", b"console.log(1)"),
+                ("assets/说明.txt", b"notes"),
+            ],
+        );
         let tmp = tempdir().unwrap();
         let path = tmp.path().join("p.zip");
         std::fs::write(&path, &bundle).unwrap();
         let report = inspect(&path, &bundle).unwrap();
         assert_eq!(report.manifest["id"], serde_json::Value::String("x".into()));
         assert!(report.files.iter().any(|f| f.name == "dist/index.js"));
+        assert!(report.files.iter().any(|f| f.name == "assets/说明.txt"));
         assert!(matches!(report.signature, SignatureStatus::NoSidecar));
         assert!(report.wasm_api_version.is_none());
     }

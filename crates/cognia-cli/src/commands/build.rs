@@ -771,7 +771,12 @@ mod tests {
         let bytes = std::fs::read(path).unwrap();
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let mut names: Vec<String> = (0..archive.len())
-            .filter_map(|i| archive.by_index(i).ok().map(|e| e.name().to_string()))
+            .filter_map(|i| {
+                archive
+                    .by_index(i)
+                    .ok()
+                    .map(|e| e.name().unwrap().into_owned())
+            })
             .collect();
         names.sort();
         names

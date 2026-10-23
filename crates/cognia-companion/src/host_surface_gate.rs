@@ -65,19 +65,9 @@ static LIVE: Lazy<Arc<LiveStanding>> = Lazy::new(|| Arc::new(LiveStanding { cach
 #[async_trait::async_trait]
 impl StandingProvider for LiveStanding {
     fn person(&self, principal: &DeviceContext) -> Result<Person, Refusal> {
-        let unbound = || forbidden("host_principal_unbound");
-        // require_owner_access authenticates the same paired-device proof,
-        // then labels it `owner` for management routes. It is still a device,
-        // and must resolve standing rather than acquiring service authority.
-        if !matches!(principal.scope.as_str(), "device" | "owner") { return Err(unbound()); }
-        let store = crate::security_store::security_store().ok_or_else(unbound)?;
-        // The raw user id belongs to the device's tenant, not the currently
-        // unlocked profile. The join also checks status on EVERY admission.
-        if store.device_user(&principal.tenant_id, &principal.device_id)
-            .map_err(|_| unbound())?.is_none() { return Err(unbound()); }
-        let binding = store.active_device_person(&principal.tenant_id, &principal.device_id)
-            .map_err(|_| unbound())?.ok_or_else(unbound)?;
-        person_ids(binding.org_id, binding.user_id, binding.canonical_org_id, binding.canonical_user_id)
+        let store = crate::security_store::security_store()
+            .ok_or_else(|| forbidden("host_principal_unbound"))?;
+        bound_device_person(&store, principal)
     }
 
     async fn actions(&self, person: &Person, workspace: Option<&str>) -> Result<Vec<String>, Refusal> {
@@ -95,16 +85,24 @@ impl StandingProvider for LiveStanding {
     }
 }
 
-fn person_ids(org: Option<String>, user: Option<String>, canonical_org: Option<String>, canonical_user: Option<String>) -> Result<Person, Refusal> {
-    let (org, user) = match (canonical_org, canonical_user) {
-        (Some(org), Some(user)) => (org, user),
-        (None, None) => match (org, user) { (Some(org), Some(user)) => (org, user), _ => return Err(forbidden("host_principal_unbound")) },
-        // Never combine ids from two namespaces or guess a missing alias.
-        _ => return Err(forbidden("host_principal_unbound")),
-    };
-    cognia_tenant_auth::OrgId::parse(&org).map_err(|_| forbidden("host_principal_unbound"))?;
-    cognia_tenant_auth::UserId::parse(&user).map_err(|_| forbidden("host_principal_unbound"))?;
-    Ok(Person { org, user })
+fn bound_device_person(
+    store: &crate::security_store::SecurityStore,
+    principal: &DeviceContext,
+) -> Result<Person, Refusal> {
+    let unbound = || forbidden("host_principal_unbound");
+    // Management routes label a DPoP-proved device as owner. That label does
+    // not give it the loopback service principal's authority.
+    if !matches!(principal.scope.as_str(), "device" | "owner") {
+        return Err(unbound());
+    }
+    let binding = store
+        .active_oidc_device_person(&principal.tenant_id, &principal.device_id)
+        .map_err(|_| unbound())?
+        .ok_or_else(unbound)?;
+    Ok(Person {
+        org: binding.org_id.to_string(),
+        user: binding.user_id.to_string(),
+    })
 }
 
 fn map_authority_error(error: crate::workspace_access::WorkspaceAccessError) -> Refusal {
@@ -956,13 +954,65 @@ mod tests {
     }
 
     #[test]
-    fn canonical_ids_must_be_a_complete_pair() {
-        let org = || Some("org_acme".into()); let user = || Some("usr_alice".into());
-        assert!(person_ids(org(), user(), None, None).is_ok());
-        assert!(person_ids(None, None, org(), user()).is_ok());
-        assert!(person_ids(org(), user(), org(), None).is_err());
-        assert!(person_ids(None, user(), None, None).is_err());
-        assert!(person_ids(Some("bad".into()), user(), None, None).is_err());
+    fn admission_reads_only_the_current_devices_verified_person() {
+        use crate::security_store::{SecurityStore, VerifiedDevicePerson};
+        use cognia_tenant_auth::{OrgId, UserId};
+        let store = SecurityStore::in_memory().unwrap();
+        let bound = VerifiedDevicePerson {
+            user_id: UserId::parse("usr_verified").unwrap(),
+            org_id: OrgId::parse("org_verified").unwrap(),
+        };
+        let challenge = store.issue_challenge("tenant", 100, 60).unwrap();
+        store
+            .register_oidc_device(
+                "tenant",
+                "oidc-subject",
+                &bound,
+                &challenge.id,
+                &challenge.nonce,
+                "device",
+                "Web",
+                "pem",
+                "thumb",
+                "member",
+                101,
+            )
+            .unwrap();
+        for scope in ["device", "owner"] {
+            let person = bound_device_person(&store, &device(scope)).unwrap();
+            assert_eq!(
+                person,
+                Person {
+                    org: "org_verified".into(),
+                    user: "usr_verified".into()
+                }
+            );
+        }
+        let mut other = device("device");
+        other.tenant_id = "another-tenant".into();
+        assert_eq!(
+            bound_device_person(&store, &other).unwrap_err().code,
+            "host_principal_unbound"
+        );
+        assert!(bound_device_person(&store, &device("service")).is_err());
+        store
+            .assign_device_user("tenant", "device", None, 102)
+            .unwrap();
+        assert_eq!(
+            bound_device_person(&store, &device("device"))
+                .unwrap_err()
+                .code,
+            "host_principal_unbound"
+        );
+        store
+            .adopt_unowned_devices("tenant", "usr_verified", 103)
+            .unwrap();
+        assert_eq!(
+            bound_device_person(&store, &device("device"))
+                .unwrap_err()
+                .code,
+            "host_principal_unbound"
+        );
     }
 
     #[test]
