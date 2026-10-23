@@ -57,7 +57,44 @@ function mapButton(button: TelegramInlineButton): InboundA2UINode | null {
   }
 }
 
-export function telegramInboundToA2UI(payload: TelegramMessagePayload): InboundA2UIBlock | null {
+/** Update fields that carry a Message object (Bot API `Update`). */
+const UPDATE_MESSAGE_FIELDS = [
+  "message",
+  "edited_message",
+  "channel_post",
+  "edited_channel_post",
+  "business_message",
+  "edited_business_message",
+  "guest_message",
+] as const
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Resolve the message from whatever `projectInboundToA2UI` handed us.
+ * Production passes the whole `Update` (`telegram/parse.ts` stores
+ * `raw: rawUpdate`); tests and legacy callers pass a bare message. An update
+ * that carries no message (callback query, reaction) has nothing to project.
+ */
+function resolveTelegramMessage(payload: unknown): TelegramMessagePayload | null {
+  if (!isRecord(payload)) return null
+  if ("update_id" in payload) {
+    for (const field of UPDATE_MESSAGE_FIELDS) {
+      const message = payload[field]
+      if (isRecord(message)) return message as TelegramMessagePayload
+    }
+    return null
+  }
+  return payload as TelegramMessagePayload
+}
+
+export function telegramInboundToA2UI(
+  input: TelegramMessagePayload | { update_id: number }
+): InboundA2UIBlock | null {
+  const payload = resolveTelegramMessage(input)
+  if (!payload) return null
   const body: InboundA2UINode[] = []
   if (payload.text) {
     body.push({ kind: "text", text: payload.text })
@@ -85,8 +122,10 @@ export function telegramInboundToA2UI(payload: TelegramMessagePayload): InboundA
   if (payload.caption && !payload.text) {
     body.push({ kind: "text", text: payload.caption, emphasis: "muted" })
   }
-  for (const row of payload.reply_markup?.inline_keyboard ?? []) {
-    const children = flatten(row.map(mapButton))
+  const keyboard = payload.reply_markup?.inline_keyboard
+  for (const row of Array.isArray(keyboard) ? keyboard : []) {
+    if (!Array.isArray(row)) continue
+    const children = flatten(row.map((button) => (isRecord(button) ? mapButton(button) : null)))
     if (children.length > 0) body.push({ kind: "row", children })
   }
   if (body.length === 0) return null

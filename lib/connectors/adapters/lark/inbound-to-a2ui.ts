@@ -1,5 +1,16 @@
 /**
- * Lark Interactive Card v2 → InboundA2UIBlock projection.
+ * Lark Interactive Card → InboundA2UIBlock projection.
+ *
+ * Two inputs reach this mapper. What Feishu actually delivers for an
+ * `interactive` message — in `im.message.receive_v1` and in the message
+ * history API — is NOT the card JSON that was sent but a converted form:
+ * `{"title": "…", "elements": [[{tag:"text"|"a"|"at"|"img"|"button"|…}]]}`,
+ * one inner array per line ("The received card structure is inconsistent
+ * with the actual card JSON structure used when sending",
+ * https://open.feishu.cn/document/server-docs/im-v1/message-content-description/message_content).
+ * `mapConvertedCard` projects that shape. The original card JSON (below) is
+ * still accepted for callers that hold it, e.g. history fetched with
+ * `card_msg_content_type=user_card_content`.
  *
  * Lark cards have an optional `header` (with `title.content`), a Card 2.0
  * `body.elements` array or legacy `elements` / `i18n_elements`, plus
@@ -14,6 +25,8 @@
 
 import type { InboundA2UIBlock, InboundA2UINode } from "../_shared/inbound-a2ui-types"
 import { flatten } from "../_shared/inbound-a2ui-types"
+import { larkCardMarkdownToCommonMark } from "./card-markdown"
+import { escapeMarkdown, markdownLinkDestination } from "../_shared/inbound-markdown"
 
 interface LarkCardElement {
   tag?: string
@@ -49,14 +62,51 @@ interface LarkCardPayload {
   card_link?: { url?: string }
 }
 
-function textOf(el: LarkCardElement | undefined): string {
-  if (!el) return ""
-  const localized = el.i18n_content?.en_us ?? el.i18n_content?.zh_cn
-  if (localized) return localized
-  if (el.content) return el.content
-  if (el.text?.content) return el.text.content
-  if (el.title?.content) return el.title.content
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/** First string among the candidates; card JSON is untrusted, so a truthy
+ *  object in a text slot must never reach React as a child. */
+function firstString(...candidates: unknown[]): string {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate) return candidate
+  }
   return ""
+}
+
+function textOf(el: LarkCardElement | undefined): string {
+  if (!isRecord(el)) return ""
+  const i18n = isRecord(el.i18n_content) ? el.i18n_content : undefined
+  return firstString(
+    i18n?.en_us,
+    i18n?.zh_cn,
+    el.content,
+    isRecord(el.text) ? el.text.content : undefined,
+    isRecord(el.title) ? el.title.content : undefined
+  )
+}
+
+/** Card Markdown: the `markdown` component, or a `div` whose text is `lark_md`. */
+function isMarkdownText(el: LarkCardElement): boolean {
+  if (el.tag === "markdown" || el.tag === "lark_md") return true
+  return isRecord(el.text) && el.text.tag === "lark_md"
+}
+
+function textNode(
+  el: LarkCardElement,
+  emphasis?: "muted"
+): Extract<InboundA2UINode, { kind: "text" }> | null {
+  const text = textOf(el)
+  if (!text) return null
+  const base = emphasis ? { kind: "text" as const, emphasis } : { kind: "text" as const }
+  return isMarkdownText(el)
+    ? { ...base, text: larkCardMarkdownToCommonMark(text), format: "markdown" }
+    : { ...base, text }
+}
+
+function elementsOf(value: unknown): LarkCardElement[] {
+  return Array.isArray(value) ? (value as LarkCardElement[]) : []
 }
 
 function mapAction(action: LarkCardElement): InboundA2UINode | null {
@@ -94,6 +144,125 @@ function actionIdOf(action: LarkCardElement): string | undefined {
   return typeof id === "string" ? id : undefined
 }
 
+/** One node of the converted (received) card form. */
+interface LarkConvertedNode {
+  tag?: string
+  text?: string
+  href?: string
+  user_id?: string
+  user_name?: string
+  image_key?: string
+  type?: string
+  placeholder?: string
+  initial_date?: string
+  elements?: unknown
+}
+
+/** Inline nodes of one converted line as Markdown; null for a control node. */
+function convertedInline(node: LarkConvertedNode): string | null {
+  switch (node.tag) {
+    case "text":
+      return escapeMarkdown(firstString(node.text))
+    case "a": {
+      const href = firstString(node.href)
+      const label = escapeMarkdown(firstString(node.text) || href)
+      return href ? `[${label}](${markdownLinkDestination(href)})` : label
+    }
+    case "at":
+      return `@${escapeMarkdown(firstString(node.user_name, node.user_id) || "user")}`
+    default:
+      return null
+  }
+}
+
+function convertedControl(node: LarkConvertedNode): InboundA2UINode[] {
+  switch (node.tag) {
+    case "img": {
+      const key = firstString(node.image_key)
+      return key ? [{ kind: "image", url: `lark-img:${key}` }] : []
+    }
+    case "button": {
+      const type = firstString(node.type)
+      return [
+        {
+          kind: "button",
+          label: firstString(node.text),
+          style: type.startsWith("primary")
+            ? "primary"
+            : type.startsWith("danger")
+              ? "danger"
+              : "default",
+        },
+      ]
+    }
+    case "select_static":
+    case "overflow":
+    case "date_picker":
+      return [{ kind: "button", label: firstString(node.placeholder, node.initial_date) || "…" }]
+    case "hr":
+      return [{ kind: "divider" }]
+    case "note":
+      return convertedLine(elementsOf(node.elements) as LarkConvertedNode[], true)
+    default:
+      // Keep unknown content at its position rather than dropping it.
+      return [{ kind: "raw_json", label: firstString(node.tag) || undefined, payload: node }]
+  }
+}
+
+/** One converted line: runs of inline nodes become one Markdown text node. */
+function convertedLine(nodes: unknown[], muted = false): InboundA2UINode[] {
+  const out: InboundA2UINode[] = []
+  let inline = ""
+  const flush = () => {
+    if (inline.trim()) {
+      out.push({
+        kind: "text",
+        text: inline,
+        format: "markdown",
+        ...(muted ? { emphasis: "muted" as const } : {}),
+      })
+    }
+    inline = ""
+  }
+  for (const raw of nodes) {
+    if (!isRecord(raw)) continue
+    const node = raw as LarkConvertedNode
+    const text = convertedInline(node)
+    if (text !== null) {
+      inline += text
+      continue
+    }
+    flush()
+    out.push(...convertedControl(node))
+  }
+  flush()
+  return out
+}
+
+interface LarkConvertedCard {
+  title?: unknown
+  elements: unknown[]
+}
+
+/** The received form: `elements` holds lines (arrays), not components. */
+function isConvertedCard(card: unknown): card is LarkConvertedCard {
+  return isRecord(card) && Array.isArray(card.elements) && card.elements.some(Array.isArray)
+}
+
+function mapConvertedCard(card: LarkConvertedCard): InboundA2UIBlock | null {
+  const title = firstString(card.title) || undefined
+  const body: InboundA2UINode[] = []
+  if (title) body.push({ kind: "heading", level: 2, text: title })
+  for (const line of card.elements) {
+    if (!Array.isArray(line)) continue
+    const nodes = convertedLine(line)
+    if (nodes.length === 0) continue
+    body.push(nodes.length === 1 ? nodes[0] : { kind: "row", children: nodes })
+  }
+  if (body.length === 0) return null
+  return { v: 1, source: "lark", ...(title ? { title } : {}), body, raw: card }
+}
+
 function mapElement(el: LarkCardElement): InboundA2UINode | null {
   if (!el || typeof el !== "object") return null
   switch (el.tag) {
@@ -103,37 +272,46 @@ function mapElement(el: LarkCardElement): InboundA2UINode | null {
     case "form":
     case "interactive_container":
     case "column":
-      return { kind: "column", children: flatten((el.elements ?? []).map(mapElement)) }
+      return { kind: "column", children: flatten(elementsOf(el.elements).map(mapElement)) }
     case "collapsible_panel":
       return {
         kind: "card",
-        title: el.header?.title?.content,
-        children: flatten((el.elements ?? []).map(mapElement)),
+        title:
+          isRecord(el.header) && isRecord(el.header.title)
+            ? firstString(el.header.title.content) || undefined
+            : undefined,
+        children: flatten(elementsOf(el.elements).map(mapElement)),
       }
     case "div":
     case "markdown":
-      return { kind: "text", text: textOf(el) }
+      return textNode(el)
     case "hr":
       return { kind: "divider" }
     case "img":
-      if (!el.img_key) return null
-      // Lark hosts images behind img_key; the renderer falls back to
-      // showing the key as a hyperlink while the operator clicks
-      // through to the original message.
+      if (typeof el.img_key !== "string" || !el.img_key) return null
+      // Lark hosts images behind img_key, and the message-resource API
+      // refuses card messages (error 234043), so no client can fetch it. The
+      // renderer shows an "open in Lark" placeholder for this reference.
       return { kind: "image", url: `lark-img:${el.img_key}`, alt: textOf(el.alt) }
     case "action":
-      if (el.actions && el.actions.length > 0) {
-        return { kind: "row", children: flatten(el.actions.map(mapAction)) }
+      if (Array.isArray(el.actions) && el.actions.length > 0) {
+        return {
+          kind: "row",
+          children: flatten(
+            el.actions.map((action) => (isRecord(action) ? mapAction(action) : null))
+          ),
+        }
       }
       return null
     case "column_set":
-      if (el.columns) {
+      if (Array.isArray(el.columns)) {
         const cols: InboundA2UINode[] = []
         for (const col of el.columns) {
-          if (col.elements && col.elements.length > 0) {
+          const colElements = isRecord(col) ? elementsOf(col.elements) : []
+          if (colElements.length > 0) {
             cols.push({
               kind: "column",
-              children: flatten(col.elements.map(mapElement)),
+              children: flatten(colElements.map(mapElement)),
             })
           }
         }
@@ -141,9 +319,14 @@ function mapElement(el: LarkCardElement): InboundA2UINode | null {
         return { kind: "row", children: cols }
       }
       return null
-    case "note":
-      // Note elements are small italicised footers in Lark cards.
-      return { kind: "text", text: textOf(el), emphasis: "muted" }
+    case "note": {
+      // Note elements are small footers in Lark cards; their text sits in
+      // nested `elements` (plain_text / lark_md / img).
+      const nested = flatten(elementsOf(el.elements).map((child) => textNode(child, "muted")))
+      if (nested.length > 0)
+        return nested.length === 1 ? nested[0] : { kind: "row", children: nested }
+      return textNode(el, "muted")
+    }
     default:
       // Retain unsupported content at its original position, including native
       // tables/charts/forms that the shared inbound vocabulary cannot express.
@@ -209,16 +392,22 @@ export function larkInboundToA2UI(
 ): InboundA2UIBlock | null {
   const card = resolveCardPayload(payload)
   if (!card) return null
+  if (isConvertedCard(card)) return mapConvertedCard(card)
+  const i18nElements = isRecord(card.i18n_elements) ? card.i18n_elements : undefined
   const elements =
-    card.body?.elements ??
-    card.elements ??
-    card.i18n_elements?.en_us ??
-    card.i18n_elements?.zh_cn ??
-    []
-  if (elements.length === 0 && !card.header?.title?.content) return null
+    ([
+      isRecord(card.body) ? card.body.elements : undefined,
+      card.elements,
+      i18nElements?.en_us,
+      i18nElements?.zh_cn,
+    ].find(Array.isArray) as LarkCardElement[] | undefined) ?? []
+  const header = isRecord(card.header) ? card.header : undefined
+  const headerTitle =
+    firstString(isRecord(header?.title) ? header.title.content : undefined) || undefined
+  const headerSubtitle =
+    firstString(isRecord(header?.subtitle) ? header.subtitle.content : undefined) || undefined
+  if (elements.length === 0 && !headerTitle) return null
   const body: InboundA2UINode[] = []
-  const headerTitle = card.header?.title?.content
-  const headerSubtitle = card.header?.subtitle?.content
   if (headerTitle) {
     body.push({ kind: "heading", level: 2, text: headerTitle })
   }
@@ -226,8 +415,9 @@ export function larkInboundToA2UI(
     body.push({ kind: "text", text: headerSubtitle, emphasis: "muted" })
   }
   body.push(...flatten(elements.map(mapElement)))
-  if (card.card_link?.url) {
-    body.push({ kind: "link", href: card.card_link.url, label: card.card_link.url })
+  const cardLink = isRecord(card.card_link) ? firstString(card.card_link.url) : ""
+  if (cardLink) {
+    body.push({ kind: "link", href: cardLink, label: cardLink })
   }
   if (body.length === 0) return null
   return {

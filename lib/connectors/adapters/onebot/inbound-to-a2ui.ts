@@ -88,14 +88,10 @@ export function onebotInboundToA2UI(payload: {
   message?: OneBotSegment[] | string
 }): InboundA2UIBlock | null {
   if (!payload.message) return null
-  if (typeof payload.message === "string") {
-    if (!payload.message.trim()) return null
-    return {
-      v: 1,
-      source: "onebot",
-      body: [{ kind: "text", text: payload.message }],
-    }
-  }
+  // A string-form message is CQ-code text the parser already decodes into
+  // segments (entities, @-mentions, images); projecting the raw string would
+  // show `[CQ:…]` codes and `&amp;` beside the decoded parts.
+  if (typeof payload.message === "string") return null
   const body: InboundA2UINode[] = []
   for (const seg of payload.message) {
     const node = mapSegment(seg)

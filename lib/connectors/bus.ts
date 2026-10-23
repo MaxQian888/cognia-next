@@ -51,6 +51,8 @@ import { recordAndCheckInbound, isRecordedInbound } from "./dedup"
 import { recordDeliveredMessage, wasDeliveredByUs } from "./delivered-messages"
 import { isReactionSystemEvent, recordInboundReaction } from "@/lib/connectors/reactions-inbound"
 import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
+import { projectInboundToA2UI } from "./adapters/_shared/inbound-a2ui-dispatch"
+import { inboundEventToStoredParts } from "./inbound-stored-parts"
 import { appendAudit } from "./audit"
 import { runInboundOcr, hasOcrableInboundImage } from "./inbound-ocr"
 import {
@@ -94,7 +96,11 @@ import { classifySiblingSender, type SiblingClassification } from "./sibling-bot
 import { applyMediaModelGate, resolveMediaModelPolicy } from "./media-model-gate"
 import { consumeSiblingInterplayBudget, DEFAULT_BOT_INTERPLAY_BUDGET } from "./at-gate"
 import { observeUnmentionedDeliveryProbe } from "./at-gate"
-import { connectorOccurrenceKey, deliveryTargetFromEvent } from "@/types/connectors/event"
+import {
+  CONVERSATION_KEY_SEP,
+  connectorOccurrenceKey,
+  deliveryTargetFromEvent,
+} from "@/types/connectors/event"
 import {
   refreshConnectorConversationDeliveryTarget,
   stampConnectorConversationPrincipal,
@@ -1601,6 +1607,12 @@ export class ConnectorBus {
     event: NormalizedInboundEvent,
     replaces: string
   ): Promise<StoredMessage | undefined> {
+    // Edit / delete events do not always name the thread the original was
+    // filed under: a Lark recall carries only `chat_id`, a Matrix `m.replace`
+    // carries no `m.thread` relation. A row stored under a thread of the
+    // event's conversation (`<key>:<thread>`) is therefore the same message —
+    // the platform message id is unique within its chat.
+    const threadPrefix = `${event.conversationKey}${CONVERSATION_KEY_SEP}`
     const candidates = await getDb()
       .messages.where("platformMessageId")
       .equals(replaces)
@@ -1608,16 +1620,23 @@ export class ConnectorBus {
         const pm = m.metadata?.platformMessage
         if (!pm || pm.platform !== event.platform) return false
         if (pm.adapterId !== undefined && pm.adapterId !== event.adapterId) return false
-        if (pm.conversationKey !== undefined && pm.conversationKey !== event.conversationKey) {
+        if (
+          pm.conversationKey !== undefined &&
+          pm.conversationKey !== event.conversationKey &&
+          !pm.conversationKey.startsWith(threadPrefix)
+        ) {
           return false
         }
         return true
       })
       .toArray()
-    return (
-      candidates.find((m) => m.metadata?.platformMessage?.adapterId === event.adapterId) ??
-      candidates[0]
-    )
+    const rank = (m: StoredMessage): number => {
+      const pm = m.metadata?.platformMessage
+      if (pm?.adapterId !== event.adapterId) return 3
+      if (pm.conversationKey === event.conversationKey) return 0
+      return pm.conversationKey === undefined ? 2 : 1
+    }
+    return candidates.sort((a, b) => rank(a) - rank(b))[0]
   }
 
   /**
@@ -1647,31 +1666,20 @@ export class ConnectorBus {
       const session = await db.sessions.get(target.sessionId)
       if (!session) throw new Error("SESSION_NOT_FOUND")
       assertLocalMutationAllowed(session, "message.correctOwn")
-      // Map the new segments → parts the same way insertInboundMessage does.
-      const parts: StoredMessage["parts"] = event.segments
-        .map((seg) => {
-          if (seg.type === "text" || seg.type === "markdown") {
-            return {
-              type: "text" as const,
-              text: seg.type === "text" ? seg.text : seg.md,
-            }
-          }
-          if (seg.type === "image") {
-            return { type: "text" as const, text: `[image: ${seg.url}]` }
-          }
-          return { type: "text" as const, text: event.plainText }
-        })
-        .filter((p, i, arr) => {
-          if (i === 0) return true
-          const prev = arr[i - 1]
-          return !(prev.type === "text" && p.type === "text" && prev.text === p.text)
-        })
-      const finalParts =
-        parts.length > 0 ? parts : [{ type: "text" as const, text: event.plainText }]
+      // Store the new revision exactly as `insertInboundMessage` stores a
+      // new message, and re-project its rich block: the old card describes
+      // the old text, and an edit that removes the card must remove it here.
+      const finalParts = inboundEventToStoredParts(event)
+      const inboundA2UI = projectInboundToA2UI(event.platform, event.raw, event.segments)
       // Labels judged the old text; an edit makes them stale (ADR-0194).
-      const { inboundLabels: _staleLabels, ...keptMetadata } = target.metadata ?? {}
+      const {
+        inboundLabels: _staleLabels,
+        inboundA2UI: _staleRich,
+        ...keptMetadata
+      } = target.metadata ?? {}
       const editedMetadata: StoredMessage["metadata"] = {
         ...keptMetadata,
+        ...(inboundA2UI ? { inboundA2UI } : {}),
         editedAt: now,
         editCount: ((target.metadata?.editCount as number | undefined) ?? 0) + 1,
       }
@@ -1727,8 +1735,15 @@ export class ConnectorBus {
       const session = await db.sessions.get(target.sessionId)
       if (!session) throw new Error("SESSION_NOT_FOUND")
       assertLocalMutationAllowed(session, "message.redactOwn")
+      // The rich projection, labels and reply quote describe the withdrawn
+      // content; keeping them would leave it on screen behind `[deleted]`.
+      const {
+        inboundA2UI: _withdrawnRich,
+        inboundLabels: _withdrawnLabels,
+        ...keptMetadata
+      } = target.metadata ?? {}
       const deletedMetadata: StoredMessage["metadata"] = {
-        ...target.metadata,
+        ...keptMetadata,
         deletedAt: now,
       }
       await db.messages.update(target.id, {

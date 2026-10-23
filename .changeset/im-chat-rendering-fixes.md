@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Fix how messages from Feishu/Lark, Slack, Discord, Telegram and other IM platforms render in the chat. Feishu cards now render from the form Feishu actually delivers, and their text reaches the AI turn and search instead of an empty message. Slack Block Kit, Discord embeds and Telegram inline keyboards are shown again. Card Markdown (Slack mrkdwn, Lark Markdown) is formatted instead of showing raw syntax, a card's text is no longer printed twice, and a sender's line breaks are kept. Recalled and edited messages no longer leave the old card on screen, including Feishu messages inside a reply thread. A malformed card no longer breaks the conversation view. Link buttons open their URL; platform action buttons stay read-only and say so. Images only the platform can fetch show a labelled placeholder instead of a broken image. Text that mentions no character keeps its Markdown formatting. Text from IM senders can no longer inject styled HTML, run embedded A2UI blocks, or link into local files.

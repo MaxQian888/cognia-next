@@ -106,4 +106,62 @@ describe("slackInboundToA2UI", () => {
       children: [{ kind: "text", text: "Last updated 5m ago", emphasis: "muted" }],
     })
   })
+
+  it("unwraps the Events API envelope the parser stores as event.raw", () => {
+    const out = slackInboundToA2UI({
+      event: { blocks: [{ type: "header", text: { type: "plain_text", text: "Hi" } }] },
+    })
+    expect(out?.body).toEqual([{ kind: "heading", level: 2, text: "Hi" }])
+  })
+
+  it("projects the new revision of a message_changed edit", () => {
+    const out = slackInboundToA2UI({
+      event: {
+        subtype: "message_changed",
+        message: { blocks: [{ type: "divider" }] },
+      },
+    } as never)
+    expect(out?.body).toEqual([{ kind: "divider" }])
+  })
+
+  it("has nothing to project for a slash command payload", () => {
+    expect(slackInboundToA2UI({ command: "/ask", text: "hello" } as never)).toBeNull()
+  })
+
+  it("renders mrkdwn section text and fields as converted Markdown", () => {
+    const out = slackInboundToA2UI({
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: "*Build* <https://ci.test|#42>" },
+          fields: [
+            { type: "mrkdwn", text: "_ok_" },
+            { type: "plain_text", text: "*literal*" },
+          ],
+        },
+      ],
+    })
+    expect(out?.body).toEqual([
+      {
+        kind: "column",
+        children: [
+          { kind: "text", text: "**Build** [#42](https://ci.test)", format: "markdown" },
+          {
+            kind: "list",
+            children: [
+              { kind: "text", text: "*ok*", format: "markdown" },
+              { kind: "text", text: "*literal*" },
+            ],
+          },
+        ],
+      },
+    ])
+  })
+
+  it("ignores malformed blocks instead of throwing", () => {
+    const out = slackInboundToA2UI({
+      blocks: [null, { type: "context", elements: "x" }, { type: "divider" }] as never,
+    })
+    expect(out?.body).toEqual([{ kind: "divider" }])
+  })
 })

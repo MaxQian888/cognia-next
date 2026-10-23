@@ -9,9 +9,9 @@ describe("onebotInboundToA2UI", () => {
     expect(onebotInboundToA2UI({ message: "" })).toBeNull()
   })
 
-  it("maps a plain string message into a single text node", () => {
-    const out = onebotInboundToA2UI({ message: "hello" })
-    expect(out!.body).toEqual([{ kind: "text", text: "hello" }])
+  it("leaves a string-form (CQ-code) message to the parser's segments", () => {
+    expect(onebotInboundToA2UI({ message: "hello" })).toBeNull()
+    expect(onebotInboundToA2UI({ message: "A &amp; B [CQ:at,qq=1]" })).toBeNull()
   })
 
   it("maps text + at + image segments", () => {

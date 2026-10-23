@@ -29,6 +29,7 @@ import { buildConversationKey } from "@/types/connectors/event"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
 import { projectInboundToA2UI } from "@/lib/connectors/adapters/_shared/inbound-a2ui-dispatch"
+import { inboundEventToStoredParts } from "@/lib/connectors/inbound-stored-parts"
 import { resolveInboundReplyTo } from "@/lib/connectors/inbound-reply-to"
 import type { RouteDecision } from "./mode-router"
 import type { LiveSteerHandler } from "./bus"
@@ -862,37 +863,7 @@ export async function insertInboundMessage(
     })
     .first()
   if (existing) return existing
-  // Map MessageSegment[] → UIMessage parts (text & image; others as text-fallback)
-  const parts: StoredMessage["parts"] = event.segments
-    .map((seg) => {
-      if (seg.type === "text" || seg.type === "markdown") {
-        return {
-          type: "text" as const,
-          text: seg.type === "text" ? seg.text : seg.md,
-        }
-      }
-      if (seg.type === "image") {
-        return { type: "text" as const, text: `[image: ${seg.url}]` }
-      }
-      if (seg.type === "file") {
-        return { type: "text" as const, text: `[file: ${seg.name}]` }
-      }
-      // Other segment types degrade to a text placeholder for Phase 1
-      return { type: "text" as const, text: event.plainText }
-    })
-    .filter((_, i, arr) => {
-      // De-duplicate fallback entries: only keep one text part when all
-      // segments collapsed to the same plainText.
-      if (i === 0) return true
-      const prev = arr[i - 1]
-      const curr = arr[i]
-      if (prev.type === "text" && curr.type === "text" && prev.text === curr.text) return false
-      return true
-    })
-
-  // If the segment list was empty, fall back to plainText
-  const finalParts: StoredMessage["parts"] =
-    parts.length > 0 ? parts : [{ type: "text", text: event.plainText }]
+  const finalParts = inboundEventToStoredParts(event)
 
   // Reverse-project the platform-native rich content (Block Kit, Lark
   // card, Discord embeds, Telegram inline keyboard, OneBot CQ segments)
