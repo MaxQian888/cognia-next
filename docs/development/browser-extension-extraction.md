@@ -18,6 +18,8 @@ The extension declares the `agent-safe-v1` profile over envelope v1 and requires
 
 The change classifier includes all Rust paths and manifests, protocol definitions, shared client/overlay/engine, desktop companion API, the pin and the contract checker. These edits keep selecting the consumer lane even though extension source is no longer in this repository.
 
+The consumer job needs no product Jest artifacts. If product planning fails or is skipped, it conservatively runs the independent checks; workflow cancellation still stops it. A failed planner continues to fail product CI.
+
 For a local check, use an explicit checkout:
 
 ```sh

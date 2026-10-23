@@ -502,7 +502,11 @@ test("expensive PR lanes follow runtime impacts without skipping Windows prerequ
     "cargo-test-diagnostic-server": "diagnostic",
   })) {
     assert.equal(jobs[name].needs, "jest-plan")
-    assert.equal(jobs[name].if, `fromJSON(needs.jest-plan.outputs.impacts).${impact}`)
+    const condition =
+      name === "e2e-browser-extension"
+        ? "${{ !cancelled() && (needs.jest-plan.result != 'success' || fromJSON(needs.jest-plan.outputs.impacts).browserExtension) }}"
+        : `fromJSON(needs.jest-plan.outputs.impacts).${impact}`
+    assert.equal(jobs[name].if, condition)
   }
   assert.deepEqual(jobs["cargo-test-windows"].needs, ["jest-plan", "build"])
   assert.match(jobs.build.if, /\.productionBuild$/)
