@@ -7,6 +7,13 @@ jest.mock("@/hooks/chat/use-follow-up-suggestions", () => ({
     retry: jest.fn(),
   })),
 }))
+jest.mock("@/hooks/chat/use-remote-doc-staging", () => ({
+  ...jest.requireActual("@/hooks/chat/use-remote-doc-staging"),
+  useRemoteDocStaging: jest.fn(
+    jest.requireActual("@/hooks/chat/use-remote-doc-staging").useRemoteDocStaging
+  ),
+}))
+import { useRemoteDocStaging } from "@/hooks/chat/use-remote-doc-staging"
 jest.mock("@/lib/i18n/runtime-translator", () => ({
   getRuntimeTranslator: async () => (key: string) => key,
 }))
@@ -300,6 +307,30 @@ function pairCompanionHost(): void {
 }
 
 describe("Composer — data-hooks integration", () => {
+  it("invalidates a captured document destination across session A-B-A", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const renderComposer = (id: string) => (
+      <Wrapper>
+        <Composer
+          session={mkSession({ id })}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    const view = render(renderComposer("session-a"))
+    const capture = jest.mocked(useRemoteDocStaging).mock.calls.at(-1)![0].captureDestination!
+    const original = capture()
+    expect(original()).toBe(true)
+    view.rerender(renderComposer("session-b"))
+    view.rerender(renderComposer("session-a"))
+    expect(original()).toBe(false)
+    expect(jest.mocked(useRemoteDocStaging).mock.calls.at(-1)![0].captureDestination!()()).toBe(
+      true
+    )
+  })
   it("retains a restored photo when the attachment gate refuses every file", async () => {
     const file = new File(["photo"], "photo.png", { type: "image/png" })
     const conversion = jest.mocked(attachmentConversion.attachmentToFiles).mockResolvedValue([file])
@@ -1851,6 +1882,19 @@ describe("Composer — best-of-N consumes exactly one send", () => {
 })
 
 describe("Composer — next-prompt predictions", () => {
+  it("places predictions inside the shared context region above the input", async () => {
+    const { ta } = renderPredictions()
+    const suggestion = await screen.findByText("Explain the next step")
+    const region = screen.getByRole("region", { name: "Composer context and notices" })
+    expect(region.parentElement).toHaveStyle({
+      "--composer-notice-inset": "18px",
+      "--composer-notice-radius": "8px",
+    })
+    expect(region).toContainElement(suggestion)
+    expect(region).not.toContainElement(ta)
+    expect(region.compareDocumentPosition(ta) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   function renderPredictions(props: Partial<React.ComponentProps<typeof Composer>> = {}) {
     const Wrapper = withAdapter(makeAdapter())
     const onSend = jest.fn(async (_content: unknown) => undefined)

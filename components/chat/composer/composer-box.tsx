@@ -12,9 +12,9 @@
  * standing up the ~1400 lines of state machine that feed it.
  *
  * Deliberately NOT included: the bands stacked above the box (attachments,
- * context chips, goal/loop/plan banners) and the popovers below it. Those are
- * not skin-controlled, so pulling them in would widen the prop surface without
- * widening what the box can express.
+ * context chips, goal/loop/plan banners) and the popovers below it. Those own
+ * their content and visibility; the geometry helpers here let neighbouring
+ * notices follow the input without widening the box's prop surface.
  */
 
 import type { ChangeEvent, ClipboardEvent, DragEvent, ReactNode, RefObject } from "react"
@@ -100,6 +100,25 @@ export function composerCardRadiusPx(
   compactLayout: boolean
 ): number {
   return skin.isClassic && compactLayout ? COMPACT_CLASSIC_RADIUS_PX : skin.radiusPx
+}
+
+/** Notices share the input's geometry without drawing a second input surface. */
+export function composerNoticeVars(
+  skin: ResolvedComposerSkin,
+  compactLayout: boolean,
+  { isMobile = false, nativeShell = false }: { isMobile?: boolean; nativeShell?: boolean } = {}
+): Record<string, string> {
+  const radius = composerCardRadiusPx(skin, compactLayout)
+  // Match the attachment glyph's centre: 1px card border + actual padding +
+  // half its 32px button (44px in the native shell), minus half the 14px info
+  // icon. Compact desktop clusters shift 4px toward the card's leading edge.
+  const padding = skin.isClassic && compactLayout ? 12 : skin.padXPx
+  const attachmentSize = nativeShell ? 44 : 32
+  const clusterShift = compactLayout && !isMobile ? -4 : 0
+  return {
+    "--composer-notice-inset": `${1 + padding + attachmentSize / 2 - 7 + clusterShift}px`,
+    "--composer-notice-radius": `${Math.min(8, radius / 2)}px`,
+  }
 }
 
 /** Every other skin drives its geometry from the inline custom properties. */

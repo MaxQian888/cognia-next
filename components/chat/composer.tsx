@@ -103,7 +103,7 @@ import {
   useComposerImageInput,
   type ComposerImageInput,
 } from "./composer/hooks/use-composer-image-input"
-import { ComposerBox, composerCardRadiusPx } from "./composer/composer-box"
+import { ComposerBox, composerCardRadiusPx, composerNoticeVars } from "./composer/composer-box"
 import {
   resolveComposerSkin,
   toolbarSitsInBox,
@@ -824,6 +824,7 @@ function ComposerInner(props: InnerProps) {
     stageRemoteDoc,
     acceptFiles,
   } = useAttachmentIntake({
+    destinationKey: props.session?.id,
     attachments,
     attachmentCitations,
     textInput: textInput,
@@ -3418,13 +3419,25 @@ function ComposerInner(props: InnerProps) {
     // mode, which `resolveSendOptions` reads back, so the mistake reached the
     // model and not just the chrome.
     <ComposerSessionProvider value={props.session?.id ?? null}>
-      <div ref={setContainerEl}>
+      <div
+        ref={setContainerEl}
+        style={
+          composerNoticeVars(props.skin, compactLayout, {
+            isMobile,
+            nativeShell: nativeMobile,
+          }) as CSSProperties
+        }
+      >
         {/* Every band stacked above the input card shares one scroll container
           with a height cap. Restored attachments, an active goal, an open loop
           and the plan-mode banner could otherwise push the input off the
           bottom of the screen. Each band still animates its own height inside
           it. (Staged attachments live INSIDE the card — `contextRow`.) */}
-        <div className="max-h-[40vh] overflow-y-auto overscroll-contain">
+        <div
+          role="region"
+          aria-label={t("contextRegion")}
+          className="max-h-[40vh] overflow-y-auto overscroll-contain"
+        >
           {pendingLaunchSpec ? (
             <TemplateLaunchDiffBar
               differences={launchDifferences}
@@ -3506,6 +3519,17 @@ function ComposerInner(props: InnerProps) {
             })()}
           </Collapse>
           <ComposerStatusBands sessionId={sessionId} />
+          {predictionEligible && (
+            <FollowUpSuggestions
+              suggestions={prediction.suggestions}
+              onAccept={(text) => acceptPrediction(text, predictionAcceptance === "send")}
+              onDismiss={prediction.dismiss}
+              directSend={predictionAcceptance === "send"}
+              status={prediction.status}
+              onRetry={prediction.retry}
+              onConfigure={() => props.onOpenSettings("conversation")}
+            />
+          )}
         </div>
         {props.runStatus ? (
           // Docked onto the card's top edge. The inset follows the corner the
@@ -3528,17 +3552,6 @@ function ComposerInner(props: InnerProps) {
             {props.runStatus}
           </div>
         ) : null}
-        {predictionEligible && (
-          <FollowUpSuggestions
-            suggestions={prediction.suggestions}
-            onAccept={(text) => acceptPrediction(text, predictionAcceptance === "send")}
-            onDismiss={prediction.dismiss}
-            directSend={predictionAcceptance === "send"}
-            status={prediction.status}
-            onRetry={prediction.retry}
-            onConfigure={() => props.onOpenSettings("conversation")}
-          />
-        )}
         <ComposerBox
           skin={props.skin}
           compactLayout={compactLayout}

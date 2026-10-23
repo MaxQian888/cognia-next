@@ -1,6 +1,7 @@
 import {
   chatMarkdownSanitizeSchema,
   chatMarkdownUrlTransform,
+  untrustedMarkdownUrlTransform,
   chatStreamdownRehypePlugins,
 } from "./rendering-policy"
 
@@ -33,5 +34,22 @@ describe("shared Markdown rendering policy", () => {
       expect.arrayContaining(["mark", "u", "abbr"])
     )
     expect(chatMarkdownSanitizeSchema.attributes?.abbr).toContain("title")
+  })
+})
+
+describe("untrustedMarkdownUrlTransform", () => {
+  it.each([
+    ["https://x.test/a", "href", "https://x.test/a"],
+    ["http://x.test/a.png", "src", "http://x.test/a.png"],
+    ["mailto:a@b.test", "href", "mailto:a@b.test"],
+    ["data:image/png;base64,AA", "src", "data:image/png;base64,AA"],
+    ["data:image/png;base64,AA", "href", ""],
+    ["file:///etc/passwd", "href", ""],
+    ["tel:+1", "href", ""],
+    ["javascript:alert(1)", "href", ""],
+    ["src/secret.ts", "href", ""],
+    ["/settings", "href", ""],
+  ])("%s as %s → %s", (url, key, expected) => {
+    expect(untrustedMarkdownUrlTransform(url, key)).toBe(expected)
   })
 })

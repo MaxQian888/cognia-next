@@ -1384,6 +1384,32 @@ describe("ComposerPopover — remote documents", () => {
     }
   }
 
+  it("never rebinds an old result to the currently selected account on Enter or click", () => {
+    const onPick = jest.fn()
+    useRemoteDocSearchMock.mockReturnValue(
+      docSearchState({
+        provider,
+        hostSupported: true,
+        accounts: [{ id: "b", label: "B" }],
+        accountId: "b",
+        items: [
+          {
+            providerId: "lark",
+            kind: "doc",
+            id: "d1",
+            title: "Old A result",
+            accountBinding: { accountId: "a" },
+          },
+        ],
+        loading: true,
+      })
+    )
+    const { ref } = setup(docTrigger("spec"), onPick)
+    act(() => ref.current?.confirm())
+    expect(onPick).not.toHaveBeenCalled()
+    expect(screen.queryByText("Old A result")).not.toBeInTheDocument()
+  })
+
   it("lists the provider's hits and labels each document kind", () => {
     useRemoteDocSearchMock.mockReturnValue(
       docSearchState({

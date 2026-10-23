@@ -178,6 +178,46 @@ describe("createAttachmentCitations", () => {
 })
 
 describe("remoteDocCitation", () => {
+  it("keeps identical resource ids in different new-provider accounts distinct", () => {
+    const binding = (accountId: string): RemoteDocRef => ({
+      providerId: "microsoft",
+      id: "drive:item",
+      kind: "doc",
+      title: "Spec",
+      accountBinding: { accountId, authorizationEpoch: "not-history" },
+    })
+    const first = remoteDocCitation({ providerId: "microsoft", doc: binding("a:b") }, "Spec")
+    const second = remoteDocCitation({ providerId: "microsoft", doc: binding("b") }, "Spec")
+    expect(first.id).toBe("microsoft:a%3Ab:drive:item")
+    expect(second.id).not.toBe(first.id)
+    expect(JSON.stringify(first)).not.toContain("not-history")
+    const citations = createAttachmentCitations()
+    citations.expect(planFile, first)
+    citations.expect(budgetFile, second)
+    citations.observe([attachment("a", planFile), attachment("b", budgetFile)])
+    expect(citations.citationsFor([{ id: "a" }, { id: "b" }])).toHaveLength(2)
+  })
+
+  it.each(["google", "lark"])(
+    "preserves historical %s citation ids for bound refs",
+    (providerId) => {
+      expect(
+        remoteDocCitation(
+          {
+            providerId,
+            doc: {
+              providerId,
+              id: "same",
+              kind: "doc",
+              title: "Spec",
+              accountBinding: { accountId: "account" },
+            },
+          },
+          "Spec"
+        ).id
+      ).toBe(`${providerId}:same`)
+    }
+  )
   const doc: RemoteDocRef = {
     providerId: "lark",
     kind: "doc",

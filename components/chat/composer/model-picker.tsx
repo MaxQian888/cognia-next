@@ -20,7 +20,7 @@
 // it is readable without opening anything, which the other two were not.
 
 import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
-import { useMemo, useState, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 
 import { toast } from "sonner"
@@ -29,7 +29,8 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 import { useSettingsStore } from "@/stores/settings"
-import { updateSession } from "@/lib/db/sessions"
+import { getSession, updateSession } from "@/lib/db/sessions"
+import { persistModelSelection } from "@/lib/chat/model-selection"
 import {
   agentHostAvailable,
   resolveAgentExecutionEnvironment,
@@ -298,17 +299,41 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
   // immediately, before the parent re-renders with the updated session prop.
   const [optimisticModel, setOptimisticModel] = useState<string | null>(null)
   const [optimisticProvider, setOptimisticProvider] = useState<string | null>(null)
+  const [autoEnablePending, setAutoEnablePending] = useState(false)
+  const selectionSaveRef = useRef<Promise<void> | null>(null)
+  const [selectionPersisted, setSelectionPersisted] = useState(false)
   // Reset the optimistic overlay when the session or the lane changes
   // (render-time setState). A pick made for one lane says nothing about the
   // other: switching Kimi Code back to the built-in agent kept naming the Kimi
   // model until the conversation was reopened.
   const laneKey = `${session?.id ?? ""}\u0000${agentId ?? ""}`
+  useEffect(
+    () => () => {
+      selectionSaveRef.current = null
+    },
+    [laneKey]
+  )
   const [prevLaneKey, setPrevLaneKey] = useState(laneKey)
   if (prevLaneKey !== laneKey) {
     setPrevLaneKey(laneKey)
     setOptimisticModel(null)
     setOptimisticProvider(null)
     setOptimisticChoice(null)
+    setAutoEnablePending(false)
+    setSelectionPersisted(false)
+  }
+  // Once the row acknowledges a persisted choice, later preset/settings edits
+  // are authoritative even though the session ID stays the same.
+  if (
+    selectionPersisted &&
+    optimisticModel !== null &&
+    session?.model === optimisticModel &&
+    (optimisticProvider === ""
+      ? session.providerOverride == null
+      : session.providerOverride === optimisticProvider)
+  ) {
+    setOptimisticModel(null)
+    setOptimisticProvider(null)
   }
 
   // --- External lane -------------------------------------------------------
@@ -350,13 +375,14 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
   // showing a Kimi model while the provider default ran.
   const rowIsAgentPick = isExternalAgentProviderId(session?.providerOverride)
   const appDefault = resolveAppDefaultModel({ defaultModel, defaultProvider })
+  const selectedModel = optimisticModel ?? (rowIsAgentPick ? undefined : session?.model)
+  const effectiveModel =
+    selectedModel === "auto" && !autoEnabled && !autoEnablePending ? undefined : selectedModel
+  const inheritAuto = autoEnabled && autoRouting?.defaultSelection === "auto" && !selectedModel
   const activeModel = externalLane
     ? (cogniaBinding?.modelId ??
       (agentActiveModel || (hasNativeList ? agentActiveModel : AGENT_DEFAULT_MODEL_ID)))
-    : (optimisticModel ??
-      (rowIsAgentPick ? undefined : session?.model) ??
-      appDefault.model ??
-      ANTHROPIC_DEFAULT_MODEL)
+    : (effectiveModel ?? (inheritAuto ? "auto" : appDefault.model) ?? ANTHROPIC_DEFAULT_MODEL)
   const activeProvider = externalLane
     ? cogniaBinding
       ? cogniaGatewayGroupId(cogniaBinding.providerId)
@@ -449,84 +475,125 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
     // rather than written: the built-in lane's pick is not a choice made for
     // an agent.
     if (externalLane) return
-    if (!session?.id) {
-      // No conversation yet, so there is no row to override. The chip is showing
-      // the app default and that is exactly what the next turn will use, so the
-      // selection writes the default rather than being silently dropped, which
-      // is what the static label used to do.
-      setOptimisticModel(modelId)
-      setOptimisticProvider(providerId)
-      void saveSettings({ defaultModel: modelId, defaultProvider: providerId })
-      return
-    }
     const prevProvider = activeProvider
+    setAutoEnablePending(false)
     setOptimisticModel(modelId)
     setOptimisticProvider(providerId)
-    void updateSession(session.id, {
-      model: modelId,
-      providerOverride: providerId,
-    })
-    // Host truth, not webview kind: a paired phone or browser reaches the
-    // host's sidecar over the companion transport (`claude_session_control` is
-    // an `execution`-target command), and the headless brain owns one outright.
-    // Gating on `isTauri()` here left every companion with a persisted override
-    // that only took effect on the NEXT session, while the running one kept the
-    // old model with no word about it.
-    if (agentHostAvailable(resolveAgentExecutionEnvironment())) {
-      if (providerId === prevProvider) {
-        // Same provider, model-only change → live in-place switch driving the
-        // running session's `setModel` so the next turn uses the new model
-        // WITHOUT losing the conversation. Works on BOTH paths: the Anthropic
-        // SDK `Query.setModel` and the ai-sdk multi-turn loop's `q.setModel`
-        // (sidecar `handleControl` routes to whichever the live session
-        // exposes). Best-effort — `no_active_session` (session not started yet)
-        // is silent; the persisted override above covers that case.
-        const liveSwitch =
-          scope?.sessionId === session.id && scope.setModel
-            ? scope.setModel(modelId)
-            : setSessionModel(session.id, modelId)
-        liveSwitch
-          .then(() => toast.success(t("liveSwitched", { model: modelId })))
-          .catch((err) => {
-            const msg = err instanceof Error ? err.message : String(err)
-            if (msg.includes("no_active_session")) return
-            toast.error(t("liveSwitchFailed"))
-          })
-      } else {
-        // Provider change → the live session is on the wrong dispatch path
-        // (Anthropic single-turn vs ai-sdk multi-turn), so an in-place model
-        // swap can't apply. Close it so the next send re-dispatches on the new
-        // provider; the persisted override above selects the new model/provider.
-        // Best-effort — a not-yet-started session has nothing to close.
-        const reset =
-          scope?.sessionId === session.id && scope.resetRuntime
-            ? scope.resetRuntime()
-            : closeSession(session.id)
-        void reset.catch(() => undefined)
+    const save: Promise<void> = saveBuiltInSelection(async () => {
+      if (!session?.id) {
+        // Read the policy when this queued operation starts: an earlier Auto
+        // save may have enabled routing since this click was rendered.
+        const currentAuto = useSettingsStore.getState().settings?.autoRouting
+        await saveSettings({
+          defaultModel: modelId,
+          defaultProvider: providerId,
+          ...(currentAuto?.defaultSelection === "auto"
+            ? { autoRouting: { ...currentAuto, defaultSelection: "manual" } }
+            : {}),
+        })
+        return
       }
-    }
+      await updateSession(session.id, { model: modelId, providerOverride: providerId })
+      if (selectionSaveRef.current === save) setSelectionPersisted(true)
+      if (!agentHostAvailable(resolveAgentExecutionEnvironment())) return
+      if (providerId === prevProvider) {
+        try {
+          await (scope?.sessionId === session.id && scope.setModel
+            ? scope.setModel(modelId)
+            : setSessionModel(session.id, modelId))
+          // A superseded control completing should not announce the old model.
+          if (selectionSaveRef.current === save)
+            toast.success(t("liveSwitched", { model: modelId }))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          if (!message.includes("no_active_session")) toast.error(t("liveSwitchFailed"))
+        }
+      } else {
+        await resetBuiltInRuntime(session.id)
+      }
+    })
+  }
+
+  const resetBuiltInRuntime = async (sessionId: string) => {
+    const reset =
+      scope?.sessionId === sessionId && scope.resetRuntime
+        ? scope.resetRuntime()
+        : closeSession(sessionId)
+    // A missing/already-closed runtime does not prevent the persisted choice.
+    await reset.catch(() => undefined)
+  }
+
+  const saveBuiltInSelection = (operation: () => Promise<void>): Promise<void> => {
+    setSelectionPersisted(false)
+    const save = persistModelSelection(session?.id ?? null, operation)
+    selectionSaveRef.current = save
+    void save.then(
+      () => {
+        if (selectionSaveRef.current !== save) return
+        selectionSaveRef.current = null
+        setAutoEnablePending(false)
+        if (!session?.id) {
+          setOptimisticModel(null)
+          setOptimisticProvider(null)
+        }
+      },
+      (error: unknown) => {
+        if (selectionSaveRef.current !== save) return
+        selectionSaveRef.current = null
+        setSelectionPersisted(false)
+        setAutoEnablePending(false)
+        setOptimisticModel(null)
+        setOptimisticProvider(null)
+        toast.error(
+          t("cogniaModelSwitchFailed", {
+            reason: error instanceof Error ? error.message : String(error),
+          })
+        )
+      }
+    )
+    return save
   }
 
   const handleSelectAuto = () => {
-    void saveSettings({
-      autoRouting: { ...(autoRouting ?? DEFAULT_AUTO_ROUTING), enabled: true },
-    })
+    setAutoEnablePending(!autoEnabled)
     setOptimisticModel("auto")
     setOptimisticProvider("")
-    if (!session?.id) return
-    void updateSession(session.id, {
-      model: "auto",
-      providerOverride: undefined,
+    const save: Promise<void> = saveBuiltInSelection(async () => {
+      const saveAutoSettings = () => {
+        const currentAuto = useSettingsStore.getState().settings?.autoRouting
+        return saveSettings({
+          autoRouting: {
+            ...(currentAuto ?? DEFAULT_AUTO_ROUTING),
+            enabled: true,
+            ...(!session?.id ? { defaultSelection: "auto" } : {}),
+          },
+        })
+      }
+      if (!session?.id) {
+        await saveAutoSettings()
+        return
+      }
+      // A failed session write must not enable inherited Auto globally. If
+      // enabling routing then fails, restore only our own model patch.
+      const previous = await getSession(session.id)
+      await updateSession(session.id, { model: "auto", providerOverride: undefined })
+      try {
+        await saveAutoSettings()
+      } catch (error) {
+        const current = await getSession(session.id)
+        if (current?.model === "auto" && current.providerOverride === undefined) {
+          await updateSession(session.id, {
+            model: previous?.model,
+            providerOverride: previous?.providerOverride,
+          })
+        }
+        throw error
+      }
+      if (selectionSaveRef.current === save) setSelectionPersisted(true)
+      if (agentHostAvailable(resolveAgentExecutionEnvironment())) {
+        await resetBuiltInRuntime(session.id)
+      }
     })
-    // Same host question as the live switch above: the runtime to reset lives
-    // wherever the sidecar does, which a companion reaches remotely.
-    if (agentHostAvailable(resolveAgentExecutionEnvironment())) {
-      const reset =
-        scope?.sessionId === session.id && scope.resetRuntime
-          ? scope.resetRuntime()
-          : closeSession(session.id)
-      void reset.catch(() => undefined)
-    }
   }
 
   // Only where asking again can learn something: a paired Host's lane gets its

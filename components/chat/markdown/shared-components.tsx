@@ -438,11 +438,14 @@ export function MarkdownInlineCode({
   projectRoot,
   onOpenProjectFile,
   className,
+  linkFiles = true,
 }: {
   children?: React.ReactNode
   projectRoot?: string | null
   onOpenProjectFile?: (target: ProjectFileReference) => void
   className?: string
+  /** `false`: never turn a path into a file link (text from a third party). */
+  linkFiles?: boolean
 }) {
   const code = (
     <code
@@ -453,7 +456,7 @@ export function MarkdownInlineCode({
     </code>
   )
   const text = typeof children === "string" ? children : Children.toArray(children).join("")
-  const target = text ? parseProjectFileReference(text, projectRoot) : null
+  const target = linkFiles && text ? parseProjectFileReference(text, projectRoot) : null
   if (!target) return code
   return (
     <ProjectFileLink target={target} onOpenFile={onOpenProjectFile} projectRoot={projectRoot}>

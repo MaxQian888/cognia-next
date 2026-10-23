@@ -35,7 +35,7 @@ describe("InboundA2UIRenderer", () => {
     expect(screen.getByText("Body")).toBeInTheDocument()
   })
 
-  it("renders buttons with disabled state and actionId data attribute", () => {
+  it("renders callback buttons inert, with a hint naming the platform", () => {
     wrap({
       v: 1,
       source: "slack",
@@ -49,6 +49,93 @@ describe("InboundA2UIRenderer", () => {
     const btn = screen.getByTestId("inbound-a2ui-button-approve")
     expect(btn).toBeDisabled()
     expect(btn).toHaveTextContent("Approve")
+    expect(btn).toHaveAttribute("data-inert", "true")
+    expect(btn).toHaveAttribute("title", "This action can only be used in Slack")
+  })
+
+  it("keeps a button inert when it carries both a callback and a URL", () => {
+    wrap({
+      v: 1,
+      source: "lark",
+      body: [{ kind: "button", label: "Both", actionId: "a", url: "https://x.test" }],
+    })
+    expect(screen.getByTestId("inbound-a2ui-button-a")).toBeDisabled()
+    expect(screen.queryByRole("link", { name: /Both/ })).not.toBeInTheDocument()
+  })
+
+  it("opens URL-only buttons as external links", () => {
+    wrap({
+      v: 1,
+      source: "telegram",
+      body: [{ kind: "button", label: "Docs", url: "https://x.test/docs" }],
+    })
+    const link = screen.getByTestId("inbound-a2ui-link-button")
+    expect(link.tagName).toBe("A")
+    expect(link).toHaveAttribute("href", "https://x.test/docs")
+    expect(link).toHaveTextContent("Docs")
+  })
+
+  it("does not navigate to non-web URL buttons or links", () => {
+    wrap({
+      v: 1,
+      source: "telegram",
+      body: [
+        { kind: "button", label: "Script", url: "javascript:alert(1)" },
+        { kind: "link", href: "telegram-file:abc", label: "report.pdf" },
+      ],
+    })
+    expect(screen.queryByRole("link")).not.toBeInTheDocument()
+    expect(screen.getByText("report.pdf")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Script/ })).toBeDisabled()
+  })
+
+  it("shows a placeholder for platform-only image references", () => {
+    wrap({
+      v: 1,
+      source: "lark",
+      body: [{ kind: "image", url: "lark-img:img_v3_x", alt: "chart" }],
+    })
+    expect(screen.getByTestId("inbound-a2ui-image-unavailable")).toHaveTextContent(
+      "chart · Image available in Lark"
+    )
+    expect(screen.queryByRole("img")).not.toBeInTheDocument()
+  })
+
+  it("renders Markdown text nodes formatted and keeps plain text line breaks", () => {
+    wrap({
+      v: 1,
+      source: "slack",
+      body: [
+        { kind: "text", text: "**Build** passed", format: "markdown" },
+        { kind: "text", text: "line one\nline two" },
+      ],
+    })
+    // react-markdown is stubbed under Jest; assert the Markdown pipeline got
+    // the text rather than a plain paragraph.
+    expect(screen.getByText("**Build** passed").closest(".markdown-renderer")).not.toBeNull()
+    expect(screen.getByText(/line one/)).toHaveClass("whitespace-pre-wrap")
+    expect(screen.getByText(/line one/).closest(".markdown-renderer")).toBeNull()
+  })
+
+  it("shows a title repeated as the first heading only once", () => {
+    wrap({
+      v: 1,
+      source: "lark",
+      title: "Deploy",
+      body: [{ kind: "heading", level: 2, text: "Deploy" }],
+    })
+    expect(screen.getAllByText("Deploy")).toHaveLength(1)
+  })
+
+  it("contains a render failure to the block", () => {
+    const spy = jest.spyOn(console, "error").mockImplementation(() => {})
+    wrap({
+      v: 1,
+      source: "lark",
+      body: [{ kind: "list", children: null as never }],
+    })
+    expect(screen.queryByTestId("inbound-a2ui")).not.toBeInTheDocument()
+    spy.mockRestore()
   })
 
   it("links render with rel/noopener and target=_blank", () => {

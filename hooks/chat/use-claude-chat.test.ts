@@ -1023,6 +1023,7 @@ import type { TurnRoute } from "@/lib/chat/turn-route/types"
 import { subscribeDiagnostic } from "@/lib/diagnostics/bus"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { useClaudeChat } from "./use-claude-chat-controller"
+import { persistModelSelection } from "@/lib/chat/model-selection"
 import { HELD_SESSION_APPROVAL_BACKSTOP_MS } from "./claude-chat-events"
 import { recordChatCanonicalEvents } from "@/lib/chat/canonical-sink"
 import {
@@ -1258,6 +1259,77 @@ afterEach(() => {
 })
 
 describe("useClaudeChat — actions", () => {
+  it("waits for the latest model write and runtime reset before reading and dispatching", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    let finishFirst!: () => void
+    let finishLatest!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      finishFirst = resolve
+    })
+    const latestGate = new Promise<void>((resolve) => {
+      finishLatest = resolve
+    })
+    const first = persistModelSelection("sess-1", () => firstGate)
+    const latest = persistModelSelection("sess-1", async () => {
+      await latestGate
+      getSessionMock.mockResolvedValue({ id: "sess-1", title: "New chat", model: "auto" })
+    })
+    getSessionMock.mockClear()
+    let send!: Promise<void>
+    try {
+      await act(async () => {
+        send = result.current.send("hello")
+      })
+      expect(getSessionMock).not.toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      await act(async () => {
+        finishFirst()
+        await first
+      })
+      expect(getSessionMock).not.toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      await act(async () => {
+        finishLatest()
+        await latest
+        await send
+      })
+      expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ session: expect.objectContaining({ model: "auto" }) })
+      )
+      expect(sendPromptMock).toHaveBeenCalledTimes(1)
+    } finally {
+      await act(async () => {
+        finishFirst()
+        finishLatest()
+        await latest
+        await send
+      })
+    }
+  })
+
+  it("does not dispatch while a pending model selection fails", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    let fail!: (error: Error) => void
+    const gate = new Promise<void>((_resolve, reject) => {
+      fail = reject
+    })
+    const selection = persistModelSelection("sess-1", () => gate)
+    const handled = selection.catch(() => undefined)
+    let send!: Promise<void>
+    await act(async () => {
+      send = result.current.send("hello")
+    })
+    await act(async () => {
+      fail(new Error("model write failed"))
+      await handled
+      await send
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(chatState.errorMessage).toContain("model write failed")
+  })
+
   it("send() guards against empty string content", async () => {
     const { result } = renderHook(() => useClaudeChat())
     await flush()

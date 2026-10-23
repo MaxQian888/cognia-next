@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react"
+import { act, renderHook } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import type { ReactNode } from "react"
 import messages from "@/i18n/messages/en.json"
@@ -87,6 +87,18 @@ describe("remoteDocFileName", () => {
 })
 
 describe("remoteDocToFile", () => {
+  it("marks a semantically partial body even when the provider forgot the legacy flag", async () => {
+    const body = await readFile(
+      remoteDocToFile(
+        content({
+          completeness: { status: "partial", reasons: ["inaccessible-block", "parse-degraded"] },
+        })
+      )
+    )
+    expect(body).toContain("inaccessible-block")
+    expect(body).toContain("parse-degraded")
+    expect(body).toContain("Incomplete")
+  })
   it("frames the body as untrusted external content", async () => {
     const body = await readFile(remoteDocToFile(content()))
     expect(body).toContain("Untrusted")
@@ -105,6 +117,131 @@ describe("remoteDocToFile", () => {
 })
 
 describe("useRemoteDocStaging", () => {
+  it("surfaces semantic partial content and rejects empty partial bodies", async () => {
+    getProviderMock.mockReturnValue({
+      fetch: async () =>
+        content({ completeness: { status: "partial", reasons: ["parse-degraded"] } }),
+    })
+    const { stage, acceptFiles } = renderStaging()
+    await stage({ providerId: "lark", accountId: "cai_1", doc: REF })
+    expect(toast.warning).toHaveBeenCalledWith(expect.stringContaining("could not be read"))
+    expect(await readFile(acceptFiles.mock.calls[0][0][0])).toContain("parse-degraded")
+    acceptFiles.mockClear()
+    jest.mocked(toast.success).mockClear()
+    getProviderMock.mockReturnValue({
+      fetch: async () => content({ text: " \n", completeness: { status: "partial", reasons: [] } }),
+    })
+    expect(await stage({ providerId: "lark", accountId: "cai_1", doc: REF })).toBeNull()
+    expect(acceptFiles).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith(expect.any(String), { id: "toast-1" })
+  })
+
+  it("does not cancel a valid epoch when a superseded account verification fails", async () => {
+    let changed: () => void = () => undefined
+    let rejectOld!: (error: Error) => void
+    const listAccounts = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectOld = reject
+          })
+      )
+      .mockResolvedValue([{ id: "a", label: "A", authorizationEpoch: "same" }])
+    const fetchDoc = jest.fn(async (_ref: RemoteDocRef, _opts: { signal: AbortSignal }) =>
+      content()
+    )
+    getProviderMock.mockReturnValue({
+      listAccounts,
+      fetch: fetchDoc,
+      subscribeAccounts: (listener: () => void) => {
+        changed = listener
+        return jest.fn()
+      },
+    })
+    const { stage } = renderStaging()
+    const pending = stage({
+      providerId: "lark",
+      accountId: "a",
+      doc: { ...REF, accountBinding: { accountId: "a", authorizationEpoch: "same" } },
+    })
+    await act(async () => {
+      changed()
+      await Promise.resolve()
+      rejectOld(new Error("old snapshot unavailable"))
+    })
+    expect(await pending).toBeInstanceOf(File)
+    expect(fetchDoc.mock.calls[0]?.[1].signal.aborted).toBe(false)
+  })
+  it("rejects a pick bound to a different account before any fetch", async () => {
+    const fetchDoc = jest.fn(async () => content())
+    getProviderMock.mockReturnValue({ fetch: fetchDoc })
+    const { stage, acceptFiles } = renderStaging()
+    expect(
+      await stage({
+        providerId: "lark",
+        accountId: "b",
+        doc: { ...REF, accountBinding: { accountId: "a" } },
+      })
+    ).toBeNull()
+    expect(fetchDoc).not.toHaveBeenCalled()
+    expect(acceptFiles).not.toHaveBeenCalled()
+  })
+
+  it("discards a fetched body after the bound account disconnects", async () => {
+    let changed: () => void = () => undefined
+    let finish!: (value: RemoteDocContent) => void
+    const fetchDoc = jest.fn(
+      () =>
+        new Promise<RemoteDocContent>((resolve) => {
+          finish = resolve
+        })
+    )
+    let connected = true
+    getProviderMock.mockReturnValue({
+      listAccounts: async () =>
+        connected ? [{ id: "a", label: "A", authorizationEpoch: "epoch" }] : [],
+      subscribeAccounts: (listener: () => void) => {
+        changed = listener
+        return jest.fn()
+      },
+      fetch: fetchDoc,
+    })
+    const { stage, acceptFiles } = renderStaging()
+    const pending = stage({
+      providerId: "lark",
+      accountId: "a",
+      doc: { ...REF, accountBinding: { accountId: "a", authorizationEpoch: "epoch" } },
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    connected = false
+    changed()
+    finish(content())
+    expect(await pending).toBeNull()
+    expect(acceptFiles).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it("discards a late fetch after the staging hook unmounts", async () => {
+    let finish!: (value: RemoteDocContent) => void
+    getProviderMock.mockReturnValue({
+      fetch: () =>
+        new Promise<RemoteDocContent>((resolve) => {
+          finish = resolve
+        }),
+    })
+    const acceptFiles = stagingEverything()
+    const { result, unmount } = renderHook(() => useRemoteDocStaging({ acceptFiles }), { wrapper })
+    const pending = result.current({ providerId: "lark", accountId: "cai_1", doc: REF })
+    unmount()
+    finish(content())
+    expect(await pending).toBeNull()
+    expect(acceptFiles).not.toHaveBeenCalled()
+  })
+
   it("fetches through the provider and stages the result as an attachment", async () => {
     const fetchDoc = jest.fn(async () => content())
     getProviderMock.mockReturnValue({ fetch: fetchDoc })
@@ -112,7 +249,10 @@ describe("useRemoteDocStaging", () => {
 
     const result = await stage({ providerId: "lark", accountId: "cai_1", doc: REF })
 
-    expect(fetchDoc).toHaveBeenCalledWith(REF, { accountId: "cai_1" })
+    expect(fetchDoc).toHaveBeenCalledWith(REF, {
+      accountId: "cai_1",
+      signal: expect.any(AbortSignal),
+    })
     expect(acceptFiles).toHaveBeenCalledTimes(1)
     const [staged] = acceptFiles.mock.calls[0][0] as File[]
     expect(staged.name).toBe("Q3 Plan.md")
