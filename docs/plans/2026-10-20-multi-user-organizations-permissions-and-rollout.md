@@ -308,6 +308,32 @@ Verified 2026-10-23 (HEAD `bef52bd74`): the 53 refused `client.read` / `client.w
 - **Unchanged.** Single-user mode, and the eight Host-global override arms, which stay on the operator brain behind `host.global-surfaces`.
 - **Offboarding (Q12).** `cognia-server persons list` shows partitions with their last use and current standing. `cognia-server persons purge --org <org> --user <user>` stops the brain, destroys the key, deletes the data root and writes an audit record. A person who later rejoins starts with an empty partition.
 
+### Sessions in a person partition (P5d)
+
+Found in P5c (2026-10-23): a member can store and read history in their partition but cannot create a conversation. Conversations are created through HostState (`session.create` on `host_state_submit`). The person brain already hosts HostState, since its message source installs the write source. Four things stop the call:
+
+- **Gate.** `host_state_*` and `host_feature_manifest` are classed by capability (`host.observe`, `workspace.write`), and that class is `workspace-action`. A member gets `403 host_surface_forbidden`.
+- **Authority binding.** `rpc/host_state.rs` binds the operator's account namespace and the device's operator grants. It should bind the partition account.
+- **Intent grants.** HostState authorizes `session.create` with `process.spawn` ("creating a session starts a runtime") and deletion, truncation and import with `host.admin`. A member holds neither.
+- **Runtime target.** HostState requires an active runtime target whose account is the caller's.
+
+**Shape.**
+
+- **Routing.** On a multi-tenant Host with a fleet, `host_state_status`, `host_state_snapshot`, `host_state_submit` and `host_feature_manifest` from a tenant device are `host-data`. They go to the caller's person brain. The status and snapshot arms need `client.read`; submit needs `client.write`. These arms are listed in a policy key of their own, with reasons, in the same way as `personModelCommands`. Single-user and desktop Hosts are unchanged.
+- **Authority.** Inside a partition, the bound account is the partition account and the Host id is the Host's. The caller is the owner of the partition. HostState authorizes by the partition policy below, not by the device's operator grants.
+- **Partition policy.** These intents are allowed, because each one only changes the person's own data:
+  - `session.create`, which writes a row and starts no runtime in a partition;
+  - session metadata: rename, archive, pin, folder, order;
+  - folders;
+  - `draft.replace`;
+  - `session.delete`, `transcript.edit`, `transcript.truncate` and `session.import`: the partition is the person's, and Q12 already makes them its owner.
+- **Refusals.**
+  - Intents that need a runtime (`message.enqueue`, `turn.*`, `approval.respond`, `elicitation.respond`) are refused per action with `execution_isolation_unavailable`. This is the same dormancy as the message arms.
+  - `session.workspace` is refused with `workspace_unavailable`: a partition has no Host workspaces.
+  - A `session.create` seed keeps a character only if the partition owns it, and drops `projectId`.
+- **Negotiation.** `host_state_status` lists exactly the allowed intents, so a client does not offer a send button that always fails. `host_feature_manifest` reports the partition's scope and marks agent execution unavailable.
+- **Runtime target.** A person brain activates its partition account's runtime target at boot.
+
 ## 10. Frontend (P3)
 
 - **`lib/collab/capabilities.ts`.** Strict parser for the v1 response: unknown features and actions are dropped, unknown states map to `off`. `CollabClient.capabilities()` sends the protocol header. A `404` yields `{ status: "unsupported" }`.
@@ -342,6 +368,9 @@ New criteria:
 | AC26 | A person brain's token is presented to a route or check that accepts `service`.                    | Refused.                                                                                                             |
 | AC27 | A departed member's device calls a data arm; the operator then purges them; they rejoin.           | `403` while departed, data kept; purge removes key and data root; after rejoining the partition is empty.            |
 | AC28 | `COGNIA_PERSON_BRAINS_MAX` brains are busy and another person calls.                               | `503 person_brain_capacity`, retryable; an idle brain is stopped first when one exists.                              |
+| AC29 | A member on a multi-tenant Host creates, renames, archives and deletes a conversation.             | Each is applied in their partition only; the other member's `session_list` never shows it.                           |
+| AC30 | The member enqueues a message, steers a turn or moves a session to a workspace in their partition. | Per-action refusals `execution_isolation_unavailable` / `workspace_unavailable`; status never advertises them.       |
+| AC31 | A single-user Host or a desktop Host receives the same HostState calls.                            | Behaviour unchanged: device grants decide, as before.                                                                |
 
 ## 12. Work packages and execution plan
 
@@ -358,9 +387,10 @@ Each package lands with co-located tests and a changeset where user-facing. Each
 | P5a     | §9a Rust: person-brain fleet in `cognia-server` (account id, secret-store keys, lazy start, idle stop, cap), account-keyed bridge slots and routing, `person-brain` token scope, admission rule, push tokens per person, `persons list/purge`, policy and README. Measures an idle person brain's RSS and sets the default cap from it. | Codex `gpt-6.1-sol`                                  | Crate tests outside the sandbox; a two-person routing test over fake bridge transports; adversarial review (AC24–AC28).                      |
 | P5b     | §9a TS: `person-brain` headless host kind and roster, `COGNIA_BRAIN_PROFILE=person` in `cognia serve`, diagnostics labels for `model_access_unavailable`, `person_brain_capacity` and `person_brain_unavailable`.                                                                                                                       | Claude                                               | Co-located Jest (roster pin, labels), `pnpm i18n:build`, `pnpm lint:i18n`.                                                                   |
 | P5c     | End-to-end: two persons on one multi-tenant `cognia-server` with two paired devices.                                                                                                                                                                                                                                                    | Claude                                               | AC25 on a real server.                                                                                                                       |
+| P5d     | §9a "Sessions in a person partition": HostState routing and authority binding for partitions (Rust), partition intent policy and status negotiation, person-brain runtime target (TS).                                                                                                                                                  | Codex `gpt-6.1-sol`                                  | Crate tests outside the sandbox; co-located Jest; rerun of the P5c rig (AC29–AC31).                                                          |
 | P6      | Deferred: org suspend/delete, rate limits, credential broker, shared multi-agent sessions (AC16), real-service E2E lane (AC17–AC18).                                                                                                                                                                                                    | —                                                    | Separate plan.                                                                                                                               |
 
-Order: P0a → P0b → P2 → P1 → P4 → P5 (P5a and P5b in parallel, then P5c), one Codex implementation job at a time. P3 runs in parallel against the contract files and switches to the live endpoint once P2 lands. Every Codex job is followed by Claude review of the diff, a rerun of its verification commands, and an adversarial Codex review on security-relevant packages (P0a, P2, P1).
+Order: P0a → P0b → P2 → P1 → P4 → P5 (P5a and P5b in parallel, then P5c, then P5d), one Codex implementation job at a time. P3 runs in parallel against the contract files and switches to the live endpoint once P2 lands. Every Codex job is followed by Claude review of the diff, a rerun of its verification commands, and an adversarial Codex review on security-relevant packages (P0a, P2, P1).
 
 Rollout stages (revision 1 §10) remain the operating procedure once P0–P4 ship:
 
