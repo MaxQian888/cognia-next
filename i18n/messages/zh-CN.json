@@ -3498,7 +3498,7 @@
         "minimaxCode": "MiniMax Code",
         "opencodeAcp": "OpenCode（ACP）",
         "opencodeRemote": "OpenCode（远程）",
-        "opencodeServer": "OpenCode",
+        "opencodeServer": "OpenCode V1",
         "pi": "Pi",
         "piRpc": "Pi（原生 RPC）",
         "qoder": "Qoder",
@@ -6419,6 +6419,7 @@
     "record": {
       "addAssertion": "断言文本…",
       "assertionPlaceholder": "预期出现的文本",
+      "captureFailed": "录制失败：{error}",
       "delete": "删除流程",
       "deleted": "流程已删除",
       "downloadJson": "保存流程 JSON…",
@@ -6474,6 +6475,12 @@
       "title": "录制操作"
     },
     "remote": {
+      "approval": {
+        "authorize": "授权浏览器访问",
+        "failed": "浏览器授权被拒绝或未能完成，可以重新申请审批。",
+        "pending": "请主机所有者或另一台已配对的管理设备确认审批码 {code}，然后再次点击“授权浏览器访问”。",
+        "required": "访问此主机上的浏览器需要审批，授权有效期最长为 10 分钟。"
+      },
       "canvas": "远程浏览器画布",
       "closePage": "关闭页面",
       "connection": {
@@ -6485,6 +6492,16 @@
       },
       "error": "远程浏览器不可用（{code}）",
       "find": "在页面中查找",
+      "grants": {
+        "blocked": "被阻止的域名：{domains}",
+        "cancel": "保留当前会话",
+        "changed": "域名权限已变更，重连后才会应用到当前浏览器。",
+        "confirm": "重连浏览器",
+        "ephemeralHint": "其他标签页会关闭，当前页面会重新加载。临时会话可能需要重新登录，未保存的修改会丢失。",
+        "manage": "管理域名",
+        "persistentHint": "已保存的站点数据会保留，部分网站仍可能要求重新登录。其他标签页会关闭，当前页面会重新加载，未保存的修改会丢失。",
+        "reconnect": "应用权限并重连"
+      },
       "humanControl": "由你控制",
       "needsRemoteHost": "连接一台 Cognia 服务器后才能使用云端浏览器",
       "runtimeUnavailable": "云端浏览器不可用（{reason}）",
@@ -7431,17 +7448,19 @@
       "providers": "服务商",
       "skills": "技能"
     },
-    "description": "从本地 CCSwitch 安装中读取服务商、MCP 服务器、提示词与技能。在这里切换服务商会更新 Cognia 自带的 SDK，并可（按需）同步到选中的外部代理。",
+    "description": "读取 CC Switch v4.0.18（schema 21）的供应商、MCP 服务器、提示词及已安装技能。Anthropic 供应商可更新 Cognia 内置 SDK；其他应用协议及托管登录仅供浏览。",
     "dialog": {
       "agentsSection": "同时写入",
       "apiKey": "API 密钥",
+      "applyFailed": "无法应用切换：{error}",
       "baseUrl": "Base URL",
+      "baseUrlNotPropagated": "不会应用 Base URL",
       "body": "请确认本次切换将带来的变更。",
       "bodyFor": "切换至 {name}。请在确认前查看本次变更。",
       "cancel": "取消",
       "close": "关闭",
-      "codexBaseUrlNotPropagated": "不会应用 Base URL",
       "cogniaApplied": "已更新 Cognia。",
+      "cogniaNotApplied": "未更新 Cognia。",
       "cogniaSection": "Cognia-next",
       "confirm": "执行切换",
       "driftAbort": "切换期间该文件在磁盘上被修改，因此未写入任何内容。请重新打开此对话框再应用一次。",
@@ -7516,7 +7535,7 @@
       "headerHint": "CCSwitch 是这些记录的唯一编辑入口 — 添加 / 改名 / 删除请回到 CCSwitch。",
       "importQuota": "导入额度",
       "model": "模型",
-      "officialEndpoint": "Anthropic 官方端点",
+      "officialEndpoint": "默认端点",
       "quotaImportErrorTitle": "未导入额度元数据",
       "quotaImportFailed": "无法保存导入的额度源：{error}",
       "quotaImportReason": {
@@ -7529,6 +7548,7 @@
       "quotaImportSuccess": "已把 {name} 导入为默认关闭的自定义额度源。请在订阅设置中检查后再显式启用。",
       "quotaImportSuccessTitle": "已导入额度元数据",
       "refresh": "刷新",
+      "unsupportedProtocol": "仅供浏览：此应用使用其他协议或由 CC Switch 管理认证，请在 CC Switch 中切换。",
       "useHere": "在此使用",
       "useHereAndIn": "在此并同步至…"
     },
@@ -7537,7 +7557,7 @@
       "emptyTitle": "CCSwitch 中没有技能",
       "errorTitle": "无法列出技能",
       "externalBadge": "外部文件",
-      "headerHint": "带有内联内容的技能会成为新的 Cognia 技能；指向外部文件的行（已置灰）需通过「设置 → 技能」单独导入。",
+      "headerHint": "导入已安装的技能包，包括 frontmatter、脚本、参考资料、资源及 Codex 元数据。缺失或不安全的目录无法导入。",
       "importBtn": "导入 {count, plural, =0 {0 项} =1 {1 项} other {# 项}}",
       "importing": "正在导入…",
       "listTitle": "CCSwitch 中的技能",
@@ -8039,6 +8059,7 @@
         "foldCollapseShort": "收起",
         "foldExpand": "展开另外 {count} 项"
       },
+      "contextRegion": "输入框上下文与提示",
       "draftRestore": {
         "dismiss": "关闭",
         "label": "需重新添加：",
@@ -8121,6 +8142,7 @@
         "acceptHint": "按 Tab 或 → 编辑后再发送",
         "configure": "配置",
         "dismiss": "关闭建议",
+        "dontShowAgain": "不再显示",
         "error": "无法生成预测内容。",
         "label": "追问建议",
         "retry": "重试",
@@ -11645,6 +11667,7 @@
     "imagesAttached": "已附加 {count} 张图片 · /images 管理",
     "language": "界面语言",
     "languageHint": "启动、审批、错误、帮助和变更审阅面板的显示语言。",
+    "manualSubagentUnsupported": "当前后端不支持手动运行 CLI 子 Agent。",
     "mcp": {
       "agentInventory": "Agent 清单：{status}（当前会话未确认）",
       "all": "（全部）",
@@ -16582,6 +16605,7 @@
       "attached": "已附加「{title}」",
       "fetching": "正在获取「{title}」…",
       "hostUnsupported": "云端文档仅在桌面端可用。",
+      "incomplete": "「{title}」的部分内容未能读取，请查看附件中的说明。",
       "linkOnlyHint": "该来源不支持搜索，请粘贴文档链接。",
       "noAccount": "请先在设置中连接账号。",
       "noMatches": "没有匹配「{query}」的文档",
@@ -16616,6 +16640,7 @@
       "description": "在聊天中用 @ 引用飞书与 Google 文档。",
       "desktopOnly": "仅桌面端可用。",
       "disconnect": "断开连接",
+      "disconnectFailed": "未能完成断开连接：{reason}",
       "disconnectNotRevoked": "已在本地断开，但向 Google 吊销失败（{reason}）。请到 Google 账号的第三方访问设置里移除 Cognia 以彻底完成。",
       "disconnectRevoked": "已断开连接，Google 侧的授权也已吊销。",
       "disconnecting": "正在断开…",
@@ -18372,7 +18397,9 @@
       }
     },
     "roleModels": {
+      "addSpawnModel": "添加派生候选模型",
       "choose": "选择模型",
+      "clearSpawnModels": "清除额外候选模型",
       "description": "此运行时的原生子代理、模型别名和辅助调用可以使用主模型同一供应商、同一账号下的其他模型。未设置的项沿用主模型。若某次运行改用其他供应商或账号，则只使用该次的主模型。",
       "effort": "推理强度",
       "effortDefault": "模型默认",
@@ -18403,11 +18430,14 @@
       "refusals": {
         "crossAccount": "子任务模型必须使用主模型的账号。",
         "crossProvider": "请选择 {provider} 的模型。子任务模型必须使用主模型的供应商。",
+        "defaultSpawnModelNotAllowed": "候选集合必须包含默认子代理模型。",
         "effortUnsupported": "此模型不支持所选的推理强度。",
+        "spawnModelsUnsupported": "此运行时不支持原生派生候选模型。",
         "tooManyModels": "一个任务使用的不同模型过多，请减少子任务模型。",
         "unsupportedSlot": "此运行时不支持这项子任务模型设置，请移除后再保存。"
       },
       "remove": "移除",
+      "removeSpawnModel": "移除 {model}",
       "removeStale": "移除不受支持的子任务模型设置",
       "sameAccount": "使用主模型所在供应商的账号。",
       "search": "搜索 {provider} 的模型…",
@@ -18418,6 +18448,8 @@
         "tierOpus": "Opus 别名",
         "tierSonnet": "Sonnet 别名"
       },
+      "spawnModels": "原生派生候选模型",
+      "spawnModelsDescription": "在此任务的供应商账号内授权有限候选集合。主模型和默认模型也属于任务授权集合。父代理在派生时选择模型；已有 V2 子代理无法直接切换。",
       "title": "子任务模型"
     },
     "runCommand": "运行 /{name}",
@@ -18486,6 +18518,80 @@
       "loadEntries": "查看会话历史",
       "loadTree": "浏览分支",
       "loading": "正在读取能力…",
+      "nativeBackend": "后端：{backend}（{confidence}，{evidence}）；运行时：{version}",
+      "nativeBackendValues": {
+        "disabled": "已禁用",
+        "unknown": "未知"
+      },
+      "nativeCapabilities": "派生选模能力：{spawn}。V2 功能开关关闭不代表当前会话使用 V1。",
+      "nativeChangeOutcome": "{child} · {scope} · {model}（{effort}）：{outcome}",
+      "nativeConfidence": {
+        "inferred": "推断",
+        "observed": "已观测",
+        "unknown": "未知"
+      },
+      "nativeCurrentTurn": "应用于当前 turn 的后续步骤",
+      "nativeDefaultEffort": "保留原生推理强度设置",
+      "nativeDirectForbidden": "Codex 禁止对此子代理直接输入。已有 V2 子代理无法直接切换模型。",
+      "nativeDirectUnknown": "直接输入能力未知，请先刷新线程事实再修改设置。",
+      "nativeEmpty": "此会话尚未识别到原生子代理线程。",
+      "nativeEvidence": {
+        "child-thread": "原生子线程事实",
+        "configuration": "配置",
+        "model-metadata": "模型元数据",
+        "unknown": "来源未知"
+      },
+      "nativeFeatureFlags": "实际开关：multi_agent_v2={v2}；step_model_switching={step}。",
+      "nativeFlags": {
+        "disabled": "已关闭",
+        "enabled": "已开启",
+        "unknown": "未知"
+      },
+      "nativeFutureTurns": "设置后续 turn 默认值",
+      "nativeHostUpdateRequired": "请升级 Host 后再配置或控制原生子代理模型。",
+      "nativeIdentity": "父线程：{parent}；根线程：{root}",
+      "nativeModelEvidence": "线程模型表示配置。设置获受理后仍需等待后续采样步骤，不能视为实际推理遥测。",
+      "nativeReasons": {
+        "child-not-owned": "此子代理不属于当前根会话。",
+        "child-settings-busy": "此子代理已有设置修改正在等待处理。",
+        "connection-changed": "连接已变化，操作结果未知。",
+        "direct-input-forbidden": "Codex 禁止对此子代理直接输入。",
+        "direct-input-unknown": "直接输入能力仍未知。",
+        "invalid-operation-id": "操作标识无效。",
+        "invalid-settings-scope": "设置作用域无效。",
+        "model-change-operation-limit": "运行时已达到设置操作上限。",
+        "model-not-allowed": "此模型未获得当前任务授权。",
+        "native-settings-unsupported": "此运行时不支持所请求的设置接口。",
+        "operation-id-conflict": "此操作标识已用于其他请求。",
+        "reasoning-effort-not-supported": "此模型不支持所选推理强度。",
+        "stale-child-turn": "子代理 turn 已变化或结束，请刷新原生线程。",
+        "stale-model-plan": "任务模型策略已变化，请刷新原生线程。",
+        "stale-process-generation": "运行时连接已变化，请刷新原生线程。",
+        "step-model-switching-disabled": "请先开启实验性当前 turn 模型切换并重新连接。",
+        "unknown-settings-response": "运行时返回了无法识别的设置结果。"
+      },
+      "nativeRefresh": "刷新原生线程",
+      "nativeRequested": "派生请求：{model}；推理强度：{effort}",
+      "nativeResults": {
+        "applied-awaiting-step": "Codex 已受理设置，尚未观测到实际执行。",
+        "outcome-unknown": "结果未知，请重新连接并刷新后再提交新的修改。",
+        "rejected": "Codex 拒绝了设置。",
+        "target-unavailable": "原生目标已不可用。"
+      },
+      "nativeSelectModel": "选择模型",
+      "nativeSettings": "模型配置：{model}；推理强度：{effort}；活跃 turn：{turn}",
+      "nativeStepDisabled": "当前 turn 切换需要开启实验性选项，且必须取得活跃子代理 turn。",
+      "nativeSupport": {
+        "supported": "已观测支持",
+        "unknown": "尚未观测",
+        "unsupported": "不支持"
+      },
+      "nativeTargetEffort": "新的推理强度",
+      "nativeTargetModel": "新的子代理模型",
+      "nativeTitle": "原生子代理",
+      "nativeTruncated": "线程发现已达到上限，未发现的线程无法控制。",
+      "nativeUncertain": "此子代理有一次设置修改的结果未知。请重新连接运行时后再提交修改。",
+      "nativeUnknown": "未知",
       "oneAtATime": "逐条处理",
       "queued": "指令已排队",
       "queuedInput": "排队指令",
@@ -18592,6 +18698,8 @@
       "codexSandboxWorkspaceWrite": "工作区可写",
       "codexServerDefault": "服务端默认",
       "codexSkillRootsBrowse": "浏览…",
+      "codexStepModelSwitching": "实验性当前 turn 模型切换",
+      "codexStepModelSwitchingDesc": "允许修改活跃 V1 子代理后续采样步骤的模型。修改后需要重新连接代理。V2 子代理仍由父代理管理。",
       "codexSummaryAuto": "自动",
       "codexSummaryConcise": "简洁",
       "codexSummaryDetailed": "详细",
@@ -22251,7 +22359,10 @@
       "sidebarSection": "收件箱侧栏分区"
     },
     "inboundA2UI": {
-      "rawPayload": "原始负载"
+      "actionUnavailable": "此操作只能在 {platform} 中使用",
+      "imageUnavailable": "图片需在 {platform} 中查看",
+      "rawPayload": "原始负载",
+      "untitledAction": "操作"
     },
     "inboundRecovery": {
       "continueSafely": "安全继续",
@@ -38248,6 +38359,14 @@
     "localProvidersTitle": "本地提供商",
     "localai": "LocalAI",
     "localaiDescription": "自托管 OpenAI 替代方案",
+    "magpie": {
+      "connected": "已连接 Magpie {version} · {count} 个模型",
+      "description": "连接正在运行的 Magpie 网关，加载其中已启用的模型。请先启动 Magpie。",
+      "discover": "发现本机 Magpie",
+      "discovering": "正在发现…",
+      "failed": "无法连接 Magpie",
+      "title": "Magpie 网关"
+    },
     "manageInstalledModels": "管理 {provider} 的已安装模型",
     "manageModels": "管理模型",
     "managementKey": "管理密钥（可选）",
@@ -43703,7 +43822,7 @@
         "workingDirPlaceholder": "/path/to/project",
         "workingDirTitle": "默认工作目录"
       },
-      "description": "配置进程内 Claude SDK 侧载的默认行为——这些值会用于所有新会话，除非角色或会话级别覆盖。",
+      "description": "配置内置 Agent 的默认行为，管理工具权限与会话，并查看运行状态。Agent 或对话中的单独设置会覆盖这些默认值。",
       "nav": {
         "groups": {
           "behaviorGroup": "行为",
@@ -44037,7 +44156,7 @@
         "sessions": "会话",
         "sidecar": "侧载诊断"
       },
-      "title": "内置代理运行时",
+      "title": "Agent 运行时",
       "toolSearch": {
         "addAria": "添加",
         "description": "按需加载工具以保持系统提示精简。在下方固定服务器或工具以使其始终可用。",
@@ -46360,7 +46479,7 @@
       },
       "title": "上下文压缩",
       "toolResultCap": {
-        "description": "压缩时将每个工具结果上限设为该 token 数。",
+        "description": "压缩时将每个工具结果上限设为该 token 数。设为 0 时保留完整结果，不进行裁剪。",
         "heading": "工具结果上限",
         "label": "工具结果最大 token 数"
       },
@@ -50212,7 +50331,7 @@
       "about": "版本、构建、诊断、更新与致谢。",
       "account": "你的身份、用量、资料、订阅与已配对设备，集中于一处。",
       "agentModes": "内置与自定义代理模式 — 系统提示词、工具列表、输出格式与实时预览预设。",
-      "agentRuntime": "内置 Anthropic SDK 侧载 — 默认值、权限模式、始终允许的工具、内置工具分类、侧载诊断与 A2UI 桥接。",
+      "agentRuntime": "管理内置 Agent 的默认行为、工具权限、会话和运行诊断。",
       "agents": "外部代理 — Claude Code CLI、Codex、Gemini CLI、Cursor，以及任何使用 ACP / OpenCode / HTTP 协议的自定义命令。",
       "aiConnections": "配置 AI 账号、端点、凭据、部署、验证、健康状态以及导入导出。",
       "apiKey": "Anthropic API 密钥（由本地 sidecar 使用）。",
@@ -55267,6 +55386,31 @@
         "note": "默认开启。关闭后 Canvas Python 可访问你的文件系统与网络——请仅在你信任的机器上关闭。",
         "title": "Canvas 代码沙盒"
       },
+      "claudeCodeRuntime": {
+        "description": "配置 Claude Agent SDK 运行时的沙盒能力和有时限的无人值守重试。",
+        "invalidMinutes": "请输入 1 到 180 之间的整数。",
+        "maximum": {
+          "description": "整次调用的累计耗时，包括正常执行和所有重试。不会为单个请求重置截止时间。请输入 1–180 分钟。",
+          "label": "调用总时限（分钟）"
+        },
+        "namespaces": {
+          "description": "默认关闭。适用于 Linux 和 WSL2 主机，也包括远程主机。为 Chromium 等工具请求此能力；Cognia 仍会在每次运行前要求显式批准。",
+          "label": "请求嵌套 User Namespace",
+          "warning": "嵌套 User Namespace 会削弱沙盒边界。命令可能在沙盒外运行并访问受保护文件和凭据文件。请仅为可信工作负载启用。"
+        },
+        "recheck": {
+          "description": "检查受支持订阅的用量限制是否已解除的间隔。请输入 1–180 分钟。",
+          "label": "用量限制复查间隔（分钟）"
+        },
+        "retry": {
+          "availability": "启用 Router + Fusion 的请求额度管理时不可用，重试由该模式统一管理。",
+          "cancellation": "取消会停止当前调用及其重试等待。达到调用总时限也会取消。",
+          "description": "默认关闭。仅适用于无人值守的 Claude Agent SDK 轮次；等待期间可重新检查受支持的 claude.ai 订阅用量限制。",
+          "label": "启用无人值守重试"
+        },
+        "saveError": "无法保存 Claude Code 运行时偏好设置，请重试。",
+        "title": "Claude Code 运行时"
+      },
       "description": "为高风险工具 (Bash / Edit / Write / text_editor) 提供按平台的 OS 沙盒。沙盒不可用时严格模式拒绝这些工具调用,不会绕过隔离。",
       "enable": {
         "description": "在每个会话中默认让高风险工具经由 OS 沙盒执行。单个会话与角色仍可覆盖此默认值。",
@@ -56267,7 +56411,7 @@
       "about": "关于",
       "account": "账户",
       "agentModes": "代理模式",
-      "agentRuntime": "内置代理运行时",
+      "agentRuntime": "Agent 运行时",
       "agents": "外部代理",
       "aiConnections": "AI 连接",
       "apiKey": "API 密钥",
@@ -63101,6 +63245,7 @@
         "larkNoPermission": "账号 {account} 无权限读取该文档。请申请访问权限，或在 设置 → 连接 中完成用户授权。",
         "larkNotAuthorized": "飞书账号 {account} 缺少凭证，请在 设置 → 连接 中重新授权。",
         "larkNotFound": "未找到该文档 — 可能已被删除，或链接有误。",
+        "larkOutputTruncated": "文档超出 lark-cli 输出上限，已丢弃不完整内容。请改用 API 连接读取。",
         "larkRateLimited": "触发飞书限流 — 请稍候重试。",
         "larkUnsupportedType": "该链接指向 {type} 对象；目前仅支持文档和知识库页面。",
         "noCommitsFound": "所选仓库未发现提交",

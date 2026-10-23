@@ -534,7 +534,10 @@
     "sidebarSection": "Inbox sidebar section"
   },
   "inboundA2UI": {
-    "rawPayload": "Raw payload"
+    "rawPayload": "Raw payload",
+    "actionUnavailable": "This action can only be used in {platform}",
+    "imageUnavailable": "Image available in {platform}",
+    "untitledAction": "Action"
   },
   "inboundRecovery": {
     "continueSafely": "Continue safely",

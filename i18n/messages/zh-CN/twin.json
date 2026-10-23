@@ -480,6 +480,7 @@
       "importParseFailed": "导出文件解析失败",
       "importParseFailedFallback": "导出文件解析失败（备用解析器也拒绝处理）",
       "larkBrowserUnsupported": "飞书文档仅能在桌面端抓取（浏览器会拦截跨域请求）。",
+      "larkOutputTruncated": "文档超出 lark-cli 输出上限，已丢弃不完整内容。请改用 API 连接读取。",
       "larkCliUnavailable": "当前环境不可用 lark-cli。",
       "larkEmptyDoc": "文档 {title} 没有可读取的文本。",
       "larkInvalidUrl": "这不像一个飞书文档链接或 token。",

@@ -879,7 +879,9 @@
     "mobileDetailNonNegativeIntegerInvalid": "Enter a whole number of zero or greater.",
     "sectionDefaults": "Defaults",
     "grokPresetName": "Grok Build",
-    "grokPresetDescription": "Run xAI Grok Build over native ACP with streamed replies, tool approvals, user questions, MCP and persisted sessions."
+    "grokPresetDescription": "Run xAI Grok Build over native ACP with streamed replies, tool approvals, user questions, MCP and persisted sessions.",
+    "codexStepModelSwitching": "Experimental current-turn model switching",
+    "codexStepModelSwitchingDesc": "Allow changing subsequent sampling steps of an active V1 child. Restart the agent after changing this setting. V2 children remain controlled by their parent."
   },
   "statusConnected": "Connected",
   "statusConnecting": "Connecting",
@@ -1152,7 +1154,81 @@
     "cancelled": "Cancelled",
     "truncated": "Output truncated",
     "archive": "Archive session",
-    "unarchive": "Restore archived session"
+    "unarchive": "Restore archived session",
+    "nativeTitle": "Native subagents",
+    "nativeUnknown": "Unknown",
+    "nativeBackend": "Backend: {backend} ({confidence}, {evidence}); runtime: {version}",
+    "nativeModelEvidence": "Thread models describe settings. Accepted changes await a subsequent sampling step; they are not inference telemetry.",
+    "nativeRefresh": "Refresh native threads",
+    "nativeTruncated": "Thread discovery reached its limit. Unseen threads cannot be controlled.",
+    "nativeEmpty": "No native child thread has been identified for this session.",
+    "nativeIdentity": "Parent: {parent}; root: {root}",
+    "nativeSettings": "Model setting: {model}; effort: {effort}; active turn: {turn}",
+    "nativeDirectForbidden": "Codex forbids direct input to this child. Existing V2 children cannot be switched directly.",
+    "nativeDirectUnknown": "Direct-input capability is unknown. Refresh thread facts before changing settings.",
+    "nativeTargetModel": "New child model",
+    "nativeSelectModel": "Choose a model",
+    "nativeTargetEffort": "New reasoning effort",
+    "nativeDefaultEffort": "Keep native effort setting",
+    "nativeCurrentTurn": "Apply to next steps of current turn",
+    "nativeFutureTurns": "Set future-turn defaults",
+    "nativeStepDisabled": "Current-turn changes require the experimental model-switching option and a known active child turn.",
+    "nativeResults": {
+      "applied-awaiting-step": "Codex accepted the settings; execution is not yet observed.",
+      "rejected": "Codex rejected the settings.",
+      "target-unavailable": "The native target is no longer available.",
+      "outcome-unknown": "The result is unknown. Reconnect and refresh before submitting another change."
+    },
+    "nativeReasons": {
+      "stale-process-generation": "The runtime connection changed. Refresh the native threads.",
+      "invalid-operation-id": "The operation identity is invalid.",
+      "operation-id-conflict": "This operation identity was already used for another request.",
+      "child-not-owned": "This child does not belong to the current root session.",
+      "direct-input-forbidden": "Codex forbids direct input to this child.",
+      "direct-input-unknown": "Direct-input support is still unknown.",
+      "stale-model-plan": "The task model policy changed. Refresh the native threads.",
+      "model-not-allowed": "This model is not authorized for the task.",
+      "reasoning-effort-not-supported": "The model does not support this reasoning effort.",
+      "invalid-settings-scope": "The requested settings scope is invalid.",
+      "step-model-switching-disabled": "Enable experimental current-turn model switching and reconnect first.",
+      "stale-child-turn": "The child turn changed or ended. Refresh the native threads.",
+      "child-settings-busy": "A settings change is already pending for this child.",
+      "model-change-operation-limit": "The runtime reached its settings operation limit.",
+      "connection-changed": "The connection changed; the result is unknown.",
+      "unknown-settings-response": "The runtime returned an unrecognized settings result.",
+      "native-settings-unsupported": "This runtime does not support the requested settings method."
+    },
+    "nativeConfidence": {
+      "inferred": "Inferred",
+      "observed": "Observed",
+      "unknown": "Unknown"
+    },
+    "nativeEvidence": {
+      "model-metadata": "Model metadata",
+      "unknown": "Unknown source",
+      "configuration": "Configuration",
+      "child-thread": "Native child thread"
+    },
+    "nativeSupport": {
+      "supported": "Observed support",
+      "unsupported": "Unsupported",
+      "unknown": "Not yet observed"
+    },
+    "nativeCapabilities": "Spawn model override capability: {spawn}. A disabled V2 feature flag does not prove this session uses V1.",
+    "nativeBackendValues": {
+      "unknown": "Unknown",
+      "disabled": "Disabled"
+    },
+    "nativeRequested": "Spawn request: {model}; effort: {effort}",
+    "nativeHostUpdateRequired": "Update the Host to configure or control native subagent models.",
+    "nativeUncertain": "This child has a settings change with an unknown outcome. Reconnect the runtime before sending another change.",
+    "nativeFlags": {
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "unknown": "Unknown"
+    },
+    "nativeFeatureFlags": "Effective flags: multi_agent_v2={v2}; step_model_switching={step}.",
+    "nativeChangeOutcome": "{child} · {scope} · {model} ({effort}): {outcome}"
   },
   "extensionUi": {
     "statusRegion": "Agent extension status",
@@ -1261,8 +1337,15 @@
       "crossProvider": "Choose a model from {provider}. Sub-task models must use the primary model's provider.",
       "crossAccount": "Sub-task models must use the primary model's account.",
       "effortUnsupported": "This model does not accept the selected reasoning effort.",
-      "tooManyModels": "Too many different models for one task. Use fewer sub-task models."
+      "tooManyModels": "Too many different models for one task. Use fewer sub-task models.",
+      "spawnModelsUnsupported": "This runtime does not support native spawn model candidates.",
+      "defaultSpawnModelNotAllowed": "Include the default child model in the candidate set."
     },
-    "invalid": "Fix the sub-task models before saving."
+    "invalid": "Fix the sub-task models before saving.",
+    "spawnModels": "Native spawn models",
+    "spawnModelsDescription": "Authorize a finite set on this task’s provider account. The task also authorizes its primary and default models. The parent selects the model when spawning; existing V2 children cannot be switched directly.",
+    "addSpawnModel": "Add spawn model",
+    "removeSpawnModel": "Remove {model}",
+    "clearSpawnModels": "Clear extra spawn models"
   }
 }

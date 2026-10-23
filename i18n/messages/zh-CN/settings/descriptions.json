@@ -3,7 +3,7 @@
   "about": "版本、构建、诊断、更新与致谢。",
   "account": "你的身份、用量、资料、订阅与已配对设备，集中于一处。",
   "agentModes": "内置与自定义代理模式 — 系统提示词、工具列表、输出格式与实时预览预设。",
-  "agentRuntime": "内置 Anthropic SDK 侧载 — 默认值、权限模式、始终允许的工具、内置工具分类、侧载诊断与 A2UI 桥接。",
+  "agentRuntime": "管理内置 Agent 的默认行为、工具权限、会话和运行诊断。",
   "agents": "外部代理 — Claude Code CLI、Codex、Gemini CLI、Cursor，以及任何使用 ACP / OpenCode / HTTP 协议的自定义命令。",
   "aiConnections": "配置 AI 账号、端点、凭据、部署、验证、健康状态以及导入导出。",
   "apiKey": "Anthropic API 密钥（由本地 sidecar 使用）。",

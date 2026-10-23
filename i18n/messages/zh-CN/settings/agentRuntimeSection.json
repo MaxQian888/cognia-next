@@ -77,7 +77,7 @@
     "workingDirPlaceholder": "/path/to/project",
     "workingDirTitle": "默认工作目录"
   },
-  "description": "配置进程内 Claude SDK 侧载的默认行为——这些值会用于所有新会话，除非角色或会话级别覆盖。",
+  "description": "配置内置 Agent 的默认行为，管理工具权限与会话，并查看运行状态。Agent 或对话中的单独设置会覆盖这些默认值。",
   "nav": {
     "groups": {
       "behaviorGroup": "行为",
@@ -411,7 +411,7 @@
     "sessions": "会话",
     "sidecar": "侧载诊断"
   },
-  "title": "内置代理运行时",
+  "title": "Agent 运行时",
   "toolSearch": {
     "addAria": "添加",
     "description": "按需加载工具以保持系统提示精简。在下方固定服务器或工具以使其始终可用。",

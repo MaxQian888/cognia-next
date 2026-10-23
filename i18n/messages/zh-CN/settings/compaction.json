@@ -90,7 +90,7 @@
   },
   "title": "上下文压缩",
   "toolResultCap": {
-    "description": "压缩时将每个工具结果上限设为该 token 数。",
+    "description": "压缩时将每个工具结果上限设为该 token 数。设为 0 时保留完整结果，不进行裁剪。",
     "heading": "工具结果上限",
     "label": "工具结果最大 token 数"
   },

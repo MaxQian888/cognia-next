@@ -1594,5 +1594,13 @@
     "subscriptionCredentials": "Subscription credentials and the plan endpoint are managed in Subscription. Configure models here and verify the selected account.",
     "credentialReady": "The active subscription account supplies the credential for this connection.",
     "credentialMissing": "Select an active subscription account before testing this connection."
+  },
+  "magpie": {
+    "title": "Magpie gateway",
+    "description": "Connect to the running Magpie gateway and load the models enabled there. Start Magpie before discovering.",
+    "discover": "Discover local Magpie",
+    "discovering": "Discovering…",
+    "connected": "Connected to Magpie {version} · {count} models",
+    "failed": "Could not connect to Magpie"
   }
 }

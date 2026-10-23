@@ -35,7 +35,8 @@
     "pasteHint": "Type keywords, or paste a document link.",
     "searching": "Searching…",
     "title": "Remote documents",
-    "truncated": "“{title}” was too large and has been truncated."
+    "truncated": "“{title}” was too large and has been truncated.",
+    "incomplete": "Some content in “{title}” could not be read. See the attachment for details."
   },
   "reach": {
     "block": {
@@ -63,6 +64,7 @@
     "description": "Reference Feishu and Google documents with @ in chat.",
     "desktopOnly": "Desktop app only.",
     "disconnect": "Disconnect",
+    "disconnectFailed": "Could not finish disconnecting: {reason}",
     "disconnectNotRevoked": "Disconnected locally, but revoking at Google failed ({reason}). Remove Cognia from your Google account's third-party access to finish.",
     "disconnectRevoked": "Disconnected. The Google authorization has been revoked.",
     "disconnecting": "Disconnecting…",

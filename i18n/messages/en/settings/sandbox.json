@@ -8,6 +8,31 @@
     "note": "On by default. Disabling lets Canvas Python reach your filesystem and network — only turn it off on a machine you trust.",
     "title": "Canvas code sandbox"
   },
+  "claudeCodeRuntime": {
+    "title": "Claude Code runtime",
+    "description": "Sandbox capabilities and bounded unattended retry for the Claude Agent SDK runtime.",
+    "namespaces": {
+      "label": "Request nested user namespaces",
+      "description": "Off by default. Available on Linux and WSL2 hosts, including remote hosts. Requests support for tools such as Chromium; Cognia still requires explicit approval for each run.",
+      "warning": "Nested user namespaces weaken the sandbox boundary. Commands may run outside the sandbox and access protected and credential files. Enable only for a workload you trust."
+    },
+    "retry": {
+      "label": "Enable unattended retry",
+      "description": "Off by default. Applies only to unattended Claude Agent SDK turns; supported claude.ai subscription usage limits can be rechecked while waiting.",
+      "availability": "Unavailable when Router + Fusion manages request budgets and retries.",
+      "cancellation": "Cancel stops the active invocation and its retry wait. Reaching the maximum invocation time also cancels it."
+    },
+    "maximum": {
+      "label": "Maximum invocation time (minutes)",
+      "description": "Total elapsed time for the whole invocation, including normal work and all retries. The deadline is never reset for individual requests. Enter 1–180 minutes."
+    },
+    "recheck": {
+      "label": "Usage-limit recheck interval (minutes)",
+      "description": "How often to check whether a supported subscription usage limit has cleared. Enter 1–180 minutes."
+    },
+    "invalidMinutes": "Enter a whole number from 1 to 180.",
+    "saveError": "Could not save Claude Code runtime preferences. Try again."
+  },
   "description": "Per-platform OS sandbox for high-risk tools (Bash / Edit / Write / text_editor). When unavailable, strict mode refuses these tool calls instead of bypassing isolation.",
   "enable": {
     "description": "Run high-risk tools through the OS sandbox by default in every session. Individual sessions and characters can still override this.",

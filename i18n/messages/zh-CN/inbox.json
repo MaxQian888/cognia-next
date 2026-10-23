@@ -534,7 +534,10 @@
     "sidebarSection": "收件箱侧栏分区"
   },
   "inboundA2UI": {
-    "rawPayload": "原始负载"
+    "rawPayload": "原始负载",
+    "actionUnavailable": "此操作只能在 {platform} 中使用",
+    "imageUnavailable": "图片需在 {platform} 中查看",
+    "untitledAction": "操作"
   },
   "inboundRecovery": {
     "continueSafely": "安全继续",

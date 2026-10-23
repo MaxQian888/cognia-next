@@ -879,7 +879,9 @@
     "mobileDetailNonNegativeIntegerInvalid": "请输入大于或等于零的整数。",
     "sectionDefaults": "默认设置",
     "grokPresetName": "Grok Build",
-    "grokPresetDescription": "通过原生 ACP 运行 xAI Grok Build，支持流式回复、工具审批、用户提问、MCP 和持久化会话。"
+    "grokPresetDescription": "通过原生 ACP 运行 xAI Grok Build，支持流式回复、工具审批、用户提问、MCP 和持久化会话。",
+    "codexStepModelSwitching": "实验性当前 turn 模型切换",
+    "codexStepModelSwitchingDesc": "允许修改活跃 V1 子代理后续采样步骤的模型。修改后需要重新连接代理。V2 子代理仍由父代理管理。"
   },
   "statusConnected": "已连接",
   "statusConnecting": "连接中",
@@ -1152,7 +1154,81 @@
     "cancelled": "已取消",
     "truncated": "输出已截断",
     "archive": "归档会话",
-    "unarchive": "恢复已归档会话"
+    "unarchive": "恢复已归档会话",
+    "nativeTitle": "原生子代理",
+    "nativeUnknown": "未知",
+    "nativeBackend": "后端：{backend}（{confidence}，{evidence}）；运行时：{version}",
+    "nativeModelEvidence": "线程模型表示配置。设置获受理后仍需等待后续采样步骤，不能视为实际推理遥测。",
+    "nativeRefresh": "刷新原生线程",
+    "nativeTruncated": "线程发现已达到上限，未发现的线程无法控制。",
+    "nativeEmpty": "此会话尚未识别到原生子代理线程。",
+    "nativeIdentity": "父线程：{parent}；根线程：{root}",
+    "nativeSettings": "模型配置：{model}；推理强度：{effort}；活跃 turn：{turn}",
+    "nativeDirectForbidden": "Codex 禁止对此子代理直接输入。已有 V2 子代理无法直接切换模型。",
+    "nativeDirectUnknown": "直接输入能力未知，请先刷新线程事实再修改设置。",
+    "nativeTargetModel": "新的子代理模型",
+    "nativeSelectModel": "选择模型",
+    "nativeTargetEffort": "新的推理强度",
+    "nativeDefaultEffort": "保留原生推理强度设置",
+    "nativeCurrentTurn": "应用于当前 turn 的后续步骤",
+    "nativeFutureTurns": "设置后续 turn 默认值",
+    "nativeStepDisabled": "当前 turn 切换需要开启实验性选项，且必须取得活跃子代理 turn。",
+    "nativeResults": {
+      "applied-awaiting-step": "Codex 已受理设置，尚未观测到实际执行。",
+      "rejected": "Codex 拒绝了设置。",
+      "target-unavailable": "原生目标已不可用。",
+      "outcome-unknown": "结果未知，请重新连接并刷新后再提交新的修改。"
+    },
+    "nativeReasons": {
+      "stale-process-generation": "运行时连接已变化，请刷新原生线程。",
+      "invalid-operation-id": "操作标识无效。",
+      "operation-id-conflict": "此操作标识已用于其他请求。",
+      "child-not-owned": "此子代理不属于当前根会话。",
+      "direct-input-forbidden": "Codex 禁止对此子代理直接输入。",
+      "direct-input-unknown": "直接输入能力仍未知。",
+      "stale-model-plan": "任务模型策略已变化，请刷新原生线程。",
+      "model-not-allowed": "此模型未获得当前任务授权。",
+      "reasoning-effort-not-supported": "此模型不支持所选推理强度。",
+      "invalid-settings-scope": "设置作用域无效。",
+      "step-model-switching-disabled": "请先开启实验性当前 turn 模型切换并重新连接。",
+      "stale-child-turn": "子代理 turn 已变化或结束，请刷新原生线程。",
+      "child-settings-busy": "此子代理已有设置修改正在等待处理。",
+      "model-change-operation-limit": "运行时已达到设置操作上限。",
+      "connection-changed": "连接已变化，操作结果未知。",
+      "unknown-settings-response": "运行时返回了无法识别的设置结果。",
+      "native-settings-unsupported": "此运行时不支持所请求的设置接口。"
+    },
+    "nativeConfidence": {
+      "inferred": "推断",
+      "observed": "已观测",
+      "unknown": "未知"
+    },
+    "nativeEvidence": {
+      "model-metadata": "模型元数据",
+      "unknown": "来源未知",
+      "configuration": "配置",
+      "child-thread": "原生子线程事实"
+    },
+    "nativeSupport": {
+      "supported": "已观测支持",
+      "unsupported": "不支持",
+      "unknown": "尚未观测"
+    },
+    "nativeCapabilities": "派生选模能力：{spawn}。V2 功能开关关闭不代表当前会话使用 V1。",
+    "nativeBackendValues": {
+      "unknown": "未知",
+      "disabled": "已禁用"
+    },
+    "nativeRequested": "派生请求：{model}；推理强度：{effort}",
+    "nativeHostUpdateRequired": "请升级 Host 后再配置或控制原生子代理模型。",
+    "nativeUncertain": "此子代理有一次设置修改的结果未知。请重新连接运行时后再提交修改。",
+    "nativeFlags": {
+      "enabled": "已开启",
+      "disabled": "已关闭",
+      "unknown": "未知"
+    },
+    "nativeFeatureFlags": "实际开关：multi_agent_v2={v2}；step_model_switching={step}。",
+    "nativeChangeOutcome": "{child} · {scope} · {model}（{effort}）：{outcome}"
   },
   "extensionUi": {
     "statusRegion": "Agent 扩展状态",
@@ -1261,8 +1337,15 @@
       "crossProvider": "请选择 {provider} 的模型。子任务模型必须使用主模型的供应商。",
       "crossAccount": "子任务模型必须使用主模型的账号。",
       "effortUnsupported": "此模型不支持所选的推理强度。",
-      "tooManyModels": "一个任务使用的不同模型过多，请减少子任务模型。"
+      "tooManyModels": "一个任务使用的不同模型过多，请减少子任务模型。",
+      "spawnModelsUnsupported": "此运行时不支持原生派生候选模型。",
+      "defaultSpawnModelNotAllowed": "候选集合必须包含默认子代理模型。"
     },
-    "invalid": "请先修正子任务模型设置，再保存。"
+    "invalid": "请先修正子任务模型设置，再保存。",
+    "spawnModels": "原生派生候选模型",
+    "spawnModelsDescription": "在此任务的供应商账号内授权有限候选集合。主模型和默认模型也属于任务授权集合。父代理在派生时选择模型；已有 V2 子代理无法直接切换。",
+    "addSpawnModel": "添加派生候选模型",
+    "removeSpawnModel": "移除 {model}",
+    "clearSpawnModels": "清除额外候选模型"
   }
 }
