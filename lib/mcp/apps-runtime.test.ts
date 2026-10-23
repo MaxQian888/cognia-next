@@ -1,10 +1,24 @@
 /** @jest-environment node */
 import type { McpCapabilityCacheRow, McpServer } from "@cognia/agent-config-types"
 
+const mockRegistryRow = jest.fn()
+jest.mock("@/lib/db/mcp-servers", () => ({
+  ...jest.requireActual("@/lib/db/mcp-servers"),
+  getMcpServer: (id: string) => mockRegistryRow(id),
+}))
+jest.mock("./credential-resolver", () => ({
+  resolveMcpRuntimeCredential: async (server: unknown) => ({ server }),
+}))
+const mockGatewayRead = jest.fn()
+jest.mock("./runtime-gateway", () => ({
+  defaultMcpRuntimeGateway: { readResource: (input: unknown) => mockGatewayRead(input) },
+}))
+
 import {
   loadMcpAppForTool,
   parseNamespacedMcpToolName,
   promoteMcpAppDownload,
+  readMcpDownloadResource,
 } from "./apps-runtime"
 
 const server = {
@@ -148,5 +162,30 @@ describe("MCP Apps runtime wiring", () => {
     ).resolves.toBe(1)
     expect(readLinked).toHaveBeenCalledWith(server, "report://daily.csv", "chat")
     expect(saveText).toHaveBeenCalledWith({ defaultName: "daily.csv", content: "a,b\n1,2" })
+  })
+
+  describe("downloads from a loaded App", () => {
+    beforeEach(() => {
+      mockRegistryRow.mockReset()
+      mockGatewayRead.mockReset()
+      mockGatewayRead.mockResolvedValue({ contents: [{ uri: "file://a", text: "a" }] })
+    })
+
+    it("reads through the current Registry row, not the App's loaded snapshot", async () => {
+      mockRegistryRow.mockResolvedValue({ ...server, enabled: false })
+      await readMcpDownloadResource(server, "file://a", "chat-1")
+      expect(mockRegistryRow).toHaveBeenCalledWith(server.id)
+      expect(mockGatewayRead).toHaveBeenCalledWith(
+        expect.objectContaining({ server: expect.objectContaining({ enabled: false }) })
+      )
+    })
+
+    it("refuses once the server has been deleted", async () => {
+      mockRegistryRow.mockResolvedValue(undefined)
+      await expect(readMcpDownloadResource(server, "file://a", "chat-1")).rejects.toThrow(
+        /no longer configured/
+      )
+      expect(mockGatewayRead).not.toHaveBeenCalled()
+    })
   })
 })
