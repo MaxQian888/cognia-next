@@ -90,7 +90,9 @@ export interface DurabilityStoreOptions {
    */
   prepareDynamicSchema?: (
     sources: readonly DurabilitySourceLike[],
-    persistedVersions: Readonly<Record<string, number>>
+    persistedVersions: Readonly<Record<string, number>>,
+    /** The tables each database was persisted with (see `prepareBuiltinPluginSchema`). */
+    persistedTables?: Readonly<Record<string, readonly string[]>>
   ) => Promise<void>
   /** Commits between automatic compactions. 0 disables auto-compaction. */
   compactEveryCommits?: number
@@ -179,14 +181,17 @@ export async function restoreState(
   for (const source of sources) {
     const entry = state.dbs[source.name]
     if (!entry) continue
-    if (
-      entry.schema.version !== source.db.verno &&
-      !isSessionListUpgrade(source, entry.schema.version)
-    ) {
+    // Same rule as `lib/db/storage-layout.ts` and the snapshot store: a LOWER
+    // persisted version is an ordinary forward move (the newer declaration
+    // only adds stores, a dropped store's rows are not restored, and rows go
+    // back through the table middleware). Only a checkpoint written by a newer
+    // build is unsafe. Refusing every difference stranded each person
+    // partition and the operator brain after any additive schema bump.
+    if (entry.schema.version > source.db.verno) {
       const { DurabilityFault } = await import("./types")
       throw new DurabilityFault(
         "checkpoint-schema-mismatch",
-        `persisted schema version ${entry.schema.version} does not match database ${source.name} version ${source.db.verno}`
+        `persisted schema version ${entry.schema.version} is newer than database ${source.name} version ${source.db.verno}`
       )
     }
     for (const table of includedTables(source)) {
@@ -204,15 +209,9 @@ export async function restoreState(
   }
 }
 
-/** The additive list projection and ciphertext witnesses rebuild from authoritative rows. */
-function isSessionListUpgrade(source: DurabilitySourceLike, previous: number | undefined): boolean {
-  return (
-    ((previous === 240 && source.db.verno === 241) ||
-      ((previous === 240 || previous === 241) && source.db.verno === 242)) &&
-    ["sessions", "sessionList", "storageLayout"].every((name) =>
-      source.db.tables.some((table) => table.name === name)
-    )
-  )
+/** Restored from a checkpoint an older build wrote (a forward move). */
+function isForwardMove(source: DurabilitySourceLike, previous: number | undefined): boolean {
+  return previous !== undefined && previous < source.db.verno
 }
 
 /**
@@ -308,16 +307,19 @@ export async function openDurabilityStore(opts: DurabilityStoreOptions): Promise
         sources,
         Object.fromEntries(
           Object.entries(resolved.state.dbs).map(([name, entry]) => [name, entry.schema.version])
+        ),
+        Object.fromEntries(
+          Object.entries(resolved.state.dbs).map(([name, entry]) => [name, entry.schema.tables])
         )
       )
     }
     await restoreState(sources, resolved.state)
     await prepareRestoredSessionLists(sources)
-    // Pin the known additive migration once; future boots need not reinterpret
-    // an older checkpoint version. Restore/rebuild remains capture-suppressed.
+    // Pin a forward move once; future boots need not reinterpret an older
+    // checkpoint version. Restore/rebuild remains capture-suppressed.
     if (
       sources.some((source) =>
-        isSessionListUpgrade(source, resolved.state.dbs[source.name]?.schema.version)
+        isForwardMove(source, resolved.state.dbs[source.name]?.schema.version)
       )
     ) {
       await resolved.backend.compact(await readSourcesState(sources, sequence))

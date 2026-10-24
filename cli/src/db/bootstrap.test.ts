@@ -1027,9 +1027,13 @@ describe("ensureCliDb", () => {
         prepareDynamicSchema,
       })
 
-      expect(prepareDynamicSchema).toHaveBeenCalledWith([expect.objectContaining({ db })], {
-        CogniaDB: 83,
-      })
+      // The persisted tables ride along so plugin tables are re-declared even
+      // when the code version has caught up with the snapshot's number.
+      expect(prepareDynamicSchema).toHaveBeenCalledWith(
+        [expect.objectContaining({ db })],
+        { CogniaDB: 83 },
+        { CogniaDB: ["goals"] }
+      )
       expect(goals.rows).toEqual([{ id: "restored" }])
     } finally {
       __resetCliDbForTesting()

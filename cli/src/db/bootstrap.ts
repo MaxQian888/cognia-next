@@ -81,7 +81,8 @@ export interface EnsureCliDbOptions {
   /** Re-declare dynamic schemas before a production table snapshot is restored. */
   prepareDynamicSchema?: (
     sources: readonly SnapshotSource[],
-    snapshotVersions: Readonly<Record<string, number>>
+    snapshotVersions: Readonly<Record<string, number>>,
+    snapshotTables?: Readonly<Record<string, readonly string[]>>
   ) => Promise<void>
 }
 
@@ -698,11 +699,20 @@ function resolveSourcesFactory(opts: EnsureCliDbOptions): () => Promise<readonly
  */
 export async function prepareBuiltinPluginSchema(
   sources: readonly SnapshotSource[],
-  snapshotVersions: Readonly<Record<string, number>>
+  snapshotVersions: Readonly<Record<string, number>>,
+  snapshotTables: Readonly<Record<string, readonly string[]>> = {}
 ): Promise<void> {
   const primary = sources[0]
-  const snapshotVersion = snapshotVersions[primary?.name ?? ""] ?? primary?.db.verno ?? 0
-  if (!primary || snapshotVersion <= primary.db.verno) return
+  if (!primary) return
+  const snapshotVersion = snapshotVersions[primary.name] ?? primary.db.verno
+  // A newer code version can catch up with the number plugin tables lifted
+  // the snapshot to (code 247 + one plugin = 248, then code itself ships 248).
+  // The version alone then says "nothing to lift" while the plugin tables are
+  // still undeclared, and their rows would be dropped on restore. So a table
+  // the snapshot holds and this database does not declare also asks for it.
+  const declared = new Set(primary.db.tables.map((table) => table.name))
+  const missingTables = (snapshotTables[primary.name] ?? []).some((name) => !declared.has(name))
+  if (snapshotVersion <= primary.db.verno && !missingTables) return
 
   const [{ getBrowserBuiltinRegistry }, { restorePluginTables }] = await Promise.all([
     import("@/lib/plugin/core/browser-builtin-registry"),
@@ -847,6 +857,9 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
         sources,
         Object.fromEntries(
           Object.entries(manifest.dbs).map(([name, entry]) => [name, entry.version])
+        ),
+        Object.fromEntries(
+          Object.entries(manifest.dbs).map(([name, entry]) => [name, entry.tables])
         )
       )
       dynamicSchemaPrepared = true
@@ -1162,7 +1175,8 @@ export interface SnapshotStoreImportOptions {
   /** Re-declare dynamic schemas before restoring (defaults to the built-in plugin tables). */
   prepareDynamicSchema?: (
     sources: readonly SnapshotSource[],
-    snapshotVersions: Readonly<Record<string, number>>
+    snapshotVersions: Readonly<Record<string, number>>,
+    snapshotTables?: Readonly<Record<string, readonly string[]>>
   ) => Promise<void>
   /** Store-lock environment (tests). */
   lockEnvironment?: StoreLockEnvironment
@@ -1258,6 +1272,9 @@ export async function importSnapshotStore(
         sources,
         Object.fromEntries(
           Object.entries(manifest.dbs).map(([name, entry]) => [name, entry.version])
+        ),
+        Object.fromEntries(
+          Object.entries(manifest.dbs).map(([name, entry]) => [name, entry.tables])
         )
       )
       const restore = await restoreTableStore(
