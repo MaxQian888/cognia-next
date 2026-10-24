@@ -113,4 +113,31 @@ describe("A2UIImage", () => {
     render(<A2UIImage {...createProps(component)} />)
     expect(screen.getByRole("img")).toHaveClass("custom-class")
   })
+
+  it.each(["javascript:alert(1)", "file:///etc/passwd", "data:text/html,<b>x</b>"])(
+    "never loads the rejected source %j and falls back instead",
+    (src) => {
+      const component: A2UIImageComponent = {
+        id: "img-4",
+        component: "Image",
+        src,
+        alt: "Chart",
+        fallback: "https://example.com/fallback.png",
+      }
+      render(<A2UIImage {...createProps(component)} />)
+      expect(screen.getByRole("img")).toHaveAttribute("src", "https://example.com/fallback.png")
+    }
+  )
+
+  it("drops a rejected fallback too", () => {
+    const component: A2UIImageComponent = {
+      id: "img-5",
+      component: "Image",
+      src: "javascript:a",
+      fallback: "javascript:b",
+    }
+    const { container } = render(<A2UIImage {...createProps(component)} />)
+    expect(container.querySelector("img")).toBeNull()
+    expect(container.querySelector("svg")).toBeInTheDocument()
+  })
 })

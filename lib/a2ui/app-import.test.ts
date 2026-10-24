@@ -170,6 +170,19 @@ describe("A2UI app import validation", () => {
     expect(parseA2UIAppImport(payload, "en").success).toBe(false)
   })
 
+  it("keeps valid computed declarations and rejects invalid ones (ADR-0240)", () => {
+    const computed = { "/count": { op: "count", args: [{ path: "/items" }] } }
+    const base = { components: validComponents, rootId: "custom-root", dataModel: { items: [] } }
+    const ok = parseA2UIAppImport(appPayload({ ...base, computed }), "en")
+    expect(ok).toEqual({ success: true, value: expect.objectContaining({ computed }) })
+
+    const bad = parseA2UIAppImport(
+      appPayload({ ...base, computed: { "/count": { op: "eval", args: ["x"] } } }),
+      "en"
+    )
+    expect(bad).toMatchObject({ success: false, error: { code: "invalid_app" } })
+  })
+
   it("rejects an input before parsing when it exceeds the resource limit", () => {
     const result = parseA2UIAppImport(" ".repeat(A2UI_MAX_IMPORT_BYTES + 1), "en")
     expect(result).toEqual({

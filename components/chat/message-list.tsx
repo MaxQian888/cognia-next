@@ -3,6 +3,7 @@
 import { ChatThinkingIndicator } from "@/components/chat/thinking-indicator"
 import type { UIMessage } from "ai"
 import { MessageRenderer } from "./message-renderer"
+import { TranscriptSessionProvider } from "./transcript-session-context"
 import {
   CompactBoundaryMarker,
   isCompactBoundaryMessage,
@@ -1002,7 +1003,11 @@ export function MessageList({
   // the whole list rather than one branch of it.
   return (
     <TranscriptSelectionHostContext.Provider value={selectionHost}>
-      <TranscriptAgentsProvider multiAgent={multiAgent}>{view}</TranscriptAgentsProvider>
+      <TranscriptAgentsProvider multiAgent={multiAgent}>
+        <TranscriptSessionProvider sessionId={paneSessionId ?? sessionId}>
+          {view}
+        </TranscriptSessionProvider>
+      </TranscriptAgentsProvider>
     </TranscriptSelectionHostContext.Provider>
   )
 }

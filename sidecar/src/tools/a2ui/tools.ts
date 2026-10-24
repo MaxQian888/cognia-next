@@ -21,6 +21,7 @@ import {
   WIDGET_THEMES,
   CONNECTOR_ACTION_TYPES,
   CONNECTOR_PLATFORMS,
+  RAW_INPUT_SCHEMAS,
   TOOL_NAMES,
   TOOL_DESCRIPTIONS,
   buildDispatch,
@@ -84,6 +85,11 @@ export function buildA2UIToolDefinitions({
         catalogId: z.string().optional(),
         title: z.string().optional(),
         widget: widgetSchema.optional(),
+        // Validated by the renderer (`lib/a2ui/computed.ts`), like components.
+        computed: z
+          .record(z.string(), z.record(z.string(), z.unknown()))
+          .optional()
+          .describe(RAW_INPUT_SCHEMAS.a2ui_create_surface.properties.computed.description),
       },
       async (args) => {
         try {
@@ -131,6 +137,10 @@ export function buildA2UIToolDefinitions({
           .boolean()
           .optional()
           .describe("Default true: merge into existing model. false: replace."),
+        computed: z
+          .record(z.string(), z.record(z.string(), z.unknown()).nullable())
+          .optional()
+          .describe(RAW_INPUT_SCHEMAS.a2ui_data_model_update.properties.computed.description),
       },
       async (args) => {
         try {

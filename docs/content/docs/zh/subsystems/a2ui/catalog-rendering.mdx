@@ -279,6 +279,14 @@ flowchart LR
 - **`A2UIMessageRenderer`**（`a2ui-message-renderer.tsx:70`）：调用 `detectA2UIContent`（L82），剥离 JSON 代码块（L90-97），渲染 `A2UIInlineSurface`（L142）。`hasA2UIContent`（L150）是廉价守卫。`useA2UIMessageIntegration` hook（L157）驱动 `processPayload`（L164，缓存键控）、`processMessage`（L185）、`renderA2UIContent`（L198）。缓存是一张 `Map`（`processedA2UIMessageCache`，L17），上限为 `PROCESSED_A2UI_CACHE_SIZE = 200`（L16），以 `fingerprintContent`（L19，含 31 乘子的 `length:hash`）为键。
 - **`A2UIToolOutput`**（`a2ui-tool-output.tsx:19`）：把工具输出解析为 `surfaceId`（L29-32），在挂载时运行 `processPayload`（L34-38），并渲染完整 `A2UISurface`（L54-59）。`hasA2UIToolOutput`（L67）门控它；`A2UIStructuredOutput`（L74）是结构化变体。
 
+### 流式、兜底与回传
+
+三项行为让聊天中的 Surface 在回合封存前后都可用（[ADR-0240](/docs/adr/0240-a-generated-surface-streams-answers-and-computes)）：
+
+- **流式预览。** 回合流式输出时，` ```a2ui ` 围栏经 `components/chat/renderers/a2ui-streaming-fence.tsx` 渲染（注册于 `components/chat/markdown/streaming-fence-renderers.tsx`）。`lib/a2ui/streaming-preview.ts` 把前缀回退到最后一个结构完整的值，字符串和数字绝不会显示半截，并绘制到保留前缀 `a2ui-preview:` 下的只读、`inert` Surface，模型写出的负载不得使用该前缀。计算值声明等围栏完整后才生效，在此之前数据更新一律合并。预览每 120 ms 最多解析一次，嵌套超过 64 层即放弃，插件 Surface 钩子会跳过它，它从不持久化，封存后的 `a2ui` part 替换它时即被删除。
+- **源码兜底。** 负载未生成 Surface 时，`A2UIPart` 显示围栏源码并附提示，不再什么都不渲染。
+- **动作回传。** 聊天中渲染的 Surface（`a2ui` part、Markdown 围栏或携带 A2UI 的工具结果）绑定到渲染它的转录列表所属的会话（`components/chat/transcript-session-context.tsx`、`use-a2ui-chat-binding.ts`、`lib/a2ui/chat-action-routing.ts`）；同一 Surface id 在多处渲染时，由最新的存活渲染接收点击。内置动作 provider 把路由器装为兜底处理：不归任何内置迷你应用处理器管的 `Button`、`FormGroup` 提交或 `Link` 动作，会成为该会话的下一条用户消息，内容为控件标签加一个携带动作与 Surface 数据模型的 `a2ui-action` 块。表格、图表、分页、标签页和数据变化从不发送；1.5 秒内的同一手势会被丢弃；未绑定的 Surface（迷你应用、编辑器、预览）保持本地处理。
+
 ## 文件
 
 <Files>

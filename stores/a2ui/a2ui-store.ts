@@ -14,6 +14,8 @@ import type {
   A2UIUserAction,
   A2UIDataModelChange,
   A2UIWidgetMetadata,
+  A2UIComputedFields,
+  A2UIComputedFieldsUpdate,
 } from "@/types/a2ui/schema"
 import {
   parseA2UIDispatchMessage,
@@ -46,6 +48,11 @@ import {
   upsertSurface as upsertDurableSurface,
 } from "@/lib/db/a2ui-surfaces"
 import type { A2UISurfaceRow } from "@/lib/db/a2ui-types"
+import {
+  applyA2UIComputedFields,
+  isA2UIComputedFields,
+  mergeA2UIComputedFields,
+} from "@/lib/a2ui/computed"
 
 /**
  * History entry for undo/redo
@@ -173,7 +180,12 @@ export interface A2UIActions {
   createSurface: (
     surfaceId: string,
     type: A2UISurfaceType,
-    options?: { catalogId?: string; title?: string; widget?: A2UIWidgetMetadata }
+    options?: {
+      catalogId?: string
+      title?: string
+      widget?: A2UIWidgetMetadata
+      computed?: A2UIComputedFields
+    }
   ) => void
   restoreSurface: (surface: A2UISurfaceState) => boolean
   deleteSurface: (surfaceId: string) => void
@@ -213,6 +225,8 @@ export interface A2UIActions {
   getComponent: (surfaceId: string, componentId: string) => A2UIComponent | undefined
 
   // Data model management
+  /** Add, replace or (with `null`) remove declared computed values, then recompute. */
+  setComputedFields: (surfaceId: string, update: A2UIComputedFieldsUpdate) => void
   updateDataModel: (surfaceId: string, data: Record<string, unknown>, merge?: boolean) => void
   setDataValue: (surfaceId: string, path: string, value: unknown) => void
   getDataValue: <T = unknown>(surfaceId: string, path: string) => T | undefined
@@ -296,6 +310,21 @@ function migrateComponentMap(
   return mutated ? next : components
 }
 
+/** Declarations from storage or an import are re-validated before they run. */
+function validComputed(value: unknown): A2UIComputedFields | undefined {
+  return value !== undefined && isA2UIComputedFields(value)
+    ? (value as A2UIComputedFields)
+    : undefined
+}
+
+/** The data model with the surface's declared values recomputed (ADR-0240). */
+function withComputed(
+  dataModel: Record<string, unknown>,
+  computed: A2UIComputedFields | undefined
+): Record<string, unknown> {
+  return applyA2UIComputedFields(dataModel, computed)
+}
+
 function normalizePersistedSurfaces(persistedSurfaces: unknown): Record<string, A2UISurfaceState> {
   if (!persistedSurfaces || typeof persistedSurfaces !== "object") {
     return {}
@@ -321,6 +350,7 @@ function normalizePersistedSurfaces(persistedSurfaces: unknown): Record<string, 
         ? (surface.dataModel as Record<string, unknown>)
         : {}
     const hasRenderableTree = Object.keys(components).length > 0
+    const computed = validComputed(surface.computed)
 
     normalized[surfaceId] = {
       id: typeof surface.id === "string" ? surface.id : surfaceId,
@@ -329,7 +359,8 @@ function normalizePersistedSurfaces(persistedSurfaces: unknown): Record<string, 
       title: surface.title,
       widget: surface.widget,
       components,
-      dataModel,
+      dataModel: withComputed(dataModel, computed),
+      ...(computed ? { computed } : {}),
       rootId: surface.rootId ?? "root",
       createdAt: typeof surface.createdAt === "number" ? surface.createdAt : Date.now(),
       updatedAt: typeof surface.updatedAt === "number" ? surface.updatedAt : Date.now(),
@@ -347,6 +378,7 @@ function toDurableSurface(surface: A2UISurfaceState): A2UISurfaceRow {
     type: surface.type,
     components: surface.components,
     dataModel: surface.dataModel,
+    ...(surface.computed ? { computed: surface.computed } : {}),
     rootId: surface.rootId,
     catalogId: surface.catalogId,
     title: surface.title,
@@ -357,10 +389,13 @@ function toDurableSurface(surface: A2UISurfaceState): A2UISurfaceRow {
 }
 
 function fromDurableSurface(row: A2UISurfaceRow): A2UISurfaceState {
+  const { computed: rawComputed, ...rest } = row
+  const computed = validComputed(rawComputed)
   return {
-    ...row,
+    ...rest,
     components: migrateComponentMap(row.components),
-    dataModel: deepClone(row.dataModel),
+    dataModel: withComputed(deepClone(row.dataModel), computed),
+    ...(computed ? { computed } : {}),
     ready: Boolean(row.components[row.rootId]),
   }
 }
@@ -509,7 +544,8 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
                   title: options?.title,
                   widget: options?.widget,
                   components: {},
-                  dataModel: {},
+                  dataModel: withComputed({}, options?.computed),
+                  ...(options?.computed ? { computed: options.computed } : {}),
                   rootId: "root",
                   createdAt: Date.now(),
                   updatedAt: Date.now(),
@@ -525,6 +561,8 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
           const components = migrateComponentMap(surface.components)
           if (!surface.id || !components[surface.rootId]) return false
 
+          const { computed: rawComputed, ...rest } = surface
+          const computed = validComputed(rawComputed)
           set((state) => {
             const { [surface.id]: _error, ...errors } = state.errors
             const { [surface.id]: _loading, ...loadingSurfaces } = state.loadingSurfaces
@@ -535,9 +573,10 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
               surfaces: {
                 ...state.surfaces,
                 [surface.id]: {
-                  ...surface,
+                  ...rest,
                   components,
-                  dataModel: deepClone(surface.dataModel),
+                  dataModel: withComputed(deepClone(surface.dataModel), computed),
+                  ...(computed ? { computed } : {}),
                   ready: true,
                 },
               },
@@ -900,7 +939,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
                 [surfaceId]: {
                   ...currentSurface,
                   components: nextComponents,
-                  dataModel: deepClone(dataModel),
+                  dataModel: withComputed(deepClone(dataModel), currentSurface.computed),
                   rootId: nextRootId,
                   ready: true,
                   updatedAt: Date.now(),
@@ -924,7 +963,10 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
             if (!surface) return state
 
             const snapshot = buildSnapshotUpdate(state, surfaceId, "updateDataModel")
-            const newDataModel = merge ? deepMerge(surface.dataModel, data) : deepClone(data)
+            const newDataModel = withComputed(
+              merge ? deepMerge(surface.dataModel, data) : deepClone(data),
+              surface.computed
+            )
 
             return {
               ...snapshot,
@@ -933,6 +975,26 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
                 [surfaceId]: {
                   ...surface,
                   dataModel: newDataModel,
+                  updatedAt: Date.now(),
+                },
+              },
+            }
+          })
+        },
+
+        setComputedFields: (surfaceId, update) => {
+          set((state) => {
+            const surface = state.surfaces[surfaceId]
+            if (!surface) return state
+            const computed = mergeA2UIComputedFields(surface.computed, update)
+            const { computed: _previous, ...rest } = surface
+            return {
+              surfaces: {
+                ...state.surfaces,
+                [surfaceId]: {
+                  ...rest,
+                  ...(computed ? { computed } : {}),
+                  dataModel: withComputed(surface.dataModel, computed),
                   updatedAt: Date.now(),
                 },
               },
@@ -953,7 +1015,10 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
             const surface = state.surfaces[surfaceId]
             if (!surface) return { eventHistory }
 
-            const newDataModel = setValueByPath(surface.dataModel, path, value)
+            const newDataModel = withComputed(
+              setValueByPath(surface.dataModel, path, value),
+              surface.computed
+            )
 
             return {
               eventHistory,
@@ -996,6 +1061,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
             updateDataModel,
             deleteSurface,
             setSurfaceReady,
+            setComputedFields,
             emitAction,
           } = get()
 
@@ -1025,11 +1091,13 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
               catalogId: message.catalogId,
               title: message.title,
               widget: message.widget,
+              computed: message.computed,
             })
           } else if (isUpdateComponentsMessage(message)) {
             updateComponents(message.surfaceId, message.components)
           } else if (isUpdateDataModelMessage(message)) {
             updateDataModel(message.surfaceId, message.data, message.merge)
+            if (message.computed) setComputedFields(message.surfaceId, message.computed)
           } else if (isDeleteSurfaceMessage(message)) {
             deleteSurface(message.surfaceId)
           } else if (isSurfaceReadyMessage(message)) {
@@ -1207,7 +1275,9 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
               [surfaceId]: {
                 ...surface,
                 components: lastEntry.components,
-                dataModel: lastEntry.dataModel,
+                // History holds data, not declarations: the surface's current
+                // declarations recompute over the restored model.
+                dataModel: withComputed(lastEntry.dataModel, surface.computed),
                 rootId: lastEntry.rootId,
                 updatedAt: Date.now(),
               },
@@ -1249,7 +1319,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
               [surfaceId]: {
                 ...surface,
                 components: nextEntry.components,
-                dataModel: nextEntry.dataModel,
+                dataModel: withComputed(nextEntry.dataModel, surface.computed),
                 rootId: nextEntry.rootId,
                 updatedAt: Date.now(),
               },

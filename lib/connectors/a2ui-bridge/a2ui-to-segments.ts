@@ -21,7 +21,8 @@ import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 import { parseA2UIInput } from "@/lib/a2ui/parser"
 import { deepMerge, isA2UIDataModel, isSafeDataModelKey } from "@/lib/a2ui/data-model"
 import { getComponentChildReferences, hasComponentReferenceCycle } from "@/lib/a2ui/component-tree"
-import type { A2UIComponent } from "@/types/a2ui/schema"
+import { applyA2UIComputedFields, mergeA2UIComputedFields } from "@/lib/a2ui/computed"
+import type { A2UIComponent, A2UIComputedFields } from "@/types/a2ui/schema"
 
 /**
  * Minimal shape of a captured assistant reply we need to read. Kept
@@ -125,7 +126,10 @@ function parseReplySurfaces(text: string): Map<string, A2UISegmentContent> | nul
       if (message.type === "createSurface") {
         surfaces.set(id, {
           components: {},
-          dataModel: {},
+          // A card cannot recompute, so it carries the declared values as of
+          // this reply (ADR-0240).
+          dataModel: applyA2UIComputedFields({}, message.computed),
+          ...(message.computed ? { computed: message.computed } : {}),
           rootId: "root",
           surfaceType: message.surfaceType,
           title: message.title,
@@ -151,10 +155,20 @@ function parseReplySurfaces(text: string): Map<string, A2UISegmentContent> | nul
         })
       } else if (message.type === "dataModelUpdate") {
         if (!isA2UIDataModel(message.data)) return null
+        const computed = message.computed
+          ? mergeA2UIComputedFields(
+              surface.computed as A2UIComputedFields | undefined,
+              message.computed
+            )
+          : (surface.computed as A2UIComputedFields | undefined)
+        const { computed: _previous, ...rest } = surface
         surfaces.set(id, {
-          ...surface,
-          dataModel:
+          ...rest,
+          ...(computed ? { computed } : {}),
+          dataModel: applyA2UIComputedFields(
             message.merge === false ? message.data : deepMerge(surface.dataModel, message.data),
+            computed
+          ),
         })
       }
     }

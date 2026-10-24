@@ -15,7 +15,10 @@ import type {
   A2UIComponent,
   A2UIMessageContent,
   A2UIWidgetMetadata,
+  A2UIComputedFields,
+  A2UIComputedFieldsUpdate,
 } from "@/types/a2ui/schema"
+import { isA2UIComputedFields } from "./computed"
 import { isA2UIDataModel, isSafeDataModelKey } from "./data-model"
 
 /**
@@ -106,7 +109,10 @@ function validateMessage(msg: unknown): A2UIServerMessage | null {
         (message.title !== undefined && typeof message.title !== "string") ||
         (message.catalogId !== undefined && typeof message.catalogId !== "string") ||
         (message.widget !== undefined &&
-          (!message.widget || typeof message.widget !== "object" || Array.isArray(message.widget)))
+          (!message.widget ||
+            typeof message.widget !== "object" ||
+            Array.isArray(message.widget))) ||
+        (message.computed !== undefined && !isA2UIComputedFields(message.computed))
       ) {
         return null
       }
@@ -118,6 +124,9 @@ function validateMessage(msg: unknown): A2UIServerMessage | null {
         catalogId: message.catalogId as string | undefined,
         title: message.title as string | undefined,
         widget: message.widget as A2UIWidgetMetadata | undefined,
+        ...(message.computed !== undefined
+          ? { computed: message.computed as A2UIComputedFields }
+          : {}),
       }
 
     case "updateComponents":
@@ -145,7 +154,9 @@ function validateMessage(msg: unknown): A2UIServerMessage | null {
     case "dataModelUpdate":
       if (
         !isA2UIDataModel(message.data) ||
-        (message.merge !== undefined && typeof message.merge !== "boolean")
+        (message.merge !== undefined && typeof message.merge !== "boolean") ||
+        (message.computed !== undefined &&
+          !isA2UIComputedFields(message.computed, { allowRemoval: true }))
       ) {
         return null
       }
@@ -154,6 +165,9 @@ function validateMessage(msg: unknown): A2UIServerMessage | null {
         surfaceId: message.surfaceId as string,
         data: message.data as Record<string, unknown>,
         merge: message.merge as boolean | undefined,
+        ...(message.computed !== undefined
+          ? { computed: message.computed as A2UIComputedFieldsUpdate }
+          : {}),
       }
 
     case "deleteSurface":
@@ -363,7 +377,7 @@ export function detectA2UIContent(content: string): boolean {
 
 /**
  * Parse simplified A2UI format into standard messages
- * Simplified format: { surface: {...}, components: [...], dataModel?: {...} }
+ * Simplified format: { surface: {...}, components: [...], dataModel?: {...}, computed?: {...} }
  */
 function parseSimplifiedA2UI(
   json: Record<string, unknown>,
@@ -381,6 +395,8 @@ function parseSimplifiedA2UI(
   )
     return null
   if (json.dataModel !== undefined && !isA2UIDataModel(json.dataModel)) return null
+  if (json.computed !== undefined && !isA2UIComputedFields(json.computed)) return null
+  const computed = json.computed as A2UIComputedFields | undefined
 
   if (!components || !Array.isArray(components)) {
     return null
@@ -399,6 +415,7 @@ function parseSimplifiedA2UI(
       surfaceType,
       title,
       widget,
+      ...(computed ? { computed } : {}),
     },
     {
       type: "updateComponents",
@@ -494,6 +511,37 @@ export function parseA2UIInput(
   input: unknown,
   options: A2UIParseInputOptions = {}
 ): A2UIUnifiedParseResult {
+  const result = parseA2UIInputRaw(input, options)
+  // Model-written payloads may not claim the ids reserved for in-flight
+  // previews (ADR-0240): plugin hooks skip those, and a preview could collide.
+  const kept = result.messages.filter(
+    (message) => !("surfaceId" in message && isA2UIPreviewSurfaceId(message.surfaceId))
+  )
+  if (kept.length === result.messages.length) return result
+  return {
+    surfaceId:
+      kept.length > 0
+        ? resolveSurfaceId(kept, options.fallbackSurfaceId)
+        : (options.fallbackSurfaceId ?? null),
+    messages: kept,
+    errors: [
+      ...result.errors,
+      `Surface ids starting with "${A2UI_PREVIEW_SURFACE_PREFIX}" are reserved`,
+    ],
+  }
+}
+
+/** Surface ids reserved for in-flight streaming previews (`streaming-preview.ts`). */
+export const A2UI_PREVIEW_SURFACE_PREFIX = "a2ui-preview:"
+
+export function isA2UIPreviewSurfaceId(surfaceId: string): boolean {
+  return surfaceId.startsWith(A2UI_PREVIEW_SURFACE_PREFIX)
+}
+
+function parseA2UIInputRaw(
+  input: unknown,
+  options: A2UIParseInputOptions = {}
+): A2UIUnifiedParseResult {
   const emptyResult: A2UIUnifiedParseResult = {
     surfaceId: options.fallbackSurfaceId ?? null,
     messages: [],
@@ -527,7 +575,7 @@ export function parseA2UIInput(
 
     try {
       const parsed = JSON.parse(trimmed)
-      return parseA2UIInput(parsed, options)
+      return parseA2UIInputRaw(parsed, options)
     } catch (error) {
       return {
         ...emptyResult,
@@ -549,7 +597,7 @@ export function parseA2UIInput(
     const payload = input as Record<string, unknown>
     const nestedMessages = payload.messages
     if (nestedMessages !== undefined) {
-      const nestedResult = parseA2UIInput(nestedMessages, options)
+      const nestedResult = parseA2UIInputRaw(nestedMessages, options)
       if (nestedResult.messages.length > 0) {
         return nestedResult
       }
@@ -562,7 +610,7 @@ export function parseA2UIInput(
       const mergedErrors: string[] = []
 
       for (const textPayload of textPayloads) {
-        const nestedResult = parseA2UIInput(textPayload, options)
+        const nestedResult = parseA2UIInputRaw(textPayload, options)
         if (nestedResult.messages.length > 0) {
           mergedMessages.push(...nestedResult.messages)
         } else if (nestedResult.errors.length > 0) {
@@ -713,6 +761,7 @@ export function createA2UISurface(
     surfaceType?: "inline" | "dialog" | "panel" | "fullscreen"
     title?: string
     widget?: A2UIWidgetMetadata
+    computed?: A2UIComputedFields
   }
 ): A2UIServerMessage[] {
   const messages: A2UIServerMessage[] = [
@@ -722,6 +771,7 @@ export function createA2UISurface(
       surfaceType: options?.surfaceType || "inline",
       title: options?.title,
       widget: options?.widget,
+      ...(options?.computed ? { computed: options.computed } : {}),
     },
     {
       type: "updateComponents",

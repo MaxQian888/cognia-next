@@ -147,6 +147,12 @@ export interface A2UISegmentContent {
   catalogId?: string
   widget?: Record<string, unknown>
   title?: string
+  /**
+   * Declared computed values (ADR-0240). Their results are already in
+   * `dataModel`; the declaration travels so a surface saved from a capture
+   * keeps recomputing. IM projections read only `dataModel`.
+   */
+  computed?: Record<string, unknown>
 }
 
 export function isTextSegment(s: MessageSegment): s is Extract<MessageSegment, { type: "text" }> {

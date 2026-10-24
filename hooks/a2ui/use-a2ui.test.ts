@@ -255,6 +255,20 @@ describe("useA2UI", () => {
 
       expect(mockProcessMessages).toHaveBeenCalled()
     })
+
+    it("passes computed declarations onto the createSurface message", () => {
+      const { result } = renderHook(() => useA2UI())
+      const computed = { "/n": { op: "add" as const, args: [1, 2] } }
+      act(() => {
+        result.current.createQuickSurface("quick-computed", [], {}, { computed })
+      })
+      expect(jest.requireMock("@/lib/a2ui/parser").createA2UISurface).toHaveBeenLastCalledWith(
+        "quick-computed",
+        [],
+        {},
+        expect.objectContaining({ computed })
+      )
+    })
   })
 
   describe("data model", () => {

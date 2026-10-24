@@ -2244,6 +2244,11 @@
     "toggle": "{emoji} {count}"
   },
   "renderers": {
+    "a2ui": {
+      "generating": "正在生成界面…",
+      "invalid": "无法渲染此交互界面，已改为显示源码。",
+      "label": "交互界面"
+    },
     "alert": {
       "caution": "注意",
       "important": "重要",

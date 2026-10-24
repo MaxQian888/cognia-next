@@ -20,6 +20,13 @@ jest.mock("../a2ui-context", () => ({
   }),
 }))
 
+// Radix only mounts the <img> once it has loaded, which never happens in
+// jsdom; this stand-in shows which source the avatar would load.
+jest.mock("@/components/ui/avatar", () => ({
+  ...jest.requireActual("@/components/ui/avatar"),
+  AvatarImage: ({ src }: { src: string }) => <img data-testid="avatar-image" src={src} alt="" />,
+}))
+
 describe("A2UIAvatar", () => {
   const cp = (c: A2UIAvatarComponent): A2UIComponentProps<A2UIAvatarComponent> => ({
     component: c,
@@ -47,5 +54,14 @@ describe("A2UIAvatar", () => {
     const avatar = container.querySelector('[data-slot="a2ui-avatar"]')
     expect(avatar).toBeInTheDocument()
     expect(avatar).toHaveAttribute("data-size", "lg")
+  })
+
+  it("loads web sources and never a rejected one", () => {
+    const { rerender } = render(
+      <A2UIAvatar {...cp({ id: "a4", component: "Avatar", src: "https://example.com/me.png" })} />
+    )
+    expect(screen.getByTestId("avatar-image")).toHaveAttribute("src", "https://example.com/me.png")
+    rerender(<A2UIAvatar {...cp({ id: "a4", component: "Avatar", src: "javascript:alert(1)" })} />)
+    expect(screen.queryByTestId("avatar-image")).not.toBeInTheDocument()
   })
 })

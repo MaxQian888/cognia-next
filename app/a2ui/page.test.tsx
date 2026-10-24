@@ -296,6 +296,27 @@ describe("A2UIPage", () => {
     )
   })
 
+  it("creates the generated app with the computed declarations the model wrote", async () => {
+    const computed = { "/n": { op: "add", args: [1, 2] } }
+    generateA2UIApp.mockResolvedValueOnce({
+      surfaceId: "s1",
+      components: [],
+      dataModel: { a: 1 },
+      computed,
+      rootId: "root",
+      title: "Generated",
+      usedFallback: false,
+    } as never)
+    render(<A2UIPage />)
+    fireEvent.change(screen.getByPlaceholderText("e.g. Make a pomodoro timer..."), {
+      target: { value: "a counter" },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: enMessages.a2ui.aiGenerate }))
+    })
+    expect(appBuilder.createCustomApp).toHaveBeenCalledWith("Generated", [], { a: 1 }, { computed })
+  })
+
   // The hub previously mixed rounded-3xl shells, a rounded-[28px] aside and
   // rounded-2xl panels with token-scale cards and controls, which is what made
   // the page read as a pile of mismatched boxes. Radii here must come from the

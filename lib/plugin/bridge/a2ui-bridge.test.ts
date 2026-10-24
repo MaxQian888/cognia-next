@@ -202,6 +202,23 @@ describe("PluginA2UIBridge", () => {
     })
   })
 
+  it("does not announce streaming preview surfaces to plugins", () => {
+    const listener = mockA2UISubscribe.mock.calls[0]?.[0] as (
+      state: { surfaces: Record<string, { type: string }> },
+      prev: { surfaces: Record<string, { type: string }> }
+    ) => void
+    expect(listener).toBeDefined()
+
+    const preview = { "a2ui-preview:r1": { type: "inline" } }
+    listener({ surfaces: { ...preview, real: { type: "panel" } } }, { surfaces: {} })
+    listener({ surfaces: {} }, { surfaces: { ...preview, real: { type: "panel" } } })
+
+    expect(hooksManager.dispatchOnA2UISurfaceCreate).toHaveBeenCalledTimes(1)
+    expect(hooksManager.dispatchOnA2UISurfaceCreate).toHaveBeenCalledWith("real", "panel")
+    expect(hooksManager.dispatchOnA2UISurfaceDestroy).toHaveBeenCalledTimes(1)
+    expect(hooksManager.dispatchOnA2UISurfaceDestroy).toHaveBeenCalledWith("real")
+  })
+
   it("creates template surface and emits surfaceReady", () => {
     const template: A2UITemplateDef = {
       id: "invoice",

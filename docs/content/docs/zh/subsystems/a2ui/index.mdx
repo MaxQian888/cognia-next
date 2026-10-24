@@ -179,7 +179,9 @@ A2UI 组件**直接渲染进主 React 树**（不同于用 iframe 隔离的 Arti
 
 - 只有**预注册**的组件类型会渲染。未知 `component` 字符串落到 `A2UIFallback`（`a2ui-renderer.tsx:197`）——绝不当作代码解释。
 - `Text` 以纯文本渲染，绝不用 `dangerouslySetInnerHTML`。
-- agent 提供的 action 字符串经事件总线路由；**绝不执行**。
+- agent 提供的 action 字符串经事件总线路由；**绝不执行**。在聊天中，手势动作只会作为普通用户消息、从绑定到该会话的 Surface 到达 agent（[ADR-0240](/docs/adr/0240-a-generated-surface-streams-answers-and-computes)）。
+- 模型写入的 URL 统一经过一条策略（`lib/a2ui/url-policy.ts`，与不可信聊天 Markdown 策略绑定）：链接只经 `ExternalLink` 打开 `http(s):` 与 `mailto:` 目标；媒体只从 `http(s):`、`data:image/`、`blob:` 和内置资源加载。渲染器把每个组件的内联 `style` 交给 `safeA2UIStyle` 处理，`url(...)` 目标被媒体策略拒绝的属性会被丢弃（`image-set()`、`src()`、`expression()`、CSS 转义、未闭合的 `url(` 亦然）。
+- 计算值是由宿主求值的封闭运算符集合（`lib/a2ui/computed.ts`）；Surface 声明的任何内容都不会作为代码执行。
 - 当 `widget.hostStrategy` 为 `sandboxed-html` / `artifact-preview` 时，内容被转到 iframe 隔离的 artifact 面板，而非内联渲染（见 [输出 profile](./output-profiles)）。
 
 扩展 catalog 时，要对每个新组件审计 XSS 面（富文本、`iframe`、SVG `foreignObject`、`data:` URL 都需要白名单过滤）。

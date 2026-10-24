@@ -31,6 +31,7 @@ export function useA2UISave(surfaceId: string) {
       ...instance,
       components: surface.components,
       dataModel: surface.dataModel,
+      computed: surface.computed,
       rootId: surface.rootId,
       catalogId: surface.catalogId,
       widget: surface.widget,

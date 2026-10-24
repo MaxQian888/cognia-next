@@ -188,7 +188,16 @@ isolation). The safety boundary is therefore the catalog:
 - Only **pre-registered** component types render. Unknown `component` strings fall to `A2UIFallback`
   (`a2ui-renderer.tsx:197`) — never interpreted as code.
 - `Text` renders as plain text, never `dangerouslySetInnerHTML`.
-- Agent-supplied action strings are routed through the event bus; they are **never executed**.
+- Agent-supplied action strings are routed through the event bus; they are **never executed**. In a
+  chat, a gesture action reaches the agent only as an ordinary user message, from a surface bound to
+  that session ([ADR-0240](/docs/adr/0240-a-generated-surface-streams-answers-and-computes)).
+- Model-written URLs pass one policy (`lib/a2ui/url-policy.ts`, pinned to the untrusted chat
+  Markdown policy): links open only `http(s):` and `mailto:` targets through `ExternalLink`; media
+  loads only from `http(s):`, `data:image/`, `blob:` and bundled assets. The renderer passes every
+  component's inline `style` through `safeA2UIStyle`, which drops a property whose `url(...)` the
+  media policy rejects (and `image-set()`, `src()`, `expression()`, CSS escapes, unclosed `url(`).
+- Computed values are a closed operator set evaluated by the host (`lib/a2ui/computed.ts`); nothing
+  a surface declares runs as code.
 - When `widget.hostStrategy` is `sandboxed-html` / `artifact-preview`, content is diverted to an
   iframe-isolated artifact panel instead of inline rendering ([output profiles](./output-profiles)).
 

@@ -26,6 +26,7 @@ describe("useA2UISave", () => {
     mockSurface = {
       components: { root: { id: "root" } },
       dataModel: { display: "5" },
+      computed: { "/double": { op: "multiply", args: [{ path: "/display" }, 2] } },
       rootId: "root",
       catalogId: "cognia-general",
     }
@@ -50,6 +51,9 @@ describe("useA2UISave", () => {
     expect(row.id).toBe("s1")
     expect(row.components).toEqual({ root: { id: "root" } })
     expect(row.dataModel).toEqual({ display: "5" })
+    expect(row.computed).toEqual({
+      "/double": { op: "multiply", args: [{ path: "/display" }, 2] },
+    })
     expect(row.rootId).toBe("root")
     expect(row.lastModified).toBeGreaterThan(1)
     expect(row.updatedAt).toBeGreaterThan(1)

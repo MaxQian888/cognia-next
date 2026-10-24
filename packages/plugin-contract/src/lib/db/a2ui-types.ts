@@ -2,7 +2,7 @@
  * The plugin contract's share of `lib/db/a2ui-types.ts`, which re-exports these.
  */
 import type { A2UIAppInstance } from "../../hooks/a2ui/app-builder/types"
-import type { A2UIComponent, A2UIWidgetMetadata } from "../../types/a2ui/schema"
+import type { A2UIComponent, A2UIComputedFields, A2UIWidgetMetadata } from "../../types/a2ui/schema"
 
 /**
  * Persisted mini-app — extends Cognia's A2UIAppInstance with the shape
@@ -22,6 +22,8 @@ export interface A2UIAppRow extends A2UIAppInstance {
   catalogId?: string
   /** Optional widget metadata (host strategy, sizing, theme). */
   widget?: A2UIWidgetMetadata
+  /** Declared derived values (ADR-0240); results live in `dataModel`. */
+  computed?: A2UIComputedFields
   /** Built-in / read-only marker. */
   isBuiltIn?: boolean
   /** UI flag — appears in the favorites filter. */

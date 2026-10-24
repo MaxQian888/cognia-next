@@ -5,7 +5,10 @@
 import React from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { AcademicSearchResults } from "./academic-search-results"
+import { openExternal } from "@/lib/tauri/opener"
 import type { Paper } from "@/types/academic"
+
+jest.mock("@/lib/tauri/opener", () => ({ openExternal: jest.fn(async () => {}) }))
 
 const createMockPaper = (id: string, title: string): Paper =>
   ({
@@ -128,6 +131,22 @@ describe("AcademicSearchResults", () => {
       )
 
       expect(container.firstChild).toHaveClass("custom-results-class")
+    })
+  })
+
+  describe("opening a PDF", () => {
+    it.each([
+      ["https://arxiv.org/pdf/1.pdf", true],
+      ["javascript:alert(1)", false],
+      ["file:///etc/passwd", false],
+      ["mailto:author@example.com", false],
+    ])("%s opens through the shell opener: %s", (pdfUrl, opens) => {
+      ;(openExternal as jest.Mock).mockClear()
+      const paper = { ...createMockPaper("p", "Paper"), pdfUrl } as Paper
+      render(<AcademicSearchResults {...defaultProps} papers={[paper]} totalResults={1} />)
+      fireEvent.click(screen.getByRole("button", { name: /pdf/i }))
+      if (opens) expect(openExternal).toHaveBeenCalledWith(pdfUrl)
+      else expect(openExternal).not.toHaveBeenCalled()
     })
   })
 })

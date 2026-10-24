@@ -1179,6 +1179,188 @@ describe("useA2UIStore", () => {
     })
   })
 
+  describe("computed values (ADR-0240)", () => {
+    const total = {
+      "/total": { op: "multiply" as const, args: [{ path: "/qty" }, { path: "/price" }] },
+    }
+
+    function createCart() {
+      act(() => {
+        useA2UIStore.getState().processMessages([
+          { type: "createSurface", surfaceId: "cart", surfaceType: "inline", computed: total },
+          {
+            type: "updateComponents",
+            surfaceId: "cart",
+            components: [{ id: "root", component: "Text", text: { path: "/total" } }],
+          },
+          { type: "dataModelUpdate", surfaceId: "cart", data: { qty: 2, price: 5 } },
+        ])
+      })
+    }
+
+    it("recomputes after data updates and every keystroke", () => {
+      createCart()
+      expect(useA2UIStore.getState().surfaces.cart.dataModel.total).toBe(10)
+      act(() => useA2UIStore.getState().setDataValue("cart", "/qty", "3"))
+      expect(useA2UIStore.getState().surfaces.cart.dataModel.total).toBe(15)
+      act(() => useA2UIStore.getState().updateDataModel("cart", { qty: 4, price: 5 }, false))
+      expect(useA2UIStore.getState().surfaces.cart.dataModel.total).toBe(20)
+    })
+
+    it("adds and removes declarations through a data update", () => {
+      createCart()
+      act(() => {
+        useA2UIStore.getState().processMessage({
+          type: "dataModelUpdate",
+          surfaceId: "cart",
+          data: {},
+          computed: {
+            "/total": null,
+            "/label": { op: "concat", args: [" × ", { path: "/qty" }, { path: "/price" }] },
+          },
+        })
+      })
+      const surface = useA2UIStore.getState().surfaces.cart
+      expect(surface.computed).toEqual({
+        "/label": { op: "concat", args: [" × ", { path: "/qty" }, { path: "/price" }] },
+      })
+      expect(surface.dataModel.label).toBe("2 × 5")
+      act(() => useA2UIStore.getState().setDataValue("cart", "/qty", 9))
+      // The removed declaration no longer updates its (stale) value.
+      expect(useA2UIStore.getState().surfaces.cart.dataModel.total).toBe(10)
+    })
+
+    it("rejects a message whose declaration is not in the closed operator set", () => {
+      expect(() =>
+        useA2UIStore.getState().processMessage({
+          type: "createSurface",
+          surfaceId: "bad",
+          surfaceType: "inline",
+          computed: { "/x": { op: "eval", args: ["1"] } },
+        } as never)
+      ).toThrow(TypeError)
+      expect(useA2UIStore.getState().surfaces.bad).toBeUndefined()
+    })
+
+    it("keeps declarations through restore and drops invalid stored ones", () => {
+      createCart()
+      const saved = useA2UIStore.getState().surfaces.cart
+      act(() => {
+        useA2UIStore
+          .getState()
+          .restoreSurface({ ...saved, id: "copy", dataModel: { qty: 1, price: 2 } })
+        useA2UIStore.getState().restoreSurface({
+          ...saved,
+          id: "tampered",
+          computed: { "/x": { op: "eval" } } as never,
+        })
+      })
+      expect(useA2UIStore.getState().surfaces.copy.dataModel.total).toBe(2)
+      expect(useA2UIStore.getState().surfaces.copy.computed).toEqual(total)
+      expect(useA2UIStore.getState().surfaces.tampered.computed).toBeUndefined()
+    })
+
+    it("ignores an update for a missing surface or one that would feed back into itself", () => {
+      createCart()
+      const before = useA2UIStore.getState().surfaces
+      act(() => useA2UIStore.getState().setComputedFields("missing", { "/x": null }))
+      expect(useA2UIStore.getState().surfaces).toBe(before)
+
+      act(() =>
+        useA2UIStore.getState().setComputedFields("cart", {
+          "/qty": { op: "add", args: [{ path: "/total" }, 1] },
+        })
+      )
+      expect(useA2UIStore.getState().surfaces.cart.computed).toEqual(total)
+      act(() => useA2UIStore.getState().setDataValue("cart", "/price", 6))
+      expect(useA2UIStore.getState().surfaces.cart.dataModel).toMatchObject({ qty: 2, total: 12 })
+    })
+
+    it("recomputes over the model undo and redo restore", () => {
+      createCart()
+      act(() => {
+        useA2UIStore.getState().pushSnapshot("cart", "edit")
+        useA2UIStore.getState().setComputedFields("cart", {
+          "/total": { op: "add", args: [{ path: "/qty" }, { path: "/price" }] },
+        })
+      })
+      expect(useA2UIStore.getState().surfaces.cart.dataModel.total).toBe(7)
+      act(() => useA2UIStore.getState().undo("cart"))
+      expect(useA2UIStore.getState().surfaces.cart.dataModel.total).toBe(7)
+      act(() => useA2UIStore.getState().redo("cart"))
+      expect(useA2UIStore.getState().surfaces.cart.dataModel.total).toBe(7)
+    })
+
+    it("recomputes declarations a localStorage rehydrate restores", async () => {
+      localStorage.setItem(
+        "cognia-a2ui-surfaces",
+        JSON.stringify({
+          state: {
+            surfaces: {
+              "stored-cart": {
+                id: "stored-cart",
+                type: "panel",
+                rootId: "root",
+                components: { root: { id: "root", component: "Text", text: "x" } },
+                dataModel: { qty: 2, price: 4, total: 0 },
+                computed: total,
+                createdAt: 1,
+                updatedAt: 2,
+                ready: true,
+              },
+              "stored-bad": {
+                id: "stored-bad",
+                type: "panel",
+                rootId: "root",
+                components: { root: { id: "root", component: "Text", text: "x" } },
+                dataModel: {},
+                computed: { "/x": { op: "eval" } },
+                createdAt: 1,
+                updatedAt: 2,
+                ready: true,
+              },
+            },
+            activeSurfaceId: null,
+          },
+          version: 3,
+        })
+      )
+      await act(async () => {
+        await (
+          useA2UIStore as unknown as { persist: { rehydrate: () => Promise<void> } }
+        ).persist.rehydrate()
+      })
+      const surfaces = useA2UIStore.getState().surfaces
+      expect(surfaces["stored-cart"].computed).toEqual(total)
+      expect(surfaces["stored-cart"].dataModel.total).toBe(8)
+      expect(surfaces["stored-bad"].computed).toBeUndefined()
+      localStorage.removeItem("cognia-a2ui-surfaces")
+    })
+
+    it("writes declarations to Dexie and recomputes them on hydration", async () => {
+      mockListDurableSurfaces.mockResolvedValue([
+        {
+          id: "durable-cart",
+          type: "panel",
+          components: { root: { id: "root", component: "Text", text: "x" } },
+          dataModel: { qty: 3, price: 3, total: 0 },
+          computed: total,
+          rootId: "root",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ])
+      await hydrateA2UISurfaceCache()
+      expect(useA2UIStore.getState().surfaces["durable-cart"].dataModel.total).toBe(9)
+
+      act(() => useA2UIStore.getState().setDataValue("durable-cart", "/qty", 4))
+      await flushA2UISurfacePersistence()
+      expect(mockUpsertDurableSurface).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "durable-cart", computed: total })
+      )
+    })
+  })
+
   describe("reset", () => {
     it("should reset to initial state", () => {
       act(() => {

@@ -10,12 +10,15 @@
 
 import { createA2UIComponentBundle } from "./component-definitions"
 import { getStandardComponentTypes } from "./catalog"
+import { A2UI_LOCAL_ACTION_NAMES } from "./chat-action-routing"
+import { A2UI_COMPUTED_LIMITS, A2UI_COMPUTED_OPS } from "./computed"
 import { getA2UIEnumPropertyDefinitions } from "./component-properties"
 import { definePrompt } from "@/lib/prompts/types"
 
 export const A2UI_PROTOCOL_PROMPT = definePrompt({
   id: "chat.a2ui.protocol",
-  contractVersion: 1,
+  // 2: action round trip and declared `computed` values (ADR-0240).
+  contractVersion: 2,
   kind: "protocol",
   group: "chat",
   operation: "inspect-only",
@@ -46,11 +49,14 @@ You can generate interactive UI surfaces containing:
 
 Generate A2UI interfaces when:
 1. User needs to make choices from multiple options
-2. Data needs to be presented in a structured way (tables, charts)
+2. Structured data sits next to controls (filters, selection, inputs)
 3. User needs to fill out a form or provide structured input
 4. Interactive dashboards or summaries would be helpful
 5. Step-by-step wizards or multi-part interactions
 6. Settings or configuration interfaces
+7. A calculator-like tool whose result follows its inputs (see Computed Values)
+
+A chart or table the reader only looks at follows this conversation's visual-output guidance (a dock chart, an inline \`chart\` fence or a Markdown table), not an A2UI surface. Use an A2UI Chart or Table when it sits inside a surface that also has controls, and RichOutput for the advanced profiles listed below.
 
 ## A2UI JSON Format
 
@@ -96,7 +102,7 @@ Wrap A2UI content in a code block with the \`a2ui\` language identifier:
 - **Alert**: Notification with \`title\`, \`message\`, and \`variant\` (info, success, warning, error)
 
 ### Input Components
-- **Button**: Clickable with \`text\`, \`action\`, and optional \`variant\`
+- **Button**: Clickable with \`text\`, \`action\`, and optional \`variant\`; the click comes back to you (see Interaction)
 - **TextField**: Single-line input with \`value\`, \`label\`, \`placeholder\`
 - **TextArea**: Multi-line input with \`value\`, \`label\`, \`rows\`
 - **Select**: Dropdown with \`value\`, \`label\`, \`options\` array
@@ -121,6 +127,28 @@ Use JSON Pointer paths to bind component values to the data model:
   "label": "Your Name"
 }
 \`\`\`
+
+## Interaction: buttons and forms come back to you
+
+In a chat, a **Button** click, a **FormGroup** submit, or a **Link** with an \`action\` is sent to you as the user's next message: the control's label, then an \`a2ui-action\` code block with \`surfaceId\`, \`componentId\`, \`componentType\`, \`action\`, any action \`data\`, and the surface's current \`dataModel\` (so every input bound to a data path arrives with it). Answer it like any user message, usually with an updated or new surface.
+
+- Give actions you want back descriptive names (\`search_flights\`, \`confirm_booking\`).
+- These names belong to built-in mini-app logic, run inside the surface and never reach you: ${A2UI_LOCAL_ACTION_NAMES.map((name) => `\`${name}\``).join(", ")}.
+- Selecting table rows, clicking chart points, paging, switching tabs and typing do not message you; their state arrives with the next button press.
+- A Link opens only \`https:\`, \`http:\` and \`mailto:\` targets; give it an \`action\` for anything else. Images load only from \`https:\`/\`http:\` or \`data:image/\` sources.
+
+## Computed Values (no extra turn)
+
+For values derived from other fields (totals, conversions, percentages, conditional labels), declare a top-level \`computed\` map next to \`dataModel\` instead of asking the user to press a button. The host recomputes it after every change:
+
+\`\`\`json
+"computed": {
+  "/total": { "op": "multiply", "args": [{ "path": "/qty" }, { "path": "/price" }] },
+  "/totalText": { "op": "currency", "args": [{ "path": "/total" }, "¥", 2] }
+}
+\`\`\`
+
+Keys are the JSON Pointer each result is written to; bind components to that path as usual. \`args\` are literals, \`{ "path": … }\`, or nested \`{ "op", "args" }\`. Declarations run in order, so a later one can read an earlier one; a declaration that reads its own target or a later one is rejected, and \`concat\` results stop at ${A2UI_COMPUTED_LIMITS.text.toLocaleString("en-US")} characters. Text-field strings count as numbers and empty fields as 0; an impossible result (division by zero, non-numeric input) becomes \`null\`. Operators: ${A2UI_COMPUTED_OPS.map((op) => `\`${op}\``).join(", ")}. Over MCP, pass the same map as \`computed\` on \`a2ui_create_surface\` or \`a2ui_data_model_update\` (\`null\` removes one).
 
 ## Example: Quick Poll
 

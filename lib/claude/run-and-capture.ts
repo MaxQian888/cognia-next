@@ -67,7 +67,16 @@ import { getImElicitationContext } from "@/lib/connectors/hitl/im-elicitation-co
 import { dispatchPreToolUse, dispatchPostToolUse } from "@/lib/claude/adapter-hooks"
 import { deepMerge } from "@/lib/a2ui/data-model"
 import { resolveStreamedRootId } from "@/lib/a2ui/component-tree"
-import type { A2UIComponent } from "@/types/a2ui/schema"
+import {
+  applyA2UIComputedFields,
+  isA2UIComputedFields,
+  mergeA2UIComputedFields,
+} from "@/lib/a2ui/computed"
+import type {
+  A2UIComponent,
+  A2UIComputedFields,
+  A2UIComputedFieldsUpdate,
+} from "@/types/a2ui/schema"
 import type { CaptureStreamEvent } from "@cognia/plugin-contract/lib/claude/run-and-capture"
 export type { CaptureStreamEvent } from "@cognia/plugin-contract/lib/claude/run-and-capture"
 
@@ -203,12 +212,24 @@ function applyA2UIToolCall(
   const op = toolName.slice(A2UI_TOOL_PREFIX.length)
   const surfaceId = typeof input.surfaceId === "string" ? input.surfaceId : null
   if (!surfaceId) return
+  // Like the renderer store, a call whose computed map does not validate is
+  // refused whole rather than captured without it (ADR-0240).
+  if (
+    input.computed !== undefined &&
+    !isA2UIComputedFields(input.computed, { allowRemoval: op === "a2ui_data_model_update" })
+  ) {
+    return
+  }
 
   switch (op) {
     case "a2ui_create_surface": {
+      const computed = isA2UIComputedFields(input.computed)
+        ? (input.computed as A2UIComputedFields)
+        : undefined
       const surface: A2UISegmentContent = {
         components: {},
-        dataModel: {},
+        dataModel: applyA2UIComputedFields({}, computed),
+        ...(computed ? { computed } : {}),
         rootId: "root",
         surfaceType: (input.surfaceType as A2UISegmentContent["surfaceType"]) ?? "inline",
         catalogId: typeof input.catalogId === "string" ? input.catalogId : undefined,
@@ -266,8 +287,20 @@ function applyA2UIToolCall(
       const data =
         input.data && typeof input.data === "object" ? (input.data as Record<string, unknown>) : {}
       const merge = input.merge !== false // default true
-      const dataModel = merge ? deepMerge(existing.dataModel, data) : data
-      acc.surfaces.set(surfaceId, { ...existing, dataModel })
+      // Same computed semantics as the renderer store (ADR-0240): the update's
+      // declarations merge by path, then every declared value is recomputed.
+      const computed = isA2UIComputedFields(input.computed, { allowRemoval: true })
+        ? mergeA2UIComputedFields(
+            existing.computed as A2UIComputedFields | undefined,
+            input.computed as A2UIComputedFieldsUpdate
+          )
+        : (existing.computed as A2UIComputedFields | undefined)
+      const { computed: _previous, ...rest } = existing
+      const dataModel = applyA2UIComputedFields(
+        merge ? deepMerge(existing.dataModel, data) : data,
+        computed
+      )
+      acc.surfaces.set(surfaceId, { ...rest, ...(computed ? { computed } : {}), dataModel })
       if (!acc.order.includes(surfaceId)) acc.order.push(surfaceId)
       break
     }

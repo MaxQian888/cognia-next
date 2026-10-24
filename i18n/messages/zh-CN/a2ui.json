@@ -80,6 +80,9 @@
   "categoryProductivity": "效率工具",
   "categorySocial": "社交",
   "categoryUtility": "实用工具",
+  "chatAction": {
+    "sendFailed": "无法将此操作发送到对话"
+  },
   "checkPublish": "检查发布要求",
   "clearAgent": "改用默认角色",
   "clearErrors": "全部清除",
@@ -444,6 +447,7 @@
   "templateName": "模板名称",
   "templatesTab": "模板",
   "thumbnail": "缩略图",
+  "toolOutput": "输出",
   "treeCollapse": "收起",
   "treeEmpty": "暂无内容",
   "treeExpand": "展开",

@@ -2244,6 +2244,11 @@
     "toggle": "{emoji} {count}"
   },
   "renderers": {
+    "a2ui": {
+      "generating": "Generating interface…",
+      "invalid": "This interactive UI couldn't be rendered. Showing its source instead.",
+      "label": "Interactive UI"
+    },
     "alert": {
       "caution": "Caution",
       "important": "Important",

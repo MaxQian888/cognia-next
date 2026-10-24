@@ -325,6 +325,33 @@ flowchart LR
   `processPayload` on mount (L34-38), and renders a full `A2UISurface` (L54-59). `hasA2UIToolOutput`
   (L67) gates it; `A2UIStructuredOutput` (L74) is the structured variant.
 
+### Streaming, fallback and answering back
+
+Three behaviors make a chat surface usable before and after the turn seals
+([ADR-0240](/docs/adr/0240-a-generated-surface-streams-answers-and-computes)):
+
+- **Streaming preview.** While a turn streams, an ` ```a2ui ` fence renders through
+  `components/chat/renderers/a2ui-streaming-fence.tsx` (registered in
+  `components/chat/markdown/streaming-fence-renderers.tsx`). `lib/a2ui/streaming-preview.ts` cuts
+  the prefix back to its last structurally complete value, so no string or number is ever shown
+  half-written, and draws it into a read-only, `inert` surface under the reserved
+  `a2ui-preview:` prefix, which model-written payloads may not use. Computed declarations wait for
+  the complete fence and data updates merge until then. The preview is throttled to one parse per
+  120 ms, gives up past 64 levels of nesting, is skipped by plugin surface hooks, never persisted,
+  and deleted when the sealed `a2ui` part replaces it.
+- **Source fallback.** When a payload yields no surface, `A2UIPart` shows the fence source with a
+  notice instead of rendering nothing.
+- **Actions answer back.** A chat-rendered surface (an `a2ui` part, a Markdown fence, or a tool
+  result with A2UI) binds to the session of the transcript list that renders it
+  (`components/chat/transcript-session-context.tsx`, `use-a2ui-chat-binding.ts`,
+  `lib/a2ui/chat-action-routing.ts`); when one surface id renders in several places, the newest
+  live render owns its clicks. The built-in actions provider installs the router as
+  its fall-through, so a `Button`, `FormGroup` submit or `Link` action that no built-in mini-app
+  handler owns becomes that session's next user message: the control's label plus an
+  `a2ui-action` block with the action and the surface's data model. Tables, charts, pagination,
+  tabs and data changes never send; a repeat of the same gesture within 1.5 s is dropped; unbound
+  surfaces (Mini Apps, the editor, previews) stay local.
+
 ## Files
 
 <Files>

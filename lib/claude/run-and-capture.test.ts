@@ -1399,6 +1399,43 @@ describe("runAndCaptureAssistantReply", () => {
     expect(result.a2uiSurfaces["sfc"].dataModel).toEqual({ name: "Alice", age: 31 })
   })
 
+  it("captures computed declarations and their values like the renderer (ADR-0240)", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    const total = { op: "multiply", args: [{ path: "/qty" }, { path: "/price" }] }
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_create_surface", {
+        surfaceId: "cart",
+        surfaceType: "inline",
+        computed: { "/total": total },
+      })
+    )
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_data_model_update", {
+        surfaceId: "cart",
+        data: { qty: 2, price: 4 },
+        computed: { "/half": { op: "divide", args: [{ path: "/total" }, 2] } },
+      })
+    )
+    fire(
+      a2uiToolCall(
+        "mcp__a2ui-bridge__a2ui_data_model_update",
+        { surfaceId: "cart", data: { qty: 9 }, computed: { "/total": { op: "eval" } } },
+        { text: "ok" }
+      )
+    )
+    fire(sessionEnded())
+    const result = await promise
+    const cart = result.a2uiSurfaces["cart"]
+    expect(cart.dataModel).toEqual({ qty: 2, price: 4, total: 8, half: 4 })
+    // The last update's computed map is invalid, so the whole call is refused,
+    // as the renderer store refuses it: neither its data nor its declaration land.
+    expect(cart.computed).toEqual({
+      "/total": total,
+      "/half": { op: "divide", args: [{ path: "/total" }, 2] },
+    })
+  })
+
   it("deep-merges captured data without losing nested siblings and honors replacement", async () => {
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
     await Promise.resolve()

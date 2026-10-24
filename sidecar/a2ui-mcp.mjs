@@ -43,7 +43,7 @@ var TOOL_DESCRIPTIONS = {
   a2ui_update_components: "Upsert components by id on an existing surface; omitted components remain. Uses Cognia legacy descriptors, not the official A2UI envelope. Alert uses message; Table uses columns (key/header) and data; Chart uses chartType/data/xKey/yKeys.",
   a2ui_data_model_update: "Patch (or replace) the surface's data model \u2014 form values, chart data, table rows, etc.",
   a2ui_delete_surface: "Remove an A2UI surface and free its resources.",
-  a2ui_handle_connector_action: "Inject a user action that arrived from an IM channel (Slack block_actions, Lark interactive card, Telegram callback_query, Discord component interaction) onto the matching A2UI surface. The agent receives this as a userAction event on the next turn \u2014 identical to in-renderer interactions \u2014 so the same flow handles both browser-side and IM-side users."
+  a2ui_handle_connector_action: "Replay a user action that arrived from an IM channel (Slack block_actions, Lark interactive card, Telegram callback_query, Discord component interaction) onto the matching A2UI surface, as if it had been clicked in the renderer: built-in handlers and plugins observe it. It does not report back to you; IM callbacks reach the agent as their own connector turn."
 };
 var componentSchema = {
   type: "object",
@@ -53,6 +53,16 @@ var componentSchema = {
     component: { type: "string" }
   },
   additionalProperties: true
+};
+var computedSchema = {
+  type: "object",
+  description: 'Derived values the host keeps up to date (no agent turn needed): keys are the JSON Pointer each value is written to, values are {op, args}. Args are literals, {path: "/pointer"} or nested {op, args}. Ops: add, subtract, multiply, divide, mod, pow, min, max, abs, round, floor, ceil, sum, sumOf(arrayPath, field), count, countWhere(arrayPath, field, value), percentage, concat(separator, ...), currency(value, symbol?, decimals?), fixed(value, decimals?), if(cond, then, else), eq, neq, gt, gte, lt, lte, and, or, not. Evaluated in declaration order after every data change; a declaration may read earlier targets but never its own or a later one.',
+  additionalProperties: { type: "object" }
+};
+var computedUpdateSchema = {
+  type: "object",
+  description: 'Derived values the host keeps up to date (no agent turn needed): keys are the JSON Pointer each value is written to, values are {op, args}. Args are literals, {path: "/pointer"} or nested {op, args}. Ops: add, subtract, multiply, divide, mod, pow, min, max, abs, round, floor, ceil, sum, sumOf(arrayPath, field), count, countWhere(arrayPath, field, value), percentage, concat(separator, ...), currency(value, symbol?, decimals?), fixed(value, decimals?), if(cond, then, else), eq, neq, gt, gte, lt, lte, and, or, not. Evaluated in declaration order after every data change; a declaration may read earlier targets but never its own or a later one. A null value removes that declaration.',
+  additionalProperties: { type: ["object", "null"] }
 };
 var widgetSchema = {
   type: "object",
@@ -75,7 +85,8 @@ var RAW_INPUT_SCHEMAS = {
       surfaceType: { type: "string", enum: SURFACE_TYPES },
       catalogId: { type: "string" },
       title: { type: "string" },
-      widget: widgetSchema
+      widget: widgetSchema,
+      computed: computedSchema
     },
     additionalProperties: false
   },
@@ -97,7 +108,8 @@ var RAW_INPUT_SCHEMAS = {
       merge: {
         type: "boolean",
         description: "Default true: merge into existing model. false: replace."
-      }
+      },
+      computed: computedUpdateSchema
     },
     additionalProperties: false
   },
@@ -159,7 +171,8 @@ function buildDispatch(name, args) {
         surfaceType: args.surfaceType,
         catalogId: args.catalogId,
         title: args.title,
-        widget: args.widget
+        widget: args.widget,
+        computed: args.computed
       };
     case "a2ui_update_components":
       return {
@@ -172,7 +185,8 @@ function buildDispatch(name, args) {
         type: "dataModelUpdate",
         surfaceId: args.surfaceId,
         data: args.data,
-        merge: args.merge ?? true
+        merge: args.merge ?? true,
+        computed: args.computed
       };
     case "a2ui_delete_surface":
       return {

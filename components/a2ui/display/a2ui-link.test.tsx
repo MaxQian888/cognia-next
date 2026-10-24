@@ -72,7 +72,21 @@ describe("A2UILink", () => {
     }
 
     render(<A2UILink {...createProps(component)} />)
-    expect(screen.getByRole("link")).toHaveAttribute("href", "https://example.com")
+    expect(screen.getByRole("link")).toHaveAttribute("href", "https://example.com/")
+  })
+
+  it("normalises a loose web URL so it opens outside the app window", () => {
+    const component: A2UILinkComponent = {
+      id: "link-loose",
+      component: "Link",
+      text: "Loose",
+      href: "https:example.com/page",
+    }
+
+    render(<A2UILink {...createProps(component)} />)
+    const link = screen.getByRole("link")
+    expect(link).toHaveAttribute("href", "https://example.com/page")
+    expect(link).toHaveAttribute("target", "_blank")
   })
 
   it("should open external links in new tab", () => {
@@ -109,11 +123,48 @@ describe("A2UILink", () => {
       id: "link-5",
       component: "Link",
       text: "Styled Link",
-      href: "#",
+      href: "https://example.com/docs",
       className: "custom-class",
     }
 
     render(<A2UILink {...createProps(component)} />)
     expect(screen.getByRole("link")).toHaveClass("custom-class")
+  })
+
+  it.each(["javascript:alert(1)", "java\tscript:alert(1)", "file:///etc/passwd", "/settings", "#"])(
+    "renders %j as text, never as a navigable link",
+    (href) => {
+      const component: A2UILinkComponent = { id: "l", component: "Link", text: "Bad", href }
+      const { container } = render(<A2UILink {...createProps(component)} />)
+      expect(screen.queryByRole("link")).not.toBeInTheDocument()
+      expect(container.querySelector("[href]")).toBeNull()
+      expect(container.querySelector("[data-a2ui-link-blocked]")).toHaveTextContent("Bad")
+    }
+  )
+
+  it("keeps the action of a link whose target was rejected, without the target", () => {
+    const component: A2UILinkComponent = {
+      id: "l",
+      component: "Link",
+      text: "Open",
+      href: "javascript:alert(1)",
+      action: "open_details",
+    }
+    render(<A2UILink {...createProps(component)} />)
+    fireEvent.click(screen.getByRole("button", { name: "Open" }))
+    expect(mockOnAction).toHaveBeenCalledWith("open_details", {})
+  })
+
+  it("keeps mail links as plain anchors", () => {
+    const component: A2UILinkComponent = {
+      id: "l",
+      component: "Link",
+      text: "Mail",
+      href: "mailto:team@example.com",
+    }
+    render(<A2UILink {...createProps(component)} />)
+    const link = screen.getByRole("link", { name: "Mail" })
+    expect(link).toHaveAttribute("href", "mailto:team@example.com")
+    expect(link).not.toHaveAttribute("target")
   })
 })

@@ -464,8 +464,11 @@ describe("markdown knobs (ADR-0127)", () => {
     }
     expect(props.plugins).not.toHaveProperty("mermaid")
     // Mermaid off ⇒ no mermaid fence renderer either, so the fence streams
-    // as code; the chart renderer stays.
-    expect(props.plugins.renderers).toEqual([expect.objectContaining({ language: "chart" })])
+    // as code; the chart renderer stays, and A2UI always streams (ADR-0240).
+    expect(props.plugins.renderers).toEqual([
+      expect.objectContaining({ language: "chart" }),
+      expect.objectContaining({ language: "a2ui" }),
+    ])
     expect(props.plugins).toHaveProperty("math")
     expect(props.lineNumbers).toBe(false)
     expect(props.className).toContain("[&_pre]:whitespace-pre-wrap")
@@ -528,6 +531,7 @@ describe("markdown knobs (ADR-0127)", () => {
     expect(props.plugins.renderers).toEqual([
       expect.objectContaining({ language: "mermaid" }),
       expect.objectContaining({ language: "chart" }),
+      expect.objectContaining({ language: "a2ui" }),
     ])
     expect(props.lineNumbers).toBe(true)
     expect((props as unknown as { codeBlockMaxHeight: string }).codeBlockMaxHeight).toBe(

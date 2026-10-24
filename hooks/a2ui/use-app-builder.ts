@@ -30,6 +30,7 @@ import type {
   A2UIComponent,
   A2UIUserAction,
   A2UIDataModelChange,
+  A2UIComputedFields,
   A2UISurfaceType,
 } from "@/types/a2ui/schema"
 
@@ -178,12 +179,14 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
     (
       name: string,
       components: A2UIComponent[],
-      dataModel: Record<string, unknown> = {}
+      dataModel: Record<string, unknown> = {},
+      options: { computed?: A2UIComputedFields } = {}
     ): string | null => {
       const surfaceId = generateTemplateId("custom")
       a2ui.createQuickSurface(surfaceId, components, dataModel, {
         type: "inline" as A2UISurfaceType,
         title: name,
+        computed: options.computed,
       })
 
       const instance: A2UIAppInstance = {
@@ -380,6 +383,7 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
           widget: row.widget,
           components: row.components,
           dataModel: row.dataModel,
+          computed: row.computed,
           rootId: row.rootId,
           createdAt: row.createdAt,
           updatedAt: row.updatedAt,

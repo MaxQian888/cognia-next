@@ -128,6 +128,38 @@ describe("useAppImportExport", () => {
     expect(onAppCreated).toHaveBeenCalledWith("imported-app", "imported")
   })
 
+  it("carries computed declarations through export, backup and import", () => {
+    const computed = { "/shout": { op: "concat" as const, args: [{ path: "/greeting" }, "!"] } }
+    const instance = {
+      id: "app-1",
+      templateId: "custom",
+      name: "Computed app",
+      createdAt: 10,
+      lastModified: 20,
+    }
+    mockCache.set("app-1", instance)
+    const restoreSurface = jest.fn(() => true)
+    const { result } = renderHook(() =>
+      useAppImportExport({
+        surfaces: { "app-1": { ...surface, computed } },
+        restoreSurface,
+        deleteSurface: jest.fn(),
+        getAllApps: () => [instance],
+        locale: "en",
+      })
+    )
+
+    const single = JSON.parse(result.current.exportApp("app-1")!)
+    expect(single.app.computed).toEqual(computed)
+    const backup = JSON.parse(result.current.exportAllApps())
+    expect(backup.apps[0].computed).toEqual(computed)
+
+    act(() => {
+      result.current.importApp(JSON.stringify(single))
+    })
+    expect(restoreSurface).toHaveBeenCalledWith(expect.objectContaining({ computed }))
+  })
+
   it("rolls back every committed app when a backup restore fails", () => {
     const restoreSurface = jest.fn().mockReturnValueOnce(true).mockReturnValueOnce(false)
     const deleteSurface = jest.fn()

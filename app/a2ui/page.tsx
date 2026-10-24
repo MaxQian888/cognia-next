@@ -356,7 +356,9 @@ function A2UIPageContent() {
         model: generationPrefs.model,
         providerOverride: generationPrefs.provider,
       })
-      appBuilder.createCustomApp(result.title, result.components, result.dataModel)
+      appBuilder.createCustomApp(result.title, result.components, result.dataModel, {
+        computed: result.computed,
+      })
       setHeroPrompt("")
       if (result.usedFallback) toast.info(t("usedTemplateFallback"))
     } catch (err) {

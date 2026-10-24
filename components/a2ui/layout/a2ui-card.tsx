@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import type { A2UIComponentProps, A2UICardComponent } from "@/types/a2ui/schema"
+import { safeA2UIMediaSrc } from "@/lib/a2ui/url-policy"
 import { useA2UIData } from "../a2ui-context"
 import { A2UIChildRenderer } from "../a2ui-child-renderer"
 
@@ -27,7 +28,8 @@ export const A2UICard = memo(function A2UICard({
 
   const title = component.title ? resolveString(component.title, "") : ""
   const description = component.description ? resolveString(component.description, "") : ""
-  const image = component.image ? resolveString(component.image, "") : ""
+  // Model-written: only web, data:image, blob: and bundled sources load (ADR-0240).
+  const image = component.image ? (safeA2UIMediaSrc(resolveString(component.image, "")) ?? "") : ""
   const isDisabled = component.disabled ? resolveBoolean(component.disabled, false) : false
 
   const handleClick = () => {

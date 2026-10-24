@@ -81,6 +81,9 @@
     "categoryProductivity": "效率工具",
     "categorySocial": "社交",
     "categoryUtility": "实用工具",
+    "chatAction": {
+      "sendFailed": "无法将此操作发送到对话"
+    },
     "checkPublish": "检查发布要求",
     "clearAgent": "改用默认角色",
     "clearErrors": "全部清除",
@@ -445,6 +448,7 @@
     "templateName": "模板名称",
     "templatesTab": "模板",
     "thumbnail": "缩略图",
+    "toolOutput": "输出",
     "treeCollapse": "收起",
     "treeEmpty": "暂无内容",
     "treeExpand": "展开",
@@ -9846,6 +9850,11 @@
       "toggle": "{emoji} {count}"
     },
     "renderers": {
+      "a2ui": {
+        "generating": "正在生成界面…",
+        "invalid": "无法渲染此交互界面，已改为显示源码。",
+        "label": "交互界面"
+      },
       "alert": {
         "caution": "注意",
         "important": "重要",

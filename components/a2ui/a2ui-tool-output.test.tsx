@@ -5,6 +5,8 @@
 import React from "react"
 import { render, screen } from "@testing-library/react"
 import { A2UIToolOutput, A2UIStructuredOutput, hasA2UIToolOutput } from "./a2ui-tool-output"
+import { TranscriptSessionProvider } from "@/components/chat/transcript-session-context"
+import { getA2UIChatBinding } from "@/lib/a2ui/chat-action-routing"
 
 const mockProcessPayload = jest.fn()
 const mockGetSurface = jest.fn()
@@ -65,6 +67,23 @@ describe("A2UIToolOutput", () => {
     expect(screen.getByTestId("a2ui-surface")).toBeInTheDocument()
     expect(screen.getByText("MyTool")).toBeInTheDocument()
     expect(mockProcessPayload).toHaveBeenCalledWith(payload, "tool:tool-1", "tool-tool-1")
+  })
+
+  it("binds its surface to the transcript's conversation so buttons answer back", () => {
+    const payload = { type: "createSurface", surfaceId: "tool-surface" }
+    const { unmount } = render(
+      <TranscriptSessionProvider sessionId="pane-session">
+        <A2UIToolOutput toolId="tool-1" toolName="MyTool" output={payload} />
+      </TranscriptSessionProvider>
+    )
+    expect(getA2UIChatBinding("tool-surface")?.sessionId).toBe("pane-session")
+    unmount()
+    expect(getA2UIChatBinding("tool-surface")).toBeUndefined()
+  })
+
+  it("stays unbound outside a conversation", () => {
+    render(<A2UIToolOutput toolId="tool-1" toolName="MyTool" output={{ type: "createSurface" }} />)
+    expect(getA2UIChatBinding("tool-surface")).toBeUndefined()
   })
 
   it("returns null when no A2UI surface is resolved", () => {

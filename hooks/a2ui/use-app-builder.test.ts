@@ -93,6 +93,7 @@ let mockSurfaces: Record<
     catalogId?: string
     title?: string
     widget?: Record<string, unknown>
+    computed?: Record<string, unknown>
     rootId?: string
     createdAt?: number
     updatedAt?: number
@@ -472,6 +473,20 @@ describe("useA2UIAppBuilder", () => {
       expect(appId!).toBe("custom-app-123")
       expect(mockCreateQuickSurface).toHaveBeenCalled()
       expect(onAppCreated).toHaveBeenCalledWith("custom-app-123", "custom")
+    })
+
+    it("creates a custom app with the computed declarations it was generated with", () => {
+      const { result } = renderHook(() => useA2UIAppBuilder())
+      const computed = { "/n": { op: "add" as const, args: [1, 2] } }
+      act(() => {
+        result.current.createCustomApp("Computed", [], { a: 1 }, { computed })
+      })
+      expect(mockCreateQuickSurface).toHaveBeenLastCalledWith(
+        expect.any(String),
+        [],
+        { a: 1 },
+        expect.objectContaining({ computed })
+      )
     })
 
     it("should duplicate existing app", () => {
@@ -1009,6 +1024,7 @@ describe("useA2UIAppBuilder", () => {
           catalogId: "catalog-v1",
           title: "Custom root app",
           widget: { theme: "dark" },
+          computed: { "/n": { op: "add", args: [1] } },
           rootId: "custom-root",
         },
       }
@@ -1030,6 +1046,7 @@ describe("useA2UIAppBuilder", () => {
           surfaceType: "panel",
           catalogId: "catalog-v1",
           widget: { theme: "dark" },
+          computed: { "/n": { op: "add", args: [1] } },
           rootId: "custom-root",
           description: "Portable description",
           author: { name: "Author" },
@@ -1628,6 +1645,7 @@ describe("useA2UIAppBuilder", () => {
             "custom-root": { id: "custom-root", component: "Column", children: [] },
           },
           dataModel: { durable: true },
+          computed: { "/n": { op: "add", args: [1] } },
           rootId: "custom-root",
         },
       ])
@@ -1644,6 +1662,7 @@ describe("useA2UIAppBuilder", () => {
           id: "durable-custom",
           rootId: "custom-root",
           dataModel: { durable: true },
+          computed: { "/n": { op: "add", args: [1] } },
           ready: true,
         })
       )

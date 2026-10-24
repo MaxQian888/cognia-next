@@ -11,6 +11,10 @@
  * toolbar, and no re-layout when the turn seals. While a fence is still open
  * (`isIncomplete`) the block shows a sized placeholder in the same frame
  * instead of attempting to parse half a diagram on every token.
+ *
+ * An ```a2ui fence is the exception to "placeholder until closed": its preview
+ * parses the structurally complete prefix (`a2ui-streaming-fence.tsx`), so an
+ * interface assembles while it streams instead of scrolling past as JSON.
  */
 
 import dynamic from "next/dynamic"
@@ -35,6 +39,33 @@ const ChartBlock = dynamic(
   { ssr: false, loading: () => <PendingChart /> }
 )
 const SafeChartBlock = withRendererErrorBoundary(ChartBlock, "Chart")
+
+// The A2UI renderer and its catalog are a large chunk; the pending frame
+// covers the load the same way the preview covers a fence with no component yet.
+const StreamingA2UIPreview = dynamic(
+  () =>
+    import("@/components/chat/renderers/a2ui-streaming-fence").then((m) => ({
+      default: m.A2UIStreamingPreview,
+    })),
+  { ssr: false, loading: () => <PendingA2UI /> }
+)
+const SafeStreamingA2UIPreview = withRendererErrorBoundary(StreamingA2UIPreview, "A2UI")
+
+function PendingA2UI() {
+  const t = useTranslations("chat.renderers.a2ui")
+  return (
+    <div
+      role="status"
+      aria-busy
+      aria-label={t("generating")}
+      data-fence-pending
+      className="my-2 space-y-2 rounded-lg border bg-card p-3"
+    >
+      <span className="text-muted-foreground text-xs">{t("generating")}</span>
+      <Skeleton className="h-16 w-full" />
+    </div>
+  )
+}
 
 function PendingChart() {
   const t = useTranslations("chat.renderers.chart")
@@ -78,6 +109,10 @@ export function StreamingChartFence({ code, isIncomplete }: CustomRendererProps)
   return <SafeChartBlock content={code} />
 }
 
+export function StreamingA2UIFence(props: CustomRendererProps) {
+  return <SafeStreamingA2UIPreview {...props} />
+}
+
 export interface StreamingFenceOptions {
   mermaid: boolean
   charts: boolean
@@ -102,11 +137,13 @@ export function withStreamingFenceRenderers(
   }
   const cached = byFlags.get(key)
   if (cached) return cached
+  // A2UI has no display toggle: the finalised branch always draws the fence.
   const renderers = [
     ...(options.mermaid ? [{ language: "mermaid", component: StreamingMermaidFence }] : []),
     ...(options.charts ? [{ language: "chart", component: StreamingChartFence }] : []),
+    { language: "a2ui", component: StreamingA2UIFence },
   ]
-  const next = renderers.length ? { ...plugins, renderers } : plugins
+  const next = { ...plugins, renderers }
   byFlags.set(key, next)
   return next
 }

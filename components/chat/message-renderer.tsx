@@ -2180,7 +2180,14 @@ function renderPart(
   }
 
   if (type === "a2ui") {
-    return <A2UIPart key={key} part={part as unknown as A2UIPartType} _messageId={messageId} />
+    return (
+      <A2UIPart
+        key={key}
+        part={part as unknown as A2UIPartType}
+        _messageId={messageId}
+        sessionId={sessionId}
+      />
+    )
   }
 
   if (type === DIAGNOSTICS_PART_TYPE) {

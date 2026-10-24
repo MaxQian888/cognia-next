@@ -106,4 +106,24 @@ describe("A2UICard", () => {
     const { container } = render(<A2UICard {...createProps(component)} />)
     expect(container.firstChild).toHaveClass("custom-class")
   })
+
+  it("loads a web image and never a rejected one", () => {
+    const { container, rerender } = render(
+      <A2UICard
+        {...createProps({
+          id: "card-img",
+          component: "Card",
+          title: "T",
+          image: "https://example.com/cover.png",
+        })}
+      />
+    )
+    expect(container.querySelector("img")).toHaveAttribute("src", "https://example.com/cover.png")
+    rerender(
+      <A2UICard
+        {...createProps({ id: "card-img", component: "Card", title: "T", image: "javascript:x" })}
+      />
+    )
+    expect(container.querySelector("img")).toBeNull()
+  })
 })

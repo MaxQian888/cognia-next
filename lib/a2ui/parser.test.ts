@@ -337,6 +337,13 @@ describe("A2UI Parser", () => {
       expect(messages[3].type).toBe("surfaceReady")
     })
 
+    it("carries computed declarations on createSurface only when given", () => {
+      const components = [{ id: "t", component: "Text" as const, text: "x" }]
+      const computed = { "/n": { op: "add" as const, args: [1, 2] } }
+      expect(createA2UISurface("s", components, {}, { computed })[0]).toMatchObject({ computed })
+      expect(createA2UISurface("s", components)[0]).not.toHaveProperty("computed")
+    })
+
     it("should skip dataModelUpdate if no data provided", () => {
       const components = [{ id: "text-1", component: "Text" as const, text: "Hello" }]
       const messages = createA2UISurface("test-surface", components)
@@ -556,5 +563,76 @@ describe("dispatch validation", () => {
     { type: "connectorAction", surfaceId: "s", actionType: "button", value: 1 },
   ])("rejects malformed dispatch %j", (message) => {
     expect(parseA2UIDispatchMessage(message)).toBeNull()
+  })
+})
+
+describe("computed declarations (ADR-0240)", () => {
+  const total = { "/total": { op: "add", args: [{ path: "/a" }, 1] } }
+
+  it("carries a simplified surface's computed map onto createSurface", () => {
+    const result = parseA2UIInput({
+      surface: { id: "s" },
+      components: [{ id: "root", component: "Text", text: { path: "/total" } }],
+      computed: total,
+    })
+    expect(result.messages[0]).toMatchObject({ type: "createSurface", computed: total })
+  })
+
+  it("accepts removals only on data updates", () => {
+    expect(
+      parseA2UIMessage({
+        type: "dataModelUpdate",
+        surfaceId: "s",
+        data: {},
+        computed: { "/x": null },
+      })
+    ).toMatchObject({ computed: { "/x": null } })
+    expect(
+      parseA2UIMessage({
+        type: "createSurface",
+        surfaceId: "s",
+        surfaceType: "inline",
+        computed: { "/x": null },
+      })
+    ).toBeNull()
+  })
+
+  it.each([
+    { "/x": { op: "eval", args: ["1"] } },
+    { x: { op: "add", args: [1] } },
+    { "/x": "1 + 1" },
+  ])("rejects an invalid declaration map %j", (computed) => {
+    expect(
+      parseA2UIMessage({ type: "createSurface", surfaceId: "s", surfaceType: "inline", computed })
+    ).toBeNull()
+    expect(
+      parseA2UIInput({
+        surface: { id: "s" },
+        components: [{ id: "root", component: "Text", text: "x" }],
+        computed,
+      }).messages
+    ).toEqual([])
+  })
+})
+
+describe("reserved preview surface ids (ADR-0240)", () => {
+  it("drops model-written messages that claim a streaming preview's id", () => {
+    const result = parseA2UIInput({
+      surface: { id: "a2ui-preview:r1" },
+      components: [{ id: "root", component: "Text", text: "x" }],
+    })
+    expect(result.messages).toHaveLength(0)
+    expect(result.errors.join(" ")).toContain("reserved")
+  })
+
+  it("keeps ordinary surfaces in the same payload", () => {
+    const result = parseA2UIInput([
+      { type: "createSurface", surfaceId: "a2ui-preview:r1", surfaceType: "inline" },
+      { type: "createSurface", surfaceId: "real", surfaceType: "inline" },
+    ])
+    expect(result.messages.map((message) => (message as { surfaceId: string }).surfaceId)).toEqual([
+      "real",
+    ])
+    expect(result.surfaceId).toBe("real")
   })
 })

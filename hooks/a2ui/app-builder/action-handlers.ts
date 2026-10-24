@@ -556,7 +556,10 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
 
         case "refresh":
         case "refresh_data": {
+          // There is no local data source to re-read; the host decides what a
+          // refresh means (a chat-bound surface asks its agent, ADR-0240).
           log.debug(`A2UI AppBuilder: Refreshing data for: ${surfaceId}`)
+          onAction?.(action)
           break
         }
 

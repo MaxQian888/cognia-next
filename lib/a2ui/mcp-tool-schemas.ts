@@ -35,6 +35,20 @@ const componentSchema = {
   additionalProperties: true,
 } as const
 
+const computedSchema = {
+  type: "object",
+  description:
+    'Derived values the host keeps up to date (no agent turn needed): keys are the JSON Pointer each value is written to, values are {op, args}. Args are literals, {path: "/pointer"} or nested {op, args}. Ops: add, subtract, multiply, divide, mod, pow, min, max, abs, round, floor, ceil, sum, sumOf(arrayPath, field), count, countWhere(arrayPath, field, value), percentage, concat(separator, ...), currency(value, symbol?, decimals?), fixed(value, decimals?), if(cond, then, else), eq, neq, gt, gte, lt, lte, and, or, not. Evaluated in declaration order after every data change; a declaration may read earlier targets but never its own or a later one.',
+  additionalProperties: { type: "object" },
+} as const
+
+const computedUpdateSchema = {
+  type: "object",
+  description:
+    'Derived values the host keeps up to date (no agent turn needed): keys are the JSON Pointer each value is written to, values are {op, args}. Args are literals, {path: "/pointer"} or nested {op, args}. Ops: add, subtract, multiply, divide, mod, pow, min, max, abs, round, floor, ceil, sum, sumOf(arrayPath, field), count, countWhere(arrayPath, field, value), percentage, concat(separator, ...), currency(value, symbol?, decimals?), fixed(value, decimals?), if(cond, then, else), eq, neq, gt, gte, lt, lte, and, or, not. Evaluated in declaration order after every data change; a declaration may read earlier targets but never its own or a later one. A null value removes that declaration.',
+  additionalProperties: { type: ["object", "null"] },
+} as const
+
 const widgetSchema = {
   type: "object",
   additionalProperties: true,
@@ -68,6 +82,7 @@ export const A2UI_BRIDGE_TOOLS: readonly A2UIToolSchema[] = [
         catalogId: { type: "string" },
         title: { type: "string" },
         widget: widgetSchema,
+        computed: computedSchema,
       },
       additionalProperties: false,
     },
@@ -104,6 +119,7 @@ export const A2UI_BRIDGE_TOOLS: readonly A2UIToolSchema[] = [
           type: "boolean",
           description: "Default true: merge into existing model. false: replace.",
         },
+        computed: computedUpdateSchema,
       },
       additionalProperties: false,
     },
@@ -121,7 +137,7 @@ export const A2UI_BRIDGE_TOOLS: readonly A2UIToolSchema[] = [
   {
     name: "a2ui_handle_connector_action",
     description:
-      "Inject a user action that arrived from an IM channel (Slack block_actions, Lark interactive card, Telegram callback_query, Discord component interaction) onto the matching A2UI surface. The agent receives this as a userAction event on the next turn — identical to in-renderer interactions — so the same flow handles both browser-side and IM-side users.",
+      "Replay a user action that arrived from an IM channel (Slack block_actions, Lark interactive card, Telegram callback_query, Discord component interaction) onto the matching A2UI surface, as if it had been clicked in the renderer: built-in handlers and plugins observe it. It does not report back to you; IM callbacks reach the agent as their own connector turn.",
     inputSchema: {
       type: "object",
       required: ["surfaceId", "actionType"],

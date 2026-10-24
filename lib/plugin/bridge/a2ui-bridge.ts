@@ -14,6 +14,7 @@ import { useA2UIStore } from "@/stores/a2ui"
 import { usePluginStore } from "@/stores/plugin-runtime"
 import { registerComponent, unregisterComponent } from "@/lib/a2ui/catalog"
 import { globalEventEmitter } from "@/lib/a2ui/events"
+import { isA2UIPreviewSurfaceId } from "@/lib/a2ui/streaming-preview"
 import type { PluginRegistry } from "../core/registry"
 import type { PluginLifecycleHooks } from "../messaging/hooks-system"
 import { loggers } from "../core/logger"
@@ -54,7 +55,10 @@ export class PluginA2UIBridge {
       const currentSurfaces = Object.keys(state.surfaces)
       const prevSurfaces = Object.keys(prevState.surfaces)
 
+      // A streaming preview is a transient stand-in for a surface the sealed
+      // message creates; plugins hear about that surface, not each preview.
       for (const surfaceId of currentSurfaces) {
+        if (isA2UIPreviewSurfaceId(surfaceId)) continue
         if (!prevSurfaces.includes(surfaceId)) {
           const surface = state.surfaces[surfaceId]
           this.config.hooksManager.dispatchOnA2UISurfaceCreate(
@@ -66,6 +70,7 @@ export class PluginA2UIBridge {
 
       // Deleted surfaces
       for (const surfaceId of prevSurfaces) {
+        if (isA2UIPreviewSurfaceId(surfaceId)) continue
         if (!currentSurfaces.includes(surfaceId)) {
           this.config.hooksManager.dispatchOnA2UISurfaceDestroy(surfaceId)
         }

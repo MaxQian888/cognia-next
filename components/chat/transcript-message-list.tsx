@@ -8,6 +8,7 @@ import { PerfBoundary } from "@/lib/perf"
 import { estimateMessageHeight } from "@/lib/chat/row-height-estimate"
 import { shouldVirtualizeMessages } from "@/lib/chat/virtualization-threshold"
 import { MessageRenderer } from "./message-renderer"
+import { TranscriptSessionProvider } from "./transcript-session-context"
 import { useMessageDisplay } from "@/hooks/chat/use-message-display"
 import { useStickToBottom } from "@/hooks/chat/use-stick-to-bottom"
 import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
@@ -99,12 +100,14 @@ export function TranscriptMessageList({
   }, [streamingRowIndex, pinNow])
 
   const renderMessage = (message: UIMessage, index: number) => (
-    <MessageRenderer
-      message={message}
-      isStreaming={index === streamingRowIndex}
-      isLastAssistant={message.id === lastAssistantId}
-      messageDisplay={messageDisplay}
-    />
+    <TranscriptSessionProvider sessionId={sessionId}>
+      <MessageRenderer
+        message={message}
+        isStreaming={index === streamingRowIndex}
+        isLastAssistant={message.id === lastAssistantId}
+        messageDisplay={messageDisplay}
+      />
+    </TranscriptSessionProvider>
   )
 
   const virtualItems = rowVirtualizer.getVirtualItems()

@@ -161,7 +161,20 @@ flowchart TB
 
 ### 计算字段
 
-`resolveComputedFields`（`:431`）遍历一个 `ComputedFieldRegistry`（`:425`）：对每个字段，经 `getValueByPath`（`:439`）读取其依赖，运行 `field.compute`，再用 `setValueByPath`（`:447`）写回结果。失败会被**静默跳过** —— 整个 `compute` 被包在 `try/catch`（`:450`）里，所以一个坏字段绝不会污染整个模型。`computedHelpers`（`:461`）是一组常见归约的工厂：
+Surface 以数据而非代码的形式声明派生值（[ADR-0240](/docs/adr/0240-a-generated-surface-streams-answers-and-computes)）：
+
+```json
+"computed": {
+  "/total": { "op": "multiply", "args": [{ "path": "/qty" }, { "path": "/price" }] },
+  "/totalText": { "op": "currency", "args": [{ "path": "/total" }, "¥", 2] }
+}
+```
+
+该映射可写在 `createSurface`、简化负载 `{ surface, components, dataModel, computed }` 以及 `dataModelUpdate` 上（在后者中 `null` 表示删除该声明）。键是结果写入的 JSON Pointer。操作数为字面量、`{ path }` 或嵌套的 `{ op, args }`，运算符来自 30 个的封闭集合（四则运算、`sum`/`sumOf`/`count`/`countWhere`/`percentage`、`concat`/`currency`/`fixed`、比较、`if`/`and`/`or`/`not`）。
+
+`lib/a2ui/computed.ts` 按固定上限校验声明（64 个字段、深度 8、32 个参数、256 个节点），把每条声明编译为 `ComputedField`，按声明顺序交给 `resolveComputedFields` 执行：后面的值可以读取前面的结果，且必定终止。声明映射必须有序：一条声明不读取自己的目标、之后的目标，也不读取包含它们或被它们包含的路径，因此数值一次求值即收敛，不会随每次按键漂移；合并后违反规则的更新会被丢弃。`concat` 超过 10,000 字符时返回 `null`。store 在每次数据变更后（包括撤销和重做）重算；声明随 Surface 持久化，并经过已保存应用、中心页生成的应用、导入导出、捕获和 IM 投影，每个入口都会拒绝声明无效的消息。文本框字符串按数字处理，空字段为 0，非有限结果为 `null`。
+
+`resolveComputedFields` 遍历编译后的 `ComputedFieldRegistry`：对每个字段经 `getValueByPath` 读取依赖，运行 `field.compute`，再用 `setValueByPath` 写回。失败的字段在 `try/catch` 中被**跳过**，一个坏字段不会污染整个模型。`computedHelpers` 提供运算符复用的常见归约：
 
 | Helper | 行为 | 备注 |
 | --- | --- | --- |

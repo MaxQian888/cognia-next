@@ -8,7 +8,13 @@
  */
 
 import type { Locale } from "@/i18n/config"
-import type { A2UIComponent, A2UISurfaceType, A2UIWidgetMetadata } from "@/types/a2ui/schema"
+import type {
+  A2UIComponent,
+  A2UIComputedFields,
+  A2UISurfaceType,
+  A2UIWidgetMetadata,
+} from "@/types/a2ui/schema"
+import { isA2UIComputedFields } from "./computed"
 import {
   collectComponentSubtreeIds,
   getComponentChildReferences,
@@ -99,6 +105,8 @@ export interface A2UIImportedApp {
   catalogId?: string
   title: string
   widget?: A2UIWidgetMetadata
+  /** Declared derived values (ADR-0240). */
+  computed?: A2UIComputedFields
   rootId: string
   metadata: A2UIImportedMetadata
 }
@@ -473,6 +481,10 @@ function validateImportedApp(
   if (widget === null) {
     return failure("invalid_app", "A2UI app contains invalid widget metadata")
   }
+  if (value.computed !== undefined && !isA2UIComputedFields(value.computed)) {
+    return failure("invalid_app", "A2UI app contains invalid computed declarations")
+  }
+  const computed = value.computed as A2UIComputedFields | undefined
 
   const rawName = optionalString(value, "name")
   const rawTemplateId = optionalString(value, "templateId")
@@ -504,6 +516,7 @@ function validateImportedApp(
       catalogId,
       title: rawTitle?.trim() || name,
       widget,
+      ...(computed ? { computed } : {}),
       rootId: graph.value.rootId,
       metadata,
     },

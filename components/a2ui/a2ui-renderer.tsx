@@ -103,6 +103,7 @@ import { A2UITree } from "./navigation/a2ui-tree"
 
 // P1 layout
 import { A2UICollapsible } from "./layout/a2ui-collapsible"
+import { safeA2UIStyle } from "@/lib/a2ui/url-policy"
 
 // Lazy-load heavy components (recharts ~200KB, motion/react)
 const A2UIChart = lazy(() => import("./data/a2ui-chart").then((m) => ({ default: m.A2UIChart })))
@@ -271,6 +272,9 @@ export const A2UIRenderer = memo(function A2UIRenderer({
         ...component,
         disabled: isDisabled,
         className: className || component.className,
+        // Every component spreads `style` onto its DOM node; one sanitizer here
+        // keeps a model-written `url(...)` under the media policy (ADR-0240).
+        ...(component.style === undefined ? {} : { style: safeA2UIStyle(component.style) }),
       },
       surfaceId,
       dataModel,
@@ -327,6 +331,9 @@ export function withA2UIContext<P extends A2UIComponentProps>(
 
     const componentProps = {
       ...props,
+      ...(props.component.style === undefined
+        ? {}
+        : { component: { ...props.component, style: safeA2UIStyle(props.component.style) } }),
       surfaceId,
       dataModel,
       onAction,

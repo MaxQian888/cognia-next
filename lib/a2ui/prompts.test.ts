@@ -8,6 +8,8 @@ import {
 } from "@/lib/prompts/snapshot"
 import { __resetPromptVerdictsForTests, resolvePrompt } from "@/lib/prompts/resolve"
 import { getStandardComponentTypes } from "./catalog"
+import { A2UI_LOCAL_ACTION_NAMES } from "./chat-action-routing"
+import { A2UI_COMPUTED_OPS } from "./computed"
 import { A2UI_PROTOCOL_PROMPT, A2UI_SYSTEM_PROMPT } from "./prompts"
 
 afterEach(() => {
@@ -123,5 +125,25 @@ describe("A2UI_SYSTEM_PROMPT", () => {
     ]) {
       expect(A2UI_SYSTEM_PROMPT).toContain(field)
     }
+  })
+
+  it("teaches the action round trip and names the actions that stay local (ADR-0240)", () => {
+    expect(A2UI_SYSTEM_PROMPT).toContain("## Interaction: buttons and forms come back to you")
+    expect(A2UI_SYSTEM_PROMPT).toContain("`a2ui-action`")
+    for (const name of A2UI_LOCAL_ACTION_NAMES) expect(A2UI_SYSTEM_PROMPT).toContain(`\`${name}\``)
+  })
+
+  it("documents every computed operator it accepts", () => {
+    const section = A2UI_SYSTEM_PROMPT.slice(A2UI_SYSTEM_PROMPT.indexOf("## Computed Values"))
+    expect(section).toContain('"computed"')
+    for (const op of A2UI_COMPUTED_OPS) expect(section).toContain(`\`${op}\``)
+    expect(section).toContain("reads its own target or a later one is rejected")
+    expect(section).toContain("stop at 10,000 characters")
+  })
+
+  it("defers display-only charts to the visual-output routing", () => {
+    expect(A2UI_SYSTEM_PROMPT).toContain(
+      "A chart or table the reader only looks at follows this conversation's visual-output guidance"
+    )
   })
 })

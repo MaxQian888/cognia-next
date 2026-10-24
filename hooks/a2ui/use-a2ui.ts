@@ -12,6 +12,7 @@ import type {
   A2UIUserAction,
   A2UIDataModelChange,
   A2UIComponent,
+  A2UIComputedFields,
   A2UISurfaceType,
   A2UIWidgetMetadata,
 } from "@/types/a2ui/schema"
@@ -49,7 +50,12 @@ interface UseA2UIReturn {
     surfaceId: string,
     components: A2UIComponent[],
     dataModel?: Record<string, unknown>,
-    options?: { type?: A2UISurfaceType; title?: string; widget?: A2UIWidgetMetadata }
+    options?: {
+      type?: A2UISurfaceType
+      title?: string
+      widget?: A2UIWidgetMetadata
+      computed?: A2UIComputedFields
+    }
   ) => void
 
   // Data model
@@ -196,12 +202,18 @@ export function useA2UI(options: UseA2UIOptions = {}): UseA2UIReturn {
       surfaceId: string,
       components: A2UIComponent[],
       dataModel?: Record<string, unknown>,
-      opts?: { type?: A2UISurfaceType; title?: string; widget?: A2UIWidgetMetadata }
+      opts?: {
+        type?: A2UISurfaceType
+        title?: string
+        widget?: A2UIWidgetMetadata
+        computed?: A2UIComputedFields
+      }
     ) => {
       const messages = createA2UISurface(surfaceId, components, dataModel, {
         surfaceType: opts?.type,
         title: opts?.title,
         widget: opts?.widget,
+        computed: opts?.computed,
       })
       processMessagesStore(messages)
     },

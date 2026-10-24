@@ -184,11 +184,37 @@ collapses that union by probing `isPathValue` (`:253` guard) and reading through
 
 ### Computed fields
 
-`resolveComputedFields` (`:431`) walks a `ComputedFieldRegistry` (`:425`): for each field it reads
-its dependency via `getValueByPath` (`:439`), runs `field.compute`, and writes the result with
-`setValueByPath` (`:447`). Failures are **silently skipped** — the whole `compute` is wrapped in a
-`try/catch` (`:450`) so one bad field never poisons the model. `computedHelpers` (`:461`) is a set
-of factories for the common reductions:
+A surface declares derived values as data, never as code ([ADR-0240](/docs/adr/0240-a-generated-surface-streams-answers-and-computes)):
+
+```json
+"computed": {
+  "/total": { "op": "multiply", "args": [{ "path": "/qty" }, { "path": "/price" }] },
+  "/totalText": { "op": "currency", "args": [{ "path": "/total" }, "¥", 2] }
+}
+```
+
+The map rides on `createSurface`, on the simplified `{ surface, components, dataModel, computed }`
+payload, and on `dataModelUpdate` (where `null` removes a declaration). Keys are the JSON Pointer
+each result is written to. Operands are literals, `{ path }` or nested `{ op, args }`, drawn from
+a closed set of 30 operators (arithmetic, `sum`/`sumOf`/`count`/`countWhere`/`percentage`,
+`concat`/`currency`/`fixed`, comparisons, `if`/`and`/`or`/`not`).
+
+`lib/a2ui/computed.ts` validates a declaration against fixed bounds (64 fields, depth 8, 32
+arguments, 256 nodes), compiles each one into a `ComputedField` and runs them through
+`resolveComputedFields` in declaration order, so a later value can read an earlier one and the pass
+always terminates. A map must be well ordered: a declaration never reads its own target, a later
+one, or a path that contains or sits inside either, so a value settles in one pass instead of
+drifting on every keystroke; an update whose merged map breaks the rule is dropped. `concat` returns
+`null` past 10,000 characters. The store recomputes after every data mutation, including undo and
+redo; the declaration is persisted with the surface and carried through saved apps, the hub's
+generated apps, import/export, capture and the IM projection, and every entry point refuses a
+message whose map is invalid. Text-field strings count as numbers, empty fields as 0, and a
+non-finite result is `null`.
+
+`resolveComputedFields` walks the compiled `ComputedFieldRegistry`: for each field it reads its
+dependencies via `getValueByPath`, runs `field.compute`, and writes the result with
+`setValueByPath`. A failing field is **skipped** inside a `try/catch`, so one bad field never
+poisons the model. `computedHelpers` supplies the shared reductions the operators reuse:
 
 | Helper | Behavior | Notes |
 | --- | --- | --- |

@@ -6,12 +6,14 @@
  */
 
 import { useEffect, useMemo } from "react"
+import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { parseA2UIInput } from "@/lib/a2ui/parser"
 import { useA2UI } from "@/hooks/a2ui"
 import { A2UISurface } from "./a2ui-surface"
 import { useA2UIMessageIntegration } from "./a2ui-message-renderer"
 import type { A2UIToolOutputProps, A2UIStructuredOutputProps } from "@/types/a2ui/renderer"
+import { useA2UIChatBinding } from "@/components/chat/message-parts/use-a2ui-chat-binding"
 
 /**
  * Renders A2UI content from tool execution output
@@ -24,6 +26,7 @@ export function A2UIToolOutput({
   onAction,
   onDataChange,
 }: A2UIToolOutputProps) {
+  const t = useTranslations("a2ui")
   const { processPayload, getSurface } = useA2UIMessageIntegration({ onAction, onDataChange })
 
   const surfaceId = useMemo(() => {
@@ -39,6 +42,9 @@ export function A2UIToolOutput({
 
   // Get the surface
   const surface = surfaceId ? getSurface(surfaceId) : null
+  // In a chat transcript, the surface's buttons answer back to that
+  // conversation like any chat-rendered surface (ADR-0240).
+  useA2UIChatBinding(surfaceId, { enabled: Boolean(surface) })
 
   // If no A2UI content, return null
   if (!surfaceId || !surface) {
@@ -49,7 +55,7 @@ export function A2UIToolOutput({
     <div className={cn("a2ui-tool-output", className)}>
       <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
         <span className="font-medium">{toolName}</span>
-        <span>output</span>
+        <span>{t("toolOutput")}</span>
       </div>
       <A2UISurface
         surfaceId={surfaceId}

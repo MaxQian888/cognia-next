@@ -80,6 +80,9 @@
   "categoryProductivity": "Productivity",
   "categorySocial": "Social",
   "categoryUtility": "Utilities",
+  "chatAction": {
+    "sendFailed": "Couldn't send this action to the conversation"
+  },
   "checkPublish": "Check Publish Requirements",
   "clearAgent": "Use the default agent",
   "clearErrors": "Clear All",
@@ -444,6 +447,7 @@
   "templateName": "Template Name",
   "templatesTab": "Templates",
   "thumbnail": "Thumbnail",
+  "toolOutput": "output",
   "treeCollapse": "Collapse",
   "treeEmpty": "Nothing to show",
   "treeExpand": "Expand",

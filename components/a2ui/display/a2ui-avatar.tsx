@@ -3,6 +3,7 @@
 import React, { memo } from "react"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import type { A2UIComponentProps, A2UIBaseComponent, A2UIStringOrPath } from "@/types/a2ui/schema"
+import { safeA2UIMediaSrc } from "@/lib/a2ui/url-policy"
 import { useA2UIData } from "../a2ui-context"
 
 export interface A2UIAvatarComponent extends A2UIBaseComponent {
@@ -17,7 +18,8 @@ export const A2UIAvatar = memo(function A2UIAvatar({
   component,
 }: A2UIComponentProps<A2UIAvatarComponent>) {
   const { resolveString } = useA2UIData()
-  const src = component.src ? resolveString(component.src) : undefined
+  // Model-written: only web, data:image, blob: and bundled sources load (ADR-0240).
+  const src = component.src ? safeA2UIMediaSrc(resolveString(component.src)) : null
 
   return (
     <Avatar

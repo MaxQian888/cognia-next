@@ -19,8 +19,20 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import { isWebHref, safeA2UIHref } from "@/lib/a2ui/url-policy"
+import { openExternal } from "@/lib/tauri/opener"
 import type { Paper, AcademicProviderType } from "@/types/academic"
 import { AcademicPaperCard } from "./academic-paper-card"
+
+/**
+ * A paper's `pdfUrl` comes from search results a model or provider supplied,
+ * so only a web URL opens (ADR-0240), and it opens the way every shell opens
+ * an outbound link: `window.open` does nothing useful under Tauri.
+ */
+function openPaperPdf(url: string): void {
+  const href = safeA2UIHref(url)
+  if (href && isWebHref(href)) void openExternal(href)
+}
 
 export interface AcademicSearchResultsProps {
   papers: Paper[]
@@ -103,10 +115,16 @@ export function AcademicSearchResults({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("allSources")}</SelectItem>
-            <SelectItem value="arxiv">arXiv</SelectItem>
-            <SelectItem value="semantic-scholar">Semantic Scholar</SelectItem>
-            <SelectItem value="openalex">OpenAlex</SelectItem>
-            <SelectItem value="huggingface-papers">HuggingFace</SelectItem>
+            <SelectItem value="arxiv">{/* i18n-exempt: provider brand name */ "arXiv"}</SelectItem>
+            <SelectItem value="semantic-scholar">
+              {/* i18n-exempt: provider brand name */ "Semantic Scholar"}
+            </SelectItem>
+            <SelectItem value="openalex">
+              {/* i18n-exempt: provider brand name */ "OpenAlex"}
+            </SelectItem>
+            <SelectItem value="huggingface-papers">
+              {/* i18n-exempt: provider brand name */ "HuggingFace"}
+            </SelectItem>
           </SelectContent>
         </Select>
 
@@ -165,7 +183,7 @@ export function AcademicSearchResults({
                 onViewDetails={onPaperSelect}
                 onAddToLibrary={onAddToLibrary}
                 onAnalyze={onAnalyzePaper}
-                onOpenPdf={(url) => window.open(url, "_blank")}
+                onOpenPdf={openPaperPdf}
               />
             ))}
 

@@ -216,7 +216,8 @@ jest.mock("@/components/chat/memory-chips", () => ({
 }))
 
 jest.mock("@/components/chat/message-parts/a2ui-part", () => ({
-  A2UIPart: () => ReactForMocks.createElement("div", { "data-test": "a2ui-part" }),
+  A2UIPart: ({ sessionId }: { sessionId?: string }) =>
+    ReactForMocks.createElement("div", { "data-test": "a2ui-part", "data-session-id": sessionId }),
 }))
 
 jest.mock("@/components/chat/message-parts/subagent-part", () => ({
@@ -1224,6 +1225,20 @@ describe("custom extension parts", () => {
     }
     render(<MessageRenderer message={msg} />)
     expect(document.querySelector("[data-test='a2ui-part']")).toBeTruthy()
+  })
+
+  it("hands the a2ui part the session its row renders for, so actions reach it", () => {
+    const msg = {
+      id: "a2",
+      role: "assistant",
+      parts: [{ type: "a2ui" }],
+      metadata: { sessionId: "s-a2ui" },
+    } as unknown as UIMessage
+    render(<MessageRenderer message={msg} />)
+    expect(document.querySelector("[data-test='a2ui-part']")).toHaveAttribute(
+      "data-session-id",
+      "s-a2ui"
+    )
   })
 
   it("renders subagent parts as a dispatch tree", () => {

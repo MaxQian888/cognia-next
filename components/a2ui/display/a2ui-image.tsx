@@ -3,6 +3,10 @@
 /**
  * A2UI Image Component
  * Renders an image with fallback support
+ *
+ * `src` and `fallback` are model-written, so only web, `data:image`, `blob:`
+ * and bundled-asset sources load (`lib/a2ui/url-policy.ts`, ADR-0240); a
+ * rejected source falls back the same way a broken one does.
  */
 
 import Image from "next/image"
@@ -10,6 +14,7 @@ import React, { useState, memo } from "react"
 import { cn } from "@/lib/utils"
 import { ImageIcon } from "lucide-react"
 import type { A2UIComponentProps, A2UIImageComponent } from "@/types/a2ui/schema"
+import { safeA2UIMediaSrc } from "@/lib/a2ui/url-policy"
 import { useA2UIData } from "../a2ui-context"
 
 const DEFAULT_IMAGE_WIDTH = 800
@@ -30,7 +35,8 @@ export const A2UIImage = memo(function A2UIImage({
   const { resolveString } = useA2UIData()
   const [hasError, setHasError] = useState(false)
 
-  const src = resolveString(component.src, "")
+  const src = safeA2UIMediaSrc(resolveString(component.src, "")) ?? ""
+  const fallback = safeA2UIMediaSrc(component.fallback)
   const alt = component.alt || ""
   const width = component.width
   const height = component.height
@@ -52,16 +58,16 @@ export const A2UIImage = memo(function A2UIImage({
   }
 
   if (hasError || !src) {
-    if (component.fallback) {
+    if (fallback) {
       return (
         <Image
-          src={component.fallback}
+          src={fallback}
           alt={alt}
           width={resolvedWidth}
           height={resolvedHeight}
           className={cn("rounded-md", component.className)}
           style={sharedStyle}
-          unoptimized={isInlineSource(component.fallback)}
+          unoptimized={isInlineSource(fallback)}
         />
       )
     }

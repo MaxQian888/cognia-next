@@ -150,6 +150,35 @@ describe("toolCallToDispatch", () => {
     ).toMatchObject({ merge: false })
   })
 
+  it("forwards a valid computed map on create and data updates, and refuses an invalid one", () => {
+    const total = { op: "add", args: [{ path: "/a" }, 1] }
+    expect(
+      toolCallToDispatch("mcp__a2ui-bridge__a2ui_create_surface", {
+        surfaceId: "s",
+        computed: { "/total": total },
+      })
+    ).toMatchObject({ computed: { "/total": total } })
+    expect(
+      toolCallToDispatch("mcp__a2ui-bridge__a2ui_data_model_update", {
+        surfaceId: "s",
+        data: {},
+        computed: { "/total": null },
+      })
+    ).toMatchObject({ computed: { "/total": null } })
+    expect(
+      toolCallToDispatch("mcp__a2ui-bridge__a2ui_create_surface", {
+        surfaceId: "s",
+        computed: { "/total": { op: "eval", args: ["1"] } },
+      })
+    ).toBeNull()
+    expect(
+      toolCallToDispatch("mcp__a2ui-bridge__a2ui_create_surface", {
+        surfaceId: "s",
+        computed: { "/total": null },
+      })
+    ).toBeNull()
+  })
+
   it("maps delete_surface and remaps to overrideSurfaceId", () => {
     expect(
       toolCallToDispatch("mcp__a2ui-bridge__a2ui_delete_surface", { surfaceId: "model" }, "canvas")
@@ -184,6 +213,18 @@ describe("segmentToMessages", () => {
       merge: false,
     })
     expect(messages[3]).toEqual({ type: "surfaceReady", surfaceId: "canvas" })
+    expect(messages[0]).not.toHaveProperty("computed")
+  })
+
+  it("carries a valid computed map onto createSurface and drops an invalid one", () => {
+    const base = { components: { root: { id: "root" } }, dataModel: {}, rootId: "root" }
+    const total = { op: "add", args: [{ path: "/a" }, 1] }
+    expect(
+      segmentToMessages("canvas", { ...base, computed: { "/total": total } })[0]
+    ).toMatchObject({ computed: { "/total": total } })
+    expect(
+      segmentToMessages("canvas", { ...base, computed: { "/total": { op: "eval" } } })[0]
+    ).not.toHaveProperty("computed")
   })
 })
 

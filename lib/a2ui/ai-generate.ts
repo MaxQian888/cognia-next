@@ -41,7 +41,14 @@ import { resolvePromptAsync } from "@/lib/prompts/resolve"
 import type { PromptResolutionContext } from "@/lib/prompts/types"
 import { A2UI_CREATE_APP_PROMPT, A2UI_EDIT_APP_PROMPT } from "@/lib/a2ui/generate-prompts"
 import type { ChatSession } from "@cognia/agent-config-types"
-import type { A2UIComponent, A2UIServerMessage, A2UIDispatchMessage } from "@/types/a2ui/schema"
+import type {
+  A2UIComponent,
+  A2UIComputedFields,
+  A2UIComputedFieldsUpdate,
+  A2UIServerMessage,
+  A2UIDispatchMessage,
+} from "@/types/a2ui/schema"
+import { isA2UIComputedFields } from "@/lib/a2ui/computed"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 
 const log = loggers.a2ui
@@ -100,6 +107,8 @@ export interface A2UIGenerateResult {
   surfaceId: string
   components: A2UIComponent[]
   dataModel: Record<string, unknown>
+  /** Computed declarations the model wrote (ADR-0240), already validated. */
+  computed?: A2UIComputedFields
   rootId: string
   title: string
   /** True when the deterministic template generator produced this result. */
@@ -157,8 +166,17 @@ export function toolCallToDispatch(
   const surfaceId =
     overrideSurfaceId ?? (typeof input.surfaceId === "string" ? input.surfaceId : "")
   if (!surfaceId) return null
+  const op = toolName.slice(A2UI_TOOL_PREFIX.length)
+  // The store refuses a message whose computed map does not validate; so does
+  // this mirror, instead of dispatching the surface without it (ADR-0240).
+  if (
+    input.computed !== undefined &&
+    !isA2UIComputedFields(input.computed, { allowRemoval: op === "a2ui_data_model_update" })
+  ) {
+    return null
+  }
 
-  switch (toolName.slice(A2UI_TOOL_PREFIX.length)) {
+  switch (op) {
     case "a2ui_create_surface":
       return {
         type: "createSurface",
@@ -170,6 +188,9 @@ export function toolCallToDispatch(
           input.widget && typeof input.widget === "object"
             ? (input.widget as Record<string, unknown>)
             : undefined,
+        ...(isA2UIComputedFields(input.computed)
+          ? { computed: input.computed as A2UIComputedFields }
+          : {}),
       }
     case "a2ui_update_components":
       return {
@@ -183,6 +204,9 @@ export function toolCallToDispatch(
         surfaceId,
         data: (input.data as Record<string, unknown>) ?? {},
         merge: typeof input.merge === "boolean" ? input.merge : true,
+        ...(isA2UIComputedFields(input.computed, { allowRemoval: true })
+          ? { computed: input.computed as A2UIComputedFieldsUpdate }
+          : {}),
       }
     case "a2ui_delete_surface":
       return { type: "deleteSurface", surfaceId }
@@ -210,6 +234,11 @@ export function segmentToMessages(
       title: content.title,
       catalogId: content.catalogId,
       widget: content.widget,
+      // Validated where it was captured; re-checked here because the segment
+      // type is loose (`Record<string, unknown>`).
+      ...(isA2UIComputedFields(content.computed)
+        ? { computed: content.computed as A2UIComputedFields }
+        : {}),
     },
     { type: "updateComponents", surfaceId, components },
     { type: "dataModelUpdate", surfaceId, data: content.dataModel, merge: false },
@@ -324,6 +353,9 @@ export async function generateA2UIApp(opts: A2UIGenerateOptions): Promise<A2UIGe
           surfaceId,
           components,
           dataModel: content.dataModel,
+          ...(isA2UIComputedFields(content.computed)
+            ? { computed: content.computed as A2UIComputedFields }
+            : {}),
           rootId: content.rootId || FALLBACK_ROOT_ID,
           title: content.title ?? deriveTitle(opts.instruction, language),
           usedFallback: false,

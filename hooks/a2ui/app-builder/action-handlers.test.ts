@@ -8,6 +8,7 @@ import { renderHook, act } from "@testing-library/react"
 import { setValueByPath } from "@/lib/a2ui/data-model"
 import { surfaceTimers } from "@/lib/a2ui/surface-timer"
 import { appTemplates } from "@/lib/a2ui/templates"
+import { A2UI_LOCAL_ACTION_NAMES } from "@/lib/a2ui/chat-action-routing"
 import { generateAppFromDescription } from "@/lib/a2ui/app-generator"
 import type { A2UIComponent } from "@/types/a2ui/schema"
 
@@ -701,7 +702,14 @@ describe("useAppActionHandlers", () => {
     // Actions the built-in handler deliberately escalates to the host.
     const ESCALATED = new Set(["follow", "message", "view_activity"])
     // Handled here AND forwarded so the host can observe the submission.
-    const HANDLED_AND_FORWARDED = new Set(["submit", "submit_form", "submit_contact", "execute"])
+    const HANDLED_AND_FORWARDED = new Set([
+      "submit",
+      "submit_form",
+      "submit_contact",
+      "execute",
+      "refresh",
+      "refresh_data",
+    ])
 
     const GENERATOR_PROMPTS = [
       "calculator",
@@ -769,6 +777,45 @@ describe("useAppActionHandlers", () => {
         expect(unhandled).toEqual([])
       }
     )
+  })
+
+  // ---------- Local vs forwarded names (ADR-0240) ----------
+
+  describe("local action names", () => {
+    const FORWARDED = [
+      "submit",
+      "submit_form",
+      "submit_contact",
+      "execute",
+      "refresh",
+      "refresh_data",
+    ]
+
+    it.each(A2UI_LOCAL_ACTION_NAMES.map((name) => [name]))(
+      "%s is handled in place and never reaches the host",
+      (actionName) => {
+        const { result, deps } = renderWithDeps({ [SURFACE]: {} })
+        act(() => result.current.handleAppAction(createAction(actionName, { index: 0 })))
+        expect(deps.onAction).not.toHaveBeenCalled()
+        surfaceTimers.stopAll()
+      }
+    )
+
+    it.each(FORWARDED.map((name) => [name]))("%s is forwarded to the host", (actionName) => {
+      const { result, deps } = renderWithDeps({ [SURFACE]: {} })
+      const action = createAction(actionName)
+      act(() => result.current.handleAppAction(action))
+      expect(deps.onAction).toHaveBeenCalledWith(action)
+    })
+
+    it("lists every name the handler owns", () => {
+      const source = jest
+        .requireActual<typeof import("fs")>("fs")
+        .readFileSync(require.resolve("./action-handlers.ts"), "utf8")
+      const owned = [...source.matchAll(/case "([a-z][a-z0-9_]*)":/g)].map((match) => match[1])
+      const local = owned.filter((name) => !FORWARDED.includes(name))
+      expect([...local].sort()).toEqual([...A2UI_LOCAL_ACTION_NAMES].sort())
+    })
   })
 
   // ---------- Default case ----------

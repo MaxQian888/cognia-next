@@ -431,6 +431,44 @@ it("passes a resolved false disabled binding to the component", () => {
   expect(screen.getByRole("button", { name: "Bound control" })).toBeEnabled()
 })
 
+describe("model-written style (ADR-0240)", () => {
+  const StyleProbe = ({ component }: A2UIComponentProps) => (
+    <div data-testid="style-probe" data-style={JSON.stringify(component.style ?? null)} />
+  )
+
+  it("strips url() targets the media policy rejects before a component sees them", () => {
+    registerBuiltInComponent("StyleProbe", StyleProbe)
+    render(
+      <A2UIRenderer
+        component={
+          {
+            id: "styled",
+            component: "StyleProbe",
+            style: { color: "red", backgroundImage: "url(file:///etc/passwd)" },
+          } as never
+        }
+      />
+    )
+    expect(JSON.parse(screen.getByTestId("style-probe").dataset.style!)).toEqual({ color: "red" })
+  })
+
+  it("does the same for components wrapped with withA2UIContext", () => {
+    const Wrapped = withA2UIContext(StyleProbe)
+    render(
+      <Wrapped
+        component={
+          {
+            id: "wrapped-styled",
+            component: "StyleProbe",
+            style: { padding: 4, cursor: "url(javascript:alert(1)), auto" },
+          } as never
+        }
+      />
+    )
+    expect(JSON.parse(screen.getByTestId("style-probe").dataset.style!)).toEqual({ padding: 4 })
+  })
+})
+
 describe("registerBuiltInComponent", () => {
   it("should register a new component", () => {
     const CustomComponent = ({ component }: A2UIComponentProps) => (

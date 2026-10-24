@@ -64,6 +64,7 @@ export function useAppImportExport(deps: ImportExportDeps) {
           catalogId: surface.catalogId,
           title: surface.title,
           widget: surface.widget,
+          computed: surface.computed,
           rootId: surface.rootId,
         },
       }
@@ -139,6 +140,7 @@ export function useAppImportExport(deps: ImportExportDeps) {
         widget: app.widget,
         components,
         dataModel: app.dataModel,
+        computed: app.computed,
         rootId: app.rootId,
         createdAt,
         updatedAt: lastModified,
@@ -228,6 +230,7 @@ export function useAppImportExport(deps: ImportExportDeps) {
           catalogId: surface.catalogId,
           title: surface.title,
           widget: surface.widget,
+          computed: surface.computed,
           rootId: surface.rootId,
         },
       ]

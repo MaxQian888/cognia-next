@@ -78,7 +78,29 @@ test("buildDispatch maps create-surface args", () => {
     catalogId: undefined,
     title: "Hi",
     widget: undefined,
+    computed: undefined,
   })
+})
+
+test("buildDispatch forwards computed declarations on create and data updates", () => {
+  const computed = { "/total": { op: "add", args: [{ path: "/a" }, 1] } }
+  assert.deepEqual(
+    buildDispatch("a2ui_create_surface", { surfaceId: "s", surfaceType: "inline", computed })!
+      .computed,
+    computed
+  )
+  assert.deepEqual(
+    buildDispatch("a2ui_data_model_update", {
+      surfaceId: "s",
+      data: {},
+      computed: { "/total": null },
+    })!.computed,
+    { "/total": null }
+  )
+  assert.deepEqual(
+    RAW_INPUT_SCHEMAS.a2ui_data_model_update.properties.computed.additionalProperties,
+    { type: ["object", "null"] }
+  )
 })
 
 test("buildDispatch maps update-components + data-model (merge default true)", () => {

@@ -6,7 +6,7 @@
 // the embedded `message` straight into the store.
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import { parseA2UIDispatchMessage } from "./parser"
+import { isA2UIPreviewSurfaceId, parseA2UIDispatchMessage } from "./parser"
 import { isTauri } from "@/lib/tauri"
 import { useA2UIStore } from "@/stores/a2ui"
 import type { A2UIDispatchMessage } from "@/types/a2ui/schema"
@@ -55,6 +55,11 @@ export async function subscribeA2UIDispatch(
     const message = parseA2UIDispatchMessage(payload.message)
     if (!message) {
       loggers.app.warn("Invalid A2UI dispatch message")
+      return
+    }
+    // An agent may not address a streaming preview's reserved id (ADR-0240).
+    if ("surfaceId" in message && isA2UIPreviewSurfaceId(message.surfaceId)) {
+      loggers.app.warn("A2UI dispatch addressed a reserved preview surface id")
       return
     }
     try {

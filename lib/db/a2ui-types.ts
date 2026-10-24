@@ -22,7 +22,12 @@
 //   - "Event-history" rows (`a2uiEventHistory`) — capped audit trail for
 //                                   the Settings → A2UI → Debugger tab.
 
-import type { A2UIComponent, A2UISurfaceType, A2UIWidgetMetadata } from "@/types/a2ui/schema"
+import type {
+  A2UIComponent,
+  A2UIComputedFields,
+  A2UISurfaceType,
+  A2UIWidgetMetadata,
+} from "@/types/a2ui/schema"
 export type {
   A2UIAppRow,
   A2UIEventHistoryRow,
@@ -43,6 +48,8 @@ export interface A2UISurfaceRow {
   type: A2UISurfaceType
   components: Record<string, A2UIComponent>
   dataModel: Record<string, unknown>
+  /** Declared derived values (ADR-0240); not indexed, re-validated on load. */
+  computed?: A2UIComputedFields
   rootId: string
   catalogId?: string
   title?: string

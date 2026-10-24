@@ -138,6 +138,37 @@ describe("assistantReplyToSegments", () => {
     )
   })
 
+  it("projects computed values into the card data (ADR-0240)", () => {
+    const out = assistantReplyToSegments({
+      text: fence([
+        {
+          type: "createSurface",
+          surfaceId: "s1",
+          surfaceType: "inline",
+          computed: { "/total": { op: "add", args: [{ path: "/a" }, { path: "/b" }] } },
+        },
+        {
+          type: "updateComponents",
+          surfaceId: "s1",
+          components: [{ id: "root", component: "Text", text: { path: "/total" } }],
+        },
+        { type: "dataModelUpdate", surfaceId: "s1", data: { a: 2, b: 3 } },
+        {
+          type: "dataModelUpdate",
+          surfaceId: "s1",
+          data: {},
+          computed: { "/double": { op: "multiply", args: [{ path: "/total" }, 2] } },
+        },
+      ]),
+    })
+    expect((out[0] as { content: A2UISegmentContent }).content.dataModel).toEqual({
+      a: 2,
+      b: 3,
+      total: 5,
+      double: 10,
+    })
+  })
+
   it("supports implicit surfaces from protocol component and data updates", () => {
     const out = assistantReplyToSegments({
       text: fence([

@@ -132,6 +132,64 @@ export type A2UINumberOrPath = number | A2UIPathValue<number>
 export type A2UIBooleanOrPath = boolean | A2UIPathValue<boolean>
 export type A2UIArrayOrPath<T = unknown> = T[] | A2UIPathValue<T[]>
 
+// =============================================================================
+// Computed Data (ADR-0240)
+// =============================================================================
+
+/**
+ * Operators a declared computed value may use. A closed set: the host
+ * evaluates them itself (`lib/a2ui/computed.ts`); nothing a model writes is
+ * ever executed as code.
+ */
+export type A2UIComputedOp =
+  | "add"
+  | "subtract"
+  | "multiply"
+  | "divide"
+  | "mod"
+  | "pow"
+  | "min"
+  | "max"
+  | "abs"
+  | "round"
+  | "floor"
+  | "ceil"
+  | "sum"
+  | "sumOf"
+  | "count"
+  | "countWhere"
+  | "percentage"
+  | "concat"
+  | "currency"
+  | "fixed"
+  | "if"
+  | "eq"
+  | "neq"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "and"
+  | "or"
+  | "not"
+
+/** An operand: a literal, a data-model path, or a nested expression. */
+export type A2UIComputedArg =
+  string | number | boolean | null | A2UIPathValue | A2UIComputedExpression
+
+export interface A2UIComputedExpression {
+  op: A2UIComputedOp
+  args?: A2UIComputedArg[]
+}
+
+/**
+ * Derived values keyed by the JSON Pointer they write to, evaluated in
+ * declaration order after every data change. In an update, `null` removes a
+ * declaration.
+ */
+export type A2UIComputedFields = Record<string, A2UIComputedExpression>
+export type A2UIComputedFieldsUpdate = Record<string, A2UIComputedExpression | null>
+
 /**
  * Check if value is a path reference
  */
@@ -818,6 +876,8 @@ export interface A2UICreateSurfaceMessage {
   catalogId?: string
   title?: string
   widget?: A2UIWidgetMetadata
+  /** Derived values the host keeps up to date (ADR-0240). */
+  computed?: A2UIComputedFields
 }
 
 /**
@@ -837,6 +897,8 @@ export interface A2UIUpdateDataModelMessage {
   surfaceId: string
   data: Record<string, unknown>
   merge?: boolean // If true, merge with existing data; if false, replace
+  /** Add, replace (by path) or, with `null`, remove computed declarations. */
+  computed?: A2UIComputedFieldsUpdate
 }
 
 /**
@@ -969,6 +1031,8 @@ export interface A2UISurfaceState {
   widget?: A2UIWidgetMetadata
   components: Record<string, A2UIComponent>
   dataModel: Record<string, unknown>
+  /** Declared derived values; their results live in `dataModel`. */
+  computed?: A2UIComputedFields
   rootId: string
   createdAt: number
   updatedAt: number

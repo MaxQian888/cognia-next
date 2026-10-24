@@ -76,6 +76,25 @@ describe("subscribeA2UIDispatch", () => {
     expect(mockProcessMessage).toHaveBeenCalledWith(message)
   })
 
+  it("refuses a dispatch addressed to a reserved preview surface id", async () => {
+    let capturedHandler: ((evt: { payload: unknown }) => void) | null = null
+    mockListen.mockImplementation((_channel, handler) => {
+      capturedHandler = handler
+      return Promise.resolve(() => {})
+    })
+
+    await subscribeA2UIDispatch()
+    capturedHandler!({
+      payload: {
+        type: "a2ui_dispatch",
+        sessionId: "abc",
+        message: { type: "surfaceReady", surfaceId: "a2ui-preview:r1" },
+      },
+    })
+
+    expect(mockProcessMessage).not.toHaveBeenCalled()
+  })
+
   it("ignores payloads with an unexpected shape", async () => {
     let capturedHandler: ((evt: { payload: unknown }) => void) | null = null
     mockListen.mockImplementation((_channel, handler) => {
