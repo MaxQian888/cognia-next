@@ -2,7 +2,7 @@
 
 Incident and maintenance steps for `cognia-identity` (`id.cognia.cn`), the
 OIDC issuer behind the official Cognia account. Provisioning, secrets and
-deployment live in [`services/identity-server/README.md`](../../services/identity-server/README.md).
+deployment live in [`services/identity-server/README.md`](https://github.com/cognia-labs/cognia-services/blob/main/services/identity-server/README.md) in cognia-services.
 
 ## Every request answers 503 `server_misconfigured`
 

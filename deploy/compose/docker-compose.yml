@@ -30,9 +30,10 @@ name: ${COGNIA_INSTANCE:-cognia}
 
 services:
   signaling:
-    image: ${SIGNALING_IMAGE:-ghcr.io/maxqian888/cognia-signaling:latest}
+    image: ${SIGNALING_IMAGE:-ghcr.io/cognia-labs/cognia-signaling:latest}
+    # Local builds use the pinned cognia-services checkout (`pnpm cognia-services:fetch`).
     build:
-      context: ../../services/signaling-server
+      context: ../../.cache/cognia-services/services/signaling-server
     environment:
       PORT: "7892"
       SIGNALING_ALLOWED_ORIGINS: ${SIGNALING_ALLOWED_ORIGINS:-}
@@ -47,9 +48,10 @@ services:
     restart: unless-stopped
 
   share:
-    image: ${SHARE_IMAGE:-ghcr.io/maxqian888/cognia-share:latest}
+    image: ${SHARE_IMAGE:-ghcr.io/cognia-labs/cognia-share:latest}
+    # Local builds use the pinned cognia-services checkout (`pnpm cognia-services:fetch`).
     build:
-      context: ../../services/share-server
+      context: ../../.cache/cognia-services/services/share-server
     environment:
       PORT: "8787"
       SHARE_DB_PATH: /data/shares.sqlite

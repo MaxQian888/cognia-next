@@ -3,7 +3,7 @@
 Incident and maintenance steps for `cognia-sync` (`sync.cognia.cn`), which
 holds each account's device registry, sealed epoch keys, enrollment
 requests and encrypted op log. Provisioning and deployment live in
-[`services/sync-server/README.md`](../../services/sync-server/README.md).
+[`services/sync-server/README.md`](https://github.com/cognia-labs/cognia-services/blob/main/services/sync-server/README.md) in cognia-services.
 
 The server holds no key, no name and no row in the clear. Nothing here can recover a
 person's data or enroll a device for them, by design.

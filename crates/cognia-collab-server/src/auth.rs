@@ -1,7 +1,7 @@
 //! The request authorization chain — ADR-0149 §8.
 //!
 //! Decision 11 of ADR-0149 says a new service adopts the grant pattern
-//! `services/diagnostic-server` proved rather than inventing another one. This
+//! `cognia-services/services/diagnostic-server` proved rather than inventing another one. This
 //! is that chain, with the one thing that service could not have: a person.
 //!
 //! ```text

@@ -338,4 +338,4 @@ POST /v1/leases/{resId}/release  {generation}
 
 ## 17. 测试向量
 
-`packages/sync-protocol/fixtures/`（客户端和 Worker 共用的、不依赖 `@/` 的包）存放冻结的向量：`v1.json`（规范编码、签名、HPKE 密封、登记表）和 `v1-ops.json`（HLC 顺序、填充、规范操作与 AAD、一个封装好的操作、合并）。客户端、Worker 以及任何 Rust 使用方都必须通过这些向量。这是防止格式漂移的唯一手段（对照今天三份授权格式实现的情况）。
+cognia-services 中的 `packages/sync-protocol/fixtures/`（客户端和 Worker 共用的 `@cognia/sync-protocol` 包）存放冻结的向量：`v1.json`（规范编码、签名、HPKE 密封、登记表）和 `v1-ops.json`（HLC 顺序、填充、规范操作与 AAD、一个封装好的操作、合并）。客户端、Worker 以及任何 Rust 使用方都必须通过这些向量。这是防止格式漂移的唯一手段（对照今天三份授权格式实现的情况）。

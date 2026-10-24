@@ -28,8 +28,8 @@ description: Phase 2 of account sync — device keys, the sync recovery key, app
 | Part | Lives in |
 | --- | --- |
 | Wire format | [Account Sync Protocol v1](../data/account-sync-protocol) §2–5 |
-| Shared rules and vectors | `packages/sync-protocol/` (`validateAppend`, `foldRegistry`, pin, `fixtures/v1.json`) |
-| Server (Worker + SQLite DO) | `services/sync-server/` (operator guide in its README) |
+| Shared rules and vectors | `cognia-services/packages/sync-protocol/` (installed as `@cognia/sync-protocol`; `validateAppend`, `foldRegistry`, pin, `fixtures/v1.json`) |
+| Server (Worker + SQLite DO) | `cognia-services/services/sync-server/` (operator guide in its README) |
 | Client keys and HPKE | `lib/account-sync/crypto/` |
 | Flows | `lib/account-sync/enrollment/` (first device, join, approve, recover, manage, revoked) |
 | API client, vault, verification | `lib/account-sync/sync-api.ts`, `vault-store.ts`, `registry-sync.ts` |

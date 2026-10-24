@@ -41,14 +41,15 @@ Creating and revoking links requires a bearer secret that only you hold.
 
 ## Deploy the worker (the API)
 
-The worker lives in `services/share-server/worker/`. It is a standalone project (not part
-of the app's pnpm workspace) and is now a pure JSON API — the viewer is the
+The worker lives in `services/share-server/worker/` of
+[cognia-labs/cognia-services](https://github.com/cognia-labs/cognia-services). Run the commands below from a clone of that
+repository. It is a standalone pnpm project and is now a pure JSON API — the viewer is the
 app's own `/share/view` route, deployed separately to Cloudflare Pages (next
 section).
 
 ```bash
-# 1. Install deps (standalone — ignore the app workspace)
-cd services/share-server/worker && pnpm install --ignore-workspace
+# 1. Install deps (in the cognia-services clone)
+cd services/share-server/worker && pnpm install --frozen-lockfile
 
 # 2. Create the storage the worker binds to
 wrangler r2 bucket create cognia-shares
@@ -82,7 +83,7 @@ The viewer is the app's `/share/view` route, shipped in the normal static
 export. Build the app and deploy `out/` to Pages on the same host:
 
 ```bash
-# from the repo root
+# from the cognia-next repo root
 pnpm build
 wrangler pages deploy out --project-name cognia-share-viewer
 ```
@@ -90,7 +91,7 @@ wrangler pages deploy out --project-name cognia-share-viewer
 Bind the Pages project to your share host (e.g. `share.cognia.cn`). The Worker
 route `…/v1/*` takes precedence, so `/v1/*` hits the API and `/share/view` (plus
 the rest of the static app) is served by Pages. See
-`services/share-server/pages/README.md` for details and the note that the full app shell
+[`services/share-server/pages/README.md`](https://github.com/cognia-labs/cognia-services/blob/main/services/share-server/pages/README.md) for details and the note that the full app shell
 becomes publicly reachable at that host.
 
 Run the test suite any time without an account — it uses miniflare:

@@ -36,9 +36,9 @@ rtk env WEBRTC_PAIR_SKIP_BUILD=1 WEBRTC_PAIR_FORCE_RELAY=1 WEBRTC_PAIR_SIGNALING
 
 尚待验收：两台真机同局域网、手机蜂窝网络连接桌面、Wi-Fi/蜂窝切换、真实业务 RPC，以及配置 TURN 后实际选中 relay 候选。本轮没有可用的第二网络设备或 TURN 配置。不能仅凭 ICE 失败断言是对称 NAT。
 
-同时通过 282 项定向 TS 测试、36 项信令核心测试、65 项 Axum 测试与 4 项 Rust 测试程序测试。信令 Clippy 和 Worker release 构建通过。全量 `pnpm test:coverage` 遇到其他 agent/workflow/UI 测试失败，随后第一个分片在 4 GiB 测试堆限制下以 Node `SIGABRT` 退出，不能声明仓库整体覆盖率验收通过。Rust 格式检查还报告 `services/signaling-server/src/server.rs` 中原有的 `healthz` 签名格式问题，不在本次修改行内。
+同时通过 282 项定向 TS 测试、36 项信令核心测试、65 项 Axum 测试与 4 项 Rust 测试程序测试。信令 Clippy 和 Worker release 构建通过。全量 `pnpm test:coverage` 遇到其他 agent/workflow/UI 测试失败，随后第一个分片在 4 GiB 测试堆限制下以 Node `SIGABRT` 退出，不能声明仓库整体覆盖率验收通过。Rust 格式检查还报告 `cognia-services/services/signaling-server/src/server.rs` 中原有的 `healthz` 签名格式问题，不在本次修改行内。
 
-任何可能影响 WebRTC 通道端到端的改动（信令信封 schema、SDP/ICE 握手、配对流程、汇合点升级、`TransportRtc` 状态机）落地后请走一遍本清单。自动化的 `pnpm webrtc:smoke` 只覆盖汇合点服务器自身——这份清单同时覆盖移动端（Capacitor）↔ 桌面端（Tauri）和浏览器（Web Companion）↔ 桌面/云宿主路径。
+任何可能影响 WebRTC 通道端到端的改动（信令信封 schema、SDP/ICE 握手、配对流程、汇合点升级、`TransportRtc` 状态机）落地后请走一遍本清单。cognia-services 中自动化的中继冒烟测试（在 `services/signaling-server/` 下执行 `node scripts/smoke.mjs`）只覆盖汇合点服务器自身——这份清单同时覆盖移动端（Capacitor）↔ 桌面端（Tauri）和浏览器（Web Companion）↔ 桌面/云宿主路径。
 
 ## 准备
 
@@ -109,7 +109,7 @@ Worker 健康接口没有全局房间/连接数，也没有 Axum 的 Prometheus 
 
 - 步骤 2 的 `chrome://webrtc-internals` 截图。
 - 步骤 3 观察到的通道状态变化日志。
-- 如果你跑了线上汇合点，贴一份步骤 5 的数值输出；否则注明你跑的是本地 `pnpm webrtc:smoke`。
+- 如果你跑了线上汇合点，贴一份步骤 5 的数值输出；否则注明你跑的是 cognia-services 的中继冒烟测试。
 
 ## 参考
 

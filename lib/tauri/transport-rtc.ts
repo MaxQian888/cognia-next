@@ -102,7 +102,7 @@ export type RtcState =
  * mid-session disconnect. The inner `SignalingClient` runs its own WSS-level
  * reconnect; this schedule applies to the SDP/ICE handshake on top of it.
  *
- * Mirrors `services/signaling-server/src/...` / `src-tauri/.../signaling/client.rs:46`
+ * Mirrors `cognia-services/services/signaling-server/src/...` / `src-tauri/.../signaling/client.rs:46`
  * so the desktop and mobile retry at compatible cadences.
  */
 export const RECONNECT_BACKOFF_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000]
@@ -137,7 +137,7 @@ export const RELAY_QUOTA_EXCEEDED_CODE = "relay_quota_exceeded"
 
 /**
  * The rendezvous refused a data-lane frame because the room spent its relay
- * byte quota (`services/signaling-server/core/src/limits.rs`). A carrier error,
+ * byte quota (`cognia-services/services/signaling-server/core/src/limits.rs`). A carrier error,
  * so callers retry on HTTPS exactly as for any other carrier loss; `retryAt`
  * is when the relay takes data again.
  */
@@ -785,7 +785,7 @@ export class TransportRtc {
         }
         // Every server error code emitted during a relay — frame_too_large,
         // rate_limited, malformed_frame, binary_not_supported, not_subscribed
-        // (see services/signaling-server/src/ws.rs) — means a critical handshake frame
+        // (see cognia-services/services/signaling-server/src/ws.rs) — means a critical handshake frame
         // (offer / answer / ICE) was dropped, so the negotiation cannot
         // complete. Fail fast instead of stalling until a timer fires; the
         // caller falls back to HTTPS+WS immediately and the mobile-controller

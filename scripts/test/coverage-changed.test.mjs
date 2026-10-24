@@ -223,16 +223,24 @@ test("CI impact distinguishes an ordinary UI edit from native and independent wo
     "web",
     "browserExtension",
     "postgres",
-    "diagnostic",
+    "cogniaServices",
   ])
     assert.equal(ui[key], false, key)
   const docs = classifyCiImpact(["docs/app/page.tsx"])
   assert.equal(docs.docs, true)
   assert.equal(docs.frontend, false)
-  const diagnostic = classifyCiImpact(["services/diagnostic-server/Cargo.toml"])
-  assert.equal(diagnostic.diagnostic, true)
-  for (const key of ["globalRust", "rust", "gateway", "postgres", "productionBuild"])
-    assert.equal(diagnostic[key], false, key)
+  for (const file of [
+    "integrations/cognia-services.json",
+    "scripts/ci/check-cognia-services.mjs",
+    "protocol/cognia-services/diagnostic-openapi.yaml",
+    "lib/diagnostic-service/types.ts",
+    "crates/cognia-tenant-auth/fixtures/grant-wire-vector.json",
+    "lib/plugin/character-pack/__fixtures__/jcs-vectors.json",
+  ])
+    assert.equal(classifyCiImpact([file]).cogniaServices, true, file)
+  const pin = classifyCiImpact(["integrations/cognia-services.json"])
+  for (const key of ["globalRust", "rust", "postgres", "frontend"])
+    assert.equal(pin[key], false, key)
   for (const file of [
     "lib/platform/client.mobile.ts",
     "components/shell.mobile.tsx",
@@ -281,7 +289,7 @@ test("shared manifests, Rust graph and workflow changes conservatively fan out t
   const rust = classifyCiImpact(["Cargo.lock"])
   for (const key of ["globalRust", "rust", "gateway", "postgres", "productionBuild"])
     assert.equal(rust[key], true, key)
-  assert.equal(rust.diagnostic, false)
+  assert.equal(rust.cogniaServices, true)
   assert.equal(rust.frontend, false)
   assert.ok(Object.values(classifyCiImpact([".github/workflows/test.yml"])).every(Boolean))
   assert.ok(Object.values(classifyCiImpact(["scripts/ci/change-plan.mjs"])).every(Boolean))
@@ -316,7 +324,7 @@ test("embedded native inputs and shared tenant auth activate their consumers", (
   }
   assert.equal(classifyCiImpact(["crates/cognia-tenant-auth/src/lib.rs"]).postgres, true)
   assert.equal(classifyCiImpact(["tests/conformance/harness.ts"]).gateway, true)
-  assert.equal(classifyCiImpact([".cargo/config.toml"]).diagnostic, true)
+  assert.equal(classifyCiImpact(["crates/cognia-tenant-auth/src/rls.rs"]).cogniaServices, true)
   assert.ok(Object.values(classifyCiImpact(["scripts/test/coverage-changed.mjs"])).every(Boolean))
 })
 

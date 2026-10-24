@@ -47,7 +47,7 @@ export interface AppReturnPickup {
   fetchImpl?: typeof fetch
 }
 
-/** The issuer's app-return claim (services/identity-server/src/app-return.ts). */
+/** The issuer's app-return claim (cognia-services/services/identity-server/src/app-return.ts). */
 export const APP_RETURN_CLAIM_PATH = "/api/app-return/claim"
 
 /**

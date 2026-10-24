@@ -531,7 +531,7 @@ mail with a plain-text alternative. The operator guide documents both required
 secrets and the Durable Object migration; auth-token rotation preserves the
 independent hashing key.
 
-See [the mail Worker operator guide](../../services/logto-email/README.md) for
+See [the mail Worker operator guide](https://github.com/cognia-labs/cognia-services/blob/main/services/logto-email/README.md) for
 deployment, connector configuration, verification and rollback. The local
 policy/connector snapshots and shared secret are kept outside the repository
 under `~/.config/cognia/logto-local/email-setup-2026-10-21/` with private

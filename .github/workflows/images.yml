@@ -2,12 +2,9 @@ name: Images
 
 # ============================================================================
 # GHCR container images (ADR-0059 P0.2 / W6 / D9):
-#   ghcr.io/<owner>/cognia-signaling      services/signaling-server
-#   ghcr.io/<owner>/cognia-share          services/share-server
 #   ghcr.io/<owner>/cognia-runner        deploy/runner (external agent CLIs)
 #   ghcr.io/<owner>/cognia-agent-bundle  deploy/bundle (ADR-0183: CLIs injected into user images)
 #   ghcr.io/<owner>/cognia-workspace-runtime services/workspace-runtime
-#   ghcr.io/<owner>/cognia-diagnostics    services/diagnostic-server
 #   ghcr.io/<owner>/cognia-collab         deploy/docker/Dockerfile.collab-server
 #   ghcr.io/<owner>/cognia-server        deploy/docker/Dockerfile.cognia-server (slim/full)
 #   ghcr.io/<owner>/cognia-web           deploy/compose/Dockerfile.web (static export + Caddy)
@@ -16,9 +13,12 @@ name: Images
 #   ghcr.io/<owner>/cognia-docker-proxy  deploy/docker/Dockerfile.docker-proxy (ADR-0224 A8)
 #   ghcr.io/<owner>/cognia-managed-desktop crates/cognia-automation/src/cua_sandbox/image (ADR-0233)
 #
+# The service images (cognia-signaling, cognia-share, cognia-diagnostics) are
+# built and published by cognia-labs/cognia-services under its own owner.
+#
 # Publish happens on version tags (and manual dispatch with push=true).
 # PRs touching the container inputs get a compile check instead:
-#   - the two service images + runner build without pushing (gha cache)
+#   - the small images + runner build without pushing (gha cache)
 #   - cognia-server builds the `check` stage — cargo check over the cooked
 #     cargo-chef deps layer, no codegen/link — because a full release build of
 #     the whole tauri graph is 45–90 min cold.
@@ -57,16 +57,11 @@ on:
       - "scripts/build/managed-desktop-release*.mjs"
       - "scripts/build/managed-desktop-context*.mjs"
       - "protocol/external-agent-runtimes.json"
-      - "services/signaling-server/Dockerfile"
-      - "services/share-server/Dockerfile"
       - "services/workspace-runtime/**"
       # The web image is the static export + Caddyfile; the compose `tls`
       # profile and the production override both pull it from GHCR.
       - "deploy/compose/Dockerfile.web"
       - "deploy/compose/Caddyfile"
-      # The whole crate, not just its Dockerfile: the build context is the
-      # service directory, so a source or migration change is an image change.
-      - "services/diagnostic-server/**"
       - "lib/browser/overlay.injected.js"
       - ".github/workflows/images.yml"
       # cognia-server compile inputs: the `check` stage COPYs these, so a PR
@@ -78,7 +73,8 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
-      - "services/signaling-server/core/**"
+      # The pinned cognia-services revision supplies cognia-signaling-core.
+      - "integrations/cognia-services.json"
       - "plugins/computer-use/rust/**"
       - "sidecar/package.json"
       - "sidecar/*.mjs"
@@ -123,18 +119,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: cognia-signaling
-            context: services/signaling-server
-            file: services/signaling-server/Dockerfile
-          - name: cognia-share
-            context: services/share-server
-            file: services/share-server/Dockerfile
           - name: cognia-workspace-runtime
             context: .
             file: services/workspace-runtime/Dockerfile
-          - name: cognia-diagnostics
-            context: services/diagnostic-server
-            file: services/diagnostic-server/Dockerfile
           - name: cognia-collab
             context: .
             file: deploy/docker/Dockerfile.collab-server

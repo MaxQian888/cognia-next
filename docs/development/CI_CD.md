@@ -18,15 +18,15 @@ what to do when one goes red, and how to set up the optional integrations.
 
 ## Tiers
 
-| Tier         | Trigger                                                   | Runs                                                                                 |
-| ------------ | --------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| **Hot path** | push to `dev`/`master`, any PR                            | `ci.yml` → `quality.yml` + incremental `test.yml` → stable `CI Gate`                 |
-| **Nightly**  | `nightly.yml`, 03:00 UTC + manual                         | full test matrix + coverage, 4-platform Tauri bundles, Tauri E2E, iOS E2E            |
-| **Release**  | `v*` tag                                                  | `release.yml` → quality + test + signed Tauri release                                |
-| **Report**   | `workflow_run` after the hot path                         | `report.yml` → PR comment + job summary                                              |
-| **Services** | changes under `services/**`                               | `share-server.yml`, `signaling-server.yml`, `identity-server.yml`, `compose-e2e.yml` |
-| **Deploy**   | manual, opt-in                                            | `deploy.yml` (see below)                                                             |
-| **Feishu**   | source workflow completion, opt-in digest, manual preview | `feishu-notify.yml` → signed group cards and delivery diagnostics                    |
+| Tier         | Trigger                                                   | Runs                                                                      |
+| ------------ | --------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **Hot path** | push to `dev`/`master`, any PR                            | `ci.yml` → `quality.yml` + incremental `test.yml` → stable `CI Gate`      |
+| **Nightly**  | `nightly.yml`, 03:00 UTC + manual                         | full test matrix + coverage, 4-platform Tauri bundles, Tauri E2E, iOS E2E |
+| **Release**  | `v*` tag                                                  | `release.yml` → quality + test + signed Tauri release                     |
+| **Report**   | `workflow_run` after the hot path                         | `report.yml` → PR comment + job summary                                   |
+| **Services** | pin bumps, `deploy/compose/**`                            | `test.yml` pinned cognia-services lane, `compose-e2e.yml`                 |
+| **Deploy**   | manual, opt-in                                            | `deploy.yml` (see below)                                                  |
+| **Feishu**   | source workflow completion, opt-in digest, manual preview | `feishu-notify.yml` → signed group cards and delivery diagnostics         |
 
 Tauri **bundling** is deliberately off the hot path — it is the largest
 wall-clock item in the repo. The Tauri crate is compiled for affected PRs and full runs:
@@ -184,8 +184,8 @@ over a vanished tip) also fails safe to full. Manual
 exact base/head, selected suites, shard assignment, and affected runtimes.
 
 PR builds follow those runtime impacts: docs, web, mobile, browser extension,
-sidecar, native Rust, PostgreSQL, diagnostic server, and gateway conformance each
-run when their inputs change. A regular frontend change uses the E2E static
+sidecar, native Rust, PostgreSQL, the pinned cognia-services contract, and
+gateway conformance each run when their inputs change. A regular frontend change uses the E2E static
 export and existing smoke/critical/accessibility/visual tests. Production export
 also runs for native changes, because Windows Rust tests require its artifact,
 and for root build configuration/dependency changes. Full mode runs all lanes.
@@ -483,46 +483,58 @@ opt-in.
 sign the bundles; without these a tagged build **fails by design**, because an
 unsigned release would be un-updatable. See `src-tauri/UPDATER.md`.
 
-### Service deployments (`deploy.yml`, manual/opt-in)
+### Service lanes and the pinned cognia-services revision
 
-`workflow_dispatch` only — never on push. Targets (ADR-0059 P0.1):
+The cloud and self-hosted services (signaling, share, status, identity, sync,
+update, diagnostics, Logto mail) live in
+[cognia-labs/cognia-services](https://github.com/cognia-labs/cognia-services).
+Their tests, images (`ghcr.io/cognia-labs/cognia-{signaling,share,diagnostics}`)
+and deployments run there. That repository also owns the wire contracts the app
+consumes: `cognia-signaling-core` (Cargo), `@cognia/sync-protocol` and
+`@cognia/status-contract` (pnpm).
 
-| Target             | Platform          | Source                              |
-| ------------------ | ----------------- | ----------------------------------- |
-| `signaling-worker` | Cloudflare Worker | `services/signaling-server/worker/` |
-| `share-worker`     | Cloudflare Worker | `services/share-server/worker/`     |
-| `identity-worker`  | Cloudflare Worker | `services/identity-server/`         |
-| `signaling-fly`    | Fly.io (axum)     | `services/signaling-server/`        |
-| `share-fly`        | Fly.io (axum)     | `services/share-server/`            |
+The app consumes exactly one revision, `integrations/cognia-services.json`. The
+`cognia-signaling-core` workspace dependency in `Cargo.toml`, both
+`package.json` entries and both lockfiles must name it;
+`pnpm cognia-services:check` fails when they disagree. The `cognia-services`
+lane in `test.yml` checks out that revision and additionally:
 
-Dispatch inputs: `environment` (`staging` / `production`) and `target` (`all`,
-`workers`, `fly`, or one of the targets above). Staging Workers deploy via the
-`[env.staging]` stanzas in each `wrangler.toml`.
+- compares the contract copies the app keeps beside its own code byte for byte
+  (the grant wire vector, the diagnostic OpenAPI document and the share
+  constants under `protocol/cognia-services/`, and the RFC 8785 vectors);
+- runs the parity tests that read service sources with `COGNIA_SERVICES_ROOT`
+  set (tenant RLS against the diagnostic server, audit actions, the status
+  Worker's asset headers) and the signaling room-id vector of the pinned crate.
 
-Three gates keep forks green with zero configuration: manual trigger only, the
-repository variable `DEPLOY_ENABLED` must be the string `true`, and each
-platform job requires its secret to be present. A failing gate **skips** the
-job rather than failing it.
+A contract change lands in cognia-services first. Bump the pin here in the same
+change that updates the copies; `pnpm cognia-services:fetch` checks the pinned
+revision out under `.cache/cognia-services` for local runs. The compose suites
+build the signaling and share images from that same checkout.
 
-The GitHub Environments `staging` and `production` hold the same names, so the
-workflow reads one set:
+### Site deployments (`deploy.yml`, manual/opt-in)
 
-| Kind     | Name                         | Notes                                                  |
-| -------- | ---------------------------- | ------------------------------------------------------ |
-| secret   | `CLOUDFLARE_API_TOKEN`       | Workers deploy token                                   |
-| secret   | `FLY_API_TOKEN`              | `fly tokens create deploy`                             |
-| variable | `CLOUDFLARE_ACCOUNT_ID`      |                                                        |
-| variable | `CF_SHARE_KV_NAMESPACE_ID`   | injected into `wrangler.toml` at deploy time           |
-| variable | `CF_IDENTITY_D1_DATABASE_ID` | the environment's identity D1; injected at deploy time |
-| variable | `FLY_SIGNALING_APP`          | e.g. `cognia-signaling` / `-staging`                   |
-| variable | `FLY_SHARE_APP`              | e.g. `cognia-share` / `-staging`                       |
+`workflow_dispatch` (or a `workflow_call`) only — never on push. Targets: `docs`
+(Fumadocs, `docs/out`) and `web` (marketing site, `web/out`), each on its own
+Cloudflare Pages project. Dispatch inputs: `environment` (`staging` /
+`production`) and `target` (`all`, `docs`, `web`).
+
+Two gates keep forks green with zero configuration: the repository variable
+`DEPLOY_ENABLED` must be the string `true`, and the job requires
+`CLOUDFLARE_API_TOKEN`. A failing gate **skips** the job rather than failing
+it. The GitHub Environments `staging` and `production` hold the same names:
+
+| Kind     | Name                    | Notes                              |
+| -------- | ----------------------- | ---------------------------------- |
+| secret   | `CLOUDFLARE_API_TOKEN`  | Pages deploy token                 |
+| variable | `CLOUDFLARE_ACCOUNT_ID` |                                    |
+| variable | `CF_DOCS_PAGES_PROJECT` | Pages project for the docs site    |
+| variable | `CF_WEB_PAGES_PROJECT`  | Pages project for the website      |
+| variable | `DOCS_SITE_URL`         | canonical docs origin (build-time) |
+| variable | `WEB_SITE_URL`          | canonical website origin           |
 
 Give `production` protection rules (required reviewers, branch restriction)
-under **Settings → Environments**. One-time provisioning per environment is
-documented in each service README: R2 bucket, KV namespace,
-`wrangler secret put SHARE_UPLOAD_SECRET`, `flyctl volumes create share_data`,
-and for the identity Worker the D1 database, `BETTER_AUTH_SECRETS` and the
-sign-in provider credentials (`services/identity-server/README.md`).
+under **Settings → Environments**. Service deployments (Workers, Fly.io) are
+documented in the cognia-services README.
 
 ### Codecov
 

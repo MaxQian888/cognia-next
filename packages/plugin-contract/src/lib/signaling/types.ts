@@ -1,7 +1,7 @@
 /**
  * Wire protocol shared between the cognia signaling server (Rust) and the
  * TypeScript clients (mobile + desktop transports). Mirror of
- * `services/signaling-server/src/proto.rs`. Keep the two files in sync — the
+ * `cognia-services/services/signaling-server/src/proto.rs`. Keep the two files in sync — the
  * end-to-end tests in `tests/signaling-server` verify field names match.
  *
  * ADR-0021.
@@ -21,7 +21,7 @@ export const SIGNALING_PROTOCOL_VERSION = 2 as const
  * the rendezvous can rate-limit and meter without decrypting: `signal` is the
  * SDP/ICE/`hello` handshake (the default, and what every pre-lane peer sends),
  * `data` is application frames carried through the rendezvous in place of a
- * DataChannel. Mirror of `RelayLane` in `services/signaling-server/core`.
+ * DataChannel. Mirror of `RelayLane` in `cognia-services/services/signaling-server/core`.
  */
 export type RelayLane = "signal" | "data"
 

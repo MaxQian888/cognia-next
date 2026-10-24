@@ -23,8 +23,8 @@ description: 账号同步的第 3a 阶段——会话、消息、角色、技能
 | 部分 | 位置 |
 | --- | --- |
 | 线上格式 | [账号同步协议 v1](../data/account-sync-protocol) §5.4、§6、§7、§9 |
-| 共享规则与向量 | `packages/sync-protocol/`（`hlc.ts`、`padding.ts`、`ops.ts`、`merge.ts`、`fixtures/v1-ops.json`） |
-| 服务端（操作日志、长轮询、WebSocket） | `services/sync-server/`（`src/ops.ts`、`src/store.ts`、`src/space.ts`） |
+| 共享规则与向量 | `cognia-services/packages/sync-protocol/`（以 `@cognia/sync-protocol` 安装；`hlc.ts`、`padding.ts`、`ops.ts`、`merge.ts`、`fixtures/v1-ops.json`） |
+| 服务端（操作日志、长轮询、WebSocket） | `cognia-services/services/sync-server/`（`src/ops.ts`、`src/store.ts`、`src/space.ts`） |
 | 逐字段决定同步什么 | `lib/account-sync/data/tables.ts` |
 | 捕获 | `lib/account-sync/data/capture-middleware.ts`（Dexie 中间件，第 3 层） |
 | 推送、拉取、应用 | `lib/account-sync/data/{pusher,applier,op-origin,sync-round}.ts` |

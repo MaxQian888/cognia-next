@@ -30,6 +30,10 @@ export const ICON_PIXELS = 288
 /** Which spot icon stands for each page outcome, per generated module. */
 export const ICON_MODULES = [
   {
+    // Lives in cognia-labs/cognia-services; written into a checkout of it
+    // (COGNIA_SERVICES_ROOT, or the one `pnpm cognia-services:fetch` makes),
+    // then committed there.
+    repository: "cognia-services",
     file: "services/identity-server/src/pages/page-icons.ts",
     type: "PageIcon",
     exportName: "PAGE_ICONS",
@@ -103,7 +107,15 @@ export function encodeIcon(source, { run = execFileSync, pixels = ICON_PIXELS } 
   }
 }
 
-export function buildSignInIcons({ root = REPO_ROOT, encode = encodeIcon } = {}) {
+/** Where a module outside this repository is written. */
+export const SERVICES_ROOT =
+  process.env.COGNIA_SERVICES_ROOT ?? path.join(REPO_ROOT, ".cache", "cognia-services")
+
+export function buildSignInIcons({
+  root = REPO_ROOT,
+  servicesRoot = SERVICES_ROOT,
+  encode = encodeIcon,
+} = {}) {
   const written = []
   for (const target of ICON_MODULES) {
     const uris = {}
@@ -112,7 +124,12 @@ export function buildSignInIcons({ root = REPO_ROOT, encode = encodeIcon } = {})
       if (!existsSync(source)) throw new Error(`build-sign-in-icons: no spot icon ${source}`)
       uris[key] = encode(source)
     }
-    const file = path.join(root, target.file)
+    const base = target.repository === "cognia-services" ? servicesRoot : root
+    const file = path.join(base, target.file)
+    if (!existsSync(path.dirname(file)))
+      throw new Error(
+        `build-sign-in-icons: ${path.dirname(file)} does not exist; for cognia-services run \`pnpm cognia-services:fetch\` or set COGNIA_SERVICES_ROOT`
+      )
     writeFileSync(file, renderIconModule(target, uris))
     written.push(file)
   }
@@ -120,5 +137,5 @@ export function buildSignInIcons({ root = REPO_ROOT, encode = encodeIcon } = {})
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  for (const file of buildSignInIcons()) console.log(`wrote ${path.relative(REPO_ROOT, file)}`)
+  for (const file of buildSignInIcons()) console.log(`wrote ${file}`)
 }

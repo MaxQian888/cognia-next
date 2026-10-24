@@ -171,8 +171,8 @@
       "@cognia/ocr/*": ["../packages/ocr/src/*"],
       "@cognia/plugin-ui": ["../packages/plugin-ui/src/index.ts"],
       "@cognia/plugin-ui/*": ["../packages/plugin-ui/src/*"],
-      "@cognia/sync-protocol": ["../packages/sync-protocol/src/index.ts"],
-      "@cognia/sync-protocol/*": ["../packages/sync-protocol/src/*"]
+      "@cognia/sync-protocol": ["./node_modules/@cognia/sync-protocol/src/index.ts"],
+      "@cognia/sync-protocol/*": ["./node_modules/@cognia/sync-protocol/src/*"]
     },
     "types": ["node", "jest", "@testing-library/jest-dom"]
   },

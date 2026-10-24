@@ -23,8 +23,8 @@ description: 账号同步的第 2 阶段——设备密钥、同步恢复密钥�
 | 部分 | 位置 |
 | --- | --- |
 | 线上格式 | [账号同步协议 v1](../data/account-sync-protocol) 第 2–5 节 |
-| 共享规则与向量 | `packages/sync-protocol/`（`validateAppend`、`foldRegistry`、固定点、`fixtures/v1.json`） |
-| 服务端（Worker + SQLite DO） | `services/sync-server/`（运维指南见其 README） |
+| 共享规则与向量 | `cognia-services/packages/sync-protocol/`（以 `@cognia/sync-protocol` 安装；`validateAppend`、`foldRegistry`、固定点、`fixtures/v1.json`） |
+| 服务端（Worker + SQLite DO） | `cognia-services/services/sync-server/`（运维指南见其 README） |
 | 客户端密钥与 HPKE | `lib/account-sync/crypto/` |
 | 流程 | `lib/account-sync/enrollment/`（首台设备、加入、批准、恢复、管理、被移除） |
 | API 客户端、保险库、验证 | `lib/account-sync/sync-api.ts`、`vault-store.ts`、`registry-sync.ts` |

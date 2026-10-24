@@ -32,9 +32,6 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY .cargo ./.cargo
 COPY src-tauri ./src-tauri
 COPY crates ./crates
-# Out-of-workspace path dependency of src-tauri; cargo reads every member's
-# manifest even when building one package.
-COPY services/signaling-server/core ./services/signaling-server/core
 # sandboxd embeds the vendored Codex model catalog it builds task catalogs from.
 COPY cli/src/runtime/external/codex-catalog ./cli/src/runtime/external/codex-catalog
 RUN cargo build --release --locked -p cognia-sandboxd --bin cognia-sandboxd \

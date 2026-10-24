@@ -542,7 +542,7 @@ the new epoch envelope), `client_too_old`, `snapshot_required`, `quota_blob`,
 
 ## 17. Test vectors
 
-`packages/sync-protocol/fixtures/` (a zero-`@/` package shared by the client and the Worker) holds the frozen
+`packages/sync-protocol/fixtures/` in cognia-services (the `@cognia/sync-protocol` package shared by the client and the Worker) holds the frozen
 vectors: `v1.json` (canonical encoding, signatures, HPKE seals, the registry)
 and `v1-ops.json` (HLC order, padding, canonical ops and AAD, a sealed op, merge). The client, the
 Worker and any Rust consumer must all pass them. That is the only defense

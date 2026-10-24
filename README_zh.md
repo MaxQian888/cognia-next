@@ -186,11 +186,10 @@ AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy --check
 - **浏览器与编辑器运行时**：本地桌面能力或工作区运行时处理浏览器控制，code-server 与 VS Code 扩展宿主提供编辑器能力。浏览器伴侣、移动端和 Chrome/Edge 扩展不会自带桌面进程能力。
 - **数据与协作**：客户端用 Dexie 保存本地数据及宿主状态镜像；Rust 宿主保存 SQLite 数据和持久化执行状态。共享对话使用协作服务管理成员权限和共享状态。
 
-`services/` 中的服务按部署场景分别运行，例如：
+服务按部署场景分别运行，例如：
 
 - `services/workspace-runtime/`：工作区浏览器运行时。
-- `services/signaling-server/`：WebRTC 信令服务，包含 axum 和 workers-rs 实现。
-- `services/share-server/`：分享链接服务、加密内容存储与查看器。
+- 云端与自托管服务（信令、分享链接、状态页、账号身份与同步、更新、诊断）位于 [cognia-labs/cognia-services](https://github.com/cognia-labs/cognia-services)，连同它们与应用共享的协议契约。本仓库通过 `integrations/cognia-services.json` 固定其一个版本。
 
 `web/` 是产品网站，`docs/` 是 Fumadocs 文档站，均与根目录的应用分别构建。生产打包前，应先生成正确目标的资源。
 
@@ -220,7 +219,7 @@ AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy --check
 | Chrome/Edge 扩展      | [独立扩展仓库命令](https://github.com/cognia-labs/cognia-browser-extension#develop-and-verify)          |
 | Sidecar               | `pnpm sidecars:install`、`pnpm sidecar:start`、`pnpm sidecar:test`、`pnpm sidecars:build`               |
 | E2E                   | `pnpm test:e2e`、`pnpm test:e2e:workflows`、`pnpm test:e2e:mobile`、`pnpm test:e2e:tauri`               |
-| 仓库检查              | `pnpm audit:slots`、`pnpm i18n:build:check`、`pnpm lint:i18n`、`pnpm webrtc:smoke`                      |
+| 仓库检查              | `pnpm audit:slots`、`pnpm i18n:build:check`、`pnpm lint:i18n`、`pnpm cognia-services:check`             |
 
 完整脚本清单见 [`package.json`](./package.json)。
 
@@ -257,10 +256,8 @@ cognia-next/
 │   └── development/      CI/CD、测试与开发流程指南
 ├── deploy/                容器构建、Compose、Kubernetes 与 runner 部署
 │   └── docker/           以仓库根目录为构建上下文的 Dockerfile
-├── services/              独立部署的服务
-│   ├── workspace-runtime/ 工作区浏览器运行时
-│   ├── signaling-server/  WebRTC 信令汇合服务（axum + workers-rs）
-│   └── share-server/      Cloudflare Worker + Vite 查看器，承载分享链
+├── services/              随桌面端打包的服务
+│   └── workspace-runtime/ 工作区浏览器运行时
 ├── tests/e2e/             Playwright 套件（workflows、mobile、tauri）
 └── scripts/               构建、审计、迁移辅助
 ```
