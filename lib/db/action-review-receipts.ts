@@ -1,5 +1,6 @@
 /**
- * Durable receipt log for the unified action review (ADR-0102).
+ * Durable receipt log for the unified action review
+ * (`packages/agent-config-types/src/action-review.ts`; policy in ADR-0239).
  *
  * One row per reviewed action, across every decision point: chat tool
  * approvals, Agent Team plan and capability gates, workflow step gates,

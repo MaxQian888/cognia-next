@@ -1,4 +1,4 @@
-// Unified Action Review contract (ADR-0102).
+// Unified Action Review contract.
 //
 // One protocol for every point where Cognia decides whether an action may run:
 // chat tool approvals, Agent Team plan and capability gates, workflow step
@@ -8,8 +8,10 @@
 // 100 entries that marked everything interrupted on reboot.
 //
 // The three types here are the wire format between a PRODUCER (whoever wants to
-// act), the POLICY ENGINE (`lib/policy/action-review/policy.ts`), and the
-// RECEIPT LOG (`lib/db/action-review-receipts.ts`). They deliberately restate —
+// act), the POLICY ENGINE, and the RECEIPT LOG (`lib/db/action-review-receipts.ts`).
+// The engine does not exist yet: each producer still resolves its own verdict.
+// ADR-0239 decides it (`planActionReview` in `lib/policy/action-review/policy.ts`),
+// starting with outbound actions. They deliberately restate —
 // rather than import — the verdict, tier, and surface vocabularies from
 // `lib/claude/permissions/ruleset.ts` and `lib/policy/risk/*`, because this
 // package must stay free of `@/` imports so the CLI can consume it. The
@@ -31,9 +33,9 @@ export const ACTION_REVIEW_CONTRACT_VERSION = 1 as const
 export type ActionReviewChannel =
   /** Sidecar `canUseTool` → the chat approval dialog. The largest producer. */
   | "chat-tool"
-  /** Squad plan approval (`lib/runtime/approval-bus.ts`, scope `agent-team`). */
+  /** Squad plan approval (`lib/ai/agent/team/gates/squad-review-gate.ts`, kind `plan`). */
   | "agent-team-plan"
-  /** Agent Team capability/risk gate (`lib/ai/agent/agent-team-runtime.ts`). */
+  /** Agent Team capability/risk gate (`lib/ai/agent/team/gates/squad-review-gate.ts`, kind `capability_audit`). */
   | "agent-team-gate"
   /** Workflow `action.approval.request` node. */
   | "workflow-step"

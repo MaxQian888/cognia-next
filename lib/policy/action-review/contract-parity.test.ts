@@ -1,5 +1,5 @@
 /**
- * The load-bearing guard of ADR-0102.
+ * The load-bearing guard of the Action Review contract.
  *
  * `packages/agent-config-types/src/action-review.ts` must stay free of `@/`
  * imports so the CLI and any future zero-dep consumer can read the contract.

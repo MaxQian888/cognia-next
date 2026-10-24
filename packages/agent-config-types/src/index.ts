@@ -806,7 +806,11 @@ export type SendOptions = {
 
   /**
    * Tool names that must ALWAYS reach the renderer as a `permission_request`,
-   * whatever else says otherwise (ADR-0102).
+   * whatever else says otherwise (ADR-0239).
+   *
+   * DORMANT: declared only. Nothing computes it and neither sidecar gate reads
+   * it yet, so the paragraphs below describe the intended behaviour. ADR-0239
+   * phase 1 (WP5) wires it, for the external-send tools first.
    *
    * This closes a hole the unified action-review layer cannot close on its own.
    * {@link suppressApprovalForTools}, {@link alwaysAllowTools}, and the
@@ -816,7 +820,7 @@ export type SendOptions = {
    * both sidecar `canUseTool` gates ignore those bypasses and emit the
    * round-trip anyway.
    *
-   * Computed by `resolveSendOptions` from the risk tables: the tool-id sets
+   * To be computed by `resolveSendOptions` from the risk tables: the tool-id sets
    * `classifyRisk` uses for the surfaces `RISK_SURFACES` marks `high`
    * (external-send, computer-use, native-command, data-destructive). Serialized
    * alongside {@link permissionRuleset}.

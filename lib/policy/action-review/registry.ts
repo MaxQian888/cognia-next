@@ -1,9 +1,8 @@
 /**
  * Per-channel policy for projecting an action review onto a run.
  *
- * Nine channels declare themselves in `ActionReviewChannel`, and until now each
- * one wired its own waiter, its own decision shape, its own pending store and
- * its own UI. The consequences were concrete: exactly ONE channel
+ * Until now, every channel declared in `ActionReviewChannel` wired its own
+ * waiter, its own decision shape, its own pending store and its own UI. The consequences were concrete: exactly ONE channel
  * (`workflow-step`) ever wrote an `ActionReviewReceipt`, so the audit table was
  * almost empty, and nothing could answer "what is blocked on a human right
  * now?" across channels.
