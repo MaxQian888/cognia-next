@@ -195,7 +195,7 @@
     "@cognia/provider-types": "workspace:*",
     "@cognia/redact": "workspace:*",
     "@cognia/security-findings": "workspace:*",
-    "@cognia/sync-protocol": "git+https://github.com/cognia-labs/cognia-services.git#a9a613b33705396a78540d706c32e082262dfd7d&path:/packages/sync-protocol",
+    "@cognia/sync-protocol": "git+https://github.com/cognia-labs/cognia-services.git#487e9f2d617c9d1b9b648ec510cafcf53b962c2c&path:/packages/sync-protocol",
     "@cognia/vector": "workspace:*",
     "@cognia/web-search": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.32.1",

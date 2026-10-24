@@ -210,7 +210,7 @@ uuid = { version = "1" }
 # The signaling relay's wire crate (ADR-0021), owned by the services
 # repository. `rev` must equal `integrations/cognia-services.json`;
 # `pnpm cognia-services:check` fails when it does not.
-cognia-signaling-core = { git = "https://github.com/cognia-labs/cognia-services", rev = "a9a613b33705396a78540d706c32e082262dfd7d" }
+cognia-signaling-core = { git = "https://github.com/cognia-labs/cognia-services", rev = "487e9f2d617c9d1b9b648ec510cafcf53b962c2c" }
 log = { version = "0.4" }
 sha2 = { version = "0.11" }
 tauri = { version = "=2.12.0" }

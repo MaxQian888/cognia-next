@@ -3,9 +3,9 @@ use std::{collections::BTreeMap, path::PathBuf};
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use cognia_observability::{
-    create_diagnostic_package, delete_incident, exchange_installation_grant, fetch_receipt,
-    submit_package, validate_diagnostic_package, withdraw_consent, AttachmentInput,
-    DiagnosticPackageInput, SubmissionRequest, SubmissionTarget,
+    create_diagnostic_package, delete_incident, delete_incident_with_credential,
+    exchange_installation_grant, fetch_receipt, submit_package, validate_diagnostic_package,
+    withdraw_consent, AttachmentInput, DiagnosticPackageInput, SubmissionRequest, SubmissionTarget,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -102,6 +102,7 @@ pub fn run(command: CrashCommand, ui: &mut RuntimeUi) -> Result<()> {
             grant,
             tenant_id,
             project_id,
+            deletion_credential,
             crash_dir,
             format,
         } => {
@@ -112,6 +113,7 @@ pub fn run(command: CrashCommand, ui: &mut RuntimeUi) -> Result<()> {
                     grant.as_deref(),
                     tenant_id.as_deref(),
                     project_id.as_deref(),
+                    deletion_credential.as_deref(),
                     format,
                 )
             } else {
@@ -436,6 +438,7 @@ fn submit(
                 "{} part(s) uploaded, {} already stored",
                 receipt.uploaded_parts, receipt.resumed_parts
             ),
+            deletion_credential_line(receipt.deletion_credential.as_deref()),
         ],
     )
 }
@@ -465,16 +468,18 @@ fn delete_remote(
     grant: Option<&str>,
     tenant_id: Option<&str>,
     project_id: Option<&str>,
+    deletion_credential: Option<&str>,
     format: OutputFormat,
 ) -> Result<()> {
-    let grant = resolve_grant(server, grant, tenant_id, project_id)?;
-    delete_incident(
-        &UreqTransport,
-        &submission_target(server, tenant_id, project_id),
-        &grant,
-        incident_id,
-    )
-    .map_err(|error| anyhow!("could not delete the incident: {error}"))?;
+    let target = submission_target(server, tenant_id, project_id);
+    if let Some(credential) = deletion_credential {
+        delete_incident_with_credential(&UreqTransport, &target, incident_id, credential)
+            .map_err(|error| anyhow!("could not delete the incident: {error}"))?;
+    } else {
+        let grant = resolve_grant(server, grant, tenant_id, project_id)?;
+        delete_incident(&UreqTransport, &target, &grant, incident_id)
+            .map_err(|error| anyhow!("could not delete the incident: {error}"))?;
+    }
     emit(
         format,
         &json!({"incidentId": incident_id, "state": "deleted"}),
@@ -509,6 +514,17 @@ fn withdraw_remote(
         &json!({"incidentId": incident_id, "state": "withdrawn"}),
         &[format!("Withdrew consent for incident {incident_id}")],
     )
+}
+
+/// The one chance to keep the deletion credential: the service stores only its
+/// hash and hands it out on the call that creates the incident.
+fn deletion_credential_line(credential: Option<&str>) -> String {
+    match credential {
+        Some(credential) => format!(
+            "Deletion credential: {credential} (shown once; `crash delete --remote --deletion-credential` deletes this incident from anywhere)"
+        ),
+        None => "Deletion credential: issued when the incident was first created".to_owned(),
+    }
 }
 
 fn delete_local(dir: PathBuf, stem: &str, format: OutputFormat) -> Result<()> {
@@ -549,6 +565,15 @@ mod tests {
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].kind.as_deref(), Some("panic"));
         assert!(reports[0].has_minidump);
+    }
+
+    #[test]
+    fn a_new_submission_shows_its_deletion_credential_once() {
+        let shown = deletion_credential_line(Some("del_0123"));
+        assert!(shown.contains("del_0123"), "{shown}");
+        assert!(shown.contains("--deletion-credential"), "{shown}");
+        let resumed = deletion_credential_line(None);
+        assert!(!resumed.contains("del_"), "{resumed}");
     }
 
     #[test]

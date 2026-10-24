@@ -146,6 +146,29 @@ paths:
         - { $ref: "#/components/parameters/IncidentId" }
       responses:
         "204": { description: Processing blocked and deletion scheduled immediately }
+  /incidents/{incidentId}/delete-with-credential:
+    post:
+      operationId: deleteIncidentWithCredential
+      description: >-
+        Delete an incident with the one-time `deletionCredential` that
+        `createIncident` returned, without a grant. The grant route
+        (`DELETE /incidents/{incidentId}`) only reaches incidents the same
+        installation uploaded; this one still works after a reinstall or a
+        lost installation key. Not part of intake: available while uploads
+        are switched off. A wrong credential, project, tenant or incident all
+        answer the same 404.
+      security: []
+      parameters:
+        - { $ref: "#/components/parameters/IncidentId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CredentialDeletionRequest" }
+      responses:
+        "204": { description: Incident deleted and its artifacts removed }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /incidents/{incidentId}/audit:
     parameters:
       - { $ref: "#/components/parameters/IncidentId" }
@@ -398,7 +421,20 @@ components:
           description: False when an identical artifactHash resumed an existing incident.
         deletionCredential:
           type: string
-          description: One-time credential, returned only when `created` is true.
+          pattern: "^del_[0-9a-f]{32}$"
+          description: >-
+            One-time credential, returned only when `created` is true. Only its
+            hash is stored; keep it to delete the incident later through
+            `deleteIncidentWithCredential`.
+    CredentialDeletionRequest:
+      type: object
+      required: [tenantId, projectId, deletionCredential]
+      properties:
+        tenantId: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        deletionCredential:
+          type: string
+          pattern: "^del_[0-9a-f]{32}$"
     GrantRole:
       type: string
       enum: [uploader, viewer, triager, admin]
