@@ -67,6 +67,8 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY .cargo ./.cargo
 COPY src-tauri ./src-tauri
 COPY crates ./crates
+# Workspace member and [patch] target (Cargo.toml); see vendor/liteparse/COGNIA-PATCH.md.
+COPY vendor/liteparse ./vendor/liteparse
 # Out-of-workspace path dependency of src-tauri (cognia-signaling-core).
 COPY services/signaling-server/core ./services/signaling-server/core
 RUN cargo chef prepare --recipe-path recipe.json
@@ -113,6 +115,8 @@ ARG COGNIA_SERVER_CARGO_FLAGS=""
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src-tauri ./src-tauri
 COPY crates ./crates
+# Workspace member and [patch] target (Cargo.toml); see vendor/liteparse/COGNIA-PATCH.md.
+COPY vendor/liteparse ./vendor/liteparse
 COPY services/signaling-server/core ./services/signaling-server/core
 # Out-of-tree include_str! targets (release: browser overlay JS; the spec
 # fixtures under cli/ + docs/ are test-cfg but cheap to keep coherent).
@@ -167,6 +171,8 @@ FROM deps AS check
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src-tauri ./src-tauri
 COPY crates ./crates
+# Workspace member and [patch] target (Cargo.toml); see vendor/liteparse/COGNIA-PATCH.md.
+COPY vendor/liteparse ./vendor/liteparse
 COPY services/signaling-server/core ./services/signaling-server/core
 # Out-of-tree include_str! targets (release: browser overlay JS; the spec
 # fixtures under cli/ + docs/ are test-cfg but cheap to keep coherent).

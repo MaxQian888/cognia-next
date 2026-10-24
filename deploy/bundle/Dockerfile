@@ -32,6 +32,8 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY .cargo ./.cargo
 COPY src-tauri ./src-tauri
 COPY crates ./crates
+# Workspace member and [patch] target (Cargo.toml); see vendor/liteparse/COGNIA-PATCH.md.
+COPY vendor/liteparse ./vendor/liteparse
 # Out-of-workspace path dependency of src-tauri; cargo reads every member's
 # manifest even when building one package.
 COPY services/signaling-server/core ./services/signaling-server/core
