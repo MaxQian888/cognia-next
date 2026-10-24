@@ -233,6 +233,7 @@
     "0235-a-vscode-tunnel-installs-a-host-and-is-one-more-route-to-it",
     "0236-built-in-prompts-are-owned-slots-behind-one-prompt-center",
     "0237-an-agents-harness-evolves-through-probed-approved-versions",
-    "0238-agent-configuration-is-governed-by-evidence"
+    "0238-agent-configuration-is-governed-by-evidence",
+    "0239-an-outbound-action-is-authorized-by-the-request"
   ]
 }
