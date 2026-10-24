@@ -135,6 +135,13 @@ describe("multi-tenant Host refusals", () => {
     expect(DIAGNOSTIC_CODES.partitionWorkspaceUnavailable.retryable).toBe(false)
   })
 
+  it("labels org administration as unavailable on a single-user Host", () => {
+    expect(diagnose("org_scope_unavailable")).toBe("orgScopeUnavailable")
+    expect(isHostRefusalCode("org_scope_unavailable")).toBe(true)
+    expect(DIAGNOSTIC_CODES.orgScopeUnavailable.retryable).toBe(false)
+    expect(DIAGNOSTIC_CODES.orgScopeUnavailable.actions).toEqual([{ kind: "dismiss" }])
+  })
+
   it("recognises only Host refusal codes", () => {
     expect(isHostRefusalCode("host_data_unpartitioned")).toBe(true)
     expect(isHostRefusalCode("sidecar_error")).toBe(false)

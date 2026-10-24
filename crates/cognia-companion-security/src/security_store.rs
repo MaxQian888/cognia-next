@@ -294,6 +294,19 @@ impl PersonReceiptScope {
     pub fn key(&self, key: &str) -> String { format!("{}{key}", self.prefix()) }
 }
 
+/// Host-derived org/user namespace. Also inspected on operation GET, so a
+/// rebound device cannot read a previous org administrator's receipt.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OrgReceiptScope { identity: String }
+const ORG_RECEIPT_PREFIX: &str = "org/v1/";
+impl OrgReceiptScope {
+    pub fn new(org: &str, user: &str) -> Self {
+        let identity = serde_json::to_vec(&(org, user)).expect("string tuple");
+        Self { identity: hex::encode(Sha256::digest(identity)) }
+    }
+    pub fn key(&self, key: &str) -> String { format!("{ORG_RECEIPT_PREFIX}{}/{key}", self.identity) }
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostPolicySummary {
@@ -1970,6 +1983,27 @@ impl SecurityStore {
             params![tenant_id, device_id, operation_id], |row| row.get(0),
         ).optional()?;
         Ok(key.and_then(|key| key.strip_prefix(PERSON_RECEIPT_PREFIX).and_then(|rest| rest.split('/').next()).map(str::to_owned)))
+    }
+
+    /// Read only the routing tag before the HTTP layer checks live org
+    /// management standing. A malformed reserved tag fails closed.
+    pub fn operation_org_scope(&self, tenant_id: &str, device_id: &str, operation_id: &str)
+        -> Result<Option<OrgReceiptScope>, SecurityStoreError> {
+        let key: Option<String> = self.conn.lock().query_row(
+            "SELECT idempotency_key FROM idempotency_records WHERE tenant_id = ?1 AND device_id = ?2 AND operation_id = ?3",
+            params![tenant_id, device_id, operation_id], |row| row.get(0),
+        ).optional()?;
+        let Some(rest) = key.as_deref().and_then(|key| key.strip_prefix(ORG_RECEIPT_PREFIX)) else { return Ok(None); };
+        let Some((identity, _)) = rest.split_once('/') else { return Err(SecurityStoreError::InvalidRunTransition); };
+        if identity.len() != 64 || !identity.bytes().all(|byte| byte.is_ascii_hexdigit()) { return Err(SecurityStoreError::InvalidRunTransition); }
+        Ok(Some(OrgReceiptScope { identity: identity.into() }))
+    }
+
+    pub fn org_operation(&self, tenant_id: &str, device_id: &str, operation_id: &str, scope: &OrgReceiptScope)
+        -> Result<Option<OperationSummary>, SecurityStoreError> {
+        if self.operation_org_scope(tenant_id, device_id, operation_id)?.as_ref() == Some(scope) {
+            self.operation(tenant_id, device_id, operation_id)
+        } else { Ok(None) }
     }
 
     pub fn person_operation(&self, tenant_id: &str, device_id: &str, operation_id: &str, scope: &PersonReceiptScope)
@@ -7390,7 +7424,9 @@ CREATE TABLE devices (
     /// the `is_browser_device` branch there).
     #[test]
     fn every_device_capability_in_the_manifest_is_grantable() {
-        const NOT_A_DEVICE_CAPABILITY: &[&str] = &["service.internal", "client.local"];
+        // Org management is live collaboration standing, never a persisted
+        // device grant. The companion requires client.read plus that action.
+        const NOT_A_DEVICE_CAPABILITY: &[&str] = &["service.internal", "client.local", "org.policy.manage"];
         let browser_only = super::BROWSER_CLASS_CAPABILITIES;
 
         let mut unreachable: Vec<&str> = cognia_companion_contract::command_manifest::commands()
@@ -7406,6 +7442,31 @@ CREATE TABLE devices (
             unreachable.is_empty(),
             "capabilities no device can hold: {unreachable:?}"
         );
+    }
+
+    #[test]
+    fn p6a_org_standing_never_changes_legacy_device_grants() {
+        assert!(!is_assignable_device_capability("org.policy.manage"));
+        assert!(!default_capabilities_for_role("owner").contains(&"org.policy.manage"));
+        assert!(!default_capabilities_for_role("member").contains(&"secret.manage"));
+        assert!(!default_capabilities_for_role("member").contains(&"host.admin"));
+        assert!(default_capabilities_for_role("member").contains(&"client.read"));
+    }
+
+    #[test]
+    fn p6a_org_receipts_require_the_same_org_user_and_device() {
+        let ledger = SecurityStore::in_memory().unwrap();
+        let scope = OrgReceiptScope::new("org_p6a_one", "usr_p6a_one");
+        let key = scope.key("p6a-key");
+        let IdempotencyDecision::Started { operation_id } = ledger.begin_idempotent_operation("tenant", "device", "host", &key, "hash", 100).unwrap() else { panic!("started"); };
+        ledger.mark_operation_running("tenant", &operation_id, 101).unwrap();
+        ledger.complete_idempotent_operation("tenant", "device", &key, "{\"result\":\"metadata\"}", true, 102).unwrap();
+        assert_eq!(ledger.operation_org_scope("tenant", "device", &operation_id).unwrap(), Some(scope.clone()));
+        assert!(ledger.org_operation("tenant", "device", &operation_id, &scope).unwrap().is_some());
+        for other in [OrgReceiptScope::new("org_p6a_two", "usr_p6a_one"), OrgReceiptScope::new("org_p6a_one", "usr_p6a_two")] {
+            assert!(ledger.org_operation("tenant", "device", &operation_id, &other).unwrap().is_none());
+        }
+        assert!(ledger.org_operation("tenant", "other-device", &operation_id, &scope).unwrap().is_none());
     }
 
     /// The inverse of the test above: every capability the store will accept
@@ -7535,6 +7596,9 @@ CREATE TABLE devices (
             // a weaker owner: `register_browser_device` is the only thing that
             // grants these, and an owner deliberately does not hold them.
             .filter(|capability| !BROWSER_ENROLLMENT.capabilities.contains(capability))
+            // P6a composes the existing device read grant with live org
+            // management standing; it never adds an operator grant.
+            .map(|capability| if capability == "org.policy.manage" { "client.read" } else { capability })
             .filter(|capability| !granted.iter().any(|held| held == capability))
             .collect();
         missing.sort_unstable();

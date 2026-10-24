@@ -918,6 +918,12 @@ async fn authorized_operation_with_scope(
     resolve: impl std::future::Future<Output = Result<Option<super::person_partition::PersonReceiptScope>, Problem>>,
 ) -> Result<Option<super::security_store::OperationSummary>, Problem> {
     let ledger = ledger?;
+    if ledger.operation_org_scope(&context.tenant_id, &context.device_id, operation_id).map_err(store_error)?.is_some() {
+        return authorized_org_operation(&ledger, context, operation_id, async {
+            let person = super::host_surface_gate::org_policy_person(context).await?;
+            Ok(super::security_store::OrgReceiptScope::new(&person.org, &person.user))
+        }).await;
+    }
     let account = ledger.operation_person_account(&context.tenant_id, &context.device_id, operation_id).map_err(store_error)?;
     let Some(account) = account else {
         return ledger.operation(&context.tenant_id, &context.device_id, operation_id).map_err(store_error);
@@ -925,6 +931,18 @@ async fn authorized_operation_with_scope(
     let Some(scope) = resolve.await? else { return Ok(None); };
     if scope.account_id != account { return Ok(None); }
     ledger.person_operation(&context.tenant_id, &context.device_id, operation_id, &scope).map_err(store_error)
+}
+
+async fn authorized_org_operation(
+    ledger: &SecurityStore, context: &DeviceContext, operation_id: &str,
+    resolve: impl std::future::Future<Output = Result<super::security_store::OrgReceiptScope, Problem>>,
+) -> Result<Option<super::security_store::OperationSummary>, Problem> {
+    // The loopback operator retains its authority. Person brains never match.
+    if super::jwt::is_service_scope(Some(&context.scope)) {
+        return ledger.operation(&context.tenant_id, &context.device_id, operation_id).map_err(store_error);
+    }
+    let scope = resolve.await?;
+    ledger.org_operation(&context.tenant_id, &context.device_id, operation_id, &scope).map_err(store_error)
 }
 
 pub(crate) async fn operation_handler(
@@ -3472,6 +3490,27 @@ mod tests {
         let rejoined = PersonReceiptScope { data_generation: uuid::Uuid::new_v4().to_string(), ..a };
         assert!(authorized_operation_with_scope(Ok(ledger.clone()), &context, &operation_id, async { Ok(Some(rejoined)) }).await.unwrap().is_none());
         assert!(authorized_operation_with_scope(Ok(ledger), &context, &operation_id, async { Ok(None) }).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn p6a_org_operation_reads_refuse_rebound_or_downgraded_admins() {
+        use crate::security_store::{OrgReceiptScope, IdempotencyDecision};
+        let ledger = SecurityStore::in_memory().unwrap();
+        let a = OrgReceiptScope::new("org_p6a_aaa", "usr_p6a_aaa");
+        let key = a.key("p6a-key");
+        let IdempotencyDecision::Started { operation_id } = ledger.begin_idempotent_operation("tenant", "device", "host", &key, "hash", 100).unwrap() else { panic!("started"); };
+        ledger.mark_operation_running("tenant", &operation_id, 101).unwrap();
+        ledger.complete_idempotent_operation("tenant", "device", &key, "{\"result\":\"private-org-policy\"}", true, 102).unwrap();
+        let context = DeviceContext { device_id: "device".into(), tenant_id: "tenant".into(), scope: "device".into(), granted_scopes: vec![], authorization_capabilities: None };
+        assert!(authorized_org_operation(&ledger, &context, &operation_id, async { Ok(a) }).await.unwrap().is_some());
+        let b = OrgReceiptScope::new("org_p6a_bbb", "usr_p6a_aaa");
+        assert!(authorized_org_operation(&ledger, &context, &operation_id, async { Ok(b) }).await.unwrap().is_none());
+        let denied = authorized_org_operation(&ledger, &context, &operation_id, async {
+            Err(api_error(StatusCode::FORBIDDEN, "host_surface_forbidden", "org management standing revoked"))
+        }).await.unwrap_err();
+        assert_eq!(denied.code, "host_surface_forbidden");
+        // The real wrapper must route org tags before any legacy receipt lookup.
+        assert!(authorized_operation_with_scope(Ok(ledger), &context, &operation_id, async { panic!("org receipt reached person resolver") }).await.is_err());
     }
 
     #[tokio::test]

@@ -38,6 +38,7 @@ const HOST_REFUSAL_TO_DIAGNOSTIC: Readonly<Record<string, DiagnosticCode>> = {
   model_access_unavailable: "modelAccessUnavailable",
   // HostState `session.workspace` in a partition (P5d): it has no workspaces.
   workspace_unavailable: "partitionWorkspaceUnavailable",
+  org_scope_unavailable: "orgScopeUnavailable",
   person_brain_capacity: "resourceLimit",
   person_brain_unavailable: "serviceUnavailable",
 }

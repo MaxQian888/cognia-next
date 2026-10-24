@@ -551,6 +551,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let input: cognia_secrets::keyring_secrets::SecretStoreInput =
                 required(&args, "input")?;
+            require_non_org_namespace(&input.namespace)?;
             let value = tokio::task::spawn_blocking(move || {
                 cognia_secrets::keyring_secrets::get(&input.namespace, &input.key)
             })
@@ -565,6 +566,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let input: cognia_secrets::keyring_secrets::SecretStoreInput =
                 required(&args, "input")?;
+            require_non_org_namespace(&input.namespace)?;
             let value = input
                 .value
                 .clone()
@@ -583,6 +585,7 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let input: cognia_secrets::keyring_secrets::SecretStoreInput =
                 required(&args, "input")?;
+            require_non_org_namespace(&input.namespace)?;
             tokio::task::spawn_blocking(move || {
                 cognia_secrets::keyring_secrets::clear(&input.namespace, &input.key)
             })
@@ -594,6 +597,12 @@ pub(super) async fn dispatch(
         unknown => Err(RpcError::unknown_command(unknown)),
     };
     result
+}
+
+fn require_non_org_namespace(namespace: &str) -> Result<(), (StatusCode, Json<RpcError>)> {
+    if cognia_companion::org_credentials::reserved_namespace(namespace) {
+        Err((StatusCode::FORBIDDEN, Json(RpcError::new("host_surface_forbidden", "organization secrets require the dedicated organization commands"))))
+    } else { Ok(()) }
 }
 
 /// The body both send arms share.
@@ -831,6 +840,30 @@ async fn send_arm(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn p6a_generic_secret_commands_never_export_or_mutate_org_namespaces() {
+        let state = super::super::tests::test_state();
+        let host = crate::headless::HeadlessServices::stub_for_tests();
+        let org = "org_p6a_generic";
+        let key = "org-key-not-exportable";
+        cognia_companion::org_credentials::OrgCredentials::set(org, "openai", key, "operator", 1).unwrap();
+        for namespace in ["host-org-provider-credentials", "host-org-provider-index", "host-org-agent-policy"] {
+            for command in ["secret_store_get", "keyring_secret_get", "secret_store_set", "keyring_secret_set", "secret_store_delete", "keyring_secret_clear"] {
+                let (status, error) = super::dispatch(command, serde_json::json!({"input":{"namespace":namespace,"key":format!("{org}/openai"),"value":key}}),
+                    &state, &host, "operator", Some("tenant"), Some("service")).await.unwrap_err();
+                assert_eq!(status, StatusCode::FORBIDDEN);
+                assert!(!serde_json::to_string(&error.0).unwrap().contains(key));
+            }
+        }
+        assert_eq!(cognia_companion::org_credentials::OrgCredentials::list(org).unwrap().len(), 1);
+        for (command, expected) in [("secret_store_set", Value::Null), ("secret_store_get", serde_json::json!("legacy-value")), ("secret_store_delete", Value::Null)] {
+            let result = super::dispatch(command, serde_json::json!({"input":{"namespace":"p6a-legacy","key":"key","value":"legacy-value"}}),
+                &state, &host, "operator", Some("tenant"), Some("service")).await.unwrap();
+            assert_eq!(result, expected);
+        }
+        cognia_companion::org_credentials::OrgCredentials::delete(org, "openai").unwrap();
+    }
+
     #[test]
     fn remote_tool_host_control_is_exposed_without_general_feature_calls() {
         assert!(super::COMMANDS.contains(&"agent_tool_host_control"));

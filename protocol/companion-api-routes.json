@@ -182,6 +182,18 @@
 
     { "path": "/internal/_rpc/{name}", "method": "post", "document": "headless" },
     {
+      "path": "/internal/org-credentials/{operation}",
+      "method": "post",
+      "document": "none",
+      "reason": "Loopback operator aliases for list/set/delete through canonical org credential RPC; explicit orgId, service JWT only."
+    },
+    {
+      "path": "/internal/org-agents/{operation}",
+      "method": "post",
+      "document": "none",
+      "reason": "Loopback operator aliases for get/set through canonical org agent-policy RPC; explicit orgId, service JWT only."
+    },
+    {
       "path": "/internal/operations/{operation_id}",
       "method": "get",
       "document": "headless"

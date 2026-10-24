@@ -411,6 +411,8 @@ export type DiagnosticCode =
    * by design: the partition holds the member's own data only.
    */
   | "partitionWorkspaceUnavailable"
+  /** Organization administration is unavailable on a single-user Host. */
+  | "orgScopeUnavailable"
   | "routingNoCandidates"
   // --- Cognia internals ---
   | "settingsLoadFailed"

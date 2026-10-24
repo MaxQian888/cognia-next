@@ -169,10 +169,28 @@ fn channel_execution_refused(mode: DeploymentMode, enabled: bool, execution: boo
 
 pub async fn decide(mode: DeploymentMode, execution: bool, sandboxes: bool, provider: &dyn StandingProvider,
     capability: &str, arm: Option<&str>, principal: &DeviceContext, workspace: Option<&str>) -> Result<(), Refusal> {
+    if capability == crate::org_policy::CAPABILITY {
+        return org_policy_standing(mode, provider, principal).await.map(|_| ());
+    }
     // No policy parse, identity/store read or provider call on the legacy path.
     if mode == DeploymentMode::SingleUser && execution { return Ok(()); }
     decide_with_person_fleet(mode, execution, sandboxes, provider, capability, arm, principal, workspace,
         crate::person_partition::fleet().is_some()).await
+}
+
+async fn org_policy_standing(mode: DeploymentMode, provider: &dyn StandingProvider, principal: &DeviceContext) -> Result<Option<Person>, Refusal> {
+    if mode != DeploymentMode::MultiTenant { return Err(Refusal { status: StatusCode::CONFLICT, code: "org_scope_unavailable" }); }
+    if crate::jwt::is_service_scope(Some(&principal.scope)) { return Ok(None); }
+    let person = provider.person(principal)?;
+    let actions = provider.actions(&person, None).await?;
+    if !actions.iter().any(|action| action == "org.policy.manage") { return Err(forbidden("host_surface_forbidden")); }
+    Ok(Some(person))
+}
+
+pub async fn org_policy_person(principal: &DeviceContext) -> Result<Person, Problem> {
+    org_policy_standing(deployment_mode(), LIVE.as_ref(), principal).await
+        .and_then(|person| person.ok_or_else(|| forbidden("host_principal_unbound")))
+        .map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -614,6 +632,54 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    #[tokio::test]
+    async fn p6a_org_commands_require_live_owner_or_admin_standing() {
+        let policy = POLICY.as_ref().unwrap();
+        let entry = policy.get(crate::org_policy::CAPABILITY).unwrap();
+        assert_eq!(entry.class, SurfaceClass::OrgAction);
+        assert_eq!(entry.action.as_deref(), Some("org.policy.manage"));
+        assert!(crate::org_policy::COMMANDS.iter().all(|command| !policy.command_overrides.contains_key(*command)));
+        struct OrgStanding { role: Option<cognia_tenant_auth::OrgRole>, bound: bool }
+        #[async_trait::async_trait]
+        impl StandingProvider for OrgStanding {
+            fn person(&self, _: &DeviceContext) -> Result<Person, Refusal> {
+                if !self.bound { return Err(forbidden("host_principal_unbound")); }
+                Ok(Person { org: "org_p6a_standing".into(), user: "usr_p6a_standing".into() })
+            }
+            async fn actions(&self, _: &Person, workspace: Option<&str>) -> Result<Vec<String>, Refusal> {
+                assert!(workspace.is_none());
+                Ok(cognia_tenant_auth::actions::org_actions_for(self.role).into_iter().map(|action|
+                    serde_json::to_value(action).unwrap().as_str().unwrap().to_string()).collect())
+            }
+        }
+        use cognia_tenant_auth::OrgRole;
+        for command in crate::org_policy::COMMANDS {
+            for role in [OrgRole::Owner, OrgRole::Admin] {
+                let provider = OrgStanding { role: Some(role), bound: true };
+                assert!(decide(DeploymentMode::MultiTenant, true, false, &provider,
+                    crate::org_policy::CAPABILITY, Some(command), &device("device"), Some("forged")).await.is_ok());
+            }
+            for provider in [OrgStanding { role: Some(OrgRole::Member), bound: true }, OrgStanding { role: None, bound: true }] {
+                assert_eq!(decide(DeploymentMode::MultiTenant, true, false, &provider,
+                    crate::org_policy::CAPABILITY, Some(command), &device("device"), None).await.unwrap_err().code, "host_surface_forbidden");
+            }
+            let unbound = OrgStanding { role: Some(OrgRole::Admin), bound: false };
+            assert_eq!(decide(DeploymentMode::MultiTenant, true, false, &unbound,
+                crate::org_policy::CAPABILITY, Some(command), &device("device"), None).await.unwrap_err().code, "host_principal_unbound");
+            assert!(decide(DeploymentMode::MultiTenant, true, false, &unbound,
+                crate::org_policy::CAPABILITY, Some(command), &device("service"), None).await.is_ok());
+            assert!(decide(DeploymentMode::MultiTenant, true, false, &unbound,
+                crate::org_policy::CAPABILITY, Some(command), &device("person-brain"), None).await.is_err());
+            assert_eq!(decide(DeploymentMode::SingleUser, true, false, &unbound,
+                crate::org_policy::CAPABILITY, Some(command), &device("service"), None).await.unwrap_err().status, StatusCode::CONFLICT);
+        }
+    }
+
+    #[test]
+    fn p6a_legacy_single_user_and_desktop_paths_stay_unchanged() {
+        host_data_single_user_keeps_zero_policy_and_provider_calls();
+    }
+
     #[test]
     fn p5_single_user_admission_retains_all_manifest_paths() {
         host_data_single_user_keeps_zero_policy_and_provider_calls();
@@ -964,11 +1030,16 @@ mod tests {
         let source = include_str!("host_surface_gate.rs");
         let body = source.split_once("pub async fn decide(").unwrap().1
             .split_once("-> Result<(), Refusal> {").unwrap().1;
-        assert!(body.starts_with("\n    // No policy parse, identity/store read or provider call on the legacy path.\n    if mode == DeploymentMode::SingleUser && execution { return Ok(()); }\n"));
+        assert!(body.contains("\n    // No policy parse, identity/store read or provider call on the legacy path.\n    if mode == DeploymentMode::SingleUser && execution { return Ok(()); }\n"));
         let provider = Fake { result: 3, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
         let manifest: Value = serde_json::from_str(include_str!("../../../protocol/companion-commands.json")).unwrap();
         for scope in ["device", "owner", "service"] {
             for command in manifest["commands"].as_array().unwrap() {
+                if command["capability"] == crate::org_policy::CAPABILITY {
+                    assert_eq!(decide(DeploymentMode::SingleUser, true, false, &provider,
+                        crate::org_policy::CAPABILITY, command["arm"].as_str(), &device(scope), None).await.unwrap_err().code, "org_scope_unavailable");
+                    continue;
+                }
                 assert!(decide(DeploymentMode::SingleUser, true, false, &provider,
                     command["capability"].as_str().unwrap(), command["arm"].as_str(), &device(scope), None).await.is_ok());
             }

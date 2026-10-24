@@ -20,6 +20,8 @@ pub mod jwt;
 pub mod official_identity;
 pub mod oidc;
 pub mod operations;
+pub mod org_credentials;
+pub mod org_agent_policy;
 pub mod principal;
 pub mod rate_limit;
 pub mod replay_cache;

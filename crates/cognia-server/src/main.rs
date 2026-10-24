@@ -34,6 +34,8 @@
 //! arm the headless host cannot serve answers `503 headless_unsupported`
 //! naming the command.
 
+mod org_admin;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -102,6 +104,16 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
+    /// Manage organization model credentials through the running Host.
+    OrgCredentials {
+        #[command(subcommand)] command: org_admin::CredentialsCommand,
+        #[arg(long, global = true)] port: Option<u16>,
+    },
+    /// Manage the organization's bundled-agent allowlist.
+    OrgAgents {
+        #[command(subcommand)] command: org_admin::AgentsCommand,
+        #[arg(long, global = true)] port: Option<u16>,
+    },
     /// Inspect or irreversibly purge person data through the running Host.
     Persons {
         #[command(subcommand)]
@@ -1455,6 +1467,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         CliCommand::Persons { command, port } => {
             run_persons(command, resolve_pair_port(port, std::env::var("COGNIA_PORT").ok().as_deref())).await
+        }
+        CliCommand::OrgCredentials { command, port } => {
+            org_admin::credentials(command, resolve_pair_port(port, std::env::var("COGNIA_PORT").ok().as_deref())).await
+        }
+        CliCommand::OrgAgents { command, port } => {
+            org_admin::agents(command, resolve_pair_port(port, std::env::var("COGNIA_PORT").ok().as_deref())).await
         }
         CliCommand::Pair {
             device_name,

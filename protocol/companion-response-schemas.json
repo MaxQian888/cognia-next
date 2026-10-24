@@ -16425,6 +16425,128 @@
       },
       "additionalProperties": false
     },
+    "org_model_credential_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["provider", "fingerprint", "setAt", "setBy"],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{12}$"
+          },
+          "setAt": {
+            "type": "integer"
+          },
+          "setBy": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "org_model_credential_set": {
+      "type": "object",
+      "required": ["provider", "fingerprint", "setAt", "setBy"],
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{12}$"
+        },
+        "setAt": {
+          "type": "integer"
+        },
+        "setBy": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "org_model_credential_delete": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "org_agent_policy_get": {
+      "type": "object",
+      "required": ["allowedAgents", "defaultAgent", "updatedAt", "updatedBy"],
+      "properties": {
+        "allowedAgents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["runtimeId", "providers", "available"],
+            "properties": {
+              "runtimeId": {
+                "type": "string"
+              },
+              "providers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "available": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "defaultAgent": {
+          "type": ["string", "null"]
+        },
+        "updatedAt": {
+          "type": ["integer", "null"]
+        },
+        "updatedBy": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "org_agent_policy_set": {
+      "type": "object",
+      "required": ["allowedAgents", "defaultAgent", "updatedAt", "updatedBy"],
+      "properties": {
+        "allowedAgents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["runtimeId", "providers", "available"],
+            "properties": {
+              "runtimeId": {
+                "type": "string"
+              },
+              "providers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "available": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "defaultAgent": {
+          "type": ["string", "null"]
+        },
+        "updatedAt": {
+          "type": ["integer", "null"]
+        },
+        "updatedBy": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
     "host_provider_credential_delete": {
       "$ref": "#/$defs/NullResult"
     },

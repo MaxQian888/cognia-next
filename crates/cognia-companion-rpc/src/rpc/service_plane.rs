@@ -63,6 +63,11 @@ pub(super) const COMMANDS: &[&str] = &[
     "connectors_keyring_list",
     // ADR-0224 A6 — secrets a paired device keeps on this host.
     "host_secret_list",
+    "org_model_credential_list",
+    "org_model_credential_set",
+    "org_model_credential_delete",
+    "org_agent_policy_get",
+    "org_agent_policy_set",
     "host_provider_credential_set",
     "host_provider_credential_delete",
     "host_git_credential_set",
@@ -116,6 +121,12 @@ pub(super) const COMMANDS: &[&str] = &[
     "langfuse_trace_ingest",
     "app_settings_update",
 ];
+
+fn require_org_server(kind: &str) -> Result<(), (StatusCode, Json<RpcError>)> {
+    if kind == "headless" { Ok(()) } else {
+        Err((StatusCode::CONFLICT, Json(RpcError::new("org_scope_unavailable", "organization administration requires a multi-tenant cognia-server"))))
+    }
+}
 
 /// The sandbox pool's runtime control, or the refusal that names the switch.
 fn task_shell_runtime() -> Result<
@@ -1611,6 +1622,12 @@ pub(super) async fn dispatch(
         // the service-only `host_provider_credentials_load` returns values, to
         // this host's own runtime. Writes are `approval: interactive`, so the
         // admin lease was checked before this arm ran.
+        "org_model_credential_list" | "org_model_credential_set" | "org_model_credential_delete"
+        | "org_agent_policy_get" | "org_agent_policy_set" => {
+            require_org_server(host.kind())?;
+            cognia_companion::org_policy::dispatch(name, args, device_id, tenant_id, scope).await
+        }
+
         "host_secret_list" => {
             // The store answers its whole (sorted) list; the page walks it.
             let page = page_request(&args)?;
@@ -2434,6 +2451,28 @@ fn announce_sweep(swept: usize, host: &dyn crate::rpc_host::RpcHost) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn p6a_org_commands_never_enable_the_desktop_host() {
+        for kind in ["tauri", "unknown"] {
+            let (status, error) = require_org_server(kind).unwrap_err();
+            assert_eq!(status, StatusCode::CONFLICT);
+            assert_eq!(error.0.code, "org_scope_unavailable");
+        }
+        assert!(require_org_server("headless").is_ok());
+    }
+
+    #[tokio::test]
+    async fn p6a_org_service_arms_preserve_the_single_user_refusal() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = bound_state(temp.path().into());
+        let host = crate::headless::HeadlessServices::stub_for_tests();
+        for command in cognia_companion::org_policy::COMMANDS {
+            let (status, error) = dispatch(command, json!({"orgId":"org_p6a_rpc"}), &state, &host, "operator", Some("tenant"), Some("service")).await.unwrap_err();
+            assert_eq!(status, StatusCode::CONFLICT);
+            assert_eq!(error.0.code, "org_scope_unavailable");
+        }
+    }
 
     #[derive(Default)]
     struct BoundBackend {

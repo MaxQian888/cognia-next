@@ -559,6 +559,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     // ADR-0224 A6 — secrets a paired device keeps on this host. The writes
     // are `approval: interactive` in the manifest; the load is service-only.
     "host_secret_list",
+    "org_model_credential_list",
+    "org_model_credential_set",
+    "org_model_credential_delete",
+    "org_agent_policy_get",
+    "org_agent_policy_set",
     "host_provider_credential_set",
     "host_provider_credential_delete",
     "host_git_credential_set",
@@ -1426,6 +1431,8 @@ pub fn known_commands() -> &'static [&'static str] {
 /// They are cheap to re-run and structurally idempotent.
 #[cfg(test)]
 const READ_ONLY_COMMANDS: &[&str] = &[
+    "org_model_credential_list",
+    "org_agent_policy_get",
     "task_workspace_canonical_root",
     "best_of_n_get",
     "best_of_n_list",
@@ -3986,5 +3993,21 @@ fn changeset_and_integration_commands_have_matching_remote_control_classificatio
         assert_eq!(is_control_command(command), !read_only, "{command}");
         assert!(!is_service_only_command(command), "{command}");
         assert!(filesystem::COMMANDS.contains(&command), "{command}");
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn p6a_org_commands_have_matching_generated_and_service_dispatch_descriptors() {
+    for command in cognia_companion::org_policy::COMMANDS {
+        assert!(KNOWN_COMMANDS.contains(command));
+        assert!(known_commands().contains(command), "regenerate the companion API contract for {command}");
+        assert!(service_plane::COMMANDS.contains(command));
+        assert!(!is_service_only_command(command));
+        let descriptor = cognia_companion::command_manifest::descriptor(command).unwrap();
+        assert_eq!(descriptor.capability, cognia_companion::org_policy::CAPABILITY);
+        assert_eq!(descriptor.approval == cognia_companion::command_manifest::CommandApproval::Interactive,
+            cognia_companion::org_policy::is_write(command));
+        assert_eq!(READ_ONLY_COMMANDS_SET.contains(command), !cognia_companion::org_policy::is_write(command));
     }
 }

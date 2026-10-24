@@ -460,6 +460,10 @@
     "partitionWorkspaceUnavailable": {
       "label": "No workspaces in your personal space",
       "hint": "On a shared Host, your conversations live in your own personal space, which isn't linked to the Host's workspaces, so this one can't be moved into a workspace here."
+    },
+    "orgScopeUnavailable": {
+      "label": "Needs an organization Host",
+      "hint": "Organization settings such as shared model keys and allowed agents only exist on a Host that serves an organization. This Host serves one person, so there is nothing to configure here."
     }
   },
   "detail": {
