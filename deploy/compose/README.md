@@ -177,6 +177,17 @@ Tiers `server`/`tls` shell into the container for the loopback-only steps
 `COGNIA_SMOKE_EXEC` to swap it (e.g. `kubectl exec` — see
 `deploy/k8s/README.md`).
 
+`--tier persons` pairs two people of one org into the multi-tenant
+`cognia-server-cloud` (web-headless-e2e overlay). It checks the following:
+
+- each person gets their own person-brain partition;
+- HostState sessions are accepted without a Host admin lease;
+- neither person sees the other's rows;
+- runtime intents and model calls keep their dormancy codes;
+- `cognia-server persons list` shows both partitions, and `persons purge` empties one.
+
+It needs the org and both people seeded first with `collab-bootstrap`. The Logto organization id must be included, because device registration matches the token's `organization_id` against it. The seed values the tier assumes are `COGNIA_SMOKE_PERSONS_ORG_ID`, `COGNIA_SMOKE_PERSONS_LOGTO_ORG` and `COGNIA_SMOKE_PERSONS`; `Compose E2E` tier 2 runs the seed step. Set `COGNIA_PERSONS_SERVER_URL` and `COGNIA_SMOKE_PERSONS_EXEC` to run the tier against a Host outside compose.
+
 The nightly `Compose E2E` workflow also builds the Web image with its dedicated
 test bridge and runs `pnpm test:e2e:web-headless`. That lane creates a real
 Browser Vault, consumes a fresh cgnp3 Owner invitation through the `/pair` UI,

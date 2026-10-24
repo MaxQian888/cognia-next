@@ -161,6 +161,8 @@ services:
   # The cloud sign-in gate lane (tests/real-e2e/cloud-sign-in-gate.spec.ts):
   # a multi-tenant gateway whose identity provider is the OIDC fixture and
   # whose account plane is the collab profile behind the same Caddy origin.
+  # The persons smoke tier (`compose-smoke.mjs --tier persons`) pairs two
+  # people of one org into it: each gets their own person-brain partition.
   cognia-server-cloud:
     profiles: [web-headless-e2e]
     image: ${COGNIA_SERVER_IMAGE:-ghcr.io/maxqian888/cognia-server:latest-full}
@@ -176,6 +178,9 @@ services:
       COGNIA_MASTER_KEY: ${COGNIA_CLOUD_MASTER_KEY:-}
       COGNIA_PUBLIC_URL: https://127.0.0.1:27894
       COGNIA_DEPLOYMENT_MODE: multi-tenant
+      # Control plane only: a multi-tenant Host refuses to boot with execution
+      # on and no gVisor/VM sandbox baseline, which CI runners do not have.
+      COGNIA_EXECUTION: disabled
       COGNIA_SIGNALING_URL: ${COGNIA_SIGNALING_URL:-ws://signaling:7892/signaling}
       COGNIA_PUBLIC_SIGNALING_URL: ${COGNIA_PUBLIC_SIGNALING_URL:-}
       COGNIA_ALLOWED_WEB_ORIGINS: ${COGNIA_ALLOWED_WEB_ORIGINS:-}
@@ -186,6 +191,9 @@ services:
       COGNIA_LOGTO_NATIVE_CLIENT_ID: native-headless-cloud
       COGNIA_LOGTO_SOCIAL_PROVIDERS: github,feishu-web
       COGNIA_COLLAB_URL: http://collab-server:8080
+      # Resolves each OIDC device to its person and org standing; its SHA-256
+      # is collab-server's COLLAB_INTERNAL_SERVICE_CREDENTIAL_SHA256.
+      COGNIA_COLLAB_SERVICE_CREDENTIAL: ${COGNIA_CLOUD_COLLAB_SERVICE_CREDENTIAL:-}
       COGNIA_PUBLIC_COLLAB_URL: https://cognia.localhost/collab
       COGNIA_WEB_ORIGIN: https://cognia.localhost
     volumes:

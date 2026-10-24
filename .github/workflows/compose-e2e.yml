@@ -180,6 +180,14 @@ jobs:
       COGNIA_SECONDARY_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000002"
       COGNIA_OIDC_MEMBER_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000003"
       COGNIA_OIDC_OWNER_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000004"
+      COGNIA_CLOUD_MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000005"
+      # The multi-tenant Host's collab service credential (clear on the Host,
+      # SHA-256 on collab-server). Throwaway, like the keys above.
+      COGNIA_CLOUD_COLLAB_SERVICE_CREDENTIAL: "web-headless-e2e-host-service-credential"
+      COLLAB_INTERNAL_SERVICE_CREDENTIAL_SHA256: "43981c35c34c974ad5b16db1004eb204b9a8b649049f95b6bb40ae0cda1e9b68"
+      # Built from this checkout below: the published image only moves on
+      # release tags, and the persons tier needs this tree's collab endpoints.
+      COLLAB_IMAGE: "cognia-collab:ci"
       COGNIA_SMOKE_AGENT: "1"
       COGNIA_PUBLIC_URL: "https://cognia.localhost"
       COGNIA_PUBLIC_SIGNALING_URL: "wss://cognia.localhost/v2/signaling"
@@ -219,6 +227,9 @@ jobs:
             --cache-from "type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cognia-server:buildcache" \
             .
 
+      - name: Build collab-server
+        run: docker build --file deploy/docker/Dockerfile.collab-server --tag cognia-collab:ci .
+
       - name: Build same-origin Web/Caddy image
         working-directory: deploy/compose
         env:
@@ -241,6 +252,7 @@ jobs:
         run: node scripts/smoke/compose-smoke.mjs --tier server
 
       - name: Start same-origin Caddy front door
+        id: front-door
         working-directory: deploy/compose
         env:
           SIGNALING_IMAGE: cognia-signaling:ci
@@ -328,6 +340,47 @@ jobs:
             COGNIA_REAL_OIDC_OWNER_PAIR_PAYLOAD="$oidc_owner_pair_payload" \
             COGNIA_REAL_COMPOSE_DIR="deploy/compose" \
             pnpm test:e2e:web-headless
+
+      # After the Playwright lane: its cloud sign-in gate claims the empty
+      # deployment, which a seeded org would already have taken. Runs even
+      # when that lane fails, as long as the stack came up.
+      - name: Seed the persons org (two people, one Logto org)
+        id: persons-seed
+        if: ${{ !cancelled() && steps.front-door.outcome == 'success' }}
+        working-directory: deploy/compose
+        env:
+          SIGNALING_IMAGE: cognia-signaling:ci
+          SHARE_IMAGE: cognia-share:ci
+          COGNIA_SERVER_IMAGE: cognia-server:ci-full
+        run: |
+          set -euo pipefail
+          for person in "usr_smoke-ada Ada smoke-ada" "usr_smoke-bob Bob smoke-bob"; do
+            set -- $person
+            docker compose --profile collab --profile collab-bootstrap run --rm \
+              -e COLLAB_BOOTSTRAP_ORG_ID=org_smoke-persons \
+              -e COLLAB_BOOTSTRAP_ORG_NAME="Smoke Persons" \
+              -e COLLAB_BOOTSTRAP_LOGTO_ORG_ID=logto-smoke-persons \
+              -e COLLAB_BOOTSTRAP_USER_ID="$1" \
+              -e COLLAB_BOOTSTRAP_USER_NAME="$2" \
+              -e COLLAB_BOOTSTRAP_IDENTITY_ID="identity-$3" \
+              -e COLLAB_BOOTSTRAP_IDENTITY_SUBJECT="$3" \
+              -e COLLAB_BOOTSTRAP_WORKSPACE_ID=workspace-smoke-persons \
+              -e COLLAB_BOOTSTRAP_WORKSPACE_NAME=Main \
+              collab-bootstrap
+          done
+          # The bootstrap seeds owners; bob becomes a plain member so the tier
+          # can check that org administration refuses him (AC32).
+          docker compose --profile collab exec -T collab-postgres \
+            psql -U cognia_collab -d cognia_collab -v ON_ERROR_STOP=1 -c \
+            "UPDATE org_memberships SET role = 'member' WHERE org_id = 'org_smoke-persons' AND user_id = 'usr_smoke-bob'"
+
+      - name: Smoke (tier persons)
+        if: ${{ !cancelled() && steps.persons-seed.outcome == 'success' }}
+        env:
+          COGNIA_PERSONS_SERVER_URL: https://127.0.0.1:27894
+          COGNIA_SMOKE_OIDC_E2E_TOKEN_URL: http://127.0.0.1:4020/e2e/token
+          COGNIA_SMOKE_PERSONS_MEMBER: smoke-bob
+        run: node scripts/smoke/compose-smoke.mjs --tier persons
 
       - name: Logs on failure
         if: failure()
