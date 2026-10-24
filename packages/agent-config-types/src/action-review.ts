@@ -207,9 +207,9 @@ export interface ActionReviewOrigin {
 /**
  * Non-authoritative model advice.
  *
- * A model may populate this and nothing else. `planActionReview` copies it onto
- * the request and never reads it, so no code path exists by which a model's
- * opinion becomes an authorization.
+ * A model may populate this and nothing else. It rides on the request into the
+ * receipt, and `planActionReview` never reads it, so no code path exists by
+ * which a model's opinion becomes an authorization.
  */
 export interface ActionReviewRecommendation {
   suggests: "allow" | "deny"
