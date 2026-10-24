@@ -419,6 +419,35 @@ describe("useChatStore", () => {
       __clearAllSubagentApprovalRoutesForTesting()
     })
 
+    it("buckets a nested subagent's ask under the root, not its ephemeral parent", async () => {
+      const { registerSubagentApprovalRoute, __clearAllSubagentApprovalRoutesForTesting } =
+        await import("@/lib/claude/agents/subagent-approval-routes")
+      __clearAllSubagentApprovalRoutesForTesting()
+      registerSubagentApprovalRoute("eph-grandchild", {
+        parentSessionId: "eph-child",
+        rootSessionId: "s1",
+        runId: "run-2",
+        subagentId: "coder",
+        backgrounded: true,
+      })
+      const { result } = renderHook(() => useChatStore())
+      act(() =>
+        result.current.pushApproval({
+          requestId: "nested-req",
+          sessionId: "eph-grandchild",
+          toolUseID: "tu",
+          toolName: "Bash",
+          input: {},
+          origin: "subagent",
+          subagentId: "coder",
+          subagentRunId: "run-2",
+        } as unknown as PendingApproval)
+      )
+      expect(result.current.pendingApprovals.map((a) => a.requestId)).toContain("nested-req")
+      expect(result.current.sessions["eph-child"]).toBeUndefined()
+      __clearAllSubagentApprovalRoutesForTesting()
+    })
+
     it("markApprovalInterrupted flags the entry, keeps it, and restores streaming", () => {
       const { result } = renderHook(() => useChatStore())
       act(() => result.current.pushApproval(approval("r1")))

@@ -118,6 +118,15 @@ describe("redispatchBackgroundRun", () => {
     })
   })
 
+  it("carries a journalled root so a grandchild's asks reach the open session", async () => {
+    await redispatchBackgroundRun(record({ sessionId: "eph-gone", rootSessionId: "chat-1" }), {
+      kind: "manual",
+    })
+    expect(startDispatchRun).toHaveBeenCalledWith(
+      expect.objectContaining({ parentSessionId: "eph-gone", rootSessionId: "chat-1" })
+    )
+  })
+
   it("parks legacy interrupted work without persisted replay evidence", async () => {
     const outcome = await redispatchBackgroundRun(record({ resumeAttempt: 1 }), { kind: "auto" })
     expect(outcome).toMatchObject({ ok: false, reason: "recovery-required" })

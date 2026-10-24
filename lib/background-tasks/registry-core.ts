@@ -45,6 +45,13 @@ export interface BackgroundTaskJournalRecord {
   subagentId: string
   prompt: string
   sessionId: string
+  /**
+   * The root of `sessionId` when that is itself an ephemeral subagent session
+   * (`lib/claude/agents/root-session.ts`). Persisted because the parent's
+   * in-memory route is gone after a restart, and a re-dispatched grandchild
+   * must still surface its approvals in the session the user looks at.
+   */
+  rootSessionId?: string
   host: BackgroundTaskHost
   status: BackgroundTaskStatus
   startedAt: number

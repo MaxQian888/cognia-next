@@ -16,8 +16,7 @@ import { contextSelectionIdentity } from "@/lib/chat/mentions/selection-identity
 import type { ContextRef } from "@/lib/chat/mentions/types"
 import type { CarriedPromptPreamble, PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
-import { decodeSubSession } from "@/lib/claude/team-session-id"
-import { getSubagentApprovalRoute } from "@/lib/claude/agents/subagent-approval-routes"
+import { resolveRootSessionId } from "@/lib/claude/agents/root-session"
 import { useApprovalJournalStore, toPersistedApproval } from "@/stores/agent/approval-journal-store"
 import { IDLE_TIMING, nextRunTiming, type RunTiming } from "@/lib/claude/run-status"
 import { nextToolTimestamps } from "@/lib/claude/run-record"
@@ -460,12 +459,13 @@ function writeBookmark(sessionId: string, messageId: string, bookmarked: boolean
     })
 }
 
+/**
+ * The session an approval surfaces in: the root of a team sub-session or a
+ * (possibly nested) subagent session, so a grandchild's ask is not stranded
+ * on its parent's ephemeral session.
+ */
 function resolveApprovalBucket(sessionId: string): string {
-  const team = decodeSubSession(sessionId)?.teamSessionId
-  if (team) return team
-  const route = getSubagentApprovalRoute(sessionId)
-  if (route) return route.parentSessionId
-  return sessionId
+  return resolveRootSessionId(sessionId)
 }
 
 function sliceForId(state: ChatState, id: string): SessionChatSlice {

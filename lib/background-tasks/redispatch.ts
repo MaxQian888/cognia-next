@@ -247,6 +247,7 @@ export async function redispatchBackgroundRun(
       ...(record.model ? { model: record.model } : {}),
       background: true,
       parentSessionId: record.sessionId,
+      ...(record.rootSessionId ? { rootSessionId: record.rootSessionId } : {}),
       caller,
       resumeOfRunId: record.runId,
       ...(recovery ? { recovery } : {}),

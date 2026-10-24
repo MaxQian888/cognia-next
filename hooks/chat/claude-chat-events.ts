@@ -56,6 +56,7 @@ import { drainSessionPeerMessages } from "@/lib/chat/session-peer-messaging"
 import { completeAttachedSession } from "@/lib/chat/attached-session"
 import { maybeDrainBackgroundResults } from "./background-result-runtime"
 import { getSubagentApprovalRoute } from "@/lib/claude/agents/subagent-approval-routes"
+import { resolveRootSessionId } from "@/lib/claude/agents/root-session"
 import { approveTool, toolResultDecision } from "@/lib/claude/ipc"
 import type { RemoteExecutionContext } from "@/lib/claude/remote-execution"
 import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
@@ -920,7 +921,8 @@ export async function handleEvent(
             subagentId: subagentRoute.subagentId,
             subagentRunId: subagentRoute.runId,
           },
-          subagentRoute.parentSessionId
+          // The session the user looks at; a nested subagent's parent is ephemeral.
+          resolveRootSessionId(evt.sessionId)
         )
         return
       }

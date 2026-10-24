@@ -26,6 +26,7 @@ import { getDispatchContext, getResolvedPermissionCeiling } from "./dispatch-con
 import { getKnowledgeAccessForSession } from "@/lib/knowledge-base/runtime/session-reader"
 import type { KnowledgeReadingAccess } from "@/lib/knowledge-base/runtime/progressive-reading"
 import { getOrCreateDispatchBudget, isDispatchBudgetExhausted } from "./dispatch-budget"
+import { resolveRootSessionId } from "./root-session"
 import {
   journalRendererForegroundRun,
   startAcceptedRendererBackgroundRun,
@@ -226,6 +227,12 @@ export interface StartDispatchRunParams {
   background: boolean
   /** The chat session that issued the dispatch (runtime-store bucketing + journal). */
   parentSessionId: string
+  /**
+   * The root of `parentSessionId`, when the caller already knows it (a
+   * re-dispatch reads it from the journal). Resolved from the live routes
+   * otherwise.
+   */
+  rootSessionId?: string
   /** Caller nesting context from {@link resolveCaller}. */
   caller: ResolvedCaller
   /** Model-facing label for the result header (defaults to the subagent id). */
@@ -305,6 +312,8 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
       prompt: resolvePluginSubagentPrompt(registered.pluginId, registered.entry),
     }
   }
+  // Resolved now, while the parent's own route (if it is a subagent) is live.
+  const rootSessionId = p.rootSessionId ?? resolveRootSessionId(p.parentSessionId)
   let target = resolved
     ? structuredClone(p.model ? { ...resolved, model: p.model } : resolved)
     : p.subagentId
@@ -329,6 +338,7 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
       abortSignal: abort.signal,
       _approvalRoute: {
         parentSessionId: p.parentSessionId,
+        rootSessionId,
         runId: childRunId,
         subagentId: p.subagentId,
         backgrounded: p.background,
@@ -455,6 +465,7 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
     subagentId: p.subagentId,
     prompt: p.prompt,
     sessionId: p.parentSessionId,
+    ...(rootSessionId !== p.parentSessionId ? { rootSessionId } : {}),
     host: "renderer" as const,
     startedAt: Date.now(),
     toolsEnabled: p.toolsEnabled,

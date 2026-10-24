@@ -568,11 +568,74 @@ describe("startDispatchRun — approval route threading", () => {
     expect(mockDispatch.mock.calls[0][2]).toMatchObject({
       _approvalRoute: {
         parentSessionId: "chat-9",
+        rootSessionId: "chat-9",
         runId: handle.runId,
         subagentId: "coder",
         backgrounded: false,
       },
     })
+  })
+
+  it("records the root for a subagent dispatched by a subagent", async () => {
+    const { registerSubagentApprovalRoute, __clearAllSubagentApprovalRoutesForTesting } =
+      await import("./subagent-approval-routes")
+    registerSubagentApprovalRoute("eph-parent", {
+      parentSessionId: "chat-9",
+      runId: "run-parent",
+      subagentId: "planner",
+      backgrounded: false,
+    })
+    try {
+      await startDispatchRun({
+        subagentId: "coder",
+        prompt: "p",
+        toolsEnabled: true,
+        background: false,
+        parentSessionId: "eph-parent",
+        caller: caller(),
+      })
+      expect(mockDispatch.mock.calls[0][2]).toMatchObject({
+        _approvalRoute: { parentSessionId: "eph-parent", rootSessionId: "chat-9" },
+      })
+    } finally {
+      __clearAllSubagentApprovalRoutesForTesting()
+    }
+  })
+
+  it("journals the root of a backgrounded grandchild and honours an explicit one", async () => {
+    const handle = await startDispatchRun({
+      subagentId: "coder",
+      prompt: "p",
+      toolsEnabled: true,
+      background: true,
+      parentSessionId: "eph-gone",
+      rootSessionId: "chat-9",
+      caller: caller(),
+    })
+    expect(mockStartBackground).toHaveBeenCalledWith(
+      handle.runId,
+      expect.objectContaining({ sessionId: "eph-gone", rootSessionId: "chat-9" }),
+      expect.any(Promise),
+      expect.anything(),
+      expect.anything()
+    )
+    await mockStartBackground.mock.calls[0][2]
+    expect(mockDispatch.mock.calls[0][2]).toMatchObject({
+      _approvalRoute: { parentSessionId: "eph-gone", rootSessionId: "chat-9" },
+    })
+  })
+
+  it("journals no root for a top-level dispatch", async () => {
+    await startDispatchRun({
+      subagentId: "coder",
+      prompt: "p",
+      toolsEnabled: true,
+      background: true,
+      parentSessionId: "chat-1",
+      caller: caller(),
+    })
+    expect(mockStartBackground.mock.calls[0][1]).not.toHaveProperty("rootSessionId")
+    await mockStartBackground.mock.calls[0][2]
   })
 })
 
