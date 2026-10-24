@@ -56,6 +56,68 @@ export const ACTION_REVIEW_RETENTION_DAYS = 90
 export const ACTION_REVIEW_RECEIPT_CAP = 20_000
 
 /**
+ * What an outbound authorization key records (ADR-0239).
+ *
+ * - `deny`: a person refused these targets; the fence holds them refused for
+ *   the rest of the instruction epoch, across tools and child runs.
+ * - `grant`: a person allowed these targets for the rest of the instruction
+ *   epoch ("allow for this request").
+ */
+export type ActionReviewAuthKeyKind = "deny" | "grant"
+
+/**
+ * The key one authorization stores and one lookup asks for.
+ *
+ * Root session and epoch are URI-encoded so a `|` inside either (an IM message
+ * id can contain anything) can never make one epoch's prefix match another's.
+ * The fingerprint is fixed-length hex and needs no escaping.
+ */
+export function actionReviewAuthKey(
+  kind: ActionReviewAuthKeyKind,
+  rootSessionId: string,
+  instructionEpoch: string,
+  fingerprint: string
+): string {
+  return `${actionReviewAuthKeyPrefix(kind, rootSessionId, instructionEpoch)}${fingerprint}`
+}
+
+/** Every key of one kind in one root session's epoch starts with this. */
+export function actionReviewAuthKeyPrefix(
+  kind: ActionReviewAuthKeyKind,
+  rootSessionId: string,
+  instructionEpoch: string
+): string {
+  return `${kind}|${encodeURIComponent(rootSessionId)}|${encodeURIComponent(instructionEpoch)}|`
+}
+
+/**
+ * The authorization keys a receipt contributes (ADR-0239).
+ *
+ * Only an outbound review that knows its root session and epoch contributes.
+ * A refusal fences only when a person made it: a timeout, an expiry, a system
+ * denial (session closed, run aborted) and a policy deny are not a person
+ * saying no, and the next attempt asks again. A grant contributes only at
+ * `instruction` scope; `once` covers the single action it answered and
+ * `policy` lives on the configured list, not here.
+ */
+function deriveAuthKeys(receipt: ActionReviewReceipt): string[] {
+  const { request, decision } = receipt
+  const targets = request.subject.targets
+  const root = request.origin.rootSessionId
+  const epoch = request.origin.instructionEpoch
+  if (!targets?.length || !root || !epoch) return []
+  const kind: ActionReviewAuthKeyKind | null =
+    decision.outcome === "deny" && decision.authority === "human"
+      ? "deny"
+      : decision.grant?.scope === "instruction" &&
+          (decision.outcome === "allow" || decision.outcome === "allow_always")
+        ? "grant"
+        : null
+  if (!kind) return []
+  return [...new Set(targets.map((t) => actionReviewAuthKey(kind, root, epoch, t.fingerprint)))]
+}
+
+/**
  * Dexie row: the receipt plus flattened, indexed query columns.
  *
  * Dexie can index nested paths, but a receipt is queried on six independent
@@ -78,6 +140,12 @@ export interface ActionReviewReceiptRow extends ActionReviewReceipt {
   projectId?: string
   /** multiEntry index — "every credential-auth decision this quarter". */
   surfaceIds: ActionReviewSurfaceId[]
+  /**
+   * multiEntry index — the fence and instruction grants (ADR-0239), one
+   * {@link actionReviewAuthKey} per target. Empty for every other receipt,
+   * and absent on rows written before schema v249.
+   */
+  authKeys: string[]
 }
 
 /**
@@ -102,6 +170,7 @@ export function toReceiptRow(receipt: ActionReviewReceipt): ActionReviewReceiptR
     runId: request.origin.runId,
     projectId: request.origin.projectId,
     surfaceIds: request.surfaces.map((s) => s.id),
+    authKeys: deriveAuthKeys(receipt),
   }
 }
 
@@ -127,8 +196,12 @@ export async function recordActionReviewReceipt(
     const count = await db.actionReviewReceipts.count()
     if (count > cap) {
       const overflow = count - cap
+      // A row that carries a fence or a grant is skipped: trimming it would
+      // lift a person's refusal because unrelated reviews piled up. Those rows
+      // still leave at their own expiry, and the cap may overshoot by them.
       const oldest = await db.actionReviewReceipts
         .orderBy("decidedAt")
+        .filter((r) => !r.authKeys?.length)
         .limit(overflow)
         .primaryKeys()
       if (oldest.length > 0) {
@@ -214,6 +287,43 @@ export async function listActionReviewReceipts(
 }
 
 /**
+ * True when an unexpired receipt carries `key` (ADR-0239). Answers "is this
+ * target fenced in this epoch?" and "did a person allow it for this request?".
+ */
+export async function hasActionReviewAuthKey(
+  key: string,
+  now: number = Date.now()
+): Promise<boolean> {
+  const row = await getDb()
+    .actionReviewReceipts.where("authKeys")
+    .equals(key)
+    .filter((r) => r.expiresAt > now)
+    .first()
+  return row !== undefined
+}
+
+/**
+ * Every unexpired authorization key that starts with `prefix`, deduplicated:
+ * the fence or the instruction grants of one root session's epoch, as built
+ * by {@link actionReviewAuthKeyPrefix}.
+ */
+export async function listActionReviewAuthKeys(
+  prefix: string,
+  now: number = Date.now()
+): Promise<string[]> {
+  const rows = await getDb()
+    .actionReviewReceipts.where("authKeys")
+    .startsWith(prefix)
+    .filter((r) => r.expiresAt > now)
+    .toArray()
+  const keys = new Set<string>()
+  for (const row of rows) {
+    for (const key of row.authKeys) if (key.startsWith(prefix)) keys.add(key)
+  }
+  return [...keys]
+}
+
+/**
  * Delete every receipt past its own watermark. Returns the count removed.
  *
  * Indexes `expiresAt` rather than recomputing `now - retentionDays`, so
@@ -228,7 +338,13 @@ export async function pruneActionReviewReceipts(now: number = Date.now()): Promi
   return expired.length
 }
 
-/** Clear the log. Backs the Settings → Security "Clear" affordance. */
+/**
+ * Clear the log. Backs the Settings → Security "Clear" affordance.
+ *
+ * This also lifts every fence and instruction grant (ADR-0239), because they
+ * are derived from these rows. A person clearing their own audit log is a
+ * deliberate act; nothing calls this on its own.
+ */
 export async function clearActionReviewReceipts(): Promise<void> {
   await getDb().actionReviewReceipts.clear()
 }

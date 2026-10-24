@@ -20,6 +20,7 @@
  */
 
 import { pruneOlderThan as pruneAgentTraces } from "@/lib/db/agent-traces"
+import { pruneActionReviewReceipts } from "@/lib/db/action-review-receipts"
 import { deleteExpiredEvalArtifacts } from "@/lib/db/eval-lab"
 import { purgeOcrCacheOlderThan } from "@/lib/db/ocr-results"
 import { pruneExpiredWorkSubmissionPayloads } from "@/lib/db/work-submissions"
@@ -90,6 +91,13 @@ function completed(removed: number): RetentionOutcome {
 const SETTLED_QUEUE_RETENTION_DAYS = 7
 
 const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
+  // Each receipt carries its own expiry, stamped at write time; the sweep only
+  // deletes past it. Without this entry the prune had no caller, and the only
+  // bound on the table was its row cap.
+  actionReviewReceipts: {
+    policy: "row-expiry",
+    prune: async () => completed(await pruneActionReviewReceipts()),
+  },
   usageHistory: {
     policy: "row-expiry",
     prune: async () => {

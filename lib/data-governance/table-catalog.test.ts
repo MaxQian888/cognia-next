@@ -180,6 +180,7 @@ describe("DataTableCatalog", () => {
     // `executionContextBundles` share one executor, and the earlier of the two
     // fixes where it lands in the sequence.
     expect(centralRetentionExecutorIds()).toEqual([
+      "actionReviewReceipts",
       "agentTraces",
       "evalArtifacts",
       "evalOnline",

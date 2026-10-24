@@ -18,15 +18,19 @@ it("declares a projection for every channel the contract declares", () => {
   )
 })
 
-it("keeps `connector-workflow` receipt-only, per the contract", () => {
-  // The contract calls it "receipt-only, never a waiter" — minting an interrupt
-  // would invent a pending item nobody can answer.
+const RECEIPT_ONLY_CHANNELS = new Set(["connector-workflow", "connector-delivery"])
+
+it("keeps the receipt-only channels receipt-only, per the contract", () => {
+  // The contract calls them "receipt-only, never a waiter" — minting an
+  // interrupt would invent a pending item nobody can answer. A planned
+  // connector delivery is answered in the draft center instead (ADR-0239).
   expect(getActionReviewChannelAdapter("connector-workflow").interruptType).toBeNull()
+  expect(getActionReviewChannelAdapter("connector-delivery").interruptType).toBeNull()
 })
 
 it("gives every other channel a run interrupt to park on", () => {
   for (const channel of ACTION_REVIEW_CHANNELS) {
-    if (channel === "connector-workflow") continue
+    if (RECEIPT_ONLY_CHANNELS.has(channel)) continue
     expect(getActionReviewChannelAdapter(channel).interruptType).not.toBeNull()
   }
 })

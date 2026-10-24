@@ -435,7 +435,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 247
+export const CURRENT_SCHEMA_VERSION = 249
 
 /**
  * The immutable cumulative v240 schema baseline.
@@ -1072,6 +1072,12 @@ const HARNESS_EVOLUTION_SCHEMA = {
     "&id, characterId, scope, validationStatus, domain, projectId, sourceRunId, updatedAt",
 }
 
+// v249 — the outbound authorization keys (ADR-0239): fence entries and
+// instruction grants, one per target, as a multiEntry index on the receipts.
+const ACTION_REVIEW_AUTH_SCHEMA = {
+  actionReviewReceipts:
+    "&id, decidedAt, expiresAt, outcome, authority, tier, channel, sessionId, runId, projectId, [channel+decidedAt], [sessionId+decidedAt], *surfaceIds, *authKeys",
+}
 export const CURRENT_SCHEMA: Record<string, string | null> = {
   ...SCHEMA_V240,
   ...SESSION_LIST_SCHEMA,
@@ -1080,6 +1086,7 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   ...MANAGED_DESKTOP_DELETION_SCHEMA,
   ...PROMPT_OVERRIDE_SCHEMA,
   ...HARNESS_EVOLUTION_SCHEMA,
+  ...ACTION_REVIEW_AUTH_SCHEMA,
 }
 
 let databaseConnectionSequence = 0
@@ -1899,8 +1906,8 @@ export class CogniaDB extends Dexie {
   // v74 — Terminal durable history + unattended-exec audit.
   terminalHistory!: Table<TerminalHistoryRow, string>
   unattendedExecAudit!: Table<UnattendedExecAuditRow, string>
-  // v139 — Unified action-review receipts (ADR-0102). One durable row per
-  // reviewed action across every decision point. See
+  // v139 — Unified action-review receipts. One durable row per reviewed action
+  // across every decision point; v249 adds `*authKeys` (ADR-0239). See
   // `lib/db/action-review-receipts.ts`.
   actionReviewReceipts!: Table<import("./action-review-receipts").ActionReviewReceiptRow, string>
   // v157 — content-free cross-domain governance ledger. See

@@ -5407,3 +5407,41 @@ schemaIt("v247 adds the Harness Evolution tables beside existing data", async ()
     await Dexie.delete(name)
   }
 })
+
+it("v249 adds the receipt authorization index and keeps existing receipts", async () => {
+  const name = "cognia-action-review-auth-v249-upgrade"
+  // The store set as it stood at v247: no media packs, receipts without
+  // `*authKeys`. Each later step must apply on top of it.
+  const { petMediaPacks: _media, ...current } = CURRENT_SCHEMA
+  const previous = {
+    ...current,
+    actionReviewReceipts: String(current.actionReviewReceipts).replace(", *authKeys", ""),
+  }
+  expect(previous.actionReviewReceipts).not.toContain("authKeys")
+  const old = new Dexie(name)
+  old.version(247).stores(previous)
+  await old.open()
+  await old.table("actionReviewReceipts").put({ id: "before", decidedAt: 1, expiresAt: 9 })
+  old.close()
+  const upgraded = new CogniaDB(name)
+  try {
+    await upgraded.open()
+    expect(upgraded.verno).toBe(CURRENT_SCHEMA_VERSION)
+    expect(upgraded.actionReviewReceipts.schema.indexes.map((index) => index.name)).toContain(
+      "authKeys"
+    )
+    expect(await upgraded.actionReviewReceipts.get("before")).toMatchObject({ decidedAt: 1 })
+    await upgraded.actionReviewReceipts.put({
+      id: "after",
+      decidedAt: 2,
+      expiresAt: 9,
+      authKeys: ["deny|root|epoch|fp"],
+    } as never)
+    expect(
+      await upgraded.actionReviewReceipts.where("authKeys").equals("deny|root|epoch|fp").count()
+    ).toBe(1)
+  } finally {
+    upgraded.close()
+    await Dexie.delete(name)
+  }
+})

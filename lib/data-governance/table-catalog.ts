@@ -1808,8 +1808,10 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
   actionReviewReceipts: {
     mode: "ttl",
     days: 90,
-    enforcement: "domain",
-    reason: "Receipts receive an indexed expiresAt when written and are pruned by their owner.",
+    enforcement: "central",
+    executorId: "actionReviewReceipts",
+    reason:
+      "Receipts receive an indexed expiresAt when written; the central sweeper deletes expired rows, including fence-bearing ones (ADR-0239), which the row cap never trims.",
   },
   behaviorEvents: {
     mode: "cap",

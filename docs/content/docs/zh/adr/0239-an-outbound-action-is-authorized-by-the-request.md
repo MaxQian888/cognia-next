@@ -108,9 +108,9 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 
 - **指纹**：`outbound | 渠道 | 归一化收件人`。不包含消息正文，所以换措辞绕不过屏障；换了收件人则重新评估。
 - **根会话**：子任务、队友和后台子运行经由现有的审批路由映射到根会话（`lib/claude/agents/subagent-approval-routes.ts`、`lib/chat/approval-routing.ts`）。
-- **存储**：屏障不是新的存储，而是从拒绝 receipt 推导，所以重载后仍然有效，也不需要第二个事实来源。Receipt 增加可选字段（契约版本 1，仅追加）：`subject.target`、`request.fingerprint`、`origin.rootSessionId`、`origin.instructionEpoch` 和 `decision.grant`。新增一个复合索引 `[rootSessionId+fingerprint]`，需要按既定流程升级一次 Dexie schema 版本。查询走内存缓存。
+- **存储**：屏障不是新的存储，而是从拒绝 receipt 推导，所以重载后仍然有效，也不需要第二个事实来源。Receipt 增加可选字段（契约版本 1，仅追加）：`subject.targets`、`origin.rootSessionId`、`origin.instructionEpoch`、`request.plan` 和 `decision.grant`。目标只存渠道和指纹。收件人本身（会话键、平台用户 id、地址）属于个人数据，而 receipt 表被归为 metadata-only；持有同样目标的定时任务正是因此被加密存储。用一个 multiEntry 索引 `*authKeys`（`deny|根会话|纪元|指纹` 与 `grant|…`）同时服务屏障和指令授予；Dexie 不支持把 multiEntry 字段放进复合索引。该索引在 schema v249 加入。查询走内存缓存。
 - **不构成屏障的情况**：超时或过期不是拒绝。它只拒绝当次动作，下次尝试会重新询问（现有的 doom-loop 防护仍然限制重复次数）。模型的意见永远不会形成屏障。
-- **有效期**：直到纪元推进，上限为 receipt 的保留期。处于休眠的 `pruneActionReviewReceipts` 需要有调用方；行数上限优先裁剪不带有效屏障记录的 receipt。
+- **有效期**：直到纪元推进，上限为 receipt 的保留期。处于休眠的 `pruneActionReviewReceipts` 现在由中央保留期清理器执行；行数上限永不裁剪带有屏障或授予的 receipt。
 
 `session-denials.ts` 继续处理非外发工具；外发类的拒绝改走屏障。
 

@@ -148,6 +148,7 @@ describe("pruneRetainedTables", () => {
     ])
     const out = await pruneRetainedTables(30)
     expect(out).toEqual([
+      { id: "actionReviewReceipts", removed: 0, status: "completed-no-work" },
       { id: "agentTraces", removed: 1, status: "completed" },
       { id: "evalArtifacts", removed: 0, status: "completed-no-work" },
       { id: "evalOnline", removed: 0, status: "completed-no-work" },
@@ -202,6 +203,8 @@ describe("pruneRetainedTables", () => {
     // bound. These two entries are what actually sweeps them.
     expect(RETENTION_TARGETS.map((t) => t.id)).toContain("memoryGovernance")
     expect(RETENTION_TARGETS.map((t) => t.id)).toContain("retrievalControl")
+    // `pruneActionReviewReceipts` had no caller either (ADR-0239 WP1).
+    expect(RETENTION_TARGETS.map((t) => t.id)).toContain("actionReviewReceipts")
   })
 
   it("preserves deletions already completed when a later file sweep stage fails", async () => {
@@ -571,4 +574,18 @@ it("replays desktop deletion even when configured retention keeps everything", a
   expect(await pruneRetainedTables(0, [target])).toEqual([
     { id: "managedDesktopDeletion", removed: 2, status: "completed" },
   ])
+})
+
+it("sweeps expired action-review receipts and keeps live ones (ADR-0239 WP1)", async () => {
+  const now = Date.now()
+  const base = { decidedAt: 1, authKeys: [], surfaceIds: [] }
+  await getDb().actionReviewReceipts.bulkPut([
+    { ...base, id: "expired", expiresAt: now - 1 },
+    { ...base, id: "live", expiresAt: now + MS_PER_DAY },
+  ] as never)
+  const target = RETENTION_TARGETS.find((row) => row.id === "actionReviewReceipts")!
+  expect(await pruneRetainedTables(0, [target])).toEqual([
+    { id: "actionReviewReceipts", removed: 1, status: "completed" },
+  ])
+  expect(await getDb().actionReviewReceipts.toCollection().primaryKeys()).toEqual(["live"])
 })

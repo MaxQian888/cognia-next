@@ -61,6 +61,12 @@ export type ActionReviewChannel =
   | "agent-team-recovery"
   /** Anything reaching the generic approval bus without a richer channel. */
   | "generic"
+  /**
+   * A connector delivery planned at `enqueueGoverned` (ADR-0239): an automated
+   * send that no tool-call review covered. Receipt-only, never a waiter: an
+   * unauthorized unattended delivery becomes a draft a person approves.
+   */
+  | "connector-delivery"
 
 export const ACTION_REVIEW_CHANNELS: readonly ActionReviewChannel[] = [
   "chat-tool",
@@ -78,6 +84,7 @@ export const ACTION_REVIEW_CHANNELS: readonly ActionReviewChannel[] = [
   "agent-team-replan",
   "agent-team-recovery",
   "generic",
+  "connector-delivery",
 ]
 
 /** RESTATEMENT of `PermissionVerdict` (lib/claude/permissions/ruleset.ts). */
@@ -128,6 +135,26 @@ export interface ActionReviewSurfaceHit {
 export type ActionReviewSubjectKind =
   "tool-call" | "plan" | "workflow-step" | "run-continue" | "handoff-commit"
 
+/**
+ * A party an outbound action delivers to (ADR-0239), as a receipt records it.
+ *
+ * The recipient itself is never stored. Conversation keys, platform user ids
+ * and mail addresses are personal data, the receipt table is classed
+ * metadata-only, and the scheduled tasks that hold the same targets are
+ * encrypted for exactly that reason. Matching a fence or a grant only needs
+ * equality, so a receipt keeps the fingerprint and the channel.
+ */
+export interface ActionReviewTarget {
+  /** Delivery channel: a connector adapter id, `mail`, or `tool:<name>`. */
+  channel: string
+  /**
+   * Lowercase hex SHA-256 of `outbound|<channel>|<normalized recipient>`,
+   * computed by `lib/policy/action-review/outbound-targets.ts`. The message
+   * body is never part of it, so rewording a refused send does not change it.
+   */
+  fingerprint: string
+}
+
 export interface ActionReviewSubject {
   kind: ActionReviewSubjectKind
   /** Stable identity of the thing: tool name, node kind, teamId, ticketId. */
@@ -140,6 +167,11 @@ export interface ActionReviewSubject {
   command?: string
   /** Filesystem target when the subject touches a path (feeds the ruleset glob). */
   path?: string
+  /**
+   * Who an outbound action delivers to (ADR-0239). Present only on outbound
+   * reviews; one review can cover several targets (`im.broadcast`).
+   */
+  targets?: ActionReviewTarget[]
 }
 
 export interface ActionReviewOrigin {
@@ -158,6 +190,18 @@ export interface ActionReviewOrigin {
   hostRef?: string
   /** True when no human can possibly answer (scheduled / headless / IM auto). */
   headless?: boolean
+  /**
+   * The session at the top of this action's run tree (ADR-0239): a subagent's,
+   * teammate's or background child's review carries its root, so a person's
+   * refusal fences the whole tree and not only the child that asked.
+   */
+  rootSessionId?: string
+  /**
+   * The requester's latest instruction in the root session when the review was
+   * raised (ADR-0239), e.g. their newest message id. Instruction-scoped grants
+   * and fence entries hold only while it is unchanged.
+   */
+  instructionEpoch?: string
 }
 
 /**
@@ -175,6 +219,29 @@ export interface ActionReviewRecommendation {
   source: string
 }
 
+/** What `planActionReview` decided for a request (ADR-0239). */
+export type ActionReviewPlanOutcome = "allow" | "ask" | "draft" | "park" | "deny"
+
+export const ACTION_REVIEW_PLAN_OUTCOMES: readonly ActionReviewPlanOutcome[] = [
+  "allow",
+  "ask",
+  "draft",
+  "park",
+  "deny",
+]
+
+/**
+ * The engine's plan, kept on the receipt.
+ *
+ * `enforced: false` is shadow mode (ADR-0239 rollout): the plan was computed
+ * and recorded while the action took its pre-existing path, so a person can
+ * see what enforcement would change before turning it on.
+ */
+export interface ActionReviewPlan {
+  outcome: ActionReviewPlanOutcome
+  enforced: boolean
+}
+
 export interface ActionReviewRequest {
   contractVersion: typeof ACTION_REVIEW_CONTRACT_VERSION
   requestId: string
@@ -187,6 +254,8 @@ export interface ActionReviewRequest {
   tier: ActionReviewTier
   surfaces: ActionReviewSurfaceHit[]
   recommendation?: ActionReviewRecommendation
+  /** Set by the policy engine on the outbound reviews it plans (ADR-0239). */
+  plan?: ActionReviewPlan
   requestedAt: number
   /** Absolute ms after which the review auto-denies. */
   expiresAt?: number
@@ -235,6 +304,29 @@ export const ACTION_REVIEW_AUTHORITIES: readonly ActionReviewAuthority[] = [
 
 export type ActionReviewActorKind = "local-user" | "device" | "connector-user"
 
+/**
+ * How far an authorization reaches (ADR-0239).
+ *
+ * - `once`: this single action.
+ * - `instruction`: these targets until the root session's instruction epoch
+ *   advances.
+ * - `policy`: a recipient list a person configured on a Bot installation or a
+ *   connector instance. Only a person can write one.
+ */
+export type ActionReviewGrantScope = "once" | "instruction" | "policy"
+
+export const ACTION_REVIEW_GRANT_SCOPES: readonly ActionReviewGrantScope[] = [
+  "once",
+  "instruction",
+  "policy",
+]
+
+export interface ActionReviewGrant {
+  scope: ActionReviewGrantScope
+  /** For `policy`: which configured list authorized it, e.g. `bot:<installationId>`. */
+  policyRef?: string
+}
+
 export interface ActionReviewDecision {
   contractVersion: typeof ACTION_REVIEW_CONTRACT_VERSION
   requestId: string
@@ -245,6 +337,8 @@ export interface ActionReviewDecision {
   updatedInput?: Record<string, unknown>
   /** Scoped allow rule derived from an `allow_always` (deriveAllowRuleFromApproval). */
   derivedRule?: { tool: string; pattern: string }
+  /** The authorization an outbound allow rests on (ADR-0239). Absent on refusals. */
+  grant?: ActionReviewGrant
   actor?: { kind: ActionReviewActorKind; id?: string; label?: string }
   decidedAt: number
 }
@@ -302,6 +396,11 @@ function validateOrigin(origin: unknown, errors: string[]): void {
   }
   if (!isNonEmptyString(origin.scope)) errors.push("origin.scope is required")
   if (!isNonEmptyString(origin.id)) errors.push("origin.id is required")
+  for (const field of ["rootSessionId", "instructionEpoch"] as const) {
+    if (origin[field] !== undefined && !isNonEmptyString(origin[field])) {
+      errors.push(`origin.${field} must be a non-empty string`)
+    }
+  }
   // `hostRef` crosses a host boundary, so it obeys the same ref rules as a
   // handoff envelope: an id, never a URL, never a credential.
   if (origin.hostRef !== undefined) {
@@ -333,6 +432,46 @@ function validateSubject(subject: unknown, errors: string[]): void {
   if (subject.input !== undefined && !isPlainObject(subject.input)) {
     errors.push("subject.input must be an object")
   }
+  if (subject.targets !== undefined) validateTargets(subject.targets, errors)
+}
+
+const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/
+
+function validateTargets(targets: unknown, errors: string[]): void {
+  if (!Array.isArray(targets)) {
+    errors.push("subject.targets must be an array")
+    return
+  }
+  for (const [i, target] of targets.entries()) {
+    if (!isPlainObject(target)) {
+      errors.push(`subject.targets[${i}] must be an object`)
+      continue
+    }
+    if (!isNonEmptyString(target.channel)) {
+      errors.push(`subject.targets[${i}].channel is required`)
+    }
+    // A raw recipient in this slot would put personal data in a metadata-only
+    // table; only a fingerprint passes.
+    if (typeof target.fingerprint !== "string" || !FINGERPRINT_PATTERN.test(target.fingerprint)) {
+      errors.push(`subject.targets[${i}].fingerprint must be a lowercase hex SHA-256`)
+    }
+    const extra = Object.keys(target).filter((key) => key !== "channel" && key !== "fingerprint")
+    if (extra.length > 0) {
+      errors.push(`subject.targets[${i}] carries unknown fields: ${extra.join(", ")}`)
+    }
+  }
+}
+
+function validatePlan(plan: unknown, errors: string[]): void {
+  if (plan === undefined) return
+  if (!isPlainObject(plan)) {
+    errors.push("plan must be an object")
+    return
+  }
+  if (!memberOf(plan.outcome, ACTION_REVIEW_PLAN_OUTCOMES)) {
+    errors.push("plan.outcome must be a known ActionReviewPlanOutcome")
+  }
+  if (typeof plan.enforced !== "boolean") errors.push("plan.enforced must be a boolean")
 }
 
 function validateSurfaces(surfaces: unknown, errors: string[]): void {
@@ -396,6 +535,7 @@ export function validateActionReviewRequest(value: unknown): string[] {
 
   validateSurfaces(req.surfaces, errors)
   validateRecommendation(req.recommendation, errors)
+  validatePlan(req.plan, errors)
 
   if (!isFiniteNumber(req.requestedAt)) errors.push("requestedAt must be a finite number")
   if (req.expiresAt !== undefined && !isFiniteNumber(req.expiresAt)) {
@@ -441,6 +581,21 @@ export function validateActionReviewDecision(value: unknown): string[] {
     } else {
       if (!isNonEmptyString(dec.derivedRule.tool)) errors.push("derivedRule.tool is required")
       if (!isNonEmptyString(dec.derivedRule.pattern)) errors.push("derivedRule.pattern is required")
+    }
+  }
+  if (dec.grant !== undefined) {
+    if (!isPlainObject(dec.grant)) {
+      errors.push("grant must be an object")
+    } else {
+      if (!memberOf(dec.grant.scope, ACTION_REVIEW_GRANT_SCOPES)) {
+        errors.push("grant.scope must be once, instruction, or policy")
+      }
+      if (dec.grant.policyRef !== undefined && !isNonEmptyString(dec.grant.policyRef)) {
+        errors.push("grant.policyRef must be a non-empty string")
+      }
+      // A grant is what an allow rests on; a refusal carrying one is a
+      // producer bug that would read as an authorization in the audit log.
+      if (!permitsOutcome(dec.outcome)) errors.push("grant requires a permitting outcome")
     }
   }
   if (dec.actor !== undefined) {

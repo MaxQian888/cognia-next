@@ -8,9 +8,13 @@ import { getDecisionContext } from "./governance-ledger"
 import {
   ACTION_REVIEW_RECEIPT_CAP,
   ACTION_REVIEW_RETENTION_DAYS,
+  actionReviewAuthKey,
+  actionReviewAuthKeyPrefix,
   attachActionReviewEffect,
   clearActionReviewReceipts,
   getActionReviewReceipt,
+  hasActionReviewAuthKey,
+  listActionReviewAuthKeys,
   listActionReviewReceipts,
   pruneActionReviewReceipts,
   recordActionReviewReceipt,
@@ -33,6 +37,10 @@ function makeReceipt(
     projectId?: string
     surfaces?: ActionReviewReceipt["request"]["surfaces"]
     effect?: ActionReviewReceipt["effect"]
+    rootSessionId?: string
+    instructionEpoch?: string
+    targets?: ActionReviewReceipt["request"]["subject"]["targets"]
+    grant?: ActionReviewReceipt["decision"]["grant"]
   } = {}
 ): ActionReviewReceipt {
   const id = overrides.id ?? "req-1"
@@ -50,8 +58,10 @@ function makeReceipt(
         sessionId: overrides.sessionId,
         runId: overrides.runId,
         projectId: overrides.projectId,
+        rootSessionId: overrides.rootSessionId,
+        instructionEpoch: overrides.instructionEpoch,
       },
-      subject: { kind: "tool-call", ref: "Bash" },
+      subject: { kind: "tool-call", ref: "Bash", targets: overrides.targets },
       verdict: "ask",
       verdictExplicit: false,
       tier: overrides.tier ?? "medium",
@@ -64,6 +74,7 @@ function makeReceipt(
       outcome: overrides.outcome ?? "allow",
       authority: overrides.authority ?? "human",
       decidedAt,
+      grant: overrides.grant,
     },
     effect: overrides.effect,
     expiresAt: overrides.expiresAt ?? 0,
@@ -127,6 +138,113 @@ describe("toReceiptRow", () => {
 
   it("emits an empty surfaceIds array when no surface tripped", () => {
     expect(toReceiptRow(makeReceipt({ surfaces: [] })).surfaceIds).toEqual([])
+  })
+})
+
+describe("outbound authorization keys (ADR-0239)", () => {
+  const FP_A = "a".repeat(64)
+  const FP_B = "b".repeat(64)
+  const outbound = {
+    rootSessionId: "root-1",
+    instructionEpoch: "msg-1",
+    targets: [
+      { channel: "lark", fingerprint: FP_A },
+      { channel: "lark", fingerprint: FP_B },
+    ],
+  }
+  const denyKey = (fp: string, epoch = "msg-1") => actionReviewAuthKey("deny", "root-1", epoch, fp)
+
+  it("fences every target a person refused", () => {
+    const row = toReceiptRow(makeReceipt({ ...outbound, outcome: "deny", authority: "human" }))
+    expect(row.authKeys).toEqual([denyKey(FP_A), denyKey(FP_B)])
+  })
+
+  it("does not fence a refusal no person made", () => {
+    for (const authority of ["timeout", "system", "policy-deny", "policy-rule"] as const) {
+      expect(
+        toReceiptRow(makeReceipt({ ...outbound, outcome: "deny", authority })).authKeys
+      ).toEqual([])
+    }
+    expect(
+      toReceiptRow(makeReceipt({ ...outbound, outcome: "expired", authority: "timeout" })).authKeys
+    ).toEqual([])
+  })
+
+  it("records an instruction grant but not a one-off or policy grant", () => {
+    expect(
+      toReceiptRow(makeReceipt({ ...outbound, outcome: "allow", grant: { scope: "instruction" } }))
+        .authKeys
+    ).toEqual([
+      actionReviewAuthKey("grant", "root-1", "msg-1", FP_A),
+      actionReviewAuthKey("grant", "root-1", "msg-1", FP_B),
+    ])
+    expect(
+      toReceiptRow(makeReceipt({ ...outbound, outcome: "allow", grant: { scope: "once" } }))
+        .authKeys
+    ).toEqual([])
+    expect(
+      toReceiptRow(
+        makeReceipt({
+          ...outbound,
+          outcome: "allow",
+          grant: { scope: "policy", policyRef: "bot:1" },
+        })
+      ).authKeys
+    ).toEqual([])
+  })
+
+  it("contributes nothing without targets, a root session or an epoch", () => {
+    const deny = { outcome: "deny" as const, authority: "human" as const }
+    expect(toReceiptRow(makeReceipt({ ...deny })).authKeys).toEqual([])
+    expect(
+      toReceiptRow(makeReceipt({ ...deny, ...outbound, rootSessionId: undefined })).authKeys
+    ).toEqual([])
+    expect(
+      toReceiptRow(makeReceipt({ ...deny, ...outbound, instructionEpoch: undefined })).authKeys
+    ).toEqual([])
+  })
+
+  it("keeps one epoch's prefix from matching another's", () => {
+    // An IM message id may contain anything, including the separator.
+    const key = actionReviewAuthKey("deny", "root-1", "a|b", FP_A)
+    expect(key.startsWith(actionReviewAuthKeyPrefix("deny", "root-1", "a"))).toBe(false)
+    expect(key.startsWith(actionReviewAuthKeyPrefix("deny", "root-1", "a|b"))).toBe(true)
+  })
+
+  it("finds a fence by key and lists an epoch's keys, and the next epoch starts clean", async () => {
+    await recordActionReviewReceipt(
+      makeReceipt({ id: "d1", ...outbound, outcome: "deny", authority: "human", decidedAt: 1_000 })
+    )
+    expect(await hasActionReviewAuthKey(denyKey(FP_A), 2_000)).toBe(true)
+    expect(await hasActionReviewAuthKey(denyKey(FP_A, "msg-2"), 2_000)).toBe(false)
+    expect(
+      (
+        await listActionReviewAuthKeys(actionReviewAuthKeyPrefix("deny", "root-1", "msg-1"), 2_000)
+      ).sort()
+    ).toEqual([denyKey(FP_A), denyKey(FP_B)])
+    expect(
+      await listActionReviewAuthKeys(actionReviewAuthKeyPrefix("deny", "root-1", "msg-2"), 2_000)
+    ).toEqual([])
+  })
+
+  it("stops answering once the receipt has expired", async () => {
+    await recordActionReviewReceipt(
+      makeReceipt({ id: "d1", ...outbound, outcome: "deny", authority: "human", expiresAt: 5_000 })
+    )
+    expect(await hasActionReviewAuthKey(denyKey(FP_A), 4_999)).toBe(true)
+    expect(await hasActionReviewAuthKey(denyKey(FP_A), 5_000)).toBe(false)
+  })
+
+  it("survives the row cap: trimming skips receipts that carry a fence", async () => {
+    await recordActionReviewReceipt(
+      makeReceipt({ id: "fence", ...outbound, outcome: "deny", authority: "human", decidedAt: 1 })
+    )
+    for (let i = 0; i < 4; i += 1) {
+      await recordActionReviewReceipt(makeReceipt({ id: `plain-${i}`, decidedAt: 10 + i }), 3)
+    }
+    const ids = (await getDb().actionReviewReceipts.toCollection().primaryKeys()).sort()
+    expect(ids).toEqual(["fence", "plain-2", "plain-3"])
+    expect(await hasActionReviewAuthKey(denyKey(FP_A), 100)).toBe(true)
   })
 })
 

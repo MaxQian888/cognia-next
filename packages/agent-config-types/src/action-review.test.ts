@@ -2,7 +2,9 @@ import {
   ACTION_REVIEW_AUTHORITIES,
   ACTION_REVIEW_CHANNELS,
   ACTION_REVIEW_CONTRACT_VERSION,
+  ACTION_REVIEW_GRANT_SCOPES,
   ACTION_REVIEW_OUTCOMES,
+  ACTION_REVIEW_PLAN_OUTCOMES,
   ACTION_REVIEW_SURFACE_IDS,
   ACTION_REVIEW_TIERS,
   ACTION_REVIEW_VERDICTS,
@@ -60,7 +62,10 @@ describe("vocabulary constants", () => {
     expect(ACTION_REVIEW_VERDICTS).toEqual(["allow", "ask", "deny"])
     expect(ACTION_REVIEW_TIERS).toEqual(["low", "medium", "high"])
     expect(ACTION_REVIEW_SURFACE_IDS).toHaveLength(6)
-    expect(ACTION_REVIEW_CHANNELS).toHaveLength(15)
+    expect(ACTION_REVIEW_CHANNELS).toHaveLength(16)
+    expect(ACTION_REVIEW_CHANNELS[ACTION_REVIEW_CHANNELS.length - 1]).toBe("connector-delivery")
+    expect(ACTION_REVIEW_GRANT_SCOPES).toEqual(["once", "instruction", "policy"])
+    expect(ACTION_REVIEW_PLAN_OUTCOMES).toEqual(["allow", "ask", "draft", "park", "deny"])
     expect(ACTION_REVIEW_OUTCOMES).toHaveLength(5)
   })
 
@@ -209,6 +214,93 @@ describe("validateActionReviewRequest", () => {
       expect(errors).toContain("recommendation.source is required")
       expect(errors).toContain("recommendation.confidence must be low, medium, or high")
     })
+  })
+})
+
+describe("outbound review fields (ADR-0239)", () => {
+  const fingerprint = "a".repeat(64)
+
+  it("accepts targets, root session, instruction epoch and a plan", () => {
+    const request = makeRequest({
+      origin: {
+        channel: "chat-tool",
+        scope: "chat",
+        id: "req-1",
+        rootSessionId: "root-1",
+        instructionEpoch: "msg-9",
+      },
+      subject: {
+        kind: "tool-call",
+        ref: "send_email",
+        targets: [{ channel: "mail", fingerprint }],
+      },
+      plan: { outcome: "ask", enforced: false },
+    })
+    expect(validateActionReviewRequest(request)).toEqual([])
+  })
+
+  it("rejects a raw recipient where only a fingerprint may go", () => {
+    const errors = validateActionReviewRequest(
+      makeRequest({
+        subject: {
+          kind: "tool-call",
+          ref: "send_email",
+          targets: [
+            { channel: "mail", fingerprint: "alice@example.com" },
+            { channel: "mail", fingerprint, recipient: "bob@example.com" } as never,
+          ],
+        },
+      })
+    )
+    expect(errors).toEqual([
+      "subject.targets[0].fingerprint must be a lowercase hex SHA-256",
+      "subject.targets[1] carries unknown fields: recipient",
+    ])
+  })
+
+  it("rejects malformed targets, origin fields and plans", () => {
+    expect(
+      validateActionReviewRequest(
+        makeRequest({ subject: { kind: "tool-call", ref: "x", targets: "conv" as never } })
+      )
+    ).toContain("subject.targets must be an array")
+    expect(
+      validateActionReviewRequest(
+        makeRequest({
+          subject: { kind: "tool-call", ref: "x", targets: [{ channel: "", fingerprint }] },
+        })
+      )
+    ).toContain("subject.targets[0].channel is required")
+    expect(
+      validateActionReviewRequest(
+        makeRequest({ origin: { channel: "chat-tool", scope: "chat", id: "r", rootSessionId: "" } })
+      )
+    ).toContain("origin.rootSessionId must be a non-empty string")
+    expect(
+      validateActionReviewRequest(
+        makeRequest({ plan: { outcome: "send" as never, enforced: "no" as never } })
+      )
+    ).toEqual([
+      "plan.outcome must be a known ActionReviewPlanOutcome",
+      "plan.enforced must be a boolean",
+    ])
+  })
+
+  it("accepts a grant only on a permitting outcome", () => {
+    expect(validateActionReviewDecision(makeDecision({ grant: { scope: "instruction" } }))).toEqual(
+      []
+    )
+    expect(
+      validateActionReviewDecision(
+        makeDecision({ grant: { scope: "policy", policyRef: "bot:inst-1" } })
+      )
+    ).toEqual([])
+    expect(
+      validateActionReviewDecision(makeDecision({ outcome: "deny", grant: { scope: "once" } }))
+    ).toContain("grant requires a permitting outcome")
+    expect(
+      validateActionReviewDecision(makeDecision({ grant: { scope: "session" as never } }))
+    ).toContain("grant.scope must be once, instruction, or policy")
   })
 })
 

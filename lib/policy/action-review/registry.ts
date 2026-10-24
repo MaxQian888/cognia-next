@@ -95,6 +95,10 @@ export const DEFAULT_ACTION_REVIEW_ADAPTERS: Record<
   // waits forever for a decision that never appears anywhere.
   "bot-step": { interruptType: "bot_approval", defaultTtlMs: TEAM_RECOVERY_TTL_MS },
   generic: { interruptType: "tool_approval", defaultTtlMs: DEFAULT_ACTION_REVIEW_TTL_MS },
+  // Receipt-only like `connector-workflow` (ADR-0239): an unauthorized
+  // unattended delivery becomes a draft in the draft center, which is where a
+  // person answers it. An interrupt here would be a second, unanswerable copy.
+  "connector-delivery": { interruptType: null, defaultTtlMs: DEFAULT_ACTION_REVIEW_TTL_MS },
 }
 
 const overrides = new Map<ActionReviewChannel, ActionReviewChannelAdapter>()
