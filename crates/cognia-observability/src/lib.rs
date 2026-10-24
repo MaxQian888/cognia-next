@@ -40,10 +40,11 @@ pub use diagnostic_package::{
     DiagnosticManifestV1, DiagnosticPackageInput, DiagnosticPackageValidation, PackageError,
 };
 pub use diagnostic_submit::{
-    build_installation_proof_body, count_events, delete_incident, exchange_installation_grant,
-    fetch_receipt, installation_key_path, read_package_parts, submit_package, withdraw_consent,
-    DiagnosticTransport, HttpRequest, HttpResponse, InstallationIdentity, PackagePart,
-    SubmissionReceipt, SubmissionRequest, SubmissionTarget, SubmitError, INSTALLATION_KEY_FILE,
+    build_installation_proof_body, count_events, delete_incident, delete_incident_with_credential,
+    exchange_installation_grant, fetch_receipt, installation_key_path, read_package_parts,
+    submit_package, withdraw_consent, DiagnosticTransport, HttpRequest, HttpResponse,
+    InstallationIdentity, PackagePart, SubmissionReceipt, SubmissionRequest, SubmissionTarget,
+    SubmitError, INSTALLATION_KEY_FILE,
 };
 pub use event::{
     create_traceparent, EventError, ObservabilityCapturePolicy, ObservabilityCorrelation,

@@ -78,6 +78,8 @@ Run the focused suites and real pair harness:
 ```bash
 pnpm exec jest lib/signaling lib/tauri/transport-rtc.test.ts --runInBand
 pnpm webrtc:crypto-vector
-pnpm webrtc:smoke
 pnpm webrtc:pair
 ```
+
+The rendezvous server's own relay smoke runs in cognia-services
+(`node scripts/smoke.mjs` in `services/signaling-server/`).

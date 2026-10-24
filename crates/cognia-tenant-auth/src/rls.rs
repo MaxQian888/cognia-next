@@ -1,6 +1,6 @@
 //! The Postgres session-variable contract every tenant-scoped service shares.
 //!
-//! Row-level security policies in `services/diagnostic-server/migrations/`
+//! Row-level security policies in `cognia-services/services/diagnostic-server/migrations/`
 //! are all written against `current_setting('app.tenant_id', true)`, and the
 //! service sets it per transaction. That pairing is the entire isolation
 //! mechanism, and it has one footgun sharp enough to deserve its own module.
@@ -19,7 +19,7 @@
 //!
 //! # No database driver
 //!
-//! Deliberately just SQL text and names. `services/diagnostic-server` speaks
+//! Deliberately just SQL text and names. `cognia-services/services/diagnostic-server` speaks
 //! `sqlx`; `crates/cognia-ops-controller` speaks `tokio-postgres` through
 //! `deadpool`. A shared module that picked one would be unusable by the other,
 //! and the thing actually worth sharing is the *contract*, not the plumbing.
@@ -44,7 +44,7 @@ pub const SET_USER_SQL: &str = "SELECT set_config('app.user_id', $1, true)";
 /// error, so a connection that never bound a tenant matches no rows instead of
 /// raising — deny by default, which is the correct failure direction.
 ///
-/// This is `services/diagnostic-server`'s spelling, where a tenant is a `uuid`
+/// This is `cognia-services/services/diagnostic-server`'s spelling, where a tenant is a `uuid`
 /// in a column literally named `tenant_id`.
 pub const TENANT_PREDICATE: &str =
     "tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid";
@@ -104,12 +104,16 @@ mod tests {
     }
 
     /// Parity guard against the live consumer. These constants describe what
-    /// `services/diagnostic-server` already does; if it changes its statement
-    /// or its policies, this crate is describing a contract nobody honours.
+    /// the diagnostic server in cognia-labs/cognia-services already does; if it
+    /// changes its statement or its policies, this crate is describing a
+    /// contract nobody honours. It reads that service from a checkout of the
+    /// pinned revision, which CI's pinned-services job provides.
     #[test]
+    #[ignore = "needs COGNIA_SERVICES_ROOT, a checkout of the pinned cognia-services revision"]
     fn matches_the_statement_and_policies_diagnostic_server_ships() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../services/diagnostic-server");
+        let services = std::env::var("COGNIA_SERVICES_ROOT")
+            .expect("COGNIA_SERVICES_ROOT names a cognia-services checkout");
+        let root = std::path::Path::new(&services).join("services/diagnostic-server");
 
         let db = std::fs::read_to_string(root.join("src/db.rs"))
             .expect("diagnostic-server is the reference implementation of this contract");

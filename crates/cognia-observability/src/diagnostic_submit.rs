@@ -612,6 +612,41 @@ pub fn delete_incident<T: DiagnosticTransport>(
     Ok(())
 }
 
+/// Delete an incident with the one-time deletion credential its creation
+/// returned, without a grant.
+///
+/// The grant route only reaches incidents this installation uploaded, so a
+/// reinstall or a lost installation key leaves earlier submissions out of its
+/// reach; the credential still deletes them. The service answers the same
+/// `incident_not_found` for every mismatch.
+pub fn delete_incident_with_credential<T: DiagnosticTransport>(
+    transport: &T,
+    target: &SubmissionTarget,
+    incident_id: &str,
+    deletion_credential: &str,
+) -> Result<(), SubmitError> {
+    let body = serde_json::to_vec(&serde_json::json!({
+        "tenantId": target.tenant_id,
+        "projectId": target.project_id,
+        "deletionCredential": deletion_credential,
+    }))?;
+    json_request(
+        transport,
+        HttpRequest {
+            method: "POST",
+            url: target.url(&format!(
+                "/v1/incidents/{incident_id}/delete-with-credential"
+            )),
+            headers: vec![
+                ("accept", "application/json".to_owned()),
+                ("content-type", "application/json".to_owned()),
+            ],
+            body: Some(&body),
+        },
+    )?;
+    Ok(())
+}
+
 /// Fetch the current receipt for an incident.
 pub fn fetch_receipt<T: DiagnosticTransport>(
     transport: &T,
@@ -765,6 +800,7 @@ mod tests {
         url: String,
         artifact_kind: Option<String>,
         headers: Vec<(&'static str, String)>,
+        body: Option<Vec<u8>>,
     }
 
     impl SeenRequest {
@@ -806,6 +842,7 @@ mod tests {
                     .find(|(name, _)| *name == "x-artifact-kind")
                     .map(|(_, value)| value.clone()),
                 headers: request.headers.clone(),
+                body: request.body.map(<[u8]>::to_vec),
             });
             let mut responses = self.responses.borrow_mut();
             if responses.is_empty() {
@@ -1134,6 +1171,30 @@ mod tests {
         let gateway = RecordingTransport::new(vec![(502, "<html>bad gateway</html>")]);
         let error = withdraw_consent(&gateway, &target(), "grant", "inc-1").unwrap_err();
         assert!(matches!(error, SubmitError::Malformed { status: 502 }));
+    }
+
+    #[test]
+    fn a_credential_deletion_carries_the_target_and_no_grant() {
+        let transport = RecordingTransport::new(vec![(204, "")]);
+        delete_incident_with_credential(&transport, &target(), "inc-1", "del_0123").unwrap();
+        let seen = transport.seen.borrow();
+        assert_eq!(seen[0].method, "POST");
+        assert!(seen[0]
+            .url
+            .ends_with("/v1/incidents/inc-1/delete-with-credential"));
+        assert_eq!(seen[0].header("authorization"), None);
+        let body: serde_json::Value =
+            serde_json::from_slice(seen[0].body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["tenantId"], serde_json::json!(target().tenant_id));
+        assert_eq!(body["projectId"], serde_json::json!(target().project_id));
+        assert_eq!(body["deletionCredential"], serde_json::json!("del_0123"));
+        drop(seen);
+
+        let refused =
+            RecordingTransport::new(vec![(404, r#"{"error":{"code":"incident_not_found"}}"#)]);
+        let error =
+            delete_incident_with_credential(&refused, &target(), "inc-1", "del_0123").unwrap_err();
+        assert_eq!(error.code(), Some("incident_not_found"));
     }
 
     #[test]

@@ -25,7 +25,8 @@
  *   2. Every Dockerfile that installs the root workspace uses a Node major
  *      that satisfies `engines.node` and pins the `packageManager` pnpm.
  *   3. Every `ghcr.io/<owner>/<name>` a compose file defaults to is published
- *      by `images.yml`.
+ *      by `images.yml`, or is a service image cognia-labs/cognia-services
+ *      publishes under `ghcr.io/cognia-labs/`.
  *   4. Every published host port in `docker-compose.yml` is interpolated, so
  *      an instance can remap it without editing the file.
  *   5. The compose project name, the runner ownership label
@@ -172,6 +173,21 @@ export function ghcrImageName(reference) {
   return match ? match[1] : undefined
 }
 
+/** `owner` from `ghcr.io/owner/cognia-web:latest`. */
+export function ghcrImageOwner(reference) {
+  const match = String(reference ?? "").match(/^ghcr\.io\/([^/]+)\/[a-z0-9._-]+(?:[:@].*)?$/)
+  return match ? match[1] : undefined
+}
+
+/**
+ * The service images cognia-labs/cognia-services builds and publishes (its own
+ * images.yml), always under that organization's GHCR namespace.
+ */
+export const SERVICES_IMAGES = {
+  owner: "cognia-labs",
+  names: new Set(["cognia-signaling", "cognia-share", "cognia-diagnostics"]),
+}
+
 /** Every image name `images.yml` builds: matrix entries plus the `images:` metadata inputs. */
 export function publishedImageNames(imagesWorkflowText) {
   const names = new Set()
@@ -195,8 +211,16 @@ export function checkComposeImagesPublished({ composeFiles, imagesWorkflow }) {
   for (const [rel, text] of Object.entries(composeFiles)) {
     const compose = parseYaml(text)
     for (const [service, spec] of Object.entries(compose?.services ?? {})) {
-      const name = ghcrImageName(composeDefault(spec?.image))
+      const reference = composeDefault(spec?.image)
+      const name = ghcrImageName(reference)
       if (!name) continue
+      if (SERVICES_IMAGES.names.has(name)) {
+        if (ghcrImageOwner(reference) !== SERVICES_IMAGES.owner)
+          problems.push(
+            `${rel}: service "${service}" defaults to ghcr.io/${ghcrImageOwner(reference)}/${name}; cognia-labs/cognia-services publishes it as ghcr.io/${SERVICES_IMAGES.owner}/${name}.`
+          )
+        continue
+      }
       if (!published.has(name)) {
         problems.push(
           `${rel}: service "${service}" defaults to ghcr.io/…/${name}, which no job in ${IMAGES_WORKFLOW} publishes. The profile that needs it can never be satisfied from the registry.`

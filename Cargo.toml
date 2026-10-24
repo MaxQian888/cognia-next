@@ -13,10 +13,6 @@
 #                            `src-tauri/src`.
 #
 # Intentionally excluded:
-#   - services/signaling-server/, services/share-server/
-#                                   standalone deploy artifacts built via
-#                                   Dockerfile/Fly.io. Each keeps its own
-#                                   Cargo.lock to isolate the deploy image.
 #   - crates/cognia-plugin-template, plugins/wasm-example-formatter
 #                                   wasm32-wasip2 components built with
 #                                   `cargo component`; their tighter
@@ -180,8 +176,6 @@ members = [
   "crates/cognia-server",
 ]
 exclude = [
-  "services/signaling-server",
-  "services/share-server",
   "crates/cognia-plugin-template",
   "crates/cognia-plugin-template-ts",
   "plugins/wasm-example-formatter",
@@ -213,6 +207,10 @@ tempfile = { version = "3" }
 parking_lot = { version = "0.12" }
 base64 = { version = "0.23" }
 uuid = { version = "1" }
+# The signaling relay's wire crate (ADR-0021), owned by the services
+# repository. `rev` must equal `integrations/cognia-services.json`;
+# `pnpm cognia-services:check` fails when it does not.
+cognia-signaling-core = { git = "https://github.com/cognia-labs/cognia-services", rev = "487e9f2d617c9d1b9b648ec510cafcf53b962c2c" }
 log = { version = "0.4" }
 sha2 = { version = "0.11" }
 tauri = { version = "=2.12.0" }
@@ -289,8 +287,8 @@ incremental = true
 [profile.dev.package."*"]
 debug = 0
 
-# Ours, but outside the workspace (a path dependency from the excluded
-# signaling server), so `"*"` above would cover it.
+# Ours, but a git dependency from the services repository, so `"*"` above
+# would cover it.
 [profile.dev.package.cognia-signaling-core]
 debug = "line-tables-only"
 

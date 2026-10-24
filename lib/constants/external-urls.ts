@@ -46,6 +46,7 @@ export const DOCS_COMPANION_SETUP_URL = `${DOCS_URL}/docs/en/getting-started`
 /**
  * Public status page for the official hosted relay (`signaling.cognia.cn`).
  * It describes the official service only, never a self-hosted relay; see
- * `lib/status/config.ts` for the API base and self-host overrides.
+ * `lib/status/config.ts` for the API base and self-host overrides. Defined by
+ * the status contract, which the status service shares.
  */
-export const STATUS_PAGE_URL = "https://status.cognia.cn/status/"
+export { STATUS_PAGE_URL } from "@cognia/status-contract/config"

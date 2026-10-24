@@ -189,8 +189,7 @@ Execution has these parts:
 Services run separately according to the deployment, for example:
 
 - `services/workspace-runtime/`: Workspace browser runtime.
-- `services/signaling-server/`: WebRTC signaling, with axum and workers-rs implementations.
-- `services/share-server/`: Share-link service, encrypted content storage, and viewer.
+- The cloud and self-hosted services (signaling, share links, status, account identity and sync, updates, diagnostics) live in [cognia-labs/cognia-services](https://github.com/cognia-labs/cognia-services), with the wire contracts they share with the app. This repository pins one revision of it in `integrations/cognia-services.json`.
 
 `web/` is the product website. `docs/` is the Fumadocs site. Both build separately from the root app. Generate assets for the correct target before packaging.
 
@@ -220,7 +219,7 @@ Run development commands from the repository root. This table lists common comma
 | Chrome/Edge extension        | [Standalone extension commands](https://github.com/cognia-labs/cognia-browser-extension#develop-and-verify) |
 | Sidecars                     | `pnpm sidecars:install`, `pnpm sidecar:start`, `pnpm sidecar:test`, `pnpm sidecars:build`                   |
 | E2E                          | `pnpm test:e2e`, `pnpm test:e2e:workflows`, `pnpm test:e2e:mobile`, `pnpm test:e2e:tauri`                   |
-| Repository checks            | `pnpm audit:slots`, `pnpm i18n:build:check`, `pnpm lint:i18n`, `pnpm webrtc:smoke`                          |
+| Repository checks            | `pnpm audit:slots`, `pnpm i18n:build:check`, `pnpm lint:i18n`, `pnpm cognia-services:check`                 |
 
 See [`package.json`](./package.json) for the complete script list.
 
@@ -257,10 +256,8 @@ cognia-next/
 │   └── development/      CI/CD, testing, and development workflow guides
 ├── deploy/                Container builds, Compose, Kubernetes, and runner deployment
 │   └── docker/           Dockerfiles built with the repository root as context
-├── services/              Independently deployed services
-│   ├── workspace-runtime/ Workspace browser runtime
-│   ├── signaling-server/  WebRTC rendezvous service (axum + workers-rs)
-│   └── share-server/      Cloudflare Worker + Vite viewer for share links
+├── services/              Services bundled with the desktop
+│   └── workspace-runtime/ Workspace browser runtime
 ├── tests/e2e/             Playwright suites (workflows, mobile, tauri)
 └── scripts/               Build, audit, and migration helpers
 ```

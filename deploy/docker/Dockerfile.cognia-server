@@ -67,8 +67,6 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY .cargo ./.cargo
 COPY src-tauri ./src-tauri
 COPY crates ./crates
-# Out-of-workspace path dependency of src-tauri (cognia-signaling-core).
-COPY services/signaling-server/core ./services/signaling-server/core
 RUN cargo chef prepare --recipe-path recipe.json
 
 # Cache the five shipping build graphs, including their distinct feature sets.
@@ -85,8 +83,6 @@ ARG CARGO_HTTP_MULTIPLEXING
 ARG COGNIA_CARGO_REGISTRY_MIRROR=""
 COPY rust-toolchain.toml ./
 COPY .cargo ./.cargo
-# The recipe skeleton still resolves the path dep at cook time.
-COPY services/signaling-server/core ./services/signaling-server/core
 COPY --from=planner /work/recipe.json .
 RUN if [ -n "${COGNIA_CARGO_REGISTRY_MIRROR}" ]; then \
       printf '[source.crates-io]\nreplace-with = "cognia-mirror"\n[source.cognia-mirror]\nregistry = "%s"\n' \
@@ -113,7 +109,6 @@ ARG COGNIA_SERVER_CARGO_FLAGS=""
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src-tauri ./src-tauri
 COPY crates ./crates
-COPY services/signaling-server/core ./services/signaling-server/core
 # Out-of-tree include_str! targets (release: browser overlay JS; the spec
 # fixtures under cli/ + docs/ are test-cfg but cheap to keep coherent).
 COPY lib/browser/overlay.injected.js lib/browser/automation-core.injected.js ./lib/browser/
@@ -168,7 +163,6 @@ FROM deps AS check
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src-tauri ./src-tauri
 COPY crates ./crates
-COPY services/signaling-server/core ./services/signaling-server/core
 # Out-of-tree include_str! targets (release: browser overlay JS; the spec
 # fixtures under cli/ + docs/ are test-cfg but cheap to keep coherent).
 COPY lib/browser/overlay.injected.js lib/browser/automation-core.injected.js ./lib/browser/

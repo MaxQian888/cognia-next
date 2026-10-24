@@ -1,6 +1,0 @@
-allowBuilds:
-  esbuild: true
-  workerd: true
-
-overrides:
-  vite: "^8.3.3"

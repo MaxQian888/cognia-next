@@ -1,6 +1,6 @@
 {
   "repository": "cognia-labs/cognia-browser-extension",
-  "revision": "425431f58482f5b3b31a398734492310a6ae5248",
+  "revision": "448d0ed83226adad8e0428e7a5ebb1633c172066",
   "manifest": {
     "manifest_version": 3,
     "name": "__MSG_extensionName__",

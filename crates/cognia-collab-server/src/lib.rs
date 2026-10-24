@@ -49,7 +49,7 @@
 //! destroy server-side search, notification and aggregation, and it would not
 //! even be self-consistent, since ADR-0054 already states the local Dexie
 //! database is not encrypted at rest. Protection here is per-tenant KMS
-//! envelopes plus row-level security, the design `services/diagnostic-server`
+//! envelopes plus row-level security, the design `cognia-services/services/diagnostic-server`
 //! already proved. The zero-knowledge share links of ADR-0037 remain a separate
 //! capability and are untouched.
 

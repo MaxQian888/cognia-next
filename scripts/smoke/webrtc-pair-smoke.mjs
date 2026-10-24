@@ -2,8 +2,9 @@
 /**
  * Real-pair WebRTC smoke (`pnpm webrtc:pair`). ADR-0021.
  *
- * The unit tests mock `RTCPeerConnection`; `pnpm webrtc:smoke` only exercises
- * the signaling SERVER's transport layer. Neither opens a real DataChannel.
+ * The unit tests mock `RTCPeerConnection`; the relay smoke in
+ * cognia-labs/cognia-services only exercises the signaling SERVER's transport
+ * layer. Neither opens a real DataChannel.
  * This driver does: it stands up the full triangle and runs the SDP/ICE/DTLS/
  * SCTP handshake for real, across the TS↔Rust language boundary.
  *
@@ -54,7 +55,12 @@ import { chromium } from "@playwright/test"
 import { createOutServer, exportHasE2eMarker } from "../e2e/serve-out.mjs"
 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "..")
-const SIGNALING_DIR = path.join(REPO, "services", "signaling-server")
+// The relay lives in cognia-labs/cognia-services. Build it from a checkout of
+// the revision the app pins: `pnpm cognia-services:fetch` makes one under
+// .cache/, or point COGNIA_SERVICES_ROOT at your own clone.
+const SERVICES_ROOT =
+  process.env.COGNIA_SERVICES_ROOT ?? path.join(REPO, ".cache", "cognia-services")
+const SIGNALING_DIR = path.join(SERVICES_ROOT, "services", "signaling-server")
 const PROFILE = process.env.WEBRTC_PAIR_PROFILE ?? "debug"
 // The src-tauri crate is part of the ROOT cargo workspace, so its binaries
 // land in <repo>/target/, NOT src-tauri/target/ (the signaling server below is
@@ -101,6 +107,10 @@ function ensureBinaries() {
     log("skipping cargo build (WEBRTC_PAIR_SKIP_BUILD=1)")
   } else {
     const profileArgs = PROFILE === "release" ? ["--release"] : []
+    if (!existsSync(path.join(SIGNALING_DIR, "Cargo.toml")))
+      fatal(
+        `no signaling server at ${SIGNALING_DIR}; run \`pnpm cognia-services:fetch\` or set COGNIA_SERVICES_ROOT`
+      )
     cargoBuild(SIGNALING_DIR, profileArgs, "signaling-server")
     cargoBuild(
       path.join(REPO, "src-tauri"),

@@ -229,14 +229,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
 
-      # Knip loads standalone Worker configs; their plugin imports must resolve
-      # even though these packages intentionally sit outside the root workspace.
-      - name: Install standalone Worker dependencies
-        if: matrix.group == 'types'
-        run: |
-          pnpm --dir services/share-server/worker install --frozen-lockfile --prefer-offline
-          pnpm --dir services/update-server/worker install --frozen-lockfile --prefer-offline
-
       - name: Install audit search dependency
         if: matrix.group == 'audit'
         run: |

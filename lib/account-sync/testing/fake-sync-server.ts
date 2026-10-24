@@ -1,7 +1,7 @@
 /**
  * An in-memory sync server for client tests (not shipped). It answers the
  * protocol §5.6 API for one space and enforces the same rules as
- * `services/sync-server` through `@cognia/sync-protocol`: `validateAppend`,
+ * `cognia-services/services/sync-server` through `@cognia/sync-protocol`: `validateAppend`,
  * complete envelope sets, atomic recovery batches, device proofs, revoked
  * devices refused first, and the commit-then-reveal request state machine.
  *

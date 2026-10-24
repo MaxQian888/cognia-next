@@ -1726,30 +1726,67 @@ jobs:
           COLLAB_RLS_APP_DATABASE_URL: postgresql://cognia_rls_app:cognia_rls_app@127.0.0.1:5432/postgres?sslmode=disable
         run: cargo test --locked -p cognia-collab-server --test postgres_rls -- --ignored
 
-  cargo-test-diagnostic-server:
+  # The services (signaling, share, status, identity, sync, diagnostics) and
+  # the wire contracts they share with the app live in
+  # cognia-labs/cognia-services. The app builds against ONE pinned revision of
+  # it; this lane checks that every spelling of the pin agrees, that the
+  # contract copies the app keeps match that revision, and runs the parity
+  # tests that read the services' own sources.
+  cognia-services:
     needs: jest-plan
-    if: fromJSON(needs.jest-plan.outputs.impacts).diagnostic
-    name: Rust Tests (diagnostic-server)
+    # A planner failure conservatively selects this lane.
+    if: ${{ !cancelled() && (needs.jest-plan.result != 'success' || fromJSON(needs.jest-plan.outputs.impacts).cogniaServices) }}
+    name: Pinned cognia-services contract
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     permissions:
       contents: read
 
-    # `services/diagnostic-server` is a standalone Cargo project with its own
-    # lockfile — exactly like `sidecar/`, and for the same reason: it ships as
-    # its own container, not inside the desktop app. `cargo test --workspace`
-    # above cannot see it, so without this job its tests never run anywhere.
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+      - name: Checkout the pinned cognia-services
+        uses: ./.github/actions/checkout-cognia-services
+      - name: Verify the pin and the contract copies
+        run: node scripts/ci/check-cognia-services.mjs --services-root .cache/cognia-services
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/master' }}
-          workspaces: "services/diagnostic-server -> target"
-      - name: Run Rust tests
-        working-directory: services/diagnostic-server
-        run: cargo test --locked
+      - name: Signaling room id vector (the pinned wire crate)
+        run: cargo test --locked -p cognia-signaling-core room_id_matches_the_typescript_vector
+      - name: Tenant RLS contract against the diagnostic server
+        env:
+          COGNIA_SERVICES_ROOT: ${{ github.workspace }}/.cache/cognia-services
+        run: cargo test --locked -p cognia-tenant-auth --lib -- --ignored matches_the_statement_and_policies_diagnostic_server_ships
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Setup Node.js 26.x
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: "pnpm"
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sidecar/pnpm-lock.yaml
+      - name: Cache standalone npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+      - name: Contract suites that read the pinned services
+        env:
+          COGNIA_SERVICES_ROOT: ${{ github.workspace }}/.cache/cognia-services
+        run: pnpm exec jest --runInBand --silent lib/diagnostic-service/types.test.ts
+      - name: Status-site headers against the status Worker
+        env:
+          COGNIA_SERVICES_ROOT: ${{ github.workspace }}/.cache/cognia-services
+        run: node --test scripts/build/build-status-site.test.mjs
+      - name: Pin check tests
+        run: node --test scripts/ci/check-cognia-services.test.mjs scripts/ci/services-extraction.test.mjs

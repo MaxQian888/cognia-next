@@ -52,17 +52,7 @@ test("workspace and sidecar scripts resolve native tsc instead of a shadowing TS
   }
   const directories = [
     ...workspaces,
-    ...[
-      "sidecar/vscode-ext-host",
-      "sidecar/webclone",
-      "services/identity-server",
-      "services/sync-server",
-      "services/share-server/worker",
-      "services/status-server/admin",
-      "services/status-server/probe",
-      "services/status-server/worker",
-      "services/update-server/worker",
-    ].map((path) => join(root, path)),
+    ...["sidecar/vscode-ext-host", "sidecar/webclone"].map((path) => join(root, path)),
   ].filter((directory) => existsSync(join(directory, "package.json")))
   const checked = new Map()
   for (const directory of directories) {
