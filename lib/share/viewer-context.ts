@@ -1,6 +1,6 @@
 // Is this share viewer the PUBLIC one, or the app's own copy of the same route?
 //
-// `/share/view` is not a separate app. `services/share-server/pages/README.md`
+// `/share/view` is not a separate app. `cognia-services/services/share-server/pages/README.md`
 // is explicit about it: the whole static export is deployed to the share host,
 // so the identical route renders for an anonymous visitor on
 // `share.<domain>` and for the owner inside the desktop, mobile or browser

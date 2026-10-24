@@ -1,5 +1,7 @@
 # Evidence ledger: browser companion revocation protocol
 
+This ledger records the earlier hardening scope and its checks. The later user request authorizes extraction and supersedes the no-publishing constraint below; see [the extraction ledger](2026-10-23-browser-extension-extraction.md) for current ownership and acceptance evidence.
+
 - Status: verifying
 - Lane: standard
 - Created: 2026-10-23

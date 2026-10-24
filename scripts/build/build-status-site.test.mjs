@@ -6,7 +6,6 @@ import { test } from "node:test"
 
 import {
   buildStatusSite,
-  REPO_ROOT,
   STATUS_ASSET_HEADERS,
   collectCssRefs,
   collectHtmlRefs,
@@ -153,11 +152,17 @@ test("crawlLocales covers every app locale so each lazily loaded catalog chunk s
   assert.deepEqual(await crawlLocales(), ["en", "zh-CN"])
 })
 
-test("_headers carries every security header the Worker sets on assets it serves", () => {
+// Reads the status Worker's source from a checkout of the pinned
+// cognia-services revision; CI's pinned-services lane sets COGNIA_SERVICES_ROOT.
+const servicesCheckout = process.env.COGNIA_SERVICES_ROOT
+
+test("_headers carries every security header the Worker sets on assets it serves", {
+  skip: !servicesCheckout && "needs COGNIA_SERVICES_ROOT (pnpm cognia-services:fetch)",
+}, () => {
   // Files the asset layer serves directly (wrangler.toml run_worker_first)
   // must not lose the headers the Worker adds to the ones it serves.
   const workerSource = readFileSync(
-    path.join(REPO_ROOT, "services", "status-server", "worker", "src", "assets.ts"),
+    path.join(servicesCheckout, "services", "status-server", "worker", "src", "assets.ts"),
     "utf8"
   )
   const workerHeaders = [...workerSource.matchAll(/headers\.set\("([a-z-]+)", "([^"]+)"\)/g)]

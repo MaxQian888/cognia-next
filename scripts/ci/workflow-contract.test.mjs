@@ -217,7 +217,6 @@ test("Linux frontend consumers reuse this run's compiled packages before frozen 
     "sidecar",
     "build",
     "build-e2e",
-    "e2e-browser-extension",
   ]) {
     const job = jobs[name]
     const download = job.steps.find(
@@ -254,7 +253,7 @@ test("workspace pnpm caches account for the sidecar lock installed by root posti
           installs.length > 0 &&
           installs.every((entry) => {
             const directory = entry["working-directory"] ?? job.defaults?.run?.["working-directory"]
-            return directory?.startsWith("services/") && locks === `${directory}/pnpm-lock.yaml`
+            return directory && directory !== "." && locks === `${directory}/pnpm-lock.yaml`
           })
         )
           continue
@@ -500,10 +499,13 @@ test("expensive PR lanes follow runtime impacts without skipping Windows prerequ
     "e2e-browser-extension": "browserExtension",
     "cargo-test-workspace": "rust",
     "postgres-rls": "postgres",
-    "cargo-test-diagnostic-server": "diagnostic",
+    "cognia-services": "cogniaServices",
   })) {
     assert.equal(jobs[name].needs, "jest-plan")
-    assert.equal(jobs[name].if, `fromJSON(needs.jest-plan.outputs.impacts).${impact}`)
+    const condition = ["e2e-browser-extension", "cognia-services"].includes(name)
+      ? `\${{ !cancelled() && (needs.jest-plan.result != 'success' || fromJSON(needs.jest-plan.outputs.impacts).${impact}) }}`
+      : `fromJSON(needs.jest-plan.outputs.impacts).${impact}`
+    assert.equal(jobs[name].if, condition)
   }
   assert.deepEqual(jobs["cargo-test-windows"].needs, ["jest-plan", "build"])
   assert.match(jobs.build.if, /\.productionBuild$/)
@@ -553,12 +555,12 @@ test("CI exposes stable and complete verification seams", async () => {
   assert.deepEqual(parse(nightly).jobs["build-tauri"].needs, ["quality", "test"])
 })
 
-test("formatting and lint exclude generated test and extension artifacts", async () => {
+test("formatting and lint exclude generated test artifacts", async () => {
   const [prettierIgnore, eslintConfig] = await Promise.all([
     readFile(new URL("../../.prettierignore", import.meta.url), "utf8"),
     readFile(new URL("../../eslint.config.mjs", import.meta.url), "utf8"),
   ])
-  assert.match(prettierIgnore, /^browser-extension\/\.wxt\/$/m)
+  assert.match(prettierIgnore, /^\.cache\/$/m)
   assert.match(eslintConfig, /"public\/_cognia\/\*\*"/)
   assert.match(eslintConfig, /"playwright-report\/\*\*"/)
   assert.match(eslintConfig, /"test-results\/\*\*"/)
@@ -571,17 +573,11 @@ test("formatting and lint exclude generated test and extension artifacts", async
     ".codex-tmp/coverage/lcov-report/block-navigation.js",
     "tmp/repro.mjs",
     "plugins/example/.venv/lib/vendor.js",
-    "services/status-server/admin/dist/index.mjs",
-    "services/status-server/worker/assets/_next/static/chunks/app.js",
     "public/plugins/cognia-pdf/dist/index.js",
   ]) {
     assert.equal(await eslint.isPathIgnored(path), true, path)
   }
-  for (const path of [
-    "public/_worker.js",
-    "services/status-server/worker/src/index.ts",
-    "plugins/cognia-laya-guard/src/index.ts",
-  ]) {
+  for (const path of ["public/_worker.js", "plugins/cognia-laya-guard/src/index.ts"]) {
     assert.equal(await eslint.isPathIgnored(path), false, path)
   }
 })
@@ -653,24 +649,6 @@ test("headless conformance compilation does not stage a desktop bundle", async (
   assert.equal(workflow.jobs.conformance.env?.TAURI_CONFIG, undefined)
 })
 
-test("the update Worker runs in its Cloudflare Vitest pool, outside root Jest", async () => {
-  const config = await readFile(new URL("../../jest.config.ts", import.meta.url), "utf8")
-  assert.match(config, /"\/services\/update-server\/worker\/"/)
-  const pkg = JSON.parse(
-    await readFile(
-      new URL("../../services/update-server/worker/package.json", import.meta.url),
-      "utf8"
-    )
-  )
-  assert.equal(pkg.scripts.test, "vitest run")
-  const workflow = parse(await readWorkflow("share-server.yml"))
-  const job = Object.values(workflow.jobs).find((job) =>
-    job.strategy?.matrix?.service?.includes("update-server")
-  )
-  assert.ok(job, "the excluded Worker still has its own CI job")
-  assert.ok(job.steps.some((step) => step.run?.includes("pnpm test")))
-})
-
 test("quality setup avoids redundant history, native packages and workspace builds", async () => {
   const workflow = parse(await readWorkflow("quality.yml"))
   const steps = workflow.jobs.gates.steps
@@ -708,7 +686,6 @@ test("pnpm caches immutable store data but always validates and links frozen ins
     "compose-e2e.yml",
     "release.yml",
     "deploy.yml",
-    "share-server.yml",
   ]) {
     const workflow = parse(await readWorkflow(name))
     for (const job of Object.values(workflow.jobs)) {
@@ -742,54 +719,6 @@ test("pnpm caches immutable store data but always validates and links frozen ins
     step.uses?.startsWith("actions/setup-node@")
   )
   assert.equal(cache.with["cache-dependency-path"], "**/pnpm-lock.yaml")
-})
-
-test("standalone Rust caches follow the selected compiler and isolate WASM targets", async () => {
-  for (const service of ["share", "signaling"]) {
-    const workflow = parse(await readWorkflow(`${service}-server.yml`))
-    for (const event of ["push", "pull_request"]) {
-      assert.ok(workflow.on[event].paths.includes("rust-toolchain.toml"))
-      assert.ok(workflow.on[event].paths.includes(".cargo/**"))
-    }
-    for (const [jobName, job] of Object.entries(workflow.jobs)) {
-      const cacheIndex = job.steps.findIndex((step) => step.uses === "Swatinem/rust-cache@v2")
-      if (service === "share" && jobName === "worker") continue
-      assert.ok(cacheIndex > 0)
-      const setupIndex = job.steps.findIndex((step) =>
-        step.run?.includes("rustup show active-toolchain")
-      )
-      assert.ok(setupIndex >= 0 && setupIndex < cacheIndex)
-      const cache = job.steps[cacheIndex]
-      const wasm = jobName === "worker"
-      assert.equal(
-        cache.with.workspaces,
-        `services/${service}-server${wasm ? "/worker" : ""} -> target`
-      )
-      assert.equal(
-        cache.with.key,
-        `${service}-server-${wasm ? "wasm32-unknown-unknown" : "native"}`
-      )
-      assert.notEqual(cache.with["add-rust-environment-hash-key"], false)
-      assert.notEqual(cache.with["add-rust-environment-hash-key"], "false")
-      assert.ok(
-        job.steps
-          .slice(cacheIndex + 1)
-          .some((step) => /cargo (clippy|check|llvm-cov)/.test(step.run ?? "") && !step.if)
-      )
-    }
-  }
-})
-
-test("the signaling deployment packager stays on its verified worker-build release", async () => {
-  const workflow = parse(await readWorkflow("signaling-server.yml"))
-  const installer = workflow.jobs.worker.steps.find((step) => step.name === "Install worker-build")
-  assert.equal(installer.with.tool, "worker-build@0.8.7")
-  const verification = workflow.jobs.worker.steps.find(
-    (step) => step.name === "Verify worker artifact"
-  )
-  for (const artifact of ["build/worker/shim.mjs", "build/index.js", "build/index_bg.wasm"]) {
-    assert.ok(verification.run.includes(`test -s ${artifact}`))
-  }
 })
 
 test("Jest shards provision ripgrep before source contract suites execute", async () => {

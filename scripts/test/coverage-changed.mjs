@@ -244,8 +244,9 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
     mobile: globalJS || any(/^mobile\/|^lib\/capacitor\/|\.mobile\.tsx?$|^next\.config\./),
     browserExtension:
       globalJS ||
+      rust ||
       any(
-        /^(?:browser-extension|packages|tests\/e2e\/browser-extension|lib\/browser|lib\/browser-companion|src-tauri\/src\/companion_api|crates\/cognia-companion(?:-[^/]+)?)\/|^playwright\./
+        /^(?:integrations\/browser-companion\.json|scripts\/ci\/check-browser-companion-contract\.mjs|src-tauri\/src\/lib\.rs)|^(?:protocol|packages|lib\/browser|lib\/browser-companion|src-tauri\/src\/companion_api|crates\/cognia-server|crates\/cognia-companion(?:-[^/]+)?)\//
       ),
     rust,
     gateway:
@@ -260,9 +261,11 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
     proIde: any(
       /^(?:crates\/cognia-codeserver\/|sidecar\/(?:codeserver-agent-ext|vscode-ext-host)\/|lib\/codeserver\/|lib\/plugin\/ide\/|scripts\/gates\/(?:check-pro-ide-perf|pro-ide-perf-baseline)|scripts\/test\/run-pro-ide-e2e)/
     ),
-    // diagnostic-server has an independent Cargo.lock; root graph edits do not
-    // change its dependencies, while toolchain/compiler config changes do.
-    diagnostic: any(/^(?:services\/diagnostic-server\/|\.cargo\/|rust-toolchain(?:\.toml)?$)/),
+    // The pinned cognia-labs/cognia-services consumer: the pin, its check, the
+    // vendored contract copies, and the app code that reads them.
+    cogniaServices: any(
+      /^(?:integrations\/cognia-services\.json|scripts\/ci\/check-cognia-services\.mjs|Cargo\.(?:toml|lock)|package\.json|pnpm-lock\.yaml|lib\/plugin\/character-pack\/__fixtures__\/jcs-vectors\.json)$|^(?:protocol\/cognia-services|lib\/diagnostic-service|crates\/cognia-tenant-auth)\//
+    ),
     productionBuild:
       rust ||
       any(

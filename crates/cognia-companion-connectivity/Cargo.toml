@@ -29,7 +29,7 @@ cognia-net = { path = "../cognia-net" }
 # (`signaling::envelope`) live in the OS credential store.
 cognia-secrets = { path = "../cognia-secrets" }
 # The relay's wire types (`RoomDescriptor`, protocol envelopes).
-cognia-signaling-core = { path = "../../services/signaling-server/core" }
+cognia-signaling-core.workspace = true
 
 # WebRTC stack (ADR-0021) — the current 0.20 API uses a runtime-agnostic
 # PeerConnection builder, one event-handler object per connection, and polled

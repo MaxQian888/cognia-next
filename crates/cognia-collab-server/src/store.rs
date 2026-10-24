@@ -15,7 +15,7 @@
 //! Rust — deliberately duplicating what RLS does — so that a route which
 //! forgets to scope a query fails a test rather than passing one and leaking in
 //! production. That is a mitigation, not a substitute: the policies themselves
-//! need a live database, the way `services/diagnostic-server` proves its own
+//! need a live database, the way `cognia-services/services/diagnostic-server` proves its own
 //! through `compose-e2e`.
 
 use std::collections::HashMap;

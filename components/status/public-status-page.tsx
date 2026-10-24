@@ -8,7 +8,7 @@
  * Cognia itself. The page renders a skeleton until the runtime resolves on
  * the client, then shows only validated live data from the status API.
  * There is no preview or fallback dataset: without a snapshot the status is
- * "unknown". Plan: docs/plans/2026-10-02-signaling-public-status-implementation.md §11.
+ * "unknown". Plan: cognia-services docs/plans/2026-10-02-signaling-public-status-implementation.md §11.
  */
 
 import { useState, type ReactNode } from "react"

@@ -113,6 +113,7 @@ if (process.env.CI || process.env.JEST_JUNIT_OUTPUT_NAME) {
 // built-in `--test` runner (see `pnpm sidecar:test`), not Jest. The two test
 // surfaces have different setup expectations and should not be run together.
 const baseTestPathIgnorePatterns = [
+  "<rootDir>/.cache/",
   "/node_modules/",
   "/.next/",
   "/out/",
@@ -130,22 +131,6 @@ const baseTestPathIgnorePatterns = [
   // These launcher tests use node:test and the official runtime's native ESM
   // module graph. The deepseek-runtime CI job installs and tests them in isolation.
   "/runtime/deepseek-harness/.*\\.test\\.mjs$",
-  // `services/share-server/` (worker + viewer) is a standalone Vitest
-  // workspace with its own package.json/node_modules — same arrangement as
-  // `sidecar/`. Its specs `import` from `vitest` and `cloudflare:test`, which
-  // Jest's CJS loader can't resolve. Run them via the share-server workspace's
-  // own `vitest` / `wrangler` scripts, not the root Jest suite.
-  "/share-server/",
-  // This Worker uses its own Vitest pool with the Cloudflare runtime too.
-  "/services/update-server/worker/",
-  // The status service (Worker, external probe, operator CLI) is three
-  // standalone Vitest packages with their own lockfiles.
-  "/services/status-server/",
-  // The official account's identity Worker (ADR-0215) is a standalone Vitest
-  // package (workerd + D1) with its own lockfile.
-  "/services/identity-server/",
-  // Account sync's Worker (ADR-0215 phase 2): standalone Vitest (workerd) with its own lockfile.
-  "/services/sync-server/",
   // `tmp/` is gitignored (see .gitignore) — a local-only vendored clone of
   // the CUA TypeScript libs whose tests target Vitest. Never run under Jest.
   "/tmp/",
@@ -206,7 +191,9 @@ const projectCommon: Config = {
     "^@cognia/primitives(.*)$": "<rootDir>/packages/primitives/src$1",
     "^@cognia/time(.*)$": "<rootDir>/packages/time/src$1",
     "^@cognia/github-bot-kit(.*)$": "<rootDir>/packages/github-bot-kit/src$1",
-    "^@cognia/sync-protocol(.*)$": "<rootDir>/packages/sync-protocol/src$1",
+    // Owned by cognia-labs/cognia-services, installed at the pinned revision.
+    "^@cognia/sync-protocol(.*)$": "<rootDir>/node_modules/@cognia/sync-protocol/src$1",
+    "^@cognia/status-contract(.*)$": "<rootDir>/node_modules/@cognia/status-contract/src$1",
     "^@cognia/latex(.*)$": "<rootDir>/packages/latex/src$1",
     "^@cognia/mermaid(.*)$": "<rootDir>/packages/mermaid/src$1",
     "^@cognia/plugin-sdk$": "<rootDir>/packages/plugin-sdk/src/index.ts",
@@ -222,9 +209,6 @@ const projectCommon: Config = {
     "^@cognia/security-findings(.*)$": "<rootDir>/packages/security-findings/src$1",
     "^@cognia/plugin-contract(.*)$": "<rootDir>/packages/plugin-contract/src$1",
     "^@cognia/companion-client(.*)$": "<rootDir>/packages/companion-client/src$1",
-    // The browser extension's own alias. `@ext/*`, never `@/*`: that
-    // workspace is built separately and cannot resolve the repo-root alias.
-    "^@ext/(.*)$": "<rootDir>/browser-extension/$1",
     "^@cognia/redact(.*)$": "<rootDir>/packages/redact/src$1",
     "^@cognia/web-search(.*)$": "<rootDir>/packages/web-search/src$1",
     "^@cognia/tts(.*)$": "<rootDir>/packages/tts/src$1",
@@ -466,7 +450,7 @@ const projectCommon: Config = {
   // have transformed it (that is how `@workflow/serde`, a transitive ESM-only
   // dep of `@ai-sdk/provider-utils@5`, slipped through).
   transformIgnorePatterns: [
-    "/node_modules/(?!.*(?:\\.pnpm/ai@|/node_modules/ai/|\\bai/dist/|@agentclientprotocol\\+|@agentclientprotocol/|@ai-sdk\\+|@ai-sdk/|@standard-schema\\+|@standard-schema/|@workflow\\+|@workflow/|@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile|react-markdown|remark-gfm|remark-math|rehype-raw|rehype-sanitize|remark-parse|remark-rehype|rehype-stringify|unified|bail|is-plain-obj|trough|zwitch|ccount|character-entities|comma-separated-tokens|decode-named-character-reference|devlop|extend|html-void-elements|longest-streak|property-information|space-separated-tokens|stringify-entities|web-namespaces|@octokit\\+|@octokit/|universal-user-agent|before-after-hook|deprecation|once|wrappy|btoa-lite|fast-content-type-parse|toad-cache|bottleneck|@types\\+|@types/|@modelcontextprotocol\\+|@modelcontextprotocol/|@xyflow\\+|@xyflow/|chart\\.js|cheerio|@noble\\+|@noble/|@babel\\+|@babel/))",
+    "/node_modules/(?!.*(?:\\.pnpm/ai@|/node_modules/ai/|\\bai/dist/|@agentclientprotocol\\+|@agentclientprotocol/|@ai-sdk\\+|@ai-sdk/|@standard-schema\\+|@standard-schema/|@workflow\\+|@workflow/|@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile|react-markdown|remark-gfm|remark-math|rehype-raw|rehype-sanitize|remark-parse|remark-rehype|rehype-stringify|unified|bail|is-plain-obj|trough|zwitch|ccount|character-entities|comma-separated-tokens|decode-named-character-reference|devlop|extend|html-void-elements|longest-streak|property-information|space-separated-tokens|stringify-entities|web-namespaces|@octokit\\+|@octokit/|universal-user-agent|before-after-hook|deprecation|once|wrappy|btoa-lite|fast-content-type-parse|toad-cache|bottleneck|@types\\+|@types/|@modelcontextprotocol\\+|@modelcontextprotocol/|@xyflow\\+|@xyflow/|chart\\.js|cheerio|@noble\\+|@noble/|@babel\\+|@babel/|@cognia\\+sync-protocol|@cognia/sync-protocol|@cognia\\+status-contract|@cognia/status-contract))",
     "\\.pnp\\.[^\\\\]+$",
   ],
 }

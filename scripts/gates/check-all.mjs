@@ -95,10 +95,6 @@ const REGISTRY = [
   // or extra key in either locale fails typecheck" — and until this entry
   // existed, nothing on a PR ever ran that check.
   { script: "web:typecheck", group: "types" },
-  // The extension workspace is excluded from the root tsc (chrome globals,
-  // its own JSX transform), exactly like `web`, so it needs its own entry or
-  // it would be typechecked by nothing.
-  { script: "browser-ext:typecheck", group: "types" },
   // The sidecar runs its TypeScript unbuilt under Node's type stripping and is
   // excluded from the root tsc (its own lib/resolution contract, ADR-0197), so
   // this is the only thing that type-checks it.
@@ -413,16 +409,9 @@ const CONTRACT_INPUTS = [
 const SDK_INPUTS = [...FRONTEND_INPUTS, ...CONTRACT_INPUTS]
 const GATE_INPUTS = {
   typecheck: FRONTEND_INPUTS,
-  "typecheck:workspaces": [
-    ...FRONTEND_INPUTS,
-    ...CONTRACT_INPUTS,
-    "docs/",
-    "web/",
-    "browser-extension/",
-  ],
-  knip: [...FRONTEND_INPUTS, "web/", "browser-extension/", "docs/app/", "docs/lib/"],
+  "typecheck:workspaces": [...FRONTEND_INPUTS, ...CONTRACT_INPUTS, "docs/", "web/"],
+  knip: [...FRONTEND_INPUTS, "web/", "docs/app/", "docs/lib/"],
   "web:typecheck": ["web/", "packages/"],
-  "browser-ext:typecheck": ["browser-extension/", "packages/", "lib/", "types/"],
   "sidecar:typecheck": CONTRACT_INPUTS,
   "build:packages": CONTRACT_INPUTS,
   "author-types:check": CONTRACT_INPUTS,
@@ -458,13 +447,7 @@ function matchesInput(path, input) {
 function fullQualityReason(changePlan) {
   if (changePlan.mode === "full") return changePlan.reason
   if (changePlan.deletedFiles.length) return "Deleted or renamed paths require full validation"
-  const knownInputs = [
-    ...FRONTEND_INPUTS,
-    ...CONTRACT_INPUTS,
-    "web/",
-    "browser-extension/",
-    "docs/",
-  ]
+  const knownInputs = [...FRONTEND_INPUTS, ...CONTRACT_INPUTS, "web/", "docs/"]
   for (const path of changePlan.changedFiles) {
     // Configuration and dependency pins can affect every gate, even when they
     // belong to a single workspace. Tooling changes also invalidate selection.

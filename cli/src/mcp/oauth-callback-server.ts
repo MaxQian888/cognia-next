@@ -71,7 +71,7 @@ function escapeHtml(value: string): string {
 }
 
 // Cognia's palette, mark and chibi spot icons, as the identity Worker's hosted
-// pages draw them (services/identity-server/src/pages/document.ts; sources of
+// pages draw them (cognia-services/services/identity-server/src/pages/document.ts; sources of
 // truth web/app/globals.css and web/components/brand-mark.tsx), so the browser
 // tab a sign-in ends on looks like the pages it started on.
 const PAGE_STYLE = `:root{color-scheme:light dark;--paper:#f3f1ec;--surface:#faf9f6;--ink:#0c1115;--muted:#5f666e;--hairline:#d7d8d5;--hairline-strong:#b9bcb8;--action:#35cedd;--glow:rgb(53 206 221 / 16%);--grid:rgb(12 17 21 / 7%);--band-top:#dff4f6;--band-bottom:#f4faf9}

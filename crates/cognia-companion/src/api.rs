@@ -403,7 +403,7 @@ fn non_empty_env(name: &str) -> Option<String> {
 /// from the request, which is a claim that *this* listener serves `/signaling`.
 /// It does not: the companion router mounts `/ws/events`, `/ws/acp`,
 /// `/ws/terminal` and `/ws/worker`, and signaling lives in a separate service
-/// (`services/signaling-server`). A browser on the loopback plane was handed
+/// (`cognia-services/services/signaling-server`). A browser on the loopback plane was handed
 /// `ws://127.0.0.1:27891/signaling` and got a failed handshake every time,
 /// while the Host sat in `wss://signaling.cognia.cn/signaling` waiting for it.
 ///

@@ -1,7 +1,7 @@
 //! Short-lived bearer grants for tenant-scoped services — ADR-0149 §7.
 //!
 //! ADR-0149 decision 11 says new services adopt the grant pattern
-//! `services/diagnostic-server` already proved rather than inventing a seventh
+//! `cognia-services/services/diagnostic-server` already proved rather than inventing a seventh
 //! auth scheme. This is that pattern, lifted and reshaped around a `User`.
 //!
 //! # Why not a JWT
@@ -388,14 +388,15 @@ mod tests {
 
     /// The frozen wire vector — ADR-0149 §8.
     ///
-    /// `services/share-server` verifies collaboration-plane grants with its own
-    /// implementation, because the image build context (`context:
-    /// services/share-server`) makes a path dependency on this crate resolve
-    /// under `cargo test` and fail inside Docker. Duplicated code that nothing
-    /// pins drifts, and the drift would be invisible until grants this crate
-    /// mints started being rejected in production.
+    /// The share service (`services/share-server` in cognia-labs/cognia-services)
+    /// verifies collaboration-plane grants with its own implementation: it
+    /// cannot depend on this crate across the repository boundary. Duplicated
+    /// code that nothing pins drifts, and the drift would be invisible until
+    /// grants this crate mints started being rejected in production.
     ///
-    /// So both sides verify the same bytes. Never regenerate this fixture: a
+    /// So both sides verify the same bytes: the service keeps a byte-identical
+    /// copy of this fixture, and `pnpm cognia-services:check` fails when the
+    /// two differ. Never regenerate this fixture: a
     /// change to it IS a wire break, and it should be as hard to make silently
     /// as any other one.
     #[test]

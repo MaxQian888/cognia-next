@@ -24,7 +24,7 @@
 //! # What is deliberately NOT here, and why
 //!
 //! ADR-0149's roadmap described this crate as "merged from
-//! `services/diagnostic-server/src/auth.rs` and
+//! `cognia-services/services/diagnostic-server/src/auth.rs` and
 //! `crates/cognia-ops-controller/src/auth.rs`". That premise did not survive
 //! contact with the two files: they share **no type, no function and no
 //! constant**. They are two different auth designs for two different threat
@@ -50,16 +50,14 @@
 //!
 //! # Why diagnostic-server does not depend on this crate
 //!
-//! It cannot, yet. `.github/workflows/images.yml` builds its image with
-//! `context: services/diagnostic-server`, so a `path = "../../crates/…"`
-//! dependency resolves at `cargo test` time and then fails inside Docker,
-//! where the parent directory does not exist. Changing a deploy pipeline's
-//! build context to serve a refactor is a worse trade than leaving a
-//! well-tested file where it is. ADR-0149 §7 priced this as a `rust-version`
-//! split; that turned out to be a phantom (the Dockerfile builds on
-//! `rust:1.95-bookworm` and the repo pins `channel = "1.95"` — the declared
-//! `rust-version = "1.82"` is a floor nothing compiles at). The build context
-//! is the real constraint.
+//! It cannot: the diagnostic server lives in cognia-labs/cognia-services
+//! (`services/diagnostic-server`) and builds its image with its own directory
+//! as the Docker context, so a path dependency on this crate cannot resolve
+//! there. ADR-0149 §7 priced this as a `rust-version` split; that turned out
+//! to be a phantom (the Dockerfile builds on the same pinned toolchain — the
+//! declared `rust-version = "1.82"` is a floor nothing compiles at). The
+//! repository boundary is the real constraint; the RLS parity test in [`rls`]
+//! reads that service from a checkout of the pinned revision.
 
 pub mod actions;
 pub mod ids;

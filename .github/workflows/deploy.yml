@@ -1,12 +1,12 @@
 name: Deploy
 
 # ============================================================================
-# Real, opt-in deployments for the cloud services (ADR-0059 P0.1):
-#   - Cloudflare Workers: cognia-signaling (Rust/wasm), cognia-share (TS),
-#     cognia-status (TS + D1 + the status-only static export),
-#     cognia-identity (TS + D1, the official account's OIDC issuer, ADR-0215),
-#     cognia-sync (TS + SQLite Durable Objects, account sync, ADR-0215 phase 2)
-#   - Fly.io axum twins:  signaling-server, share-server
+# Real, opt-in deployments for the app repository's sites (ADR-0059 P0.6 / D8,
+# ADR-0092): the docs site and the marketing website, each a static export on
+# its own Cloudflare Pages project.
+#
+# The cloud services (signaling, share, status, identity, sync Workers and the
+# Fly.io twins) deploy from cognia-labs/cognia-services.
 #
 # Safety model (forks stay green with zero configuration):
 #   1. Trigger is manual (workflow_dispatch) or an explicit workflow_call.
@@ -16,15 +16,11 @@ name: Deploy
 #
 # Configuration lives in GitHub Environments `staging` and `production`, both
 # holding the SAME names so the workflow reads one set:
-#   secrets:  CLOUDFLARE_API_TOKEN, FLY_API_TOKEN
-#   variables: CLOUDFLARE_ACCOUNT_ID, CF_SHARE_KV_NAMESPACE_ID,
-#              CF_STATUS_D1_DATABASE_ID (staging), CF_IDENTITY_D1_DATABASE_ID,
-#              FLY_SIGNALING_APP, FLY_SHARE_APP
+#   secrets:  CLOUDFLARE_API_TOKEN
+#   variables: CLOUDFLARE_ACCOUNT_ID, CF_DOCS_PAGES_PROJECT, CF_WEB_PAGES_PROJECT,
+#              DOCS_SITE_URL, WEB_SITE_URL
 # `production` should carry protection rules (required reviewers) — configured
 # in Settings → Environments, documented in docs/development/CI_CD.md.
-#
-# Staging Workers deploy via the [env.staging] stanzas in each wrangler.toml
-# (separate worker names, no custom-domain routes → *.workers.dev).
 # ============================================================================
 
 on:
@@ -42,15 +38,6 @@ on:
         type: choice
         options:
           - all
-          - workers
-          - fly
-          - signaling-worker
-          - share-worker
-          - status-worker
-          - identity-worker
-          - sync-worker
-          - signaling-fly
-          - share-fly
           - docs
           - web
         default: all
@@ -82,18 +69,15 @@ jobs:
     outputs:
       enabled: ${{ steps.g.outputs.enabled }}
       has_cf: ${{ steps.g.outputs.has_cf }}
-      has_fly: ${{ steps.g.outputs.has_fly }}
     steps:
       - id: g
         env:
           DEPLOY_ENABLED: ${{ vars.DEPLOY_ENABLED }}
           HAS_CF: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
-          HAS_FLY: ${{ secrets.FLY_API_TOKEN != '' }}
         run: |
           {
             echo "enabled=${DEPLOY_ENABLED:-false}"
             echo "has_cf=${HAS_CF}"
-            echo "has_fly=${HAS_FLY}"
           } >> "$GITHUB_OUTPUT"
           {
             echo "## Deploy gate — ${{ inputs.environment }}"
@@ -102,304 +86,10 @@ jobs:
             echo "| --- | --- |"
             echo "| DEPLOY_ENABLED | \`${DEPLOY_ENABLED:-unset}\` |"
             echo "| CLOUDFLARE_API_TOKEN present | \`${HAS_CF}\` |"
-            echo "| FLY_API_TOKEN present | \`${HAS_FLY}\` |"
             echo "| target | \`${{ inputs.target }}\` |"
             echo ""
             echo "Jobs whose gate is false are skipped (green)."
           } >> "$GITHUB_STEP_SUMMARY"
-
-  deploy-signaling-worker:
-    name: Worker — signaling
-    needs: gate
-    if: >
-      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_cf == 'true' &&
-      contains(fromJSON('["all","workers","signaling-worker"]'), inputs.target)
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Rust toolchain (wasm32)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Install worker-build
-        uses: taiki-e/install-action@v2
-        with:
-          tool: worker-build
-
-      - name: Deploy
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: services/signaling-server/worker
-          command: deploy ${{ inputs.environment == 'staging' && '--env staging' || '' }}
-
-  deploy-share-worker:
-    name: Worker — share
-    needs: gate
-    if: >
-      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_cf == 'true' &&
-      contains(fromJSON('["all","workers","share-worker"]'), inputs.target)
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Inject KV namespace id
-        env:
-          KV_ID: ${{ vars.CF_SHARE_KV_NAMESPACE_ID }}
-        run: |
-          if [ -z "$KV_ID" ]; then
-            echo "::error::CF_SHARE_KV_NAMESPACE_ID environment variable is not set"
-            exit 1
-          fi
-          sed -i "s/REPLACE_WITH_KV_NAMESPACE_ID/$KV_ID/" services/share-server/worker/wrangler.toml
-
-      - name: Deploy
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: services/share-server/worker
-          command: deploy ${{ inputs.environment == 'staging' && '--env staging' || '' }}
-
-  deploy-status-worker:
-    name: Worker — status
-    needs: gate
-    # Public signaling status (docs/plans/2026-10-02-signaling-public-status-
-    # implementation.md §12). Builds the app's static export, extracts the
-    # status-only distribution, applies additive D1 migrations BEFORE the new
-    # code goes live, then deploys Worker + assets together. Never touches the
-    # signaling Worker. Secrets (PROBE_SECRETS, SUBSCRIBER_*_KEYS,
-    # IP_BUCKET_SECRET) are set once with `wrangler secret put`, not here.
-    if: >
-      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_cf == 'true' &&
-      contains(fromJSON('["all","workers","status-worker"]'), inputs.target)
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: pnpm
-          cache-dependency-path: |
-            pnpm-lock.yaml
-            sidecar/pnpm-lock.yaml
-            services/status-server/worker/pnpm-lock.yaml
-
-      - name: Cache standalone npm downloads
-        uses: actions/cache@v6
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-${{ runner.arch }}-node26-npm-${{ hashFiles('sidecar/vscode-ext-host/package-lock.json', 'sidecar/webclone/package-lock.json') }}
-          restore-keys: ${{ runner.os }}-${{ runner.arch }}-node26-npm-
-
-      - name: Guard D1 database variable
-        if: inputs.environment == 'staging'
-        env:
-          D1_ID: ${{ vars.CF_STATUS_D1_DATABASE_ID }}
-        run: |
-          if [ -z "$D1_ID" ]; then
-            echo "::error::CF_STATUS_D1_DATABASE_ID environment variable is not set"
-            exit 1
-          fi
-
-      - name: Install app dependencies
-        run: pnpm install --frozen-lockfile --prefer-offline
-
-      - name: Build static export
-        run: pnpm build
-
-      - name: Install Chromium for the asset crawl
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Extract status-only distribution
-        run: node scripts/build/build-status-site.mjs
-
-      - name: Install and test the status Worker
-        working-directory: services/status-server/worker
-        run: |
-          pnpm install --frozen-lockfile --prefer-offline
-          pnpm typecheck
-          pnpm test
-
-      - name: Inject D1 database id
-        if: inputs.environment == 'staging'
-        env:
-          D1_ID: ${{ vars.CF_STATUS_D1_DATABASE_ID }}
-        run: |
-          # Production's id is committed; staging's is injected per environment.
-          sed -i "s/REPLACE_WITH_STAGING_D1_DATABASE_ID/$D1_ID/" services/status-server/worker/wrangler.toml
-
-      - name: Apply D1 migrations (additive)
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: services/status-server/worker
-          command: >
-            d1 migrations apply
-            ${{ inputs.environment == 'staging' && 'cognia-status-staging --env staging' || 'cognia-status' }}
-            --remote
-
-      - name: Deploy
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: services/status-server/worker
-          command: >
-            deploy ${{ inputs.environment == 'staging' && '--env staging' || '' }}
-            --var BUILD_SHA:${{ github.sha }}
-
-  deploy-sync-worker:
-    name: Worker — sync
-    needs: gate
-    # Account sync (ADR-0215 phase 2): the device registry and enrollment, one
-    # SQLite Durable Object per space. No secrets; it reads the identity
-    # Worker's JWKS through its IDENTITY service binding, so cognia-identity
-    # must exist first (it does from phase 1). The identity job waits for this
-    # one because its SYNC_ADMIN binding needs this Worker to exist.
-    # The protocol package is linked from packages/sync-protocol.
-    if: >
-      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_cf == 'true' &&
-      contains(fromJSON('["all","workers","sync-worker"]'), inputs.target)
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: pnpm
-          cache-dependency-path: services/sync-server/pnpm-lock.yaml
-
-      - name: Install and test the sync Worker
-        working-directory: services/sync-server
-        run: |
-          pnpm install --frozen-lockfile --prefer-offline
-          pnpm typecheck
-          pnpm test
-
-      - name: Deploy
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: services/sync-server
-          command: deploy ${{ inputs.environment == 'staging' && '--env staging' || '' }}
-
-  deploy-identity-worker:
-    name: Worker — identity
-    needs: [gate, deploy-sync-worker]
-    # The official account (ADR-0215 §2). Tests run first; migrations are
-    # applied before the deploy so new code never meets an old schema.
-    # Secrets (BETTER_AUTH_SECRETS, provider credentials) are set once per
-    # environment with `wrangler secret put`; see services/identity-server/README.md.
-    # Runs after the sync Worker when both deploy (its SYNC_ADMIN binding), and
-    # on its own when only the identity Worker is selected.
-    if: >
-      always() &&
-      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_cf == 'true' &&
-      contains(fromJSON('["success","skipped"]'), needs.deploy-sync-worker.result) &&
-      contains(fromJSON('["all","workers","identity-worker"]'), inputs.target)
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: pnpm
-          cache-dependency-path: services/identity-server/pnpm-lock.yaml
-
-      - name: Install and test the identity Worker
-        working-directory: services/identity-server
-        run: |
-          pnpm install --frozen-lockfile --prefer-offline
-          pnpm typecheck
-          pnpm test
-
-      - name: Inject D1 database id
-        env:
-          D1_ID: ${{ vars.CF_IDENTITY_D1_DATABASE_ID }}
-          PLACEHOLDER: ${{ inputs.environment == 'staging' && 'REPLACE_WITH_STAGING_D1_DATABASE_ID' || 'REPLACE_WITH_PRODUCTION_D1_DATABASE_ID' }}
-        run: |
-          if [ -z "$D1_ID" ]; then
-            echo "::error::CF_IDENTITY_D1_DATABASE_ID environment variable is not set"
-            exit 1
-          fi
-          sed -i "s/$PLACEHOLDER/$D1_ID/" services/identity-server/wrangler.toml
-
-      - name: Apply D1 migrations
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: services/identity-server
-          command: >
-            d1 migrations apply
-            ${{ inputs.environment == 'staging' && 'cognia-identity-staging --env staging' || 'cognia-identity' }}
-            --remote
-
-      - name: Deploy
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: services/identity-server
-          command: deploy ${{ inputs.environment == 'staging' && '--env staging' || '' }}
-
-  deploy-signaling-fly:
-    name: Fly — signaling
-    needs: gate
-    if: >
-      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_fly == 'true' &&
-      contains(fromJSON('["all","fly","signaling-fly"]'), inputs.target)
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Deploy
-        working-directory: services/signaling-server
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --remote-only --app "${{ vars.FLY_SIGNALING_APP }}"
-
-  deploy-share-fly:
-    name: Fly — share
-    needs: gate
-    if: >
-      needs.gate.outputs.enabled == 'true' && needs.gate.outputs.has_fly == 'true' &&
-      contains(fromJSON('["all","fly","share-fly"]'), inputs.target)
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Deploy
-        working-directory: services/share-server
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl deploy --remote-only --app "${{ vars.FLY_SHARE_APP }}"
 
   deploy-docs:
     name: Pages — docs
@@ -555,19 +245,7 @@ jobs:
 
   summary:
     name: Summary
-    needs:
-      [
-        gate,
-        deploy-signaling-worker,
-        deploy-share-worker,
-        deploy-status-worker,
-        deploy-identity-worker,
-        deploy-sync-worker,
-        deploy-signaling-fly,
-        deploy-share-fly,
-        deploy-docs,
-        deploy-web,
-      ]
+    needs: [gate, deploy-docs, deploy-web]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -578,13 +256,6 @@ jobs:
             echo ""
             echo "| Job | Result |"
             echo "| --- | --- |"
-            echo "| Worker — signaling | ${{ needs.deploy-signaling-worker.result }} |"
-            echo "| Worker — share | ${{ needs.deploy-share-worker.result }} |"
-            echo "| Worker — status | ${{ needs.deploy-status-worker.result }} |"
-            echo "| Worker — identity | ${{ needs.deploy-identity-worker.result }} |"
-            echo "| Worker — sync | ${{ needs.deploy-sync-worker.result }} |"
-            echo "| Fly — signaling | ${{ needs.deploy-signaling-fly.result }} |"
-            echo "| Fly — share | ${{ needs.deploy-share-fly.result }} |"
             echo "| Pages — docs | ${{ needs.deploy-docs.result }} |"
             echo "| Pages — website | ${{ needs.deploy-web.result }} |"
           } >> "$GITHUB_STEP_SUMMARY"

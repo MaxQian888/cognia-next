@@ -45,7 +45,7 @@ use crate::store::{
 
 /// How long a minted grant lives.
 ///
-/// Five minutes, matching `services/diagnostic-server`. Short because the role
+/// Five minutes, matching `cognia-services/services/diagnostic-server`. Short because the role
 /// is baked into the claim: the TTL is the whole bound on how stale a
 /// membership change can be before it takes effect.
 pub const GRANT_TTL: std::time::Duration = std::time::Duration::from_secs(300);

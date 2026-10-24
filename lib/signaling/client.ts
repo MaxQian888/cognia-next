@@ -46,7 +46,7 @@ const OUTBOUND_QUEUE_CAPACITY = 64
  * `RELAY_OUTBOUND_QUEUE`.
  */
 const DATA_OUTBOUND_QUEUE_CAPACITY = 1024
-// Mirrors services/signaling-server/core/src/limits.rs. Data cannot consume
+// Mirrors cognia-services/services/signaling-server/core/src/limits.rs. Data cannot consume
 // the separately budgeted signaling lane, even when a large transfer queues.
 const DATA_RATE_CAPACITY = 256
 const DATA_RATE_PER_MS = 64 / 1_000

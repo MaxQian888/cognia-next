@@ -1,6 +1,6 @@
 import { createCipheriv, hkdfSync } from "node:crypto"
 
-import constants from "@/services/share-server/share-constants.json"
+import constants from "@/protocol/cognia-services/share-constants.json"
 
 import {
   SHARE_BLOB_CHUNK_BYTES,

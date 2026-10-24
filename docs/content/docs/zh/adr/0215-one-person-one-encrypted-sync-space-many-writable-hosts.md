@@ -208,7 +208,7 @@ Cognia 为普通用户运营账号。登录是可选的："离线继续"保留�
 - 登录方式为飞书（自建应用）、GitHub、Google、Apple。提供方令牌一律丢弃；只有当双方提供方都验证了同一邮箱时才合并账号。
 - ID 令牌和 UserInfo 中的 `cognia_identities` 列出此人关联的登录方式。
 - CORS 只开放给 Web 源。`/api/account/deletion` 实现 §10 的冷静期，由每小时的 cron 清除到期账号。
-- 运维指南见其 README，故障处理见 `docs/runbooks/identity-worker.md`。
+- 运维指南见其 README，故障处理见 cognia-services 的 [`docs/runbooks/identity-worker.md`](https://github.com/cognia-labs/cognia-services/blob/main/docs/runbooks/identity-worker.md)。
 
 **此人的 id。** 只有官方签发方的 subject（当它是合法的 `usr_` id 时）才直接作为此人的 id；其他所有签发方（Logto 与任何自托管 OIDC 签发方）的 subject 都与签发方一起做哈希派生。部署自称的类型从不决定这一点，因此任何网关都无法签发一个等于他人官方 id 的 subject。渲染层（`lib/identity/sign-in.ts`）与桌面宿主（`crates/cognia-companion-security/src/official_identity.rs`）读取同一组向量（`fixtures/identity-id-vectors.json`）。
 
@@ -251,7 +251,7 @@ Cognia 为普通用户运营账号。登录是可选的："离线继续"保留�
 - 每个设备操作都检查设备证明，被撤销的设备在读取任何内容之前就被拒绝。
 - 它强制要求完整的信封集合、原子的恢复批次，以及批准请求的状态、转录和批准者。
 - `SyncAdmin.purgeSpace` 删除一个空间。身份 Worker 清除账号时通过 `SYNC_ADMIN` 绑定调用它，预发布环境和生产环境都已绑定。
-- 运维指南见其 README，事故处理见 `docs/runbooks/sync-worker.md`。
+- 运维指南见其 README，事故处理见 cognia-services 的 [`docs/runbooks/sync-worker.md`](https://github.com/cognia-labs/cognia-services/blob/main/docs/runbooks/sync-worker.md)。
 
 **客户端。**
 

@@ -48,6 +48,7 @@ RPC 顶层为：
 ```bash
 pnpm exec jest lib/signaling lib/tauri/transport-rtc.test.ts --runInBand
 pnpm webrtc:crypto-vector
-pnpm webrtc:smoke
 pnpm webrtc:pair
 ```
+
+汇合点服务器自身的中继冒烟测试在 cognia-services 中运行（在 `services/signaling-server/` 下执行 `node scripts/smoke.mjs`）。

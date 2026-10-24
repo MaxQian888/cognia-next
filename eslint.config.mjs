@@ -31,13 +31,6 @@ const eslintConfig = defineConfig([
     // not read .gitignore, so it must be listed explicitly like out/ & docs/out/.
     "storybook-static/**",
     "cli/dist/**",
-    // WXT build products: `.wxt/` is the generated type surface, `build/` and
-    // `.output/` the packed extension. Authored nothing, and `.wxt/` carries
-    // ambient declarations that the app's config has no reason to parse.
-    // (The bare `build/**` above matches only the repo root.)
-    "browser-extension/.wxt/**",
-    "browser-extension/build/**",
-    "browser-extension/.output/**",
     // Playwright emits self-contained HTML reports and trace viewers containing
     // minified third-party bundles. Flat ESLint does not read .gitignore, so a
     // local E2E run must not make the authored-source lint gate fail afterward.
@@ -86,26 +79,6 @@ const eslintConfig = defineConfig([
     "sidecar/vscode-ext-host/**",
     "sidecar/webclone/**",
     "sidecar/codeserver-agent-ext/**",
-    // Standalone Cloudflare worker + Vite viewer workspace with its own
-    // toolchain, tsconfig, and lockfile (like sidecar/). Its src is linted
-    // by its own config; its dist/ is a minified build artifact.
-    "services/share-server/**",
-    // Standalone status-service bundles and copied static-export assets.
-    "services/status-server/*/dist/**",
-    "services/status-server/worker/assets/**",
-    "services/update-server/worker/dist/**",
-    "services/update-server/worker/.wrangler/**",
-    // ADR-0215 identity spike: wrangler dev cache and dry-run bundle.
-    "services/identity-server/.wrangler/**",
-    "services/identity-server/dist/**",
-    // Account sync's Worker (ADR-0215 phase 2): wrangler dev cache and dry-run bundle.
-    "services/sync-server/.wrangler/**",
-    "services/sync-server/dist/**",
-    // Standalone Cloudflare worker (workers-rs / Rust) with its own toolchain.
-    // Its build/ and .wrangler/ dirs are minified JS bundles emitted by wrangler,
-    // never authored here (same rationale as services/share-server/**).
-    "services/signaling-server/worker/build/**",
-    "services/signaling-server/worker/.wrangler/**",
     "node_modules/**",
     // Generated catalogs emitted by scripts/build/*.mjs (e.g.
     // build-builtin-skills.mjs). They carry a `/* eslint-disable */` header so

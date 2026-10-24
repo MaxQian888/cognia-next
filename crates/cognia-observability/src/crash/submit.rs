@@ -19,10 +19,11 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    create_diagnostic_package, delete_incident, exchange_installation_grant, fetch_receipt,
-    installation_key_path, submit_package, withdraw_consent, AttachmentInput, AttachmentKind,
-    DiagnosticPackageInput, DiagnosticTransport, HttpRequest, HttpResponse, InstallationIdentity,
-    SubmissionRequest, SubmissionTarget, SubmitError,
+    create_diagnostic_package, delete_incident, delete_incident_with_credential,
+    exchange_installation_grant, fetch_receipt, installation_key_path, submit_package,
+    withdraw_consent, AttachmentInput, AttachmentKind, DiagnosticPackageInput, DiagnosticTransport,
+    HttpRequest, HttpResponse, InstallationIdentity, SubmissionRequest, SubmissionTarget,
+    SubmitError,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -581,6 +582,35 @@ pub async fn crash_withdraw_submission(
     .map_err(|_| "submission_task_failed".to_owned())?
 }
 
+/// Delete one remote incident: with this installation's grant, falling back to
+/// the incident's deletion credential when the grant cannot reach it.
+///
+/// The grant only reaches incidents this installation identity uploaded. After
+/// a reinstall or a lost installation key the exchange fails or the service
+/// answers `incident_not_found`; the credential stored with the receipt is the
+/// one proof left. Without a credential the grant's error stands.
+fn delete_remote_incident<T: DiagnosticTransport>(
+    transport: &T,
+    target: &SubmissionTarget,
+    grant: Result<String, String>,
+    incident_id: &str,
+    deletion_credential: Option<&str>,
+) -> Result<(), String> {
+    let grant_error = match grant {
+        Ok(grant) => match delete_incident(transport, target, &grant, incident_id) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.code() == Some("incident_not_found") => submit_error_code(&error),
+            Err(error) => return Err(submit_error_code(&error)),
+        },
+        Err(error) => error,
+    };
+    let Some(credential) = deletion_credential else {
+        return Err(grant_error);
+    };
+    delete_incident_with_credential(transport, target, incident_id, credential)
+        .map_err(|error| submit_error_code(&error))
+}
+
 /// Delete the remote incident and forget the local record.
 ///
 /// The local record is dropped only after the service confirms: forgetting it
@@ -594,14 +624,14 @@ pub async fn crash_delete_submission(
         validate_stem(&stem)?;
         let crash_dir = crate::crash::crash_reports_dir().ok_or("crash_dir_unavailable")?;
         let record = receipts::load(&crash_dir, &stem).ok_or("submission_not_found")?;
-        let grant = uploader_grant(&connection, &identity()?)?;
-        delete_incident(
+        let grant = identity().and_then(|identity| uploader_grant(&connection, &identity));
+        delete_remote_incident(
             &NativeTransport,
             &connection.target(),
-            &grant,
+            grant,
             &record.incident_id,
-        )
-        .map_err(|error| submit_error_code(&error))?;
+            record.deletion_credential.as_deref(),
+        )?;
         receipts::remove(&crash_dir, &stem).map_err(|error| format!("receipt:{error}"))?;
         Ok(())
     })
@@ -612,6 +642,147 @@ pub async fn crash_delete_submission(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+
+    /// Answers scripted responses in order and records method and URL.
+    struct ScriptedTransport {
+        responses: RefCell<Vec<(u16, &'static str)>>,
+        seen: RefCell<Vec<(String, String)>>,
+    }
+
+    impl ScriptedTransport {
+        fn new(responses: Vec<(u16, &'static str)>) -> Self {
+            Self {
+                responses: RefCell::new(responses),
+                seen: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn seen(&self) -> Vec<(String, String)> {
+            self.seen.borrow().clone()
+        }
+    }
+
+    impl DiagnosticTransport for ScriptedTransport {
+        fn execute(&self, request: HttpRequest<'_>) -> Result<HttpResponse, String> {
+            self.seen
+                .borrow_mut()
+                .push((request.method.to_owned(), request.url.clone()));
+            let mut responses = self.responses.borrow_mut();
+            if responses.is_empty() {
+                return Err("unreachable".to_owned());
+            }
+            let (status, body) = responses.remove(0);
+            Ok(HttpResponse {
+                status,
+                body: body.as_bytes().to_vec(),
+            })
+        }
+    }
+
+    fn delete_target() -> SubmissionTarget {
+        SubmissionTarget::new("https://diag.test", "tenant", "project")
+    }
+
+    const NOT_FOUND: &str = r#"{"error":{"code":"incident_not_found"}}"#;
+
+    #[test]
+    fn the_installation_grant_deletes_when_it_reaches_the_incident() {
+        let transport = ScriptedTransport::new(vec![(204, "")]);
+        delete_remote_incident(
+            &transport,
+            &delete_target(),
+            Ok("grant".to_owned()),
+            "inc-1",
+            Some("del_x"),
+        )
+        .unwrap();
+        assert_eq!(
+            transport.seen(),
+            vec![(
+                "DELETE".to_owned(),
+                "https://diag.test/v1/incidents/inc-1".to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    fn a_new_installation_falls_back_to_the_deletion_credential() {
+        let transport = ScriptedTransport::new(vec![(404, NOT_FOUND), (204, "")]);
+        delete_remote_incident(
+            &transport,
+            &delete_target(),
+            Ok("grant".to_owned()),
+            "inc-1",
+            Some("del_x"),
+        )
+        .unwrap();
+        assert_eq!(
+            transport.seen()[1],
+            (
+                "POST".to_owned(),
+                "https://diag.test/v1/incidents/inc-1/delete-with-credential".to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn a_failed_grant_exchange_still_deletes_with_the_credential() {
+        let transport = ScriptedTransport::new(vec![(204, "")]);
+        delete_remote_incident(
+            &transport,
+            &delete_target(),
+            Err("identity:unreadable".to_owned()),
+            "inc-1",
+            Some("del_x"),
+        )
+        .unwrap();
+        assert_eq!(transport.seen().len(), 1);
+        assert_eq!(transport.seen()[0].0, "POST");
+    }
+
+    #[test]
+    fn without_a_credential_the_grant_error_stands() {
+        let transport = ScriptedTransport::new(vec![(404, NOT_FOUND)]);
+        let error = delete_remote_incident(
+            &transport,
+            &delete_target(),
+            Ok("grant".to_owned()),
+            "inc-1",
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(error, "incident_not_found");
+        assert_eq!(
+            delete_remote_incident(
+                &ScriptedTransport::new(Vec::new()),
+                &delete_target(),
+                Err("identity:unreadable".to_owned()),
+                "inc-1",
+                None,
+            )
+            .unwrap_err(),
+            "identity:unreadable"
+        );
+    }
+
+    #[test]
+    fn other_refusals_do_not_spend_the_credential() {
+        // An intake or auth problem is not "this installation cannot see it";
+        // retrying with the credential would only mask it.
+        let transport =
+            ScriptedTransport::new(vec![(503, r#"{"error":{"code":"ingest_disabled"}}"#)]);
+        let error = delete_remote_incident(
+            &transport,
+            &delete_target(),
+            Ok("grant".to_owned()),
+            "inc-1",
+            Some("del_x"),
+        )
+        .unwrap_err();
+        assert_eq!(error, "ingest_disabled");
+        assert_eq!(transport.seen().len(), 1);
+    }
 
     #[test]
     fn screenshot_is_skipped_without_a_capture_backend_or_when_it_refuses() {

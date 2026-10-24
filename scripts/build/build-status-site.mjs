@@ -17,6 +17,9 @@
  *      asset request — catching lazily loaded chunks the static scan cannot
  *      name, such as each locale's message catalog.
  *
+ * The status Worker lives in cognia-labs/cognia-services; its deploy checks out
+ * this repository at a pinned revision and runs this script with `--dest`.
+ *
  * Output layout (consumed by `[assets]` in services/status-server/worker/
  * wrangler.toml and by the mirror's assetsDir):
  *   <dest>/status/index.html, <dest>/status.txt, <dest>/status/__next.*.txt,
@@ -49,12 +52,15 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const REPO_ROOT = path.resolve(HERE, "..", "..")
 export const DEFAULT_OUT = path.join(REPO_ROOT, "out")
-export const DEFAULT_DEST = path.join(REPO_ROOT, "services", "status-server", "worker", "assets")
+/** A cognia-services checkout (`pnpm cognia-services:fetch` makes one under .cache/). */
+export const SERVICES_ROOT =
+  process.env.COGNIA_SERVICES_ROOT ?? path.join(REPO_ROOT, ".cache", "cognia-services")
+export const DEFAULT_DEST = path.join(SERVICES_ROOT, "services", "status-server", "worker", "assets")
 /** Cloudflare Workers static asset limits (per file / per deployment). */
 export const MAX_ASSET_BYTES = 25 * 1024 * 1024
 export const MAX_ASSET_FILES = 20_000
 const RUNTIME_META = JSON.stringify({ mode: "primary", apiBase: "/api/status/v1" })
-/** Mirrors INERT_SERVICE_WORKER in services/status-server/worker/src/assets.ts. */
+/** Mirrors INERT_SERVICE_WORKER in cognia-services' services/status-server/worker/src/assets.ts. */
 const INERT_SERVICE_WORKER =
   'self.addEventListener("install", () => self.skipWaiting())\nself.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()))\n'
 
@@ -62,7 +68,7 @@ const INERT_SERVICE_WORKER =
  * `_headers` for files the asset layer serves without invoking the Worker
  * (wrangler.toml `run_worker_first` lists the Worker-first paths). Same
  * security headers as `withSecurityHeaders` in
- * services/status-server/worker/src/assets.ts; content-hashed Next files are
+ * cognia-services' services/status-server/worker/src/assets.ts; content-hashed Next files are
  * immutable, everything else revalidates.
  */
 export const STATUS_ASSET_HEADERS = `/*
@@ -269,8 +275,8 @@ function startCrawlServer(outDir, statusHtml, fixtures, requested) {
       return send(400, CONTENT_TYPES[".json"], JSON.stringify({ code: "token_invalid", requestId: "crawl" }))
     }
     if (url.pathname === "/status/" || url.pathname === "/status") return send(200, CONTENT_TYPES[".html"], html)
-    // Production serves an inert worker here (services/status-server/worker/
-    // src/assets.ts), never the app's precaching one.
+    // Production serves an inert worker here (cognia-services'
+    // services/status-server/worker/src/assets.ts), never the app's precaching one.
     if (url.pathname === "/sw.js") return send(200, CONTENT_TYPES[".js"], INERT_SERVICE_WORKER)
     const file = path.join(outDir, decodeURIComponent(url.pathname).replace(/^\//, ""))
     if (!file.startsWith(outDir) || !existsSync(file) || !statSync(file).isFile()) {

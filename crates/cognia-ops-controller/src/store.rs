@@ -2143,7 +2143,7 @@ mod tests {
     }
 
     /// The predicate must not gain a `::uuid` cast copied from
-    /// `services/diagnostic-server`, whose `tenant_id` is a UUID. Here it is
+    /// `cognia-services/services/diagnostic-server`, whose `tenant_id` is a UUID. Here it is
     /// TEXT, and a cast would raise per row — turning a clean deny into a 500.
     #[test]
     fn the_policy_does_not_cast_the_tenant_to_a_uuid() {

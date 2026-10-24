@@ -5,6 +5,9 @@ description: "取代 ADR-0154 §1、§2、§11。扩展可以捕获可读 Markdo
 
 # ADR 0228 — 浏览器伴侣可以丰富捕获，也可以被驱动
 
+仓库归属（2026-10-23）：完整插件及 Chromium 测试迁入 [cognia-labs/cognia-browser-extension](https://github.com/cognia-labs/cognia-browser-extension)。Host 与固定版本消费者兼容性 CI 保留在主仓库。下文插件源码路径对应独立仓库。
+
+
 **状态：** 已接受
 **日期：** 2026-10-16
 **取代：** ADR-0154 §1（只交接、不驱动）、§2（两项能力）、§11（仅在可见时轮询）

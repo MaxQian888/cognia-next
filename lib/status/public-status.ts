@@ -3,8 +3,8 @@
  *
  * Re-exports the v1 contract (`contract.ts`), its derivation rules
  * (`derive.ts`), boundary parsers (`validate.ts`) and runtime config
- * (`config.ts`). The standalone services import those leaf files directly by
- * relative path; app code imports this barrel. Preview data no longer lives
+ * (`config.ts`), all owned by `@cognia/status-contract` in
+ * cognia-labs/cognia-services; app code imports this barrel. Preview data no longer lives
  * here: fixtures are in `fixtures.ts` and only tests and stories import them.
  */
 
