@@ -48,6 +48,11 @@ Revision 2 changes four things against revision 1:
 | Q10 | Host data partitioning (2026-10-23)             | **One brain process per person** on multi-tenant Hosts. The brain stays single-account by design (`getDb()` is a process singleton used by ~780 files), so partitioning happens at the process boundary, not per request or per row. See §9a.                                                                                                                                                          |
 | Q11 | Model calls from person partitions (2026-10-23) | `pet_chat_send` and `pet_soul_generate` stay intentionally dormant on multi-tenant Hosts (`503 model_access_unavailable`) until the P6 credential broker. A person partition starts with no provider configuration.                                                                                                                                                                                    |
 | Q12 | A departed member's Host data (2026-10-23)      | **Kept but inaccessible.** Standing is checked on every request, so access ends at once. Data and key stay until an operator runs `cognia-server persons purge`; nothing is deleted automatically.                                                                                                                                                                                                     |
+| Q13 | Member agent turns (2026-10-24)                 | **With tools, in a sandbox.** A member's turn runs a bundled external agent inside a sandbox-pool container with gVisor or VM isolation. It never runs in a Host process or the shared sidecar. Cognia's own agent does not run in the sandbox.                                                                                                                                                        |
+| Q14 | Org model credentials (2026-10-24)              | **Org owner/admin configure them in the app**, with an operator CLI as fallback. Keys live only in the Host's encrypted secret store and are never shown again. Members use them only through brokered gateway tickets.                                                                                                                                                                                |
+| Q15 | Member usage (2026-10-24)                       | **Monthly token cap per member.** The org admin sets a default; unlimited is allowed. Over the cap, the member gets a clear refusal. Admins see each member's usage.                                                                                                                                                                                                                                   |
+| Q16 | Agents members may run (2026-10-24)             | **Org admin allowlist** over the bundled agents, with a default. An agent is offered only when an org credential covers its provider.                                                                                                                                                                                                                                                                  |
+| Q17 | Member working directory (2026-10-24)           | **One persistent personal workspace per member.** Files persist across conversations, with a size cap. It is purged together with the member's partition.                                                                                                                                                                                                                                              |
 
 ## 3. Verified current state (HEAD `07eb0d44b5`)
 
@@ -334,6 +339,69 @@ Found in P5c (2026-10-23): a member can store and read history in their partitio
 - **Negotiation.** `host_state_status` lists exactly the allowed intents, so a client does not offer a send button that always fails. `host_feature_manifest` reports the partition's scope and marks agent execution unavailable.
 - **Runtime target.** A person brain activates its partition account's runtime target at boot.
 
+## 9b. Member agent turns with org credentials (P6)
+
+Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
+
+- **No model path from a partition.**
+  - Route tickets are service-only. They take no principal and are owned by the gateway's single account (`provider_admin.rs` `mint_bridge_ticket`, `crates/cognia-gateway/src/lib.rs` `mint_route_ticket`).
+  - Provider credentials are Host secrets keyed by (kind, name), with no org dimension (`crates/cognia-secrets/src/host_secrets.rs`).
+- **The sandboxed agent path exists.**
+  - `spawn_external_agent` runs a bundled agent CLI, from `deploy/bundle/agent-versions.json`, in a sandbox-pool container (`crates/cognia-sandbox-pool/src/docker.rs`).
+  - Placement is Host-stamped (`PlacementBinding`). Credentials are `Brokered` when only `COGNIA_GATEWAY_TOKEN` / `COGNIA_GATEWAY_TASK_CONFIG` enter the container.
+  - Output returns as `external-agent://*` events, persisted as chat parts.
+  - Multi-tenant pools need gVisor or VM isolation and the local driver.
+- **The run binding is a workspace.** A partition has none. The session scratch workspace (`EnsureSessionScratchWorkspace`) has no person or org owner.
+- **Usage ledgers.** No per-member monthly ledger exists. Route tickets reserve and settle per ticket only.
+
+**Shape.**
+
+1. **Org credentials (P6a).**
+   - **Storage:** Host secrets gain an org scope: kind `org-provider`, key `<org_id>/<provider>`.
+   - **Operations:** set, list (metadata only: provider, fingerprint, updatedAt, updatedBy) and delete.
+     - App: org owner/admin, through the Host as an org-action under a new `org.model-credentials` action.
+     - CLI: `cognia-server org-credentials …`.
+   - **Disclosure:** keys are never returned. Every change is audited.
+   - **Allowlist:** an org agent allowlist with a default (Q16) is stored next to the keys. An agent is offered only when an org credential covers its provider.
+2. **Usage ledger and cap (P6b).**
+   - **Ledger:** a Host table keyed by (org, member account, UTC month) with `reserved` and `spent` tokens, plus an org default cap and per-member overrides (Q15).
+   - **Admin operations:** set the cap and read per-member usage, both under the same org action.
+   - **Refusal:** over the cap gives `429 member_usage_cap_reached`, which is not retryable before the month rolls over.
+3. **Partition tickets (P6c).**
+   - **Mint:** a person brain may mint a route ticket for its own partition only (`person-brain` scope, its own account).
+   - **Snapshot:** the ticket is frozen to the org credential for the requested provider.
+   - **Budget:** reserve and settle against the member's monthly ledger.
+   - **First user-visible outcome:** the pet's model calls (`pet_chat_send`, `pet_soul_generate`) leave dormancy and use the ticket. They run in the brain with no tools, as today on single-user Hosts.
+   - **Without credentials:** with no org credential they keep `503 model_access_unavailable`.
+4. **Personal workspace and partition execution (P6d).**
+   - **Workspace:** each partition gets one persistent personal workspace under `COGNIA_WORKSPACES_DIR/persons/<account>/` (Q17), with a size cap. Purge deletes it.
+   - **Admission:** a person brain may call the external-agent spawn, status and kill arms for its own partition. Admission comes from the partition: the person's live org standing, and the person as owner of their own workspace. The binding is the personal workspace.
+   - **Placement:** a sandbox is mandatory. Credentials must be brokered, and the ticket comes from P6c. Remote providers stay refused.
+   - **Without a sandbox:** with no conforming pool, it stays `execution_isolation_unavailable`, labelled as today.
+5. **Partition agent sessions (P6e).**
+   - **Runtimes:** the person profile gains the external-agent runtime pieces needed to drive a session.
+   - **Dispatch:** HostState `message.enqueue` and the turn intents become allowed when the Host advertises partition execution. They dispatch to the session's external agent.
+   - **Agent choice:** the session's agent must be on the org allowlist.
+   - **Negotiation:** `session_attach` `supportedActions` follows. Without execution the P5d refusals stand.
+6. **Frontend (P6g).**
+   - **Admin page:** org admin settings for model credentials, allowed agents, caps and usage. It reuses the org admin surfaces.
+   - **Member UI:** an agent picker limited to the allowlist, plus labels for the cap and for missing credentials.
+7. **E2E lane (P6f).**
+   - **Compose:** fix `cognia-server-cloud` in `docker-compose.web-headless-e2e.yml`: master key, collab service credential, `COGNIA_EXECUTION=disabled`, and the brain fleet.
+   - **Smoke tier:** a `persons` tier in `scripts/smoke/compose-smoke.mjs`. Two OIDC persons of one org pair into one Host, using the fixture's `/e2e/token`, device registration and signed RPC. It checks:
+     - isolation;
+     - HostState sessions;
+     - dormancy;
+     - purge;
+     - once P6c lands, a pet reply through an org credential pointed at `anthropic-fixture`.
+   - **CI:** wired into `compose-e2e.yml` tier 2. Sandboxed turns need gVisor, so the sandbox half runs only where `runsc` is available and is otherwise reported as skipped.
+
+**Intentional dormancy (Rule 7).**
+
+- Tool turns need a conforming sandbox pool. Without one they keep `execution_isolation_unavailable`.
+- Model calls need an org credential. Without one they keep `model_access_unavailable`.
+- Single-user and desktop Hosts are unchanged.
+
 ## 10. Frontend (P3)
 
 - **`lib/collab/capabilities.ts`.** Strict parser for the v1 response: unknown features and actions are dropped, unknown states map to `off`. `CollabClient.capabilities()` sends the protocol header. A `404` yields `{ status: "unsupported" }`.
@@ -356,21 +424,26 @@ AC01–AC18 from revision 1 stand, with these changes:
 
 New criteria:
 
-| ID   | Given / when                                                                                       | Required result                                                                                                      |
-| ---- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| AC19 | The app DB role is superuser or BYPASSRLS.                                                         | The server refuses to start unless explicitly overridden; `/health` reports the override.                            |
-| AC20 | A tenant principal calls each Host surface class in multi-tenant mode.                             | Matrix holds; an unclassified surface is denied; the classification test fails when a new route is unclassified.     |
-| AC21 | A policy row is absent, paused, killed, denied, canary at 0/50/100%, or has an unmet prerequisite. | Decisions match the evaluation order and the golden bucket vectors; reads, exports, leave and cancel stay available. |
-| AC22 | An offboarded issuer's pending chat invite is accepted.                                            | Refused; the invite shows as unavailable.                                                                            |
-| AC23 | A scoped internal credential queries another org.                                                  | `403`; unscoped single-credential deployments unchanged.                                                             |
-| AC24 | A tenant device calls a `client.read` / `client.write` data command on a multi-tenant Host.        | Before P5: `403 host_data_unpartitioned`. After P5: it reads and writes only its own person's partition.             |
-| AC25 | Persons A and B of one org use one multi-tenant Host; A writes messages, files, pet and issues.    | B's reads return none of A's rows; A's data root is encrypted with A's key only.                                     |
-| AC26 | A person brain's token is presented to a route or check that accepts `service`.                    | Refused.                                                                                                             |
-| AC27 | A departed member's device calls a data arm; the operator then purges them; they rejoin.           | `403` while departed, data kept; purge removes key and data root; after rejoining the partition is empty.            |
-| AC28 | `COGNIA_PERSON_BRAINS_MAX` brains are busy and another person calls.                               | `503 person_brain_capacity`, retryable; an idle brain is stopped first when one exists.                              |
-| AC29 | A member on a multi-tenant Host creates, renames, archives and deletes a conversation.             | Each is applied in their partition only; the other member's `session_list` never shows it.                           |
-| AC30 | The member enqueues a message, steers a turn or moves a session to a workspace in their partition. | Per-action refusals `execution_isolation_unavailable` / `workspace_unavailable`; status never advertises them.       |
-| AC31 | A single-user Host or a desktop Host receives the same HostState calls.                            | Behaviour unchanged: device grants decide, as before.                                                                |
+| ID   | Given / when                                                                                       | Required result                                                                                                                             |
+| ---- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| AC19 | The app DB role is superuser or BYPASSRLS.                                                         | The server refuses to start unless explicitly overridden; `/health` reports the override.                                                   |
+| AC20 | A tenant principal calls each Host surface class in multi-tenant mode.                             | Matrix holds; an unclassified surface is denied; the classification test fails when a new route is unclassified.                            |
+| AC21 | A policy row is absent, paused, killed, denied, canary at 0/50/100%, or has an unmet prerequisite. | Decisions match the evaluation order and the golden bucket vectors; reads, exports, leave and cancel stay available.                        |
+| AC22 | An offboarded issuer's pending chat invite is accepted.                                            | Refused; the invite shows as unavailable.                                                                                                   |
+| AC23 | A scoped internal credential queries another org.                                                  | `403`; unscoped single-credential deployments unchanged.                                                                                    |
+| AC24 | A tenant device calls a `client.read` / `client.write` data command on a multi-tenant Host.        | Before P5: `403 host_data_unpartitioned`. After P5: it reads and writes only its own person's partition.                                    |
+| AC25 | Persons A and B of one org use one multi-tenant Host; A writes messages, files, pet and issues.    | B's reads return none of A's rows; A's data root is encrypted with A's key only.                                                            |
+| AC26 | A person brain's token is presented to a route or check that accepts `service`.                    | Refused.                                                                                                                                    |
+| AC27 | A departed member's device calls a data arm; the operator then purges them; they rejoin.           | `403` while departed, data kept; purge removes key and data root; after rejoining the partition is empty.                                   |
+| AC28 | `COGNIA_PERSON_BRAINS_MAX` brains are busy and another person calls.                               | `503 person_brain_capacity`, retryable; an idle brain is stopped first when one exists.                                                     |
+| AC29 | A member on a multi-tenant Host creates, renames, archives and deletes a conversation.             | Each is applied in their partition only; the other member's `session_list` never shows it.                                                  |
+| AC30 | The member enqueues a message, steers a turn or moves a session to a workspace in their partition. | Per-action refusals `execution_isolation_unavailable` / `workspace_unavailable`; status never advertises them.                              |
+| AC31 | A single-user Host or a desktop Host receives the same HostState calls.                            | Behaviour unchanged: device grants decide, as before.                                                                                       |
+| AC32 | An org member (not owner/admin) tries to set, read or delete an org credential.                    | Refused; owner/admin succeed; no call ever returns key material; each change is audited.                                                    |
+| AC33 | A member's partition mints a ticket, then another partition presents it.                           | Refused; the ticket names its partition; the org credential never reaches the brain.                                                        |
+| AC34 | A member exceeds their monthly cap mid-turn.                                                       | The reservation fails before the call: `429 member_usage_cap_reached`; other members are unaffected; usage shows per member.                |
+| AC35 | A member runs a tool turn on a Host with a conforming sandbox pool.                                | It runs in a sandbox container bound to their personal workspace with brokered credentials only; another member's workspace is not mounted. |
+| AC36 | The same request on a Host without a conforming pool, or with an agent outside the allowlist.      | `execution_isolation_unavailable` / refused agent; no Host process is started.                                                              |
 
 ## 12. Work packages and execution plan
 
@@ -388,9 +461,16 @@ Each package lands with co-located tests and a changeset where user-facing. Each
 | P5b     | §9a TS: `person-brain` headless host kind and roster, `COGNIA_BRAIN_PROFILE=person` in `cognia serve`, diagnostics labels for `model_access_unavailable`, `person_brain_capacity` and `person_brain_unavailable`.                                                                                                                       | Claude                                               | Co-located Jest (roster pin, labels), `pnpm i18n:build`, `pnpm lint:i18n`.                                                                   |
 | P5c     | End-to-end: two persons on one multi-tenant `cognia-server` with two paired devices.                                                                                                                                                                                                                                                    | Claude                                               | AC25 on a real server.                                                                                                                       |
 | P5d     | §9a "Sessions in a person partition": HostState routing and authority binding for partitions (Rust), partition intent policy and status negotiation, person-brain runtime target (TS).                                                                                                                                                  | Codex `gpt-6.1-sol`                                  | Crate tests outside the sandbox; co-located Jest; rerun of the P5c rig (AC29–AC31).                                                          |
-| P6      | Deferred: org suspend/delete, rate limits, credential broker, shared multi-agent sessions (AC16), real-service E2E lane (AC17–AC18).                                                                                                                                                                                                    | —                                                    | Separate plan.                                                                                                                               |
+| P6a     | §9b.1 Org model credentials and agent allowlist: Host org-scoped secrets, admin RPC, `cognia-server org-credentials`, audit.                                                                                                                                                                                                            | Codex `gpt-6.1-sol`                                  | Crate tests outside the sandbox (AC32).                                                                                                      |
+| P6b     | §9b.2 Member usage ledger and monthly cap.                                                                                                                                                                                                                                                                                              | Codex `gpt-6.1-sol`                                  | Crate tests, cap race test (AC34).                                                                                                           |
+| P6c     | §9b.3 Partition route tickets; pet model calls leave dormancy.                                                                                                                                                                                                                                                                          | Codex `gpt-6.1-sol` + Claude (TS)                    | Crate tests + Jest; rig run against `anthropic-fixture` (AC33).                                                                              |
+| P6d     | §9b.4 Personal workspace and partition execution admission.                                                                                                                                                                                                                                                                             | Codex `gpt-6.1-sol`                                  | Crate tests; sandbox run where `runsc` exists (AC35, AC36).                                                                                  |
+| P6e     | §9b.5 Person brain drives external-agent sessions.                                                                                                                                                                                                                                                                                      | Claude                                               | Jest; rig run.                                                                                                                               |
+| P6f     | §9b.7 Real-service E2E lane (`persons` tier, CI wiring).                                                                                                                                                                                                                                                                                | Claude                                               | Lane green locally and in CI.                                                                                                                |
+| P6g     | §9b.6 Frontend: org model settings, agent picker, cap labels.                                                                                                                                                                                                                                                                           | Claude                                               | Jest, i18n, browser check.                                                                                                                   |
+| P7      | Deferred: org suspend/delete, rate limits, shared multi-agent sessions (AC16).                                                                                                                                                                                                                                                          | —                                                    | Separate plan.                                                                                                                               |
 
-Order: P0a → P0b → P2 → P1 → P4 → P5 (P5a and P5b in parallel, then P5c, then P5d), one Codex implementation job at a time. P3 runs in parallel against the contract files and switches to the live endpoint once P2 lands. Every Codex job is followed by Claude review of the diff, a rerun of its verification commands, and an adversarial Codex review on security-relevant packages (P0a, P2, P1).
+Order: P0a → P0b → P2 → P1 → P4 → P5 (P5a and P5b in parallel, then P5c, then P5d) → P6 (P6f first and alongside; then P6a → P6b → P6c → P6d → P6e, with P6g after P6a), one Codex implementation job at a time. P3 runs in parallel against the contract files and switches to the live endpoint once P2 lands. Every Codex job is followed by Claude review of the diff, a rerun of its verification commands, and an adversarial Codex review on security-relevant packages (P0a, P2, P1).
 
 Rollout stages (revision 1 §10) remain the operating procedure once P0–P4 ship:
 
