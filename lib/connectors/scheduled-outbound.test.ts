@@ -15,6 +15,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import {
   __setDigestSendPromptForTesting,
   installScheduledOutboundHandlers,
+  runConnectorDigestTurn,
 } from "./scheduled-outbound"
 import { PiiGateBlocked } from "@/lib/connectors/ai-loop/safe-send-prompt"
 import { getConnectorDeliveryGateway } from "./delivery-gateway"
@@ -151,6 +152,33 @@ jest.mock("@/lib/db/outbound-jobs", () => {
         : (actual.enqueueOutbound as (...a: unknown[]) => unknown)(...args),
   }
 })
+
+// The digest turn's approvers (ADR-0239 WP9). The park and the IM card are the
+// seams; what they decide is theirs and tested where they live.
+let mockParkOutcome: { kind: string; decision?: unknown } = { kind: "expired" }
+const mockParks: Array<{ options: Record<string, unknown>; finish: jest.Mock }> = []
+jest.mock("@/lib/claude/unattended-park", () => ({
+  createUnattendedPark: (options: Record<string, unknown>) => {
+    const finish = jest.fn(async () => undefined)
+    mockParks.push({ options, finish })
+    return { park: async () => mockParkOutcome, finish, runId: () => null }
+  },
+}))
+const mockClockRelease = jest.fn()
+const mockHoldExecutionClock = jest.fn((_signal?: AbortSignal) => mockClockRelease)
+jest.mock("@/lib/scheduler/execution-clock", () => ({
+  holdExecutionClock: (signal?: AbortSignal) => mockHoldExecutionClock(signal),
+}))
+const mockImResponderContexts: Array<Record<string, unknown>> = []
+let mockCardAnswered = true
+jest.mock("./hitl/tool-approval", () => ({
+  ...jest.requireActual("./hitl/tool-approval"),
+  makeImPermissionResponder: (ctx: { onUnanswered?: (request: unknown) => Promise<unknown> }) => {
+    mockImResponderContexts.push(ctx as Record<string, unknown>)
+    return async (request: unknown) =>
+      mockCardAnswered ? { decision: "allow" } : ctx.onUnanswered!(request)
+  },
+}))
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -533,7 +561,10 @@ describe("connection:scheduled:digest executor — full AI loop", () => {
       "sess_1",
       "Give me the daily summary",
       expect.any(Object),
-      { adapterId: "adp_discord", conversationKey: "discord:adp_discord:ch_test" }
+      expect.objectContaining({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+      })
     )
 
     const jobs = await getDb().outboundQueue.toArray()
@@ -1213,5 +1244,204 @@ describe("the outbound policy on scheduled deliveries (ADR-0239)", () => {
       output: { draftId: "cdr_2", heldAsDraft: true, assistantMessageId: "msg-held" },
     })
     expect(await getDb().outboundQueue.count()).toBe(0)
+  })
+})
+
+describe("the digest turn's tool requests (ADR-0239)", () => {
+  beforeEach(() => {
+    installScheduledOutboundHandlers()
+    mockParks.length = 0
+    mockParkOutcome = { kind: "expired" }
+    mockHoldExecutionClock.mockClear()
+    mockClockRelease.mockClear()
+    mockImResponderContexts.length = 0
+    mockCardAnswered = true
+  })
+
+  const ask = {
+    type: "permission_request",
+    sessionId: "sess_1",
+    requestId: "req_1",
+    toolUseID: "toolu_1",
+    toolName: "im_broadcast",
+    input: {},
+  }
+
+  /** A turn that asks for one tool, and reports what it was told. */
+  function askingSender(seen: unknown[]) {
+    return jest.fn(
+      async (
+        _sessionId: string,
+        _prompt: unknown,
+        _options: unknown,
+        cap: { onPermissionRequest?: (r: typeof ask) => Promise<unknown> }
+      ) => {
+        seen.push(await cap.onPermissionRequest!(ask))
+        return { text: "Digest.", messageId: "msg-ask", a2uiSurfaces: {}, a2uiSurfaceOrder: [] }
+      }
+    )
+  }
+
+  const digestPayload = {
+    adapterId: "adp_discord",
+    conversationKey: "discord:adp_discord:ch_test",
+    characterId: "char_001",
+    prompt: "digest",
+  }
+  const task = { id: "t1", name: "Morning digest" }
+
+  it("runs a scheduled digest unattended, in the task's origin, under its permission profile", async () => {
+    const sender = jest.fn(async () => ({
+      text: "Digest.",
+      messageId: "msg-plain",
+      a2uiSurfaces: {},
+      a2uiSurfaceOrder: [],
+    }))
+    __setDigestSendPromptForTesting(sender as never)
+
+    const result = await callExecutor(
+      "connection:scheduled:digest",
+      task,
+      makeExecution(digestPayload)
+    )
+
+    expect(result.success).toBe(true)
+    const cap = (sender.mock.calls[0] as unknown[])[3] as {
+      outboundPolicy: { unattended: boolean; origin: () => Promise<{ rootSessionId: string }> }
+      pauseTimeoutWhileAwaitingPermission?: boolean
+      signal?: AbortSignal
+    }
+    expect(cap.outboundPolicy.unattended).toBe(true)
+    await expect(cap.outboundPolicy.origin()).resolves.toMatchObject({ rootSessionId: "task:t1" })
+    expect(cap.pauseTimeoutWhileAwaitingPermission).toBe(true)
+    expect(cap.signal).toBeDefined()
+    expect(resolveSendOptionsImpl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capabilityGrants: [
+          {
+            schemaVersion: 1,
+            source: { kind: "scheduler", id: "t1" },
+            permissionProfile: {},
+          },
+        ],
+      })
+    )
+    // Nothing parked, but the turn's park is closed.
+    expect(mockParks).toHaveLength(1)
+    expect(mockParks[0].finish).toHaveBeenCalledWith("completed", undefined)
+  })
+
+  it("parks a scheduled digest's request for a person, holding the execution's clock", async () => {
+    mockParkOutcome = { kind: "approved", decision: { decision: "allow" } }
+    const seen: unknown[] = []
+    __setDigestSendPromptForTesting(askingSender(seen) as never)
+
+    const result = await callExecutor(
+      "connection:scheduled:digest",
+      task,
+      makeExecution(digestPayload)
+    )
+
+    expect(mockParks[0].options).toMatchObject({
+      origin: "scheduler",
+      sessionId: "sess_1",
+      label: "Scheduled digest: Morning digest",
+    })
+    expect(seen).toEqual([{ decision: "allow", attribution: { authority: "human" } }])
+    expect(mockHoldExecutionClock).toHaveBeenCalledWith(expect.any(AbortSignal))
+    expect(mockClockRelease).toHaveBeenCalledTimes(1)
+    expect(result.success).toBe(true)
+    expect(await getDb().outboundQueue.count()).toBe(1)
+  })
+
+  it("delivers the reply and ends the run needs_approval when nobody answered in time", async () => {
+    mockParkOutcome = { kind: "expired" }
+    const seen: unknown[] = []
+    __setDigestSendPromptForTesting(askingSender(seen) as never)
+
+    const result = await callExecutor(
+      "connection:scheduled:digest",
+      task,
+      makeExecution(digestPayload)
+    )
+
+    expect(seen[0]).toMatchObject({ decision: "deny", attribution: { authority: "timeout" } })
+    expect(result).toMatchObject({
+      success: false,
+      error: "needs approval: im_broadcast",
+      terminalReason: "needs-approval",
+      output: {
+        status: "needs_approval",
+        assistantMessageId: "msg-ask",
+        needsApproval: [expect.objectContaining({ requestId: "req_1", toolName: "im_broadcast" })],
+      },
+    })
+    // The reply says what is still pending; it goes out as usual.
+    expect(await getDb().outboundQueue.count()).toBe(1)
+  })
+
+  it("asks a clicked card's turn in its conversation, planned as attended", async () => {
+    readOverrideImpl = jest.fn(async () => ({ approvalMode: "yolo" }))
+    const seen: unknown[] = []
+    const sender = askingSender(seen)
+    __setDigestSendPromptForTesting(sender as never)
+
+    const result = await runConnectorDigestTurn({
+      ...digestPayload,
+      approver: { kind: "conversation", initiatorUserId: "U_clicker" },
+    })
+
+    expect(mockImResponderContexts[0]).toMatchObject({
+      sessionId: "sess_1",
+      adapterId: "adp_discord",
+      conversationKey: "discord:adp_discord:ch_test",
+      conversationRef: { platform: "discord", adapterId: "adp_discord", channelId: "ch_test" },
+      initiatorUserId: "U_clicker",
+      approvalMode: "yolo",
+    })
+    expect(seen).toEqual([{ decision: "allow" }])
+    expect((sender.mock.calls[0] as unknown[])[3]).toMatchObject({
+      outboundPolicy: { unattended: false },
+      pauseTimeoutWhileAwaitingPermission: true,
+    })
+    expect(mockParks).toHaveLength(0)
+    expect(result.success).toBe(true)
+  })
+
+  it("ends a clicked card's turn needs_approval when nobody tapped the card", async () => {
+    mockCardAnswered = false
+    __setDigestSendPromptForTesting(askingSender([]) as never)
+
+    const result = await runConnectorDigestTurn({
+      ...digestPayload,
+      approver: { kind: "conversation", initiatorUserId: "U_clicker" },
+    })
+
+    expect(result).toMatchObject({ success: false, terminalReason: "needs-approval" })
+  })
+
+  it("refuses at once when nobody can answer, saying where the turn came from", async () => {
+    const seen: unknown[] = []
+    const sender = askingSender(seen)
+    __setDigestSendPromptForTesting(sender as never)
+
+    const result = await runConnectorDigestTurn({
+      ...digestPayload,
+      approver: { kind: "none", surface: "external bridge" },
+    })
+
+    expect(seen[0]).toMatchObject({
+      decision: "deny",
+      message: expect.stringContaining("external bridge"),
+      attribution: { authority: "system" },
+    })
+    expect((sender.mock.calls[0] as unknown[])[3]).toMatchObject({
+      outboundPolicy: { unattended: true },
+    })
+    expect((sender.mock.calls[0] as unknown[])[3]).not.toHaveProperty(
+      "pauseTimeoutWhileAwaitingPermission"
+    )
+    expect(mockParks).toHaveLength(0)
+    expect(result).toMatchObject({ success: false, terminalReason: "needs-approval" })
   })
 })

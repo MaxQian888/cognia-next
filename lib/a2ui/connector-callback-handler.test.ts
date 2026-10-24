@@ -127,6 +127,8 @@ describe("defaultConnectorCallbackHandler", () => {
         kind: "origin-reply",
         inboundConversationKey: baseEvent.conversationKey ?? "slack:adp_sl:C_test",
       },
+      // The person who clicked answers the turn's tool requests there.
+      approver: { kind: "conversation", initiatorUserId: baseEvent.user.remoteUserId },
     })
   })
 

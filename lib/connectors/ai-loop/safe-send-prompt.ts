@@ -346,6 +346,12 @@ export async function safeSendPrompt(
       timeoutMs: opts.timeoutMs,
       onPartial: opts.onPartial,
       onPermissionRequest: opts.onPermissionRequest,
+      // Who answers those requests decides how outbound calls are planned
+      // (ADR-0239), and a request parked for a person stops the clock.
+      ...(opts.outboundPolicy ? { outboundPolicy: opts.outboundPolicy } : {}),
+      ...(opts.pauseTimeoutWhileAwaitingPermission
+        ? { pauseTimeoutWhileAwaitingPermission: true }
+        : {}),
       onEvent: opts.onEvent,
       execution: {
         kind: "connector",

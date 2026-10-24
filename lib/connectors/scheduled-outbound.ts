@@ -24,7 +24,10 @@
 
 import { registerTaskExecutor } from "@/lib/scheduler/task-scheduler"
 import { enqueueAuthorized, type OutboundAuthorization } from "@/lib/connectors/delivery-gateway"
-import { taskPlanOrigin } from "@/lib/policy/action-review/plan-context"
+import {
+  taskPlanOrigin,
+  type ActionReviewPlanOrigin,
+} from "@/lib/policy/action-review/plan-context"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import { resolveCharacterById } from "@/lib/db/characters"
@@ -43,9 +46,28 @@ import {
 import { isLateDelivery } from "@/lib/scheduler/catchup-policy"
 import { findSessionByConversationKey } from "./runtime"
 import { registerImElicitationContext } from "./hitl/im-elicitation-context"
+import { makeImPermissionResponder } from "./hitl/tool-approval"
+import {
+  createUnattendedPermissionResponder,
+  needsApprovalSummary,
+  NEEDS_APPROVAL_STATUS,
+} from "@/lib/claude/unattended-permission-responder"
+import { createUnattendedPark } from "@/lib/claude/unattended-park"
+import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
+import type { OutboundToolPlannerOptions } from "@/lib/policy/action-review/plan-tool-call"
+import { holdExecutionClock } from "@/lib/scheduler/execution-clock"
+import {
+  AGENT_CAPABILITY_GRANT_SCHEMA_VERSION,
+  type AgentCapabilityGrantV1,
+} from "@cognia/agent-config-types/agent-capability-grant"
+import type { PermissionRequestEvent } from "@cognia/agent-config-types"
 import { appendAudit } from "./audit"
 import type { MessageSegment } from "@/types/connectors/segment"
-import { parseConversationKey } from "@/types/connectors/event"
+import {
+  parseConversationKey,
+  type ConversationDeliveryTarget,
+  type ConversationReference,
+} from "@/types/connectors/event"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import type { OutboundJobSource, OutboundJobWorkflowSource } from "@/lib/db/connector-types"
@@ -198,6 +220,43 @@ export function __setDigestSendPromptForTesting(fn: DigestSendPromptFn | null): 
 }
 
 /**
+ * Who answers the digest turn's tool requests (ADR-0239). It also decides how
+ * the turn's outbound calls are planned: attended in the conversation a person
+ * clicked in, unattended otherwise.
+ *
+ * - `parked`: a scheduled digest. A request waits for a person on the desktop
+ *   or a paired phone (ADR-0224 A7); the wait stops the turn's and the
+ *   execution's clocks, and the park bounds it.
+ * - `conversation`: a turn a person started in the conversation by clicking a
+ *   card. A request becomes an approval card there, like an IM reply's.
+ * - `none`: nobody can answer (an external agent asked for the turn). A request
+ *   is denied at once.
+ *
+ * Whatever answers, a request that went unapproved for want of an answer ends
+ * the run `needs_approval`.
+ */
+export type DigestApprover =
+  | {
+      kind: "parked"
+      /** Shown on the parked approval. */
+      label: string
+      /** The origin the turn's outbound calls are planned in. */
+      outboundOrigin: () => Promise<ActionReviewPlanOrigin>
+      /** The scheduled execution's signal: it holds the execution's clock. */
+      signal?: AbortSignal
+    }
+  | {
+      kind: "conversation"
+      /** remoteUserId of the person who clicked; they may answer the cards. */
+      initiatorUserId?: string
+    }
+  | {
+      kind: "none"
+      /** Where the turn came from, for the message the model is given. */
+      surface: string
+    }
+
+/**
  * Input shape for the core AI-loop runner. Used by both the scheduled
  * task executor and the connector-callback handler so both code paths
  * share one production-grade implementation (resolveSendOptions →
@@ -225,12 +284,117 @@ export interface RunDigestInput {
    * an unattended send in the bound session's origin.
    */
   authorization?: OutboundAuthorization
+  /** Who answers the turn's tool requests. Default: nobody (`none`). */
+  approver?: DigestApprover
+  /** Customise the turn (a scheduled digest's unattended permission profile). */
+  capabilityGrants?: AgentCapabilityGrantV1[]
+  /** Cancels the turn (the scheduled execution's signal). */
+  signal?: AbortSignal
 }
 
 export interface RunDigestResult {
   success: boolean
   output?: Record<string, unknown>
   error?: string
+  /** `needs-approval` when a tool request went unapproved for want of an answer. */
+  terminalReason?: "needs-approval"
+}
+
+/** The digest turn's permission handling, built from its {@link DigestApprover}. */
+interface DigestPermissions {
+  onPermissionRequest: (request: PermissionRequestEvent) => Promise<CapturePermissionDecision>
+  outboundPolicy: OutboundToolPlannerOptions
+  pauseTimeoutWhileAwaitingPermission: boolean
+  /** True once a request went unapproved for want of an answer. */
+  needsApproval: () => boolean
+  /** One line for the run list: `needs approval: im_broadcast`. */
+  summary: () => string
+  /** The requests nobody approved, in arrival order. */
+  denials: () => readonly { requestId: string; toolName: string }[]
+  finish: (status: "completed" | "failed" | "cancelled") => Promise<void>
+}
+
+function digestPermissions(
+  approver: DigestApprover,
+  turn: {
+    sessionId: string
+    projectId?: string
+    adapterId: string
+    conversationKey: string
+    /** Absent when the conversation's platform is unknown: no card can reach it. */
+    conversationRef?: ConversationReference
+    deliveryTarget?: ConversationDeliveryTarget
+    approvalMode?: "prompt" | "yolo"
+    signal: AbortSignal
+  }
+): DigestPermissions {
+  if (approver.kind === "parked") {
+    const responder = createUnattendedPermissionResponder("scheduled digest", {
+      park: createUnattendedPark({
+        origin: "scheduler",
+        sessionId: turn.sessionId,
+        label: approver.label,
+        ...(turn.projectId ? { projectId: turn.projectId } : {}),
+        signal: turn.signal,
+      }),
+    })
+    return {
+      onPermissionRequest: async (request) => {
+        // A parked request is a person's think-time, not the task running long.
+        const release = holdExecutionClock(approver.signal)
+        try {
+          return await responder.onPermissionRequest(request)
+        } finally {
+          release()
+        }
+      },
+      outboundPolicy: { unattended: true, origin: approver.outboundOrigin },
+      pauseTimeoutWhileAwaitingPermission: true,
+      needsApproval: responder.needsApproval,
+      summary: () => needsApprovalSummary(responder),
+      denials: () => responder.denials,
+      finish: (status) => responder.finish(status),
+    }
+  }
+  // Records what nobody approved: every request without a park, and a card
+  // nobody answered before it expired.
+  const unanswered = createUnattendedPermissionResponder(
+    approver.kind === "none" ? approver.surface : "connector callback"
+  )
+  const conversationRef = turn.conversationRef
+  const common = {
+    needsApproval: unanswered.needsApproval,
+    summary: () => needsApprovalSummary(unanswered),
+    denials: () => unanswered.denials,
+    finish: async () => undefined,
+  }
+  if (approver.kind === "none" || !conversationRef) {
+    return {
+      ...common,
+      onPermissionRequest: async (request) => unanswered.onPermissionRequest(request),
+      outboundPolicy: { unattended: true },
+      pauseTimeoutWhileAwaitingPermission: false,
+    }
+  }
+  const card = makeImPermissionResponder({
+    sessionId: turn.sessionId,
+    adapterId: turn.adapterId,
+    conversationKey: turn.conversationKey,
+    conversationRef,
+    ...(turn.deliveryTarget ? { deliveryTarget: turn.deliveryTarget } : {}),
+    ...(turn.approvalMode ? { approvalMode: turn.approvalMode } : {}),
+    ...(approver.initiatorUserId ? { initiatorUserId: approver.initiatorUserId } : {}),
+    signal: turn.signal,
+    onUnanswered: (request) => unanswered.onPermissionRequest(request),
+  })
+  return {
+    ...common,
+    onPermissionRequest: card,
+    // The person who clicked is in the conversation and answers asks there.
+    outboundPolicy: { unattended: false },
+    // The card waits for a tap; its TTL bounds the wait.
+    pauseTimeoutWhileAwaitingPermission: true,
+  }
 }
 
 /**
@@ -307,6 +471,7 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
     twinUserMessage: twinHandshake ? prompt : undefined,
     memoryDeps: memoryHandshake,
     memoryUserMessage: memoryHandshake ? prompt : undefined,
+    ...(input.capabilityGrants?.length ? { capabilityGrants: input.capabilityGrants } : {}),
   })
 
   // ── Step 3: suppression gate (quiet hours / muted / forced manual) ───
@@ -346,6 +511,30 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
     }
   }
   const elicitationController = new AbortController()
+  const turnSignal = input.signal
+    ? AbortSignal.any([elicitationController.signal, input.signal])
+    : elicitationController.signal
+  const permissions = digestPermissions(
+    input.approver ?? { kind: "none", surface: "connector digest" },
+    {
+      sessionId: session.id,
+      ...(session.projectId ? { projectId: session.projectId } : {}),
+      adapterId,
+      conversationKey,
+      // A card can only be answered where it can be addressed.
+      ...(elicitationPlatform
+        ? {
+            conversationRef: digestDeliveryTarget?.conversationRef ?? {
+              platform: elicitationPlatform,
+              adapterId,
+            },
+          }
+        : {}),
+      ...(digestDeliveryTarget ? { deliveryTarget: digestDeliveryTarget } : {}),
+      ...(overrideRow?.approvalMode ? { approvalMode: overrideRow.approvalMode } : {}),
+      signal: turnSignal,
+    }
+  )
   const unregisterImElicitation = elicitationPlatform
     ? registerImElicitationContext({
         sessionId: session.id,
@@ -365,8 +554,15 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
     captured = await injectedDigestSender(session.id, prompt, sendOptions, {
       adapterId,
       conversationKey,
+      ...(input.signal ? { signal: input.signal } : {}),
+      onPermissionRequest: permissions.onPermissionRequest,
+      outboundPolicy: permissions.outboundPolicy,
+      ...(permissions.pauseTimeoutWhileAwaitingPermission
+        ? { pauseTimeoutWhileAwaitingPermission: true }
+        : {}),
     })
   } catch (err) {
+    await permissions.finish(input.signal?.aborted ? "cancelled" : "failed")
     const reason = err instanceof PiiGateBlocked ? "pii_blocked" : "ai_run_capture_failed"
     const msg = err instanceof Error ? err.message : String(err)
     await appendAudit({
@@ -385,6 +581,23 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
     elicitationController.abort()
     unregisterImElicitation?.()
   }
+  // The turn is over: close the run a parked request opened.
+  await permissions.finish("completed")
+  // A request nobody approved: the reply (which says what is still pending) is
+  // delivered as usual, and the run is marked `needs_approval`.
+  const settle = (result: RunDigestResult): RunDigestResult =>
+    result.success && permissions.needsApproval()
+      ? {
+          success: false,
+          error: permissions.summary(),
+          terminalReason: "needs-approval",
+          output: {
+            ...result.output,
+            status: NEEDS_APPROVAL_STATUS,
+            needsApproval: [...permissions.denials()],
+          },
+        }
+      : result
 
   // ── Step 5: project text + A2UI surfaces into outbound segments ─────
   const deliveryTarget = session.platformBinding?.deliveryTarget
@@ -434,14 +647,14 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
       },
     })
     if (delivered.kind === "drafted") {
-      return {
+      return settle({
         success: true,
         output: {
           draftId: delivered.draft.id,
           heldAsDraft: true,
           assistantMessageId: captured.messageId,
         },
-      }
+      })
     }
     const job = delivered.job
 
@@ -458,14 +671,14 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
       },
     })
 
-    return {
+    return settle({
       success: true,
       output: {
         jobId: job.id,
         a2uiSurfaceCount: captured.a2uiSurfaceOrder?.length ?? 0,
         assistantMessageId: captured.messageId,
       },
-    }
+    })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { success: false, error: msg }
@@ -483,7 +696,7 @@ async function handleScheduledDigest(
   task: ScheduledTask,
   execution: TaskExecution,
   signal: AbortSignal
-): Promise<{ success: boolean; output?: Record<string, unknown>; error?: string }> {
+): Promise<RunDigestResult> {
   if (signal?.aborted) {
     return { success: false, error: "Scheduled digest aborted" }
   }
@@ -510,6 +723,22 @@ async function handleScheduledDigest(
       ownerRef: `task:${task.id}`,
       origin: taskPlanOrigin(task),
     },
+    // Nobody is watching: a tool request parks for a person instead of going
+    // unanswered, and the turn runs under the unattended permission profile.
+    approver: {
+      kind: "parked",
+      label: `Scheduled digest: ${task.name}`,
+      outboundOrigin: async () => taskPlanOrigin(task),
+      signal,
+    },
+    capabilityGrants: [
+      {
+        schemaVersion: AGENT_CAPABILITY_GRANT_SCHEMA_VERSION,
+        source: { kind: "scheduler", id: task.id },
+        permissionProfile: {},
+      },
+    ],
+    signal,
   })
 }
 

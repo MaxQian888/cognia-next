@@ -312,6 +312,36 @@ describe("connectorsSendMessage", () => {
     expect(out.ok).toBe(false)
     expect(out.reason).toBe("pii_blocked")
   })
+
+  // ADR-0239: nobody on the bridge side can approve a tool request.
+  it("has tool requests refused at once and reports the ones that need a person", async () => {
+    await seedConversation({
+      sessionId: "s-approve",
+      conversationKey: "telegram:tg-1:capprove",
+      title: "Approval target",
+    })
+    const detail = {
+      jobId: "job-1",
+      status: "needs_approval",
+      needsApproval: [{ requestId: "r1", toolName: "im_broadcast" }],
+    }
+    mockRunDigest.mockResolvedValueOnce({
+      success: false,
+      error: "needs approval: im_broadcast",
+      terminalReason: "needs-approval",
+      output: detail,
+    })
+    const out = await connectorsSendMessage({
+      adapterId: "tg-1",
+      conversationKey: "telegram:tg-1:capprove",
+      prompt: "hi",
+    })
+    expect(mockRunDigest).toHaveBeenCalledWith(
+      expect.objectContaining({ approver: { kind: "none", surface: "external bridge" } })
+    )
+    // The reply was still delivered; the caller hears what is pending.
+    expect(out).toEqual({ ok: true, detail })
+  })
 })
 
 describe("clamp", () => {

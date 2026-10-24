@@ -57,6 +57,9 @@ export async function defaultConnectorCallbackHandler(
       kind: "origin-reply",
       inboundConversationKey: event.conversationKey ?? conversationKey,
     },
+    // The person who clicked is in the conversation: a tool request becomes
+    // an approval card there that they may answer.
+    approver: { kind: "conversation", initiatorUserId: event.user.remoteUserId },
   })
 }
 

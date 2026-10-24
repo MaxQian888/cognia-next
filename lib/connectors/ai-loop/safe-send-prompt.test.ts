@@ -383,6 +383,29 @@ describe("safeSendPrompt", () => {
     )
   })
 
+  it("forwards how the turn's outbound calls are planned and whether parking stops the clock", async () => {
+    await safeSendPrompt("sess_1", "clean", undefined, {
+      ...auditCtx,
+      outboundPolicy: { unattended: false },
+      pauseTimeoutWhileAwaitingPermission: true,
+    })
+    expect(mockRun).toHaveBeenCalledWith(
+      "sess_1",
+      "clean",
+      undefined,
+      expect.objectContaining({
+        outboundPolicy: { unattended: false },
+        pauseTimeoutWhileAwaitingPermission: true,
+      })
+    )
+
+    mockRun.mockClear()
+    await safeSendPrompt("sess_1", "clean", undefined, auditCtx)
+    const forwarded = mockRun.mock.calls[0][3] as Record<string, unknown>
+    expect(forwarded).not.toHaveProperty("outboundPolicy")
+    expect(forwarded).not.toHaveProperty("pauseTimeoutWhileAwaitingPermission")
+  })
+
   it("records connector usage and provider telemetry when the captured result includes usage", async () => {
     const usage = {
       inputTokens: 100,

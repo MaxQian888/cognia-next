@@ -257,7 +257,11 @@ export interface SendMessageOutput {
   ok: boolean
   /** Surface-level reason when `ok === false`. */
   reason?: string
-  /** Set when `ok === true` and the AI loop produced any output. */
+  /**
+   * Set when `ok === true` and the AI loop produced any output. A turn whose
+   * tool request was refused for want of an approver still delivers its reply
+   * and carries `status: "needs_approval"` with the requests in `needsApproval`.
+   */
   detail?: RunDigestResult["output"]
 }
 
@@ -281,8 +285,14 @@ export async function connectorsSendMessage(input: SendMessageInput): Promise<Se
     // An external agent asked for it. Its scope grant lets it ask; it does not
     // authorize a recipient, so the reply is held unless one is (ADR-0239).
     authorization: { kind: "unattended", ownerRef: "external-bridge" },
+    // Nobody here can approve a tool request: it is refused at once, and the
+    // caller hears which ones still need a person.
+    approver: { kind: "none", surface: "external bridge" },
   }
   const result = await runConnectorDigestTurn(digestInput)
+  if (result.terminalReason === "needs-approval") {
+    return { ok: true, detail: result.output }
+  }
   if (!result.success) {
     return { ok: false, reason: result.error ?? "send_failed" }
   }
