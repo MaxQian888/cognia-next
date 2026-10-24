@@ -293,6 +293,19 @@ fn record_command(command: &str) -> bool {
     matches!(command, "get_external_agent_status" | "send_to_external_agent" | "kill_external_agent")
 }
 
+/// Host-brain arms on a multi-tenant Host. Pool availability never makes Host
+/// JS/sidecar code isolated, so an arm that launches work stays inert for every
+/// principal; no client id can lift this. A non-executing arm
+/// (`nonExecutionCommands`: ownership leases, settings, state flags) called by
+/// the loopback service principal is the Host's own brain managing its own
+/// runtime (the connector runtime lease is required for readiness). Tenant
+/// callers have no workspace to resolve it against.
+fn host_brain_refusal(executes: bool, service: bool) -> Option<Refusal> {
+    if executes { return Some(unavailable("execution_isolation_unavailable")); }
+    if service { return None; }
+    Some(forbidden("workspace_unresolved"))
+}
+
 fn host_brain_execution(capability: &str, command: &str) -> bool {
     (POLICY.as_ref().ok().and_then(|policy| policy.get(capability))
         .is_some_and(|entry| entry.class == SurfaceClass::SandboxedExecution) && !record_command(command))
@@ -564,13 +577,14 @@ pub async fn authorize_execution(state: &crate::SharedState, capability: &str, c
         return Ok(None);
     }
     let result = async {
-        // Pool availability never makes Host JS/sidecar code isolated. These
-        // arms remain intentionally unavailable; no client id can lift this.
-        if (brain && POLICY.as_ref().is_ok_and(|policy| policy.command_executes(capability, Some(command))))
-            || (command == "environment_task_shell_exec" && crate::jwt::is_service_scope(Some(principal.scope.as_ref()))) {
+        let service = crate::jwt::is_service_scope(Some(principal.scope.as_ref()));
+        if command == "environment_task_shell_exec" && service {
             return Err(unavailable("execution_isolation_unavailable"));
         }
-        if brain { return Err(forbidden("workspace_unresolved")); }
+        if brain {
+            let executes = POLICY.as_ref().is_ok_and(|policy| policy.command_executes(capability, Some(command)));
+            return host_brain_refusal(executes, service).map_or(Ok(None), Err);
+        }
         if !execution_enabled() || crate::environment_pool::installed().is_none() {
             return Err(unavailable("execution_isolation_unavailable"));
         }
@@ -649,6 +663,22 @@ mod tests {
             assert!(host_brain_execution(capability, command), "{command}");
         }
         assert!(!host_brain_execution("agent.run", "get_external_agent_status"));
+    }
+
+    #[test]
+    fn multi_tenant_host_brain_admits_only_its_own_non_executing_arms() {
+        let policy = POLICY.as_ref().unwrap();
+        // The operator brain's connector-runtime lease: under agent.run, declared non-executing.
+        for command in ["connectors_runtime_lease_acquire", "connectors_runtime_lease_renew", "connectors_runtime_lease_release"] {
+            assert!(host_brain_execution("agent.run", command), "{command}");
+            assert!(!policy.command_executes("agent.run", Some(command)), "{command}");
+        }
+        assert!(policy.command_executes("agent.run", Some("agent_send")));
+        assert!(host_brain_refusal(false, true).is_none());
+        assert_eq!(host_brain_refusal(false, false).unwrap().code, "workspace_unresolved");
+        for service in [false, true] {
+            assert_eq!(host_brain_refusal(true, service).unwrap().code, "execution_isolation_unavailable");
+        }
     }
 
     fn p4_binding() -> PlacementBinding {
