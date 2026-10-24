@@ -22,6 +22,7 @@
  * `classify-risk.test.ts`. Per ADR-0070.
  */
 
+import { normalizeToolId, RISK_EXTERNAL_SEND_TOOL_IDS } from "./outbound-tools"
 import { RISK_SURFACES, type RiskSurfaceId } from "./risk-surfaces"
 
 export type RiskTier = "low" | "medium" | "high"
@@ -62,11 +63,10 @@ export interface RiskAssessment {
  * registry id the computer-use plugin registers), `computer_20251124` (the
  * Anthropic tool type). Matching the normalized tail against a known set beats
  * a substring search, which would classify `read_bash_history` as shell access.
+ *
+ * `normalizeToolId` lives in `./outbound-tools`, shared with the outbound
+ * policy engine (ADR-0239) so both match the same spellings.
  */
-function normalizeToolId(id: string): string {
-  const tail = id.split("__").pop() ?? id
-  return tail.trim().toLowerCase()
-}
 
 /**
  * Screen / mouse / keyboard automation. See `plugins/computer-use/src/index.ts`.
@@ -140,22 +140,11 @@ const FILE_WRITE_TOOL_IDS = new Set([
  * `riskGating` and thereby lose the computer-use/shell gating that is the
  * point. The risk is sending somewhere the requester did not ask for, which
  * needs an agent-callable send tool — that is what this set catches.
+ *
+ * The list itself is shared with the outbound policy engine (ADR-0239), which
+ * reviews a wider set; see `./outbound-tools` for why this one is narrower.
  */
-const EXTERNAL_SEND_IDS = new Set([
-  "connector_send",
-  "send_message",
-  "send_email",
-  // Publishing a Cognia Site puts a URL other people can load in front of the
-  // world, and it cannot be unsent: `takeDown` removes the Site, it does not
-  // restore the previous version. `build_site` produces an immutable local
-  // version and is deliberately absent.
-  "deploy_site",
-  // An agent publishing a conversation's files as a public link or handing out
-  // network-drive access (ADR-0222 §9). `filespace_list` and the revoking
-  // tools only read or take access away, and are deliberately absent.
-  "filespace_share",
-  "filespace_enable_webdav",
-])
+const EXTERNAL_SEND_IDS = RISK_EXTERNAL_SEND_TOOL_IDS
 
 /** Ids that reach secrets at rest. */
 const CREDENTIAL_IDS = new Set(["keyring", "secrets", "secret_store", "subscription", "oauth"])
@@ -210,7 +199,10 @@ export function classifyRisk(input: RiskInput): RiskAssessment {
   /** Severity overrides for rules the sandbox downgrades. */
   const downgraded = new Set<RiskSurfaceId>()
 
-  const firstIn = (set: Set<string>, candidates: Set<string>): string | undefined => {
+  const firstIn = (
+    set: ReadonlySet<string>,
+    candidates: ReadonlySet<string>
+  ): string | undefined => {
     for (const id of set) if (candidates.has(id)) return id
     return undefined
   }

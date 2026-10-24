@@ -65,7 +65,7 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 一个动作在会把内容投递给用户以外的一方时，就是**外发动作**：
 
 - 来自任何自动来源（`ai-run`、`skill`、`plugin`、`workflow`、`notification`、Bot 投递）的 connector 投递。`manual` 和 `draft-approved` 是人本人的操作，不再重复审核；
-- 工具被归为外发类的工具调用。只维护一份列表，风险分类器的 `EXTERNAL_SEND_IDS` 和 sidecar 的 `outbound` 权限类共用，并有一致性测试。同时修正分类器的名称归一化，让 `connectors_send_message`、`send_session_message` 等名称能被匹配。
+- 工具被归为外发类的工具调用。只维护一份列表（`lib/policy/risk/outbound-tools.ts`）和一套名称归一化，风险分类器与本引擎共用。分类器的 `external-send` 集合仍是其中较窄的一部分：IM 内建 skill、`team_post_to_chat`、`connectors_send_message` 在这里受审查，但暂不计入风险，因为计入会改变每个能用它们的团队的计划门控。这个差集由测试固定。发往用户自己的会话或队友的消息（`send_session_message`、`team_send_message`）不算外发。
 
 每个外发动作都带有一个**目标**：渠道（connector adapter、邮件或工具族）加归一化的收件人 id（会话键、用户 id、地址）。无法给出目标的生产方，交互场景下得到 `ask`，无人值守场景下得到 `draft` 或 `park`，绝不是 `allow`。
 

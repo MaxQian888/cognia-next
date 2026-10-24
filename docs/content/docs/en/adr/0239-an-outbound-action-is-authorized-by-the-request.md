@@ -65,7 +65,7 @@ Phase 1 consults the engine for **outbound actions** only. Other tool approvals 
 An action is **outbound** when it would deliver content to a party other than the user:
 
 - a connector delivery from any automated source (`ai-run`, `skill`, `plugin`, `workflow`, `notification`, Bot delivery). `manual` and `draft-approved` are a person's own act and are not reviewed again;
-- a tool call whose tool is classed outbound. There is one list, shared by the risk classifier's `EXTERNAL_SEND_IDS` and the sidecar's `outbound` permission class, with a parity test. The classifier's name normalization is fixed so that `connectors_send_message`, `send_session_message` and similar names match.
+- a tool call whose tool is classed outbound. There is one list (`lib/policy/risk/outbound-tools.ts`) with one name normalization, read by the risk classifier and this engine. The classifier's `external-send` set stays the narrower part of it: the IM built-in skills, `team_post_to_chat` and `connectors_send_message` are reviewed here but not yet counted as risk, because counting them changes plan gating for every team that can use them. A test pins that gap. Sends to the user's own sessions or teammates (`send_session_message`, `team_send_message`) are not outbound.
 
 Every outbound action carries a **target**: the channel (connector adapter, mail, or tool family) and a normalized recipient id (conversation key, user id, address). A producer that cannot name the target gets `ask` interactively and `draft` or `park` unattended, never `allow`.
 
