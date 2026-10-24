@@ -386,7 +386,10 @@ impl BrainSupervisor {
 
     fn child_env(&self, token: &str) -> Vec<(String, String)> {
         let mut env = build_brain_env(&self.config, token);
-        if self.person { env.push(("COGNIA_BRAIN_PROFILE".into(), "person".into())); }
+        if self.person {
+            env.push(("COGNIA_BRAIN_PROFILE".into(), "person".into()));
+            env.push(("COGNIA_PERSON_CHAT".into(), "tool-less".into())); // P6c A-D Host contract.
+        }
         env
     }
 
@@ -516,6 +519,7 @@ impl BrainSupervisor {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         cmd.env_remove("COGNIA_BRAIN_PROFILE");
+        cmd.env_remove("COGNIA_PERSON_CHAT"); // P6c is advertised only by this supervisor.
         if withhold_unpaired_collab_url(
             std::env::var("COGNIA_COLLAB_URL").ok().as_deref(),
             std::env::var("COGNIA_COLLAB_ORG_ID").ok().as_deref(),
@@ -737,7 +741,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn p5_person_supervisor_reuses_env_contract_with_distinct_scope_and_profile() {
+    async fn p6c_person_supervisor_advertises_tool_less_chat_with_distinct_scope_and_profile() {
         let _slot = ws_bridge::test_support::lock_slot().await;
         let config = test_config(PathBuf::from("brain.mjs"), Duration::from_secs(1));
         let state = test_state();
@@ -747,6 +751,7 @@ pub(crate) mod tests {
         let _generation = person.person_authority().unwrap().begin_child().unwrap();
         let mut expected = build_brain_env(&config, "token");
         expected.push(("COGNIA_BRAIN_PROFILE".into(), "person".into()));
+        expected.push(("COGNIA_PERSON_CHAT".into(), "tool-less".into()));
         assert_eq!(person.child_env("token"), expected);
         let token = person.mint_token().unwrap();
         assert!(cognia_companion::jwt::verify(&person.state.secret.read(), &token, "service").is_err());

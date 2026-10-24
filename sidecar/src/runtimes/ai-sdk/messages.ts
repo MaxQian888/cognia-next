@@ -1,3 +1,4 @@
+import { extractHttpErrorMeta } from "../../providers/http-error-meta.ts"
 import type { ConversationMessage } from "../../context/compaction.ts"
 export function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {}
@@ -11,6 +12,11 @@ export function errorToMessage(err: unknown): string {
   } catch {
     return String(err)
   }
+}
+
+/** Terminal events expose safe refusal fields, while recovery keeps its original message. */
+export function terminalErrorMessage(err: unknown): string {
+  return extractHttpErrorMeta(err).code ?? errorToMessage(err)
 }
 
 export function stripReasoningParts(messages: ConversationMessage[]) {

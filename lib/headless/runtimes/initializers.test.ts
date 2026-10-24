@@ -26,6 +26,14 @@ import {
 import { _waitForPluginTriggerReconciliationForTest } from "@/lib/workflow/triggers/lifecycle"
 import * as costHistory from "@/lib/db/provider-cost-daily"
 
+jest.mock("@/lib/work-submission/terminal-events", () => {
+  const actual = jest.requireActual("@/lib/work-submission/terminal-events")
+  return {
+    ...actual,
+    startWorkSubmissionTerminalEvents: jest.fn(actual.startWorkSubmissionTerminalEvents),
+  }
+})
+
 jest.mock("@/lib/db/provider-cost-daily", () => {
   const actual = jest.requireActual("@/lib/db/provider-cost-daily")
   return {
@@ -193,4 +201,27 @@ describe("initializer batch headless smoke", () => {
     getDb().close()
     __resetDbForTesting()
   }, 60_000)
+})
+
+it("starts only the terminal listener for an opted-in person brain", async () => {
+  const { initializePersonChat } = await import("../person-chat")
+  const { listHeadlessRuntimes } = await import("../registry")
+  const terminal = await import("@/lib/work-submission/terminal-events")
+  const subscribe = jest.mocked(terminal.startWorkSubmissionTerminalEvents)
+  subscribe.mockClear().mockReturnValueOnce(() => {})
+  try {
+    const runtime = listHeadlessRuntimes().find((item) => item.name === "work-submission-outbox")!
+    const ctx = { ...makeCtx(), host: "person-brain" as const }
+    initializePersonChat("person-brain", {})
+    await runtime.start(ctx)
+    expect(subscribe).not.toHaveBeenCalled()
+    initializePersonChat("person-brain", { COGNIA_PERSON_CHAT: "tool-less" })
+    const stop = await runtime.start(ctx)
+    expect(subscribe).toHaveBeenCalledTimes(1)
+    expect(typeof stop).toBe("function")
+    if (typeof stop === "function") await stop()
+  } finally {
+    initializePersonChat("brain", {})
+    subscribe.mockReset()
+  }
 })

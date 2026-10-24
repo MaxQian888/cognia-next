@@ -192,15 +192,21 @@ pub async fn boundary(State(mode): State<DeploymentMode>, request: Request, next
     next.run(request).await
 }
 
+/// The person sockets authenticate separately (live generation in their
+/// handlers; events are filtered to the partition per frame). They are never
+/// admitted as a service principal by the Host policy or any other internal
+/// route; person RPC is gated at dispatch.
+fn person_socket_exempt(path: &str, principal: Option<&DeviceContext>) -> bool {
+    matches!(path, "/internal/bridge" | "/internal/events")
+        && principal.is_some_and(|principal| principal.scope == "person-brain")
+}
+
 /// Installed inside device/owner/service authentication, so the identity is
 /// already established. RPC adapters are gated later at command dispatch.
 pub async fn admission(request: Request, next: Next) -> Response {
     if crate::deployment::deployment_mode() == DeploymentMode::SingleUser { return next.run(request).await; }
     let path = request.extensions().get::<MatchedPath>().map(MatchedPath::as_str).unwrap_or("");
-    // The person socket authenticates separately; it is never admitted as a
-    // service principal by the Host policy or any other internal route.
-    if path == "/internal/bridge" && request.extensions().get::<DeviceContext>()
-        .is_some_and(|principal| principal.scope == "person-brain") { return next.run(request).await; }
+    if person_socket_exempt(path, request.extensions().get::<DeviceContext>()) { return next.run(request).await; }
     if let Some(capability) = lookup(path).and_then(|route| route.capability) {
         let Some(principal) = request.extensions().get::<DeviceContext>() else {
             return cognia_problem::Problem::with_status(StatusCode::FORBIDDEN, "host_principal_unbound", "route authentication supplied no principal").into_response();
@@ -335,6 +341,21 @@ mod tests {
             .layer(axum::middleware::from_fn_with_state(DeploymentMode::MultiTenant, boundary));
         let response = router.oneshot(axum::http::Request::builder().uri("/api/apps/app/runs/run").body(axum::body::Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn p6c_person_brain_skips_route_admission_only_on_its_two_sockets() {
+        let principal = |scope: &str| DeviceContext { device_id: "brain-pb".into(), tenant_id: "pb".into(),
+            scope: scope.into(), granted_scopes: vec![], authorization_capabilities: None };
+        for path in ["/internal/bridge", "/internal/events"] {
+            assert!(person_socket_exempt(path, Some(&principal("person-brain"))), "{path}");
+            assert!(!person_socket_exempt(path, Some(&principal("service"))), "{path}");
+            assert!(!person_socket_exempt(path, Some(&principal("device"))), "{path}");
+            assert!(!person_socket_exempt(path, None), "{path}");
+        }
+        for path in ["/internal/_rpc/{name}", "/internal/persons", "/internal/org-credentials/{operation}", "/internal/catalog"] {
+            assert!(!person_socket_exempt(path, Some(&principal("person-brain"))), "{path}");
+        }
     }
 
     #[tokio::test]

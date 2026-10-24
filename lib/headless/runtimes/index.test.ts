@@ -59,7 +59,7 @@ describe("headless runtime roster", () => {
     })
   })
 
-  it("starts only the pinned data runtimes in a person brain", async () => {
+  it("starts only data runtimes and the gated terminal listener in a person brain", async () => {
     await jest.isolateModulesAsync(async () => {
       const registry = await import("../registry")
       registry.__resetHeadlessRuntimesForTesting()
@@ -68,7 +68,15 @@ describe("headless runtime roster", () => {
         .listHeadlessRuntimes()
         .filter((runtime) => runtime.hosts.includes("person-brain"))
         .map((runtime) => runtime.name)
+      expect([...PERSON_BRAIN_RUNTIMES].sort()).toEqual([
+        "desktop-message-source",
+        "desktop-sync-source",
+        "host-event-publisher",
+        "work-submission-outbox",
+      ])
       expect(personal.sort()).toEqual([...PERSON_BRAIN_RUNTIMES].sort())
+      expect(personal).toEqual(expect.arrayContaining(["work-submission-outbox"]))
+      expect(personal).not.toEqual(expect.arrayContaining(["host-provider-keys", "plugin-runtime"]))
       // Each is also a Host-brain runtime: the profile only subtracts.
       for (const runtime of registry.listHeadlessRuntimes()) {
         expect(runtime.hosts).toContain("brain")

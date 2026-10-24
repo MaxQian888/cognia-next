@@ -419,6 +419,8 @@ export async function markWorkSubmissionStarted(submissionId: string, now: numbe
 }
 
 export interface SettleWorkSubmissionInput {
+  /** Upstream refusal reset, retained in the terminal run event. */
+  resetAt?: number | string
   submissionId: string
   outcome: WorkTerminalOutcomeV1
   errorCode?: string
@@ -500,6 +502,7 @@ export async function settleWorkSubmission(
               {
                 submissionId: input.submissionId,
                 outcome: input.outcome,
+                ...(input.resetAt !== undefined ? { resetAt: input.resetAt } : {}),
                 ...(input.errorCode ? { errorCode: input.errorCode } : {}),
               },
               { ts: now }

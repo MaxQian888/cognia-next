@@ -134,6 +134,7 @@ pub fn event_visible(frame: &crate::event_bus::EventFrame, device: &str, tenant:
 fn event_visible_in_store(frame: &crate::event_bus::EventFrame, device: &str, tenant: Option<&str>, store: &crate::security_store::SecurityStore) -> bool {
     let Some(account) = frame.partition_account_id.as_deref() else { return true; };
     if !frame.visible_to(device) { return false; }
+    if device == format!("brain-{account}") && tenant == Some(account) { return true; }
     let person = match tenant {
         Some(tenant) => store.active_oidc_device_person(tenant, device),
         None => store.person_for_account_device(device),
@@ -157,6 +158,48 @@ pub async fn purge_handler(axum::Json(body): axum::Json<PurgePerson>) -> Result<
 pub fn unavailable(code: &'static str) -> cognia_problem::Problem {
     cognia_problem::Problem::with_status(axum::http::StatusCode::SERVICE_UNAVAILABLE, code, code)
         .retryable(true)
+}
+
+/// P6c shared fake fleet: tests exercise the actual middleware/dispatcher
+/// without spawning a brain or opening a listener.
+#[cfg(any(test, feature = "test-support"))]
+pub mod person_test_support {
+    use super::*;
+    pub struct PersonFleet {
+        pub people: Vec<PersonPartition>,
+        pub generation: String,
+        pub active: std::sync::atomic::AtomicBool,
+    }
+    struct Request(PersonReceiptScope);
+    impl PersonRequest for Request { fn receipt_scope(&self) -> PersonReceiptScope { self.0.clone() } }
+    #[async_trait::async_trait]
+    impl PersonBrainFleet for PersonFleet {
+        async fn acquire(&self, person: &PersonPartition) -> Result<Box<dyn PersonRequest>, &'static str> {
+            if self.person(&person.account_id).is_none() { return Err("person_brain_unavailable"); }
+            Ok(Box::new(Request(PersonReceiptScope { account_id:person.account_id.clone(), data_generation:"p6c-data".into() })))
+        }
+        fn accepts_bridge(&self, account: &str, generation: &str) -> bool {
+            self.active.load(std::sync::atomic::Ordering::SeqCst) && generation == self.generation && self.person(account).is_some()
+        }
+        fn bridge_authority(&self, _: &str) -> Option<Arc<PersonBrainAuthority>> { None }
+        fn receipt_scope(&self, account: &str) -> Option<PersonReceiptScope> {
+            self.person(account).map(|person| PersonReceiptScope { account_id:person.account_id, data_generation:"p6c-data".into() })
+        }
+        fn person(&self, account: &str) -> Option<PersonPartition> { self.people.iter().find(|p| p.account_id == account).cloned() }
+        fn statuses(&self) -> Vec<PersonBrainStatus> { vec![] }
+        async fn list(&self) -> Result<serde_json::Value, String> { Ok(serde_json::json!({"persons":[]})) }
+        async fn purge(&self, _: &PersonPartition) -> Result<(), &'static str> { Ok(()) }
+    }
+    pub struct Installed(Option<Arc<dyn PersonBrainFleet>>);
+    impl Installed {
+        pub fn new(people: Vec<PersonPartition>) -> (Self, Arc<PersonFleet>) {
+            let previous = fleet();
+            let fleet = Arc::new(PersonFleet { people, generation:"p6c-generation".into(), active:std::sync::atomic::AtomicBool::new(true) });
+            install(Some(fleet.clone()));
+            (Self(previous), fleet)
+        }
+    }
+    impl Drop for Installed { fn drop(&mut self) { install(self.0.take()); } }
 }
 
 #[cfg(test)]

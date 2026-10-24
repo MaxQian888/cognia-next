@@ -244,6 +244,8 @@ export async function claimChatTurnForDispatch(
 }
 
 export interface SettleChatTurnInput {
+  /** Upstream refusal reset, retained in the terminal run event. */
+  resetAt?: number | string
   runId: string
   outcome: "completed" | "no_response" | "failed" | "cancelled"
   errorCode?: string
@@ -302,6 +304,7 @@ export async function settleChatTurn(
         submissionId: chatSubmissionId(input.runId),
         outcome: input.outcome,
         ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+        ...(input.resetAt !== undefined ? { resetAt: input.resetAt } : {}),
         ...(input.writeTranscript ? { writeTranscript: input.writeTranscript } : {}),
         ...(input.now === undefined ? {} : { now: input.now }),
       },

@@ -267,6 +267,23 @@ describe("publishTranscriptRevision", () => {
     window.removeEventListener("transcript://revision", listener)
   })
 
+  // The headless brain shims `window` to the Node global, which has no event
+  // target: a person brain's replayed turn reached this through invalidation.
+  it("still publishes when the window shim has no event target", async () => {
+    const { setHostEventPublisher } = await import("@/lib/companion/host-event-publisher")
+    const publisher = jest.fn()
+    const release = setHostEventPublisher(publisher)
+    Object.defineProperty(window, "dispatchEvent", { value: undefined, configurable: true })
+    try {
+      await expect(publishTranscriptRevision("s1", 7)).resolves.toBeUndefined()
+      expect(publisher).toHaveBeenCalled()
+    } finally {
+      delete (window as unknown as Record<string, unknown>).dispatchEvent
+      release()
+    }
+    expect(typeof window.dispatchEvent).toBe("function")
+  })
+
   // The defect: only Tauri was tried, so the headless brain — which keeps a
   // paired browser's replies — never told that browser its transcript moved.
   it("publishes through the headless brain's host-event publisher", async () => {

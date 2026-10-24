@@ -103,6 +103,7 @@ pub use cognia_companion_security::oidc;
 pub use cognia_companion_security::operations;
 pub mod paired_turn;
 pub mod person_partition;
+pub mod person_chat;
 pub mod org_policy;
 pub use cognia_companion_security::org_credentials;
 pub use cognia_companion_security::org_agent_policy;

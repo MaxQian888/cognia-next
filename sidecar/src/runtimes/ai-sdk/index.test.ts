@@ -4121,3 +4121,40 @@ test("SIWC ordinary chat requires Host RPC and selects Responses without legacy 
     await session?.q.interrupt()
   }
 })
+
+test("upstream JSON refusal fields reach terminal errors before and after partial text without its body", async () => {
+  for (const partial of [false, true]) {
+    const { events, emit } = captureEmit()
+    dispatchAiSdk({
+      provider: "openai",
+      sessionId: `structured-error-${partial}`,
+      firstPrompt: "hi",
+      sendOptions: {
+        model: "gpt-x",
+        providerCredentials: { apiKey: "ticket", protocol: "openai" },
+        toolSurface: "none",
+      },
+      emit,
+      log: () => {},
+      streamText: makeFakeStream([
+        ...(partial ? [{ type: "text-delta", id: "reply", text: "safe partial reply" }] : []),
+        {
+          type: "error",
+          error: Object.assign(new Error("private upstream message"), {
+            statusCode: 429,
+            responseBody: JSON.stringify({
+              error: { code: "member_usage_cap_reached", resetAt: 123, private: "secret" },
+            }),
+          }),
+        },
+      ]),
+    })
+    await waitForEvent(events, (event) => event.type === "session_ended")
+    const ended = events.find((event) => event.type === "session_ended")!
+    assert.equal(ended.code, "member_usage_cap_reached")
+    assert.equal(ended.resetAt, 123)
+    assert.equal(ended.httpStatus, 429)
+    assert.equal(ended.error, "member_usage_cap_reached")
+    assert.equal(JSON.stringify(ended).includes("private"), false)
+  }
+})

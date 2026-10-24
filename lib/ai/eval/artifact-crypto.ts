@@ -1,5 +1,9 @@
 import type { KeyringStore } from "@/lib/credentials/keyring-store"
 import { createKeyringStore } from "@/lib/credentials/keyring-store"
+import {
+  derivePartitionArtifactKey,
+  hasPartitionArtifactKeys,
+} from "@/lib/accounts/partition-artifact-keys"
 import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { isTauri } from "@/lib/tauri"
@@ -313,6 +317,9 @@ export async function loadOrCreateAccountArtifactKey(
   dependencies: EvalArtifactKeyDependencies = {}
 ): Promise<Uint8Array> {
   if (!accountId) throw new Error("An account id is required for artifact encryption")
+  // A person brain derives every artifact key from its own partition base:
+  // the Host keyring is shared by every partition (lib/accounts/partition-artifact-keys.ts).
+  if (hasPartitionArtifactKeys(accountId)) return derivePartitionArtifactKey(accountId, domain)
   if (domain === "evaluation") return loadOrCreateEvalArtifactKey(accountId, dependencies)
   const location = ARTIFACT_KEY_LOCATIONS[domain]
   const platform = dependencies.platform ?? resolveArtifactPlatform()
@@ -347,6 +354,8 @@ export async function loadOrCreateEvalArtifactKey(
   dependencies: EvalArtifactKeyDependencies = {}
 ): Promise<Uint8Array> {
   if (!accountId) throw new Error("An account id is required for evaluation encryption")
+  if (hasPartitionArtifactKeys(accountId))
+    return derivePartitionArtifactKey(accountId, "evaluation")
   const platform = dependencies.platform ?? resolveArtifactPlatform()
   if (platform === "desktop") {
     return loadOrCreateDesktopEvalKey(

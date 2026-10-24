@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 
+import "fake-indexeddb/auto"
 import type { ClaudeEvent } from "@cognia/agent-config-types"
 
 import {
@@ -221,3 +222,129 @@ describe("work submission terminal events", () => {
     jest.useRealTimers()
   })
 })
+
+it("settles structured provider refusals with the code and cap reset", async () => {
+  let handler: ((event: ClaudeEvent) => void) | undefined
+  const settleSession = jest.fn(async () => true)
+  const stop = startWorkSubmissionTerminalEvents({
+    subscribe: async (next) => {
+      handler = next
+      return () => {}
+    },
+    settleSession,
+  })
+  await Promise.resolve()
+  handler?.({
+    type: "session_ended",
+    sessionId: "person-session",
+    error: "cap",
+    code: "member_usage_cap_reached",
+    resetAt: 123,
+    httpStatus: 429,
+  })
+  for (let tick = 0; tick < 30; tick += 1) await Promise.resolve()
+  expect(settleSession).toHaveBeenCalledWith("person-session", {
+    outcome: "failed",
+    errorCode: "member_usage_cap_reached",
+    resetAt: 123,
+  })
+  stop()
+})
+
+it("writes a real reply and terminal settlement only into the person account database", async () => {
+  const { webcrypto } = await import("node:crypto")
+  if (!globalThis.crypto?.subtle)
+    Object.defineProperty(globalThis, "crypto", { value: webcrypto, configurable: true })
+  const { activateAccountDatabase, clearAccountDatabaseSelection, __resetDbForTesting, getDb } =
+    await import("@/lib/db/schema")
+  const { AccountContentCipher, activateAccountContentCipher } =
+    await import("@/lib/accounts/content-cipher")
+  const { acceptChatTurn, settleChatTurnForSession } = await import("./chat-adapter")
+  const { listMessages } = await import("@/lib/db/messages")
+  const { initializePersonChat } = await import("@/lib/headless/person-chat")
+  initializePersonChat("person-brain", { COGNIA_PERSON_CHAT: "tool-less" })
+  activateAccountDatabase("pb_chat_test", "local-host")
+  activateAccountContentCipher(
+    await AccountContentCipher.createForTesting("pb_chat_test", getDb().name)
+  )
+  await getDb().delete()
+  __resetDbForTesting()
+  const deps = {
+    resolveScope: () => ({ accountId: "pb_chat_test", runtimeTargetId: "local-host" }),
+    loadKey: async () => new Uint8Array(32).fill(5),
+  }
+  await getDb().sessions.put({ id: "person-session", title: "Chat", createdAt: 1, updatedAt: 1 })
+  await acceptChatTurn(
+    {
+      sessionId: "person-session",
+      runId: "person-run",
+      messageId: "user",
+      content: "hello",
+      visibleMessageIds: ["user"],
+    },
+    deps
+  )
+  let handler: ((event: ClaudeEvent) => void) | undefined
+  let finish!: () => void
+  let fail!: (error: unknown) => void
+  const finished = new Promise<void>((resolve, reject) => {
+    finish = resolve
+    fail = reject
+  })
+  const stop = startWorkSubmissionTerminalEvents({
+    subscribe: async (next) => {
+      handler = next
+      return () => {}
+    },
+    settleSession: async (id, input) => {
+      const result = await settleChatTurnForSession(id, input, deps)
+      finish()
+      return result
+    },
+    onError: fail,
+  })
+  try {
+    await Promise.resolve()
+    handler?.({
+      type: "event",
+      sessionId: "person-session",
+      event: {
+        type: "assistant",
+        message: {
+          id: "reply",
+          role: "assistant",
+          content: [{ type: "text", text: "partition reply" }],
+        },
+      } as never,
+    })
+    handler?.({ type: "session_ended", sessionId: "person-session" })
+    await finished
+    expect(await listMessages("person-session")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "assistant",
+          parts: expect.arrayContaining([
+            expect.objectContaining({ type: "text", text: "partition reply" }),
+          ]),
+        }),
+      ])
+    )
+    expect(await getDb().workSubmissions.get("work:person-run")).toMatchObject({
+      dispatchState: "settled",
+      terminalOutcome: "completed",
+    })
+    activateAccountDatabase("pb_other_chat_test", "local-host")
+    activateAccountContentCipher(
+      await AccountContentCipher.createForTesting("pb_other_chat_test", getDb().name)
+    )
+    expect(await listMessages("person-session")).toEqual([])
+    await getDb().delete()
+  } finally {
+    stop()
+    activateAccountDatabase("pb_chat_test", "local-host")
+    await getDb().delete()
+    clearAccountDatabaseSelection()
+    __resetDbForTesting()
+    initializePersonChat("brain", {})
+  }
+}, 30_000)

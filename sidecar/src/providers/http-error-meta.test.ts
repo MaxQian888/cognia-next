@@ -44,3 +44,44 @@ test("extractHttpErrorMeta: non-object / plain string error → empty object", (
   assert.deepEqual(extractHttpErrorMeta("boom"), {})
   assert.deepEqual(extractHttpErrorMeta(null), {})
 })
+
+test("structured JSON errors expose only code and resetAt", () => {
+  for (const [statusCode, code] of [
+    [503, "model_access_unavailable"],
+    [429, "member_usage_cap_reached"],
+    [403, "host_surface_forbidden"],
+  ] as const) {
+    assert.deepEqual(
+      extractHttpErrorMeta({
+        statusCode,
+        responseBody: JSON.stringify({
+          error: { code, resetAt: 123, secret: "private", message: "private" },
+        }),
+      }),
+      { httpStatus: statusCode, code, resetAt: 123 }
+    )
+  }
+  assert.deepEqual(
+    extractHttpErrorMeta({ responseBody: { code: "any_provider_code", resetAt: "2030-01-01" } }),
+    { code: "any_provider_code", resetAt: "2030-01-01" }
+  )
+  assert.deepEqual(extractHttpErrorMeta({ responseBody: "not json" }), {})
+  assert.deepEqual(extractHttpErrorMeta({ data: { error: { code: "other", resetAt: {} } } }), {
+    code: "other",
+  })
+})
+
+test("SDK retry wrappers retain the final structured failure and bound cyclic causes", () => {
+  assert.deepEqual(
+    extractHttpErrorMeta({
+      lastError: {
+        statusCode: 429,
+        responseBody: JSON.stringify({ error: { code: "quota", resetAt: 123 } }),
+      },
+    }),
+    { httpStatus: 429, code: "quota", resetAt: 123 }
+  )
+  const cycle: { cause?: unknown } = {}
+  cycle.cause = cycle
+  assert.deepEqual(extractHttpErrorMeta(cycle), {})
+})

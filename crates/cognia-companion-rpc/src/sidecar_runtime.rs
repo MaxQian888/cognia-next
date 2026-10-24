@@ -85,7 +85,7 @@ impl SidecarHost for HeadlessSidecarHost {
         // Unchanged channel names + payloads: `/ws/v1/events` subscribers
         // (phones, the brain) receive exactly what the desktop WebView would.
         // This includes `permission_request` events — see the module docs.
-        self.event_bus.publish(channel.to_string(), payload.clone());
+        cognia_companion::person_chat::person_publish(&self.event_bus, channel, payload);
     }
 
     async fn inject_env(&self, cmd: &mut Command) {
@@ -255,6 +255,19 @@ async fn dispatch_tool_host_bridge(method: &str, params: &Value) -> Result<Value
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn p6c_headless_sidecar_stamps_partition_before_replay() {
+        let bus = EventBus::new();
+        let person = cognia_companion::person_partition::PersonPartition::new("org_p6c_sidecar".into(), "usr_p6c_sidecar".into());
+        cognia_companion::person_chat::PERSON_SESSIONS.bind("p6c-sidecar-emitter", Some(&person)).unwrap();
+        let host = HeadlessSidecarHost::new("unused".into(), bus.clone(), ApiKeyState::new());
+        host.emit("claude://message", &serde_json::json!({"sessionId":"p6c-sidecar-emitter","text":"private"}));
+        let cognia_companion::event_bus::SubscribeResult::Ok { replay, .. } = bus.subscribe(Some(0), 0) else { panic!("replay"); };
+        assert!(!replay.is_empty());
+        assert!(replay.iter().all(|frame| frame.partition_account_id.as_deref() == Some(person.account_id.as_str())));
+        assert!(replay.iter().all(|frame| !cognia_companion::person_chat::person_connection_visible(frame, "__service__", Some("operator"))));
+    }
+
     #[test]
     fn private_bridge_payload_cannot_choose_an_address_or_supply_host_authority() {
         let request = serde_json::json!({"agentId":"agent","ownerSessionId":"chat","originDeviceId":null,"leaseId":"renderer-tool-host-fixture","generation":1,"port":12345});

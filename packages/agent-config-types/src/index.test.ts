@@ -62,3 +62,14 @@ describe("DEFAULT_BACKUP_AUTO_SCHEDULE", () => {
     expect(DEFAULT_BACKUP_AUTO_SCHEDULE.intervalDays).toBeLessThanOrEqual(30)
   })
 })
+
+it("carries a provider refusal code and cap reset on terminal events", () => {
+  const event: ClaudeEvent = {
+    type: "session_ended",
+    sessionId: "person-session",
+    error: "member_usage_cap_reached",
+    code: "member_usage_cap_reached",
+    resetAt: 123,
+  }
+  expect(event).toMatchObject({ code: "member_usage_cap_reached", resetAt: 123 })
+})

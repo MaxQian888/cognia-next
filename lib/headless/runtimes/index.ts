@@ -233,4 +233,7 @@ export const PERSON_BRAIN_RUNTIMES = [
   "host-event-publisher",
   "desktop-sync-source",
   "desktop-message-source",
+  // Opt-in terminal write-back only in person brains; no replay runner, workers,
+  // plugins or Host keys. The listener persists into the process's account DB.
+  "work-submission-outbox",
 ] as const

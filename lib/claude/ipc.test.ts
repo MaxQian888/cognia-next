@@ -728,6 +728,18 @@ describe("Claude session commands", () => {
     expect(callSpy).toHaveBeenCalledWith("claude_close_session", { sessionId: "sess-4" })
   })
 
+  it("closeSession uses the admitted agent_close_session in a tool-less person brain", async () => {
+    const { initializePersonChat } = await import("@/lib/headless/person-chat")
+    initializePersonChat("person-brain", { COGNIA_PERSON_CHAT: "tool-less" })
+    try {
+      callSpy.mockResolvedValueOnce(undefined)
+      await closeSession("sess-5")
+      expect(callSpy).toHaveBeenCalledWith("agent_close_session", { sessionId: "sess-5" })
+    } finally {
+      initializePersonChat("operator", {})
+    }
+  })
+
   it("getSidecarStatus returns the parsed boolean", async () => {
     callSpy.mockResolvedValueOnce({ ready: true })
     await expect(getSidecarStatus()).resolves.toEqual({ ready: true })

@@ -374,6 +374,12 @@ async fn execute_inner(
     state: &SharedState,
     request: ExecutionRequest,
 ) -> Result<ExecutionOutcome, Problem> {
+    if request.principal.scope == "person-brain" {
+        if request.transport != ExecutionTransport::Internal {
+            return Err(problem(&request.request_id, StatusCode::FORBIDDEN, "host_surface_forbidden", "host_surface_forbidden"));
+        }
+        super::person_chat::person_caller(&request.principal, &request.command)?;
+    }
     let descriptor = super::command_manifest::descriptor(&request.command)
         .ok_or_else(|| missing_command_problem(&request.request_id, &request.command))?;
     let admission = super::host_surface_gate::authorize_execution(
@@ -497,7 +503,10 @@ async fn execute_admitted(state: &SharedState, request: ExecutionRequest,
     .unwrap_or_default();
     let request_hash = hex::encode(Sha256::digest(payload));
     let now = unix_time_secs();
-    if descriptor.receipt_policy() == CommandReceiptPolicy::HostSemantic {
+    // P6c ticket secrets must remain ephemeral: persist only the retry hash,
+    // and remint against current credentials on a retry, never store a secret receipt.
+    if descriptor.receipt_policy() == CommandReceiptPolicy::HostSemantic
+        || descriptor.arm == "person_model_ticket_mint" {
         return execute_host_semantic_request(
             &store, &request, &request_hash, now, dispatch(state, &request),
         ).await;
@@ -617,9 +626,10 @@ async fn execute_host_semantic_request(
     store: &SecurityStore, request: &ExecutionRequest, request_hash: &str, now: i64,
     dispatch: impl std::future::Future<Output = Result<Value, Problem>>,
 ) -> Result<ExecutionOutcome, Problem> {
+    let person_retry_key = if request.principal.scope == "person-brain" { Some(receipt_idempotency_key(request)?) } else { None };
     store.bind_host_semantic_request(
         &request.principal.tenant_id, &request.principal.device_id,
-        request.idempotency_key.as_deref().expect("validated UUID key"), request_hash, now,
+        person_retry_key.as_deref().or(request.idempotency_key.as_deref()).expect("validated UUID key"), request_hash, now,
     ).map_err(|error| map_store_error(&request.request_id, error))?;
     // Always redispatch: current approval/source checks and evidence deletion
     // fences belong to the Host. Neither successes nor failures enter receipts.
@@ -665,6 +675,7 @@ fn partition_unleased_input(
 }
 
 fn contract_plane_for(scope: &str) -> cognia_headless_contract::ContractPlane {
+    if scope == "person-brain" { return cognia_headless_contract::ContractPlane::Service; }
     if crate::jwt::is_service_scope(Some(scope.as_ref())) {
         cognia_headless_contract::ContractPlane::Service
     } else {
@@ -816,6 +827,12 @@ fn authorize_transport(
     request: &ExecutionRequest,
     descriptor: &CommandDescriptor,
 ) -> Result<(), Problem> {
+    if request.principal.scope == "person-brain" {
+        super::person_chat::person_caller(&request.principal, &descriptor.arm)?;
+        return if request.transport == ExecutionTransport::Internal { Ok(()) } else {
+            Err(problem(&request.request_id, StatusCode::FORBIDDEN, "host_surface_forbidden", "host_surface_forbidden"))
+        };
+    }
     let allowed = transport_admits(
         crate::jwt::is_service_scope(Some(request.principal.scope.as_ref())),
         request.transport,
@@ -837,6 +854,10 @@ fn authorize_capability(
     request: &ExecutionRequest,
     descriptor: &CommandDescriptor,
 ) -> Result<(), Problem> {
+    if request.principal.scope == "person-brain" {
+        super::person_chat::person_caller(&request.principal, &descriptor.arm)?;
+        return Ok(());
+    }
     if crate::jwt::is_service_scope(Some(request.principal.scope.as_ref())) {
         return Ok(());
     }
@@ -895,6 +916,10 @@ fn authorize_approval(
     request: &ExecutionRequest,
     descriptor: &CommandDescriptor,
 ) -> Result<(), Problem> {
+    if request.principal.scope == "person-brain" {
+        super::person_chat::person_caller(&request.principal, &descriptor.arm)?;
+        return Ok(());
+    }
     // The loopback-only service principal is the policy authority for the
     // internal Brain plane. Device transports must still present interactive
     // leases or signed host policies according to the manifest.
@@ -1105,6 +1130,25 @@ mod tests {
         assert!(org_policy_device_capability(&org, super::super::deployment::DeploymentMode::SingleUser).is_none());
         org.arm = "host_provider_credential_set".into();
         assert!(org_policy_device_capability(&org, super::super::deployment::DeploymentMode::MultiTenant).is_none());
+    }
+
+    #[tokio::test]
+    async fn p6c_mint_retry_hash_is_durable_but_ticket_secret_is_not_a_receipt() {
+        let store = SecurityStore::in_memory().unwrap();
+        let mut request = execution_request("person-brain", None);
+        request.command = "person_model_ticket_mint".into();
+        request.idempotency_key = Some(Uuid::new_v4().to_string());
+        for secret in ["sk-cognia-rt-first", "sk-cognia-rt-second"] {
+            let result = json!({"ticketId":"rt_p6c","secret":secret,"endpoint":"http://127.0.0.1:19384/v1",
+                "gatewayPort":19384,"provider":"fixture","model":"fixture-model","expiresAt":1,"credentialFingerprint":"123456abcdef"});
+            let outcome = execute_host_semantic_request(&store, &request, "same-hash", unix_time_secs(), async { Ok(result.clone()) }).await.unwrap();
+            let ExecutionOutcome::Completed { result:actual, operation_id, replayed, .. } = outcome else { panic!("completed"); };
+            assert_eq!(actual, result); assert!(operation_id.is_none()); assert!(!replayed);
+        }
+        let error = execute_host_semantic_request(&store, &request, "different-hash", unix_time_secs(), async {
+            panic!("conflicting retry must not redispatch")
+        }).await.unwrap_err();
+        assert_eq!(error.status_code(), StatusCode::CONFLICT);
     }
 
     #[tokio::test]

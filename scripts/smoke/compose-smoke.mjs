@@ -381,16 +381,30 @@ async function rpc(name, args, auth) {
   const descriptor = COMMANDS.get(name)
   const headers = {
     Authorization: `Bearer ${auth.accessToken}`,
-    DPoP: await deviceProof(auth.privateKey, auth.accessJti, "POST", path),
     "Content-Type": "application/json",
   }
   if (descriptor?.idempotency === "required") headers["Idempotency-Key"] = randomUUID()
-  const res = await fetch(`${auth.baseUrl ?? SERVER_URL}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(args ?? {}),
-  })
-  const envelope = await res.json().catch(() => null)
+  const send = async () =>
+    fetch(`${auth.baseUrl ?? SERVER_URL}${path}`, {
+      method: "POST",
+      headers: {
+        ...headers,
+        DPoP: await deviceProof(auth.privateKey, auth.accessJti, "POST", path),
+      },
+      body: JSON.stringify(args ?? {}),
+    })
+  let res = await send()
+  let envelope = await res.json().catch(() => null)
+  // The Host meters each device's remote calls; wait out a 429 as a client
+  // would, with the same idempotency key and a fresh proof per attempt.
+  for (let attempt = 0; res.status === 429 && attempt < 5; attempt++) {
+    const seconds = Number(
+      envelope?.details?.retryAfterSeconds ?? res.headers.get("retry-after") ?? 1
+    )
+    await new Promise((resolve) => setTimeout(resolve, Math.max(1, seconds) * 1000))
+    res = await send()
+    envelope = await res.json().catch(() => null)
+  }
   // The device plane answers `{requestId, result}`; errors are problem
   // documents without it. Unwrap the way the real client does
   // (lib/tauri/transport-companion.ts), so callers read the result itself.
@@ -1593,7 +1607,7 @@ async function partitionHostState(person) {
   const status = await rpc("host_state_status", scope, person.auth)
   check(
     status.status === 200 && typeof status.body?.hostId === "string",
-    `${person.subject}: host_state_status → 200 (got ${status.status})`
+    `${person.subject}: host_state_status → 200 (got ${status.status}: ${JSON.stringify(status.body?.details ?? status.body).slice(0, 900)})`
   )
   return scope && status.status === 200 ? { scope, status: status.body } : null
 }
@@ -1612,6 +1626,126 @@ async function sessionIds(person) {
   const listed = await rpc("session_list", {}, person.auth)
   check(listed.status === 200, `${person.subject}: session_list → 200 (got ${listed.status})`)
   return new Set((listed.body?.items ?? []).map((row) => row.id))
+}
+
+const FIXTURE_REPLY = "[web-headless-e2e] deterministic assistant reply"
+
+/** Enqueue one message on a fresh chat session and wait for its turn to settle. */
+async function personsTurn(person, seed, text) {
+  const sessionId = `smoke-chat-${person.subject}-${randomUUID()}`
+  const [created] = await submitPartition(person, person.state, [
+    hostStateAction(person.state.scope, person.state.status, sessionId, 1, {
+      kind: "session.create",
+      title: "Smoke chat",
+      seed,
+    }),
+  ])
+  check(
+    created?.outcome === "applied",
+    `${person.subject}: chat session created (got ${JSON.stringify(created)})`
+  )
+  const enqueue = hostStateAction(
+    person.state.scope,
+    person.state.status,
+    sessionId,
+    2,
+    { kind: "message.enqueue", messageId: randomUUID(), text, attachments: [] },
+    1
+  )
+  const [enqueued] = await submitPartition(person, person.state, [enqueue])
+  check(
+    enqueued && enqueued.outcome !== "rejected",
+    `${person.subject}: message.enqueue is accepted (got ${JSON.stringify(enqueued)})`
+  )
+  let messages = []
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    const page = await rpc("message_get_by_session", { session_id: sessionId }, person.auth)
+    messages = page.body?.items ?? page.body ?? []
+    const text = JSON.stringify(messages)
+    if (text.includes(FIXTURE_REPLY) || /"(error|failed|errorCode)"/.test(text)) break
+    const fate = await personsTurnFate(person, enqueue)
+    if (fate.operation?.status === "failed" || fate.turn?.endsWith("-error")) break
+  }
+  const { operation, turn } = await personsTurnFate(person, enqueue)
+  return { sessionId, messages, text: JSON.stringify(messages), operation, turn }
+}
+
+/** The enqueue's fate and the turn's end state, as a partition client sees them. */
+async function personsTurnFate(person, action) {
+  const snapshot = await rpc(
+    "host_state_snapshot",
+    {
+      accountId: person.state.scope.accountId,
+      runtimeTargetId: person.state.scope.runtimeTargetId,
+      channel: action.channel,
+    },
+    person.auth
+  )
+  const state = snapshot.body?.state
+  return {
+    operation: (state?.operations ?? []).find((item) => item.actionId === action.actionId),
+    turn: state?.turn,
+  }
+}
+
+async function personsChat(person, owner) {
+  const seed = { provider: "anthropic", model: "claude-e2e" }
+  await rpc("org_model_credential_delete", { provider: "anthropic" }, owner.auth)
+  const keyless = await personsTurn(person, seed, "hello without a key")
+  check(
+    keyless.operation?.status === "failed" &&
+      keyless.operation.errorCode === "model_access_unavailable",
+    `${person.subject}: a turn without an org key fails model_access_unavailable (got ${JSON.stringify(keyless.operation)})`
+  )
+  const stored = await rpc(
+    "org_model_credential_set",
+    { provider: "anthropic", apiKey: `smoke-anthropic-${randomUUID()}` },
+    owner.auth
+  )
+  check(stored.status === 200, `the owner stores an anthropic org key (got ${stored.status})`)
+  const before = await rpc("org_member_usage_get", {}, owner.auth)
+  const reply = await personsTurn(person, seed, "hello with the org key")
+  check(
+    reply.text.includes(FIXTURE_REPLY),
+    `${person.subject} gets a model reply through the org key`
+  )
+  check(
+    reply.turn === "completed",
+    `${person.subject}'s keyed turn settles completed (got ${reply.turn})`
+  )
+  const after = await rpc("org_member_usage_get", {}, owner.auth)
+  const spent = (body) =>
+    (body?.members ?? []).find((member) => member.userId === person.userId)?.spentTokens ?? 0
+  check(
+    spent(after.body) > spent(before.body),
+    `${person.subject}'s usage grows with the reply (${spent(before.body)} → ${spent(after.body)})`
+  )
+  const capped = await rpc(
+    "org_member_usage_cap_set",
+    { userId: person.userId, monthlyTokens: 1 },
+    owner.auth
+  )
+  check(capped.status === 200, `the owner caps ${person.subject} at 1 token (got ${capped.status})`)
+  const capBefore = await rpc("org_member_usage_get", {}, owner.auth)
+  const overCap = await personsTurn(person, seed, "hello over the cap")
+  const capAfter = await rpc("org_member_usage_get", {}, owner.auth)
+  // AC34: the gateway refuses the reservation (429 member_usage_cap_reached)
+  // before any provider call, so nothing is spent and the turn ends in error.
+  check(!overCap.text.includes(FIXTURE_REPLY), `${person.subject} gets no reply over the cap`)
+  check(
+    overCap.turn === "fatal-error",
+    `${person.subject}'s over-cap turn settles fatal-error (got ${overCap.turn})`
+  )
+  check(
+    spent(capAfter.body) === spent(capBefore.body),
+    `${person.subject} spends nothing over the cap (${spent(capBefore.body)} → ${spent(capAfter.body)})`
+  )
+  await rpc(
+    "org_member_usage_cap_set",
+    { userId: person.userId, monthlyTokens: "default" },
+    owner.auth
+  )
 }
 
 async function tierPersons() {
@@ -1693,36 +1827,50 @@ async function tierPersons() {
     "bob's sync_pull does not return ada's character"
   )
 
-  // 3. Intentional dormancy (Rule 7): runtime intents and model calls stay
-  //    refused until P6 lands their sandbox and credential broker.
+  // 3. Intentional dormancy (Rule 7): workspaces stay refused, and so does
+  //    chat on a Host older than P6c, which does not advertise tool-less chat.
+  const manifest = await rpc("host_feature_manifest", {}, ada.auth)
+  const toolLessChat = (manifest.body?.operations ?? []).some(
+    (operation) => operation.feature === "claude.tool-less-chat" && operation.healthy === true
+  )
   const refused = await submitPartition(ada, ada.state, [
-    hostStateAction(ada.state.scope, ada.state.status, ada.sessionId, 3, {
-      kind: "message.enqueue",
-      messageId: randomUUID(),
-      text: "hello",
-      attachments: [],
-    }),
+    ...(toolLessChat
+      ? []
+      : [
+          hostStateAction(ada.state.scope, ada.state.status, ada.sessionId, 3, {
+            kind: "message.enqueue",
+            messageId: randomUUID(),
+            text: "hello",
+            attachments: [],
+          }),
+        ]),
     hostStateAction(ada.state.scope, ada.state.status, ada.sessionId, 4, {
       kind: "session.workspace",
       projectId: "smoke-project",
     }),
   ])
+  if (!toolLessChat) {
+    check(
+      JSON.stringify(refused[0] ?? null).includes("execution_isolation_unavailable"),
+      `message.enqueue is refused execution_isolation_unavailable (got ${JSON.stringify(refused[0])})`
+    )
+  }
   check(
-    JSON.stringify(refused[0] ?? null).includes("execution_isolation_unavailable"),
-    `message.enqueue is refused execution_isolation_unavailable (got ${JSON.stringify(refused[0])})`
-  )
-  check(
-    JSON.stringify(refused[1] ?? null).includes("workspace_unavailable"),
-    `session.workspace is refused workspace_unavailable (got ${JSON.stringify(refused[1])})`
+    JSON.stringify(refused.at(-1) ?? null).includes("workspace_unavailable"),
+    `session.workspace is refused workspace_unavailable (got ${JSON.stringify(refused.at(-1))})`
   )
   const pet = await rpc(
     "pet_chat_send",
     { text: "hi", locale: "en", idempotencyKey: randomUUID() },
     bob.auth
   )
+  // No headless brain has a pet: from P6c the person brain answers it like
+  // any headless Host; before, the Host refused it as model dormancy.
   check(
-    pet.status === 503 && JSON.stringify(pet.body).includes("model_access_unavailable"),
-    `pet_chat_send is 503 model_access_unavailable (got ${pet.status}: ${JSON.stringify(pet.body).slice(0, 200)})`
+    toolLessChat
+      ? JSON.stringify(pet.body ?? null).includes("headless-host")
+      : pet.status === 503 && JSON.stringify(pet.body).includes("model_access_unavailable"),
+    `pet_chat_send answers ${toolLessChat ? "headless-host" : "503 model_access_unavailable"} (got ${pet.status}: ${JSON.stringify(pet.body).slice(0, 200)})`
   )
 
   // 4. Org administration (P6a/P6b, AC32): an owner writes on live standing
@@ -1829,6 +1977,12 @@ async function tierPersons() {
   } else {
     skip("COGNIA_SMOKE_PERSONS_MEMBER unset: member refusal not exercised")
   }
+
+  // 4b. Tool-less member chat (P6c, AC33/AC34): a member's turn runs on an
+  //     org key through a partition ticket, is charged to that member, and
+  //     fails with a clear code without a key or over the cap.
+  if (toolLessChat) await personsChat(ada, owner)
+  else skip("the Host does not advertise tool-less member chat (pre-P6c)")
 
   // 5. The operator sees one partition per person, then purges bob (AC27):
   //    his next request starts an empty partition and ada keeps hers.

@@ -240,7 +240,7 @@ const ACCOUNT_ID: &str = "local_acct_a";
 /// Shared with the per-family test modules (`gateway_plane`, ...): they need a
 /// `SharedState` to call `dispatch`, and rebuilding this fifteen-field literal
 /// in each of them would make the next field addition a multi-file edit.
-pub(super) fn test_state() -> cognia_companion::SharedState {
+pub(crate) fn test_state() -> cognia_companion::SharedState {
     use cognia_companion::event_bus::EventBus;
     Arc::new(CompanionState {
         secret: RwLock::new(SECRET.to_vec()),

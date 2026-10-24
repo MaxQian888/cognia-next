@@ -8924,3 +8924,37 @@ describe("SIWC explicit-only routing", () => {
     ).toBe(false)
   })
 })
+
+it("resolves a partition ticket under a deny-all grant without reading host keys", async () => {
+  const { resolveSendOptions } = await import("./build-options")
+  const ctx = {
+    personChat: {
+      model: "org-model",
+      secret: "partition-ticket",
+      endpoint: "http://127.0.0.1:9000/v1",
+    },
+    capabilityGrants: [
+      { schemaVersion: 1 as const, source: { kind: "cli" as const }, tools: { restrictTo: [] } },
+    ],
+    get appSettings(): never {
+      throw new Error("host keys must not be read")
+    },
+  }
+  expect(await resolveSendOptions(ctx)).toEqual({
+    model: "org-model",
+    provider: "openai",
+    providerCredentials: {
+      apiKey: "partition-ticket",
+      baseURL: "http://127.0.0.1:9000/v1",
+      protocol: "openai",
+      apiFlavor: "chat",
+    },
+    allowedTools: [],
+    toolSurface: "none",
+    permissionMode: "plan",
+    maxTurns: 1,
+  })
+  await expect(resolveSendOptions({ personChat: ctx.personChat })).rejects.toThrow(
+    "person_chat_deny_all_grant_required"
+  )
+})

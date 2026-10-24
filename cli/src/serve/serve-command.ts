@@ -19,6 +19,7 @@
  * The sidecar is spawned by cognia-server (R8), NOT by the brain — no
  * transport conflict, and the WebView↔Tauri isomorphism holds exactly.
  */
+import { initializePersonChat } from "@/lib/headless/person-chat"
 import os from "node:os"
 import path from "node:path"
 
@@ -125,6 +126,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   // only: no collaboration reader (it would use the Host's CLI session), no
   // agent workers, no account sync, no plugins.
   const personBrain = profile.host === "person-brain"
+  initializePersonChat(profile.host, env)
   const localAccountId =
     stringFlag(args, "account") ?? env.COGNIA_LOCAL_ACCOUNT_ID ?? HEADLESS_LOCAL_ACCOUNT_ID
   const bridgeUrl = env.COGNIA_BRIDGE_URL ?? deriveBridgeUrl(serverUrl)
@@ -140,7 +142,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   await installFakeIndexedDb()
 
   // ── 2. Account ─────────────────────────────────────────────────────────────
-  await ensureHeadlessAccount(localAccountId)
+  await ensureHeadlessAccount(localAccountId, { partitionArtifactKeys: personBrain })
   out.write(`serve: account ${localAccountId} unlocked\n`)
   if (personBrain) out.write("serve: person partition profile (data only)\n")
 

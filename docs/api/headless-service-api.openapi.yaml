@@ -101977,6 +101977,12 @@ paths:
                       - recovering
                       - ready
                       - degraded
+                  supportedActions:
+                    type: array
+                    description: "P5d/P6c: on a person partition, exactly the intents this Host accepts from that person
+                      (personPartitionIntentDecision); absent elsewhere."
+                    items:
+                      type: string
                 additionalProperties: false
         "202":
           description: Command is still running under the durable operation ledger. The body is the Operation document.
@@ -125695,6 +125701,214 @@ paths:
                       - "null"
                     pattern: ^[a-f0-9]{64}$
                 additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/person_model_ticket_mint:
+    post:
+      operationId: internalRpcPersonModelTicketMint
+      tags:
+        - headless-rpc
+      summary: person_model_ticket_mint (service.internal)
+      description: "Loopback service-token command. Target: service; risk: low."
+      x-cognia-request-schema-source: zod-contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                model:
+                  type: string
+                  minLength: 1
+                sessionId:
+                  type: string
+                  minLength: 1
+              required:
+                - provider
+                - model
+                - sessionId
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - ticketId
+                  - secret
+                  - endpoint
+                  - gatewayPort
+                  - provider
+                  - model
+                  - expiresAt
+                  - credentialFingerprint
+                properties:
+                  ticketId:
+                    type: string
+                  secret:
+                    type: string
+                  endpoint:
+                    type: string
+                  gatewayPort:
+                    type: integer
+                    minimum: 1
+                    maximum: 65535
+                  provider:
+                    type: string
+                  model:
+                    type: string
+                  expiresAt:
+                    type: integer
+                  credentialFingerprint:
+                    type: string
+                    pattern: ^[0-9a-f]{12}$
         "202":
           description: Command is still running under the durable operation ledger. The body is the Operation document.
           content:
@@ -213719,6 +213933,7 @@ components:
           - perf_trace_close
           - perf_trace_open
           - perf_trace_read_chunk
+          - person_model_ticket_mint
           - pet_act
           - pet_chat_clear
           - pet_chat_list
@@ -214344,10 +214559,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 952
-  generatedRequestSchemaCount: 952
+  internalCommandCount: 953
+  generatedRequestSchemaCount: 953
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 952
+  contractRequestSchemaCount: 953
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 952
+  generatedResponseSchemaCount: 953
   loopbackOnly: true

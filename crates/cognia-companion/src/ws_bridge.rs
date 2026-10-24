@@ -1428,9 +1428,7 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
             let event = payload.get("event").cloned();
             match (topic, event) {
                 (Some("host-state://action"), Some(event)) => {
-                    state
-                        .event_bus
-                        .publish("host-state://action".to_string(), event);
+                    super::person_chat::person_publish(&state.event_bus, "host-state://action", &event);
                 }
                 _ => log::warn!("companion-api ws-bridge: bad HostState publish payload"),
             }
@@ -1485,9 +1483,7 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
                 (Some(TRANSCRIPT_REVISION_TOPIC), Some(event)) => {
                     match transcript_revision_envelope(&event) {
                         Some(envelope) => {
-                            state
-                                .event_bus
-                                .publish(TRANSCRIPT_REVISION_TOPIC.to_string(), envelope);
+                            super::person_chat::person_publish(&state.event_bus, TRANSCRIPT_REVISION_TOPIC, &envelope);
                         }
                         None => log::warn!(
                             "companion-api ws-bridge: bad transcript revision payload"
@@ -1495,7 +1491,7 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
                     }
                 }
                 (Some(topic), Some(event)) if ALLOWED_TOPICS.contains(&topic) => {
-                    state.event_bus.publish(topic.to_string(), event);
+                    super::person_chat::person_publish(&state.event_bus, topic, &event);
                 }
                 (Some(topic), _) => {
                     log::warn!(

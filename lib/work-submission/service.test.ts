@@ -585,10 +585,18 @@ describe("settleWorkSubmission", () => {
     await settleWorkSubmission({
       submissionId: "submission-1",
       outcome: "failed",
-      errorCode: "host_unavailable",
+      errorCode: "member_usage_cap_reached",
+      resetAt: 123,
       now: NOW + 1,
     })
-    expect((await getWorkSubmission("submission-1"))?.errorCode).toBe("host_unavailable")
+    expect((await getWorkSubmission("submission-1"))?.errorCode).toBe("member_usage_cap_reached")
+    expect(await getDb().executionRunEvents.toArray()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          payload: expect.objectContaining({ errorCode: "member_usage_cap_reached", resetAt: 123 }),
+        }),
+      ])
+    )
   })
 
   it("returns false for a missing submission", async () => {

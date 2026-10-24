@@ -7,6 +7,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event"
 import type { UIMessage } from "@/types"
 import { transport } from "@/lib/tauri"
 import { detectHostProfile } from "@/lib/platform/capabilities"
+import { personChatCapability } from "@/lib/headless/person-chat"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { reportGovernanceProjectionFailure } from "@/lib/db/governance-ledger"
 import type {
@@ -1024,7 +1025,11 @@ export async function closeSession(
   sessionId: string,
   options?: { commandId?: string }
 ): Promise<void> {
-  const command = options?.commandId ? "agent_close_session" : "claude_close_session"
+  // A tool-less person brain's channel admits only agent_close_session (P6c).
+  const command =
+    options?.commandId || personChatCapability().chat === "tool-less"
+      ? "agent_close_session"
+      : "claude_close_session"
   await transport.call(command, {
     sessionId,
     ...(options?.commandId ? { commandId: options.commandId } : {}),

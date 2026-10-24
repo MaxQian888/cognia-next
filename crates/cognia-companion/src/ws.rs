@@ -105,6 +105,7 @@ pub async fn ws_handler(
         identity.device_id,
         ConnectionScope::Device,
         state,
+        None,
     )
 }
 
@@ -131,7 +132,7 @@ pub async fn internal_ws_handler(
             json!({}),
         );
     };
-    if !crate::jwt::is_service_scope(Some(context.scope.as_ref())) {
+    if !crate::jwt::is_service_scope(Some(context.scope.as_ref())) && context.scope != "person-brain" {
         return super::api::public_error_response(
             StatusCode::FORBIDDEN,
             "service_scope_required",
@@ -140,6 +141,13 @@ pub async fn internal_ws_handler(
             json!({}),
         );
     }
+    let person_generation = if context.scope == "person-brain" {
+        request.extensions().get::<crate::jwt::PersonBrainClaims>().map(|claims| (context.tenant_id.clone(), claims.generation.clone()))
+    } else { None };
+    if context.scope == "person-brain" && !person_generation.as_ref().is_some_and(|(account, generation)|
+        crate::person_partition::fleet().is_some_and(|fleet| fleet.accepts_bridge(account, generation))) {
+        return super::api::public_error_response(StatusCode::FORBIDDEN, "host_surface_forbidden", "host_surface_forbidden", false, json!({}));
+    }
     upgrade_events_ws(
         ws,
         params.since,
@@ -147,6 +155,7 @@ pub async fn internal_ws_handler(
         context.device_id,
         ConnectionScope::from_claim(&context.scope),
         state,
+        person_generation,
     )
 }
 
@@ -157,6 +166,7 @@ fn upgrade_events_ws(
     device_id: String,
     scope: ConnectionScope,
     state: SharedState,
+    person_generation: Option<(String, String)>,
 ) -> Response {
     // Bound inbound frame allocation (DoS guard). The events channel only ever
     // receives tiny client frames (pongs / keep-alive text), so a small cap is
@@ -165,7 +175,7 @@ fn upgrade_events_ws(
     const MAX_WS_FRAME_BYTES: usize = 64 * 1024;
     ws.max_message_size(MAX_WS_FRAME_BYTES)
         .max_frame_size(MAX_WS_FRAME_BYTES)
-        .on_upgrade(move |socket| handle_socket(socket, since, tenant_id, device_id, scope, state))
+        .on_upgrade(move |socket| handle_socket(socket, since, tenant_id, device_id, scope, state, person_generation))
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +274,11 @@ async fn handle_socket(
     device_id: String,
     scope: ConnectionScope,
     state: SharedState,
+    person_generation: Option<(String, String)>,
 ) {
+    let person_live = || person_generation.as_ref().is_none_or(|(account, generation)|
+        crate::person_partition::fleet().is_some_and(|fleet| fleet.accepts_bridge(account, generation)));
+    if !person_live() { return; }
     // Channels this connection receives. Starts at the catalog's `default_on`
     // set — i.e. exactly what reached clients before subscriptions existed, so
     // a client that never sends a `subscribe` frame sees no change — and is
@@ -302,8 +316,7 @@ async fn handle_socket(
     let visible_replay: Vec<EventFrame> = replay
         .into_iter()
         .filter(|frame| {
-            frame.visible_to_connection(&device_id, scope)
-                && frame_visible_to_tenant(frame, tenant_id.as_deref())
+            person_frame_visible(frame, tenant_id.as_deref(), &device_id, scope)
                 && subscription.allows(&frame.event_type)
         })
         .collect();
@@ -335,6 +348,7 @@ async fn handle_socket(
     let mut batcher = EventBatcher::new();
 
     loop {
+        if !person_live() { return; }
         tokio::select! {
             // Batch window expired — flush what accumulated.
             _ = batch_window(batcher.deadline()) => {
@@ -349,8 +363,8 @@ async fn handle_socket(
             result = receiver.recv() => {
                 match result {
                     Ok(frame) => {
-                        if !frame.visible_to_connection(&device_id, scope)
-                            || !frame_visible_to_tenant(&frame, tenant_id.as_deref())
+                        if !person_live() { return; }
+                        if !person_frame_visible(&frame, tenant_id.as_deref(), &device_id, scope)
                         {
                             continue;
                         }
@@ -560,10 +574,12 @@ fn revocation_targets(
     })
 }
 
+fn person_frame_visible(frame: &super::event_bus::EventFrame, tenant_id: Option<&str>, device: &str, scope: ConnectionScope) -> bool {
+    crate::person_chat::person_connection_visible(frame, device, tenant_id)
+        && frame.visible_to_connection(device, scope) && frame_visible_to_tenant(frame, tenant_id)
+}
+
 fn frame_visible_to_tenant(frame: &super::event_bus::EventFrame, tenant_id: Option<&str>) -> bool {
-    if let Some(device) = frame.target_device_id.as_deref() {
-        if !super::person_partition::event_visible(frame, device, tenant_id) { return false; }
-    }
     match frame.payload.get("tenantId").and_then(Value::as_str) {
         Some(event_tenant) => tenant_id == Some(event_tenant),
         None => true,
@@ -590,6 +606,17 @@ mod tests {
     use parking_lot::RwLock;
     use serde_json::{json, Value};
     use std::sync::Arc;
+
+    #[test]
+    fn p6c_ws_live_and_replay_predicate_precedes_service_sidecar_exception() {
+        let bus = EventBus::new();
+        let frame = bus.publish_person_to("claude://message".into(), json!({"sessionId":"p6c-ws"}),
+            "brain-pb_owner".into(), "pb_owner".into());
+        assert!(frame.visible_to_connection("__service__", ConnectionScope::Service));
+        assert!(!person_frame_visible(&frame, Some("operator"), "__service__", ConnectionScope::Service));
+        assert!(person_frame_visible(&frame, Some("pb_owner"), "brain-pb_owner", ConnectionScope::Device));
+        assert!(!person_frame_visible(&frame, Some("pb_other"), "brain-pb_other", ConnectionScope::Device));
+    }
 
     #[test]
     fn a_device_keeps_its_admin_lease_until_its_last_event_stream_closes() {

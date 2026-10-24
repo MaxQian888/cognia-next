@@ -21,6 +21,7 @@
  *   arms instead (R7).
  */
 import { registerHeadlessRuntime } from "../registry"
+import { personChatCapability } from "../person-chat"
 
 // ── A7: scheduler ───────────────────────────────────────────────────────────
 
@@ -403,8 +404,18 @@ registerHeadlessRuntime({
 registerHeadlessRuntime({
   name: "work-submission-outbox",
   criticality: "required",
-  hosts: ["brain"],
-  start: async () => {
+  hosts: ["brain", "person-brain"],
+  start: async (ctx) => {
+    if (ctx.host === "person-brain") {
+      if (personChatCapability().chat !== "tool-less") return () => {}
+      // Terminal listener only: no stored execution replay, workers or plugins.
+      // getDb() is this process's own account DB; Host SSE filters session ownership.
+      const { startWorkSubmissionTerminalEvents } =
+        await import("@/lib/work-submission/terminal-events")
+      return startWorkSubmissionTerminalEvents({
+        onError: (error) => ctx.log("error", `person chat write-back failed: ${String(error)}`),
+      })
+    }
     const { startHeadlessWorkOutbox } = await import("@/lib/work-submission/bootstrap")
     return startHeadlessWorkOutbox()
   },

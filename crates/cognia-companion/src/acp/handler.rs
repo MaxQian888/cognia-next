@@ -1592,7 +1592,8 @@ async fn handle_acp_socket(
             result = receiver.recv() => {
                 match result {
                     Ok(frame) => {
-                        if frame.event_type != "claude://message" {
+                        if !crate::person_chat::person_connection_visible(&frame, &conn.device_id, conn.account_id.as_deref())
+                            || frame.event_type != "claude://message" {
                             continue;
                         }
                         for msg in conn.handle_event_payload(&frame.payload).await {

@@ -1,5 +1,7 @@
 "use client"
 
+import { personChatCapability } from "@/lib/headless/person-chat"
+
 /**
  * Host-side counterpart of the Rust `companion::desktop_writes_bridge`.
  *
@@ -1159,7 +1161,9 @@ function sessionAttach(
     supportedActions:
       result.mode === "control"
         ? partition
-          ? HOST_STATE_INTENT_KINDS.filter((kind) => personPartitionIntentDecision(kind).allowed)
+          ? HOST_STATE_INTENT_KINDS.filter(
+              (kind) => personPartitionIntentDecision(kind, personChatCapability()).allowed
+            )
           : permittedHostStateIntentKinds(grants)
         : [],
   }
@@ -2196,6 +2200,7 @@ async function hostFeatureManifest(
           : `local-${platform}`,
       hostStateScope: { accountId: active.accountId, runtimeTargetId: active.targetId },
       personPartition: true,
+      personChat: personChatCapability().chat,
       deviceGrants,
     })
     // These are execution surfaces, unavailable in a data-only person brain.

@@ -127,6 +127,7 @@ function resolveProtocol(provider: string, credentials?: AdapterCredentials, mod
  */
 import {
   errorToMessage,
+  terminalErrorMessage,
   stripReasoningParts,
   toAiSdkUserContent,
   toolOutputHasImage,
@@ -1336,7 +1337,7 @@ export function dispatchAiSdk({
           emit({
             type: "session_ended",
             sessionId,
-            error: msg,
+            error: terminalErrorMessage(streamError),
             // Forward the real HTTP status + Retry-After from the ai-sdk
             // APICallError so the renderer classifies + cools down off
             // authoritative data, not string-matching.
@@ -1560,7 +1561,7 @@ export function dispatchAiSdk({
         // reply as a successful turn. Symmetric with the pre-text error branch
         // above — forward the real HTTP status + Retry-After so the renderer
         // classifies off authoritative data.
-        const msg = errorToMessage(turnError)
+        const msg = terminalErrorMessage(turnError)
         emit({
           type: "session_ended",
           sessionId,
@@ -1597,7 +1598,7 @@ export function dispatchAiSdk({
         emit({
           type: "session_ended",
           sessionId,
-          error: errorToMessage(err),
+          error: terminalErrorMessage(err),
           // Thrown (non-streamed) failures — buildModel errors, the variant
           // adapter's HTTP throw, getter rejections — carry status/Retry-After
           // too; forward it so the renderer's breaker doesn't fall back to

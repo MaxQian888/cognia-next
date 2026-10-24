@@ -60,8 +60,10 @@ pub struct HostSurfacePolicy {
     pub execution_capabilities: Vec<String>,
     pub execution_commands: Vec<String>,
     pub non_execution_commands: Vec<NonExecutionCommand>,
-    /// P6 credential-broker dormancy; storage-only message arms remain routed.
+    /// P6c keeps this empty: pet arms route to the headless person brain.
     pub person_model_commands: Vec<NonExecutionCommand>,
+    /// P6c closed loopback channel, separate from service authority.
+    pub person_brain_commands: Vec<NonExecutionCommand>,
     /// P5d tenant-only data arms, enabled only with an installed person fleet.
     pub person_host_state_commands: Vec<PersonHostStateCommand>,
     /// Host-global arms hidden behind mixed client capabilities. Applied only
@@ -104,6 +106,10 @@ where
 }
 
 impl HostSurfacePolicy {
+    pub fn person_brain_admits(&self, arm: &str) -> bool {
+        self.person_brain_commands.iter().any(|entry| entry.arm == arm)
+    }
+
     pub fn person_host_state_capability(&self, arm: &str) -> Option<&str> {
         self.person_host_state_commands.iter().find(|entry| entry.arm == arm)
             .map(|entry| entry.capability.as_str())
@@ -154,10 +160,13 @@ mod tests {
     }
 
     #[test]
-    fn p5_model_dormancy_is_labeled_without_changing_global_overrides() {
+    fn p6c_pet_routes_to_headless_person_without_changing_global_overrides() {
         let policy = POLICY.as_ref().unwrap();
-        assert_eq!(policy.person_model_commands.iter().map(|entry| entry.arm.as_str()).collect::<Vec<_>>(), vec!["pet_chat_send", "pet_soul_generate"]);
-        assert!(policy.person_model_commands.iter().all(|entry| entry.reason.contains("P6") && entry.reason.contains("model_access_unavailable")));
+        assert!(policy.person_model_commands.is_empty());
+        assert!(policy.comment.contains("P6c emptied personModelCommands"));
+        assert_eq!(policy.person_brain_commands.iter().map(|entry| entry.arm.as_str()).collect::<BTreeSet<_>>(),
+            BTreeSet::from(["person_model_ticket_mint", "agent_send", "agent_interrupt", "agent_close_session"]));
+        assert!(policy.person_brain_commands.iter().all(|entry| !entry.reason.is_empty()));
         assert_eq!(policy.command_overrides.len(), 8);
         assert!(policy.command_overrides.values().all(|entry| entry.action.as_deref() == Some("host.global-surfaces")));
     }

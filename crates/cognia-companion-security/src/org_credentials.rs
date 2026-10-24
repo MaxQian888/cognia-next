@@ -41,8 +41,8 @@ fn account(org: &str, provider: &str) -> Result<String, String> {
     Ok(format!("{org}/{provider}"))
 }
 
-/// Host-internal org secret boundary. The value reader is intentionally dormant
-/// until P6c binds gateway tickets to a verified person/org. Device commands may
+/// Host-internal org secret boundary. Only P6c partition ticket brokerage reads
+/// values, bound to a verified person/org. Device commands may
 /// use metadata and mutations only, never `org_provider_key`. There is no
 /// registration in `host_secrets`: operator overlays and device revocation cannot
 /// enumerate or cascade these org-owned keys.
@@ -106,7 +106,7 @@ impl OrgCredentials {
         Ok(entries)
     }
 
-    /// Host-internal, dormant until P6c. Never expose this through RPC or CLI.
+    /// Host-internal P6c ticket broker only. Never expose values through RPC or CLI.
     /// Answers a key only when the metadata an admin can see vouches for it.
     pub fn org_provider_key(org: &str, provider: &str) -> Result<Option<String>, String> {
         let account = account(org, provider)?;
@@ -172,10 +172,15 @@ mod tests {
     }
 
     #[test]
-    fn p6a_value_reader_remains_dormant_on_both_command_planes() {
+    fn p6c_value_reader_has_only_the_partition_ticket_caller() {
+        let p6c = include_str!("../../cognia-companion-rpc/src/person_model.rs");
+        assert_eq!(p6c.matches("::org_provider_key(").count(), 1);
         for source in [include_str!("../../cognia-companion-rpc/src/rpc.rs"),
             include_str!("../../cognia-companion-rpc/src/rpc/chat.rs"),
             include_str!("../../cognia-companion-rpc/src/rpc/service_plane.rs"),
+            include_str!("../../cognia-companion-rpc/src/rpc/gateway_plane.rs"),
+            include_str!("../../cognia-companion-rpc/src/provider_admin.rs"),
+            include_str!("../../cognia-server/src/main.rs"),
             include_str!("../../cognia-companion/src/org_policy.rs")] {
             assert!(!source.contains("::org_provider_key("));
         }

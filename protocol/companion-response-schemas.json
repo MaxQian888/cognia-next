@@ -4745,6 +4745,11 @@
         "recovery": {
           "type": "string",
           "enum": ["recovering", "ready", "degraded"]
+        },
+        "supportedActions": {
+          "type": "array",
+          "description": "P5d/P6c: on a person partition, exactly the intents this Host accepts from that person (personPartitionIntentDecision); absent elsewhere.",
+          "items": { "type": "string" }
         }
       },
       "additionalProperties": false
@@ -16424,6 +16429,30 @@
         }
       },
       "additionalProperties": false
+    },
+    "person_model_ticket_mint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ticketId",
+        "secret",
+        "endpoint",
+        "gatewayPort",
+        "provider",
+        "model",
+        "expiresAt",
+        "credentialFingerprint"
+      ],
+      "properties": {
+        "ticketId": { "type": "string" },
+        "secret": { "type": "string" },
+        "endpoint": { "type": "string" },
+        "gatewayPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "provider": { "type": "string" },
+        "model": { "type": "string" },
+        "expiresAt": { "type": "integer" },
+        "credentialFingerprint": { "type": "string", "pattern": "^[0-9a-f]{12}$" }
+      }
     },
     "org_model_credential_list": {
       "type": "array",

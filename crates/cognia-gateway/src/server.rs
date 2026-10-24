@@ -252,6 +252,8 @@ struct AppState {
 }
 
 struct AccountBoundHost {
+    // P6c server-only audience, derived from a redeemed member ticket.
+    person_partition: Option<(String, String)>,
     host: Arc<dyn GatewayHost>,
     account: Arc<RwLock<crate::GatewayAccountContext>>,
     generation: u64,
@@ -262,8 +264,13 @@ impl GatewayHost for AccountBoundHost {
         if account.generation != self.generation {
             return false;
         }
+        if let Some((person, session)) = &self.person_partition {
+            payload["personPartitionAccountId"] = json!(person);
+            payload["sessionId"] = json!(session);
+        }
         if account.required {
-            payload["ownerAccountId"] = json!(account.owner_account_id);
+            payload["ownerAccountId"] = json!(self.person_partition.as_ref()
+                .map(|(person, _)| person).or(account.owner_account_id.as_ref()));
             payload["accountGeneration"] = json!(account.generation);
         }
         self.host.emit(event, payload)
@@ -297,6 +304,8 @@ impl AppState {
             }
         }
         self.host = Arc::new(AccountBoundHost {
+            person_partition: ctx.ticket.as_ref().filter(|ticket| ticket.member.is_some())
+                .and_then(|ticket| ticket.owner_account_id.clone().map(|account| (account, ticket.session_id.clone()))),
             host: self.host.clone(),
             account: self.account.clone(),
             generation: ctx.account_generation,
@@ -1083,6 +1092,10 @@ async fn middleware(
     // Rejections happen before ReqCtx exists, so bind their event authority
     // at entry too. Never relabel an earlier request with a later account.
     let rejection_host = AccountBoundHost {
+        person_partition: supplied_token(&headers)
+            .and_then(|secret| state.tickets.validate(secret, chrono::Utc::now().timestamp_millis()).ok())
+            .filter(|ticket| ticket.member.is_some())
+            .and_then(|ticket| ticket.owner_account_id.map(|account| (account, ticket.session_id))),
         host: state.host.clone(),
         account: state.account.clone(),
         generation: account.generation,
@@ -4815,6 +4828,21 @@ mod tests {
     }
 
     #[test]
+    fn p6c_gateway_events_keep_ticket_partition_and_session_authority() {
+        let recording = Arc::new(crate::host::RecordingGatewayHost::new(false));
+        let account = Arc::new(RwLock::new(crate::GatewayAccountContext {
+            owner_account_id:Some("operator".into()), generation:0, required:true,
+        }));
+        let host = AccountBoundHost { person_partition:Some(("pb_owner".into(), "member-session".into())),
+            host:recording.clone(), generation:0, account };
+        host.emit(REQUEST_OUTCOME_EVENT, json!({"sessionId":"forged","personPartitionAccountId":"forged"}));
+        let events = recording.events.lock();
+        assert_eq!(events[0].1["personPartitionAccountId"], "pb_owner");
+        assert_eq!(events[0].1["sessionId"], "member-session");
+        assert_eq!(events[0].1["ownerAccountId"], "pb_owner");
+    }
+
+    #[test]
     fn request_events_are_owner_tagged_and_stale_generations_are_suppressed() {
         let recording = Arc::new(crate::host::RecordingGatewayHost::new(false));
         let account = Arc::new(RwLock::new(crate::GatewayAccountContext {
@@ -4823,6 +4851,7 @@ mod tests {
             required: true,
         }));
         let host = AccountBoundHost {
+            person_partition: None,
             host: recording.clone(),
             account: account.clone(),
             generation: 1,
@@ -5905,6 +5934,32 @@ mod router_fusion_server_tests {
             "timestamp": "2026-09-16T08:00:00.000Z",
             "payload": {}
         })
+    }
+
+    #[tokio::test]
+    async fn p6c_ac34_member_ticket_cap_is_http_429_before_upstream_and_other_member_can_reserve() {
+        let snapshot: RoutingSnapshot = serde_json::from_value(json!({"generatedAtMs":1,"providers":[{
+            "id":"p6c-provider","protocol":"openai","enabled":true,"baseUrl":"https://fixture.invalid/v1","models":["p6c-model"]
+        }]})).unwrap();
+        let gateway = gateway_with(Arc::new(RecordingBrainBridge::new()), false, false, Some(snapshot.clone()));
+        let now = chrono::Utc::now().timestamp_millis();
+        let registry = &gateway.state.tickets;
+        registry.org_usage_cap_set("org_p6c_http", None, Some(Some(0))).unwrap();
+        registry.org_usage_cap_set("org_p6c_http", Some("usr_p6c_other"), Some(Some(100))).unwrap();
+        let mint = |user: &str| {
+            let request = serde_json::from_value(json!({"sessionId":format!("p6c-{user}"),"executionFingerprint":uuid::Uuid::new_v4().to_string(),
+                "candidates":[{"deploymentId":"p6c-provider","modelId":"p6c-model"}],"credentialAffinity":"session-sticky","routePolicy":"p6c"})).unwrap();
+            registry.person_mint_owned(request, Some(&snapshot), now, Some(format!("pb_{user}")), Some(crate::org_usage::MemberBinding {
+                org_id:"org_p6c_http".into(), user_id:user.into() })).unwrap()
+        };
+        let blocked = mint("usr_p6c_blocked"); let other = mint("usr_p6c_other");
+        let response = send(&gateway.app, request("POST", "/v1/chat/completions", Some(&blocked.secret), Some(json!({
+            "model":"p6c-model","messages":[{"role":"user","content":"hello"}],"max_tokens":10
+        })))).await;
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        let body: Value = serde_json::from_slice(&bytes_of(response).await).unwrap();
+        assert_eq!(body["error"]["code"], "member_usage_cap_reached"); assert_eq!(body["error"]["retryable"], false);
+        registry.validate_and_reserve(&other.secret, now, TicketOperation::Chat, "p6c-other-reservation", 10).unwrap();
     }
 
     // ---- step 1: one error shape ------------------------------------------

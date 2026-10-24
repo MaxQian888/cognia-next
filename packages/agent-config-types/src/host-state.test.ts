@@ -70,7 +70,7 @@ describe("P5d person partition intent policy", () => {
       new Set(HOST_STATE_INTENT_KINDS)
     )
     for (const kind of HOST_STATE_INTENT_KINDS) {
-      expect(personPartitionIntentDecision(kind)).toEqual(
+      expect(personPartitionIntentDecision(kind, { chat: "none" })).toEqual(
         allowed.includes(kind)
           ? { allowed: true }
           : {
@@ -1371,6 +1371,9 @@ describe("wire guards", () => {
       recovery: "ready" as const,
     }
     expect(isHostStateStatus(good)).toBe(true)
+    expect(
+      isHostStateStatus({ ...good, supportedActions: ["message.enqueue", "turn.abort"] })
+    ).toBe(true)
     for (const patch of [
       { hostId: "" },
       { hostGeneration: -1 },
@@ -1378,6 +1381,7 @@ describe("wire guards", () => {
       { leaseExpiresAt: "soon" },
       { pendingDispatch: -1 },
       { pendingBroadcast: null },
+      { supportedActions: ["unknown"] },
       // A Host that will not say where recovery got to is not reporting status.
       { recovery: undefined },
       { recovery: "done" },
@@ -1737,4 +1741,13 @@ describe("hostStateIntentTargetsSessionIndex", () => {
       expect(hostStateIntentRequiresLiveControl(kind)).toBe(false)
     }
   })
+})
+
+it("allows only enqueue and abort beyond data intents for tool-less partition chat", () => {
+  for (const kind of HOST_STATE_INTENT_KINDS) {
+    const dormant = personPartitionIntentDecision(kind, { chat: "none" })
+    expect(personPartitionIntentDecision(kind, { chat: "tool-less" })).toEqual(
+      kind === "message.enqueue" || kind === "turn.abort" ? { allowed: true } : dormant
+    )
+  }
 })

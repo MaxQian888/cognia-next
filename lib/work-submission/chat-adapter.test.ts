@@ -344,10 +344,21 @@ describe("settleChatTurn", () => {
 
   it("records an error code on failure", async () => {
     await settleChatTurn(
-      { runId: "run-1", outcome: "failed", errorCode: "sidecar_exit", now: NOW + 1 },
+      {
+        runId: "run-1",
+        outcome: "failed",
+        errorCode: "member_usage_cap_reached",
+        resetAt: 123,
+        now: NOW + 1,
+      },
       deps()
     )
-    expect((await getWorkSubmission("work:run-1"))?.errorCode).toBe("sidecar_exit")
+    expect((await getWorkSubmission("work:run-1"))?.errorCode).toBe("member_usage_cap_reached")
+    expect(await getDb().executionRunEvents.toArray()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ payload: expect.objectContaining({ resetAt: 123 }) }),
+      ])
+    )
   }, 30_000)
 
   it("seals the open turn when only the session id is known", async () => {

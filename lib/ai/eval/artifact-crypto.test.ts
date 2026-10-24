@@ -19,6 +19,11 @@ import {
   loadOrCreateAccountArtifactKey,
 } from "./artifact-crypto"
 import type { KeyringStore } from "@/lib/credentials/keyring-store"
+import {
+  clearPartitionArtifactKeyBase,
+  derivePartitionArtifactKey,
+  installPartitionArtifactKeyBase,
+} from "@/lib/accounts/partition-artifact-keys"
 
 describe("evaluation artifact encryption", () => {
   it("round-trips authenticated JSON and rejects tampering", async () => {
@@ -181,5 +186,36 @@ it("uses the real active vault through the default artifact-key provider", async
   } finally {
     __resetBrowserVaultForTesting()
     await Dexie.delete(BROWSER_VAULT_DB_NAME)
+  }
+})
+
+it("derives a person partition's artifact keys from its base instead of any keyring", async () => {
+  const keyring: KeyringStore = {
+    save: jest.fn(),
+    load: jest.fn(async () => {
+      throw new Error("host keyring must not be read")
+    }),
+    delete: jest.fn(),
+  } as unknown as KeyringStore
+  await installPartitionArtifactKeyBase("pb_person", new Uint8Array(32).fill(5))
+  try {
+    const evalKey = await loadOrCreateEvalArtifactKey("pb_person", {
+      platform: "desktop",
+      keyringStore: keyring,
+    })
+    const submissionKey = await loadOrCreateAccountArtifactKey("pb_person", "performance", {
+      platform: "desktop",
+      keyringStore: keyring,
+    })
+    await expect(
+      loadOrCreateAccountArtifactKey("pb_person", "evaluation", { platform: "desktop" })
+    ).resolves.toEqual(evalKey)
+    await expect(derivePartitionArtifactKey("pb_person", "performance")).resolves.toEqual(
+      submissionKey
+    )
+    expect(submissionKey).not.toEqual(evalKey)
+    expect(keyring.load).not.toHaveBeenCalled()
+  } finally {
+    clearPartitionArtifactKeyBase()
   }
 })

@@ -423,6 +423,7 @@ async fn run(
                                                 .into_iter()
                                                 .filter(|frame| {
                                                     frame.visible_to(&device_id)
+                                                        && crate::person_chat::person_connection_visible(frame, &device_id, None)
                                                         && crate::person_partition::event_visible(frame, &device_id, None)
                                                         && subscription.allows(&frame.event_type)
                                                 })
@@ -526,6 +527,7 @@ async fn run(
                 match recv_result {
                     Ok(frame) => {
                         if !frame.visible_to(&device_id)
+                            || !crate::person_chat::person_connection_visible(&frame, &device_id, None)
                             || !crate::person_partition::event_visible(&frame, &device_id, None)
                             || !subscription.allows(&frame.event_type)
                         {

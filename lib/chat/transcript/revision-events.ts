@@ -82,7 +82,7 @@ export function createTranscriptRuntimeFence(onInvalidated: (sessionId: string) 
         generations.clear()
         runtimeInvalidationListeners.add(listen)
         listening = true
-        if (typeof window !== "undefined")
+        if (typeof window !== "undefined" && typeof window.addEventListener === "function")
           window.addEventListener(TRANSCRIPT_REVISION_EVENT, receiveLocalRevision)
         if (isTauri()) {
           const owner = ++subscription
@@ -148,7 +148,7 @@ export function createTranscriptRuntimeFence(onInvalidated: (sessionId: string) 
       subscription++
       unlistenHost?.()
       unlistenHost = undefined
-      if (typeof window !== "undefined")
+      if (typeof window !== "undefined" && typeof window.removeEventListener === "function")
         window.removeEventListener(TRANSCRIPT_REVISION_EVENT, receiveLocalRevision)
       // Preserve guards already handed to the unmount flush. The DB checks
       // their generation even after this observer has detached.
@@ -265,7 +265,10 @@ export async function publishTranscriptRevision(
     payload.runtimeGeneration = runtimeGeneration
     payload.databaseName = getDb().name
   }
-  if (typeof window !== "undefined") {
+  // The headless brain shims `window` to the bare Node global, which has no
+  // event target; it has no in-process UI listener either (the bridge below
+  // reaches paired clients).
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
     window.dispatchEvent(new CustomEvent(TRANSCRIPT_REVISION_EVENT, { detail: payload }))
   }
   // The host-neutral publisher: Tauri `emit` on the desktop, the bridge route

@@ -196,6 +196,10 @@ pub async fn org_policy_person(principal: &DeviceContext) -> Result<Person, Prob
 #[allow(clippy::too_many_arguments)]
 async fn decide_with_person_fleet(mode: DeploymentMode, execution: bool, sandboxes: bool, provider: &dyn StandingProvider,
     capability: &str, arm: Option<&str>, principal: &DeviceContext, workspace: Option<&str>, person_fleet: bool) -> Result<(), Refusal> {
+    if principal.scope == "person-brain" {
+        return crate::person_chat::person_caller(principal, arm.unwrap_or_default()).map(|_| ())
+            .map_err(|_| forbidden("host_surface_forbidden"));
+    }
     // No policy parse, identity/store read or provider call on the legacy path.
     if mode == DeploymentMode::SingleUser && execution { return Ok(()); }
     let policy = POLICY.as_ref().map_err(|_| forbidden("host_surface_forbidden"))?;
@@ -262,6 +266,9 @@ pub(crate) async fn operation_person(principal: &DeviceContext) -> Result<Option
 
 pub async fn person_partition(capability: &str, command: &str, principal: &DeviceContext)
     -> Result<Option<crate::person_partition::PersonPartition>, Problem> {
+    if principal.scope == "person-brain" {
+        return crate::person_chat::person_caller(principal, command).map(Some);
+    }
     if deployment_mode() == DeploymentMode::SingleUser || crate::jwt::is_service_scope(Some(principal.scope.as_ref())) { return Ok(None); }
     let policy = POLICY.as_ref().map_err(|_| Problem::with_status(StatusCode::FORBIDDEN, "host_surface_forbidden", "invalid Host policy"))?;
     let partition_host_state = crate::person_partition::fleet().is_some()
@@ -582,6 +589,11 @@ pub async fn prune_execution_records(directory: std::path::PathBuf, backend: Arc
 /// The typed decision is scoped over dispatch; it never enters request args.
 pub async fn authorize_execution(state: &crate::SharedState, capability: &str, command: &str,
     principal: &DeviceContext, args: &Value) -> Result<Option<ExecutionAdmission>, Problem> {
+    // P6c is a closed tool-less channel, admitted even when execution is disabled.
+    if principal.scope == "person-brain" {
+        crate::person_chat::person_caller(principal, command)?;
+        return Ok(None);
+    }
     if deployment_mode() == DeploymentMode::SingleUser {
         authorize(capability, Some(command), principal, command_workspace(command, args)).await?;
         return Ok(None);
@@ -631,6 +643,24 @@ pub async fn authorize_execution(state: &crate::SharedState, capability: &str, c
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn p6c_tool_less_admission_ignores_execution_switch_only_for_closed_person_commands() {
+        let _slot = crate::ws_bridge::test_support::lock_slot().await;
+        let person = crate::person_partition::PersonPartition::new("org_p6c_gate".into(), "usr_p6c_gate".into());
+        let (_installed, _) = crate::person_partition::person_test_support::Installed::new(vec![person.clone()]);
+        let mut principal = device("person-brain"); principal.tenant_id = person.account_id;
+        let provider = Fake { result:0, calls:AtomicUsize::new(0), workspaces:Mutex::new(vec![]) };
+        for command in ["agent_send", "agent_interrupt", "person_model_ticket_mint"] {
+            decide_with_person_fleet(DeploymentMode::MultiTenant, false, false, &provider,
+                "agent.run", Some(command), &principal, None, true).await.unwrap();
+        }
+        assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, false, false, &provider,
+            "agent.run", Some("agent_start"), &principal, None, true).await.unwrap_err().code, "host_surface_forbidden");
+        assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, false, false, &provider,
+            "agent.run", Some("agent_send"), &device("service"), None, true).await.unwrap_err().code, "execution_isolation_unavailable");
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    }
 
     #[tokio::test]
     async fn p6b_org_commands_require_live_owner_or_admin_standing_without_host_approval() {
@@ -698,8 +728,8 @@ mod tests {
             }
             assert!(provider.workspaces.lock().iter().all(Option::is_none));
             for arm in ["pet_chat_send", "pet_soul_generate"] {
-                assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, true, false, &provider,
-                    "client.write", Some(arm), &device("device"), None, true).await.unwrap_err().code, "model_access_unavailable");
+                decide_with_person_fleet(DeploymentMode::MultiTenant, true, false, &provider,
+                    "client.write", Some(arm), &device("device"), None, true).await.unwrap();
             }
             if result == 1 {
                 assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, true, false, &provider,

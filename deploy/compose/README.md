@@ -183,11 +183,12 @@ Tiers `server`/`tls` shell into the container for the loopback-only steps
 - each person gets their own person-brain partition;
 - HostState sessions are accepted without a Host admin lease;
 - neither person sees the other's rows;
-- runtime intents and model calls keep their dormancy codes;
+- runtime intents and model calls keep their dormancy codes, except tool-less member chat on a Host that advertises it (`claude.tool-less-chat`), where the pet answers `headless-host`;
 - an org owner writes model keys, the agent allowlist and usage caps directly, sees metadata only, and a member is refused;
+- member chat: without an org key a turn fails `model_access_unavailable`; with one, the member gets the fixture's reply through the org key and their usage grows; capped at 1 token, the turn ends `fatal-error` and spends nothing;
 - `cognia-server persons list` shows both partitions, and `persons purge` empties one.
 
-It needs the org and both people seeded first with `collab-bootstrap`. The Logto organization id must be included, because device registration matches the token's `organization_id` against it. The seed values the tier assumes are `COGNIA_SMOKE_PERSONS_ORG_ID`, `COGNIA_SMOKE_PERSONS_LOGTO_ORG` and `COGNIA_SMOKE_PERSONS`; `Compose E2E` tier 2 runs the seed step. Set `COGNIA_PERSONS_SERVER_URL` and `COGNIA_SMOKE_PERSONS_EXEC` to run the tier against a Host outside compose.
+It needs the org and both people seeded first with `collab-bootstrap`, and the fixture provider profile (`tests/real-e2e/persons-provider-profiles.json`, mounted at `/fixture/`) imported with `cognia-server profiles import` before the Host starts or followed by a restart: a running Host projects only changes made through its own store. The Logto organization id must be included, because device registration matches the token's `organization_id` against it. The seed values the tier assumes are `COGNIA_SMOKE_PERSONS_ORG_ID`, `COGNIA_SMOKE_PERSONS_LOGTO_ORG` and `COGNIA_SMOKE_PERSONS`; `Compose E2E` tier 2 runs the seed step. Set `COGNIA_PERSONS_SERVER_URL` and `COGNIA_SMOKE_PERSONS_EXEC` to run the tier against a Host outside compose.
 
 The nightly `Compose E2E` workflow also builds the Web image with its dedicated
 test bridge and runs `pnpm test:e2e:web-headless`. That lane creates a real

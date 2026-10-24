@@ -17,6 +17,10 @@ use cognia_hooks as hooks;
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendOptions {
+    /// P6c Host-only proof. Deserialization can never set it; prevents loading
+    /// Host hooks/settings after the companion has stripped person options.
+    #[serde(skip)]
+    pub person_tool_less: bool,
     /// W3C parent context for renderer → Rust → sidecar trace continuity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub traceparent: Option<String>,
@@ -359,6 +363,7 @@ pub async fn claude_send_with_host_and_id(
     let _perf = cognia_instrument::guard("claude.send");
     validate_send_request(&session_id, &prompt)?;
     spawn_sidecar(Arc::clone(&host), state.clone()).await?;
+    let person_tool_less = options.as_ref().is_some_and(|options| options.person_tool_less);
     let mut opts_value = match options {
         Some(o) => {
             o.validate()?;
@@ -367,25 +372,28 @@ pub async fn claude_send_with_host_and_id(
         None => Value::Object(Default::default()),
     };
 
-    // Resolve trusted settings once and inject them into the SDK-native hook
-    // pipeline. The SDK owns every built-in lifecycle event, including
-    // UserPromptSubmit. Running that event here as well would execute each
-    // configured handler twice because `buildAgentHooks` registers all SDK
-    // lifecycle events.
-    let cwd = opts_value
-        .get("cwd")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    // Project/local hooks load only for a trusted cwd; untrusted → user scope.
-    let trusted_cwd = hooks::trust::resolve_trusted_cwd(cwd.as_deref());
-    let settings = hooks::load_effective_settings(trusted_cwd.as_deref());
+    if !person_tool_less {
+        // Resolve trusted settings once and inject them into the SDK-native hook
+        // pipeline. The SDK owns every built-in lifecycle event, including
+        // UserPromptSubmit. Running that event here as well would execute each
+        // configured handler twice because `buildAgentHooks` registers all SDK
+        // lifecycle events.
+        let cwd = opts_value
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        // Project/local hooks load only for a trusted cwd; untrusted → user scope.
+        let trusted_cwd = hooks::trust::resolve_trusted_cwd(cwd.as_deref());
+        let settings = hooks::load_effective_settings(trusted_cwd.as_deref());
 
-    // Injected host-side after the trust gate, so a compromised renderer cannot
-    // smuggle untrusted project hooks through `options`.
-    if let Some(hooks_value) = settings.merged.hooks.clone() {
-        if let Value::Object(map) = &mut opts_value {
-            map.insert("hooks".to_string(), hooks_value);
+        // Injected host-side after the trust gate, so a compromised renderer cannot
+        // smuggle untrusted project hooks through `options`.
+        if let Some(hooks_value) = settings.merged.hooks.clone() {
+            if let Value::Object(map) = &mut opts_value {
+                map.insert("hooks".to_string(), hooks_value);
+            }
         }
+
     }
 
     let active_command_id = command_id
@@ -1098,6 +1106,14 @@ pub async fn agent_command_telemetry() -> Result<serde_json::Value, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn p6c_person_tool_less_proof_is_host_only_and_not_a_wire_option() {
+        let input: SendOptions = serde_json::from_value(json!({"personToolLess":true})).unwrap();
+        assert!(!input.person_tool_less);
+        let trusted = SendOptions { person_tool_less:true, ..Default::default() };
+        assert!(serde_json::to_value(trusted).unwrap().get("personToolLess").is_none());
+    }
+
     #[test]
     fn deferred_remote_tools_require_a_sandbox_identity_and_keep_host_targets_private() {
         let context = serde_json::json!({"originDeviceId":"device-a"});

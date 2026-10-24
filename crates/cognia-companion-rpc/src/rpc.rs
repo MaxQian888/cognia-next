@@ -559,6 +559,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // ADR-0224 A6 — secrets a paired device keeps on this host. The writes
     // are `approval: interactive` in the manifest; the load is service-only.
     "host_secret_list",
+    "person_model_ticket_mint", // P6c person-only; service catalog still lists it.
     "org_model_credential_list",
     "org_model_credential_set",
     "org_model_credential_delete",
@@ -2630,6 +2631,8 @@ fn inject_caller_device_grants(
 /// `mcp_oauth_*`.
 #[cfg(test)]
 const SERVICE_ONLY_COMMANDS: &[&str] = &[
+    // P6c internal descriptor; dedicated arm permits only person-brain.
+    "person_model_ticket_mint",
     "sandbox_preview_context",
     "sandbox_preview_create",
     "sandbox_preview_list",
@@ -3738,6 +3741,20 @@ pub(super) async fn dispatch(
     scope: Option<&str>,
     plane: cognia_companion::remote_execution::ExecutionPlane,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
+    // P6c defence at the shared dispatcher, before every service-only arm.
+    if scope == Some("person-brain") && !cognia_companion::person_chat::person_command_allowed(name) {
+        return Err(crate::person_model::person_forbidden());
+    }
+    // The service catalog includes this internal command, but its dedicated
+    // arm owns person-only authority and explicitly refuses service callers.
+    if name == "person_model_ticket_mint" {
+        return chat::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
+    }
+    if scope != Some("person-brain") {
+        let person_partition = if cognia_companion::jwt::is_service_scope(scope) { None } else { cognia_companion::person_partition::current() };
+        cognia_companion::person_chat::person_check_session_args(&args, person_partition.as_ref())
+            .map_err(|_| crate::person_model::person_forbidden())?;
+    }
     validate_completion_command_fields(name, &args)?;
     // Remote Session Control gate. Runs for both the HTTP `rpc_handler` and
     // the WebRTC `signaling::dispatch` path (both funnel through here), so the
@@ -3931,7 +3948,7 @@ pub(super) async fn dispatch(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 #[test]

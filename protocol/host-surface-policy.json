@@ -1,5 +1,5 @@
 {
-  "$comment": "P6b org.policy.manage gates org credentials, agent policy, usage and caps for live owners/admins; org writes use approval none (signed device request plus live standing), without Host consent, Host policy or admin lease; it grants no Host-global secret or operator authority. Single-user Hosts refuse these new org commands. Multi-tenant Host surface policy (docs/plans/2026-10-20-multi-user-organizations-permissions-and-rollout.md \u00a78). Maps every CommandDescriptor capability in protocol/companion-commands.json to the collaboration action a tenant principal must hold before the Host dispatches the command. A test fails when the manifest gains a capability this file does not classify; an unclassified capability is denied in multi-tenant mode. Single-user mode skips Host standing checks; executionCapabilities and executionCommands still apply when execution is explicitly disabled. Actions come from protocol/collab-capabilities-v1.json. commandOverrides correct capability-level client standing for Host-global arms; client is not a claim about where code executes. Stream adapters have explicit execution flags when no descriptor exists. P5 routes host-data to an OIDC-bound person brain only when a server fleet is installed; personModelCommands label the P6 model-access dormancy. personHostStateCommands apply only to tenant devices on multi-tenant Hosts with a person fleet, using client.read/client.write and the partition intent policy. Message data arms are storage-only; agent replies remain refused.",
+  "$comment": "P6c emptied personModelCommands: pet arms route to the person brain and return headless-host. P6b org.policy.manage gates org credentials, agent policy, usage and caps for live owners/admins; org writes use approval none (signed device request plus live standing), without Host consent, Host policy or admin lease; it grants no Host-global secret or operator authority. Single-user Hosts refuse these new org commands. Multi-tenant Host surface policy (docs/plans/2026-10-20-multi-user-organizations-permissions-and-rollout.md \u00a78). Maps every CommandDescriptor capability in protocol/companion-commands.json to the collaboration action a tenant principal must hold before the Host dispatches the command. A test fails when the manifest gains a capability this file does not classify; an unclassified capability is denied in multi-tenant mode. Single-user mode skips Host standing checks; executionCapabilities and executionCommands still apply when execution is explicitly disabled. Actions come from protocol/collab-capabilities-v1.json. commandOverrides correct capability-level client standing for Host-global arms; client is not a claim about where code executes. Stream adapters have explicit execution flags when no descriptor exists. P5 routes host-data to an OIDC-bound person brain only when a server fleet is installed; personModelCommands stays empty after P6c; the pet answers headless-host in person brains. personHostStateCommands apply only to tenant devices on multi-tenant Hosts with a person fleet, using client.read/client.write and the partition intent policy. P6c tool-less replies use only the closed personBrainCommands channel.",
   "schemaVersion": 1,
   "workspaceResolution": "container-record-bindings;workspace-actions-fallback;host-brain-execution-unavailable",
   "executionCapabilities": ["agent.worker"],
@@ -1081,19 +1081,28 @@
       "reason": "P5d: discover the caller's partition hostStateScope and unavailable agent execution; retain host.observe and workspace standing outside a partitioned Host."
     }
   ],
-  "personModelCommands": [
+  "personModelCommands": [],
+  "personBrainCommands": [
     {
-      "arm": "pet_chat_send",
-      "reason": "P5 intentional dormancy: no provider in a person partition until the P6 credential broker; 503 model_access_unavailable."
+      "arm": "person_model_ticket_mint",
+      "reason": "P6c verified loopback person brain mints only its partition's org model ticket."
     },
     {
-      "arm": "pet_soul_generate",
-      "reason": "P5 intentional dormancy: no provider in a person partition until the P6 credential broker; 503 model_access_unavailable."
+      "arm": "agent_send",
+      "reason": "P6c Host-enforced toolSurface none with ai-sdk runs no tools or subprocess; admitted with COGNIA_EXECUTION=disabled. Other execution refusals are unchanged."
+    },
+    {
+      "arm": "agent_interrupt",
+      "reason": "P6c cancel only the caller partition's bound tool-less turn."
+    },
+    {
+      "arm": "agent_close_session",
+      "reason": "P6c retire the caller partition's own tool-less runtime before a replayed turn; a session no partition has bound closes nothing, and another owner's session is refused."
     }
   ],
   "classes": {
     "client": "Client-local bridge plumbing; no additional Host standing check. Host-stored data uses host-data instead.",
-    "host-data": "Person-partitioned data on multi-tenant cognia-server: OIDC-bound person and live non-guest org standing; no workspace. No installed fleet: 403 host_data_unpartitioned. Message arms store/read history only; agent replies stay execution_isolation_unavailable. Single-user unchanged.",
+    "host-data": "Person-partitioned data on multi-tenant cognia-server: OIDC-bound person and live non-guest org standing; no workspace. No installed fleet: 403 host_data_unpartitioned. Message arms store/read history only; a member's tool-less chat reply comes only through the person brain's closed P6c channel, and turns with tools stay execution_isolation_unavailable. Single-user unchanged.",
     "operator-only": "Never served to a tenant principal in multi-tenant mode.",
     "org-action": "Requires the named org-scope action for the tenant org.",
     "workspace-action": "Requires the named workspace-scope action in the workspace the Host resolves for the target (never a renderer-supplied id). When the Host cannot resolve a workspace, the fallback org action applies.",

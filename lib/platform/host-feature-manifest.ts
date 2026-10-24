@@ -17,6 +17,7 @@ export const HOST_PROTOCOL_MAX_VERSION = 2
 
 export const HOST_FEATURE_IDS = [
   "claude.host-tools",
+  "claude.tool-less-chat",
   "claude.controller-tool-proxy",
   "skills.catalog",
   "skills.session-attach",
@@ -480,6 +481,7 @@ export function buildLocalHostFeatureManifest({
   hostId = `local-${platform}`,
   hostStateScope,
   personPartition,
+  personChat = "none",
   deviceGrants = [...DEFAULT_COMPANION_DEVICE_GRANTS],
   operationHealth = {},
 }: {
@@ -488,6 +490,7 @@ export function buildLocalHostFeatureManifest({
   hostId?: string
   hostStateScope?: { accountId: string; runtimeTargetId: string }
   personPartition?: true
+  personChat?: "tool-less" | "none"
   deviceGrants?: string[]
   operationHealth?: Readonly<Record<string, HostOperationHealth>>
 }): HostFeatureManifestV2 {
@@ -929,7 +932,32 @@ export function buildLocalHostFeatureManifest({
       ],
     }
   }
+  if (personPartition) {
+    features["claude.tool-less-chat"] = {
+      version: 1,
+      operations: ["agent_send", "agent_interrupt"],
+    }
+  }
   const healthFor = (name: string): { healthy: boolean; reason?: string } => {
+    if (personPartition && (name === "agent_send" || name === "agent_interrupt")) {
+      return {
+        healthy: personChat === "tool-less",
+        reason: personChat === "tool-less" ? "tool-less" : "execution_isolation_unavailable",
+      }
+    }
+    if (
+      personPartition &&
+      Object.entries(features).some(
+        ([feature, descriptor]) =>
+          (feature === "claude.host-tools" ||
+            feature.startsWith("external-agent.") ||
+            feature === "workflow.execution" ||
+            feature === "router-fusion.companion") &&
+          descriptor?.operations.includes(name)
+      )
+    )
+      return { healthy: false, reason: "execution_isolation_unavailable" }
+
     const health = operationHealth[name]
     if (typeof health === "boolean") return { healthy: health }
     return health ?? { healthy: true }

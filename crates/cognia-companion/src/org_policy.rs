@@ -13,6 +13,13 @@ pub fn org_usage_install(registry: std::sync::Arc<cognia_gateway::route_ticket::
     *ORG_USAGE_REGISTRY.write() = Some(registry);
 }
 
+// P6c serialize key read + mint against credential mutation + revocation.
+// Held only in synchronous blocking workers, never across await.
+pub static PERSON_CREDENTIAL_FENCE: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+pub fn person_revoke_provider(org: &str, provider: &str) {
+    if let Some(registry) = ORG_USAGE_REGISTRY.read().clone() { registry.person_revoke_provider(org, provider); }
+}
+
 pub const CAPABILITY: &str = "org.policy.manage";
 pub const COMMANDS: &[&str] = &["org_model_credential_list", "org_model_credential_set", "org_model_credential_delete", "org_agent_policy_get", "org_agent_policy_set", "org_member_usage_get", "org_usage_cap_set", "org_member_usage_cap_set"];
 tokio::task_local! { static AUTHORITY: Option<(String, String)>; }
@@ -95,10 +102,19 @@ async fn dispatch_in_mode(mode: DeploymentMode, command: &str, args: Value, devi
         match operation.as_str() {
             "org_model_credential_list" => serde_json::to_value(OrgCredentials::list(&org)?).map_err(|_| "cannot encode metadata".into()),
             "org_model_credential_set" => {
-                let metadata = OrgCredentials::set(&org, required_provider()?, input.api_key.as_deref().ok_or("apiKey is required")?, &user, now)?;
+                let _p6c_fence = PERSON_CREDENTIAL_FENCE.lock();
+                let metadata = OrgCredentials::set(&org, required_provider()?, input.api_key.as_deref().ok_or("apiKey is required")?, &user, now);
+                person_revoke_provider(&org, required_provider()?);
+                let metadata = metadata?;
                 serde_json::to_value(metadata).map_err(|_| "cannot encode metadata".into())
             },
-            "org_model_credential_delete" => { OrgCredentials::delete(&org, required_provider()?)?; Ok(Value::Null) },
+            "org_model_credential_delete" => {
+                let _p6c_fence = PERSON_CREDENTIAL_FENCE.lock();
+                let deleted = OrgCredentials::delete(&org, required_provider()?);
+                person_revoke_provider(&org, required_provider()?);
+                deleted?;
+                Ok(Value::Null)
+            },
             "org_agent_policy_get" => serde_json::to_value(crate::org_agent_policy::get(&org)?).map_err(|_| "cannot encode policy".into()),
             "org_agent_policy_set" => serde_json::to_value(crate::org_agent_policy::set(&org,
                 input.allowed_agents.ok_or("allowedAgents is required")?, input.default_agent, &user, now)?).map_err(|_| "cannot encode policy".into()),
@@ -201,6 +217,45 @@ pub async fn agents_handler(Path(operation): Path<String>, Extension(principal):
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn p6c_credential_set_and_delete_revoke_only_matching_org_provider_tickets() {
+        use cognia_gateway::route_ticket::{RouteTicketRegistry, InMemoryTicketMetaStore, MintRequest, MemberBinding};
+        let _audit = crate::audit::test_guard();
+        let registry = std::sync::Arc::new(RouteTicketRegistry::new(std::sync::Arc::new(InMemoryTicketMetaStore::default())));
+        let previous = ORG_USAGE_REGISTRY.read().clone();
+        struct Restore(Option<std::sync::Arc<RouteTicketRegistry>>);
+        impl Drop for Restore { fn drop(&mut self) { *ORG_USAGE_REGISTRY.write() = self.0.take(); } }
+        let _restore = Restore(previous);
+        org_usage_install(registry.clone());
+        let org = "org_p6c_rotation";
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+        let snapshot = serde_json::from_value(json!({"generatedAtMs":now,"providers":[
+            {"id":"p6c-provider","enabled":true,"protocol":"openai","baseUrl":"https://fixture.invalid/v1","models":["model"]},
+            {"id":"p6c-other","enabled":true,"protocol":"openai","baseUrl":"https://other.invalid/v1","models":["model"]}
+        ]})).unwrap();
+        let mint = |org: &str, provider: &str| {
+            let mut provider_snapshot: cognia_gateway::snapshot::ProviderSnapshot = serde_json::from_value(json!({
+                "id":provider,"enabled":true,"protocol":"openai","baseUrl":"https://fixture.invalid/v1","models":["model"],"apiKey":"old-org-key"})).unwrap();
+            provider_snapshot.deployment_id = Some(provider.into());
+            let request: MintRequest = serde_json::from_value(json!({"sessionId":"p6c-revoke","executionFingerprint":uuid::Uuid::new_v4().to_string(),
+                "candidates":[{"deploymentId":provider,"modelId":"model"}],"credentialAffinity":"session-sticky","routePolicy":"p6c"})).unwrap();
+            let mut request = request; request.provider_overrides = vec![provider_snapshot];
+            registry.person_mint_owned(request, Some(&snapshot), now, Some("pb_p6c".into()), Some(MemberBinding { org_id:org.into(), user_id:"usr_p6c_rotation".into() })).unwrap()
+        };
+        let first = mint(org, "p6c-provider");
+        let other_provider = mint(org, "p6c-other"); let other_org = mint("org_p6c_other", "p6c-provider");
+        dispatch_in_mode(DeploymentMode::MultiTenant, "org_model_credential_set", json!({"orgId":org,"provider":"p6c-provider","apiKey":"new-org-key"}),
+            "operator", None, Some("service")).await.unwrap();
+        assert!(registry.validate(&first.secret, now).is_err());
+        assert!(registry.provider_overrides(&first.ticket.ticket_id).is_empty());
+        assert!(registry.validate(&other_provider.secret, now).is_ok()); assert!(registry.validate(&other_org.secret, now).is_ok());
+        let second = mint(org, "p6c-provider");
+        dispatch_in_mode(DeploymentMode::MultiTenant, "org_model_credential_delete", json!({"orgId":org,"provider":"p6c-provider"}),
+            "operator", None, Some("service")).await.unwrap();
+        assert!(registry.validate(&second.secret, now).is_err());
+        assert!(registry.validate(&other_provider.secret, now).is_ok()); assert!(registry.validate(&other_org.secret, now).is_ok());
+    }
+
     #[tokio::test]
     async fn p6b_org_usage_admin_validation_approval_audit_and_mode() {
         use cognia_gateway::route_ticket::{RouteTicketRegistry, InMemoryTicketMetaStore};

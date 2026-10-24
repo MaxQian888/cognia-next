@@ -414,3 +414,19 @@ describe("pet_get", () => {
     })
   })
 })
+
+it("keeps pet chat headless-host even in an opted-in person brain", async () => {
+  const { initializePersonChat } = await import("@/lib/headless/person-chat")
+  initializePersonChat("person-brain", { COGNIA_PERSON_CHAT: "tool-less" })
+  try {
+    await expect(
+      dispatchPetHostCommand(
+        "pet_chat_send",
+        { ...CALLER, text: "hi", locale: "en", idempotencyKey: "person-chat" },
+        hostDeps({ platform: "headless" })
+      )
+    ).resolves.toEqual({ ok: false, refusal: { code: "headless-host" } })
+  } finally {
+    initializePersonChat("brain", {})
+  }
+})

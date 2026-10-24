@@ -6,6 +6,10 @@
 import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"
 import { encryptedAccountDatabaseName } from "@/lib/accounts/account-db"
 import { getActiveAccountContentCipher } from "@/lib/accounts/content-cipher"
+import {
+  clearPartitionArtifactKeyBase,
+  hasPartitionArtifactKeys,
+} from "@/lib/accounts/partition-artifact-keys"
 import { unlockAccountForHost, useAccountStore } from "@/stores/account/account-store"
 
 import { ensureHeadlessAccount, HEADLESS_LOCAL_ACCOUNT_ID } from "./account"
@@ -44,6 +48,24 @@ describe("ensureHeadlessAccount", () => {
     const again = await ensureHeadlessAccount()
     expect(again).toBe(HEADLESS_LOCAL_ACCOUNT_ID)
     expect(useAccountStore.getState().unlockedAccountId).toBe(HEADLESS_LOCAL_ACCOUNT_ID)
+  })
+
+  it("installs a partition artifact key base only for a person brain", async () => {
+    clearPartitionArtifactKeyBase()
+    process.env.COGNIA_ACCOUNT_CONTENT_KEY = "33".repeat(32)
+    await ensureHeadlessAccount("local_acct_operator")
+    expect(hasPartitionArtifactKeys("local_acct_operator")).toBe(false)
+
+    const injected = new Uint8Array(32).fill(0x44)
+    await ensureHeadlessAccount("local_acct_person", {
+      accountContentKey: injected,
+      partitionArtifactKeys: true,
+    })
+    expect(hasPartitionArtifactKeys("local_acct_person")).toBe(true)
+    // An injected key stays the caller's: the base holds its own copy.
+    expect(injected.every((byte) => byte === 0x44)).toBe(true)
+    clearPartitionArtifactKeyBase()
+    process.env.COGNIA_ACCOUNT_CONTENT_KEY = "33".repeat(32)
   })
 
   it("fails closed when the supervisor did not provide a content key", async () => {

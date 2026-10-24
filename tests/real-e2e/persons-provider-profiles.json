@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "profileVersion": 1,
+  "providerProfiles": [
+    {
+      "id": "anthropic",
+      "displayName": "Anthropic (web-headless fixture)",
+      "deploymentRefs": ["anthropic"]
+    }
+  ],
+  "deploymentProfiles": [
+    {
+      "id": "anthropic",
+      "providerRef": "anthropic",
+      "endpoint": "http://anthropic-fixture:4010/v1",
+      "transportProfileRef": "tp-anthropic-x-api-key",
+      "models": [
+        {
+          "id": "claude-sonnet-4-5"
+        },
+        {
+          "id": "claude-sonnet-4-6"
+        },
+        {
+          "id": "claude-opus-4-8"
+        },
+        {
+          "id": "claude-haiku-4-5-20251001"
+        },
+        {
+          "id": "claude-e2e"
+        }
+      ],
+      "modelRoles": {
+        "primary": "claude-sonnet-4-5",
+        "fast": "claude-haiku-4-5-20251001",
+        "powerful": "claude-opus-4-8"
+      },
+      "enabled": true
+    }
+  ],
+  "transportProfiles": [
+    {
+      "id": "tp-anthropic-x-api-key",
+      "protocol": "anthropic",
+      "auth": {
+        "scheme": "x-api-key"
+      }
+    }
+  ],
+  "legacyAliases": {}
+}

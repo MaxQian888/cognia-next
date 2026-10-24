@@ -67,7 +67,8 @@ pub(crate) fn listener_kind(request: &Request) -> ListenerKind {
 }
 
 fn person_brain_route_allowed(loopback: bool, path: &str, fleet_installed: bool) -> bool {
-    loopback && fleet_installed && path == "/internal/bridge"
+    loopback && fleet_installed && (matches!(path, "/internal/bridge" | "/internal/events")
+        || path.starts_with("/internal/_rpc/"))
 }
 
 const LOCAL_DEBUG_TOKEN_ENV: &str = "COGNIA_LOCAL_DEBUG_TOKEN";
@@ -331,12 +332,15 @@ async fn authenticate_request(
     let person_claims = { crate::jwt::verify_person_brain(&state.secret.read(), &token) };
     if let Ok(claims) = person_claims {
         if !person_brain_route_allowed(peer_is_loopback, request.uri().path(), crate::person_partition::fleet().is_some()) {
-            return error_response("wrong_scope", "person brain token is restricted to its loopback bridge");
+            return error_response("wrong_scope", "person brain token is restricted to its loopback channel");
         }
         let Some(account_id) = claims.identity.account_id.clone().filter(|id| id.starts_with("pb_") && id.len() == 27
             && id[3..].bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))) else {
             return error_response("malformed_token", "person brain account is malformed");
         };
+        if !crate::person_partition::fleet().is_some_and(|fleet| fleet.accepts_bridge(&account_id, &claims.generation)) {
+            return error_response("wrong_scope", "person brain generation is no longer active");
+        }
         let ctx = DeviceContext { device_id: claims.identity.device_id.clone().unwrap_or_default(), tenant_id: account_id,
             scope: "person-brain".into(), granted_scopes: Vec::new(), authorization_capabilities: None };
         request.extensions_mut().insert(ctx);
@@ -600,14 +604,74 @@ mod tests {
     use std::sync::Arc;
     use tower::ServiceExt as _;
 
+    #[tokio::test]
+    async fn p6c_verified_person_rpc_dispatch_allowlist_and_generation() {
+        use crate::{runtime::{CompanionRuntime, DispatchResult}, remote_execution::ExecutionPlane};
+        use crate::person_partition::{PersonPartition, person_test_support::Installed};
+        let _slot = crate::ws_bridge::test_support::lock_slot().await;
+        let _store_guard = crate::security_store::test_guard();
+        let previous_store = crate::security_store::security_store();
+        crate::security_store::install_security_store(Some(crate::security_store::SecurityStore::in_memory().unwrap()));
+        struct RestoreStore(Option<Arc<crate::security_store::SecurityStore>>);
+        impl Drop for RestoreStore { fn drop(&mut self) { crate::security_store::install_security_store(self.0.take()); } }
+        let _restore = RestoreStore(previous_store);
+        struct Runtime(PersonPartition);
+        #[async_trait::async_trait]
+        impl CompanionRuntime for Runtime {
+            fn ide_relay_routes(&self) -> Router<SharedState> { Router::new() }
+            fn can_dispatch(&self, _: &SharedState) -> bool { true }
+            async fn dispatch(&self, command: &str, _: serde_json::Value, _: &SharedState, principal: &DeviceContext, _: ExecutionPlane) -> DispatchResult {
+                assert_eq!(command, "agent_interrupt");
+                assert_eq!(principal.scope, "person-brain");
+                assert_eq!(crate::person_partition::current(), Some(self.0.clone()));
+                Ok(serde_json::Value::Null)
+            }
+        }
+        let person = PersonPartition::new("org_p6c_admission".into(), "usr_p6c_admission".into());
+        let (_installed, fleet) = Installed::new(vec![person.clone()]);
+        let mut state = test_state();
+        Arc::get_mut(&mut state).unwrap().runtime = Arc::new(Runtime(person.clone()));
+        let router = Router::new().route("/internal/_rpc/{name}", axum::routing::post(crate::api::internal_rpc_handler))
+            .layer(from_fn_with_state(state.clone(), require_service_jwt)).with_state(state);
+        let token = crate::jwt::issue_person_brain_jwt(SECRET, &person.account_id, &fleet.generation).unwrap().0;
+        let request = |command: &str, token: &str, ip: &str| {
+            let mut request = Request::builder().method("POST").uri(format!("/internal/_rpc/{command}"))
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json").header("idempotency-key", uuid::Uuid::new_v4().to_string())
+                .body(Body::from(r#"{"sessionId":"p6c-admission-session"}"#)).unwrap();
+            request.extensions_mut().insert(ConnectInfo(ip.parse::<SocketAddr>().unwrap()));
+            request
+        };
+        let response = router.clone().oneshot(request("agent_interrupt", &token, "127.0.0.1:12345")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        for command in ["host_provider_credential_set", "sync_pull", "unknown_person_command"] {
+            let response = router.clone().oneshot(request(command, &token, "127.0.0.1:12345")).await.unwrap();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{command}");
+            assert_eq!(body_json(response).await["code"], "host_surface_forbidden");
+        }
+        for (token, ip) in [(token.clone(), "192.0.2.1:12345"),
+            (crate::jwt::issue_person_brain_jwt(SECRET, &person.account_id, "stale").unwrap().0, "127.0.0.1:12345")] {
+            let response = router.clone().oneshot(request("agent_interrupt", &token, ip)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert_eq!(body_json(response).await["code"], "wrong_scope");
+        }
+        fleet.active.store(false, std::sync::atomic::Ordering::SeqCst);
+        let response = router.oneshot(request("agent_interrupt", &token, "127.0.0.1:12345")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
     #[test]
-    fn p5_person_scope_has_one_endpoint_and_no_service_bypass() {
-        for path in ["/internal/events", "/internal/catalog", "/internal/persons", "/internal/persons/purge",
-            "/internal/_rpc/app_settings_update", "/internal/_rpc/sync_pull", "/api/commands/execute",
+    fn p6c_person_scope_has_closed_endpoints_and_no_service_bypass() {
+        for path in ["/internal/catalog", "/internal/persons", "/internal/persons/purge",
+            "/api/commands/execute",
             "/ide/content", "/ide/content/value", "/metrics", "/internal/operations/id"] {
             assert!(!person_brain_route_allowed(true, path, true), "{path}");
         }
-        assert!(person_brain_route_allowed(true, "/internal/bridge", true));
+        for path in ["/internal/bridge", "/internal/events", "/internal/_rpc/agent_send"] {
+            assert!(person_brain_route_allowed(true, path, true));
+            assert!(!person_brain_route_allowed(false, path, true));
+            assert!(!person_brain_route_allowed(true, path, false));
+        }
         assert!(!person_brain_route_allowed(false, "/internal/bridge", true));
         assert!(!person_brain_route_allowed(true, "/internal/bridge", false));
     }

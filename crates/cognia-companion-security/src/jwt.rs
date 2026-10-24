@@ -238,6 +238,11 @@ mod tests {
     const ACCOUNT_ID: &str = "local_acct_a";
 
     #[test]
+    fn p6c_partition_chat_preserves_audited_exact_service_trust() {
+        p5_all_audited_service_bypasses_use_exact_service_trust();
+    }
+
+    #[test]
     fn p6b_org_usage_preserves_audited_exact_service_trust() {
         p5_all_audited_service_bypasses_use_exact_service_trust();
     }
@@ -259,7 +264,8 @@ mod tests {
             ("crates/cognia-companion/src/ws.rs", include_str!("../../cognia-companion/src/ws.rs"), 1),
             ("crates/cognia-companion-rpc/src/managed_desktops.rs", include_str!("../../cognia-companion-rpc/src/managed_desktops.rs"), 1),
             ("crates/cognia-companion-rpc/src/remote_desktops.rs", include_str!("../../cognia-companion-rpc/src/remote_desktops.rs"), 1),
-            ("crates/cognia-companion-rpc/src/rpc.rs", include_str!("../../cognia-companion-rpc/src/rpc.rs"), 7),
+            // P6c: the eighth site keeps the operator outside person session authority.
+            ("crates/cognia-companion-rpc/src/rpc.rs", include_str!("../../cognia-companion-rpc/src/rpc.rs"), 8),
             ("crates/cognia-companion-rpc/src/rpc/service_plane.rs", include_str!("../../cognia-companion-rpc/src/rpc/service_plane.rs"), 8),
             ("crates/cognia-companion-rpc/src/rpc/source_control.rs", include_str!("../../cognia-companion-rpc/src/rpc/source_control.rs"), 2),
             ("crates/cognia-companion-rpc/src/rpc/native_tools.rs", include_str!("../../cognia-companion-rpc/src/rpc/native_tools.rs"), 1),

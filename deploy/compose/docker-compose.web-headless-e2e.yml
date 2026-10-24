@@ -173,6 +173,10 @@ services:
         condition: service_healthy
       collab-server:
         condition: service_healthy
+      # Tool-less member chat (P6c): the org key routes through the Host
+      # gateway to this fixture, via the imported persons provider profile.
+      anthropic-fixture:
+        condition: service_healthy
     environment:
       COGNIA_DATA_DIR: /data
       COGNIA_MASTER_KEY: ${COGNIA_CLOUD_MASTER_KEY:-}
@@ -198,6 +202,7 @@ services:
       COGNIA_WEB_ORIGIN: https://cognia.localhost
     volumes:
       - cognia_cloud_data:/data
+      - ../../tests/real-e2e/persons-provider-profiles.json:/fixture/persons-provider-profiles.json:ro
     ports:
       - "27894:27890"
     security_opt:

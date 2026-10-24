@@ -9,6 +9,7 @@
  * `desktop-sync-source` rejects pulls unless `unlockedAccountId` matches the
  * request's `account_id`.
  */
+import { installPartitionArtifactKeyBase } from "@/lib/accounts/partition-artifact-keys"
 import { LocalAccountRegistry } from "@/lib/accounts/account-db"
 import type { PasswordVerifierRecord } from "@/lib/accounts/account-types"
 import { unlockAccountForHost, useAccountStore } from "@/stores/account/account-store"
@@ -39,6 +40,11 @@ export interface EnsureHeadlessAccountOptions {
   registry?: LocalAccountRegistry
   /** Injected raw key (tests/embedding); defaults to the supervisor env. */
   accountContentKey?: Uint8Array
+  /**
+   * A person partition's brain (plan §9a): derive account artifact keys from
+   * this content key instead of the Host keyring, which no partition owns.
+   */
+  partitionArtifactKeys?: boolean
 }
 
 /**
@@ -68,6 +74,9 @@ export async function ensureHeadlessAccount(
   const accountContentKey = opts.accountContentKey ?? decodeHeadlessAccountContentKey()
   try {
     await unlockAccountForHost(localAccountId, accountContentKey)
+    if (opts.partitionArtifactKeys) {
+      await installPartitionArtifactKeyBase(localAccountId, accountContentKey)
+    }
   } finally {
     if (ownsAccountContentKey) accountContentKey.fill(0)
   }

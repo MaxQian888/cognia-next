@@ -528,6 +528,9 @@ function buildWorkflowSnapshotBlock(
 }
 
 export interface BuildOptionsContext {
+  /** Partition-only ticket route; skips all Host credential and workspace resolution. */
+  personChat?: { model: string; secret: string; endpoint: string }
+
   /**
    * The workspace code-owned prompt slots (ADR-0236) resolve against when the
    * session carries no `projectId`. The CLI sets it to the workspace mounting
@@ -1437,6 +1440,28 @@ export function resolvedSessionAsideRuntime(options: SendOptions): AgentRuntimeR
 }
 
 export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<SendOptions> {
+  if (ctx.personChat) {
+    const grant = foldCapabilityGrants(ctx.capabilityGrants)
+    if (!grant?.tools?.restrictTo || grant.tools.restrictTo.length !== 0) {
+      throw new Error("person_chat_deny_all_grant_required")
+    }
+    // Resolve from the grant, before any profile, plugin, workspace or key
+    // lookup. An empty restrictive allowlist is sealed by the same finalizer.
+    return {
+      model: ctx.personChat.model,
+      provider: "openai",
+      providerCredentials: {
+        apiKey: ctx.personChat.secret,
+        baseURL: ctx.personChat.endpoint,
+        protocol: "openai",
+        apiFlavor: "chat",
+      },
+      ...finalizeToolSurface({ allowedTools: grant.tools.restrictTo }, undefined),
+      permissionMode: "plan",
+      maxTurns: 1,
+    }
+  }
+
   const asideBinding =
     ctx.session?.kind === "resource-workbench" && ctx.session.surfaceBinding?.kind === "session"
       ? ctx.session.surfaceBinding

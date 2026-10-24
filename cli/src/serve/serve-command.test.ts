@@ -56,6 +56,8 @@ jest.mock("@/lib/headless/bootstrap", () => {
     ) => {
       if (context.host === "person-brain") {
         expect(context.collab).toBeUndefined()
+        const { personChatCapability } = await import("@/lib/headless/person-chat")
+        expect(personChatCapability()).toEqual({ chat: "none" })
         const { getActiveRuntimeTargetContext } =
           await import("@/lib/runtime/runtime-target-context")
         expect(getActiveRuntimeTargetContext()).toMatchObject({

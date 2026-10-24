@@ -1350,6 +1350,9 @@ export interface LogEvent {
 
 export interface SessionEndedEvent {
   type: "session_ended"
+  /** Safe structured upstream refusal fields, without the response body. */
+  code?: string
+  resetAt?: number | string
   /** Complete AI SDK conversation at the completed turn boundary. */
   conversationSnapshot?: unknown[]
   sessionId: string

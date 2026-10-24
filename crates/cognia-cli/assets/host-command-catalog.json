@@ -313,6 +313,11 @@
       "category": "system"
     },
     {
+      "id": "person",
+      "title": "Person",
+      "category": "extensions"
+    },
+    {
       "id": "pet",
       "title": "Pet",
       "category": "sessions"
@@ -43241,6 +43246,13 @@
               "ready",
               "degraded"
             ]
+          },
+          "supportedActions": {
+            "type": "array",
+            "description": "P5d/P6c: on a person partition, exactly the intents this Host accepts from that person (personPartitionIntentDecision); absent elsewhere.",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "additionalProperties": false
@@ -54577,6 +54589,89 @@
           }
         },
         "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "person_model_ticket_mint",
+      "category": "extensions",
+      "resource": "person",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "person_model_ticket_mint (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "provider",
+          "model",
+          "sessionId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ticketId",
+          "secret",
+          "endpoint",
+          "gatewayPort",
+          "provider",
+          "model",
+          "expiresAt",
+          "credentialFingerprint"
+        ],
+        "properties": {
+          "ticketId": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "gatewayPort": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "integer"
+          },
+          "credentialFingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{12}$"
+          }
+        }
       },
       "outputTyped": true
     },
@@ -102135,5 +102230,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "681dd5fa426ea94627ff755424134a58191f6ef14e162d71e24234316a8bc773"
+  "catalogHash": "1b6c845e9b8deb860b8fe947d9b7ecca57f7e7c8e1ace3ce6011ad57bdca0e3b"
 }

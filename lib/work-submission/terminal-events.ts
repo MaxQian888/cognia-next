@@ -1,3 +1,4 @@
+import { personChatCapability } from "@/lib/headless/person-chat"
 import type { UIMessage } from "ai"
 import type { ClaudeEvent, SDKMessage } from "@cognia/agent-config-types"
 
@@ -127,10 +128,16 @@ export function startWorkSubmissionTerminalEvents(
       })
     } else if (event.type === "session_ended") {
       enqueue(event.sessionId, async () => {
+        const terminal =
+          personChatCapability().chat === "tool-less"
+            ? await (await import("@/lib/claude/person-chat-turn")).personChatTerminalEvent(event)
+            : event
+        if (!terminal) return
         const messages = mirrors.get(event.sessionId)
         await settleSession(event.sessionId, {
-          outcome: event.error ? "failed" : "completed",
-          ...(event.error ? { errorCode: "turn_error" } : {}),
+          outcome: terminal.error ? "failed" : "completed",
+          ...(terminal.error ? { errorCode: terminal.code ?? "turn_error" } : {}),
+          ...(terminal.resetAt !== undefined ? { resetAt: terminal.resetAt } : {}),
           ...(messages ? { writeTranscript: () => persist(event.sessionId, messages) } : {}),
         })
         mirrors.delete(event.sessionId)

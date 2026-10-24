@@ -420,6 +420,12 @@ const schemas = {
     userId: z.string().regex(/^usr_[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/),
     monthlyTokens: z.union([z.number().int().min(0).max(1000000000000), z.null(), z.literal("default")]),
   }),
+  // P6c accepts authority only from the verified person token.
+  person_model_ticket_mint: z.object({
+    provider: z.string().min(1).max(200),
+    model: z.string().min(1),
+    sessionId: z.string().min(1),
+  }).strict(),
   org_model_credential_list: z.object({ ...orgScope }),
   org_model_credential_set: z.object({
     ...orgScope,

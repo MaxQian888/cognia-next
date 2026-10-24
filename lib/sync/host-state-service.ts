@@ -1,3 +1,4 @@
+import { personChatCapability } from "@/lib/headless/person-chat"
 import { archiveSessionScratchWorkspace } from "@/lib/task-workspace/managed-workspace"
 import {
   canonicalHostStateJson,
@@ -11,6 +12,7 @@ import {
   OPEN_DECISION_STATUSES,
   callerMaySubmitHostStateIntent,
   personPartitionIntentDecision,
+  HOST_STATE_INTENT_KINDS,
   hostStateIntentCapability,
   type HostStateActionReceipt,
   type HostStateAction,
@@ -340,7 +342,10 @@ export function createAgentRpcHostStateDispatcher(
             if (runtimeRef.kind !== "builtin") {
               throw new Error(`host_state_runtime_not_builtin:${runtimeRef.kind}`)
             }
-            const options = await buildSendOptions(session, action.action.text)
+            const partitionChat = personChatCapability().chat === "tool-less"
+            const options = partitionChat
+              ? undefined
+              : await buildSendOptions(session, action.action.text)
             // Attachments become content here, not in the intent: the intent
             // carries refs so a 10 MB screenshot never rides the action ledger
             // (or the replay stream, or a queue row that gets retried). This is
@@ -367,19 +372,32 @@ export function createAgentRpcHostStateDispatcher(
             }
             const { withTranscriptRuntimeLock } =
               await import("@/lib/chat/transcript/revision-events")
-            await withTranscriptRuntimeLock(sessionId, async () => {
-              const prepared = await prepareTranscriptRuntimeSend(sessionId, options, {
-                currentMessageId:
-                  action.action.kind === "message.enqueue" ? action.action.messageId : null,
+            const dispatch = async (
+              sendOptions: import("@cognia/agent-config-types").SendOptions,
+              refreshed = false
+            ) =>
+              withTranscriptRuntimeLock(sessionId, async () => {
+                const prepared = await prepareTranscriptRuntimeSend(sessionId, sendOptions, {
+                  // Partition RPC admits no runtimeStatus probe. Always hydrate
+                  // from this account's canonical history, including after a restart.
+                  ...(partitionChat ? { replacesHistory: true } : {}),
+                  currentMessageId:
+                    action.action.kind === "message.enqueue" ? action.action.messageId : null,
+                })
+                if (receipt) {
+                  await workSubmissionAdapter.bindHostStateChatTurnContext(action, prepared)
+                }
+                await sendPrompt(sessionId, prompt.content, prepared, {
+                  commandId: refreshed ? `${action.actionId}:ticket-refresh` : action.actionId,
+                  transcriptRuntime: "prepared",
+                })
               })
-              if (receipt) {
-                await workSubmissionAdapter.bindHostStateChatTurnContext(action, prepared)
-              }
-              await sendPrompt(sessionId, prompt.content, prepared, {
-                commandId: action.actionId,
-                transcriptRuntime: "prepared",
-              })
-            })
+            if (partitionChat) {
+              const { sendPersonChatTurn } = await import("@/lib/claude/person-chat-turn")
+              await sendPersonChatTurn(session, dispatch)
+            } else {
+              await dispatch(options!)
+            }
             // Only now: the runtime has the file, so the staging copy is dead
             // weight and the per-session staging slot should be freed. Before
             // the send it is the only copy that exists.
@@ -390,6 +408,19 @@ export function createAgentRpcHostStateDispatcher(
             await workSubmissionAdapter.markHostStateChatTurnStarted(action.actionId)
           }
           handedOff = true
+        } catch (error) {
+          if (personChatCapability().chat === "tool-less") {
+            const { personChatFailure } = await import("@/lib/gateway/person-model-ticket")
+            const failure = personChatFailure(error)
+            const { settleChatTurnForSession } = await import("@/lib/work-submission/chat-adapter")
+            await settleChatTurnForSession(sessionId, {
+              outcome: "failed",
+              errorCode: failure.code,
+              resetAt: failure.resetAt,
+            })
+            throw new HostStateDispatchAbandonedError(failure.code)
+          }
+          throw error
         } finally {
           if (!handedOff) stopAssemblyHeartbeat()
         }
@@ -410,6 +441,10 @@ export function createAgentRpcHostStateDispatcher(
         break
       }
       case "turn.abort":
+        if (personChatCapability().chat === "tool-less") {
+          const { forgetPersonChatTurn } = await import("@/lib/claude/person-chat-turn")
+          forgetPersonChatTurn(sessionId)
+        }
         if (dependencies.abort) {
           await dependencies.abort(sessionId, action.actionId)
         } else {
@@ -1155,7 +1190,7 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
         // Host state or fan an event out to every replica at all.
         const partitionDecision =
           options.authorization === "person-partition"
-            ? personPartitionIntentDecision(action.action.kind)
+            ? personPartitionIntentDecision(action.action.kind, personChatCapability())
             : undefined
         if (partitionDecision && !partitionDecision.allowed) {
           const meta = await getHostStateMeta()
@@ -1272,6 +1307,13 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
       const [meta, pending] = await Promise.all([getHostStateMeta(), listPendingHostStateActions()])
       return {
         recovery,
+        ...(options.authorization === "person-partition"
+          ? {
+              supportedActions: HOST_STATE_INTENT_KINDS.filter(
+                (kind) => personPartitionIntentDecision(kind, personChatCapability()).allowed
+              ),
+            }
+          : {}),
         hostId: meta.hostId,
         hostGeneration: meta.hostGeneration,
         hostSeq: meta.hostSeq,
@@ -1527,7 +1569,7 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
       return "settled"
     }
     if (options.authorization === "person-partition") {
-      const decision = personPartitionIntentDecision(row.action.action.kind)
+      const decision = personPartitionIntentDecision(row.action.action.kind, personChatCapability())
       if (!decision.allowed) {
         await abandonDispatch(row, decision.code)
         return "settled"

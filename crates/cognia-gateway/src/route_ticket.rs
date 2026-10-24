@@ -111,8 +111,8 @@ pub struct TicketReservation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RouteTicket {
-    /// Dormant until P6c supplies verified member minting. Existing mint paths
-    /// always leave this None; unbound tickets retain their previous behavior.
+    /// P6c binds person tickets to the verified org member at mint. Other mint
+    /// paths leave this None; unbound tickets retain their previous behavior.
     /// Host-only and ephemeral like ticket secrets: never plaintext metadata.
     #[serde(skip)]
     pub member: Option<MemberBinding>,
@@ -497,6 +497,14 @@ impl RouteTicketRegistry {
         now_ms: i64,
         owner_account_id: Option<String>,
     ) -> Result<MintedTicket, TicketError> {
+        self.person_mint_owned(request, snapshot, now_ms, owner_account_id, None)
+    }
+
+    /// P6c Host-only member authority, supplied outside the deserializable request.
+    pub fn person_mint_owned(
+        &self, request: MintRequest, snapshot: Option<&RoutingSnapshot>, now_ms: i64,
+        owner_account_id: Option<String>, member: Option<MemberBinding>,
+    ) -> Result<MintedTicket, TicketError> {
         let mut frozen = snapshot.ok_or(TicketError::NoSnapshot)?.clone();
         for provider in &request.provider_overrides {
             let deployment = provider.deployment_id.as_deref().unwrap_or(&provider.id);
@@ -683,7 +691,7 @@ impl RouteTicketRegistry {
             uuid::Uuid::new_v4().simple()
         );
         let ticket = RouteTicket {
-            member: None,
+            member,
             owner_account_id,
             ticket_id: ticket_id.clone(),
             route_pin_id: format!("pin_{}", uuid::Uuid::new_v4().simple()),
@@ -1082,6 +1090,27 @@ impl RouteTicketRegistry {
         hit
     }
 
+    /// P6c credential rotation revokes only this org's provider deployments.
+    /// Clear credentials and secrets even if metadata persistence fails.
+    pub fn person_revoke_provider(&self, org: &str, provider: &str) -> usize {
+        let mut inner = self.inner.lock();
+        let mut count = 0;
+        for record in &mut inner.records {
+            if !record.ticket.revoked
+                && record.ticket.member.as_ref().is_some_and(|member| member.org_id == org)
+                && record.provider_overrides.iter().any(|entry| entry.id == provider
+                    || entry.deployment_id.as_deref() == Some(provider)) {
+                record.ticket.revoked = true;
+                record.secret = None;
+                record.provider_overrides.clear();
+                record.task_client = None;
+                count += 1;
+            }
+        }
+        inner.dirty |= count > 0;
+        count
+    }
+
     pub fn revoke_session(&self, session_id: &str) -> usize {
         let mut inner = self.inner.lock();
         let mut count = 0;
@@ -1227,6 +1256,21 @@ mod tests {
     }
 
     fn p6b_now(month: &str) -> i64 { crate::org_usage::reset_at(month) - 1000 }
+
+    #[test]
+    fn p6c_member_authority_is_host_only_ephemeral_and_atomic_at_mint() {
+        let registry = registry();
+        let legacy = registry.mint_owned(mint_request(), Some(&snapshot()), 1, Some("operator".into())).unwrap();
+        assert!(legacy.ticket.member.is_none());
+        let member = MemberBinding { org_id:"org_p6c_bound".into(), user_id:"usr_p6c_bound".into() };
+        let minted = registry.person_mint_owned(mint_request(), Some(&snapshot()), 1,
+            Some("pb_member".into()), Some(member.clone())).unwrap();
+        assert_eq!(registry.validate(&minted.secret, 2).unwrap().member, Some(member));
+        assert!(registry.secret_has_token_budget(&minted.secret));
+        let wire = serde_json::to_string(&minted.ticket).unwrap();
+        assert!(!wire.contains("usr_p6c_bound"));
+        assert!(serde_json::from_str::<RouteTicket>(&wire).unwrap().member.is_none());
+    }
 
     #[test]
     fn p6b_concurrent_reservations_never_overshoot_member_cap() {

@@ -2,6 +2,11 @@
 
 import "fake-indexeddb/auto"
 
+jest.mock("@/lib/gateway/person-model-ticket", () => ({
+  ...jest.requireActual("@/lib/gateway/person-model-ticket"),
+  mintPersonModelTicket: jest.fn(),
+}))
+jest.mock("@/lib/claude/build-options", () => ({ resolveSendOptions: jest.fn() }))
 const archiveScratchMock = jest.fn()
 jest.mock("@/lib/task-workspace/managed-workspace", () => ({
   archiveSessionScratchWorkspace: (sessionOrId: unknown) => archiveScratchMock(sessionOrId),
@@ -176,6 +181,46 @@ describe("HostStateService", () => {
     __resetDbForTesting()
   })
 
+  it("P6c status and submit admit only opted-in chat and cancellation", async () => {
+    const { initializePersonChat } = await import("@/lib/headless/person-chat")
+    initializePersonChat("person-brain", { COGNIA_PERSON_CHAT: "tool-less" })
+    const dispatchRuntime = jest.fn(async () => undefined)
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "person",
+      authorization: "person-partition",
+      now: () => 100,
+      dispatchRuntime,
+      publish: async () => {},
+    })
+    try {
+      const started = await service.start({ now: 0, heartbeat: false })
+      expect(started.supportedActions).toEqual(
+        expect.arrayContaining(["message.enqueue", "turn.abort"])
+      )
+      expect(started.supportedActions).not.toContain("approval.respond")
+      expect(isHostStateStatus(started)).toBe(true)
+      const response = await service.submit(
+        {
+          ...scope,
+          actions: [
+            action(
+              { kind: "message.enqueue", messageId: "person-message", text: "hi", attachments: [] },
+              { hostGeneration: started.hostGeneration }
+            ),
+          ],
+        },
+        { deviceId: "member", grants: ["client.write"] }
+      )
+      expect(response.results[0].outcome).toBe("applied")
+      expect(dispatchRuntime).toHaveBeenCalledTimes(1)
+    } finally {
+      await service.stop()
+      initializePersonChat("brain", {})
+    }
+  })
+
   it("P5d applies owner data intents with no operator grants and refuses runtime/workspace actions per item", async () => {
     const dispatchRuntime = jest.fn(async () => undefined)
     const deleteSessions = jest.fn(async (ids: readonly string[]) => {
@@ -247,7 +292,7 @@ describe("HostStateService", () => {
       "applied",
     ])
     for (let i = 0; i < actions.length; i++) {
-      const decision = personPartitionIntentDecision(actions[i].action.kind)
+      const decision = personPartitionIntentDecision(actions[i].action.kind, { chat: "none" })
       if (!decision.allowed) {
         expect(result.results[i].rejection?.code).toBe(decision.code)
         await expect(
@@ -375,6 +420,7 @@ describe("HostStateService", () => {
         "pendingBroadcast",
         "pendingDispatch",
         "recovery",
+        ...(authorization === "person-partition" ? ["supportedActions"] : []),
       ])
       const response = await service.submit(
         { ...scope, actions: [action({ kind: "turn.abort" })] },
@@ -3069,4 +3115,86 @@ describe("HostState Agent RPC dispatcher", () => {
     expect(consoleError).toHaveBeenCalledWith("acceptHostStateChatTurn failed", expect.any(Error))
     consoleError.mockRestore()
   })
+  it("dispatches opted-in partition chat through a ticket and skips ordinary options", async () => {
+    const { initializePersonChat } = await import("@/lib/headless/person-chat")
+    const gateway = await import("@/lib/gateway/person-model-ticket")
+    const resolver = await import("@/lib/claude/build-options")
+    const mint = jest.mocked(gateway.mintPersonModelTicket).mockResolvedValue({
+      secret: "ticket",
+      endpoint: "http://127.0.0.1:9000/v1",
+      expiresAt: Number.MAX_SAFE_INTEGER,
+    } as never)
+    const resolve = jest.mocked(resolver.resolveSendOptions).mockResolvedValue({
+      provider: "openai",
+      model: "org-model",
+      toolSurface: "none",
+      providerCredentials: {
+        apiKey: "ticket",
+        baseURL: "http://127.0.0.1:9000/v1",
+        protocol: "openai",
+        apiFlavor: "chat",
+      },
+    })
+    await getDb().sessions.update("session-1", {
+      providerOverride: "anthropic",
+      model: "org-model",
+    })
+    initializePersonChat("person-brain", { COGNIA_PERSON_CHAT: "tool-less" })
+    try {
+      await createAgentRpcHostStateDispatcher()(
+        action({ kind: "message.enqueue", messageId: "m-person", text: "hello", attachments: [] })
+      )
+      expect(mint).toHaveBeenCalledWith("anthropic", "org-model", "session-1")
+      expect(buildSendOptionsMock).not.toHaveBeenCalled()
+      expect(prepareTranscriptRuntimeSendMock).toHaveBeenCalledWith(
+        "session-1",
+        expect.objectContaining({ toolSurface: "none" }),
+        expect.objectContaining({ replacesHistory: true })
+      )
+      expect(sendPromptMock).toHaveBeenCalledWith(
+        "session-1",
+        "hello",
+        expect.objectContaining({
+          toolSurface: "none",
+          providerCredentials: expect.objectContaining({ apiKey: "ticket" }),
+        }),
+        expect.objectContaining({ commandId: "action-1" })
+      )
+    } finally {
+      initializePersonChat("brain", {})
+      const { forgetPersonChatTurn } = await import("@/lib/claude/person-chat-turn")
+      forgetPersonChatTurn("session-1")
+      mint.mockReset()
+      resolve.mockReset()
+    }
+  })
+  it.each(["model_access_unavailable", "member_usage_cap_reached", "host_surface_forbidden"])(
+    "abandons refused partition sends with Host code %s",
+    async (code) => {
+      const { initializePersonChat } = await import("@/lib/headless/person-chat")
+      const { mintPersonModelTicket } = await import("@/lib/gateway/person-model-ticket")
+      await getDb().sessions.update("session-1", {
+        providerOverride: "anthropic",
+        model: "org-model",
+      })
+      jest.mocked(mintPersonModelTicket).mockRejectedValue({ code, resetAt: 123 })
+      initializePersonChat("person-brain", { COGNIA_PERSON_CHAT: "tool-less" })
+      try {
+        await expect(
+          createAgentRpcHostStateDispatcher()(
+            action({
+              kind: "message.enqueue",
+              messageId: "person-refused",
+              text: "hi",
+              attachments: [],
+            })
+          )
+        ).rejects.toMatchObject({ code })
+        expect(sendPromptMock).not.toHaveBeenCalled()
+      } finally {
+        initializePersonChat("brain", {})
+        jest.mocked(mintPersonModelTicket).mockReset()
+      }
+    }
+  )
 })

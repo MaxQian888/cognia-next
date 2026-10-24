@@ -504,14 +504,20 @@ export function hostStateIntentKindCapability(
 }
 
 /**
- * P5d data-only authority for the owner of a person partition. No runtime,
- * workspace, or provider is installed there: execution intents intentionally
- * remain dormant with execution_isolation_unavailable, and workspace moves
+ * Partition authority for its owner. P6c admits chat/cancel only after Host
+ * opt-in; older Hosts keep execution dormant with execution_isolation_unavailable.
+ * Tools still require isolation, and workspace moves remain refused
  * with workspace_unavailable. Use this same exhaustive decision for submit
  * receipts and session-attach negotiation; device operator grants cannot widen it.
  */
+export interface PersonPartitionCapabilities {
+  /** Explicit Host opt-in; absent on pre-P6c Hosts. Tools still need isolation. */
+  chat: "tool-less" | "none"
+}
+
 export function personPartitionIntentDecision(
-  kind: HostStateIntentKind
+  kind: HostStateIntentKind,
+  capabilities: PersonPartitionCapabilities
 ):
   | { allowed: true }
   | { allowed: false; code: "execution_isolation_unavailable" | "workspace_unavailable" } {
@@ -533,9 +539,13 @@ export function personPartitionIntentDecision(
     case "session.import":
       return { allowed: true }
     case "message.enqueue":
+    case "turn.abort":
+      return capabilities.chat === "tool-less"
+        ? { allowed: true }
+        : { allowed: false, code: "execution_isolation_unavailable" }
+    // Both use agent_steer, which the partition RPC allowlist does not admit.
     case "turn.steer":
     case "turn.followup":
-    case "turn.abort":
     case "approval.respond":
     case "elicitation.respond":
       return { allowed: false, code: "execution_isolation_unavailable" }
@@ -979,6 +989,8 @@ export interface HostStateSubmitResponse {
 export type HostStateRecoveryStatus = "recovering" | "ready" | "degraded"
 
 export interface HostStateStatus {
+  /** Partition negotiation, derived from the exact submit policy. */
+  supportedActions?: HostStateIntentKind[]
   hostId: string
   hostGeneration: number
   hostSeq: number
@@ -1701,7 +1713,11 @@ export function isHostStateStatus(value: unknown): value is HostStateStatus {
       "pendingDispatch",
       "pendingBroadcast",
       "recovery",
+      "supportedActions",
     ]) &&
+    (value.supportedActions === undefined ||
+      (Array.isArray(value.supportedActions) &&
+        value.supportedActions.every((kind) => INTENT_KINDS.includes(kind)))) &&
     nonEmptyString(value.hostId) &&
     nonNegativeInteger(value.hostGeneration) &&
     nonNegativeInteger(value.hostSeq) &&

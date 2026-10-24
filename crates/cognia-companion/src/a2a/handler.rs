@@ -265,7 +265,8 @@ async fn drive_turn(
                 break TurnOutcome::Failed("turn timed out".to_string());
             }
             Ok(Ok(frame)) => {
-                if frame.event_type != "claude://message" {
+                if !crate::person_chat::person_connection_visible(&frame, &ctx.device_id, Some(&ctx.tenant_id))
+                    || frame.event_type != "claude://message" {
                     continue;
                 }
                 let mut done = None;

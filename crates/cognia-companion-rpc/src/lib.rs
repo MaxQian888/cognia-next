@@ -9,6 +9,7 @@ pub mod mcp_oauth;
 pub mod pair_invitation;
 pub mod project_environment;
 pub mod provider_admin;
+pub mod person_model;
 pub mod rpc;
 pub mod rpc_host;
 pub mod shell;

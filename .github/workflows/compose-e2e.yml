@@ -294,6 +294,17 @@ jobs:
           docker compose --profile collab exec -T collab-postgres \
             psql -U cognia_collab -d cognia_collab -v ON_ERROR_STOP=1 -c \
             "UPDATE org_memberships SET role = 'member' WHERE org_id = 'org_smoke-persons' AND user_id = 'usr_smoke-bob'"
+          # Member chat routes the org key to the Anthropic fixture. A running
+          # Host projects only its own store writes, so restart after import.
+          docker compose --profile web-headless-e2e exec -T cognia-server-cloud \
+            cognia-server profiles import /fixture/persons-provider-profiles.json
+          docker compose --profile web-headless-e2e restart cognia-server-cloud
+          for attempt in $(seq 1 30); do
+            curl -kfsS https://127.0.0.1:27894/readyz >/dev/null && exit 0
+            sleep 2
+          done
+          echo "cognia-server-cloud did not become ready after the profile import" >&2
+          exit 1
 
       - name: Smoke (tier persons)
         if: ${{ !cancelled() && steps.persons-seed.outcome == 'success' }}

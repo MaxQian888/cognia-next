@@ -520,7 +520,7 @@ describe("P5d partition HostState adapter", () => {
         downgradeReason: null,
         eventPlane: "ready",
         supportedActions: HOST_STATE_INTENT_KINDS.filter(
-          (kind) => personPartitionIntentDecision(kind).allowed
+          (kind) => personPartitionIntentDecision(kind, { chat: "none" }).allowed
         ),
       })
       expect(isSessionAttached(payload.sessionId)).toBe(true)
@@ -3527,4 +3527,47 @@ it("routes advanced session operations through the admitted native-session servi
   await expect(
     dispatchCommand("external_agent_session_mutate", { ...request, externalSessionId: "" })
   ).rejects.toThrow("identities")
+})
+
+it("partition manifest and session negotiation share Host chat opt-in", async () => {
+  const { initializePersonChat } = await import("@/lib/headless/person-chat")
+  const { __resetRemoteAttachForTests } = await import("./remote-attach-registry")
+  const payload = {
+    callerAccountId: "local-default",
+    authoritativeHostId: "host-person-p6c",
+    runtimeTargetId: "target-a",
+    callerDeviceId: "member-p6c",
+    callerDeviceGrants: ["client.write"],
+    callerPartition: true,
+  }
+  initializePersonChat("person-brain", { COGNIA_PERSON_CHAT: "tool-less" })
+  try {
+    const manifest = (await dispatchCommand("host_feature_manifest", payload, undefined, true)) as {
+      operations: { name: string; healthy: boolean; reason?: string }[]
+    }
+    expect(manifest.operations.find((op) => op.name === "agent_send")).toMatchObject({
+      healthy: true,
+      reason: "tool-less",
+    })
+    const attached = (await dispatchCommand(
+      "session_attach",
+      {
+        ...payload,
+        sessionId: "p6c-attach",
+        mode: "control",
+        callerEventStreams: [
+          { leaseId: "p6c-stream", transport: "ws", state: "ready", openedAt: 1 },
+        ],
+      },
+      undefined,
+      true
+    )) as { supportedActions: string[] }
+    expect(attached.supportedActions).toEqual(
+      expect.arrayContaining(["message.enqueue", "turn.abort"])
+    )
+    expect(attached.supportedActions).not.toContain("turn.followup")
+  } finally {
+    initializePersonChat("brain", {})
+    __resetRemoteAttachForTests()
+  }
 })

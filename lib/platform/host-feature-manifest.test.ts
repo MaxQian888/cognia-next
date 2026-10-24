@@ -1059,3 +1059,28 @@ it("advertises fixed browser recording controls and refs on headless browser hos
     expect(supportsHostFeatureOperation(manifest, "browser.remote", command)).toBe(true)
   }
 })
+
+it.each(["none", "tool-less"] as const)(
+  "partition manifest advertises %s chat with tools refused",
+  (personChat) => {
+    const manifest = buildLocalHostFeatureManifest({
+      platform: "headless",
+      personPartition: true,
+      personChat,
+    })
+    expect(parseHostFeatureManifest(manifest)).not.toBeNull()
+    expect(manifest.features["claude.tool-less-chat"]).toEqual({
+      version: 1,
+      operations: ["agent_send", "agent_interrupt"],
+    })
+    expect(manifest.operations.find((op) => op.name === "agent_send")).toMatchObject({
+      healthy: personChat === "tool-less",
+      reason: personChat === "tool-less" ? "tool-less" : "execution_isolation_unavailable",
+    })
+    for (const operation of manifest.operations.filter(
+      (op) => op.feature === "claude.host-tools" || op.feature.startsWith("external-agent.")
+    )) {
+      expect(operation).toMatchObject({ healthy: false, reason: "execution_isolation_unavailable" })
+    }
+  }
+)
