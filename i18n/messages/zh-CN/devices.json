@@ -687,6 +687,53 @@
       "saving": "正在密封保存…"
     }
   },
+  "orgModels": {
+    "title": "组织模型",
+    "meta": "{count, plural, =0 {没有密钥} other {# 个密钥}}",
+    "description": "组织内所有成员在 {host} 上使用的模型密钥和智能体。",
+    "loading": "正在向 {host} 读取组织模型…",
+    "notAdmin": "只有组织的所有者或管理员可以管理模型密钥和智能体。",
+    "notOrgHost": "{host} 不服务于组织，因此没有组织模型。",
+    "saved": "已在 {host} 上保存 {provider} 密钥",
+    "removed": "已从 {host} 移除 {provider} 密钥",
+    "keys": {
+      "title": "模型密钥",
+      "empty": "还没有模型密钥。管理员添加可用的密钥之前，成员无法运行智能体。",
+      "fingerprint": "密钥 {fingerprint}",
+      "setBy": "{when}由管理员设置",
+      "setByOperator": "{when}通过主机命令行设置",
+      "remove": "移除",
+      "removing": "正在移除…",
+      "removeAria": "移除 {provider} 密钥"
+    },
+    "add": {
+      "title": "添加模型密钥",
+      "provider": "提供方",
+      "providerPlaceholder": "选择提供方",
+      "apiKey": "API 密钥",
+      "hint": "密钥只发送到 {host}，之后任何地方都无法再读出。",
+      "save": "保存到 {host}",
+      "saving": "正在保存…"
+    },
+    "agents": {
+      "title": "成员可运行的智能体",
+      "hint": "成员只能从这些智能体中选择。任一组织密钥都可用于受代理的智能体：标记为“无密钥”的在添加密钥后即可运行；标记为“此主机不可用”的无法在此主机上运行。",
+      "noKey": "无密钥",
+      "unsupported": "此主机不可用",
+      "default": "默认智能体",
+      "defaultPlaceholder": "选择默认智能体",
+      "save": "保存智能体",
+      "saving": "正在保存…",
+      "saved": "已保存 {host} 的智能体设置",
+      "updated": "{when}更新"
+    },
+    "confirm": {
+      "title": "移除 {provider} 密钥？",
+      "body": "使用该密钥的成员智能体将在 {host} 上停止工作，直到有人添加新密钥。",
+      "keep": "保留",
+      "remove": "移除"
+    }
+  },
   "hostSystem": {
     "loading": "正在读取 Host 的系统信息…",
     "memory": "已用 {used} / 共 {total}",

@@ -15481,6 +15481,53 @@
       "title": "Does not apply here"
     },
     "notAvailable": "—",
+    "orgModels": {
+      "add": {
+        "apiKey": "API key",
+        "hint": "The key goes only to {host}. Nobody can read it back, here or anywhere else.",
+        "provider": "Provider",
+        "providerPlaceholder": "Choose a provider",
+        "save": "Save to {host}",
+        "saving": "Saving…",
+        "title": "Add a model key"
+      },
+      "agents": {
+        "default": "Default agent",
+        "defaultPlaceholder": "Choose a default",
+        "hint": "Members pick from these agents. Any org key can serve a brokered agent, so one marked No key runs once a key is added; one marked Not available here can't run on this Host.",
+        "noKey": "No key",
+        "save": "Save agents",
+        "saved": "Saved the agents for {host}",
+        "saving": "Saving…",
+        "title": "Agents members may run",
+        "unsupported": "Not available here",
+        "updated": "Updated {when}"
+      },
+      "confirm": {
+        "body": "Members' agents that use it stop working on {host} until someone adds a new key.",
+        "keep": "Keep",
+        "remove": "Remove",
+        "title": "Remove the {provider} key?"
+      },
+      "description": "The model keys and agents everyone in your organization uses on {host}.",
+      "keys": {
+        "empty": "No model keys yet. Members can't run an agent until an admin adds a key it can use.",
+        "fingerprint": "key {fingerprint}",
+        "remove": "Remove",
+        "removeAria": "Remove the {provider} key",
+        "removing": "Removing…",
+        "setBy": "Set {when} by an admin",
+        "setByOperator": "Set {when} from the host's command line",
+        "title": "Model keys"
+      },
+      "loading": "Asking {host} for your organization's models…",
+      "meta": "{count, plural, =0 {No keys} one {# key} other {# keys}}",
+      "notAdmin": "Only an owner or admin of your organization can manage its model keys and agents.",
+      "notOrgHost": "{host} doesn't serve an organization, so it has no organization models.",
+      "removed": "Removed the {provider} key from {host}",
+      "saved": "Saved the {provider} key on {host}",
+      "title": "Organization models"
+    },
     "overview": {
       "added": "Added",
       "adminState": "State",

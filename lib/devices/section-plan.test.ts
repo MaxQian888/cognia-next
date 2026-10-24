@@ -1,3 +1,5 @@
+import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
+
 import type { DeviceCapabilityCell, DeviceRow } from "./types"
 import {
   canOwnTiming,
@@ -239,6 +241,34 @@ describe("planDeviceSections", () => {
     expect(ids(planDeviceSections(pairHost).sections)).not.toContain("host-runtimes")
     const routed = { ...pairHost, runtime: { ...pairHost.runtime, isRoutingTarget: true } }
     expect(ids(planDeviceSections(routed).sections)).toContain("routing")
+  })
+
+  it("shows organization models only on a Host that serves this device a person partition", () => {
+    const host = row({ ref: "host:org", kind: "remote-host", hostId: "org" })
+    expect(ids(planDeviceSections(host).sections)).not.toContain("org-models")
+    const single = {
+      ...host,
+      featureManifest: buildLocalHostFeatureManifest({ platform: "headless" }),
+    }
+    expect(ids(planDeviceSections(single).sections)).not.toContain("org-models")
+    const org = {
+      ...host,
+      featureManifest: buildLocalHostFeatureManifest({
+        platform: "headless",
+        personPartition: true,
+      }),
+    }
+    const sections = ids(planDeviceSections(org).sections)
+    // Right after the host's own secrets: both are keys the Host keeps.
+    expect(
+      sections.slice(sections.indexOf("host-secrets"), sections.indexOf("host-secrets") + 2)
+    ).toEqual(["host-secrets", "org-models"])
+    expect(
+      planDeviceSections(org).sections.find((section) => section.id === "org-models")?.wide
+    ).toBe(true)
+    // A `/pair` Host this app is not routed to cannot be reached at all.
+    const unreachable = { ...org, ref: "companion:org", hostId: undefined }
+    expect(ids(planDeviceSections(unreachable).sections)).not.toContain("org-models")
   })
 
   it("manages the /pair Host this app is connected to over the app's own connection", () => {

@@ -84,7 +84,7 @@ function message(error: unknown): string {
 }
 
 /** Providers a key can be sealed for: built-ins that take one, and this account's own. */
-function useProviderOptions(): Array<{ id: string; label: string }> {
+export function useProviderOptions(): Array<{ id: string; label: string }> {
   const customProviders = useSettingsStore((state) => state.customProviders)
   return useMemo(() => {
     const builtIn = Object.values(getAllProviders())

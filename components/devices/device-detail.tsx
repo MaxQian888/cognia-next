@@ -55,6 +55,7 @@ import type { DeviceGrantActions } from "@/hooks/devices/use-device-grant-action
 
 import { AlwaysOnSection } from "./always-on/always-on-section"
 import { HostSecretsSection } from "./host-secrets/host-secrets-section"
+import { OrgModelsSection } from "./org-models/org-models-section"
 import { HostRuntimesSection } from "./host-runtimes/host-runtimes-section"
 import { HostUpdatesSection } from "./host-updates/host-updates-section"
 import { HostSystemSection } from "./host-system/host-system-section"
@@ -91,6 +92,7 @@ export function deviceSectionAnchor(id: string): string {
 const SECTION_LABEL_KEY: Record<DeviceSectionId, string> = {
   "always-on": "alwaysOn.title",
   "host-secrets": "hostSecrets.title",
+  "org-models": "orgModels.title",
   "host-updates": "hostUpdates.title",
   "host-runtimes": "hostRuntimes.title",
   "host-system": "hostSystem.title",
@@ -145,6 +147,8 @@ function PlannedSection({
       return <AlwaysOnSection row={row} />
     case "host-secrets":
       return <HostSecretsSection row={row} />
+    case "org-models":
+      return <OrgModelsSection row={row} />
     case "host-updates":
       return <HostUpdatesSection row={row} />
     case "host-runtimes":

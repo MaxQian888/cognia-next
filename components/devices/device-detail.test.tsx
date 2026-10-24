@@ -39,6 +39,9 @@ jest.mock("./sections/wan-section", () => ({ WanSection: marker("wan") }))
 jest.mock("./host-secrets/host-secrets-section", () => ({
   HostSecretsSection: marker("host-secrets"),
 }))
+jest.mock("./org-models/org-models-section", () => ({
+  OrgModelsSection: marker("org-models"),
+}))
 jest.mock("./host-system/host-system-section", () => ({
   HostSystemSection: marker("host-system"),
 }))

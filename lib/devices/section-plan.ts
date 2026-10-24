@@ -29,6 +29,7 @@ import type { DeviceKind, DeviceRow } from "./types"
 export type DeviceSectionId =
   | "always-on"
   | "host-secrets"
+  | "org-models"
   | "host-updates"
   | "host-runtimes"
   | "host-system"
@@ -91,6 +92,7 @@ export const NOT_APPLICABLE_SECTION_ID = "not-applicable"
 const WIDE: Record<DeviceSectionId, boolean> = {
   "always-on": true,
   "host-secrets": true,
+  "org-models": true,
   "host-updates": true,
   "host-runtimes": true,
   "host-system": false,
@@ -154,6 +156,7 @@ const ORDER: Record<DeviceKind, readonly DeviceSectionId[]> = {
   "remote-host": [
     "always-on",
     "host-secrets",
+    "org-models",
     "host-updates",
     "host-runtimes",
     "sandbox",
@@ -193,6 +196,12 @@ export function managementRefOf(row: DeviceRow): string | null {
   return row.ref.startsWith("companion:") && row.runtime.isRoutingTarget ? row.ref : null
 }
 
+/** Whether this row's manifest came from a person brain on a multi-tenant Host. */
+function servesPersonPartition(row: DeviceRow): boolean {
+  const manifest = row.featureManifest
+  return manifest?.schemaVersion === 2 && manifest.personPartition === true
+}
+
 export function canOwnTiming(row: DeviceRow): boolean {
   return row.kind === "local" || (row.kind === "remote-host" && Boolean(row.hostId))
 }
@@ -213,6 +222,11 @@ function isApplicable(row: DeviceRow, id: DeviceSectionId): boolean {
     // The Host's own system details travel the same channel.
     case "host-system":
       return Boolean(managementRefOf(row))
+    // An organization's model keys and agents live on a multi-tenant Host
+    // (plan §9b, P6), which declares itself through the person brain that
+    // serves this device's manifest.
+    case "org-models":
+      return Boolean(managementRefOf(row)) && servesPersonPartition(row)
     // The machine a Host was installed on by this desktop (ADR-0235 P5).
     case "host-install":
       return row.kind === "remote-host" && Boolean(row.installBinding)

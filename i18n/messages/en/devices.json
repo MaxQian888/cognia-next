@@ -687,6 +687,53 @@
       "saving": "Sealing…"
     }
   },
+  "orgModels": {
+    "title": "Organization models",
+    "meta": "{count, plural, =0 {No keys} one {# key} other {# keys}}",
+    "description": "The model keys and agents everyone in your organization uses on {host}.",
+    "loading": "Asking {host} for your organization's models…",
+    "notAdmin": "Only an owner or admin of your organization can manage its model keys and agents.",
+    "notOrgHost": "{host} doesn't serve an organization, so it has no organization models.",
+    "saved": "Saved the {provider} key on {host}",
+    "removed": "Removed the {provider} key from {host}",
+    "keys": {
+      "title": "Model keys",
+      "empty": "No model keys yet. Members can't run an agent until an admin adds a key it can use.",
+      "fingerprint": "key {fingerprint}",
+      "setBy": "Set {when} by an admin",
+      "setByOperator": "Set {when} from the host's command line",
+      "remove": "Remove",
+      "removing": "Removing…",
+      "removeAria": "Remove the {provider} key"
+    },
+    "add": {
+      "title": "Add a model key",
+      "provider": "Provider",
+      "providerPlaceholder": "Choose a provider",
+      "apiKey": "API key",
+      "hint": "The key goes only to {host}. Nobody can read it back, here or anywhere else.",
+      "save": "Save to {host}",
+      "saving": "Saving…"
+    },
+    "agents": {
+      "title": "Agents members may run",
+      "hint": "Members pick from these agents. Any org key can serve a brokered agent, so one marked No key runs once a key is added; one marked Not available here can't run on this Host.",
+      "noKey": "No key",
+      "unsupported": "Not available here",
+      "default": "Default agent",
+      "defaultPlaceholder": "Choose a default",
+      "save": "Save agents",
+      "saving": "Saving…",
+      "saved": "Saved the agents for {host}",
+      "updated": "Updated {when}"
+    },
+    "confirm": {
+      "title": "Remove the {provider} key?",
+      "body": "Members' agents that use it stop working on {host} until someone adds a new key.",
+      "keep": "Keep",
+      "remove": "Remove"
+    }
+  },
   "hostSystem": {
     "loading": "Reading the Host's system details…",
     "memory": "{used} in use of {total}",
