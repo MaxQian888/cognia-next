@@ -1319,6 +1319,13 @@ export interface ApprovalResponseOptions {
    * and redirect the work. Ignored on allow.
    */
   message?: string
+  /**
+   * Allow only, on an outbound ask (`PendingApproval.outbound`, ADR-0239):
+   * allow these recipients for the rest of the requester's current
+   * instruction, not just this call. Ignored for a public link or a recipient
+   * that could not be named, which are only ever allowed per call.
+   */
+  forRequest?: boolean
 }
 
 // ---- Inbound (sidecar → Tauri → UI) --------------------------------------
@@ -1443,9 +1450,9 @@ export interface PermissionInterruptedEvent {
  * decided. Emitted before the tool runs on the ai-sdk rail and after it ran on
  * the Agent SDK rail, where only PostToolUse can tell that nobody was asked.
  *
- * DORMANT CONSUMER: the sidecar emits it and nothing in the host reads it yet;
- * the tool-call chokepoint (ADR-0239 WP6) records it. Pinned by the sidecar
- * gate tests.
+ * Recorded as a shadow receipt by `recordOutboundShadowObservation`
+ * (`lib/policy/action-review/plan-tool-call.ts`): by the desktop chat
+ * listener, or by the capture that answers the session's asks.
  */
 export interface ExplicitToolAllowedEvent {
   type: "explicit_tool_allowed"
@@ -6859,6 +6866,29 @@ export interface McpRuntimeStatusSnapshot {
   errorCode?: string
 }
 
+/** A recipient as an approval card shows it (ADR-0239). Never written to a receipt. */
+export interface PendingOutboundTarget {
+  kind: "conversation" | "person" | "mail" | "public" | "unknown"
+  /** The connector adapter id, `mail`, or `tool:<name>`. */
+  channel: string
+  /** Normalized recipient (`conv:…`, `person:…`, `mail:…`, `public:…`, `*`). */
+  recipient: string
+}
+
+/**
+ * The outbound policy's view of an ask (ADR-0239): who the call delivers to,
+ * and which of them nothing has authorized yet.
+ */
+export interface PendingOutboundReview {
+  targets: PendingOutboundTarget[]
+  unauthorized: PendingOutboundTarget[]
+  /**
+   * False in shadow mode: the card behaves as it did before the outbound
+   * policy existed, and the plan is only recorded.
+   */
+  enforced: boolean
+}
+
 export interface PendingApproval {
   sessionId: string
   requestId: string
@@ -6896,6 +6926,13 @@ export interface PendingApproval {
   subagentId?: string
   /** Runtime-store run id of the asking subagent (Cancel-run target). */
   subagentRunId?: string
+  /**
+   * Set when the tool is outbound (ADR-0239). The card names the recipients;
+   * in enforce mode it offers no standing grant, and a deny fences the
+   * recipients for the rest of the request instead of joining the session's
+   * denial list.
+   */
+  outbound?: PendingOutboundReview
 }
 
 // ---- Characters / Skills / Teams -----------------------------------------

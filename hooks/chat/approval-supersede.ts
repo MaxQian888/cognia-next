@@ -145,7 +145,11 @@ async function denyThroughChannel(
     return
   }
   const { approveTool } = await import("@/lib/claude/ipc")
-  await approveTool(sessionId, requestId, "deny", SUPERSEDED_MESSAGE)
+  // A new instruction replaced the question; nobody refused the call, so it
+  // fences nothing (ADR-0239).
+  await approveTool(sessionId, requestId, "deny", SUPERSEDED_MESSAGE, undefined, undefined, {
+    authority: "system",
+  })
 }
 
 /**

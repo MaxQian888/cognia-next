@@ -154,6 +154,18 @@ jest.mock("@/lib/claude/permissions/command-judge", () => ({
   __resetJudgeCache: jest.fn(),
 }))
 
+const recordChatToolApprovalDecisionMock = jest.fn()
+jest.mock("@/lib/policy/action-review/chat-tool-channel", () => {
+  const actual = jest.requireActual("@/lib/policy/action-review/chat-tool-channel")
+  return {
+    ...actual,
+    recordChatToolApprovalDecision: (...a: unknown[]) => {
+      recordChatToolApprovalDecisionMock(...a)
+      return actual.recordChatToolApprovalDecision(...a)
+    },
+  }
+})
+
 jest.mock("@/lib/claude/ipc", () => ({
   approveTool: (...a: unknown[]) => approveToolMock(...a),
   closeSession: (id: string) => closeSessionIpcMock(id),
@@ -4889,6 +4901,66 @@ describe("useClaudeChat — actions", () => {
     expect(approveToolMock).toHaveBeenCalledWith("sess-1", "r-1", "allow")
   })
 
+  describe("an outbound ask (ADR-0239)", () => {
+    const outbound = {
+      enforced: true,
+      targets: [{ kind: "conversation", channel: "bot-a", recipient: "conv:lark:bot-a:oc_1" }],
+      unauthorized: [{ kind: "conversation", channel: "bot-a", recipient: "conv:lark:bot-a:oc_1" }],
+    } as const
+    const approval = {
+      sessionId: "sess-1",
+      requestId: "r-out",
+      toolName: "mcp__cognia-plugin-tools__im_broadcast",
+      input: { conversationKeys: ["lark:bot-a:oc_1"] },
+      outbound,
+    } as never
+
+    afterEach(() => {
+      jest
+        .requireActual<typeof import("@/lib/claude/permissions/session-denials")>(
+          "@/lib/claude/permissions/session-denials"
+        )
+        .__resetSessionDenialsForTesting()
+    })
+
+    it("records an allow for this request as an instruction grant, and a plain allow as once", async () => {
+      const record = recordChatToolApprovalDecisionMock
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.respondToApproval(approval, "allow", { forRequest: true })
+      })
+      expect(record).toHaveBeenLastCalledWith(
+        expect.objectContaining({ requestId: "r-out" }),
+        "allow",
+        { scope: "instruction" }
+      )
+      await act(async () => {
+        await result.current.respondToApproval(approval, "allow")
+      })
+      expect(record).toHaveBeenLastCalledWith(expect.anything(), "allow", { scope: "once" })
+    })
+
+    it("leaves an enforced refusal to the fence instead of the session denial list", async () => {
+      const denials = jest.requireActual<typeof import("@/lib/claude/permissions/session-denials")>(
+        "@/lib/claude/permissions/session-denials"
+      )
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.respondToApproval(approval, "deny")
+      })
+      expect(denials.countSessionDenials("sess-1")).toBe(0)
+      await act(async () => {
+        await result.current.respondToApproval(
+          { ...(approval as object), outbound: { ...outbound, enforced: false } } as never,
+          "deny"
+        )
+      })
+      expect(denials.countSessionDenials("sess-1")).toBe(1)
+    })
+  })
+
   it("follows a HostState deny with its reason, since that answer carries no text", async () => {
     enqueueHostStateIntentMock.mockResolvedValue({ id: "action-1", status: "pending" })
     chatState.status = "streaming"
@@ -6106,7 +6178,10 @@ describe("useClaudeChat — actions", () => {
       "sess-1",
       "req-2",
       "deny",
-      expect.stringContaining("auto-denied")
+      expect.stringContaining("auto-denied"),
+      undefined,
+      undefined,
+      { authority: "system" }
     )
     chatState.activeSessionId = "sess-1"
   })
@@ -6172,7 +6247,10 @@ describe("useClaudeChat — actions", () => {
         "sess-1",
         "forgotten",
         "deny",
-        "auto-denied: approval timed out"
+        "auto-denied: approval timed out",
+        undefined,
+        undefined,
+        { authority: "timeout" }
       )
       expect(chatState.markApprovalInterrupted).toHaveBeenCalledWith(
         "forgotten",
@@ -6219,7 +6297,10 @@ describe("useClaudeChat — actions", () => {
         "sess-1",
         "held-ask",
         "deny",
-        "auto-denied: approval timed out"
+        "auto-denied: approval timed out",
+        undefined,
+        undefined,
+        { authority: "timeout" }
       )
     } finally {
       __resetRemoteAttachForTests()
@@ -6636,7 +6717,10 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
       "sess-1",
       "req-pending",
       "deny",
-      expect.stringContaining("superseded")
+      expect.stringContaining("superseded"),
+      undefined,
+      undefined,
+      { authority: "system" }
     )
     expect(chatState.markApprovalInterrupted).toHaveBeenCalledWith(
       "req-pending",

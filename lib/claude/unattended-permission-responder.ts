@@ -24,6 +24,13 @@
  * A `bypassPermissions` turn rarely reaches it, but an unattended turn's
  * permission profile still makes its outbound, secret and host-configuration
  * calls ask, so even a bypass turn can park.
+ *
+ * Every answer says who gave it, so its action-review receipt is written: a
+ * person's answer to a parked request is `human`, an expiry or a withdrawn
+ * question is `timeout`, and a denial for want of any approver is `system`.
+ * None of those but the person's denial fences an outbound recipient
+ * (ADR-0239). The outbound policy itself runs ahead of this responder, in
+ * `answerWithOutboundPolicy`.
  */
 
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
@@ -113,9 +120,13 @@ export function createUnattendedPermissionResponder(
   const refusals: UnattendedPermissionRefusal[] = []
   const park = options.park
 
-  const deny = (request: PermissionRequestEvent, reason: string): CapturePermissionDecision => {
+  const deny = (
+    request: PermissionRequestEvent,
+    reason: string,
+    authority: "system" | "timeout"
+  ): CapturePermissionDecision => {
     denials.push({ requestId: request.requestId, toolName: request.toolName, at: now(), reason })
-    return { decision: "deny", message: reason }
+    return { decision: "deny", message: reason, attribution: { authority } }
   }
 
   const parked = async (
@@ -132,21 +143,25 @@ export function createUnattendedPermissionResponder(
         `[unattended] could not park ${request.toolName}; denying it instead:`,
         error instanceof Error ? error.message : error
       )
-      return deny(request, unattendedDenialMessage(surface, request.toolName))
+      return deny(request, unattendedDenialMessage(surface, request.toolName), "system")
     }
     switch (outcome.kind) {
       case "approved":
-        return outcome.decision
+        return {
+          ...outcome.decision,
+          attribution: outcome.decision.attribution ?? { authority: "human" },
+        }
       case "denied": {
         refusals.push({ requestId: request.requestId, toolName: request.toolName, at: now() })
         return {
           decision: "deny",
           message: unattendedRefusalMessage(request.toolName, outcome.message),
+          attribution: { authority: "human" },
         }
       }
       case "expired":
       case "withdrawn":
-        return deny(request, unattendedTimeoutMessage(surface, request.toolName))
+        return deny(request, unattendedTimeoutMessage(surface, request.toolName), "timeout")
     }
   }
 
@@ -157,7 +172,7 @@ export function createUnattendedPermissionResponder(
     onPermissionRequest: (request) =>
       park
         ? parked(request, park)
-        : deny(request, unattendedDenialMessage(surface, request.toolName)),
+        : deny(request, unattendedDenialMessage(surface, request.toolName), "system"),
     needsApproval: () => denials.length > 0,
     deniedToolNames: () => [...new Set(denials.map((denial) => denial.toolName))],
     finish: async (status, summary) => {

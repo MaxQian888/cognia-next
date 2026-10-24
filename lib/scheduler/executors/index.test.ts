@@ -50,6 +50,18 @@ jest.mock("@/lib/claude/ipc", () => ({
   approveTool: (...args: unknown[]) => approveToolMock(...args),
 }))
 
+// The outbound policy is tested in `plan-tool-call.test.ts`; here it passes
+// every ask to the task's responder, and the cases check what it is handed.
+const answerWithOutboundPolicyMock = jest.fn(
+  (request: unknown, _options: unknown, respond: (r: unknown) => unknown) => respond(request)
+)
+const recordOutboundShadowMock = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/policy/action-review/plan-tool-call", () => ({
+  answerWithOutboundPolicy: (...args: [unknown, unknown, (r: unknown) => unknown]) =>
+    answerWithOutboundPolicyMock(...args),
+  recordOutboundShadowObservation: (...args: unknown[]) => recordOutboundShadowMock(...args),
+}))
+
 // Parking needs Dexie and the approval registry; the scheduler's part is how it
 // answers the request with whatever the park decided (ADR-0224 A7).
 const parkOutcomeMock = jest.fn(async (): Promise<Record<string, unknown>> => ({ kind: "expired" }))
@@ -1082,14 +1094,58 @@ describe("executeChatTask", () => {
         label: "Scheduled task: Nightly digest",
       })
     )
-    expect(approveToolMock).toHaveBeenCalledWith("session-created", "req-1", "allow", undefined, {
-      file_path: "/repo/b.ts",
-    })
+    expect(approveToolMock).toHaveBeenCalledWith(
+      "session-created",
+      "req-1",
+      "allow",
+      undefined,
+      { file_path: "/repo/b.ts" },
+      undefined,
+      // The receipt names the person who answered the parked request.
+      { authority: "human" }
+    )
     expect(r.success).toBe(true)
     expect(parkFinishMock).toHaveBeenCalledWith("completed", undefined)
     // The turn id it answers for rides the send, so the desktop listener stands back.
     const options = sendPromptMock.mock.calls.at(-1)?.[2] as SendOptions
     expect(options.turnId).toEqual(expect.any(String))
+  })
+  it("plans its outbound asks in the task's own origin and records shadow observations", async () => {
+    const shadow = {
+      sessionId: "session-created",
+      type: "explicit_tool_allowed",
+      toolName: "mcp__cognia-plugin-tools__im_broadcast",
+      input: {},
+      permissionClass: "outbound",
+    }
+    onClaudeMessageMock.mockImplementationOnce(async (cb) => {
+      const cast = cb as (e: unknown) => void
+      setTimeout(() => {
+        cast({
+          sessionId: "session-created",
+          type: "permission_request",
+          requestId: "req-1",
+          toolUseID: "tu-1",
+          toolName: "Edit",
+          input: {},
+        })
+        cast(shadow)
+      }, 0)
+      setTimeout(() => cast({ sessionId: "session-created", type: "result" }), 20)
+      return () => undefined
+    })
+    const task = makeTask({ payload: { prompt: "hi" } })
+    await executeChatTask(task, makeExecution(), makeSignal())
+    expect(answerWithOutboundPolicyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-1", toolName: "Edit" }),
+      expect.objectContaining({ unattended: true }),
+      expect.any(Function)
+    )
+    const options = answerWithOutboundPolicyMock.mock.calls[0]?.[1] as {
+      origin: () => Promise<unknown>
+    }
+    await expect(options.origin()).resolves.toMatchObject({ rootSessionId: `task:${task.id}` })
+    expect(recordOutboundShadowMock).toHaveBeenCalledWith(shadow, options)
   })
   it("resolves with the payload's builtinTools patch applied to settings", async () => {
     emitTerminalResult()
@@ -1152,7 +1208,9 @@ describe("executeChatTask", () => {
       "req-1",
       "deny",
       expect.stringContaining("needs_approval"),
-      undefined
+      undefined,
+      undefined,
+      { authority: "timeout" }
     )
     expect(r.success).toBe(false)
     expect(r.error).toBe("needs approval: Edit")

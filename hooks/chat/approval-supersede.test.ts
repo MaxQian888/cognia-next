@@ -108,11 +108,15 @@ describe("supersedePendingApprovals", () => {
     state.sessions.s1 = { pendingApprovals: [approval({})] }
     const count = await supersedePendingApprovals("s1")
     expect(count).toBe(1)
+    // A superseded question is nobody's refusal: system, no fence (ADR-0239).
     expect(mockApproveTool).toHaveBeenCalledWith(
       "s1",
       "req-1",
       "deny",
-      "superseded by a new user instruction"
+      "superseded by a new user instruction",
+      undefined,
+      undefined,
+      { authority: "system" }
     )
     expect(state.sessions.s1.pendingApprovals[0].status).toBe("interrupted")
     expect(state.sessions.s1.pendingApprovals[0].interruptReason).toBe(APPROVAL_SUPERSEDED_REASON)
@@ -225,7 +229,15 @@ describe("supersedePendingApprovals", () => {
     const count = await supersedePendingApprovals("s1")
     expect(count).toBe(1)
     expect(mockApproveTool).toHaveBeenCalledTimes(1)
-    expect(mockApproveTool).toHaveBeenCalledWith("s1", "req-live", "deny", expect.any(String))
+    expect(mockApproveTool).toHaveBeenCalledWith(
+      "s1",
+      "req-live",
+      "deny",
+      expect.any(String),
+      undefined,
+      undefined,
+      { authority: "system" }
+    )
   })
 
   it("supersedes subagent-routed approvals through the entry's own sessionId", async () => {
@@ -236,6 +248,14 @@ describe("supersedePendingApprovals", () => {
     }
     const count = await supersedePendingApprovals("parent")
     expect(count).toBe(1)
-    expect(mockApproveTool).toHaveBeenCalledWith("ephemeral-1", "req-1", "deny", expect.any(String))
+    expect(mockApproveTool).toHaveBeenCalledWith(
+      "ephemeral-1",
+      "req-1",
+      "deny",
+      expect.any(String),
+      undefined,
+      undefined,
+      { authority: "system" }
+    )
   })
 })

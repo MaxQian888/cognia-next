@@ -23,7 +23,7 @@ import path from "node:path"
 import { createHash } from "node:crypto"
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs"
 
-import type { PermissionRequestEvent } from "@cognia/agent-config-types"
+import type { ExplicitToolAllowedEvent, PermissionRequestEvent } from "@cognia/agent-config-types"
 import type {
   AgentEventEnvelope,
   CanonicalAgentEvent,
@@ -402,6 +402,7 @@ export interface ExternalAgentSessionParams {
     execHostTool: (name: string, args: unknown) => Promise<{ result?: unknown; error?: string }>
     onToolCall?: (event: { name: string; input: unknown; callKey: string }) => void
     onToolResult?: (event: { callKey: string; name: string; ok: boolean; summary?: string }) => void
+    onExplicitToolAllowed?: (event: ExplicitToolAllowedEvent) => void
   }) => Promise<ToolHostBroker>
   /** Project a live broker into `session/new` MCP entries. Injected in tests. */
   buildToolHostServers?: (broker: ToolHostBroker) => AcpMcpServerConfig[]
@@ -906,7 +907,15 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           }
           watchdog?.pause()
           try {
-            const decision = await turnOptions.gate(request)
+            // ADR-0239: an outbound call is answered by the outbound policy
+            // first; what it leaves to a person reaches the overlay per call.
+            const { answerWithOutboundPolicy } =
+              await import("@/lib/policy/action-review/plan-tool-call")
+            const decision = await answerWithOutboundPolicy(
+              request,
+              { unattended: false, annotateReview: false },
+              (r) => turnOptions.gate(r)
+            )
             return (activeTurnOptions === turnOptions ||
               (backgroundTurnsSupported && autonomousOptions === turnOptions && !closed)) &&
               !turnOptions.signal?.aborted
@@ -915,6 +924,15 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           } finally {
             watchdog?.resume()
           }
+        },
+        // ADR-0239 shadow mode: an outbound call the session's policy let
+        // through without asking.
+        onExplicitToolAllowed: (event) => {
+          void import("@/lib/policy/action-review/plan-tool-call")
+            .then(({ recordOutboundShadowObservation }) =>
+              recordOutboundShadowObservation(event, { unattended: false })
+            )
+            .catch(() => undefined)
         },
         // Read per call, not captured: the barrier belongs to whichever turn is
         // live, and the broker outlives any one of them.

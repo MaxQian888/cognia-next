@@ -62,7 +62,14 @@ export function hasCaptureResponder(event: {
   sessionId?: string
   turnId?: string
 }): boolean {
-  if (event.type !== "permission_request" && event.type !== "tool_result_review") return false
+  if (
+    event.type !== "permission_request" &&
+    event.type !== "tool_result_review" &&
+    // ADR-0239: the capture that answers a session's asks also records its
+    // shadow-mode outbound observations, in the run's own origin.
+    event.type !== "explicit_tool_allowed"
+  )
+    return false
   if (!event.sessionId) return false
   const owners = captureResponders.get(event.sessionId)
   if (!owners) return false

@@ -732,6 +732,36 @@ describe("createAgentSession", () => {
     expect((await capture.mock.calls[1][3].onPermissionRequest(request)).decision).toBe("deny")
   })
 
+  it("never answers a per-call ask from a remembered approval, and plans outbound asks as attended", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg(),
+      sessionId: "s_percall",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      resolveApprovedTools: () => new Set(["mcp__cognia-plugin-tools__im_broadcast"]),
+      capture,
+      transcriptFs: memFs().fsx,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: false }) })
+    const captureOptions = capture.mock.calls[0][3]
+    expect(captureOptions.outboundPolicy).toEqual({ unattended: false })
+    const request = {
+      requestId: "request",
+      toolName: "mcp__cognia-plugin-tools__im_broadcast",
+      input: { conversationKeys: ["lark:bot-a:oc_1"] },
+    }
+    expect(await captureOptions.onPermissionRequest(request)).toEqual({ decision: "allow" })
+    expect(
+      (await captureOptions.onPermissionRequest({ ...request, requiresPerCallApproval: true }))
+        .decision
+    ).toBe("deny")
+  })
+
   it("threads the resolved agent mode into the build context (and folds its permission)", async () => {
     const resolveOptions = jest.fn().mockResolvedValue({ model: "m", provider: "anthropic" })
     const planMode = {

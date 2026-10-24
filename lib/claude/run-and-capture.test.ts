@@ -62,6 +62,13 @@ jest.mock("@/lib/claude/adapter-hooks", () => ({
   dispatchPostToolUse: (...args: unknown[]) => (postToolUseMock as jest.Mock)(...args),
 }))
 
+const answerWithOutboundPolicyMock = jest.fn()
+const recordOutboundShadowMock = jest.fn(async (..._args: unknown[]) => {})
+jest.mock("@/lib/policy/action-review/plan-tool-call", () => ({
+  answerWithOutboundPolicy: (...args: unknown[]) => answerWithOutboundPolicyMock(...args),
+  recordOutboundShadowObservation: (...args: unknown[]) => recordOutboundShadowMock(...args),
+}))
+
 const subscribeAgentEventsMock = jest.fn()
 jest.mock("./ipc", () => ({
   // A delivery hint is forwarded only when given, so the many three-argument
@@ -2946,6 +2953,110 @@ describe("connector permission attribution", () => {
     fire(assistantEvent("done"))
     fire(sessionEnded())
     await running
+  })
+})
+
+describe("outbound calls (ADR-0239)", () => {
+  const SEND = "mcp__cognia-plugin-tools__connectors_send_message"
+  const policy = { unattended: true, origin: { rootSessionId: "task:t1" } }
+  const permissionRequest = (requestId: string, toolName: string, input: unknown) =>
+    ({
+      type: "permission_request",
+      sessionId: SESSION,
+      requestId,
+      toolUseID: "tu-1",
+      toolName,
+      input,
+    }) as unknown as ClaudeEvent
+
+  beforeEach(() => {
+    answerWithOutboundPolicyMock.mockReset()
+    recordOutboundShadowMock.mockClear()
+  })
+
+  it("lets the outbound policy answer first, on the input the plugin rewrote", async () => {
+    preToolUseMock.mockResolvedValueOnce({
+      action: "modify",
+      modifiedArgs: { conversationKey: "lark:bot-a:oc_1", text: "redacted" },
+    } as never)
+    answerWithOutboundPolicyMock.mockImplementation(async (request, _options, respond) =>
+      respond({ ...request, requiresPerCallApproval: true })
+    )
+    const responder = jest.fn(async () => ({ decision: "allow" as const }))
+    const running = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      onPermissionRequest: responder,
+      outboundPolicy: policy,
+    })
+    await flushUntilSubscribed()
+    fire(permissionRequest("send", SEND, { conversationKey: "lark:bot-a:oc_1", text: "raw" }))
+    for (let i = 0; i < 100 && approveToolMock.mock.calls.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1))
+    }
+    expect(answerWithOutboundPolicyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "send",
+        input: expect.objectContaining({ text: "redacted" }),
+      }),
+      policy,
+      expect.any(Function)
+    )
+    expect(responder).toHaveBeenCalledWith(
+      expect.objectContaining({ requiresPerCallApproval: true })
+    )
+    expect(approveToolMock.mock.calls[0]?.slice(0, 3)).toEqual([SESSION, "send", "allow"])
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await running
+  })
+
+  it("does not plan a tool that is not outbound", async () => {
+    const responder = jest.fn(async () => ({ decision: "allow" as const }))
+    const running = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      onPermissionRequest: responder,
+      outboundPolicy: policy,
+    })
+    await flushUntilSubscribed()
+    fire(permissionRequest("read", "Read", {}))
+    await flushMicrotasks(10)
+    expect(answerWithOutboundPolicyMock).not.toHaveBeenCalled()
+    expect(responder).toHaveBeenCalledTimes(1)
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await running
+  })
+
+  it("records a shadow observation for a session it answers, and only then", async () => {
+    const event = {
+      type: "explicit_tool_allowed",
+      sessionId: SESSION,
+      toolName: SEND,
+      input: {},
+      permissionClass: "outbound",
+    } as unknown as ClaudeEvent
+    const answering = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      onPermissionRequest: async () => ({ decision: "allow" }),
+      outboundPolicy: policy,
+    })
+    await flushUntilSubscribed()
+    fire(event)
+    for (let i = 0; i < 50 && recordOutboundShadowMock.mock.calls.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1))
+    }
+    expect(recordOutboundShadowMock).toHaveBeenCalledWith(event, policy)
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await answering
+
+    recordOutboundShadowMock.mockClear()
+    captured = null
+    const watching = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await flushUntilSubscribed()
+    fire(event)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(recordOutboundShadowMock).not.toHaveBeenCalled()
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await watching
   })
 })
 

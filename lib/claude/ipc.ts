@@ -38,6 +38,7 @@ import type { ProtocolAdapterCancelEvent } from "@cognia/agent-config-types"
 import type {
   ActionReviewActorKind,
   ActionReviewAuthority,
+  ActionReviewGrant,
 } from "@cognia/agent-config-types/action-review"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { isRemoteExecutionContext, type RemoteExecutionContext } from "./remote-execution"
@@ -811,6 +812,8 @@ export async function sendMessageFromMobile(
 export interface ApproveToolAttribution {
   authority: ActionReviewAuthority
   actor?: { kind: ActionReviewActorKind; id?: string; label?: string }
+  /** The authorization an outbound allow rests on (ADR-0239). */
+  grant?: ActionReviewGrant
 }
 
 export async function approveTool(
@@ -942,6 +945,7 @@ async function recordApprovalReceipt(
       authority: attribution.authority,
       ...(message ? { reason: message } : {}),
       ...(attribution.actor ? { actor: attribution.actor } : {}),
+      ...(attribution.grant ? { grant: attribution.grant } : {}),
     })
   } catch {
     // Audit projection must never fail an approval the user already made.

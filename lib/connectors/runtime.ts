@@ -2004,6 +2004,9 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           timeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
           idleTimeoutMs: CONNECTOR_TURN_IDLE_TIMEOUT_MS,
           signal: captureSignal,
+          // ADR-0239: the IM requester is in the thread and answers asks there;
+          // a reply into that thread needs no ask at all.
+          outboundPolicy: { unattended: false },
           onPermissionRequest: async (request) => {
             await persistCanonicalEvent({
               kind: "permission-request",

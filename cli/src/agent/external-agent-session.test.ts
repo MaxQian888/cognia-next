@@ -18,6 +18,17 @@ jest.mock("@/lib/claude/adapter-hooks", () => {
     ),
   }
 })
+// The outbound policy itself is tested in `plan-tool-call.test.ts`; here it
+// passes every call to the turn's gate unless a case says otherwise.
+const mockAnswerWithOutboundPolicy = jest.fn(
+  (request: unknown, _options: unknown, respond: (r: unknown) => unknown) => respond(request)
+)
+const mockRecordOutboundShadow = jest.fn(async (..._args: unknown[]) => {})
+jest.mock("@/lib/policy/action-review/plan-tool-call", () => ({
+  answerWithOutboundPolicy: (...args: [unknown, unknown, (r: unknown) => unknown]) =>
+    mockAnswerWithOutboundPolicy(...args),
+  recordOutboundShadowObservation: (...args: unknown[]) => mockRecordOutboundShadow(...args),
+}))
 jest.mock("./configured-plugin-tool-handle", () => ({
   makeConfiguredCliPluginToolHandle: jest.fn(() => jest.fn(async () => ({ result: "ok" }))),
 }))
@@ -436,6 +447,75 @@ describe("createExternalAgentSession", () => {
       await session.send("read", { gate: async () => ({ decision: "allow" }), onAction: receive })
       expect(receive.mock.calls.filter(([event]) => event.type === "TOOL_CALL")).toHaveLength(1)
       expect(receive.mock.calls.filter(([event]) => event.type === "TOOL_RESULT")).toHaveLength(1)
+    } finally {
+      await session.close()
+    }
+  })
+
+  it("answers a hosted tool call through the outbound policy, and records shadow observations", async () => {
+    const { manager } = fakeManager()
+    let host: Parameters<
+      NonNullable<import("./external-agent-session").ExternalAgentSessionParams["startToolHost"]>
+    >[0]
+    const request = {
+      type: "permission_request" as const,
+      sessionId: "s",
+      requestId: "send",
+      toolUseID: "send",
+      toolName: "mcp__cognia-plugin-tools__im_broadcast",
+      input: { conversationKeys: ["lark:bot-a:oc_1"] },
+    }
+    const shadow = {
+      type: "explicit_tool_allowed" as const,
+      sessionId: "s",
+      toolName: "mcp__cognia-plugin-tools__im_broadcast",
+      input: {},
+      permissionClass: "outbound" as const,
+    }
+    let answered: unknown
+    mockAnswerWithOutboundPolicy.mockImplementationOnce((req, _options, respond) =>
+      respond({ ...(req as object), requiresPerCallApproval: true })
+    )
+    const execute = (manager.execute as jest.Mock).getMockImplementation()!
+    ;(manager.execute as jest.Mock).mockImplementation(async (...args) => {
+      answered = await host.gate?.(request)
+      host.onExplicitToolAllowed?.(shadow)
+      return execute(...args)
+    })
+    const gate = jest.fn(async () => ({ decision: "deny" as const }))
+    const session = createExternalAgentSession({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "pi-rpc" },
+      manager,
+      connection: {
+        agentId: "pi-existing",
+        presetId: "pi-rpc",
+        capabilities: { negotiated: { mcpTools: true, toolExecution: true } },
+      },
+      transcriptFs: memoryTranscript().fs,
+      buildToolHostServers: () => [],
+      startToolHost: async (params) => {
+        host = params
+        return {
+          isClosed: () => false,
+          connections: () => 0,
+          cancelInFlight: jest.fn(),
+          close: async () => {},
+        } as never
+      },
+    })
+    try {
+      await session.send("send it", { gate })
+      expect(mockAnswerWithOutboundPolicy).toHaveBeenCalledWith(
+        request,
+        { unattended: false, annotateReview: false },
+        expect.any(Function)
+      )
+      expect(gate).toHaveBeenCalledWith(expect.objectContaining({ requiresPerCallApproval: true }))
+      expect(answered).toEqual({ decision: "deny" })
+      for (let i = 0; i < 50 && mockRecordOutboundShadow.mock.calls.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1))
+      }
+      expect(mockRecordOutboundShadow).toHaveBeenCalledWith(shadow, { unattended: false })
     } finally {
       await session.close()
     }

@@ -100,6 +100,8 @@ describe("createAgentTurnBotExecutor", () => {
       grantSource: { kind: "bot", id: "acme:summary" },
       sessionKey: "boti_1",
       unattendedLabel: "Bot: Summary",
+      // ADR-0239: outbound calls are planned in the installation's origin.
+      outboundOrigin: { rootSessionId: "bot:boti_1", instructionEpoch: "bot:boti_1@0" },
       usage: {
         operationId: "bot:run_1:agent-turn",
         sessionId: "bot:run_1",

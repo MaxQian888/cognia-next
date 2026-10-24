@@ -106,7 +106,13 @@ import {
   dispatchOnAssistantMessage as dispatchPluginAssistantMessage,
 } from "@/lib/claude/adapter-hooks"
 import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
-import type { ClaudeEvent, PendingApproval, SDKEventEnvelope } from "@cognia/agent-config-types"
+import type {
+  ClaudeEvent,
+  PendingApproval,
+  PermissionRequestEvent,
+  SDKEventEnvelope,
+} from "@cognia/agent-config-types"
+import { isOutboundToolId } from "@/lib/policy/risk/outbound-tools"
 import { isSubSessionId } from "@/lib/claude/team-session-id"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
@@ -349,7 +355,11 @@ function denyTimedOutApproval(approval: PendingApproval, ownerSessionId: string)
     approval.sessionId,
     approval.requestId,
     "deny",
-    "auto-denied: approval timed out"
+    "auto-denied: approval timed out",
+    undefined,
+    undefined,
+    // Nobody answered: not a refusal, so it fences nothing (ADR-0239).
+    { authority: "timeout" }
   )
     .then(() => {
       useChatStore
@@ -357,6 +367,29 @@ function denyTimedOutApproval(approval: PendingApproval, ownerSessionId: string)
         .markApprovalInterrupted(approval.requestId, approval.sessionId, "approval timed out")
     })
     .catch((error) => console.error("approval backstop deny failed", error))
+}
+
+/**
+ * Plan an outbound tool call before any allow list, auto-mode answer or card
+ * sees it (ADR-0239); see `planOutboundAsk` for what each answer means.
+ */
+async function planOutboundAsk(evt: PermissionRequestEvent, unattended: boolean) {
+  if (!isOutboundToolId(evt.toolName)) return null
+  const { planOutboundAsk: plan } = await import("@/lib/policy/action-review/plan-tool-call")
+  return plan(
+    evt,
+    { unattended, settings: () => useSettingsStore.getState().settings },
+    (decision, message, attribution) =>
+      approveTool(
+        evt.sessionId,
+        evt.requestId,
+        decision,
+        message,
+        undefined,
+        undefined,
+        attribution
+      )
+  )
 }
 
 export async function handleEvent(
@@ -787,6 +820,19 @@ export async function handleEvent(
       useChatStore.getState().markApprovalInterrupted(evt.requestId, evt.sessionId, evt.reason)
       return
     }
+    case "explicit_tool_allowed": {
+      // ADR-0239 shadow mode: an outbound call a permission shortcut let
+      // through without asking. Recorded with what the policy would have done.
+      void import("@/lib/policy/action-review/plan-tool-call")
+        .then(({ recordOutboundShadowObservation }) =>
+          recordOutboundShadowObservation(evt, {
+            unattended: !isSessionOpen(evt.sessionId),
+            settings: () => useSettingsStore.getState().settings,
+          })
+        )
+        .catch((err) => console.error("outbound shadow record failed", err))
+      return
+    }
     case "permission_request": {
       // Canonical event log: recorded at the TOP of the case so every exit path
       // below (plugin deny, plugin modify, allowlist auto-approve, subagent
@@ -857,8 +903,26 @@ export async function handleEvent(
           return
         }
       }
+      // ADR-0239: an outbound call is planned before any shortcut answers it.
+      // Nobody watches a session that is neither open, attached nor routed to
+      // a parent, so it is planned as unattended.
+      const outbound = await planOutboundAsk(
+        evt,
+        !getSubagentApprovalRoute(evt.sessionId) &&
+          !isSessionOpen(evt.sessionId) &&
+          !isSessionAttached(evt.sessionId)
+      )
+      if (outbound?.answered) return
+      const personOnly = outbound?.personOnly === true
+      const outboundFields: Pick<
+        PendingApproval,
+        "outbound" | "suppressAlwaysAllowRule" | "requiresPerCallApproval"
+      > = {
+        ...(outbound?.review ? { outbound: outbound.review } : {}),
+        ...(personOnly ? { suppressAlwaysAllowRule: true, requiresPerCallApproval: true } : {}),
+      }
       // Auto-approve if the user has previously allowed this tool.
-      if (!perCall && allowListRef.current.includes(evt.toolName)) {
+      if (!perCall && !personOnly && allowListRef.current.includes(evt.toolName)) {
         try {
           await approveTool(
             evt.sessionId,
@@ -890,14 +954,17 @@ export async function handleEvent(
               evt.sessionId,
               evt.requestId,
               "deny",
-              "auto-denied: subagent asks disabled"
+              "auto-denied: subagent asks disabled",
+              undefined,
+              undefined,
+              { authority: "system" }
             )
           } catch (err) {
             console.error("subagent auto-deny failed", err)
           }
           return
         }
-        const decided = await tryAutoModeDecision(evt)
+        const decided = !personOnly && (await tryAutoModeDecision(evt))
         if (decided) return
         pushInteractiveApproval(
           {
@@ -917,6 +984,7 @@ export async function handleEvent(
             suppressAlwaysAllowRule:
               evt.suppressAlwaysAllowRule || evt.requiresPerCallApproval || undefined,
             ...(evt.requiresPerCallApproval ? { requiresPerCallApproval: true } : {}),
+            ...outboundFields,
             origin: "subagent",
             subagentId: subagentRoute.subagentId,
             subagentRunId: subagentRoute.runId,
@@ -946,7 +1014,10 @@ export async function handleEvent(
               evt.sessionId,
               evt.requestId,
               "deny",
-              "auto-denied: remote approval timed out"
+              "auto-denied: remote approval timed out",
+              undefined,
+              undefined,
+              { authority: "timeout" }
             ).catch((err) => console.error("remote backstop deny failed", err))
           })
           // Notify a backgrounded (WS-closed) watcher via push so it can come
@@ -961,7 +1032,15 @@ export async function handleEvent(
         }
         // No remote watcher — default-deny rather than block silently.
         try {
-          await approveTool(evt.sessionId, evt.requestId, "deny", "auto-denied: session not open")
+          await approveTool(
+            evt.sessionId,
+            evt.requestId,
+            "deny",
+            "auto-denied: session not open",
+            undefined,
+            undefined,
+            { authority: "system" }
+          )
         } catch (err) {
           console.error("non-open deny failed", err)
         }
@@ -970,7 +1049,7 @@ export async function handleEvent(
       // Auto mode: auto-decide shell-command safety (deterministic rules +
       // optional small-model judge). A non-"ask" decision short-circuits the
       // approval modal; anything uncertain falls through to the manual prompt.
-      if (await tryAutoModeDecision(evt)) return
+      if (!personOnly && (await tryAutoModeDecision(evt))) return
       const approval: PendingApproval = {
         sessionId: evt.sessionId,
         requestId: evt.requestId,
@@ -986,6 +1065,7 @@ export async function handleEvent(
         suppressAlwaysAllowRule:
           evt.suppressAlwaysAllowRule || evt.requiresPerCallApproval || undefined,
         ...(evt.requiresPerCallApproval ? { requiresPerCallApproval: true } : {}),
+        ...outboundFields,
       }
       pushInteractiveApproval(approval)
       return

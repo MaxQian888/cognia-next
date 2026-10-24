@@ -65,6 +65,7 @@ import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
 import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
 import { getImElicitationContext } from "@/lib/connectors/hitl/im-elicitation-context"
 import { dispatchPreToolUse, dispatchPostToolUse } from "@/lib/claude/adapter-hooks"
+import { isOutboundToolId } from "@/lib/policy/risk/outbound-tools"
 import { deepMerge } from "@/lib/a2ui/data-model"
 import { resolveStreamedRootId } from "@/lib/a2ui/component-tree"
 import {
@@ -554,6 +555,13 @@ export interface RunAndCaptureOptions {
    * turns only; a host-run external agent answers its requests elsewhere.
    */
   pauseTimeoutWhileAwaitingPermission?: boolean
+  /**
+   * How the outbound policy (ADR-0239) plans this turn's outbound calls ahead
+   * of {@link onPermissionRequest}: whether anyone is watching, and the origin
+   * of a run that carries its own (a scheduled task, a Bot). Default: an
+   * unattended run in its session's origin.
+   */
+  outboundPolicy?: import("@/lib/policy/action-review/plan-tool-call").OutboundToolPlannerOptions
   /**
    * PostToolUse responder. Called exactly once per tool result: on the ai-sdk
    * channel via the `tool_result_review` round-trip (where a returned
@@ -1154,10 +1162,16 @@ async function captureAssistantReplyCore(
               }
             } else {
               const rewritten = !perCall && pre.action === "modify" ? pre.modifiedArgs : undefined
-              outcome = await cap.onPermissionRequest!({
-                ...req,
-                ...(rewritten ? { input: rewritten } : {}),
-              })
+              const ask = { ...req, ...(rewritten ? { input: rewritten } : {}) }
+              // ADR-0239: the outbound policy answers an outbound call first,
+              // on the input it would actually send.
+              outcome = isOutboundToolId(ask.toolName)
+                ? await (
+                    await import("@/lib/policy/action-review/plan-tool-call")
+                  ).answerWithOutboundPolicy(ask, cap.outboundPolicy ?? { unattended: true }, (r) =>
+                    cap.onPermissionRequest!(r)
+                  )
+                : await cap.onPermissionRequest!(ask)
               if (outcome.decision !== "deny" && rewritten && outcome.updatedInput === undefined) {
                 outcome = { ...outcome, updatedInput: rewritten }
               }
@@ -1444,6 +1458,19 @@ async function captureAssistantReplyCore(
         // the next streamed event once the decision lets the model continue.
         pauseIdle()
         handlePermissionRequest(evt)
+        return
+      }
+
+      if (evt.type === "explicit_tool_allowed") {
+        // ADR-0239 shadow mode: an outbound call a shortcut let through. The
+        // capture that answers this session's requests records it.
+        if (cap?.onPermissionRequest) {
+          void import("@/lib/policy/action-review/plan-tool-call")
+            .then(({ recordOutboundShadowObservation }) =>
+              recordOutboundShadowObservation(evt, cap.outboundPolicy ?? { unattended: true })
+            )
+            .catch(() => undefined)
+        }
         return
       }
 

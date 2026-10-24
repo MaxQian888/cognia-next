@@ -131,7 +131,7 @@ describe("runPluginAgentTurn", () => {
         toolName: "Edit",
         input: {},
       })
-      expect(decision).toEqual({ decision: "allow" })
+      expect(decision).toEqual({ decision: "allow", attribution: { authority: "human" } })
       return { text: "Edited.", messageId: "m1" }
     })
     const result = await runTurn(base)

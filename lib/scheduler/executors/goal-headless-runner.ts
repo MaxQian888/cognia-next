@@ -375,6 +375,8 @@ async function driveGoalLoop(
         execution: { kind: "goal", label: `Goal ${goalId.slice(0, 8)}`, taskId: goalId },
         onPermissionRequest,
         ...(permissions.parks ? { pauseTimeoutWhileAwaitingPermission: true } : {}),
+        // ADR-0239: an IM-driven goal's requester answers in the conversation.
+        outboundPolicy: { unattended: !input.onPermissionRequest },
       })
       captureText = capture.text
       lastResponse = capture.text

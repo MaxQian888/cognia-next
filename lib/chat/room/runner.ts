@@ -96,6 +96,7 @@ import {
   type PromptPreambleSummary,
 } from "@/lib/chat/prompt-preamble"
 import { denialMessageForModel, denialReasonOf } from "@/lib/chat/approval-routing"
+import { humanOutboundGrant } from "@/lib/policy/action-review/policy"
 import {
   attachRunMetadataToLastAssistant,
   buildCompletedRunMetadata,
@@ -971,6 +972,9 @@ export class RoomRunner {
     decision: ApprovalDecision,
     options?: ApprovalResponseOptions
   ): Promise<void> {
+    // A per-call ask (ADR-0201, an outbound recipient, ADR-0239) never
+    // becomes a standing grant.
+    if (approval.suppressAlwaysAllowRule && decision === "allow_always") decision = "allow"
     if (decision === "allow_always") {
       await this.sinks.settings.toggleAlwaysAllow(approval.toolName, true)
     }
@@ -981,7 +985,13 @@ export class RoomRunner {
       decision === "allow_always" ? "allow" : decision,
       ...(reason ? ([denialMessageForModel(reason)] as const) : ([] as const))
     )
-    await this.deps.ai.recordChatToolApprovalDecision(approval, decision)
+    // An allow on an outbound ask rests on a grant: this call, or the rest of
+    // the requester's instruction ("allow for this request").
+    const grant =
+      approval.outbound && decision !== "deny"
+        ? humanOutboundGrant(options?.forRequest, approval.outbound)
+        : undefined
+    await this.deps.ai.recordChatToolApprovalDecision(approval, decision, grant)
     this.sinks.approvals.clear(approval.requestId)
   }
 
@@ -1554,7 +1564,29 @@ export class RoomRunner {
         return
       }
       case "permission_request": {
-        if (sinks.settings.alwaysAllowTools().includes(evt.toolName)) {
+        // ADR-0239: an outbound call is planned before the always-allow list.
+        const outbound = deps.outbound
+          ? await deps.outbound.plan(evt, (decision, message, attribution) =>
+              deps.ipc.approveTool(
+                evt.sessionId,
+                evt.requestId,
+                decision,
+                message,
+                undefined,
+                undefined,
+                attribution
+              )
+            )
+          : null
+        if (outbound?.answered) return
+        const personOnly = outbound?.personOnly === true
+        // A per-call ask (ADR-0201, or an outbound one the plan left to a
+        // person) is never answered from the always-allow list.
+        if (
+          !personOnly &&
+          !evt.requiresPerCallApproval &&
+          sinks.settings.alwaysAllowTools().includes(evt.toolName)
+        ) {
           try {
             await deps.ipc.approveTool(
               evt.sessionId,
@@ -1605,6 +1637,12 @@ export class RoomRunner {
             : `From ${characterId}`,
           blockedPath: evt.blockedPath,
           decisionReason: evt.decisionReason,
+          ...(outbound?.review ? { outbound: outbound.review } : {}),
+          ...(personOnly || evt.requiresPerCallApproval
+            ? { suppressAlwaysAllowRule: true, requiresPerCallApproval: true }
+            : evt.suppressAlwaysAllowRule
+              ? { suppressAlwaysAllowRule: true }
+              : {}),
         })
         return
       }

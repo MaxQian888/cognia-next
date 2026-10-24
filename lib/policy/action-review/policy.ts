@@ -31,6 +31,7 @@
  * Pure: every input is passed in. `plan-context.ts` gathers the context.
  */
 
+import type { PendingOutboundReview } from "@cognia/agent-config-types"
 import type {
   ActionReviewAuthority,
   ActionReviewGrant,
@@ -198,4 +199,21 @@ export function planActionReview(
     fenced: [],
     unauthorized: [],
   })
+}
+
+/**
+ * The grant a person's allow on an outbound card rests on: `instruction` when
+ * they allowed it for the rest of the request and every recipient can be
+ * granted that long (a public link or an unnamed recipient cannot), else this
+ * one call.
+ */
+export function humanOutboundGrant(
+  forRequest: boolean | undefined,
+  review?: Pick<PendingOutboundReview, "targets">
+): ActionReviewGrant {
+  const grantable =
+    review !== undefined &&
+    review.targets.length > 0 &&
+    review.targets.every((target) => target.kind !== "public" && target.kind !== "unknown")
+  return { scope: forRequest && grantable ? "instruction" : "once" }
 }

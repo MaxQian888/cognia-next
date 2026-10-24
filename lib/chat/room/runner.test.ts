@@ -1184,6 +1184,76 @@ describe("tool approvals", () => {
     expect(w.approvals).toEqual([])
   })
 
+  // ADR-0239: a member's outbound call is planned before the always-allow list.
+  const OUTBOUND_REVIEW = {
+    enforced: true,
+    targets: [{ kind: "conversation" as const, channel: "b", recipient: "conv:lark:b:oc_1" }],
+    unauthorized: [{ kind: "conversation" as const, channel: "b", recipient: "conv:lark:b:oc_1" }],
+  }
+
+  it("lets the outbound plan answer a member's call before the always-allow list", async () => {
+    const w = createWorld()
+    w.setAlwaysAllow(["im_broadcast"])
+    w.deps.outbound = {
+      plan: async (_request, approve) => {
+        await approve("allow", undefined, { authority: "policy-default" })
+        return { answered: true }
+      },
+    }
+    w.emit(permissionFrame(SUB_A, "im_broadcast"))
+    await flush()
+    expect(w.calls.approve).toEqual([
+      [SUB_A, "req-1", "allow", undefined, undefined, undefined, { authority: "policy-default" }],
+    ])
+    expect(w.approvals).toEqual([])
+  })
+
+  it("keeps an enforced outbound ask for a person, past the always-allow list", async () => {
+    const w = createWorld()
+    w.setAlwaysAllow(["im_broadcast"])
+    w.deps.outbound = {
+      plan: async () => ({ answered: false, personOnly: true, review: OUTBOUND_REVIEW }),
+    }
+    w.emit(permissionFrame(SUB_A, "im_broadcast"))
+    await flush()
+    expect(w.calls.approve).toEqual([])
+    expect(w.approvals).toEqual([
+      expect.objectContaining({
+        outbound: OUTBOUND_REVIEW,
+        suppressAlwaysAllowRule: true,
+        requiresPerCallApproval: true,
+      }),
+    ])
+  })
+
+  it("never answers a per-call ask from the always-allow list", async () => {
+    const w = createWorld()
+    w.setAlwaysAllow(["Bash"])
+    w.emit({ ...(permissionFrame(SUB_A) as object), requiresPerCallApproval: true } as never)
+    await flush()
+    expect(w.calls.approve).toEqual([])
+    expect(w.approvals).toEqual([expect.objectContaining({ requiresPerCallApproval: true })])
+  })
+
+  it("records an outbound allow's grant and never turns it into a standing rule", async () => {
+    const w = createWorld()
+    const recorded: unknown[] = []
+    w.deps.ai.recordChatToolApprovalDecision = async (...args) => {
+      recorded.push(args)
+    }
+    const approval = {
+      sessionId: SUB_A,
+      requestId: "req-1",
+      toolName: "im_broadcast",
+      suppressAlwaysAllowRule: true,
+      outbound: OUTBOUND_REVIEW,
+    } as never
+    await w.runner.respondToApproval(approval, "allow_always", { forRequest: true })
+    expect(w.calls.alwaysAllowToggled).toEqual([])
+    expect(w.calls.approve).toEqual([[SUB_A, "req-1", "allow"]])
+    expect(recorded).toEqual([[approval, "allow", { scope: "instruction" }]])
+  })
+
   it("answers on the member sub-session and remembers allow_always", async () => {
     const w = createWorld()
     const approval = { sessionId: SUB_A, requestId: "req-1", toolName: "Bash" } as never

@@ -7,6 +7,7 @@ import { actionReviewInterruptId } from "./projection"
 import {
   __pendingChatToolReviewCount,
   __resetChatToolReviewsForTesting,
+  annotateChatToolReview,
   openChatToolReview,
   recordChatToolApprovalDecision,
   settleChatToolReview,
@@ -179,4 +180,50 @@ it("ignores a repeat capture of the same ask (one frame, many subscribers)", asy
   await open()
   expect(__pendingChatToolReviewCount()).toBe(1)
   expect(await getDb().executionRunInterrupts.count()).toBe(1)
+})
+
+describe("annotateChatToolReview (ADR-0239)", () => {
+  const FP = "a".repeat(64)
+  const annotation = {
+    targets: [{ channel: "bot-a", fingerprint: FP }],
+    rootSessionId: "root-1",
+    instructionEpoch: "msg:u1",
+    plan: { outcome: "ask" as const, enforced: true },
+  }
+
+  it("lands on the receipt whether it arrives before or after the ask opens", async () => {
+    annotateChatToolReview(SESSION, REQUEST, annotation)
+    await open("im_broadcast")
+    await recordChatToolApprovalDecision({ sessionId: SESSION, requestId: REQUEST }, "deny")
+    const receipt = await getActionReviewReceipt(REQUEST)
+    expect(receipt?.request.subject.targets).toEqual(annotation.targets)
+    expect(receipt?.request.origin).toMatchObject({
+      rootSessionId: "root-1",
+      instructionEpoch: "msg:u1",
+    })
+    expect(receipt?.request.plan).toEqual(annotation.plan)
+    // A person's refusal of a target fences it for the epoch.
+    expect(receipt?.authKeys).toHaveLength(1)
+  })
+
+  it("keeps a grant on an allow and drops it from a refusal", async () => {
+    await open("im_broadcast")
+    annotateChatToolReview(SESSION, REQUEST, annotation)
+    await recordChatToolApprovalDecision({ sessionId: SESSION, requestId: REQUEST }, "allow", {
+      scope: "instruction",
+    })
+    expect((await getActionReviewReceipt(REQUEST))?.decision.grant).toEqual({
+      scope: "instruction",
+    })
+
+    await openChatToolReview({ sessionId: SESSION, requestId: "req-2", toolName: "x" }, 5_000)
+    await settleChatToolReview({
+      sessionId: SESSION,
+      requestId: "req-2",
+      outcome: "deny",
+      authority: "human",
+      grant: { scope: "once" },
+    })
+    expect((await getActionReviewReceipt("req-2"))?.decision.grant).toBeUndefined()
+  })
 })

@@ -59,6 +59,8 @@ export type ToolApprovalDecision = "allow" | "deny" | "allow_session"
 export interface ToolApprovalSurfaceInput {
   bindingId: string
   toolName: string
+  /** A per-call ask: no "allow for session" button. */
+  perCall?: boolean
 }
 
 /**
@@ -72,19 +74,27 @@ export function buildToolApprovalSurface(input: ToolApprovalSurfaceInput): A2UIS
   const allowSession = TOOL_ALLOW_SESSION_PREFIX + input.bindingId
   const title = `工具授权 / Tool approval: ${input.toolName}`
   const prompt = `助手想运行工具 “${input.toolName}”。是否允许？ / Allow the assistant to run "${input.toolName}"?`
+  const sessionButton = !input.perCall
   return {
     components: {
       root: { component: "Card", title, children: ["prompt", "actions"] },
       prompt: { component: "Text", text: prompt },
-      actions: { component: "Row", children: ["allow", "deny", "allowSession"] },
+      actions: {
+        component: "Row",
+        children: sessionButton ? ["allow", "deny", "allowSession"] : ["allow", "deny"],
+      },
       allow: { component: "Button", text: "允许 / Allow", action: "approve", value: approve },
       deny: { component: "Button", text: "拒绝 / Deny", action: "cancel", value: deny },
-      allowSession: {
-        component: "Button",
-        text: "本会话始终允许 / Allow for session",
-        action: "approve",
-        value: allowSession,
-      },
+      ...(sessionButton
+        ? {
+            allowSession: {
+              component: "Button",
+              text: "本会话始终允许 / Allow for session",
+              action: "approve",
+              value: allowSession,
+            },
+          }
+        : {}),
     },
     dataModel: {},
     rootId: "root",
@@ -94,8 +104,12 @@ export function buildToolApprovalSurface(input: ToolApprovalSurfaceInput): A2UIS
       fallbackText: [
         `# ${title}`,
         prompt,
-        "[允许 / Allow] [拒绝 / Deny] [本会话始终允许 / Allow for session]",
-        "回复 1 允许 / 2 拒绝 / 3 本会话始终允许",
+        ...(sessionButton
+          ? [
+              "[允许 / Allow] [拒绝 / Deny] [本会话始终允许 / Allow for session]",
+              "回复 1 允许 / 2 拒绝 / 3 本会话始终允许",
+            ]
+          : ["[允许 / Allow] [拒绝 / Deny]", "回复 1 允许 / 2 拒绝"]),
       ].join("\n"),
     },
   }
@@ -150,8 +164,16 @@ export function makeImPermissionResponder(
   const audit = ctx.audit ?? appendAudit
 
   return async (req: PermissionRequestEvent): Promise<CapturePermissionDecision> => {
+    // A per-call ask (ADR-0201; an outbound call to an unauthorized
+    // recipient, ADR-0239) is a person's decision every time: neither yolo nor
+    // a remembered "allow for session" answers it, and no card offers one.
+    const perCall = req.requiresPerCallApproval === true
+
     // 1. yolo mode or a prior "allow for session" → auto-approve.
-    if (ctx.approvalMode === "yolo" || hasSessionBypass(ctx.sessionId, req.toolName)) {
+    if (
+      !perCall &&
+      (ctx.approvalMode === "yolo" || hasSessionBypass(ctx.sessionId, req.toolName))
+    ) {
       return { decision: "allow" }
     }
 
@@ -173,7 +195,7 @@ export function makeImPermissionResponder(
       })
     }
     const surfaceId = `tool_approve:${ctx.conversationKey}:${bindingId}`
-    const surface = buildToolApprovalSurface({ bindingId, toolName: req.toolName })
+    const surface = buildToolApprovalSurface({ bindingId, toolName: req.toolName, perCall })
 
     const buttons: Array<{
       actionId: string
@@ -182,11 +204,15 @@ export function makeImPermissionResponder(
     }> = [
       { actionId: TOOL_APPROVE_PREFIX + bindingId, componentId: "allow", decision: "allow" },
       { actionId: TOOL_DENY_PREFIX + bindingId, componentId: "deny", decision: "deny" },
-      {
-        actionId: TOOL_ALLOW_SESSION_PREFIX + bindingId,
-        componentId: "allowSession",
-        decision: "allow_session",
-      },
+      ...(perCall
+        ? []
+        : [
+            {
+              actionId: TOOL_ALLOW_SESSION_PREFIX + bindingId,
+              componentId: "allowSession",
+              decision: "allow_session" as const,
+            },
+          ]),
     ]
     let approvalJobId: string | undefined
     let expired = false

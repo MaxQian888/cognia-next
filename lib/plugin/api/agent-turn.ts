@@ -135,6 +135,12 @@ export interface RunPluginAgentTurnOptions {
    * chat runtime then skips it) and written here as a `plugin` row.
    */
   usage?: PluginAgentTurnUsageBooking
+  /**
+   * The origin the outbound policy (ADR-0239) plans this turn's outbound
+   * calls in, for a caller that carries its own: a Bot passes its
+   * installation's (`botPlanOrigin`). Default: the turn's session.
+   */
+  outboundOrigin?: import("@/lib/policy/action-review/plan-context").ActionReviewPlanOrigin
 }
 
 export interface PluginAgentTurnUsageBooking {
@@ -276,6 +282,10 @@ export async function runPluginAgentTurn(
       ...(request.timeoutMs ? { timeoutMs: request.timeoutMs } : {}),
       onPermissionRequest: permissions.onPermissionRequest,
       pauseTimeoutWhileAwaitingPermission: true,
+      outboundPolicy: {
+        unattended: true,
+        ...(options.outboundOrigin ? { origin: options.outboundOrigin } : {}),
+      },
       ...(usageTracker ? { onEvent: usageTracker.observe } : {}),
     })
   } catch (error) {

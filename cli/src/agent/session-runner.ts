@@ -850,11 +850,17 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
           // Idle (read) watchdog: interrupt a turn whose provider stream stalls
           // mid-flight.
           idleTimeoutMs: params.config.streamIdleTimeoutMs,
+          // A person at the terminal answers asks (ADR-0239: an outbound
+          // call to anyone but its origin thread waits for them).
+          outboundPolicy: { unattended: false },
           onPermissionRequest: async (request) => {
             const approved = resolveApprovedTools()
+            // A per-call ask (ADR-0201, an outbound recipient) is never
+            // answered from a remembered approval.
             if (
-              approved.has(request.toolName) ||
-              approved.has(approvalKey(request.toolName, request.input))
+              !request.requiresPerCallApproval &&
+              (approved.has(request.toolName) ||
+                approved.has(approvalKey(request.toolName, request.input)))
             ) {
               return { decision: "allow" }
             }

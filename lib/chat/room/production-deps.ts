@@ -44,6 +44,14 @@ export function createProductionRoomDeps(opts: ProductionRoomDepsOptions = {}): 
       closeSession: (sessionId) => closeSession(sessionId),
       approveTool: (...args) => approveTool(...(args as Parameters<typeof approveTool>)),
     },
+    // A member's outbound call is planned in its team session's origin; the
+    // person watching the room answers what the plan leaves to them.
+    outbound: {
+      plan: async (request, approve) => {
+        const { planOutboundAsk } = await import("@/lib/policy/action-review/plan-tool-call")
+        return planOutboundAsk(request, { unattended: false }, approve)
+      },
+    },
     db: {
       getSession,
       updateSession,

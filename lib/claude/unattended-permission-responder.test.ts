@@ -78,6 +78,8 @@ describe("createUnattendedPermissionResponder with a park (ADR-0224 A7)", () => 
     await expect(responder.onPermissionRequest(request("Edit"))).resolves.toEqual({
       decision: "allow",
       updatedInput: { a: 1 },
+      // The person who answered the parked request.
+      attribution: { authority: "human" },
     })
     expect(responder.needsApproval()).toBe(false)
   })
@@ -90,6 +92,7 @@ describe("createUnattendedPermissionResponder with a park (ADR-0224 A7)", () => 
     await expect(responder.onPermissionRequest(request("Edit"))).resolves.toEqual({
       decision: "deny",
       message: unattendedRefusalMessage("Edit", "not now"),
+      attribution: { authority: "human" },
     })
     expect(responder.needsApproval()).toBe(false)
     expect(responder.refusals).toEqual([{ requestId: "req-Edit", toolName: "Edit", at: 7 }])
@@ -104,6 +107,8 @@ describe("createUnattendedPermissionResponder with a park (ADR-0224 A7)", () => 
       expect(decision).toEqual({
         decision: "deny",
         message: unattendedTimeoutMessage("scheduled task", "Bash"),
+        // Nobody answered: a timeout, which fences nothing (ADR-0239).
+        attribution: { authority: "timeout" },
       })
       expect(responder.needsApproval()).toBe(true)
       expect(needsApprovalSummary(responder)).toBe("needs approval: Bash")
@@ -118,6 +123,7 @@ describe("createUnattendedPermissionResponder with a park (ADR-0224 A7)", () => 
     await expect(responder.onPermissionRequest(request("Edit"))).resolves.toEqual({
       decision: "deny",
       message: unattendedDenialMessage("bot", "Edit"),
+      attribution: { authority: "system" },
     })
     expect(responder.needsApproval()).toBe(true)
     warn.mockRestore()
@@ -131,5 +137,33 @@ describe("createUnattendedPermissionResponder with a park (ADR-0224 A7)", () => 
     await expect(createUnattendedPermissionResponder("bot").finish("failed")).resolves.toBe(
       undefined
     )
+  })
+})
+
+describe("createUnattendedPermissionResponder attribution (ADR-0239)", () => {
+  it("keeps an approver's own attribution, and names the system when nobody could ask", async () => {
+    const decision = await createUnattendedPermissionResponder("bot").onPermissionRequest(
+      request("Edit")
+    )
+    expect(decision.attribution).toEqual({ authority: "system" })
+
+    const attributed: UnattendedPark = {
+      park: async () => ({
+        kind: "approved",
+        decision: {
+          decision: "allow",
+          attribution: { authority: "human", actor: { kind: "device", id: "phone-1" } },
+        },
+      }),
+      finish: async () => {},
+      runId: () => "run-1",
+    }
+    const approved = await createUnattendedPermissionResponder("bot", {
+      park: attributed,
+    }).onPermissionRequest(request("Edit"))
+    expect(approved.attribution).toEqual({
+      authority: "human",
+      actor: { kind: "device", id: "phone-1" },
+    })
   })
 })

@@ -210,6 +210,8 @@ describe("capture response ownership", () => {
     expect(hasCaptureResponder(request)).toBe(true)
     expect(hasCaptureResponder({ ...request, turnId: undefined })).toBe(true)
     expect(hasCaptureResponder({ ...request, type: "tool_result_review" })).toBe(true)
+    // ADR-0239: the capture records its own shadow-mode outbound observations.
+    expect(hasCaptureResponder({ ...request, type: "explicit_tool_allowed" })).toBe(true)
     expect(hasCaptureResponder({ ...request, type: "event" })).toBe(false)
     expect(hasCaptureResponder({ ...request, turnId: "previous" })).toBe(false)
     expect(hasCaptureResponder({ ...request, sessionId: "another" })).toBe(false)

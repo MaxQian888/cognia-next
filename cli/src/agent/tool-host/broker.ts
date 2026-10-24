@@ -102,7 +102,7 @@ export interface ToolHostBrokerParams {
   /**
    * Shadow mode (ADR-0239): an outbound call the session's policy allowed
    * without asking, for the host to record what its outbound policy would
-   * have decided. Not wired by any caller yet (ADR-0239 WP6).
+   * have decided. `external-agent-session.ts` records it.
    */
   onExplicitToolAllowed?: (event: ExplicitToolAllowedEvent) => void
   /** Socket directory. Defaults to a private dir under the OS temp root. */

@@ -108,6 +108,38 @@ describe("buildToolApprovalSurface", () => {
   })
 })
 
+describe("buildToolApprovalSurface — per-call asks (ADR-0201, ADR-0239)", () => {
+  it("offers no allow-for-session button, in the card or its numeric fallback", () => {
+    const s = buildToolApprovalSurface({
+      bindingId: "abcd1234",
+      toolName: "im_broadcast",
+      perCall: true,
+    })
+    const comps = s.components as Record<string, { children?: string[] }>
+    expect(comps.allowSession).toBeUndefined()
+    expect(comps.actions.children).toEqual(["allow", "deny"])
+    const fallback = (s.widget as { fallbackText: string }).fallbackText
+    expect(fallback).toMatch(/回复 1 允许 \/ 2 拒绝$/)
+    expect(fallback).not.toMatch(/Allow for session/)
+  })
+})
+
+describe("makeImPermissionResponder — per-call asks", () => {
+  it("asks even in yolo mode or with a session bypass, and records no session binding", async () => {
+    grantSessionBypass("s1", "Bash")
+    const h = harness("yolo")
+    const pending = makeImPermissionResponder(h.ctx)(req({ requiresPerCallApproval: true }))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(h.enqueued).toHaveLength(1)
+    expect(h.bindings.map((b) => b.actionId)).not.toContainEqual(
+      expect.stringContaining(TOOL_ALLOW_SESSION_PREFIX)
+    )
+    expect(h.bindings).toHaveLength(2)
+    resolveApproval("s1", "req_1", { decision: "allow" })
+    await expect(pending).resolves.toEqual({ decision: "allow" })
+  })
+})
+
 describe("makeImPermissionResponder", () => {
   it("auto-allows in yolo mode without surfacing a card", async () => {
     const h = harness("yolo")

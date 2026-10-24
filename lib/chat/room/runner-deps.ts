@@ -150,7 +150,9 @@ export interface RoomRunnerAi {
   applySdkSubagentBridge: (event: SDKMessage, teamSessionId: string) => void
   recordChatToolApprovalDecision: (
     approval: PendingApproval,
-    decision: ApprovalDecision
+    decision: ApprovalDecision,
+    /** The grant an outbound allow rests on (ADR-0239). */
+    grant?: import("@cognia/agent-config-types/action-review").ActionReviewGrant
   ) => Promise<void>
 }
 
@@ -167,7 +169,28 @@ export interface RoomRunnerDeps {
   random?: () => number
   /** Waits while an auto round yields to a typing human. Defaults to a timer. */
   sleep?: (ms: number) => Promise<void>
+  /**
+   * The outbound policy (ADR-0239), consulted for a member's outbound tool
+   * call before the always-allow list. Absent: no planning, as before.
+   */
+  outbound?: RoomRunnerOutbound
 }
+
+export interface RoomRunnerOutbound {
+  /** `planOutboundAsk` (`lib/policy/action-review/plan-tool-call.ts`) for a member's ask. */
+  plan: (
+    request: { sessionId: string; requestId: string; toolName: string; input: unknown },
+    approve: (
+      decision: "allow" | "deny",
+      message: string | undefined,
+      attribution: ApproveToolAttribution
+    ) => Promise<void>
+  ) => Promise<RoomOutboundAsk | null>
+}
+
+export type RoomOutboundAsk =
+  | { answered: true }
+  | { answered: false; review?: PendingApproval["outbound"]; personOnly: boolean }
 
 export interface RoomRunnerSinks {
   status: {

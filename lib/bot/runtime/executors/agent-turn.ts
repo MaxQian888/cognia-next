@@ -89,12 +89,18 @@ export function createAgentTurnBotExecutor(deps: AgentTurnExecutorDeps = {}): Bo
     const run =
       deps.run ??
       (async ({ usage, ...input }) => {
-        const { runPluginAgentTurn } = await import("@/lib/plugin/api/agent-turn")
+        const [{ runPluginAgentTurn }, { botPlanOrigin }] = await Promise.all([
+          import("@/lib/plugin/api/agent-turn"),
+          import("@/lib/policy/action-review/plan-context"),
+        ])
         return runPluginAgentTurn(input, {
           grantSource: { kind: "bot", id: ctx.definition.id },
           sessionKey: ctx.installationId,
           unattendedLabel: `Bot: ${ctx.definition.name}`,
           usage,
+          // ADR-0239: a Bot's outbound calls are planned in its installation's
+          // origin; it has no origin thread, only its recipient list.
+          outboundOrigin: botPlanOrigin(ctx.installation),
         })
       })
 

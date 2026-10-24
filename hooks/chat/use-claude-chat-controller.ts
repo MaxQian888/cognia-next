@@ -6384,6 +6384,15 @@ export function useClaudeChat() {
       // it as a follow-up to the same turn, right behind the refusal, so the
       // one answer still redirects the work on every lane.
       const denialReason = denialReasonOf(decision, options)
+      // ADR-0239: an allow on an outbound ask rests on a grant, this one call
+      // or ("allow for this request") the rest of the requester's instruction.
+      const outboundGrant =
+        approval.outbound && decision !== "deny"
+          ? (await import("@/lib/policy/action-review/plan-tool-call")).humanOutboundGrant(
+              options?.forRequest,
+              approval.outbound
+            )
+          : undefined
       const followDenialWithReason = () => {
         if (!denialReason) return
         void sendRef.current?.(denialReason, undefined, { sessionId: approval.sessionId })
@@ -6396,7 +6405,7 @@ export function useClaudeChat() {
             await import("@/lib/connectors/hitl/approval-registry")
           if (decision === "allow_always") grantSessionBypass(approval.sessionId, approval.toolName)
           resolveApproval(approval.sessionId, approval.requestId, { decision })
-          await recordChatToolApprovalDecision(approval, decision)
+          await recordChatToolApprovalDecision(approval, decision, outboundGrant)
           store.getState().clearApproval(approval.requestId, approval.sessionId)
           followDenialWithReason()
           return
@@ -6508,7 +6517,7 @@ export function useClaudeChat() {
             // An unknown id means the turn already released it (the adapter is
             // gone). Clear the card rather than leaving a dialog the user
             // cannot dismiss.
-            if (answered) await recordChatToolApprovalDecision(approval, decision)
+            if (answered) await recordChatToolApprovalDecision(approval, decision, outboundGrant)
           } catch (error) {
             // Leave the approval mounted so the operator can retry; the agent
             // is still waiting.
@@ -6534,7 +6543,11 @@ export function useClaudeChat() {
       // "Deny" bought nothing: the same call asked again next turn, and any
       // widening in between (a new always-allow, a broader rule in Settings)
       // would start auto-approving the very thing the user just refused.
-      if (decision === "deny") {
+      //
+      // An enforced outbound refusal is not remembered here: its receipt fences
+      // the recipient for the rest of the requester's instruction, on every
+      // tool and child run (ADR-0239), and a new instruction lifts it.
+      if (decision === "deny" && !approval.outbound?.enforced) {
         const { rememberDenial } = await import("@/lib/claude/permissions/session-denials")
         rememberDenial(approval.sessionId, approval.toolName, approval.input)
       }
@@ -6646,7 +6659,7 @@ export function useClaudeChat() {
       // The receipt asserts the backend received the decision, so it is written
       // only after either dispatch path succeeds. A failure leaves the approval
       // mounted and pending, allowing the operator to retry.
-      await recordChatToolApprovalDecision(approval, decision)
+      await recordChatToolApprovalDecision(approval, decision, outboundGrant)
       // Scope the clear to the approval's own session so resolving a gate in
       // one pane never disturbs another pane's pending queue.
       store.getState().clearApproval(approval.requestId, approval.sessionId)

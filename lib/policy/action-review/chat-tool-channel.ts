@@ -11,6 +11,12 @@
  *   (modal, allowlist, auto-mode, plugin firewall, remote device, backstop
  *   deny) and calls {@link settleChatToolReview}.
  *
+ * An outbound call (ADR-0239) is also planned, by `plan-tool-call.ts`, which
+ * hands its targets, root session, instruction epoch and plan to
+ * {@link annotateChatToolReview}. The annotation is kept apart and merged at
+ * settlement, so it lands on the receipt whichever of the two subscribers saw
+ * the frame first; `toReceiptRow` derives the fence and grant keys from it.
+ *
  * ## Why authority is a required argument
  *
  * `ActionReviewAuthority` is a closed set that answers "who authorized this",
@@ -24,8 +30,11 @@
 import type {
   ActionReviewActorKind,
   ActionReviewAuthority,
+  ActionReviewGrant,
   ActionReviewOutcome,
+  ActionReviewPlan,
   ActionReviewRequest,
+  ActionReviewTarget,
 } from "@cognia/agent-config-types/action-review"
 import { ACTION_REVIEW_CONTRACT_VERSION } from "@cognia/agent-config-types/action-review"
 import { classifyRisk } from "@/lib/policy/risk/classify-risk"
@@ -45,6 +54,16 @@ export interface ChatToolReviewSettleInput {
   /** Free-text rationale already produced by the deciding path. */
   reason?: string
   actor?: { kind: ActionReviewActorKind; id?: string; label?: string }
+  /** The authorization an outbound allow rests on (ADR-0239). */
+  grant?: ActionReviewGrant
+}
+
+/** What the outbound policy knows about a call, for its receipt (ADR-0239). */
+export interface ChatToolReviewAnnotation {
+  targets: ActionReviewTarget[]
+  rootSessionId: string
+  instructionEpoch: string
+  plan: ActionReviewPlan
 }
 
 /**
@@ -56,6 +75,7 @@ export interface ChatToolReviewSettleInput {
  */
 const MAX_PENDING = 500
 const pending = new Map<string, Promise<ActionReviewRequest>>()
+const annotations = new Map<string, ChatToolReviewAnnotation>()
 
 const key = (sessionId: string, requestId: string) => `${sessionId}:${requestId}`
 
@@ -137,6 +157,39 @@ export async function openChatToolReview(
   }
 }
 
+/**
+ * Attach the outbound policy's view of a call to its review. Bounded like the
+ * reviews themselves; settling the review consumes it.
+ */
+export function annotateChatToolReview(
+  sessionId: string,
+  requestId: string,
+  annotation: ChatToolReviewAnnotation
+): void {
+  if (annotations.size >= MAX_PENDING) {
+    const oldest = annotations.keys().next()
+    if (!oldest.done) annotations.delete(oldest.value)
+  }
+  annotations.set(key(sessionId, requestId), annotation)
+}
+
+function annotated(
+  request: ActionReviewRequest,
+  annotation: ChatToolReviewAnnotation | undefined
+): ActionReviewRequest {
+  if (!annotation) return request
+  return {
+    ...request,
+    origin: {
+      ...request.origin,
+      rootSessionId: annotation.rootSessionId,
+      instructionEpoch: annotation.instructionEpoch,
+    },
+    subject: { ...request.subject, targets: annotation.targets },
+    plan: annotation.plan,
+  }
+}
+
 /** Resolve the interrupt and write the receipt. No-op for an unknown ask. */
 export async function settleChatToolReview(
   input: ChatToolReviewSettleInput,
@@ -147,17 +200,22 @@ export async function settleChatToolReview(
   if (!opening) return
   const request = await opening
   if (pending.get(mapKey) !== opening) return
+  const annotation = annotations.get(mapKey)
+  const refused = input.outcome !== "allow" && input.outcome !== "allow_always"
 
-  await projectActionReviewSettled(request, {
+  await projectActionReviewSettled(annotated(request, annotation), {
     contractVersion: ACTION_REVIEW_CONTRACT_VERSION,
     requestId: input.requestId,
     outcome: input.outcome,
     authority: input.authority,
     ...(input.reason ? { reason: input.reason } : {}),
+    // A grant describes an allow; a refusal carries none.
+    ...(input.grant && !refused ? { grant: input.grant } : {}),
     ...(input.actor ? { actor: input.actor } : {}),
     decidedAt: now,
   })
   if (pending.get(mapKey) === opening) pending.delete(mapKey)
+  if (annotations.get(mapKey) === annotation) annotations.delete(mapKey)
 }
 
 /**
@@ -197,7 +255,9 @@ async function resolveSessionRunId(sessionId: string): Promise<string | undefine
  */
 export async function recordChatToolApprovalDecision(
   approval: { sessionId: string; requestId: string },
-  decision: "allow" | "allow_always" | "deny"
+  decision: "allow" | "allow_always" | "deny",
+  /** For an outbound allow: `once`, or `instruction` for "allow for this request". */
+  grant?: ActionReviewGrant
 ): Promise<void> {
   await settleChatToolReview({
     sessionId: approval.sessionId,
@@ -205,12 +265,14 @@ export async function recordChatToolApprovalDecision(
     outcome: decision,
     authority: "human",
     actor: { kind: "local-user" },
+    ...(grant ? { grant } : {}),
   })
 }
 
 /** Test-only: drop in-flight asks so suites do not leak into each other. */
 export function __resetChatToolReviewsForTesting(): void {
   pending.clear()
+  annotations.clear()
 }
 
 /** Test-only: how many asks are awaiting a decision. */

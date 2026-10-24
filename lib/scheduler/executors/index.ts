@@ -112,9 +112,11 @@ import type {
   BuiltinToolsConfig,
   ChatSession,
   ClaudeEvent,
+  ExplicitToolAllowedEvent,
   PermissionRequestEvent,
   SendOptions,
 } from "@cognia/agent-config-types"
+import type { OutboundToolPlannerOptions } from "@/lib/policy/action-review/plan-tool-call"
 import { createSession, getSession } from "@/lib/db/sessions"
 import {
   beginAgentTaskAttempt,
@@ -952,6 +954,15 @@ async function runChatPrompt(
       ...(options.signal ? { signal: options.signal } : {}),
     }),
   })
+  // ADR-0239: the task's outbound calls are planned in the task's own origin
+  // (its root, its person-edit epoch, the conversation `/schedule` came from).
+  const outboundPolicy: OutboundToolPlannerOptions = {
+    unattended: true,
+    origin: async () => {
+      const { taskPlanOrigin } = await import("@/lib/policy/action-review/plan-context")
+      return taskPlanOrigin(task)
+    },
+  }
   // This turn answers its own permission requests. Registered under its turn
   // id so the desktop's chat listener stands back instead of racing it with
   // a "session not open" denial.
@@ -980,7 +991,7 @@ async function runChatPrompt(
         void (async () => {
           let decision: Awaited<ReturnType<UnattendedPermissionResponder["onPermissionRequest"]>>
           try {
-            decision = await permissions.onPermissionRequest({
+            const ask: PermissionRequestEvent = {
               ...request,
               type: "permission_request",
               sessionId,
@@ -988,7 +999,12 @@ async function runChatPrompt(
               toolUseID: request.toolUseID ?? requestId,
               toolName: request.toolName!,
               input: request.input ?? {},
-            })
+            }
+            const { answerWithOutboundPolicy } =
+              await import("@/lib/policy/action-review/plan-tool-call")
+            decision = await answerWithOutboundPolicy(ask, outboundPolicy, (r) =>
+              permissions.onPermissionRequest(r)
+            )
           } finally {
             releaseClock()
           }
@@ -998,12 +1014,23 @@ async function runChatPrompt(
             requestId,
             decision.decision === "allow_always" ? "allow" : decision.decision,
             decision.message,
-            decision.updatedInput
+            decision.updatedInput,
+            undefined,
+            decision.attribution
           )
         })().catch((error) =>
           log.warn("Scheduler unattended permission answer failed", { sessionId, error })
         )
       }
+      return
+    }
+    if (evtType === "explicit_tool_allowed") {
+      // ADR-0239 shadow mode: an outbound call a shortcut let through.
+      void import("@/lib/policy/action-review/plan-tool-call")
+        .then(({ recordOutboundShadowObservation }) =>
+          recordOutboundShadowObservation(evt as ExplicitToolAllowedEvent, outboundPolicy)
+        )
+        .catch(() => undefined)
       return
     }
     if (evtType === "result") {

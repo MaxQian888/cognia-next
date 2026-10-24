@@ -482,7 +482,11 @@ describe("runGoalLoopHeadless — unattended permissions", () => {
 
     await runGoalLoopHeadless(input())
     expect(decisions).toEqual([
-      { decision: "deny", message: expect.stringContaining('Tool "Edit" needs a human approval') },
+      {
+        decision: "deny",
+        message: expect.stringContaining('Tool "Edit" needs a human approval'),
+        attribution: { authority: "system" },
+      },
     ])
     expect((decisions[0] as { message: string }).message).toContain("this goal turn")
   })
@@ -582,7 +586,7 @@ describe("runGoalLoopHeadless — unattended permissions", () => {
     expect(createUnattendedParkMock).toHaveBeenCalledWith(
       expect.objectContaining({ origin: "scheduler", label: "Scheduled task: Ship" })
     )
-    expect(decisions).toEqual([{ decision: "allow" }])
+    expect(decisions).toEqual([{ decision: "allow", attribution: { authority: "human" } }])
     expect(r.needsApproval).toBeUndefined()
     expect(runCaptureMock.mock.calls[0][3]).toEqual(
       expect.objectContaining({ pauseTimeoutWhileAwaitingPermission: true })
@@ -732,7 +736,11 @@ describe("runGoalLoopHeadless — caller-supplied permission responder", () => {
     const r = await runGoalLoopHeadless(input({ onPermissionRequest }))
     expect(decisions).toEqual([
       { decision: "deny", message: "no" },
-      { decision: "deny", message: expect.stringContaining('Tool "Write" needs a human approval') },
+      {
+        decision: "deny",
+        message: expect.stringContaining('Tool "Write" needs a human approval'),
+        attribution: { authority: "system" },
+      },
     ])
     expect(handleTurnCompleteMock.mock.calls[0][0].needsApproval).toEqual(["Write"])
     expect(r).toMatchObject({
