@@ -25,6 +25,7 @@
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import type { CogniaDB } from "@/lib/db/schema"
 import type { OutboundJobRow } from "@/lib/db/connector-types"
+import type { OutboundJobAuthorization } from "@cognia/plugin-contract/lib/db/connector-types"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { scopeKeyOf } from "@/types/notifications/scope"
@@ -50,6 +51,13 @@ export interface PreparedNotificationDelivery {
   >
   /** The operation-authority key stamped on BOTH rows (unique on each). */
   operationKey: string
+  /**
+   * What authorizes the send (ADR-0239), stamped on the job. A target is only
+   * ever written by a person in settings, so a proactive target is a `policy`
+   * grant of its conversation; an origin-reply target answers the conversation
+   * the approval request came from.
+   */
+  authorizedBy: OutboundJobAuthorization
   /** Versions the commit revalidates — moved versions ⇒ replan, don't send. */
   expectedTargetVersion: number
   expectedSubscriptionVersion?: number
@@ -206,6 +214,14 @@ export async function prepareGovernedNotificationDelivery(input: {
     request,
     intent,
     operationKey: input.operationKey,
+    authorizedBy:
+      target.consent.mode === "proactive"
+        ? {
+            authority: "policy-rule",
+            grantScope: "policy",
+            policyRef: `notification-target:${input.targetId}`,
+          }
+        : { authority: "policy-default" },
     expectedTargetVersion: target.version,
     ...(expectedSubscriptionVersion !== undefined ? { expectedSubscriptionVersion } : {}),
   }
@@ -291,6 +307,7 @@ export async function persistGovernedNotificationInsideTransaction(
     idempotencyKey: prepared.operationKey,
     source: "notification",
     notificationOperationKey: prepared.operationKey,
+    authorizedBy: prepared.authorizedBy,
   }
   try {
     await txDb.outboundQueue.add(job)

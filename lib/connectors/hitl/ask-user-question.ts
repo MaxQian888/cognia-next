@@ -351,6 +351,7 @@ async function editAskUserCard(
         metadata: { idempotencyKey: `ask-user-edit:${meta.surfaceId}:${stateTag}` },
       },
       source: "ai-run",
+      authorization: { kind: "system-notice", inboundConversationKey: meta.conversationKey },
     })
   } catch {
     await (deps.audit ?? appendAudit)({
@@ -831,6 +832,7 @@ export async function runImAskUser(input: RunImAskUserInput): Promise<string> {
         metadata: { idempotencyKey: `ask-user:${ctx.sessionId}:${toolUseId}` },
       },
       source: "ai-run",
+      authorization: { kind: "system-notice", inboundConversationKey: ctx.conversationKey },
     })
     jobId = job?.id
     // The job id lets a `toggle` re-render or the settle edit resolve the

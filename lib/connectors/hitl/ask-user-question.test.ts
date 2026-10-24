@@ -705,6 +705,11 @@ describe("settleAskUserCard / refreshAskUserCard", () => {
     expect(d.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         adapterId: "tg-1",
+        // ADR-0239: an edit of the card in the conversation it was asked in.
+        authorization: {
+          kind: "system-notice",
+          inboundConversationKey: "telegram:tg-1:chat_9",
+        },
         request: expect.objectContaining({
           editTargetMessageId: "tg-msg-7",
           metadata: expect.objectContaining({
@@ -851,9 +856,15 @@ describe("runImAskUser", () => {
     expect(d.enqueue).toHaveBeenCalledTimes(1)
     const call = d.enqueue.mock.calls[0][0] as {
       adapterId: string
+      authorization: unknown
       request: { segments: Array<{ type: string }>; metadata: { idempotencyKey: string } }
     }
     expect(call.adapterId).toBe("adp-1")
+    // ADR-0239: the question card goes into the conversation that asked.
+    expect(call.authorization).toEqual({
+      kind: "system-notice",
+      inboundConversationKey: "lark:adp-1:oc_1",
+    })
     expect(call.request.segments[0].type).toBe("a2ui")
     expect(call.request.metadata.idempotencyKey).toBe("ask-user:sess-1:use-1")
     expect(pending!.meta.jobId).toBe("job-1")

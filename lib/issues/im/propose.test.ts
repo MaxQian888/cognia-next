@@ -97,6 +97,10 @@ describe("proposeIssueFromIm", () => {
       draftId: "draft1",
     })
     expect((out as { projectIds: string[] }).projectIds[0]).toBe(p1.id)
+    // ADR-0239: the card goes into the conversation the proposal came from.
+    expect(sent[0]).toMatchObject({
+      authorization: { kind: "system-notice", inboundConversationKey: CONV },
+    })
     const req = (
       sent[0] as {
         request: {

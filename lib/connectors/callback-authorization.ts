@@ -464,5 +464,9 @@ export async function notifyCallbackDenied(
       metadata: { idempotencyKey: `cb-denied:${event.triggerId}` },
     },
     source: "ai-run",
+    authorization: {
+      kind: "system-notice",
+      inboundConversationKey: event.conversationKey ?? conversationKey,
+    },
   }).catch(() => undefined)
 }

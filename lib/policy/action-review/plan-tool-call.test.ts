@@ -10,6 +10,10 @@ import {
   recordChatToolApprovalDecision,
   settleChatToolReview,
 } from "./chat-tool-channel"
+import {
+  __resetAuthorizedToolCallsForTesting,
+  authorizedOutboundToolCall,
+} from "./authorized-tool-calls"
 import { conversationTarget, outboundFingerprint } from "./outbound-targets"
 import { taskPlanOrigin } from "./plan-context"
 import {
@@ -65,6 +69,7 @@ beforeEach(async () => {
   await dbFixture.restore()
   __resetChatToolReviewsForTesting()
   __clearRequestOriginCacheForTesting()
+  __resetAuthorizedToolCallsForTesting()
 })
 
 describe("planOutboundToolCall", () => {
@@ -337,5 +342,67 @@ describe("recordOutboundShadowObservation", () => {
     expect(row.request.verdict).toBe("allow")
     expect(row.decision).toMatchObject({ outcome: "allow", authority: "policy-rule" })
     expect(row.request.subject.targets).toHaveLength(1)
+  })
+})
+
+describe("the authorized call, for the delivery it makes (ADR-0239)", () => {
+  const withUse = (key: string, requestId = "r1") => ({
+    ...send(key, requestId),
+    toolUseID: "toolu_1",
+  })
+
+  it("records a policy allow before the caller dispatches it", async () => {
+    await answerWithOutboundPolicy(withUse(THREAD_KEY), options(), jest.fn())
+    expect(authorizedOutboundToolCall("chat", "toolu_1")).toMatchObject({
+      requestId: "r1",
+      toolName: "connectors_send_message",
+      authority: "policy-default",
+      fingerprints: [outboundFingerprint(conversationTarget(THREAD_KEY)!)],
+    })
+  })
+
+  it("records a person's allow of an ask with its grant, and nothing for a refusal", async () => {
+    await answerWithOutboundPolicy(withUse(OTHER_KEY), options(), async () => ({
+      decision: "allow" as const,
+    }))
+    expect(authorizedOutboundToolCall("chat", "toolu_1")).toMatchObject({
+      authority: "human",
+      grant: { scope: "once" },
+    })
+
+    __resetAuthorizedToolCallsForTesting()
+    await answerWithOutboundPolicy(withUse(OTHER_KEY, "r2"), options(), async () => ({
+      decision: "deny" as const,
+    }))
+    expect(authorizedOutboundToolCall("chat", "toolu_1")).toBeUndefined()
+  })
+
+  it("is in place by the time planOutboundAsk's approve runs", async () => {
+    let seen: unknown
+    await planOutboundAsk(withUse(THREAD_KEY), options(), async () => {
+      seen = authorizedOutboundToolCall("chat", "toolu_1")
+    })
+    expect(seen).toMatchObject({ authority: "policy-default" })
+  })
+
+  it("is recorded by the modal's decision, before its answer is dispatched", async () => {
+    await planOutboundAsk(withUse(OTHER_KEY), options(), async () => {})
+    expect(authorizedOutboundToolCall("chat", "toolu_1")).toBeUndefined()
+    const settling = recordChatToolApprovalDecision(
+      { sessionId: "chat", requestId: "r1" },
+      "allow",
+      { scope: "instruction" }
+    )
+    // Synchronously, before the first await settles anything.
+    expect(authorizedOutboundToolCall("chat", "toolu_1")).toMatchObject({
+      authority: "human",
+      grant: { scope: "instruction" },
+    })
+    await settling
+  })
+
+  it("remembers nothing for a request that names no tool use", async () => {
+    await answerWithOutboundPolicy(send(THREAD_KEY), options(), jest.fn())
+    expect(authorizedOutboundToolCall("chat", "r1")).toBeUndefined()
   })
 })

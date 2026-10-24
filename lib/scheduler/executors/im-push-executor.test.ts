@@ -13,7 +13,7 @@ jest.mock("@/lib/db/connector-conversation-state", () => ({
   getConnectorConversationState: jest.fn(),
 }))
 jest.mock("@/lib/db/conversation-overrides", () => ({ readForResolution: jest.fn() }))
-jest.mock("@/lib/connectors/delivery-gateway", () => ({ enqueueGoverned: jest.fn() }))
+jest.mock("@/lib/connectors/delivery-gateway", () => ({ enqueueAuthorized: jest.fn() }))
 jest.mock("@/lib/connectors/audit", () => ({ appendAudit: jest.fn() }))
 jest.mock("@cognia/logging", () => {
   const stub = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
@@ -23,7 +23,7 @@ jest.mock("@cognia/logging", () => {
 import { createImPushExecutor, executeImPushTask } from "./im-push-executor"
 import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
 import { readForResolution } from "@/lib/db/conversation-overrides"
-import { enqueueGoverned } from "@/lib/connectors/delivery-gateway"
+import { enqueueAuthorized } from "@/lib/connectors/delivery-gateway"
 import { appendAudit } from "@/lib/connectors/audit"
 
 const deliveryTarget = {
@@ -68,7 +68,7 @@ function makeDeps(overrides: Partial<Parameters<typeof createImPushExecutor>[0]>
   return {
     getConversationState: jest.fn(async () => ({ deliveryTarget })),
     readOverride: jest.fn(async () => ({ proactivePush: true })),
-    enqueue: jest.fn(async () => ({ id: "job-1" })),
+    enqueue: jest.fn(async () => ({ kind: "queued", job: { id: "job-1" } })),
     audit: jest.fn(async () => ({})),
     isPiiSafe: jest.fn(() => true),
     ...overrides,
@@ -144,6 +144,12 @@ describe("executeImPushTask", () => {
         metadata: { idempotencyKey: "task-im:exec-im" },
       },
       source: "manual",
+      // Nobody watches the push when it fires: the task's own origin decides.
+      authorization: {
+        kind: "unattended",
+        ownerRef: "task:task-im",
+        origin: { rootSessionId: "task:task-im", instructionEpoch: expect.any(String) },
+      },
     })
     expect(deps.audit).toHaveBeenCalledWith(expect.objectContaining({ kind: "notify.im_pushed" }))
     expect(r.output).toMatchObject({ jobId: "job-1", adapterId: "lark-1", segments: 1 })
@@ -251,7 +257,10 @@ describe("executeImPushTask", () => {
   it("default executor uses the real modules", async () => {
     jest.mocked(getConnectorConversationState).mockResolvedValue({ deliveryTarget } as never)
     jest.mocked(readForResolution).mockResolvedValue({ proactivePush: true } as never)
-    jest.mocked(enqueueGoverned).mockResolvedValue({ id: "job-real" } as never)
+    jest.mocked(enqueueAuthorized).mockResolvedValue({
+      kind: "queued",
+      job: { id: "job-real" },
+    } as never)
     jest.mocked(appendAudit).mockResolvedValue({} as never)
     const r = await executeImPushTask(
       makeTask({ conversationKey: "c1", text: "hello there" }),
@@ -259,6 +268,21 @@ describe("executeImPushTask", () => {
       new AbortController().signal
     )
     expect(r.success).toBe(true)
-    expect(jest.mocked(enqueueGoverned)).toHaveBeenCalled()
+    expect(jest.mocked(enqueueAuthorized)).toHaveBeenCalled()
+  })
+
+  it("reports a push the outbound policy held as a draft as done, not failed", async () => {
+    const deps = makeDeps({
+      enqueue: jest.fn(async () => ({ kind: "drafted", draft: { id: "cdr_1" } })) as never,
+    })
+    const r = await createImPushExecutor(deps)(
+      makeTask({ conversationKey: "c1", text: "hi" }),
+      makeExecution(),
+      new AbortController().signal
+    )
+    expect(r).toMatchObject({ success: true, output: { draftId: "cdr_1", heldAsDraft: true } })
+    expect(deps.audit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "notify.im_pushed" })
+    )
   })
 })

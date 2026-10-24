@@ -69,6 +69,8 @@ describe("pushIssueText", () => {
       adapterId: "lark-1",
       conversationKey: "lark:lark-1:oc_1",
       source: "skill",
+      // ADR-0239: issue text goes into the conversation the skill or click came from.
+      authorization: { kind: "system-notice", inboundConversationKey: "lark:lark-1:oc_1" },
       request: {
         conversationRef: { platform: "lark", adapterId: "lark-1" },
         segments: [{ type: "text", text: "hi" }],

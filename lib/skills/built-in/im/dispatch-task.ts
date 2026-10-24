@@ -19,7 +19,13 @@ import type { ConversationReference } from "@/types/connectors/event"
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill, BuiltInSkillContext } from "../types"
 import { buildConfirmSurface } from "../_shared/confirm-surface"
-import { previewText, requireMethod, resolveChatCapableAdapter, withScopeCapture } from "./_helpers"
+import {
+  previewText,
+  requireMethod,
+  resolveChatCapableAdapter,
+  skillDeliveryAuthorization,
+  withScopeCapture,
+} from "./_helpers"
 
 const schema = z
   .object({
@@ -182,7 +188,8 @@ const skill: BuiltInSkill<typeof schema> = {
     // PII-gate the composed dispatch message before it leaves the device.
     const messageText = `【${args.title}】\n${args.brief}`
     const { hasNoLeakingPiiDeep } = await import("@cognia/redact")
-    let brief: "sent" | "pii_blocked"
+    // `drafted`: the outbound policy (ADR-0239) held it for a person to approve.
+    let brief: "sent" | "drafted" | "pii_blocked"
     if (!hasNoLeakingPiiDeep(messageText)) {
       // The chat WAS created/bound — report the partial outcome instead of
       // failing the whole call (mirrors im.create_chat's firstMessage path).
@@ -197,9 +204,9 @@ const skill: BuiltInSkill<typeof schema> = {
       })
       brief = "pii_blocked"
     } else {
-      const { enqueueGoverned: enqueueOutbound } = await import("@/lib/connectors/delivery-gateway")
+      const { enqueueAuthorized } = await import("@/lib/connectors/delivery-gateway")
       const { newIdempotencyKey } = await import("@/types/connectors/outbound")
-      await enqueueOutbound({
+      const delivered = await enqueueAuthorized({
         adapterId: target.adapterId,
         conversationKey: target.conversationKey,
         request: {
@@ -208,8 +215,11 @@ const skill: BuiltInSkill<typeof schema> = {
           metadata: { idempotencyKey: newIdempotencyKey() },
         },
         source: "skill",
+        authorization: skillDeliveryAuthorization(ctx, "im.dispatch_task", {
+          createdConversation: target.created,
+        }),
       })
-      brief = "sent"
+      brief = delivered.kind === "drafted" ? "drafted" : "sent"
     }
 
     // Auto-run: teams only (a bound character responds to the NEXT inbound in
@@ -219,6 +229,10 @@ const skill: BuiltInSkill<typeof schema> = {
     if (args.respondWithTeamId && args.startRun !== false) {
       if (brief === "pii_blocked") {
         run = "pii_blocked"
+      } else if (brief === "drafted") {
+        // A held brief holds the run: the team would post into the chat
+        // before a person approved anything going there.
+        run = "drafted"
       } else {
         const { startTeamRunFromIM } = await import("@/lib/connectors/team-dispatch")
         const res = await startTeamRunFromIM({

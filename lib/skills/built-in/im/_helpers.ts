@@ -12,6 +12,7 @@ import type { Capability } from "@/types/connectors/capability"
 import type { PlatformAdapter } from "@/types/connectors/adapter"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { ChatManagementScopeError } from "@/types/connectors/chat-management"
+import type { OutboundAuthorization } from "@/lib/policy/action-review/plan-delivery"
 import type { BuiltInSkillContext } from "../types"
 
 export interface ResolvedChatAdapter {
@@ -131,4 +132,30 @@ async function persistMissingScope(adapterId: string, scope: string): Promise<vo
 export function previewText(text: string, max = 120): string {
   const trimmed = text.trim().replace(/\s+/g, " ")
   return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed
+}
+
+/**
+ * What authorizes a delivery this skill invocation makes (ADR-0239): what the
+ * host path that started it set (`BuiltInSkillContext.outboundAuthorization`),
+ * else an unattended send in the session's origin, so a reply into the
+ * session's own conversation still goes and anything else is drafted under
+ * enforcement. `createdConversation` marks a delivery into a chat the
+ * invocation itself just created, which only a tool call can cover.
+ */
+export function skillDeliveryAuthorization(
+  ctx: BuiltInSkillContext,
+  skillId: string,
+  options: { createdConversation?: boolean } = {}
+): OutboundAuthorization {
+  const given = ctx.outboundAuthorization
+  if (given?.kind === "tool-call" && options.createdConversation) {
+    return { ...given, createdConversation: true }
+  }
+  return (
+    given ?? {
+      kind: "unattended",
+      ownerRef: `skill:${skillId}`,
+      ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
+    }
+  )
 }

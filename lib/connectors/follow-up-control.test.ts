@@ -200,6 +200,8 @@ describe("Lark follow-up controls", () => {
     expect(enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         conversationKey: "lark:lark-1:chat-1",
+        // ADR-0239: a notice into its own conversation.
+        authorization: { kind: "system-notice", inboundConversationKey: "lark:lark-1:chat-1" },
         request: expect.objectContaining({
           segments: [
             expect.objectContaining({ type: "text", text: expect.stringContaining("running") }),

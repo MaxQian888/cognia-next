@@ -24,6 +24,7 @@
 
 import type { z, ZodTypeAny } from "zod"
 
+import type { OutboundAuthorization } from "@/lib/policy/action-review/plan-delivery"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { Capability } from "@/types/connectors/capability"
 import type {
@@ -97,6 +98,15 @@ export interface BuiltInSkillContext {
    * unattended writes (the scheduler's `agentAutoCreate`) read it.
    */
   humanConfirmed?: boolean
+  /**
+   * What authorizes the connector deliveries this invocation makes (ADR-0239),
+   * set by the host path that started it: the agent's tool call
+   * (`plugin-tool-ipc`), a person's click on the IM confirm card (the bus), or
+   * a plugin (`ctx.skills.invokeBuiltIn`). Absent elsewhere (a `/lark` command,
+   * which an agent can also run): the deliveries are then planned as
+   * unattended in the session's origin (`skillDeliveryAuthorization`).
+   */
+  outboundAuthorization?: OutboundAuthorization
   /** Wall-clock for audit rows; defaults to `Date.now()`. */
   now?: number
 }

@@ -1,7 +1,15 @@
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import { enqueueGoverned } from "@/lib/connectors/delivery-gateway"
 import { handleWorkflowFanoutCallback } from "./workflow-fanout-handler"
+
+// Pass-through spy: the real gateway still queues the job, the test can see
+// what the handler asked it to authorize.
+jest.mock("@/lib/connectors/delivery-gateway", () => {
+  const actual = jest.requireActual("@/lib/connectors/delivery-gateway")
+  return { ...actual, enqueueGoverned: jest.fn(actual.enqueueGoverned) }
+})
 
 const dbFixture = createDbTestFixture()
 
@@ -69,6 +77,12 @@ describe("handleWorkflowFanoutCallback", () => {
       createdBy: "claude-tool",
     })
 
+    // ADR-0239: a confirmation of the click, in the conversation it came from.
+    expect(enqueueGoverned).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorization: { kind: "system-notice", inboundConversationKey: conversationKey },
+      })
+    )
     const jobs = await getDb().outboundQueue.toArray()
     expect(jobs).toHaveLength(1)
     expect((jobs[0].request.segments[0] as { text: string }).text).toContain("Deploy Pipeline")

@@ -281,6 +281,12 @@ describe("startConnectorGoalDriver", () => {
     expect(texts).toContain("turn one")
     expect(texts).toContain("🎯 目标已完成，共 2 回合 / Goal completed after 2 turns.")
     expect(texts).not.toContain("   ")
+    // ADR-0239: a goal turn answers the conversation the goal was set in.
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorization: { kind: "origin-reply", inboundConversationKey: "ck" },
+      })
+    )
     expect(__isConnectorGoalDriverRunningForTesting("g1")).toBe(false)
   })
 

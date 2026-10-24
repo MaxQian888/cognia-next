@@ -90,6 +90,8 @@ async function pushOutboundText(args: {
       metadata: { idempotencyKey: args.idempotencyKey },
     },
     source: "workflow",
+    // A confirmation of the click, in the conversation it came from.
+    authorization: { kind: "system-notice", inboundConversationKey: args.conversationKey },
   })
 }
 

@@ -42,6 +42,10 @@ import type {
   ActionReviewGrant,
 } from "@cognia/agent-config-types/action-review"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import {
+  authorizeOutboundToolCall,
+  forgetPlannedOutboundToolCall,
+} from "@/lib/policy/action-review/authorized-tool-calls"
 import { isRemoteExecutionContext, type RemoteExecutionContext } from "./remote-execution"
 
 const SIDECAR_EVENT = "claude://message"
@@ -826,6 +830,16 @@ export async function approveTool(
   remoteExecutionContext?: RemoteExecutionContext,
   attribution?: ApproveToolAttribution
 ): Promise<void> {
+  // ADR-0239: an outbound call's authorization is recorded before the answer
+  // leaves, so the delivery the tool makes once it runs can name it.
+  if (decision === "deny") {
+    forgetPlannedOutboundToolCall(sessionId, requestId)
+  } else if (attribution) {
+    authorizeOutboundToolCall(sessionId, requestId, {
+      authority: attribution.authority,
+      ...(attribution.grant ? { grant: attribution.grant } : {}),
+    })
+  }
   const { recordToolAuthorizationGovernance } =
     await import("@/lib/governance/producers/tool-authorization")
   const key = remoteApprovalKey(sessionId, requestId)

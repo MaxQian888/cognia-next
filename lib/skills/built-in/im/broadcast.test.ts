@@ -10,7 +10,7 @@ jest.mock("@/lib/connectors/delivery-gateway", () => ({
   enqueueGovernedMany: jest
     .fn()
     .mockImplementation(async (inputs: unknown[]) =>
-      inputs.map((_, index) => ({ id: `job-${index}` }))
+      inputs.map((_, index) => ({ kind: "queued", job: { id: `job-${index}` } }))
     ),
 }))
 
@@ -70,7 +70,7 @@ describe("im.broadcast", () => {
     expect(mAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "broadcast.enqueued",
-        fields: { targetCount: 3, enqueued: 3, skipped: 0 },
+        fields: { targetCount: 3, enqueued: 3, drafted: 0, skipped: 0 },
       })
     )
   })
@@ -105,6 +105,36 @@ describe("im.broadcast", () => {
     expect(mAudit).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "broadcast.partial_failure" })
     )
+  })
+
+  it("delivers under the call's own authorization, else the session's unattended origin", async () => {
+    const toolCall = { kind: "tool-call", sessionId: "s", toolUseId: "toolu_1" } as const
+    await skill().execute(
+      { conversationKeys: ["lark:a1:oc_1"], message: "hi" },
+      { sessionId: "s", outboundAuthorization: toolCall }
+    )
+    expect(mEnqueueMany.mock.calls[0][0][0]).toMatchObject({ authorization: toolCall })
+
+    await skill().execute({ conversationKeys: ["lark:a1:oc_1"], message: "hi" }, { sessionId: "s" })
+    expect(mEnqueueMany.mock.calls[1][0][0]).toMatchObject({
+      authorization: { kind: "unattended", ownerRef: "skill:im.broadcast", sessionId: "s" },
+    })
+  })
+
+  it("reports a target the outbound policy held as a draft", async () => {
+    mEnqueueMany.mockImplementationOnce(async (inputs: unknown[]) =>
+      inputs.map((_, index) =>
+        index === 1
+          ? { kind: "drafted", draft: { id: "cdr_1" } }
+          : { kind: "queued", job: { id: `job-${index}` } }
+      )
+    )
+    const out = (await skill().execute(
+      { conversationKeys: ["lark:a1:oc_1", "lark:a1:oc_2"], message: "hi" },
+      { sessionId: "s" }
+    )) as { enqueued: number; drafted?: number; outcomes: Array<{ status: string }> }
+    expect(out).toMatchObject({ enqueued: 1, drafted: 1, skipped: 0 })
+    expect(out.outcomes.map((o) => o.status)).toEqual(["enqueued", "drafted"])
   })
 
   it("reuses the bound session's conversationRef when available", async () => {

@@ -367,6 +367,8 @@
       },
       "outbound": {
         "ai_run_enqueued": "AI 回复已入队",
+        "denied": "已拒绝（外发授权）",
+        "drafted": "已转为草稿（外发授权）",
         "enqueued": "已入队待发",
         "queue_capped": "队列已达上限",
         "replayed": "已重放"

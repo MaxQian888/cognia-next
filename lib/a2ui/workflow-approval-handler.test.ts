@@ -3,7 +3,15 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createWorkflow } from "@/lib/db/workflows"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { publishWorkflowLifecycle } from "@/lib/workflow/publish/publication-lifecycle"
+import { enqueueGoverned } from "@/lib/connectors/delivery-gateway"
 import { handleWorkflowApprovalCallback } from "./workflow-approval-handler"
+
+// Pass-through spy: the real gateway still queues the job, the test can see
+// what the handler asked it to authorize.
+jest.mock("@/lib/connectors/delivery-gateway", () => {
+  const actual = jest.requireActual("@/lib/connectors/delivery-gateway")
+  return { ...actual, enqueueGoverned: jest.fn(actual.enqueueGoverned) }
+})
 
 const dbFixture = createDbTestFixture()
 
@@ -78,6 +86,12 @@ describe("handleWorkflowApprovalCallback", () => {
       conversationKey,
     })
 
+    // ADR-0239: a confirmation of the click, in the conversation it came from.
+    expect(enqueueGoverned).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorization: { kind: "system-notice", inboundConversationKey: conversationKey },
+      })
+    )
     const jobs = await getDb().outboundQueue.toArray()
     expect(jobs).toHaveLength(1)
     expect(jobs[0].source).toBe("workflow")

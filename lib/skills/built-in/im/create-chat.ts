@@ -13,7 +13,13 @@ import { z } from "zod"
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill } from "../types"
 import { buildConfirmSurface } from "../_shared/confirm-surface"
-import { previewText, requireMethod, resolveChatCapableAdapter, withScopeCapture } from "./_helpers"
+import {
+  previewText,
+  requireMethod,
+  resolveChatCapableAdapter,
+  skillDeliveryAuthorization,
+  withScopeCapture,
+} from "./_helpers"
 
 const schema = z.object({
   name: z.string().min(1).describe("Display name for the new group chat."),
@@ -72,7 +78,8 @@ const skill: BuiltInSkill<typeof schema> = {
       source: "im.create_chat",
     })
 
-    let firstMessage: "sent" | "pii_blocked" | undefined
+    // `drafted`: the outbound policy (ADR-0239) held it for a person to approve.
+    let firstMessage: "sent" | "drafted" | "pii_blocked" | undefined
     if (args.firstMessage?.trim()) {
       const { hasNoLeakingPiiDeep } = await import("@cognia/redact")
       if (!hasNoLeakingPiiDeep(args.firstMessage)) {
@@ -89,10 +96,9 @@ const skill: BuiltInSkill<typeof schema> = {
         })
         firstMessage = "pii_blocked"
       } else {
-        const { enqueueGoverned: enqueueOutbound } =
-          await import("@/lib/connectors/delivery-gateway")
+        const { enqueueAuthorized } = await import("@/lib/connectors/delivery-gateway")
         const { newIdempotencyKey } = await import("@/types/connectors/outbound")
-        await enqueueOutbound({
+        const delivered = await enqueueAuthorized({
           adapterId: resolved.adapterId,
           conversationKey: bootstrap.conversationKey,
           request: {
@@ -105,8 +111,13 @@ const skill: BuiltInSkill<typeof schema> = {
             metadata: { idempotencyKey: newIdempotencyKey() },
           },
           source: "skill",
+          // The chat is the one this call just created, around the members
+          // the call was authorized to reach.
+          authorization: skillDeliveryAuthorization(ctx, "im.create_chat", {
+            createdConversation: true,
+          }),
         })
-        firstMessage = "sent"
+        firstMessage = delivered.kind === "drafted" ? "drafted" : "sent"
       }
     }
 

@@ -1,0 +1,377 @@
+import {
+  isActionReviewDecision,
+  isActionReviewRequest,
+} from "@cognia/agent-config-types/action-review"
+
+import { actionReviewAuthKeyPrefix } from "@/lib/db/action-review-receipts"
+
+import {
+  __resetAuthorizedToolCallsForTesting,
+  authorizeOutboundToolCall,
+  beginOutboundToolExecution,
+  rememberPlannedOutboundToolCall,
+} from "./authorized-tool-calls"
+import { conversationTarget, outboundFingerprint } from "./outbound-targets"
+import {
+  planDelivery,
+  sameChat,
+  type DeliveryPlanInput,
+  type PlanDeliveryDeps,
+} from "./plan-delivery"
+
+const ORIGIN_KEY = "lark:bot-a:oc_origin"
+const OTHER_KEY = "lark:bot-a:oc_other"
+const ORIGIN = conversationTarget(ORIGIN_KEY)!
+const OTHER = conversationTarget(OTHER_KEY)!
+
+const enforce = { agentPermissions: { outboundAuthorization: "enforce" } }
+const shadow = { agentPermissions: {} }
+
+function deps(
+  settings: object,
+  keys: Record<string, string[]> = {},
+  extra: Partial<PlanDeliveryDeps> = {}
+): PlanDeliveryDeps {
+  let seq = 0
+  return {
+    settings: () => settings,
+    listAuthKeys: async (prefix) => keys[prefix] ?? [],
+    resolveSessionOrigin: async () => ({
+      rootSessionId: "root-1",
+      instructionEpoch: "epoch-1",
+      originThread: ORIGIN,
+    }),
+    now: () => 5_000,
+    newRequestId: () => `n${++seq}`,
+    ...extra,
+  }
+}
+
+function delivery(
+  conversationKey: string,
+  authorization?: DeliveryPlanInput["authorization"],
+  source: DeliveryPlanInput["source"] = "ai-run"
+): DeliveryPlanInput {
+  return {
+    adapterId: "bot-a",
+    conversationKey,
+    source,
+    ...(authorization ? { authorization } : {}),
+  }
+}
+
+beforeEach(() => __resetAuthorizedToolCallsForTesting())
+
+describe("sameChat", () => {
+  it("matches a chat through any bot and any thread, on the same platform", () => {
+    expect(sameChat("lark:bot-a:oc_1", "lark:bot-b:oc_1:om_thread")).toBe(true)
+    expect(sameChat("lark:bot-a:oc_1", "lark:bot-a:oc_2")).toBe(false)
+    expect(sameChat("lark:bot-a:oc_1", "slack:bot-a:oc_1")).toBe(false)
+    expect(sameChat("not a key", "lark:bot-a:oc_1")).toBe(false)
+  })
+})
+
+describe("planDelivery", () => {
+  it("sends a person's own message with no authorization and no receipt", async () => {
+    await expect(
+      planDelivery(delivery(OTHER_KEY, undefined, "manual"), deps(enforce))
+    ).resolves.toEqual({ action: "send" })
+  })
+
+  describe("origin-reply and system-notice", () => {
+    it.each(["origin-reply", "system-notice"] as const)(
+      "%s into its own chat goes, through a sibling bot too",
+      async (kind) => {
+        await expect(
+          planDelivery(
+            delivery("lark:bot-b:oc_origin", { kind, inboundConversationKey: ORIGIN_KEY }),
+            deps(enforce)
+          )
+        ).resolves.toEqual({ action: "send", authorizedBy: { authority: "policy-default" } })
+      }
+    )
+
+    it("refuses a reply to another conversation under enforcement", async () => {
+      const decision = await planDelivery(
+        delivery(OTHER_KEY, { kind: "origin-reply", inboundConversationKey: ORIGIN_KEY }),
+        deps(enforce)
+      )
+      expect(decision).toMatchObject({ action: "deny", reason: "conversation-mismatch" })
+      if (decision.action !== "deny") throw new Error("unreachable")
+      expect(decision.receipt.request.plan).toEqual({ outcome: "deny", enforced: true })
+      expect(decision.receipt.decision).toMatchObject({ outcome: "deny", authority: "policy-deny" })
+    })
+
+    it("only records the mismatch in shadow mode", async () => {
+      const decision = await planDelivery(
+        delivery(OTHER_KEY, { kind: "system-notice", inboundConversationKey: ORIGIN_KEY }),
+        deps(shadow)
+      )
+      expect(decision.action).toBe("send")
+      expect(decision.receipt?.request.plan).toEqual({ outcome: "deny", enforced: false })
+      expect(decision.receipt?.decision).toMatchObject({
+        outcome: "allow",
+        authority: "policy-default",
+      })
+    })
+  })
+
+  describe("unattended", () => {
+    it("sends into the origin thread with no receipt", async () => {
+      await expect(
+        planDelivery(
+          delivery(ORIGIN_KEY, { kind: "unattended", ownerRef: "task:t1", sessionId: "s1" }),
+          deps(enforce)
+        )
+      ).resolves.toEqual({ action: "send", authorizedBy: { authority: "policy-default" } })
+    })
+
+    it("drafts a delivery nothing authorized, keyed to its session, with a valid receipt", async () => {
+      const decision = await planDelivery(
+        delivery(OTHER_KEY, { kind: "unattended", ownerRef: "task:t1", sessionId: "s1" }),
+        deps(enforce)
+      )
+      expect(decision).toMatchObject({ action: "draft", draftSessionId: "s1" })
+      if (decision.action !== "draft") throw new Error("unreachable")
+      const { request, decision: settled } = decision.receipt
+      expect(isActionReviewRequest(request)).toBe(true)
+      expect(isActionReviewDecision(settled)).toBe(true)
+      expect(request).toMatchObject({
+        requestId: "delivery:n1",
+        origin: {
+          channel: "connector-delivery",
+          sessionId: "s1",
+          rootSessionId: "root-1",
+          instructionEpoch: "epoch-1",
+          headless: true,
+        },
+        subject: {
+          kind: "connector-delivery",
+          ref: "task:t1",
+          targets: [{ channel: "bot-a", fingerprint: outboundFingerprint(OTHER) }],
+        },
+        plan: { outcome: "draft", enforced: true },
+      })
+      // A draft is not a person's refusal: it must not fence anything.
+      expect(settled).toMatchObject({ outcome: "deny", authority: "policy-default" })
+    })
+
+    it("sends to a recipient a person granted for this request, with a receipt", async () => {
+      const prefix = actionReviewAuthKeyPrefix("grant", "root-1", "epoch-1")
+      const decision = await planDelivery(
+        delivery(OTHER_KEY, { kind: "unattended", ownerRef: "task:t1", sessionId: "s1" }),
+        deps(enforce, { [prefix]: [`${prefix}${outboundFingerprint(OTHER)}`] })
+      )
+      expect(decision).toMatchObject({
+        action: "send",
+        authorizedBy: {
+          receiptId: "delivery:n1",
+          authority: "human",
+          grantScope: "instruction",
+        },
+      })
+      expect(decision.receipt?.decision).toMatchObject({
+        outcome: "allow",
+        grant: { scope: "instruction" },
+      })
+    })
+
+    it("sends to a recipient on a configured list", async () => {
+      const decision = await planDelivery(
+        delivery(OTHER_KEY, {
+          kind: "unattended",
+          ownerRef: "bot:b1",
+          origin: { rootSessionId: "bot:b1", instructionEpoch: "bot:b1:1" },
+          policyGrants: [{ policyRef: "bot:b1", fingerprints: [outboundFingerprint(OTHER)] }],
+        }),
+        deps(enforce)
+      )
+      expect(decision).toMatchObject({
+        action: "send",
+        authorizedBy: { authority: "policy-rule", grantScope: "policy", policyRef: "bot:b1" },
+      })
+    })
+
+    it("refuses a fenced recipient, even the origin thread", async () => {
+      const prefix = actionReviewAuthKeyPrefix("deny", "root-1", "epoch-1")
+      const decision = await planDelivery(
+        delivery(ORIGIN_KEY, { kind: "unattended", ownerRef: "n:1", sessionId: "s1" }),
+        deps(enforce, { [prefix]: [`${prefix}${outboundFingerprint(ORIGIN)}`] })
+      )
+      expect(decision).toMatchObject({ action: "deny", reason: "fenced" })
+    })
+
+    it("sends in shadow mode and records that enforcement would have drafted it", async () => {
+      const decision = await planDelivery(
+        delivery(OTHER_KEY, { kind: "unattended", ownerRef: "task:t1" }),
+        deps(shadow)
+      )
+      expect(decision.action).toBe("send")
+      expect(decision.receipt?.request.plan).toEqual({ outcome: "draft", enforced: false })
+      expect(decision.receipt?.decision.reason).toMatch(/shadow mode/)
+    })
+
+    it("does not change a shadow-mode send when planning fails", async () => {
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+      const failing = {
+        resolveSessionOrigin: async () => {
+          throw new Error("db closed")
+        },
+      }
+      await expect(
+        planDelivery(
+          delivery(OTHER_KEY, { kind: "unattended", ownerRef: "x", sessionId: "s1" }),
+          deps(shadow, {}, failing)
+        )
+      ).resolves.toEqual({ action: "send" })
+      // Enforcement does not send on a failure.
+      await expect(
+        planDelivery(
+          delivery(OTHER_KEY, { kind: "unattended", ownerRef: "x", sessionId: "s1" }),
+          deps(enforce, {}, failing)
+        )
+      ).resolves.toMatchObject({ action: "draft" })
+      warn.mockRestore()
+    })
+
+    it("plans an automated source that names no authorization as unattended", async () => {
+      await expect(
+        planDelivery(delivery(OTHER_KEY, undefined, "plugin"), deps(enforce))
+      ).resolves.toMatchObject({ action: "draft", draftSessionId: "source:plugin" })
+    })
+  })
+
+  describe("tool-call", () => {
+    function allowCall(fingerprints: string[], toolName = "im_broadcast") {
+      rememberPlannedOutboundToolCall({
+        sessionId: "s1",
+        requestId: "req_1",
+        toolUseId: "toolu_1",
+        toolName,
+        fingerprints,
+      })
+      authorizeOutboundToolCall("s1", "req_1", { authority: "human", grant: { scope: "once" } })
+    }
+    const call = { kind: "tool-call", sessionId: "s1", toolUseId: "toolu_1" } as const
+
+    it("sends a target the authorized call planned, pointing at its receipt", async () => {
+      allowCall([outboundFingerprint(OTHER)])
+      await expect(
+        planDelivery(delivery(OTHER_KEY, call, "skill"), deps(enforce))
+      ).resolves.toEqual({
+        action: "send",
+        authorizedBy: { receiptId: "req_1", authority: "human", grantScope: "once" },
+      })
+    })
+
+    it("plans a target the call did not name in the session's origin", async () => {
+      allowCall([outboundFingerprint(ORIGIN)])
+      await expect(
+        planDelivery(delivery(OTHER_KEY, call, "skill"), deps(enforce))
+      ).resolves.toMatchObject({ action: "draft", draftSessionId: "s1" })
+    })
+
+    it("covers the chat a creating tool just made, and only for such a tool", async () => {
+      allowCall([], "im_create_chat")
+      await expect(
+        planDelivery(
+          delivery("lark:bot-a:oc_new", { ...call, createdConversation: true }, "skill"),
+          deps(enforce)
+        )
+      ).resolves.toMatchObject({ action: "send", authorizedBy: { receiptId: "req_1" } })
+
+      __resetAuthorizedToolCallsForTesting()
+      allowCall([], "im_broadcast")
+      await expect(
+        planDelivery(
+          delivery("lark:bot-a:oc_new", { ...call, createdConversation: true }, "skill"),
+          deps(enforce)
+        )
+      ).resolves.toMatchObject({ action: "draft" })
+    })
+
+    it("plans a call the host never authorized as unattended under enforcement", async () => {
+      await expect(
+        planDelivery(delivery(OTHER_KEY, call, "skill"), deps(enforce))
+      ).resolves.toMatchObject({ action: "draft" })
+      // …while a reply into the origin thread still goes.
+      await expect(
+        planDelivery(delivery(ORIGIN_KEY, call, "skill"), deps(enforce))
+      ).resolves.toMatchObject({ action: "send" })
+    })
+
+    it("records nothing in shadow mode for a call it has no record of", async () => {
+      await expect(planDelivery(delivery(OTHER_KEY, call, "skill"), deps(shadow))).resolves.toEqual(
+        {
+          action: "send",
+        }
+      )
+    })
+  })
+
+  describe("plugin", () => {
+    it("is covered by one of the plugin's running, authorized calls", async () => {
+      rememberPlannedOutboundToolCall({
+        sessionId: "s1",
+        requestId: "req_1",
+        toolUseId: "toolu_1",
+        toolName: "send_message",
+        fingerprints: [outboundFingerprint(OTHER)],
+      })
+      authorizeOutboundToolCall("s1", "req_1", { authority: "policy-rule" })
+      beginOutboundToolExecution("s1", "toolu_1", "plugin:p1")
+
+      await expect(
+        planDelivery(
+          delivery(OTHER_KEY, { kind: "plugin", pluginId: "p1" }, "plugin"),
+          deps(enforce)
+        )
+      ).resolves.toMatchObject({ action: "send", authorizedBy: { receiptId: "req_1" } })
+      // Another plugin cannot ride on it.
+      await expect(
+        planDelivery(
+          delivery(OTHER_KEY, { kind: "plugin", pluginId: "p2" }, "plugin"),
+          deps(enforce)
+        )
+      ).resolves.toMatchObject({ action: "draft", draftSessionId: "plugin:p2" })
+    })
+  })
+
+  describe("human and rerouted", () => {
+    it("sends what a person confirmed, with a receipt under enforcement", async () => {
+      const decision = await planDelivery(
+        delivery(OTHER_KEY, { kind: "human", actor: "connector-user" }, "skill"),
+        deps(enforce)
+      )
+      expect(decision).toMatchObject({
+        action: "send",
+        authorizedBy: { authority: "human", grantScope: "once", receiptId: "delivery:n1" },
+      })
+      expect(decision.receipt?.decision.actor).toEqual({ kind: "connector-user" })
+    })
+
+    it("carries a rerouted job's authorization to the same chat only", async () => {
+      const authorizedBy = { receiptId: "req_9", authority: "human" as const }
+      await expect(
+        planDelivery(
+          delivery(
+            "lark:bot-b:oc_other",
+            { kind: "rerouted", from: { conversationKey: OTHER_KEY, authorizedBy } },
+            "skill"
+          ),
+          deps(enforce)
+        )
+      ).resolves.toEqual({ action: "send", authorizedBy })
+      await expect(
+        planDelivery(
+          delivery(
+            "lark:bot-b:oc_elsewhere",
+            { kind: "rerouted", from: { conversationKey: OTHER_KEY, authorizedBy } },
+            "skill"
+          ),
+          deps(enforce)
+        )
+      ).resolves.toMatchObject({ action: "deny", reason: "conversation-mismatch" })
+    })
+  })
+})

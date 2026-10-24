@@ -30,7 +30,7 @@
  */
 
 import type { NotificationRecord } from "@/types/notifications"
-import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
+import { enqueueAuthorized } from "@/lib/connectors/delivery-gateway"
 import { appendAudit } from "@/lib/connectors/audit"
 import { buildA2UISegment } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { findSessionByConversationKey } from "@/lib/connectors/session-bindings"
@@ -43,7 +43,7 @@ import { buildNotificationCardSurface } from "./im-card"
 export interface ImDeliverDeps {
   findSession?: typeof findSessionByConversationKey
   readOverride?: typeof readForResolution
-  enqueue?: typeof enqueueOutbound
+  enqueue?: typeof enqueueAuthorized
   audit?: typeof appendAudit
   /** PII gate (defaults to `hasNoLeakingPii`). Returns true when SAFE to send. */
   isPiiSafe?: (text: string) => boolean
@@ -149,6 +149,7 @@ export type ImDeliverOutcome =
         | "delivery-target-missing" // bound session lacks a delivery target
         | "opt-in-off" // proactivePush not enabled (fail-closed default)
         | "pii-blocked" // gated content failed the PII scan
+        | "held-as-draft" // the outbound policy held it for a person (ADR-0239)
       conversationKey?: string
     }
   | { status: "error" } // transport/persist fault — evidence is in the audit log
@@ -165,7 +166,7 @@ export async function deliverRecordToIM(
 ): Promise<ImDeliverOutcome> {
   const findSession = deps.findSession ?? findSessionByConversationKey
   const readOverride = deps.readOverride ?? readForResolution
-  const enqueue = deps.enqueue ?? enqueueOutbound
+  const enqueue = deps.enqueue ?? enqueueAuthorized
   const audit = deps.audit ?? appendAudit
   const isPiiSafe = deps.isPiiSafe ?? hasNoLeakingPii
   const getSession = deps.getSession ?? defaultGetSession
@@ -228,7 +229,7 @@ export async function deliverRecordToIM(
         ? buildA2UISegment(`notification:${rec.id}`, buildNotificationCardSurface({ record: rec }))
         : { type: "text" as const, text: text || rec.title }
 
-    await enqueue({
+    const delivered = await enqueue({
       adapterId: binding.adapterId,
       conversationKey,
       request: {
@@ -240,7 +241,17 @@ export async function deliverRecordToIM(
         metadata: { idempotencyKey: `notify:${rec.id}` },
       },
       source: "ai-run",
+      // The conversation is the one the record's session is bound to, so it is
+      // that session's origin thread; a fence on it still holds (ADR-0239).
+      authorization: {
+        kind: "unattended",
+        ownerRef: `notification:${rec.id}`,
+        ...(session?.id ? { sessionId: session.id } : {}),
+      },
     })
+    if (delivered.kind === "drafted") {
+      return { status: "skipped", reason: "held-as-draft", conversationKey }
+    }
     await audit({
       adapterId: binding.adapterId,
       kind: "notify.im_pushed",

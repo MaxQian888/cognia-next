@@ -337,11 +337,17 @@ describe("notifyCallbackDenied", () => {
       enqueue,
     })
     const input = enqueue.mock.calls[0][0] as {
+      authorization: unknown
       request: {
         conversationRef: { channelId: string; threadTs?: string }
         metadata: { idempotencyKey: string }
       }
     }
+    // ADR-0239: a notice into the conversation the click came from.
+    expect(input.authorization).toEqual({
+      kind: "system-notice",
+      inboundConversationKey: "lark:lk-1:oc_1",
+    })
     expect(input.request.metadata.idempotencyKey).toBe("cb-denied:act_1")
     expect(input.request.conversationRef.channelId).toBe("oc_1")
     expect(input.request.conversationRef.threadTs).toBe("omt_5")

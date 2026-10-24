@@ -78,6 +78,14 @@ export type AuditKind =
   | "inbound.media_model_blocked"
   | "outbound.enqueued"
   | "outbound.ai_run_enqueued"
+  // The outbound policy (ADR-0239) held an automated delivery as a draft for a
+  // person to approve: nothing authorized its recipient. Carries
+  // `fields.draftId`, `fields.source`, `fields.receiptId`.
+  | "outbound.drafted"
+  // The outbound policy refused an automated delivery: its recipient was
+  // fenced, or a reply named a conversation other than the one it answers.
+  // Carries `fields.source`, `fields.reason`, `fields.receiptId`.
+  | "outbound.denied"
   // outboundQueue soft cap (5000) tripped — `enqueueOutbound` aged the
   // oldest pending row to `deadlettered`. Carries `fields.jobId`,
   // `fields.ageMs`, `fields.createdAt`, `fields.source`. Drives the

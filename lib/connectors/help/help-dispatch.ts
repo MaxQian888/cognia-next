@@ -152,6 +152,7 @@ export async function maybeHandleHelpCommand(
       metadata: { idempotencyKey: newIdempotencyKey() },
     },
     source: "ai-run",
+    authorization: { kind: "system-notice", inboundConversationKey: event.conversationKey },
   })
   await audit({
     adapterId: event.adapterId,
@@ -206,6 +207,7 @@ export async function maybeSendWelcome(
       metadata: { idempotencyKey: `welcome:${event.conversationKey}` },
     },
     source: "ai-run",
+    authorization: { kind: "system-notice", inboundConversationKey: event.conversationKey },
   })
   await audit({
     adapterId: event.adapterId,

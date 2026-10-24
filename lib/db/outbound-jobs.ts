@@ -21,6 +21,7 @@ import type {
   OutboundJobSource,
   OutboundJobWorkflowSource,
 } from "./connector-types"
+import type { OutboundJobAuthorization } from "@cognia/plugin-contract/lib/db/connector-types"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import { getDb } from "./schema"
 import { recordTombstones } from "@/lib/sync/tombstones"
@@ -181,6 +182,11 @@ export interface EnqueueInput {
   sourceWorkflow?: OutboundJobWorkflowSource
   /** Manual transcript committed atomically with this delivery job. */
   localMessage?: StoredMessage
+  /**
+   * What authorized the delivery (ADR-0239). Set by the delivery gateway
+   * after it plans the delivery; persisted verbatim.
+   */
+  authorizedBy?: OutboundJobAuthorization
 }
 
 export async function enqueueOutbound(input: EnqueueInput): Promise<OutboundJobRow> {
@@ -251,6 +257,7 @@ export async function enqueueOutboundMany(
             ...(input.source === "workflow" && input.sourceWorkflow
               ? { sourceWorkflow: input.sourceWorkflow }
               : {}),
+            ...(input.authorizedBy ? { authorizedBy: input.authorizedBy } : {}),
           } satisfies OutboundJobRow
         })
         return db.outboundQueue.bulkAdd(created).then(async () => {

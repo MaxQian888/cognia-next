@@ -278,6 +278,9 @@ export async function connectorsSendMessage(input: SendMessageInput): Promise<Se
     characterId: input.characterId,
     prompt: input.prompt,
     sourceTaskId: input.sourceTaskId ?? "external-bridge",
+    // An external agent asked for it. Its scope grant lets it ask; it does not
+    // authorize a recipient, so the reply is held unless one is (ADR-0239).
+    authorization: { kind: "unattended", ownerRef: "external-bridge" },
   }
   const result = await runConnectorDigestTurn(digestInput)
   if (!result.success) {

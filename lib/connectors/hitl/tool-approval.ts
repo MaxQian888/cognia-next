@@ -331,6 +331,7 @@ export function makeImPermissionResponder(
           metadata: { idempotencyKey: newIdempotencyKey() },
         },
         source: "ai-run",
+        authorization: { kind: "system-notice", inboundConversationKey: ctx.conversationKey },
       })
       approvalJobId = approvalJob?.id
       await audit({

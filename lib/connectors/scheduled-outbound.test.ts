@@ -17,6 +17,7 @@ import {
   installScheduledOutboundHandlers,
 } from "./scheduled-outbound"
 import { PiiGateBlocked } from "@/lib/connectors/ai-loop/safe-send-prompt"
+import { getConnectorDeliveryGateway } from "./delivery-gateway"
 
 // ── module mocks (hoisted) ──────────────────────────────────────────────────
 
@@ -43,9 +44,18 @@ jest.mock("@/lib/scheduler/task-scheduler", () => ({
   })),
 }))
 
+// Every named logger is the same stub: modules this suite loads only for their
+// imports (the agent-team store, via the sandbox chain) create child loggers of
+// their own at module scope.
 jest.mock("@cognia/logging", () => {
-  const stub = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }
-  return { loggers: { scheduler: stub, app: stub }, createLogger: () => stub }
+  const stub: Record<string, unknown> = {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+  }
+  stub.child = () => stub
+  return { loggers: new Proxy({}, { get: () => stub }), createLogger: () => stub }
 })
 
 const mockSession: ChatSession = {
@@ -1069,5 +1079,139 @@ describe("connection:scheduled:digest executor — full AI loop", () => {
     expect(resolveSendOptionsImpl).toHaveBeenCalledWith(
       expect.objectContaining({ memoryDeps, memoryUserMessage: "summarise" })
     )
+  })
+})
+
+describe("the outbound policy on scheduled deliveries (ADR-0239)", () => {
+  beforeEach(() => installScheduledOutboundHandlers())
+  afterEach(() => jest.restoreAllMocks())
+
+  async function persistTarget(conversationKey: string, adapterId: string, chat: string) {
+    await getDb().connectorConversationStates.put({
+      conversationKey,
+      adapterId,
+      activationStatus: "inactive",
+      deliveryReadiness: "unknown",
+      deliveryTarget: {
+        address: {
+          conversationKey,
+          platform: "discord",
+          adapterId,
+          scopeKind: "channel",
+          containerId: chat,
+        },
+        conversationRef: { platform: "discord", adapterId, channelId: chat },
+        refreshedAt: 1,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    })
+  }
+
+  it("plans a scheduled send as the task's, in the task's origin", async () => {
+    const conversationKey = "discord:adp_d:chat_policy"
+    await persistTarget(conversationKey, "adp_d", "chat_policy")
+    const spy = jest.spyOn(getConnectorDeliveryGateway(), "enqueueAuthorized")
+
+    const result = await callExecutor(
+      "connection:outbound:send",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_d",
+        conversationKey,
+        segments: [{ type: "text", text: "hello" }],
+      })
+    )
+
+    expect(result.success).toBe(true)
+    expect(spy.mock.calls[0][0].authorization).toEqual({
+      kind: "unattended",
+      ownerRef: "task:t1",
+      origin: expect.objectContaining({ rootSessionId: "task:t1" }),
+    })
+    expect(await getDb().outboundQueue.count()).toBe(1)
+  })
+
+  it("succeeds without queueing when the send is held as a draft", async () => {
+    const conversationKey = "discord:adp_d:chat_held"
+    await persistTarget(conversationKey, "adp_d", "chat_held")
+    jest
+      .spyOn(getConnectorDeliveryGateway(), "enqueueAuthorized")
+      .mockResolvedValue({ kind: "drafted", draft: { id: "cdr_1" } as never })
+
+    const result = await callExecutor(
+      "connection:outbound:send",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_d",
+        conversationKey,
+        segments: [{ type: "text", text: "held" }],
+      })
+    )
+
+    // Not retried into a second draft: the task did what it can.
+    expect(result).toEqual({ success: true, output: { draftId: "cdr_1", heldAsDraft: true } })
+    expect(await getDb().outboundQueue.count()).toBe(0)
+  })
+
+  it("plans a scheduled digest's reply as the task's", async () => {
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => ({
+        text: "Digest.",
+        messageId: "msg-policy",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as never
+    )
+    const spy = jest.spyOn(getConnectorDeliveryGateway(), "enqueueAuthorized")
+
+    const result = await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "digest",
+      })
+    )
+
+    expect(result.success).toBe(true)
+    expect(spy.mock.calls[0][0].authorization).toEqual({
+      kind: "unattended",
+      ownerRef: "task:t1",
+      origin: expect.objectContaining({ rootSessionId: "task:t1" }),
+    })
+  })
+
+  it("reports a digest reply held as a draft with the turn's message", async () => {
+    __setDigestSendPromptForTesting(
+      jest.fn(async () => ({
+        text: "Digest.",
+        messageId: "msg-held",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as never
+    )
+    jest
+      .spyOn(getConnectorDeliveryGateway(), "enqueueAuthorized")
+      .mockResolvedValue({ kind: "drafted", draft: { id: "cdr_2" } as never })
+
+    const result = await callExecutor(
+      "connection:scheduled:digest",
+      makeTask(),
+      makeExecution({
+        adapterId: "adp_discord",
+        conversationKey: "discord:adp_discord:ch_test",
+        characterId: "char_001",
+        prompt: "digest",
+      })
+    )
+
+    expect(result).toEqual({
+      success: true,
+      output: { draftId: "cdr_2", heldAsDraft: true, assistantMessageId: "msg-held" },
+    })
+    expect(await getDb().outboundQueue.count()).toBe(0)
   })
 })

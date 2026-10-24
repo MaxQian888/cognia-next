@@ -31,6 +31,7 @@ import {
   registerRunningAdapter,
   unregisterRunningAdapter,
 } from "@/lib/connectors/lifecycle"
+import type { OutboundJobRow } from "@/lib/db/connector-types"
 import type { PlatformAdapter } from "@/types/connectors/adapter"
 
 const binding: ExecutionRunBinding = {
@@ -712,6 +713,53 @@ describe("execution run presentation projection", () => {
     await expect(freeze).resolves.toBe(false)
     expect((await getExecutionRunBinding(binding.id))?.status).toBe("disabled")
     unregisterRunningAdapter(adapter.id)
+  })
+
+  it("queues an append card as a notice into the run's own conversation (ADR-0239)", async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    __resetLifecycleForTesting()
+    await createExecutionRun({
+      id: snapshot.runId,
+      kind: "agent-turn",
+      sourceId: "append-authorization",
+      title: "Agent run",
+      status: "running",
+      currentRevision: snapshot.revision,
+      latestSnapshot: snapshot,
+      startedAt: 1,
+      updatedAt: 2,
+    })
+    await createExecutionRunBinding({
+      ...binding,
+      deliveryMode: "append",
+      lastProjectedRevision: snapshot.revision,
+      deliveryTarget: {
+        address: {
+          conversationKey: binding.conversationKey,
+          platform: "lark",
+          adapterId: binding.adapterId,
+          scopeKind: "private",
+          containerId: "chat-1",
+        },
+        conversationRef: { platform: "lark", adapterId: binding.adapterId, channelId: "chat-1" },
+        refreshedAt: 1,
+      },
+    })
+
+    const heartbeat = heartbeatExecutionRunBinding(binding.id)
+    let job: OutboundJobRow | undefined
+    for (let i = 0; i < 200 && !job; i += 1) {
+      job = (await getDb().outboundQueue.toArray())[0]
+      if (!job) await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    expect(job).toMatchObject({
+      conversationKey: binding.conversationKey,
+      authorizedBy: { authority: "policy-default" },
+    })
+    // Let the card's delivery settle so the heartbeat finishes.
+    await getDb().outboundQueue.update(job!.id, { status: "sent", platformMessageId: "m-1" })
+    await heartbeat
   })
 
   it("registers heartbeat work before DB reads so freeze drains stale progress updates", async () => {

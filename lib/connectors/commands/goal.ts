@@ -226,6 +226,7 @@ export function startConnectorGoalDriver(
         metadata: { idempotencyKey: newIdempotencyKey() },
       },
       source: "ai-run",
+      authorization: { kind: "origin-reply", inboundConversationKey: args.conversationKey },
     })
   }
 

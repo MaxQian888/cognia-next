@@ -38,6 +38,7 @@ import type {
 } from "@cognia/agent-config-types/action-review"
 import { ACTION_REVIEW_CONTRACT_VERSION } from "@cognia/agent-config-types/action-review"
 import { classifyRisk } from "@/lib/policy/risk/classify-risk"
+import { authorizeOutboundToolCall, forgetPlannedOutboundToolCall } from "./authorized-tool-calls"
 import { projectActionReviewOpened, projectActionReviewSettled } from "./projection"
 
 export interface ChatToolReviewOpenInput {
@@ -252,6 +253,10 @@ async function resolveSessionRunId(sessionId: string): Promise<string | undefine
  * It also preserves `allow_always`, which the wire call collapses to `"allow"`
  * — the audit trail should show that a standing rule was created, not just
  * that this one call was let through.
+ *
+ * An outbound call's authorization (`authorized-tool-calls.ts`) is recorded
+ * synchronously, before the first `await`, so it is in place before the
+ * caller dispatches the answer by either branch.
  */
 export async function recordChatToolApprovalDecision(
   approval: { sessionId: string; requestId: string },
@@ -259,6 +264,14 @@ export async function recordChatToolApprovalDecision(
   /** For an outbound allow: `once`, or `instruction` for "allow for this request". */
   grant?: ActionReviewGrant
 ): Promise<void> {
+  if (decision === "deny") {
+    forgetPlannedOutboundToolCall(approval.sessionId, approval.requestId)
+  } else {
+    authorizeOutboundToolCall(approval.sessionId, approval.requestId, {
+      authority: "human",
+      ...(grant ? { grant } : {}),
+    })
+  }
   await settleChatToolReview({
     sessionId: approval.sessionId,
     requestId: approval.requestId,

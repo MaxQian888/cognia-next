@@ -23,6 +23,10 @@
 
 import type { PluginToolContext } from "@/types/plugin"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import {
+  beginOutboundToolExecution,
+  endOutboundToolExecution,
+} from "@/lib/policy/action-review/authorized-tool-calls"
 import { WORKFLOW_RUNNER_TOOL_NAME } from "@/lib/workflow/publish/runner-tool"
 import { ASK_USER_TOOL_NAME } from "./ask-user-tool"
 import { DISPATCH_AGENT_TOOL_NAME, TASK_TOOL_NAME } from "./agents/dispatch-agent-tool"
@@ -693,6 +697,28 @@ export async function handlePluginToolExec(
   request: PluginToolExecRequest,
   hostDeps: PluginToolExecHostDeps = {}
 ): Promise<PluginToolExecResponse> {
+  try {
+    return await runPluginToolExec(request, hostDeps)
+  } finally {
+    // ADR-0239: an outbound call's authorization covers what it delivers
+    // while it runs, and ends when it returns.
+    endOutboundToolExecution(request.sessionId, request.toolUseId)
+  }
+}
+
+/** The call's identity, for the deliveries an outbound tool makes. */
+function toolCallAuthorization(request: PluginToolExecRequest) {
+  return {
+    kind: "tool-call" as const,
+    sessionId: request.sessionId,
+    toolUseId: request.toolUseId,
+  }
+}
+
+async function runPluginToolExec(
+  request: PluginToolExecRequest,
+  hostDeps: PluginToolExecHostDeps
+): Promise<PluginToolExecResponse> {
   const baseResponse = {
     type: "plugin_tool_response" as const,
     sessionId: request.sessionId,
@@ -932,7 +958,10 @@ export async function handlePluginToolExec(
     if (isTeamBuiltinTool(request.name)) {
       const caller = getTeamDispatchContext(request.sessionId)
       const result = caller
-        ? await runTeamBuiltinTool(request.name, request.args, caller)
+        ? await runTeamBuiltinTool(request.name, request.args, {
+            ...caller,
+            toolCall: toolCallAuthorization(request),
+          })
         : `Error: ${request.name} is only available to a teammate during a team run.`
       return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
@@ -975,6 +1004,13 @@ export async function handlePluginToolExec(
         // name is what made those capabilities available to exactly one plugin.
         const { createInvocationProjectAPI } = await import("@/lib/plugin/api/project-api")
         const invocationProject = createInvocationProjectAPI(resolved.pluginId, request.sessionId)
+        // A plugin's delivery cannot name its call; it is matched against the
+        // plugin's own running calls instead (ADR-0239).
+        beginOutboundToolExecution(
+          request.sessionId,
+          request.toolUseId,
+          `plugin:${resolved.pluginId}`
+        )
         try {
           const { result } = await invokePluginTool(resolved.pluginId, request.name, request.args, {
             signal: request.abortSignal,
@@ -1014,7 +1050,10 @@ export async function handlePluginToolExec(
       // model only held on the slash-command path.
       const { resolveBuiltInSkillContext } = await import("@/lib/skills/built-in/context")
       const skillCtx = await resolveBuiltInSkillContext(request.sessionId)
-      const result = await runBuiltInSkill(builtIn.id, request.args, skillCtx)
+      const result = await runBuiltInSkill(builtIn.id, request.args, {
+        ...skillCtx,
+        outboundAuthorization: toolCallAuthorization(request),
+      })
       // The dispatcher returns a discriminated union; on `denied` /
       // `pending_hitl` / `error` we surface the structured payload so the
       // model can see the reason. The SDK turns this into a tool result

@@ -143,6 +143,8 @@ export async function proposeIssueFromIm(
       metadata: { idempotencyKey: `issue-propose:${draft.draftId}` },
     },
     source: "skill",
+    // Issue cards go into the conversation the skill or the click came from.
+    authorization: { kind: "system-notice", inboundConversationKey: input.conversationKey },
   })
   return {
     status: "proposed",

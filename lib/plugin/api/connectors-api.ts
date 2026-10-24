@@ -52,7 +52,10 @@ import { shouldRespondToMessage } from "@/lib/connectors/at-gate"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import { waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
 import { requireMethod, withScopeCapture } from "@/lib/skills/built-in/im/_helpers"
-import { getConnectorDeliveryGateway } from "@/lib/connectors/delivery-gateway"
+import {
+  ConnectorDeliveryHeldError,
+  getConnectorDeliveryGateway,
+} from "@/lib/connectors/delivery-gateway"
 import { appendAudit } from "@/lib/connectors/audit"
 import { createA2UIBuilder } from "@/lib/connectors/a2ui-bridge/surface-builder"
 import {
@@ -284,13 +287,18 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
     uploadFile: (adapterId, file) => getBus().uploadFileOutbound(adapterId, file),
     streamReply: (adapterId, req) => getBus().streamReplyOutbound(adapterId, req),
     enqueueSend: async (adapterId, conversationKey, req, opts) => {
-      const row = await getConnectorDeliveryGateway().enqueue({
+      const result = await getConnectorDeliveryGateway().enqueueAuthorized({
         adapterId,
         conversationKey,
         request: req,
         source: "plugin",
+        // Covered by one of this plugin's running, authorized tool calls, or
+        // planned as the plugin's own unattended send (ADR-0239).
+        authorization: { kind: "plugin", pluginId },
         ...(opts?.nextAttemptAt !== undefined ? { nextAttemptAt: opts.nextAttemptAt } : {}),
       })
+      if (result.kind === "drafted") throw new ConnectorDeliveryHeldError(result.draft.id)
+      const row = result.job
       return {
         jobId: row.id,
         adapterId: row.adapterId,

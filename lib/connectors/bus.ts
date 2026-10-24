@@ -3241,6 +3241,8 @@ export class ConnectorBus {
             conversationKey: resolvedConversationKey ?? event.adapterId,
           },
           hitlBypass: true,
+          // The person in the chat confirmed this very invocation (ADR-0239).
+          outboundAuthorization: { kind: "human", actor: "connector-user" },
         })
       } catch (err) {
         decide({ status: "failed" })

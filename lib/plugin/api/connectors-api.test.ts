@@ -804,6 +804,32 @@ describe("createConnectorsAPI", () => {
       })
     })
 
+    it("plans the send as this plugin's, and rejects one held as a draft (ADR-0239)", async () => {
+      const { getConnectorDeliveryGateway, ConnectorDeliveryHeldError } =
+        await import("@/lib/connectors/delivery-gateway")
+      const gateway = getConnectorDeliveryGateway()
+      const spy = jest.spyOn(gateway, "enqueueAuthorized")
+      const api = createConnectorsAPI(PLUGIN)
+      const req = {
+        conversationRef: { conv: "c1" },
+        segments: [{ type: "text", text: "release is out" }],
+        metadata: { idempotencyKey: "idem-10" },
+      }
+      await api.enqueueSend("tg", "telegram:tg:42", req as never)
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({ authorization: { kind: "plugin", pluginId: PLUGIN } })
+      )
+
+      spy.mockResolvedValueOnce({ kind: "drafted", draft: { id: "cdr_9" } as never })
+      const held = api.enqueueSend("tg", "telegram:tg:42", req as never)
+      await expect(held).rejects.toBeInstanceOf(ConnectorDeliveryHeldError)
+      await expect(held).rejects.toMatchObject({
+        code: "connector_delivery_held",
+        draftId: "cdr_9",
+      })
+      spy.mockRestore()
+    })
+
     it("preserves recipient-only intent through the governed enqueue API", async () => {
       const api = createConnectorsAPI(PLUGIN)
       const req = {

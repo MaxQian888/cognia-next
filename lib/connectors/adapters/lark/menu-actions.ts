@@ -67,15 +67,17 @@ function p2pReply(
   slot: string,
   text: string
 ): Parameters<typeof enqueueOutbound>[0] {
+  const conversationKey = `lark:${adapterId}:${outcome.chatId ?? outcome.openId}`
   return {
     adapterId,
-    conversationKey: `lark:${adapterId}:${outcome.chatId ?? outcome.openId}`,
+    conversationKey,
     request: {
       conversationRef: { platform: "lark", adapterId, channelId: outcome.chatId ?? outcome.openId },
       segments: [{ type: "text", text }],
       metadata: { idempotencyKey: `${slot}:${adapterId}:${outcome.eventId}` },
     },
     source: "ai-run",
+    authorization: { kind: "system-notice", inboundConversationKey: conversationKey },
   }
 }
 

@@ -159,7 +159,7 @@ export async function handleHandoffCommand(input: HandoffCommandInput): Promise<
       remoteUserId: input.event.sender.remoteUserId,
       displayName: input.event.sender.displayName,
     },
-    deliverBrief: await defaultBriefDeliverer(),
+    deliverBrief: await defaultBriefDeliverer(input.event.conversationKey),
   })
 
   await input.reply(
@@ -178,7 +178,7 @@ export async function handleHandoffCommand(input: HandoffCommandInput): Promise<
  * failure message and can carry a stack, which is exactly why the stopped-run
  * note every platform receives does not print it either.
  */
-async function defaultBriefDeliverer() {
+async function defaultBriefDeliverer(commandConversationKey: string) {
   const [{ renderHandoffBrief }, { enqueueGoverned }, { getDb }] = await Promise.all([
     import("@/lib/execution/delegation-handoff"),
     import("@/lib/connectors/delivery-gateway"),
@@ -216,6 +216,8 @@ async function defaultBriefDeliverer() {
         metadata: { idempotencyKey: input.idempotencyKey },
       },
       source: "ai-run",
+      // The brief answers the `/handoff` command, in the chat it came from.
+      authorization: { kind: "system-notice", inboundConversationKey: commandConversationKey },
     })
   }
 }

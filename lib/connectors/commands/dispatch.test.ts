@@ -72,7 +72,7 @@ function session(id: string, title = id, workingDir?: string): ChatSession {
 }
 
 interface Harness {
-  enqueued: Array<{ text: string }>
+  enqueued: Array<{ text: string; authorization?: unknown }>
   audits: Array<{ kind: string; command?: unknown }>
   patches: Array<{ patch: Record<string, unknown>; sessionId?: string }>
   created: ChatSession[]
@@ -107,8 +107,10 @@ function harness(
     }) as unknown as ControlCommandDeps["handleGoal"],
     enqueue: (async (job: {
       request: { segments: Array<{ text?: string; card?: { payload: unknown } }> }
+      authorization?: unknown
     }) => {
       enqueued.push({
+        authorization: job.authorization,
         text: job.request.segments
           .map((s) => s.text ?? (s.card ? JSON.stringify(s.card.payload) : ""))
           .join(""),
@@ -225,6 +227,11 @@ describe("maybeHandleControlCommand", () => {
       h.deps
     )
     expect(h.enqueued[0].text).toMatch(/not allowed/)
+    // ADR-0239: a notice into the conversation the command came from.
+    expect(h.enqueued[0].authorization).toEqual({
+      kind: "system-notice",
+      inboundConversationKey: "telegram:tg-1:42",
+    })
     expect(h.audits[0]).toEqual(
       expect.objectContaining({ kind: "command.denied", command: "schedule" })
     )

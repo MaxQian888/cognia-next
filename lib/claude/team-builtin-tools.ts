@@ -30,6 +30,7 @@ import type {
   SharedMemoryEntry,
 } from "@/types/agent/agent-team"
 import type { AuditKind } from "@/types/connectors/audit"
+import type { OutboundAuthorization } from "@/lib/policy/action-review/plan-delivery"
 import type { TwinKnowledgeHit } from "@/lib/ai/agent/team/teammate/twin-context"
 import {
   canSendMessage,
@@ -90,6 +91,11 @@ export interface TeamToolCaller {
   teammateId: string
   teammateName: string
   runId?: string
+  /**
+   * The tool call being run, set by `plugin-tool-ipc`. What `team_post_to_chat`
+   * delivers is authorized by it (ADR-0239).
+   */
+  toolCall?: { kind: "tool-call"; sessionId: string; toolUseId: string }
 }
 
 /**
@@ -181,12 +187,16 @@ export interface TeamToolDeps {
   ) => Promise<Array<{ adapterId: string; conversationKey: string; sessionId: string }>>
   /** PII gate — `true` when the message is safe to leave the device. */
   messagePassesPiiGate: (message: string) => Promise<boolean>
-  /** Enqueue one outbound text message on the durable outbound queue. */
+  /**
+   * Enqueue one outbound text message on the durable outbound queue.
+   * `drafted`: the outbound policy (ADR-0239) held it for a person to approve.
+   */
   postToConversation: (input: {
     adapterId: string
     conversationKey: string
     text: string
-  }) => Promise<void>
+    authorization: OutboundAuthorization
+  }) => Promise<"queued" | "drafted">
   /** Append a connector audit row (best-effort; failures must not throw). */
   appendAuditEntry: (entry: {
     adapterId: string
@@ -660,17 +670,13 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
       // Mirrors the `im.broadcast` enqueue path: durable outbound queue with a
       // fresh idempotency key; per-adapter rate limit / circuit breaker /
       // quiet-hours all apply automatically downstream.
-      const [
-        { parseConversationKey },
-        bindings,
-        { enqueueGoverned: enqueueOutbound },
-        { newIdempotencyKey },
-      ] = await Promise.all([
-        import("@/types/connectors/event"),
-        import("@/lib/connectors/session-bindings"),
-        import("@/lib/connectors/delivery-gateway"),
-        import("@/types/connectors/outbound"),
-      ])
+      const [{ parseConversationKey }, bindings, { enqueueAuthorized }, { newIdempotencyKey }] =
+        await Promise.all([
+          import("@/types/connectors/event"),
+          import("@/lib/connectors/session-bindings"),
+          import("@/lib/connectors/delivery-gateway"),
+          import("@/types/connectors/outbound"),
+        ])
       const parsed = parseConversationKey(input.conversationKey)
       const session = await bindings.findSessionByConversationKey(input.conversationKey)
       const conversationRef = session?.platformBinding?.conversationRef ?? {
@@ -678,7 +684,7 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
         adapterId: input.adapterId,
         channelId: parsed.remoteChatId,
       }
-      await enqueueOutbound({
+      const result = await enqueueAuthorized({
         adapterId: input.adapterId,
         conversationKey: input.conversationKey,
         request: {
@@ -687,7 +693,9 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
           metadata: { idempotencyKey: newIdempotencyKey() },
         },
         source: "skill",
+        authorization: input.authorization,
       })
+      return result.kind
     },
     appendAuditEntry: async (entry) => {
       const { appendAudit } = await import("@/lib/connectors/audit")
@@ -934,11 +942,20 @@ export async function runTeamBuiltinTool(
           return "Error: message rejected by the PII gate — redact identifiers and retry."
         }
         // 4. Deliver via the durable outbound queue + audit the identity used.
-        await d.postToConversation({
+        //    The call's own authorization covers it (ADR-0239); without one
+        //    (a direct host call) it is a reply into the run's own chat.
+        const delivered = await d.postToConversation({
           adapterId: target.adapterId,
           conversationKey,
           text: message,
+          authorization: caller.toolCall ?? {
+            kind: "origin-reply",
+            inboundConversationKey: origin.conversationKey,
+          },
         })
+        if (delivered === "drafted") {
+          return "Held as a draft: a person approves it before it is posted. Do not post it again."
+        }
         await d.appendAuditEntry({
           adapterId: target.adapterId,
           kind: "team.posted_as_bot",

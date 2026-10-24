@@ -64,11 +64,17 @@ describe("handleUnresolvedPrincipal", () => {
     expect(JSON.stringify(auditRow)).not.toContain("ou_1")
 
     const enqueued = deps.enqueue.mock.calls[0][0] as {
+      authorization: unknown
       request: {
         segments: Array<{ type: string; card?: { payload: Record<string, unknown> } }>
         metadata: { idempotencyKey: string }
       }
     }
+    // ADR-0239: a notice into the conversation the sender wrote in.
+    expect(enqueued.authorization).toEqual({
+      kind: "system-notice",
+      inboundConversationKey: "lark:lk-1:oc-1",
+    })
     // A card with the code large enough to read out to an administrator.
     const notice = enqueued.request.segments[0]
     expect(notice.type).toBe("card")

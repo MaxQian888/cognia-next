@@ -98,6 +98,7 @@ export async function handleUnresolvedPrincipal(
         },
       },
       source: "ai-run",
+      authorization: { kind: "system-notice", inboundConversationKey: event.conversationKey },
     })
     return
   }

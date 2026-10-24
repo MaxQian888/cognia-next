@@ -44,7 +44,11 @@ export function createSkillsAPI(
       if (options.signal?.aborted)
         throw options.signal.reason ?? new DOMException("Aborted", "AbortError")
       const ctx = await resolveBuiltInSkillContext(options.sessionId)
-      const result = await runBuiltInSkill(skillId, args, ctx)
+      // What the skill delivers is the plugin's doing (ADR-0239).
+      const result = await runBuiltInSkill(skillId, args, {
+        ...ctx,
+        outboundAuthorization: { kind: "plugin", pluginId },
+      })
       if (options.signal?.aborted)
         throw options.signal.reason ?? new DOMException("Aborted", "AbortError")
       return result

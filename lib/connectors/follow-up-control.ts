@@ -107,6 +107,7 @@ async function reply(
       metadata: { idempotencyKey: `run-follow-up:${event.messageId}:${suffix}` },
     },
     source: "ai-run",
+    authorization: { kind: "system-notice", inboundConversationKey: event.conversationKey },
   })
 }
 

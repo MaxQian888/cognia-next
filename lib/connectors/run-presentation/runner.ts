@@ -446,6 +446,9 @@ async function deliverMilestone(
       },
     },
     source: snapshot.kind === "workflow" ? "workflow" : "ai-run",
+    // A binding is where this run reports: the conversation it was started
+    // from, or one a person subscribed to its progress (ADR-0239).
+    authorization: { kind: "system-notice", inboundConversationKey: binding.conversationKey },
   })
   const terminal = await waitForOutboundTerminal(job.id, 30_000)
   if (terminal?.status !== "sent") {
@@ -519,6 +522,9 @@ async function deliverFallback(
       },
     },
     source: snapshot.kind === "workflow" ? "workflow" : "ai-run",
+    // A binding is where this run reports: the conversation it was started
+    // from, or one a person subscribed to its progress (ADR-0239).
+    authorization: { kind: "system-notice", inboundConversationKey: binding.conversationKey },
     ...(snapshot.kind === "workflow"
       ? {
           sourceWorkflow: {

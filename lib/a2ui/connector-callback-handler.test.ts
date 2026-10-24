@@ -122,6 +122,11 @@ describe("defaultConnectorCallbackHandler", () => {
       characterId: undefined,
       prompt: expect.stringContaining("[A2UI slack callback]"),
       sourceTaskId: "cb:trig_001",
+      // The turn answers the click, in its own conversation (ADR-0239).
+      authorization: {
+        kind: "origin-reply",
+        inboundConversationKey: baseEvent.conversationKey ?? "slack:adp_sl:C_test",
+      },
     })
   })
 

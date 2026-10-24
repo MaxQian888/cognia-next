@@ -3,6 +3,33 @@ import type { ExecutionRun } from "@/types/execution/run"
 
 import { handleHandoffCommand, type HandoffCommandDeps } from "./handoff"
 
+// The default brief deliverer's collaborators, for the ADR-0239 test below.
+const mockEnqueueGoverned = jest.fn(async () => ({ id: "job-1" }))
+jest.mock("@/lib/connectors/delivery-gateway", () => ({
+  enqueueGoverned: (...args: unknown[]) => mockEnqueueGoverned(...(args as [])),
+}))
+jest.mock("@/lib/execution/delegation-handoff", () => ({
+  renderHandoffBrief: () => "brief",
+}))
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({
+    executionRunBindings: {
+      where: () => ({
+        equals: () => ({
+          toArray: async () => [
+            {
+              runId: "execution:delegation:d1",
+              deliveryTarget: {
+                conversationRef: { platform: "lark", adapterId: "lark-1", channelId: "chat-1" },
+              },
+            },
+          ],
+        }),
+      }),
+    },
+  }),
+}))
+
 const event = (): NormalizedInboundEvent =>
   ({
     platform: "lark",
@@ -65,6 +92,39 @@ describe("/handoff", () => {
       })
     )
     expect(reply).toHaveBeenCalledWith(expect.stringContaining("Dana"), "applied", undefined)
+  })
+
+  it("delivers the brief as a notice answering the command, in its chat (ADR-0239)", async () => {
+    const handOff = jest.fn(
+      async (input: {
+        deliverBrief: (brief: {
+          conversationKey: string
+          adapterId: string
+          brief: { runId: string }
+          idempotencyKey: string
+        }) => Promise<void>
+      }) => {
+        await input.deliverBrief({
+          conversationKey: "lark:lark-1:chat-1",
+          adapterId: "lark-1",
+          brief: { runId: "execution:delegation:d1" },
+          idempotencyKey: "brief-1",
+        })
+        return { handedOff: true, interruptId: "i-1" }
+      }
+    )
+    await handleHandoffCommand({
+      event: event(),
+      arg: "",
+      reply: jest.fn(async () => undefined),
+      deps: deps({ handOff: handOff as unknown as HandoffCommandDeps["handOff"] }),
+    })
+    expect(mockEnqueueGoverned).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationKey: "lark:lark-1:chat-1",
+        authorization: { kind: "system-notice", inboundConversationKey: "lark:lark-1:chat-1" },
+      })
+    )
   })
 
   it("uses the named person and does not claim their platform id", async () => {

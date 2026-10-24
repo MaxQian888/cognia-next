@@ -1423,7 +1423,13 @@ describe("outbound-runner — circuit-open failover", () => {
       [sibling, healthy],
     ])
     await enqueue(primary, `telegram:${primary}:chat`, "k_fo_1")
-    await enqueue(primary, `telegram:${primary}:chat`, "k_fo_2")
+    const authorizedBy = {
+      receiptId: "req_1",
+      authority: "human" as const,
+      grantScope: "once" as const,
+    }
+    const second = await enqueue(primary, `telegram:${primary}:chat`, "k_fo_2")
+    await getDb().outboundQueue.update(second.id, { authorizedBy })
 
     const { promise, stop } = createRunner(adapters)
     const jobs = await waitForJobs((rows) =>
@@ -1442,6 +1448,8 @@ describe("outbound-runner — circuit-open failover", () => {
     expect(rerouted!.request.metadata.failoverFromAdapterId).toBe(primary)
     // Derived idempotency key — never collides with the original.
     expect(rerouted!.idempotencyKey).toBe(`k_fo_2:fo:${sibling}`)
+    // The same chat through a sibling bot: what authorized it carries over (ADR-0239).
+    expect(rerouted!.authorizedBy).toEqual(authorizedBy)
     const audits = await listRecent(primary)
     expect(audits.some((a) => a.kind === "delivery.failover")).toBe(true)
   })

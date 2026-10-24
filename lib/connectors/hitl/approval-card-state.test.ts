@@ -68,6 +68,8 @@ it("edits the original delivered message through the durable queue", async () =>
         editTargetMessageId: "om-1",
         segments: [approvalStateSegment("approved")],
       }),
+      // ADR-0239: an edit of the card in its own conversation.
+      authorization: { kind: "system-notice", inboundConversationKey: "chat" },
     })
   )
 })

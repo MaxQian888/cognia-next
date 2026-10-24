@@ -83,11 +83,20 @@ describe("plan approval card", () => {
 describe("plan approval delegate", () => {
   it("scopes the buttons to the person who started the run", async () => {
     const recordBinding = jest.fn(async () => undefined)
-    const delegate = makeImPlanApprovalDelegate(ctx({ recordBinding: recordBinding as never }))
+    const enqueue = jest.fn(async () => undefined)
+    const delegate = makeImPlanApprovalDelegate(
+      ctx({ recordBinding: recordBinding as never, enqueue: enqueue as never })
+    )
     const pending = delegate({ planText: "the plan", revision: 0 })
 
     // Let the card go out before answering it.
     await new Promise((resolve) => setTimeout(resolve, 0))
+    // ADR-0239: the plan card goes into the conversation that asked.
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorization: { kind: "system-notice", inboundConversationKey: "lark:lark-1:chat-1" },
+      })
+    )
     expect(recordBinding).toHaveBeenCalledTimes(2)
     for (const call of recordBinding.mock.calls as unknown as Array<[Record<string, unknown>]>) {
       expect(call[0]).toMatchObject({

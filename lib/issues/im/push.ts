@@ -11,6 +11,10 @@
  * `pushIssueCard` derives the card's move buttons from the state machine
  * (`allowedIssueMoveTargets`) and its Run button from the run registry, so
  * the card can only offer what the desktop board would.
+ *
+ * Every push goes into the conversation the request came from (the IM-bound
+ * session's, or the one the card was clicked in), so it is authorized as a
+ * system notice there (ADR-0239).
  */
 
 import { hasNoLeakingPii } from "@cognia/redact"
@@ -50,6 +54,7 @@ export interface IssueImPushDeps {
       metadata: { idempotencyKey: string }
     }
     source: "skill"
+    authorization: { kind: "system-notice"; inboundConversationKey: string }
   }) => Promise<unknown>
   buildSegment: (surfaceId: string, content: A2UISegmentContent) => Record<string, unknown>
   audit: (entry: {
@@ -118,6 +123,8 @@ export async function pushIssueText(
       metadata: { idempotencyKey: input.idempotencyKey },
     },
     source: "skill",
+    // Issue cards go into the conversation the skill or the click came from.
+    authorization: { kind: "system-notice", inboundConversationKey: input.conversationKey },
   })
   return "sent"
 }
@@ -188,6 +195,8 @@ export async function pushIssueCard(
       metadata: { idempotencyKey: input.idempotencyKey ?? newIdempotencyKey() },
     },
     source: "skill",
+    // Issue cards go into the conversation the skill or the click came from.
+    authorization: { kind: "system-notice", inboundConversationKey: input.conversationKey },
   })
   return { status: "sent", surfaceId }
 }
@@ -242,6 +251,8 @@ export async function pushIssueRunChoice(
       metadata: { idempotencyKey: input.idempotencyKey ?? newIdempotencyKey() },
     },
     source: "skill",
+    // Issue cards go into the conversation the skill or the click came from.
+    authorization: { kind: "system-notice", inboundConversationKey: input.conversationKey },
   })
   return { status: "sent", surfaceId }
 }

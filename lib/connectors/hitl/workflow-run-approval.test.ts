@@ -80,6 +80,12 @@ describe("holdWorkflowDispatchForApproval", () => {
     expect(surfaces.size).toBe(1)
     expect([...surfaces][0]).toContain(WORKFLOW_HOLD_SURFACE_PREFIX)
     expect(args.enqueue).toHaveBeenCalledTimes(1)
+    // ADR-0239: the hold card goes into the conversation that asked.
+    expect(args.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorization: { kind: "system-notice", inboundConversationKey: "lark:lark-1:chat-1" },
+      })
+    )
   })
 
   it("starts nothing — the whole point is that the run waits for a person", async () => {

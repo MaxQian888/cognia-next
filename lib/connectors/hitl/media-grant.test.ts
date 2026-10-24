@@ -188,6 +188,12 @@ describe("requestMediaGrant", () => {
       audit: audit as never,
     })
     expect(enqueue).toHaveBeenCalledTimes(1)
+    // ADR-0239: the grant card goes into the conversation that asked.
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorization: { kind: "system-notice", inboundConversationKey: "telegram:cai_1:c1" },
+      })
+    )
     expect(audit).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "media_grant.requested", fields: { provider: "anthropic" } })
     )

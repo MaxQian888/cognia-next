@@ -105,6 +105,11 @@ describe("maybeHandleHelpCommand", () => {
     expect(arg.conversationKey).toBe("lark:ad1:oc_1")
     expect(arg.request.segments[0].type).toBe("a2ui")
     expect(arg.source).toBe("ai-run")
+    // ADR-0239: a notice into the conversation that asked.
+    expect(arg.authorization).toEqual({
+      kind: "system-notice",
+      inboundConversationKey: "lark:ad1:oc_1",
+    })
     expect(d.audit).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "inbound.help_served", at: 5000 })
     )
@@ -154,6 +159,10 @@ describe("maybeSendWelcome", () => {
     expect(recordWelcome).toHaveBeenCalledWith("ad1", "lark:ad1:oc_1")
     expect(d.enqueue).toHaveBeenCalledTimes(1)
     expect(d.enqueue.mock.calls[0][0].request.metadata.idempotencyKey).toBe("welcome:lark:ad1:oc_1")
+    expect(d.enqueue.mock.calls[0][0].authorization).toEqual({
+      kind: "system-notice",
+      inboundConversationKey: "lark:ad1:oc_1",
+    })
     expect(d.audit).toHaveBeenCalledWith(expect.objectContaining({ kind: "inbound.welcome_sent" }))
   })
 

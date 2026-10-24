@@ -363,6 +363,7 @@ async function replyImFailure(
         },
       },
       source: "ai-run",
+      authorization: { kind: "origin-reply", inboundConversationKey: event.conversationKey },
     })
   } catch {
     notifyImFailure(event.conversationKey, notice, dedupeKey)
@@ -2454,6 +2455,10 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
                 },
               },
               source: "ai-run",
+              authorization: {
+                kind: "origin-reply",
+                inboundConversationKey: event.conversationKey,
+              },
             })
           }
         } else {
@@ -2462,6 +2467,8 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             conversationKey: outboundTarget.conversationKey,
             request: outboundRequest,
             source: "ai-run",
+            // The respond-via target is the same chat through a sibling bot.
+            authorization: { kind: "origin-reply", inboundConversationKey: event.conversationKey },
           })
         }
 

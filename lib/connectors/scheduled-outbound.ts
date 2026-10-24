@@ -23,7 +23,8 @@
  */
 
 import { registerTaskExecutor } from "@/lib/scheduler/task-scheduler"
-import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
+import { enqueueAuthorized, type OutboundAuthorization } from "@/lib/connectors/delivery-gateway"
+import { taskPlanOrigin } from "@/lib/policy/action-review/plan-context"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import { resolveCharacterById } from "@/lib/db/characters"
@@ -132,7 +133,7 @@ async function handleOutboundSend(
   }
 
   try {
-    const job = await enqueueOutbound({
+    const result = await enqueueAuthorized({
       adapterId,
       conversationKey,
       request: {
@@ -145,7 +146,19 @@ async function handleOutboundSend(
       },
       source: payload.source ?? "manual",
       sourceWorkflow: payload.source === "workflow" ? payload.sourceWorkflow : undefined,
+      // Whoever wrote the task, nobody is watching when it fires (ADR-0239).
+      authorization: {
+        kind: "unattended",
+        ownerRef: `task:${task.id}`,
+        origin: taskPlanOrigin(task),
+      },
     })
+    if (result.kind === "drafted") {
+      // Held for a person to approve: the task did what it can, so it is not
+      // retried into a second draft.
+      return { success: true, output: { draftId: result.draft.id, heldAsDraft: true } }
+    }
+    const job = result.job
 
     await appendAudit({
       adapterId,
@@ -206,6 +219,12 @@ export interface RunDigestInput {
    * on-time runs and for callback-driven turns, which are never late.
    */
   lateForSlot?: Date
+  /**
+   * What authorizes delivering the reply (ADR-0239): the task's origin for a
+   * scheduled digest, the clicked conversation for a callback turn. Default:
+   * an unattended send in the bound session's origin.
+   */
+  authorization?: OutboundAuthorization
 }
 
 export interface RunDigestResult {
@@ -395,7 +414,7 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
   // a payload field — the conversationKey format is the single source of
   // truth (it round-trips through `buildConversationKey`).
   try {
-    const job = await enqueueOutbound({
+    const delivered = await enqueueAuthorized({
       adapterId,
       conversationKey,
       request: {
@@ -408,7 +427,23 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
         },
       },
       source: "ai-run",
+      authorization: input.authorization ?? {
+        kind: "unattended",
+        ownerRef: `digest:${sourceTaskId ?? conversationKey}`,
+        sessionId: session.id,
+      },
     })
+    if (delivered.kind === "drafted") {
+      return {
+        success: true,
+        output: {
+          draftId: delivered.draft.id,
+          heldAsDraft: true,
+          assistantMessageId: captured.messageId,
+        },
+      }
+    }
+    const job = delivered.job
 
     await appendAudit({
       adapterId,
@@ -470,6 +505,11 @@ async function handleScheduledDigest(
     prompt: payload.prompt,
     sourceTaskId: task.id,
     lateForSlot,
+    authorization: {
+      kind: "unattended",
+      ownerRef: `task:${task.id}`,
+      origin: taskPlanOrigin(task),
+    },
   })
 }
 

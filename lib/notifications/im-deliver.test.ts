@@ -58,6 +58,7 @@ interface Harness {
     conversationKey: string
     idempotencyKey?: string
     segments: Array<Record<string, unknown>>
+    authorization?: unknown
   }>
   audits: string[]
   deps: Parameters<typeof createImDeliver>[0]
@@ -71,6 +72,8 @@ function harness(opts: {
   sessions?: Record<string, { platformBinding?: { conversationKey?: string } }>
   /** Run bindings the run-kind resolution step can find. */
   runBindings?: Record<string, Array<{ conversationKey?: string }>>
+  /** The outbound policy holds the push as a draft (ADR-0239). */
+  heldAsDraft?: boolean
 }): Harness {
   const enqueued: Harness["enqueued"] = []
   const audits: string[] = []
@@ -89,13 +92,17 @@ function harness(opts: {
         metadata?: { idempotencyKey?: string }
         segments: Array<Record<string, unknown>>
       }
+      authorization?: unknown
     }) => {
       enqueued.push({
         adapterId: job.adapterId,
         conversationKey: job.conversationKey,
         idempotencyKey: job.request.metadata?.idempotencyKey,
         segments: job.request.segments,
+        authorization: job.authorization,
       })
+      if (opts.heldAsDraft) return { kind: "drafted", draft: { id: "cdr_1" } }
+      return { kind: "queued", job: { id: "job-1" } }
     }) as unknown as NonNullable<Harness["deps"]>["enqueue"],
     audit: (async (e: { kind: string }) => {
       audits.push(e.kind)
@@ -121,8 +128,17 @@ describe("createImDeliver", () => {
       adapterId: "tg-1",
       conversationKey: "telegram:tg-1:9",
       idempotencyKey: "notify:n1",
+      // The bound session's own conversation: its origin thread (ADR-0239).
+      authorization: { kind: "unattended", ownerRef: "notification:n1", sessionId: "s1" },
     })
     expect(h.audits).toContain("notify.im_pushed")
+  })
+
+  it("does not report a push the outbound policy held as a draft as pushed", async () => {
+    const h = harness({ proactivePush: true, piiSafe: true, heldAsDraft: true })
+    await createImDeliver(h.deps)(rec())
+    expect(h.enqueued).toHaveLength(1)
+    expect(h.audits).not.toContain("notify.im_pushed")
   })
 
   it("skips (no enqueue) when the conversation has not opted in", async () => {

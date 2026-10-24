@@ -314,6 +314,13 @@ export interface PluginConnectorsAPI {
    * (`hasNoLeakingPiiDeep`) — the queue path is not otherwise scanned;
    * rejected payloads throw. Jobs are tagged `source: "plugin"` for the
    * inbox provenance badge / audit trail.
+   *
+   * The host's outbound policy (ADR-0239) plans the delivery first. It goes
+   * when a tool call of this plugin that a person or policy allowed covers
+   * the recipient, or when the recipient is otherwise authorized; otherwise,
+   * under enforcement, it is held as a draft for a person to approve and the
+   * call rejects with `code: "connector_delivery_held"` (and `draftId`), or is
+   * refused with `code: "connector_delivery_denied"`.
    */
   enqueueSend(
     adapterId: string,

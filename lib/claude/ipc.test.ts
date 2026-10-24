@@ -6,6 +6,11 @@ import { createExecutionRun, listExecutionRunEvents } from "@/lib/db/execution-r
 import { getDb } from "@/lib/db/schema"
 import { getActionReviewReceipt } from "@/lib/db/action-review-receipts"
 import { __resetChatToolReviewsForTesting } from "@/lib/policy/action-review/chat-tool-channel"
+import {
+  __resetAuthorizedToolCallsForTesting,
+  authorizedOutboundToolCall,
+  rememberPlannedOutboundToolCall,
+} from "@/lib/policy/action-review/authorized-tool-calls"
 
 const mockRecordToolAuthorizationGovernance = jest.fn().mockResolvedValue("decision-1")
 const mockReportGovernanceProjectionFailure = jest.fn().mockResolvedValue(undefined)
@@ -215,6 +220,37 @@ describe("connector approval review settlement", () => {
       status: "pending",
     })
     expect(await getActionReviewReceipt("approval-1")).toBeUndefined()
+  })
+
+  it("authorizes a planned outbound call before the answer leaves (ADR-0239)", async () => {
+    __resetAuthorizedToolCallsForTesting()
+    const planned = {
+      sessionId: "session-x",
+      requestId: "req-x",
+      toolUseId: "toolu_x",
+      toolName: "im_broadcast",
+      fingerprints: ["fp"],
+    }
+    rememberPlannedOutboundToolCall(planned)
+    let seen: unknown
+    callSpy.mockImplementationOnce(async () => {
+      seen = authorizedOutboundToolCall("session-x", "toolu_x")
+    })
+    await approveTool("session-x", "req-x", "allow", undefined, undefined, undefined, {
+      authority: "human",
+      grant: { scope: "once" },
+    })
+    expect(seen).toMatchObject({ authority: "human", grant: { scope: "once" } })
+
+    // A deny drops the plan; an unattributed allow authorizes nothing.
+    __resetAuthorizedToolCallsForTesting()
+    rememberPlannedOutboundToolCall(planned)
+    callSpy.mockResolvedValue(undefined)
+    await approveTool("session-x", "req-x", "deny")
+    await approveTool("session-x", "req-x", "allow", undefined, undefined, undefined, {
+      authority: "human",
+    })
+    expect(authorizedOutboundToolCall("session-x", "toolu_x")).toBeUndefined()
   })
 })
 

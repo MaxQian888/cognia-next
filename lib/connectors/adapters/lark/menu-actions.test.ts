@@ -41,6 +41,11 @@ describe("handleMenuUnknownKey", () => {
     )
     expect(d.enqueue.mock.calls[0][0]).toMatchObject({
       conversationKey: `lark:${ADAPTER_ID}:oc_private`,
+      // ADR-0239: a notice into its own conversation.
+      authorization: {
+        kind: "system-notice",
+        inboundConversationKey: `lark:${ADAPTER_ID}:oc_private`,
+      },
       request: { conversationRef: { channelId: "oc_private" } },
     })
     expect(d.audit.mock.calls[0][0].conversationKey).toBe(`lark:${ADAPTER_ID}:oc_private`)

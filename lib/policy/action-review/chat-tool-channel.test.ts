@@ -5,6 +5,11 @@ import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { actionReviewInterruptId } from "./projection"
 import {
+  __resetAuthorizedToolCallsForTesting,
+  authorizedOutboundToolCall,
+  rememberPlannedOutboundToolCall,
+} from "./authorized-tool-calls"
+import {
   __pendingChatToolReviewCount,
   __resetChatToolReviewsForTesting,
   annotateChatToolReview,
@@ -156,6 +161,32 @@ describe("settleChatToolReview", () => {
 })
 
 describe("recordChatToolApprovalDecision", () => {
+  it("authorizes a planned outbound call for its delivery, or drops it on a deny", () => {
+    __resetAuthorizedToolCallsForTesting()
+    const planned = {
+      sessionId: SESSION,
+      requestId: REQUEST,
+      toolUseId: "toolu_1",
+      toolName: "im_broadcast",
+      fingerprints: ["fp"],
+    }
+    rememberPlannedOutboundToolCall(planned)
+    void recordChatToolApprovalDecision({ sessionId: SESSION, requestId: REQUEST }, "allow", {
+      scope: "once",
+    })
+    expect(authorizedOutboundToolCall(SESSION, "toolu_1")).toMatchObject({
+      authority: "human",
+      grant: { scope: "once" },
+    })
+
+    __resetAuthorizedToolCallsForTesting()
+    rememberPlannedOutboundToolCall(planned)
+    void recordChatToolApprovalDecision({ sessionId: SESSION, requestId: REQUEST }, "deny")
+    void recordChatToolApprovalDecision({ sessionId: SESSION, requestId: REQUEST }, "allow")
+    // The refusal dropped the plan, so a late allow authorizes nothing.
+    expect(authorizedOutboundToolCall(SESSION, "toolu_1")).toBeUndefined()
+  })
+
   it("attributes the decision to a person and preserves allow_always", async () => {
     await seedRun()
     await open()

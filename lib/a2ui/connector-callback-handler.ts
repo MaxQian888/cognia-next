@@ -52,6 +52,11 @@ export async function defaultConnectorCallbackHandler(
     characterId: undefined,
     prompt,
     sourceTaskId: `cb:${event.triggerId}`,
+    // The turn answers a click, in the conversation it was made in.
+    authorization: {
+      kind: "origin-reply",
+      inboundConversationKey: event.conversationKey ?? conversationKey,
+    },
   })
 }
 

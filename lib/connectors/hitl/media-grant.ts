@@ -197,6 +197,7 @@ export async function requestMediaGrant(input: RequestMediaGrantInput): Promise<
       metadata: { idempotencyKey: newIdempotencyKey() },
     },
     source: "ai-run",
+    authorization: { kind: "system-notice", inboundConversationKey: input.conversationKey },
   })
   await audit({
     adapterId: input.adapterId,

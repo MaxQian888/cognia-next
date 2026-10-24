@@ -209,6 +209,7 @@ export async function holdWorkflowDispatchForApproval(
         metadata: { idempotencyKey: newIdempotencyKey() },
       },
       source: "ai-run",
+      authorization: { kind: "system-notice", inboundConversationKey: input.conversationKey },
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

@@ -337,6 +337,7 @@ describe("ConnectorBus.dispatchConnectorCallback — skill_invoke kind", () => {
       await import("@/lib/skills/built-in/registry")
     __resetSharedBuiltInSkillRegistry()
     let executed = false
+    let outboundAuthorization: unknown
     const { z } = await import("zod")
     registerBuiltInSkill({
       id: "test.skill",
@@ -348,8 +349,9 @@ describe("ConnectorBus.dispatchConnectorCallback — skill_invoke kind", () => {
       imAccess: "always",
       mcpToolName: "test_skill",
       inputSchema: z.object({ x: z.string() }),
-      execute: async () => {
+      execute: async (_args, ctx) => {
         executed = true
+        outboundAuthorization = ctx.outboundAuthorization
         return { ok: true }
       },
       hitlSurface: () => ({
@@ -377,6 +379,8 @@ describe("ConnectorBus.dispatchConnectorCallback — skill_invoke kind", () => {
     )
 
     expect(executed).toBe(true)
+    // The person in the chat confirmed this invocation (ADR-0239).
+    expect(outboundAuthorization).toEqual({ kind: "human", actor: "connector-user" })
     // Standard digest handler is bypassed.
     expect(handler).not.toHaveBeenCalled()
 

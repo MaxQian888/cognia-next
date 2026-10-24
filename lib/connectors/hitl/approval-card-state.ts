@@ -82,6 +82,7 @@ export async function settleApprovalCard(input: {
         metadata: { idempotencyKey: `approval-state:${input.surfaceId}:${input.state}` },
       },
       source: "ai-run",
+      authorization: { kind: "system-notice", inboundConversationKey: input.conversationKey },
     })
   } catch {
     // Presentation failure must never reverse an already applied decision.

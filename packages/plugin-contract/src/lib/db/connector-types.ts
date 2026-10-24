@@ -14,6 +14,10 @@ import type {
   AutonomyLevel,
   EngagementMode,
 } from "@cognia/agent-config-types/agent-composition"
+import type {
+  ActionReviewAuthority,
+  ActionReviewGrantScope,
+} from "@cognia/agent-config-types/action-review"
 import type { EscalationPolicy } from "../../types/connectors/escalation"
 import type { ItemOwner, ItemProvenance } from "../../types/placement/item-owner"
 import type { OutboundRequest } from "../../types/connectors/outbound"
@@ -702,4 +706,32 @@ export interface OutboundJobRow {
    * index rows that lack the field, so they cannot collide).
    */
   notificationOperationKey?: string
+  /**
+   * What authorized this delivery (ADR-0239), written by the delivery
+   * gateway for an automated source. Absent on a person's own send
+   * (`manual`, `draft-approved`) and on rows written before the outbound
+   * policy existed. Non-indexed JSON column — no schema version bump.
+   */
+  authorizedBy?: OutboundJobAuthorization
+}
+
+/**
+ * The authorization an automated delivery rests on (ADR-0239).
+ *
+ * The receipt holds the full record (targets, root session, epoch, plan); the
+ * job keeps only what lets a reader find it and see at a glance who allowed
+ * the send.
+ */
+export interface OutboundJobAuthorization {
+  /**
+   * The receipt the authorization is recorded on: the chat-tool review of the
+   * tool call that made the delivery, or the delivery's own
+   * `connector-delivery` receipt. Absent for a reply into the conversation
+   * the request came from, which needs no receipt.
+   */
+  receiptId?: string
+  authority: ActionReviewAuthority
+  grantScope?: ActionReviewGrantScope
+  /** For a `policy` grant: the configured list, e.g. `bot:<installationId>`. */
+  policyRef?: string
 }

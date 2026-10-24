@@ -133,7 +133,13 @@ export interface ActionReviewSurfaceHit {
 
 /** What kind of thing is being reviewed. */
 export type ActionReviewSubjectKind =
-  "tool-call" | "plan" | "workflow-step" | "run-continue" | "handoff-commit"
+  | "tool-call"
+  | "plan"
+  | "workflow-step"
+  | "run-continue"
+  | "handoff-commit"
+  /** A connector delivery planned at the delivery gateway (ADR-0239). */
+  | "connector-delivery"
 
 /**
  * A party an outbound action delivers to (ADR-0239), as a receipt records it.
@@ -424,6 +430,7 @@ function validateSubject(subject: unknown, errors: string[]): void {
     "workflow-step",
     "run-continue",
     "handoff-commit",
+    "connector-delivery",
   ]
   if (!memberOf(subject.kind, kinds)) {
     errors.push("subject.kind must be a known ActionReviewSubjectKind")

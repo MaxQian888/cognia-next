@@ -11,7 +11,9 @@
  *   - every target gets a DISTINCT idempotency key (the outbound runner
  *     short-circuits duplicates, which would collapse the fan-out);
  *   - unparseable keys / conversations without a bound session are skipped
- *     and REPORTED, never silently dropped (`broadcast.partial_failure`).
+ *     and REPORTED, never silently dropped (`broadcast.partial_failure`);
+ *   - a target the outbound policy holds as a draft (ADR-0239) is reported as
+ *     `drafted`: it waits for a person to approve it in the draft center.
  */
 
 import { z } from "zod"
@@ -19,7 +21,7 @@ import { z } from "zod"
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill } from "../types"
 import { buildConfirmSurface } from "../_shared/confirm-surface"
-import { previewText } from "./_helpers"
+import { previewText, skillDeliveryAuthorization } from "./_helpers"
 
 const schema = z.object({
   conversationKeys: z
@@ -34,7 +36,7 @@ const schema = z.object({
 
 interface TargetOutcome {
   conversationKey: string
-  status: "enqueued" | "skipped"
+  status: "enqueued" | "drafted" | "skipped"
   reason?: string
 }
 
@@ -54,7 +56,7 @@ const skill: BuiltInSkill<typeof schema> = {
   imAccess: "opt-in",
   mcpToolName: "im_broadcast",
   inputSchema: schema,
-  execute: async (args) => {
+  execute: async (args, ctx) => {
     const { hasNoLeakingPiiDeep } = await import("@cognia/redact")
     if (!hasNoLeakingPiiDeep(args.message)) {
       return {
@@ -72,6 +74,8 @@ const skill: BuiltInSkill<typeof schema> = {
 
     const outcomes: TargetOutcome[] = []
     const batch: Array<Parameters<typeof enqueueGovernedMany>[0][number]> = []
+    const batchOutcomes: TargetOutcome[] = []
+    const authorization = skillDeliveryAuthorization(ctx, "im.broadcast")
     for (const key of args.conversationKeys) {
       let parsed
       try {
@@ -101,14 +105,21 @@ const skill: BuiltInSkill<typeof schema> = {
           metadata: { idempotencyKey: newIdempotencyKey() },
         },
         source: "skill",
+        authorization,
       })
-      outcomes.push({ conversationKey: key, status: "enqueued" })
+      const outcome: TargetOutcome = { conversationKey: key, status: "enqueued" }
+      outcomes.push(outcome)
+      batchOutcomes.push(outcome)
     }
 
-    await enqueueGovernedMany(batch)
+    const results = await enqueueGovernedMany(batch)
+    results.forEach((result, index) => {
+      if (result.kind === "drafted") batchOutcomes[index].status = "drafted"
+    })
 
     const enqueued = outcomes.filter((o) => o.status === "enqueued").length
-    const skipped = outcomes.length - enqueued
+    const drafted = outcomes.filter((o) => o.status === "drafted").length
+    const skipped = outcomes.length - enqueued - drafted
     const auditAdapterId = outcomes.find((o) => o.status === "enqueued")
       ? parseConversationKey(outcomes.find((o) => o.status === "enqueued")!.conversationKey)
           .adapterId
@@ -117,7 +128,7 @@ const skill: BuiltInSkill<typeof schema> = {
       adapterId: auditAdapterId,
       kind: "broadcast.enqueued",
       at: Date.now(),
-      fields: { targetCount: outcomes.length, enqueued, skipped },
+      fields: { targetCount: outcomes.length, enqueued, drafted, skipped },
     })
     if (skipped > 0) {
       await appendAudit({
@@ -130,7 +141,7 @@ const skill: BuiltInSkill<typeof schema> = {
         },
       })
     }
-    return { enqueued, skipped, outcomes }
+    return { enqueued, ...(drafted > 0 ? { drafted } : {}), skipped, outcomes }
   },
   hitlSurface: (args) =>
     buildConfirmSurface({

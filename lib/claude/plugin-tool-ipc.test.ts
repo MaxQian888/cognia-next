@@ -125,6 +125,18 @@ const mockExecuteRunWorkflowTyped = jest.fn()
 jest.mock("@/lib/workflow/publish/run-workflow-typed-tool", () => ({
   executeRunWorkflowTyped: (args: Record<string, unknown>) => mockExecuteRunWorkflowTyped(args),
 }))
+// Pass-through, so a test can see the caller a team tool runs as.
+const mockRunTeamBuiltinTool = jest.fn()
+jest.mock("./team-builtin-tools", () => {
+  const actual = jest.requireActual("./team-builtin-tools")
+  return {
+    ...actual,
+    runTeamBuiltinTool: (...args: Parameters<typeof actual.runTeamBuiltinTool>) => {
+      mockRunTeamBuiltinTool(...args)
+      return actual.runTeamBuiltinTool(...args)
+    },
+  }
+})
 const mockRunWorkingSetTool = jest.fn()
 jest.mock("./working-set-tool", () => ({
   isWorkingSetTool: (name: string) => name === "working_set",
@@ -610,6 +622,36 @@ describe("handlePluginToolExec — unified invokePluginTool path", () => {
     )
   })
 
+  it("matches the plugin's deliveries to this call only while it runs (ADR-0239)", async () => {
+    const { __setInvokePluginToolDepsForTesting } =
+      await import("@/lib/plugin/core/invoke-plugin-tool")
+    const calls = await import("@/lib/policy/action-review/authorized-tool-calls")
+    calls.__resetAuthorizedToolCallsForTesting()
+    calls.rememberPlannedOutboundToolCall({
+      sessionId: "session-1",
+      requestId: "req-1",
+      toolUseId: "use-1",
+      toolName: "demo_tool",
+      fingerprints: ["fp"],
+    })
+    calls.authorizeOutboundToolCall("session-1", "req-1", { authority: "human" })
+    let running: unknown[] = []
+    const { deps } = makeSeamDeps({
+      executeImpl: jest.fn(async () => {
+        running = calls.runningAuthorizedToolCallsOf("plugin:plug-a")
+        return { ok: true }
+      }),
+    })
+    __setInvokePluginToolDepsForTesting(deps as never)
+
+    await handlePluginToolExec(makeRequest())
+
+    expect(running).toEqual([expect.objectContaining({ toolUseId: "use-1" })])
+    // The authorization ends with the call.
+    expect(calls.runningAuthorizedToolCallsOf("plugin:plug-a")).toEqual([])
+    expect(calls.authorizedOutboundToolCall("session-1", "use-1")).toBeUndefined()
+  })
+
   it("gives no plugin private host dependencies, whatever its tool is called", async () => {
     // The host used to branch on `request.name === "deep_research"` and inject
     // a web binding plus a model bridge into that one plugin. Every plugin now
@@ -788,7 +830,12 @@ describe("handlePluginToolExec — built-in skill fallback", () => {
     // allowlist / HITL) can no longer be bypassed by the tool-call path.
     expect(execute).toHaveBeenCalledWith(
       {},
-      expect.objectContaining({ sessionId: "session-1", imBinding })
+      expect.objectContaining({
+        sessionId: "session-1",
+        imBinding,
+        // What the skill delivers is authorized by this tool call (ADR-0239).
+        outboundAuthorization: { kind: "tool-call", sessionId: "session-1", toolUseId: "use-1" },
+      })
     )
   })
 
@@ -797,6 +844,34 @@ describe("handlePluginToolExec — built-in skill fallback", () => {
 
     const response = await handlePluginToolExec(makeRequest({ name: "no_such_tool" }))
     expect(response.error).toBe("plugin tool not found: no_such_tool")
+  })
+})
+
+describe("handlePluginToolExec — team tools", () => {
+  it("runs a team tool as its teammate, under this tool call (ADR-0239)", async () => {
+    const { registerTeamDispatchContext, clearTeamDispatchContext } =
+      await import("./agents/dispatch-context-registry")
+    registerTeamDispatchContext("session-1", {
+      teamId: "team-1",
+      teammateId: "tm-1",
+      teammateName: "Ada",
+    } as never)
+    mockRunTeamBuiltinTool.mockClear()
+    try {
+      await handlePluginToolExec(
+        makeRequest({ name: "team_post_to_chat", args: { conversationKey: "k", message: "m" } })
+      )
+    } finally {
+      clearTeamDispatchContext("session-1")
+    }
+    expect(mockRunTeamBuiltinTool).toHaveBeenCalledWith(
+      "team_post_to_chat",
+      { conversationKey: "k", message: "m" },
+      expect.objectContaining({
+        teamId: "team-1",
+        toolCall: { kind: "tool-call", sessionId: "session-1", toolUseId: "use-1" },
+      })
+    )
   })
 })
 

@@ -20,6 +20,9 @@
  * Whatever the decision, the plan is attached to the call's chat-tool review,
  * so the receipt written when the call settles carries its targets, root
  * session, epoch and plan, and a person's deny on it fences the recipient.
+ * A call that names its `toolUseID` also has its recipients remembered for
+ * the connector delivery it causes (`authorized-tool-calls.ts`); an allow
+ * this module answers promotes it there before the answer is dispatched.
  *
  * A call a shortcut allowed inside the sidecar never asks at all; in shadow
  * mode the sidecar reports it (`explicit_tool_allowed`) and
@@ -36,14 +39,22 @@ import {
 
 import { resolveRootSessionId } from "@/lib/claude/agents/root-session"
 import { classifyRisk } from "@/lib/policy/risk/classify-risk"
-import { isOutboundToolId } from "@/lib/policy/risk/outbound-tools"
+import { isOutboundToolId, normalizeToolId } from "@/lib/policy/risk/outbound-tools"
 
+import { authorizeOutboundToolCall, rememberPlannedOutboundToolCall } from "./authorized-tool-calls"
 import { annotateChatToolReview } from "./chat-tool-channel"
-import { extractOutboundTargets, toReviewTarget, type OutboundTarget } from "./outbound-targets"
+import {
+  extractOutboundTargets,
+  outboundFingerprint,
+  toReviewTarget,
+  type OutboundTarget,
+} from "./outbound-targets"
 import {
   buildActionReviewPlanContext,
+  readAppSettings,
   type ActionReviewPlanOrigin,
   type OutboundPolicyGrantList,
+  type OutboundSettingsLike,
 } from "./plan-context"
 import { humanOutboundGrant, planActionReview, type ActionReviewPlanResult } from "./policy"
 import { projectActionReviewSettled } from "./projection"
@@ -54,6 +65,12 @@ export interface OutboundToolCallRequest {
   requestId: string
   toolName: string
   input: unknown
+  /**
+   * The tool use the request asks about (`PermissionRequestEvent.toolUseID`).
+   * Without it the call's deliveries cannot be told apart from any other and
+   * are planned on their own.
+   */
+  toolUseID?: string
 }
 
 export interface OutboundToolCallPlan {
@@ -64,7 +81,7 @@ export interface OutboundToolCallPlan {
   result: ActionReviewPlanResult
 }
 
-type SettingsLike = { agentPermissions?: unknown } | null | undefined
+type SettingsLike = OutboundSettingsLike
 
 export interface OutboundToolPlannerOptions {
   /** No person is watching the run. */
@@ -102,16 +119,6 @@ export type OutboundToolDecision =
   | { kind: "deny"; message: string; attribution: OutboundAttribution }
   | { kind: "ask" }
   | { kind: "unchanged" }
-
-async function storeSettings(): Promise<SettingsLike> {
-  try {
-    const { useSettingsStore } = await import("@/stores/settings")
-    return useSettingsStore.getState().settings
-  } catch {
-    // No settings store in this shell: shadow mode, the safe default.
-    return null
-  }
-}
 
 async function originOf(
   request: OutboundToolCallRequest,
@@ -165,11 +172,20 @@ async function planCall(
     origin: { ...origin, rootSessionId, instructionEpoch },
     unattended: options.unattended,
     via: "tool",
-    settings: await (options.settings ?? storeSettings)(),
+    settings: await (options.settings ?? readAppSettings)(),
     ...(options.policyGrants ? { policyGrants: options.policyGrants } : {}),
     ...(options.now ? { now: options.now() } : {}),
   })
   const result = planActionReview({ verdict: "ask", targets }, context)
+  if (request.toolUseID) {
+    rememberPlannedOutboundToolCall({
+      sessionId: request.sessionId,
+      requestId: request.requestId,
+      toolUseId: request.toolUseID,
+      toolName: normalizeToolId(request.toolName),
+      fingerprints: targets.map((target) => outboundFingerprint(target)),
+    })
+  }
   if (annotate) {
     annotateChatToolReview(request.sessionId, request.requestId, {
       targets: targets.map(toReviewTarget),
@@ -361,11 +377,12 @@ export async function answerWithOutboundPolicy<R extends PermissionRequestLike>(
   } catch (error) {
     console.warn("[outbound] planning failed; leaving the call to a person", error)
     const { readOutboundAuthorizationMode } = await import("./policy")
-    const mode = readOutboundAuthorizationMode(await (options.settings ?? storeSettings)())
+    const mode = readOutboundAuthorizationMode(await (options.settings ?? readAppSettings)())
     decision = mode === "enforce" ? { kind: "ask" } : { kind: "unchanged" }
   }
   switch (decision.kind) {
     case "allow":
+      authorizeOutboundToolCall(request.sessionId, request.requestId, decision.attribution)
       return { decision: "allow", attribution: decision.attribution }
     case "deny":
       return { decision: "deny", message: decision.message, attribution: decision.attribution }
@@ -383,7 +400,13 @@ export async function answerWithOutboundPolicy<R extends PermissionRequestLike>(
       const { forRequest, grant: _fromResponder, ...answer } = reply
       // A per-call answer never becomes a standing rule.
       if (answer.decision === "deny") return answer
-      return { ...answer, decision: "allow", grant: humanOutboundGrant(forRequest, review) }
+      const grant = humanOutboundGrant(forRequest, review)
+      // Only a person answers an enforced ask.
+      authorizeOutboundToolCall(request.sessionId, request.requestId, {
+        authority: "human",
+        grant,
+      })
+      return { ...answer, decision: "allow", grant }
     }
   }
 }
@@ -417,12 +440,15 @@ export async function planOutboundAsk(
   } catch (error) {
     console.error("[outbound] planning failed", error)
     const { readOutboundAuthorizationMode } = await import("./policy")
-    const mode = readOutboundAuthorizationMode(await (options.settings ?? storeSettings)())
+    const mode = readOutboundAuthorizationMode(await (options.settings ?? readAppSettings)())
     return { answered: false, personOnly: mode === "enforce" }
   }
   if (!plan) return null
   const decision = outboundToolDecision(plan, request.toolName)
   if (decision.kind === "allow" || decision.kind === "deny") {
+    if (decision.kind === "allow") {
+      authorizeOutboundToolCall(request.sessionId, request.requestId, decision.attribution)
+    }
     try {
       await approve(
         decision.kind,

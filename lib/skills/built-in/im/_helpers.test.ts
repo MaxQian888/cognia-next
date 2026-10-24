@@ -12,7 +12,13 @@ import { getRunningAdapter, listRunningAdapters } from "@/lib/connectors/lifecyc
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { ChatManagementScopeError } from "@/types/connectors/chat-management"
 import type { PlatformAdapter } from "@/types/connectors/adapter"
-import { previewText, requireMethod, resolveChatCapableAdapter, withScopeCapture } from "./_helpers"
+import {
+  previewText,
+  requireMethod,
+  resolveChatCapableAdapter,
+  skillDeliveryAuthorization,
+  withScopeCapture,
+} from "./_helpers"
 
 const mGet = getRunningAdapter as jest.Mock
 const mList = listRunningAdapters as jest.Mock
@@ -162,5 +168,37 @@ describe("previewText", () => {
   it("collapses whitespace and truncates with an ellipsis", () => {
     expect(previewText("  a   b\n c ")).toBe("a b c")
     expect(previewText("x".repeat(200), 10)).toBe("xxxxxxxxxx…")
+  })
+})
+
+describe("skillDeliveryAuthorization (ADR-0239)", () => {
+  const toolCall = { kind: "tool-call", sessionId: "s1", toolUseId: "toolu_1" } as const
+
+  it("uses what the host path set, marking a delivery into a chat the call created", () => {
+    expect(
+      skillDeliveryAuthorization({ sessionId: "s1", outboundAuthorization: toolCall }, "x")
+    ).toBe(toolCall)
+    expect(
+      skillDeliveryAuthorization({ sessionId: "s1", outboundAuthorization: toolCall }, "x", {
+        createdConversation: true,
+      })
+    ).toEqual({ ...toolCall, createdConversation: true })
+  })
+
+  it("never lets anything but a tool call cover a created chat", () => {
+    const human = { kind: "human", actor: "connector-user" } as const
+    expect(
+      skillDeliveryAuthorization({ sessionId: "s1", outboundAuthorization: human }, "x", {
+        createdConversation: true,
+      })
+    ).toBe(human)
+  })
+
+  it("falls back to an unattended send in the session's origin", () => {
+    expect(skillDeliveryAuthorization({ sessionId: "s1" }, "im.broadcast")).toEqual({
+      kind: "unattended",
+      ownerRef: "skill:im.broadcast",
+      sessionId: "s1",
+    })
   })
 })

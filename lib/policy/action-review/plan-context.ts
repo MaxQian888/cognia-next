@@ -14,7 +14,8 @@
  *   belongs to. No list is stored yet, so callers pass none and every
  *   unattended delivery outside the origin thread drafts.
  * - **Mode**: `agentPermissions.outboundAuthorization`, `shadow` unless it is
- *   exactly `enforce` (`readOutboundAuthorizationMode`).
+ *   exactly `enforce` (`readOutboundAuthorizationMode`), read from the app's
+ *   settings store by default ({@link readAppSettings}).
  */
 
 import {
@@ -24,13 +25,26 @@ import {
 } from "@/lib/db/action-review-receipts"
 import type { ScheduledTaskPayload } from "@/types/scheduler"
 
-import { outboundFingerprint, type OutboundTarget } from "./outbound-targets"
+import { conversationTarget, outboundFingerprint, type OutboundTarget } from "./outbound-targets"
 import {
   readOutboundAuthorizationMode,
   type ActionReviewPlanContext,
   type OutboundReviewVia,
 } from "./policy"
 import { botInstructionEpoch, taskInstructionEpoch, taskOriginThread } from "./request-origin"
+
+/** App settings as the engine reads them: only `agentPermissions.outboundAuthorization`. */
+export type OutboundSettingsLike = { agentPermissions?: unknown } | null | undefined
+
+/** The settings store's current settings; `null`, so shadow mode, in a shell without one. */
+export async function readAppSettings(): Promise<OutboundSettingsLike> {
+  try {
+    const { useSettingsStore } = await import("@/stores/settings")
+    return useSettingsStore.getState().settings
+  } catch {
+    return null
+  }
+}
 
 /** Where a run's request came from, as the engine keys its fence and grants. */
 export interface ActionReviewPlanOrigin {
@@ -82,6 +96,25 @@ export function botPlanOrigin(installation: {
   return {
     rootSessionId: `bot:${installation.id}`,
     instructionEpoch: botInstructionEpoch(installation),
+  }
+}
+
+/**
+ * The origin of a workflow run: one root and one epoch per run, and the IM
+ * conversation that triggered it, if one did, as its origin thread. A run
+ * started anywhere else has no origin thread, so each of its unattended
+ * deliveries needs a `policy` grant.
+ */
+export function workflowRunPlanOrigin(run: {
+  id: string
+  triggeredBy?: { conversationKey?: string }
+}): ActionReviewPlanOrigin {
+  const key = run.triggeredBy?.conversationKey
+  const originThread = key ? conversationTarget(key) : undefined
+  return {
+    rootSessionId: `workflow-run:${run.id}`,
+    instructionEpoch: `workflow-run:${run.id}`,
+    ...(originThread ? { originThread } : {}),
   }
 }
 

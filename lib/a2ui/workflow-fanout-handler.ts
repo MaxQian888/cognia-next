@@ -85,6 +85,8 @@ async function pushOutboundText(args: {
     // Mirror workflow-approval-handler's source so both A2UI
     // approve/cancel confirmations land with the same inbox badge.
     source: "workflow",
+    // A confirmation of the click, in the conversation it came from.
+    authorization: { kind: "system-notice", inboundConversationKey: args.conversationKey },
   })
 }
 

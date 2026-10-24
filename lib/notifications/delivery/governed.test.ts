@@ -191,6 +191,12 @@ describe("persistGovernedNotificationInsideTransaction", () => {
     expect(job?.notificationOperationKey).toBe("op-1")
     expect(job?.source).toBe("notification")
     expect(job?.orderSeq).toBe(1)
+    // A target a person configured grants its conversation (ADR-0239).
+    expect(job?.authorizedBy).toEqual({
+      authority: "policy-rule",
+      grantScope: "policy",
+      policyRef: `notification-target:${t.id}`,
+    })
   })
 
   it("is idempotent — re-committing the same operationKey returns the existing intent", async () => {

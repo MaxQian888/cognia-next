@@ -46,7 +46,11 @@ function req(over: Partial<PermissionRequestEvent> = {}): PermissionRequestEvent
 }
 
 interface Harness {
-  enqueued: Array<{ segments: unknown[]; deliveryTarget?: ConversationDeliveryTarget }>
+  enqueued: Array<{
+    segments: unknown[]
+    deliveryTarget?: ConversationDeliveryTarget
+    authorization?: unknown
+  }>
   bindings: Array<{
     actionId: string
     kind?: string
@@ -74,8 +78,10 @@ function harness(
     approvalMode,
     enqueue: (async (job: {
       request: { segments: unknown[]; deliveryTarget?: ConversationDeliveryTarget }
+      authorization?: unknown
     }) => {
       enqueued.push({
+        authorization: job.authorization,
         segments: job.request.segments,
         deliveryTarget: job.request.deliveryTarget,
       })
@@ -295,6 +301,11 @@ describe("makeImPermissionResponder", () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(h.enqueued).toHaveLength(1)
     expect(h.enqueued[0].segments).toHaveLength(1)
+    // ADR-0239: the approval card goes into the conversation that asked.
+    expect(h.enqueued[0].authorization).toEqual({
+      kind: "system-notice",
+      inboundConversationKey: "telegram:tg-1:9",
+    })
     expect(h.bindings).toHaveLength(3)
     expect(h.bindings.every((b) => b.kind === "tool_approve")).toBe(true)
     expect(h.bindings[0].payload).toMatchObject({

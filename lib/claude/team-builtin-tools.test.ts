@@ -48,7 +48,7 @@ jest.mock("@/lib/db/outbound-jobs", () => ({
   enqueueOutbound: (...a: unknown[]) => enqueueOutboundMock(...a),
 }))
 jest.mock("@/lib/connectors/delivery-gateway", () => ({
-  enqueueGoverned: (...a: unknown[]) => enqueueOutboundMock(...a),
+  enqueueAuthorized: (...a: unknown[]) => enqueueOutboundMock(...a),
 }))
 const appendAuditMock = jest.fn()
 jest.mock("@/lib/connectors/audit", () => ({
@@ -137,6 +137,7 @@ function makeDeps(over: Partial<TeamToolDeps> = {}): {
     messagePassesPiiGate: (async () => true) as TeamToolDeps["messagePassesPiiGate"],
     postToConversation: (async (input) => {
       rec("postToConversation")(input)
+      return "queued"
     }) as TeamToolDeps["postToConversation"],
     appendAuditEntry: (async (entry) => {
       rec("appendAuditEntry")(entry)
@@ -825,6 +826,8 @@ describe("team_post_to_chat", () => {
       adapterId: "bot-a",
       conversationKey: "lark:bot-a:chat-1",
       text: "status: done",
+      // No tool call to name: a reply into the run's own chat (ADR-0239).
+      authorization: { kind: "origin-reply", inboundConversationKey: "lark:bot-a:chat-1" },
     })
     expect((calls.appendAuditEntry[0] as [Record<string, unknown>])[0]).toMatchObject({
       kind: "team.posted_as_bot",
@@ -851,11 +854,40 @@ describe("team_post_to_chat", () => {
       adapterId: "bot-b",
       conversationKey: "lark:bot-b:chat-1",
       text: "posting as B",
+      authorization: { kind: "origin-reply", inboundConversationKey: "lark:bot-a:chat-1" },
     })
     expect((calls.appendAuditEntry[0] as [Record<string, unknown>])[0]).toMatchObject({
       kind: "team.posted_as_bot",
       fields: expect.objectContaining({ fromAdapterId: "bot-a", targetAdapterId: "bot-b" }),
     })
+  })
+
+  it("delivers under the tool call's own authorization when it has one", async () => {
+    const { deps, calls } = makeDeps()
+    const toolCall = { kind: "tool-call", sessionId: "s1", toolUseId: "toolu_1" } as const
+    await runTeamBuiltinTool(
+      TEAM_TOOL_NAMES.postToChat,
+      { conversationKey: "lark:bot-a:chat-1", message: "status: done" },
+      { ...caller, toolCall },
+      deps
+    )
+    expect((calls.postToConversation[0] as [Record<string, unknown>])[0]).toMatchObject({
+      authorization: toolCall,
+    })
+  })
+
+  it("tells the model a post held as a draft is not to be retried", async () => {
+    const { deps, calls } = makeDeps({
+      postToConversation: (async () => "drafted") as TeamToolDeps["postToConversation"],
+    })
+    const out = await runTeamBuiltinTool(
+      TEAM_TOOL_NAMES.postToChat,
+      { conversationKey: "lark:bot-a:chat-1", message: "status: done" },
+      caller,
+      deps
+    )
+    expect(out).toMatch(/Held as a draft/)
+    expect(calls.appendAuditEntry).toBeUndefined()
   })
 
   it("rejects a target that is neither the origin nor a sibling", async () => {
@@ -900,7 +932,7 @@ describe("team_post_to_chat", () => {
 
 describe("defaultTeamToolDeps — team_post_to_chat wiring", () => {
   beforeEach(() => {
-    enqueueOutboundMock.mockReset()
+    enqueueOutboundMock.mockReset().mockResolvedValue({ kind: "queued", job: { id: "job-1" } })
     appendAuditMock.mockReset().mockResolvedValue(undefined)
     findSessionByConversationKeyMock.mockReset().mockResolvedValue(undefined)
     listSiblingConversationsDbMock.mockReset().mockResolvedValue([])
@@ -936,6 +968,7 @@ describe("defaultTeamToolDeps — team_post_to_chat wiring", () => {
       adapterId: "bot-b",
       conversationKey: "lark:bot-b:chat-1",
       text: "hello",
+      authorization: { kind: "origin-reply", inboundConversationKey: "lark:bot-a:chat-1" },
     })
     expect(enqueueOutboundMock).toHaveBeenCalledTimes(1)
     const job = enqueueOutboundMock.mock.calls[0]![0] as {
@@ -952,6 +985,7 @@ describe("defaultTeamToolDeps — team_post_to_chat wiring", () => {
       adapterId: "bot-b",
       conversationKey: "lark:bot-b:chat-1",
       source: "skill",
+      authorization: { kind: "origin-reply", inboundConversationKey: "lark:bot-a:chat-1" },
     })
     expect(job.request.segments).toEqual([{ type: "text", text: "hello" }])
     expect(job.request.metadata.idempotencyKey).toBeTruthy()
@@ -975,6 +1009,7 @@ describe("defaultTeamToolDeps — team_post_to_chat wiring", () => {
       adapterId: "bot-b",
       conversationKey: "lark:bot-b:chat-1",
       text: "hello",
+      authorization: { kind: "origin-reply", inboundConversationKey: "lark:bot-a:chat-1" },
     })
     expect(
       (enqueueOutboundMock.mock.calls[0]![0] as { request: { conversationRef: unknown } }).request

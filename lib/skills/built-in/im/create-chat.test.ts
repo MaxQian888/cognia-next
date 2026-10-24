@@ -12,6 +12,15 @@ jest.mock("@/lib/db/outbound-jobs", () => ({
   enqueueOutbound: jest.fn().mockResolvedValue({ id: "job1" }),
 }))
 
+// The outbound policy's mode and its drafts (ADR-0239), per test.
+let mockOutboundSettings: { agentPermissions?: unknown } = {}
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: { getState: () => ({ settings: mockOutboundSettings }) },
+}))
+jest.mock("@/lib/db/connector-drafts", () => ({
+  createDraft: jest.fn(async () => ({ id: "cdr_1" })),
+}))
+
 jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: jest.fn(() => true),
 }))
@@ -27,6 +36,11 @@ import { bootstrapConversation } from "@/lib/connectors/conversation-bootstrap"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { appendAudit } from "@/lib/connectors/audit"
+import {
+  __resetAuthorizedToolCallsForTesting,
+  authorizeOutboundToolCall,
+  rememberPlannedOutboundToolCall,
+} from "@/lib/policy/action-review/authorized-tool-calls"
 
 const mResolve = resolveChatCapableAdapter as jest.Mock
 const mBootstrap = bootstrapConversation as jest.Mock
@@ -46,6 +60,8 @@ function skill() {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockOutboundSettings = {}
+  __resetAuthorizedToolCallsForTesting()
   mPii.mockReturnValue(true)
   mResolve.mockResolvedValue({
     adapterId: "a1",
@@ -91,6 +107,44 @@ describe("im.create_chat execute", () => {
       sessionId: "s_new",
       firstMessage: "sent",
     })
+  })
+
+  it("sends the first message under the call that created the chat (ADR-0239)", async () => {
+    rememberPlannedOutboundToolCall({
+      sessionId: "s",
+      requestId: "req_1",
+      toolUseId: "toolu_1",
+      toolName: "im_create_chat",
+      fingerprints: [],
+    })
+    authorizeOutboundToolCall("s", "req_1", { authority: "human", grant: { scope: "once" } })
+    mockOutboundSettings = { agentPermissions: { outboundAuthorization: "enforce" } }
+    const out = await skill().execute(
+      { name: "Project X", memberIds: ["ou_a"], firstMessage: "hello team" },
+      {
+        sessionId: "s",
+        outboundAuthorization: { kind: "tool-call", sessionId: "s", toolUseId: "toolu_1" },
+      }
+    )
+    expect(mEnqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorizedBy: { receiptId: "req_1", authority: "human", grantScope: "once" },
+      })
+    )
+    expect(out).toMatchObject({ firstMessage: "sent" })
+  })
+
+  it("reports a first message the outbound policy held as a draft", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    mockOutboundSettings = { agentPermissions: { outboundAuthorization: "enforce" } }
+    // No tool call to vouch for it: planned as the session's unattended send.
+    const out = await skill().execute(
+      { name: "Project X", memberIds: ["ou_a"], firstMessage: "hello team" },
+      { sessionId: "s" }
+    )
+    expect(mEnqueue).not.toHaveBeenCalled()
+    expect(out).toMatchObject({ firstMessage: "drafted" })
+    warn.mockRestore()
   })
 
   it("reports rejected member ids as a partial outcome", async () => {

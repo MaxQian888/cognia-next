@@ -19,7 +19,12 @@
  *   3. the text passes the PII gate (`hasNoLeakingPii`, the cross-cutting
  *      redaction gate from CLAUDE.md) before it leaves the app;
  *   4. the job is idempotency-keyed on `<taskId>:<executionId>` (overridable)
- *      so a retried execution never double-sends.
+ *      so a retried execution never double-sends;
+ *   5. the outbound policy (ADR-0239) plans it as the task's unattended send:
+ *      a conversation the task's `/schedule` came from takes it, any other is
+ *      held as a draft under enforcement until a person grants it. The
+ *      proactive-push opt-in says the chat accepts pushes; it does not say who
+ *      may push there, so it is not a grant.
  *
  * Every refusal is audited under the same `notify.im_*` kinds the center uses
  * so operators see one consistent trail. Host requirement:
@@ -43,7 +48,7 @@ const log = loggers.scheduler
 export interface ImPushExecutorDeps {
   getConversationState?: typeof import("@/lib/db/connector-conversation-state").getConnectorConversationState
   readOverride?: typeof import("@/lib/db/conversation-overrides").readForResolution
-  enqueue?: typeof import("@/lib/connectors/delivery-gateway").enqueueGoverned
+  enqueue?: typeof import("@/lib/connectors/delivery-gateway").enqueueAuthorized
   audit?: typeof import("@/lib/connectors/audit").appendAudit
   /** PII gate; returns true when SAFE to send. Defaults to `hasNoLeakingPii`. */
   isPiiSafe?: (text: string) => boolean
@@ -116,7 +121,7 @@ export function createImPushExecutor(deps: ImPushExecutorDeps = {}) {
     const getConversationState =
       deps.getConversationState ?? conversationStateMod.getConnectorConversationState
     const readOverride = deps.readOverride ?? overridesMod.readForResolution
-    const enqueue = deps.enqueue ?? gatewayMod.enqueueGoverned
+    const enqueue = deps.enqueue ?? gatewayMod.enqueueAuthorized
     const audit = deps.audit ?? auditMod.appendAudit
     const isPiiSafe = deps.isPiiSafe ?? hasNoLeakingPii
     const now = Date.now()
@@ -167,7 +172,8 @@ export function createImPushExecutor(deps: ImPushExecutorDeps = {}) {
 
     const idempotencyKey = normalized.idempotencyKey ?? `${task.id}:${execution.id}`
     try {
-      const job = await enqueue({
+      const { taskPlanOrigin } = await import("@/lib/policy/action-review/plan-context")
+      const delivered = await enqueue({
         adapterId,
         conversationKey,
         request: {
@@ -177,7 +183,33 @@ export function createImPushExecutor(deps: ImPushExecutorDeps = {}) {
           metadata: { idempotencyKey },
         },
         source: "manual",
+        authorization: {
+          kind: "unattended",
+          ownerRef: `task:${task.id}`,
+          origin: taskPlanOrigin(task),
+        },
       })
+      if (delivered.kind === "drafted") {
+        log.info("Scheduler im-push held as a draft", {
+          taskId: task.id,
+          executionId: execution.id,
+          conversationKey,
+          draftId: delivered.draft.id,
+        })
+        // Not a failure: retrying would only hold a second draft.
+        return {
+          success: true,
+          output: {
+            draftId: delivered.draft.id,
+            heldAsDraft: true,
+            adapterId,
+            conversationKey,
+            segments: segments.length,
+            idempotencyKey,
+          },
+        }
+      }
+      const job = delivered.job
       await audit({
         adapterId,
         kind: "notify.im_pushed",

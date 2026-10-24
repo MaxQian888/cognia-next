@@ -46993,6 +46993,8 @@
           },
           "outbound": {
             "ai_run_enqueued": "AI reply queued",
+            "denied": "Refused (outbound policy)",
+            "drafted": "Held as a draft (outbound policy)",
             "enqueued": "Queued to send",
             "queue_capped": "Queue cap reached",
             "replayed": "Replayed"

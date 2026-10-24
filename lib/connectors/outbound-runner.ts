@@ -654,6 +654,15 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         ...(job.source === "workflow" && job.sourceWorkflow
           ? { sourceWorkflow: job.sourceWorkflow }
           : {}),
+        // The same chat through a sibling bot: what authorized the original
+        // job carries over, it is not planned again (ADR-0239).
+        authorization: {
+          kind: "rerouted",
+          from: {
+            conversationKey: job.conversationKey,
+            ...(job.authorizedBy ? { authorizedBy: job.authorizedBy } : {}),
+          },
+        },
       })
       const reasonText = mechanism === "failover" ? "circuit open" : "rate limited"
       // Point the dead-lettered original at the sibling job that now carries

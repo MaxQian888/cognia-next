@@ -266,6 +266,7 @@ export async function maybeHandleControlCommand(
         metadata: { idempotencyKey: newIdempotencyKey() },
       },
       source: "ai-run",
+      authorization: { kind: "system-notice", inboundConversationKey: event.conversationKey },
     })
     await audit({
       adapterId: event.adapterId,

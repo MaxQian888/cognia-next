@@ -1,6 +1,6 @@
 import { registerNodeExecutor } from "../registry"
 import { guardWorkflowEgress, WorkflowPiiBlockedError } from "@/lib/workflow/runtime/egress-guard"
-import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
+import { enqueueAuthorized as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { createDraft } from "@/lib/db/connector-drafts"
 import { nonRetryable } from "../shared/executor-support"
 
@@ -97,7 +97,15 @@ registerNodeExecutor({
         },
       ] as unknown as Segments
     }
-    const job = await enqueueOutbound({
+    // Nobody watches a workflow step. The run's own origin decides: its IM
+    // trigger conversation, if it had one, takes the send; anything else is
+    // held as a draft until a person grants the recipient (ADR-0239).
+    const [{ getDb }, { workflowRunPlanOrigin }] = await Promise.all([
+      import("@/lib/db/schema"),
+      import("@/lib/policy/action-review/plan-context"),
+    ])
+    const run = await getDb().workflowRuns.get(ctx.runId)
+    const delivered = await enqueueOutbound({
       adapterId,
       conversationKey,
       request: {
@@ -125,7 +133,29 @@ registerNodeExecutor({
         runId: ctx.runId,
         nodeId: ctx.stepId,
       },
+      authorization: {
+        kind: "unattended",
+        ownerRef: `workflow:${ctx.workflowId}`,
+        origin: workflowRunPlanOrigin({
+          id: ctx.runId,
+          ...(run?.triggeredBy ? { triggeredBy: run.triggeredBy } : {}),
+        }),
+      },
     })
+    if (delivered.kind === "drafted") {
+      return {
+        output: {
+          draftId: delivered.draft.id,
+          heldAsDraft: true,
+          delivered: false,
+          adapterId,
+          conversationKey,
+          idempotencyKey,
+          ...(guarded.redacted ? { piiRedacted: true } : {}),
+        },
+      }
+    }
+    const job = delivered.job
     const baseOutput = {
       jobId: job.id,
       adapterId,
