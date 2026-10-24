@@ -14,7 +14,7 @@
  *   belongs to. No list is stored yet, so callers pass none and every
  *   unattended delivery outside the origin thread drafts.
  * - **Mode**: `agentPermissions.outboundAuthorization`, `shadow` unless it is
- *   exactly `enforce` (see {@link OutboundAuthorizationMode}).
+ *   exactly `enforce` (`readOutboundAuthorizationMode`).
  */
 
 import {
@@ -25,10 +25,10 @@ import {
 import type { ScheduledTaskPayload } from "@/types/scheduler"
 
 import { outboundFingerprint, type OutboundTarget } from "./outbound-targets"
-import type {
-  ActionReviewPlanContext,
-  OutboundAuthorizationMode,
-  OutboundReviewVia,
+import {
+  readOutboundAuthorizationMode,
+  type ActionReviewPlanContext,
+  type OutboundReviewVia,
 } from "./policy"
 import { botInstructionEpoch, taskInstructionEpoch, taskOriginThread } from "./request-origin"
 
@@ -55,16 +55,6 @@ export interface BuildActionReviewPlanContextArgs {
   now?: number
   /** Test seam for the receipt query. */
   listAuthKeys?: (prefix: string, now: number) => Promise<string[]>
-}
-
-/** `enforce` only when the setting says exactly that; anything else observes. */
-export function readOutboundAuthorizationMode(
-  settings: { agentPermissions?: unknown } | null | undefined
-): OutboundAuthorizationMode {
-  const permissions = settings?.agentPermissions
-  if (!permissions || typeof permissions !== "object") return "shadow"
-  const mode = (permissions as { outboundAuthorization?: unknown }).outboundAuthorization
-  return mode === "enforce" ? "enforce" : "shadow"
 }
 
 /** The origin of a scheduled task's sessionless run: one root per task. */

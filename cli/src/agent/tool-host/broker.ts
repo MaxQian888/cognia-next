@@ -19,7 +19,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
 
-import type { PermissionRequestEvent } from "@cognia/agent-config-types"
+import type { ExplicitToolAllowedEvent, PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 
 import type { ResolvedCliSessionContext } from "../session-context"
@@ -46,6 +46,7 @@ import {
   extractPathArguments,
   isInsideRoots,
   isExplicitlyDenied,
+  explicitToolMode,
   confinementRoots,
   namespacedHostTool,
   needsApproval,
@@ -98,6 +99,12 @@ export interface ToolHostBrokerParams {
   /** Surface a projected tool call in the TUI, like a built-in one. */
   onToolCall?: (event: ToolHostCallEvent) => void
   onToolResult?: (event: ToolHostResultEvent) => void
+  /**
+   * Shadow mode (ADR-0239): an outbound call the session's policy allowed
+   * without asking, for the host to record what its outbound policy would
+   * have decided. Not wired by any caller yet (ADR-0239 WP6).
+   */
+  onExplicitToolAllowed?: (event: ExplicitToolAllowedEvent) => void
   /** Socket directory. Defaults to a private dir under the OS temp root. */
   socketDir?: string
   /** Injected for tests. */
@@ -278,8 +285,19 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
     const full = namespacedFor(server, p.name)
     if (isExplicitlyDenied(session.sendOptions, full, p.args))
       return { allow: false, reason: "denied by permission ruleset" }
-    if (!needsApproval(session.sendOptions, full, p.args))
+    const explicit = explicitToolMode(session.sendOptions, full)
+    if (!needsApproval(session.sendOptions, full, p.args)) {
+      if (explicit === "observe") {
+        params.onExplicitToolAllowed?.({
+          type: "explicit_tool_allowed",
+          sessionId: session.sessionId,
+          toolName: full,
+          input: (p.args ?? {}) as Record<string, unknown>,
+          permissionClass: "outbound",
+        })
+      }
       return { allow: true, ...(updatedArgs !== undefined ? { updatedArgs } : {}) }
+    }
     if (!params.gate) {
       return { allow: false, reason: `"${p.name}" needs approval and none is available` }
     }
@@ -291,6 +309,11 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
       toolName: full,
       displayName: full,
       input: (p.args ?? {}) as Record<string, unknown>,
+      ...(explicit ? { permissionClass: "outbound" as const } : {}),
+      // An enforced outbound call is approved per call, never remembered.
+      ...(explicit === "enforce"
+        ? { requiresPerCallApproval: true, suppressAlwaysAllowRule: true, defaultToNo: true }
+        : {}),
     }
     let decision: CapturePermissionDecision
     try {

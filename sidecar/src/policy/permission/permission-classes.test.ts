@@ -5,12 +5,19 @@ import {
   EMPTY_PLUGIN_CLASS_INDEX,
   buildPluginClassIndex,
   classesOfTool,
+  explicitToolAllowedFrame,
+  explicitToolMustAsk,
+  explicitToolName,
+  explicitToolObserved,
+  isExplicitTool,
   isSandboxExecuted,
   profileDenialMessage,
   profileVerdict,
   readApprovalTtlMs,
+  readExplicitToolPolicy,
   readPermissionProfile,
   readSandboxAttested,
+  requestPermissionClass,
 } from "./permission-classes.ts"
 
 const PROFILE = {
@@ -140,4 +147,64 @@ test("reads a positive approval TTL and ignores anything else", () => {
   assert.equal(readApprovalTtlMs(0), undefined)
   assert.equal(readApprovalTtlMs("60000"), undefined)
   assert.equal(readApprovalTtlMs(undefined), undefined)
+})
+
+test("an always-explicit list matches the registered name on any server", () => {
+  const policy = readExplicitToolPolicy([" Send_Email ", "im_broadcast", 7, ""], "observe")
+  assert.deepEqual(policy && [...policy.tools].sort(), ["im_broadcast", "send_email"])
+  assert.equal(explicitToolName("mcp__cognia-tools__Send_Email"), "send_email")
+  assert.equal(isExplicitTool("mcp__cognia-tools__send_email", policy), true)
+  assert.equal(isExplicitTool("mcp__someone__send_email", policy), true)
+  assert.equal(isExplicitTool("mcp__cognia-plugin-tools__im_broadcast", policy), true)
+  assert.equal(isExplicitTool("mcp__cognia-tools__write", policy), false)
+  assert.equal(isExplicitTool("send_email", null), false)
+})
+
+test("an always-explicit list enforces unless its mode is exactly observe", () => {
+  assert.equal(readExplicitToolPolicy(undefined, "enforce"), null)
+  assert.equal(readExplicitToolPolicy([], "enforce"), null)
+  assert.equal(readExplicitToolPolicy("send_email", "enforce"), null)
+  for (const mode of [undefined, "enforce", "Observe", "shadow", 1]) {
+    assert.equal(readExplicitToolPolicy(["send_email"], mode)?.mode, "enforce", String(mode))
+  }
+  const observe = readExplicitToolPolicy(["send_email"], "observe")
+  const enforce = readExplicitToolPolicy(["send_email"], "enforce")
+  assert.equal(explicitToolMustAsk("send_email", enforce), true)
+  assert.equal(explicitToolMustAsk("send_email", observe), false)
+  assert.equal(explicitToolObserved("send_email", observe), true)
+  assert.equal(explicitToolObserved("send_email", enforce), false)
+  assert.equal(explicitToolObserved("write", observe), false)
+})
+
+test("a listed request is labelled outbound unless the profile names its class", () => {
+  const listed = readExplicitToolPolicy(["im_send"], "observe")
+  const tool = "mcp__cognia-plugin-tools__im_send"
+  assert.equal(
+    requestPermissionClass({ kind: "none" }, null, tool, EMPTY_PLUGIN_CLASS_INDEX, listed),
+    "outbound"
+  )
+  assert.equal(
+    requestPermissionClass({ kind: "always-ask", cls: "secrets" }, PROFILE, tool, INDEX, listed),
+    "secrets"
+  )
+  assert.equal(
+    requestPermissionClass({ kind: "none" }, PROFILE, "mcp__cognia-tools__write", INDEX, listed),
+    "workspace"
+  )
+  assert.equal(
+    requestPermissionClass({ kind: "none" }, null, "mcp__cognia-tools__write", INDEX, listed),
+    undefined
+  )
+})
+
+test("the observation frame carries the call and its class", () => {
+  assert.deepEqual(explicitToolAllowedFrame("s1", "send_email", { to: "a@b.c" }, "tu-1"), {
+    type: "explicit_tool_allowed",
+    sessionId: "s1",
+    toolUseID: "tu-1",
+    toolName: "send_email",
+    input: { to: "a@b.c" },
+    permissionClass: "outbound",
+  })
+  assert.equal("toolUseID" in explicitToolAllowedFrame("s1", "send_email", {}), false)
 })

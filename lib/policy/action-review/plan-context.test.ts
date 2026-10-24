@@ -18,11 +18,10 @@ import { conversationTarget, outboundFingerprint, toReviewTarget } from "./outbo
 import {
   botPlanOrigin,
   buildActionReviewPlanContext,
-  readOutboundAuthorizationMode,
   taskPlanOrigin,
   type ActionReviewPlanOrigin,
 } from "./plan-context"
-import { planActionReview } from "./policy"
+import { planActionReview, readOutboundAuthorizationMode } from "./policy"
 import {
   __clearRequestOriginCacheForTesting,
   resolveSessionRequestOrigin,

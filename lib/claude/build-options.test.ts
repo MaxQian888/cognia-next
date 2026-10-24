@@ -3715,6 +3715,24 @@ describe("resolveSendOptions — workspace port lease admission", () => {
   )
 })
 
+describe("resolveSendOptions — outbound tools always reach the host (ADR-0239)", () => {
+  it("lists the outbound tools in observe mode unless enforcement is on", async () => {
+    const shadow = await resolveSendOptions({ character: makeChar() })
+    expect(shadow.alwaysExplicitTools).toEqual(
+      expect.arrayContaining(["im_broadcast", "send_email"])
+    )
+    expect(shadow.alwaysExplicitToolsMode).toBe("observe")
+
+    const enforce = await resolveSendOptions({
+      character: makeChar(),
+      appSettings: {
+        agentPermissions: { outboundAuthorization: "enforce" },
+      } as unknown as AppSettings,
+    })
+    expect(enforce.alwaysExplicitToolsMode).toBe("enforce")
+  })
+})
+
 describe("resolveSendOptions — cwd / permissionMode", () => {
   it("session.workingDir wins, then character, then appSettings", async () => {
     const opts = await resolveSendOptions({

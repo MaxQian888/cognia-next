@@ -45,6 +45,8 @@ import { resolveSandboxEnabled, resolveSandboxSessionBinding } from "@/lib/sandb
 import { resolveHostTaskPlacement } from "@/lib/sandbox/host-task-placement"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import { applyUnattendedPermissionProfile } from "./unattended-permission-options"
+import { applyAlwaysExplicitTools } from "./always-explicit-tools"
+import { readOutboundAuthorizationMode } from "@/lib/policy/action-review/policy"
 import {
   deriveExternalSessionPermission,
   type ExternalSessionPermissionSpec,
@@ -6341,6 +6343,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         bypassRouterFusion(error)
       }
     }
+  }
+
+  // --- Outbound tools always reach the host (ADR-0239) -----------------------
+  // Over the final tool surface, like the profile below. In shadow mode the
+  // sidecar only reports the outbound calls a shortcut let through.
+  {
+    const { usePluginStore } = await import("@/stores/plugin-runtime")
+    const plugins = usePluginStore.getState().plugins
+    applyAlwaysExplicitTools(opts, {
+      mode: readOutboundAuthorizationMode(appSettings),
+      pluginPermissions: (pluginId) => plugins[pluginId]?.manifest.permissions ?? [],
+    })
   }
 
   // --- Unattended permission profile (ADR-0224 A7) --------------------------

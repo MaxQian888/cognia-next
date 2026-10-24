@@ -178,3 +178,72 @@ test("a mode's MCP allowlist installs the hook and refuses unpicked tools under 
   )
   assert.deepEqual(asked, [])
 })
+
+// ADR-0239: outbound tools listed in `alwaysExplicitTools`.
+const IM_SEND = "mcp__cognia-plugin-tools__im_broadcast"
+
+function explicitHooks(mode: "observe" | "enforce", seen = new Set<string>()) {
+  const asked: string[] = []
+  const frames: Array<Record<string, unknown>> = []
+  const hooks = buildProfileToolHooks({
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      alwaysExplicitTools: ["im_broadcast"],
+      alwaysExplicitToolsMode: mode,
+    },
+    pluginToolNameAliases: new Map(),
+    profileApprovals: new Set(),
+    explicitSeen: seen,
+    emit: (frame) => frames.push(frame),
+    sessionId: "s1",
+    canUseTool: async (tool) => {
+      asked.push(tool)
+      return { behavior: "allow" }
+    },
+  })
+  assert.ok(hooks, "an always-explicit list gets the hooks")
+  return { hooks, asked, frames, seen }
+}
+
+type PostHook = (input: Record<string, unknown>, toolUseID: string | undefined) => Promise<unknown>
+
+test("an enforced outbound tool asks before the SDK's bypass can run it", async () => {
+  const { hooks, asked } = explicitHooks("enforce")
+  const pre = hooks.PreToolUse[0]!.hooks[0] as unknown as Hook
+  const out = await pre({ tool_name: IM_SEND, tool_input: {} }, "tu-1", { signal })
+  assert.deepEqual(asked, [IM_SEND])
+  assert.equal(
+    (out.hookSpecificOutput as { permissionDecision: string }).permissionDecision,
+    "allow"
+  )
+  assert.equal(hooks.PostToolUse, undefined)
+  // An unlisted tool is left to the SDK.
+  assert.deepEqual(await pre({ tool_name: "Bash", tool_input: {} }, "tu-2", { signal }), {})
+})
+
+test("an observed outbound tool the SDK ran without asking is reported after it ran", async () => {
+  const { hooks, asked, frames, seen } = explicitHooks("observe")
+  const pre = hooks.PreToolUse[0]!.hooks[0] as unknown as Hook
+  assert.deepEqual(await pre({ tool_name: IM_SEND, tool_input: {} }, "tu-1", { signal }), {})
+  assert.deepEqual(asked, [])
+
+  const post = hooks.PostToolUse![0]!.hooks[0] as unknown as PostHook
+  await post({ tool_name: IM_SEND, tool_input: { text: "hi" } }, "tu-1")
+  assert.deepEqual(frames, [
+    {
+      type: "explicit_tool_allowed",
+      sessionId: "s1",
+      toolUseID: "tu-1",
+      toolName: IM_SEND,
+      input: { text: "hi" },
+      permissionClass: "outbound",
+    },
+  ])
+
+  // A call canUseTool already allowed or reported is not reported again.
+  seen.add("tu-2")
+  await post({ tool_name: IM_SEND, tool_input: {} }, "tu-2")
+  await post({ tool_name: "Bash", tool_input: {} }, "tu-3")
+  assert.equal(frames.length, 1)
+  assert.equal(seen.size, 0)
+})

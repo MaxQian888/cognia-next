@@ -51,6 +51,20 @@ import { outboundFingerprint, type OutboundTarget } from "./outbound-targets"
  */
 export type OutboundAuthorizationMode = "shadow" | "enforce"
 
+/**
+ * The mode `agentPermissions.outboundAuthorization` selects: `enforce` only
+ * when it says exactly that, anything else observes. Read structurally so a
+ * settings object from any source (the app store, the CLI) can be passed.
+ */
+export function readOutboundAuthorizationMode(
+  settings: { agentPermissions?: unknown } | null | undefined
+): OutboundAuthorizationMode {
+  const permissions = settings?.agentPermissions
+  if (!permissions || typeof permissions !== "object") return "shadow"
+  const mode = (permissions as { outboundAuthorization?: unknown }).outboundAuthorization
+  return mode === "enforce" ? "enforce" : "shadow"
+}
+
 /** The chokepoint asking: a tool call, or a connector delivery. */
 export type OutboundReviewVia = "tool" | "delivery"
 

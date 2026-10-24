@@ -16,6 +16,13 @@
 // A hook `allow` does not stop the SDK from consulting `canUseTool` later, so
 // an approval obtained here is recorded under the call's tool-use id and
 // `canUseTool` honours it once instead of asking the same person twice.
+//
+// Outbound tools (`alwaysExplicitTools`, ADR-0239) take the same path while
+// their list enforces: every call asks through `canUseTool`, in every mode.
+// While it only observes, the SDK may still run a listed call without asking
+// anyone (bypass, an allow rule); a PostToolUse hook reports each such call
+// with an `explicit_tool_allowed` frame, unless `canUseTool` already allowed
+// or reported it.
 
 import type { HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk"
 
@@ -24,8 +31,12 @@ import type { PermissionSendOptions } from "../../policy/permission/ladder.ts"
 import { mcpToolAllowlistDenies, toolPermissionDecision } from "../../policy/permission/ladder.ts"
 import {
   buildPluginClassIndex,
+  explicitToolAllowedFrame,
+  explicitToolMustAsk,
+  explicitToolObserved,
   profileDenialMessage,
   profileVerdict,
+  readExplicitToolPolicy,
   readPermissionProfile,
 } from "../../policy/permission/permission-classes.ts"
 import { PLUGIN_TOOLS_SERVER_NAME } from "../../policy/tool-catalog/names.ts"
@@ -44,6 +55,11 @@ export interface ProfileToolHookOptions {
   canUseTool: CanUseTool
   /** Tool-use ids a person approved here; `canUseTool` consumes each once. */
   profileApprovals: Set<string>
+  /** Tool-use ids of listed calls `canUseTool` already allowed or reported. */
+  explicitSeen?: Set<string>
+  /** Sends the `explicit_tool_allowed` frame; required for an observed list. */
+  emit?: (frame: Record<string, unknown>) => void
+  sessionId?: string
 }
 
 function decision(permissionDecision: "allow" | "deny", extra: Record<string, unknown>) {
@@ -52,29 +68,66 @@ function decision(permissionDecision: "allow" | "deny", extra: Record<string, un
   }
 }
 
-/** The PreToolUse hook, absent when neither a profile nor per-tool policies apply. */
+type ProfileHookMap = { PreToolUse: HookCallbackMatcher[]; PostToolUse?: HookCallbackMatcher[] }
+
+/** The hooks, absent when no profile, per-tool policy or always-explicit list applies. */
 export function buildProfileToolHooks({
   sendOptions,
   pluginToolNameAliases,
   canUseTool,
   profileApprovals,
-}: ProfileToolHookOptions): { PreToolUse: HookCallbackMatcher[] } | undefined {
+  explicitSeen,
+  emit,
+  sessionId,
+}: ProfileToolHookOptions): ProfileHookMap | undefined {
   const profile = readPermissionProfile(sendOptions.permissionProfile)
-  if (!profile && !sendOptions.toolPermissionRules && !sendOptions.mcpToolAllowlist)
+  const explicitTools = readExplicitToolPolicy(
+    sendOptions.alwaysExplicitTools,
+    sendOptions.alwaysExplicitToolsMode
+  )
+  if (
+    !profile &&
+    !sendOptions.toolPermissionRules &&
+    !sendOptions.mcpToolAllowlist &&
+    !explicitTools
+  )
     return undefined
   const pluginClasses = buildPluginClassIndex(sendOptions.pluginTools)
+  const restore = (modelToolName: string) =>
+    restorePluginToolName(pluginToolNameAliases, PLUGIN_TOOLS_SERVER_NAME, modelToolName)
+  const observing = explicitTools?.mode === "observe" && typeof emit === "function"
   return {
+    ...(observing
+      ? {
+          PostToolUse: [
+            {
+              hooks: [
+                async (input, toolUseID) => {
+                  if (!("tool_name" in input) || typeof input.tool_name !== "string") return {}
+                  const toolName = restore(input.tool_name)
+                  if (!explicitToolObserved(toolName, explicitTools)) return {}
+                  if (toolUseID && explicitSeen?.delete(toolUseID)) return {}
+                  const toolInput =
+                    "tool_input" in input &&
+                    input.tool_input &&
+                    typeof input.tool_input === "object"
+                      ? input.tool_input
+                      : {}
+                  emit!(explicitToolAllowedFrame(sessionId, toolName, toolInput, toolUseID))
+                  return {}
+                },
+              ],
+            },
+          ],
+        }
+      : {}),
     PreToolUse: [
       {
         hooks: [
           async (input, toolUseID, { signal }) => {
             if (!("tool_name" in input) || typeof input.tool_name !== "string") return {}
             const modelToolName = input.tool_name
-            const toolName = restorePluginToolName(
-              pluginToolNameAliases,
-              PLUGIN_TOOLS_SERVER_NAME,
-              modelToolName
-            )
+            const toolName = restore(modelToolName)
             const verdict = profileVerdict(profile, toolName, pluginClasses)
             const toolPolicy = toolPermissionDecision(toolName, sendOptions.toolPermissionRules)
             // The CLI connects MCP servers itself, so a tool a mode did not
@@ -94,7 +147,12 @@ export function buildProfileToolHooks({
                 permissionDecisionReason: profileDenialMessage(toolName, verdict.cls),
               })
             }
-            if (verdict.kind !== "always-ask" && toolPolicy !== "ask") return {}
+            if (
+              verdict.kind !== "always-ask" &&
+              toolPolicy !== "ask" &&
+              !explicitToolMustAsk(toolName, explicitTools)
+            )
+              return {}
             if (!toolUseID)
               return decision("deny", {
                 permissionDecisionReason: "missing tool-use id for per-call approval",

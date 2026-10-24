@@ -18,12 +18,17 @@ import { awaitApproval } from "./approval.ts"
 import type { ApprovalAnswer, PendingApproval } from "./approval.ts"
 import {
   buildPluginClassIndex,
-  classesOfTool,
+  explicitToolAllowedFrame,
+  explicitToolMustAsk,
+  explicitToolObserved,
+  isExplicitTool,
   profileDenialMessage,
   readApprovalTtlMs,
+  readExplicitToolPolicy,
   readPermissionProfile,
   readSandboxAttested,
   profileVerdict,
+  requestPermissionClass,
 } from "./permission-classes.ts"
 import {
   buildApprovalRequiredSet,
@@ -108,6 +113,10 @@ function livePolicy(sendOptions: PermissionSendOptions): LadderPolicy {
     profile: readPermissionProfile(sendOptions.permissionProfile),
     pluginClasses: buildPluginClassIndex(sendOptions.pluginTools),
     sandboxAttested: readSandboxAttested(sendOptions.sandboxAttestation),
+    explicitTools: readExplicitToolPolicy(
+      sendOptions.alwaysExplicitTools,
+      sendOptions.alwaysExplicitToolsMode
+    ),
   }
 }
 
@@ -188,6 +197,12 @@ export interface AnthropicCanUseToolOptions {
    * (`runtimes/claude-agent-sdk/profile-hooks.ts`). Each is honoured once.
    */
   profileApprovals?: Set<string>
+  /**
+   * Tool-use ids of always-explicit calls this callback already allowed or
+   * reported (ADR-0239). The profile hook's PostToolUse reports a listed call
+   * the SDK ran without consulting `canUseTool`, and skips the ones here.
+   */
+  explicitSeen?: Set<string>
 }
 
 /**
@@ -205,6 +220,7 @@ export function createAnthropicCanUseTool({
   pluginToolNameAliases,
   doomGuard,
   profileApprovals,
+  explicitSeen,
 }: AnthropicCanUseToolOptions): (
   modelToolName: string,
   input: Record<string, unknown>,
@@ -243,7 +259,13 @@ export function createAnthropicCanUseTool({
     if (outcome.kind === "deny") {
       return Promise.resolve({ behavior: "deny", message: renderDenial(outcome.reason, toolName) })
     }
-    if (outcome.kind === "allow") return Promise.resolve({ behavior: "allow", updatedInput: input })
+    if (outcome.kind === "allow") {
+      if (explicitToolObserved(toolName, policy.explicitTools)) {
+        emit(explicitToolAllowedFrame(sessionId, toolName, input, ctx?.toolUseID))
+        if (ctx?.toolUseID) explicitSeen?.add(ctx.toolUseID)
+      }
+      return Promise.resolve({ behavior: "allow", updatedInput: input })
+    }
 
     const pluginClasses = policy.pluginClasses ?? buildPluginClassIndex(undefined)
     const profile = profileVerdict(policy.profile, toolName, pluginClasses)
@@ -253,13 +275,15 @@ export function createAnthropicCanUseTool({
       ctx.requiresInteraction === true ||
       requiresPerCallApproval(toolName, buildPerCallApprovalSet(sendOptions.pluginTools)) ||
       toolPermissionDecision(toolName, sendOptions.toolPermissionRules) === "ask" ||
-      profile.kind === "always-ask"
-    const permissionClass =
-      profile.kind === "always-ask"
-        ? profile.cls
-        : policy.profile
-          ? classesOfTool(toolName, pluginClasses)[0]
-          : undefined
+      profile.kind === "always-ask" ||
+      explicitToolMustAsk(toolName, policy.explicitTools)
+    const permissionClass = requestPermissionClass(
+      profile,
+      policy.profile,
+      toolName,
+      pluginClasses,
+      policy.explicitTools
+    )
     // The SDK enforces dontAsk before calling here, so this is defence in
     // depth: an approve-every-call tool is never asked about under dontAsk,
     // it is denied (ADR-0201).
@@ -351,6 +375,10 @@ export function createAnthropicCanUseTool({
             ctx?.signal
           )
           if (reason) return { behavior: "deny", message: reason }
+          // A person answered this call; it is no shortcut to report.
+          if (ctx?.toolUseID && isExplicitTool(toolName, policy.explicitTools)) {
+            explicitSeen?.add(ctx.toolUseID)
+          }
         }
         return answer
       },

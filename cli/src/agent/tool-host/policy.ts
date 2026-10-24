@@ -36,6 +36,7 @@ import {
 import type { ResolvedCliSessionContext } from "../session-context"
 import { commandIsAutoApprovable, shellCommandOf } from "../command-approval"
 import { resolvePermissionDetailed, resolveBashPermission } from "@/lib/claude/permissions/ruleset"
+import { normalizeToolId } from "@/lib/policy/risk/outbound-tools"
 
 /** Bare names of the built-ins that never require approval (read-only). */
 export const READ_ONLY_BUILTIN_TOOLS: ReadonlySet<string> = new Set(
@@ -364,11 +365,32 @@ export function isExplicitlyDenied(options: SendOptions, name: string, input: un
   })
 }
 
+/**
+ * How the session's always-explicit list (ADR-0239) treats a call: `enforce`
+ * asks on every call whatever else allows it, `observe` lets the ordinary
+ * policy decide and reports what it let through, `null` when the tool is not
+ * listed. Matched on the registered name, as the sidecar gates match it; any
+ * mode other than exactly `observe` enforces.
+ */
+export function explicitToolMode(
+  options: Pick<SendOptions, "alwaysExplicitTools" | "alwaysExplicitToolsMode">,
+  namespacedName: string
+): "enforce" | "observe" | null {
+  const listed = options.alwaysExplicitTools
+  if (!Array.isArray(listed) || listed.length === 0) return null
+  const name = normalizeToolId(namespacedName)
+  if (!listed.some((entry) => typeof entry === "string" && normalizeToolId(entry) === name))
+    return null
+  return options.alwaysExplicitToolsMode === "observe" ? "observe" : "enforce"
+}
+
 export function needsApproval(
   options: SendOptions,
   namespacedName: string,
   input?: unknown
 ): boolean {
+  // An enforced outbound tool asks even when a grant or a mode would not.
+  if (explicitToolMode(options, namespacedName) === "enforce") return true
   const suppressed = new Set(options.suppressApprovalForTools ?? [])
   if (suppressed.has(namespacedName)) return false
   if (options.permissionMode === "bypassPermissions") return false

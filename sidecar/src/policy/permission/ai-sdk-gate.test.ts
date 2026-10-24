@@ -737,3 +737,79 @@ test("createToolPermissionGate: a requiresApproval plugin tool asks even under b
     assert.equal(frame.suppressAlwaysAllowRule, true)
   }
 })
+
+// ADR-0239: outbound tools listed in `alwaysExplicitTools`.
+const IM_SEND = "mcp__cognia-plugin-tools__im_broadcast"
+
+test("an enforced outbound tool asks per call under bypass and an always-allow grant", async () => {
+  const pending = new Map()
+  const frames: Array<Record<string, unknown>> = []
+  const gate = createToolPermissionGate({
+    emit: (frame) => {
+      frames.push(frame)
+      queueMicrotask(() => pending.get(frame.requestId)?.resolve({ behavior: "allow" }))
+    },
+    sessionId: "s",
+    pendingApprovals: pending,
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      alwaysAllowTools: [IM_SEND],
+      alwaysExplicitTools: ["im_broadcast"],
+      alwaysExplicitToolsMode: "enforce",
+    },
+  })
+  await gate(IM_SEND, { conversationKeys: ["lark:b:oc_1"] })
+  assert.equal(frames.length, 1)
+  assert.equal(frames[0]!.type, "permission_request")
+  assert.equal(frames[0]!.permissionClass, "outbound")
+  assert.equal(frames[0]!.requiresPerCallApproval, true)
+  assert.equal(frames[0]!.suppressAlwaysAllowRule, true)
+  assert.equal(frames[0]!.defaultToNo, true)
+})
+
+test("an observed outbound tool runs as before and reports the shortcut that let it through", async () => {
+  const frames: Array<Record<string, unknown>> = []
+  const gate = createToolPermissionGate({
+    emit: (frame) => frames.push(frame),
+    sessionId: "s",
+    pendingApprovals: new Map(),
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      alwaysExplicitTools: ["im_broadcast"],
+      alwaysExplicitToolsMode: "observe",
+    },
+  })
+  const input = { conversationKeys: ["lark:b:oc_1"] }
+  assert.equal(await gate(IM_SEND, input), input)
+  assert.deepEqual(frames, [
+    {
+      type: "explicit_tool_allowed",
+      sessionId: "s",
+      toolName: IM_SEND,
+      input,
+      permissionClass: "outbound",
+    },
+  ])
+  // An unlisted tool allowed the same way is not reported.
+  await gate("mcp__cognia-tools__git_status", {})
+  assert.equal(frames.length, 1)
+})
+
+test("an observed outbound tool that asks anyway is labelled outbound but not per call", async () => {
+  const pending = new Map()
+  const frames: Array<Record<string, unknown>> = []
+  const gate = createToolPermissionGate({
+    emit: (frame) => {
+      frames.push(frame)
+      queueMicrotask(() => pending.get(frame.requestId)?.resolve({ behavior: "allow" }))
+    },
+    sessionId: "s",
+    pendingApprovals: pending,
+    sendOptions: { alwaysExplicitTools: ["im_broadcast"], alwaysExplicitToolsMode: "observe" },
+  })
+  await gate(IM_SEND, {})
+  assert.equal(frames.length, 1)
+  assert.equal(frames[0]!.type, "permission_request")
+  assert.equal(frames[0]!.permissionClass, "outbound")
+  assert.equal(frames[0]!.requiresPerCallApproval, undefined)
+})

@@ -16,6 +16,9 @@ import {
   requiresPerCallApproval,
 } from "./ladder.ts"
 import type { LadderCall, LadderPolicy, LadderStep, RailProfile } from "./ladder.ts"
+import { AI_SDK_RAIL } from "./ai-sdk-gate.ts"
+import { readExplicitToolPolicy } from "./permission-classes.ts"
+import { CLAUDE_AGENT_SDK_RAIL } from "./sdk-can-use-tool.ts"
 
 const ROOT = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cognia-ladder-unit-")))
 const WRITE = "mcp__cognia-tools__write"
@@ -435,4 +438,90 @@ test("the ruleset step denies an MCP tool outside the allowlist, even under bypa
     policy: policy({ mode: "bypassPermissions", mcpToolAllowlist: { search: ["query"] } }),
   })
   assert.equal(allowed.kind, "allow")
+})
+
+// ADR-0239: an enforced always-explicit (outbound) tool on the real rails.
+const SEND = "mcp__cognia-plugin-tools__im_broadcast"
+const ENFORCE = readExplicitToolPolicy(["im_broadcast"], "enforce")
+const OBSERVE = readExplicitToolPolicy(["im_broadcast"], "observe")
+
+for (const [name, rail] of [
+  ["ai-sdk", AI_SDK_RAIL],
+  ["agent-sdk", CLAUDE_AGENT_SDK_RAIL],
+] as const) {
+  test(`${name}: an enforced outbound tool asks past every shortcut`, () => {
+    const shortcuts: Partial<LadderPolicy>[] = [
+      {},
+      { mode: "bypassPermissions" },
+      { mode: "acceptEdits" },
+      { alwaysAllow: [SEND] },
+      { suppress: [SEND] },
+      { ruleset: { "mcp__cognia-plugin-tools__im_broadcast": "allow" } },
+    ]
+    for (const extra of shortcuts) {
+      const outcome = decidePermission(rail, {
+        ...call(SEND, {}),
+        policy: policy({ ...extra, explicitTools: ENFORCE }),
+      })
+      assert.deepEqual(outcome, { kind: "ask" }, JSON.stringify(extra))
+    }
+  })
+
+  test(`${name}: a ruleset deny still beats an enforced outbound tool`, () => {
+    const outcome = decidePermission(rail, {
+      ...call(SEND, {}),
+      policy: policy({
+        mode: "bypassPermissions",
+        ruleset: { "mcp__cognia-plugin-tools__im_broadcast": "deny" },
+        explicitTools: ENFORCE,
+      }),
+    })
+    assert.deepEqual(outcome, { kind: "deny", reason: { code: "ruleset" } })
+  })
+
+  test(`${name}: an observed outbound tool keeps every shortcut`, () => {
+    for (const extra of [
+      { mode: "bypassPermissions" },
+      { alwaysAllow: [SEND] },
+    ] as Partial<LadderPolicy>[]) {
+      const outcome = decidePermission(rail, {
+        ...call(SEND, {}),
+        policy: policy({ ...extra, explicitTools: OBSERVE }),
+      })
+      // The Agent SDK rail leaves bypass to the SDK itself, so it asks there.
+      const expected =
+        rail === CLAUDE_AGENT_SDK_RAIL && extra.mode === "bypassPermissions"
+          ? { kind: "ask" }
+          : { kind: "allow" }
+      assert.deepEqual(outcome, expected, JSON.stringify(extra))
+    }
+  })
+}
+
+test("ai-sdk: dontAsk and a missing approval channel deny an enforced outbound tool", () => {
+  assert.deepEqual(
+    decidePermission(AI_SDK_RAIL, {
+      ...call(SEND, {}),
+      policy: policy({ mode: "dontAsk", alwaysAllow: [SEND], explicitTools: ENFORCE }),
+    }),
+    { kind: "deny", reason: { code: "dont-ask" } }
+  )
+  assert.deepEqual(
+    decidePermission(AI_SDK_RAIL, {
+      ...call(SEND, {}),
+      canPrompt: false,
+      policy: policy({ alwaysAllow: [SEND], explicitTools: ENFORCE }),
+    }),
+    { kind: "deny", reason: { code: "no-approval-channel" } }
+  )
+})
+
+test("an enforced list leaves unlisted tools to the ordinary ladder", () => {
+  assert.deepEqual(
+    decidePermission(AI_SDK_RAIL, {
+      ...call(WRITE, {}),
+      policy: policy({ mode: "bypassPermissions", explicitTools: ENFORCE }),
+    }),
+    { kind: "allow" }
+  )
 })

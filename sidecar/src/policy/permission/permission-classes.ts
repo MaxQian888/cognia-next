@@ -213,3 +213,114 @@ export function readSandboxAttested(raw: unknown): boolean {
 export function readApprovalTtlMs(raw: unknown): number | undefined {
   return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : undefined
 }
+
+/**
+ * Tools that must reach a person, or at least the host, on every call
+ * (`SendOptions.alwaysExplicitTools`, ADR-0239).
+ *
+ * - `enforce`: no shortcut may allow a listed call: not a grant, a ruleset
+ *   allow, a suppress entry, an attested sandbox, acceptEdits or bypass. It
+ *   asks, and dontAsk or a missing approval channel denies it. A deny still
+ *   comes first.
+ * - `observe`: the ladder is unchanged. When a shortcut allows a listed call
+ *   the gate reports it with an `explicit_tool_allowed` frame, so the host can
+ *   record what the outbound policy would have decided without changing what
+ *   is sent.
+ *
+ * Phase 1 lists outbound tools only, so a listed call is labelled
+ * `permissionClass: "outbound"` when the run's profile names no class for it.
+ */
+export interface ExplicitToolPolicy {
+  /** Normalized names: see {@link explicitToolName}. */
+  tools: ReadonlySet<string>
+  mode: "observe" | "enforce"
+}
+
+/**
+ * A tool name reduced to the name it was registered under: the last `__`
+ * segment, trimmed and lowercased, so `mcp__cognia-tools__send_email` and
+ * `send_email` are one entry. The same reduction as the host's
+ * `normalizeToolId` (`lib/policy/risk/outbound-tools.ts`), pinned by
+ * `lib/policy/risk/outbound-tools.sidecar-parity.test.ts`.
+ */
+export function explicitToolName(toolName: string): string {
+  const tail = toolName.split("__").pop() ?? toolName
+  return tail.trim().toLowerCase()
+}
+
+/**
+ * Read the list and its mode. No list, or an empty one, is no policy. Any mode
+ * other than exactly `observe` enforces: a malformed value must not quietly
+ * turn the always-ask off.
+ */
+export function readExplicitToolPolicy(
+  rawTools: unknown,
+  rawMode: unknown
+): ExplicitToolPolicy | null {
+  if (!Array.isArray(rawTools)) return null
+  const tools = new Set<string>()
+  for (const entry of rawTools as unknown[]) {
+    if (typeof entry !== "string") continue
+    const name = explicitToolName(entry)
+    if (name) tools.add(name)
+  }
+  if (tools.size === 0) return null
+  return { tools, mode: rawMode === "observe" ? "observe" : "enforce" }
+}
+
+/** Whether `toolName` is listed, in either mode. */
+export function isExplicitTool(
+  toolName: string,
+  policy: ExplicitToolPolicy | null | undefined
+): boolean {
+  return Boolean(policy?.tools.has(explicitToolName(toolName)))
+}
+
+/** Whether no shortcut may allow `toolName`. */
+export function explicitToolMustAsk(
+  toolName: string,
+  policy: ExplicitToolPolicy | null | undefined
+): boolean {
+  return policy?.mode === "enforce" && isExplicitTool(toolName, policy)
+}
+
+/** Whether a shortcut allowing `toolName` is to be reported. */
+export function explicitToolObserved(
+  toolName: string,
+  policy: ExplicitToolPolicy | null | undefined
+): boolean {
+  return policy?.mode === "observe" && isExplicitTool(toolName, policy)
+}
+
+/**
+ * The class a permission request names: the profile's always-ask class, else
+ * `outbound` for a listed tool, else the call's first class under a profile.
+ */
+export function requestPermissionClass(
+  verdict: ProfileVerdict,
+  profile: ResolvedPermissionProfile | null | undefined,
+  toolName: string,
+  index: PluginClassIndex,
+  explicit: ExplicitToolPolicy | null | undefined
+): PermissionClass | undefined {
+  if (verdict.kind === "always-ask") return verdict.cls
+  if (isExplicitTool(toolName, explicit)) return "outbound"
+  return profile ? classesOfTool(toolName, index)[0] : undefined
+}
+
+/** The frame a gate emits when a shortcut allowed an observed call. */
+export function explicitToolAllowedFrame(
+  sessionId: string | undefined,
+  toolName: string,
+  input: unknown,
+  toolUseID?: string
+): Record<string, unknown> {
+  return {
+    type: "explicit_tool_allowed",
+    sessionId,
+    ...(toolUseID ? { toolUseID } : {}),
+    toolName,
+    input,
+    permissionClass: "outbound",
+  }
+}

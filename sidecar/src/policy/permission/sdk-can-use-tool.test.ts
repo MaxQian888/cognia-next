@@ -254,3 +254,88 @@ test("anthropic canUseTool denies browser_set_files under dontAsk", async () => 
   assert.equal(res.behavior, "deny")
   assert.equal(frames.length, 0)
 })
+
+// ADR-0239: outbound tools listed in `alwaysExplicitTools`.
+const IM_SEND = "mcp__cognia-plugin-tools__im_broadcast"
+
+test("an enforced outbound tool asks per call past an always-allow grant", async () => {
+  const pending = new Map<string, PendingApproval>()
+  const frames: Array<Record<string, unknown>> = []
+  const gate = mkGate(
+    {
+      alwaysAllowTools: [IM_SEND],
+      alwaysExplicitTools: ["im_broadcast"],
+      alwaysExplicitToolsMode: "enforce",
+    },
+    {
+      pendingApprovals: pending,
+      emit: (frame) => {
+        frames.push(frame)
+        queueMicrotask(() => pending.get(frame.requestId as string)?.resolve({ behavior: "allow" }))
+      },
+    }
+  )
+  const result = await gate(IM_SEND, {}, { toolUseID: "tu-1" })
+  assert.equal(result.behavior, "allow")
+  assert.equal(frames.length, 1)
+  assert.equal(frames[0]!.permissionClass, "outbound")
+  assert.equal(frames[0]!.requiresPerCallApproval, true)
+  assert.equal(frames[0]!.suppressAlwaysAllowRule, true)
+})
+
+test("an observed outbound tool a grant allows is reported once and marked seen", async () => {
+  const frames: Array<Record<string, unknown>> = []
+  const seen = new Set<string>()
+  const gate = createAnthropicCanUseTool({
+    sendOptions: {
+      alwaysAllowTools: [IM_SEND],
+      alwaysExplicitTools: ["im_broadcast"],
+      alwaysExplicitToolsMode: "observe",
+    },
+    sessionId: "s1",
+    emit: (frame) => frames.push(frame),
+    log: () => {},
+    pendingApprovals: new Map(),
+    pluginToolNameAliases: new Map(),
+    doomGuard: createDoomLoopGuard(),
+    explicitSeen: seen,
+  })
+  const result = await gate(IM_SEND, { text: "hi" }, { toolUseID: "tu-2" })
+  assert.equal(result.behavior, "allow")
+  assert.deepEqual(frames, [
+    {
+      type: "explicit_tool_allowed",
+      sessionId: "s1",
+      toolUseID: "tu-2",
+      toolName: IM_SEND,
+      input: { text: "hi" },
+      permissionClass: "outbound",
+    },
+  ])
+  assert.deepEqual([...seen], ["tu-2"])
+})
+
+test("a person's approval of a listed call marks it seen, not reported", async () => {
+  const pending = new Map<string, PendingApproval>()
+  const frames: Array<Record<string, unknown>> = []
+  const seen = new Set<string>()
+  const gate = createAnthropicCanUseTool({
+    sendOptions: { alwaysExplicitTools: ["im_broadcast"], alwaysExplicitToolsMode: "observe" },
+    sessionId: "s1",
+    emit: (frame) => {
+      frames.push(frame)
+      queueMicrotask(() => pending.get(frame.requestId as string)?.resolve({ behavior: "allow" }))
+    },
+    log: () => {},
+    pendingApprovals: pending,
+    pluginToolNameAliases: new Map(),
+    doomGuard: createDoomLoopGuard(),
+    explicitSeen: seen,
+  })
+  await gate(IM_SEND, {}, { toolUseID: "tu-3" })
+  assert.deepEqual(
+    frames.map((f) => f.type),
+    ["permission_request"]
+  )
+  assert.deepEqual([...seen], ["tu-3"])
+})

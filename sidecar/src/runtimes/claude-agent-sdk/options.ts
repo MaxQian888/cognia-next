@@ -130,6 +130,9 @@ export function buildAnthropicOptions({
   // One `canUseTool` for the SDK and the profile hook (ADR-0224 A7), which
   // asks through it ahead of the SDK's own modes and hands the approval over.
   const profileApprovals = new Set<string>()
+  // Outbound calls `canUseTool` allowed or reported, so the observing
+  // PostToolUse hook does not report them twice (ADR-0239).
+  const explicitSeen = new Set<string>()
   const sessionCanUseTool = createAnthropicCanUseTool({
     sendOptions,
     sessionId,
@@ -139,6 +142,7 @@ export function buildAnthropicOptions({
     pluginToolNameAliases,
     doomGuard,
     profileApprovals,
+    explicitSeen,
   })
   let options: Options & Record<string, unknown> = {
     cwd: sendOptions.cwd,
@@ -252,6 +256,9 @@ export function buildAnthropicOptions({
         pluginToolNameAliases,
         canUseTool: sessionCanUseTool,
         profileApprovals,
+        explicitSeen,
+        emit,
+        sessionId,
       }) as unknown as HookMap
     ) as Options["hooks"],
 

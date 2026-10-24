@@ -205,6 +205,58 @@ describe("startToolHostBroker — handshake", () => {
   })
 })
 
+describe("startToolHostBroker — outbound tools (ADR-0239)", () => {
+  // `git_status` stands in for an outbound tool: the list is matched by name.
+  const LISTED = { alwaysExplicitTools: ["git_status"] }
+
+  it("asks per call for an enforced tool its suppress entry would have allowed", async () => {
+    const requests: Array<Record<string, unknown>> = []
+    const broker = await start({
+      session: sessionContext({ ...LISTED, alwaysExplicitToolsMode: "enforce" }),
+      gate: async (request) => {
+        requests.push(request as unknown as Record<string, unknown>)
+        return { decision: "allow" }
+      },
+    })
+    const { c } = await connected(broker)
+    expect(await c.call("authorize", { name: "git_status", args: {} })).toEqual({ allow: true })
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      permissionClass: "outbound",
+      requiresPerCallApproval: true,
+      suppressAlwaysAllowRule: true,
+      defaultToNo: true,
+    })
+  })
+
+  it("reports an observed tool its suppress entry allowed, without asking", async () => {
+    const observed: unknown[] = []
+    let prompts = 0
+    const broker = await start({
+      session: sessionContext({ ...LISTED, alwaysExplicitToolsMode: "observe" }),
+      gate: async () => {
+        prompts += 1
+        return { decision: "allow" }
+      },
+      onExplicitToolAllowed: (event) => observed.push(event),
+    })
+    const { c } = await connected(broker)
+    expect(await c.call("authorize", { name: "git_status", args: { a: 1 } })).toEqual({
+      allow: true,
+    })
+    expect(prompts).toBe(0)
+    expect(observed).toEqual([
+      {
+        type: "explicit_tool_allowed",
+        sessionId: "sess1",
+        toolName: namespaced("git_status"),
+        input: { a: 1 },
+        permissionClass: "outbound",
+      },
+    ])
+  })
+})
+
 describe("startToolHostBroker — authorization", () => {
   it("allows a visible, suppressed, in-workspace call without prompting", async () => {
     let prompts = 0

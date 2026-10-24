@@ -13,6 +13,12 @@
 // `sandbox` adds one shortcut, allowing the sandboxed tools of a run whose
 // placement the host attested.
 //
+// Outbound tools (`alwaysExplicitTools`, ADR-0239) join the per-call set when
+// their list enforces: every call asks, whatever mode or grant says otherwise,
+// so the host's outbound policy sees each recipient. While the list only
+// observes, the ladder is unchanged and the adapters report the calls a
+// shortcut allowed.
+//
 // The rails share every step, but not the order or the set of steps. The
 // Claude Agent SDK enforces plan, dontAsk and bypassPermissions over its own
 // tools, so its profile leaves them to the SDK, while the ai-sdk rail has no
@@ -51,8 +57,10 @@ import {
 } from "../tool-catalog/names.ts"
 import {
   EMPTY_PLUGIN_CLASS_INDEX,
+  explicitToolMustAsk,
   isSandboxExecuted,
   profileVerdict,
+  type ExplicitToolPolicy,
   type PluginClassIndex,
   type ProfileVerdict,
 } from "./permission-classes.ts"
@@ -79,6 +87,10 @@ export interface PermissionSendOptions {
   sandboxAttestation?: unknown
   /** How long a permission request may wait for an answer (ms). */
   approvalTtlMs?: unknown
+  /** Tools every call of which reaches the host (ADR-0239). */
+  alwaysExplicitTools?: unknown
+  /** `observe` reports shortcut allows instead of disarming them. */
+  alwaysExplicitToolsMode?: unknown
 }
 
 /**
@@ -110,6 +122,8 @@ export interface LadderPolicy {
   pluginClasses?: PluginClassIndex | null
   /** Whether the host attested an isolated sandbox placement for this run. */
   sandboxAttested?: boolean
+  /** Tools that must ask on every call, or whose shortcut allows are reported. */
+  explicitTools?: ExplicitToolPolicy | null
 }
 
 export interface LadderCall {
@@ -257,8 +271,8 @@ class CallState {
   }
 
   /**
-   * A call no shortcut may allow: a per-call plugin tool, or a class the
-   * profile makes ask on every call.
+   * A call no shortcut may allow: a per-call plugin tool, a class the profile
+   * makes ask on every call, or an enforced always-explicit tool.
    */
   mustAsk(): boolean {
     const { policy, toolName } = this.call
@@ -266,7 +280,8 @@ class CallState {
       this.call.requiresInteraction === true ||
       requiresPerCallApproval(toolName, policy.perCallApproval) ||
       toolPermissionDecision(toolName, policy.toolPermissionRules) === "ask" ||
-      this.profileVerdict().kind === "always-ask"
+      this.profileVerdict().kind === "always-ask" ||
+      explicitToolMustAsk(toolName, policy.explicitTools)
     )
   }
 

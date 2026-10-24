@@ -805,31 +805,40 @@ export type SendOptions = {
   permissionRuleset?: import("@cognia/plugin-contract/lib/claude/permissions/ruleset").Ruleset
 
   /**
-   * Tool names that must ALWAYS reach the renderer as a `permission_request`,
+   * Tools whose every call must reach the host as a `permission_request`,
    * whatever else says otherwise (ADR-0239).
    *
-   * DORMANT: declared only. Nothing computes it and neither sidecar gate reads
-   * it yet, so the paragraphs below describe the intended behaviour. ADR-0239
-   * phase 1 (WP5) wires it, for the external-send tools first.
+   * {@link suppressApprovalForTools}, {@link alwaysAllowTools}, ruleset allows,
+   * an attested sandbox and the permission modes all resolve
+   * `{ behavior: "allow" }` *inside the sidecar*, before any event is emitted,
+   * so the host's outbound policy engine cannot see a call they let through.
+   * A tool listed here makes both sidecar gates (and the Agent SDK profile
+   * hook, and the CLI tool host) ignore those shortcuts and ask anyway; a
+   * `deny` still wins, and dontAsk or a missing approval channel denies it.
    *
-   * This closes a hole the unified action-review layer cannot close on its own.
-   * {@link suppressApprovalForTools}, {@link alwaysAllowTools}, and the
-   * connector `yolo` mode all resolve `{ behavior: "allow" }` *inside the
-   * sidecar*, before any event is emitted — so the renderer-side policy engine
-   * physically cannot escalate a call it never sees. A tool listed here makes
-   * both sidecar `canUseTool` gates ignore those bypasses and emit the
-   * round-trip anyway.
+   * Entries are matched on the registered name, the last `__` segment
+   * lowercased (`normalizeToolId`), so `send_email` covers
+   * `mcp__<any server>__send_email`. Phase 1 lists outbound tools only:
+   * `OUTBOUND_TOOL_IDS` plus every plugin tool in the `outbound` class.
+   * Computed by `resolveSendOptions` (`lib/claude/always-explicit-tools.ts`);
+   * the sidecar labels a listed request `permissionClass: "outbound"`.
+   * Listing other surfaces (computer use, native commands) is a separate
+   * decision that needs a class per entry first.
    *
-   * To be computed by `resolveSendOptions` from the risk tables: the tool-id sets
-   * `classifyRisk` uses for the surfaces `RISK_SURFACES` marks `high`
-   * (external-send, computer-use, native-command, data-destructive). Serialized
-   * alongside {@link permissionRuleset}.
-   *
-   * This raises friction on purpose, and only for surfaces whose effects escape
-   * the app and cannot be undone by closing it. It does not override a `deny`:
-   * a denied tool is still denied without asking.
+   * See {@link alwaysExplicitToolsMode} for shadow mode.
    */
   alwaysExplicitTools?: string[]
+
+  /**
+   * How {@link alwaysExplicitTools} applies (ADR-0239).
+   *
+   * - `observe` (shadow mode): the sidecar decides listed calls exactly as it
+   *   would without the list, and reports each one a shortcut allowed with an
+   *   `explicit_tool_allowed` event, so the host can record what the outbound
+   *   policy would have done without changing what is sent.
+   * - `enforce`, absent, or anything else: listed calls always ask.
+   */
+  alwaysExplicitToolsMode?: "observe" | "enforce"
 
   /**
    * Workspace confinement policy (ADR-0028 "lite") consulted by the sidecar
@@ -1423,6 +1432,29 @@ export interface PermissionInterruptedEvent {
   sessionId: string
   requestId: string
   reason: string
+}
+
+/**
+ * A call to a tool in `SendOptions.alwaysExplicitTools` that a shortcut
+ * allowed without asking while the list only observes (ADR-0239 shadow mode):
+ * a grant, a ruleset allow, a suppress entry, an attested sandbox, a
+ * permission mode, or on the Agent SDK rail the SDK's own allow. The call has
+ * already been allowed; the host records what its outbound policy would have
+ * decided. Emitted before the tool runs on the ai-sdk rail and after it ran on
+ * the Agent SDK rail, where only PostToolUse can tell that nobody was asked.
+ *
+ * DORMANT CONSUMER: the sidecar emits it and nothing in the host reads it yet;
+ * the tool-call chokepoint (ADR-0239 WP6) records it. Pinned by the sidecar
+ * gate tests.
+ */
+export interface ExplicitToolAllowedEvent {
+  type: "explicit_tool_allowed"
+  sessionId: string
+  toolUseID?: string
+  toolName: string
+  input: Record<string, unknown>
+  /** Always `outbound` in phase 1. */
+  permissionClass: PermissionClass
 }
 
 export interface SDKEventEnvelope {
@@ -2031,6 +2063,7 @@ export type ClaudeEvent =
   | SdkSessionIdEvent
   | PermissionRequestEvent
   | PermissionInterruptedEvent
+  | ExplicitToolAllowedEvent
   | SDKEventEnvelope
   | UsageHeadersEvent
   | PluginToolExecEvent

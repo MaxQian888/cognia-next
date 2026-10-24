@@ -10,6 +10,7 @@ import {
   READ_ONLY_BUILTIN_TOOLS,
   checkConfinement,
   confinementRoots,
+  explicitToolMode,
   extractPathArguments,
   isInsideRoots,
   isSecretPath,
@@ -189,5 +190,39 @@ describe("needsApproval", () => {
     expect(needsApproval(opts, namespaced("edit"))).toBe(false)
     expect(needsApproval(opts, namespaced("bash"))).toBe(true)
     expect(needsApproval(opts, namespaced("git_commit"))).toBe(true)
+  })
+})
+
+describe("explicitToolMode (ADR-0239)", () => {
+  const listed = { alwaysExplicitTools: ["send_email"] }
+
+  it("matches the registered name on any server, and nothing else", () => {
+    expect(explicitToolMode(options(listed), "mcp__cognia-tools__send_email")).toBe("enforce")
+    expect(explicitToolMode(options(listed), "mcp__other__Send_Email")).toBe("enforce")
+    expect(explicitToolMode(options(listed), namespaced("write"))).toBeNull()
+    expect(explicitToolMode(options(), "send_email")).toBeNull()
+  })
+
+  it("observes only when the mode says exactly observe", () => {
+    expect(
+      explicitToolMode(options({ ...listed, alwaysExplicitToolsMode: "observe" }), "send_email")
+    ).toBe("observe")
+    expect(
+      explicitToolMode(
+        options({ ...listed, alwaysExplicitToolsMode: "shadow" as never }),
+        "send_email"
+      )
+    ).toBe("enforce")
+  })
+
+  it("makes an enforced tool ask past bypass and a suppress entry", () => {
+    const tool = "mcp__cognia-tools__send_email"
+    const enforce = options({
+      ...listed,
+      permissionMode: "bypassPermissions",
+      suppressApprovalForTools: [tool],
+    })
+    expect(needsApproval(enforce, tool)).toBe(true)
+    expect(needsApproval({ ...enforce, alwaysExplicitToolsMode: "observe" }, tool)).toBe(false)
   })
 })

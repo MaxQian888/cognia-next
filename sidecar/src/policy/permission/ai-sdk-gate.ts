@@ -17,12 +17,16 @@ import type { PendingApproval } from "./approval.ts"
 import {
   EMPTY_PLUGIN_CLASS_INDEX,
   buildPluginClassIndex,
-  classesOfTool,
+  explicitToolAllowedFrame,
+  explicitToolMustAsk,
+  explicitToolObserved,
   profileDenialMessage,
   profileVerdict,
   readApprovalTtlMs,
+  readExplicitToolPolicy,
   readPermissionProfile,
   readSandboxAttested,
+  requestPermissionClass,
 } from "./permission-classes.ts"
 import {
   buildApprovalRequiredSet,
@@ -186,6 +190,11 @@ export function createToolPermissionGate({
     : EMPTY_PLUGIN_CLASS_INDEX
   const sandboxAttested = readSandboxAttested(sendOptions?.sandboxAttestation)
   const ttlMs = readApprovalTtlMs(sendOptions?.approvalTtlMs)
+  // Outbound tools (ADR-0239), fixed for the session like the ruleset.
+  const explicitTools = readExplicitToolPolicy(
+    sendOptions?.alwaysExplicitTools,
+    sendOptions?.alwaysExplicitToolsMode
+  )
 
   return async function gate(toolName, input, signal) {
     const outcome = decidePermission(AI_SDK_RAIL, {
@@ -209,9 +218,16 @@ export function createToolPermissionGate({
         profile,
         pluginClasses,
         sandboxAttested,
+        explicitTools,
       },
     })
-    if (outcome.kind === "allow") return input
+    if (outcome.kind === "allow") {
+      // Shadow mode: the call runs as before, and the host hears about it.
+      if (explicitToolObserved(toolName, explicitTools) && typeof emit === "function") {
+        emit(explicitToolAllowedFrame(sessionId, toolName, input))
+      }
+      return input
+    }
     if (outcome.kind === "deny") throw denialError(outcome.reason, toolName)
     // Only "ask" is left, and the approval-channel step only asks when both
     // the emitter and the pending map exist.
@@ -219,13 +235,15 @@ export function createToolPermissionGate({
     const verdict = profileVerdict(profile, toolName, pluginClasses)
     const alwaysAsk =
       verdict.kind === "always-ask" ||
-      toolPermissionDecision(toolName, sendOptions?.toolPermissionRules) === "ask"
-    const permissionClass =
-      verdict.kind === "always-ask"
-        ? verdict.cls
-        : profile
-          ? classesOfTool(toolName, pluginClasses)[0]
-          : undefined
+      toolPermissionDecision(toolName, sendOptions?.toolPermissionRules) === "ask" ||
+      explicitToolMustAsk(toolName, explicitTools)
+    const permissionClass = requestPermissionClass(
+      verdict,
+      profile,
+      toolName,
+      pluginClasses,
+      explicitTools
+    )
     emit!({
       type: "permission_request",
       sessionId,
