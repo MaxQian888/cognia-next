@@ -148,7 +148,13 @@ export async function dispatchScheduledTaskRpc(
     case "scheduled_task_create":
       return scheduler.createTask(reviveCreateInput(payload.input))
     case "scheduled_task_update":
-      return scheduler.updateTask(stringField(payload, "taskId"), reviveUpdateInput(payload.input))
+      // A paired device says `source: "user"` for an edit made in its UI; any
+      // other value, or none, is not a person's edit.
+      return scheduler.updateTask(
+        stringField(payload, "taskId"),
+        reviveUpdateInput(payload.input),
+        payload.source === "user" ? { source: "user" } : {}
+      )
     case "scheduled_task_delete":
       return scheduler.deleteTask(stringField(payload, "taskId"))
     case "scheduled_task_pause":

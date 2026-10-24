@@ -11,7 +11,11 @@ import { transport } from "@/lib/tauri"
 import { getEffectiveSchedulerHostTarget } from "./scheduler-host-target"
 import { schedulerDb } from "./scheduler-db"
 import { resolveTaskWorkspace } from "./task-workspace-binding"
-import { getTaskScheduler, type CancelExecutionOutcome } from "./task-scheduler"
+import {
+  getTaskScheduler,
+  type CancelExecutionOutcome,
+  type UpdateTaskOptions,
+} from "./task-scheduler"
 
 export interface SchedulerDataSource {
   readonly host: "local" | "remote"
@@ -19,7 +23,8 @@ export interface SchedulerDataSource {
   updateTask(
     taskId: string,
     input: UpdateScheduledTaskInput,
-    taskType?: string
+    taskType?: string,
+    options?: UpdateTaskOptions
   ): Promise<ScheduledTask | null>
   deleteTask(taskId: string, taskType?: string): Promise<boolean>
   getTask(taskId: string): Promise<ScheduledTask | null>
@@ -79,8 +84,13 @@ class LocalSchedulerDataSource implements SchedulerDataSource {
     })
   }
 
-  updateTask(taskId: string, input: UpdateScheduledTaskInput) {
-    return getTaskScheduler().updateTask(taskId, input)
+  updateTask(
+    taskId: string,
+    input: UpdateScheduledTaskInput,
+    _taskType?: string,
+    options?: UpdateTaskOptions
+  ) {
+    return getTaskScheduler().updateTask(taskId, input, options)
   }
 
   deleteTask(taskId: string) {
@@ -233,12 +243,14 @@ class RemoteSchedulerDataSource implements SchedulerDataSource {
   async updateTask(
     taskId: string,
     input: UpdateScheduledTaskInput,
-    taskType?: string
+    taskType?: string,
+    options?: UpdateTaskOptions
   ): Promise<ScheduledTask | null> {
     const task = await transport.call<TaskWire | null>("scheduled_task_update", {
       taskId,
       input,
       taskType,
+      ...(options?.source === "user" ? { source: "user" } : {}),
     })
     return task ? hydrateTask(task) : null
   }

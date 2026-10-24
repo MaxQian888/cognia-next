@@ -467,19 +467,24 @@ function SchedulerPageBody() {
       if (!selectedAppTask) return
       setIsSubmitting(true)
       try {
-        const updated = await updateTask(selectedAppTask.id, {
-          name: input.name,
-          description: input.description,
-          trigger: input.trigger,
-          payload: input.payload,
-          notification: input.notification,
-          config: input.config,
-          tags: input.tags,
-          // null clears a previously-set end bound; undefined would leave it.
-          endAt: input.endAt ?? null,
-          onSuccessTaskIds: input.onSuccessTaskIds ?? [],
-          onFailureTaskIds: input.onFailureTaskIds ?? [],
-        })
+        const updated = await updateTask(
+          selectedAppTask.id,
+          {
+            name: input.name,
+            description: input.description,
+            trigger: input.trigger,
+            payload: input.payload,
+            notification: input.notification,
+            config: input.config,
+            tags: input.tags,
+            // null clears a previously-set end bound; undefined would leave it.
+            endAt: input.endAt ?? null,
+            onSuccessTaskIds: input.onSuccessTaskIds ?? [],
+            onFailureTaskIds: input.onFailureTaskIds ?? [],
+          },
+          // A person's edit: a new instruction for the task's unattended runs.
+          { source: "user" }
+        )
         if (!updated) {
           // The sheet stays open with the user's edits; closing it would read
           // as saved.

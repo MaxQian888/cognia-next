@@ -84,7 +84,7 @@ describe("TaskWorkspaceMove", () => {
       fireEvent.click(screen.getByRole("option", { name: "Docs" }))
     })
 
-    expect(updateTaskMock).toHaveBeenCalledWith("t1", { projectId: "ws_b" })
+    expect(updateTaskMock).toHaveBeenCalledWith("t1", { projectId: "ws_b" }, { source: "user" })
   })
 
   it("can un-bind a schedule so it belongs to every workspace again", async () => {
@@ -97,7 +97,7 @@ describe("TaskWorkspaceMove", () => {
       fireEvent.click(screen.getByRole("option", { name: "unbound" }))
     })
 
-    expect(updateTaskMock).toHaveBeenCalledWith("t1", { projectId: null })
+    expect(updateTaskMock).toHaveBeenCalledWith("t1", { projectId: null }, { source: "user" })
   })
 
   it("names a workspace that no longer exists instead of rendering an empty trigger", () => {

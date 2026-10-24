@@ -9,7 +9,11 @@
  */
 
 import { parseInterval, MIN_INTERVAL_MS } from "@/lib/loop/interval"
-import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
+import { getTaskScheduler, type CreateTaskOptions } from "@/lib/scheduler/task-scheduler"
+import {
+  readScheduleProvenance,
+  type ImScheduleProvenance,
+} from "@/lib/scheduler/schedule-provenance"
 import {
   a2uiComponent,
   buildA2UIMessageSegment,
@@ -22,17 +26,10 @@ export const MAX_SCHEDULES_PER_CONVERSATION = 8
 export const MAX_SCHEDULES_PER_USER = 16
 
 export interface ScheduleCommandScheduler {
-  createTask(input: CreateScheduledTaskInput): Promise<ScheduledTask>
+  createTask(input: CreateScheduledTaskInput, options?: CreateTaskOptions): Promise<ScheduledTask>
   getAllTasks(): Promise<ScheduledTask[]>
   deleteTask(taskId: string): Promise<boolean>
   runTaskNow?(taskId: string): Promise<TaskExecution | null>
-}
-
-interface ScheduleProvenance {
-  source: "im"
-  adapterId: string
-  conversationKey: string
-  senderId: string
 }
 
 interface ScheduleCommandInput {
@@ -53,27 +50,12 @@ type ParsedScheduleAction =
   | { kind: "off"; selector: string }
   | { kind: "invalid" }
 
-function provenanceOf(task: ScheduledTask): ScheduleProvenance | null {
-  const raw = (task.payload as Record<string, unknown> | undefined)?.scheduleProvenance
-  if (!raw || typeof raw !== "object") return null
-  const value = raw as Record<string, unknown>
-  if (
-    value.source !== "im" ||
-    typeof value.adapterId !== "string" ||
-    typeof value.conversationKey !== "string" ||
-    typeof value.senderId !== "string"
-  ) {
-    return null
-  }
-  return value as unknown as ScheduleProvenance
-}
-
 export function listVisibleScheduleTasks(
   tasks: readonly ScheduledTask[],
   conversationKey: string
 ): ScheduledTask[] {
   return tasks
-    .filter((task) => provenanceOf(task)?.conversationKey === conversationKey)
+    .filter((task) => readScheduleProvenance(task)?.conversationKey === conversationKey)
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
 }
 
@@ -217,7 +199,9 @@ export async function handleScheduleCommand(input: ScheduleCommandInput): Promis
   }
 
   const senderId = input.event.sender.remoteUserId
-  const userTaskCount = allTasks.filter((task) => provenanceOf(task)?.senderId === senderId).length
+  const userTaskCount = allTasks.filter(
+    (task) => readScheduleProvenance(task)?.senderId === senderId
+  ).length
   if (visible.length >= MAX_SCHEDULES_PER_CONVERSATION) {
     await input.reply(
       `本会话最多可创建 ${MAX_SCHEDULES_PER_CONVERSATION} 个定时任务 / This conversation is limited to ${MAX_SCHEDULES_PER_CONVERSATION} scheduled tasks.`,
@@ -235,33 +219,37 @@ export async function handleScheduleCommand(input: ScheduleCommandInput): Promis
     return
   }
 
-  const provenance: ScheduleProvenance = {
+  const provenance: ImScheduleProvenance = {
     source: "im",
     adapterId: input.event.adapterId,
     conversationKey: input.event.conversationKey,
     senderId,
   }
-  const task = await scheduler.createTask({
-    name: scheduleName(action.prompt),
-    description: `Created from IM conversation ${input.event.conversationKey}`,
-    type: "connection:scheduled:digest",
-    trigger: action.trigger,
-    payload: {
-      adapterId: input.event.adapterId,
-      conversationKey: input.event.conversationKey,
-      characterId: input.characterId ?? "",
-      prompt: action.prompt,
-      scheduleProvenance: provenance,
+  // The provenance rides as the trusted option; the scheduler drops one that
+  // arrives inside a payload (`lib/scheduler/schedule-provenance.ts`).
+  const task = await scheduler.createTask(
+    {
+      name: scheduleName(action.prompt),
+      description: `Created from IM conversation ${input.event.conversationKey}`,
+      type: "connection:scheduled:digest",
+      trigger: action.trigger,
+      payload: {
+        adapterId: input.event.adapterId,
+        conversationKey: input.event.conversationKey,
+        characterId: input.characterId ?? "",
+        prompt: action.prompt,
+      },
+      notification: {
+        onStart: false,
+        onComplete: false,
+        onError: true,
+        channels: ["im"],
+        imTarget: { conversationKey: input.event.conversationKey },
+      },
+      tags: ["connector", "im-schedule"],
     },
-    notification: {
-      onStart: false,
-      onComplete: false,
-      onError: true,
-      channels: ["im"],
-      imTarget: { conversationKey: input.event.conversationKey },
-    },
-    tags: ["connector", "im-schedule"],
-  })
+    { imScheduleProvenance: provenance }
+  )
 
   await input.reply(
     [

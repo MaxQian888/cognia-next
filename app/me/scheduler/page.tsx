@@ -342,18 +342,23 @@ function MobileSchedulerBody() {
       if (!selectedAppTask) return
       setIsSubmitting(true)
       try {
-        const updated = await updateTask(selectedAppTask.id, {
-          name: input.name,
-          description: input.description,
-          trigger: input.trigger,
-          payload: input.payload,
-          notification: input.notification,
-          config: input.config,
-          tags: input.tags,
-          endAt: input.endAt ?? null,
-          onSuccessTaskIds: input.onSuccessTaskIds ?? [],
-          onFailureTaskIds: input.onFailureTaskIds ?? [],
-        })
+        const updated = await updateTask(
+          selectedAppTask.id,
+          {
+            name: input.name,
+            description: input.description,
+            trigger: input.trigger,
+            payload: input.payload,
+            notification: input.notification,
+            config: input.config,
+            tags: input.tags,
+            endAt: input.endAt ?? null,
+            onSuccessTaskIds: input.onSuccessTaskIds ?? [],
+            onFailureTaskIds: input.onFailureTaskIds ?? [],
+          },
+          // A person's edit: a new instruction for the task's unattended runs.
+          { source: "user" }
+        )
         if (!updated) {
           toast.error(t("updateTaskFailed"), {
             description: useSchedulerStore.getState().error ?? undefined,

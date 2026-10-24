@@ -6,7 +6,7 @@
  * confirmed delete for every kind, and the composer draft hand-off.
  */
 
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
@@ -157,6 +157,7 @@ jest.mock("@/components/scheduler/detail/item-detail", () => ({
     actions: {
       onDelete: (i: unknown) => void
       onPause: (i: unknown) => void
+      onEdit?: () => void
       onDuplicate?: () => void
       onBackfill?: () => void
       onOpenDependencyGraph?: () => void
@@ -179,6 +180,7 @@ jest.mock("@/components/scheduler/detail/item-detail", () => ({
       {item.name}
       <button data-testid="detail-delete" onClick={() => actions.onDelete(item)} />
       <button data-testid="detail-pause" onClick={() => actions.onPause(item)} />
+      <button data-testid="detail-edit" onClick={() => actions.onEdit?.()} />
       <button data-testid="detail-duplicate" onClick={() => actions.onDuplicate?.()} />
       <button data-testid="detail-backfill" onClick={() => actions.onBackfill?.()} />
     </div>
@@ -340,6 +342,20 @@ describe("MobileSchedulerPage", () => {
     })
     expect(cloneTaskMock).toHaveBeenCalledWith("t1")
     expect(routerReplace).toHaveBeenLastCalledWith("/me/scheduler?item=app%3Acopy")
+  })
+
+  it("saves an edit as the person's own (it is a new instruction for the task)", async () => {
+    unifiedItemsRef = [item("app", "t1", "Nightly")]
+    searchParams = new URLSearchParams("item=app:t1")
+    render(<MobileSchedulerPage />)
+    fireEvent.click(screen.getByTestId("detail-edit"))
+    const body = screen.getByTestId("mobile-scheduler-edit-body")
+    await act(async () => {
+      fireEvent.click(within(body).getByTestId("task-form"))
+    })
+    expect(updateTaskMock).toHaveBeenCalledWith("t1", expect.objectContaining({ name: "x" }), {
+      source: "user",
+    })
   })
 
   it("writes a tap into the address and opens the detail from it with the full run set", () => {

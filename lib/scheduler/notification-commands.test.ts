@@ -101,15 +101,21 @@ describe("installScheduledNotificationCommands", () => {
     expect(getTask).toHaveBeenCalledWith("t1")
     // Merging is the contract: a bare `{dueReminder:false}` write would wipe
     // onComplete/channels for every task muted from a toast.
-    expect(updateTask).toHaveBeenCalledWith("t1", {
-      notification: {
-        onStart: false,
-        onComplete: true,
-        onError: true,
-        channels: ["toast", "desktop"],
-        dueReminder: false,
+    // A person tapped it, so the edit is theirs (it advances the task's
+    // instruction epoch, ADR-0239).
+    expect(updateTask).toHaveBeenCalledWith(
+      "t1",
+      {
+        notification: {
+          onStart: false,
+          onComplete: true,
+          onError: true,
+          channels: ["toast", "desktop"],
+          dueReminder: false,
+        },
       },
-    })
+      { source: "user" }
+    )
   })
 
   it("mute is a no-op when the task is gone or the id is missing", async () => {

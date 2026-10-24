@@ -796,6 +796,14 @@ export interface ScheduledTask {
   onFailureTaskIds?: string[]
   /** Consecutive terminal failures since the last success (drives auto-pause). */
   consecutiveFailures?: number
+  /**
+   * How many times a person has edited this task (`updateTask` with
+   * `source: "user"`). Agent, plugin and system writes leave it alone. It is
+   * the instruction epoch of the task's unattended runs for the outbound
+   * policy engine (ADR-0239): a person's edit is a new instruction, an
+   * agent's is not. Absent means 0.
+   */
+  humanRevision?: number
   /** Last execution time */
   lastRunAt?: Date
   /** Next scheduled execution time */

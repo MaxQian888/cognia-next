@@ -507,6 +507,41 @@ describe("setBotInstallationEnabled", () => {
   })
 })
 
+describe("human revision (ADR-0239 instruction epoch)", () => {
+  it("advances on every control-plane change a person makes, and not on a plugin patch", async () => {
+    register(definition({ requires: { credentials: [{ id: "gh", label: "GitHub" }] } }))
+    const row = await installBot({
+      definitionId: "acme:digest",
+      definitionSource: "plugin",
+      pinnedVersion: "1.0.0",
+      scope: { kind: "account" },
+      requiredCredentials: [{ id: "gh", label: "GitHub" }],
+      now: NOW,
+    })
+    expect(row.humanRevision).toBeUndefined()
+
+    expect((await updateBotConfig(row.id, { channel: "#a" })).humanRevision).toBe(1)
+    expect(
+      (await bindBotCredential(row.id, "gh", { integrationAccountId: "iacc_1" })).humanRevision
+    ).toBe(2)
+    expect((await setBotInstallationEnabled(row.id, false)).humanRevision).toBe(3)
+    expect(
+      (
+        await setBotExecutionRoute(row.id, {
+          mode: "gateway",
+          providerId: "openai",
+          modelId: "gpt-x",
+        })
+      ).humanRevision
+    ).toBe(4)
+
+    // The patch a plugin or the runtime writes leaves it where it was.
+    const { updateBotInstallation } = await import("@/lib/db/bot-installations")
+    const patched = await updateBotInstallation(row.id, { config: { channel: "#b" } })
+    expect(patched?.humanRevision).toBe(4)
+  })
+})
+
 describe("uninstallBotInstallation", () => {
   it("removes the row", async () => {
     register()

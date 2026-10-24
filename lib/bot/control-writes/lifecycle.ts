@@ -253,11 +253,15 @@ export async function updateBotConfigLocally(
     phase: "onConfigure",
     previousConfig: installation.config,
   })
-  const updated = await updateBotInstallation(installationId, {
-    config,
-    requiredCredentials,
-    ...(grant ? { policyGrant: { ...installation.policyGrant, ...grant } } : {}),
-  })
+  const updated = await updateBotInstallation(
+    installationId,
+    {
+      config,
+      requiredCredentials,
+      ...(grant ? { policyGrant: { ...installation.policyGrant, ...grant } } : {}),
+    },
+    { humanEdit: true }
+  )
   if (!updated) throw new BotControlTargetMissingError("installation", installationId)
   if (
     grant &&
@@ -299,7 +303,9 @@ export async function setBotExecutionRouteLocally(
   if (installation.syncedFromHost)
     throw new BotLifecycleUnavailableError({ state: "unsupported", reason: "requires-companion" })
   const parsed = route === null ? undefined : botExecutionRouteSchema.parse(route)
-  const updated = await setBotInstallationExecutionRoute(installationId, parsed)
+  const updated = await setBotInstallationExecutionRoute(installationId, parsed, Date.now(), {
+    humanEdit: true,
+  })
   if (!updated) throw new BotControlTargetMissingError("installation", installationId)
   const { cancelLiveBotInstallation } = await import("@/lib/bot/runtime/run")
   cancelLiveBotInstallation(installationId)
@@ -348,10 +354,11 @@ export async function bindBotCredentialLocally(
   }
 
   const requiredCredentials = await requiredSlotsFor(installation)
-  const updated = await updateBotInstallation(installationId, {
-    credentialBindings: next,
-    requiredCredentials,
-  })
+  const updated = await updateBotInstallation(
+    installationId,
+    { credentialBindings: next, requiredCredentials },
+    { humanEdit: true }
+  )
   if (!updated) throw new BotControlTargetMissingError("installation", installationId)
   return updated
 }
@@ -373,10 +380,11 @@ export async function setBotInstallationEnabledLocally(
   if (installation.syncedFromHost)
     throw new BotLifecycleUnavailableError({ state: "unsupported", reason: "requires-companion" })
   const requiredCredentials = await requiredSlotsFor(installation)
-  const updated = await updateBotInstallation(installationId, {
-    status: enabled ? "enabled" : "disabled",
-    requiredCredentials,
-  })
+  const updated = await updateBotInstallation(
+    installationId,
+    { status: enabled ? "enabled" : "disabled", requiredCredentials },
+    { humanEdit: true }
+  )
   if (!updated) throw new BotControlTargetMissingError("installation", installationId)
   return updated
 }

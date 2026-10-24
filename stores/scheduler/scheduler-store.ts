@@ -20,7 +20,7 @@ import { DEFAULT_PERMISSION_POLICY } from "@/types/scheduler"
 import type { ScheduledItemKind } from "@/types/scheduler/unified"
 import type { UnifiedStatusFilter } from "@/lib/scheduler/unified-filter"
 import { getSchedulerDataSource } from "@/lib/scheduler/scheduler-data-source"
-import type { CancelExecutionOutcome } from "@/lib/scheduler/task-scheduler"
+import type { CancelExecutionOutcome, UpdateTaskOptions } from "@/lib/scheduler/task-scheduler"
 import { isRemoteHostActive, subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import { subscribeSchedulerHostTarget } from "@/lib/scheduler/scheduler-host-target"
 import {
@@ -101,7 +101,12 @@ interface SchedulerState {
 interface SchedulerActions {
   // Task CRUD
   createTask: (input: CreateScheduledTaskInput) => Promise<ScheduledTask | null>
-  updateTask: (taskId: string, input: UpdateScheduledTaskInput) => Promise<ScheduledTask | null>
+  /** `options.source: "user"` marks a person's edit (see `TaskScheduler.updateTask`). */
+  updateTask: (
+    taskId: string,
+    input: UpdateScheduledTaskInput,
+    options?: UpdateTaskOptions
+  ) => Promise<ScheduledTask | null>
   deleteTask: (taskId: string) => Promise<boolean>
 
   // Task Actions
@@ -300,11 +305,11 @@ export const useSchedulerStore = create<SchedulerStore>()(
         }
       },
 
-      updateTask: async (taskId, input) => {
+      updateTask: async (taskId, input, options) => {
         set({ isLoading: true, error: null })
         try {
           const taskType = get().tasks.find((task) => task.id === taskId)?.type
-          const task = await getSchedulerDataSource().updateTask(taskId, input, taskType)
+          const task = await getSchedulerDataSource().updateTask(taskId, input, taskType, options)
 
           if (task) {
             await get().refreshAll()

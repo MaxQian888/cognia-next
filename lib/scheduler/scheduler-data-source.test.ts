@@ -132,6 +132,33 @@ it("sends task provenance hints with remote mutations", async () => {
   })
 })
 
+it("marks a person's remote edit and nothing else", async () => {
+  remoteActive = true
+  call.mockResolvedValue(null)
+
+  const source = getSchedulerDataSource()
+  await source.updateTask("task-1", { name: "a" }, "agent", { source: "user" })
+  await source.updateTask("task-1", { name: "b" }, "agent", { source: "plugin" })
+  await source.updateTask("task-1", { name: "c" })
+
+  expect(call).toHaveBeenNthCalledWith(1, "scheduled_task_update", {
+    taskId: "task-1",
+    input: { name: "a" },
+    taskType: "agent",
+    source: "user",
+  })
+  expect(call).toHaveBeenNthCalledWith(2, "scheduled_task_update", {
+    taskId: "task-1",
+    input: { name: "b" },
+    taskType: "agent",
+  })
+  expect(call).toHaveBeenNthCalledWith(3, "scheduled_task_update", {
+    taskId: "task-1",
+    input: { name: "c" },
+    taskType: undefined,
+  })
+})
+
 describe("cancelling a run on a paired host", () => {
   it("carries the request over the scheduled_task_cancel_run command", async () => {
     remoteActive = true

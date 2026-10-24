@@ -11,6 +11,7 @@
 
 import { registerNotificationCommand } from "@/lib/notifications/action-registry"
 import type { ScheduledTask, UpdateScheduledTaskInput } from "@/types/scheduler"
+import type { UpdateTaskOptions } from "./task-scheduler"
 import { parseUnifiedId } from "@/types/scheduler/unified"
 
 /** Open the task's detail pane — `/scheduler?item=` is the selection address. */
@@ -28,7 +29,11 @@ export interface ScheduledNotificationCommandDeps {
    * the write goes through the same data-source routing (local vs remote
    * daemon) and list refresh the scheduler page uses.
    */
-  updateTask?: (taskId: string, input: UpdateScheduledTaskInput) => Promise<ScheduledTask | null>
+  updateTask?: (
+    taskId: string,
+    input: UpdateScheduledTaskInput,
+    options?: UpdateTaskOptions
+  ) => Promise<ScheduledTask | null>
 }
 
 async function defaultGetTask(taskId: string): Promise<ScheduledTask | null> {
@@ -38,12 +43,13 @@ async function defaultGetTask(taskId: string): Promise<ScheduledTask | null> {
 
 async function defaultUpdateTask(
   taskId: string,
-  input: UpdateScheduledTaskInput
+  input: UpdateScheduledTaskInput,
+  options?: UpdateTaskOptions
 ): Promise<ScheduledTask | null> {
   // Lazy: `stores/scheduler` imports `lib/scheduler`, so a static edge here
   // would cycle the module graph.
   const { useSchedulerStore } = await import("@/stores/scheduler/scheduler-store")
-  return useSchedulerStore.getState().updateTask(taskId, input)
+  return useSchedulerStore.getState().updateTask(taskId, input, options)
 }
 
 /** Register the scheduler notification commands. Returns the unregister fn. */
@@ -74,9 +80,12 @@ export function installScheduledNotificationCommands(
     // `notification` replaces wholesale on update, so merge the existing
     // config rather than writing `{ dueReminder: false }` alone — that would
     // wipe onStart/onComplete/channels.
-    await updateTask(taskId, {
-      notification: { ...task.notification, dueReminder: false },
-    })
+    // A person tapped the notification's action, so this is their edit.
+    await updateTask(
+      taskId,
+      { notification: { ...task.notification, dueReminder: false } },
+      { source: "user" }
+    )
   })
 
   return () => {

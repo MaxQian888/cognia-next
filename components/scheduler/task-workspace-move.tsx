@@ -82,7 +82,7 @@ export function TaskWorkspaceMove({ task }: TaskWorkspaceMoveProps) {
     }
     setBusy(true)
     try {
-      await updateTask(task.id, { projectId: plan.projectId })
+      await updateTask(task.id, { projectId: plan.projectId }, { source: "user" })
       toast.success(plan.projectId ? t("moved") : t("cleared"))
     } catch (error) {
       toast.error(t("failed", { error: error instanceof Error ? error.message : String(error) }))

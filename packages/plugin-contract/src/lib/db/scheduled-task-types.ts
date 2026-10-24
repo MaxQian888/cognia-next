@@ -52,6 +52,8 @@ export interface DBScheduledTask {
   onSuccessTaskIds?: string // JSON serialized string[]
   onFailureTaskIds?: string // JSON serialized string[]
   consecutiveFailures?: number
+  /** `ScheduledTask.humanRevision`; not indexed. */
+  humanRevision?: number
   lastRunAt?: string // ISO date string
   nextRunAt?: string // ISO date string
   runCount: number

@@ -161,8 +161,16 @@ export async function installBot(input: InstallBotInput): Promise<BotInstallatio
 export type BotInstallationPatch = Partial<
   Omit<
     BotInstallationRow,
-    // `owner` and `executionRoute` have their own writers.
-    "id" | "createdAt" | "updatedAt" | "workspaceId" | "projectId" | "owner" | "executionRoute"
+    // `owner` and `executionRoute` have their own writers; `humanRevision`
+    // moves only with `humanEdit`, so a plugin's patch cannot claim to be a person.
+    | "id"
+    | "createdAt"
+    | "updatedAt"
+    | "workspaceId"
+    | "projectId"
+    | "owner"
+    | "executionRoute"
+    | "humanRevision"
   >
 > & {
   /** Re-evaluated against the merged row when bindings or status change. */
@@ -170,9 +178,22 @@ export type BotInstallationPatch = Partial<
   now?: number
 }
 
+export interface BotInstallationWriteOptions {
+  /** A person's change through the control plane: advances `humanRevision`. */
+  humanEdit?: boolean
+}
+
+function nextHumanRevision(
+  existing: BotInstallationRow,
+  options: BotInstallationWriteOptions
+): Pick<BotInstallationRow, "humanRevision"> {
+  return options.humanEdit ? { humanRevision: (existing.humanRevision ?? 0) + 1 } : {}
+}
+
 export async function updateBotInstallation(
   id: string,
-  patch: BotInstallationPatch
+  patch: BotInstallationPatch,
+  options: BotInstallationWriteOptions = {}
 ): Promise<BotInstallationRow | undefined> {
   const db = getDb()
   const existing = await db.botInstallations.get(id)
@@ -182,7 +203,12 @@ export async function updateBotInstallation(
   assertRunsHere("bot-installation", existing.owner)
 
   const { now, requiredCredentials, ...fields } = patch
-  const merged: BotInstallationRow = { ...existing, ...fields, updatedAt: now ?? Date.now() }
+  const merged: BotInstallationRow = {
+    ...existing,
+    ...fields,
+    ...nextHumanRevision(existing, options),
+    updatedAt: now ?? Date.now(),
+  }
   if (fields.scope) {
     // The denormalized copies exist only so the index can answer per-workspace
     // queries. Letting them drift from `scope` would hide an installation from
@@ -259,7 +285,8 @@ export async function setBotInstallationOwner(
 export async function setBotInstallationExecutionRoute(
   id: string,
   route: BotExecutionRoute | undefined,
-  now = Date.now()
+  now = Date.now(),
+  options: BotInstallationWriteOptions = {}
 ): Promise<BotInstallationRow | undefined> {
   const db = getDb()
   const existing = await db.botInstallations.get(id)
@@ -267,7 +294,11 @@ export async function setBotInstallationExecutionRoute(
   assertRunsHere("bot-installation", existing.owner)
   if (route?.mode === "gateway" && (!route.providerId.trim() || !route.modelId.trim()))
     throw new Error("A gateway route names a provider and a model")
-  const next: BotInstallationRow = { ...existing, updatedAt: now }
+  const next: BotInstallationRow = {
+    ...existing,
+    ...nextHumanRevision(existing, options),
+    updatedAt: now,
+  }
   if (route) next.executionRoute = route
   else delete next.executionRoute
   await db.botInstallations.put(next)

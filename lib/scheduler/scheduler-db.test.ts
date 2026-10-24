@@ -823,6 +823,7 @@ describe("SchedulerDatabase", () => {
         onSuccessTaskIds: ["next-1", "next-2"],
         onFailureTaskIds: ["cleanup-1"],
         consecutiveFailures: 2,
+        humanRevision: 3,
         config: {
           timeout: 1000,
           maxRetries: 0,
@@ -844,6 +845,7 @@ describe("SchedulerDatabase", () => {
       expect(retrieved?.onSuccessTaskIds).toEqual(["next-1", "next-2"])
       expect(retrieved?.onFailureTaskIds).toEqual(["cleanup-1"])
       expect(retrieved?.consecutiveFailures).toBe(2)
+      expect(retrieved?.humanRevision).toBe(3)
       expect(retrieved?.config.overlapPolicy).toBe("queue-all")
       expect(retrieved?.config.maxQueueSize).toBe(5)
       expect(retrieved?.config.maxRuns).toBe(20)
@@ -860,6 +862,7 @@ describe("SchedulerDatabase", () => {
       expect(retrieved?.onSuccessTaskIds).toBeUndefined()
       expect(retrieved?.onFailureTaskIds).toBeUndefined()
       expect(retrieved?.consecutiveFailures).toBeUndefined()
+      expect(retrieved?.humanRevision).toBeUndefined()
     })
   })
 

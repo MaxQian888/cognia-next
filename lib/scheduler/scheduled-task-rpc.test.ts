@@ -186,3 +186,24 @@ it("passes a migration's provenance to the import and drops anything malformed",
     provenance: undefined,
   })
 })
+
+describe("scheduled_task_update", () => {
+  it("forwards a paired device's person edit and nothing else as the writer", async () => {
+    await dispatchScheduledTaskRpc("scheduled_task_update", {
+      taskId: "t1",
+      input: { name: "a" },
+      source: "user",
+    })
+    await dispatchScheduledTaskRpc("scheduled_task_update", {
+      taskId: "t1",
+      input: { name: "b" },
+      source: "agent",
+    })
+    await dispatchScheduledTaskRpc("scheduled_task_update", { taskId: "t1", input: { name: "c" } })
+    expect(scheduler.updateTask.mock.calls.map((call) => call[2])).toEqual([
+      { source: "user" },
+      {},
+      {},
+    ])
+  })
+})

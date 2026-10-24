@@ -32,7 +32,7 @@ import {
 } from "./host-support"
 import { decideConcurrencyAdmission, resolveConcurrencyLimit } from "./concurrency-limit"
 import { describeOverrun, selectOverrunJobs, taskRuntimeLimitMs } from "./process-reaper"
-import { loadSchedulerPolicy } from "./write-authority"
+import { loadSchedulerPolicy, type TaskWriteSource } from "./write-authority"
 import { getNextCronTime } from "./cron-parser"
 import { enumerateBackfillSlots } from "./backfill"
 import { schedulerDb } from "./scheduler-db"
@@ -77,10 +77,25 @@ import {
   resolveItemTimingAuthority,
 } from "@/lib/placement/ownership"
 import type { ItemOwner } from "@/types/placement/item-owner"
+import {
+  payloadWithTrustedProvenance,
+  withoutScheduleProvenance,
+  type ImScheduleProvenance,
+} from "./schedule-provenance"
 import type { LeaderAwareTimingDriver, SchedulerTimingDriver } from "@/types/scheduler"
 import { loggers } from "@cognia/logging"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { normalizeTaskTrigger } from "./trigger-normalizer"
+
+export interface CreateTaskOptions {
+  /** The IM origin, from the host-side `/schedule` handler only. */
+  imScheduleProvenance?: ImScheduleProvenance
+}
+
+export interface UpdateTaskOptions {
+  /** Who is writing; only `"user"` advances `humanRevision`. */
+  source?: TaskWriteSource
+}
 
 /**
  * Drop a housekeeping interval's hold on the event loop.
@@ -1476,7 +1491,17 @@ class TaskSchedulerImpl {
   /**
    * Create a new scheduled task
    */
-  async createTask(input: CreateScheduledTaskInput): Promise<ScheduledTask> {
+  /**
+   * Create a task.
+   *
+   * `options.imScheduleProvenance` is the only way to give a task an IM
+   * origin; a provenance inside `input.payload` is dropped
+   * (`./schedule-provenance.ts`).
+   */
+  async createTask(
+    input: CreateScheduledTaskInput,
+    options: CreateTaskOptions = {}
+  ): Promise<ScheduledTask> {
     if (isDeprecatedTaskType(input.type)) {
       throw SchedulerError.deprecatedTaskType(input.type)
     }
@@ -1522,7 +1547,10 @@ class TaskSchedulerImpl {
       description: input.description,
       type: input.type,
       trigger: normalizedTrigger,
-      payload: normalizeConversationalTaskPayload(input.type, input.payload),
+      payload: normalizeConversationalTaskPayload(
+        input.type,
+        payloadWithTrustedProvenance(input.payload, options.imScheduleProvenance)
+      ),
       config: {
         ...config,
         maxMissedRuns: Math.max(0, config.maxMissedRuns ?? 1),
@@ -1563,9 +1591,19 @@ class TaskSchedulerImpl {
   }
 
   /**
-   * Update an existing task
+   * Update an existing task.
+   *
+   * `options.source` says who is writing. Only `"user"`, a person in the UI or
+   * on a paired device, advances `humanRevision`, which is the task's
+   * instruction epoch for the outbound policy engine (ADR-0239): an agent or
+   * plugin edit must not look like a new instruction from the person. The
+   * payload's IM provenance is never written here; the stored one is kept.
    */
-  async updateTask(taskId: string, input: UpdateScheduledTaskInput): Promise<ScheduledTask | null> {
+  async updateTask(
+    taskId: string,
+    input: UpdateScheduledTaskInput,
+    options: UpdateTaskOptions = {}
+  ): Promise<ScheduledTask | null> {
     const version = this.lifecycleVersion
     if (
       input.trigger ||
@@ -1621,7 +1659,7 @@ class TaskSchedulerImpl {
       ...(input.payload && {
         payload: normalizeConversationalTaskPayload(task.type, {
           ...(task.payload || {}),
-          ...input.payload,
+          ...withoutScheduleProvenance(input.payload),
         }),
       }),
       ...(input.config && {
@@ -1647,6 +1685,7 @@ class TaskSchedulerImpl {
       ...(input.projectId !== undefined && { projectId: input.projectId ?? undefined }),
       ...(input.onSuccessTaskIds !== undefined && { onSuccessTaskIds: input.onSuccessTaskIds }),
       ...(input.onFailureTaskIds !== undefined && { onFailureTaskIds: input.onFailureTaskIds }),
+      ...(options.source === "user" && { humanRevision: (task.humanRevision ?? 0) + 1 }),
       updatedAt: now,
     }
 
@@ -3952,12 +3991,22 @@ class TaskSchedulerImpl {
           }
         }
 
-        // Neither travels: see the method comment.
-        const { promotion: _promotion, owner: _owner, ...portable } = task
+        // Neither travels: see the method comment. Nor does the IM origin or
+        // the human revision: a file can claim any conversation, and the
+        // imported task starts its own instruction history here.
+        const {
+          promotion: _promotion,
+          owner: _owner,
+          humanRevision: _humanRevision,
+          ...portable
+        } = task
         const importedTask: ScheduledTask = {
           ...portable,
           trigger: normalizeTaskTrigger(task.trigger, { now: new Date() }),
-          payload: normalizeConversationalTaskPayload(task.type, task.payload),
+          payload: normalizeConversationalTaskPayload(
+            task.type,
+            withoutScheduleProvenance(task.payload)
+          ),
           config: {
             ...DEFAULT_EXECUTION_CONFIG,
             ...task.config,

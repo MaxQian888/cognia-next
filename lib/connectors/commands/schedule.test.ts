@@ -138,8 +138,18 @@ describe("IM schedule policy", () => {
           channels: ["im"],
           imTarget: { conversationKey: "telegram:bot:private" },
         }),
-      })
+      }),
+      {
+        imScheduleProvenance: {
+          source: "im",
+          adapterId: "bot",
+          conversationKey: "telegram:bot:private",
+          senderId: "alice",
+        },
+      }
     )
+    // The provenance is never put in the payload, where the scheduler drops it.
+    expect(runtime.createTask.mock.calls[0][0].payload).not.toHaveProperty("scheduleProvenance")
   })
 
   it("enforces the per-conversation quota before creating", async () => {

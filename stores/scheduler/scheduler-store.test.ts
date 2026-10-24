@@ -95,7 +95,10 @@ jest.mock("@/lib/scheduler/scheduler-data-source", () => ({
     return {
       host: "local",
       createTask: scheduler.createTask,
-      updateTask: (taskId: string, input: unknown) => scheduler.updateTask(taskId, input),
+      updateTask: (taskId: string, input: unknown, _taskType?: string, options?: unknown) =>
+        options === undefined
+          ? scheduler.updateTask(taskId, input)
+          : scheduler.updateTask(taskId, input, options),
       deleteTask: (taskId: string) => scheduler.deleteTask(taskId),
       getTask: scheduler.getTask,
       pauseTask: (taskId: string) => scheduler.pauseTask(taskId),
@@ -682,6 +685,18 @@ describe("useSchedulerStore", () => {
   })
 
   describe("updateTask", () => {
+    it("passes the writer through to the data source", async () => {
+      const { result } = renderHook(() => useSchedulerStore())
+      await act(async () => {
+        await result.current.updateTask("task-id", { name: "Renamed" }, { source: "user" })
+      })
+      expect(mockScheduler.updateTask).toHaveBeenCalledWith(
+        "task-id",
+        { name: "Renamed" },
+        { source: "user" }
+      )
+    })
+
     it("returns the updated task when scheduler resolves it", async () => {
       const { result } = renderHook(() => useSchedulerStore())
       let updated: ScheduledTask | null = null

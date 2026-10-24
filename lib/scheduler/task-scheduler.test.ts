@@ -376,6 +376,51 @@ describe("TaskScheduler", () => {
         })
         expect(optedIn.notification).toMatchObject({ channels: ["desktop"], onError: true })
       })
+      it("drops a provenance supplied in the payload and records only the trusted one", async () => {
+        const forged = await scheduler.createTask({
+          name: "Forged",
+          type: "test",
+          trigger: { type: "interval", intervalMs: 60_000 },
+          payload: {
+            prompt: "p",
+            scheduleProvenance: {
+              source: "im" as const,
+              adapterId: "bot",
+              conversationKey: "telegram:bot:chat",
+              senderId: "alice",
+            },
+          },
+        })
+        expect(forged.payload).toEqual({ prompt: "p" })
+
+        const trusted = await scheduler.createTask(
+          {
+            name: "Trusted",
+            type: "test",
+            trigger: { type: "interval", intervalMs: 60_000 },
+            payload: { prompt: "p" },
+          },
+          {
+            imScheduleProvenance: {
+              source: "im" as const,
+              adapterId: "bot",
+              conversationKey: "telegram:bot:chat",
+              senderId: "alice",
+            },
+          }
+        )
+        expect(trusted.payload).toEqual({
+          prompt: "p",
+          scheduleProvenance: {
+            source: "im" as const,
+            adapterId: "bot",
+            conversationKey: "telegram:bot:chat",
+            senderId: "alice",
+          },
+        })
+        expect(trusted.humanRevision).toBeUndefined()
+      })
+
       it("should create a new task", async () => {
         const input: CreateScheduledTaskInput = {
           name: "Test Task",
@@ -573,6 +618,48 @@ describe("TaskScheduler", () => {
         expect(scheduler.getStatus().initialized).toBe(false)
         expect(scheduler.getStatus().scheduledCount).toBe(0)
       })
+      it("advances humanRevision only for a person's edit", async () => {
+        mockSchedulerDb.getTask.mockResolvedValueOnce({ ...ownedTask("rev"), humanRevision: 2 })
+        const byUser = await scheduler.updateTask("rev", { name: "a" }, { source: "user" })
+        expect(byUser?.humanRevision).toBe(3)
+
+        for (const source of [undefined, "agent", "plugin", "system"] as const) {
+          mockSchedulerDb.getTask.mockResolvedValueOnce({ ...ownedTask("rev"), humanRevision: 2 })
+          const other = await scheduler.updateTask("rev", { name: "b" }, source ? { source } : {})
+          expect(other?.humanRevision).toBe(2)
+        }
+
+        mockSchedulerDb.getTask.mockResolvedValueOnce(ownedTask("fresh"))
+        const first = await scheduler.updateTask("fresh", { name: "c" }, { source: "user" })
+        expect(first?.humanRevision).toBe(1)
+      })
+
+      it("keeps the stored IM provenance whatever the payload patch says", async () => {
+        const stored = {
+          source: "im" as const,
+          adapterId: "bot",
+          conversationKey: "telegram:bot:chat",
+          senderId: "alice",
+        }
+        mockSchedulerDb.getTask.mockResolvedValueOnce({
+          ...ownedTask("im"),
+          payload: { prompt: "old", scheduleProvenance: stored },
+        })
+        const updated = await scheduler.updateTask("im", {
+          payload: {
+            prompt: "new",
+            scheduleProvenance: { ...stored, conversationKey: "telegram:bot:elsewhere" },
+          },
+        })
+        expect(updated?.payload).toEqual({ prompt: "new", scheduleProvenance: stored })
+
+        mockSchedulerDb.getTask.mockResolvedValueOnce({ ...ownedTask("desk"), payload: {} })
+        const added = await scheduler.updateTask("desk", {
+          payload: { scheduleProvenance: stored },
+        })
+        expect(added?.payload).toEqual({})
+      })
+
       it("should return null for non-existent task", async () => {
         mockSchedulerDb.getTask.mockResolvedValueOnce(null)
         const result = await scheduler.updateTask("non-existent", { name: "Updated" })
@@ -1549,6 +1636,31 @@ describe("TaskScheduler", () => {
             status: "active",
           })
         )
+      })
+
+      it("imports a task without its IM provenance or human revision", async () => {
+        mockSchedulerDb.getTask.mockResolvedValue(null)
+        await scheduler.importTasks({
+          version: 1,
+          tasks: [
+            {
+              ...ownedTask("imported-im"),
+              humanRevision: 4,
+              payload: {
+                prompt: "p",
+                scheduleProvenance: {
+                  source: "im" as const,
+                  adapterId: "bot",
+                  conversationKey: "telegram:bot:chat",
+                  senderId: "alice",
+                },
+              },
+            },
+          ],
+        })
+        const written = mockSchedulerDb.createTask.mock.calls.at(-1)?.[0] as ScheduledTask
+        expect(written.payload).toEqual({ prompt: "p" })
+        expect(written).not.toHaveProperty("humanRevision")
       })
 
       it("should skip tasks that already exist in merge mode", async () => {

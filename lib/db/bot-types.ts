@@ -208,6 +208,15 @@ export interface BotInstallationRow {
    * `setBotInstallationOwner`.
    */
   owner?: ItemOwner
+  /**
+   * How many times a person has changed this installation through the Bot
+   * control plane (config, execution route, a credential binding, enabling).
+   * Plugin and runtime writes leave it alone. It is the instruction epoch of
+   * the Bot's runs for the outbound policy engine (ADR-0239): a person's change
+   * is a new instruction, a plugin's is not. Absent means 0. Written only with
+   * `humanEdit` on the two writers below, never through a patch.
+   */
+  humanRevision?: number
   createdAt: number
   updatedAt: number
 }
