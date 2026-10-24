@@ -3439,7 +3439,7 @@ dependencies = [
 [[package]]
 name = "cognia-signaling-core"
 version = "0.1.0"
-source = "git+https://github.com/cognia-labs/cognia-services?rev=d0b22fff90cff988660d2e658559b0df5f16953d#d0b22fff90cff988660d2e658559b0df5f16953d"
+source = "git+https://github.com/cognia-labs/cognia-services?rev=a9a613b33705396a78540d706c32e082262dfd7d#a9a613b33705396a78540d706c32e082262dfd7d"
 dependencies = [
  "base64 0.23.1",
  "p256 0.14.0",
@@ -15432,7 +15432,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",

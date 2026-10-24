@@ -45,7 +45,8 @@ The worker lives in `services/share-server/worker/` of
 [cognia-labs/cognia-services](https://github.com/cognia-labs/cognia-services). Run the commands below from a clone of that
 repository. It is a standalone pnpm project and is now a pure JSON API — the viewer is the
 app's own `/share/view` route, deployed separately to Cloudflare Pages (next
-section).
+section). Its [operator guide](https://github.com/cognia-labs/cognia-services/blob/main/services/share-server/worker/README.md) is the maintained reference, including
+lifecycle migrations for an existing deployment; the steps below are the short path.
 
 ```bash
 # 1. Install deps (in the cognia-services clone)

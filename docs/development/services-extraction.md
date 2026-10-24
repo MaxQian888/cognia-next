@@ -40,6 +40,16 @@ Land the change in cognia-services first, with its own tests. Then bump the pin 
 
 The status Worker builds the public status page from a pinned revision of this repository (`integrations/cognia-next.json` in cognia-services). Bump that pin there when the page changes.
 
+## Documentation
+
+Service documentation lives with the services. cognia-services keeps a README per service and package, [contracts](https://github.com/cognia-labs/cognia-services/blob/main/docs/contracts.md) and [releasing](https://github.com/cognia-labs/cognia-services/blob/main/docs/releasing.md) guides, and its own `CONTRIBUTING.md`, `SECURITY.md` and `AGENTS.md`. These moved there from this repository and are maintained there:
+
+- the account sync protocol specification (`docs/protocols/account-sync-protocol{,.zh}.md`); the docs site keeps a short page that links to it;
+- the sync and identity Worker runbooks (`docs/runbooks/`);
+- the public status implementation plan (`docs/plans/2026-10-02-signaling-public-status-implementation.md`).
+
+The decision records stay here. cognia-services keeps English and Chinese copies of the ones its services follow (ADR-0021, 0037, 0102, 0135, 0149, 0170, 0211, 0215, 0224) under `docs/adr/`; amend a record here first, then refresh its copy there.
+
 ## Deployments and secrets
 
 Service deployments (Workers, Fly.io) and image publishing run in cognia-services, gated by its own `DEPLOY_ENABLED` variable and the `staging` / `production` environments described in its README. `deploy.yml` here deploys only the docs and marketing sites.

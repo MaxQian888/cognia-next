@@ -34,6 +34,8 @@ Cognia 可将对话记录、工作流图、A2UI 应用或备份包生成任何�
 
 worker 位于 [cognia-labs/cognia-services](https://github.com/cognia-labs/cognia-services) 的 `services/share-server/worker/`，是独立的 pnpm 项目，下面的命令都在该仓库的克隆中执行。它现在是纯 JSON API——viewer 改为应用自身的 `/share/view` 路由，单独部署到 Cloudflare Pages（见下一节）。
 
+Worker 的[运维指南](https://github.com/cognia-labs/cognia-services/blob/main/services/share-server/worker/README.md)是持续维护的参考（含已有部署的生命周期迁移），下面是最短路径。
+
 ```bash
 # 1. 安装依赖（独立项目——忽略应用 workspace）
 cd services/share-server/worker && pnpm install --frozen-lockfile
