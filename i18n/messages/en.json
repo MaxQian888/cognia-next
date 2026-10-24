@@ -50431,7 +50431,7 @@
       "hostMode": {
         "closeLocked": "Always-on host mode keeps this on Minimize to tray.",
         "description": "Make this computer the machine your bots, connectors and scheduled tasks run on while you are away.",
-        "details": "Keeps the computer from sleeping, starts Cognia hidden when you sign in, and makes the close button minimize to the tray. Quit from the tray still exits.",
+        "details": "Keeps the computer from sleeping while idle (closing a laptop lid still puts it to sleep), starts Cognia hidden when you sign in, and makes the close button minimize to the tray. Quit from the tray still exits.",
         "disabledToast": "Always-on host mode is off.",
         "enabledToast": "This computer is now an always-on host.",
         "failed": "Could not change always-on host mode: {error}",
