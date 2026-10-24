@@ -101,6 +101,9 @@ export const renderSkillsSection = (...args: unknown[]) =>
   hostCall("renderSkillsSection", ...args)
 export const upsertSkillByCanonicalId = (...args: unknown[]) =>
   hostCall("upsertSkillByCanonicalId", ...args)
+export const duplicateSkill = (...args: unknown[]) => hostCall("duplicateSkill", ...args)
+export const bulkImportSkills = (...args: unknown[]) => hostCall("bulkImportSkills", ...args)
+export const persistSkillBundle = (...args: unknown[]) => hostCall("persistSkillBundle", ...args)
 export const workflowSkillBody = (...args: unknown[]) => hostCall("workflowSkillBody", ...args)
 export const listCharacters = (...args: unknown[]) => hostCall("listCharacters", ...args)
 export const getCharacter = (...args: unknown[]) => hostCall("getCharacter", ...args)
@@ -111,4 +114,10 @@ export const listCharactersByIds = (...args: unknown[]) =>
   hostCall("listCharactersByIds", ...args)
 export const resolveCharacterById = (...args: unknown[]) =>
   hostCall("resolveCharacterById", ...args)
+export const listResolvedCharacters = (...args: unknown[]) =>
+  hostCall("listResolvedCharacters", ...args)
+export const listCharacterVariants = (...args: unknown[]) =>
+  hostCall("listCharacterVariants", ...args)
+export const createCharacterVariant = (...args: unknown[]) =>
+  hostCall("createCharacterVariant", ...args)
 export const recordCall = (...args: unknown[]) => hostCall("recordCall", ...args)
