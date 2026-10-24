@@ -5,8 +5,8 @@ import type { ChatStatus } from "@/stores/chat/chat-store"
 import { buildHandoffContext } from "@/lib/chat/handoff-context"
 import { listMessages } from "@/lib/db/messages"
 import { getSession, updateSession } from "@/lib/db/sessions"
-import { sendChatMessage } from "@/hooks/chat/chat-send-bridge"
 import { sessionStatusOf } from "@/hooks/chat/steer-runtime"
+import { sendAutomatedChatMessage } from "@/hooks/chat/chat-send-bridge"
 import { extractAssistantText } from "@/hooks/chat/claude-chat-turn-tasks"
 import { enableProjectCoordination } from "./user-actions"
 import { continueAsProjectRefusal, type ContinueAsProjectRefusal } from "./continue-eligibility"
@@ -50,7 +50,8 @@ function defaultDeps(): ContinueAsProjectDeps {
     listMessages,
     statusOf: sessionStatusOf,
     enable: (projectId, title) => enableProjectCoordination(projectId, title),
-    send: sendChatMessage,
+    // A coordinator seed, never the person's own instruction (ADR-0239).
+    send: (sessionId, text) => sendAutomatedChatMessage(sessionId, text, "project-coordinator"),
     gate: hasNoLeakingPii,
     now: Date.now,
   }

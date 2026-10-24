@@ -1,7 +1,7 @@
 import type { UIMessage } from "ai"
 import type { ChatSession } from "@cognia/agent-config-types"
 
-jest.mock("@/hooks/chat/chat-send-bridge", () => ({ sendChatMessage: jest.fn() }))
+jest.mock("@/hooks/chat/chat-send-bridge", () => ({ sendAutomatedChatMessage: jest.fn() }))
 jest.mock("@/hooks/chat/steer-runtime", () => ({ sessionStatusOf: jest.fn(() => "idle") }))
 jest.mock("./user-actions", () => ({ enableProjectCoordination: jest.fn() }))
 

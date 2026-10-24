@@ -56,6 +56,13 @@ interface ActiveSharedRun {
   deviceId: string
   token: string
   queueItemId?: string
+  /**
+   * The member whose queued request this run serves. The outbound policy
+   * engine (ADR-0239) reads it as the run's requester: only that member's own
+   * messages advance the instruction epoch. Absent on a recovered run, which
+   * only finishes and never executes a turn.
+   */
+  requestedByUserId?: string
   baselineMessageIds: Set<string>
   published: Map<string, string>
   /**
@@ -592,6 +599,7 @@ export async function beginSharedSessionRun(
     deviceId,
     token: acquired.token,
     queueItemId: queued.id,
+    requestedByUserId: acquired.item.requestedByUserId,
     baselineMessageIds: new Set(claimIntent.baselineMessageIds),
     published: new Map(),
     rawSeen: new Map(),
@@ -738,6 +746,15 @@ export function sharedAssistantParts(parts: unknown[]): unknown[] {
 }
 
 /** Publish complete snapshots serially so replay never observes half of a tool/message update. */
+/**
+ * The member a shared session's live run is serving, or `undefined` when the
+ * session has no live run here (ADR-0239: the run's requester).
+ */
+export function getSharedRunRequester(localSessionId: string): string | undefined {
+  const active = activeRuns.get(localSessionId)
+  return active && !active.leaseLost ? active.requestedByUserId : undefined
+}
+
 export async function publishSharedSessionRun(localSessionId: string): Promise<void> {
   const active = activeRuns.get(localSessionId)
   if (!active || active.leaseLost) return

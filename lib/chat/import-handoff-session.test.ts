@@ -83,6 +83,8 @@ describe("importHandoffSession", () => {
     const rows = await listMessages("handoff")
     expect(rows).toHaveLength(1)
     expect(rows[0].id).toBe("handoff:turn")
+    // Carried-over history never becomes the person's current instruction (ADR-0239).
+    expect(rows[0].metadata).toMatchObject({ automatedTurn: { producer: "history-import" } })
     expect(rows[0].parts).toEqual(
       expect.arrayContaining([
         { type: "reasoning", text: "Why", state: "done" },

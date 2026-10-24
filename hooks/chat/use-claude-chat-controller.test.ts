@@ -360,6 +360,9 @@ describe("autonomous external turns", () => {
           expect.objectContaining({
             role: "user",
             parts: [expect.objectContaining({ type: "text", text: "background request" })],
+            // Out-of-band input the runtime reported, never the person's
+            // instruction (ADR-0239).
+            metadata: { automatedTurn: { producer: "external-runtime" } },
           }),
           expect.objectContaining({
             role: "assistant",

@@ -23,6 +23,7 @@
  */
 
 import type { UIMessage } from "ai"
+import { automatedTurnMetadata } from "@cognia/agent-config-types/automated-turn"
 import type {
   PluginSeededSessionInput,
   PluginSeededSessionResult,
@@ -45,7 +46,11 @@ export async function startSeededSession(
       import("@/lib/db/messages"),
       import("@/lib/claude/adapter"),
     ])
-    await persistMessages(session.id, [makeUserMessage(seedUserMessage) as UIMessage])
+    // A plugin seeded it, not the person (ADR-0239).
+    const seeded = makeUserMessage(seedUserMessage) as UIMessage
+    await persistMessages(session.id, [
+      { ...seeded, metadata: { ...(seeded.metadata ?? {}), ...automatedTurnMetadata("plugin") } },
+    ])
   }
 
   return { sessionId: session.id }

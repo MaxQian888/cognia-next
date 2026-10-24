@@ -173,7 +173,11 @@ describe("runVerifiedFreshAgentTurn", () => {
     })
     expect(result.diffIncluded).toBe(true)
     expect(deps.persistTranscript).toHaveBeenCalledWith("fresh-session", [
-      expect.objectContaining({ role: "user" }),
+      // The verifier's framed request is never the person's instruction (ADR-0239).
+      expect.objectContaining({
+        role: "user",
+        metadata: { automatedTurn: { producer: "verifier" } },
+      }),
       expect.objectContaining({ id: "verifier-reply", role: "assistant" }),
     ])
   })

@@ -8,7 +8,7 @@ import {
   markAttachedSessionRunning,
 } from "@/lib/chat/attached-session"
 import { cancelQueuedChatTurn } from "@/lib/execution/chat-lease"
-import { sendChatMessage } from "@/hooks/chat/chat-send-bridge"
+import { sendAutomatedChatMessage } from "@/hooks/chat/chat-send-bridge"
 import { stopChatTurn } from "@/hooks/chat/chat-control-bridge"
 import { sessionStatusOf } from "@/hooks/chat/steer-runtime"
 import {
@@ -57,6 +57,15 @@ export interface ThreadRuntimeDeps extends Pick<ProjectAccess, "getProject"> {
   now: () => number
 }
 
+/**
+ * Send coordinator-written text into a session: routing, a PR nudge, a staged
+ * brief, a continue seed. Marked as an automation's turn, so it is never read
+ * as the person's own instruction (ADR-0239).
+ */
+export function sendCoordinatorMessage(sessionId: string, text: string): boolean {
+  return sendAutomatedChatMessage(sessionId, text, "project-coordinator")
+}
+
 export function defaultThreadRuntimeDeps(): ThreadRuntimeDeps {
   return {
     getProject: projectAccess.getProject,
@@ -66,7 +75,7 @@ export function defaultThreadRuntimeDeps(): ThreadRuntimeDeps {
     markRunning: (threadId) => markAttachedSessionRunning(threadId),
     interrupt: (threadId, owner) => interruptAttachedSession(threadId, owner),
     consumeStagedPrompt: (threadId, mode) => consumeStagedPrompt(threadId, mode),
-    send: sendChatMessage,
+    send: sendCoordinatorMessage,
     stopTurn: stopChatTurn,
     cancelQueued: cancelQueuedChatTurn,
     hold: (sessionId) => useChatStore.getState().holdInBackground(sessionId, THREAD_HOLDER_ID),

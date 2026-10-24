@@ -38,6 +38,7 @@ import { setSessionsArchived } from "@/lib/chat/session-archive-writes"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { UIMessage } from "ai"
+import { automatedTurnMetadata } from "@cognia/agent-config-types/automated-turn"
 import type { StepExecutionContext } from "@/types/workflow/visual"
 import { registerNodeExecutor } from "../registry"
 import { nonRetryable } from "../shared/executor-support"
@@ -232,6 +233,8 @@ registerNodeExecutor({
       id: messageId,
       role,
       parts: [{ type: "text" as const, text }],
+      // A workflow wrote it, not the person (ADR-0239).
+      metadata: automatedTurnMetadata("workflow"),
     } as unknown as UIMessage
     await persistMessages(session.id, [...existing.filter((m) => m.id !== messageId), message])
     return {

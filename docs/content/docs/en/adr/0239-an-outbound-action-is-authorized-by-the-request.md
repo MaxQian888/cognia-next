@@ -98,9 +98,10 @@ Every outbound review carries the **instruction epoch** of its root session: the
 
 - the user sends a message from the desktop or a paired device;
 - in IM, the original requester sends a new message in the thread;
+- in a shared session, the member whose request the run serves sends a new message;
 - for a run that has no conversation (a scheduled task, a Bot trigger), a person edits the task or installation, or writes in its session.
 
-It does **not** advance on a scheduled or Bot trigger, a webhook, the model's own follow-up, a subagent's or teammate's message, or a message from anyone else in an IM group.
+It does **not** advance on a scheduled or Bot trigger, a webhook, the model's own follow-up, a subagent's or teammate's message, or a message from anyone else in an IM group or shared session. Nor does it advance on a user-role row an automation wrote: another session's agent, a background task's result, the project coordinator, a workflow, a plugin, a verifier, an external runtime or an imported transcript. Those producers mark their rows `metadata.automatedTurn`, because such a row is otherwise shaped exactly like one the person typed. Only a person's edit advances a task's or Bot's revision; an agent's or plugin's edit does not.
 
 ### The denial fence
 

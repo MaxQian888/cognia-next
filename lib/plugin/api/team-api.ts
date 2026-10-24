@@ -410,10 +410,12 @@ export function createTeamAPI(pluginId: string): PluginTeamAPI {
       try {
         const { prepareBestOfNChat, startPreparedBestOfN } = await import("@/lib/best-of-n/entry")
         const prepared = await prepareBestOfNChat(input.sessionId, input.prompt, n, input.agents)
-        const group = await startPreparedBestOfN(prepared, {
-          targetRef: prepared.targetRef,
-          targetIsNew: true,
-        })
+        const group = await startPreparedBestOfN(
+          prepared,
+          { targetRef: prepared.targetRef, targetIsNew: true },
+          prepared.agents,
+          { automatedTurn: "plugin" }
+        )
         return { ok: true, run: toPublicBestOfNRun(group) }
       } catch (error) {
         return { ok: false, reason: error instanceof Error ? error.message : "dispatch_error" }

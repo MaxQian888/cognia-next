@@ -459,6 +459,8 @@ describe("Session API", () => {
       expect(message.id).toBeDefined()
       expect(message.content).toBe("New message")
       expect(message.role).toBe("user")
+      // A plugin's row is never the person's instruction (ADR-0239).
+      expect(message.metadata).toMatchObject({ automatedTurn: { producer: "plugin" } })
       expect(mockMessages[sessionId].length).toBe(3)
     })
 

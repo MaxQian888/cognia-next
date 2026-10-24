@@ -404,7 +404,9 @@ describe("createTeamAPI", () => {
   describe("best-of-N", () => {
     beforeEach(() => {
       bestOfN.canManage = true
-      bestOfN.prepare.mockReset().mockResolvedValue({ targetRef: "best-of-n/new" })
+      bestOfN.prepare
+        .mockReset()
+        .mockResolvedValue({ targetRef: "best-of-n/new", agents: ["session", "codex", "session"] })
       bestOfN.start.mockReset().mockResolvedValue(bestOfNGroup("g1", 1))
       bestOfN.cancel.mockReset().mockResolvedValue(bestOfNGroup("g1", 1))
       bestOfN.run.mockReset()
@@ -420,10 +422,13 @@ describe("createTeamAPI", () => {
         agents: ["session", "codex", "session"],
       })
       expect(bestOfN.prepare).toHaveBeenCalledWith("s", "fix", 3, ["session", "codex", "session"])
-      expect(bestOfN.start).toHaveBeenCalledWith(expect.anything(), {
-        targetRef: "best-of-n/new",
-        targetIsNew: true,
-      })
+      // The plugin's prompt row is marked as an automation's (ADR-0239).
+      expect(bestOfN.start).toHaveBeenCalledWith(
+        expect.anything(),
+        { targetRef: "best-of-n/new", targetIsNew: true },
+        ["session", "codex", "session"],
+        { automatedTurn: "plugin" }
+      )
       expect(result.ok).toBe(true)
       expect(JSON.stringify(result)).not.toContain("owner")
     })

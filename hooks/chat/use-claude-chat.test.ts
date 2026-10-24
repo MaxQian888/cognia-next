@@ -6727,6 +6727,25 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
     )
   })
 
+  it("keeps an automation's marker on a turn queued for a busy session", async () => {
+    chatState.status = "streaming"
+    steerSessionMock.mockRejectedValue(new Error("input_closed"))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("PR checks failed", undefined, {
+        automatedTurn: "project-coordinator",
+      })
+    })
+    const appended = chatState.replaceSessionMessages.mock.calls.at(-1)?.[1] as Array<{
+      metadata?: Record<string, unknown>
+    }>
+    expect(appended.at(-1)?.metadata).toMatchObject({
+      automatedTurn: { producer: "project-coordinator" },
+      steer: expect.objectContaining({ state: "queued" }),
+    })
+  })
+
   it("stamps citations on a live-delivered steer too", async () => {
     chatState.status = "streaming"
     steerSessionMock.mockResolvedValue({ accepted: true })
@@ -10443,6 +10462,14 @@ describe("durable background result admission", () => {
     )
     expect(onAccepted).toHaveBeenCalledTimes(1)
     expect(sendPromptMock).toHaveBeenCalledTimes(1)
+    // The delivered result is an automation's row, never the person's
+    // instruction (ADR-0239).
+    const rows = chatState.replaceSessionMessages.mock.calls.flatMap(
+      (call) => call[1] as Array<{ id: string; metadata?: Record<string, unknown> }>
+    )
+    expect(rows.find((row) => row.id === "background-delivery-test")?.metadata).toMatchObject({
+      automatedTurn: { producer: "background-result" },
+    })
   })
 
   it("does not send an automatic delivery when durable admission is unavailable", async () => {

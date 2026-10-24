@@ -81,6 +81,8 @@ describe("createPluginAgentSession", () => {
     const persisted = mockPersist.mock.calls[0][1]
     expect(persisted).toHaveLength(2)
     expect(persisted[0].role).toBe("user")
+    // The plugin's prompt is never the person's instruction (ADR-0239).
+    expect(persisted[0].metadata).toMatchObject({ automatedTurn: { producer: "plugin" } })
     expect(persisted[1].role).toBe("assistant")
     expect(res).toMatchObject({ text: "reply", channel: "sidecar", toolsAvailable: true })
   })

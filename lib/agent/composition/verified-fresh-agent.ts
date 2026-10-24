@@ -50,6 +50,7 @@ import type { HostProfile } from "@/lib/platform/capabilities"
 import type { VerificationVerdict, VerificationVerdictPart } from "@/lib/claude/parts-extensions"
 import { flattenMessageText } from "@/lib/claude/replay"
 import { extractJson } from "@cognia/eval-core/json"
+import { automatedTurnMetadata } from "@cognia/agent-config-types/automated-turn"
 import type { WorkspaceDiffSnapshot } from "@/lib/git/workspace-diff"
 import { resolvePrompt, resolvePromptAsync } from "@/lib/prompts/resolve"
 import { definePrompt } from "@/lib/prompts/types"
@@ -362,6 +363,8 @@ export async function runVerifiedFreshAgentTurn(
       id: `${verificationSessionId}:request`,
       role: "user",
       parts: [{ type: "text", text: prompt }],
+      // The verifier's framed request, not the person's (ADR-0239).
+      metadata: automatedTurnMetadata("verifier"),
     },
     {
       id: result.messageId || `${verificationSessionId}:verdict`,

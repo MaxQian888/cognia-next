@@ -197,6 +197,9 @@ describe("action.session.appendMessage", () => {
     const messages = await listMessages("sess1")
     expect(messages).toHaveLength(2)
     expect(messages.map((m) => m.id)).toEqual(["m1", "msg_wf_run1_s1"])
+    // A workflow's row is never the person's instruction (ADR-0239).
+    expect(messages[1].metadata).toMatchObject({ automatedTurn: { producer: "workflow" } })
+    expect(messages[0].metadata).not.toHaveProperty("automatedTurn")
   })
 
   it("uses a deterministic id so a replayed step does not write a second copy", async () => {

@@ -103,7 +103,8 @@ it("calls the single service once, persists one parent pair, and binds the proje
   )
   expect(commitMessageDelta).toHaveBeenCalledWith("s", {
     upserts: [
-      expect.objectContaining({ role: "user" }),
+      // Started from the composer: the person's own prompt, unmarked.
+      expect.not.objectContaining({ metadata: expect.anything() }),
       expect.objectContaining({
         id: prepared.requestId,
         role: "assistant",
@@ -116,6 +117,35 @@ it("calls the single service once, persists one parent pair, and binds the proje
     group,
     expect.objectContaining({ parentMessageId: prepared.requestId, parentSessionId: "s" })
   )
+})
+
+it("marks the prompt row of a run an automation started (ADR-0239)", async () => {
+  const prepared = await prepareBestOfNChat("s", "fix", 2)
+  const group = {
+    groupId: "g",
+    baseSha: prepared.baseSha,
+    targetRef: prepared.targetRef,
+    checkoutHadUncommittedChanges: false,
+  }
+  jest
+    .mocked(startBestOfN)
+    .mockResolvedValue({ group, completion: Promise.resolve(group) } as never)
+  jest.mocked(commitMessageDelta).mockClear()
+  await startPreparedBestOfN(
+    prepared,
+    { targetRef: prepared.targetRef, targetIsNew: true },
+    prepared.agents,
+    { automatedTurn: "plugin" }
+  )
+  expect(commitMessageDelta).toHaveBeenCalledWith("s", {
+    upserts: [
+      expect.objectContaining({
+        role: "user",
+        metadata: { automatedTurn: { producer: "plugin" } },
+      }),
+      expect.objectContaining({ role: "assistant" }),
+    ],
+  })
 })
 
 it("refuses starts from paired observers before accessing the Host", async () => {

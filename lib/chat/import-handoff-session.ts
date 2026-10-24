@@ -20,6 +20,7 @@ import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 import type { CanonicalSession, CanonicalTurn } from "@cognia/agent-config-types/canonical-session"
 
 import type { ChatSession } from "@cognia/agent-config-types"
+import { automatedTurnMetadata } from "@cognia/agent-config-types/automated-turn"
 import { getDb } from "@/lib/db/schema"
 import { invalidatePersistSnapshot, toStoredMessageRow } from "@/lib/db/messages"
 import { resolveScopeProjectId } from "@/lib/db/project-scope"
@@ -127,6 +128,16 @@ function newMessageId(seed: string): string {
  * Mint a fresh session id when the CLI-supplied one collides with a native
  * (non-handoff) desktop session. Same shape as `lib/db/sessions.ts:newId`.
  */
+function withHistoryImportMarker(message: UIMessage): UIMessage {
+  return {
+    ...message,
+    metadata: {
+      ...((message.metadata as Record<string, unknown> | undefined) ?? {}),
+      ...automatedTurnMetadata("history-import"),
+    },
+  }
+}
+
 function newSessionId(): string {
   return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
@@ -285,8 +296,10 @@ export async function importHandoffSession(params: ImportHandoffParams): Promise
       // hoists `senderId` / `senderKind` / `turnKey` / `collaboration` out of
       // metadata onto their columns, and a second writer that skipped that step
       // would store rows shaped unlike every other row in this table.
+      // Carried-over history, not something the person says now: it never
+      // becomes their current instruction (ADR-0239).
       const rows = normalized.map((message, index) =>
-        toStoredMessageRow(uiMessages[index] ?? message, {
+        toStoredMessageRow(withHistoryImportMarker(uiMessages[index] ?? message), {
           id: `${sessionId}:${message.id}`,
           sessionId,
           projectId,

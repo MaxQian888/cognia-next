@@ -8,11 +8,16 @@ import {
   reopenThread,
   resolveThread,
   resumeProjectThreads,
+  sendCoordinatorMessage,
   sendToThread,
   startThread,
   stopThread,
   type ThreadRuntimeDeps,
 } from "./thread-runtime"
+import {
+  __resetChatSendBridgeForTesting,
+  registerChatSendBridge,
+} from "@/hooks/chat/chat-send-bridge"
 
 const NOW = new Date(2026, 8, 29, 15).getTime()
 
@@ -242,5 +247,16 @@ describe("resolveThread / reopenThread", () => {
     expect(table.get("t1")?.projectThread?.resolvedBy).toBeUndefined()
     await expect(resolveThread("missing", "user", deps)).resolves.toBe(false)
     await reopenThread("t1", deps)
+  })
+})
+
+describe("sendCoordinatorMessage", () => {
+  afterEach(() => __resetChatSendBridgeForTesting())
+
+  it("sends as the coordinator, so the row is never the person's instruction (ADR-0239)", () => {
+    const send = jest.fn()
+    registerChatSendBridge(send)
+    expect(sendCoordinatorMessage("thread-1", "PR checks failed")).toBe(true)
+    expect(send).toHaveBeenCalledWith("PR checks failed", "thread-1", "project-coordinator")
   })
 })

@@ -13,6 +13,7 @@
  */
 
 import type { UIMessage } from "ai"
+import { automatedTurnMetadata } from "@cognia/agent-config-types/automated-turn"
 import { createPluginBudget, type PluginBudget } from "./budget"
 import type {
   PluginAgentSession,
@@ -89,6 +90,8 @@ function buildSession(
       id: newMessageId(),
       role: "user",
       parts: [{ type: "text", text: prompt }],
+      // The plugin's prompt, not the person's (ADR-0239).
+      metadata: automatedTurnMetadata("plugin"),
     }
     const assistantMsg: UIMessage = {
       id: newMessageId(),

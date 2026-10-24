@@ -1,4 +1,8 @@
 import type { UIMessage } from "ai"
+import {
+  automatedTurnMetadata,
+  type AutomatedTurnProducer,
+} from "@cognia/agent-config-types/automated-turn"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { getSession } from "@/lib/db/sessions"
 import { commitMessageDelta } from "@/lib/db/messages"
@@ -108,10 +112,15 @@ export async function prepareBestOfNChat(
 }
 
 /** Both composer entry points consume their ordinary send through this one call. */
+/**
+ * `options.automatedTurn` names the automation starting the run (a plugin);
+ * the prompt row then never reads as the person's instruction (ADR-0239).
+ */
 export async function startPreparedBestOfN(
   prepared: PreparedBestOfN,
   target: { targetRef: string; targetIsNew: boolean },
-  agents: readonly string[] = prepared.agents
+  agents: readonly string[] = prepared.agents,
+  options: { automatedTurn?: AutomatedTurnProducer } = {}
 ) {
   const t = await getRuntimeTranslator("bestOfNEntry")
   if (!canManageBestOfNRuns()) throw new Error(t("unavailable"))
@@ -140,7 +149,12 @@ export async function startPreparedBestOfN(
   }
   await projectBestOfNGroup(handle.group, binding)
   const messages: UIMessage[] = [
-    { id: `${requestId}-prompt`, role: "user", parts: [{ type: "text", text: prompt }] },
+    {
+      id: `${requestId}-prompt`,
+      role: "user",
+      parts: [{ type: "text", text: prompt }],
+      ...(options.automatedTurn ? { metadata: automatedTurnMetadata(options.automatedTurn) } : {}),
+    },
     {
       id: requestId,
       role: "assistant",

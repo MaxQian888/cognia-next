@@ -95,6 +95,10 @@ import {
   registerBackgroundReplaySend,
 } from "./background-result-runtime"
 import { registerChatRetryBridge, registerChatSendBridge } from "./chat-send-bridge"
+import {
+  automatedTurnMetadata,
+  type AutomatedTurnProducer,
+} from "@cognia/agent-config-types/automated-turn"
 import { registerChatApprovalBridge, registerChatStopBridge } from "./chat-control-bridge"
 import { tagBranchSiblings, tagEditSibling } from "@/lib/chat/branch-regen"
 import {
@@ -682,7 +686,17 @@ export function createExternalIdleEventConsumer(
               }
             : undefined
       if (!part) return
-      const message: UIMessage = { id, role: "user", parts: [...(existing?.parts ?? []), part] }
+      // Reported by the external runtime, not typed here: never the
+      // requester's instruction (ADR-0239).
+      const message: UIMessage = {
+        id,
+        role: "user",
+        parts: [...(existing?.parts ?? []), part],
+        metadata: {
+          ...((existing?.metadata as Record<string, unknown> | undefined) ?? {}),
+          ...automatedTurnMetadata("external-runtime"),
+        },
+      }
       const messages = existing
         ? current.map((item) => (item.id === id ? message : item))
         : [...current, message]
@@ -1478,6 +1492,13 @@ export function useClaudeChat() {
         skipUserAppend?: boolean
         /** Stable journal batch identity, reserved before automatic result delivery. */
         backgroundDelivery?: { id: string; onAccepted: () => void }
+        /**
+         * An automation, not the person, is sending this turn. Stamped on the
+         * user row as `metadata.automatedTurn` so it never counts as the
+         * person's instruction (ADR-0239). A background delivery is always
+         * `background-result`.
+         */
+        automatedTurn?: AutomatedTurnProducer
         /** Let approval continuations retain a retry action when dispatch is refused. */
         throwOnError?: boolean
         /** Skip Thread-B delegation routing. Set on the built-in fallback
@@ -1954,6 +1975,8 @@ export function useClaudeChat() {
             steer: steerMeta,
             ...(steerMentions.length > 0 ? { mentions: steerMentions } : {}),
             ...(callOptions?.promptPreamble ? { promptPreamble: callOptions.promptPreamble } : {}),
+            // Queued for a busy session, still an automation's (ADR-0239).
+            ...(callOptions?.automatedTurn ? automatedTurnMetadata(callOptions.automatedTurn) : {}),
           }
 
           const externalAgentId = sessionExternalLane(sessionId)
@@ -2763,6 +2786,15 @@ export function useClaudeChat() {
         ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
           ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
           replyTo: callOptions.replyTo,
+        }
+      }
+      const automatedProducer =
+        callOptions?.automatedTurn ??
+        (callOptions?.backgroundDelivery ? "background-result" : undefined)
+      if (automatedProducer) {
+        ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
+          ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
+          ...automatedTurnMetadata(automatedProducer),
         }
       }
       // Edit-as-branch: the replacement joins the original's sibling group, and
@@ -6028,8 +6060,11 @@ export function useClaudeChat() {
   // parts). One registration covers every session: the callback carries the
   // target sessionId.
   useEffect(() => {
-    return registerChatSendBridge((text, targetSessionId) => {
-      void sendRef.current?.(text, undefined, { sessionId: targetSessionId })
+    return registerChatSendBridge((text, targetSessionId, automatedTurn) => {
+      void sendRef.current?.(text, undefined, {
+        sessionId: targetSessionId,
+        ...(automatedTurn ? { automatedTurn } : {}),
+      })
     })
   }, [])
 

@@ -28,6 +28,7 @@ import type {
 import type { Session, UIMessage } from "@/types"
 import { createPluginSystemLogger } from "../core/logger"
 import { nanoid } from "nanoid"
+import { automatedTurnMetadata } from "@cognia/agent-config-types/automated-turn"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { startSeededSession } from "./session-seed"
@@ -199,6 +200,8 @@ export function createSessionAPI(pluginId: string): PluginSessionAPI {
         role: options?.role || "user",
         content,
         createdAt: new Date(),
+        // A plugin wrote it, not the person (ADR-0239).
+        metadata: automatedTurnMetadata("plugin"),
         attachments: options?.attachments?.map((a) => ({
           id: nanoid(),
           name: a.name,

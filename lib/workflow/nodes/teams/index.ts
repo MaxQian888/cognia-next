@@ -1,3 +1,4 @@
+import { automatedTurnMetadata } from "@cognia/agent-config-types/automated-turn"
 import { registerNodeExecutor } from "../registry"
 import { createCharacter, updateCharacter } from "@/lib/db/characters"
 import { createTeam, updateTeam } from "@/lib/db/teams"
@@ -192,6 +193,8 @@ registerNodeExecutor({
       id,
       role,
       parts: [{ type: "text" as const, text: content }],
+      // A workflow wrote it, not the person (ADR-0239).
+      metadata: automatedTurnMetadata("workflow"),
     } as unknown as UIMessageLike
     const next: UIMessageLike[] = [...existing, message]
     await persistMessages(sessionId, next)

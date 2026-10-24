@@ -14,7 +14,13 @@
  * resolution).
  */
 
-export type ChatSendBridge = (text: string, sessionId: string) => void
+import type { AutomatedTurnProducer } from "@cognia/agent-config-types/automated-turn"
+
+export type ChatSendBridge = (
+  text: string,
+  sessionId: string,
+  automatedTurn?: AutomatedTurnProducer
+) => void
 
 let bridge: ChatSendBridge | undefined
 
@@ -35,6 +41,22 @@ export function registerChatSendBridge(send: ChatSendBridge): () => void {
 export function sendChatMessage(sessionId: string, text: string): boolean {
   if (!bridge || !sessionId || !text.trim()) return false
   bridge(text, sessionId)
+  return true
+}
+
+/**
+ * Send `text` on behalf of an automation (the project coordinator). The user
+ * row is stamped `metadata.automatedTurn`, so it is never read as the person's
+ * instruction (ADR-0239). A surface a person acts through uses
+ * {@link sendChatMessage}.
+ */
+export function sendAutomatedChatMessage(
+  sessionId: string,
+  text: string,
+  producer: AutomatedTurnProducer
+): boolean {
+  if (!bridge || !sessionId || !text.trim()) return false
+  bridge(text, sessionId, producer)
   return true
 }
 

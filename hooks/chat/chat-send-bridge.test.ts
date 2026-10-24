@@ -2,6 +2,7 @@ import {
   registerChatRetryBridge,
   registerChatSendBridge,
   retryChatTurn,
+  sendAutomatedChatMessage,
   sendChatMessage,
   __resetChatSendBridgeForTesting,
 } from "./chat-send-bridge"
@@ -15,6 +16,16 @@ describe("chat-send-bridge", () => {
     registerChatSendBridge(send)
     expect(sendChatMessage("s-1", "hello")).toBe(true)
     expect(send).toHaveBeenCalledWith("hello", "s-1")
+  })
+
+  it("marks an automation's message with its producer, and a person's with none", () => {
+    const send = jest.fn()
+    registerChatSendBridge(send)
+    expect(sendAutomatedChatMessage("s-1", "nudge", "project-coordinator")).toBe(true)
+    expect(send).toHaveBeenCalledWith("nudge", "s-1", "project-coordinator")
+    expect(sendAutomatedChatMessage("s-1", "  ", "project-coordinator")).toBe(false)
+    __resetChatSendBridgeForTesting()
+    expect(sendAutomatedChatMessage("s-1", "nudge", "project-coordinator")).toBe(false)
   })
 
   it("returns false when no runtime is registered rather than pretending", () => {

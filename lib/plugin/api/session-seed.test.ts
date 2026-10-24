@@ -40,8 +40,14 @@ describe("startSeededSession", () => {
     startNewSession.mockResolvedValue({ id: "sess-created" })
     const result = await startSeededSession({ seedUserMessage: "write this" })
     expect(makeUserMessage).toHaveBeenCalledWith("write this")
+    // The seed is the plugin's, never the person's instruction (ADR-0239).
     expect(persistMessages).toHaveBeenCalledWith("sess-created", [
-      { id: "m1", role: "user", text: "write this" },
+      {
+        id: "m1",
+        role: "user",
+        text: "write this",
+        metadata: { automatedTurn: { producer: "plugin" } },
+      },
     ])
     expect(result).toEqual({ sessionId: "sess-created" })
   })

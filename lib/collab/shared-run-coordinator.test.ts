@@ -40,6 +40,7 @@ import { CollabError } from "./client"
 import {
   canAutomaticallyDrainSharedQueue,
   beginSharedSessionRun,
+  getSharedRunRequester,
   finishSharedSessionRun,
   resetSharedRunCoordinatorForTesting,
   sharedRequestTranscript,
@@ -102,6 +103,9 @@ it("acquires a bound lease, publishes lifecycle events, and releases it", async 
     }
   )
   expect(result.kind).toBe("acquired")
+  // The run's requester, for the outbound policy engine (ADR-0239).
+  expect(getSharedRunRequester("local-session")).toBe("requester")
+  expect(getSharedRunRequester("other-session")).toBeUndefined()
   expect(client.appendSessionEvent).not.toHaveBeenCalled()
   expect(client.appendSessionRunEvent).toHaveBeenCalledWith(
     "org",
@@ -118,6 +122,7 @@ it("acquires a bound lease, publishes lifecycle events, and releases it", async 
     "secret",
     expect.objectContaining({ kind: "run.completed" })
   )
+  expect(getSharedRunRequester("local-session")).toBeUndefined()
   expect(client.releaseSessionRunLease).toHaveBeenCalledWith(
     "org",
     "shared-session",
