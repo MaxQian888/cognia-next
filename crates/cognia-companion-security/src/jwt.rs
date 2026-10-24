@@ -238,6 +238,11 @@ mod tests {
     const ACCOUNT_ID: &str = "local_acct_a";
 
     #[test]
+    fn p6b_org_usage_preserves_audited_exact_service_trust() {
+        p5_all_audited_service_bypasses_use_exact_service_trust();
+    }
+
+    #[test]
     fn p5_all_audited_service_bypasses_use_exact_service_trust() {
         assert!(is_service_scope(Some("service")));
         for scope in [None, Some("person-brain"), Some("device"), Some("owner"), Some("Service")] {
@@ -249,7 +254,7 @@ mod tests {
             ("crates/cognia-companion/src/paired_turn.rs", include_str!("../../cognia-companion/src/paired_turn.rs"), 1),
             ("crates/cognia-companion/src/catalog.rs", include_str!("../../cognia-companion/src/catalog.rs"), 1),
             ("crates/cognia-companion/src/host_surface_gate.rs", include_str!("../../cognia-companion/src/host_surface_gate.rs"), 7),
-            ("crates/cognia-companion/src/org_policy.rs", include_str!("../../cognia-companion/src/org_policy.rs"), 2),
+            ("crates/cognia-companion/src/org_policy.rs", include_str!("../../cognia-companion/src/org_policy.rs"), 1),
             ("crates/cognia-companion/src/api.rs", include_str!("../../cognia-companion/src/api.rs"), 1),
             ("crates/cognia-companion/src/ws.rs", include_str!("../../cognia-companion/src/ws.rs"), 1),
             ("crates/cognia-companion-rpc/src/managed_desktops.rs", include_str!("../../cognia-companion-rpc/src/managed_desktops.rs"), 1),

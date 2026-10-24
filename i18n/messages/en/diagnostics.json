@@ -464,6 +464,10 @@
     "orgScopeUnavailable": {
       "label": "Needs an organization Host",
       "hint": "Organization settings such as shared model keys and allowed agents only exist on a Host that serves an organization. This Host serves one person, so there is nothing to configure here."
+    },
+    "memberUsageCapReached": {
+      "label": "Monthly allowance used up",
+      "hint": "You've used this month's model allowance from your organization. It resets at the start of next month; an org owner or admin can raise it."
     }
   },
   "detail": {

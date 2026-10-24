@@ -21,6 +21,40 @@ pub enum AgentsCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+pub enum OrgUsageCommand {
+    Get { #[arg(long)] org: String, #[arg(long)] month: Option<String> },
+    SetDefault { #[arg(long)] org: String, #[arg(long, value_parser = org_usage_default_tokens)] tokens: String },
+    SetMember { #[arg(long)] org: String, #[arg(long)] user: String, #[arg(long, value_parser = org_usage_member_tokens)] tokens: String },
+}
+fn org_usage_default_tokens(value: &str) -> Result<String, String> { org_usage_parse_tokens(value, false).map(|_| value.into()) }
+fn org_usage_member_tokens(value: &str) -> Result<String, String> { org_usage_parse_tokens(value, true).map(|_| value.into()) }
+fn org_usage_parse_tokens(value: &str, allow_default: bool) -> Result<Value, String> {
+    match value {
+        "unlimited" => Ok(Value::Null),
+        "default" if allow_default => Ok(json!("default")),
+        value => value.parse::<u64>().ok().filter(|n| *n <= cognia_gateway::org_usage::MAX_MONTHLY_TOKENS)
+            .map(|n| json!(n)).ok_or_else(|| "tokens must be a bounded nonnegative integer or unlimited (member also accepts default)".into()),
+    }
+}
+pub async fn org_usage(command: OrgUsageCommand, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let (operation, args) = match command {
+        OrgUsageCommand::Get { org, month } => {
+            let mut args = json!({"orgId":org});
+            if let Some(month) = month {
+                if !cognia_gateway::org_usage::valid_month(&month) { return Err("month must be YYYY-MM".into()); }
+                args["month"] = month.into();
+            }
+            ("get", args)
+        },
+        OrgUsageCommand::SetDefault { org, tokens } => ("set-default", json!({"orgId":org,"defaultMonthlyTokens":org_usage_parse_tokens(&tokens, false)?})),
+        OrgUsageCommand::SetMember { org, user, tokens } => ("set-member", json!({"orgId":org,"userId":user,"monthlyTokens":org_usage_parse_tokens(&tokens, true)?})),
+    };
+    let body = call("org-usage", operation, args, port).await?;
+    println!("{}", serde_json::to_string_pretty(&body)?);
+    Ok(())
+}
+
 fn read_key(reader: impl std::io::Read) -> Result<String, Box<dyn std::error::Error>> {
     let mut key = String::new();
     reader.take(64 * 1024 + 1).read_to_string(&mut key)?;
@@ -68,6 +102,26 @@ pub async fn agents(command: AgentsCommand, port: u16) -> Result<(), Box<dyn std
 mod tests {
     use super::*;
     use clap::Parser;
+    #[test]
+    fn p6b_org_usage_cli_parse_and_token_validation() {
+        use crate::{Cli, CliCommand};
+        let cli = Cli::try_parse_from(["cognia-server", "org-usage", "--port", "27891", "get", "--org", "org_p6b", "--month", "2026-10"]).unwrap();
+        assert!(matches!(cli.command, CliCommand::OrgUsage { command: OrgUsageCommand::Get { org, month }, port: Some(27891) } if org == "org_p6b" && month.as_deref() == Some("2026-10")));
+        for tokens in ["0", "100", "unlimited"] {
+            assert!(Cli::try_parse_from(["cognia-server", "org-usage", "set-default", "--org", "org_p6b", "--tokens", tokens]).is_ok());
+        }
+        for tokens in ["0", "100", "unlimited", "default"] {
+            assert!(Cli::try_parse_from(["cognia-server", "org-usage", "set-member", "--org", "org_p6b", "--user", "usr_p6b", "--tokens", tokens]).is_ok());
+        }
+        for tokens in ["default", "-1", "1.5", "1000000000001"] {
+            assert!(Cli::try_parse_from(["cognia-server", "org-usage", "set-default", "--org", "org_p6b", "--tokens", tokens]).is_err());
+        }
+        assert!(Cli::try_parse_from(["cognia-server", "org-usage", "get"]).is_err());
+        assert!(Cli::try_parse_from(["cognia-server", "org-usage", "set-member", "--org", "org_p6b", "--tokens", "default"]).is_err());
+        assert_eq!(org_usage_parse_tokens("unlimited", false).unwrap(), Value::Null);
+        assert_eq!(org_usage_parse_tokens("default", true).unwrap(), json!("default"));
+    }
+
     #[test]
     fn p6a_org_cli_has_explicit_identity_port_and_stdin_only_keys() {
         use crate::{Cli, CliCommand};

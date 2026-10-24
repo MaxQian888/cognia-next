@@ -633,7 +633,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[tokio::test]
-    async fn p6a_org_commands_require_live_owner_or_admin_standing() {
+    async fn p6b_org_commands_require_live_owner_or_admin_standing_without_host_approval() {
         let policy = POLICY.as_ref().unwrap();
         let entry = policy.get(crate::org_policy::CAPABILITY).unwrap();
         assert_eq!(entry.class, SurfaceClass::OrgAction);
@@ -654,6 +654,8 @@ mod tests {
         }
         use cognia_tenant_auth::OrgRole;
         for command in crate::org_policy::COMMANDS {
+            assert_eq!(crate::command_manifest::descriptor(command).unwrap().approval,
+                crate::command_manifest::CommandApproval::None);
             for role in [OrgRole::Owner, OrgRole::Admin] {
                 let provider = OrgStanding { role: Some(role), bound: true };
                 assert!(decide(DeploymentMode::MultiTenant, true, false, &provider,

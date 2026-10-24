@@ -564,6 +564,9 @@ const KNOWN_COMMANDS: &[&str] = &[
     "org_model_credential_delete",
     "org_agent_policy_get",
     "org_agent_policy_set",
+    "org_member_usage_get",
+    "org_usage_cap_set",
+    "org_member_usage_cap_set",
     "host_provider_credential_set",
     "host_provider_credential_delete",
     "host_git_credential_set",
@@ -1431,6 +1434,7 @@ pub fn known_commands() -> &'static [&'static str] {
 /// They are cheap to re-run and structurally idempotent.
 #[cfg(test)]
 const READ_ONLY_COMMANDS: &[&str] = &[
+    "org_member_usage_get",
     "org_model_credential_list",
     "org_agent_policy_get",
     "task_workspace_canonical_root",
@@ -4006,8 +4010,24 @@ fn p6a_org_commands_have_matching_generated_and_service_dispatch_descriptors() {
         assert!(!is_service_only_command(command));
         let descriptor = cognia_companion::command_manifest::descriptor(command).unwrap();
         assert_eq!(descriptor.capability, cognia_companion::org_policy::CAPABILITY);
-        assert_eq!(descriptor.approval == cognia_companion::command_manifest::CommandApproval::Interactive,
-            cognia_companion::org_policy::is_write(command));
+        // Org writes rest on live owner/admin standing and the signed request
+        // alone (P6b): no command asks for Host consent or an admin lease.
+        assert_eq!(descriptor.approval, cognia_companion::command_manifest::CommandApproval::None);
         assert_eq!(READ_ONLY_COMMANDS_SET.contains(command), !cognia_companion::org_policy::is_write(command));
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn p6b_usage_commands_are_catalogued_on_both_planes() {
+    for command in ["org_member_usage_get", "org_usage_cap_set", "org_member_usage_cap_set"] {
+        assert!(KNOWN_COMMANDS.contains(&command));
+        assert!(known_commands().contains(&command));
+        assert!(service_plane::COMMANDS.contains(&command));
+        assert!(!is_service_only_command(command));
+        let descriptor = cognia_companion::command_manifest::descriptor(command).unwrap();
+        assert_eq!(descriptor.capability, "org.policy.manage");
+        assert_eq!(descriptor.approval, cognia_companion::command_manifest::CommandApproval::None);
+        assert_eq!(READ_ONLY_COMMANDS_SET.contains(command), command == "org_member_usage_get");
     }
 }

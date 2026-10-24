@@ -13,7 +13,7 @@ static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 /// validation/approval/audit path, even for the loopback service principal.
 pub fn reserved_namespace(namespace: &str) -> bool {
     let service = format!("com.cognia.{namespace}/v1");
-    [VALUE_SERVICE, INDEX_SERVICE, crate::org_agent_policy::SERVICE].contains(&service.as_str())
+    [VALUE_SERVICE, INDEX_SERVICE, crate::org_agent_policy::SERVICE, "com.cognia.host-org-member-usage/v1"].contains(&service.as_str())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -125,6 +125,12 @@ mod tests {
     use super::*;
     const ORG: &str = "org_p6a00000000000000000000";
     const USER: &str = "usr_p6a00000000000000000000";
+
+    #[test]
+    fn p6b_usage_namespace_is_closed_to_generic_keyring_commands() {
+        assert!(reserved_namespace("host-org-member-usage"));
+        assert!(!reserved_namespace("org-member-usage"));
+    }
 
     #[test]
     fn p6a_org_keys_are_metadata_only_and_never_operator_or_device_secrets() {

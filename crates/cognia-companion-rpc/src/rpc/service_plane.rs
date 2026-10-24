@@ -68,6 +68,9 @@ pub(super) const COMMANDS: &[&str] = &[
     "org_model_credential_delete",
     "org_agent_policy_get",
     "org_agent_policy_set",
+    "org_member_usage_get",
+    "org_usage_cap_set",
+    "org_member_usage_cap_set",
     "host_provider_credential_set",
     "host_provider_credential_delete",
     "host_git_credential_set",
@@ -1623,7 +1626,8 @@ pub(super) async fn dispatch(
         // this host's own runtime. Writes are `approval: interactive`, so the
         // admin lease was checked before this arm ran.
         "org_model_credential_list" | "org_model_credential_set" | "org_model_credential_delete"
-        | "org_agent_policy_get" | "org_agent_policy_set" => {
+        | "org_agent_policy_get" | "org_agent_policy_set"
+        | "org_member_usage_get" | "org_usage_cap_set" | "org_member_usage_cap_set" => {
             require_org_server(host.kind())?;
             cognia_companion::org_policy::dispatch(name, args, device_id, tenant_id, scope).await
         }
@@ -2460,6 +2464,18 @@ mod tests {
             assert_eq!(error.0.code, "org_scope_unavailable");
         }
         assert!(require_org_server("headless").is_ok());
+    }
+
+    #[tokio::test]
+    async fn p6b_usage_commands_refuse_non_server_hosts() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = bound_state(temp.path().into());
+        let host = crate::headless::HeadlessServices::stub_for_tests();
+        for command in ["org_member_usage_get", "org_usage_cap_set", "org_member_usage_cap_set"] {
+            let (status, error) = dispatch(command, json!({"orgId":"org_p6b_rpc"}), &state, &host, "operator", Some("tenant"), Some("service")).await.unwrap_err();
+            assert_eq!(status, StatusCode::CONFLICT);
+            assert_eq!(error.0.code, "org_scope_unavailable");
+        }
     }
 
     #[tokio::test]

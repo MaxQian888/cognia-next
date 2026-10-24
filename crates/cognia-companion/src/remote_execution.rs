@@ -1215,6 +1215,46 @@ mod tests {
         )
     }
 
+    #[test]
+    fn p6b_org_writes_pass_approval_without_consent_lease_or_host_policy() {
+        for command in super::super::org_policy::COMMANDS.iter().filter(|command| super::super::org_policy::is_write(command)) {
+            let descriptor = super::super::command_manifest::descriptor(command).unwrap();
+            for scope in ["device", "owner"] {
+                let mut request = execution_request(scope, Some(vec!["org.policy.manage".into()]));
+                request.command = (*command).into();
+                assert_eq!(request.args, json!({}));
+                assert!(request.policy_id.is_none());
+                assert_eq!(descriptor.approval, CommandApproval::None);
+                assert!(authorize_capability(&request, descriptor).is_ok());
+                assert!(authorize_approval(&request, descriptor).is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn p6b_org_contracts_drop_admin_leases_and_include_bundled_agents() {
+        use cognia_headless_contract::{ContractDirection, ContractPlane};
+        for (command, args) in [
+            ("org_model_credential_set", json!({"provider":"openai","apiKey":"p6b-contract-key"})),
+            ("org_model_credential_delete", json!({"provider":"openai"})),
+            ("org_agent_policy_set", json!({"allowedAgents":[],"defaultAgent":null})),
+            ("org_usage_cap_set", json!({"defaultMonthlyTokens":null})),
+            ("org_member_usage_cap_set", json!({"userId":"usr_p6b_contract","monthlyTokens":"default"})),
+        ] {
+            for plane in [ContractPlane::Device, ContractPlane::Service] {
+                assert!(validate_contract_value("p6b", command, &args, ContractDirection::Input, plane).is_ok(), "{command}");
+                let mut obsolete = args.clone(); obsolete["adminLease"] = "obsolete".into();
+                assert!(validate_contract_value("p6b", command, &obsolete, ContractDirection::Input, plane).is_err(), "{command}");
+            }
+        }
+        let output = serde_json::to_value(super::super::org_agent_policy::get("org_p6b_contract").unwrap()).unwrap();
+        for command in ["org_agent_policy_get", "org_agent_policy_set"] {
+            assert!(validate_contract_value("p6b", command, &output, ContractDirection::Output, ContractPlane::Device).is_ok());
+            let mut missing = output.clone(); missing.as_object_mut().unwrap().remove("bundledAgents");
+            assert!(validate_contract_value("p6b", command, &missing, ContractDirection::Output, ContractPlane::Device).is_err());
+        }
+    }
+
     /// The bootstrap burst must land on the wide bucket.
     ///
     /// `runSyncDown` walks every companion-sync handler back to back and each

@@ -863,6 +863,7 @@ fn build_router_for_mode(
         .route("/internal/persons/purge", post(super::person_partition::purge_handler))
         .route("/internal/org-credentials/{operation}", post(super::org_policy::credentials_handler))
         .route("/internal/org-agents/{operation}", post(super::org_policy::agents_handler))
+        .route("/internal/org-usage/{operation}", post(super::org_policy::org_usage_handler))
         .route("/internal/events", any(ws::internal_ws_handler))
         .route(
             "/internal/_rpc/{name}",

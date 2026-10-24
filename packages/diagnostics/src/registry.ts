@@ -916,6 +916,13 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "dismiss" }],
     icon: "settings",
   },
+  memberUsageCapReached: {
+    severity: "warning",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "dismiss" }],
+    icon: "key",
+  },
   orgScopeUnavailable: {
     severity: "info",
     retryable: false,

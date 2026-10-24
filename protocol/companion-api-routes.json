@@ -188,6 +188,12 @@
       "reason": "Loopback operator aliases for list/set/delete through canonical org credential RPC; explicit orgId, service JWT only."
     },
     {
+      "path": "/internal/org-usage/{operation}",
+      "method": "post",
+      "document": "none",
+      "reason": "Loopback operator aliases for get/set-default/set-member through canonical org usage RPC; explicit orgId, service JWT only."
+    },
+    {
       "path": "/internal/org-agents/{operation}",
       "method": "post",
       "document": "none",

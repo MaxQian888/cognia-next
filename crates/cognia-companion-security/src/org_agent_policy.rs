@@ -49,6 +49,7 @@ pub struct AgentAvailability {
 #[serde(rename_all = "camelCase")]
 pub struct PolicyView {
     pub allowed_agents: Vec<AgentAvailability>,
+    pub bundled_agents: Vec<AgentAvailability>,
     pub default_agent: Option<String>,
     pub updated_at: Option<i64>,
     pub updated_by: Option<String>,
@@ -90,20 +91,41 @@ fn view(org: &str, policy: AgentPolicy) -> Result<PolicyView, String> {
     validate(&policy.allowed_agents, policy.default_agent.as_deref())?;
     let credentials = OrgCredentials::list(org)?;
     let present: Vec<String> = credentials.into_iter().map(|entry| entry.provider).collect();
-    let allowed_agents = policy.allowed_agents.into_iter().map(|runtime_id| {
+    let availability = |runtime_id: String| {
         let requirement = AGENT_PROVIDERS.iter().find(|(id, _)| *id == runtime_id).expect("validated runtime").1;
         // Coverage only: P6c still validates the provider profile/model and
         // mints a ticket. Holding an arbitrary slug never authorizes execution.
         let providers = if requirement.is_some() { present.clone() } else { vec![] };
         let available = !providers.is_empty();
         AgentAvailability { runtime_id, providers, available }
-    }).collect();
-    Ok(PolicyView { allowed_agents, default_agent: policy.default_agent, updated_at: policy.updated_at, updated_by: policy.updated_by })
+    };
+    let bundled_agents = AGENT_PROVIDERS.iter().map(|(runtime, _)| availability((*runtime).into())).collect();
+    let allowed_agents = policy.allowed_agents.into_iter().map(availability).collect();
+    Ok(PolicyView { allowed_agents, bundled_agents, default_agent: policy.default_agent, updated_at: policy.updated_at, updated_by: policy.updated_by })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn p6b_bundled_agents_include_disallowed_runtimes_in_table_order() {
+        let org = "org_p6b_bundled_agents";
+        let empty = serde_json::to_value(get(org).unwrap()).unwrap();
+        assert_eq!(empty["bundledAgents"].as_array().unwrap().len(), AGENT_PROVIDERS.len());
+        assert!(empty["allowedAgents"].as_array().unwrap().is_empty());
+        OrgCredentials::set(org, "openai", "p6b-bundle-secret", "operator", 1).unwrap();
+        let policy = set(org, vec!["pi".into()], Some("pi".into()), "operator", 2).unwrap();
+        let output = serde_json::to_value(policy).unwrap();
+        for (agent, (id, family)) in output["bundledAgents"].as_array().unwrap().iter().zip(AGENT_PROVIDERS) {
+            assert_eq!(agent["runtimeId"], *id);
+            assert_eq!(agent["available"], family.is_some());
+            assert_eq!(agent["providers"], if family.is_some() { serde_json::json!(["openai"]) } else { serde_json::json!([]) });
+            if *id == "pi" { assert_eq!(*agent, output["allowedAgents"][0]); }
+        }
+        OrgCredentials::delete(org, "openai").unwrap();
+        assert!(serde_json::to_value(get(org).unwrap()).unwrap()["bundledAgents"].as_array().unwrap().iter().all(|agent| agent["available"] == false));
+    }
+
     #[test]
     fn p6a_provider_table_covers_exactly_the_shipped_bundle() {
         let bundle: serde_json::Value = serde_json::from_str(include_str!("../../../deploy/bundle/agent-versions.json")).unwrap();

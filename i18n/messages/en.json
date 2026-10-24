@@ -15937,6 +15937,10 @@
         "hint": "The managed policy disallows this sandbox or approval mode. Choose an allowed mode or contact your administrator.",
         "label": "Managed policy refused"
       },
+      "memberUsageCapReached": {
+        "hint": "You've used this month's model allowance from your organization. It resets at the start of next month; an org owner or admin can raise it.",
+        "label": "Monthly allowance used up"
+      },
       "modelAccessUnavailable": {
         "hint": "Your data on a shared Host has no AI model configured, so this can't generate a reply here yet. It will work once the organization's model access is available to members.",
         "label": "No model access on this shared Host"

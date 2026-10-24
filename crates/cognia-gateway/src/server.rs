@@ -344,7 +344,7 @@ fn spawn_request_task(
             struct ReleaseReservation(Arc<RouteTicketRegistry>, String);
             impl Drop for ReleaseReservation {
                 fn drop(&mut self) {
-                    self.0.release_reservation(&self.1);
+                    self.0.org_usage_settle_unknown(&self.1, 0);
                 }
             }
             let _reservation = ReleaseReservation(tickets.clone(), request_id);
@@ -1204,6 +1204,11 @@ async fn middleware(
                 Ok(ticket) => ticket,
                 Err(kind) => {
                     let (status, message) = match kind {
+                        TicketReject::MemberUsageCapReached { reset_at } => {
+                            let _ = reject(StatusCode::TOO_MANY_REQUESTS, "member_usage_cap_reached", None);
+                            return org_usage_refusal(reset_at);
+                        },
+                        TicketReject::MemberUsageUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "member usage accounting unavailable"),
                         TicketReject::Expired => (StatusCode::UNAUTHORIZED, "route ticket expired"),
                         TicketReject::Revoked => (StatusCode::UNAUTHORIZED, "route ticket revoked"),
                         TicketReject::Unknown => (StatusCode::UNAUTHORIZED, "unknown route ticket"),
@@ -2875,8 +2880,23 @@ fn no_snapshot_error(format: InboundFormat) -> Response {
         .into_response()
 }
 
-/// Emit a durable request-log row for a terminal error and return the inbound
-/// error response in one call.
+/// Member caps require usage trailers even when the caller did not request one.
+fn org_usage_request_stream_usage(body: &mut Value, protocol: &str, member: bool) {
+    if member && protocol == "openai" && body["stream"] == true {
+        if !body["stream_options"].is_object() { body["stream_options"] = json!({}); }
+        body["stream_options"]["include_usage"] = true.into();
+    }
+}
+
+fn org_usage_refusal(reset_at: i64) -> Response {
+    (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": {
+        "code": "member_usage_cap_reached", "type": "member_usage_cap_reached",
+        "message": "member monthly token cap reached", "retryable": false,
+        "resetAt": reset_at, "details": { "resetAt": reset_at }
+    }}))).into_response()
+}
+
+/// Emit a durable request-log row and return the inbound error response.
 #[allow(clippy::too_many_arguments)]
 fn logged_error(
     state: &AppState,
@@ -3549,6 +3569,15 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             ) {
                 Ok(Some(output)) => upstream_body[field] = json!(output),
                 Ok(None) => {}
+                Err(TicketReject::MemberUsageCapReached { reset_at }) => {
+                    let _ = logged_error(&state, &ctx, format, StatusCode::TOO_MANY_REQUESTS,
+                        "member_usage_cap_reached", "member monthly token cap reached", Some(&model));
+                    return org_usage_refusal(reset_at);
+                }
+                Err(TicketReject::MemberUsageUnavailable) => {
+                    return logged_error(&state, &ctx, format, StatusCode::SERVICE_UNAVAILABLE,
+                        "member_usage_unavailable", "member usage accounting unavailable", Some(&model));
+                }
                 Err(_) => {
                     return logged_error(
                         &state,
@@ -3571,6 +3600,8 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
             &cfg.field_strip_allow,
         );
 
+        org_usage_request_stream_usage(&mut upstream_body, &candidate.provider.protocol,
+            ctx.ticket.as_ref().is_some_and(|ticket| ticket.member.is_some()));
         let url = upstream_url(&candidate.provider.protocol, &candidate.provider.base_url);
         let mut req = state.http.post(&url).json(&upstream_body);
         if !stream {
@@ -4671,9 +4702,11 @@ fn log_success(
     // A ticket request settles its reservation at the real usage (streams
     // reach here at stream end). Idempotent by request id.
     if ctx.ticket.is_some() {
-        state
-            .tickets
-            .settle_reservation(&ctx.request_id, consumed.max(0) as u64);
+        if ctx.ticket.as_ref().is_some_and(|ticket| ticket.member.is_some()) && (input_tokens.is_none() || output_tokens.is_none()) {
+            state.tickets.org_usage_settle_unknown(&ctx.request_id, consumed.max(0) as u64);
+        } else {
+            state.tickets.settle_reservation(&ctx.request_id, consumed.max(0) as u64);
+        }
     }
     // Record the upstream account's success for rotation + per-account usage.
     record_key_success(&state.key_rotation, candidate);
@@ -4752,6 +4785,34 @@ fn emit_request_log_ctx(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn p6b_member_streams_request_usage_without_changing_legacy_requests() {
+        let original = json!({"stream":true,"stream_options":{"custom":true,"include_usage":false}});
+        let mut member = original.clone();
+        org_usage_request_stream_usage(&mut member, "openai", true);
+        assert_eq!(member["stream_options"]["include_usage"], true);
+        assert_eq!(member["stream_options"]["custom"], true);
+        let mut legacy = original.clone(); org_usage_request_stream_usage(&mut legacy, "openai", false);
+        assert_eq!(legacy, original);
+        let mut anthropic = original.clone(); org_usage_request_stream_usage(&mut anthropic, "anthropic", true);
+        assert_eq!(anthropic, original);
+        let mut buffered = json!({"stream":false}); let expected = buffered.clone();
+        org_usage_request_stream_usage(&mut buffered, "openai", true);
+        assert_eq!(buffered, expected);
+    }
+
+    #[tokio::test]
+    async fn p6b_member_cap_http_refusal_is_429_non_retryable_with_reset() {
+        let reset = crate::org_usage::reset_at("2026-10");
+        let response = org_usage_refusal(reset);
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        let body = axum::body::to_bytes(response.into_body(), 4096).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["error"]["code"], "member_usage_cap_reached");
+        assert_eq!(value["error"]["retryable"], false);
+        assert_eq!(value["error"]["resetAt"], reset);
+    }
 
     #[test]
     fn request_events_are_owner_tagged_and_stale_generations_are_suppressed() {

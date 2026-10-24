@@ -109,6 +109,11 @@ enum CliCommand {
         #[command(subcommand)] command: org_admin::CredentialsCommand,
         #[arg(long, global = true)] port: Option<u16>,
     },
+    /// Inspect member monthly usage and manage organization token caps.
+    OrgUsage {
+        #[command(subcommand)] command: org_admin::OrgUsageCommand,
+        #[arg(long, global = true)] port: Option<u16>,
+    },
     /// Manage the organization's bundled-agent allowlist.
     OrgAgents {
         #[command(subcommand)] command: org_admin::AgentsCommand,
@@ -1470,6 +1475,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         CliCommand::OrgCredentials { command, port } => {
             org_admin::credentials(command, resolve_pair_port(port, std::env::var("COGNIA_PORT").ok().as_deref())).await
+        }
+        CliCommand::OrgUsage { command, port } => {
+            org_admin::org_usage(command, resolve_pair_port(port, std::env::var("COGNIA_PORT").ok().as_deref())).await
         }
         CliCommand::OrgAgents { command, port } => {
             org_admin::agents(command, resolve_pair_port(port, std::env::var("COGNIA_PORT").ok().as_deref())).await
@@ -2999,6 +3007,16 @@ async fn run_serve(
     if let Some(services) = headless_services() {
         let gateway = Arc::clone(&services.gateway);
         gateway.hydrate_from_disk(data_dir.join(".cognia").join("gateway-config.json"));
+        // P6b: member ids and usage are sealed, never in gateway JSON files.
+        // Only the server keeps a member ledger; the desktop gateway never
+        // attaches one.
+        if let Err(error) = gateway
+            .tickets
+            .attach_usage_store(Arc::new(cognia_gateway::org_usage::SealedMemberUsageStore))
+        {
+            log::error!("member usage store unavailable: {error}");
+        }
+        cognia_companion::org_policy::org_usage_install(Arc::clone(&gateway.tickets));
         // ADR-0188 D9/D36: the Run API, the `cognia/*` models and the
         // passthrough ledger reach the connected brain over its
         // `/internal/bridge` socket, and the brain publishes the account's

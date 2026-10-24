@@ -135,6 +135,23 @@ describe("multi-tenant Host refusals", () => {
     expect(DIAGNOSTIC_CODES.partitionWorkspaceUnavailable.retryable).toBe(false)
   })
 
+  it("maps monthly member allowance exhaustion to its non-retryable diagnostic", () => {
+    expect(
+      diagnoseCommandError({
+        code: "member_usage_cap_reached",
+        message: "member monthly token cap reached",
+        retryable: false,
+        structured: true,
+      })
+    ).toEqual({
+      code: "memberUsageCapReached",
+      message: "member monthly token cap reached",
+      retryable: false,
+    })
+    expect(isHostRefusalCode("member_usage_cap_reached")).toBe(true)
+    expect(DIAGNOSTIC_CODES.memberUsageCapReached.retryable).toBe(false)
+  })
+
   it("labels org administration as unavailable on a single-user Host", () => {
     expect(diagnose("org_scope_unavailable")).toBe("orgScopeUnavailable")
     expect(isHostRefusalCode("org_scope_unavailable")).toBe(true)

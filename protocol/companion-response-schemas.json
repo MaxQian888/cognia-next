@@ -16471,11 +16471,71 @@
     "org_model_credential_delete": {
       "$ref": "#/$defs/NullResult"
     },
+    "org_member_usage_get": {
+      "type": "object",
+      "required": ["month", "defaultMonthlyTokens", "members"],
+      "properties": {
+        "month": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" },
+        "defaultMonthlyTokens": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["userId", "spentTokens", "reservedTokens", "monthlyTokens", "capSource"],
+            "properties": {
+              "userId": { "type": "string" },
+              "spentTokens": { "type": "integer", "minimum": 0 },
+              "reservedTokens": { "type": "integer", "minimum": 0 },
+              "monthlyTokens": {
+                "type": ["integer", "null"],
+                "minimum": 0,
+                "maximum": 1000000000000
+              },
+              "capSource": { "type": "string", "enum": ["default", "override"] }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "org_usage_cap_set": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "org_member_usage_cap_set": {
+      "$ref": "#/$defs/NullResult"
+    },
     "org_agent_policy_get": {
       "type": "object",
-      "required": ["allowedAgents", "defaultAgent", "updatedAt", "updatedBy"],
+      "required": ["allowedAgents", "bundledAgents", "defaultAgent", "updatedAt", "updatedBy"],
       "properties": {
         "allowedAgents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["runtimeId", "providers", "available"],
+            "properties": {
+              "runtimeId": {
+                "type": "string"
+              },
+              "providers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "available": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "bundledAgents": {
           "type": "array",
           "items": {
             "type": "object",
@@ -16511,9 +16571,31 @@
     },
     "org_agent_policy_set": {
       "type": "object",
-      "required": ["allowedAgents", "defaultAgent", "updatedAt", "updatedBy"],
+      "required": ["allowedAgents", "bundledAgents", "defaultAgent", "updatedAt", "updatedBy"],
       "properties": {
         "allowedAgents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["runtimeId", "providers", "available"],
+            "properties": {
+              "runtimeId": {
+                "type": "string"
+              },
+              "providers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "available": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "bundledAgents": {
           "type": "array",
           "items": {
             "type": "object",

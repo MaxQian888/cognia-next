@@ -111,6 +111,7 @@ pub const HOST_ROUTES: &[HostRoute] = &[
     // P6a operator aliases: the canonical /internal/_rpc dispatch gates them (service JWT).
     HostRoute { path: "/internal/org-credentials/{operation}", class: GatedByDispatch, capability: Some("service.internal"), execution: false },
     HostRoute { path: "/internal/org-agents/{operation}", class: GatedByDispatch, capability: Some("service.internal"), execution: false },
+    HostRoute { path: "/internal/org-usage/{operation}", class: GatedByDispatch, capability: Some("service.internal"), execution: false },
     HostRoute { path: "/internal/catalog", class: GatedByDispatch, capability: Some("service.internal"), execution: false },
     HostRoute { path: "/operator/lark/admin", class: GatedByDispatch, capability: Some("service.internal"), execution: false },
     HostRoute { path: "/operator/lark/admin/{request_id}", class: GatedByDispatch, capability: Some("service.internal"), execution: false },

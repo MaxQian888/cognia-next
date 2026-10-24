@@ -413,6 +413,8 @@ export type DiagnosticCode =
   | "partitionWorkspaceUnavailable"
   /** Organization administration is unavailable on a single-user Host. */
   | "orgScopeUnavailable"
+  /** Member monthly token allowance is exhausted until the UTC reset. */
+  | "memberUsageCapReached"
   | "routingNoCandidates"
   // --- Cognia internals ---
   | "settingsLoadFailed"

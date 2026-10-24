@@ -112,6 +112,11 @@ pub trait PersonBrainFleet: Send + Sync {
     fn receipt_scope(&self, account_id: &str) -> Option<PersonReceiptScope>;
     fn person(&self, account_id: &str) -> Option<PersonPartition>;
     fn statuses(&self) -> Vec<PersonBrainStatus>;
+    /// Known org people, including parked brains; no server dependency.
+    fn org_people(&self, org: &str) -> Vec<String> {
+        self.statuses().iter().filter_map(|status| self.person(&status.account_id))
+            .filter(|person| person.org_id == org).map(|person| person.user_id).collect()
+    }
     async fn list(&self) -> Result<serde_json::Value, String>;
     async fn purge(&self, person: &PersonPartition) -> Result<(), &'static str>;
 }

@@ -402,28 +402,37 @@ const remoteDesktopBindingDraft = z.object({
 })
 
 // Org is required by service scope and forbidden for tenant devices at runtime.
-// Explicit optional adminLease keeps generic generation from requiring a Host
-// owner lease: org writes also support the existing Host-consent retry flow.
+// Org writes use live owner/admin standing and the signed device request;
+// neither a Host policy, Host consent nor an admin lease is required.
 const orgScope = { orgId: z.string().min(1).optional() }
-const orgApproval = { adminLease: z.string().min(1).optional() }
 
 const schemas = {
+  org_member_usage_get: z.object({
+    ...orgScope,
+    month: z.string().regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/).optional(),
+  }),
+  org_usage_cap_set: z.object({
+    ...orgScope,
+    defaultMonthlyTokens: z.number().int().min(0).max(1000000000000).nullable(),
+  }),
+  org_member_usage_cap_set: z.object({
+    ...orgScope,
+    userId: z.string().regex(/^usr_[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/),
+    monthlyTokens: z.union([z.number().int().min(0).max(1000000000000), z.null(), z.literal("default")]),
+  }),
   org_model_credential_list: z.object({ ...orgScope }),
   org_model_credential_set: z.object({
     ...orgScope,
-    ...orgApproval,
     provider: z.string().min(1).max(200),
     apiKey: z.string().min(1).max(65536),
   }),
   org_model_credential_delete: z.object({
     ...orgScope,
-    ...orgApproval,
     provider: z.string().min(1).max(200),
   }),
   org_agent_policy_get: z.object({ ...orgScope }),
   org_agent_policy_set: z.object({
     ...orgScope,
-    ...orgApproval,
     allowedAgents: z.array(z.string().min(1)),
     defaultAgent: z.string().min(1).nullable(),
   }),

@@ -43,6 +43,7 @@ pub mod lease;
 pub mod passthrough_ledger;
 pub mod route_planner;
 pub mod route_ticket;
+pub mod org_usage;
 pub mod runs;
 pub mod server;
 pub mod session_key;

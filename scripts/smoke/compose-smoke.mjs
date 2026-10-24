@@ -1725,32 +1725,74 @@ async function tierPersons() {
     `pet_chat_send is 503 model_access_unavailable (got ${pet.status}: ${JSON.stringify(pet.body).slice(0, 200)})`
   )
 
-  // 4. Org administration (P6a, AC32): an owner reads credential metadata
-  //    only and needs Host consent to write; a plain member is refused.
+  // 4. Org administration (P6a/P6b, AC32): an owner writes on live standing
+  //    alone (no Host consent, no lease), reads metadata only, and a plain
+  //    member is refused.
   const owner = people.find((person) => person.subject !== PERSONS_MEMBER)
   const listedKeys = await rpc("org_model_credential_list", {}, owner.auth)
   check(
     listedKeys.status === 200 && Array.isArray(listedKeys.body),
     `${owner.subject} (owner): org_model_credential_list → 200 (got ${listedKeys.status}: ${JSON.stringify(listedKeys.body).slice(0, 200)})`
   )
-  check(
-    (listedKeys.body ?? []).every((row) => !("apiKey" in row) && !("value" in row)),
-    "org credential rows carry metadata only"
-  )
-  const unapproved = await rpc(
+  const smokeKey = `smoke-org-key-${randomUUID()}`
+  const stored = await rpc(
     "org_model_credential_set",
-    { provider: "smoke-provider", apiKey: "smoke-never-stored-without-consent" },
+    { provider: "openai", apiKey: smokeKey },
     owner.auth
   )
   check(
-    unapproved.status === 428 && !JSON.stringify(unapproved.body).includes("smoke-never-stored"),
-    `an owner's org credential write waits for Host consent and echoes no key (got ${unapproved.status})`
+    stored.status === 200 &&
+      stored.body?.provider === "openai" &&
+      typeof stored.body?.fingerprint === "string" &&
+      !JSON.stringify(stored.body).includes(smokeKey),
+    `${owner.subject} (owner): org_model_credential_set → 200 with metadata and no key echo (got ${stored.status}: ${JSON.stringify(stored.body).slice(0, 200)})`
   )
+  const relisted = await rpc("org_model_credential_list", {}, owner.auth)
   check(
-    !JSON.stringify((await rpc("org_model_credential_list", {}, owner.auth)).body).includes(
-      "smoke-provider"
-    ),
-    "the unapproved write stored nothing"
+    (relisted.body ?? []).some((row) => row.provider === "openai") &&
+      (relisted.body ?? []).every((row) => !("apiKey" in row) && !("value" in row)) &&
+      !JSON.stringify(relisted.body).includes(smokeKey),
+    "org credential rows carry metadata only"
+  )
+  const policy = await rpc(
+    "org_agent_policy_set",
+    { allowedAgents: ["claude-agent-acp"], defaultAgent: "claude-agent-acp" },
+    owner.auth
+  )
+  const bundled = policy.body?.bundledAgents ?? []
+  check(
+    policy.status === 200 &&
+      policy.body?.defaultAgent === "claude-agent-acp" &&
+      bundled.some((agent) => agent.runtimeId === "claude-agent-acp" && agent.available === true) &&
+      bundled.some((agent) => agent.runtimeId === "codex-acp"),
+    `${owner.subject} (owner): org_agent_policy_set → 200, lists every bundled agent, claude served by an org key (got ${policy.status}: ${JSON.stringify(policy.body).slice(0, 300)})`
+  )
+  const capSet = await rpc("org_usage_cap_set", { defaultMonthlyTokens: 1_000_000 }, owner.auth)
+  const usage = await rpc("org_member_usage_get", {}, owner.auth)
+  check(
+    capSet.status === 200 &&
+      usage.status === 200 &&
+      usage.body?.defaultMonthlyTokens === 1_000_000 &&
+      Array.isArray(usage.body?.members),
+    `${owner.subject} (owner): org_usage_cap_set + org_member_usage_get → 200 with the default cap (got ${capSet.status}/${usage.status}: ${JSON.stringify(usage.body).slice(0, 200)})`
+  )
+  const capCleared = await rpc("org_usage_cap_set", { defaultMonthlyTokens: null }, owner.auth)
+  check(
+    capCleared.status === 200,
+    `the default cap returns to unlimited (got ${capCleared.status})`
+  )
+  // Any org key serves a brokered agent, so the allowed agent stays
+  // available exactly while some other key remains.
+  const removed = await rpc("org_model_credential_delete", { provider: "openai" }, owner.auth)
+  const remaining = (await rpc("org_model_credential_list", {}, owner.auth)).body ?? []
+  const afterRemove = await rpc("org_agent_policy_get", {}, owner.auth)
+  check(
+    removed.status === 200 &&
+      !remaining.some((row) => row.provider === "openai") &&
+      (afterRemove.body?.allowedAgents ?? []).every(
+        (agent) => agent.available === remaining.length > 0
+      ),
+    `removing the key updates the allowed agent's availability (got ${removed.status}: ${JSON.stringify(afterRemove.body).slice(0, 200)})`
   )
   const selected = await rpc("org_model_credential_list", { orgId: "org_someone-else" }, owner.auth)
   check(selected.status === 403, `a device cannot select another org (got ${selected.status})`)
@@ -1769,6 +1811,20 @@ async function tierPersons() {
     check(
       refusedPolicy.status === 403,
       `${member.subject} (member): org_agent_policy_set is refused (got ${refusedPolicy.status})`
+    )
+    const refusedKey = await rpc(
+      "org_model_credential_set",
+      { provider: "openai", apiKey: "smoke-member-key" },
+      member.auth
+    )
+    check(
+      refusedKey.status === 403 && !JSON.stringify(refusedKey.body).includes("smoke-member-key"),
+      `${member.subject} (member): org_model_credential_set is refused without an echo (got ${refusedKey.status})`
+    )
+    const refusedUsage = await rpc("org_member_usage_get", {}, member.auth)
+    check(
+      refusedUsage.status === 403,
+      `${member.subject} (member): org_member_usage_get is refused (got ${refusedUsage.status})`
     )
   } else {
     skip("COGNIA_SMOKE_PERSONS_MEMBER unset: member refusal not exercised")

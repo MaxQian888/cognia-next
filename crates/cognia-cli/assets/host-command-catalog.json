@@ -52636,12 +52636,39 @@
         "type": "object",
         "required": [
           "allowedAgents",
+          "bundledAgents",
           "defaultAgent",
           "updatedAt",
           "updatedBy"
         ],
         "properties": {
           "allowedAgents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "runtimeId",
+                "providers",
+                "available"
+              ],
+              "properties": {
+                "runtimeId": {
+                  "type": "string"
+                },
+                "providers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "available": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "bundledAgents": {
             "type": "array",
             "items": {
               "type": "object",
@@ -52698,7 +52725,7 @@
       "operation": "write",
       "capability": "org.policy.manage",
       "risk": "critical",
-      "approval": "interactive",
+      "approval": "none",
       "idempotency": "required",
       "summary": "org_agent_policy_set (org.policy.manage)",
       "description": "Loopback service-token command. Target: host-admin; risk: critical.",
@@ -52707,10 +52734,6 @@
         "type": "object",
         "properties": {
           "orgId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "adminLease": {
             "type": "string",
             "minLength": 1
           },
@@ -52744,12 +52767,39 @@
         "type": "object",
         "required": [
           "allowedAgents",
+          "bundledAgents",
           "defaultAgent",
           "updatedAt",
           "updatedBy"
         ],
         "properties": {
           "allowedAgents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "runtimeId",
+                "providers",
+                "available"
+              ],
+              "properties": {
+                "runtimeId": {
+                  "type": "string"
+                },
+                "providers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "available": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "bundledAgents": {
             "type": "array",
             "items": {
               "type": "object",
@@ -52799,16 +52849,16 @@
       "outputTyped": true
     },
     {
-      "name": "org_model_credential_delete",
+      "name": "org_member_usage_cap_set",
       "category": "system",
       "resource": "org",
       "target": "host-admin",
       "operation": "write",
       "capability": "org.policy.manage",
       "risk": "critical",
-      "approval": "interactive",
+      "approval": "none",
       "idempotency": "required",
-      "summary": "org_model_credential_delete (org.policy.manage)",
+      "summary": "org_member_usage_cap_set (org.policy.manage)",
       "description": "Loopback service-token command. Target: host-admin; risk: critical.",
       "inputSchemaSource": "zod-contract",
       "inputSchema": {
@@ -52818,7 +52868,151 @@
             "type": "string",
             "minLength": 1
           },
-          "adminLease": {
+          "userId": {
+            "type": "string",
+            "pattern": "^usr_[A-Za-z0-9][A-Za-z0-9_-]{2,63}$"
+          },
+          "monthlyTokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000000000
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "const": "default"
+              }
+            ]
+          }
+        },
+        "required": [
+          "userId",
+          "monthlyTokens"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "org_member_usage_get",
+      "category": "system",
+      "resource": "org",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "org.policy.manage",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "org_member_usage_get (org.policy.manage)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orgId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "month": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "month",
+          "defaultMonthlyTokens",
+          "members"
+        ],
+        "properties": {
+          "month": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+          },
+          "defaultMonthlyTokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "userId",
+                "spentTokens",
+                "reservedTokens",
+                "monthlyTokens",
+                "capSource"
+              ],
+              "properties": {
+                "userId": {
+                  "type": "string"
+                },
+                "spentTokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "reservedTokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "monthlyTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 1000000000000
+                },
+                "capSource": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "override"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "org_model_credential_delete",
+      "category": "system",
+      "resource": "org",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "org.policy.manage",
+      "risk": "critical",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "org_model_credential_delete (org.policy.manage)",
+      "description": "Loopback service-token command. Target: host-admin; risk: critical.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orgId": {
             "type": "string",
             "minLength": 1
           },
@@ -52901,7 +53095,7 @@
       "operation": "write",
       "capability": "org.policy.manage",
       "risk": "critical",
-      "approval": "interactive",
+      "approval": "none",
       "idempotency": "required",
       "summary": "org_model_credential_set (org.policy.manage)",
       "description": "Loopback service-token command. Target: host-admin; risk: critical.",
@@ -52910,10 +53104,6 @@
         "type": "object",
         "properties": {
           "orgId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "adminLease": {
             "type": "string",
             "minLength": 1
           },
@@ -52959,6 +53149,50 @@
           }
         },
         "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "org_usage_cap_set",
+      "category": "system",
+      "resource": "org",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "org.policy.manage",
+      "risk": "critical",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "org_usage_cap_set (org.policy.manage)",
+      "description": "Loopback service-token command. Target: host-admin; risk: critical.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orgId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "defaultMonthlyTokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000000000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "defaultMonthlyTokens"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -101853,5 +102087,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "99319e8a7d6c31a052a06df735bb14b8384129f265728833fd5e5b733f5eb703"
+  "catalogHash": "e9263d3a86eb0369c54cb328c3c460dfc9e5f02c89cf009f37b5bd52a3bf9f52"
 }

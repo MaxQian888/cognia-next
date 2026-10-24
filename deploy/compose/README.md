@@ -184,6 +184,7 @@ Tiers `server`/`tls` shell into the container for the loopback-only steps
 - HostState sessions are accepted without a Host admin lease;
 - neither person sees the other's rows;
 - runtime intents and model calls keep their dormancy codes;
+- an org owner writes model keys, the agent allowlist and usage caps directly, sees metadata only, and a member is refused;
 - `cognia-server persons list` shows both partitions, and `persons purge` empties one.
 
 It needs the org and both people seeded first with `collab-bootstrap`. The Logto organization id must be included, because device registration matches the token's `organization_id` against it. The seed values the tier assumes are `COGNIA_SMOKE_PERSONS_ORG_ID`, `COGNIA_SMOKE_PERSONS_LOGTO_ORG` and `COGNIA_SMOKE_PERSONS`; `Compose E2E` tier 2 runs the seed step. Set `COGNIA_PERSONS_SERVER_URL` and `COGNIA_SMOKE_PERSONS_EXEC` to run the tier against a Host outside compose.

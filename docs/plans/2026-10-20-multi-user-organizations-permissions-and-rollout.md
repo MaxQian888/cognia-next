@@ -362,6 +362,7 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
      - App: org owner/admin, through the Host as an org-action under a new `org.model-credentials` action.
      - CLI: `cognia-server org-credentials …`.
    - **Disclosure:** keys are never returned. Every change is audited.
+   - **Approval (decided 2026-10-24):** every org write (keys, allowlist, caps) is authorized by the caller's live org owner/admin standing and the signed device request alone. Neither Host-operator consent nor an admin lease is asked for, because a cloud Host has no operator at hand.
    - **Allowlist:** an org agent allowlist with a default (Q16) is stored next to the keys. An agent is offered only when an org credential covers its provider.
 2. **Usage ledger and cap (P6b).**
    - **Ledger:** a Host table keyed by (org, member account, UTC month) with `reserved` and `spent` tokens, plus an org default cap and per-member overrides (Q15).

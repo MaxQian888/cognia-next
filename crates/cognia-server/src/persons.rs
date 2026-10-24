@@ -228,6 +228,9 @@ impl PersonBrainFleet for Fleet {
     fn person(&self, account_id: &str) -> Option<PersonPartition> {
         self.people.read().get(account_id).cloned()
     }
+    fn org_people(&self, org: &str) -> Vec<String> {
+        self.people.read().values().filter(|person| person.org_id == org).map(|person| person.user_id.clone()).collect()
+    }
     fn statuses(&self) -> Vec<PersonBrainStatus> { self.snapshots.read().clone() }
     async fn list(&self) -> Result<serde_json::Value, String> {
         let entries = self.entries.lock().await;
@@ -284,6 +287,18 @@ mod tests {
             cognia_companion::security_store::SecurityStore::in_memory().unwrap()).unwrap()
     }
     fn person(user: &str) -> PersonPartition { PersonPartition::new("p5-test-org".into(), user.into()) }
+
+    #[test]
+    fn p6b_usage_people_include_parked_members_only_in_their_org() {
+        let temp = tempfile::tempdir().unwrap(); let fleet = fixture(temp.path(), 1);
+        let a = PersonPartition::new("org_p6b_one".into(), "usr_p6b_one".into());
+        let b = PersonPartition::new("org_p6b_other".into(), "usr_p6b_other".into());
+        fleet.people.write().insert(a.account_id.clone(), a);
+        fleet.people.write().insert(b.account_id.clone(), b);
+        assert!(fleet.statuses().is_empty());
+        assert_eq!(fleet.org_people("org_p6b_one"), vec!["usr_p6b_one"]);
+        assert!(fleet.org_people("org_p6b_unknown").is_empty());
+    }
 
     #[tokio::test]
     async fn p5_eviction_and_server_restart_revoke_child_tokens_but_keep_data_generation() {

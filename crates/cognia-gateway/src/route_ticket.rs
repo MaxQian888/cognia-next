@@ -29,6 +29,8 @@ use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 
 use crate::snapshot::RoutingSnapshot;
+pub use crate::org_usage::MemberBinding;
+use crate::org_usage::{MemberUsageLedger, MemberUsageStore, InMemoryMemberUsageStore, month_at};
 
 pub const TICKET_SECRET_PREFIX: &str = "sk-cognia-rt-";
 
@@ -102,11 +104,18 @@ pub struct TicketReservation {
     pub ticket_id: String,
     pub request_id: String,
     pub tokens_held: u64,
+    /// Frozen at reservation, including when settlement crosses UTC midnight.
+    pub member_month: Option<(MemberBinding, String)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RouteTicket {
+    /// Dormant until P6c supplies verified member minting. Existing mint paths
+    /// always leave this None; unbound tickets retain their previous behavior.
+    /// Host-only and ephemeral like ticket secrets: never plaintext metadata.
+    #[serde(skip)]
+    pub member: Option<MemberBinding>,
     #[serde(default)]
     pub owner_account_id: Option<String>,
     pub ticket_id: String,
@@ -254,6 +263,9 @@ pub enum TicketReject {
     OperationNotAllowed,
     /// The ticket is valid but its request or token budget is spent (429).
     BudgetExhausted,
+    MemberUsageCapReached { reset_at: i64 },
+    /// Fail closed on unavailable sealed accounting, never unlimited fallback.
+    MemberUsageUnavailable,
 }
 
 /// Metadata persistence port — everything except secrets.
@@ -319,11 +331,15 @@ struct Inner {
     /// Budget counters changed since the last persist. Flushed on the
     /// server's periodic key flush and on stop, never per request.
     dirty: bool,
+    usage: MemberUsageLedger,
+    usage_dirty: bool,
+    usage_unavailable: bool,
 }
 
 pub struct RouteTicketRegistry {
     inner: Mutex<Inner>,
     store: Mutex<std::sync::Arc<dyn TicketMetaStore>>,
+    usage_store: Mutex<std::sync::Arc<dyn MemberUsageStore>>,
 }
 
 const MIN_TTL_MS: i64 = 60_000;
@@ -350,7 +366,55 @@ impl RouteTicketRegistry {
                 ..Inner::default()
             }),
             store: Mutex::new(store),
+            usage_store: Mutex::new(std::sync::Arc::new(InMemoryMemberUsageStore::default())),
         }
+    }
+
+    /// Boot-time only; failed loading disables member accounting until a
+    /// successful attach. Unbound tickets remain unaffected.
+    pub fn attach_usage_store(&self, store: std::sync::Arc<dyn MemberUsageStore>) -> Result<(), TicketError> {
+        let mut inner = self.inner.lock();
+        inner.usage_unavailable = true;
+        let mut usage = store.load().map_err(TicketError::Persist)?;
+        for org in usage.orgs.values_mut() {
+            for rows in org.months.values_mut() {
+                for row in rows.values_mut() {
+                    row.spent = row.spent.saturating_add(row.reserved);
+                    row.reserved = 0;
+                }
+            }
+        }
+        inner.usage = usage;
+        inner.usage_dirty = true;
+        *self.usage_store.lock() = store;
+        inner.usage_unavailable = false;
+        Ok(())
+    }
+
+    pub fn org_member_usage_get(&self, org: &str, month: &str, people: &[String]) -> Result<serde_json::Value, String> {
+        if !crate::org_usage::valid_month(month) { return Err("invalid month".into()); }
+        let inner = self.inner.lock();
+        if inner.usage_unavailable { return Err("organization usage store unavailable".into()); }
+        Ok(inner.usage.report(org, month, people))
+    }
+
+    /// None user => org default; Some(user), None value => remove override;
+    /// Some(None) => explicitly unlimited. Persist before publishing the cap.
+    pub fn org_usage_cap_set(&self, org: &str, user: Option<&str>, value: Option<Option<u64>>) -> Result<(), String> {
+        if value.flatten().is_some_and(|n| n > crate::org_usage::MAX_MONTHLY_TOKENS) { return Err("invalid monthly tokens".into()); }
+        let mut inner = self.inner.lock();
+        if inner.usage_unavailable { return Err("organization usage store unavailable".into()); }
+        let mut usage = inner.usage.orgs.get(org).cloned().unwrap_or_default();
+        match user {
+            None => usage.default_monthly_tokens = value.flatten(),
+            Some(user) => match value {
+                Some(cap) => { usage.overrides.insert(user.into(), cap); },
+                None => { usage.overrides.remove(user); },
+            },
+        }
+        self.usage_store.lock().save_org(org, &usage)?;
+        inner.usage.orgs.insert(org.into(), usage);
+        Ok(())
     }
 
     /// Swap the metadata store (boot-time: in-memory → on-disk once the data
@@ -390,6 +454,13 @@ impl RouteTicketRegistry {
                 record.provider_overrides.clear();
                 record.task_client = None;
             }
+        }
+        if inner.usage_dirty {
+            if inner.usage_unavailable { return Err(TicketError::Persist("organization usage store unavailable".into())); }
+            for (org, usage) in &inner.usage.orgs {
+                self.usage_store.lock().save_org(org, usage).map_err(TicketError::Persist)?;
+            }
+            inner.usage_dirty = false;
         }
         if !inner.dirty {
             return Ok(());
@@ -612,6 +683,7 @@ impl RouteTicketRegistry {
             uuid::Uuid::new_v4().simple()
         );
         let ticket = RouteTicket {
+            member: None,
             owner_account_id,
             ticket_id: ticket_id.clone(),
             route_pin_id: format!("pin_{}", uuid::Uuid::new_v4().simple()),
@@ -670,6 +742,7 @@ impl RouteTicketRegistry {
                 .budget
                 .as_ref()
                 .is_some_and(|b| b.max_tokens.is_some())
+                || inner.records[index].ticket.member.is_some()
         })
     }
 
@@ -705,16 +778,28 @@ impl RouteTicketRegistry {
                 return Err(TicketReject::OperationNotAllowed);
             }
         }
+        // Protect member holds; preserve legacy unbound duplicate-id behavior.
+        if inner.reservations.get(request_id).is_some_and(|hold|
+            hold.member_month.is_some() || inner.records[index].ticket.member.is_some()) {
+            return Err(TicketReject::BudgetExhausted);
+        }
+        let member_month = inner.records[index].ticket.member.clone().map(|member| (member, month_at(now_ms)));
+        if let Some((member, month)) = &member_month {
+            if inner.usage_unavailable { return Err(TicketReject::MemberUsageUnavailable); }
+            inner.usage.check(member, month, est_tokens)?;
+        }
         let held: u64 = inner
             .reservations
             .values()
             .filter(|r| r.ticket_id == ticket_id)
-            .map(|r| r.tokens_held)
-            .sum();
+            .fold(0u64, |sum, r| sum.saturating_add(r.tokens_held));
         let Inner {
             records,
             reservations,
             dirty,
+            usage,
+            usage_dirty,
+            ..
         } = &mut *inner;
         if let Some(budget) = records[index].ticket.budget.as_mut() {
             if let Some(max) = budget.max_requests {
@@ -735,12 +820,18 @@ impl RouteTicketRegistry {
             budget.spent_requests += 1;
             *dirty = true;
         }
+        if let Some((member, month)) = &member_month {
+            let row = usage.row_mut(member, month);
+            row.reserved = row.reserved.saturating_add(est_tokens);
+            *usage_dirty = true;
+        }
         reservations.insert(
             request_id.to_string(),
             TicketReservation {
                 ticket_id,
                 request_id: request_id.to_string(),
                 tokens_held: est_tokens,
+                member_month,
             },
         );
         Ok(records[index].ticket.clone())
@@ -760,34 +851,40 @@ impl RouteTicketRegistry {
         let Some(reservation) = inner.reservations.get(request_id) else {
             return Ok(requested_output);
         };
-        let ticket_id = reservation.ticket_id.clone();
-        let Some(budget) = inner
-            .records
-            .iter()
-            .find(|record| record.ticket.ticket_id == ticket_id)
-            .and_then(|record| record.ticket.budget.as_ref())
-        else {
-            return Ok(requested_output);
-        };
-        let Some(max) = budget.max_tokens else {
-            return Ok(requested_output);
-        };
-        let other_held = inner
-            .reservations
-            .iter()
-            .filter(|(id, r)| id.as_str() != request_id && r.ticket_id == ticket_id)
-            .fold(0u64, |sum, (_, r)| sum.saturating_add(r.tokens_held));
-        let remaining = max
-            .saturating_sub(budget.spent_tokens)
-            .saturating_sub(other_held)
-            .saturating_sub(input_tokens);
-        if remaining == 0 {
-            return Err(TicketReject::BudgetExhausted);
+        let reservation = reservation.clone();
+        let mut limit = None;
+        if let Some(budget) = inner.records.iter().find(|r| r.ticket.ticket_id == reservation.ticket_id).and_then(|r| r.ticket.budget.as_ref()) {
+            if let Some(max) = budget.max_tokens {
+                let other_held = inner.reservations.iter().filter(|(id, r)| id.as_str() != request_id && r.ticket_id == reservation.ticket_id)
+                    .fold(0u64, |sum, (_, r)| sum.saturating_add(r.tokens_held));
+                let remaining = max.saturating_sub(budget.spent_tokens).saturating_sub(other_held).saturating_sub(input_tokens);
+                if remaining == 0 { return Err(TicketReject::BudgetExhausted); }
+                limit = Some(remaining);
+            }
         }
-        let output = requested_output.unwrap_or(remaining).min(remaining);
-        inner.reservations.get_mut(request_id).unwrap().tokens_held =
-            input_tokens.saturating_add(output);
-        Ok(Some(output))
+        if let Some((member, month)) = &reservation.member_month {
+            if inner.usage_unavailable { return Err(TicketReject::MemberUsageUnavailable); }
+            if let Some(org) = inner.usage.orgs.get(&member.org_id) {
+                if let Some(cap) = org.effective_cap(&member.user_id) {
+                    let row = org.months.get(month).and_then(|rows| rows.get(&member.user_id));
+                    let used = row.map_or(0, |r| r.spent.saturating_add(r.reserved.saturating_sub(reservation.tokens_held)));
+                    let remaining = cap.saturating_sub(used).saturating_sub(input_tokens);
+                    if remaining == 0 { return Err(TicketReject::MemberUsageCapReached { reset_at: crate::org_usage::reset_at(month) }); }
+                    limit = Some(limit.map_or(remaining, |ticket: u64| ticket.min(remaining)));
+                }
+            }
+        }
+        let output = match limit { Some(remaining) => Some(requested_output.unwrap_or(remaining).min(remaining)), None => requested_output };
+        // Preserve legacy unmetered behavior when neither budget applies.
+        if reservation.member_month.is_none() && limit.is_none() { return Ok(requested_output); }
+        let held = input_tokens.saturating_add(output.unwrap_or(0));
+        if let Some((member, month)) = &reservation.member_month {
+            let row = inner.usage.row_mut(member, month);
+            row.reserved = row.reserved.saturating_sub(reservation.tokens_held).saturating_add(held);
+            inner.usage_dirty = true;
+        }
+        inner.reservations.get_mut(request_id).unwrap().tokens_held = held;
+        Ok(output)
     }
 
     pub fn settle_reservation(&self, request_id: &str, actual_tokens: u64) {
@@ -795,6 +892,12 @@ impl RouteTicketRegistry {
         let Some(reservation) = inner.reservations.remove(request_id) else {
             return;
         };
+        if let Some((member, month)) = &reservation.member_month {
+            let row = inner.usage.row_mut(member, month);
+            row.reserved = row.reserved.saturating_sub(reservation.tokens_held);
+            row.spent = row.spent.saturating_add(actual_tokens);
+            inner.usage_dirty = true;
+        }
         if let Some(record) = inner
             .records
             .iter_mut()
@@ -807,6 +910,18 @@ impl RouteTicketRegistry {
         }
     }
 
+    /// Dispatched work may end without usage (omitted usage, cancellation or
+    /// expiry). Charge the member hold conservatively; legacy unbound requests
+    /// retain their refund behavior. Known partial usage is a lower bound.
+    pub fn org_usage_settle_unknown(&self, request_id: &str, known_tokens: u64) {
+        let held = self.inner.lock().reservations.get(request_id)
+            .filter(|hold| hold.member_month.is_some()).map(|hold| hold.tokens_held.max(known_tokens));
+        match held {
+            Some(tokens) => self.settle_reservation(request_id, tokens),
+            None => self.release_reservation(request_id),
+        }
+    }
+
     /// Drop a hold for a request that was never served (gateway rejection or
     /// upstream failure); the request slot is handed back. Idempotent.
     pub fn release_reservation(&self, request_id: &str) {
@@ -814,6 +929,12 @@ impl RouteTicketRegistry {
         let Some(reservation) = inner.reservations.remove(request_id) else {
             return;
         };
+        if let Some((member, month)) = &reservation.member_month {
+            let row = inner.usage.row_mut(member, month);
+            row.reserved = row.reserved.saturating_sub(reservation.tokens_held);
+            row.spent = row.spent.saturating_add(0);
+            inner.usage_dirty = true;
+        }
         if let Some(record) = inner
             .records
             .iter_mut()
@@ -992,9 +1113,17 @@ impl RouteTicketRegistry {
                 .iter()
                 .map(|r| r.ticket.ticket_id.clone())
                 .collect();
-            inner
-                .reservations
-                .retain(|_, reservation| live.contains(&reservation.ticket_id));
+            let expired: Vec<_> = inner.reservations.values().filter(|r| !live.contains(&r.ticket_id)).cloned().collect();
+            for hold in expired {
+                inner.reservations.remove(&hold.request_id);
+                if let Some((member, month)) = &hold.member_month {
+                    let row = inner.usage.row_mut(member, month);
+                    row.reserved = row.reserved.saturating_sub(hold.tokens_held);
+                    // Expiry must not refund dispatched work with unknown usage.
+                    row.spent = row.spent.saturating_add(hold.tokens_held);
+                    inner.usage_dirty = true;
+                }
+            }
             let _ = self.persist(&inner.records);
         }
         dropped
@@ -1085,6 +1214,184 @@ mod tests {
             "routePolicy": "gateway-required",
         }))
         .unwrap()
+    }
+
+    fn p6b_member_ticket(reg: &RouteTicketRegistry, now: i64, user: &str) -> MintedTicket {
+        let mut request = mint_request();
+        request.execution_fingerprint = format!("p6b-{}", uuid::Uuid::new_v4());
+        let mut ticket = reg.mint(request, Some(&snapshot()), now).unwrap();
+        let member = MemberBinding { org_id: "org_p6b_test".into(), user_id: user.into() };
+        reg.inner.lock().records.iter_mut().find(|r| r.ticket.ticket_id == ticket.ticket.ticket_id).unwrap().ticket.member = Some(member.clone());
+        ticket.ticket.member = Some(member);
+        ticket
+    }
+
+    fn p6b_now(month: &str) -> i64 { crate::org_usage::reset_at(month) - 1000 }
+
+    #[test]
+    fn p6b_concurrent_reservations_never_overshoot_member_cap() {
+        let reg = std::sync::Arc::new(registry());
+        reg.org_usage_cap_set("org_p6b_test", None, Some(Some(30))).unwrap();
+        let now = p6b_now("2026-10");
+        let tickets: Vec<_> = (0..20).map(|_| p6b_member_ticket(&reg, now, "usr_p6b_one")).collect();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(20));
+        let handles: Vec<_> = tickets.into_iter().enumerate().map(|(i, ticket)| {
+            let reg = reg.clone(); let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                reg.validate_and_reserve(&ticket.secret, now, TicketOperation::Chat, &format!("race-{i}"), 10).is_ok()
+            })
+        }).collect();
+        assert_eq!(handles.into_iter().map(|h| h.join().unwrap()).filter(|ok| *ok).count(), 3);
+        for hold in reg.open_reservations() { reg.settle_reservation(&hold.request_id, 10); }
+        let report = reg.org_member_usage_get("org_p6b_test", "2026-10", &[]).unwrap();
+        assert_eq!(report["members"][0]["spentTokens"], 30);
+        assert_eq!(report["members"][0]["reservedTokens"], 0);
+        let ticket = p6b_member_ticket(&reg, now, "usr_p6b_other");
+        assert!(reg.validate_and_reserve(&ticket.secret, now, TicketOperation::Chat, "other", 30).is_ok());
+    }
+
+    #[test]
+    fn p6b_month_rollover_settles_original_month_and_release_is_idempotent() {
+        let reg = registry();
+        reg.org_usage_cap_set("org_p6b_test", None, Some(Some(10))).unwrap();
+        let now = p6b_now("2026-12");
+        let ticket = p6b_member_ticket(&reg, now, "usr_p6b_one");
+        reg.validate_and_reserve(&ticket.secret, now, TicketOperation::Chat, "dec", 10).unwrap();
+        assert_eq!(reg.validate_and_reserve(&ticket.secret, now, TicketOperation::Chat, "full", 1), Err(TicketReject::MemberUsageCapReached { reset_at: crate::org_usage::reset_at("2026-12") }));
+        reg.validate_and_reserve(&ticket.secret, now + 2000, TicketOperation::Chat, "jan", 10).unwrap();
+        reg.settle_reservation("dec", 7); reg.settle_reservation("dec", 7);
+        reg.release_reservation("jan"); reg.release_reservation("jan");
+        assert_eq!(reg.org_member_usage_get("org_p6b_test", "2026-12", &[]).unwrap()["members"][0]["spentTokens"], 7);
+        assert_eq!(reg.org_member_usage_get("org_p6b_test", "2027-01", &[]).unwrap()["members"][0]["reservedTokens"], 0);
+        assert_eq!(reg.org_member_usage_get("org_p6b_test", "2027-01", &[]).unwrap()["members"][0]["spentTokens"], 0);
+    }
+
+    #[test]
+    fn p6b_translated_output_rechecks_cap_without_ticket_budget() {
+        let reg = registry(); let now = p6b_now("2026-10");
+        reg.org_usage_cap_set("org_p6b_test", None, Some(Some(30))).unwrap();
+        let ticket = p6b_member_ticket(&reg, now, "usr_p6b_one");
+        assert!(reg.secret_has_token_budget(&ticket.secret));
+        reg.validate_and_reserve(&ticket.secret, now, TicketOperation::Chat, "one", 5).unwrap();
+        reg.validate_and_reserve(&ticket.secret, now, TicketOperation::Chat, "two", 10).unwrap();
+        assert_eq!(reg.reserve_model_output("one", 10, Some(100)), Ok(Some(10)));
+        assert_eq!(reg.open_reservations().iter().find(|r| r.request_id == "one").unwrap().tokens_held, 20);
+        assert!(matches!(reg.reserve_model_output("two", 10, Some(1)), Err(TicketReject::MemberUsageCapReached { .. })));
+        assert_eq!(reg.org_member_usage_get("org_p6b_test", "2026-10", &[]).unwrap()["members"][0]["reservedTokens"], 30);
+        reg.release_reservation("two"); reg.settle_reservation("one", 15);
+        assert_eq!(reg.org_member_usage_get("org_p6b_test", "2026-10", &[]).unwrap()["members"][0]["spentTokens"], 15);
+    }
+
+    #[test]
+    fn p6b_usage_flush_restart_and_synchronous_caps() {
+        use crate::org_usage::{InMemoryMemberUsageStore, MemberUsageStore};
+        let store = std::sync::Arc::new(InMemoryMemberUsageStore::default());
+        let reg = registry(); reg.attach_usage_store(store.clone()).unwrap();
+        reg.org_usage_cap_set("org_p6b_test", None, Some(Some(100))).unwrap();
+        reg.org_usage_cap_set("org_p6b_test", Some("usr_p6b_one"), Some(Some(50))).unwrap();
+        assert_eq!(store.load().unwrap().orgs["org_p6b_test"].effective_cap("usr_p6b_one"), Some(50));
+        let now = p6b_now("2026-10"); let ticket = p6b_member_ticket(&reg, now, "usr_p6b_one");
+        reg.validate_and_reserve(&ticket.secret, now, TicketOperation::Chat, "settled", 20).unwrap();
+        reg.settle_reservation("settled", 12);
+        assert!(store.load().unwrap().orgs["org_p6b_test"].months.is_empty(), "usage must not write per call");
+        reg.validate_and_reserve(&ticket.secret, now, TicketOperation::Chat, "orphan", 10).unwrap();
+        reg.flush().unwrap();
+        let persisted = store.load().unwrap();
+        assert_eq!(persisted.orgs["org_p6b_test"].months["2026-10"]["usr_p6b_one"].spent, 12);
+        assert_eq!(persisted.orgs["org_p6b_test"].months["2026-10"]["usr_p6b_one"].reserved, 10);
+        let restarted = registry(); restarted.attach_usage_store(store).unwrap();
+        let report = restarted.org_member_usage_get("org_p6b_test", "2026-10", &[]).unwrap();
+        assert_eq!(report["members"][0]["spentTokens"], 22);
+        assert_eq!(report["members"][0]["reservedTokens"], 0);
+        assert_eq!(report["members"][0]["monthlyTokens"], 50);
+        let source = include_str!("server.rs");
+        assert!(source.contains("tokio::time::interval(Duration::from_secs(60))"));
+        assert!(source.contains("flush_tickets.flush()"));
+        assert!(include_str!("lib.rs").contains("self.tickets.flush()"));
+    }
+
+    #[test]
+    fn p6b_expiry_and_missing_stream_usage_cannot_refund_member_work() {
+        let reg = registry(); let now = p6b_now("2026-10");
+        reg.org_usage_cap_set("org_p6b_test", None, Some(Some(50))).unwrap();
+        let ticket = p6b_member_ticket(&reg, now, "usr_p6b_one");
+        reg.validate_and_reserve(&ticket.secret, now, TicketOperation::Chat, "stream", 10).unwrap();
+        assert!(reg.validate_and_reserve(&ticket.secret, now, TicketOperation::Chat, "stream", 1).is_err());
+        reg.org_usage_settle_unknown("stream", 0); reg.org_usage_settle_unknown("stream", 0);
+        reg.validate_and_reserve(&ticket.secret, now, TicketOperation::Chat, "expires", 10).unwrap();
+        assert_eq!(reg.sweep_expired(ticket.ticket.expires_at_ms), 1);
+        assert!(reg.open_reservations().is_empty());
+        let report = reg.org_member_usage_get("org_p6b_test", "2026-10", &[]).unwrap();
+        assert_eq!(report["members"][0]["spentTokens"], 20);
+        assert_eq!(report["members"][0]["reservedTokens"], 0);
+        reg.release_reservation("expires"); reg.settle_reservation("expires", 20);
+        assert_eq!(reg.org_member_usage_get("org_p6b_test", "2026-10", &[]).unwrap(), report);
+        let legacy = reg.mint(mint_request(), Some(&snapshot()), now).unwrap();
+        reg.validate_and_reserve(&legacy.secret, now, TicketOperation::Chat, "legacy-stream", 10).unwrap();
+        reg.org_usage_settle_unknown("legacy-stream", 10);
+        assert!(reg.open_reservations().is_empty());
+        assert_eq!(reg.org_member_usage_get("org_p6b_test", "2026-10", &[]).unwrap(), report);
+    }
+
+    #[test]
+    fn p6b_store_failures_keep_caps_atomic_and_flush_dirty_for_retry() {
+        struct P6bStore {
+            memory: crate::org_usage::InMemoryMemberUsageStore,
+            fail: std::sync::atomic::AtomicBool,
+        }
+        impl crate::org_usage::MemberUsageStore for P6bStore {
+            fn load(&self) -> Result<MemberUsageLedger, String> {
+                if self.fail.load(std::sync::atomic::Ordering::SeqCst) { return Err("organization usage store unavailable".into()); }
+                self.memory.load()
+            }
+            fn save_org(&self, org: &str, usage: &crate::org_usage::OrgUsage) -> Result<(), String> {
+                if self.fail.load(std::sync::atomic::Ordering::SeqCst) { return Err("organization usage store unavailable".into()); }
+                self.memory.save_org(org, usage)
+            }
+        }
+        let store = std::sync::Arc::new(P6bStore { memory: Default::default(), fail: Default::default() });
+        let reg = registry(); reg.attach_usage_store(store.clone()).unwrap();
+        reg.org_usage_cap_set("org_p6b_test", None, Some(Some(10))).unwrap();
+        store.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(reg.org_usage_cap_set("org_p6b_test", None, Some(None)).is_err());
+        assert_eq!(reg.org_member_usage_get("org_p6b_test", "2026-10", &[]).unwrap()["defaultMonthlyTokens"], 10);
+        let now = p6b_now("2026-10"); let ticket = p6b_member_ticket(&reg, now, "usr_p6b_one");
+        reg.validate_and_reserve(&ticket.secret, now, TicketOperation::Chat, "request", 10).unwrap();
+        reg.settle_reservation("request", 8);
+        assert!(reg.flush().is_err());
+        assert!(reg.inner.lock().usage_dirty);
+        store.fail.store(false, std::sync::atomic::Ordering::SeqCst);
+        reg.flush().unwrap();
+        assert!(!reg.inner.lock().usage_dirty);
+        assert_eq!(store.memory.load().unwrap().orgs["org_p6b_test"].months["2026-10"]["usr_p6b_one"].spent, 8);
+        store.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+        let unavailable = registry();
+        assert!(unavailable.attach_usage_store(store).is_err());
+        let member = p6b_member_ticket(&unavailable, now, "usr_p6b_one");
+        assert_eq!(unavailable.validate_and_reserve(&member.secret, now, TicketOperation::Chat, "closed", 1), Err(TicketReject::MemberUsageUnavailable));
+        let legacy = unavailable.mint(mint_request(), Some(&snapshot()), now).unwrap();
+        assert!(unavailable.validate_and_reserve(&legacy.secret, now, TicketOperation::Chat, "legacy", 1).is_ok());
+        assert!(unavailable.org_member_usage_get("org_p6b_test", "2026-10", &[]).is_err());
+    }
+
+    #[test]
+    fn p6b_unbound_tickets_and_mint_paths_remain_unchanged() {
+        let reg = registry();
+        reg.org_usage_cap_set("org_p6b_test", None, Some(Some(0))).unwrap();
+        let ticket = reg.mint(mint_request(), Some(&snapshot()), 0).unwrap();
+        assert!(ticket.ticket.member.is_none());
+        let bound = p6b_member_ticket(&reg, 0, "usr_p6b_never_plaintext");
+        let metadata = serde_json::to_string(&bound.ticket).unwrap();
+        assert!(!metadata.contains("usr_p6b_never_plaintext"));
+        assert!(serde_json::from_str::<RouteTicket>(&metadata).unwrap().member.is_none());
+        assert!(!reg.secret_has_token_budget(&ticket.secret));
+        reg.validate_and_reserve(&ticket.secret, 1, TicketOperation::Chat, "legacy", 100).unwrap();
+        reg.validate_and_reserve(&ticket.secret, 1, TicketOperation::Chat, "legacy", 200).unwrap();
+        assert_eq!(reg.open_reservations()[0].tokens_held, 200);
+        assert_eq!(reg.reserve_model_output("legacy", 1000, Some(4000)), Ok(Some(4000)));
+        reg.settle_reservation("legacy", 5000);
+        assert!(reg.inner.lock().usage.orgs["org_p6b_test"].months.is_empty());
     }
 
     #[test]

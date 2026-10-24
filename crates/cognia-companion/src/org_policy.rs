@@ -6,15 +6,22 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use crate::{deployment::{deployment_mode, DeploymentMode}, middleware::DeviceContext, org_credentials::OrgCredentials, rpc_error::RpcError, SharedState};
 
+// The server installs the very same registry used by its gateway. No second
+// ledger, no server dependency, and desktop never installs a member ledger.
+static ORG_USAGE_REGISTRY: parking_lot::RwLock<Option<std::sync::Arc<cognia_gateway::route_ticket::RouteTicketRegistry>>> = parking_lot::RwLock::new(None);
+pub fn org_usage_install(registry: std::sync::Arc<cognia_gateway::route_ticket::RouteTicketRegistry>) {
+    *ORG_USAGE_REGISTRY.write() = Some(registry);
+}
+
 pub const CAPABILITY: &str = "org.policy.manage";
-pub const COMMANDS: &[&str] = &["org_model_credential_list", "org_model_credential_set", "org_model_credential_delete", "org_agent_policy_get", "org_agent_policy_set"];
+pub const COMMANDS: &[&str] = &["org_model_credential_list", "org_model_credential_set", "org_model_credential_delete", "org_agent_policy_get", "org_agent_policy_set", "org_member_usage_get", "org_usage_cap_set", "org_member_usage_cap_set"];
 tokio::task_local! { static AUTHORITY: Option<(String, String)>; }
 pub fn current_authority() -> Option<(String, String)> { AUTHORITY.try_with(Clone::clone).ok().flatten() }
 pub async fn scope<T>(authority: Option<(String, String)>, future: impl std::future::Future<Output = T>) -> T {
     AUTHORITY.scope(authority, future).await
 }
 pub fn is_write(command: &str) -> bool {
-    matches!(command, "org_model_credential_set" | "org_model_credential_delete" | "org_agent_policy_set")
+    matches!(command, "org_model_credential_set" | "org_model_credential_delete" | "org_agent_policy_set" | "org_usage_cap_set" | "org_member_usage_cap_set")
 }
 
 pub fn require_mode(mode: DeploymentMode) -> Result<(), Problem> {
@@ -48,29 +55,10 @@ async fn caller_in_mode(mode: DeploymentMode, args: &Value, principal: &DeviceCo
     Ok(authority)
 }
 
-/// The existing Host consent queue lets org admins request approval without
-/// becoming Host operators or minting globally powerful admin leases.
-pub async fn authorize_request(state: &SharedState, request: &crate::remote_execution::ExecutionRequest) -> Result<(), Problem> {
-    let (org, _) = caller(&request.args, &request.principal).await?;
-    let result = approve_write(&request.command, &org, &request.principal, &request.args);
-    if let Err(problem) = &result {
-        if problem.code == "interactive_approval_required" {
-            state.event_bus.publish(crate::host_consent::CONSENT_CHANNEL.into(), problem.details["consent"].clone());
-        }
-    }
-    result
-}
-
-fn approve_write(command: &str, org: &str, principal: &DeviceContext, args: &Value) -> Result<(), Problem> {
-    if !is_write(command) || crate::jwt::is_service_scope(Some(&principal.scope)) { return Ok(()); }
-    if crate::admin_lease::validate(&principal.device_id, command, args.get("adminLease").and_then(Value::as_str)).is_ok() { return Ok(()); }
-    // Approval belongs to this device, org and operation. Neither confirmed:true
-    // nor an approval for another org/operation can authorize the retry.
-    let operations = vec![format!("org:{org}:{command}")];
-    if crate::host_consent::take_approved(&principal.device_id, &operations) { return Ok(()); }
-    let ask = crate::host_consent::request(&principal.device_id, Some(&principal.tenant_id), operations);
-    Err(Problem::with_status(StatusCode::PRECONDITION_REQUIRED, "interactive_approval_required", "Host approval is required for this organization change")
-        .with_detail_field("consent", serde_json::to_value(ask).unwrap_or(Value::Null)))
+/// Signed device requests need only their verified org binding and live
+/// org.policy.manage standing. No Host consent or admin lease is involved.
+pub async fn authorize_request(_state: &SharedState, request: &crate::remote_execution::ExecutionRequest) -> Result<(), Problem> {
+    caller(&request.args, &request.principal).await.map(|_| ())
 }
 
 #[derive(Deserialize)]
@@ -81,7 +69,6 @@ struct Args {
     api_key: Option<String>,
     allowed_agents: Option<Vec<String>>,
     default_agent: Option<String>,
-    admin_lease: Option<String>,
 }
 
 pub async fn dispatch(command: &str, args: Value, device: &str, tenant: Option<&str>, scope: Option<&str>) -> Result<Value, (StatusCode, Json<RpcError>)> {
@@ -92,10 +79,12 @@ async fn dispatch_in_mode(mode: DeploymentMode, command: &str, args: Value, devi
     let principal = DeviceContext { device_id: device.into(), tenant_id: tenant.unwrap_or_default().into(), scope: scope.unwrap_or_default().into(), granted_scopes: vec![], authorization_capabilities: None };
     let (org, user) = caller_in_mode(mode, &args, &principal).await.map_err(|problem|
         (problem.status_code(), Json(RpcError::new(problem.code, problem.detail))))?;
+    if matches!(command, "org_member_usage_get" | "org_usage_cap_set" | "org_member_usage_cap_set") {
+        return org_usage_dispatch(command, args, &org, &user, device, scope).await;
+    }
     let input: Args = serde_json::from_value(args).map_err(|_| RpcError::malformed("invalid organization command arguments".into()))?;
-    // Scope has already been resolved from the verified binding. These fields
-    // are accepted only for service scope / canonical approval, never trusted.
-    let _ = (&input.org_id, &input.admin_lease);
+    // Scope has already been resolved from the verified caller.
+    let _ = &input.org_id;
     let operation = command.to_string();
     let action = operation.clone();
     let audit_org = org.clone();
@@ -127,6 +116,77 @@ async fn dispatch_in_mode(mode: DeploymentMode, command: &str, args: Value, devi
     } else { RpcError::malformed("invalid organization command arguments".into()) })
 }
 
+/// Values are parsed explicitly to distinguish missing, null (unlimited),
+/// and "default" (delete override). Never echo rejected inputs in errors.
+fn org_usage_tokens(value: Option<&Value>, allow_default: bool) -> Result<Option<Option<u64>>, String> {
+    match value {
+        Some(Value::Null) => Ok(Some(None)),
+        Some(Value::String(value)) if allow_default && value == "default" => Ok(None),
+        Some(value) => value.as_u64().filter(|n| *n <= cognia_gateway::org_usage::MAX_MONTHLY_TOKENS)
+            .map(|n| Some(Some(n))).ok_or_else(|| "invalid monthly tokens".into()),
+        None => Err("monthly tokens are required".into()),
+    }
+}
+
+fn org_usage_apply(registry: &cognia_gateway::route_ticket::RouteTicketRegistry, command: &str, args: &Value, org: &str, people: &[String]) -> Result<Value, String> {
+    let allowed: &[&str] = match command {
+        "org_member_usage_get" => &["orgId", "month"],
+        "org_usage_cap_set" => &["orgId", "defaultMonthlyTokens"],
+        "org_member_usage_cap_set" => &["orgId", "userId", "monthlyTokens"],
+        _ => return Err("unknown organization usage command".into()),
+    };
+    let object = args.as_object().ok_or("invalid organization command arguments")?;
+    if object.keys().any(|key| !allowed.contains(&key.as_str())) { return Err("invalid organization command arguments".into()); }
+    match command {
+        "org_member_usage_get" => {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
+            let current = cognia_gateway::org_usage::month_at(now);
+            let month = match args.get("month") { None => current.as_str(), Some(Value::String(month)) => month, _ => return Err("invalid month".into()) };
+            registry.org_member_usage_get(org, month, people)
+        },
+        "org_usage_cap_set" => {
+            registry.org_usage_cap_set(org, None, org_usage_tokens(args.get("defaultMonthlyTokens"), false)?)?;
+            Ok(Value::Null)
+        },
+        "org_member_usage_cap_set" => {
+            let user = args.get("userId").and_then(Value::as_str).ok_or("userId is required")?;
+            cognia_tenant_auth::UserId::parse(user).map_err(|_| "invalid user id")?;
+            registry.org_usage_cap_set(org, Some(user), org_usage_tokens(args.get("monthlyTokens"), true)?)?;
+            Ok(Value::Null)
+        },
+        _ => unreachable!(),
+    }
+}
+
+async fn org_usage_dispatch(command: &str, args: Value, org: &str, user: &str, device: &str, scope: Option<&str>) -> Result<Value, (StatusCode, Json<RpcError>)> {
+    let registry = ORG_USAGE_REGISTRY.read().clone();
+    let people = crate::person_partition::fleet().map(|fleet| fleet.org_people(org)).unwrap_or_default();
+    // Audit only validated ids/numbers; no arbitrary client values or strings.
+    let mut audit = json!({ "orgId": org, "userId": user });
+    if let Some(member) = args.get("userId").and_then(Value::as_str).filter(|id| cognia_tenant_auth::UserId::parse(*id).is_ok()) {
+        audit["memberUserId"] = member.into();
+    }
+    for key in ["defaultMonthlyTokens", "monthlyTokens"] {
+        if let Some(tokens) = args.get(key).and_then(Value::as_u64).filter(|n| *n <= cognia_gateway::org_usage::MAX_MONTHLY_TOKENS) { audit[key] = tokens.into(); }
+    }
+    let operation = command.to_string(); let org = org.to_string();
+    let result = tokio::task::spawn_blocking(move || {
+        let registry = registry.ok_or("organization usage store unavailable")?;
+        org_usage_apply(&registry, &operation, &args, &org, &people)
+    }).await
+        .map_err(|_| RpcError::internal("organization usage worker failed".into()))?;
+    if is_write(command) {
+        crate::audit::record_async(command, device, scope.unwrap_or_default(), if result.is_ok() { "allow" } else { "deny" }, audit).await;
+    }
+    result.map_err(|error| if error.contains("unavailable") { RpcError::service_unavailable("organization usage store unavailable".into()) }
+        else { RpcError::malformed("invalid organization command arguments".into()) })
+}
+
+pub async fn org_usage_handler(Path(operation): Path<String>, Extension(principal): Extension<DeviceContext>, headers: HeaderMap, State(state): State<SharedState>, body: Result<Json<Value>, JsonRejection>) -> Response {
+    let command = match operation.as_str() { "get" => "org_member_usage_get", "set-default" => "org_usage_cap_set", "set-member" => "org_member_usage_cap_set", _ => return StatusCode::NOT_FOUND.into_response() };
+    crate::api::internal_rpc_handler(Path(command.into()), Extension(principal), headers, State(state), body).await
+}
+
 /// Named operator aliases use the very same canonical approval, contract,
 /// receipt and dispatch path as /internal/_rpc. Router requires service JWT.
 pub async fn credentials_handler(Path(operation): Path<String>, Extension(principal): Extension<DeviceContext>, headers: HeaderMap, State(state): State<SharedState>, body: Result<Json<Value>, JsonRejection>) -> Response {
@@ -141,6 +201,52 @@ pub async fn agents_handler(Path(operation): Path<String>, Extension(principal):
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn p6b_org_usage_admin_validation_approval_audit_and_mode() {
+        use cognia_gateway::route_ticket::{RouteTicketRegistry, InMemoryTicketMetaStore};
+        let registry = std::sync::Arc::new(RouteTicketRegistry::new(std::sync::Arc::new(InMemoryTicketMetaStore::default())));
+        org_usage_install(registry.clone());
+        let org = "org_p6b_admin";
+        let user = "usr_p6b_member";
+        let _guard = crate::audit::test_guard();
+        let temp = tempfile::tempdir().unwrap(); let path = temp.path().join("audit.log");
+        crate::audit::install_at_for_testing(Some(path.clone()));
+        for (command, args) in [
+            ("org_usage_cap_set", json!({"orgId":org,"defaultMonthlyTokens":100})),
+            ("org_member_usage_cap_set", json!({"orgId":org,"userId":user,"monthlyTokens":20})),
+            ("org_member_usage_get", json!({"orgId":org,"month":"2026-10"})),
+        ] {
+            assert!(COMMANDS.contains(&command));
+            let result = dispatch_in_mode(DeploymentMode::MultiTenant, command, args.clone(), "operator", None, Some("service")).await.unwrap();
+            if command == "org_member_usage_get" {
+                assert_eq!(result["members"][0]["monthlyTokens"], 20);
+                assert_eq!(result["members"][0]["capSource"], "override");
+            }
+            let (status, error) = dispatch_in_mode(DeploymentMode::SingleUser, command, args, "operator", None, Some("service")).await.unwrap_err();
+            assert_eq!(status, StatusCode::CONFLICT); assert_eq!(error.0.code, "org_scope_unavailable");
+        }
+        for invalid in [json!({}), json!({"defaultMonthlyTokens":-1}), json!({"defaultMonthlyTokens":1.5}), json!({"defaultMonthlyTokens":1000000000001u64}), json!({"defaultMonthlyTokens":"default"})] {
+            assert!(org_usage_apply(&registry, "org_usage_cap_set", &invalid, org, &[]).is_err());
+        }
+        for invalid in [json!({"userId":"../bad","monthlyTokens":1}), json!({"userId":user}), json!({"userId":user,"monthlyTokens":true}), json!({"userId":user,"monthlyTokens":1,"payload":"p6b-never-audited"})] {
+            let mut args = invalid; args["orgId"] = org.into();
+            assert!(dispatch_in_mode(DeploymentMode::MultiTenant, "org_member_usage_cap_set", args, "operator", None, Some("service")).await.is_err());
+        }
+        assert!(org_usage_apply(&registry, "org_member_usage_get", &json!({"month":"2026-13"}), org, &[]).is_err());
+        assert!(org_usage_apply(&registry, "org_member_usage_get", &json!({"month":null}), org, &[]).is_err());
+        org_usage_apply(&registry, "org_member_usage_cap_set", &json!({"userId":user,"monthlyTokens":null}), org, &[]).unwrap();
+        assert_eq!(registry.org_member_usage_get(org, "2026-10", &[]).unwrap()["members"][0]["monthlyTokens"], Value::Null);
+        org_usage_apply(&registry, "org_member_usage_cap_set", &json!({"userId":user,"monthlyTokens":"default"}), org, &[]).unwrap();
+        let result = registry.org_member_usage_get(org, "2026-10", &[user.into()]).unwrap();
+        assert_eq!(result["members"][0]["monthlyTokens"], 100);
+        assert_eq!(result["members"][0]["capSource"], "default");
+        assert!(registry.org_member_usage_get("org_p6b_other", "2026-10", &[]).unwrap()["members"].as_array().unwrap().is_empty());
+        let audit = std::fs::read_to_string(path).unwrap();
+        assert!(audit.contains("org_usage_cap_set")); assert!(audit.contains("org_member_usage_cap_set"));
+        assert!(audit.contains(org)); assert!(audit.contains(user)); assert!(!audit.contains("p6b-never-audited"));
+        crate::audit::install_at_for_testing(None);
+    }
+
     #[test]
     fn p6a_mode_refuses_single_user_without_affecting_legacy_surfaces() {
         let refusal = require_mode(DeploymentMode::SingleUser).unwrap_err();
@@ -172,26 +278,15 @@ mod tests {
     }
 
     #[test]
-    fn p6a_org_writes_require_host_approval_bound_to_device_org_and_operation() {
-        let p = principal("device");
-        let command = "org_model_credential_set";
-        let args = json!({"confirmed":true,"apiKey":"never-in-consent-or-errors"});
-        let error = approve_write(command, "org_p6a_approval", &p, &args).unwrap_err();
-        assert_eq!(error.status_code(), StatusCode::PRECONDITION_REQUIRED);
-        assert!(!serde_json::to_string(&error).unwrap().contains("never-in-consent-or-errors"));
-        let id = error.details["consent"]["id"].as_str().unwrap();
-        assert!(crate::host_consent::resolve(id, true, crate::host_consent::Approver::Device(&p.device_id)).is_err());
-        crate::host_consent::resolve(id, true, crate::host_consent::Approver::Host).unwrap();
-        assert!(approve_write(command, "org_p6a_other", &p, &args).is_err());
-        assert!(approve_write("org_model_credential_delete", "org_p6a_approval", &p, &args).is_err());
-        let mut other_device = principal("person-brain");
-        other_device.device_id = "p6a-other-device".into();
-        assert!(approve_write(command, "org_p6a_approval", &other_device, &args).is_err());
-        assert!(approve_write(command, "org_p6a_approval", &p, &args).is_ok());
-        // Approval is consumed once only; person-brain never gets the service exemption.
-        assert!(approve_write(command, "org_p6a_approval", &p, &args).is_err());
-        assert!(approve_write(command, "org_p6a_approval", &principal("service"), &args).is_ok());
-        crate::host_consent::forget_device(&p.device_id);
+    fn p6b_org_writes_require_no_consent_or_lease_contract() {
+        for command in COMMANDS.iter().filter(|command| is_write(command)) {
+            let descriptor = crate::command_manifest::descriptor(command).unwrap();
+            assert_eq!(descriptor.approval, crate::command_manifest::CommandApproval::None);
+            let input = json!({"adminLease":"obsolete"});
+            if command.starts_with("org_model_") || command.starts_with("org_agent_") {
+                assert!(serde_json::from_value::<Args>(input).is_err());
+            }
+        }
     }
 
     #[tokio::test]

@@ -14,6 +14,12 @@ const RETRY_KINDS = new Set<DiagnosticAction["kind"]>([
 ])
 
 describe("DIAGNOSTIC_CODES", () => {
+  it("keeps member monthly caps non-retryable with a dismiss action", () => {
+    expect(isDiagnosticCode("memberUsageCapReached")).toBe(true)
+    expect(DIAGNOSTIC_CODES.memberUsageCapReached.retryable).toBe(false)
+    expect(DIAGNOSTIC_CODES.memberUsageCapReached.severity).toBe("warning")
+    expect(DIAGNOSTIC_CODES.memberUsageCapReached.actions).toEqual([{ kind: "dismiss" }])
+  })
   it("keeps the org-scope configuration boundary non-retryable", () => {
     expect(isDiagnosticCode("orgScopeUnavailable")).toBe(true)
     expect(DIAGNOSTIC_CODES.orgScopeUnavailable.retryable).toBe(false)
