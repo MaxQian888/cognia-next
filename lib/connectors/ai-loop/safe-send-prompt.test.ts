@@ -352,20 +352,24 @@ describe("safeSendPrompt", () => {
     )
   })
 
-  it("passes signal + timeoutMs through to the underlying call", async () => {
-    const ac = new AbortController()
-    await safeSendPrompt("sess_1", "clean", undefined, {
-      ...auditCtx,
-      signal: ac.signal,
-      timeoutMs: 10_000,
-    })
-    expect(mockRun).toHaveBeenCalledWith(
-      "sess_1",
-      "clean",
-      undefined,
-      expect.objectContaining({ signal: ac.signal, timeoutMs: 10_000 })
-    )
-  })
+  it.each([120_000, 0])(
+    "passes signal + timeouts through with idleTimeoutMs=%i",
+    async (idleTimeoutMs) => {
+      const ac = new AbortController()
+      await safeSendPrompt("sess_1", "clean", undefined, {
+        ...auditCtx,
+        signal: ac.signal,
+        timeoutMs: 10_000,
+        idleTimeoutMs,
+      })
+      expect(mockRun).toHaveBeenCalledWith(
+        "sess_1",
+        "clean",
+        undefined,
+        expect.objectContaining({ signal: ac.signal, timeoutMs: 10_000, idleTimeoutMs })
+      )
+    }
+  )
 
   it("forwards onPermissionRequest + onEvent so IM HITL and live-activity survive the gate", async () => {
     const onPermissionRequest = jest.fn()
@@ -380,6 +384,20 @@ describe("safeSendPrompt", () => {
       "clean",
       undefined,
       expect.objectContaining({ onPermissionRequest, onEvent })
+    )
+  })
+
+  it("forwards onSdkSessionId so IM recovery learns the SDK session id", async () => {
+    const onSdkSessionId = jest.fn()
+    await safeSendPrompt("sess_1", "clean", undefined, {
+      ...auditCtx,
+      onSdkSessionId,
+    })
+    expect(mockRun).toHaveBeenCalledWith(
+      "sess_1",
+      "clean",
+      undefined,
+      expect.objectContaining({ onSdkSessionId })
     )
   })
 

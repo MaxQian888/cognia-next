@@ -344,6 +344,7 @@ export async function safeSendPrompt(
     result = await runAndCaptureAssistantReply(sessionId, prompt, sendOptions, {
       signal: opts.signal,
       timeoutMs: opts.timeoutMs,
+      idleTimeoutMs: opts.idleTimeoutMs,
       onPartial: opts.onPartial,
       onPermissionRequest: opts.onPermissionRequest,
       // Who answers those requests decides how outbound calls are planned
@@ -353,6 +354,7 @@ export async function safeSendPrompt(
         ? { pauseTimeoutWhileAwaitingPermission: true }
         : {}),
       onEvent: opts.onEvent,
+      onSdkSessionId: opts.onSdkSessionId,
       execution: {
         kind: "connector",
         label: `${opts.adapterId} · ${opts.conversationKey}`,
